@@ -153,7 +153,7 @@ function SkillPicker({
 
   const handleAdd = (id: string) => {
     onUpdate([...skillIds, id], skillValues);
-    setDropdownOpen(false);
+    // Keep dropdown open so user can add multiple skills without re-clicking
   };
 
   const handleRemove = (id: string) => {

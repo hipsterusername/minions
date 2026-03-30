@@ -228,11 +228,33 @@ export function createTaskToolsForLeader(opts: {
     },
   );
 
+  // ── set_task_name ──────────────────────────────────
+
+  const setTaskNameTool = tool(
+    "set_task_name",
+    "Set a short display name for this leader session (3-6 words). Call once at the start.",
+    {
+      name: z.string().describe("Concise task name, 3-6 words"),
+    },
+    async (args) => {
+      broadcast(wss, {
+        type: "session_task_name",
+        sessionKey: leaderSessionKey,
+        taskName: args.name,
+      });
+      return {
+        content: [
+          { type: "text" as const, text: `Task name set: ${args.name}` },
+        ],
+      };
+    },
+  );
+
   // ── Build MCP server ───────────────────────────────
 
   const mcpServer = createSdkMcpServer({
     name: "task-manager",
-    tools: [assignTaskTool, getTaskStatusTool],
+    tools: [assignTaskTool, getTaskStatusTool, setTaskNameTool],
   });
 
   return { mcpServer, taskState };

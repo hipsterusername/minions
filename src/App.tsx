@@ -34,6 +34,55 @@ const WS_URL = `ws://localhost:${import.meta.env["VITE_SERVER_PORT"] ?? "3141"}`
 // Register user-defined skills from localStorage
 initUserSkills();
 
+/**
+ * Sanitize nodes loaded from persistence — reset transient session state
+ * so nodes don't appear active when sessions are gone after a restart.
+ */
+function sanitizePersistedNodes(nodes: CanvasNode[]): CanvasNode[] {
+  return nodes.map((node) => {
+    if (node.type === "leader") {
+      const data = node.data as Record<string, unknown>;
+      return {
+        ...node,
+        data: {
+          ...data,
+          // Reset transient session state
+          status: "disconnected",
+          streamingText: "",
+          error: null,
+          // Keep sessionKey so sync_session can attempt reconnection
+          // Keep messages, totalCost, turns as historical data
+        },
+      };
+    }
+    if (node.type === "minion") {
+      const data = node.data as Record<string, unknown>;
+      return {
+        ...node,
+        data: {
+          ...data,
+          status: "disconnected",
+          streamingText: "",
+          error: null,
+        },
+      };
+    }
+    if (node.type === "claude-session") {
+      const data = node.data as Record<string, unknown>;
+      return {
+        ...node,
+        data: {
+          ...data,
+          status: "disconnected",
+          streamingText: "",
+          error: null,
+        },
+      };
+    }
+    return node;
+  });
+}
+
 function buildLeaderPrompt(card: KanbanCard): string {
   let prompt = `# Task: ${card.title}\n\n`;
   if (card.description) prompt += `${card.description}\n\n`;
@@ -84,7 +133,7 @@ function ProjectView({
         setProjectName(project.name);
         setTransform(project.transform);
         setProjectSettings(project.settings ?? {});
-        dispatch({ type: "SET_NODES", nodes: project.nodes });
+        dispatch({ type: "SET_NODES", nodes: sanitizePersistedNodes(project.nodes) });
         setLoaded(true);
       } catch (err) {
         console.error("Failed to load project:", err);
@@ -447,6 +496,7 @@ function ProjectView({
             projectName={projectName}
             settings={projectSettings}
             onSpawnContextExplorer={handleSpawnContextExplorer}
+            nodes={nodes}
           />
           <SkillsBrowser
             onLaunchSkill={handleLaunchSkill}

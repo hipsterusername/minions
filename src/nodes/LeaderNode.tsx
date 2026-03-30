@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import type { NodeRenderProps } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
 import { registerContract, LEADER_CONTRACT } from "../graph.ts";
-import type { ServerMessage, SdkMessage, ContentBlock } from "../use-socket.ts";
+import type { ServerMessage, SdkMessage } from "../use-socket.ts";
+import { sdkToDisplayMessages, msgId as sharedMsgId, type DisplayMessage } from "../sdk-messages.ts";
 import { LEADER_SYSTEM_PROMPT } from "../prompts/leader-system.ts";
 import { useStatusBanners, StatusBannerStack } from "../components/StatusBanner.tsx";
 import { StreamingBubble, StreamingIndicator } from "../components/StreamingBubble.tsx";
@@ -58,14 +59,15 @@ export interface LeaderData {
   autoStartPrompt?: string | null;
 }
 
-interface LeaderMessage {
-  id: string;
-  role: "user" | "assistant" | "tool" | "system" | "result";
-  content: string;
-  timestamp: number;
-  toolName?: string;
-  /** e.g. "8.6s · $0.0288" */
-  suffix?: string;
+// LeaderMessage is now an alias for the shared DisplayMessage type
+type LeaderMessage = DisplayMessage;
+
+function msgId(): string {
+  return sharedMsgId("lm");
+}
+
+function sdkToLeaderMessages(sdkMsg: SdkMessage): LeaderMessage[] {
+  return sdkToDisplayMessages(sdkMsg, "lm");
 }
 
 interface PlanItem {
@@ -91,82 +93,17 @@ function extractPlanItems(text: string): PlanItem[] {
   return items;
 }
 
-function msgId(): string {
-  return `lm-${crypto.randomUUID()}`;
-}
-
-function extractText(blocks: ContentBlock[]): string {
-  const parts: string[] = [];
-  for (const block of blocks) {
-    if (block.type === "text" && block.text) {
-      parts.push(block.text);
-    } else if (block.type === "tool_use" && block.name) {
-      parts.push(`[Tool: ${block.name}]`);
-    }
-  }
-  return parts.join("\n").replace(/<!--task-name:.+?-->\s*/g, "");
-}
-
-function sdkToLeaderMessage(sdkMsg: SdkMessage): LeaderMessage | null {
-  const now = Date.now();
-  switch (sdkMsg.type) {
-    case "system": {
-      const sub = sdkMsg.subtype;
-      if (sub === "init") {
-        const model = sdkMsg.model ?? "unknown";
-        return { id: msgId(), role: "system", content: `Leader on ${model}`, timestamp: now };
-      }
-      if (sub === "task_started") {
-        return { id: msgId(), role: "system", content: `Subagent: ${sdkMsg.description ?? sdkMsg.task_id ?? "task"}`, timestamp: now };
-      }
-      if (sub === "task_notification") {
-        const ico = sdkMsg.status === "completed" ? "\u2713" : "\u2717";
-        return { id: msgId(), role: "system", content: `${ico} Subagent ${sdkMsg.status}: ${sdkMsg.summary ?? ""}`, timestamp: now };
-      }
-      if (sub === "local_command_output" && sdkMsg.content) {
-        return { id: msgId(), role: "system", content: sdkMsg.content, timestamp: now };
-      }
-      return null;
-    }
-    case "assistant":
-      if (sdkMsg.message?.content) {
-        const text = extractText(sdkMsg.message.content);
-        if (!text.trim()) return null;
-        return { id: msgId(), role: "assistant", content: text, timestamp: now };
-      }
-      return null;
-    case "tool_progress":
-      return {
-        id: msgId(), role: "tool",
-        content: `${sdkMsg.tool_name} (${sdkMsg.elapsed_time_seconds?.toFixed(1)}s)`,
-        timestamp: now, toolName: sdkMsg.tool_name,
-      };
-    case "tool_use_summary":
-      if (sdkMsg.summary) {
-        return { id: msgId(), role: "system", content: sdkMsg.summary, timestamp: now };
-      }
-      return null;
-    case "result": {
-      const txt = sdkMsg.result ?? (sdkMsg.is_error ? "Error" : "Done");
-      const ds = sdkMsg.duration_ms ? `${(sdkMsg.duration_ms / 1000).toFixed(1)}s` : null;
-      const cs = sdkMsg.total_cost_usd ? `$${sdkMsg.total_cost_usd.toFixed(4)}` : null;
-      const sfx = [ds, cs].filter(Boolean).join(" · ");
-      return { id: msgId(), role: "result", content: txt, timestamp: now, suffix: sfx || undefined };
-    }
-    default:
-      return null;
-  }
-}
-
 /* ── Tool group helpers (Leader purple theme) ────────────────────────── */
 
 type LeaderMessageGroup =
   | { kind: "single"; msg: LeaderMessage }
-  | { kind: "tool-group"; msgs: LeaderMessage[] };
+  | { kind: "tool-group"; msgs: LeaderMessage[] }
+  | { kind: "thinking-group"; msgs: LeaderMessage[] };
 
 function groupMessages(messages: LeaderMessage[]): LeaderMessageGroup[] {
   const groups: LeaderMessageGroup[] = [];
   let toolBatch: LeaderMessage[] = [];
+  let thinkingBatch: LeaderMessage[] = [];
 
   const flushTools = () => {
     if (toolBatch.length > 0) {
@@ -175,15 +112,28 @@ function groupMessages(messages: LeaderMessage[]): LeaderMessageGroup[] {
     }
   };
 
+  const flushThinking = () => {
+    if (thinkingBatch.length > 0) {
+      groups.push({ kind: "thinking-group", msgs: [...thinkingBatch] });
+      thinkingBatch = [];
+    }
+  };
+
   for (const msg of messages) {
     if (msg.role === "tool") {
+      flushThinking();
       toolBatch.push(msg);
+    } else if (msg.role === "thinking") {
+      flushTools();
+      thinkingBatch.push(msg);
     } else {
       flushTools();
+      flushThinking();
       groups.push({ kind: "single", msg });
     }
   }
   flushTools();
+  flushThinking();
   return groups;
 }
 
@@ -323,6 +273,104 @@ function LeaderToolGroup({ msgs }: { msgs: LeaderMessage[] }) {
                 </div>
               );
             })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LeaderThinkingGroup({ msgs }: { msgs: LeaderMessage[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const totalLen = msgs.reduce((sum, m) => sum + m.content.length, 0);
+  const charLabel = totalLen > 1000 ? `${(totalLen / 1000).toFixed(1)}k chars` : `${totalLen} chars`;
+
+  return (
+    <div style={{ marginBlock: 2 }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          width: "100%",
+          padding: "4px 8px",
+          background: expanded ? "rgba(168, 85, 247, 0.06)" : "transparent",
+          border: "none",
+          borderRadius: 4,
+          cursor: "pointer",
+          color: "var(--text-muted)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 11,
+          textAlign: "left",
+          transition: "color 0.15s, background 0.15s",
+        }}
+        onMouseEnter={(e) =>
+          (e.currentTarget.style.color = "var(--text-dim)")
+        }
+        onMouseLeave={(e) =>
+          (e.currentTarget.style.color = "var(--text-muted)")
+        }
+      >
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 16,
+            height: 16,
+            fontSize: 10,
+            borderRadius: 3,
+            background: "rgba(168, 85, 247, 0.10)",
+            color: "#a855f7",
+            flexShrink: 0,
+            transition: "transform 0.2s",
+            transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
+          }}
+        >
+          &#9654;
+        </span>
+        <span style={{ opacity: 0.7, color: "#a855f7" }}>Thinking</span>
+        <span
+          style={{
+            marginLeft: "auto",
+            fontSize: 10,
+            opacity: 0.4,
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {charLabel}
+        </span>
+      </button>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateRows: expanded ? "1fr" : "0fr",
+          transition: "grid-template-rows 0.2s ease-out",
+        }}
+      >
+        <div style={{ overflow: "hidden" }}>
+          <div
+            style={{
+              paddingBlock: 4,
+              paddingInline: 10,
+              maxHeight: 200,
+              overflowY: "auto",
+              fontSize: 11,
+              fontFamily: "var(--font-mono)",
+              color: "var(--text-muted)",
+              lineHeight: 1.6,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              overflowWrap: "break-word",
+              fontStyle: "italic",
+              borderLeft: "2px solid rgba(168, 85, 247, 0.25)",
+              marginLeft: 8,
+            }}
+          >
+            {msgs.map((m) => m.content).join("\n\n")}
           </div>
         </div>
       </div>
@@ -869,6 +917,7 @@ function SkillFlyout({
   skillValues,
   open,
   readOnly,
+  anchorRef,
   onUpdate,
   onClose,
 }: {
@@ -876,6 +925,7 @@ function SkillFlyout({
   skillValues: Record<string, Record<string, string>>;
   open: boolean;
   readOnly: boolean;
+  anchorRef?: React.RefObject<HTMLElement | null>;
   onUpdate: (patch: {
     skillIds?: string[];
     skillValues?: Record<string, Record<string, string>>;
@@ -884,6 +934,19 @@ function SkillFlyout({
   onClose: () => void;
 }) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!open || !anchorRef?.current) {
+      setPos(null);
+      return;
+    }
+    const rect = anchorRef.current.getBoundingClientRect();
+    setPos({
+      top: rect.top,
+      left: rect.left - 308, // 300 width + 8 gap
+    });
+  }, [open, anchorRef]);
   const allSkills = getAllSkills();
   const taggedSkills = skillIds
     .map((id) => getSkill(id))
@@ -934,7 +997,7 @@ function SkillFlyout({
 
   if (!open) return null;
 
-  return (
+  const flyoutContent = (
     <>
       {/* Backdrop */}
       <div
@@ -942,17 +1005,17 @@ function SkillFlyout({
         style={{
           position: "fixed",
           inset: 0,
-          zIndex: 998,
+          zIndex: 9998,
         }}
       />
       {/* Flyout panel */}
       <div
         onMouseDown={(e) => e.stopPropagation()}
         style={{
-          position: "absolute",
-          top: 0,
-          right: "calc(100% + 8px)",
-          zIndex: 999,
+          position: "fixed",
+          top: pos?.top ?? 100,
+          left: pos?.left ?? 100,
+          zIndex: 9999,
           width: 300,
           maxHeight: 480,
           background: "var(--bg-secondary)",
@@ -992,161 +1055,178 @@ function SkillFlyout({
           </button>
         </div>
 
-        {/* Active skills with variable inputs */}
-        {taggedSkills.length > 0 && (
-          <div
-            style={{
-              padding: "8px 12px",
-              borderBottom: "1px solid var(--border-default)",
-            }}
-          >
+        {/* Scrollable body — everything below the header scrolls together */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            minHeight: 0,
+          }}
+        >
+          {/* Active skills with variable inputs */}
+          {taggedSkills.length > 0 && (
             <div
               style={{
-                fontSize: 9,
-                fontFamily: "var(--font-mono)",
-                color: "var(--text-muted)",
-                textTransform: "uppercase",
-                letterSpacing: 0.5,
-                marginBottom: 6,
+                padding: "8px 12px",
+                borderBottom: "1px solid var(--border-default)",
               }}
             >
-              Active ({taggedSkills.length})
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 4 }}>
+              <div
+                style={{
+                  fontSize: 9,
+                  fontFamily: "var(--font-mono)",
+                  color: "var(--text-muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
+                  marginBottom: 6,
+                }}
+              >
+                Active ({taggedSkills.length})
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 4 }}>
+                {taggedSkills.map((skill) => (
+                  <SkillTagChip
+                    key={skill.id}
+                    skill={skill}
+                    readOnly={readOnly}
+                    onRemove={() => handleRemoveSkill(skill.id)}
+                  />
+                ))}
+              </div>
+              {/* Variable inputs */}
               {taggedSkills.map((skill) => (
-                <SkillTagChip
+                <SkillVariableInputs
                   key={skill.id}
                   skill={skill}
+                  values={skillValues[skill.id] ?? {}}
+                  onChange={(varName, value) => handleVarChange(skill.id, varName, value)}
                   readOnly={readOnly}
-                  onRemove={() => handleRemoveSkill(skill.id)}
                 />
               ))}
             </div>
-            {/* Variable inputs */}
-            {taggedSkills.map((skill) => (
-              <SkillVariableInputs
-                key={skill.id}
-                skill={skill}
-                values={skillValues[skill.id] ?? {}}
-                onChange={(varName, value) => handleVarChange(skill.id, varName, value)}
-                readOnly={readOnly}
-              />
-            ))}
-          </div>
-        )}
+          )}
 
-        {/* Search + available skills */}
-        {!readOnly && (
-          <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-            {/* Search */}
-            <div style={{ padding: "8px 12px 4px" }}>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onMouseDown={(e) => e.stopPropagation()}
-                placeholder="Search skills..."
+          {/* Search + available skills */}
+          {!readOnly && (
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              {/* Search — sticky within the scroll area */}
+              <div
                 style={{
-                  width: "100%",
-                  padding: "6px 10px",
-                  fontSize: 12,
-                  fontFamily: "var(--font-mono)",
-                  background: "var(--bg-primary)",
-                  border: "1px solid var(--border-default)",
-                  borderRadius: 6,
-                  color: "var(--text-primary)",
-                  outline: "none",
-                  boxSizing: "border-box",
+                  padding: "8px 12px 4px",
+                  position: "sticky",
+                  top: 0,
+                  zIndex: 1,
+                  background: "var(--bg-secondary)",
                 }}
-              />
-            </div>
-
-            {/* Skill list */}
-            <div
-              style={{
-                flex: 1,
-                overflowY: "auto",
-                padding: "4px 8px 8px",
-              }}
-            >
-              {availableByCategory.length === 0 && (
-                <div
+              >
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  placeholder="Search skills..."
                   style={{
-                    padding: "12px",
-                    fontSize: 11,
-                    color: "var(--text-muted)",
-                    textAlign: "center",
+                    width: "100%",
+                    padding: "6px 10px",
+                    fontSize: 12,
+                    fontFamily: "var(--font-mono)",
+                    background: "var(--bg-primary)",
+                    border: "1px solid var(--border-default)",
+                    borderRadius: 6,
+                    color: "var(--text-primary)",
+                    outline: "none",
+                    boxSizing: "border-box",
                   }}
-                >
-                  {query ? "No skills match your search" : "All skills already added"}
-                </div>
-              )}
-              {availableByCategory.map((cat) => (
-                <div key={cat.key}>
+                />
+              </div>
+
+              {/* Skill list */}
+              <div
+                style={{
+                  padding: "4px 8px 8px",
+                }}
+              >
+                {availableByCategory.length === 0 && (
                   <div
                     style={{
-                      fontSize: 9,
-                      fontFamily: "var(--font-mono)",
+                      padding: "12px",
+                      fontSize: 11,
                       color: "var(--text-muted)",
-                      padding: "6px 8px 2px",
-                      textTransform: "uppercase",
-                      letterSpacing: 0.5,
+                      textAlign: "center",
                     }}
                   >
-                    {cat.label}
+                    {query ? "No skills match your search" : "All skills already added"}
                   </div>
-                  {cat.skills.map((skill) => (
-                    <button
-                      key={skill.id}
-                      onClick={() => handleAddSkill(skill.id)}
-                      onMouseDown={(e) => e.stopPropagation()}
+                )}
+                {availableByCategory.map((cat) => (
+                  <div key={cat.key}>
+                    <div
                       style={{
-                        display: "flex",
-                        alignItems: "flex-start",
-                        gap: 8,
-                        width: "100%",
-                        padding: "6px 8px",
-                        background: "transparent",
-                        border: "none",
-                        borderRadius: 4,
-                        color: "var(--text-primary)",
-                        fontSize: 11,
-                        cursor: "pointer",
-                        textAlign: "left",
-                        transition: "background 0.1s",
+                        fontSize: 9,
+                        fontFamily: "var(--font-mono)",
+                        color: "var(--text-muted)",
+                        padding: "6px 8px 2px",
+                        textTransform: "uppercase",
+                        letterSpacing: 0.5,
                       }}
-                      onMouseEnter={(e) =>
-                        (e.currentTarget.style.background = "var(--bg-elevated)")
-                      }
-                      onMouseLeave={(e) =>
-                        (e.currentTarget.style.background = "transparent")
-                      }
                     >
-                      <span style={{ fontSize: 14, lineHeight: 1.2 }}>{skill.icon}</span>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                        <span style={{ fontWeight: 500 }}>{skill.name}</span>
-                        <span
-                          style={{
-                            fontSize: 10,
-                            color: "var(--text-muted)",
-                            lineHeight: 1.3,
-                          }}
-                        >
-                          {skill.description.length > 80
-                            ? skill.description.slice(0, 80) + "…"
-                            : skill.description}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              ))}
+                      {cat.label}
+                    </div>
+                    {cat.skills.map((skill) => (
+                      <button
+                        key={skill.id}
+                        onClick={() => handleAddSkill(skill.id)}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        style={{
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: 8,
+                          width: "100%",
+                          padding: "6px 8px",
+                          background: "transparent",
+                          border: "none",
+                          borderRadius: 4,
+                          color: "var(--text-primary)",
+                          fontSize: 11,
+                          cursor: "pointer",
+                          textAlign: "left",
+                          transition: "background 0.1s",
+                        }}
+                        onMouseEnter={(e) =>
+                          (e.currentTarget.style.background = "var(--bg-elevated)")
+                        }
+                        onMouseLeave={(e) =>
+                          (e.currentTarget.style.background = "transparent")
+                        }
+                      >
+                        <span style={{ fontSize: 14, lineHeight: 1.2 }}>{skill.icon}</span>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                          <span style={{ fontWeight: 500 }}>{skill.name}</span>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              color: "var(--text-muted)",
+                              lineHeight: 1.3,
+                            }}
+                          >
+                            {skill.description.length > 80
+                              ? skill.description.slice(0, 80) + "…"
+                              : skill.description}
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </>
   );
+
+  return createPortal(flyoutContent, document.body);
 }
 
 /* ── P4: Compact config footer (worktree + context in one bar) ────────── */
@@ -1380,12 +1460,23 @@ function HeaderMenu({
   onReset,
   onExportLog,
   data,
+  canvasScale,
 }: {
   onReset: () => void;
   onExportLog: () => void;
   data: LeaderData;
+  canvasScale?: number;
 }) {
   const [open, setOpen] = useState(false);
+
+  // Close menu when canvas zoom level changes
+  const prevScaleRef = useRef(canvasScale);
+  useEffect(() => {
+    if (prevScaleRef.current !== canvasScale) {
+      prevScaleRef.current = canvasScale;
+      setOpen(false);
+    }
+  }, [canvasScale]);
 
   return (
     <div style={{ position: "relative" }}>
@@ -1490,6 +1581,7 @@ function LeaderNodeRenderer({
   getContextForNode,
   projectPath,
   onResize,
+  canvasScale,
 }: NodeRenderProps) {
   const data = node.data as LeaderData;
   const dataRef = useRef(data);
@@ -1499,10 +1591,20 @@ function LeaderNodeRenderer({
   const [planItems, setPlanItems] = useState<PlanItem[]>([]);
   const [planExpanded, setPlanExpanded] = useState(false);
   const [skillFlyoutOpen, setSkillFlyoutOpen] = useState(false);
+  const skillAnchorRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLDivElement>(null);
   const syncedRef = useRef(false);
   const planParsedRef = useRef(false);
   const { banners, processSdkEvent, dismissBanner } = useStatusBanners();
+
+  // Close flyout panels when canvas zoom level changes
+  const prevScaleRef = useRef(canvasScale);
+  useEffect(() => {
+    if (prevScaleRef.current !== canvasScale) {
+      prevScaleRef.current = canvasScale;
+      setSkillFlyoutOpen(false);
+    }
+  }, [canvasScale]);
 
   // Parse plan items from first assistant message
   useEffect(() => {
@@ -1592,10 +1694,16 @@ function LeaderNodeRenderer({
           let rebuiltStatus: LeaderData["status"] =
             (serverMsg.status as LeaderData["status"]) ?? current.status;
 
+          const seenIds = new Set<string>();
           for (const evt of serverMsg.events) {
             if (evt.type === "sdk_event" && evt.message) {
-              const lm = sdkToLeaderMessage(evt.message);
-              if (lm) rebuiltMessages.push(lm);
+              const lms = sdkToLeaderMessages(evt.message);
+              for (const lm of lms) {
+                if (!seenIds.has(lm.id)) {
+                  seenIds.add(lm.id);
+                  rebuiltMessages.push(lm);
+                }
+              }
               if (evt.message.type === "result") {
                 rebuiltCost = evt.message.total_cost_usd ?? rebuiltCost;
                 rebuiltTurns = evt.message.num_turns ?? rebuiltTurns;
@@ -1665,23 +1773,38 @@ function LeaderNodeRenderer({
           return;
         }
 
-        const lm = sdkToLeaderMessage(serverMsg.message);
-        if (lm) {
-          const updated = { ...current };
-          updated.messages = [...current.messages, lm];
-          // Clear streaming buffer on complete assistant message
-          if (serverMsg.message.type === "assistant") {
-            updated.streamingText = "";
+        const lms = sdkToLeaderMessages(serverMsg.message);
+        if (lms.length > 0) {
+          const existingIds = new Set(current.messages.map((m) => m.id));
+          const newMsgs = lms.filter((m) => !existingIds.has(m.id));
+          if (newMsgs.length > 0) {
+            const updated = { ...current };
+            updated.messages = [...current.messages, ...newMsgs];
+            // Clear streaming buffer on complete assistant message
+            if (serverMsg.message.type === "assistant") {
+              updated.streamingText = "";
+            }
+            if (serverMsg.message.type === "result") {
+              updated.status = "idle";
+              updated.totalCost =
+                serverMsg.message.total_cost_usd ?? current.totalCost;
+              updated.turns =
+                serverMsg.message.num_turns ?? current.turns;
+              updated.streamingText = "";
+            }
+            emitUpdate(updated);
+          } else if (serverMsg.message.type === "assistant") {
+            // Still clear streaming even if messages were deduped
+            emitUpdate({ ...current, streamingText: "" });
+          } else if (serverMsg.message.type === "result") {
+            emitUpdate({
+              ...current,
+              status: "idle",
+              totalCost: serverMsg.message.total_cost_usd ?? current.totalCost,
+              turns: serverMsg.message.num_turns ?? current.turns,
+              streamingText: "",
+            });
           }
-          if (serverMsg.message.type === "result") {
-            updated.status = "idle";
-            updated.totalCost =
-              serverMsg.message.total_cost_usd ?? current.totalCost;
-            updated.turns =
-              serverMsg.message.num_turns ?? current.turns;
-            updated.streamingText = "";
-          }
-          emitUpdate(updated);
         }
         return;
       }
@@ -1848,10 +1971,20 @@ function LeaderNodeRenderer({
   const handleSend = useCallback(() => {
     const current = dataRef.current;
     if (!socketSend || !input.trim() || !current.sessionKey) return;
+
+    // Compile current skills into system prompt so mid-session skill
+    // additions/removals take effect on the next turn
+    const taggedSkills = (current.skillIds ?? [])
+      .map((id) => getSkill(id))
+      .filter((s): s is SkillTemplate => s !== undefined);
+    const skillsAddendum = compileSkills(taggedSkills, current.skillValues ?? {});
+    const finalSystemPrompt = LEADER_SYSTEM_PROMPT + skillsAddendum;
+
     socketSend({
       type: "send_message",
       sessionKey: current.sessionKey,
       prompt: input.trim(),
+      systemPrompt: finalSystemPrompt,
     });
     onUpdateData({
       ...current,
@@ -2109,6 +2242,7 @@ function LeaderNodeRenderer({
             onReset={handleReset}
             onExportLog={handleExportLog}
             data={data}
+            canvasScale={canvasScale}
           />
         </div>
       </div>
@@ -2128,67 +2262,67 @@ function LeaderNodeRenderer({
       {/* Status banners */}
       <StatusBannerStack banners={banners} onDismiss={dismissBanner} />
 
-      {/* P3: Skills button (opens flyout) — only before session starts */}
-      {!data.sessionKey && (
-        <div
-          onMouseDown={(e) => e.stopPropagation()}
+      {/* P3: Skills button (opens flyout) — visible in all states */}
+      <div
+        ref={skillAnchorRef}
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{
+          padding: "4px 10px",
+          borderBottom: "1px solid var(--border-default)",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          flexShrink: 0,
+          background: "var(--bg-primary)",
+        }}
+      >
+        <button
+          onClick={() => setSkillFlyoutOpen(true)}
           style={{
-            padding: "4px 10px",
-            borderBottom: "1px solid var(--border-default)",
             display: "flex",
             alignItems: "center",
-            gap: 6,
-            flexShrink: 0,
-            background: "var(--bg-primary)",
+            gap: 4,
+            padding: "3px 10px",
+            borderRadius: 4,
+            fontSize: 10,
+            fontWeight: 600,
+            fontFamily: "var(--font-mono)",
+            background: taggedSkillCount > 0 ? "rgba(129, 140, 248, 0.12)" : "var(--bg-elevated)",
+            border: taggedSkillCount > 0 ? "1px solid rgba(129, 140, 248, 0.3)" : "1px dashed var(--border-default)",
+            color: taggedSkillCount > 0 ? "#818cf8" : "var(--text-muted)",
+            cursor: "pointer",
+            transition: "all 0.15s",
           }}
         >
-          <button
-            onClick={() => setSkillFlyoutOpen(true)}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-              padding: "3px 10px",
-              borderRadius: 4,
-              fontSize: 10,
-              fontWeight: 600,
-              fontFamily: "var(--font-mono)",
-              background: taggedSkillCount > 0 ? "rgba(129, 140, 248, 0.12)" : "var(--bg-elevated)",
-              border: taggedSkillCount > 0 ? "1px solid rgba(129, 140, 248, 0.3)" : "1px dashed var(--border-default)",
-              color: taggedSkillCount > 0 ? "#818cf8" : "var(--text-muted)",
-              cursor: "pointer",
-              transition: "all 0.15s",
-            }}
-          >
-            ⚡ Skills {taggedSkillCount > 0 ? `(${taggedSkillCount})` : ""}
-          </button>
-          {/* Show active skill chips inline */}
-          {(data.skillIds ?? [])
-            .map((id) => getSkill(id))
-            .filter((s): s is SkillTemplate => s !== undefined)
-            .slice(0, 3)
-            .map((skill) => (
-              <SkillTagChip key={skill.id} skill={skill} readOnly={false} onRemove={() => {
-                const next = (data.skillIds ?? []).filter((s) => s !== skill.id);
-                const nextValues = { ...(data.skillValues ?? {}) };
-                delete nextValues[skill.id];
-                onUpdateData({ ...dataRef.current, skillIds: next, skillValues: nextValues });
-              }} />
-            ))}
-          {taggedSkillCount > 3 && (
-            <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-              +{taggedSkillCount - 3} more
-            </span>
-          )}
-        </div>
-      )}
+          ⚡ Skills {taggedSkillCount > 0 ? `(${taggedSkillCount})` : ""}
+        </button>
+        {/* Show active skill chips inline */}
+        {(data.skillIds ?? [])
+          .map((id) => getSkill(id))
+          .filter((s): s is SkillTemplate => s !== undefined)
+          .slice(0, 3)
+          .map((skill) => (
+            <SkillTagChip key={skill.id} skill={skill} readOnly={false} onRemove={() => {
+              const next = (data.skillIds ?? []).filter((s) => s !== skill.id);
+              const nextValues = { ...(data.skillValues ?? {}) };
+              delete nextValues[skill.id];
+              onUpdateData({ ...dataRef.current, skillIds: next, skillValues: nextValues });
+            }} />
+          ))}
+        {taggedSkillCount > 3 && (
+          <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+            +{taggedSkillCount - 3} more
+          </span>
+        )}
+      </div>
 
       {/* P3: Skill Flyout */}
       <SkillFlyout
         skillIds={data.skillIds ?? []}
         skillValues={data.skillValues ?? {}}
         open={skillFlyoutOpen}
-        readOnly={!!data.sessionKey}
+        readOnly={false}
+        anchorRef={skillAnchorRef}
         onUpdate={(patch) => {
           onUpdateData({ ...dataRef.current, ...patch });
         }}
@@ -2236,11 +2370,19 @@ function LeaderNodeRenderer({
           if (group.kind === "tool-group") {
             return <LeaderToolGroup key={`tg-${gi}`} msgs={group.msgs} />;
           }
+          if (group.kind === "thinking-group") {
+            return <LeaderThinkingGroup key={`thg-${gi}`} msgs={group.msgs} />;
+          }
           const msg = group.msg;
 
           // P5: User messages get collapsible treatment
           if (msg.role === "user") {
             return <UserMessageBubble key={msg.id} msg={msg} />;
+          }
+
+          // Thinking messages (singleton — rare, usually grouped)
+          if (msg.role === "thinking") {
+            return <LeaderThinkingGroup key={msg.id} msgs={[msg]} />;
           }
 
           // P5: Assistant messages get markdown rendering

@@ -135,5 +135,23 @@ export function updateProjectSettings(id: string, settings: ProjectSettings): Pr
   });
 }
 
+// ── Directory tree ──────────────────────────────────────
+
+export interface TreeNode {
+  name: string;
+  path: string;       // relative to project root
+  type: "dir" | "file";
+  children?: TreeNode[];
+}
+
+export interface ProjectTree {
+  root: string;
+  tree: TreeNode[];
+}
+
+export function getProjectTree(id: string, depth = 2): Promise<ProjectTree> {
+  return apiFetch(`/projects/${id}/tree?depth=${depth}`);
+}
+
 // Re-export encodePath for consumers that need to convert raw paths to IDs
 export { encodePath };

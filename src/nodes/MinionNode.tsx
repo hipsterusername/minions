@@ -3,13 +3,14 @@ import type { NodeRenderProps } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
 import { registerContract, MINION_CONTRACT } from "../graph.ts";
 import type { TaskAssignment } from "../graph.ts";
-import type { ServerMessage, SdkMessage, ContentBlock } from "../use-socket.ts";
+import type { ServerMessage, SdkMessage } from "../use-socket.ts";
 import { MINION_SYSTEM_PROMPT } from "../prompts/minion-system.ts";
 import { useStatusBanners, StatusBannerStack } from "../components/StatusBanner.tsx";
 import { StreamingBubble, StreamingIndicator } from "../components/StreamingBubble.tsx";
 import { extractStreamDelta, isStreamingEvent } from "../streaming.ts";
 import { SessionToolbar } from "../components/SessionToolbar.tsx";
 import type { ModelOption, PermissionMode } from "../components/SessionToolbar.tsx";
+import { sdkToDisplayMessages, msgId, type DisplayMessage } from "../sdk-messages.ts";
 
 registerContract(MINION_CONTRACT);
 
@@ -45,113 +46,11 @@ export interface MinionData {
   worktreeBranch?: string | null;
 }
 
-interface MinionMessage {
-  id: string;
-  role: "user" | "assistant" | "tool" | "system" | "result";
-  content: string;
-  timestamp: number;
-  toolName?: string;
-  /** e.g. "8.6s · $0.0288" */
-  suffix?: string;
-}
+// MinionMessage is now an alias for the shared DisplayMessage type
+type MinionMessage = DisplayMessage;
 
-function msgId(): string {
-  return `mm-${crypto.randomUUID()}`;
-}
-
-// UI trigger patterns emitted by the minion agent
-const STEP_RE = /\[STEP\]\s*(.+)/;
-const DONE_RE = /\[DONE\]\s*(.+)/;
-const FAIL_RE = /\[FAIL\]\s*(.+)/;
-
-interface ParsedTrigger {
-  type: "step" | "done" | "fail";
-  message: string;
-}
-
-function parseTriggers(text: string): ParsedTrigger[] {
-  const triggers: ParsedTrigger[] = [];
-  for (const line of text.split("\n")) {
-    const stepMatch = STEP_RE.exec(line);
-    if (stepMatch) {
-      triggers.push({ type: "step", message: stepMatch[1]!.trim() });
-      continue;
-    }
-    const doneMatch = DONE_RE.exec(line);
-    if (doneMatch) {
-      triggers.push({ type: "done", message: doneMatch[1]!.trim() });
-      continue;
-    }
-    const failMatch = FAIL_RE.exec(line);
-    if (failMatch) {
-      triggers.push({ type: "fail", message: failMatch[1]!.trim() });
-      continue;
-    }
-  }
-  return triggers;
-}
-
-function extractText(blocks: ContentBlock[]): string {
-  const parts: string[] = [];
-  for (const block of blocks) {
-    if (block.type === "text" && block.text) {
-      parts.push(block.text);
-    } else if (block.type === "tool_use" && block.name) {
-      parts.push(`[Tool: ${block.name}]`);
-    }
-  }
-  return parts.join("\n");
-}
-
-function sdkToMinionMessage(sdkMsg: SdkMessage): MinionMessage | null {
-  const now = Date.now();
-  switch (sdkMsg.type) {
-    case "system": {
-      const sub = sdkMsg.subtype;
-      if (sub === "init") {
-        const model = sdkMsg.model ?? "unknown";
-        return { id: msgId(), role: "system", content: `Minion on ${model}`, timestamp: now };
-      }
-      if (sub === "task_started") {
-        return { id: msgId(), role: "system", content: `Sub: ${sdkMsg.description ?? sdkMsg.task_id ?? "task"}`, timestamp: now };
-      }
-      if (sub === "task_notification") {
-        const ico = sdkMsg.status === "completed" ? "\u2713" : "\u2717";
-        return { id: msgId(), role: "system", content: `${ico} Sub ${sdkMsg.status}: ${sdkMsg.summary ?? ""}`, timestamp: now };
-      }
-      if (sub === "local_command_output" && sdkMsg.content) {
-        return { id: msgId(), role: "system", content: sdkMsg.content, timestamp: now };
-      }
-      return null;
-    }
-    case "assistant":
-      if (sdkMsg.message?.content) {
-        const text = extractText(sdkMsg.message.content);
-        if (!text.trim()) return null;
-        return { id: msgId(), role: "assistant", content: text, timestamp: now };
-      }
-      return null;
-    case "tool_progress":
-      return {
-        id: msgId(), role: "tool",
-        content: `${sdkMsg.tool_name} (${sdkMsg.elapsed_time_seconds?.toFixed(1)}s)`,
-        timestamp: now, toolName: sdkMsg.tool_name,
-      };
-    case "tool_use_summary":
-      if (sdkMsg.summary) {
-        return { id: msgId(), role: "system", content: sdkMsg.summary, timestamp: now };
-      }
-      return null;
-    case "result": {
-      const txt = sdkMsg.result ?? (sdkMsg.is_error ? "Error" : "Done");
-      const ds = sdkMsg.duration_ms ? `${(sdkMsg.duration_ms / 1000).toFixed(1)}s` : null;
-      const cs = sdkMsg.total_cost_usd ? `$${sdkMsg.total_cost_usd.toFixed(4)}` : null;
-      const sfx = [ds, cs].filter(Boolean).join(" · ");
-      return { id: msgId(), role: "result", content: txt, timestamp: now, suffix: sfx || undefined };
-    }
-    default:
-      return null;
-  }
+function sdkToMinionMessages(sdkMsg: SdkMessage): MinionMessage[] {
+  return sdkToDisplayMessages(sdkMsg, "mm");
 }
 
 function MinionNodeRenderer({
@@ -236,10 +135,16 @@ function MinionNodeRenderer({
           const rebuiltCost = serverMsg.totalCost ?? current.totalCost;
           const rebuiltTurns = serverMsg.turns ?? current.turns;
 
+          const seenIds = new Set<string>();
           for (const evt of serverMsg.events) {
             if (evt.type === "sdk_event" && evt.message) {
-              const mm = sdkToMinionMessage(evt.message as SdkMessage);
-              if (mm) rebuiltMessages.push(mm);
+              const mms = sdkToMinionMessages(evt.message as SdkMessage);
+              for (const mm of mms) {
+                if (!seenIds.has(mm.id)) {
+                  seenIds.add(mm.id);
+                  rebuiltMessages.push(mm);
+                }
+              }
             }
             if (evt.type === "session_status" && evt.status) {
               rebuiltStatus = evt.status as MinionData["status"];
@@ -270,6 +175,44 @@ function MinionNodeRenderer({
 
       if (!current.sessionKey) return;
 
+      // ── Handle structured minion_status events from MCP tools ──
+      if (
+        (serverMsg as Record<string, unknown>).type === "minion_status" &&
+        (serverMsg as Record<string, unknown>).minionSessionKey === current.sessionKey
+      ) {
+        const trigger = (serverMsg as Record<string, unknown>).trigger as string;
+        const message = (serverMsg as Record<string, unknown>).message as string;
+        if (current.activeTaskIndex >= 0 && current.activeTaskIndex < current.taskQueue.length) {
+          const tasks = [...current.taskQueue];
+          const task = tasks[current.activeTaskIndex];
+          if (task) {
+            if (trigger === "step") {
+              tasks[current.activeTaskIndex] = {
+                ...task,
+                activeStep: message,
+                progress: [...task.progress, message],
+              };
+            } else if (trigger === "done") {
+              tasks[current.activeTaskIndex] = {
+                ...task,
+                status: "completed",
+                result: message,
+                activeStep: null,
+              };
+            } else if (trigger === "fail") {
+              tasks[current.activeTaskIndex] = {
+                ...task,
+                status: "failed",
+                result: message,
+                activeStep: null,
+              };
+            }
+            emitUpdate({ ...current, taskQueue: tasks });
+          }
+        }
+        return;
+      }
+
       if (
         serverMsg.type === "sdk_event" &&
         serverMsg.sessionKey === current.sessionKey
@@ -288,48 +231,17 @@ function MinionNodeRenderer({
           return;
         }
 
-        const mm = sdkToMinionMessage(serverMsg.message);
-        if (mm) {
+        const mms = sdkToMinionMessages(serverMsg.message);
+        if (mms.length > 0) {
+          const existingIds = new Set(current.messages.map((m) => m.id));
+          const newMsgs = mms.filter((m) => !existingIds.has(m.id));
           const updated = { ...current };
-          updated.messages = [...current.messages, mm];
+          if (newMsgs.length > 0) {
+            updated.messages = [...current.messages, ...newMsgs];
+          }
           // Clear streaming buffer on complete assistant message
           if (serverMsg.message.type === "assistant") {
             updated.streamingText = "";
-
-            // Parse UI triggers from assistant text
-            if (mm.content && current.activeTaskIndex >= 0 && current.activeTaskIndex < current.taskQueue.length) {
-              const triggers = parseTriggers(mm.content);
-              if (triggers.length > 0) {
-                const tasks = [...current.taskQueue];
-                const task = tasks[current.activeTaskIndex];
-                if (task) {
-                  for (const trigger of triggers) {
-                    if (trigger.type === "step") {
-                      tasks[current.activeTaskIndex] = {
-                        ...task,
-                        activeStep: trigger.message,
-                        progress: [...task.progress, trigger.message],
-                      };
-                    } else if (trigger.type === "done") {
-                      tasks[current.activeTaskIndex] = {
-                        ...task,
-                        status: "completed",
-                        result: trigger.message,
-                        activeStep: null,
-                      };
-                    } else if (trigger.type === "fail") {
-                      tasks[current.activeTaskIndex] = {
-                        ...task,
-                        status: "failed",
-                        result: trigger.message,
-                        activeStep: null,
-                      };
-                    }
-                  }
-                  updated.taskQueue = tasks;
-                }
-              }
-            }
           }
           if (serverMsg.message.type === "result") {
             updated.totalCost =
@@ -337,7 +249,7 @@ function MinionNodeRenderer({
             updated.turns =
               serverMsg.message.num_turns ?? current.turns;
             updated.streamingText = "";
-            // Ensure active task is marked completed if not already resolved by triggers
+            // Ensure active task is marked completed if not already resolved by MCP tools
             if (current.activeTaskIndex >= 0 && current.activeTaskIndex < current.taskQueue.length) {
               const tasks = [...(updated.taskQueue ?? current.taskQueue)];
               const task = tasks[current.activeTaskIndex];
@@ -364,7 +276,7 @@ function MinionNodeRenderer({
               updated.messages = [
                 ...updated.messages,
                 {
-                  id: msgId(),
+                  id: msgId("mm"),
                   role: "user" as const,
                   content: `Starting task: ${nextTask.title}`,
                   timestamp: Date.now(),

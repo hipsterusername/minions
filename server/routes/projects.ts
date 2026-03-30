@@ -352,5 +352,62 @@ export function createProjectRoutes(): Router {
     res.json({ ok: true });
   });
 
+  // ── Directory tree (high-level) ──────────────────────
+  router.get("/:encodedPath/tree", (req: Request, res: Response) => {
+    const projectPath = decodePath(param(req, "encodedPath"));
+    const depthParam = req.query["depth"];
+    const maxDepth = typeof depthParam === "string" ? Math.min(parseInt(depthParam, 10) || 2, 4) : 2;
+
+    interface TreeNode {
+      name: string;
+      path: string;       // relative to project root
+      type: "dir" | "file";
+      children?: TreeNode[];
+    }
+
+    // Directories/files to always skip
+    const SKIP = new Set([
+      "node_modules", ".git", ".next", ".cache", "dist", "build",
+      ".turbo", ".vercel", ".DS_Store", "__pycache__", ".canvas-worktrees",
+      ".canvas", "coverage", ".nyc_output", ".parcel-cache",
+    ]);
+
+    function scanDir(absPath: string, relPath: string, depth: number): TreeNode[] {
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(absPath, { withFileTypes: true });
+      } catch {
+        return [];
+      }
+
+      const result: TreeNode[] = [];
+      // Sort: dirs first, then files, alpha within each
+      const dirs = entries.filter(e => e.isDirectory() && !SKIP.has(e.name) && !e.name.startsWith(".")).sort((a, b) => a.name.localeCompare(b.name));
+      const files = entries.filter(e => e.isFile() && !e.name.startsWith(".")).sort((a, b) => a.name.localeCompare(b.name));
+
+      for (const d of dirs) {
+        const childRel = relPath ? `${relPath}/${d.name}` : d.name;
+        const childAbs = path.join(absPath, d.name);
+        const node: TreeNode = { name: d.name, path: childRel, type: "dir" };
+        if (depth < maxDepth) {
+          node.children = scanDir(childAbs, childRel, depth + 1);
+        }
+        result.push(node);
+      }
+      for (const f of files) {
+        const childRel = relPath ? `${relPath}/${f.name}` : f.name;
+        result.push({ name: f.name, path: childRel, type: "file" });
+      }
+      return result;
+    }
+
+    try {
+      const tree = scanDir(projectPath, "", 0);
+      res.json({ root: path.basename(projectPath), tree });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to scan directory" });
+    }
+  });
+
   return router;
 }

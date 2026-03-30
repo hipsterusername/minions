@@ -1,0 +1,97 @@
+/**
+ * Status-reporting MCP tools for Minion agents.
+ *
+ * Replaces the text-marker convention ([STEP], [DONE], [FAIL]) with
+ * proper MCP tools so the UI gets structured, guaranteed-parseable events.
+ */
+
+import { z } from "zod/v4";
+import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
+import type { WebSocketServer, WebSocket } from "ws";
+
+// ── Broadcast helper ───────────────────────────────────
+
+function broadcast(wss: WebSocketServer, data: unknown): void {
+  const msg = JSON.stringify(data);
+  for (const client of wss.clients) {
+    if ((client as WebSocket).readyState === 1) {
+      (client as WebSocket).send(msg);
+    }
+  }
+}
+
+// ── Factory ────────────────────────────────────────────
+
+export function createMinionToolsForSession(opts: {
+  minionSessionKey: string;
+  wss: WebSocketServer;
+}) {
+  const { minionSessionKey, wss } = opts;
+
+  const reportStepTool = tool(
+    "report_step",
+    "Report a progress step to the UI. Call this when starting a meaningful phase of work (e.g. reading files, implementing, testing).",
+    {
+      message: z.string().describe("Short description of what you're doing now"),
+    },
+    async (args) => {
+      broadcast(wss, {
+        type: "minion_status",
+        minionSessionKey,
+        trigger: "step",
+        message: args.message,
+        timestamp: Date.now(),
+      });
+      return {
+        content: [{ type: "text" as const, text: `Step reported: ${args.message}` }],
+      };
+    },
+  );
+
+  const reportDoneTool = tool(
+    "report_done",
+    "Report task completion. Call exactly once when the current task is finished successfully.",
+    {
+      summary: z.string().describe("One-line summary of what was accomplished"),
+    },
+    async (args) => {
+      broadcast(wss, {
+        type: "minion_status",
+        minionSessionKey,
+        trigger: "done",
+        message: args.summary,
+        timestamp: Date.now(),
+      });
+      return {
+        content: [{ type: "text" as const, text: `Task completed: ${args.summary}` }],
+      };
+    },
+  );
+
+  const reportFailTool = tool(
+    "report_fail",
+    "Report task failure. Call exactly once if you cannot complete the current task.",
+    {
+      reason: z.string().describe("One-line reason for failure"),
+    },
+    async (args) => {
+      broadcast(wss, {
+        type: "minion_status",
+        minionSessionKey,
+        trigger: "fail",
+        message: args.reason,
+        timestamp: Date.now(),
+      });
+      return {
+        content: [{ type: "text" as const, text: `Task failed: ${args.reason}` }],
+      };
+    },
+  );
+
+  const mcpServer = createSdkMcpServer({
+    name: "minion-status",
+    tools: [reportStepTool, reportDoneTool, reportFailTool],
+  });
+
+  return { mcpServer };
+}

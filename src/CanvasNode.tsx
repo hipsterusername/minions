@@ -16,27 +16,6 @@ interface CanvasNodeProps {
   onResize?: (id: string, size: Size) => void;
 }
 
-/** Walk from the event target up to (but not including) the node root,
- *  looking for the first element with scrollable overflow.  If found,
- *  return it — otherwise return null. */
-function findScrollableAncestor(
-  target: EventTarget | null,
-  boundary: HTMLElement,
-): HTMLElement | null {
-  let el = target as HTMLElement | null;
-  while (el && el !== boundary) {
-    const { overflowY } = getComputedStyle(el);
-    if (
-      (overflowY === "auto" || overflowY === "scroll") &&
-      el.scrollHeight > el.clientHeight
-    ) {
-      return el;
-    }
-    el = el.parentElement;
-  }
-  return null;
-}
-
 export function CanvasNodeComponent({
   node,
   transform,
@@ -93,23 +72,11 @@ export function CanvasNodeComponent({
     [node.id, node.position, transform.scale, onSelect, onMove],
   );
 
-  /** If the wheel event is over a scrollable child, absorb it so the
-   *  canvas zoom handler never fires; otherwise let it bubble. */
+  /** Always absorb wheel events on nodes so the canvas never zooms
+   *  while the pointer is over a node. Scrollable children still scroll
+   *  normally — we just prevent the event from reaching the canvas. */
   const handleWheel = useCallback((e: React.WheelEvent) => {
-    if (!nodeRef.current) return;
-    const scrollable = findScrollableAncestor(e.target, nodeRef.current);
-    if (!scrollable) return; // nothing scrollable — let canvas zoom
-
-    const { scrollTop, scrollHeight, clientHeight } = scrollable;
-    const atTop = scrollTop <= 0 && e.deltaY < 0;
-    const atBottom =
-      scrollTop + clientHeight >= scrollHeight - 1 && e.deltaY > 0;
-
-    // If the scrollable area still has room in the scroll direction, eat the event.
-    if (!atTop && !atBottom) {
-      e.stopPropagation();
-    }
-    // At the boundary → let it bubble to canvas for zoom.
+    e.stopPropagation();
   }, []);
 
   // Stable callback — only changes when node.id or parent handler changes,
@@ -161,6 +128,7 @@ export function CanvasNodeComponent({
         getContextForNode={getContextForNode}
         projectPath={projectPath}
         onResize={handleResize}
+        canvasScale={transform.scale}
       />
     </div>
   );

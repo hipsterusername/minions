@@ -59,4 +59,6 @@ export interface NodeRenderProps {
   projectPath?: string;
   /** Callback to resize this node on the canvas */
   onResize?: (size: Size) => void;
+  /** Current canvas zoom scale — useful for closing popups on zoom */
+  canvasScale?: number;
 }

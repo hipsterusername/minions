@@ -4,8 +4,9 @@ import { WebSocketServer, WebSocket } from "ws";
 import { query, type Query } from "@anthropic-ai/claude-agent-sdk";
 import { createProjectRoutes } from "./routes/projects.ts";
 import { createTaskToolsForLeader, type TaskManagerState } from "./task-tools.ts";
+import { createMinionToolsForSession } from "./minion-tools.ts";
 import { MINION_SYSTEM_PROMPT } from "../src/prompts/minion-system.ts";
-import { createWorktree, removeWorktree, mergeWorktree, getWorktreeStatus, isGitRepo, type WorktreeInfo } from "./worktree.ts";
+import { createWorktree, removeWorktree, mergeWorktree, getWorktreeStatus, isGitRepo, cleanupStaleWorktrees, type WorktreeInfo } from "./worktree.ts";
 
 // ── Database ─────────────────────────────────────────────
 console.log("Server starting (per-project SQLite mode)");
@@ -212,7 +213,7 @@ function deriveTaskName(prompt: string): string {
   // Strip connected-context wrapper if present
   let clean = prompt.replace(/<connected-context>[\s\S]*?<\/connected-context>\s*/g, "").trim();
   // Take first line only
-  clean = clean.split("\n")[0].trim();
+  clean = (clean.split("\n")[0] ?? "").trim();
   // Truncate to 40 chars
   if (clean.length > 40) {
     clean = clean.slice(0, 37) + "…";
@@ -366,6 +367,16 @@ async function runSession(
       session.taskState = taskState;
     }
 
+    // For minion sessions, attach status-reporting MCP tools
+    if (role === "minion") {
+      const { mcpServer: minionMcp } = createMinionToolsForSession({
+        minionSessionKey: sessionKey,
+        wss: wsServer,
+      });
+      const existing = (options["mcpServers"] as Record<string, unknown>) ?? {};
+      options["mcpServers"] = { ...existing, "minion-status": minionMcp };
+    }
+
     const handle = query({ prompt, options: options as never });
 
     session.queryHandle = handle;
@@ -393,29 +404,6 @@ async function runSession(
           skills: msg["skills"],
           claude_code_version: msg["claude_code_version"],
         };
-      }
-
-      // ── Detect task name from leader's first assistant message ──
-      if (
-        session.role === "leader" &&
-        !session.taskName &&
-        message.type === "assistant" &&
-        "message" in message
-      ) {
-        const assistantMsg = message as { message?: { content?: Array<{ type: string; text?: string }> } };
-        const textBlocks = assistantMsg.message?.content?.filter((b: { type: string }) => b.type === "text") ?? [];
-        for (const block of textBlocks) {
-          const match = (block as { text?: string }).text?.match(/<!--task-name:(.+?)-->/);
-          if (match) {
-            session.taskName = match[1].trim();
-            broadcast(wsServer, {
-              type: "session_task_name",
-              sessionKey,
-              taskName: session.taskName,
-            });
-            break;
-          }
-        }
       }
 
       // ── Forward ALL SDK events to connected clients ───
@@ -563,7 +551,7 @@ function handleCommand(
         cmd.prompt,
         sendSession.cwd,
         sendSession.sessionId ?? undefined,
-        undefined,
+        cmd.systemPrompt ?? undefined,
         sendSession.role,
       );
       break;
@@ -1236,4 +1224,9 @@ wss.on("connection", (ws) => {
 server.listen(PORT, () => {
   console.log(`Claude Canvas server on http://localhost:${PORT}`);
   console.log(`WebSocket available on ws://localhost:${PORT}`);
+
+  // Clean up stale worktrees from previous sessions
+  void cleanupStaleWorktrees(process.cwd()).catch((err) => {
+    console.warn("Worktree cleanup skipped:", err instanceof Error ? err.message : err);
+  });
 });
