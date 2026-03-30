@@ -10,7 +10,7 @@ import { Canvas } from "./Canvas.tsx";
 import { useSocket } from "./use-socket.ts";
 import { useAutosave } from "./use-autosave.ts";
 import { ProjectList } from "./ProjectList.tsx";
-import { ProjectHeader } from "./ProjectHeader.tsx";
+import { ProjectHeader, type ActiveView } from "./ProjectHeader.tsx";
 import { ProjectPanel } from "./ProjectPanel.tsx";
 import { getProject, updateProject } from "./api.ts";
 import type { ProjectSettings } from "./api.ts";
@@ -67,6 +67,7 @@ function ProjectView({
   const [projectName, setProjectName] = useState("Loading...");
   const [projectSettings, setProjectSettings] = useState<ProjectSettings>({});
   const [loaded, setLoaded] = useState(false);
+  const [activeView, setActiveView] = useState<ActiveView>("kanban");
 
   // Skills customization state
   const [skillEditorOpen, setSkillEditorOpen] = useState(false);
@@ -150,6 +151,7 @@ function ProjectView({
       const y = window.innerHeight / 2 - node.position.y - node.size.height / 2;
       setTransform({ x, y, scale: 1 });
       setFocusNodeId(nodeId);
+      setActiveView("canvas");
     },
     [nodes, setTransform],
   );
@@ -273,16 +275,16 @@ function ProjectView({
           totalCost: 0,
           turns: 0,
           error: null,
-          model: "sonnet",
-          permissionMode: "bypassPermissions",
+          model: card.model ?? "sonnet",
+          permissionMode: card.permissionMode ?? "bypassPermissions",
           completedTasks: [],
           autoStartPrompt: prompt,
-          worktreeIsolation: true,
+          worktreeIsolation: card.worktreeIsolation ?? true,
           worktreePath: null,
           worktreeBranch: null,
           worktreeStatus: "none",
-          skillIds: [],
-          skillValues: {},
+          skillIds: card.skillIds ?? [],
+          skillValues: card.skillValues ?? {},
           skillPanelOpen: false,
         },
       };
@@ -393,6 +395,8 @@ function ProjectView({
     );
   }
 
+  const kanbanReviewCount = kanbanBoard.cards.filter((c) => c.columnId === "review").length;
+
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
       <ProjectHeader
@@ -403,57 +407,68 @@ function ProjectView({
         onBack={onClose}
         retryCount={retryCount}
         retry={retry}
+        activeView={activeView}
+        onViewChange={setActiveView}
+        kanbanReviewCount={kanbanReviewCount}
       />
-      <KanbanBoard
-        board={kanbanBoard}
-        dispatch={kanbanDispatch}
-        onLaunchLeader={handleLaunchLeader}
-        leaderStatuses={leaderStatuses}
-        onCloseCard={handleCloseCard}
-        onFocusNode={handleFocusNode}
-      />
-      <div style={{ position: "absolute", top: 44, left: 0, right: 0, bottom: 0 }}>
-        <Canvas
-          nodes={nodes}
-          dispatch={dispatch}
-          graph={graph}
-          graphDispatch={graphDispatch}
-          transform={transform}
-          setTransform={setTransform}
-          socketSend={socket.send}
-          socketSubscribe={socket.subscribe}
-          socketConnected={socket.connected}
-          projectPath={projectPath}
-          focusNodeId={focusNodeId}
-          onFocusNodeHandled={handleFocusNodeHandled}
-        />
-        <ProjectPanel
-          projectId={projectId}
-          projectPath={projectPath}
-          projectName={projectName}
-          settings={projectSettings}
-          onSpawnContextExplorer={handleSpawnContextExplorer}
-        />
-        <SkillsBrowser
-          onLaunchSkill={handleLaunchSkill}
-          onCreateSkill={handleCreateSkill}
-          onEditSkill={handleEditSkill}
-          onDeleteSkill={handleDeleteSkill}
-          onImportSkills={handleImportSkills}
-          onExportSkills={handleExportSkills}
-          refreshKey={skillsRefreshKey}
-        />
-        {skillEditorOpen && (
-          <SkillEditor
-            skill={editingSkill}
-            onSave={handleSaveSkill}
-            onClose={() => {
-              setSkillEditorOpen(false);
-              setEditingSkill(null);
-            }}
+      {activeView === "kanban" ? (
+        <div style={{ position: "absolute", top: 44, left: 0, right: 0, bottom: 0 }}>
+          <KanbanBoard
+            board={kanbanBoard}
+            dispatch={kanbanDispatch}
+            onLaunchLeader={handleLaunchLeader}
+            leaderStatuses={leaderStatuses}
+            onCloseCard={handleCloseCard}
+            onFocusNode={handleFocusNode}
+            socketSend={socket.send}
+            socketSubscribe={socket.subscribe}
+            projectPath={projectPath}
           />
-        )}
-      </div>
+        </div>
+      ) : (
+        <div style={{ position: "absolute", top: 44, left: 0, right: 0, bottom: 0 }}>
+          <Canvas
+            nodes={nodes}
+            dispatch={dispatch}
+            graph={graph}
+            graphDispatch={graphDispatch}
+            transform={transform}
+            setTransform={setTransform}
+            socketSend={socket.send}
+            socketSubscribe={socket.subscribe}
+            socketConnected={socket.connected}
+            projectPath={projectPath}
+            focusNodeId={focusNodeId}
+            onFocusNodeHandled={handleFocusNodeHandled}
+          />
+          <ProjectPanel
+            projectId={projectId}
+            projectPath={projectPath}
+            projectName={projectName}
+            settings={projectSettings}
+            onSpawnContextExplorer={handleSpawnContextExplorer}
+          />
+          <SkillsBrowser
+            onLaunchSkill={handleLaunchSkill}
+            onCreateSkill={handleCreateSkill}
+            onEditSkill={handleEditSkill}
+            onDeleteSkill={handleDeleteSkill}
+            onImportSkills={handleImportSkills}
+            onExportSkills={handleExportSkills}
+            refreshKey={skillsRefreshKey}
+          />
+          {skillEditorOpen && (
+            <SkillEditor
+              skill={editingSkill}
+              onSave={handleSaveSkill}
+              onClose={() => {
+                setSkillEditorOpen(false);
+                setEditingSkill(null);
+              }}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }

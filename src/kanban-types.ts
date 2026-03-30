@@ -4,6 +4,9 @@ export interface KanbanSubtask {
   done: boolean;
 }
 
+export type ModelOption = "sonnet" | "opus" | "haiku";
+export type PermissionMode = "bypassPermissions" | "default" | "plan" | "acceptEdits";
+
 export interface KanbanCard {
   id: string;
   title: string;
@@ -13,6 +16,16 @@ export interface KanbanCard {
   priority: "low" | "medium" | "high" | "critical";
   columnId: string;
   createdAt: number;
+  /** Model to use for the leader session */
+  model: ModelOption;
+  /** Permission mode for the leader session */
+  permissionMode: PermissionMode;
+  /** Whether to isolate the leader in a git worktree */
+  worktreeIsolation: boolean;
+  /** IDs of skills to attach to the leader */
+  skillIds: string[];
+  /** Variable values for each skill: { [skillId]: { [varName]: value } } */
+  skillValues: Record<string, Record<string, string>>;
   /** The canvas node ID of the Leader node working on this card */
   leaderNodeId?: string;
   /** Summary of the agent's work (filled when moved to history) */

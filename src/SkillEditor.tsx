@@ -17,6 +17,7 @@ const CATEGORIES: SkillTemplate["category"][] = [
   "testing",
   "devops",
   "analysis",
+  "design",
   "general",
 ];
 

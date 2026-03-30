@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import type { NodeRenderProps } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
 import { registerContract, LEADER_CONTRACT } from "../graph.ts";
@@ -12,6 +13,9 @@ import type { ModelOption, PermissionMode } from "../components/SessionToolbar.t
 import { getSkill, getAllSkills } from "../skills/registry.ts";
 import { compileSkills } from "../skills/types.ts";
 import type { SkillTemplate } from "../skills/types.ts";
+import { ResizeHandle } from "../components/ResizeHandle.tsx";
+import { AutoTextarea } from "../components/AutoTextarea.tsx";
+import { SimpleMarkdown } from "../components/SimpleMarkdown.tsx";
 
 registerContract(LEADER_CONTRACT);
 
@@ -50,6 +54,8 @@ export interface LeaderData {
   skillValues: Record<string, Record<string, string>>;
   /** Whether the skill config panel is expanded */
   skillPanelOpen: boolean;
+  /** If set, auto-start a session with this prompt (then clear it) */
+  autoStartPrompt?: string | null;
 }
 
 interface LeaderMessage {
@@ -341,186 +347,342 @@ function timeAgo(ts: number): string {
   return `${hrs}h ago`;
 }
 
-function TaskTracker({ tasks }: { tasks: CompletedTask[] }) {
-  const [collapsed, setCollapsed] = useState(false);
-  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+/* ── P5: Collapsible user message ─────────────────────────────────────── */
 
-  const totalTasks = tasks.length;
+function UserMessageBubble({ msg }: { msg: LeaderMessage }) {
+  const [collapsed, setCollapsed] = useState(msg.content.length > 300);
+  const isLong = msg.content.length > 300;
 
   return (
     <div
       style={{
-        borderTop: "1px solid var(--border-default)",
-        flexShrink: 0,
-        background: "var(--bg-secondary)",
+        padding: "6px 10px",
+        borderRadius: 6,
+        fontSize: 12,
+        lineHeight: 1.6,
+        fontFamily: "var(--font-sans)",
+        color: "var(--accent)",
+        borderLeft: "2px solid var(--accent)",
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+        overflowWrap: "break-word",
+        position: "relative",
       }}
     >
-      {/* Header */}
+      {collapsed ? msg.content.slice(0, 200) + "…" : msg.content}
+      {isLong && (
+        <button
+          onClick={() => setCollapsed(!collapsed)}
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            display: "inline-block",
+            marginLeft: 6,
+            fontSize: 10,
+            fontFamily: "var(--font-mono)",
+            color: "var(--accent)",
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            textDecoration: "underline",
+            opacity: 0.7,
+            padding: 0,
+          }}
+        >
+          {collapsed ? "show more" : "show less"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ── P4: Unified Task Tracker + Plan in tabbed panel ──────────────────── */
+
+function PlanAndTrackerPanel({
+  planItems,
+  completedTasks,
+  planExpanded,
+  onTogglePlan,
+}: {
+  planItems: PlanItem[];
+  completedTasks: CompletedTask[];
+  planExpanded: boolean;
+  onTogglePlan: () => void;
+}) {
+  const [activeTab, setActiveTab] = useState<"plan" | "tasks">(
+    planItems.length > 0 ? "plan" : "tasks",
+  );
+  const hasPlan = planItems.length > 0;
+  const hasTasks = completedTasks.length > 0;
+
+  if (!hasPlan && !hasTasks) return null;
+
+  const completedCount = planItems.filter((i) => i.status === "completed").length;
+  const [hoveredTask, setHoveredTask] = useState<number | null>(null);
+
+  const statusDotColor: Record<PlanItem["status"], string> = {
+    pending: "#4a5068",
+    active: "#facc15",
+    completed: "#4ade80",
+    failed: "#ef4444",
+  };
+
+  return (
+    <div
+      style={{
+        background: "var(--bg-surface)",
+        borderBottom: "1px solid var(--border-default)",
+        flexShrink: 0,
+      }}
+    >
+      {/* Tab bar */}
       <div
-        onClick={() => setCollapsed(!collapsed)}
         style={{
-          padding: "6px 10px",
           display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          cursor: "pointer",
-          userSelect: "none",
+          borderBottom: "1px solid var(--border-default)",
         }}
       >
-        <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-primary)" }}>
-          Task Tracker ({totalTasks} completed)
-        </span>
-        <span
+        {hasPlan && (
+          <button
+            onClick={() => { setActiveTab("plan"); if (!planExpanded) onTogglePlan(); }}
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              flex: 1,
+              padding: "6px 12px",
+              fontSize: 10,
+              fontWeight: 600,
+              fontFamily: "var(--font-mono)",
+              background: activeTab === "plan" ? "rgba(129, 140, 248, 0.08)" : "transparent",
+              border: "none",
+              borderBottom: activeTab === "plan" ? "2px solid #818cf8" : "2px solid transparent",
+              color: activeTab === "plan" ? "#818cf8" : "var(--text-muted)",
+              cursor: "pointer",
+              transition: "all 0.15s",
+            }}
+          >
+            Plan ({completedCount}/{planItems.length})
+          </button>
+        )}
+        {hasTasks && (
+          <button
+            onClick={() => setActiveTab("tasks")}
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              flex: 1,
+              padding: "6px 12px",
+              fontSize: 10,
+              fontWeight: 600,
+              fontFamily: "var(--font-mono)",
+              background: activeTab === "tasks" ? "rgba(74, 222, 128, 0.08)" : "transparent",
+              border: "none",
+              borderBottom: activeTab === "tasks" ? "2px solid #4ade80" : "2px solid transparent",
+              color: activeTab === "tasks" ? "#4ade80" : "var(--text-muted)",
+              cursor: "pointer",
+              transition: "all 0.15s",
+            }}
+          >
+            Tasks ({completedTasks.length})
+          </button>
+        )}
+        {/* Collapse button */}
+        <button
+          onClick={onTogglePlan}
+          onMouseDown={(e) => e.stopPropagation()}
           style={{
+            padding: "6px 8px",
             fontSize: 10,
+            background: "transparent",
+            border: "none",
             color: "var(--text-muted)",
-            transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)",
+            cursor: "pointer",
+            transform: planExpanded ? "rotate(0deg)" : "rotate(-90deg)",
             transition: "transform 0.15s",
-            display: "inline-block",
           }}
         >
           ▼
-        </span>
+        </button>
       </div>
 
-      {/* Task list */}
-      {!collapsed && (
+      {/* Panel content */}
+      {planExpanded && (
         <div
           onMouseDown={(e) => e.stopPropagation()}
           style={{
-            maxHeight: 180,
+            maxHeight: 200,
             overflowY: "auto",
-            padding: "0 10px 6px",
+            padding: "6px 12px 8px",
           }}
         >
-          {tasks.map((task, idx) => (
-            <div
-              key={task.taskId}
-              onMouseEnter={() => setHoveredIdx(idx)}
-              onMouseLeave={() => setHoveredIdx(null)}
-              style={{
-                position: "relative",
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "4px 6px",
-                borderRadius: 4,
-                background: hoveredIdx === idx ? "var(--bg-elevated)" : "transparent",
-                cursor: "default",
-              }}
-            >
-              <span style={{ color: "#4ade80", fontSize: 12, flexShrink: 0 }}>✓</span>
-              <span
-                style={{
-                  fontSize: 11,
-                  color: "var(--text-primary)",
-                  flex: 1,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {task.title}
-              </span>
-              <span
-                style={{
-                  fontSize: 9,
-                  padding: "1px 5px",
-                  borderRadius: 3,
-                  background: PRIORITY_COLORS[task.priority] ?? "#4a5068",
-                  color: "#fff",
-                  fontWeight: 600,
-                  flexShrink: 0,
-                  textTransform: "uppercase",
-                  letterSpacing: 0.3,
-                }}
-              >
-                {task.priority}
-              </span>
-              {task.cost > 0 && (
-                <span
-                  style={{
-                    fontSize: 10,
-                    color: "var(--text-muted)",
-                    fontFamily: "var(--font-mono)",
-                    flexShrink: 0,
-                  }}
-                >
-                  ${task.cost.toFixed(4)}
-                </span>
-              )}
-              <span
-                style={{
-                  fontSize: 9,
-                  color: "var(--text-muted)",
-                  fontFamily: "var(--font-mono)",
-                  flexShrink: 0,
-                }}
-              >
-                {timeAgo(task.completedAt)}
-              </span>
-
-              {/* Tooltip */}
-              {hoveredIdx === idx && (
+          {activeTab === "plan" && hasPlan && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              {planItems.map((item, idx) => (
                 <div
+                  key={idx}
                   style={{
-                    position: "absolute",
-                    bottom: "calc(100% + 6px)",
-                    left: 0,
-                    zIndex: 9999,
-                    background: "var(--bg-elevated)",
-                    border: "1px solid var(--border-default)",
-                    borderRadius: 8,
-                    padding: 12,
-                    maxWidth: 360,
-                    boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
-                    pointerEvents: "none",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    fontSize: 12,
+                    fontFamily: "var(--font-sans)",
+                    color: item.status === "completed"
+                      ? "var(--text-muted)"
+                      : "var(--text-primary)",
+                    lineHeight: 1.4,
                   }}
                 >
-                  <div style={{ fontSize: 11, color: "var(--text-primary)", marginBottom: 6, lineHeight: 1.4 }}>
-                    {task.description.length > 200
-                      ? task.description.slice(0, 200) + "…"
-                      : task.description}
-                  </div>
-                  {task.sessionKey && (
-                    <div
+                  <span
+                    style={{
+                      width: 7,
+                      height: 7,
+                      borderRadius: "50%",
+                      background: statusDotColor[item.status],
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span
+                    style={{
+                      textDecoration: item.status === "completed" ? "line-through" : "none",
+                      opacity: item.status === "completed" ? 0.6 : 1,
+                    }}
+                  >
+                    {item.title}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {activeTab === "tasks" && hasTasks && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {completedTasks.map((task, idx) => (
+                <div
+                  key={task.taskId}
+                  onMouseEnter={() => setHoveredTask(idx)}
+                  onMouseLeave={() => setHoveredTask(null)}
+                  style={{
+                    position: "relative",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "4px 6px",
+                    borderRadius: 4,
+                    background: hoveredTask === idx ? "var(--bg-elevated)" : "transparent",
+                    cursor: "default",
+                  }}
+                >
+                  <span style={{ color: "#4ade80", fontSize: 12, flexShrink: 0 }}>✓</span>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      color: "var(--text-primary)",
+                      flex: 1,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {task.title}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 9,
+                      padding: "1px 5px",
+                      borderRadius: 3,
+                      background: PRIORITY_COLORS[task.priority] ?? "#4a5068",
+                      color: "#fff",
+                      fontWeight: 600,
+                      flexShrink: 0,
+                      textTransform: "uppercase",
+                      letterSpacing: 0.3,
+                    }}
+                  >
+                    {task.priority}
+                  </span>
+                  {task.cost > 0 && (
+                    <span
                       style={{
                         fontSize: 10,
-                        fontFamily: "var(--font-mono)",
                         color: "var(--text-muted)",
-                        marginBottom: 4,
-                        opacity: 0.7,
+                        fontFamily: "var(--font-mono)",
+                        flexShrink: 0,
                       }}
                     >
-                      {task.sessionKey}
-                    </div>
+                      ${task.cost.toFixed(4)}
+                    </span>
                   )}
-                  {(task.result || task.sessionSummary) && (
+                  <span
+                    style={{
+                      fontSize: 9,
+                      color: "var(--text-muted)",
+                      fontFamily: "var(--font-mono)",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {timeAgo(task.completedAt)}
+                  </span>
+
+                  {/* Tooltip */}
+                  {hoveredTask === idx && (
                     <div
                       style={{
-                        fontSize: 10,
-                        color: "var(--text-secondary, var(--text-muted))",
-                        lineHeight: 1.4,
-                        whiteSpace: "pre-wrap",
-                        wordBreak: "break-word",
-                        maxHeight: 120,
-                        overflowY: "auto",
+                        position: "absolute",
+                        bottom: "calc(100% + 6px)",
+                        left: 0,
+                        zIndex: 9999,
+                        background: "var(--bg-elevated)",
+                        border: "1px solid var(--border-default)",
+                        borderRadius: 8,
+                        padding: 12,
+                        maxWidth: 360,
+                        boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+                        pointerEvents: "none",
                       }}
                     >
-                      {task.result ?? task.sessionSummary}
+                      <div style={{ fontSize: 11, color: "var(--text-primary)", marginBottom: 6, lineHeight: 1.4 }}>
+                        {task.description.length > 200
+                          ? task.description.slice(0, 200) + "…"
+                          : task.description}
+                      </div>
+                      {task.sessionKey && (
+                        <div
+                          style={{
+                            fontSize: 10,
+                            fontFamily: "var(--font-mono)",
+                            color: "var(--text-muted)",
+                            marginBottom: 4,
+                            opacity: 0.7,
+                          }}
+                        >
+                          {task.sessionKey}
+                        </div>
+                      )}
+                      {(task.result || task.sessionSummary) && (
+                        <div
+                          style={{
+                            fontSize: 10,
+                            color: "var(--text-secondary, var(--text-muted))",
+                            lineHeight: 1.4,
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-word",
+                            maxHeight: 120,
+                            overflowY: "auto",
+                          }}
+                        >
+                          {task.result ?? task.sessionSummary}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-              )}
+              ))}
             </div>
-          ))}
+          )}
         </div>
       )}
     </div>
   );
 }
 
-/* ── Skill tag panel ────────────────────────────────────────────────── */
+/* ── P3: Skills Flyout (floating panel instead of inline) ─────────────── */
 
 const SKILL_CATEGORIES: { key: string; label: string }[] = [
   { key: "code", label: "Code" },
@@ -528,6 +690,7 @@ const SKILL_CATEGORIES: { key: string; label: string }[] = [
   { key: "testing", label: "Testing" },
   { key: "devops", label: "DevOps" },
   { key: "analysis", label: "Analysis" },
+  { key: "design", label: "Design" },
   { key: "general", label: "General" },
 ];
 
@@ -593,24 +756,25 @@ function SkillVariableInputs({
   if (skill.variables.length === 0) return null;
 
   return (
-    <div style={{ padding: "4px 0", display: "flex", flexDirection: "column", gap: 4 }}>
+    <div style={{ padding: "6px 0", display: "flex", flexDirection: "column", gap: 6 }}>
       <div
         style={{
-          fontSize: 9,
+          fontSize: 10,
           fontFamily: "var(--font-mono)",
           color: skill.accentColor,
-          opacity: 0.7,
+          opacity: 0.8,
           textTransform: "uppercase",
           letterSpacing: 0.5,
+          fontWeight: 600,
         }}
       >
-        {skill.name} Variables
+        {skill.icon} {skill.name}
       </div>
       {skill.variables.map((v) => (
-        <div key={v.name} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <div key={v.name} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
           <label
             style={{
-              fontSize: 10,
+              fontSize: 11,
               color: "var(--text-secondary)",
               fontFamily: "var(--font-mono)",
               display: "flex",
@@ -620,7 +784,7 @@ function SkillVariableInputs({
           >
             {v.label}
             {v.required && (
-              <span style={{ color: "#ef4444", fontSize: 9 }}>*</span>
+              <span style={{ color: "#ef4444", fontSize: 10 }}>*</span>
             )}
           </label>
           {v.type === "select" ? (
@@ -630,8 +794,8 @@ function SkillVariableInputs({
               onMouseDown={(e) => e.stopPropagation()}
               disabled={readOnly}
               style={{
-                padding: "4px 6px",
-                fontSize: 10,
+                padding: "6px 8px",
+                fontSize: 12,
                 fontFamily: "var(--font-mono)",
                 background: "var(--bg-primary)",
                 border: "1px solid var(--border-default)",
@@ -656,8 +820,8 @@ function SkillVariableInputs({
               placeholder={v.placeholder}
               rows={2}
               style={{
-                padding: "4px 6px",
-                fontSize: 10,
+                padding: "6px 8px",
+                fontSize: 12,
                 fontFamily: "var(--font-mono)",
                 background: "var(--bg-primary)",
                 border: "1px solid var(--border-default)",
@@ -677,8 +841,8 @@ function SkillVariableInputs({
               readOnly={readOnly}
               placeholder={v.placeholder}
               style={{
-                padding: "4px 6px",
-                fontSize: 10,
+                padding: "6px 8px",
+                fontSize: 12,
                 fontFamily: "var(--font-mono)",
                 background: "var(--bg-primary)",
                 border: "1px solid var(--border-default)",
@@ -690,7 +854,7 @@ function SkillVariableInputs({
             />
           )}
           {v.description && (
-            <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+            <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
               {v.description}
             </span>
           )}
@@ -700,24 +864,26 @@ function SkillVariableInputs({
   );
 }
 
-function SkillPanel({
+function SkillFlyout({
   skillIds,
   skillValues,
-  panelOpen,
+  open,
   readOnly,
   onUpdate,
+  onClose,
 }: {
   skillIds: string[];
   skillValues: Record<string, Record<string, string>>;
-  panelOpen: boolean;
+  open: boolean;
   readOnly: boolean;
   onUpdate: (patch: {
     skillIds?: string[];
     skillValues?: Record<string, Record<string, string>>;
     skillPanelOpen?: boolean;
   }) => void;
+  onClose: () => void;
 }) {
-  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const allSkills = getAllSkills();
   const taggedSkills = skillIds
     .map((id) => getSkill(id))
@@ -730,7 +896,6 @@ function SkillPanel({
         skillPanelOpen: true,
       });
     }
-    setDropdownOpen(false);
   };
 
   const handleRemoveSkill = (id: string) => {
@@ -750,15 +915,262 @@ function SkillPanel({
     });
   };
 
-  // Group available skills by category for the dropdown
+  // Filter available skills by search + category
+  const query = searchQuery.toLowerCase().trim();
   const availableByCategory = SKILL_CATEGORIES
     .map((cat) => ({
       ...cat,
       skills: allSkills.filter(
-        (s) => s.category === cat.key && !skillIds.includes(s.id),
+        (s) =>
+          s.category === cat.key &&
+          !skillIds.includes(s.id) &&
+          (query === "" ||
+            s.name.toLowerCase().includes(query) ||
+            s.description.toLowerCase().includes(query) ||
+            s.category.toLowerCase().includes(query)),
       ),
     }))
     .filter((cat) => cat.skills.length > 0);
+
+  if (!open) return null;
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 998,
+        }}
+      />
+      {/* Flyout panel */}
+      <div
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{
+          position: "absolute",
+          top: 0,
+          right: "calc(100% + 8px)",
+          zIndex: 999,
+          width: 300,
+          maxHeight: 480,
+          background: "var(--bg-secondary)",
+          border: "1px solid var(--border-default)",
+          borderRadius: 8,
+          boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        {/* Flyout header */}
+        <div
+          style={{
+            padding: "10px 12px",
+            borderBottom: "1px solid var(--border-default)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
+            Skills Configuration
+          </span>
+          <button
+            onClick={onClose}
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              fontSize: 14,
+              padding: "0 2px",
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Active skills with variable inputs */}
+        {taggedSkills.length > 0 && (
+          <div
+            style={{
+              padding: "8px 12px",
+              borderBottom: "1px solid var(--border-default)",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 9,
+                fontFamily: "var(--font-mono)",
+                color: "var(--text-muted)",
+                textTransform: "uppercase",
+                letterSpacing: 0.5,
+                marginBottom: 6,
+              }}
+            >
+              Active ({taggedSkills.length})
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 4 }}>
+              {taggedSkills.map((skill) => (
+                <SkillTagChip
+                  key={skill.id}
+                  skill={skill}
+                  readOnly={readOnly}
+                  onRemove={() => handleRemoveSkill(skill.id)}
+                />
+              ))}
+            </div>
+            {/* Variable inputs */}
+            {taggedSkills.map((skill) => (
+              <SkillVariableInputs
+                key={skill.id}
+                skill={skill}
+                values={skillValues[skill.id] ?? {}}
+                onChange={(varName, value) => handleVarChange(skill.id, varName, value)}
+                readOnly={readOnly}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Search + available skills */}
+        {!readOnly && (
+          <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+            {/* Search */}
+            <div style={{ padding: "8px 12px 4px" }}>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onMouseDown={(e) => e.stopPropagation()}
+                placeholder="Search skills..."
+                style={{
+                  width: "100%",
+                  padding: "6px 10px",
+                  fontSize: 12,
+                  fontFamily: "var(--font-mono)",
+                  background: "var(--bg-primary)",
+                  border: "1px solid var(--border-default)",
+                  borderRadius: 6,
+                  color: "var(--text-primary)",
+                  outline: "none",
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
+
+            {/* Skill list */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "4px 8px 8px",
+              }}
+            >
+              {availableByCategory.length === 0 && (
+                <div
+                  style={{
+                    padding: "12px",
+                    fontSize: 11,
+                    color: "var(--text-muted)",
+                    textAlign: "center",
+                  }}
+                >
+                  {query ? "No skills match your search" : "All skills already added"}
+                </div>
+              )}
+              {availableByCategory.map((cat) => (
+                <div key={cat.key}>
+                  <div
+                    style={{
+                      fontSize: 9,
+                      fontFamily: "var(--font-mono)",
+                      color: "var(--text-muted)",
+                      padding: "6px 8px 2px",
+                      textTransform: "uppercase",
+                      letterSpacing: 0.5,
+                    }}
+                  >
+                    {cat.label}
+                  </div>
+                  {cat.skills.map((skill) => (
+                    <button
+                      key={skill.id}
+                      onClick={() => handleAddSkill(skill.id)}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 8,
+                        width: "100%",
+                        padding: "6px 8px",
+                        background: "transparent",
+                        border: "none",
+                        borderRadius: 4,
+                        color: "var(--text-primary)",
+                        fontSize: 11,
+                        cursor: "pointer",
+                        textAlign: "left",
+                        transition: "background 0.1s",
+                      }}
+                      onMouseEnter={(e) =>
+                        (e.currentTarget.style.background = "var(--bg-elevated)")
+                      }
+                      onMouseLeave={(e) =>
+                        (e.currentTarget.style.background = "transparent")
+                      }
+                    >
+                      <span style={{ fontSize: 14, lineHeight: 1.2 }}>{skill.icon}</span>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                        <span style={{ fontWeight: 500 }}>{skill.name}</span>
+                        <span
+                          style={{
+                            fontSize: 10,
+                            color: "var(--text-muted)",
+                            lineHeight: 1.3,
+                          }}
+                        >
+                          {skill.description.length > 80
+                            ? skill.description.slice(0, 80) + "…"
+                            : skill.description}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+/* ── P4: Compact config footer (worktree + context in one bar) ────────── */
+
+function ConfigFooter({
+  data,
+  onUpdateData,
+  socketSend,
+  getContextForNode,
+}: {
+  data: LeaderData;
+  onUpdateData: (d: LeaderData) => void;
+  socketSend?: (data: unknown) => void;
+  getContextForNode?: () => import("../types.ts").ContextItem[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const contextCount = getContextForNode?.().length ?? 0;
+  const hasSession = !!data.sessionKey;
+
+  // Worktree status indicators (merged, merging, discarded) shown inline
+  const wtStatus = data.worktreeStatus;
+  const showWorktreeActions = wtStatus === "active" && data.status === "idle";
+  const showWorktreeStatusBadge =
+    wtStatus === "merging" || wtStatus === "merged" || wtStatus === "discarded";
 
   return (
     <div
@@ -768,291 +1180,307 @@ function SkillPanel({
         flexShrink: 0,
       }}
     >
-      {/* Header */}
+      {/* Compact summary row — always visible */}
       <div
-        onClick={() => onUpdate({ skillPanelOpen: !panelOpen })}
+        onClick={() => setExpanded(!expanded)}
+        onMouseDown={(e) => e.stopPropagation()}
         style={{
           padding: "4px 10px",
           display: "flex",
-          justifyContent: "space-between",
           alignItems: "center",
+          gap: 8,
           cursor: "pointer",
           userSelect: "none",
+          fontSize: 10,
+          fontFamily: "var(--font-mono)",
+          color: "var(--text-muted)",
         }}
       >
-        <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
-          ⚡ Skills ({taggedSkills.length})
-        </span>
+        {/* Worktree badge */}
         <span
           style={{
-            fontSize: 10,
-            color: "var(--text-muted)",
-            transform: panelOpen ? "rotate(0deg)" : "rotate(-90deg)",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 3,
+            padding: "1px 6px",
+            borderRadius: 3,
+            background: data.worktreeIsolation
+              ? "rgba(99, 102, 241, 0.15)"
+              : "rgba(255, 255, 255, 0.04)",
+            color: data.worktreeIsolation ? "#818cf8" : "var(--text-muted)",
+          }}
+        >
+          {"\u{1F33F}"} {data.worktreeIsolation ? "isolated" : "shared"}
+        </span>
+
+        {/* Context count */}
+        {contextCount > 0 && (
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 3,
+              color: "#818cf8",
+            }}
+          >
+            {"\u{1F4CE}"} {contextCount}
+          </span>
+        )}
+
+        {/* Worktree branch */}
+        {data.worktreeBranch && (
+          <span style={{ color: "#a78bfa", fontSize: 9 }}>
+            {data.worktreeBranch}
+          </span>
+        )}
+
+        {/* Worktree status badge */}
+        {showWorktreeStatusBadge && (
+          <span
+            style={{
+              color: wtStatus === "merged" ? "#4ade80" : wtStatus === "discarded" ? "#f87171" : "#facc15",
+            }}
+          >
+            {wtStatus === "merging" ? "merging..." : wtStatus === "merged" ? "merged" : "discarded"}
+          </span>
+        )}
+
+        <span style={{ flex: 1 }} />
+        <span
+          style={{
+            fontSize: 8,
+            transform: expanded ? "rotate(0deg)" : "rotate(-90deg)",
             transition: "transform 0.15s",
-            display: "inline-block",
           }}
         >
           ▼
         </span>
       </div>
 
-      {/* Expanded content */}
-      {panelOpen && (
+      {/* Expanded config */}
+      {expanded && (
         <div
           onMouseDown={(e) => e.stopPropagation()}
-          style={{ padding: "0 10px 6px" }}
+          style={{ padding: "4px 10px 8px" }}
         >
-          {/* Tag chips row */}
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 4,
-              alignItems: "center",
-              marginBottom: taggedSkills.length > 0 ? 6 : 0,
-            }}
-          >
-            {taggedSkills.map((skill) => (
-              <SkillTagChip
-                key={skill.id}
-                skill={skill}
-                readOnly={readOnly}
-                onRemove={() => handleRemoveSkill(skill.id)}
+          {/* Worktree isolation toggle */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+            <button
+              onClick={() => {
+                if (!hasSession) {
+                  onUpdateData({ ...data, worktreeIsolation: !data.worktreeIsolation });
+                }
+              }}
+              disabled={hasSession}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                padding: "4px 10px",
+                borderRadius: 4,
+                border: "none",
+                cursor: hasSession ? "default" : "pointer",
+                opacity: hasSession ? 0.7 : 1,
+                background: data.worktreeIsolation
+                  ? "rgba(99, 102, 241, 0.25)"
+                  : "rgba(255, 255, 255, 0.06)",
+                color: data.worktreeIsolation ? "#818cf8" : "var(--text-muted)",
+              }}
+            >
+              {"\u{1F33F}"} Worktree Isolation
+              <span
+                style={{
+                  display: "inline-block",
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: data.worktreeIsolation ? "#818cf8" : "var(--text-muted)",
+                  marginLeft: 2,
+                }}
               />
-            ))}
-            {/* Add button */}
-            {!readOnly && (
-              <div style={{ position: "relative" }}>
-                <button
-                  onClick={() => setDropdownOpen(!dropdownOpen)}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 2,
-                    padding: "2px 8px",
-                    borderRadius: 4,
-                    fontSize: 10,
-                    fontFamily: "var(--font-mono)",
-                    background: "var(--bg-elevated)",
-                    border: "1px dashed var(--border-default)",
-                    color: "var(--text-muted)",
-                    cursor: "pointer",
-                  }}
-                >
-                  + Add
-                </button>
-                {/* Dropdown */}
-                {dropdownOpen && availableByCategory.length > 0 && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: "calc(100% + 4px)",
-                      left: 0,
-                      zIndex: 999,
-                      background: "var(--bg-elevated)",
-                      border: "1px solid var(--border-default)",
-                      borderRadius: 6,
-                      padding: 4,
-                      minWidth: 180,
-                      maxHeight: 240,
-                      overflowY: "auto",
-                      boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
-                    }}
-                  >
-                    {availableByCategory.map((cat) => (
-                      <div key={cat.key}>
-                        <div
-                          style={{
-                            fontSize: 9,
-                            fontFamily: "var(--font-mono)",
-                            color: "var(--text-muted)",
-                            padding: "4px 8px 2px",
-                            textTransform: "uppercase",
-                            letterSpacing: 0.5,
-                          }}
-                        >
-                          {cat.label}
-                        </div>
-                        {cat.skills.map((skill) => (
-                          <button
-                            key={skill.id}
-                            onClick={() => handleAddSkill(skill.id)}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 6,
-                              width: "100%",
-                              padding: "4px 8px",
-                              background: "transparent",
-                              border: "none",
-                              borderRadius: 4,
-                              color: "var(--text-primary)",
-                              fontSize: 11,
-                              cursor: "pointer",
-                              textAlign: "left",
-                            }}
-                            onMouseEnter={(e) =>
-                              (e.currentTarget.style.background = "var(--bg-surface)")
-                            }
-                            onMouseLeave={(e) =>
-                              (e.currentTarget.style.background = "transparent")
-                            }
-                          >
-                            <span>{skill.icon}</span>
-                            <span>{skill.name}</span>
-                          </button>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {dropdownOpen && availableByCategory.length === 0 && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: "calc(100% + 4px)",
-                      left: 0,
-                      zIndex: 999,
-                      background: "var(--bg-elevated)",
-                      border: "1px solid var(--border-default)",
-                      borderRadius: 6,
-                      padding: "8px 12px",
-                      fontSize: 10,
-                      color: "var(--text-muted)",
-                      boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
-                    }}
-                  >
-                    All skills already added
-                  </div>
-                )}
-              </div>
-            )}
+            </button>
           </div>
 
-          {/* Variable inputs for each tagged skill */}
-          {taggedSkills.map((skill) => (
-            <SkillVariableInputs
-              key={skill.id}
-              skill={skill}
-              values={skillValues[skill.id] ?? {}}
-              onChange={(varName, value) => handleVarChange(skill.id, varName, value)}
-              readOnly={readOnly}
-            />
-          ))}
+          {/* Context sources */}
+          {contextCount > 0 && (
+            <div
+              style={{
+                fontSize: 10,
+                color: "#818cf8",
+                fontFamily: "var(--font-mono)",
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                marginBottom: 4,
+              }}
+            >
+              {"\u{1F4CE}"} {contextCount} context source{contextCount !== 1 ? "s" : ""} connected
+            </div>
+          )}
+
+          {/* Worktree actions */}
+          {showWorktreeActions && (
+            <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+              <button
+                onClick={() => {
+                  if (socketSend && data.sessionKey) {
+                    socketSend({ type: "get_worktree_diff", sessionKey: data.sessionKey });
+                  }
+                }}
+                style={{
+                  padding: "3px 8px", fontSize: 10, background: "var(--bg-elevated)",
+                  border: "1px solid var(--border-default)", borderRadius: 4,
+                  color: "var(--text-secondary)", cursor: "pointer", fontFamily: "var(--font-mono)",
+                }}
+              >
+                View Diff
+              </button>
+              <button
+                onClick={() => {
+                  if (socketSend && data.sessionKey) {
+                    socketSend({ type: "merge_worktree", sessionKey: data.sessionKey });
+                    onUpdateData({ ...data, worktreeStatus: "merging" });
+                  }
+                }}
+                style={{
+                  padding: "3px 8px", fontSize: 10, background: "rgba(74, 222, 128, 0.15)",
+                  border: "1px solid #4ade80", borderRadius: 4,
+                  color: "#4ade80", cursor: "pointer", fontFamily: "var(--font-mono)",
+                }}
+              >
+                Merge
+              </button>
+              <button
+                onClick={() => {
+                  if (socketSend && data.sessionKey && confirm("Discard all worktree changes?")) {
+                    socketSend({ type: "discard_worktree", sessionKey: data.sessionKey });
+                  }
+                }}
+                style={{
+                  padding: "3px 8px", fontSize: 10, background: "rgba(239, 68, 68, 0.1)",
+                  border: "1px solid #ef4444", borderRadius: 4,
+                  color: "#f87171", cursor: "pointer", fontFamily: "var(--font-mono)",
+                }}
+              >
+                Discard
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-/* ── Plan decomposition panel ──────────────────────────────────────── */
+/* ── P6: Header menu ──────────────────────────────────────────────────── */
 
-function PlanPanel({
-  items,
-  expanded,
-  onToggle,
+function HeaderMenu({
+  onReset,
+  onExportLog,
+  data,
 }: {
-  items: PlanItem[];
-  expanded: boolean;
-  onToggle: () => void;
+  onReset: () => void;
+  onExportLog: () => void;
+  data: LeaderData;
 }) {
-  if (items.length === 0) return null;
-
-  const completedCount = items.filter((i) => i.status === "completed").length;
-
-  const statusDotColor: Record<PlanItem["status"], string> = {
-    pending: "#4a5068",
-    active: "#facc15",
-    completed: "#4ade80",
-    failed: "#ef4444",
-  };
+  const [open, setOpen] = useState(false);
 
   return (
-    <div
-      style={{
-        background: "var(--bg-surface)",
-        borderBottom: "1px solid var(--border-default)",
-        flexShrink: 0,
-      }}
-    >
-      <div
-        onClick={onToggle}
+    <div style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen(!open)}
         onMouseDown={(e) => e.stopPropagation()}
         style={{
-          padding: "8px 12px",
+          background: "none",
+          border: "none",
+          color: "var(--text-muted)",
           cursor: "pointer",
-          userSelect: "none",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          fontSize: 12,
-          fontFamily: "var(--font-sans)",
-          color: "var(--text-primary)",
+          fontSize: 14,
+          padding: "2px 4px",
+          lineHeight: 1,
+          borderRadius: 3,
+          transition: "color 0.15s",
         }}
+        onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-primary)")}
+        onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
       >
-        <span style={{ fontSize: 10 }}>{expanded ? "▼" : "▶"}</span>
-        <span style={{ fontWeight: 600 }}>Plan</span>
-        <span
-          style={{
-            fontSize: 11,
-            color: "var(--text-muted)",
-            fontFamily: "var(--font-mono)",
-          }}
-        >
-          ({completedCount}/{items.length})
-        </span>
-      </div>
-      {expanded && (
-        <div
-          onMouseDown={(e) => e.stopPropagation()}
-          style={{
-            padding: "0 12px 8px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 3,
-          }}
-        >
-          {items.map((item, idx) => (
-            <div
-              key={idx}
+        ⋮
+      </button>
+      {open && (
+        <>
+          <div
+            onClick={() => setOpen(false)}
+            style={{ position: "fixed", inset: 0, zIndex: 998 }}
+          />
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              position: "absolute",
+              top: "calc(100% + 4px)",
+              right: 0,
+              zIndex: 999,
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--border-default)",
+              borderRadius: 6,
+              boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+              overflow: "hidden",
+              minWidth: 160,
+            }}
+          >
+            <button
+              onClick={() => { onExportLog(); setOpen(false); }}
               style={{
                 display: "flex",
                 alignItems: "center",
                 gap: 8,
-                fontSize: 12,
-                fontFamily: "var(--font-sans)",
-                color: item.status === "completed"
-                  ? "var(--text-muted)"
-                  : "var(--text-primary)",
-                lineHeight: 1.4,
+                width: "100%",
+                padding: "8px 12px",
+                background: "transparent",
+                border: "none",
+                color: "var(--text-secondary)",
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                cursor: "pointer",
+                textAlign: "left",
               }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-surface)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
             >
-              <span
+              <span style={{ opacity: 0.6 }}>↗</span> Export Log
+            </button>
+            {data.sessionKey && (
+              <button
+                onClick={() => { onReset(); setOpen(false); }}
                 style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: "50%",
-                  background: statusDotColor[item.status],
-                  flexShrink: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  width: "100%",
+                  padding: "8px 12px",
+                  background: "transparent",
+                  border: "none",
+                  color: "#f87171",
+                  fontSize: 11,
+                  fontFamily: "var(--font-mono)",
+                  cursor: "pointer",
+                  textAlign: "left",
                 }}
-              />
-              <span
-                style={{
-                  textDecoration: item.status === "completed" ? "line-through" : "none",
-                  opacity: item.status === "completed" ? 0.6 : 1,
-                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(239,68,68,0.08)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
               >
-                {item.title}
-              </span>
-            </div>
-          ))}
-        </div>
+                <span style={{ opacity: 0.6 }}>↺</span> Reset Session
+              </button>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
 }
+
+/* ── Main component ───────────────────────────────────────────────────── */
 
 function LeaderNodeRenderer({
   node,
@@ -1061,6 +1489,7 @@ function LeaderNodeRenderer({
   socketSubscribe,
   getContextForNode,
   projectPath,
+  onResize,
 }: NodeRenderProps) {
   const data = node.data as LeaderData;
   const dataRef = useRef(data);
@@ -1069,6 +1498,7 @@ function LeaderNodeRenderer({
   const [input, setInput] = useState("");
   const [planItems, setPlanItems] = useState<PlanItem[]>([]);
   const [planExpanded, setPlanExpanded] = useState(false);
+  const [skillFlyoutOpen, setSkillFlyoutOpen] = useState(false);
   const outputRef = useRef<HTMLDivElement>(null);
   const syncedRef = useRef(false);
   const planParsedRef = useRef(false);
@@ -1362,6 +1792,59 @@ function LeaderNodeRenderer({
     setInput("");
   }, [socketSend, input, onUpdateData, getContextForNode, data.skillIds, data.skillValues]);
 
+  // Auto-start session when autoStartPrompt is set (e.g. from Kanban launch)
+  const autoStartFired = useRef(false);
+  useEffect(() => {
+    if (autoStartFired.current) return;
+    const prompt = dataRef.current.autoStartPrompt;
+    if (!prompt || dataRef.current.sessionKey || !socketSend) return;
+    autoStartFired.current = true;
+
+    const key = `leader-${Date.now().toString(36)}`;
+
+    // Gather context from connected nodes
+    const contextItems = getContextForNode?.() ?? [];
+    let fullPrompt = prompt;
+    if (contextItems.length > 0) {
+      const contextBlock = contextItems
+        .map((item) => `## ${item.label} (${item.nodeType})\n\n${item.content}`)
+        .join("\n\n---\n\n");
+      fullPrompt = `<connected-context>\nThe following context has been provided by the user via connected canvas nodes:\n\n${contextBlock}\n</connected-context>\n\n${prompt}`;
+    }
+
+    // Compile tagged skills
+    const taggedSkills = (dataRef.current.skillIds ?? [])
+      .map((id) => getSkill(id))
+      .filter((s): s is SkillTemplate => s !== undefined);
+    const skillsAddendum = compileSkills(taggedSkills, dataRef.current.skillValues ?? {});
+    const finalSystemPrompt = LEADER_SYSTEM_PROMPT + skillsAddendum;
+
+    socketSend({
+      type: "create_session",
+      sessionKey: key,
+      prompt: fullPrompt,
+      systemPrompt: finalSystemPrompt,
+      role: "leader",
+      worktreeIsolation: dataRef.current.worktreeIsolation,
+      ...(projectPath ? { cwd: projectPath } : {}),
+    });
+    syncedRef.current = true;
+    onUpdateData({
+      ...dataRef.current,
+      sessionKey: key,
+      status: "creating",
+      autoStartPrompt: null, // Clear so it doesn't re-trigger
+      messages: [
+        {
+          id: msgId(),
+          role: "user" as const,
+          content: prompt,
+          timestamp: Date.now(),
+        },
+      ],
+    });
+  }, [socketSend, onUpdateData, getContextForNode, projectPath]);
+
   const handleSend = useCallback(() => {
     const current = dataRef.current;
     if (!socketSend || !input.trim() || !current.sessionKey) return;
@@ -1434,6 +1917,40 @@ function LeaderNodeRenderer({
     [handleSend, handleCreate],
   );
 
+  // P6: Reset session handler
+  const handleReset = useCallback(() => {
+    if (!confirm("Reset this Leader session? All messages will be cleared.")) return;
+    if (socketSend && data.sessionKey) {
+      socketSend({ type: "stop_session", sessionKey: data.sessionKey });
+    }
+    syncedRef.current = false;
+    planParsedRef.current = false;
+    setPlanItems([]);
+    emitUpdate({
+      ...LEADER_DEFAULT_DATA,
+      skillIds: data.skillIds,
+      skillValues: data.skillValues,
+      model: data.model,
+      permissionMode: data.permissionMode,
+      worktreeIsolation: data.worktreeIsolation,
+    });
+  }, [socketSend, data, emitUpdate]);
+
+  // P6: Export log handler
+  const handleExportLog = useCallback(() => {
+    const lines = data.messages.map((m) => {
+      const ts = new Date(m.timestamp).toISOString();
+      return `[${ts}] [${m.role}] ${m.content}${m.suffix ? ` (${m.suffix})` : ""}`;
+    });
+    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `leader-log-${new Date().toISOString().slice(0, 10)}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [data.messages]);
+
   const statusColor: Record<string, string> = {
     disconnected: "#4a5068",
     creating: "#facc15",
@@ -1443,8 +1960,7 @@ function LeaderNodeRenderer({
     error: "#ef4444",
   };
 
-  // Task counts are no longer tracked client-side — task management
-  // is handled server-side via MCP tools (assign_task, get_task_status)
+  const taggedSkillCount = (data.skillIds ?? []).length;
 
   return (
     <div
@@ -1457,9 +1973,21 @@ function LeaderNodeRenderer({
         borderRadius: 8,
         border: "1px solid var(--border-default)",
         overflow: "hidden",
+        position: "relative",
       }}
     >
-      {/* Header */}
+      {/* P1: Resize handle */}
+      {onResize && (
+        <ResizeHandle
+          currentSize={node.size}
+          minWidth={420}
+          minHeight={320}
+          onResize={onResize}
+          color="#818cf8"
+        />
+      )}
+
+      {/* Header — P6: enhanced with menu, turn count, skill badges */}
       <div
         style={{
           padding: "8px 12px",
@@ -1495,20 +2023,32 @@ function LeaderNodeRenderer({
                 color: "var(--text-primary)",
                 fontWeight: 600,
                 lineHeight: 1.2,
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
               }}
             >
               Leader
-              {data.worktreeBranch && (
-                <span style={{
-                  fontSize: 9,
-                  fontFamily: "var(--font-mono)",
-                  color: "#a78bfa",
-                  background: "rgba(167, 139, 250, 0.12)",
-                  padding: "1px 6px",
-                  borderRadius: 3,
-                  marginLeft: 4,
-                }}>
-                  📂 {data.worktreeBranch}
+              {/* Skill badge icons in header */}
+              {taggedSkillCount > 0 && (
+                <span
+                  onClick={() => setSkillFlyoutOpen(true)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 2,
+                    padding: "1px 5px",
+                    borderRadius: 3,
+                    fontSize: 9,
+                    fontFamily: "var(--font-mono)",
+                    background: "rgba(129, 140, 248, 0.12)",
+                    color: "#818cf8",
+                    cursor: "pointer",
+                  }}
+                  title="Skills configured"
+                >
+                  ⚡{taggedSkillCount}
                 </span>
               )}
             </div>
@@ -1519,9 +2059,18 @@ function LeaderNodeRenderer({
                 fontFamily: "var(--font-mono)",
                 textTransform: "uppercase",
                 letterSpacing: 0.5,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
               }}
             >
               {data.status}
+              {/* Turn count badge */}
+              {data.turns > 0 && (
+                <span style={{ color: "var(--text-muted)", textTransform: "none" }}>
+                  {data.turns} turn{data.turns !== 1 ? "s" : ""}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -1555,6 +2104,12 @@ function LeaderNodeRenderer({
               Stop
             </button>
           )}
+          {/* P6: Header menu */}
+          <HeaderMenu
+            onReset={handleReset}
+            onExportLog={handleExportLog}
+            data={data}
+          />
         </div>
       </div>
 
@@ -1573,25 +2128,82 @@ function LeaderNodeRenderer({
       {/* Status banners */}
       <StatusBannerStack banners={banners} onDismiss={dismissBanner} />
 
-      {/* Skill tags panel */}
-      <SkillPanel
+      {/* P3: Skills button (opens flyout) — only before session starts */}
+      {!data.sessionKey && (
+        <div
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            padding: "4px 10px",
+            borderBottom: "1px solid var(--border-default)",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            flexShrink: 0,
+            background: "var(--bg-primary)",
+          }}
+        >
+          <button
+            onClick={() => setSkillFlyoutOpen(true)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              padding: "3px 10px",
+              borderRadius: 4,
+              fontSize: 10,
+              fontWeight: 600,
+              fontFamily: "var(--font-mono)",
+              background: taggedSkillCount > 0 ? "rgba(129, 140, 248, 0.12)" : "var(--bg-elevated)",
+              border: taggedSkillCount > 0 ? "1px solid rgba(129, 140, 248, 0.3)" : "1px dashed var(--border-default)",
+              color: taggedSkillCount > 0 ? "#818cf8" : "var(--text-muted)",
+              cursor: "pointer",
+              transition: "all 0.15s",
+            }}
+          >
+            ⚡ Skills {taggedSkillCount > 0 ? `(${taggedSkillCount})` : ""}
+          </button>
+          {/* Show active skill chips inline */}
+          {(data.skillIds ?? [])
+            .map((id) => getSkill(id))
+            .filter((s): s is SkillTemplate => s !== undefined)
+            .slice(0, 3)
+            .map((skill) => (
+              <SkillTagChip key={skill.id} skill={skill} readOnly={false} onRemove={() => {
+                const next = (data.skillIds ?? []).filter((s) => s !== skill.id);
+                const nextValues = { ...(data.skillValues ?? {}) };
+                delete nextValues[skill.id];
+                onUpdateData({ ...dataRef.current, skillIds: next, skillValues: nextValues });
+              }} />
+            ))}
+          {taggedSkillCount > 3 && (
+            <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+              +{taggedSkillCount - 3} more
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* P3: Skill Flyout */}
+      <SkillFlyout
         skillIds={data.skillIds ?? []}
         skillValues={data.skillValues ?? {}}
-        panelOpen={data.skillPanelOpen ?? false}
+        open={skillFlyoutOpen}
         readOnly={!!data.sessionKey}
         onUpdate={(patch) => {
           onUpdateData({ ...dataRef.current, ...patch });
         }}
+        onClose={() => setSkillFlyoutOpen(false)}
       />
 
-      {/* Plan decomposition */}
-      <PlanPanel
-        items={planItems}
-        expanded={planExpanded}
-        onToggle={() => setPlanExpanded((p) => !p)}
+      {/* P4: Plan + Task Tracker (tabbed) */}
+      <PlanAndTrackerPanel
+        planItems={planItems}
+        completedTasks={data.completedTasks ?? []}
+        planExpanded={planExpanded}
+        onTogglePlan={() => setPlanExpanded((p) => !p)}
       />
 
-      {/* Messages (simplified — just the recent ones, tools collapsed) */}
+      {/* Messages — P5: with markdown rendering and collapsible user messages */}
       <div
         ref={outputRef}
         onMouseDown={(e) => e.stopPropagation()}
@@ -1625,31 +2237,81 @@ function LeaderNodeRenderer({
             return <LeaderToolGroup key={`tg-${gi}`} msgs={group.msgs} />;
           }
           const msg = group.msg;
+
+          // P5: User messages get collapsible treatment
+          if (msg.role === "user") {
+            return <UserMessageBubble key={msg.id} msg={msg} />;
+          }
+
+          // P5: Assistant messages get markdown rendering
+          if (msg.role === "assistant") {
+            return (
+              <div
+                key={msg.id}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  lineHeight: 1.6,
+                  fontFamily: "var(--font-sans)",
+                  color: "var(--text-primary)",
+                  borderLeft: "2px solid #818cf8",
+                  wordBreak: "break-word",
+                  overflowWrap: "break-word",
+                }}
+              >
+                <SimpleMarkdown text={msg.content} />
+                {msg.suffix && (
+                  <span style={{ display: "inline-block", marginLeft: 6, fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", opacity: 0.7 }}>
+                    {msg.suffix}
+                  </span>
+                )}
+              </div>
+            );
+          }
+
+          // P5: Result messages get markdown too
+          if (msg.role === "result") {
+            return (
+              <div
+                key={msg.id}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  lineHeight: 1.6,
+                  fontFamily: "var(--font-sans)",
+                  color: "var(--text-primary)",
+                  borderLeft: "2px solid #4ade80",
+                  wordBreak: "break-word",
+                  overflowWrap: "break-word",
+                }}
+              >
+                <SimpleMarkdown text={msg.content} />
+                {msg.suffix && (
+                  <span style={{ display: "inline-block", marginLeft: 6, fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", opacity: 0.7 }}>
+                    {msg.suffix}
+                  </span>
+                )}
+              </div>
+            );
+          }
+
+          // System messages — compact
           return (
             <div
               key={msg.id}
               style={{
-                padding: "6px 10px",
+                padding: "4px 10px",
                 borderRadius: 6,
-                fontSize: msg.role === "system" ? 10 : 12,
+                fontSize: 10,
                 lineHeight: 1.6,
                 fontFamily: "var(--font-sans)",
-                color:
-                  msg.role === "user"
-                    ? "var(--accent)"
-                    : "var(--text-primary)",
-                borderLeft:
-                  msg.role === "user"
-                    ? "2px solid var(--accent)"
-                    : msg.role === "assistant"
-                      ? "2px solid #818cf8"
-                      : msg.role === "result"
-                        ? "2px solid #4ade80"
-                        : "none",
+                color: "var(--text-primary)",
                 whiteSpace: "pre-wrap",
                 wordBreak: "break-word",
                 overflowWrap: "break-word",
-                opacity: msg.role === "system" ? 0.5 : 1,
+                opacity: 0.5,
               }}
             >
               {msg.content}
@@ -1669,165 +2331,15 @@ function LeaderNodeRenderer({
         ) : null}
       </div>
 
-      {/* Task Tracker */}
-      {data.completedTasks && data.completedTasks.length > 0 && (
-        <TaskTracker tasks={data.completedTasks} />
-      )}
+      {/* P4: Unified config footer (worktree + context) */}
+      <ConfigFooter
+        data={data}
+        onUpdateData={(d) => emitUpdate(d)}
+        socketSend={socketSend}
+        getContextForNode={getContextForNode}
+      />
 
-      {/* Worktree action bar */}
-      {data.worktreeStatus === "active" && data.status === "idle" && (
-        <div style={{
-          padding: "6px 10px",
-          borderTop: "1px solid var(--border-default)",
-          display: "flex",
-          gap: 6,
-          alignItems: "center",
-          background: "rgba(167, 139, 250, 0.06)",
-          flexShrink: 0,
-        }}>
-          <span style={{ fontSize: 10, color: "var(--text-muted)", flex: 1, fontFamily: "var(--font-mono)" }}>
-            Worktree ready
-          </span>
-          <button
-            onClick={() => {
-              if (socketSend && data.sessionKey) {
-                socketSend({ type: "get_worktree_diff", sessionKey: data.sessionKey });
-              }
-            }}
-            onMouseDown={(e) => e.stopPropagation()}
-            style={{
-              padding: "3px 8px", fontSize: 10, background: "var(--bg-elevated)",
-              border: "1px solid var(--border-default)", borderRadius: 4,
-              color: "var(--text-secondary)", cursor: "pointer", fontFamily: "var(--font-mono)",
-            }}
-          >
-            View Diff
-          </button>
-          <button
-            onClick={() => {
-              if (socketSend && data.sessionKey) {
-                socketSend({ type: "merge_worktree", sessionKey: data.sessionKey });
-                onUpdateData({ ...dataRef.current, worktreeStatus: "merging" });
-              }
-            }}
-            onMouseDown={(e) => e.stopPropagation()}
-            style={{
-              padding: "3px 8px", fontSize: 10, background: "rgba(74, 222, 128, 0.15)",
-              border: "1px solid #4ade80", borderRadius: 4,
-              color: "#4ade80", cursor: "pointer", fontFamily: "var(--font-mono)",
-            }}
-          >
-            Merge
-          </button>
-          <button
-            onClick={() => {
-              if (socketSend && data.sessionKey && confirm("Discard all worktree changes?")) {
-                socketSend({ type: "discard_worktree", sessionKey: data.sessionKey });
-              }
-            }}
-            onMouseDown={(e) => e.stopPropagation()}
-            style={{
-              padding: "3px 8px", fontSize: 10, background: "rgba(239, 68, 68, 0.1)",
-              border: "1px solid #ef4444", borderRadius: 4,
-              color: "#f87171", cursor: "pointer", fontFamily: "var(--font-mono)",
-            }}
-          >
-            Discard
-          </button>
-        </div>
-      )}
-
-      {/* Worktree status indicator */}
-      {(data.worktreeStatus === "merging" || data.worktreeStatus === "merged" || data.worktreeStatus === "discarded") && (
-        <div style={{
-          padding: "4px 10px",
-          borderTop: "1px solid var(--border-default)",
-          fontSize: 10,
-          fontFamily: "var(--font-mono)",
-          color: data.worktreeStatus === "merged" ? "#4ade80" : data.worktreeStatus === "discarded" ? "#f87171" : "#facc15",
-          background: "var(--bg-secondary)",
-          flexShrink: 0,
-        }}>
-          {data.worktreeStatus === "merging" ? "⏳ Merging..." : data.worktreeStatus === "merged" ? "✅ Merged to main" : "🗑️ Worktree discarded"}
-        </div>
-      )}
-
-      {/* Context indicator */}
-      {getContextForNode && getContextForNode().length > 0 && (
-        <div style={{
-          padding: "4px 10px",
-          borderTop: "1px solid var(--border-default)",
-          background: "rgba(129, 140, 248, 0.08)",
-          fontSize: 10,
-          color: "#818cf8",
-          fontFamily: "var(--font-mono)",
-          display: "flex",
-          alignItems: "center",
-          gap: 4,
-        }}>
-          <span>{"\u{1F4CE}"}</span>
-          <span>{getContextForNode().length} context source{getContextForNode().length !== 1 ? "s" : ""} connected</span>
-        </div>
-      )}
-
-      {/* Worktree isolation toggle */}
-      <div style={{
-        padding: "4px 10px",
-        borderTop: "1px solid var(--border-default)",
-        background: "var(--bg-secondary)",
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        flexShrink: 0,
-      }}>
-        <button
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={() => {
-            if (!data.sessionKey) {
-              onUpdateData({ ...data, worktreeIsolation: !data.worktreeIsolation });
-            }
-          }}
-          disabled={!!data.sessionKey}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            fontSize: 10,
-            fontFamily: "var(--font-mono)",
-            padding: "3px 8px",
-            borderRadius: 4,
-            border: "none",
-            cursor: data.sessionKey ? "default" : "pointer",
-            opacity: data.sessionKey ? 0.7 : 1,
-            background: data.worktreeIsolation
-              ? "rgba(99, 102, 241, 0.25)"
-              : "rgba(255, 255, 255, 0.06)",
-            color: data.worktreeIsolation ? "#818cf8" : "var(--text-muted)",
-          }}
-        >
-          <span>{"\u{1F33F}"}</span>
-          <span>Worktree Isolation</span>
-          <span style={{
-            display: "inline-block",
-            width: 8,
-            height: 8,
-            borderRadius: "50%",
-            background: data.worktreeIsolation ? "#818cf8" : "var(--text-muted)",
-            marginLeft: 2,
-          }} />
-        </button>
-        {data.sessionKey && (
-          <span style={{
-            fontSize: 9,
-            color: "var(--text-muted)",
-            fontFamily: "var(--font-mono)",
-          }}>
-            {data.worktreeIsolation ? "isolated" : "shared"}
-          </span>
-        )}
-      </div>
-
-      {/* Input */}
+      {/* P2: Auto-growing input */}
       <div
         style={{
           padding: "8px 10px",
@@ -1836,32 +2348,19 @@ function LeaderNodeRenderer({
           gap: 6,
           flexShrink: 0,
           background: "var(--bg-secondary)",
+          alignItems: "flex-end",
         }}
       >
-        <textarea
+        <AutoTextarea
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={setInput}
           onKeyDown={handleKeyDown}
-          onMouseDown={(e) => e.stopPropagation()}
           placeholder={
             data.sessionKey
               ? "Guide the leader..."
               : "Describe your project goal..."
           }
-          rows={1}
-          style={{
-            flex: 1,
-            padding: "8px 10px",
-            background: "var(--bg-primary)",
-            border: "1px solid var(--border-default)",
-            borderRadius: 6,
-            color: "var(--text-primary)",
-            fontSize: 12,
-            fontFamily: "var(--font-sans)",
-            resize: "none",
-            outline: "none",
-            lineHeight: 1.4,
-          }}
+          maxRows={8}
         />
         <button
           onClick={data.sessionKey ? handleSend : handleCreate}
@@ -1884,6 +2383,7 @@ function LeaderNodeRenderer({
             cursor: "pointer",
             flexShrink: 0,
             opacity: !input.trim() && !!data.sessionKey ? 0.4 : 1,
+            marginBottom: 1,
           }}
         >
           {data.sessionKey ? "Send" : "Start"}
@@ -1912,7 +2412,7 @@ function LeaderNodeRenderer({
 registerNodeType({
   type: "leader",
   label: "Leader",
-  defaultSize: { width: 520, height: 460 },
+  defaultSize: { width: 560, height: 520 },
   render: LeaderNodeRenderer,
 });
 

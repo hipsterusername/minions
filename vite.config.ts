@@ -8,5 +8,13 @@ export default defineConfig({
     proxy: {
       "/api": "http://localhost:3141",
     },
+    watch: {
+      // Ignore sidecar data and worktree directories so that autosave DB writes,
+      // settings changes, and worktree operations don't trigger Vite full-reloads.
+      ignored: [
+        "**/.claude-canvas/**",
+        "**/.canvas-worktrees/**",
+      ],
+    },
   },
 })

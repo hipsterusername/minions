@@ -34,7 +34,7 @@ export interface SkillTemplate {
   /** Short description shown in skill browser/tags */
   description: string;
   /** Category for grouping */
-  category: "code" | "docs" | "testing" | "devops" | "analysis" | "general";
+  category: "code" | "docs" | "testing" | "devops" | "analysis" | "design" | "general";
   /** Emoji icon */
   icon: string;
   /** Accent color hex for UI */

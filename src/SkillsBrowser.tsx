@@ -19,6 +19,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   testing: "Testing",
   devops: "DevOps",
   analysis: "Analysis",
+  design: "Design",
   general: "General",
 };
 

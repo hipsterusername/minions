@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import type { SaveStatus } from "./use-autosave.ts";
 
+export type ActiveView = "canvas" | "kanban";
+
 interface ProjectHeaderProps {
   name: string;
   saveStatus: SaveStatus;
@@ -9,6 +11,10 @@ interface ProjectHeaderProps {
   onBack: () => void;
   retryCount?: number;
   retry?: () => void;
+  activeView: ActiveView;
+  onViewChange: (view: ActiveView) => void;
+  /** Number of cards awaiting review — shows a badge on the Kanban tab */
+  kanbanReviewCount?: number;
 }
 
 export function ProjectHeader({
@@ -19,6 +25,9 @@ export function ProjectHeader({
   onBack,
   retryCount = 0,
   retry,
+  activeView,
+  onViewChange,
+  kanbanReviewCount = 0,
 }: ProjectHeaderProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(name);
@@ -57,7 +66,7 @@ export function ProjectHeader({
       case "unsaved":
         return "Unsaved";
       case "error":
-        return "Save failed · Click to retry";
+        return "Save failed \u00b7 Click to retry";
       case "idle":
         return "";
     }
@@ -175,6 +184,47 @@ export function ProjectHeader({
         </span>
       )}
 
+      {/* ─── View Toggle ─────────────────────────────── */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          background: "var(--bg-primary)",
+          border: "1px solid var(--border-default)",
+          borderRadius: 8,
+          padding: 2,
+          gap: 2,
+        }}
+        role="tablist"
+        aria-label="View mode"
+      >
+        <ViewTab
+          label="Canvas"
+          active={activeView === "canvas"}
+          onClick={() => onViewChange("canvas")}
+          icon={
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <rect x="1" y="1" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.2" />
+              <rect x="7" y="3" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.2" />
+              <rect x="2" y="7" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.2" />
+            </svg>
+          }
+        />
+        <ViewTab
+          label="Kanban"
+          active={activeView === "kanban"}
+          onClick={() => onViewChange("kanban")}
+          badge={kanbanReviewCount > 0 ? kanbanReviewCount : undefined}
+          icon={
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <rect x="1" y="1" width="2.5" height="10" rx="0.75" stroke="currentColor" strokeWidth="1.1" />
+              <rect x="4.75" y="1" width="2.5" height="7" rx="0.75" stroke="currentColor" strokeWidth="1.1" />
+              <rect x="8.5" y="1" width="2.5" height="5" rx="0.75" stroke="currentColor" strokeWidth="1.1" />
+            </svg>
+          }
+        />
+      </div>
+
       {/* Save status */}
       <div
         onClick={saveStatus === "error" && retry ? () => retry() : undefined}
@@ -226,5 +276,76 @@ export function ProjectHeader({
         )}
       </div>
     </div>
+  );
+}
+
+// ─── View Tab ───────────────────────────────────────────────
+
+function ViewTab({
+  label,
+  active,
+  onClick,
+  icon,
+  badge,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  badge?: number;
+}) {
+  return (
+    <button
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 5,
+        padding: "4px 12px",
+        fontSize: 11,
+        fontFamily: "var(--font-sans)",
+        fontWeight: active ? 600 : 500,
+        color: active ? "var(--text-primary)" : "var(--text-secondary)",
+        background: active ? "var(--bg-elevated)" : "transparent",
+        border: "none",
+        borderRadius: 6,
+        cursor: "pointer",
+        transition: "background 120ms ease, color 120ms ease",
+        position: "relative",
+        whiteSpace: "nowrap",
+      }}
+      onMouseEnter={(e) => {
+        if (!active) e.currentTarget.style.background = "var(--bg-surface)";
+      }}
+      onMouseLeave={(e) => {
+        if (!active) e.currentTarget.style.background = "transparent";
+      }}
+    >
+      {icon}
+      {label}
+      {badge != null && badge > 0 && (
+        <span
+          style={{
+            minWidth: 16,
+            height: 16,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "0 5px",
+            fontSize: 9,
+            fontFamily: "var(--font-mono)",
+            fontWeight: 700,
+            color: "#fff",
+            background: "#ef4444",
+            borderRadius: 8,
+            lineHeight: 1,
+          }}
+        >
+          {badge}
+        </span>
+      )}
+    </button>
   );
 }
