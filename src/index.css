@@ -1,0 +1,52 @@
+:root {
+  --bg-primary: #0a0c14;
+  --bg-secondary: #0f1117;
+  --bg-surface: #141620;
+  --bg-elevated: #181c2a;
+  --border-default: #1e2030;
+  --border-hover: #2a3050;
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #4a5068;
+  --text-dim: #64748b;
+  --accent: #f0883e;
+  --accent-dark: #e05b2a;
+  --dot-grid: #1a1d2e;
+  --font-sans: "DM Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+}
+
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgba(240, 136, 62, 0.3);
+}
+
+@keyframes bannerSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

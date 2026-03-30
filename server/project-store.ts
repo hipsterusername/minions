@@ -1,0 +1,155 @@
+import fs from "fs";
+import path from "path";
+import os from "os";
+import { initDb } from "./db.ts";
+import type Database from "better-sqlite3";
+
+const SIDECAR_DIR = ".claude-canvas";
+const GLOBAL_DIR = path.join(os.homedir(), ".claude-canvas");
+const RECENT_PROJECTS_FILE = path.join(GLOBAL_DIR, "recent-projects.json");
+
+export interface RecentProject {
+  path: string;          // absolute path to the project working directory
+  name: string;          // display name
+  lastOpened: string;    // ISO date
+}
+
+export interface ProjectContext {
+  content: string;       // raw markdown
+  exists: boolean;       // whether context.md existed on disk
+}
+
+export interface ProjectSettings {
+  defaultModel?: string;
+  defaultPermissionMode?: string;
+  [key: string]: unknown;
+}
+
+// ── Recent projects index ──────────────────────────────
+
+function ensureGlobalDir(): void {
+  fs.mkdirSync(GLOBAL_DIR, { recursive: true });
+}
+
+export function listRecentProjects(): RecentProject[] {
+  ensureGlobalDir();
+  if (!fs.existsSync(RECENT_PROJECTS_FILE)) return [];
+  try {
+    const raw = fs.readFileSync(RECENT_PROJECTS_FILE, "utf-8");
+    return JSON.parse(raw) as RecentProject[];
+  } catch {
+    return [];
+  }
+}
+
+export function addRecentProject(projectPath: string, name: string): void {
+  ensureGlobalDir();
+  const recents = listRecentProjects().filter((r) => r.path !== projectPath);
+  recents.unshift({
+    path: projectPath,
+    name,
+    lastOpened: new Date().toISOString(),
+  });
+  // Keep last 20
+  const trimmed = recents.slice(0, 20);
+  fs.writeFileSync(RECENT_PROJECTS_FILE, JSON.stringify(trimmed, null, 2));
+}
+
+export function removeRecentProject(projectPath: string): void {
+  ensureGlobalDir();
+  const recents = listRecentProjects().filter((r) => r.path !== projectPath);
+  fs.writeFileSync(RECENT_PROJECTS_FILE, JSON.stringify(recents, null, 2));
+}
+
+// ── Sidecar management ─────────────────────────────────
+
+function sidecarPath(projectPath: string): string {
+  return path.join(projectPath, SIDECAR_DIR);
+}
+
+export function hasSidecar(projectPath: string): boolean {
+  return fs.existsSync(sidecarPath(projectPath));
+}
+
+/**
+ * Initialize a .claude-canvas sidecar in the given project directory.
+ * Creates the directory, SQLite DB, empty context.md, and default settings.
+ * Returns the initialized database handle.
+ */
+export function initSidecar(projectPath: string): Database.Database {
+  const sidecar = sidecarPath(projectPath);
+  fs.mkdirSync(sidecar, { recursive: true });
+
+  // Initialize SQLite
+  const dbPath = path.join(sidecar, "canvas.db");
+  const db = initDb(dbPath);
+
+  // Create context.md if it doesn't exist
+  const contextPath = path.join(sidecar, "context.md");
+  if (!fs.existsSync(contextPath)) {
+    const dirName = path.basename(projectPath);
+    fs.writeFileSync(contextPath, `# ${dirName}\n\nProject context has not been configured yet.\n`);
+  }
+
+  // Create settings.json if it doesn't exist
+  const settingsPath = path.join(sidecar, "settings.json");
+  if (!fs.existsSync(settingsPath)) {
+    fs.writeFileSync(settingsPath, JSON.stringify({
+      defaultModel: "sonnet",
+      defaultPermissionMode: "bypassPermissions",
+    }, null, 2));
+  }
+
+  return db;
+}
+
+/**
+ * Open an existing sidecar's database. Initializes sidecar if it doesn't exist.
+ */
+export function openProjectDb(projectPath: string): Database.Database {
+  if (!hasSidecar(projectPath)) {
+    return initSidecar(projectPath);
+  }
+  const dbPath = path.join(sidecarPath(projectPath), "canvas.db");
+  return initDb(dbPath);
+}
+
+// ── Context.md operations ──────────────────────────────
+
+export function readContext(projectPath: string): ProjectContext {
+  const contextPath = path.join(sidecarPath(projectPath), "context.md");
+  if (!fs.existsSync(contextPath)) {
+    return { content: "", exists: false };
+  }
+  return {
+    content: fs.readFileSync(contextPath, "utf-8"),
+    exists: true,
+  };
+}
+
+export function writeContext(projectPath: string, content: string): void {
+  const contextPath = path.join(sidecarPath(projectPath), "context.md");
+  fs.mkdirSync(path.dirname(contextPath), { recursive: true });
+  fs.writeFileSync(contextPath, content);
+}
+
+// ── Settings operations ────────────────────────────────
+
+export function readSettings(projectPath: string): ProjectSettings {
+  const settingsPath = path.join(sidecarPath(projectPath), "settings.json");
+  if (!fs.existsSync(settingsPath)) {
+    return { defaultModel: "sonnet", defaultPermissionMode: "bypassPermissions" };
+  }
+  try {
+    const raw = fs.readFileSync(settingsPath, "utf-8");
+    return JSON.parse(raw) as ProjectSettings;
+  } catch {
+    return { defaultModel: "sonnet", defaultPermissionMode: "bypassPermissions" };
+  }
+}
+
+export function writeSettings(projectPath: string, settings: ProjectSettings): void {
+  const settingsPath = path.join(sidecarPath(projectPath), "settings.json");
+  fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+}

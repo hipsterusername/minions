@@ -1,0 +1,41 @@
+{
+  "name": "claude-canvas",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "server": "npx tsx server/index.ts",
+    "start": "npx tsx server/index.ts & vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.86",
+    "better-sqlite3": "^12.8.0",
+    "express": "^5.2.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "ws": "^8.20.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.5.0",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "6.0.1",
+    "tsx": "^4.21.0",
+    "typescript": "5.9.3",
+    "vite": "8.0.1"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "better-sqlite3"
+    ]
+  }
+}
