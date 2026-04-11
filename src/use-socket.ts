@@ -7,9 +7,15 @@ export type ServerMessage =
   | { type: "session_status"; sessionKey: string; status: string; sessionId?: string }
   | { type: "session_error"; sessionKey: string; error: string }
   | { type: "sdk_event"; sessionKey: string; message: SdkMessage }
-  | { type: "sync_response"; sessionKey: string; found: boolean; status?: string; sessionId?: string; totalCost?: number; turns?: number; lastError?: string | null; events?: SyncEvent[]; model?: string; permissionMode?: string; initData?: Record<string, unknown>; taskName?: string | null; role?: "leader" | "minion" | "default"; activeMinions?: ActiveMinion[] }
+  | { type: "sync_response"; sessionKey: string; found: boolean; status?: string; sessionId?: string; totalCost?: number; turns?: number; lastError?: string | null; events?: SyncEvent[]; model?: string; permissionMode?: string; initData?: Record<string, unknown>; taskName?: string | null; role?: "leader" | "minion" | "default"; activeMinions?: ActiveMinion[]; worktree?: { path: string; branch: string } | null; approval?: { requested?: boolean; summary?: string; diff?: unknown } | null }
   | { type: "control_response"; command: string; sessionKey: string; requestId: string | null; success: boolean; error?: string; [key: string]: unknown }
   | { type: "session_task_name"; sessionKey: string; taskName: string }
+  | { type: "approval_requested"; sessionKey: string; summary: string; diff: unknown; timestamp: number }
+  | { type: "approval_resolved"; sessionKey: string; outcome: string; timestamp: number }
+  | { type: "worktree_status"; sessionKey: string; status: string; path?: string; branch?: string }
+  | { type: "worktree_merged"; sessionKey: string }
+  | { type: "worktree_merge_failed"; sessionKey: string; error: string }
+  | { type: "wait_state"; sessionKey: string; action: string; reason: string; waitUntil?: number; timestamp: number }
   | { type: "error"; message: string };
 
 export interface SyncEvent {

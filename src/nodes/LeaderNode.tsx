@@ -621,7 +621,8 @@ function LeaderToolGroup({ msgs }: { msgs: LeaderMessage[] }) {
 function LeaderThinkingGroup({ msgs }: { msgs: LeaderMessage[] }) {
   const [expanded, setExpanded] = useState(false);
   const totalLen = msgs.reduce((sum, m) => sum + m.content.length, 0);
-  const charLabel = totalLen > 1000 ? `${(totalLen / 1000).toFixed(1)}k chars` : `${totalLen} chars`;
+  const estTokens = Math.round(totalLen / 4);
+  const tokenLabel = estTokens >= 1000 ? `~${(estTokens / 1000).toFixed(1)}k tokens` : `~${estTokens} tokens`;
 
   return (
     <div style={{ marginBlock: 2 }}>
@@ -678,7 +679,7 @@ function LeaderThinkingGroup({ msgs }: { msgs: LeaderMessage[] }) {
             fontVariantNumeric: "tabular-nums",
           }}
         >
-          {charLabel}
+          {tokenLabel}
         </span>
       </button>
 
@@ -2262,6 +2263,20 @@ function LeaderNodeRenderer({
           // Restore taskName from sync if available
           if (serverMsg.taskName) {
             syncData.taskName = serverMsg.taskName;
+          }
+
+          // Restore approval state from sync if available
+          const syncApproval = (serverMsg as Record<string, unknown>).approval as {
+            requested?: boolean;
+            summary?: string;
+            diff?: LeaderData["approvalDiff"];
+          } | null | undefined;
+          if (syncApproval?.requested) {
+            syncData.approvalPending = true;
+            syncData.approvalSummary = syncApproval.summary ?? null;
+            syncData.approvalDiff = syncApproval.diff ?? null;
+          } else {
+            syncData.approvalPending = false;
           }
 
           emitUpdate({
