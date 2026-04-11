@@ -800,6 +800,7 @@ function handleCommand(
           permissionMode: syncSession.permissionMode,
           initData: syncSession.initData,
           worktree: syncSession.worktree,
+          approval: syncSession.taskState?.approval ?? null,
           taskName: syncSession.taskName,
           role: syncSession.role,
           activeMinions: syncSession.taskState
