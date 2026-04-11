@@ -733,12 +733,20 @@ export function Canvas({
     [nodes, setTransform],
   );
 
-  // ── Active nodes: leaders/minions with status "running" ──
+  // ── Active nodes: leaders/minions with a live session ──
+  // Includes running, idle, creating, and waiting — excludes disconnected/stopped/error
+  const INACTIVE_STATUSES = new Set(["disconnected", "stopped", "error"]);
   const activeNodeIds = useMemo(() => {
     return nodes
       .filter((n) => {
-        if (n.type === "leader") return (n.data as LeaderData).status === "running";
-        if (n.type === "minion") return (n.data as MinionData).status === "running";
+        if (n.type === "leader") {
+          const s = (n.data as LeaderData).status;
+          return !INACTIVE_STATUSES.has(s) && (n.data as LeaderData).sessionKey != null;
+        }
+        if (n.type === "minion") {
+          const s = (n.data as MinionData).status;
+          return !INACTIVE_STATUSES.has(s) && (n.data as MinionData).sessionKey != null;
+        }
         return false;
       })
       .map((n) => n.id);
