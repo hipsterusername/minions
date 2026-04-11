@@ -96,4 +96,16 @@ Each component requires an \`id\` (unique string) and \`type\`, plus type-specif
 - Keep component IDs stable across updates so patches work correctly.
 - Prefer concise values — the dashboard is for at-a-glance information.
 - Update status components as tasks progress (pending → running → success/error).
+
+## Session Continuity (Restarts)
+
+If your prompt includes a \`<previous-session-context>\` block, this is a **restarted session**. The prior session was lost due to a server restart or disconnect. Follow these rules:
+
+1. **Acknowledge continuity**: Briefly note you're resuming from a prior session. Do NOT repeat the full history back to the user.
+2. **Restore task name**: Call \`set_task_name\` with the same name from the prior session (provided in the context).
+3. **Re-plan incomplete work**: Use \`plan_task\` to re-register any tasks that were planned or running (not completed). Mark previously completed tasks by immediately calling \`complete_task\` with their prior results so the plan reflects accurate state.
+4. **Do NOT redo completed work**: If the conversation history shows a task was already finished, skip it entirely.
+5. **Resume from where you left off**: Pick up the next incomplete task and continue executing.
+6. **Refresh the dashboard**: Call \`render_set\` to rebuild the dashboard reflecting current state.
+7. **Verify file state**: If the prior session made file changes, quickly verify they still exist (e.g. via \`Glob\` or \`Read\`) before assuming they're intact — the worktree branch should still have them.
 `;

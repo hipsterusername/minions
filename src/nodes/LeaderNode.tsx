@@ -84,6 +84,111 @@ function sdkToLeaderMessages(sdkMsg: SdkMessage): LeaderMessage[] {
   return sdkToDisplayMessages(sdkMsg, "lm");
 }
 
+/* ── Session context builder for restarts ─────────────────────────── */
+
+/**
+ * Build a context block from previous session messages and task plan.
+ * Used when restarting a leader session post-disconnect so the new
+ * Claude instance understands what happened in the prior session.
+ *
+ * Returns an empty string if there's nothing meaningful to include.
+ */
+function buildSessionContext(
+  messages: LeaderMessage[],
+  taskPlan: TaskPlanItem[],
+  taskName?: string | null,
+): string {
+  // Only include user/assistant/result messages with meaningful content
+  const conversationEntries = messages
+    .filter(
+      (m) =>
+        (m.role === "user" || m.role === "assistant" || m.role === "result") &&
+        m.content.trim().length > 0,
+    )
+    .map((m) => {
+      const role = m.role === "result" ? "assistant (result)" : m.role;
+      // Truncate very long individual messages to keep context manageable
+      const content =
+        m.content.length > 2000
+          ? m.content.slice(0, 1997) + "…"
+          : m.content;
+      return `[${role}]: ${content}`;
+    });
+
+  if (conversationEntries.length === 0 && taskPlan.length === 0) {
+    return "";
+  }
+
+  const parts: string[] = [];
+
+  parts.push("<previous-session-context>");
+  parts.push(
+    "This is a RESTARTED session. The previous session was lost (server restart or disconnect).",
+  );
+  parts.push(
+    "Below is the conversation history and task state from the prior session.",
+  );
+  parts.push(
+    "Use this to maintain continuity — do NOT repeat completed work.\n",
+  );
+
+  if (taskName) {
+    parts.push(`Session name: ${taskName}\n`);
+  }
+
+  // Task plan state
+  if (taskPlan.length > 0) {
+    parts.push("<task-plan>");
+    for (const task of taskPlan) {
+      const statusEmoji =
+        task.status === "completed"
+          ? "✅"
+          : task.status === "running"
+            ? "🔄"
+            : task.status === "failed"
+              ? "❌"
+              : "📋";
+      let line = `${statusEmoji} [${task.status}] ${task.title}`;
+      if (task.result) {
+        const result =
+          task.result.length > 500
+            ? task.result.slice(0, 497) + "…"
+            : task.result;
+        line += ` → ${result}`;
+      }
+      parts.push(line);
+    }
+    parts.push("</task-plan>\n");
+  }
+
+  // Conversation history — cap at ~30k chars total to stay within context limits
+  if (conversationEntries.length > 0) {
+    parts.push("<conversation-history>");
+    let totalLen = 0;
+    const MAX_CONTEXT_CHARS = 30000;
+    // Include from newest to oldest, then reverse for chronological order
+    const included: string[] = [];
+    for (let i = conversationEntries.length - 1; i >= 0; i--) {
+      const entry = conversationEntries[i];
+      if (totalLen + entry.length > MAX_CONTEXT_CHARS) {
+        included.push(
+          `[... ${i + 1} earlier messages omitted for brevity ...]`,
+        );
+        break;
+      }
+      included.push(entry);
+      totalLen += entry.length;
+    }
+    included.reverse();
+    parts.push(included.join("\n\n"));
+    parts.push("</conversation-history>");
+  }
+
+  parts.push("</previous-session-context>");
+
+  return parts.join("\n");
+}
+
 /* ── Wait countdown component ──────────────────────────────────────── */
 
 function WaitCountdown({ waitUntil, reason }: { waitUntil: number; reason: string }) {
@@ -2290,6 +2395,14 @@ function LeaderNodeRenderer({
     const userPrompt =
       input.trim() || "Analyze the project and suggest how to proceed.";
 
+    // ── Build previous-session context for restarts ──────────
+    // If there are existing messages from a prior session, this is a restart.
+    // Serialize conversation + task plan so the new Claude instance has continuity.
+    const prevMessages = dataRef.current.messages;
+    const prevTaskPlan = dataRef.current.taskPlan;
+    const prevTaskName = dataRef.current.taskName;
+    const sessionContext = buildSessionContext(prevMessages, prevTaskPlan, prevTaskName);
+
     // Gather context from connected nodes
     const contextItems = getContextForNode?.() ?? [];
     let fullPrompt = userPrompt;
@@ -2305,6 +2418,11 @@ function LeaderNodeRenderer({
         })
         .join("\n");
       fullPrompt = `<connected-context>\nThe following context has been provided by the user via connected canvas nodes:\n\n${contextBlock}\n</connected-context>\n\n${userPrompt}`;
+    }
+
+    // Prepend previous session context if this is a restart
+    if (sessionContext) {
+      fullPrompt = `${sessionContext}\n\n${fullPrompt}`;
     }
 
     // Compile tagged skills into system prompt addendum
@@ -2330,6 +2448,7 @@ function LeaderNodeRenderer({
       sessionKey: key,
       status: "creating",
       messages: [
+        ...prevMessages,
         {
           id: msgId(),
           role: "user" as const,
@@ -2351,6 +2470,12 @@ function LeaderNodeRenderer({
 
     const key = `leader-${Date.now().toString(36)}`;
 
+    // ── Build previous-session context for restarts ──────────
+    const prevMessages = dataRef.current.messages;
+    const prevTaskPlan = dataRef.current.taskPlan;
+    const prevTaskName = dataRef.current.taskName;
+    const sessionContext = buildSessionContext(prevMessages, prevTaskPlan, prevTaskName);
+
     // Gather context from connected nodes
     const contextItems = getContextForNode?.() ?? [];
     let fullPrompt = prompt;
@@ -2365,6 +2490,11 @@ function LeaderNodeRenderer({
         })
         .join("\n");
       fullPrompt = `<connected-context>\nThe following context has been provided by the user via connected canvas nodes:\n\n${contextBlock}\n</connected-context>\n\n${prompt}`;
+    }
+
+    // Prepend previous session context if this is a restart
+    if (sessionContext) {
+      fullPrompt = `${sessionContext}\n\n${fullPrompt}`;
     }
 
     // Compile tagged skills
@@ -2391,6 +2521,7 @@ function LeaderNodeRenderer({
       status: "creating",
       autoStartPrompt: null, // Clear so it doesn't re-trigger
       messages: [
+        ...prevMessages,
         {
           id: msgId(),
           role: "user" as const,
