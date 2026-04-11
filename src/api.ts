@@ -7,6 +7,11 @@ const BASE = "/api";
 let _authToken: string | null = null;
 let _tokenPromise: Promise<string> | null = null;
 
+export function clearAuthToken(): void {
+  _authToken = null;
+  _tokenPromise = null;
+}
+
 export function getAuthToken(): Promise<string> {
   if (_authToken) return Promise.resolve(_authToken);
   if (!_tokenPromise) {

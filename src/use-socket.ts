@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { getAuthToken } from "./api.ts";
+import { getAuthToken, clearAuthToken } from "./api.ts";
 
 export type ServerMessage =
   | { type: "session_list"; sessions: SessionInfo[] }
@@ -673,6 +673,9 @@ export function useSocket(url: string): SocketHandle {
 
       ws.onclose = () => {
         setConnected(false);
+        // Clear cached auth token so the next reconnect fetches a fresh one
+        // (the server generates a new token on every restart)
+        clearAuthToken();
         const nextAttempt = attemptRef.current + 1;
         attemptRef.current = nextAttempt;
         setReconnectAttempt(nextAttempt);
@@ -731,6 +734,7 @@ export function useSocket(url: string): SocketHandle {
     attemptRef.current = 0;
     setReconnectAttempt(0);
     setReconnectState("reconnecting");
+    clearAuthToken();
     // Close any existing socket before reconnecting
     if (wsRef.current) {
       // Prevent the onclose handler from scheduling its own reconnect
