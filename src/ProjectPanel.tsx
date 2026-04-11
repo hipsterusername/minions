@@ -25,6 +25,8 @@ interface ProjectPanelProps {
   onOpenFile?: (relativePath: string) => void;
   /** Called when a node's data is updated from the panel (e.g. renaming a leader) */
   onUpdateNodeData?: (nodeId: string, data: unknown) => void;
+  /** Called when user clicks "Focus" on an agent to center it on the canvas */
+  onFocusNode?: (nodeId: string) => void;
 }
 
 // ── Helpers ──────────────────────────────────────────────
@@ -86,6 +88,7 @@ export function ProjectPanel({
   nodes,
   onOpenFile,
   onUpdateNodeData,
+  onFocusNode,
 }: ProjectPanelProps) {
   const { themeId, setTheme, themes: allThemes } = useTheme();
   const [collapsed, setCollapsed] = useState(true);
@@ -445,6 +448,7 @@ export function ProjectPanel({
             onOpenFile={onOpenFile}
             nodes={nodes}
             onUpdateNodeData={onUpdateNodeData}
+            onFocusNode={onFocusNode}
           />
         )}
 
@@ -969,6 +973,7 @@ function DashboardView({
   onOpenFile,
   nodes,
   onUpdateNodeData,
+  onFocusNode,
 }: {
   agents: Array<{
     id: string;
@@ -988,6 +993,7 @@ function DashboardView({
   onOpenFile?: (relativePath: string) => void;
   nodes?: CanvasNode[];
   onUpdateNodeData?: (nodeId: string, data: unknown) => void;
+  onFocusNode?: (nodeId: string) => void;
 }) {
   const [tree, setTree] = useState<TreeNode[] | null>(null);
   const [rootName, setRootName] = useState("");
@@ -1369,6 +1375,7 @@ function DashboardView({
                 <div
                   style={{
                     display: "flex",
+                    alignItems: "center",
                     gap: 10,
                     fontSize: 10,
                     fontFamily: "var(--font-mono)",
@@ -1380,6 +1387,46 @@ function DashboardView({
                   {agent.cost > 0 && <span>${agent.cost.toFixed(3)}</span>}
                   {agent.type === "leader" && agent.minionCount > 0 && (
                     <span>{agent.minionCount} tasks</span>
+                  )}
+                  {onFocusNode && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onFocusNode(agent.id);
+                      }}
+                      title="Focus node on canvas"
+                      style={{
+                        marginLeft: "auto",
+                        padding: "2px 7px",
+                        fontSize: 9,
+                        fontFamily: "var(--font-mono)",
+                        fontWeight: 500,
+                        letterSpacing: 0.3,
+                        background: "transparent",
+                        border: "1px solid var(--border-default)",
+                        borderRadius: 4,
+                        color: "var(--text-muted)",
+                        cursor: "pointer",
+                        transition: "all 0.15s ease",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,
+                        flexShrink: 0,
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = "var(--accent)";
+                        e.currentTarget.style.color = "var(--accent)";
+                        e.currentTarget.style.background = "var(--state-active)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = "var(--border-default)";
+                        e.currentTarget.style.color = "var(--text-muted)";
+                        e.currentTarget.style.background = "transparent";
+                      }}
+                    >
+                      <span style={{ fontSize: 10, lineHeight: 1 }}>&#8982;</span>
+                      Focus
+                    </button>
                   )}
                 </div>
 
