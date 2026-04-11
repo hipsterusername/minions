@@ -71,6 +71,17 @@ export interface LeaderData {
   /** Wait state: populated when the leader calls wait_and_continue */
   waitUntil?: number | null;
   waitReason?: string | null;
+  /** Approval state: set when the leader calls request_approval */
+  approvalPending?: boolean;
+  approvalSummary?: string | null;
+  approvalDiff?: {
+    filesChanged: number;
+    insertions: number;
+    deletions: number;
+    files: { file: string; insertions: number; deletions: number; status: string }[];
+    commits: string[];
+    branch: string;
+  } | null;
 }
 
 // LeaderMessage is now an alias for the shared DisplayMessage type
@@ -1872,9 +1883,93 @@ function ConfigFooter({
             </div>
           )}
 
-          {/* Worktree actions */}
-          {showWorktreeActions && (
-            <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+          {/* Approval pending banner */}
+          {data.approvalPending && (
+            <div
+              style={{
+                marginTop: 6,
+                padding: "8px 10px",
+                background: "var(--state-active)",
+                border: "1px solid var(--accent)",
+                borderRadius: 6,
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", marginBottom: 4 }}>
+                Awaiting Approval
+              </div>
+              {data.approvalSummary && (
+                <div style={{ fontSize: 10, color: "var(--text-secondary)", marginBottom: 6, lineHeight: 1.4 }}>
+                  {data.approvalSummary}
+                </div>
+              )}
+              {data.approvalDiff && (
+                <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 6, fontFamily: "var(--font-mono)" }}>
+                  {data.approvalDiff.filesChanged} file{data.approvalDiff.filesChanged !== 1 ? "s" : ""} changed
+                  {" \u00b7 "}
+                  <span style={{ color: "var(--success-color)" }}>+{data.approvalDiff.insertions}</span>
+                  {" "}
+                  <span style={{ color: "var(--status-error)" }}>-{data.approvalDiff.deletions}</span>
+                  {data.approvalDiff.commits.length > 0 && (
+                    <span> {" \u00b7 "} {data.approvalDiff.commits.length} commit{data.approvalDiff.commits.length !== 1 ? "s" : ""}</span>
+                  )}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  onClick={() => {
+                    if (socketSend && data.sessionKey) {
+                      socketSend({ type: "approve_changes", sessionKey: data.sessionKey });
+                      onUpdateData({ ...data, worktreeStatus: "merging", approvalPending: false });
+                    }
+                  }}
+                  style={{
+                    padding: "4px 12px", fontSize: 11, fontWeight: 600,
+                    background: "var(--success-color)", border: "none", borderRadius: 4,
+                    color: "#fff", cursor: "pointer", fontFamily: "var(--font-mono)",
+                  }}
+                >
+                  Approve & Merge
+                </button>
+                <button
+                  onClick={() => {
+                    if (socketSend && data.sessionKey) {
+                      socketSend({ type: "get_worktree_diff", sessionKey: data.sessionKey });
+                    }
+                  }}
+                  style={{
+                    padding: "4px 10px", fontSize: 10, background: "var(--bg-elevated)",
+                    border: "1px solid var(--border-default)", borderRadius: 4,
+                    color: "var(--text-secondary)", cursor: "pointer", fontFamily: "var(--font-mono)",
+                  }}
+                >
+                  View Diff
+                </button>
+                <button
+                  onClick={() => {
+                    if (socketSend && data.sessionKey && confirm("Discard all worktree changes?")) {
+                      socketSend({ type: "discard_worktree", sessionKey: data.sessionKey });
+                    }
+                  }}
+                  style={{
+                    padding: "4px 10px", fontSize: 10, background: "var(--danger-bg)",
+                    border: "1px solid var(--danger-color)", borderRadius: 4,
+                    color: "var(--status-error)", cursor: "pointer", fontFamily: "var(--font-mono)",
+                  }}
+                >
+                  Discard
+                </button>
+              </div>
+              <div style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 4, fontStyle: "italic" }}>
+                Send a message to request changes instead
+              </div>
+            </div>
+          )}
+
+          {/* Worktree actions (shown when idle with active worktree but NOT when approval is pending) */}
+          {/* NOTE: No manual "Merge" button — merging happens only through the approval workflow */}
+          {/* (the agent calls request_approval → user clicks "Approve & Merge"). */}
+          {showWorktreeActions && !data.approvalPending && (
+            <div style={{ display: "flex", gap: 6, marginTop: 4, alignItems: "center" }}>
               <button
                 onClick={() => {
                   if (socketSend && data.sessionKey) {
@@ -1891,21 +1986,6 @@ function ConfigFooter({
               </button>
               <button
                 onClick={() => {
-                  if (socketSend && data.sessionKey) {
-                    socketSend({ type: "merge_worktree", sessionKey: data.sessionKey });
-                    onUpdateData({ ...data, worktreeStatus: "merging" });
-                  }
-                }}
-                style={{
-                  padding: "3px 8px", fontSize: 10, background: "var(--success-bg)",
-                  border: "1px solid var(--success-color)", borderRadius: 4,
-                  color: "var(--success-color)", cursor: "pointer", fontFamily: "var(--font-mono)",
-                }}
-              >
-                Merge
-              </button>
-              <button
-                onClick={() => {
                   if (socketSend && data.sessionKey && confirm("Discard all worktree changes?")) {
                     socketSend({ type: "discard_worktree", sessionKey: data.sessionKey });
                   }
@@ -1918,6 +1998,9 @@ function ConfigFooter({
               >
                 Discard
               </button>
+              <span style={{ fontSize: 9, color: "var(--text-muted)", fontStyle: "italic" }}>
+                Agent will request approval when ready to merge
+              </span>
             </div>
           )}
         </div>
@@ -2383,6 +2466,32 @@ function LeaderNodeRenderer({
           worktreePath: null,
           worktreeBranch: null,
           worktreeStatus: "discarded",
+          approvalPending: false,
+          approvalSummary: null,
+          approvalDiff: null,
+        });
+        return;
+      }
+
+      // Handle approval_requested — leader is waiting for user to approve changes
+      if (serverMsg.type === "approval_requested" && serverMsg.sessionKey === current.sessionKey) {
+        emitUpdate({
+          ...current,
+          approvalPending: true,
+          approvalSummary: (serverMsg.summary as string) ?? null,
+          approvalDiff: (serverMsg.diff as LeaderData["approvalDiff"]) ?? null,
+        });
+        return;
+      }
+
+      // Handle approval_resolved — approval was accepted or changes requested
+      if (serverMsg.type === "approval_resolved" && serverMsg.sessionKey === current.sessionKey) {
+        emitUpdate({
+          ...current,
+          approvalPending: false,
+          approvalSummary: null,
+          approvalDiff: null,
+          // If approved, the worktree_merged event handles worktree status
         });
         return;
       }

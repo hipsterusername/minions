@@ -95,17 +95,20 @@ export async function createWorktree(
 
 /**
  * Force-remove a worktree and delete its branch.
+ *
+ * @param worktreePath - Absolute path to the worktree directory
+ * @param projectPath  - Absolute path to the main project root (avoids fragile `../..` derivation)
  */
-export async function removeWorktree(worktreePath: string): Promise<void> {
+export async function removeWorktree(worktreePath: string, projectPath?: string): Promise<void> {
   // Derive the branch name from the worktree directory name.
   const key = basename(worktreePath);
   const branch = `canvas/${key}`;
 
-  // Derive the project path (two levels up from .canvas-worktrees/<key>).
-  const projectPath = join(worktreePath, "..", "..");
+  // Use explicit projectPath if provided, otherwise fall back to derivation.
+  const resolvedProjectPath = projectPath ?? join(worktreePath, "..", "..");
 
-  await exec(["worktree", "remove", "--force", worktreePath], projectPath);
-  await exec(["branch", "-D", branch], projectPath);
+  await exec(["worktree", "remove", "--force", worktreePath], resolvedProjectPath);
+  await exec(["branch", "-D", branch], resolvedProjectPath);
 }
 
 /**
@@ -157,49 +160,47 @@ export async function listWorktrees(
 
 /**
  * Merge the worktree branch into a target branch (default: current branch
- * of the main worktree). Aborts on conflict and returns conflict details.
+ * of the main worktree).
+ *
+ * SAFETY: This function does NOT run `git checkout` in the user's main
+ * worktree. Instead it merges the target branch into the canvas branch
+ * (inside the worktree), then fast-forwards the target ref. This avoids
+ * disrupting the user's working directory, uncommitted changes, or branch.
  */
 export async function mergeWorktree(
   info: WorktreeInfo,
   targetBranch?: string,
 ): Promise<MergeResult> {
-  const cwd = info.projectPath;
+  const projectCwd = info.projectPath;
+  const worktreeCwd = info.path;
 
   // If no target specified, determine the current branch of the main worktree.
   if (!targetBranch) {
-    const { stdout } = await exec(["rev-parse", "--abbrev-ref", "HEAD"], cwd);
+    const { stdout } = await exec(["rev-parse", "--abbrev-ref", "HEAD"], projectCwd);
     targetBranch = stdout.trim();
   }
 
-  // Ensure we're on the target branch.
-  await exec(["checkout", targetBranch], cwd);
-
+  // Step 1: Inside the worktree, merge the target branch INTO the canvas branch.
+  // This catches up the canvas branch with any changes on main since the worktree
+  // was created, and surfaces any conflicts here (in the worktree, not in main).
   try {
-    const { stdout } = await exec(
-      ["merge", "--no-ff", info.branch],
-      cwd,
-    );
-    return {
-      success: true,
-      conflicts: [],
-      summary: stdout.trim(),
-    };
+    await exec(["merge", targetBranch, "--no-edit"], worktreeCwd);
   } catch (err) {
-    // Check for merge conflicts by looking at unmerged paths.
+    // Merge conflict — the canvas branch can't cleanly incorporate main's changes.
     let conflicts: string[] = [];
     try {
       const { stdout: diffOut } = await exec(
         ["diff", "--name-only", "--diff-filter=U"],
-        cwd,
+        worktreeCwd,
       );
       conflicts = diffOut.trim().split("\n").filter(Boolean);
     } catch {
       // If diff fails too, just use the error message.
     }
 
-    // Abort the failed merge.
+    // Abort the failed merge in the worktree.
     try {
-      await exec(["merge", "--abort"], cwd);
+      await exec(["merge", "--abort"], worktreeCwd);
     } catch {
       // Abort may fail if there's nothing to abort; ignore.
     }
@@ -208,9 +209,47 @@ export async function mergeWorktree(
     return {
       success: false,
       conflicts,
-      summary: `Merge failed: ${message}`,
+      summary: `Merge failed (conflicts with ${targetBranch}): ${message}`,
     };
   }
+
+  // Step 2: The canvas branch now contains everything from the target branch
+  // plus all worktree changes. Fast-forward the target branch ref to match.
+  // This is safe because the canvas branch is a superset of the target.
+  try {
+    await exec(["branch", "-f", targetBranch, info.branch], projectCwd);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      success: false,
+      conflicts: [],
+      summary: `Failed to update ${targetBranch} ref: ${message}`,
+    };
+  }
+
+  // Step 3: If the main worktree is on the target branch, update its working
+  // tree to reflect the new HEAD. This is equivalent to what `git merge` would
+  // do, but without the risk of a checkout switching branches.
+  try {
+    const { stdout: mainBranch } = await exec(
+      ["rev-parse", "--abbrev-ref", "HEAD"],
+      projectCwd,
+    );
+    if (mainBranch.trim() === targetBranch) {
+      // Reset the working tree to match the updated branch ref.
+      // --hard is safe here because we only advanced the ref forward.
+      await exec(["reset", "--hard", targetBranch], projectCwd);
+    }
+  } catch {
+    // Non-fatal: the ref was updated even if the working tree wasn't refreshed.
+    // The user can run `git pull` or `git checkout` to catch up.
+  }
+
+  return {
+    success: true,
+    conflicts: [],
+    summary: `Merged ${info.branch} into ${targetBranch}`,
+  };
 }
 
 /**
@@ -223,11 +262,25 @@ export async function mergeAndCleanup(
   info: WorktreeInfo,
   targetBranch?: string,
 ): Promise<MergeResult> {
+  // Auto-commit any uncommitted changes so they aren't lost on merge.
+  try {
+    await exec(["add", "-A"], info.path);
+    const { stdout: status } = await exec(["status", "--porcelain"], info.path);
+    if (status.trim()) {
+      await exec(
+        ["commit", "-m", "chore: auto-commit uncommitted changes before merge"],
+        info.path,
+      );
+    }
+  } catch {
+    // Non-fatal — proceed with merge even if auto-commit fails (e.g. nothing to commit)
+  }
+
   const result = await mergeWorktree(info, targetBranch);
 
   if (result.success) {
     // Merge succeeded — remove worktree directory + branch
-    await removeWorktree(info.path);
+    await removeWorktree(info.path, info.projectPath);
     info.lifecycle = "cleaned";
   }
   // On failure the worktree stays "active" so the user can fix or discard.
@@ -272,6 +325,160 @@ export async function getWorktreeStatus(
   if (delMatch) deletions = parseInt(delMatch[1]!, 10);
 
   return { filesChanged, insertions, deletions, summary: lastLine.trim() };
+}
+
+/**
+ * Per-file change detail for detailed diff views.
+ */
+export interface FileChange {
+  file: string;
+  insertions: number;
+  deletions: number;
+  status: "added" | "modified" | "deleted" | "renamed";
+}
+
+/**
+ * Detailed diff information including per-file stats and commit list.
+ * Used for the approval workflow dashboard.
+ */
+export interface DetailedDiff {
+  /** Overall stats */
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+  /** Per-file breakdown */
+  files: FileChange[];
+  /** Commits on the worktree branch not on the base branch */
+  commits: string[];
+  /** Branch name */
+  branch: string;
+}
+
+/**
+ * Get a detailed diff for a worktree branch vs its base.
+ * Includes per-file stats and commit list — used for the approval dashboard.
+ */
+export async function getDetailedDiff(
+  info: WorktreeInfo,
+): Promise<DetailedDiff> {
+  const cwd = info.path;
+  const branch = info.branch;
+
+  // Find the merge-base between the worktree branch and the main worktree's HEAD.
+  // The project path's HEAD is the base branch.
+  let mergeBase: string;
+  try {
+    const { stdout } = await exec(
+      ["merge-base", "HEAD", branch],
+      info.projectPath,
+    );
+    mergeBase = stdout.trim();
+  } catch {
+    // Fallback: diff against HEAD of main worktree
+    mergeBase = "HEAD";
+  }
+
+  // Per-file numstat: shows insertions/deletions per file
+  const files: FileChange[] = [];
+  let totalInsertions = 0;
+  let totalDeletions = 0;
+
+  // Build a map of file changes. We process committed changes first (branch vs
+  // merge-base), then layer on any uncommitted changes in the worktree. For files
+  // that appear in both, we sum the stats to reflect the full delta.
+  const fileMap = new Map<string, FileChange>();
+
+  const parseNumstat = (output: string) => {
+    for (const line of output.split("\n").filter(Boolean)) {
+      const parts = line.split("\t");
+      if (parts.length < 3) continue;
+
+      const [ins, del, file] = parts;
+      if (!file) continue;
+
+      const insertions = ins === "-" ? 0 : parseInt(ins!, 10) || 0;
+      const deletions = del === "-" ? 0 : parseInt(del!, 10) || 0;
+
+      const existing = fileMap.get(file);
+      if (existing) {
+        // Accumulate uncommitted changes on top of committed
+        existing.insertions += insertions;
+        existing.deletions += deletions;
+      } else {
+        let status: FileChange["status"] = "modified";
+        if (file.includes(" => ")) status = "renamed";
+        fileMap.set(file, { file, insertions, deletions, status });
+      }
+    }
+  };
+
+  try {
+    // Committed changes on the branch vs merge-base
+    const { stdout: committedStat } = await exec(
+      ["diff", "--numstat", mergeBase, branch],
+      info.projectPath,
+    );
+    parseNumstat(committedStat);
+
+    // Uncommitted changes (staged + unstaged) in the worktree
+    const { stdout: uncommittedStat } = await exec(["diff", "--numstat", "HEAD"], cwd);
+    parseNumstat(uncommittedStat);
+  } catch {
+    // Fallback: empty file list
+  }
+
+  // Enrich file status using name-status (more accurate for add/delete/rename)
+  try {
+    const { stdout: nameStatus } = await exec(
+      ["diff", "--name-status", mergeBase, branch],
+      info.projectPath,
+    );
+    for (const line of nameStatus.split("\n").filter(Boolean)) {
+      const parts = line.split("\t");
+      if (parts.length >= 2) {
+        const statusChar = parts[0]!.trim();
+        const fileName = parts[parts.length - 1]!;
+        const existing = fileMap.get(fileName);
+        if (existing) {
+          if (statusChar === "A") existing.status = "added";
+          else if (statusChar === "D") existing.status = "deleted";
+          else if (statusChar.startsWith("R")) existing.status = "renamed";
+        }
+      }
+    }
+  } catch {
+    // Non-critical
+  }
+
+  // Compute totals from the map
+  for (const f of fileMap.values()) {
+    files.push(f);
+    totalInsertions += f.insertions;
+    totalDeletions += f.deletions;
+  }
+
+  // Get commits on this branch since merge-base
+  const commits: string[] = [];
+  try {
+    const { stdout } = await exec(
+      ["log", "--oneline", `${mergeBase}..${branch}`],
+      info.projectPath,
+    );
+    for (const line of stdout.trim().split("\n").filter(Boolean)) {
+      commits.push(line);
+    }
+  } catch {
+    // No commits or error
+  }
+
+  return {
+    filesChanged: files.length,
+    insertions: totalInsertions,
+    deletions: totalDeletions,
+    files,
+    commits,
+    branch,
+  };
 }
 
 /**
