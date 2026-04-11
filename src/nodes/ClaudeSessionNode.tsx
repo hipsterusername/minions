@@ -12,6 +12,8 @@ import { useStatusBanners, StatusBannerStack } from "../components/StatusBanner.
 import { SessionToolbar } from "../components/SessionToolbar.tsx";
 import type { ModelOption, PermissionMode } from "../components/SessionToolbar.tsx";
 import { StreamingBubble, StreamingIndicator } from "../components/StreamingBubble.tsx";
+import { CopyButton } from "../components/CopyButton.tsx";
+import { AddAsNodeButton } from "../components/AddAsNodeButton.tsx";
 import { extractStreamDelta, isStreamingEvent } from "../streaming.ts";
 
 export interface SubagentInfo {
@@ -62,6 +64,7 @@ interface SessionMessage {
   content: string;
   timestamp: number;
   toolName?: string;
+  toolInput?: Record<string, unknown>;
   /** For result messages: structured metadata */
   meta?: ResultMeta;
 }
@@ -138,9 +141,33 @@ function sdkMessageToSessionMessages(
     }
     case "assistant":
       if (sdkMsg.message?.content) {
-        const text = extractText(sdkMsg.message.content);
-        if (text.trim()) {
-          out.push({ id: msgId(), role: "assistant", content: text, timestamp: now });
+        const blocks = sdkMsg.message.content;
+        // Split content blocks into separate messages for proper grouping
+        const textParts: string[] = [];
+        for (const block of blocks) {
+          if (block.type === "text" && block.text) {
+            textParts.push(block.text);
+          } else if (block.type === "tool_use" && block.name) {
+            // Flush accumulated text first
+            if (textParts.length > 0) {
+              const joined = textParts.join("\n").trim();
+              if (joined) out.push({ id: msgId(), role: "assistant", content: joined, timestamp: now });
+              textParts.length = 0;
+            }
+            out.push({
+              id: msgId(), role: "tool",
+              content: block.name,
+              timestamp: now,
+              toolName: block.name,
+              toolInput: block.input as Record<string, unknown> | undefined,
+            });
+          } else if (block.type === "tool_result" && block.text) {
+            textParts.push(block.text);
+          }
+        }
+        if (textParts.length > 0) {
+          const joined = textParts.join("\n").trim();
+          if (joined) out.push({ id: msgId(), role: "assistant", content: joined, timestamp: now });
         }
       }
       break;
@@ -264,6 +291,132 @@ const TOOL_ICONS: Record<string, string> = {
   WebSearch: "\u2315",
 };
 
+/** Format tool input into a readable summary string */
+function formatToolInput(toolName: string, input?: Record<string, unknown>): string | null {
+  if (!input || Object.keys(input).length === 0) return null;
+  switch (toolName) {
+    case "Read": return input.file_path as string ?? null;
+    case "Write": return input.file_path as string ?? null;
+    case "Edit": return input.file_path as string ?? null;
+    case "Bash": return input.command as string ?? null;
+    case "Glob": return input.pattern as string ?? null;
+    case "Grep": return input.pattern as string ?? null;
+    case "Agent": return input.description as string ?? input.prompt as string ?? null;
+    case "WebFetch": return input.url as string ?? null;
+    case "WebSearch": return input.query as string ?? null;
+    default: {
+      for (const v of Object.values(input)) {
+        if (typeof v === "string" && v.length > 0) return v;
+      }
+      return null;
+    }
+  }
+}
+
+/** Format the full tool input as key-value pairs for the detail view */
+function formatToolInputDetail(input?: Record<string, unknown>): string {
+  if (!input || Object.keys(input).length === 0) return "(no input)";
+  const lines: string[] = [];
+  for (const [k, v] of Object.entries(input)) {
+    const val = typeof v === "string" ? v : JSON.stringify(v, null, 2);
+    lines.push(`${k}: ${val}`);
+  }
+  return lines.join("\n");
+}
+
+function ToolItem({ msg, accentColor }: { msg: SessionMessage; accentColor: string }) {
+  const [detailOpen, setDetailOpen] = useState(false);
+  const icon = TOOL_ICONS[msg.toolName ?? ""] ?? "\u2022";
+  const summary = formatToolInput(msg.toolName ?? "", msg.toolInput);
+  const hasInput = msg.toolInput && Object.keys(msg.toolInput).length > 0;
+
+  return (
+    <div>
+      <div
+        onClick={hasInput ? () => setDetailOpen(!detailOpen) : undefined}
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          gap: 6,
+          fontSize: 11,
+          fontFamily: "var(--font-mono)",
+          color: "var(--text-muted)",
+          lineHeight: 1.6,
+          cursor: hasInput ? "pointer" : "default",
+          borderRadius: 3,
+          padding: "1px 4px",
+          transition: "background 0.15s",
+        }}
+        onMouseEnter={(e) => { if (hasInput) e.currentTarget.style.background = `${accentColor}11`; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+      >
+        <span
+          style={{
+            color: accentColor,
+            opacity: 0.5,
+            fontSize: 10,
+            flexShrink: 0,
+            width: 12,
+            textAlign: "center",
+          }}
+        >
+          {icon}
+        </span>
+        <span style={{ fontWeight: 500, flexShrink: 0 }}>{msg.toolName ?? "tool"}</span>
+        {summary && (
+          <span
+            style={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              opacity: 0.5,
+              flex: 1,
+              minWidth: 0,
+            }}
+          >
+            {summary}
+          </span>
+        )}
+        {hasInput && (
+          <span
+            style={{
+              fontSize: 8,
+              opacity: 0.35,
+              flexShrink: 0,
+              transition: "transform 0.15s",
+              transform: detailOpen ? "rotate(90deg)" : "rotate(0deg)",
+            }}
+          >
+            &#9654;
+          </span>
+        )}
+      </div>
+      {detailOpen && hasInput && (
+        <pre
+          style={{
+            margin: "2px 0 4px 22px",
+            padding: "6px 8px",
+            background: `${accentColor}08`,
+            border: `1px solid ${accentColor}18`,
+            borderRadius: 4,
+            fontSize: 10,
+            fontFamily: "var(--font-mono)",
+            color: "var(--text-muted)",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-all",
+            maxHeight: 200,
+            overflow: "auto",
+            lineHeight: 1.5,
+          }}
+        >
+          {formatToolInputDetail(msg.toolInput)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 function ToolGroup({ msgs }: { msgs: SessionMessage[] }) {
   const [expanded, setExpanded] = useState(false);
   const toolNames = msgs.map((m) => m.toolName ?? "tool");
@@ -310,8 +463,8 @@ function ToolGroup({ msgs }: { msgs: SessionMessage[] }) {
             height: 16,
             fontSize: 8,
             borderRadius: 3,
-            background: "rgba(74, 222, 128, 0.08)",
-            color: "#4ade80",
+            background: "var(--success-bg)",
+            color: "var(--success-color)",
             flexShrink: 0,
             transition: "transform 0.2s",
             transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
@@ -349,45 +502,9 @@ function ToolGroup({ msgs }: { msgs: SessionMessage[] }) {
               gap: 1,
             }}
           >
-            {msgs.map((m) => {
-              const icon = TOOL_ICONS[m.toolName ?? ""] ?? "\u2022";
-              return (
-                <div
-                  key={m.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "baseline",
-                    gap: 6,
-                    fontSize: 11,
-                    fontFamily: "var(--font-mono)",
-                    color: "var(--text-muted)",
-                    lineHeight: 1.6,
-                  }}
-                >
-                  <span
-                    style={{
-                      color: "#4ade80",
-                      opacity: 0.5,
-                      fontSize: 10,
-                      flexShrink: 0,
-                      width: 12,
-                      textAlign: "center",
-                    }}
-                  >
-                    {icon}
-                  </span>
-                  <span
-                    style={{
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {m.content}
-                  </span>
-                </div>
-              );
-            })}
+            {msgs.map((m) => (
+              <ToolItem key={m.id} msg={m} accentColor="var(--success-color)" />
+            ))}
           </div>
         </div>
       </div>
@@ -395,7 +512,7 @@ function ToolGroup({ msgs }: { msgs: SessionMessage[] }) {
   );
 }
 
-function AssistantBubble({ msg }: { msg: SessionMessage }) {
+function AssistantBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAddContentNode?: (content: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const [isOverflowing, setIsOverflowing] = useState(false);
@@ -415,7 +532,9 @@ function AssistantBubble({ msg }: { msg: SessionMessage }) {
     : [msg.content];
 
   return (
-    <div style={{ position: "relative", marginBlock: 2 }}>
+    <div style={{ position: "relative", marginBlock: 2 }} className="copyable">
+      <CopyButton text={msg.content} />
+      <AddAsNodeButton text={msg.content} onAdd={onAddContentNode} />
       <div
         ref={contentRef}
         style={{
@@ -425,7 +544,7 @@ function AssistantBubble({ msg }: { msg: SessionMessage }) {
           lineHeight: 1.6,
           fontFamily: "var(--font-sans)",
           color: "var(--text-primary)",
-          borderLeft: "2px solid #60a5fa",
+          borderLeft: "2px solid var(--streaming-color)",
           whiteSpace: "pre-wrap",
           wordBreak: "break-word",
           overflowWrap: "break-word",
@@ -455,10 +574,10 @@ function AssistantBubble({ msg }: { msg: SessionMessage }) {
                 <div
                   style={{
                     padding: "4px 8px",
-                    background: "rgba(74, 222, 128, 0.06)",
+                    background: "var(--success-bg)",
                     fontSize: 10,
                     fontFamily: "var(--font-mono)",
-                    color: "#4ade80",
+                    color: "var(--success-color)",
                     opacity: 0.7,
                   }}
                 >
@@ -596,7 +715,7 @@ function ModelUsageBar({ modelUsage }: { modelUsage: Record<string, ModelUsage> 
   if (entries.length === 0) return null;
   const totalCost = entries.reduce((s, [, u]) => s + u.costUSD, 0);
   const MODEL_COLORS: Record<string, string> = {
-    opus: "#a78bfa", sonnet: "#f59e0b", haiku: "#34d399",
+    opus: "var(--model-opus)", sonnet: "var(--model-sonnet)", haiku: "var(--model-haiku)",
   };
 
   return (
@@ -607,7 +726,7 @@ function ModelUsageBar({ modelUsage }: { modelUsage: Record<string, ModelUsage> 
       {entries.map(([model, usage]) => {
         const pct = totalCost > 0 ? (usage.costUSD / totalCost) * 100 : 0;
         const shortName = model.replace(/claude-/, "").replace(/-\d.*$/, "");
-        const color = MODEL_COLORS[shortName] ?? "#60a5fa";
+        const color = MODEL_COLORS[shortName] ?? "var(--streaming-color)";
         return (
           <div key={model} style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ fontSize: 9, fontFamily: "var(--font-mono)", color, minWidth: 48, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
@@ -629,14 +748,14 @@ function ModelUsageBar({ modelUsage }: { modelUsage: Record<string, ModelUsage> 
   );
 }
 
-function ResultBubble({ msg }: { msg: SessionMessage }) {
+function ResultBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAddContentNode?: (content: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   const isLong = msg.content.length > 300;
   const meta = msg.meta;
   const hasUsage = meta?.modelUsage && Object.keys(meta.modelUsage).length > 0;
 
   return (
-    <div style={{ marginBlock: 4 }}>
+    <div style={{ marginBlock: 4 }} className="copyable">
       <div
         style={{
           padding: "8px 10px",
@@ -644,8 +763,8 @@ function ResultBubble({ msg }: { msg: SessionMessage }) {
           fontSize: 12,
           lineHeight: 1.6,
           fontFamily: "var(--font-sans)",
-          color: meta?.isError ? "#f87171" : "var(--text-primary)",
-          borderLeft: `2px solid ${meta?.isError ? "#ef4444" : "#818cf8"}`,
+          color: meta?.isError ? "var(--status-error)" : "var(--text-primary)",
+          borderLeft: `2px solid ${meta?.isError ? "var(--danger-color)" : "var(--tool-accent)"}`,
           whiteSpace: "pre-wrap",
           wordBreak: "break-word",
           overflowWrap: "break-word",
@@ -654,6 +773,8 @@ function ResultBubble({ msg }: { msg: SessionMessage }) {
           position: "relative",
         }}
       >
+        <CopyButton text={msg.content} />
+        <AddAsNodeButton text={msg.content} onAdd={onAddContentNode} />
         {msg.content}
         {meta && (() => {
           const ds = meta.durationMs ? `${(meta.durationMs / 1000).toFixed(1)}s` : null;
@@ -700,7 +821,7 @@ function ResultBubble({ msg }: { msg: SessionMessage }) {
   );
 }
 
-function MessageFeed({ messages }: { messages: SessionMessage[] }) {
+function MessageFeed({ messages, onAddContentNode }: { messages: SessionMessage[]; onAddContentNode?: (content: string) => void }) {
   const groups = groupMessages(messages);
   return (
     <>
@@ -713,11 +834,11 @@ function MessageFeed({ messages }: { messages: SessionMessage[] }) {
           case "user":
             return <UserBubble key={msg.id} msg={msg} />;
           case "assistant":
-            return <AssistantBubble key={msg.id} msg={msg} />;
+            return <AssistantBubble key={msg.id} msg={msg} onAddContentNode={onAddContentNode} />;
           case "system":
             return <SystemBubble key={msg.id} msg={msg} />;
           case "result":
-            return <ResultBubble key={msg.id} msg={msg} />;
+            return <ResultBubble key={msg.id} msg={msg} onAddContentNode={onAddContentNode} />;
           default:
             return null;
         }
@@ -733,6 +854,7 @@ function ClaudeSessionRenderer({
   onUpdateData,
   socketSend,
   socketSubscribe,
+  onAddContentNode,
 }: NodeRenderProps) {
   const data = node.data as ClaudeSessionData;
   const dataRef = useRef(data);
@@ -872,7 +994,20 @@ function ClaudeSessionRenderer({
         const newMsgs = sdkMessageToSessionMessages(serverMsg.message);
         if (newMsgs.length > 0) {
           const updated = { ...current };
-          updated.messages = [...current.messages, ...newMsgs];
+          let base = current.messages;
+          // When a result arrives, drop the last assistant msg if its content
+          // matches the result — the SDK sends both, but we only want the
+          // green result bubble.
+          if (serverMsg.message.type === "result") {
+            const resultText = newMsgs.find((m) => m.role === "result")?.content;
+            if (resultText) {
+              const lastIdx = base.findLastIndex((m) => m.role === "assistant");
+              if (lastIdx >= 0 && base[lastIdx].content.trim() === resultText.trim()) {
+                base = [...base.slice(0, lastIdx), ...base.slice(lastIdx + 1)];
+              }
+            }
+          }
+          updated.messages = [...base, ...newMsgs];
           // When a complete assistant message arrives, clear streaming buffer
           if (serverMsg.message.type === "assistant") {
             updated.streamingText = "";
@@ -1033,12 +1168,12 @@ function ClaudeSessionRenderer({
   );
 
   const statusColor: Record<string, string> = {
-    disconnected: "#4a5068",
-    creating: "#facc15",
-    running: "#4ade80",
-    idle: "#60a5fa",
-    stopped: "#f87171",
-    error: "#ef4444",
+    disconnected: "var(--text-muted)",
+    creating: "var(--status-creating)",
+    running: "var(--success-color)",
+    idle: "var(--streaming-color)",
+    stopped: "var(--status-error)",
+    error: "var(--danger-color)",
   };
 
   const statusLabel: Record<string, string> = {
@@ -1081,7 +1216,7 @@ function ClaudeSessionRenderer({
               width: 8,
               height: 8,
               borderRadius: "50%",
-              background: statusColor[data.status] ?? "#4a5068",
+              background: statusColor[data.status] ?? "var(--text-muted)",
               boxShadow:
                 data.status === "running"
                   ? `0 0 8px ${statusColor["running"]}`
@@ -1130,10 +1265,10 @@ function ClaudeSessionRenderer({
               style={{
                 padding: "2px 8px",
                 fontSize: 10,
-                background: "#3a1a1a",
-                border: "1px solid #ef4444",
+                background: "var(--danger-bg)",
+                border: "1px solid var(--danger-color)",
                 borderRadius: 4,
-                color: "#f87171",
+                color: "var(--status-error)",
                 cursor: "pointer",
                 fontFamily: "var(--font-mono)",
               }}
@@ -1165,6 +1300,7 @@ function ClaudeSessionRenderer({
         onMouseDown={(e) => e.stopPropagation()}
         style={{
           flex: 1,
+          minHeight: 0,
           overflow: "auto",
           padding: "8px 10px",
           display: "flex",
@@ -1189,10 +1325,10 @@ function ClaudeSessionRenderer({
               : "Enter a prompt to start a session"}
           </div>
         )}
-        <MessageFeed messages={data.messages} />
+        <MessageFeed messages={data.messages} onAddContentNode={onAddContentNode} />
         {/* Streaming partial text with blinking cursor */}
         {data.streamingText ? (
-          <StreamingBubble text={data.streamingText} borderColor="#60a5fa" />
+          <StreamingBubble text={data.streamingText} borderColor="var(--streaming-color)" />
         ) : data.status === "running" && data.messages.length > 0 ? (
           <StreamingIndicator />
         ) : null}
@@ -1204,14 +1340,14 @@ function ClaudeSessionRenderer({
               left: "50%",
               transform: "translateX(-50%)",
               background: "var(--accent)",
-              color: "#fff",
+              color: "var(--text-primary)",
               padding: "4px 12px",
               borderRadius: 12,
               fontSize: 11,
               cursor: "pointer",
               zIndex: 10,
               fontFamily: "var(--font-sans)",
-              boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+              boxShadow: "var(--shadow-md)",
               alignSelf: "center",
               flexShrink: 0,
             }}
@@ -1234,16 +1370,16 @@ function ClaudeSessionRenderer({
           style={{
             padding: "6px 10px",
             borderTop: "1px solid var(--border-default)",
-            background: "rgba(129, 140, 248, 0.04)",
+            background: "var(--state-hover)",
             flexShrink: 0,
           }}
         >
-          <div style={{ fontSize: 9, fontFamily: "var(--font-mono)", color: "#818cf8", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>
+          <div style={{ fontSize: 9, fontFamily: "var(--font-mono)", color: "var(--tool-accent)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>
             Subagents ({data.subagents.filter(s => s.status === "running").length} running)
           </div>
           {data.subagents.filter(s => s.status === "running").map(sa => (
             <div key={sa.taskId} style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 0" }}>
-              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#818cf8", boxShadow: "0 0 6px #818cf8", flexShrink: 0, animation: "pulse 1.5s infinite" }} />
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--tool-accent)", boxShadow: "0 0 6px var(--tool-accent)", flexShrink: 0, animation: "pulse 1.5s infinite" }} />
               <span style={{ fontSize: 11, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
                 {sa.description || sa.taskId}
               </span>
@@ -1362,7 +1498,7 @@ function ClaudeSessionRenderer({
                 : "var(--bg-elevated)",
             color:
               input.trim() || !data.sessionKey
-                ? "#fff"
+                ? "var(--text-primary)"
                 : "var(--text-muted)",
             fontSize: 12,
             fontWeight: 600,
@@ -1387,10 +1523,10 @@ function ClaudeSessionRenderer({
         <div
           style={{
             padding: "6px 10px",
-            background: "#3a1a1a",
-            color: "#f87171",
+            background: "var(--danger-bg)",
+            color: "var(--status-error)",
             fontSize: 11,
-            borderTop: "1px solid #ef4444",
+            borderTop: "1px solid var(--danger-color)",
             fontFamily: "var(--font-mono)",
             wordBreak: "break-word",
           }}

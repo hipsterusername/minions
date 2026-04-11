@@ -1,12 +1,20 @@
 import express from "express";
+import type { Request, Response } from "express";
+import crypto from "crypto";
 import { createServer } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { query, type Query } from "@anthropic-ai/claude-agent-sdk";
 import { createProjectRoutes } from "./routes/projects.ts";
+import { createFileRoutes } from "./routes/files.ts";
 import { createTaskToolsForLeader, type TaskManagerState } from "./task-tools.ts";
 import { createMinionToolsForSession } from "./minion-tools.ts";
+import { createRenderToolsForLeader } from "./render-tools.ts";
 import { MINION_SYSTEM_PROMPT } from "../src/prompts/minion-system.ts";
-import { createWorktree, removeWorktree, mergeWorktree, getWorktreeStatus, isGitRepo, cleanupStaleWorktrees, type WorktreeInfo } from "./worktree.ts";
+import { createWorktree, removeWorktree, mergeAndCleanup, getWorktreeStatus, isGitRepo, cleanupStaleWorktrees, type WorktreeInfo } from "./worktree.ts";
+import { validateSessionCwd } from "./path-guard.ts";
+
+// ── Auth Token ──────────────────────────────────────────
+const AUTH_TOKEN = crypto.randomBytes(32).toString("hex");
 
 // ── Database ─────────────────────────────────────────────
 console.log("Server starting (per-project SQLite mode)");
@@ -15,17 +23,91 @@ console.log("Server starting (per-project SQLite mode)");
 const app = express();
 app.use(express.json({ limit: "10mb" }));
 
-// Mount REST API routes
-app.use("/api/projects", createProjectRoutes());
+// ── CORS ────────────────────────────────────────────────
+app.use((req, res, next) => {
+  const allowedOrigins = ["http://localhost:5173", "http://localhost:4173", "http://127.0.0.1:5173"];
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+  }
+  if (req.method === "OPTIONS") {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
+
+// ── Auth bootstrap endpoint (unauthenticated, localhost only) ──
+app.get("/api/auth/token", (req: Request, res: Response) => {
+  const host = req.hostname;
+  if (host !== "localhost" && host !== "127.0.0.1" && host !== "::1") {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  res.json({ token: AUTH_TOKEN });
+});
+
+// ── Auth middleware ─────────────────────────────────────
+function authMiddleware(req: Request, res: Response, next: Function) {
+  const authHeader = req.headers["authorization"];
+  const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (token !== AUTH_TOKEN) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  next();
+}
+
+// Mount REST API routes (with auth)
+app.use("/api/projects", authMiddleware, createProjectRoutes());
+app.use("/api/files", authMiddleware, createFileRoutes());
 
 // ── HTTP + WebSocket Server ──────────────────────────────
 const PORT = parseInt(process.env["PORT"] ?? "3141", 10);
 const server = createServer(app);
-const wss = new WebSocketServer({ server });
+
+// ── Origin validation ───────────────────────────────────
+// Only allow WebSocket connections from localhost origins.
+// This prevents drive-by attacks from malicious web pages.
+const ALLOWED_ORIGIN_PATTERNS = [
+  /^https?:\/\/localhost(:\d+)?$/,
+  /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+  /^https?:\/\/\[::1\](:\d+)?$/,
+];
+
+function isAllowedOrigin(origin: string | undefined): boolean {
+  // Allow connections with no origin header (non-browser clients like CLI tools)
+  if (!origin) return true;
+  return ALLOWED_ORIGIN_PATTERNS.some((pattern) => pattern.test(origin));
+}
+
+const wss = new WebSocketServer({
+  server,
+  maxPayload: 1 * 1024 * 1024, // 1MB max message size
+  verifyClient: (info) => {
+    const origin = info.origin ?? info.req.headers["origin"];
+    if (!isAllowedOrigin(origin)) {
+      console.warn(`[ws] Rejected connection from disallowed origin: ${origin}`);
+      return false;
+    }
+    // Check auth token in query string
+    const url = new URL(info.req.url ?? "", `http://${info.req.headers.host}`);
+    const token = url.searchParams.get("token");
+    if (token !== AUTH_TOKEN) {
+      console.warn(`[ws] Rejected connection: invalid auth token`);
+      return false;
+    }
+    return true;
+  },
+});
 
 // ── Session management ──────────────────────────────────
 
 const MAX_BUFFERED_EVENTS = 200;
+const MAX_SESSIONS = 50;
 
 interface BufferedEvent {
   type: string;
@@ -57,6 +139,8 @@ interface Session {
   taskName: string | null;
   worktree: WorktreeInfo | null;
   worktreeIsolation: boolean;
+  /** Active wait timer for wait_and_continue (leader only) */
+  waitTimerId: ReturnType<typeof setTimeout> | null;
 }
 
 // ── WebSocket command types ─────────────────────────────
@@ -70,6 +154,7 @@ type WsCommandType =
   | "list_sessions"
   // Execution control
   | "interrupt"
+  | "interrupt_session"
   | "close_session"
   // Configuration control
   | "set_permission_mode"
@@ -233,6 +318,7 @@ async function runSession(
   role?: "leader" | "minion" | "default",
   worktreeIsolation?: boolean,
   parentWorktree?: WorktreeInfo,
+  initialModel?: string,
 ): Promise<void> {
   const existing = sessions.get(sessionKey);
   const abortController = new AbortController();
@@ -247,7 +333,7 @@ async function runSession(
     totalCost: existing?.totalCost ?? 0,
     turns: existing?.turns ?? 0,
     lastError: null,
-    model: existing?.model ?? null,
+    model: existing?.model ?? initialModel ?? null,
     permissionMode: existing?.permissionMode ?? null,
     initData: existing?.initData ?? null,
     taskState: existing?.taskState ?? null,
@@ -255,7 +341,12 @@ async function runSession(
     taskName: existing?.taskName ?? (role === "leader" ? deriveTaskName(prompt) : null),
     worktree: parentWorktree ?? existing?.worktree ?? null,
     worktreeIsolation: worktreeIsolation !== false,
+    waitTimerId: null,
   };
+  // Clear any existing wait timer when the session resumes (it's being continued)
+  if (existing?.waitTimerId) {
+    clearTimeout(existing.waitTimerId);
+  }
   sessions.set(sessionKey, session);
 
   // ── Inherit parent worktree for minion sessions ──────
@@ -287,11 +378,27 @@ async function runSession(
             worktreePath: worktreeInfo.path,
             branch: worktreeInfo.branch,
           });
+        } else {
+          // Not a git repo — worktree isolation was requested but is impossible.
+          // Notify the frontend so the user knows they're working on the live tree.
+          console.warn(`[worktree] ${sessionKey}: not a git repo — isolation unavailable`);
+          broadcast(wsServer, {
+            type: "worktree_failed",
+            sessionKey,
+            error: "Project is not a git repository. Worktree isolation is unavailable.",
+          });
         }
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.error(`[worktree] Failed to create worktree for ${sessionKey}: ${errMsg}`);
-        // Fall back to original cwd — don't prevent session from starting
+        // Do NOT silently fall back. Notify the user and let them decide.
+        broadcast(wsServer, {
+          type: "worktree_failed",
+          sessionKey,
+          error: `Worktree creation failed: ${errMsg}`,
+        });
+        // Session still starts, but without isolation — the user is informed.
+        session.worktreeIsolation = false;
       }
     }
   }
@@ -325,14 +432,16 @@ async function runSession(
       resume: resumeId,
       allowedTools: fullTools,
       disallowedTools: [],
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
+      permissionMode: "auto",
       abortController,
       includePartialMessages: true,
       promptSuggestions: true,
     };
     if (systemPrompt) {
       options["systemPrompt"] = systemPrompt;
+    }
+    if (session.model) {
+      options["model"] = session.model;
     }
 
     // For leader sessions, ALWAYS attach task management MCP tools —
@@ -362,8 +471,43 @@ async function runSession(
         minionSystemPrompt: MINION_SYSTEM_PROMPT,
         existingTaskState: session.taskState ?? undefined,
         worktreeBranch: session.worktree?.branch ?? null,
+        scheduleWaitContinue: (durationMs: number, reason: string) => {
+          // Cancel any previous wait timer
+          if (session.waitTimerId) clearTimeout(session.waitTimerId);
+
+          console.log(`[wait] Leader ${sessionKey} waiting ${durationMs}ms: ${reason}`);
+
+          session.waitTimerId = setTimeout(() => {
+            session.waitTimerId = null;
+
+            // Broadcast that the wait has ended
+            broadcast(wsServer, {
+              type: "wait_state",
+              sessionKey,
+              action: "completed",
+              reason,
+              timestamp: Date.now(),
+            });
+
+            // Resume the session with "Continue"
+            console.log(`[wait] Resuming leader ${sessionKey} after ${durationMs}ms wait`);
+            runSession(
+              wsServer,
+              sessionKey,
+              `Continue. The ${Math.round(durationMs / 1000)}s wait has elapsed (reason: ${reason}). Pick up where you left off.`,
+              session.cwd,
+              session.sessionId ?? undefined,
+              systemPrompt,
+              "leader",
+            );
+          }, durationMs);
+        },
       });
-      options["mcpServers"] = { "task-manager": mcpServer };
+      const { mcpServer: renderMcp } = createRenderToolsForLeader({
+        leaderSessionKey: sessionKey,
+        wss: wsServer,
+      });
+      options["mcpServers"] = { "task-manager": mcpServer, "render-dashboard": renderMcp };
       session.taskState = taskState;
     }
 
@@ -468,7 +612,7 @@ async function runSession(
 
         // ── Propagate minion completion back to leader's task state ──
         if (session.role === "minion") {
-          for (const [, otherSession] of sessions) {
+          for (const [leaderKey, otherSession] of sessions) {
             if (!otherSession.taskState) continue;
             for (const [, task] of otherSession.taskState.tasks) {
               if (task.minionSessionKey === sessionKey) {
@@ -477,6 +621,17 @@ async function runSession(
                 task.result =
                   (msg["result"] as string) ??
                   (isError ? "Task failed" : "Task completed");
+                // Broadcast so the frontend leader node and any subscribers learn
+                // the task is done without needing to poll get_task_status.
+                broadcast(wsServer, {
+                  type: "minion_completed",
+                  leaderSessionKey: leaderKey,
+                  minionSessionKey: sessionKey,
+                  taskId: task.taskId,
+                  status: task.status,
+                  result: task.result,
+                  timestamp: Date.now(),
+                });
                 break;
               }
             }
@@ -512,10 +667,22 @@ function handleCommand(
     // ────────────────────────────────────────────────────
 
     case "create_session": {
+      if (sessions.size >= MAX_SESSIONS) {
+        ws.send(JSON.stringify({
+          type: "error",
+          message: `Maximum session limit (${MAX_SESSIONS}) reached. Remove unused sessions first.`,
+        }));
+        return;
+      }
       const key = cmd.sessionKey ?? generateKey();
-      const cwd = cmd.cwd ?? process.cwd();
+      const rawCwd = cmd.cwd ?? process.cwd();
+      const cwd = validateSessionCwd(rawCwd);
+      if (!cwd) {
+        ws.send(JSON.stringify({ type: "error", message: "Invalid cwd: must be under home directory" }));
+        return;
+      }
       const prompt = cmd.prompt ?? "Hello";
-      runSession(wsServer, key, prompt, cwd, undefined, cmd.systemPrompt, cmd.role, cmd.worktreeIsolation);
+      runSession(wsServer, key, prompt, cwd, undefined, cmd.systemPrompt, cmd.role, cmd.worktreeIsolation, undefined, cmd.model);
       ws.send(
         JSON.stringify({
           type: "session_created",
@@ -561,6 +728,18 @@ function handleCommand(
       if (!cmd.sessionKey) return;
       const stopSession = sessions.get(cmd.sessionKey);
       if (stopSession) {
+        // Cancel any pending wait timer
+        if (stopSession.waitTimerId) {
+          clearTimeout(stopSession.waitTimerId);
+          stopSession.waitTimerId = null;
+          broadcast(wsServer, {
+            type: "wait_state",
+            sessionKey: cmd.sessionKey,
+            action: "cancelled",
+            reason: "Session stopped",
+            timestamp: Date.now(),
+          });
+        }
         stopSession.abortController.abort();
         stopSession.status = "stopped";
         const stopEvent: BufferedEvent = {
@@ -607,7 +786,7 @@ function handleCommand(
           role: syncSession.role,
           activeMinions: syncSession.taskState
             ? Array.from(syncSession.taskState.tasks.entries())
-                .filter(([, t]) => t.status === "assigned" || t.status === "running")
+                .filter(([, t]) => t.status === "planned" || t.status === "running")
                 .map(([id, t]) => ({ taskId: id, title: t.title, status: t.status, sessionKey: t.minionSessionKey }))
             : [],
           events: syncSession.eventBuffer,
@@ -630,7 +809,7 @@ function handleCommand(
         role: s.role,
         activeMinions: s.taskState
           ? Array.from(s.taskState.tasks.entries())
-              .filter(([, t]) => t.status === "assigned" || t.status === "running")
+              .filter(([, t]) => t.status === "planned" || t.status === "running")
               .map(([id, t]) => ({ taskId: id, title: t.title, status: t.status, sessionKey: t.minionSessionKey }))
           : [],
       }));
@@ -671,9 +850,38 @@ function handleCommand(
       break;
     }
 
+    // interrupt_session is the frontend alias for "interrupt" — same behaviour.
+    case "interrupt_session": {
+      const intSSession = getSessionOrError(cmd.sessionKey, ws);
+      if (!intSSession) return;
+      if (!intSSession.queryHandle) {
+        sendControlError(ws, "interrupt_session", cmd.sessionKey!, cmd.requestId, "No active query");
+        return;
+      }
+      intSSession.queryHandle
+        .interrupt()
+        .then(() => {
+          sendControlResponse(ws, "interrupt_session", cmd.sessionKey!, cmd.requestId);
+        })
+        .catch((err: unknown) => {
+          sendControlError(
+            ws,
+            "interrupt_session",
+            cmd.sessionKey!,
+            cmd.requestId,
+            err instanceof Error ? err.message : String(err),
+          );
+        });
+      break;
+    }
+
     case "close_session": {
       const closeSession = getSessionOrError(cmd.sessionKey, ws);
       if (!closeSession) return;
+      if (closeSession.waitTimerId) {
+        clearTimeout(closeSession.waitTimerId);
+        closeSession.waitTimerId = null;
+      }
       if (closeSession.queryHandle) {
         closeSession.queryHandle.close();
       }
@@ -698,11 +906,26 @@ function handleCommand(
       }
       const removeSession = sessions.get(cmd.sessionKey);
       if (removeSession) {
+        // Clear any pending wait timer
+        if (removeSession.waitTimerId) {
+          clearTimeout(removeSession.waitTimerId);
+          removeSession.waitTimerId = null;
+        }
         // Stop if still running
         if (removeSession.queryHandle) {
           removeSession.queryHandle.close();
         }
         removeSession.abortController.abort();
+
+        // Clean up worktree if this session owns one
+        if (removeSession.worktree) {
+          const wtPath = removeSession.worktree.path;
+          removeWorktree(wtPath).catch((err: unknown) => {
+            console.warn(`[worktree] Cleanup on remove_session failed for ${cmd.sessionKey}: ${err instanceof Error ? err.message : err}`);
+          });
+          removeSession.worktree = null;
+        }
+
         sessions.delete(cmd.sessionKey);
       }
       // Broadcast updated session list to all clients
@@ -719,7 +942,7 @@ function handleCommand(
         role: s.role,
         activeMinions: s.taskState
           ? Array.from(s.taskState.tasks.entries())
-              .filter(([, t]) => t.status === "assigned" || t.status === "running")
+              .filter(([, t]) => t.status === "planned" || t.status === "running")
               .map(([id, t]) => ({ taskId: id, title: t.title, status: t.status, sessionKey: t.minionSessionKey }))
           : [],
       }));
@@ -834,14 +1057,27 @@ function handleCommand(
         sendControlError(ws, "merge_worktree", cmd.sessionKey!, cmd.requestId, "No worktree for this session");
         return;
       }
-      mergeWorktree(mergeSession.worktree)
+      mergeAndCleanup(mergeSession.worktree)
         .then((result) => {
-          broadcast(wsServer, {
-            type: "worktree_merged",
-            sessionKey: cmd.sessionKey,
-            result,
-            timestamp: Date.now(),
-          });
+          if (result.success) {
+            // Worktree + branch have been removed by mergeAndCleanup
+            mergeSession.worktree = null;
+            broadcast(wsServer, {
+              type: "worktree_merged",
+              sessionKey: cmd.sessionKey,
+              result,
+              cleaned: true,
+              timestamp: Date.now(),
+            });
+          } else {
+            // Merge had conflicts — worktree stays active for retry/discard
+            broadcast(wsServer, {
+              type: "worktree_merge_failed",
+              sessionKey: cmd.sessionKey,
+              result,
+              timestamp: Date.now(),
+            });
+          }
           sendControlResponse(ws, "merge_worktree", cmd.sessionKey!, cmd.requestId, { result });
         })
         .catch((err: unknown) => {
@@ -1221,12 +1457,36 @@ wss.on("connection", (ws) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Claude Canvas server on http://localhost:${PORT}`);
-  console.log(`WebSocket available on ws://localhost:${PORT}`);
+const HOST = process.env["HOST"] ?? "127.0.0.1";
+server.listen(PORT, HOST, () => {
+  console.log(`Minions server on http://${HOST}:${PORT}`);
+  console.log(`WebSocket available on ws://${HOST}:${PORT}`);
+  console.log(`[auth] Auth token: ${AUTH_TOKEN.slice(0, 8)}...`);
 
   // Clean up stale worktrees from previous sessions
   void cleanupStaleWorktrees(process.cwd()).catch((err) => {
     console.warn("Worktree cleanup skipped:", err instanceof Error ? err.message : err);
   });
 });
+
+// ── Graceful shutdown: clean up all active worktrees ────────────────────────
+async function shutdownCleanup(): Promise<void> {
+  console.log("[shutdown] Cleaning up active worktrees...");
+  const cleanups: Promise<void>[] = [];
+  for (const [key, session] of sessions) {
+    if (session.worktree) {
+      console.log(`[shutdown] Removing worktree for ${key}: ${session.worktree.branch}`);
+      cleanups.push(
+        removeWorktree(session.worktree.path).catch((err: unknown) => {
+          console.warn(`[shutdown] Failed to remove worktree for ${key}: ${err instanceof Error ? err.message : err}`);
+        }),
+      );
+    }
+  }
+  await Promise.allSettled(cleanups);
+  console.log("[shutdown] Worktree cleanup complete.");
+  process.exit(0);
+}
+
+process.on("SIGINT", () => void shutdownCleanup());
+process.on("SIGTERM", () => void shutdownCleanup());

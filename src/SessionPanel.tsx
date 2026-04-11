@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { ServerMessage, SessionInfo, ActiveMinion } from "./use-socket.ts";
+import { STATUS_COLORS, COLORS } from "./palette.ts";
 
 interface SessionPanelProps {
   socketSend?: (data: unknown) => void;
   socketSubscribe?: (fn: (msg: unknown) => void) => () => void;
   socketConnected?: boolean;
-  onAttachSession: (sessionKey: string) => void;
+  onAttachSession: (sessionKey: string, role?: "leader" | "minion" | "default") => void;
   attachedSessionKeys: Set<string>;
 }
 
@@ -102,11 +103,11 @@ export function SessionPanel({
   );
 
   const statusColor: Record<string, string> = {
-    creating: "#facc15",
-    running: "#4ade80",
-    idle: "#60a5fa",
-    stopped: "#f87171",
-    error: "#ef4444",
+    creating: "var(--status-creating)",
+    running: "var(--status-success)",
+    idle: "var(--status-idle)",
+    stopped: "var(--danger-color-text)",
+    error: "var(--danger-color)",
   };
 
   const totalCost = sessions.reduce((sum, s) => sum + (s.totalCost ?? 0), 0);
@@ -146,8 +147,8 @@ export function SessionPanel({
               width: 6,
               height: 6,
               borderRadius: "50%",
-              background: "#4ade80",
-              boxShadow: "0 0 6px #4ade80",
+              background: "var(--status-success)",
+              boxShadow: "0 0 6px var(--status-success)",
               display: "inline-block",
             }}
           />
@@ -168,7 +169,7 @@ export function SessionPanel({
         background: "var(--bg-secondary)",
         border: "1px solid var(--border-default)",
         borderRadius: 10,
-        boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+        boxShadow: "var(--shadow-lg)",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
@@ -251,7 +252,7 @@ export function SessionPanel({
         )}
         {sessions.filter((s) => s.role !== "minion").map((session) => {
           const isAttached = attachedSessionKeys.has(session.sessionKey);
-          const color = statusColor[session.status] ?? "#4a5068";
+          const color = statusColor[session.status] ?? "var(--text-muted)";
 
           return (
             <div
@@ -358,10 +359,10 @@ export function SessionPanel({
                         padding: "2px 7px",
                         fontSize: 9,
                         fontFamily: "var(--font-mono)",
-                        background: "rgba(250, 204, 21, 0.10)",
-                        border: "1px solid rgba(250, 204, 21, 0.25)",
+                        background: "var(--warning-bg)",
+                        border: "1px solid var(--warning-color)",
                         borderRadius: 10,
-                        color: "#facc15",
+                        color: "var(--warning-color)",
                       }}
                     >
                       <span
@@ -369,8 +370,8 @@ export function SessionPanel({
                           width: 4,
                           height: 4,
                           borderRadius: "50%",
-                          background: "#facc15",
-                          boxShadow: "0 0 4px #facc15",
+                          background: "var(--warning-color)",
+                          boxShadow: "0 0 4px var(--warning-color)",
                         }}
                       />
                       {minion.title.length > 20
@@ -385,7 +386,7 @@ export function SessionPanel({
               <div style={{ display: "flex", gap: 4 }}>
                 {!isAttached && (
                   <button
-                    onClick={() => onAttachSession(session.sessionKey)}
+                    onClick={() => onAttachSession(session.sessionKey, session.role)}
                     style={{
                       flex: 1,
                       padding: "4px 0",
@@ -421,10 +422,10 @@ export function SessionPanel({
                     style={{
                       padding: "4px 8px",
                       fontSize: 10,
-                      background: "#3a1a1a",
-                      border: "1px solid #ef4444",
+                      background: "var(--danger-bg)",
+                      border: "1px solid var(--danger-color)",
                       borderRadius: 4,
-                      color: "#f87171",
+                      color: "var(--status-error)",
                       cursor: "pointer",
                       fontFamily: "var(--font-mono)",
                     }}
@@ -442,7 +443,7 @@ export function SessionPanel({
                     style={{
                       padding: "4px 8px",
                       fontSize: 10,
-                      background: "rgba(120, 113, 108, 0.15)",
+                      background: "color-mix(in srgb, var(--status-stopped) 15%, transparent)",
                       border: "1px solid var(--border-default)",
                       borderRadius: 4,
                       color: "var(--text-muted)",

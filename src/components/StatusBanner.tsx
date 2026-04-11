@@ -29,27 +29,27 @@ const BANNER_CONFIG: Record<
 > = {
   rate_limit: {
     icon: "\u29D7", // hourglass
-    color: "#facc15",
-    bg: "rgba(250, 204, 21, 0.08)",
-    border: "rgba(250, 204, 21, 0.2)",
+    color: "var(--warning-color)",
+    bg: "var(--warning-bg)",
+    border: "var(--warning-bg)",
   },
   retry: {
     icon: "\u21BB", // clockwise arrow
-    color: "#f97316",
-    bg: "rgba(249, 115, 22, 0.08)",
-    border: "rgba(249, 115, 22, 0.2)",
+    color: "var(--priority-high)",
+    bg: "var(--warning-bg)",
+    border: "var(--warning-bg)",
   },
   compaction: {
     icon: "\u2026", // ellipsis
-    color: "#818cf8",
-    bg: "rgba(129, 140, 248, 0.08)",
-    border: "rgba(129, 140, 248, 0.2)",
+    color: "var(--tool-accent)",
+    bg: "var(--tool-bg)",
+    border: "var(--tool-bg)",
   },
   warning: {
     icon: "\u26A0", // warning triangle
-    color: "#f87171",
-    bg: "rgba(248, 113, 113, 0.08)",
-    border: "rgba(248, 113, 113, 0.2)",
+    color: "var(--status-error)",
+    bg: "var(--danger-bg)",
+    border: "var(--danger-bg)",
   },
 };
 
@@ -269,7 +269,7 @@ function ProgressBar({ ttl, timestamp }: { ttl: number; timestamp: number }) {
         left: 0,
         right: 0,
         height: 2,
-        background: "rgba(255,255,255,0.05)",
+        background: "var(--state-hover)",
         overflow: "hidden",
         borderRadius: "0 0 4px 4px",
       }}

@@ -4,12 +4,30 @@ import { join, basename } from "node:path";
 
 // ── Interfaces ──────────────────────────────────────────────────────────────
 
+/**
+ * Formal worktree lifecycle states.
+ *
+ * initializing → active   (worktree created successfully)
+ * initializing → failed   (git worktree add failed — user must decide)
+ * active       → merging  (user approved merge)
+ * merging      → cleaned  (merge succeeded, worktree + branch removed)
+ * merging      → active   (merge had conflicts, aborted — user can retry)
+ * active       → cleaned  (user chose to discard)
+ */
+export type WorktreeLifecycle =
+  | "initializing"
+  | "active"
+  | "failed"
+  | "merging"
+  | "cleaned";
+
 export interface WorktreeInfo {
   path: string;
   branch: string;
   leaderSessionKey: string;
   createdAt: number;
   projectPath: string;
+  lifecycle: WorktreeLifecycle;
 }
 
 export interface MergeResult {
@@ -71,6 +89,7 @@ export async function createWorktree(
     leaderSessionKey,
     createdAt: Date.now(),
     projectPath,
+    lifecycle: "active" as WorktreeLifecycle,
   };
 }
 
@@ -128,6 +147,7 @@ export async function listWorktrees(
         leaderSessionKey: key,
         createdAt: 0, // Not tracked by git; caller can enrich from DB
         projectPath,
+        lifecycle: "active",
       });
     }
   }
@@ -191,6 +211,28 @@ export async function mergeWorktree(
       summary: `Merge failed: ${message}`,
     };
   }
+}
+
+/**
+ * Merge the worktree branch then clean up the worktree directory and branch.
+ * Returns the merge result. On success the worktree is fully removed.
+ * On conflict the merge is aborted and the worktree remains for the user to
+ * inspect or retry.
+ */
+export async function mergeAndCleanup(
+  info: WorktreeInfo,
+  targetBranch?: string,
+): Promise<MergeResult> {
+  const result = await mergeWorktree(info, targetBranch);
+
+  if (result.success) {
+    // Merge succeeded — remove worktree directory + branch
+    await removeWorktree(info.path);
+    info.lifecycle = "cleaned";
+  }
+  // On failure the worktree stays "active" so the user can fix or discard.
+
+  return result;
 }
 
 /**

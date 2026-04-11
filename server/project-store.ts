@@ -96,7 +96,7 @@ export function initSidecar(projectPath: string): Database.Database {
   if (!fs.existsSync(settingsPath)) {
     fs.writeFileSync(settingsPath, JSON.stringify({
       defaultModel: "sonnet",
-      defaultPermissionMode: "bypassPermissions",
+      defaultPermissionMode: "auto",
     }, null, 2));
   }
 
@@ -138,13 +138,13 @@ export function writeContext(projectPath: string, content: string): void {
 export function readSettings(projectPath: string): ProjectSettings {
   const settingsPath = path.join(sidecarPath(projectPath), "settings.json");
   if (!fs.existsSync(settingsPath)) {
-    return { defaultModel: "sonnet", defaultPermissionMode: "bypassPermissions" };
+    return { defaultModel: "sonnet", defaultPermissionMode: "auto" };
   }
   try {
     const raw = fs.readFileSync(settingsPath, "utf-8");
     return JSON.parse(raw) as ProjectSettings;
   } catch {
-    return { defaultModel: "sonnet", defaultPermissionMode: "bypassPermissions" };
+    return { defaultModel: "sonnet", defaultPermissionMode: "auto" };
   }
 }
 
@@ -152,4 +152,26 @@ export function writeSettings(projectPath: string, settings: ProjectSettings): v
   const settingsPath = path.join(sidecarPath(projectPath), "settings.json");
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+}
+
+// ── Skills operations ─────────────────────────────────
+
+export function readSkills(projectPath: string): unknown[] {
+  const skillsPath = path.join(sidecarPath(projectPath), "skills.json");
+  if (!fs.existsSync(skillsPath)) {
+    return [];
+  }
+  try {
+    const raw = fs.readFileSync(skillsPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function writeSkills(projectPath: string, skills: unknown[]): void {
+  const skillsPath = path.join(sidecarPath(projectPath), "skills.json");
+  fs.mkdirSync(path.dirname(skillsPath), { recursive: true });
+  fs.writeFileSync(skillsPath, JSON.stringify(skills, null, 2));
 }

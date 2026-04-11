@@ -59,6 +59,14 @@ export interface NodeRenderProps {
   projectPath?: string;
   /** Callback to resize this node on the canvas */
   onResize?: (size: Size) => void;
+  /** Callback to add a text response as a new markdown node on the canvas */
+  onAddContentNode?: (content: string) => void;
+  /** Callback to reveal (create or scroll-to) a minion node for a given session key */
+  onRevealMinion?: (minionSessionKey: string) => void;
   /** Current canvas zoom scale — useful for closing popups on zoom */
   canvasScale?: number;
+  /** True when a compatible node is being dragged over this node (drop target) */
+  isDropTarget?: boolean;
+  /** True when this node is currently being dragged by the user */
+  isBeingDragged?: boolean;
 }

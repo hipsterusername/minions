@@ -30,10 +30,10 @@ function renderInline(text: string): (string | JSX.Element)[] {
           style={{
             padding: "1px 5px",
             borderRadius: 3,
-            background: "rgba(129, 140, 248, 0.12)",
+            background: "var(--code-bg)",
             fontFamily: "var(--font-mono)",
             fontSize: "0.9em",
-            color: "#c4b5fd",
+            color: "var(--accent)",
           }}
         >
           {raw.slice(1, -1)}
@@ -156,7 +156,7 @@ export function SimpleMarkdown({ text }: { text: string }) {
               >
                 <span
                   style={{
-                    color: "#818cf8",
+                    color: "var(--accent)",
                     flexShrink: 0,
                     fontSize: 10,
                     marginTop: 3,
@@ -183,7 +183,7 @@ export function SimpleMarkdown({ text }: { text: string }) {
                   overflowX: "auto",
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-word",
-                  color: "#c4b5fd",
+                  color: "var(--accent)",
                 }}
               >
                 {escapeHtml(block.content)}

@@ -1,0 +1,11 @@
+version: 1.0.0
+projectName: Project
+rootPath: /home/hipsterusername/PersonalRepos/project
+files: {}
+decisions: {}
+summaries: {}
+filesByPath: {}
+summaryTree: null
+metadata:
+  createdAt: '2026-04-10T04:14:09.751Z'
+  lastModified: '2026-04-10T04:14:09.752Z'

@@ -24,13 +24,13 @@ function injectStyle() {
 interface StreamingBubbleProps {
   /** Accumulated partial text so far */
   text: string;
-  /** Border color to match the node's theme (default: #60a5fa) */
+  /** Border color to match the node's theme (default: var(--streaming-color)) */
   borderColor?: string;
 }
 
 export function StreamingBubble({
   text,
-  borderColor = "#60a5fa",
+  borderColor = "var(--streaming-color)",
 }: StreamingBubbleProps) {
   const elRef = useRef<HTMLDivElement>(null);
 
@@ -102,7 +102,7 @@ export function StreamingIndicator({ label = "Thinking..." }: { label?: string }
           width: 6,
           height: 6,
           borderRadius: "50%",
-          background: "#60a5fa",
+          background: "var(--streaming-color)",
           animation: "streamCursorBlink 1s ease-in-out infinite",
         }}
       />

@@ -6,20 +6,60 @@
  * within that subtree. Files show the specific leader(s) working on them.
  */
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, type CSSProperties, type ReactNode } from "react";
 import type { TreeNode } from "../api.ts";
+
+// ── Inline tooltip (CSS-only, no portal) ──
+
+function Tooltip({ label, children, style }: { label: string; children: ReactNode; style?: CSSProperties }) {
+  const [show, setShow] = useState(false);
+  return (
+    <span
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+      style={{ position: "relative", ...style }}
+    >
+      {children}
+      {show && (
+        <span
+          style={{
+            position: "absolute",
+            left: "50%",
+            bottom: "calc(100% + 4px)",
+            transform: "translateX(-50%)",
+            padding: "3px 7px",
+            borderRadius: 4,
+            fontSize: 10,
+            fontFamily: "var(--font-mono)",
+            fontWeight: 500,
+            color: "var(--text-primary)",
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--border-default)",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+            whiteSpace: "nowrap",
+            pointerEvents: "none",
+            zIndex: 100,
+            lineHeight: "14px",
+          }}
+        >
+          {label}
+        </span>
+      )}
+    </span>
+  );
+}
 
 // ── Leader color palette — distinct, high-contrast hues ──
 
 const LEADER_HUES = [
-  { bg: "rgba(251,146,60,0.14)", dot: "#fb923c", text: "#fb923c", ring: "rgba(251,146,60,0.3)" },   // amber
-  { bg: "rgba(129,140,248,0.14)", dot: "#818cf8", text: "#818cf8", ring: "rgba(129,140,248,0.3)" },  // indigo
-  { bg: "rgba(52,211,153,0.14)", dot: "#34d399", text: "#34d399", ring: "rgba(52,211,153,0.3)" },    // emerald
-  { bg: "rgba(244,114,182,0.14)", dot: "#f472b6", text: "#f472b6", ring: "rgba(244,114,182,0.3)" },  // pink
-  { bg: "rgba(56,189,248,0.14)", dot: "#38bdf8", text: "#38bdf8", ring: "rgba(56,189,248,0.3)" },    // sky
-  { bg: "rgba(251,191,36,0.14)", dot: "#fbbf24", text: "#fbbf24", ring: "rgba(251,191,36,0.3)" },    // yellow
-  { bg: "rgba(167,139,250,0.14)", dot: "#a78bfa", text: "#a78bfa", ring: "rgba(167,139,250,0.3)" },  // violet
-  { bg: "rgba(248,113,113,0.14)", dot: "#f87171", text: "#f87171", ring: "rgba(248,113,113,0.3)" },  // red
+  { bg: "color-mix(in srgb, var(--priority-high) 14%, transparent)", dot: "var(--priority-high)", text: "var(--priority-high)", ring: "color-mix(in srgb, var(--priority-high) 30%, transparent)" },
+  { bg: "color-mix(in srgb, var(--tool-accent) 14%, transparent)", dot: "var(--tool-accent)", text: "var(--tool-accent)", ring: "color-mix(in srgb, var(--tool-accent) 30%, transparent)" },
+  { bg: "color-mix(in srgb, var(--status-success) 14%, transparent)", dot: "var(--status-success)", text: "var(--status-success)", ring: "color-mix(in srgb, var(--status-success) 30%, transparent)" },
+  { bg: "color-mix(in srgb, var(--status-error) 14%, transparent)", dot: "var(--status-error)", text: "var(--status-error)", ring: "color-mix(in srgb, var(--status-error) 30%, transparent)" },
+  { bg: "color-mix(in srgb, var(--streaming-color) 14%, transparent)", dot: "var(--streaming-color)", text: "var(--streaming-color)", ring: "color-mix(in srgb, var(--streaming-color) 30%, transparent)" },
+  { bg: "color-mix(in srgb, var(--status-warning) 14%, transparent)", dot: "var(--status-warning)", text: "var(--status-warning)", ring: "color-mix(in srgb, var(--status-warning) 30%, transparent)" },
+  { bg: "color-mix(in srgb, var(--status-waiting) 14%, transparent)", dot: "var(--status-waiting)", text: "var(--status-waiting)", ring: "color-mix(in srgb, var(--status-waiting) 30%, transparent)" },
+  { bg: "color-mix(in srgb, var(--danger-color-text) 14%, transparent)", dot: "var(--danger-color-text)", text: "var(--danger-color-text)", ring: "color-mix(in srgb, var(--danger-color-text) 30%, transparent)" },
 ];
 
 function getLeaderColor(index: number) {
@@ -34,7 +74,7 @@ function fileIcon(name: string): string {
     case "ts": case "tsx": return "◇";
     case "js": case "jsx": return "◆";
     case "css": case "scss": return "◈";
-    case "json": return "{ }";
+    case "json": return "{}";
     case "md": return "¶";
     case "html": return "◁";
     case "svg": return "△";
@@ -51,14 +91,46 @@ function fileIcon(name: string): string {
 function fileIconColor(name: string): string {
   const ext = name.split(".").pop()?.toLowerCase();
   switch (ext) {
-    case "ts": case "tsx": return "#3b82f6";
-    case "js": case "jsx": return "#eab308";
-    case "css": case "scss": return "#c084fc";
-    case "json": return "#a3a3a3";
-    case "md": return "#737373";
-    case "html": return "#f97316";
+    case "ts": case "tsx": return "var(--priority-medium)";
+    case "js": case "jsx": return "var(--status-warning)";
+    case "css": case "scss": return "var(--thinking-accent)";
+    case "json": return "var(--text-secondary)";
+    case "md": return "var(--text-muted)";
+    case "html": return "var(--priority-high)";
     default: return "var(--text-muted)";
   }
+}
+
+/** Tooltip label for file-type icons */
+function fileIconTooltip(name: string): string {
+  const ext = name.split(".").pop()?.toLowerCase();
+  switch (ext) {
+    case "ts": return "TypeScript";
+    case "tsx": return "TypeScript (JSX)";
+    case "js": return "JavaScript";
+    case "jsx": return "JavaScript (JSX)";
+    case "css": return "CSS Stylesheet";
+    case "scss": return "SCSS Stylesheet";
+    case "json": return "JSON";
+    case "md": return "Markdown";
+    case "html": return "HTML";
+    case "svg": return "SVG Image";
+    case "png": return "PNG Image";
+    case "jpg": return "JPEG Image";
+    case "gif": return "GIF Image";
+    case "webp": return "WebP Image";
+    case "sql": return "SQL";
+    case "sh": case "bash": return "Shell Script";
+    case "yaml": case "yml": return "YAML";
+    case "toml": return "TOML";
+    case "lock": return "Lock File";
+    default: return ext ? `.${ext} file` : "File";
+  }
+}
+
+function dirIconTooltip(expanded: boolean, hasActivity: boolean): string {
+  const state = expanded ? "Expanded" : "Collapsed";
+  return hasActivity ? `${state} folder (has agent activity)` : `${state} folder`;
 }
 
 // ── Types ──
@@ -80,6 +152,10 @@ interface ProjectTreeProps {
   projectPath?: string;
   /** When true, only show paths with active leader work */
   filterActive?: boolean;
+  /** Called when the user clicks a file entry (relative path) */
+  onFileClick?: (relativePath: string) => void;
+  /** Called after a file/dir is moved or renamed (triggers tree refresh) */
+  onTreeChanged?: () => void;
 }
 
 // ── Helpers ──
@@ -127,7 +203,7 @@ function hasActivity(node: TreeNode, activityMap: Map<string, Set<number>>): boo
 
 // ── Components ──
 
-export function ProjectTree({ tree, rootName, leaders, projectPath, filterActive = false }: ProjectTreeProps) {
+export function ProjectTree({ tree, rootName, leaders, projectPath, filterActive = false, onFileClick, onTreeChanged }: ProjectTreeProps) {
   const activityMap = useMemo(() => buildActivityMap(leaders, projectPath), [leaders, projectPath]);
 
   const activeLeaders = leaders.filter(l => l.status === "running" || l.status === "creating");
@@ -223,7 +299,7 @@ export function ProjectTree({ tree, rootName, leaders, projectPath, filterActive
               style={{
                 marginLeft: "auto",
                 fontSize: 9,
-                color: "#34d399",
+                color: "var(--status-success)",
                 display: "flex",
                 alignItems: "center",
                 gap: 4,
@@ -234,8 +310,8 @@ export function ProjectTree({ tree, rootName, leaders, projectPath, filterActive
                   width: 5,
                   height: 5,
                   borderRadius: "50%",
-                  background: "#34d399",
-                  boxShadow: "0 0 6px rgba(52,211,153,0.5)",
+                  background: "var(--status-success)",
+                  boxShadow: "0 0 6px var(--status-success)",
                   display: "inline-block",
                   animation: "treePulse 2s ease-in-out infinite",
                 }}
@@ -254,6 +330,9 @@ export function ProjectTree({ tree, rootName, leaders, projectPath, filterActive
             activityMap={activityMap}
             leaders={leaders}
             filterActive={filterActive}
+            onFileClick={onFileClick}
+            projectPath={projectPath}
+            onTreeChanged={onTreeChanged}
           />
         ))}
       </div>
@@ -279,12 +358,18 @@ function TreeRow({
   activityMap,
   leaders,
   filterActive,
+  onFileClick,
+  projectPath,
+  onTreeChanged,
 }: {
   node: TreeNode;
   depth: number;
   activityMap: Map<string, Set<number>>;
   leaders: LeaderActivity[];
   filterActive: boolean;
+  onFileClick?: (relativePath: string) => void;
+  projectPath?: string;
+  onTreeChanged?: () => void;
 }) {
   const [expanded, setExpanded] = useState(() => {
     // Auto-expand directories that have activity
@@ -293,6 +378,10 @@ function TreeRow({
     if (depth <= 1) return true;
     return false;
   });
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
 
   const leaderIndices = activityMap.get(node.path);
   const isDirectlyTouched = leaderIndices && leaderIndices.size > 0;
@@ -304,9 +393,129 @@ function TreeRow({
   const isDir = node.type === "dir";
   const indent = depth * 16;
 
-  const toggleExpand = useCallback(() => {
-    if (isDir) setExpanded(e => !e);
+  const handleRowClick = useCallback(() => {
+    if (renaming) return;
+    if (isDir) {
+      setExpanded(e => !e);
+    } else if (onFileClick) {
+      onFileClick(node.path);
+    }
+  }, [isDir, onFileClick, node.path, renaming]);
+
+  // ── Drag source ──
+  const handleDragStart = useCallback((e: React.DragEvent) => {
+    e.dataTransfer.setData("application/x-tree-path", node.path);
+    e.dataTransfer.setData("application/x-tree-type", node.type);
+    e.dataTransfer.effectAllowed = "copyMove";
+  }, [node.path, node.type]);
+
+  // ── Drop target (directories only) ──
+  const handleDragOverRow = useCallback((e: React.DragEvent) => {
+    if (!isDir) return;
+    if (!e.dataTransfer.types.includes("application/x-tree-path")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setIsDragOver(true);
   }, [isDir]);
+
+  const handleDragLeaveRow = useCallback(() => {
+    setIsDragOver(false);
+  }, []);
+
+  const handleDropOnRow = useCallback(async (e: React.DragEvent) => {
+    setIsDragOver(false);
+    if (!isDir || !projectPath) return;
+    const fromPath = e.dataTransfer.getData("application/x-tree-path");
+    if (!fromPath || fromPath === node.path) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Compute destination: move into this directory
+    const fileName = fromPath.split("/").pop() ?? fromPath;
+    const toPath = node.path + "/" + fileName;
+    if (fromPath === toPath) return;
+
+    try {
+      const resp = await fetch("/api/files/move", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, fromPath, toPath }),
+      });
+      const json = await resp.json() as { ok?: boolean; error?: string };
+      if (json.ok) {
+        onTreeChanged?.();
+      }
+    } catch {
+      // silently fail
+    }
+  }, [isDir, projectPath, node.path, onTreeChanged]);
+
+  // ── Context menu ──
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    if (!projectPath) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY });
+  }, [projectPath]);
+
+  const handleRename = useCallback(() => {
+    setContextMenu(null);
+    setRenameValue(node.name);
+    setRenaming(true);
+  }, [node.name]);
+
+  const handleRenameSubmit = useCallback(async () => {
+    setRenaming(false);
+    if (!projectPath || !renameValue || renameValue === node.name) return;
+    const parentDir = node.path.includes("/") ? node.path.slice(0, node.path.lastIndexOf("/")) : "";
+    const toPath = parentDir ? parentDir + "/" + renameValue : renameValue;
+    try {
+      const resp = await fetch("/api/files/move", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, fromPath: node.path, toPath }),
+      });
+      const json = await resp.json() as { ok?: boolean };
+      if (json.ok) onTreeChanged?.();
+    } catch {
+      // silently fail
+    }
+  }, [projectPath, renameValue, node.name, node.path, onTreeChanged]);
+
+  const handleDelete = useCallback(async () => {
+    setContextMenu(null);
+    if (!projectPath) return;
+    if (!window.confirm(`Delete "${node.name}"?`)) return;
+    try {
+      const resp = await fetch("/api/files/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, filePath: node.path }),
+      });
+      const json = await resp.json() as { ok?: boolean };
+      if (json.ok) onTreeChanged?.();
+    } catch {
+      // silently fail
+    }
+  }, [projectPath, node.path, node.name, onTreeChanged]);
+
+  const handleNewFolder = useCallback(async () => {
+    setContextMenu(null);
+    if (!projectPath || !isDir) return;
+    const name = window.prompt("New folder name:");
+    if (!name) return;
+    try {
+      const resp = await fetch("/api/files/mkdir", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, dirPath: node.path + "/" + name }),
+      });
+      const json = await resp.json() as { ok?: boolean };
+      if (json.ok) onTreeChanged?.();
+    } catch {
+      // silently fail
+    }
+  }, [projectPath, isDir, node.path, onTreeChanged]);
 
   // Determine if any touching leader is actively running
   const hasRunningLeader = leaderIndices
@@ -326,29 +535,39 @@ function TreeRow({
   return (
     <>
       <div
-        onClick={toggleExpand}
+        onClick={handleRowClick}
+        onContextMenu={handleContextMenu}
+        draggable
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOverRow}
+        onDragLeave={handleDragLeaveRow}
+        onDrop={handleDropOnRow}
         style={{
           display: "flex",
           alignItems: "center",
           gap: 0,
           padding: "3px 12px 3px 0",
           paddingLeft: indent,
-          cursor: isDir ? "pointer" : "default",
-          background: rowBg,
-          borderLeft: isDirectlyTouched && node.type === "file"
-            ? `2px solid ${getLeaderColor([...leaderIndices!][0]).dot}`
-            : "2px solid transparent",
+          cursor: isDir || onFileClick ? "pointer" : "default",
+          background: isDragOver ? "rgba(192, 132, 252, 0.12)" : rowBg,
+          borderLeft: isDragOver
+            ? "2px solid rgba(192, 132, 252, 0.6)"
+            : isDirectlyTouched && node.type === "file"
+              ? `2px solid ${getLeaderColor([...leaderIndices!][0]).dot}`
+              : "2px solid transparent",
           transition: "background 0.2s ease",
           userSelect: "none",
           position: "relative",
         }}
         onMouseEnter={(e) => {
-          if (!isDirectlyTouched || node.type !== "file") {
+          if (!isDragOver && (!isDirectlyTouched || node.type !== "file")) {
             e.currentTarget.style.background = "var(--bg-elevated)";
           }
         }}
         onMouseLeave={(e) => {
-          e.currentTarget.style.background = rowBg;
+          if (!isDragOver) {
+            e.currentTarget.style.background = rowBg;
+          }
         }}
       >
         {/* Expand/collapse chevron for dirs */}
@@ -372,8 +591,9 @@ function TreeRow({
           <span style={{ width: 14, flexShrink: 0 }} />
         )}
 
-        {/* Icon */}
-        <span
+        {/* Icon with tooltip */}
+        <Tooltip
+          label={isDir ? dirIconTooltip(expanded, hasChildActivity) : fileIconTooltip(node.name)}
           style={{
             width: 16,
             fontSize: isDir ? 10 : 11,
@@ -385,62 +605,123 @@ function TreeRow({
             justifyContent: "center",
             flexShrink: 0,
             fontWeight: isDir ? 600 : 400,
+            cursor: "help",
           }}
         >
           {isDir ? (expanded ? "▾" : "▸") : fileIcon(node.name)}
-        </span>
+        </Tooltip>
 
         {/* Name */}
-        <span
-          style={{
-            flex: 1,
-            minWidth: 0,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            color: isDirectlyTouched
-              ? "var(--text-primary)"
-              : (isDir && hasChildActivity)
-                ? "var(--text-secondary)"
-                : "var(--text-muted)",
-            fontWeight: isDir ? 500 : 400,
-            fontSize: 11,
-            letterSpacing: isDir ? 0.2 : 0,
-            transition: "color 0.2s ease",
-          }}
-        >
-          {node.name}
-        </span>
+        {renaming ? (
+          <input
+            autoFocus
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onBlur={handleRenameSubmit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleRenameSubmit();
+              if (e.key === "Escape") setRenaming(false);
+            }}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--accent)",
+              borderRadius: 3,
+              color: "var(--text-primary)",
+              fontSize: 11,
+              fontFamily: "var(--font-mono)",
+              padding: "1px 4px",
+              outline: "none",
+            }}
+          />
+        ) : (
+          <span
+            style={{
+              flex: 1,
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              color: isDirectlyTouched
+                ? "var(--text-primary)"
+                : (isDir && hasChildActivity)
+                  ? "var(--text-secondary)"
+                  : "var(--text-muted)",
+              fontWeight: isDir ? 500 : 400,
+              fontSize: 11,
+              letterSpacing: isDir ? 0.2 : 0,
+              transition: "color 0.2s ease",
+            }}
+          >
+            {node.name}
+          </span>
+        )}
 
-        {/* Leader activity pips */}
+        {/* Leader activity tags */}
         {isDirectlyTouched && (
           <span
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 3,
+              gap: 4,
               flexShrink: 0,
               marginLeft: 6,
             }}
           >
             {[...leaderIndices!].map((idx) => {
               const c = getLeaderColor(idx);
-              const isRunning = leaders[idx]?.status === "running" || leaders[idx]?.status === "creating";
+              const leader = leaders[idx];
+              const isRunning = leader?.status === "running" || leader?.status === "creating";
+              const label = leader?.name
+                ? (leader.name.length > 12 ? leader.name.slice(0, 12) + "…" : leader.name)
+                : null;
               return (
                 <span
                   key={idx}
-                  title={leaders[idx]?.name}
+                  title={leader?.name ?? `Agent ${idx}`}
                   style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: "50%",
-                    background: c.dot,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 3,
+                    padding: "0 4px",
+                    borderRadius: 3,
+                    background: c.bg,
+                    border: `1px solid ${c.ring}`,
                     boxShadow: isRunning ? `0 0 6px ${c.ring}` : "none",
-                    display: "inline-block",
-                    flexShrink: 0,
                     animation: isRunning ? "treeFlicker 1.5s ease-in-out infinite" : "none",
+                    flexShrink: 0,
+                    maxWidth: 100,
                   }}
-                />
+                >
+                  <span
+                    style={{
+                      width: 5,
+                      height: 5,
+                      borderRadius: "50%",
+                      background: c.dot,
+                      display: "inline-block",
+                      flexShrink: 0,
+                    }}
+                  />
+                  {label && (
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontFamily: "var(--font-mono)",
+                        color: c.text,
+                        fontWeight: 500,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        lineHeight: "14px",
+                      }}
+                    >
+                      {label}
+                    </span>
+                  )}
+                </span>
               );
             })}
           </span>
@@ -463,6 +744,74 @@ function TreeRow({
         )}
       </div>
 
+      {/* Context menu */}
+      {contextMenu && (
+        <>
+          <div
+            style={{ position: "fixed", inset: 0, zIndex: 9998 }}
+            onClick={() => setContextMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              left: contextMenu.x,
+              top: contextMenu.y,
+              background: "var(--bg-secondary)",
+              border: "1px solid var(--border-default)",
+              borderRadius: 6,
+              boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+              padding: "4px 0",
+              zIndex: 9999,
+              minWidth: 140,
+              fontSize: 11,
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            <div
+              onClick={handleRename}
+              style={{
+                padding: "6px 12px",
+                cursor: "pointer",
+                color: "var(--text-secondary)",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-elevated)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+            >
+              Rename
+            </div>
+            {!isDir && (
+              <div
+                onClick={handleDelete}
+                style={{
+                  padding: "6px 12px",
+                  cursor: "pointer",
+                  color: "var(--danger-color)",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-elevated)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+              >
+                Delete
+              </div>
+            )}
+            {isDir && (
+              <div
+                onClick={handleNewFolder}
+                style={{
+                  padding: "6px 12px",
+                  cursor: "pointer",
+                  color: "var(--text-secondary)",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-elevated)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+              >
+                New folder
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
       {/* Children */}
       {isDir && expanded && node.children && (
         <div
@@ -479,6 +828,9 @@ function TreeRow({
               activityMap={activityMap}
               leaders={leaders}
               filterActive={filterActive}
+              onFileClick={onFileClick}
+              projectPath={projectPath}
+              onTreeChanged={onTreeChanged}
             />
           ))}
         </div>

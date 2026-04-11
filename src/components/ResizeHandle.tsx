@@ -8,6 +8,12 @@ interface ResizeHandleProps {
   onResize: (size: Size) => void;
   /** Accent color for the handle dots */
   color?: string;
+  /** Current canvas zoom scale — used to compensate pixel deltas */
+  canvasScale?: number;
+  /** Called when the user starts dragging the resize handle */
+  onResizeStart?: () => void;
+  /** Called when the user stops dragging the resize handle */
+  onResizeEnd?: () => void;
 }
 
 /**
@@ -20,6 +26,9 @@ export function ResizeHandle({
   minHeight = 280,
   onResize,
   color = "var(--text-muted)",
+  canvasScale = 1,
+  onResizeStart,
+  onResizeEnd,
 }: ResizeHandleProps) {
   const dragRef = useRef<{
     startX: number;
@@ -40,10 +49,13 @@ export function ResizeHandle({
         startH: currentSize.height,
       };
 
+      onResizeStart?.();
+
       const handleMouseMove = (ev: MouseEvent) => {
         if (!dragRef.current) return;
-        const dx = ev.clientX - dragRef.current.startX;
-        const dy = ev.clientY - dragRef.current.startY;
+        const scale = canvasScale || 1;
+        const dx = (ev.clientX - dragRef.current.startX) / scale;
+        const dy = (ev.clientY - dragRef.current.startY) / scale;
         onResize({
           width: Math.max(minWidth, dragRef.current.startW + dx),
           height: Math.max(minHeight, dragRef.current.startH + dy),
@@ -52,6 +64,7 @@ export function ResizeHandle({
 
       const handleMouseUp = () => {
         dragRef.current = null;
+        onResizeEnd?.();
         window.removeEventListener("mousemove", handleMouseMove);
         window.removeEventListener("mouseup", handleMouseUp);
         document.body.style.cursor = "";
@@ -61,7 +74,7 @@ export function ResizeHandle({
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseup", handleMouseUp);
     },
-    [currentSize, minWidth, minHeight, onResize],
+    [currentSize, minWidth, minHeight, onResize, canvasScale, onResizeStart, onResizeEnd],
   );
 
   return (

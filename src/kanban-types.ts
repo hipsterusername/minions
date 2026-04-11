@@ -5,7 +5,14 @@ export interface KanbanSubtask {
 }
 
 export type ModelOption = "sonnet" | "opus" | "haiku";
-export type PermissionMode = "bypassPermissions" | "default" | "plan" | "acceptEdits";
+export type PermissionMode = "auto" | "bypassPermissions" | "default" | "plan" | "acceptEdits";
+
+export type BlockReason =
+  | "session_lost"
+  | "error"
+  | "interrupted"
+  | "needs_input"
+  | "idle_review";
 
 export interface KanbanCard {
   id: string;
@@ -26,12 +33,28 @@ export interface KanbanCard {
   skillIds: string[];
   /** Variable values for each skill: { [skillId]: { [varName]: value } } */
   skillValues: Record<string, Record<string, string>>;
+  /** IDs of canvas context nodes (markdown, file-viewer) linked to this card */
+  linkedContextNodeIds: string[];
   /** The canvas node ID of the Leader node working on this card */
   leaderNodeId?: string;
   /** Summary of the agent's work (filled when moved to history) */
   agentSummary?: string;
   /** Total cost of the agent session */
   agentCost?: number;
+  /** Archived messages from the leader session (preserved when card moves to history) */
+  archivedMessages?: import("./sdk-messages.ts").DisplayMessage[];
+  /** Archived task plan from the leader session */
+  archivedTaskPlan?: import("./nodes/LeaderNode.tsx").TaskPlanItem[];
+  /** Archived task name set by the agent */
+  archivedTaskName?: string | null;
+  /** Archived turn count */
+  archivedTurns?: number;
+  /** Why this card is halted (only relevant when columnId === "halted") */
+  blockReason?: BlockReason;
+  /** Human-readable detail about the block */
+  blockDetail?: string;
+  /** True if this card was auto-created to represent a canvas agent (not manually created from backlog) */
+  autoSynced?: boolean;
 }
 
 export interface KanbanColumn {
@@ -48,13 +71,14 @@ export interface KanbanBoard {
 export const DEFAULT_COLUMNS: KanbanColumn[] = [
   { id: "backlog", title: "Backlog", color: "#6b7280" },
   { id: "in-progress", title: "In Progress", color: "#f59e0b" },
-  { id: "review", title: "Ready for Review", color: "#3b82f6" },
-  { id: "history", title: "Agent History", color: "#8b5cf6" },
+  { id: "halted", title: "Waiting", color: "#f59e0b" },
+  { id: "history", title: "Agent History", color: "#10b981" },
 ];
 
 export type KanbanAction =
   | { type: "ADD_CARD"; card: KanbanCard }
   | { type: "REMOVE_CARD"; cardId: string }
+  | { type: "CLEAR_ARCHIVE" }
   | { type: "UPDATE_CARD"; cardId: string; data: Partial<Omit<KanbanCard, "id">> }
   | { type: "MOVE_CARD"; cardId: string; targetColumnId: string; targetIndex?: number }
   | { type: "TOGGLE_SUBTASK"; cardId: string; subtaskId: string }
@@ -62,7 +86,11 @@ export type KanbanAction =
   | { type: "REMOVE_SUBTASK"; cardId: string; subtaskId: string }
   | { type: "SET_BOARD"; board: KanbanBoard }
   | { type: "BIND_LEADER"; cardId: string; leaderNodeId: string }
-  | { type: "COMPLETE_CARD"; cardId: string; summary?: string; cost?: number };
+  | { type: "COMPLETE_CARD"; cardId: string; summary?: string; cost?: number; archivedMessages?: import("./sdk-messages.ts").DisplayMessage[]; archivedTaskPlan?: import("./nodes/LeaderNode.tsx").TaskPlanItem[]; archivedTaskName?: string | null; archivedTurns?: number }
+  | { type: "BLOCK_CARD"; cardId: string; reason: BlockReason; detail?: string }
+  | { type: "UNBLOCK_CARD"; cardId: string }
+  | { type: "HALT_CARD"; cardId: string; reason: BlockReason; detail?: string }
+  | { type: "RESUME_HALTED_CARD"; cardId: string };
 
 export function kanbanReducer(state: KanbanBoard, action: KanbanAction): KanbanBoard {
   switch (action.type) {
@@ -71,6 +99,9 @@ export function kanbanReducer(state: KanbanBoard, action: KanbanAction): KanbanB
 
     case "REMOVE_CARD":
       return { ...state, cards: state.cards.filter((c) => c.id !== action.cardId) };
+
+    case "CLEAR_ARCHIVE":
+      return { ...state, cards: state.cards.filter((c) => c.columnId !== "history") };
 
     case "UPDATE_CARD":
       return {
@@ -168,7 +199,58 @@ export function kanbanReducer(state: KanbanBoard, action: KanbanAction): KanbanB
         ...state,
         cards: state.cards.map((c) =>
           c.id === action.cardId
-            ? { ...c, columnId: "history", agentSummary: action.summary, agentCost: action.cost }
+            ? {
+                ...c,
+                columnId: "history",
+                agentSummary: action.summary,
+                agentCost: action.cost,
+                archivedMessages: action.archivedMessages ?? c.archivedMessages,
+                archivedTaskPlan: action.archivedTaskPlan ?? c.archivedTaskPlan,
+                archivedTaskName: action.archivedTaskName ?? c.archivedTaskName,
+                archivedTurns: action.archivedTurns ?? c.archivedTurns,
+                blockReason: undefined,
+                blockDetail: undefined,
+              }
+            : c,
+        ),
+      };
+
+    case "BLOCK_CARD":
+      return {
+        ...state,
+        cards: state.cards.map((c) =>
+          c.id === action.cardId
+            ? { ...c, columnId: "halted", blockReason: action.reason, blockDetail: action.detail }
+            : c,
+        ),
+      };
+
+    case "UNBLOCK_CARD":
+      return {
+        ...state,
+        cards: state.cards.map((c) =>
+          c.id === action.cardId
+            ? { ...c, columnId: "in-progress", blockReason: undefined, blockDetail: undefined }
+            : c,
+        ),
+      };
+
+    case "HALT_CARD":
+      return {
+        ...state,
+        cards: state.cards.map((c) =>
+          c.id === action.cardId
+            ? { ...c, columnId: "halted", blockReason: action.reason, blockDetail: action.detail }
+            : c,
+        ),
+      };
+
+    case "RESUME_HALTED_CARD":
+      return {
+        ...state,
+        cards: state.cards.map((c) =>
+          c.id === action.cardId
+            ? { ...c, columnId: "in-progress", blockReason: undefined, blockDetail: undefined }
             : c,
         ),
       };

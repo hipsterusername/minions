@@ -39,7 +39,7 @@ function titleCase(s: string): string {
 const overlayStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(0,0,0,0.6)",
+  background: "var(--overlay-bg)",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
@@ -313,7 +313,7 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
                 style={{
                   ...inputStyle,
                   borderColor: errors.name
-                    ? "#ef4444"
+                    ? "var(--danger-color)"
                     : "var(--border-default)",
                 }}
                 value={name}
@@ -321,7 +321,7 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
                 placeholder="My Skill"
               />
               {errors.name && (
-                <div style={{ color: "#ef4444", fontSize: 11, marginTop: 2 }}>
+                <div style={{ color: "var(--danger-color)", fontSize: 11, marginTop: 2 }}>
                   {errors.name}
                 </div>
               )}
@@ -413,7 +413,7 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
               resize: "vertical",
               lineHeight: 1.5,
               borderColor: errors.template
-                ? "#ef4444"
+                ? "var(--danger-color)"
                 : "var(--border-default)",
             }}
             value={template}
@@ -421,7 +421,7 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
             placeholder={"# My Skill\n\nInstructions here...\n\nFocus on: {{focus_area}}"}
           />
           {errors.template && (
-            <div style={{ color: "#ef4444", fontSize: 11, marginTop: 2 }}>
+            <div style={{ color: "var(--danger-color)", fontSize: 11, marginTop: 2 }}>
               {errors.template}
             </div>
           )}
@@ -527,7 +527,7 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
                             ...btnBase,
                             padding: "2px 8px",
                             fontSize: 11,
-                            color: "#ef4444",
+                            color: "var(--danger-color)",
                             background: "none",
                           }}
                         >

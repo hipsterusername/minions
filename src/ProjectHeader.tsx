@@ -13,8 +13,8 @@ interface ProjectHeaderProps {
   retry?: () => void;
   activeView: ActiveView;
   onViewChange: (view: ActiveView) => void;
-  /** Number of cards awaiting review — shows a badge on the Kanban tab */
-  kanbanReviewCount?: number;
+  /** Number of cards blocked/needing attention — shows a badge on the Kanban tab */
+  kanbanBlockedCount?: number;
 }
 
 export function ProjectHeader({
@@ -27,7 +27,7 @@ export function ProjectHeader({
   retry,
   activeView,
   onViewChange,
-  kanbanReviewCount = 0,
+  kanbanBlockedCount = 0,
 }: ProjectHeaderProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(name);
@@ -77,11 +77,11 @@ export function ProjectHeader({
       case "saving":
         return "var(--text-muted)";
       case "saved":
-        return "#4ade80";
+        return "var(--success-color)";
       case "unsaved":
         return "var(--accent)";
       case "error":
-        return "#ef4444";
+        return "var(--danger-color)";
       case "idle":
         return "var(--text-muted)";
     }
@@ -214,7 +214,7 @@ export function ProjectHeader({
           label="Kanban"
           active={activeView === "kanban"}
           onClick={() => onViewChange("kanban")}
-          badge={kanbanReviewCount > 0 ? kanbanReviewCount : undefined}
+          badge={kanbanBlockedCount > 0 ? kanbanBlockedCount : undefined}
           icon={
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
               <rect x="1" y="1" width="2.5" height="10" rx="0.75" stroke="currentColor" strokeWidth="1.1" />
@@ -238,11 +238,11 @@ export function ProjectHeader({
           cursor: saveStatus === "error" && retry ? "pointer" : "default",
           background:
             saveStatus === "error"
-              ? "rgba(239, 68, 68, 0.1)"
+              ? "var(--danger-bg)"
               : "transparent",
           border:
             saveStatus === "error"
-              ? "1px solid rgba(239, 68, 68, 0.25)"
+              ? "1px solid var(--danger-color)"
               : "1px solid transparent",
           transition: "background 0.2s, border-color 0.2s",
         }}
@@ -337,8 +337,8 @@ function ViewTab({
             fontSize: 9,
             fontFamily: "var(--font-mono)",
             fontWeight: 700,
-            color: "#fff",
-            background: "#ef4444",
+            color: "var(--text-primary)",
+            background: "var(--danger-color)",
             borderRadius: 8,
             lineHeight: 1,
           }}

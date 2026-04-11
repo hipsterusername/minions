@@ -1,0 +1,128 @@
+import { useEffect, useRef, type ReactNode } from "react";
+
+export interface ConfirmModalAction {
+  label: string;
+  variant?: "primary" | "danger" | "ghost";
+  onClick: () => void;
+}
+
+interface ConfirmModalProps {
+  title: string;
+  description?: ReactNode;
+  actions: ConfirmModalAction[];
+  onClose: () => void;
+}
+
+export function ConfirmModal({ title, description, actions, onClose }: ConfirmModalProps) {
+  const backdropRef = useRef<HTMLDivElement>(null);
+
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.stopPropagation(); onClose(); }
+    };
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={backdropRef}
+      onMouseDown={(e) => { if (e.target === backdropRef.current) onClose(); }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "rgba(0,0,0,0.45)",
+        backdropFilter: "blur(4px)",
+      }}
+    >
+      <div
+        style={{
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border-default)",
+          borderRadius: 12,
+          padding: "20px 24px",
+          minWidth: 340,
+          maxWidth: 420,
+          boxShadow: "0 16px 48px rgba(0,0,0,0.3)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
+        }}
+      >
+        {/* Title */}
+        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", fontFamily: "var(--font-sans)" }}>
+          {title}
+        </div>
+
+        {/* Description */}
+        {description && (
+          <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, fontFamily: "var(--font-sans)" }}>
+            {description}
+          </div>
+        )}
+
+        {/* Actions */}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+          <button
+            onClick={onClose}
+            style={{
+              ...buttonBase,
+              background: "transparent",
+              color: "var(--text-secondary)",
+              border: "1px solid var(--border-default)",
+            }}
+          >
+            Cancel
+          </button>
+          {actions.map((action) => (
+            <button
+              key={action.label}
+              onClick={action.onClick}
+              style={{
+                ...buttonBase,
+                ...(action.variant === "danger" ? dangerStyle : action.variant === "ghost" ? ghostStyle : primaryStyle),
+              }}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const buttonBase: React.CSSProperties = {
+  padding: "6px 14px",
+  borderRadius: 6,
+  fontSize: 12,
+  fontWeight: 500,
+  fontFamily: "var(--font-sans)",
+  cursor: "pointer",
+  border: "none",
+  outline: "none",
+  transition: "background 0.15s, opacity 0.15s",
+};
+
+const primaryStyle: React.CSSProperties = {
+  background: "var(--accent)",
+  color: "var(--text-primary)",
+  border: "1px solid var(--accent)",
+};
+
+const dangerStyle: React.CSSProperties = {
+  background: "var(--danger-color)",
+  color: "var(--text-primary)",
+  border: "1px solid var(--danger-color)",
+};
+
+const ghostStyle: React.CSSProperties = {
+  background: "var(--state-hover)",
+  color: "var(--text-primary)",
+  border: "1px solid var(--border-default)",
+};

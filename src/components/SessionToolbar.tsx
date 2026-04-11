@@ -1,7 +1,9 @@
 import { useState, useCallback } from "react";
+import { MODEL_COLORS, COLORS } from "../palette.ts";
 
 export type ModelOption = "sonnet" | "opus" | "haiku";
 export type PermissionMode =
+  | "auto"
   | "bypassPermissions"
   | "default"
   | "plan"
@@ -17,6 +19,8 @@ export interface SessionToolbarProps {
   onPermissionModeChange: (mode: PermissionMode) => void;
   /** Optional accent color for theming (hex). Defaults to #60a5fa */
   accent?: string;
+  /** Optional content rendered on the right side of the toolbar (e.g. skills button) */
+  skillsContent?: React.ReactNode;
 }
 
 const MODEL_LABELS: Record<ModelOption, string> = {
@@ -25,13 +29,10 @@ const MODEL_LABELS: Record<ModelOption, string> = {
   haiku: "Haiku",
 };
 
-const MODEL_COLORS: Record<ModelOption, string> = {
-  sonnet: "#f59e0b",
-  opus: "#a78bfa",
-  haiku: "#34d399",
-};
+const MODEL_COLOR: Record<string, string> = MODEL_COLORS;
 
 const PERMISSION_LABELS: Record<PermissionMode, string> = {
+  auto: "Auto",
   bypassPermissions: "Bypass",
   default: "Default",
   plan: "Plan",
@@ -39,6 +40,7 @@ const PERMISSION_LABELS: Record<PermissionMode, string> = {
 };
 
 const PERMISSION_DESCRIPTIONS: Record<PermissionMode, string> = {
+  auto: "Auto-approve safe operations",
   bypassPermissions: "Skip all permission checks",
   default: "Ask before dangerous operations",
   plan: "Require plan approval first",
@@ -129,7 +131,7 @@ function Dropdown<T extends string>({
             background: "var(--bg-elevated)",
             border: "1px solid var(--border-default)",
             borderRadius: 6,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+            boxShadow: "var(--shadow-lg)",
             overflow: "hidden",
           }}
         >
@@ -149,7 +151,7 @@ function Dropdown<T extends string>({
                 padding: "7px 10px",
                 background:
                   opt === value
-                    ? "rgba(96, 165, 250, 0.1)"
+                    ? "var(--state-active)"
                     : "transparent",
                 border: "none",
                 cursor: "pointer",
@@ -165,13 +167,13 @@ function Dropdown<T extends string>({
               onMouseEnter={(e) =>
                 (e.currentTarget.style.background =
                   opt === value
-                    ? "rgba(96, 165, 250, 0.15)"
-                    : "rgba(255,255,255,0.04)")
+                    ? "var(--state-active)"
+                    : "var(--state-hover)")
               }
               onMouseLeave={(e) =>
                 (e.currentTarget.style.background =
                   opt === value
-                    ? "rgba(96, 165, 250, 0.1)"
+                    ? "var(--state-active)"
                     : "transparent")
               }
             >
@@ -233,6 +235,7 @@ export function SessionToolbar({
   onInterrupt,
   onModelChange,
   onPermissionModeChange,
+  skillsContent,
 }: SessionToolbarProps) {
   const [modelOpen, setModelOpen] = useState(false);
   const [permOpen, setPermOpen] = useState(false);
@@ -265,7 +268,7 @@ export function SessionToolbar({
         value={model}
         options={["sonnet", "opus", "haiku"] as ModelOption[]}
         labels={MODEL_LABELS}
-        colors={MODEL_COLORS}
+        colors={MODEL_COLOR}
         onChange={(m) => {
           onModelChange(m);
           closeAll();
@@ -282,6 +285,7 @@ export function SessionToolbar({
         value={permissionMode}
         options={
           [
+            "auto",
             "bypassPermissions",
             "default",
             "plan",
@@ -304,6 +308,9 @@ export function SessionToolbar({
       {/* Spacer */}
       <div style={{ flex: 1 }} />
 
+      {/* Skills content (right side) */}
+      {skillsContent}
+
       {/* Interrupt button */}
       {hasSession && isRunning && (
         <button
@@ -317,20 +324,20 @@ export function SessionToolbar({
             fontSize: 10,
             fontFamily: "var(--font-mono)",
             fontWeight: 600,
-            background: "rgba(239, 68, 68, 0.1)",
-            border: "1px solid rgba(239, 68, 68, 0.3)",
+            background: "var(--danger-bg)",
+            border: "1px solid var(--danger-color)",
             borderRadius: 4,
-            color: "#f87171",
+            color: "var(--status-error)",
             cursor: "pointer",
             transition: "all 0.15s",
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = "rgba(239, 68, 68, 0.2)";
-            e.currentTarget.style.borderColor = "#ef4444";
+            e.currentTarget.style.background = "var(--danger-bg)";
+            e.currentTarget.style.borderColor = "var(--danger-color)";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = "rgba(239, 68, 68, 0.1)";
-            e.currentTarget.style.borderColor = "rgba(239, 68, 68, 0.3)";
+            e.currentTarget.style.background = "var(--danger-bg)";
+            e.currentTarget.style.borderColor = "var(--danger-bg)";
           }}
         >
           <span style={{ fontSize: 8, lineHeight: 1 }}>■</span>

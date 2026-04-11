@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react";
 import type { CanvasNode, CanvasTransform } from "./types.ts";
 import type { GraphDocument } from "./graph.ts";
 import { getContract } from "./graph.ts";
@@ -8,6 +9,14 @@ interface EdgeRendererProps {
   transform: CanvasTransform;
 }
 
+/**
+ * Get the position of a port on a node.
+ *
+ * For hidden ports (used internally for task/status/result routing),
+ * we fall back to the node center-edge since they have no visible dot.
+ * For visible ports, we use the same spacing math as CanvasNode's port
+ * dot rendering (only counting visible ports).
+ */
 function getPortPosition(
   node: CanvasNode,
   portId: string,
@@ -18,10 +27,30 @@ function getPortPosition(
     return { x: node.position.x, y: node.position.y };
   }
 
-  const ports = contract.ports.filter((p) => p.direction === direction);
-  const portIndex = ports.findIndex((p) => p.id === portId);
-  const spacing = node.size.height / (ports.length + 1);
-  const y = node.position.y + spacing * (portIndex + 1);
+  const port = contract.ports.find((p) => p.id === portId);
+  if (!port) {
+    return { x: node.position.x, y: node.position.y };
+  }
+
+  // For hidden ports, anchor at the node edge midpoint
+  if (port.hidden) {
+    const y = node.position.y + node.size.height / 2;
+    if (direction === "output") {
+      return { x: node.position.x + node.size.width, y };
+    }
+    return { x: node.position.x, y };
+  }
+
+  // For visible ports, match CanvasNode spacing (only visible ports counted)
+  const visiblePorts = contract.ports.filter(
+    (p) => p.direction === direction && !p.hidden,
+  );
+  const portIndex = visiblePorts.findIndex((p) => p.id === portId);
+
+  // Use fixed anchorY if specified, otherwise even-space
+  const y = port.anchorY != null
+    ? node.position.y + node.size.height * port.anchorY
+    : node.position.y + node.size.height / (visiblePorts.length + 1) * (portIndex + 1);
 
   if (direction === "output") {
     return { x: node.position.x + node.size.width, y };
@@ -29,7 +58,7 @@ function getPortPosition(
   return { x: node.position.x, y };
 }
 
-function BezierEdge({
+const BezierEdge = memo(function BezierEdge({
   x1,
   y1,
   x2,
@@ -51,10 +80,12 @@ function BezierEdge({
 
   const color =
     protocol === "task-assignment"
-      ? "#818cf8"
+      ? "var(--accent)"
       : protocol === "task-status"
-        ? "#facc15"
-        : "#4ade80";
+        ? "var(--edge-status)"
+        : protocol === "context"
+          ? "var(--edge-context)"
+          : "var(--edge-context)";
 
   return (
     <>
@@ -87,16 +118,16 @@ function BezierEdge({
       <circle cx={x1} cy={y1} r={3} fill={color} opacity={0.6} />
     </>
   );
-}
+});
 
-export function EdgeRenderer({
+export const EdgeRenderer = memo(function EdgeRenderer({
   graph,
   nodes,
   transform,
 }: EdgeRendererProps) {
   if (graph.edges.length === 0) return null;
 
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
   return (
     <svg
@@ -135,4 +166,4 @@ export function EdgeRenderer({
       </g>
     </svg>
   );
-}
+});

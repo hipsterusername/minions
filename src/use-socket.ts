@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { getAuthToken } from "./api.ts";
 
 export type ServerMessage =
   | { type: "session_list"; sessions: SessionInfo[] }
@@ -601,6 +602,39 @@ interface SocketHandle {
   subscribe: (fn: Listener) => () => void;
 }
 
+/** Known server message types — reject anything not in this set */
+const KNOWN_SERVER_MESSAGE_TYPES = new Set([
+  "session_list",
+  "session_created",
+  "session_status",
+  "session_error",
+  "sdk_event",
+  "sync_response",
+  "control_response",
+  "session_task_name",
+  "error",
+  // Canvas-specific broadcast events
+  "worktree_created",
+  "worktree_failed",
+  "minion_completed",
+  "agent_spawned",
+  "agent_task_update",
+  "wait_state",
+  "task_planned",
+  "task_assigned",
+  "task_completed",
+  "task_failed",
+  "task_name_set",
+  "render_dashboard",
+]);
+
+function isValidServerMessage(data: unknown): data is ServerMessage {
+  if (typeof data !== "object" || data === null) return false;
+  const obj = data as Record<string, unknown>;
+  if (typeof obj.type !== "string") return false;
+  return KNOWN_SERVER_MESSAGE_TYPES.has(obj.type);
+}
+
 export function useSocket(url: string): SocketHandle {
   const wsRef = useRef<WebSocket | null>(null);
   const listenersRef = useRef<Set<Listener>>(new Set());
@@ -613,43 +647,55 @@ export function useSocket(url: string): SocketHandle {
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-    const ws = new WebSocket(url);
-    wsRef.current = ws;
+    // Fetch the auth token, then connect with it as a query param
+    void getAuthToken().then((token) => {
+      // Re-check after async gap
+      if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-    ws.onopen = () => {
-      setConnected(true);
-      setReconnectState("connected");
-      attemptRef.current = 0;
-      setReconnectAttempt(0);
-    };
+      const separator = url.includes("?") ? "&" : "?";
+      const authedUrl = `${url}${separator}token=${encodeURIComponent(token)}`;
+      const ws = new WebSocket(authedUrl);
+      wsRef.current = ws;
 
-    ws.onclose = () => {
-      setConnected(false);
-      const nextAttempt = attemptRef.current + 1;
-      attemptRef.current = nextAttempt;
-      setReconnectAttempt(nextAttempt);
+      ws.onopen = () => {
+        setConnected(true);
+        setReconnectState("connected");
+        attemptRef.current = 0;
+        setReconnectAttempt(0);
+      };
 
-      if (nextAttempt >= MAX_RECONNECT_ATTEMPTS) {
-        setReconnectState("failed");
-        return; // stop auto-retrying
-      }
+      ws.onclose = () => {
+        setConnected(false);
+        const nextAttempt = attemptRef.current + 1;
+        attemptRef.current = nextAttempt;
+        setReconnectAttempt(nextAttempt);
 
-      setReconnectState("reconnecting");
-      const delay = getBackoffDelay(nextAttempt - 1);
-      reconnectTimer.current = setTimeout(connect, delay);
-    };
-
-    ws.onerror = () => ws.close();
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(String(ev.data)) as ServerMessage;
-        for (const fn of listenersRef.current) {
-          fn(msg);
+        if (nextAttempt >= MAX_RECONNECT_ATTEMPTS) {
+          setReconnectState("failed");
+          return; // stop auto-retrying
         }
-      } catch {
-        // ignore malformed messages
-      }
-    };
+
+        setReconnectState("reconnecting");
+        const delay = getBackoffDelay(nextAttempt - 1);
+        reconnectTimer.current = setTimeout(connect, delay);
+      };
+
+      ws.onerror = () => ws.close();
+      ws.onmessage = (ev) => {
+        try {
+          const parsed: unknown = JSON.parse(String(ev.data));
+          if (!isValidServerMessage(parsed)) {
+            console.warn("[ws] Rejected message with unknown type:", (parsed as Record<string, unknown>)?.type);
+            return;
+          }
+          for (const fn of listenersRef.current) {
+            fn(parsed);
+          }
+        } catch {
+          // ignore malformed messages
+        }
+      };
+    });
   }, [url]);
 
   useEffect(() => {

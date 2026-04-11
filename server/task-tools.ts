@@ -2,11 +2,19 @@
  * Task management MCP tools for the Leader agent.
  *
  * Uses `createSdkMcpServer` + `tool` from the Claude Agent SDK to expose
- * `assign_task`, `get_task_status`, and `list_tasks` as first-class tools
- * that the Leader can invoke instead of emitting JSON blocks in its text.
+ * `plan_task`, `assign_task`, `complete_task`, `get_task_status`, and
+ * `set_task_name` as first-class tools.
  *
- * Each tool handler has closure access to server-side state (sessions, WSS)
- * so it can create minion sessions and broadcast events to the frontend.
+ * Lifecycle:
+ *   plan_task   → "planned"  (registered, not started)
+ *   assign_task → "running"  (delegated to a new Minion session)
+ *   complete_task → "completed" (leader executed it directly)
+ *
+ * The leader can also call assign_task on a pre-planned task to delegate it,
+ * or complete_task to mark it done without spawning a minion.
+ *
+ * A `task_plan_update` broadcast fires on every state change so the frontend
+ * always has an accurate, deterministic view of the full plan.
  */
 
 import { z } from "zod/v4";
@@ -24,18 +32,32 @@ export interface TaskRecord {
   title: string;
   description: string;
   priority: "low" | "medium" | "high" | "critical";
+  /** Who is executing this task */
+  executor: "leader" | "minion";
   minionSessionKey: string | null;
   leaderSessionKey: string;
-  status: "pending" | "assigned" | "running" | "completed" | "failed";
-  assignedAt: number;
+  /** planned → running → completed | failed */
+  status: "planned" | "running" | "completed" | "failed";
+  createdAt: number;
+  completedAt: number | null;
   result: string | null;
+}
+
+export interface PendingWait {
+  durationMs: number;
+  reason: string;
+  scheduledAt: number;
+  /** Node.js timer handle — allows cancellation if the session is stopped */
+  timerId: ReturnType<typeof setTimeout> | null;
 }
 
 export interface TaskManagerState {
   tasks: Map<string, TaskRecord>;
+  /** If set, the leader has requested a wait-then-continue cycle */
+  pendingWait: PendingWait | null;
 }
 
-// ── Broadcast helper ───────────────────────────────────
+// ── Broadcast helpers ──────────────────────────────────
 
 function broadcast(wss: WebSocketServer, data: unknown): void {
   const msg = JSON.stringify(data);
@@ -44,6 +66,18 @@ function broadcast(wss: WebSocketServer, data: unknown): void {
       (client as WebSocket).send(msg);
     }
   }
+}
+
+function broadcastTaskPlanUpdate(
+  wss: WebSocketServer,
+  leaderSessionKey: string,
+  taskState: TaskManagerState,
+): void {
+  broadcast(wss, {
+    type: "task_plan_update",
+    leaderSessionKey,
+    tasks: Array.from(taskState.tasks.values()),
+  });
 }
 
 // ── Factory ────────────────────────────────────────────
@@ -71,19 +105,83 @@ export function createTaskToolsForLeader(opts: {
   existingTaskState?: TaskManagerState;
   /** Worktree branch the leader session is running in */
   worktreeBranch?: string | null;
+  /** Callback to schedule a delayed "Continue" message to resume the leader */
+  scheduleWaitContinue: (durationMs: number, reason: string) => void;
 }) {
   const { leaderSessionKey, wss, startMinionSession, cwd, minionSystemPrompt } = opts;
 
   // Reuse existing task state on resume so get_task_status still works
-  const taskState: TaskManagerState = opts.existingTaskState ?? { tasks: new Map() };
+  const taskState: TaskManagerState = opts.existingTaskState ?? { tasks: new Map(), pendingWait: null };
+
+  // ── plan_task ──────────────────────────────────────
+  // Register a task without starting it. The leader can later execute it
+  // directly (complete_task) or delegate it to a minion (assign_task).
+
+  const planTaskTool = tool(
+    "plan_task",
+    "Register a task in the plan without executing it yet. Use this to outline your work upfront. Each task can later be executed by you directly with complete_task, or delegated to a Minion with assign_task.",
+    {
+      taskId: z.string().describe("Unique identifier for this task"),
+      title: z.string().describe("Short title for the task"),
+      description: z
+        .string()
+        .describe("Detailed description of what needs to be done"),
+      priority: z
+        .enum(["low", "medium", "high", "critical"])
+        .describe("Task priority level"),
+    },
+    async (args) => {
+      const { taskId, title, description, priority } = args;
+
+      if (taskState.tasks.has(taskId)) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Task ${taskId} already exists in the plan.`,
+            },
+          ],
+        };
+      }
+
+      const record: TaskRecord = {
+        taskId,
+        title,
+        description,
+        priority,
+        executor: "leader", // default until delegated
+        minionSessionKey: null,
+        leaderSessionKey,
+        status: "planned",
+        createdAt: Date.now(),
+        completedAt: null,
+        result: null,
+      };
+      taskState.tasks.set(taskId, record);
+
+      broadcastTaskPlanUpdate(wss, leaderSessionKey, taskState);
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Task "${title}" (${taskId}) added to plan. Execute it yourself with complete_task, or delegate with assign_task.`,
+          },
+        ],
+      };
+    },
+  );
 
   // ── assign_task ────────────────────────────────────
+  // Delegate a task to a new Minion session. If the task was already
+  // registered via plan_task, it transitions from "planned" → "running".
+  // If not pre-planned, it is created and immediately delegated.
 
   const assignTaskTool = tool(
     "assign_task",
-    "Assign a task to a new Minion agent. Creates a minion session that will execute the task autonomously. Returns the minion session key for tracking.",
+    "Delegate a task to a new Minion agent. Creates a minion session that will execute the task autonomously. If the task was registered with plan_task, it will transition from planned to running.",
     {
-      taskId: z.string().describe("Unique identifier for this task"),
+      taskId: z.string().describe("Unique identifier for this task (use the same ID as plan_task if pre-planned)"),
       title: z.string().describe("Short title for the task"),
       description: z
         .string()
@@ -97,13 +195,14 @@ export function createTaskToolsForLeader(opts: {
     async (args) => {
       const { taskId, title, description, priority } = args;
 
-      // Prevent duplicate assignment
-      if (taskState.tasks.has(taskId)) {
+      // Check if already running/completed — don't re-assign
+      const existing = taskState.tasks.get(taskId);
+      if (existing && existing.status !== "planned") {
         return {
           content: [
             {
               type: "text" as const,
-              text: `Task ${taskId} already assigned. Use get_task_status to check its progress.`,
+              text: `Task ${taskId} is already ${existing.status}. Use get_task_status to check its progress.`,
             },
           ],
         };
@@ -111,18 +210,28 @@ export function createTaskToolsForLeader(opts: {
 
       const minionKey = `minion-${Date.now().toString(36)}-${taskId.slice(0, 8)}`;
 
-      const record: TaskRecord = {
-        taskId,
-        title,
-        description,
-        priority,
-        minionSessionKey: minionKey,
-        leaderSessionKey,
-        status: "assigned",
-        assignedAt: Date.now(),
-        result: null,
-      };
-      taskState.tasks.set(taskId, record);
+      if (existing) {
+        // Transition pre-planned task to running
+        existing.executor = "minion";
+        existing.minionSessionKey = minionKey;
+        existing.status = "running";
+      } else {
+        // Create and immediately delegate
+        const record: TaskRecord = {
+          taskId,
+          title,
+          description,
+          priority,
+          executor: "minion",
+          minionSessionKey: minionKey,
+          leaderSessionKey,
+          status: "running",
+          createdAt: Date.now(),
+          completedAt: null,
+          result: null,
+        };
+        taskState.tasks.set(taskId, record);
+      }
 
       // Build the minion's initial prompt
       const prompt = [
@@ -142,9 +251,7 @@ export function createTaskToolsForLeader(opts: {
         systemPrompt: minionSystemPrompt,
       });
 
-      record.status = "running";
-
-      // Broadcast to frontend so it can create the minion node
+      // Broadcast: minion_spawned so Canvas creates the node
       broadcast(wss, {
         type: "minion_spawned",
         leaderSessionKey,
@@ -157,11 +264,80 @@ export function createTaskToolsForLeader(opts: {
         timestamp: Date.now(),
       });
 
+      // Broadcast: full plan update so frontend reflects "running" status
+      broadcastTaskPlanUpdate(wss, leaderSessionKey, taskState);
+
       return {
         content: [
           {
             type: "text" as const,
-            text: `Task "${title}" (${taskId}) assigned to minion ${minionKey}. The minion session has started and is executing the task autonomously.`,
+            text: `Task "${title}" (${taskId}) delegated to minion ${minionKey}. The minion session has started and is executing the task autonomously.`,
+          },
+        ],
+      };
+    },
+  );
+
+  // ── complete_task ──────────────────────────────────
+  // Mark a task as completed by the leader itself (no minion involved).
+  // If the task was pre-planned, transitions it to "completed".
+  // If not pre-planned, auto-creates and immediately completes it.
+
+  const completeTaskTool = tool(
+    "complete_task",
+    "Mark a task as completed by you (the leader) directly. Use this when you have executed a task yourself without delegating to a minion.",
+    {
+      taskId: z.string().describe("The task ID to mark as completed"),
+      result: z
+        .string()
+        .describe("Summary of what was done and the outcome"),
+    },
+    async (args) => {
+      const { taskId, result } = args;
+
+      let record = taskState.tasks.get(taskId);
+
+      if (!record) {
+        // Auto-create if the leader completed something without pre-planning
+        record = {
+          taskId,
+          title: taskId,
+          description: "",
+          priority: "medium",
+          executor: "leader",
+          minionSessionKey: null,
+          leaderSessionKey,
+          status: "planned",
+          createdAt: Date.now(),
+          completedAt: null,
+          result: null,
+        };
+        taskState.tasks.set(taskId, record);
+      }
+
+      if (record.status === "completed" || record.status === "failed") {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Task ${taskId} is already ${record.status}.`,
+            },
+          ],
+        };
+      }
+
+      record.executor = "leader";
+      record.status = "completed";
+      record.completedAt = Date.now();
+      record.result = result;
+
+      broadcastTaskPlanUpdate(wss, leaderSessionKey, taskState);
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Task ${taskId} marked as completed by leader.`,
           },
         ],
       };
@@ -172,7 +348,7 @@ export function createTaskToolsForLeader(opts: {
 
   const getTaskStatusTool = tool(
     "get_task_status",
-    "Check the status of one or all assigned tasks. Returns current status, minion session key, and any results.",
+    "Check the status of one or all tasks. Returns current status, executor, and any results.",
     {
       taskId: z
         .string()
@@ -210,6 +386,7 @@ export function createTaskToolsForLeader(opts: {
         title: t.title,
         priority: t.priority,
         status: t.status,
+        executor: t.executor,
         minionSessionKey: t.minionSessionKey,
         result: t.result,
       }));
@@ -220,8 +397,67 @@ export function createTaskToolsForLeader(opts: {
             type: "text" as const,
             text:
               all.length === 0
-                ? "No tasks assigned yet."
+                ? "No tasks in plan yet."
                 : JSON.stringify(all, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  // ── wait_and_continue ──────────────────────────────
+  // The leader calls this to pause execution for a specified duration,
+  // then the system automatically resumes the session with "Continue".
+
+  const waitAndContinueTool = tool(
+    "wait_and_continue",
+    "Pause execution for a specified duration, then the system will automatically resume your session with a \"Continue\" message. Use this when you need to wait for external processes (builds, deploys, tests) or to periodically check on long-running minion tasks. Maximum wait: 30 minutes.",
+    {
+      duration_seconds: z
+        .number()
+        .min(5)
+        .max(1800)
+        .describe("How long to wait in seconds (5–1800)"),
+      reason: z
+        .string()
+        .describe("Why you are waiting (shown to the user in the UI)"),
+    },
+    async (args) => {
+      const durationMs = args.duration_seconds * 1000;
+
+      // Record the pending wait on the task state
+      taskState.pendingWait = {
+        durationMs,
+        reason: args.reason,
+        scheduledAt: Date.now(),
+        timerId: null,
+      };
+
+      // Broadcast so the frontend can show the countdown immediately
+      broadcast(wss, {
+        type: "wait_state",
+        sessionKey: leaderSessionKey,
+        action: "started",
+        durationMs,
+        reason: args.reason,
+        scheduledAt: Date.now(),
+      });
+
+      // Schedule the actual continuation via the server callback.
+      // This fires after the SDK turn ends and the session goes idle.
+      opts.scheduleWaitContinue(durationMs, args.reason);
+
+      const mins = Math.floor(args.duration_seconds / 60);
+      const secs = args.duration_seconds % 60;
+      const display = mins > 0
+        ? `${mins}m ${secs > 0 ? `${secs}s` : ""}`
+        : `${secs}s`;
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Waiting ${display}. Reason: ${args.reason}. The session will automatically resume with "Continue" after the wait period.`,
           },
         ],
       };
@@ -254,7 +490,7 @@ export function createTaskToolsForLeader(opts: {
 
   const mcpServer = createSdkMcpServer({
     name: "task-manager",
-    tools: [assignTaskTool, getTaskStatusTool, setTaskNameTool],
+    tools: [planTaskTool, assignTaskTool, completeTaskTool, getTaskStatusTool, setTaskNameTool, waitAndContinueTool],
   });
 
   return { mcpServer, taskState };

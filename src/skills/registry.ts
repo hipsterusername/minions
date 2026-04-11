@@ -1,21 +1,13 @@
 import type { SkillTemplate } from "./types.ts";
 
 const registry = new Map<string, SkillTemplate>();
-const builtInIds = new Set<string>();
 
-export function registerSkill(
-  def: SkillTemplate,
-  options?: { builtIn?: boolean },
-): void {
+export function registerSkill(def: SkillTemplate): void {
   registry.set(def.id, def);
-  if (options?.builtIn) {
-    builtInIds.add(def.id);
-  }
 }
 
 export function unregisterSkill(id: string): void {
   registry.delete(id);
-  builtInIds.delete(id);
 }
 
 export function getSkill(id: string): SkillTemplate | undefined {
@@ -32,6 +24,15 @@ export function getSkillsByCategory(category: string): SkillTemplate[] {
   );
 }
 
-export function isBuiltInSkill(id: string): boolean {
-  return builtInIds.has(id);
+/** Replace all skills in the registry (used when loading a project). */
+export function setAllSkills(skills: SkillTemplate[]): void {
+  registry.clear();
+  for (const skill of skills) {
+    registry.set(skill.id, skill);
+  }
+}
+
+/** Clear all skills from the registry. */
+export function clearSkills(): void {
+  registry.clear();
 }

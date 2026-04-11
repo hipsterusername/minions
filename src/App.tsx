@@ -1,21 +1,25 @@
-import "./nodes/NoteNode.tsx";
 import "./nodes/ClaudeSessionNode.tsx";
 import "./nodes/LeaderNode.tsx";
 import "./nodes/MinionNode.tsx";
 import "./nodes/MarkdownNode.tsx";
-import "./skills/built-in/index.ts";
-import { initUserSkills, saveUserSkill, deleteUserSkill as removeUserSkill, exportUserSkills, importUserSkills } from "./skills/user-skills.ts";
+import "./nodes/FileViewerNode.tsx";
+import "./nodes/FolderNode.tsx";
+import "./nodes/ContextGroupNode.tsx";
+import "./nodes/RenderNode.tsx";
+import { loadProjectSkillsFromData, saveUserSkill, deleteUserSkill as removeUserSkill, exportUserSkills, importUserSkills } from "./skills/user-skills.ts";
 import { useState, useEffect, useReducer, useCallback, useMemo, useRef } from "react";
 import { Canvas } from "./Canvas.tsx";
 import { useSocket } from "./use-socket.ts";
+import type { ServerMessage } from "./use-socket.ts";
 import { useAutosave } from "./use-autosave.ts";
 import { ProjectList } from "./ProjectList.tsx";
 import { ProjectHeader, type ActiveView } from "./ProjectHeader.tsx";
 import { ProjectPanel } from "./ProjectPanel.tsx";
-import { getProject, updateProject } from "./api.ts";
+import { getProject, updateProject, updateProjectSettings } from "./api.ts";
 import type { ProjectSettings } from "./api.ts";
 import { canvasReducer, generateId } from "./canvas-state.ts";
-import { graphReducer } from "./graph-runtime.ts";
+import { viewportCenter, findNonOverlappingPosition } from "./canvas-utils.ts";
+import { graphReducer, createEdge } from "./graph-runtime.ts";
 import type { GraphDocument } from "./graph.ts";
 import type { CanvasTransform, CanvasNode } from "./types.ts";
 import { CONTEXT_EXPLORER_PROMPT } from "./prompts/context-explorer.ts";
@@ -28,11 +32,10 @@ import { SkillsBrowser } from "./SkillsBrowser.tsx";
 import { SkillEditor } from "./SkillEditor.tsx";
 import type { SkillTemplate } from "./skills/types.ts";
 import { getSkill } from "./skills/registry.ts";
+import { themes, themeMap, applyTheme, DEFAULT_THEME_ID } from "./themes.ts";
+import { ThemeContext, loadPersistedThemeId, persistThemeId } from "./use-theme.ts";
 
 const WS_URL = `ws://localhost:${import.meta.env["VITE_SERVER_PORT"] ?? "3141"}`;
-
-// Register user-defined skills from localStorage
-initUserSkills();
 
 /**
  * Sanitize nodes loaded from persistence — reset transient session state
@@ -133,6 +136,8 @@ function ProjectView({
         setProjectName(project.name);
         setTransform(project.transform);
         setProjectSettings(project.settings ?? {});
+        loadProjectSkillsFromData(projectId, project.skills ?? []);
+        setSkillsRefreshKey((k) => k + 1);
         dispatch({ type: "SET_NODES", nodes: sanitizePersistedNodes(project.nodes) });
         setLoaded(true);
       } catch (err) {
@@ -159,6 +164,29 @@ function ProjectView({
     [projectId],
   );
 
+  const handleSettingsChange = useCallback(
+    (newSettings: ProjectSettings) => {
+      setProjectSettings(newSettings);
+      void updateProjectSettings(projectId, newSettings);
+    },
+    [projectId],
+  );
+
+  /** Compute a non-overlapping position centered in the current viewport. */
+  const positionInViewport = useCallback(
+    (w: number, h: number) => {
+      const center = viewportCenter(transform);
+      return findNonOverlappingPosition(
+        center.x - w / 2,
+        center.y - h / 2,
+        w,
+        h,
+        nodes,
+      );
+    },
+    [transform, nodes],
+  );
+
   // Spawn a Leader node to explore the project and generate context.md
   const handleSpawnContextExplorer = useCallback(() => {
     const typeDef = getAllNodeTypes().find((t) => t.type === "leader");
@@ -167,7 +195,7 @@ function ProjectView({
     const node: CanvasNode = {
       id: generateId(),
       type: "leader",
-      position: { x: 100, y: 100 },
+      position: positionInViewport(typeDef.defaultSize.width, typeDef.defaultSize.height),
       size: { ...typeDef.defaultSize },
       data: {
         sessionKey: null,
@@ -178,7 +206,7 @@ function ProjectView({
         turns: 0,
         error: null,
         model: "sonnet",
-        permissionMode: "bypassPermissions",
+        permissionMode: "auto",
         // Special flag: auto-start with context explorer prompt
         autoStartPrompt: CONTEXT_EXPLORER_PROMPT(projectPath),
         skillIds: [],
@@ -187,7 +215,25 @@ function ProjectView({
       },
     };
     dispatch({ type: "ADD_NODE", node });
-  }, [projectPath]);
+  }, [projectPath, positionInViewport]);
+
+  // Open a file in a new File Viewer node
+  const handleOpenFile = useCallback(
+    (relativePath: string) => {
+      const typeDef = getAllNodeTypes().find((t) => t.type === "file-viewer");
+      if (!typeDef) return;
+
+      const node: CanvasNode = {
+        id: generateId(),
+        type: "file-viewer",
+        position: positionInViewport(typeDef.defaultSize.width, typeDef.defaultSize.height),
+        size: { ...typeDef.defaultSize },
+        data: { filePath: relativePath },
+      };
+      dispatch({ type: "ADD_NODE", node });
+    },
+    [positionInViewport],
+  );
 
   // Focus-node state for Kanban → Canvas navigation
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
@@ -220,7 +266,7 @@ function ProjectView({
     const node: CanvasNode = {
       id: generateId(),
       type: "leader",
-      position: { x: 200, y: 200 },
+      position: positionInViewport(typeDef.defaultSize.width, typeDef.defaultSize.height),
       size: { ...typeDef.defaultSize },
       data: {
         sessionKey: null,
@@ -231,8 +277,8 @@ function ProjectView({
         turns: 0,
         error: null,
         model: "sonnet",
-        permissionMode: "bypassPermissions",
-        completedTasks: [],
+        permissionMode: "auto",
+        taskPlan: [],
         worktreeIsolation: true,
         worktreePath: null,
         worktreeBranch: null,
@@ -243,7 +289,7 @@ function ProjectView({
       },
     };
     dispatch({ type: "ADD_NODE", node });
-  }, [dispatch]);
+  }, [dispatch, positionInViewport]);
 
   // Skills customization handlers
   const handleCreateSkill = useCallback(() => {
@@ -257,7 +303,7 @@ function ProjectView({
   }, []);
 
   const handleSaveSkill = useCallback((skill: SkillTemplate) => {
-    saveUserSkill(skill);
+    void saveUserSkill(skill);
     setSkillEditorOpen(false);
     setEditingSkill(null);
     setSkillsRefreshKey((k) => k + 1);
@@ -265,7 +311,7 @@ function ProjectView({
 
   const handleDeleteSkill = useCallback((skillId: string) => {
     if (!confirm(`Delete skill "${getSkill(skillId)?.name ?? skillId}"?`)) return;
-    removeUserSkill(skillId);
+    void removeUserSkill(skillId);
     setSkillsRefreshKey((k) => k + 1);
   }, []);
 
@@ -278,13 +324,15 @@ function ProjectView({
       if (!file) return;
       const reader = new FileReader();
       reader.onload = () => {
-        try {
-          const count = importUserSkills(reader.result as string);
-          setSkillsRefreshKey((k) => k + 1);
-          alert(`Imported ${count} skill(s)`);
-        } catch (err) {
-          alert(`Import failed: ${err instanceof Error ? err.message : "Unknown error"}`);
-        }
+        void (async () => {
+          try {
+            const count = await importUserSkills(reader.result as string);
+            setSkillsRefreshKey((k) => k + 1);
+            alert(`Imported ${count} skill(s)`);
+          } catch (err) {
+            alert(`Import failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+          }
+        })();
       };
       reader.readAsText(file);
     };
@@ -314,7 +362,7 @@ function ProjectView({
       const node: CanvasNode = {
         id: nodeId,
         type: "leader",
-        position: { x: 100, y: 100 },
+        position: positionInViewport(typeDef.defaultSize.width, typeDef.defaultSize.height),
         size: { ...typeDef.defaultSize },
         data: {
           sessionKey: null,
@@ -325,8 +373,8 @@ function ProjectView({
           turns: 0,
           error: null,
           model: card.model ?? "sonnet",
-          permissionMode: card.permissionMode ?? "bypassPermissions",
-          completedTasks: [],
+          permissionMode: card.permissionMode ?? "auto",
+          taskPlan: [],
           autoStartPrompt: prompt,
           worktreeIsolation: card.worktreeIsolation ?? true,
           worktreePath: null,
@@ -338,10 +386,29 @@ function ProjectView({
         },
       };
       dispatch({ type: "ADD_NODE", node });
+
+      // Create edges from linked context nodes → leader's context-in port
+      for (const contextNodeId of card.linkedContextNodeIds ?? []) {
+        const contextNode = nodes.find((n) => n.id === contextNodeId);
+        if (!contextNode) continue;
+        const edge = createEdge(
+          contextNodeId,
+          "context-out",
+          contextNode.type,
+          nodeId,
+          "context-in",
+          "leader",
+          node.data, // pass node data so guard can verify session not started
+        );
+        if (edge) {
+          graphDispatch({ type: "ADD_EDGE", edge });
+        }
+      }
+
       // Bind the kanban card to this leader node and move to in-progress
       kanbanDispatch({ type: "BIND_LEADER", cardId: card.id, leaderNodeId: nodeId });
     },
-    [kanbanDispatch],
+    [kanbanDispatch, nodes, graphDispatch, positionInViewport],
   );
 
   // Close a card from "Ready for Review" → "Agent History"
@@ -359,9 +426,36 @@ function ProjectView({
           ? `Completed in ${leaderData.turns} turns`
           : undefined,
         cost: leaderData?.totalCost,
+        archivedMessages: leaderData?.messages,
+        archivedTaskPlan: leaderData?.taskPlan,
+        archivedTaskName: leaderData?.taskName,
+        archivedTurns: leaderData?.turns,
       });
+
+      // Stop the session and remove the canvas node
+      if (leaderData?.sessionKey) {
+        socket.send({ type: "stop_session", sessionKey: leaderData.sessionKey });
+      }
+      if (card.leaderNodeId) {
+        dispatch({ type: "REMOVE_NODE", id: card.leaderNodeId });
+      }
     },
-    [nodes, kanbanDispatch],
+    [nodes, kanbanDispatch, socket, dispatch],
+  );
+
+  const handleResumeCard = useCallback(
+    (card: KanbanCard) => {
+      if (card.columnId === "halted") {
+        kanbanDispatch({ type: "RESUME_HALTED_CARD", cardId: card.id });
+      } else {
+        kanbanDispatch({ type: "UNBLOCK_CARD", cardId: card.id });
+      }
+      if (card.leaderNodeId) {
+        setFocusNodeId(card.leaderNodeId);
+        setActiveView("canvas");
+      }
+    },
+    [kanbanDispatch],
   );
 
   // Build leaderStatuses map from canvas nodes for the Kanban board
@@ -381,6 +475,11 @@ function ProjectView({
     return map;
   }, [nodes]);
 
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+  const kanbanCardsRef = useRef(kanbanBoard.cards);
+  kanbanCardsRef.current = kanbanBoard.cards;
+
   // Auto-transition kanban cards based on leader node status changes
   const prevLeaderStatusesRef = useRef<Map<string, { status: string; worktreeStatus: string }>>(new Map());
   useEffect(() => {
@@ -388,17 +487,62 @@ function ProjectView({
     for (const card of kanbanBoard.cards) {
       if (!card.leaderNodeId) continue;
       const current = leaderStatuses.get(card.leaderNodeId);
-      if (!current) continue;
+
+      // Leader node was removed from canvas — remove the kanban card (1:1 sync)
+      if (!current) {
+        if (card.columnId !== "history") {
+          kanbanDispatch({ type: "REMOVE_CARD", cardId: card.id });
+        }
+        continue;
+      }
+
       const prevStatus = prev.get(card.leaderNodeId);
 
-      // Auto-move to "review" when worktree becomes active and leader is idle
+      // Auto-block when leader is idle/stopped with active worktree (ready for review)
       if (
         card.columnId === "in-progress" &&
         current.worktreeStatus === "active" &&
         (current.status === "idle" || current.status === "stopped") &&
         prevStatus?.status !== current.status
       ) {
-        kanbanDispatch({ type: "MOVE_CARD", cardId: card.id, targetColumnId: "review" });
+        kanbanDispatch({ type: "HALT_CARD", cardId: card.id, reason: "idle_review", detail: "Agent finished — review changes and approve or resume." });
+      }
+
+      // Auto-block when leader is idle/stopped without a worktree (no-isolation workflow)
+      if (
+        card.columnId === "in-progress" &&
+        current.worktreeStatus === "none" &&
+        (current.status === "idle" || current.status === "stopped") &&
+        prevStatus?.status !== current.status
+      ) {
+        kanbanDispatch({ type: "HALT_CARD", cardId: card.id, reason: "idle_review", detail: "Agent finished — review results and close or resume." });
+      }
+
+      // Auto-block when leader disconnects (session lost after server restart)
+      if (
+        card.columnId === "in-progress" &&
+        current.status === "disconnected" &&
+        prevStatus?.status && prevStatus.status !== "disconnected"
+      ) {
+        kanbanDispatch({ type: "HALT_CARD", cardId: card.id, reason: "session_lost", detail: "Session was lost (server restart or disconnect). Resume to re-launch." });
+      }
+
+      // Auto-block when leader hits an error
+      if (
+        card.columnId === "in-progress" &&
+        current.status === "error" &&
+        prevStatus?.status !== "error"
+      ) {
+        kanbanDispatch({ type: "HALT_CARD", cardId: card.id, reason: "error", detail: "Agent encountered an error. View on canvas for details." });
+      }
+
+      // Auto-resume when user sends a message (status transitions to "running")
+      if (
+        card.columnId === "halted" &&
+        current.status === "running" &&
+        prevStatus?.status !== "running"
+      ) {
+        kanbanDispatch({ type: "RESUME_HALTED_CARD", cardId: card.id });
       }
 
       // Auto-move to "history" when worktree is merged/discarded
@@ -407,11 +551,18 @@ function ProjectView({
         (current.worktreeStatus === "merged" || current.worktreeStatus === "discarded") &&
         prevStatus?.worktreeStatus !== current.worktreeStatus
       ) {
+        // Archive leader data before completing
+        const leaderNode = card.leaderNodeId ? nodes.find((n) => n.id === card.leaderNodeId) : undefined;
+        const ld = leaderNode?.data as LeaderData | undefined;
         kanbanDispatch({
           type: "COMPLETE_CARD",
           cardId: card.id,
           summary: `Worktree ${current.worktreeStatus}`,
           cost: current.cost,
+          archivedMessages: ld?.messages,
+          archivedTaskPlan: ld?.taskPlan,
+          archivedTaskName: ld?.taskName,
+          archivedTurns: ld?.turns,
         });
       }
     }
@@ -423,6 +574,175 @@ function ProjectView({
     }
     prevLeaderStatusesRef.current = newPrev;
   }, [leaderStatuses, kanbanBoard.cards, kanbanDispatch]);
+
+  // ─── Canvas → Kanban reconciliation ──────────────────────
+  // Auto-create kanban cards for any active leader node that doesn't already have one,
+  // so that ALL active agents are represented on the Kanban board.
+  const reconciledLeadersRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const boundLeaderIds = new Set(
+      kanbanBoard.cards
+        .filter((c) => c.leaderNodeId)
+        .map((c) => c.leaderNodeId!),
+    );
+
+    for (const node of nodes) {
+      if (node.type !== "leader") continue;
+      const data = node.data as LeaderData;
+      // Skip disconnected leaders (not yet active)
+      if (data.status === "disconnected") continue;
+      // Skip if this leader already has a kanban card
+      if (boundLeaderIds.has(node.id)) continue;
+      // Skip if we already reconciled this leader (avoid duplicate creates)
+      if (reconciledLeadersRef.current.has(node.id)) continue;
+
+      reconciledLeadersRef.current.add(node.id);
+
+      // Derive a title from taskName, autoStartPrompt, or fallback
+      let title = "Canvas Agent";
+      if (data.taskName) {
+        title = data.taskName;
+      } else if (data.autoStartPrompt) {
+        // Extract first meaningful line from the prompt
+        const firstLine = data.autoStartPrompt
+          .split("\n")
+          .map((l) => l.replace(/^#+\s*/, "").replace(/^Task:\s*/i, "").trim())
+          .find((l) => l.length > 0);
+        if (firstLine) {
+          title = firstLine.length > 60 ? firstLine.slice(0, 57) + "..." : firstLine;
+        }
+      } else if (data.messages.length > 0) {
+        const firstUser = data.messages.find((m) => m.role === "user");
+        if (firstUser) {
+          const text = typeof firstUser.content === "string"
+            ? firstUser.content
+            : "";
+          if (text) {
+            title = text.length > 60 ? text.slice(0, 57) + "..." : text;
+          }
+        }
+      }
+
+      const card: KanbanCard = {
+        id: `auto-${node.id}`,
+        title,
+        description: "",
+        subtasks: [],
+        context: "",
+        priority: "medium",
+        columnId: "in-progress",
+        createdAt: Date.now(),
+        model: data.model ?? "sonnet",
+        permissionMode: data.permissionMode ?? "auto",
+        worktreeIsolation: data.worktreeIsolation ?? false,
+        skillIds: data.skillIds ?? [],
+        skillValues: data.skillValues ?? {},
+        linkedContextNodeIds: [],
+        leaderNodeId: node.id,
+        autoSynced: true,
+      };
+      kanbanDispatch({ type: "ADD_CARD", card });
+    }
+  }, [nodes, kanbanBoard.cards, kanbanDispatch]);
+
+  // Update auto-synced card titles when the leader's taskName changes
+  useEffect(() => {
+    for (const card of kanbanBoard.cards) {
+      if (!card.autoSynced || !card.leaderNodeId) continue;
+      const node = nodes.find((n) => n.id === card.leaderNodeId);
+      if (!node) continue;
+      const data = node.data as LeaderData;
+      if (data.taskName && data.taskName !== card.title) {
+        kanbanDispatch({
+          type: "UPDATE_CARD",
+          cardId: card.id,
+          data: { title: data.taskName },
+        });
+      }
+    }
+  }, [nodes, kanbanBoard.cards, kanbanDispatch]);
+
+  // Reconcile in-progress kanban cards after page load
+  // Two mechanisms:
+  // 1. Immediate: halt cards whose leader has no sessionKey (session ended before save)
+  //    or whose leader node no longer exists on the canvas.
+  // 2. sync_response: when sync_session returns found:false, halt the card.
+  // 3. Timeout safety net: after 5s, halt any remaining in-progress cards whose
+  //    leader is still "disconnected" (sync_session should have resolved by then).
+  const loadReconciledRef = useRef(false);
+  useEffect(() => {
+    if (!loaded || loadReconciledRef.current) return;
+    loadReconciledRef.current = true;
+
+    // Immediate reconciliation: cards whose leader has no sessionKey or no node
+    for (const card of kanbanCardsRef.current) {
+      if (card.columnId !== "in-progress" || !card.leaderNodeId) continue;
+      const node = nodesRef.current.find((n) => n.id === card.leaderNodeId);
+      if (!node) {
+        // Leader node was removed — halt the card
+        kanbanDispatch({
+          type: "HALT_CARD",
+          cardId: card.id,
+          reason: "session_lost",
+          detail: "Leader node no longer exists. Create a new agent to resume this work.",
+        });
+        continue;
+      }
+      const data = node.data as LeaderData;
+      if (!data.sessionKey) {
+        // Session already ended before save — halt immediately
+        kanbanDispatch({
+          type: "HALT_CARD",
+          cardId: card.id,
+          reason: "session_lost",
+          detail: "Session was lost (server restart or disconnect). Resume to re-launch.",
+        });
+      }
+    }
+
+    // Timeout safety net: after 5s, halt any remaining in-progress cards
+    // whose leader is still disconnected (sync_session should have resolved)
+    const timer = setTimeout(() => {
+      for (const card of kanbanCardsRef.current) {
+        if (card.columnId !== "in-progress" || !card.leaderNodeId) continue;
+        const node = nodesRef.current.find((n) => n.id === card.leaderNodeId);
+        if (!node) continue;
+        const data = node.data as LeaderData;
+        if (data.status === "disconnected") {
+          kanbanDispatch({
+            type: "HALT_CARD",
+            cardId: card.id,
+            reason: "session_lost",
+            detail: "Session was lost (server restart or disconnect). Resume to re-launch.",
+          });
+        }
+      }
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  }, [loaded, kanbanDispatch]);
+
+  // When sync_response returns found: false, halt the corresponding card
+  useEffect(() => {
+    if (!loaded) return;
+    return socket.subscribe((msg: ServerMessage) => {
+      if (msg.type !== "sync_response" || msg.found) return;
+      const leaderNode = nodesRef.current.find(
+        (n) => n.type === "leader" && (n.data as LeaderData).sessionKey === msg.sessionKey,
+      );
+      if (!leaderNode) return;
+      const card = kanbanCardsRef.current.find(
+        (c) => c.columnId === "in-progress" && c.leaderNodeId === leaderNode.id,
+      );
+      if (!card) return;
+      kanbanDispatch({
+        type: "HALT_CARD",
+        cardId: card.id,
+        reason: "session_lost",
+        detail: "Session was lost (server restart or disconnect). Resume to re-launch.",
+      });
+    });
+  }, [loaded, socket, kanbanDispatch]);
 
   if (!loaded) {
     return (
@@ -444,7 +764,10 @@ function ProjectView({
     );
   }
 
-  const kanbanReviewCount = kanbanBoard.cards.filter((c) => c.columnId === "review").length;
+  const kanbanBlockedCount =
+    activeView === "kanban"
+      ? 0
+      : kanbanBoard.cards.filter((c) => c.columnId === "halted").length;
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
@@ -458,7 +781,7 @@ function ProjectView({
         retry={retry}
         activeView={activeView}
         onViewChange={setActiveView}
-        kanbanReviewCount={kanbanReviewCount}
+        kanbanBlockedCount={kanbanBlockedCount}
       />
       {activeView === "kanban" ? (
         <div style={{ position: "absolute", top: 44, left: 0, right: 0, bottom: 0 }}>
@@ -468,10 +791,13 @@ function ProjectView({
             onLaunchLeader={handleLaunchLeader}
             leaderStatuses={leaderStatuses}
             onCloseCard={handleCloseCard}
+            onResume={handleResumeCard}
             onFocusNode={handleFocusNode}
             socketSend={socket.send}
             socketSubscribe={socket.subscribe}
             projectPath={projectPath}
+            nodes={nodes}
+            onUpdateNodeData={(nodeId, data) => dispatch({ type: "UPDATE_NODE_DATA", id: nodeId, data })}
           />
         </div>
       ) : (
@@ -487,6 +813,7 @@ function ProjectView({
             socketSubscribe={socket.subscribe}
             socketConnected={socket.connected}
             projectPath={projectPath}
+            projectSettings={projectSettings}
             focusNodeId={focusNodeId}
             onFocusNodeHandled={handleFocusNodeHandled}
           />
@@ -495,8 +822,11 @@ function ProjectView({
             projectPath={projectPath}
             projectName={projectName}
             settings={projectSettings}
+            onSettingsChange={handleSettingsChange}
             onSpawnContextExplorer={handleSpawnContextExplorer}
             nodes={nodes}
+            onOpenFile={handleOpenFile}
+            onUpdateNodeData={(nodeId, data) => dispatch({ type: "UPDATE_NODE_DATA", id: nodeId, data })}
           />
           <SkillsBrowser
             onLaunchSkill={handleLaunchSkill}
@@ -525,21 +855,47 @@ function ProjectView({
 
 export default function App() {
   const [currentProject, setCurrentProject] = useState<{ id: string; path: string } | null>(null);
+  const [themeId, setThemeIdState] = useState(() => loadPersistedThemeId());
+
+  // Apply theme on mount and when changed
+  useEffect(() => {
+    applyTheme(themeId);
+  }, [themeId]);
+
+  const setTheme = useCallback((id: string) => {
+    setThemeIdState(id);
+    persistThemeId(id);
+    applyTheme(id);
+  }, []);
+
+  const themeCtx = useMemo(
+    () => ({
+      themeId,
+      theme: themeMap[themeId] ?? themeMap[DEFAULT_THEME_ID]!,
+      setTheme,
+      themes,
+    }),
+    [themeId, setTheme],
+  );
 
   if (!currentProject) {
     return (
-      <ProjectList
-        onOpenProject={(id, projectPath) => setCurrentProject({ id, path: projectPath })}
-      />
+      <ThemeContext.Provider value={themeCtx}>
+        <ProjectList
+          onOpenProject={(id, projectPath) => setCurrentProject({ id, path: projectPath })}
+        />
+      </ThemeContext.Provider>
     );
   }
 
   return (
-    <ProjectView
-      key={currentProject.id}
-      projectId={currentProject.id}
-      projectPath={currentProject.path}
-      onClose={() => setCurrentProject(null)}
-    />
+    <ThemeContext.Provider value={themeCtx}>
+      <ProjectView
+        key={currentProject.id}
+        projectId={currentProject.id}
+        projectPath={currentProject.path}
+        onClose={() => setCurrentProject(null)}
+      />
+    </ThemeContext.Provider>
   );
 }

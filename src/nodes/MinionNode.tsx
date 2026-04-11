@@ -11,6 +11,9 @@ import { extractStreamDelta, isStreamingEvent } from "../streaming.ts";
 import { SessionToolbar } from "../components/SessionToolbar.tsx";
 import type { ModelOption, PermissionMode } from "../components/SessionToolbar.tsx";
 import { sdkToDisplayMessages, msgId, type DisplayMessage } from "../sdk-messages.ts";
+import { CopyButton } from "../components/CopyButton.tsx";
+import { AddAsNodeButton } from "../components/AddAsNodeButton.tsx";
+import { STATUS_COLORS, PRIORITY_COLORS, getTaskStatusColor, COLORS } from "../palette.ts";
 
 registerContract(MINION_CONTRACT);
 
@@ -19,7 +22,7 @@ export interface MinionTaskState {
   title: string;
   description: string;
   priority: TaskAssignment["priority"];
-  status: "pending" | "in_progress" | "completed" | "failed";
+  status: "pending" | "in_progress" | "completed" | "failed" | "blocked";
   activeStep: string | null;
   progress: string[];
   result: string | null;
@@ -59,6 +62,7 @@ function MinionNodeRenderer({
   socketSend,
   socketSubscribe,
   onResize,
+  onAddContentNode,
 }: NodeRenderProps) {
   const data = node.data as MinionData;
   const dataRef = useRef(data);
@@ -85,19 +89,28 @@ function MinionNodeRenderer({
     socketSend({ type: "sync_session", sessionKey: data.sessionKey });
   }, [socketSend, data.sessionKey]);
 
-  // Reset agent-subagent minions that were "running" on reload (can't re-attach)
+  // Reset agent-subagent minions that were "running" on reload (can't re-attach).
+  // Also catches idle-on-reload case where in_progress tasks were left behind.
   useEffect(() => {
-    if (data.agentTaskId && !data.sessionKey && data.status === "running") {
+    const hasStuckTasks = data.taskQueue.some((t) => t.status === "in_progress");
+    if (data.agentTaskId && !data.sessionKey && (data.status === "running" || hasStuckTasks)) {
+      const blockedTasks = data.taskQueue.map((t) =>
+        t.status === "in_progress"
+          ? { ...t, status: "blocked" as const, activeStep: null, result: "Subagent status unknown after reload." }
+          : t,
+      );
       onUpdateData({
         ...data,
         status: "idle",
         streamingText: "",
+        activeTaskIndex: -1,
+        taskQueue: blockedTasks,
         messages: [
           ...data.messages,
           {
             id: msgId(),
             role: "system" as const,
-            content: "Subagent status unknown after reload — marked idle.",
+            content: "Subagent status unknown after reload — tasks marked blocked.",
             timestamp: Date.now(),
           },
         ],
@@ -161,13 +174,29 @@ function MinionNodeRenderer({
             streamingText: "",
           });
         } else if (!serverMsg.found) {
-          // Session no longer exists on server — reset to disconnected
+          // Session no longer exists on server — mark in-progress tasks as blocked
+          const blockedTasks = current.taskQueue.map((t) =>
+            t.status === "in_progress"
+              ? { ...t, status: "blocked" as const, activeStep: null, result: "Session lost — requires user action to resume." }
+              : t,
+          );
           emitUpdate({
             ...current,
             status: "disconnected",
             sessionKey: null,
             streamingText: "",
             error: null,
+            activeTaskIndex: -1,
+            taskQueue: blockedTasks,
+            messages: [
+              ...current.messages,
+              {
+                id: msgId(),
+                role: "system" as const,
+                content: "Session lost after server restart. Blocked tasks require user action.",
+                timestamp: Date.now(),
+              },
+            ],
           });
         }
         return;
@@ -237,7 +266,20 @@ function MinionNodeRenderer({
           const newMsgs = mms.filter((m) => !existingIds.has(m.id));
           const updated = { ...current };
           if (newMsgs.length > 0) {
-            updated.messages = [...current.messages, ...newMsgs];
+            let base = current.messages;
+            // When a result arrives, drop the last assistant msg if its content
+            // matches the result — the SDK sends both, but we only want the
+            // green result bubble.
+            if (serverMsg.message.type === "result") {
+              const resultText = newMsgs.find((m) => m.role === "result")?.content;
+              if (resultText) {
+                const lastIdx = base.findLastIndex((m) => m.role === "assistant");
+                if (lastIdx >= 0 && base[lastIdx].content.trim() === resultText.trim()) {
+                  base = [...base.slice(0, lastIdx), ...base.slice(lastIdx + 1)];
+                }
+              }
+            }
+            updated.messages = [...base, ...newMsgs];
           }
           // Clear streaming buffer on complete assistant message
           if (serverMsg.message.type === "assistant") {
@@ -282,11 +324,13 @@ function MinionNodeRenderer({
                   timestamp: Date.now(),
                 },
               ];
-              // Send the next task to the existing session
+              // Send the next task to the existing session.
+              // Capture sessionKey before the timeout to avoid stale-closure issues.
+              const sessionKeyForNext = current.sessionKey;
               setTimeout(() => {
                 socketSend({
                   type: "send_message",
-                  sessionKey: current.sessionKey,
+                  sessionKey: sessionKeyForNext,
                   prompt: `## Next Task\n\n**Task ID:** ${nextTask.taskId}\n**Title:** ${nextTask.title}\n**Priority:** ${nextTask.priority}\n\n**Description:**\n${nextTask.description}\n\nPlease execute this task now.`,
                 });
               }, 500);
@@ -303,9 +347,22 @@ function MinionNodeRenderer({
         serverMsg.type === "session_status" &&
         serverMsg.sessionKey === current.sessionKey
       ) {
+        const newStatus = serverMsg.status as MinionData["status"];
+        // When a session is stopped, mark any in-progress tasks as blocked so
+        // the user can see they need attention and retry them.
+        const updatedTasks =
+          newStatus === "stopped"
+            ? current.taskQueue.map((t) =>
+                t.status === "in_progress"
+                  ? { ...t, status: "blocked" as const, activeStep: null, result: "Session stopped — click Retry to resume." }
+                  : t,
+              )
+            : current.taskQueue;
         emitUpdate({
           ...current,
-          status: serverMsg.status as MinionData["status"],
+          status: newStatus,
+          activeTaskIndex: newStatus === "stopped" ? -1 : current.activeTaskIndex,
+          taskQueue: updatedTasks,
         });
         return;
       }
@@ -314,10 +371,19 @@ function MinionNodeRenderer({
         serverMsg.type === "session_error" &&
         serverMsg.sessionKey === current.sessionKey
       ) {
+        // Mark the active in-progress task as failed so it shows in the kanban
+        // and can be retried, rather than staying stuck as "in_progress".
+        const tasksAfterError = current.taskQueue.map((t, i) =>
+          i === current.activeTaskIndex && t.status === "in_progress"
+            ? { ...t, status: "failed" as const, activeStep: null, result: serverMsg.error ?? "Session error" }
+            : t,
+        );
         emitUpdate({
           ...current,
           status: "error" as const,
           error: serverMsg.error,
+          activeTaskIndex: -1,
+          taskQueue: tasksAfterError,
         });
         return;
       }
@@ -439,15 +505,7 @@ function MinionNodeRenderer({
     [socketSend, onUpdateData],
   );
 
-  const statusColor: Record<string, string> = {
-    disconnected: "#4a5068",
-    waiting: "#facc15",
-    creating: "#facc15",
-    running: "#4ade80",
-    idle: "#60a5fa",
-    stopped: "#f87171",
-    error: "#ef4444",
-  };
+  const statusColor: Record<string, string> = STATUS_COLORS;
 
   const activeTask =
     data.activeTaskIndex >= 0 && data.activeTaskIndex < data.taskQueue.length
@@ -459,28 +517,25 @@ function MinionNodeRenderer({
   const totalTasks = data.taskQueue.length;
   const progressPct = totalTasks > 0 ? (completedCount / totalTasks) * 100 : 0;
 
-  const priorityColors: Record<string, string> = {
-    critical: "#ef4444",
-    high: "#f97316",
-    medium: "#60a5fa",
-    low: "#4a5068",
-  };
+  const priorityColors: Record<string, string> = PRIORITY_COLORS;
 
   const taskStatusIcon = (status: string) => {
     switch (status) {
-      case "in_progress": return "⏳";
-      case "completed": return "✓";
-      case "failed": return "✗";
-      default: return "○";
+      case "in_progress": return "\u23F3";
+      case "completed": return "\u2713";
+      case "failed": return "\u2717";
+      case "blocked": return "\u26A0";
+      default: return "\u25CB";
     }
   };
 
   const taskDotColor = (status: string) => {
     switch (status) {
-      case "completed": return "#4ade80";
-      case "in_progress": return "#facc15";
-      case "failed": return "#ef4444";
-      default: return "#4a5068";
+      case "completed": return "var(--success-color)";
+      case "in_progress": return "var(--status-creating)";
+      case "failed": return "var(--danger-color)";
+      case "blocked": return "var(--status-warning)";
+      default: return "var(--text-muted)";
     }
   };
 
@@ -524,7 +579,7 @@ function MinionNodeRenderer({
         background: "var(--bg-surface)",
         borderRadius: 8,
         border: "1px solid var(--border-default)",
-        overflow: "hidden",
+        overflow: "auto",
       }}
     >
       {/* ── Header (single compact row, ~32px) ── */}
@@ -536,7 +591,7 @@ function MinionNodeRenderer({
           alignItems: "center",
           borderBottom: "1px solid var(--border-default)",
           flexShrink: 0,
-          background: "linear-gradient(135deg, #0a2a1a 0%, var(--bg-secondary) 100%)",
+          background: "linear-gradient(135deg, var(--bg-surface) 0%, var(--bg-secondary) 100%)",
           height: 32,
           boxSizing: "border-box",
         }}
@@ -548,7 +603,7 @@ function MinionNodeRenderer({
               width: 8,
               height: 8,
               borderRadius: "50%",
-              background: statusColor[data.status] ?? "#4a5068",
+              background: statusColor[data.status] ?? "var(--text-muted)",
               flexShrink: 0,
               animation: data.status === "running" ? "minion-pulse 1.5s ease-in-out infinite" : "none",
             }}
@@ -560,8 +615,8 @@ function MinionNodeRenderer({
             <span style={{
               fontSize: 9,
               fontFamily: "var(--font-mono)",
-              color: "#86efac",
-              background: "rgba(134, 239, 172, 0.1)",
+              color: "var(--success-color)",
+              background: "var(--success-bg)",
               padding: "1px 5px",
               borderRadius: 3,
               lineHeight: 1.2,
@@ -587,10 +642,10 @@ function MinionNodeRenderer({
               style={{
                 padding: "1px 7px",
                 fontSize: 9,
-                background: "#3a1a1a",
-                border: "1px solid #ef4444",
+                background: "var(--danger-bg)",
+                border: "1px solid var(--danger-color)",
                 borderRadius: 10,
-                color: "#f87171",
+                color: "var(--status-error)",
                 cursor: "pointer",
                 fontFamily: "var(--font-mono)",
                 lineHeight: 1.4,
@@ -630,7 +685,7 @@ function MinionNodeRenderer({
           onInterrupt={handleInterrupt}
           onModelChange={handleModelChange}
           onPermissionModeChange={handlePermissionModeChange}
-          accent="#4ade80"
+          accent="var(--success-color)"
         />
       )}
 
@@ -644,12 +699,14 @@ function MinionNodeRenderer({
             padding: "6px 10px",
             background:
               activeTask.status === "completed"
-                ? "rgba(74, 222, 128, 0.05)"
+                ? "var(--success-bg)"
                 : activeTask.status === "failed"
-                  ? "rgba(239, 68, 68, 0.05)"
-                  : activeTask.status === "in_progress"
-                    ? "rgba(250, 204, 21, 0.04)"
-                    : "rgba(148, 163, 184, 0.03)",
+                  ? "var(--danger-bg)"
+                  : activeTask.status === "blocked"
+                    ? "var(--warning-bg)"
+                    : activeTask.status === "in_progress"
+                      ? "var(--warning-bg)"
+                      : "var(--state-hover)",
             borderBottom: "1px solid var(--border-default)",
             flexShrink: 0,
           }}
@@ -675,8 +732,8 @@ function MinionNodeRenderer({
               fontSize: 9,
               padding: "1px 5px",
               borderRadius: 8,
-              background: `${priorityColors[activeTask.priority] ?? "#4a5068"}22`,
-              color: priorityColors[activeTask.priority] ?? "#4a5068",
+              background: "var(--state-hover)",
+              color: priorityColors[activeTask.priority] ?? "var(--text-muted)",
               fontFamily: "var(--font-mono)",
               fontWeight: 600,
               flexShrink: 0,
@@ -689,7 +746,7 @@ function MinionNodeRenderer({
           {activeTask.activeStep && (
             <div style={{
               fontSize: 10,
-              color: "#facc15",
+              color: "var(--status-creating)",
               fontFamily: "var(--font-mono)",
               marginTop: 3,
               overflow: "hidden",
@@ -703,7 +760,7 @@ function MinionNodeRenderer({
           {activeTask.result && (
             <div style={{
               fontSize: 10,
-              color: activeTask.status === "completed" ? "#4ade80" : "#f87171",
+              color: activeTask.status === "completed" ? "var(--success-color)" : activeTask.status === "blocked" ? "var(--status-warning)" : "var(--status-error)",
               fontFamily: "var(--font-mono)",
               marginTop: 2,
               overflow: "hidden",
@@ -767,7 +824,7 @@ function MinionNodeRenderer({
             <div style={{
               width: `${progressPct}%`,
               height: "100%",
-              background: "#4ade80",
+              background: "var(--success-color)",
               borderRadius: 2,
               transition: "width 0.3s ease",
             }} />
@@ -803,24 +860,24 @@ function MinionNodeRenderer({
                   }}>
                     {task.title}
                   </span>
-                  {task.status === "pending" && data.status !== "running" && (
+                  {(task.status === "pending" || task.status === "blocked") && data.status !== "running" && (
                     <button
                       onClick={() => startTask(i)}
                       onMouseDown={(e) => e.stopPropagation()}
                       style={{
                         padding: "0px 5px",
                         fontSize: 9,
-                        background: "var(--bg-elevated)",
-                        border: "1px solid var(--border-default)",
+                        background: task.status === "blocked" ? "var(--warning-bg)" : "var(--bg-elevated)",
+                        border: task.status === "blocked" ? "1px solid var(--status-warning)" : "1px solid var(--border-default)",
                         borderRadius: 3,
-                        color: "var(--text-secondary)",
+                        color: task.status === "blocked" ? "var(--status-warning)" : "var(--text-secondary)",
                         cursor: "pointer",
                         fontFamily: "var(--font-mono)",
                         flexShrink: 0,
                         lineHeight: 1.5,
                       }}
                     >
-                      Run
+                      {task.status === "blocked" ? "Retry" : "Run"}
                     </button>
                   )}
                 </div>
@@ -887,7 +944,9 @@ function MinionNodeRenderer({
               .map((msg) => (
                 <div
                   key={msg.id}
+                  className={msg.role === "assistant" ? "copyable" : undefined}
                   style={{
+                    position: "relative",
                     padding: "4px 8px",
                     borderRadius: 4,
                     fontSize: 11,
@@ -899,7 +958,7 @@ function MinionNodeRenderer({
                         : "var(--text-primary)",
                     borderLeft:
                       msg.role === "assistant"
-                        ? "2px solid #4ade80"
+                        ? "2px solid var(--success-color)"
                         : "none",
                     whiteSpace: "pre-wrap",
                     wordBreak: "break-word",
@@ -908,6 +967,8 @@ function MinionNodeRenderer({
                     opacity: msg.role === "system" ? 0.5 : 1,
                   }}
                 >
+                  {msg.role === "assistant" && <CopyButton text={msg.content} />}
+                  {msg.role === "assistant" && <AddAsNodeButton text={msg.content} onAdd={onAddContentNode} />}
                   {msg.content}
                   {msg.suffix && (
                     <span style={{ display: "inline-block", marginLeft: 6, fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", opacity: 0.7 }}>
@@ -918,7 +979,7 @@ function MinionNodeRenderer({
               ))}
             {/* Streaming partial text in log */}
             {data.streamingText ? (
-              <StreamingBubble text={data.streamingText} borderColor="#4ade80" />
+              <StreamingBubble text={data.streamingText} borderColor="var(--success-color)" />
             ) : data.status === "running" ? (
               <StreamingIndicator label="Working..." />
             ) : null}
@@ -933,7 +994,7 @@ function MinionNodeRenderer({
               fontSize: 11,
               fontFamily: "var(--font-mono)",
               color: "var(--text-secondary)",
-              borderLeft: "2px solid #4ade80",
+              borderLeft: "2px solid var(--success-color)",
               marginLeft: 10,
               marginRight: 10,
               overflow: "hidden",
@@ -968,10 +1029,10 @@ function MinionNodeRenderer({
         <div
           style={{
             padding: "5px 10px",
-            background: "#3a1a1a",
-            color: "#f87171",
+            background: "var(--danger-bg)",
+            color: "var(--status-error)",
             fontSize: 11,
-            borderTop: "1px solid #ef4444",
+            borderTop: "1px solid var(--danger-color)",
             fontFamily: "var(--font-mono)",
             wordBreak: "break-word",
             flexShrink: 0,

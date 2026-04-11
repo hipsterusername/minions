@@ -1,15 +1,20 @@
 {
-  "name": "claude-canvas",
+  "name": "minions",
   "private": true,
   "version": "0.1.0",
+  "description": "A canvas for managing agentic context and workflows",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "vite",
     "server": "npx tsx server/index.ts",
-    "start": "npx tsx server/index.ts & vite",
+    "start": "npx tsx server/index.ts & vite --open",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "preflight": "node scripts/preflight.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.86",

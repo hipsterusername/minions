@@ -14,8 +14,15 @@ import {
   writeContext,
   readSettings,
   writeSettings,
+  readSkills,
+  writeSkills,
 } from "../project-store.ts";
 import type { ProjectSettings } from "../project-store.ts";
+import {
+  registerProjectPath,
+  validateProjectPath,
+  unregisterProjectPath,
+} from "../path-guard.ts";
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -117,6 +124,11 @@ function ensureProjectRow(db: ReturnType<typeof openProjectDb>, projectPath: str
 export function createProjectRoutes(): Router {
   const router = Router();
 
+  // Pre-register recent projects so they're accessible without re-opening
+  for (const p of listRecentProjects()) {
+    registerProjectPath(p.path);
+  }
+
   // List recent projects
   router.get("/", (_req: Request, res: Response) => {
     const recents = listRecentProjects();
@@ -140,7 +152,11 @@ export function createProjectRoutes(): Router {
       return;
     }
 
-    const absPath = path.resolve(projectPath);
+    const absPath = registerProjectPath(projectPath);
+    if (!absPath) {
+      res.status(403).json({ error: "Project path must be under the home directory" });
+      return;
+    }
 
     // Create the project directory if it doesn't exist
     if (!fs.existsSync(absPath)) {
@@ -163,6 +179,7 @@ export function createProjectRoutes(): Router {
       ...rowToProject(row, absPath),
       context: readContext(absPath),
       settings: readSettings(absPath),
+      skills: readSkills(absPath),
     });
   });
 
@@ -175,7 +192,11 @@ export function createProjectRoutes(): Router {
       return;
     }
 
-    const absPath = path.resolve(projectPath);
+    const absPath = registerProjectPath(projectPath);
+    if (!absPath) {
+      res.status(403).json({ error: "Project path must be under the home directory" });
+      return;
+    }
 
     if (!fs.existsSync(absPath)) {
       res.status(404).json({ error: "Directory does not exist" });
@@ -198,12 +219,17 @@ export function createProjectRoutes(): Router {
       nodes: nodeRows.map(rowToNode),
       context: readContext(absPath),
       settings: readSettings(absPath),
+      skills: readSkills(absPath),
     });
   });
 
   // Get a project by encoded path
   router.get("/:encodedPath", (req: Request, res: Response) => {
-    const projectPath = decodePath(param(req, "encodedPath"));
+    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    if (!projectPath) {
+      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      return;
+    }
 
     if (!fs.existsSync(projectPath)) {
       res.status(404).json({ error: "Project directory not found" });
@@ -226,12 +252,17 @@ export function createProjectRoutes(): Router {
       nodes: nodeRows.map(rowToNode),
       context: readContext(projectPath),
       settings: readSettings(projectPath),
+      skills: readSkills(projectPath),
     });
   });
 
   // Update project metadata / transform
   router.put("/:encodedPath", (req: Request, res: Response) => {
-    const projectPath = decodePath(param(req, "encodedPath"));
+    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    if (!projectPath) {
+      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      return;
+    }
     const { name, transform } = req.body as {
       name?: string;
       transform?: { x: number; y: number; scale: number };
@@ -262,15 +293,24 @@ export function createProjectRoutes(): Router {
 
   // Delete a project from recent list (does NOT delete the folder)
   router.delete("/:encodedPath", (req: Request, res: Response) => {
-    const projectPath = decodePath(param(req, "encodedPath"));
+    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    if (!projectPath) {
+      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      return;
+    }
     removeRecentProject(projectPath);
+    unregisterProjectPath(projectPath);
     dbCache.delete(projectPath);
     res.json({ ok: true });
   });
 
   // Bulk save: replace all nodes + update transform
   router.put("/:encodedPath/state", (req: Request, res: Response) => {
-    const projectPath = decodePath(param(req, "encodedPath"));
+    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    if (!projectPath) {
+      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      return;
+    }
     const { transform, nodes } = req.body as {
       transform?: { x: number; y: number; scale: number };
       nodes?: Array<{
@@ -327,12 +367,20 @@ export function createProjectRoutes(): Router {
   // ── Context.md routes ────────────────────────────────
 
   router.get("/:encodedPath/context", (req: Request, res: Response) => {
-    const projectPath = decodePath(param(req, "encodedPath"));
+    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    if (!projectPath) {
+      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      return;
+    }
     res.json(readContext(projectPath));
   });
 
   router.put("/:encodedPath/context", (req: Request, res: Response) => {
-    const projectPath = decodePath(param(req, "encodedPath"));
+    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    if (!projectPath) {
+      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      return;
+    }
     const { content } = req.body as { content: string };
     writeContext(projectPath, content);
     res.json({ ok: true });
@@ -341,20 +389,155 @@ export function createProjectRoutes(): Router {
   // ── Settings routes ──────────────────────────────────
 
   router.get("/:encodedPath/settings", (req: Request, res: Response) => {
-    const projectPath = decodePath(param(req, "encodedPath"));
+    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    if (!projectPath) {
+      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      return;
+    }
     res.json(readSettings(projectPath));
   });
 
   router.put("/:encodedPath/settings", (req: Request, res: Response) => {
-    const projectPath = decodePath(param(req, "encodedPath"));
+    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    if (!projectPath) {
+      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      return;
+    }
     const settings = req.body as ProjectSettings;
     writeSettings(projectPath, settings);
     res.json({ ok: true });
   });
 
+  // ── Skills routes ───────────────────────────────────
+
+  router.get("/:encodedPath/skills", (req: Request, res: Response) => {
+    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    if (!projectPath) {
+      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      return;
+    }
+    res.json(readSkills(projectPath));
+  });
+
+  router.put("/:encodedPath/skills", (req: Request, res: Response) => {
+    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    if (!projectPath) {
+      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      return;
+    }
+    const skills = req.body as unknown[];
+    if (!Array.isArray(skills)) {
+      res.status(400).json({ error: "Expected an array of skills" });
+      return;
+    }
+    writeSkills(projectPath, skills);
+    res.json({ ok: true });
+  });
+
+  // ── File read ────────────────────────────────────────
+  router.get("/:encodedPath/file", (req: Request, res: Response) => {
+    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    if (!projectPath) {
+      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      return;
+    }
+    const relFile = req.query["path"];
+
+    if (typeof relFile !== "string" || !relFile) {
+      res.status(400).json({ error: "Missing ?path= query parameter" });
+      return;
+    }
+
+    // Prevent path traversal
+    const resolved = path.resolve(projectPath, relFile);
+    if (!resolved.startsWith(projectPath + path.sep) && resolved !== projectPath) {
+      res.status(403).json({ error: "Path traversal not allowed" });
+      return;
+    }
+
+    if (!fs.existsSync(resolved)) {
+      res.status(404).json({ error: "File not found" });
+      return;
+    }
+
+    const stat = fs.statSync(resolved);
+    if (!stat.isFile()) {
+      res.status(400).json({ error: "Not a file" });
+      return;
+    }
+
+    // Cap at 512KB to avoid huge payloads
+    const MAX_SIZE = 512 * 1024;
+    if (stat.size > MAX_SIZE) {
+      res.json({
+        path: relFile,
+        size: stat.size,
+        truncated: true,
+        content: fs.readFileSync(resolved, "utf-8").slice(0, MAX_SIZE),
+      });
+      return;
+    }
+
+    try {
+      const content = fs.readFileSync(resolved, "utf-8");
+      res.json({ path: relFile, size: stat.size, truncated: false, content });
+    } catch {
+      res.status(500).json({ error: "Failed to read file" });
+    }
+  });
+
+  // ── Directory listing (for file browser) ────────────
+  router.get("/:encodedPath/ls", (req: Request, res: Response) => {
+    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    if (!projectPath) {
+      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      return;
+    }
+    const relDir = (req.query["path"] as string) || "";
+
+    const resolved = path.resolve(projectPath, relDir);
+    if (!resolved.startsWith(projectPath + path.sep) && resolved !== projectPath) {
+      res.status(403).json({ error: "Path traversal not allowed" });
+      return;
+    }
+
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+      res.status(404).json({ error: "Directory not found" });
+      return;
+    }
+
+    const SKIP = new Set([
+      "node_modules", ".git", ".next", ".cache", "dist", "build",
+      ".turbo", ".vercel", ".DS_Store", "__pycache__", ".canvas-worktrees",
+      ".canvas", "coverage", ".nyc_output", ".parcel-cache",
+    ]);
+
+    try {
+      const entries = fs.readdirSync(resolved, { withFileTypes: true });
+      const dirs = entries
+        .filter(e => e.isDirectory() && !SKIP.has(e.name))
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(e => ({ name: e.name, type: "dir" as const }));
+      const files = entries
+        .filter(e => e.isFile())
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(e => {
+          const size = fs.statSync(path.join(resolved, e.name)).size;
+          return { name: e.name, type: "file" as const, size };
+        });
+      res.json({ path: relDir, entries: [...dirs, ...files] });
+    } catch {
+      res.status(500).json({ error: "Failed to list directory" });
+    }
+  });
+
   // ── Directory tree (high-level) ──────────────────────
   router.get("/:encodedPath/tree", (req: Request, res: Response) => {
-    const projectPath = decodePath(param(req, "encodedPath"));
+    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    if (!projectPath) {
+      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      return;
+    }
     const depthParam = req.query["depth"];
     const maxDepth = typeof depthParam === "string" ? Math.min(parseInt(depthParam, 10) || 2, 4) : 2;
 

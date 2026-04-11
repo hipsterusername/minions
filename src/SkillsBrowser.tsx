@@ -1,6 +1,5 @@
 import { useState, useMemo } from "react";
 import { getAllSkills } from "./skills/registry.ts";
-import { isUserSkill } from "./skills/user-skills.ts";
 import type { SkillTemplate } from "./skills/types.ts";
 
 interface SkillsBrowserProps {
@@ -110,7 +109,7 @@ export function SkillsBrowser({
           display: "flex",
           alignItems: "center",
           gap: 6,
-          boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+          boxShadow: "var(--shadow-md)",
         }}
       >
         <span style={{ fontSize: 14 }}>&#9889;</span>
@@ -144,7 +143,7 @@ export function SkillsBrowser({
         background: "var(--bg-secondary)",
         border: "1px solid var(--border-default)",
         borderRadius: 10,
-        boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+        boxShadow: "var(--shadow-lg)",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
@@ -276,6 +275,7 @@ export function SkillsBrowser({
       <div
         style={{
           flex: 1,
+          minHeight: 0,
           overflow: "auto",
           padding: "6px",
         }}
@@ -363,7 +363,6 @@ export function SkillsBrowser({
               {/* Skill cards */}
               {!isCatCollapsed &&
                 skills.map((skill) => {
-                  const isCustom = isUserSkill(skill.id);
                   return (
                     <div
                       key={skill.id}
@@ -442,30 +441,12 @@ export function SkillsBrowser({
                                 flexShrink: 0,
                               }}
                             />
-                            {isCustom && (
-                              <span
-                                style={{
-                                  fontSize: 9,
-                                  background: `${skill.accentColor}30`,
-                                  color: skill.accentColor,
-                                  padding: "1px 5px",
-                                  borderRadius: 4,
-                                  fontFamily: "var(--font-mono)",
-                                  flexShrink: 0,
-                                }}
-                              >
-                                custom
-                              </span>
-                            )}
                           </div>
                           <div
                             style={{
                               fontSize: 11,
                               color: "var(--text-muted)",
                               lineHeight: 1.3,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
                             }}
                           >
                             {skill.description}
@@ -513,35 +494,33 @@ export function SkillsBrowser({
                         >
                           &#9998;
                         </button>
-                        {isCustom && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDeleteSkill(skill.id);
-                            }}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            title="Delete skill"
-                            style={{
-                              fontSize: 11,
-                              background: "transparent",
-                              border: "none",
-                              cursor: "pointer",
-                              color: "var(--text-muted)",
-                              padding: "2px 4px",
-                              borderRadius: 3,
-                              lineHeight: 1,
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.color = "#e55";
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.color =
-                                "var(--text-muted)";
-                            }}
-                          >
-                            &#215;
-                          </button>
-                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteSkill(skill.id);
+                          }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          title="Delete skill"
+                          style={{
+                            fontSize: 11,
+                            background: "transparent",
+                            border: "none",
+                            cursor: "pointer",
+                            color: "var(--text-muted)",
+                            padding: "2px 4px",
+                            borderRadius: 3,
+                            lineHeight: 1,
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.color = "var(--danger-color)";
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.color =
+                              "var(--text-muted)";
+                          }}
+                        >
+                          &#215;
+                        </button>
                       </div>
                     </div>
                   );

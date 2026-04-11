@@ -17,19 +17,28 @@ import type { SkillTemplate } from "../skills/types.ts";
 import { ResizeHandle } from "../components/ResizeHandle.tsx";
 import { AutoTextarea } from "../components/AutoTextarea.tsx";
 import { SimpleMarkdown } from "../components/SimpleMarkdown.tsx";
+import { CopyButton } from "../components/CopyButton.tsx";
+import { AddAsNodeButton } from "../components/AddAsNodeButton.tsx";
 
 registerContract(LEADER_CONTRACT);
 
-export interface CompletedTask {
+/** A single entry in the leader's task plan. Covers all states. */
+export interface TaskPlanItem {
   taskId: string;
   title: string;
   description: string;
   priority: "low" | "medium" | "high" | "critical";
+  /** planned → running → completed | failed */
+  status: "planned" | "running" | "completed" | "failed";
+  /** Who is/was executing this task */
+  executor: "leader" | "minion";
+  minionSessionKey: string | null;
   result: string | null;
-  completedAt: number;
+  /** Cost in USD — populated for minion tasks on completion */
   cost: number;
-  sessionKey: string | null;
-  /** Full minion session messages for tooltip detail */
+  createdAt: number;
+  completedAt: number | null;
+  /** Last few assistant messages from the minion session (tooltip detail) */
   sessionSummary: string;
 }
 
@@ -44,11 +53,11 @@ export interface LeaderData {
   error: string | null;
   model: ModelOption;
   permissionMode: PermissionMode;
-  completedTasks: CompletedTask[];
+  taskPlan: TaskPlanItem[];
   worktreeIsolation: boolean;
   worktreePath: string | null;
   worktreeBranch: string | null;
-  worktreeStatus: "none" | "creating" | "active" | "merging" | "merged" | "discarded";
+  worktreeStatus: "none" | "creating" | "active" | "merging" | "merged" | "discarded" | "failed";
   /** IDs of skills tagged onto this leader */
   skillIds: string[];
   /** Variable values for each skill: { [skillId]: { [varName]: value } } */
@@ -57,6 +66,11 @@ export interface LeaderData {
   skillPanelOpen: boolean;
   /** If set, auto-start a session with this prompt (then clear it) */
   autoStartPrompt?: string | null;
+  /** Display name set by the agent via set_task_name */
+  taskName?: string | null;
+  /** Wait state: populated when the leader calls wait_and_continue */
+  waitUntil?: number | null;
+  waitReason?: string | null;
 }
 
 // LeaderMessage is now an alias for the shared DisplayMessage type
@@ -70,27 +84,133 @@ function sdkToLeaderMessages(sdkMsg: SdkMessage): LeaderMessage[] {
   return sdkToDisplayMessages(sdkMsg, "lm");
 }
 
-interface PlanItem {
-  title: string;
-  status: "pending" | "active" | "completed" | "failed";
+/* ── Wait countdown component ──────────────────────────────────────── */
+
+function WaitCountdown({ waitUntil, reason }: { waitUntil: number; reason: string }) {
+  // Capture the total duration once when the component mounts (or waitUntil changes)
+  const totalDurationRef = useRef(Math.max(1, waitUntil - Date.now()));
+  const [remaining, setRemaining] = useState(() => Math.max(0, waitUntil - Date.now()));
+
+  useEffect(() => {
+    totalDurationRef.current = Math.max(1, waitUntil - Date.now());
+    const tick = () => setRemaining(Math.max(0, waitUntil - Date.now()));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [waitUntil]);
+
+  const totalSecs = Math.ceil(remaining / 1000);
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs % 60;
+  const display = mins > 0 ? `${mins}:${secs.toString().padStart(2, "0")}` : `${secs}s`;
+
+  // Progress bar: fraction of total duration that has elapsed
+  const elapsed = 1 - (remaining / totalDurationRef.current);
+
+  return (
+    <div
+      style={{
+        margin: "8px 10px",
+        padding: "10px 12px",
+        borderRadius: 8,
+        background: "var(--bg-tertiary, #1a1a2e)",
+        border: "1px solid var(--accent, #6c63ff)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 16 }}>⏳</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
+          Waiting — resuming in {display}
+        </span>
+      </div>
+      <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.3 }}>
+        {reason}
+      </div>
+      {/* Progress bar */}
+      <div
+        style={{
+          height: 3,
+          borderRadius: 2,
+          background: "var(--border-default, #333)",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            height: "100%",
+            width: `${Math.min(100, elapsed * 100)}%`,
+            background: "var(--accent, #6c63ff)",
+            borderRadius: 2,
+            transition: "width 1s linear",
+          }}
+        />
+      </div>
+    </div>
+  );
 }
 
-/** Extract numbered/bulleted plan items from assistant text */
-function extractPlanItems(text: string): PlanItem[] {
-  const lines = text.split("\n");
-  const items: PlanItem[] = [];
-  const seen = new Set<string>();
-  for (const line of lines) {
-    const match = line.match(/^\s*(?:\d+[.)]\s+|[-*•]\s+|Task:\s+)(.+)/i);
-    if (match) {
-      const title = match[1].trim().replace(/\*\*/g, "");
-      if (title.length > 3 && title.length < 200 && !seen.has(title.toLowerCase())) {
-        seen.add(title.toLowerCase());
-        items.push({ title, status: "pending" });
-      }
-    }
+/* ── Inline editable title ──────────────────────────────────────────── */
+
+function EditableTitle({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Sync draft when value changes externally
+  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+
+  if (!editing) {
+    return (
+      <span
+        onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
+        style={{ cursor: "default", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+        title={`${value} (double-click to rename)`}
+      >
+        {value}
+      </span>
+    );
   }
-  return items;
+
+  const commit = () => {
+    const trimmed = draft.trim();
+    onChange(trimmed || value);
+    setEditing(false);
+  };
+
+  return (
+    <input
+      ref={inputRef}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") commit();
+        if (e.key === "Escape") { setDraft(value); setEditing(false); }
+        e.stopPropagation();
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
+      style={{
+        all: "unset",
+        fontSize: 11,
+        fontWeight: 600,
+        color: "var(--text-primary)",
+        background: "var(--bg-primary)",
+        border: "1px solid var(--border-active)",
+        borderRadius: 3,
+        padding: "1px 4px",
+        width: "100%",
+        minWidth: 40,
+        boxSizing: "border-box",
+      }}
+    />
+  );
 }
 
 /* ── Tool group helpers (Leader purple theme) ────────────────────────── */
@@ -149,6 +269,144 @@ const TOOL_ICONS: Record<string, string> = {
   WebSearch: "\u2315",
 };
 
+/** Format tool input into a readable summary string */
+function formatToolInput(toolName: string, input?: Record<string, unknown>): string | null {
+  if (!input || Object.keys(input).length === 0) return null;
+
+  // Show the most relevant field(s) based on tool type
+  switch (toolName) {
+    case "Read":
+      return input.file_path as string ?? null;
+    case "Write":
+      return input.file_path as string ?? null;
+    case "Edit":
+      return input.file_path as string ?? null;
+    case "Bash":
+      return input.command as string ?? null;
+    case "Glob":
+      return input.pattern as string ?? null;
+    case "Grep":
+      return input.pattern as string ?? null;
+    case "Agent":
+      return input.description as string ?? input.prompt as string ?? null;
+    case "WebFetch":
+      return input.url as string ?? null;
+    case "WebSearch":
+      return input.query as string ?? null;
+    default: {
+      // Generic: show first string value
+      for (const v of Object.values(input)) {
+        if (typeof v === "string" && v.length > 0) return v;
+      }
+      return null;
+    }
+  }
+}
+
+/** Format the full tool input as key-value pairs for the detail view */
+function formatToolInputDetail(input?: Record<string, unknown>): string {
+  if (!input || Object.keys(input).length === 0) return "(no input)";
+  const lines: string[] = [];
+  for (const [k, v] of Object.entries(input)) {
+    const val = typeof v === "string" ? v : JSON.stringify(v, null, 2);
+    lines.push(`${k}: ${val}`);
+  }
+  return lines.join("\n");
+}
+
+function ToolItem({ msg, accentColor }: { msg: LeaderMessage | DisplayMessage; accentColor: string }) {
+  const [detailOpen, setDetailOpen] = useState(false);
+  const icon = TOOL_ICONS[msg.toolName ?? ""] ?? "\u2022";
+  const summary = formatToolInput(msg.toolName ?? "", msg.toolInput);
+  const hasInput = msg.toolInput && Object.keys(msg.toolInput).length > 0;
+
+  return (
+    <div>
+      <div
+        onClick={hasInput ? () => setDetailOpen(!detailOpen) : undefined}
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          gap: 6,
+          fontSize: 11,
+          fontFamily: "var(--font-mono)",
+          color: "var(--text-muted)",
+          lineHeight: 1.6,
+          cursor: hasInput ? "pointer" : "default",
+          borderRadius: 3,
+          padding: "1px 4px",
+          transition: "background 0.15s",
+        }}
+        onMouseEnter={(e) => { if (hasInput) e.currentTarget.style.background = `${accentColor}11`; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+      >
+        <span
+          style={{
+            color: accentColor,
+            opacity: 0.5,
+            fontSize: 10,
+            flexShrink: 0,
+            width: 12,
+            textAlign: "center",
+          }}
+        >
+          {icon}
+        </span>
+        <span style={{ fontWeight: 500, flexShrink: 0 }}>{msg.toolName ?? "tool"}</span>
+        {summary && (
+          <span
+            style={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              opacity: 0.5,
+              flex: 1,
+              minWidth: 0,
+            }}
+          >
+            {summary}
+          </span>
+        )}
+        {hasInput && (
+          <span
+            style={{
+              fontSize: 8,
+              opacity: 0.35,
+              flexShrink: 0,
+              transition: "transform 0.15s",
+              transform: detailOpen ? "rotate(90deg)" : "rotate(0deg)",
+            }}
+          >
+            &#9654;
+          </span>
+        )}
+      </div>
+      {detailOpen && hasInput && (
+        <pre
+          style={{
+            margin: "2px 0 4px 22px",
+            padding: "6px 8px",
+            background: `${accentColor}08`,
+            border: `1px solid ${accentColor}18`,
+            borderRadius: 4,
+            fontSize: 10,
+            fontFamily: "var(--font-mono)",
+            color: "var(--text-muted)",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-all",
+            maxHeight: 200,
+            overflow: "auto",
+            lineHeight: 1.5,
+          }}
+        >
+          {formatToolInputDetail(msg.toolInput)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 function LeaderToolGroup({ msgs }: { msgs: LeaderMessage[] }) {
   const [expanded, setExpanded] = useState(false);
   const toolNames = msgs.map((m) => m.toolName ?? "tool");
@@ -169,7 +427,7 @@ function LeaderToolGroup({ msgs }: { msgs: LeaderMessage[] }) {
           gap: 6,
           width: "100%",
           padding: "4px 8px",
-          background: expanded ? "rgba(129, 140, 248, 0.08)" : "transparent",
+          background: expanded ? "var(--tool-bg)" : "transparent",
           border: "none",
           borderRadius: 4,
           cursor: "pointer",
@@ -195,8 +453,8 @@ function LeaderToolGroup({ msgs }: { msgs: LeaderMessage[] }) {
             height: 16,
             fontSize: 8,
             borderRadius: 3,
-            background: "rgba(129, 140, 248, 0.10)",
-            color: "#818cf8",
+            background: "var(--tool-bg-hover)",
+            color: "var(--tool-accent)",
             flexShrink: 0,
             transition: "transform 0.2s",
             transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
@@ -234,45 +492,9 @@ function LeaderToolGroup({ msgs }: { msgs: LeaderMessage[] }) {
               gap: 1,
             }}
           >
-            {msgs.map((m) => {
-              const icon = TOOL_ICONS[m.toolName ?? ""] ?? "\u2022";
-              return (
-                <div
-                  key={m.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "baseline",
-                    gap: 6,
-                    fontSize: 11,
-                    fontFamily: "var(--font-mono)",
-                    color: "var(--text-muted)",
-                    lineHeight: 1.6,
-                  }}
-                >
-                  <span
-                    style={{
-                      color: "#818cf8",
-                      opacity: 0.5,
-                      fontSize: 10,
-                      flexShrink: 0,
-                      width: 12,
-                      textAlign: "center",
-                    }}
-                  >
-                    {icon}
-                  </span>
-                  <span
-                    style={{
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {m.content}
-                  </span>
-                </div>
-              );
-            })}
+            {msgs.map((m) => (
+              <ToolItem key={m.id} msg={m} accentColor="var(--tool-accent)" />
+            ))}
           </div>
         </div>
       </div>
@@ -296,7 +518,7 @@ function LeaderThinkingGroup({ msgs }: { msgs: LeaderMessage[] }) {
           gap: 6,
           width: "100%",
           padding: "4px 8px",
-          background: expanded ? "rgba(168, 85, 247, 0.06)" : "transparent",
+          background: expanded ? "var(--thinking-bg)" : "transparent",
           border: "none",
           borderRadius: 4,
           cursor: "pointer",
@@ -322,8 +544,8 @@ function LeaderThinkingGroup({ msgs }: { msgs: LeaderMessage[] }) {
             height: 16,
             fontSize: 10,
             borderRadius: 3,
-            background: "rgba(168, 85, 247, 0.10)",
-            color: "#a855f7",
+            background: "var(--thinking-bg-hover)",
+            color: "var(--thinking-accent)",
             flexShrink: 0,
             transition: "transform 0.2s",
             transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
@@ -331,7 +553,7 @@ function LeaderThinkingGroup({ msgs }: { msgs: LeaderMessage[] }) {
         >
           &#9654;
         </span>
-        <span style={{ opacity: 0.7, color: "#a855f7" }}>Thinking</span>
+        <span style={{ opacity: 0.7, color: "var(--thinking-accent)" }}>Thinking</span>
         <span
           style={{
             marginLeft: "auto",
@@ -366,7 +588,7 @@ function LeaderThinkingGroup({ msgs }: { msgs: LeaderMessage[] }) {
               wordBreak: "break-word",
               overflowWrap: "break-word",
               fontStyle: "italic",
-              borderLeft: "2px solid rgba(168, 85, 247, 0.25)",
+              borderLeft: "2px solid var(--thinking-accent)",
               marginLeft: 8,
             }}
           >
@@ -379,10 +601,10 @@ function LeaderThinkingGroup({ msgs }: { msgs: LeaderMessage[] }) {
 }
 
 const PRIORITY_COLORS: Record<string, string> = {
-  critical: "#ef4444",
-  high: "#f97316",
-  medium: "#facc15",
-  low: "#60a5fa",
+  critical: "var(--priority-critical)",
+  high: "var(--priority-high)",
+  medium: "var(--warning-color)",
+  low: "var(--streaming-color)",
 };
 
 function timeAgo(ts: number): string {
@@ -403,6 +625,7 @@ function UserMessageBubble({ msg }: { msg: LeaderMessage }) {
 
   return (
     <div
+      className="copyable"
       style={{
         padding: "6px 10px",
         borderRadius: 6,
@@ -417,6 +640,7 @@ function UserMessageBubble({ msg }: { msg: LeaderMessage }) {
         position: "relative",
       }}
     >
+      <CopyButton text={msg.content} />
       {collapsed ? msg.content.slice(0, 200) + "…" : msg.content}
       {isLong && (
         <button
@@ -443,36 +667,44 @@ function UserMessageBubble({ msg }: { msg: LeaderMessage }) {
   );
 }
 
-/* ── P4: Unified Task Tracker + Plan in tabbed panel ──────────────────── */
+/* ── P4: Task Plan Panel ──────────────────────────────────────────────── */
+// Shows the full task lifecycle: planned → running → completed/failed.
+// Driven entirely by taskPlan[] which is populated from deterministic
+// server-side task_plan_update broadcasts and minion completion events.
 
-function PlanAndTrackerPanel({
-  planItems,
-  completedTasks,
-  planExpanded,
-  onTogglePlan,
+const TASK_STATUS_ICON: Record<TaskPlanItem["status"], string> = {
+  planned: "○",
+  running: "◎",
+  completed: "✓",
+  failed: "✗",
+};
+
+const TASK_STATUS_COLOR: Record<TaskPlanItem["status"], string> = {
+  planned: "var(--text-muted)",
+  running: "var(--status-creating)",
+  completed: "var(--success-color)",
+  failed: "var(--danger-color)",
+};
+
+function TaskPlanPanel({
+  taskPlan,
+  expanded,
+  onToggle,
+  onRevealMinion,
 }: {
-  planItems: PlanItem[];
-  completedTasks: CompletedTask[];
-  planExpanded: boolean;
-  onTogglePlan: () => void;
+  taskPlan: TaskPlanItem[];
+  expanded: boolean;
+  onToggle: () => void;
+  onRevealMinion?: (minionSessionKey: string) => void;
 }) {
-  const [activeTab, setActiveTab] = useState<"plan" | "tasks">(
-    planItems.length > 0 ? "plan" : "tasks",
-  );
-  const hasPlan = planItems.length > 0;
-  const hasTasks = completedTasks.length > 0;
-
-  if (!hasPlan && !hasTasks) return null;
-
-  const completedCount = planItems.filter((i) => i.status === "completed").length;
   const [hoveredTask, setHoveredTask] = useState<number | null>(null);
+  const [tooltipAnchor, setTooltipAnchor] = useState<DOMRect | null>(null);
 
-  const statusDotColor: Record<PlanItem["status"], string> = {
-    pending: "#4a5068",
-    active: "#facc15",
-    completed: "#4ade80",
-    failed: "#ef4444",
-  };
+  if (taskPlan.length === 0) return null;
+
+  const completedCount = taskPlan.filter(
+    (t) => t.status === "completed" || t.status === "failed",
+  ).length;
 
   return (
     <div
@@ -482,248 +714,242 @@ function PlanAndTrackerPanel({
         flexShrink: 0,
       }}
     >
-      {/* Tab bar */}
-      <div
+      {/* Header */}
+      <button
+        onClick={onToggle}
+        onMouseDown={(e) => e.stopPropagation()}
         style={{
           display: "flex",
-          borderBottom: "1px solid var(--border-default)",
+          alignItems: "center",
+          gap: 6,
+          width: "100%",
+          padding: "5px 12px",
+          background: "transparent",
+          border: "none",
+          borderBottom: expanded ? "1px solid var(--border-default)" : "none",
+          color: "var(--text-dim)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          fontWeight: 600,
+          cursor: "pointer",
+          textAlign: "left",
         }}
       >
-        {hasPlan && (
-          <button
-            onClick={() => { setActiveTab("plan"); if (!planExpanded) onTogglePlan(); }}
-            onMouseDown={(e) => e.stopPropagation()}
-            style={{
-              flex: 1,
-              padding: "6px 12px",
-              fontSize: 10,
-              fontWeight: 600,
-              fontFamily: "var(--font-mono)",
-              background: activeTab === "plan" ? "rgba(129, 140, 248, 0.08)" : "transparent",
-              border: "none",
-              borderBottom: activeTab === "plan" ? "2px solid #818cf8" : "2px solid transparent",
-              color: activeTab === "plan" ? "#818cf8" : "var(--text-muted)",
-              cursor: "pointer",
-              transition: "all 0.15s",
-            }}
-          >
-            Plan ({completedCount}/{planItems.length})
-          </button>
-        )}
-        {hasTasks && (
-          <button
-            onClick={() => setActiveTab("tasks")}
-            onMouseDown={(e) => e.stopPropagation()}
-            style={{
-              flex: 1,
-              padding: "6px 12px",
-              fontSize: 10,
-              fontWeight: 600,
-              fontFamily: "var(--font-mono)",
-              background: activeTab === "tasks" ? "rgba(74, 222, 128, 0.08)" : "transparent",
-              border: "none",
-              borderBottom: activeTab === "tasks" ? "2px solid #4ade80" : "2px solid transparent",
-              color: activeTab === "tasks" ? "#4ade80" : "var(--text-muted)",
-              cursor: "pointer",
-              transition: "all 0.15s",
-            }}
-          >
-            Tasks ({completedTasks.length})
-          </button>
-        )}
-        {/* Collapse button */}
-        <button
-          onClick={onTogglePlan}
-          onMouseDown={(e) => e.stopPropagation()}
+        <span
           style={{
-            padding: "6px 8px",
-            fontSize: 10,
-            background: "transparent",
-            border: "none",
-            color: "var(--text-muted)",
-            cursor: "pointer",
-            transform: planExpanded ? "rotate(0deg)" : "rotate(-90deg)",
+            fontSize: 8,
             transition: "transform 0.15s",
+            transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
+            color: "var(--text-muted)",
           }}
         >
-          ▼
-        </button>
-      </div>
+          &#9654;
+        </span>
+        <span style={{ flex: 1 }}>
+          Plan{" "}
+          <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>
+            ({completedCount}/{taskPlan.length})
+          </span>
+        </span>
+        {/* Live running indicator */}
+        {taskPlan.some((t) => t.status === "running") && (
+          <span style={{ color: "var(--status-creating)", fontSize: 9, opacity: 0.8 }}>
+            {taskPlan.filter((t) => t.status === "running").length} running
+          </span>
+        )}
+      </button>
 
-      {/* Panel content */}
-      {planExpanded && (
+      {/* Task list */}
+      {expanded && (
         <div
           onMouseDown={(e) => e.stopPropagation()}
           style={{
-            maxHeight: 200,
+            maxHeight: 220,
             overflowY: "auto",
-            padding: "6px 12px 8px",
+            padding: "4px 12px 8px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
           }}
         >
-          {activeTab === "plan" && hasPlan && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              {planItems.map((item, idx) => (
-                <div
-                  key={idx}
+          {taskPlan.map((task, idx) => {
+            const isMinion = task.executor === "minion";
+            const canReveal = isMinion && onRevealMinion && (task.minionSessionKey || task.taskId);
+            return (
+            <div
+              key={task.taskId}
+              onMouseEnter={(e) => { setHoveredTask(idx); setTooltipAnchor((e.currentTarget as HTMLElement).getBoundingClientRect()); }}
+              onMouseLeave={() => { setHoveredTask(null); setTooltipAnchor(null); }}
+              onClick={canReveal ? (e) => { e.stopPropagation(); onRevealMinion!(task.minionSessionKey ?? task.taskId); } : undefined}
+              onMouseDown={canReveal ? (e) => e.stopPropagation() : undefined}
+              style={{
+                position: "relative",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "4px 6px",
+                borderRadius: 4,
+                background: hoveredTask === idx ? "var(--bg-elevated)" : "transparent",
+                cursor: canReveal ? "pointer" : "default",
+                opacity: task.status === "planned" ? 0.6 : 1,
+              }}
+            >
+              {/* Status icon */}
+              <span
+                style={{
+                  fontSize: 11,
+                  color: TASK_STATUS_COLOR[task.status],
+                  flexShrink: 0,
+                  width: 14,
+                  textAlign: "center",
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
+                {TASK_STATUS_ICON[task.status]}
+              </span>
+
+              {/* Title */}
+              <span
+                style={{
+                  fontSize: 11,
+                  color: task.status === "failed" ? "var(--danger-color)" : "var(--text-primary)",
+                  flex: 1,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  textDecoration: task.status === "failed" ? "line-through" : "none",
+                }}
+              >
+                {task.title}
+              </span>
+
+              {/* Executor badge — minion badges hint at click-to-reveal */}
+              {task.status !== "planned" && (
+                <span
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    fontSize: 12,
-                    fontFamily: "var(--font-sans)",
-                    color: item.status === "completed"
-                      ? "var(--text-muted)"
-                      : "var(--text-primary)",
-                    lineHeight: 1.4,
+                    fontSize: 9,
+                    padding: "1px 4px",
+                    borderRadius: 3,
+                    background: task.executor === "leader"
+                      ? "var(--state-active)"
+                      : "var(--success-bg)",
+                    color: task.executor === "leader" ? "var(--accent)" : "var(--success-color)",
+                    fontFamily: "var(--font-mono)",
+                    flexShrink: 0,
+                    ...(canReveal ? { textDecoration: "underline", textUnderlineOffset: 2 } : {}),
+                  }}
+                  title={canReveal ? "Click to view minion" : undefined}
+                >
+                  {task.executor === "leader" ? "self" : canReveal ? "▸ minion" : "minion"}
+                </span>
+              )}
+
+              {/* Priority */}
+              <span
+                style={{
+                  fontSize: 9,
+                  padding: "1px 5px",
+                  borderRadius: 3,
+                  background: PRIORITY_COLORS[task.priority] ?? "var(--text-muted)",
+                  color: task.priority === "medium" ? "var(--bg-primary)" : "var(--text-primary)",
+                  fontWeight: 600,
+                  flexShrink: 0,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.3,
+                }}
+              >
+                {task.priority}
+              </span>
+
+              {/* Cost (minion tasks only, on completion) */}
+              {task.cost > 0 && (
+                <span
+                  style={{
+                    fontSize: 10,
+                    color: "var(--text-muted)",
+                    fontFamily: "var(--font-mono)",
+                    flexShrink: 0,
                   }}
                 >
-                  <span
-                    style={{
-                      width: 7,
-                      height: 7,
-                      borderRadius: "50%",
-                      background: statusDotColor[item.status],
-                      flexShrink: 0,
-                    }}
-                  />
-                  <span
-                    style={{
-                      textDecoration: item.status === "completed" ? "line-through" : "none",
-                      opacity: item.status === "completed" ? 0.6 : 1,
-                    }}
-                  >
-                    {item.title}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
+                  ${task.cost.toFixed(4)}
+                </span>
+              )}
 
-          {activeTab === "tasks" && hasTasks && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              {completedTasks.map((task, idx) => (
-                <div
-                  key={task.taskId}
-                  onMouseEnter={() => setHoveredTask(idx)}
-                  onMouseLeave={() => setHoveredTask(null)}
+              {/* Time */}
+              {task.completedAt != null && (
+                <span
                   style={{
-                    position: "relative",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "4px 6px",
-                    borderRadius: 4,
-                    background: hoveredTask === idx ? "var(--bg-elevated)" : "transparent",
-                    cursor: "default",
+                    fontSize: 9,
+                    color: "var(--text-muted)",
+                    fontFamily: "var(--font-mono)",
+                    flexShrink: 0,
                   }}
                 >
-                  <span style={{ color: "#4ade80", fontSize: 12, flexShrink: 0 }}>✓</span>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      color: "var(--text-primary)",
-                      flex: 1,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {task.title}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 9,
-                      padding: "1px 5px",
-                      borderRadius: 3,
-                      background: PRIORITY_COLORS[task.priority] ?? "#4a5068",
-                      color: "#fff",
-                      fontWeight: 600,
-                      flexShrink: 0,
-                      textTransform: "uppercase",
-                      letterSpacing: 0.3,
-                    }}
-                  >
-                    {task.priority}
-                  </span>
-                  {task.cost > 0 && (
-                    <span
-                      style={{
-                        fontSize: 10,
-                        color: "var(--text-muted)",
-                        fontFamily: "var(--font-mono)",
-                        flexShrink: 0,
-                      }}
-                    >
-                      ${task.cost.toFixed(4)}
-                    </span>
-                  )}
-                  <span
-                    style={{
-                      fontSize: 9,
-                      color: "var(--text-muted)",
-                      fontFamily: "var(--font-mono)",
-                      flexShrink: 0,
-                    }}
-                  >
-                    {timeAgo(task.completedAt)}
-                  </span>
+                  {timeAgo(task.completedAt)}
+                </span>
+              )}
 
-                  {/* Tooltip */}
-                  {hoveredTask === idx && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        bottom: "calc(100% + 6px)",
-                        left: 0,
-                        zIndex: 9999,
-                        background: "var(--bg-elevated)",
-                        border: "1px solid var(--border-default)",
-                        borderRadius: 8,
-                        padding: 12,
-                        maxWidth: 360,
-                        boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
-                        pointerEvents: "none",
-                      }}
-                    >
+              {/* Hover tooltip — rendered via portal to escape overflow:hidden/auto containers */}
+              {hoveredTask === idx && tooltipAnchor && (task.description || task.result || task.sessionSummary) &&
+                createPortal(
+                  <div
+                    style={{
+                      position: "fixed",
+                      top: tooltipAnchor.top - 6,
+                      left: tooltipAnchor.left,
+                      transform: "translateY(-100%)",
+                      zIndex: 99999,
+                      background: "var(--bg-elevated)",
+                      border: "1px solid var(--border-default)",
+                      borderRadius: 8,
+                      padding: 12,
+                      maxWidth: 360,
+                      boxShadow: "var(--shadow-lg)",
+                      pointerEvents: "none",
+                    }}
+                  >
+                    {task.description && (
                       <div style={{ fontSize: 11, color: "var(--text-primary)", marginBottom: 6, lineHeight: 1.4 }}>
                         {task.description.length > 200
                           ? task.description.slice(0, 200) + "…"
                           : task.description}
                       </div>
-                      {task.sessionKey && (
-                        <div
-                          style={{
-                            fontSize: 10,
-                            fontFamily: "var(--font-mono)",
-                            color: "var(--text-muted)",
-                            marginBottom: 4,
-                            opacity: 0.7,
-                          }}
-                        >
-                          {task.sessionKey}
-                        </div>
-                      )}
-                      {(task.result || task.sessionSummary) && (
-                        <div
-                          style={{
-                            fontSize: 10,
-                            color: "var(--text-secondary, var(--text-muted))",
-                            lineHeight: 1.4,
-                            whiteSpace: "pre-wrap",
-                            wordBreak: "break-word",
-                            maxHeight: 120,
-                            overflowY: "auto",
-                          }}
-                        >
-                          {task.result ?? task.sessionSummary}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
+                    )}
+                    {task.minionSessionKey && (
+                      <div
+                        style={{
+                          fontSize: 10,
+                          fontFamily: "var(--font-mono)",
+                          color: "var(--text-muted)",
+                          marginBottom: 4,
+                          opacity: 0.7,
+                        }}
+                      >
+                        {task.minionSessionKey}
+                      </div>
+                    )}
+                    {(task.result || task.sessionSummary) && (
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: "var(--text-secondary, var(--text-muted))",
+                          lineHeight: 1.4,
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-word",
+                          maxHeight: 120,
+                          overflowY: "auto",
+                        }}
+                      >
+                        {task.result ?? task.sessionSummary}
+                      </div>
+                    )}
+                  </div>,
+                  document.body,
+                )
+              }
             </div>
-          )}
+            );
+          })}
         </div>
       )}
     </div>
@@ -832,7 +1058,7 @@ function SkillVariableInputs({
           >
             {v.label}
             {v.required && (
-              <span style={{ color: "#ef4444", fontSize: 10 }}>*</span>
+              <span style={{ color: "var(--danger-color)", fontSize: 10 }}>*</span>
             )}
           </label>
           {v.type === "select" ? (
@@ -912,6 +1138,10 @@ function SkillVariableInputs({
   );
 }
 
+const FLYOUT_W = 680;
+const FLYOUT_H = 480;
+const FLYOUT_GAP = 6; // px below anchor
+
 function SkillFlyout({
   skillIds,
   skillValues,
@@ -937,16 +1167,26 @@ function SkillFlyout({
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
   useLayoutEffect(() => {
-    if (!open || !anchorRef?.current) {
-      setPos(null);
-      return;
-    }
-    const rect = anchorRef.current.getBoundingClientRect();
-    setPos({
-      top: rect.top,
-      left: rect.left - 308, // 300 width + 8 gap
-    });
+    if (!open) { setPos(null); return; }
+    const el = anchorRef?.current;
+    if (!el) { setPos(null); return; }
+
+    const rect = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    // Prefer opening below the anchor; flip above if it would clip
+    let top = rect.bottom + FLYOUT_GAP;
+    if (top + FLYOUT_H > vh - 8) top = rect.top - FLYOUT_H - FLYOUT_GAP;
+
+    // Left-align with anchor, clamp to viewport
+    let left = rect.left;
+    if (left + FLYOUT_W > vw - 8) left = vw - FLYOUT_W - 8;
+    if (left < 8) left = 8;
+
+    setPos({ top, left });
   }, [open, anchorRef]);
+
   const allSkills = getAllSkills();
   const taggedSkills = skillIds
     .map((id) => getSkill(id))
@@ -954,10 +1194,7 @@ function SkillFlyout({
 
   const handleAddSkill = (id: string) => {
     if (!skillIds.includes(id)) {
-      onUpdate({
-        skillIds: [...skillIds, id],
-        skillPanelOpen: true,
-      });
+      onUpdate({ skillIds: [...skillIds, id], skillPanelOpen: true });
     }
   };
 
@@ -970,27 +1207,21 @@ function SkillFlyout({
 
   const handleVarChange = (skillId: string, varName: string, value: string) => {
     const current = skillValues[skillId] ?? {};
-    onUpdate({
-      skillValues: {
-        ...skillValues,
-        [skillId]: { ...current, [varName]: value },
-      },
-    });
+    onUpdate({ skillValues: { ...skillValues, [skillId]: { ...current, [varName]: value } } });
   };
 
-  // Filter available skills by search + category
+  // Filter available skills by search + category (show all when readOnly)
   const query = searchQuery.toLowerCase().trim();
-  const availableByCategory = SKILL_CATEGORIES
+  const browseByCategory = SKILL_CATEGORIES
     .map((cat) => ({
       ...cat,
       skills: allSkills.filter(
         (s) =>
           s.category === cat.key &&
-          !skillIds.includes(s.id) &&
+          (readOnly ? skillIds.includes(s.id) : !skillIds.includes(s.id)) &&
           (query === "" ||
             s.name.toLowerCase().includes(query) ||
-            s.description.toLowerCase().includes(query) ||
-            s.category.toLowerCase().includes(query)),
+            s.description.toLowerCase().includes(query)),
       ),
     }))
     .filter((cat) => cat.skills.length > 0);
@@ -1000,227 +1231,340 @@ function SkillFlyout({
   const flyoutContent = (
     <>
       {/* Backdrop */}
-      <div
-        onClick={onClose}
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 9998,
-        }}
-      />
-      {/* Flyout panel */}
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 9998 }} />
+
+      {/* Wide split-panel modal — anchored below the skills button */}
       <div
         onMouseDown={(e) => e.stopPropagation()}
         style={{
           position: "fixed",
-          top: pos?.top ?? 100,
-          left: pos?.left ?? 100,
+          top: pos?.top ?? 120,
+          left: pos?.left ?? 120,
           zIndex: 9999,
-          width: 300,
-          maxHeight: 480,
+          width: FLYOUT_W,
+          height: FLYOUT_H,
           background: "var(--bg-secondary)",
           border: "1px solid var(--border-default)",
-          borderRadius: 8,
-          boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+          borderRadius: 10,
+          boxShadow: "var(--shadow-lg)",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
         }}
       >
-        {/* Flyout header */}
+        {/* ── Modal header ── */}
         <div
           style={{
-            padding: "10px 12px",
+            padding: "10px 14px",
             borderBottom: "1px solid var(--border-default)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
+            background: "var(--bg-primary)",
+            flexShrink: 0,
           }}
         >
-          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
-            Skills Configuration
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 14 }}>⚡</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>
+              Skills
+            </span>
+            {taggedSkills.length > 0 && (
+              <span
+                style={{
+                  fontSize: 10,
+                  fontFamily: "var(--font-mono)",
+                  padding: "1px 6px",
+                  borderRadius: 10,
+                  background: "var(--state-active)",
+                  color: "var(--accent)",
+                  border: "1px solid var(--accent)",
+                }}
+              >
+                {taggedSkills.length} active
+              </span>
+            )}
+          </div>
           <button
             onClick={onClose}
+            onMouseDown={(e) => e.stopPropagation()}
             style={{
               background: "none",
               border: "none",
               color: "var(--text-muted)",
               cursor: "pointer",
-              fontSize: 14,
+              fontSize: 16,
               padding: "0 2px",
+              lineHeight: 1,
             }}
           >
             ✕
           </button>
         </div>
 
-        {/* Scrollable body — everything below the header scrolls together */}
-        <div
-          style={{
-            flex: 1,
-            overflowY: "auto",
-            minHeight: 0,
-          }}
-        >
-          {/* Active skills with variable inputs */}
-          {taggedSkills.length > 0 && (
+        {/* ── Body: left browser + right config ── */}
+        <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+
+          {/* LEFT PANEL — skill browser */}
+          <div
+            style={{
+              width: 220,
+              flexShrink: 0,
+              borderRight: "1px solid var(--border-default)",
+              display: "flex",
+              flexDirection: "column",
+              background: "var(--bg-primary)",
+            }}
+          >
+            {/* Search */}
+            <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--border-default)", flexShrink: 0 }}>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onMouseDown={(e) => e.stopPropagation()}
+                placeholder="Search skills…"
+                style={{
+                  width: "100%",
+                  padding: "5px 8px",
+                  fontSize: 11,
+                  fontFamily: "var(--font-mono)",
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--border-default)",
+                  borderRadius: 5,
+                  color: "var(--text-primary)",
+                  outline: "none",
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
+
+            {/* Skill list — scrollable */}
+            <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "4px 6px 8px" }}>
+              {browseByCategory.length === 0 && (
+                <div style={{ padding: "16px 8px", fontSize: 11, color: "var(--text-muted)", textAlign: "center", fontFamily: "var(--font-mono)" }}>
+                  {query ? "No matches" : readOnly ? "No skills" : "All added ✓"}
+                </div>
+              )}
+              {browseByCategory.map((cat) => (
+                <div key={cat.key}>
+                  <div
+                    style={{
+                      fontSize: 9,
+                      fontFamily: "var(--font-mono)",
+                      color: "var(--text-muted)",
+                      padding: "8px 6px 3px",
+                      textTransform: "uppercase",
+                      letterSpacing: 0.6,
+                    }}
+                  >
+                    {cat.label}
+                  </div>
+                  {cat.skills.map((skill) => (
+                    <button
+                      key={skill.id}
+                      onClick={() => !readOnly && handleAddSkill(skill.id)}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      disabled={readOnly}
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 7,
+                        width: "100%",
+                        padding: "6px 6px",
+                        background: "transparent",
+                        border: "none",
+                        borderRadius: 5,
+                        color: "var(--text-primary)",
+                        fontSize: 11,
+                        cursor: readOnly ? "default" : "pointer",
+                        textAlign: "left",
+                        transition: "background 0.1s",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!readOnly) e.currentTarget.style.background = "var(--bg-elevated)";
+                      }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                    >
+                      <span style={{ fontSize: 13, lineHeight: 1.3, flexShrink: 0 }}>{skill.icon}</span>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
+                        <span style={{ fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {skill.name}
+                        </span>
+                        <span style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: 1.3 }}>
+                          {skill.description.length > 55
+                            ? skill.description.slice(0, 55) + "…"
+                            : skill.description}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* RIGHT PANEL — active skills config */}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+
+            {/* TOP GUTTER — active skill chips, single scrollable row */}
             <div
               style={{
-                padding: "8px 12px",
+                position: "relative",
                 borderBottom: "1px solid var(--border-default)",
+                flexShrink: 0,
+                background: "var(--state-hover)",
               }}
             >
               <div
                 style={{
-                  fontSize: 9,
-                  fontFamily: "var(--font-mono)",
-                  color: "var(--text-muted)",
-                  textTransform: "uppercase",
-                  letterSpacing: 0.5,
-                  marginBottom: 6,
+                  padding: "6px 12px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  flexWrap: "nowrap",
+                  overflowX: "auto",
+                  scrollbarWidth: "none",
+                  msOverflowStyle: "none",
+                  minHeight: 38,
+                  // hide webkit scrollbar via inline won't work — handled by className below
                 }}
               >
-                Active ({taggedSkills.length})
+                {taggedSkills.length === 0 ? (
+                  <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontStyle: "italic", whiteSpace: "nowrap" }}>
+                    No skills selected — pick from the left panel
+                  </span>
+                ) : (
+                  taggedSkills.map((skill) => (
+                    <SkillTagChip
+                      key={skill.id}
+                      skill={skill}
+                      readOnly={readOnly}
+                      onRemove={() => handleRemoveSkill(skill.id)}
+                    />
+                  ))
+                )}
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 4 }}>
-                {taggedSkills.map((skill) => (
-                  <SkillTagChip
-                    key={skill.id}
-                    skill={skill}
-                    readOnly={readOnly}
-                    onRemove={() => handleRemoveSkill(skill.id)}
-                  />
-                ))}
-              </div>
-              {/* Variable inputs */}
-              {taggedSkills.map((skill) => (
-                <SkillVariableInputs
-                  key={skill.id}
-                  skill={skill}
-                  values={skillValues[skill.id] ?? {}}
-                  onChange={(varName, value) => handleVarChange(skill.id, varName, value)}
-                  readOnly={readOnly}
-                />
-              ))}
-            </div>
-          )}
-
-          {/* Search + available skills */}
-          {!readOnly && (
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              {/* Search — sticky within the scroll area */}
-              <div
-                style={{
-                  padding: "8px 12px 4px",
-                  position: "sticky",
-                  top: 0,
-                  zIndex: 1,
-                  background: "var(--bg-secondary)",
-                }}
-              >
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  placeholder="Search skills..."
+              {/* Right-edge fade when chips overflow */}
+              {taggedSkills.length > 0 && (
+                <div
                   style={{
-                    width: "100%",
-                    padding: "6px 10px",
-                    fontSize: 12,
-                    fontFamily: "var(--font-mono)",
-                    background: "var(--bg-primary)",
-                    border: "1px solid var(--border-default)",
-                    borderRadius: 6,
-                    color: "var(--text-primary)",
-                    outline: "none",
-                    boxSizing: "border-box",
+                    position: "absolute",
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                    width: 32,
+                    background: "linear-gradient(to right, transparent, var(--state-hover))",
+                    pointerEvents: "none",
                   }}
                 />
-              </div>
+              )}
+            </div>
 
-              {/* Skill list */}
-              <div
-                style={{
-                  padding: "4px 8px 8px",
-                }}
-              >
-                {availableByCategory.length === 0 && (
+            {/* MAIN CONFIG AREA — scrollable, position:relative gives concrete bounds */}
+            <div style={{ flex: 1, position: "relative", minHeight: 0 }}>
+            <div style={{ position: "absolute", inset: 0, overflowY: "auto", padding: "12px 16px", display: "flex", flexDirection: "column", gap: 16 }}>
+              {taggedSkills.length === 0 && (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    height: "100%",
+                    gap: 10,
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  <span style={{ fontSize: 32, opacity: 0.3 }}>⚡</span>
+                  <span style={{ fontSize: 12, fontFamily: "var(--font-mono)" }}>
+                    Add skills to configure them here
+                  </span>
+                </div>
+              )}
+              {taggedSkills.map((skill) => (
+                <div
+                  key={skill.id}
+                  style={{
+                    background: "var(--bg-primary)",
+                    border: `1px solid ${skill.accentColor}30`,
+                    borderRadius: 7,
+                    overflow: "hidden",
+                    flexShrink: 0,
+                  }}
+                >
+                  {/* Skill config header */}
                   <div
                     style={{
-                      padding: "12px",
-                      fontSize: 11,
-                      color: "var(--text-muted)",
-                      textAlign: "center",
+                      padding: "8px 12px",
+                      borderBottom: `1px solid ${skill.accentColor}20`,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      background: `${skill.accentColor}10`,
                     }}
                   >
-                    {query ? "No skills match your search" : "All skills already added"}
-                  </div>
-                )}
-                {availableByCategory.map((cat) => (
-                  <div key={cat.key}>
-                    <div
-                      style={{
-                        fontSize: 9,
-                        fontFamily: "var(--font-mono)",
-                        color: "var(--text-muted)",
-                        padding: "6px 8px 2px",
-                        textTransform: "uppercase",
-                        letterSpacing: 0.5,
-                      }}
-                    >
-                      {cat.label}
+                    <span style={{ fontSize: 15 }}>{skill.icon}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: skill.accentColor, fontFamily: "var(--font-mono)" }}>
+                        {skill.name}
+                      </div>
+                      <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 1 }}>
+                        {skill.description}
+                      </div>
                     </div>
-                    {cat.skills.map((skill) => (
+                    {!readOnly && (
                       <button
-                        key={skill.id}
-                        onClick={() => handleAddSkill(skill.id)}
+                        onClick={() => handleRemoveSkill(skill.id)}
                         onMouseDown={(e) => e.stopPropagation()}
                         style={{
-                          display: "flex",
-                          alignItems: "flex-start",
-                          gap: 8,
-                          width: "100%",
-                          padding: "6px 8px",
-                          background: "transparent",
+                          background: "none",
                           border: "none",
-                          borderRadius: 4,
-                          color: "var(--text-primary)",
-                          fontSize: 11,
+                          color: "var(--text-muted)",
                           cursor: "pointer",
-                          textAlign: "left",
-                          transition: "background 0.1s",
+                          fontSize: 12,
+                          padding: "2px 4px",
+                          borderRadius: 3,
+                          lineHeight: 1,
+                          flexShrink: 0,
                         }}
-                        onMouseEnter={(e) =>
-                          (e.currentTarget.style.background = "var(--bg-elevated)")
-                        }
-                        onMouseLeave={(e) =>
-                          (e.currentTarget.style.background = "transparent")
-                        }
                       >
-                        <span style={{ fontSize: 14, lineHeight: 1.2 }}>{skill.icon}</span>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                          <span style={{ fontWeight: 500 }}>{skill.name}</span>
-                          <span
-                            style={{
-                              fontSize: 10,
-                              color: "var(--text-muted)",
-                              lineHeight: 1.3,
-                            }}
-                          >
-                            {skill.description.length > 80
-                              ? skill.description.slice(0, 80) + "…"
-                              : skill.description}
-                          </span>
-                        </div>
+                        ✕
                       </button>
-                    ))}
+                    )}
                   </div>
-                ))}
-              </div>
+                  {/* Variable inputs (or empty state) */}
+                  {skill.variables.length === 0 ? (
+                    <div style={{ padding: "10px 12px", fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>
+                      No configuration needed.
+                    </div>
+                  ) : (
+                    <div style={{ padding: "10px 12px" }}>
+                      <SkillVariableInputs
+                        skill={skill}
+                        values={skillValues[skill.id] ?? {}}
+                        onChange={(varName, value) => handleVarChange(skill.id, varName, value)}
+                        readOnly={readOnly}
+                      />
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
-          )}
+              {/* Bottom fade — suggests scrollability */}
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  height: 28,
+                  background: "linear-gradient(to bottom, transparent, var(--bg-secondary))",
+                  pointerEvents: "none",
+                }}
+              />
+            </div>
+          </div>
         </div>
       </div>
     </>
@@ -1246,11 +1590,11 @@ function ConfigFooter({
   const contextCount = getContextForNode?.().length ?? 0;
   const hasSession = !!data.sessionKey;
 
-  // Worktree status indicators (merged, merging, discarded) shown inline
+  // Worktree status indicators (merged, merging, discarded, failed) shown inline
   const wtStatus = data.worktreeStatus;
   const showWorktreeActions = wtStatus === "active" && data.status === "idle";
   const showWorktreeStatusBadge =
-    wtStatus === "merging" || wtStatus === "merged" || wtStatus === "discarded";
+    wtStatus === "merging" || wtStatus === "merged" || wtStatus === "discarded" || wtStatus === "failed";
 
   return (
     <div
@@ -1285,31 +1629,32 @@ function ConfigFooter({
             padding: "1px 6px",
             borderRadius: 3,
             background: data.worktreeIsolation
-              ? "rgba(99, 102, 241, 0.15)"
-              : "rgba(255, 255, 255, 0.04)",
-            color: data.worktreeIsolation ? "#818cf8" : "var(--text-muted)",
+              ? "var(--state-active)"
+              : "var(--state-hover)",
+            color: data.worktreeIsolation ? "var(--accent)" : "var(--text-muted)",
           }}
         >
           {"\u{1F33F}"} {data.worktreeIsolation ? "isolated" : "shared"}
         </span>
 
-        {/* Context count */}
+        {/* Context count — locked after session starts */}
         {contextCount > 0 && (
           <span
             style={{
               display: "inline-flex",
               alignItems: "center",
               gap: 3,
-              color: "#818cf8",
+              color: hasSession ? "var(--text-muted)" : "var(--accent)",
+              opacity: hasSession ? 0.7 : 1,
             }}
           >
-            {"\u{1F4CE}"} {contextCount}
+            {hasSession ? "\u{1F512}" : "\u{1F4CE}"} {contextCount}
           </span>
         )}
 
         {/* Worktree branch */}
         {data.worktreeBranch && (
-          <span style={{ color: "#a78bfa", fontSize: 9 }}>
+          <span style={{ color: "var(--accent)", fontSize: 9 }}>
             {data.worktreeBranch}
           </span>
         )}
@@ -1318,10 +1663,10 @@ function ConfigFooter({
         {showWorktreeStatusBadge && (
           <span
             style={{
-              color: wtStatus === "merged" ? "#4ade80" : wtStatus === "discarded" ? "#f87171" : "#facc15",
+              color: wtStatus === "merged" ? "var(--success-color)" : wtStatus === "failed" ? "var(--danger-color)" : wtStatus === "discarded" ? "var(--status-error)" : "var(--status-creating)",
             }}
           >
-            {wtStatus === "merging" ? "merging..." : wtStatus === "merged" ? "merged" : "discarded"}
+            {wtStatus === "merging" ? "merging..." : wtStatus === "merged" ? "merged" : wtStatus === "failed" ? "isolation failed" : "discarded"}
           </span>
         )}
 
@@ -1364,9 +1709,9 @@ function ConfigFooter({
                 cursor: hasSession ? "default" : "pointer",
                 opacity: hasSession ? 0.7 : 1,
                 background: data.worktreeIsolation
-                  ? "rgba(99, 102, 241, 0.25)"
-                  : "rgba(255, 255, 255, 0.06)",
-                color: data.worktreeIsolation ? "#818cf8" : "var(--text-muted)",
+                  ? "var(--state-active)"
+                  : "var(--state-hover)",
+                color: data.worktreeIsolation ? "var(--accent)" : "var(--text-muted)",
               }}
             >
               {"\u{1F33F}"} Worktree Isolation
@@ -1376,27 +1721,49 @@ function ConfigFooter({
                   width: 8,
                   height: 8,
                   borderRadius: "50%",
-                  background: data.worktreeIsolation ? "#818cf8" : "var(--text-muted)",
+                  background: data.worktreeIsolation ? "var(--accent)" : "var(--text-muted)",
                   marginLeft: 2,
                 }}
               />
             </button>
           </div>
 
-          {/* Context sources */}
+          {/* Context sources — locked after session starts */}
           {contextCount > 0 && (
             <div
               style={{
                 fontSize: 10,
-                color: "#818cf8",
+                color: hasSession ? "var(--text-muted)" : "var(--accent)",
                 fontFamily: "var(--font-mono)",
                 display: "flex",
                 alignItems: "center",
                 gap: 4,
                 marginBottom: 4,
+                opacity: hasSession ? 0.7 : 1,
               }}
             >
-              {"\u{1F4CE}"} {contextCount} context source{contextCount !== 1 ? "s" : ""} connected
+              {hasSession ? "\u{1F512}" : "\u{1F4CE}"}{" "}
+              {contextCount} context source{contextCount !== 1 ? "s" : ""}
+              {hasSession ? " (locked)" : " connected"}
+            </div>
+          )}
+
+          {/* Worktree failure warning */}
+          {wtStatus === "failed" && (
+            <div
+              style={{
+                marginTop: 4,
+                padding: "6px 8px",
+                background: "var(--danger-bg)",
+                border: "1px solid var(--danger-color)",
+                borderRadius: 4,
+                fontSize: 10,
+                color: "var(--status-error)",
+                lineHeight: 1.4,
+              }}
+            >
+              <strong>Isolation failed:</strong> This session is operating directly on your working tree.
+              Changes will not be isolated in a branch.
             </div>
           )}
 
@@ -1425,9 +1792,9 @@ function ConfigFooter({
                   }
                 }}
                 style={{
-                  padding: "3px 8px", fontSize: 10, background: "rgba(74, 222, 128, 0.15)",
-                  border: "1px solid #4ade80", borderRadius: 4,
-                  color: "#4ade80", cursor: "pointer", fontFamily: "var(--font-mono)",
+                  padding: "3px 8px", fontSize: 10, background: "var(--success-bg)",
+                  border: "1px solid var(--success-color)", borderRadius: 4,
+                  color: "var(--success-color)", cursor: "pointer", fontFamily: "var(--font-mono)",
                 }}
               >
                 Merge
@@ -1439,9 +1806,9 @@ function ConfigFooter({
                   }
                 }}
                 style={{
-                  padding: "3px 8px", fontSize: 10, background: "rgba(239, 68, 68, 0.1)",
-                  border: "1px solid #ef4444", borderRadius: 4,
-                  color: "#f87171", cursor: "pointer", fontFamily: "var(--font-mono)",
+                  padding: "3px 8px", fontSize: 10, background: "var(--danger-bg)",
+                  border: "1px solid var(--danger-color)", borderRadius: 4,
+                  color: "var(--status-error)", cursor: "pointer", fontFamily: "var(--font-mono)",
                 }}
               >
                 Discard
@@ -1515,7 +1882,7 @@ function HeaderMenu({
               background: "var(--bg-elevated)",
               border: "1px solid var(--border-default)",
               borderRadius: 6,
-              boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+              boxShadow: "var(--shadow-lg)",
               overflow: "hidden",
               minWidth: 160,
             }}
@@ -1552,13 +1919,13 @@ function HeaderMenu({
                   padding: "8px 12px",
                   background: "transparent",
                   border: "none",
-                  color: "#f87171",
+                  color: "var(--status-error)",
                   fontSize: 11,
                   fontFamily: "var(--font-mono)",
                   cursor: "pointer",
                   textAlign: "left",
                 }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(239,68,68,0.08)")}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--danger-bg)")}
                 onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
               >
                 <span style={{ opacity: 0.6 }}>↺</span> Reset Session
@@ -1581,6 +1948,8 @@ function LeaderNodeRenderer({
   getContextForNode,
   projectPath,
   onResize,
+  onAddContentNode,
+  onRevealMinion,
   canvasScale,
 }: NodeRenderProps) {
   const data = node.data as LeaderData;
@@ -1588,14 +1957,22 @@ function LeaderNodeRenderer({
   dataRef.current = data;
 
   const [input, setInput] = useState("");
-  const [planItems, setPlanItems] = useState<PlanItem[]>([]);
-  const [planExpanded, setPlanExpanded] = useState(false);
+  const [tasksExpanded, setTasksExpanded] = useState(false);
   const [skillFlyoutOpen, setSkillFlyoutOpen] = useState(false);
   const skillAnchorRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLDivElement>(null);
   const syncedRef = useRef(false);
-  const planParsedRef = useRef(false);
   const { banners, processSdkEvent, dismissBanner } = useStatusBanners();
+
+  // Auto-expand the plan panel when the first task is registered
+  const prevPlanCountRef = useRef(0);
+  useEffect(() => {
+    const count = data.taskPlan?.length ?? 0;
+    if (count > 0 && prevPlanCountRef.current === 0) {
+      setTasksExpanded(true);
+    }
+    prevPlanCountRef.current = count;
+  }, [data.taskPlan]);
 
   // Close flyout panels when canvas zoom level changes
   const prevScaleRef = useRef(canvasScale);
@@ -1605,53 +1982,6 @@ function LeaderNodeRenderer({
       setSkillFlyoutOpen(false);
     }
   }, [canvasScale]);
-
-  // Parse plan items from first assistant message
-  useEffect(() => {
-    if (planParsedRef.current) return;
-    const firstAssistant = data.messages.find((m) => m.role === "assistant");
-    if (!firstAssistant) return;
-    const items = extractPlanItems(firstAssistant.content);
-    if (items.length > 0) {
-      setPlanItems(items);
-      setPlanExpanded(true);
-      planParsedRef.current = true;
-    }
-  }, [data.messages]);
-
-  // Update plan item statuses based on completedTasks and system messages
-  useEffect(() => {
-    if (planItems.length === 0) return;
-    const completedTitles = (data.completedTasks ?? []).map((t) => t.title.toLowerCase());
-    const systemMsgs = data.messages
-      .filter((m) => m.role === "system")
-      .map((m) => m.content.toLowerCase());
-
-    setPlanItems((prev) => {
-      let changed = false;
-      const next = prev.map((item) => {
-        const lower = item.title.toLowerCase();
-        // Check completed
-        if (
-          item.status !== "completed" &&
-          completedTitles.some((ct) => ct.includes(lower) || lower.includes(ct))
-        ) {
-          changed = true;
-          return { ...item, status: "completed" as const };
-        }
-        // Check active (subagent started)
-        if (
-          item.status === "pending" &&
-          systemMsgs.some((sm) => sm.includes("subagent") && sm.includes(lower.slice(0, 20)))
-        ) {
-          changed = true;
-          return { ...item, status: "active" as const };
-        }
-        return item;
-      });
-      return changed ? next : prev;
-    });
-  }, [data.completedTasks, data.messages, planItems.length]);
 
   useEffect(() => {
     if (outputRef.current) {
@@ -1698,6 +2028,17 @@ function LeaderNodeRenderer({
           for (const evt of serverMsg.events) {
             if (evt.type === "sdk_event" && evt.message) {
               const lms = sdkToLeaderMessages(evt.message);
+              // When a result arrives, drop the last assistant msg if its
+              // content matches — avoids duplicate bubble on sync rebuild.
+              if (evt.message.type === "result") {
+                const resultText = lms.find((m) => m.role === "result")?.content;
+                if (resultText) {
+                  const lastIdx = rebuiltMessages.findLastIndex((m) => m.role === "assistant");
+                  if (lastIdx >= 0 && rebuiltMessages[lastIdx].content.trim() === resultText.trim()) {
+                    rebuiltMessages.splice(lastIdx, 1);
+                  }
+                }
+              }
               for (const lm of lms) {
                 if (!seenIds.has(lm.id)) {
                   seenIds.add(lm.id);
@@ -1728,6 +2069,11 @@ function LeaderNodeRenderer({
             syncData.worktreePath = wt.path;
             syncData.worktreeBranch = wt.branch;
             syncData.worktreeStatus = "active";
+          }
+
+          // Restore taskName from sync if available
+          if (serverMsg.taskName) {
+            syncData.taskName = serverMsg.taskName;
           }
 
           emitUpdate({
@@ -1779,7 +2125,20 @@ function LeaderNodeRenderer({
           const newMsgs = lms.filter((m) => !existingIds.has(m.id));
           if (newMsgs.length > 0) {
             const updated = { ...current };
-            updated.messages = [...current.messages, ...newMsgs];
+            let base = current.messages;
+            // When a result arrives, drop the last assistant msg if its content
+            // matches the result — the SDK sends both, but we only want the
+            // green result bubble.
+            if (serverMsg.message.type === "result") {
+              const resultText = newMsgs.find((m) => m.role === "result")?.content;
+              if (resultText) {
+                const lastIdx = base.findLastIndex((m) => m.role === "assistant");
+                if (lastIdx >= 0 && base[lastIdx].content.trim() === resultText.trim()) {
+                  base = [...base.slice(0, lastIdx), ...base.slice(lastIdx + 1)];
+                }
+              }
+            }
+            updated.messages = [...base, ...newMsgs];
             // Clear streaming buffer on complete assistant message
             if (serverMsg.message.type === "assistant") {
               updated.streamingText = "";
@@ -1813,9 +2172,17 @@ function LeaderNodeRenderer({
         serverMsg.type === "session_status" &&
         serverMsg.sessionKey === current.sessionKey
       ) {
+        const patch: Partial<LeaderData> = {
+          status: serverMsg.status as LeaderData["status"],
+        };
+        // Clear wait state when the session resumes (auto-continue fired)
+        if (serverMsg.status === "running" && current.waitUntil) {
+          patch.waitUntil = null;
+          patch.waitReason = null;
+        }
         emitUpdate({
           ...current,
-          status: serverMsg.status as LeaderData["status"],
+          ...patch,
         });
         return;
       }
@@ -1832,6 +2199,34 @@ function LeaderNodeRenderer({
         return;
       }
 
+      // Handle session_task_name — agent set its display name
+      if (serverMsg.type === "session_task_name" && serverMsg.sessionKey === current.sessionKey) {
+        emitUpdate({
+          ...current,
+          taskName: serverMsg.taskName,
+        });
+        return;
+      }
+
+      // Handle wait_state — leader is waiting or wait completed/cancelled
+      if (serverMsg.type === "wait_state" && serverMsg.sessionKey === current.sessionKey) {
+        if (serverMsg.action === "started") {
+          emitUpdate({
+            ...current,
+            waitUntil: (serverMsg.scheduledAt as number) + (serverMsg.durationMs as number),
+            waitReason: serverMsg.reason as string,
+          });
+        } else {
+          // completed or cancelled — clear wait state
+          emitUpdate({
+            ...current,
+            waitUntil: null,
+            waitReason: null,
+          });
+        }
+        return;
+      }
+
       // Handle worktree_created
       if (serverMsg.type === "worktree_created" && serverMsg.sessionKey === current.sessionKey) {
         emitUpdate({
@@ -1843,16 +2238,40 @@ function LeaderNodeRenderer({
         return;
       }
 
-      // Handle worktree_merged
+      // Handle worktree_failed — isolation was requested but creation failed
+      if (serverMsg.type === "worktree_failed" && serverMsg.sessionKey === current.sessionKey) {
+        emitUpdate({
+          ...current,
+          worktreeStatus: "failed",
+          worktreeIsolation: false,
+          error: (serverMsg.error as string) ?? "Worktree creation failed",
+        });
+        return;
+      }
+
+      // Handle worktree_merged — merge succeeded and worktree was cleaned up
       if (serverMsg.type === "worktree_merged" && serverMsg.sessionKey === current.sessionKey) {
         emitUpdate({
           ...current,
+          worktreePath: null,
+          worktreeBranch: null,
           worktreeStatus: "merged",
         });
         return;
       }
 
-      // Handle worktree_removed
+      // Handle worktree_merge_failed — conflicts, worktree still active
+      if (serverMsg.type === "worktree_merge_failed" && serverMsg.sessionKey === current.sessionKey) {
+        const result = serverMsg.result as { conflicts?: string[]; summary?: string } | undefined;
+        emitUpdate({
+          ...current,
+          worktreeStatus: "active",
+          error: `Merge conflicts: ${result?.conflicts?.join(", ") ?? result?.summary ?? "unknown"}`,
+        });
+        return;
+      }
+
+      // Handle worktree_removed (explicit discard)
       if (serverMsg.type === "worktree_removed" && serverMsg.sessionKey === current.sessionKey) {
         emitUpdate({
           ...current,
@@ -1877,8 +2296,14 @@ function LeaderNodeRenderer({
 
     if (contextItems.length > 0) {
       const contextBlock = contextItems
-        .map((item) => `## ${item.label} (${item.nodeType})\n\n${item.content}`)
-        .join("\n\n---\n\n");
+        .map((item) => {
+          const isDefault = item.label.toLowerCase() === item.nodeType.toLowerCase();
+          const openTag = isDefault
+            ? `<context-group>`
+            : `<context-group title="${item.label}">`;
+          return `${openTag}\n${item.content}\n</context-group>`;
+        })
+        .join("\n");
       fullPrompt = `<connected-context>\nThe following context has been provided by the user via connected canvas nodes:\n\n${contextBlock}\n</connected-context>\n\n${userPrompt}`;
     }
 
@@ -1895,6 +2320,7 @@ function LeaderNodeRenderer({
       prompt: fullPrompt,
       systemPrompt: finalSystemPrompt,
       role: "leader",
+      model: data.model,
       worktreeIsolation: data.worktreeIsolation,
       ...(projectPath ? { cwd: projectPath } : {}),
     });
@@ -1913,7 +2339,7 @@ function LeaderNodeRenderer({
       ],
     });
     setInput("");
-  }, [socketSend, input, onUpdateData, getContextForNode, data.skillIds, data.skillValues]);
+  }, [socketSend, input, onUpdateData, getContextForNode, data.skillIds, data.skillValues, data.model]);
 
   // Auto-start session when autoStartPrompt is set (e.g. from Kanban launch)
   const autoStartFired = useRef(false);
@@ -1930,8 +2356,14 @@ function LeaderNodeRenderer({
     let fullPrompt = prompt;
     if (contextItems.length > 0) {
       const contextBlock = contextItems
-        .map((item) => `## ${item.label} (${item.nodeType})\n\n${item.content}`)
-        .join("\n\n---\n\n");
+        .map((item) => {
+          const isDefault = item.label.toLowerCase() === item.nodeType.toLowerCase();
+          const openTag = isDefault
+            ? `<context-group>`
+            : `<context-group title="${item.label}">`;
+          return `${openTag}\n${item.content}\n</context-group>`;
+        })
+        .join("\n");
       fullPrompt = `<connected-context>\nThe following context has been provided by the user via connected canvas nodes:\n\n${contextBlock}\n</connected-context>\n\n${prompt}`;
     }
 
@@ -1948,6 +2380,7 @@ function LeaderNodeRenderer({
       prompt: fullPrompt,
       systemPrompt: finalSystemPrompt,
       role: "leader",
+      model: dataRef.current.model,
       worktreeIsolation: dataRef.current.worktreeIsolation,
       ...(projectPath ? { cwd: projectPath } : {}),
     });
@@ -2057,8 +2490,6 @@ function LeaderNodeRenderer({
       socketSend({ type: "stop_session", sessionKey: data.sessionKey });
     }
     syncedRef.current = false;
-    planParsedRef.current = false;
-    setPlanItems([]);
     emitUpdate({
       ...LEADER_DEFAULT_DATA,
       skillIds: data.skillIds,
@@ -2085,12 +2516,12 @@ function LeaderNodeRenderer({
   }, [data.messages]);
 
   const statusColor: Record<string, string> = {
-    disconnected: "#4a5068",
-    creating: "#facc15",
-    running: "#4ade80",
-    idle: "#60a5fa",
-    stopped: "#f87171",
-    error: "#ef4444",
+    disconnected: "var(--text-muted)",
+    creating: "var(--status-creating)",
+    running: "var(--success-color)",
+    idle: "var(--status-idle)",
+    stopped: "var(--status-error)",
+    error: "var(--danger-color)",
   };
 
   const taggedSkillCount = (data.skillIds ?? []).length;
@@ -2116,7 +2547,8 @@ function LeaderNodeRenderer({
           minWidth={420}
           minHeight={320}
           onResize={onResize}
-          color="#818cf8"
+          color="var(--accent)"
+          canvasScale={canvasScale}
         />
       )}
 
@@ -2129,7 +2561,7 @@ function LeaderNodeRenderer({
           alignItems: "center",
           borderBottom: "1px solid var(--border-default)",
           flexShrink: 0,
-          background: "linear-gradient(135deg, #1a1040 0%, var(--bg-secondary) 100%)",
+          background: "linear-gradient(135deg, var(--bg-surface) 0%, var(--bg-secondary) 100%)",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -2138,18 +2570,18 @@ function LeaderNodeRenderer({
               width: 20,
               height: 20,
               borderRadius: 5,
-              background: "linear-gradient(135deg, #818cf8, #6366f1)",
+              background: "var(--gradient-primary)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               fontSize: 11,
-              color: "#fff",
+              color: "var(--text-primary)",
               fontWeight: 700,
             }}
           >
             L
           </div>
-          <div>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div
               style={{
                 fontSize: 11,
@@ -2161,7 +2593,10 @@ function LeaderNodeRenderer({
                 gap: 4,
               }}
             >
-              Leader
+              <EditableTitle
+                value={data.taskName ?? "Leader"}
+                onChange={(name) => onUpdateData({ ...data, taskName: name || null })}
+              />
               {/* Skill badge icons in header */}
               {taggedSkillCount > 0 && (
                 <span
@@ -2175,8 +2610,8 @@ function LeaderNodeRenderer({
                     borderRadius: 3,
                     fontSize: 9,
                     fontFamily: "var(--font-mono)",
-                    background: "rgba(129, 140, 248, 0.12)",
-                    color: "#818cf8",
+                    background: "var(--state-active)",
+                    color: "var(--accent)",
                     cursor: "pointer",
                   }}
                   title="Skills configured"
@@ -2188,7 +2623,7 @@ function LeaderNodeRenderer({
             <div
               style={{
                 fontSize: 9,
-                color: statusColor[data.status] ?? "#4a5068",
+                color: statusColor[data.status] ?? "var(--text-muted)",
                 fontFamily: "var(--font-mono)",
                 textTransform: "uppercase",
                 letterSpacing: 0.5,
@@ -2226,10 +2661,10 @@ function LeaderNodeRenderer({
               style={{
                 padding: "2px 8px",
                 fontSize: 10,
-                background: "#3a1a1a",
-                border: "1px solid #ef4444",
+                background: "var(--danger-bg)",
+                border: "1px solid var(--danger-color)",
                 borderRadius: 4,
-                color: "#f87171",
+                color: "var(--status-error)",
                 cursor: "pointer",
                 fontFamily: "var(--font-mono)",
               }}
@@ -2252,69 +2687,61 @@ function LeaderNodeRenderer({
         sessionKey={data.sessionKey}
         status={data.status}
         model={data.model ?? "opus"}
-        permissionMode={data.permissionMode ?? "bypassPermissions"}
+        permissionMode={data.permissionMode ?? "auto"}
         onInterrupt={handleInterrupt}
         onModelChange={handleModelChange}
         onPermissionModeChange={handlePermissionModeChange}
-        accent="#818cf8"
+        accent="var(--accent)"
+        skillsContent={
+          <div
+            ref={skillAnchorRef}
+            style={{ display: "flex", alignItems: "center", gap: 6 }}
+          >
+            <button
+              onClick={() => setSkillFlyoutOpen(true)}
+              onMouseDown={(e) => e.stopPropagation()}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                padding: "3px 10px",
+                borderRadius: 4,
+                fontSize: 10,
+                fontWeight: 600,
+                fontFamily: "var(--font-mono)",
+                background: taggedSkillCount > 0 ? "var(--state-active)" : "var(--bg-elevated)",
+                border: taggedSkillCount > 0 ? "1px solid var(--accent)" : "1px dashed var(--border-default)",
+                color: taggedSkillCount > 0 ? "var(--accent)" : "var(--text-muted)",
+                cursor: "pointer",
+                transition: "all 0.15s",
+              }}
+            >
+              ⚡ Skills {taggedSkillCount > 0 ? `(${taggedSkillCount})` : ""}
+            </button>
+            {/* Show active skill chips inline */}
+            {(data.skillIds ?? [])
+              .map((id) => getSkill(id))
+              .filter((s): s is SkillTemplate => s !== undefined)
+              .slice(0, 3)
+              .map((skill) => (
+                <SkillTagChip key={skill.id} skill={skill} readOnly={false} onRemove={() => {
+                  const next = (data.skillIds ?? []).filter((s) => s !== skill.id);
+                  const nextValues = { ...(data.skillValues ?? {}) };
+                  delete nextValues[skill.id];
+                  onUpdateData({ ...dataRef.current, skillIds: next, skillValues: nextValues });
+                }} />
+              ))}
+            {taggedSkillCount > 3 && (
+              <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+                +{taggedSkillCount - 3} more
+              </span>
+            )}
+          </div>
+        }
       />
 
       {/* Status banners */}
       <StatusBannerStack banners={banners} onDismiss={dismissBanner} />
-
-      {/* P3: Skills button (opens flyout) — visible in all states */}
-      <div
-        ref={skillAnchorRef}
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{
-          padding: "4px 10px",
-          borderBottom: "1px solid var(--border-default)",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          flexShrink: 0,
-          background: "var(--bg-primary)",
-        }}
-      >
-        <button
-          onClick={() => setSkillFlyoutOpen(true)}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            padding: "3px 10px",
-            borderRadius: 4,
-            fontSize: 10,
-            fontWeight: 600,
-            fontFamily: "var(--font-mono)",
-            background: taggedSkillCount > 0 ? "rgba(129, 140, 248, 0.12)" : "var(--bg-elevated)",
-            border: taggedSkillCount > 0 ? "1px solid rgba(129, 140, 248, 0.3)" : "1px dashed var(--border-default)",
-            color: taggedSkillCount > 0 ? "#818cf8" : "var(--text-muted)",
-            cursor: "pointer",
-            transition: "all 0.15s",
-          }}
-        >
-          ⚡ Skills {taggedSkillCount > 0 ? `(${taggedSkillCount})` : ""}
-        </button>
-        {/* Show active skill chips inline */}
-        {(data.skillIds ?? [])
-          .map((id) => getSkill(id))
-          .filter((s): s is SkillTemplate => s !== undefined)
-          .slice(0, 3)
-          .map((skill) => (
-            <SkillTagChip key={skill.id} skill={skill} readOnly={false} onRemove={() => {
-              const next = (data.skillIds ?? []).filter((s) => s !== skill.id);
-              const nextValues = { ...(data.skillValues ?? {}) };
-              delete nextValues[skill.id];
-              onUpdateData({ ...dataRef.current, skillIds: next, skillValues: nextValues });
-            }} />
-          ))}
-        {taggedSkillCount > 3 && (
-          <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-            +{taggedSkillCount - 3} more
-          </span>
-        )}
-      </div>
 
       {/* P3: Skill Flyout */}
       <SkillFlyout
@@ -2329,12 +2756,12 @@ function LeaderNodeRenderer({
         onClose={() => setSkillFlyoutOpen(false)}
       />
 
-      {/* P4: Plan + Task Tracker (tabbed) */}
-      <PlanAndTrackerPanel
-        planItems={planItems}
-        completedTasks={data.completedTasks ?? []}
-        planExpanded={planExpanded}
-        onTogglePlan={() => setPlanExpanded((p) => !p)}
+      {/* P4: Task Plan Panel */}
+      <TaskPlanPanel
+        taskPlan={data.taskPlan ?? []}
+        expanded={tasksExpanded}
+        onToggle={() => setTasksExpanded((p) => !p)}
+        onRevealMinion={onRevealMinion}
       />
 
       {/* Messages — P5: with markdown rendering and collapsible user messages */}
@@ -2343,6 +2770,7 @@ function LeaderNodeRenderer({
         onMouseDown={(e) => e.stopPropagation()}
         style={{
           flex: 1,
+          minHeight: 0,
           overflow: "auto",
           padding: "8px 10px",
           display: "flex",
@@ -2390,18 +2818,22 @@ function LeaderNodeRenderer({
             return (
               <div
                 key={msg.id}
+                className="copyable"
                 style={{
+                  position: "relative",
                   padding: "6px 10px",
                   borderRadius: 6,
                   fontSize: 12,
                   lineHeight: 1.6,
                   fontFamily: "var(--font-sans)",
                   color: "var(--text-primary)",
-                  borderLeft: "2px solid #818cf8",
+                  borderLeft: "2px solid var(--accent)",
                   wordBreak: "break-word",
                   overflowWrap: "break-word",
                 }}
               >
+                <CopyButton text={msg.content} />
+                <AddAsNodeButton text={msg.content} onAdd={onAddContentNode} />
                 <SimpleMarkdown text={msg.content} />
                 {msg.suffix && (
                   <span style={{ display: "inline-block", marginLeft: 6, fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", opacity: 0.7 }}>
@@ -2417,18 +2849,22 @@ function LeaderNodeRenderer({
             return (
               <div
                 key={msg.id}
+                className="copyable"
                 style={{
+                  position: "relative",
                   padding: "6px 10px",
                   borderRadius: 6,
                   fontSize: 12,
                   lineHeight: 1.6,
                   fontFamily: "var(--font-sans)",
                   color: "var(--text-primary)",
-                  borderLeft: "2px solid #4ade80",
+                  borderLeft: "2px solid var(--success-color)",
                   wordBreak: "break-word",
                   overflowWrap: "break-word",
                 }}
               >
+                <CopyButton text={msg.content} />
+                <AddAsNodeButton text={msg.content} onAdd={onAddContentNode} />
                 <SimpleMarkdown text={msg.content} />
                 {msg.suffix && (
                   <span style={{ display: "inline-block", marginLeft: 6, fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", opacity: 0.7 }}>
@@ -2467,10 +2903,14 @@ function LeaderNodeRenderer({
         })}
         {/* Streaming partial text with blinking cursor */}
         {data.streamingText ? (
-          <StreamingBubble text={data.streamingText.replace(/<!--task-name:.+?-->\s*/g, "")} borderColor="#818cf8" />
+          <StreamingBubble text={data.streamingText.replace(/<!--task-name:.+?-->\s*/g, "")} borderColor="var(--accent)" />
         ) : data.status === "running" && data.messages.length > 0 ? (
           <StreamingIndicator label="Leader is thinking..." />
         ) : null}
+        {/* Wait countdown timer */}
+        {data.waitUntil && data.waitUntil > Date.now() && (
+          <WaitCountdown waitUntil={data.waitUntil} reason={data.waitReason ?? "Waiting..."} />
+        )}
       </div>
 
       {/* P4: Unified config footer (worktree + context) */}
@@ -2514,11 +2954,11 @@ function LeaderNodeRenderer({
             border: "none",
             background:
               input.trim() || !data.sessionKey
-                ? "linear-gradient(135deg, #818cf8, #6366f1)"
+                ? "var(--gradient-primary)"
                 : "var(--bg-elevated)",
             color:
               input.trim() || !data.sessionKey
-                ? "#fff"
+                ? "var(--text-primary)"
                 : "var(--text-muted)",
             fontSize: 12,
             fontWeight: 600,
@@ -2536,10 +2976,10 @@ function LeaderNodeRenderer({
         <div
           style={{
             padding: "6px 10px",
-            background: "#3a1a1a",
-            color: "#f87171",
+            background: "var(--danger-bg)",
+            color: "var(--status-error)",
             fontSize: 11,
-            borderTop: "1px solid #ef4444",
+            borderTop: "1px solid var(--danger-color)",
             fontFamily: "var(--font-mono)",
             wordBreak: "break-word",
           }}
@@ -2567,8 +3007,8 @@ export const LEADER_DEFAULT_DATA: LeaderData = {
   turns: 0,
   error: null,
   model: "opus",
-  permissionMode: "bypassPermissions",
-  completedTasks: [],
+  permissionMode: "auto",
+  taskPlan: [],
   worktreeIsolation: true,
   worktreePath: null,
   worktreeBranch: null,
@@ -2576,4 +3016,6 @@ export const LEADER_DEFAULT_DATA: LeaderData = {
   skillIds: [],
   skillValues: {},
   skillPanelOpen: false,
+  waitUntil: null,
+  waitReason: null,
 };

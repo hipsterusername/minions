@@ -63,6 +63,10 @@ export interface PortDefinition {
   direction: PortDirection;
   protocol: EdgeMessage["protocol"];
   maxConnections: number;
+  /** If true, port is used internally (edge routing) but not rendered as a visible dot */
+  hidden?: boolean;
+  /** Fixed vertical position as a ratio (0–1) of node height. Overrides even-spacing. */
+  anchorY?: number;
 }
 
 // ── Node interface contracts ────────────────────────────
@@ -88,6 +92,7 @@ export const LEADER_CONTRACT: NodeInterfaceContract = {
       direction: "output",
       protocol: "task-assignment",
       maxConnections: 10,
+      hidden: true,
     },
     {
       id: "status-in",
@@ -95,6 +100,7 @@ export const LEADER_CONTRACT: NodeInterfaceContract = {
       direction: "input",
       protocol: "task-status",
       maxConnections: 10,
+      hidden: true,
     },
     {
       id: "result-in",
@@ -102,6 +108,7 @@ export const LEADER_CONTRACT: NodeInterfaceContract = {
       direction: "input",
       protocol: "task-result",
       maxConnections: 10,
+      hidden: true,
     },
     {
       id: "context-in",
@@ -109,6 +116,7 @@ export const LEADER_CONTRACT: NodeInterfaceContract = {
       direction: "input",
       protocol: "context",
       maxConnections: 20,
+      anchorY: 0.92,
     },
   ],
 };
@@ -126,6 +134,7 @@ export const MINION_CONTRACT: NodeInterfaceContract = {
       direction: "input",
       protocol: "task-assignment",
       maxConnections: 1,
+      hidden: true,
     },
     {
       id: "status-out",
@@ -133,6 +142,7 @@ export const MINION_CONTRACT: NodeInterfaceContract = {
       direction: "output",
       protocol: "task-status",
       maxConnections: 1,
+      hidden: true,
     },
     {
       id: "result-out",
@@ -140,6 +150,7 @@ export const MINION_CONTRACT: NodeInterfaceContract = {
       direction: "output",
       protocol: "task-result",
       maxConnections: 1,
+      hidden: true,
     },
   ],
 };
@@ -159,6 +170,18 @@ export const CONTEXT_PROVIDER_CONTRACT: NodeInterfaceContract = {
   label: "Context Provider",
   description:
     "Provides text context that can be connected to Leader nodes.",
+  ports: [CONTEXT_OUT_PORT],
+};
+
+// ── Context group ─────────────────────────────────────
+
+export const CONTEXT_GROUP_CONTRACT: NodeInterfaceContract = {
+  nodeType: "context-group",
+  label: "Context Group",
+  description:
+    "A visual frame that groups context nodes by spatial containment. " +
+    "Place Markdown, Note, or File Viewer nodes inside the frame, " +
+    "then connect the group's output to a Leader.",
   ports: [CONTEXT_OUT_PORT],
 };
 
@@ -209,6 +232,7 @@ export function getAllContracts(): NodeInterfaceContract[] {
 registerContract(LEADER_CONTRACT);
 registerContract(MINION_CONTRACT);
 registerContract(CONTEXT_PROVIDER_CONTRACT);
+registerContract(CONTEXT_GROUP_CONTRACT);
 
 // ── Validation ──────────────────────────────────────────
 
@@ -224,4 +248,24 @@ export function canConnect(
   if (srcPort.direction !== "output") return false;
   if (tgtPort.direction !== "input") return false;
   return srcPort.protocol === tgtPort.protocol;
+}
+
+/**
+ * State-aware guard for context connections.
+ *
+ * Context edges are only valid when the target Leader has NOT yet
+ * started a session (sessionKey is null). Once a session is created
+ * the context is baked into the first prompt and the port is locked.
+ *
+ * Returns true if the connection should be allowed.
+ */
+export function canAcceptContextConnection(
+  targetNodeType: string,
+  targetPortId: string,
+  targetNodeData: unknown,
+): boolean {
+  // Only applies to leader context-in port
+  if (targetNodeType !== "leader" || targetPortId !== "context-in") return true;
+  const data = targetNodeData as { sessionKey: string | null } | undefined;
+  return !data?.sessionKey;
 }

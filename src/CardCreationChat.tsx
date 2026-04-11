@@ -82,10 +82,10 @@ interface CardCreationChatProps {
 // ─── Priority badge ───────────────────────────────────────
 
 const PRIORITY_COLORS: Record<KanbanCard["priority"], string> = {
-  critical: "#ef4444",
-  high: "#f97316",
-  medium: "#3b82f6",
-  low: "#6b7280",
+  critical: "var(--priority-critical)",
+  high: "var(--priority-high)",
+  medium: "var(--priority-medium)",
+  low: "var(--priority-low)",
 };
 
 function PriorityDot({ priority }: { priority: KanbanCard["priority"] }) {
@@ -243,10 +243,11 @@ export function CardCreationChat({
         columnId: "backlog",
         createdAt: Date.now(),
         model: "sonnet",
-        permissionMode: "bypassPermissions",
+        permissionMode: "auto",
         worktreeIsolation: true,
         skillIds: [],
         skillValues: {},
+        linkedContextNodeIds: [],
       };
       dispatch({ type: "ADD_CARD", card });
 
@@ -281,10 +282,11 @@ export function CardCreationChat({
           columnId: "backlog",
           createdAt: Date.now(),
           model: "sonnet",
-          permissionMode: "bypassPermissions",
+          permissionMode: "auto",
           worktreeIsolation: true,
           skillIds: [],
           skillValues: {},
+          linkedContextNodeIds: [],
         };
         dispatch({ type: "ADD_CARD", card });
       });

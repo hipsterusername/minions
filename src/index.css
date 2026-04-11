@@ -1,4 +1,5 @@
 :root {
+  /* ── Core palette (fallbacks — overridden by theme system) ── */
   --bg-primary: #0a0c14;
   --bg-secondary: #0f1117;
   --bg-surface: #141620;
@@ -7,13 +8,92 @@
   --border-hover: #2a3050;
   --text-primary: #e2e8f0;
   --text-secondary: #94a3b8;
-  --text-muted: #4a5068;
-  --text-dim: #64748b;
+  --text-muted: #7b82a0;
+  --text-dim: #8494b4;
   --accent: #f0883e;
   --accent-dark: #e05b2a;
   --dot-grid: #1a1d2e;
+  --selection-bg: rgba(240, 136, 62, 0.3);
   --font-sans: "DM Sans", "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", monospace;
+
+  /* ── Semantic colors ── */
+  --status-success: #34d399;
+  --status-running: #34d399;
+  --status-idle: #60a5fa;
+  --status-warning: #fbbf24;
+  --status-error: #f87171;
+  --status-stopped: #78716c;
+  --status-waiting: #a78bfa;
+  --status-creating: #fbbf24;
+
+  --priority-critical: #ef4444;
+  --priority-high: #f97316;
+  --priority-medium: #3b82f6;
+  --priority-low: #6b7280;
+
+  --status-disconnected: #64748b;
+
+  --model-sonnet: #f59e0b;
+  --model-opus: #a78bfa;
+  --model-haiku: #34d399;
+
+  --tool-accent: #818cf8;
+  --thinking-accent: #a855f7;
+  --success-color: #4ade80;
+  --danger-color: #dc2626;
+  --danger-color-text: #f87171;
+  --warning-color: #facc15;
+  --info-color: #60a5fa;
+  --streaming-color: #60a5fa;
+
+  /* ── Shadows ── */
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.2);
+  --shadow-md: 0 8px 24px rgba(0,0,0,0.3);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.4);
+  --overlay-bg: rgba(0,0,0,0.6);
+
+  /* ── Interactive states ── */
+  --state-hover: rgba(255,255,255,0.04);
+  --state-active: rgba(255,255,255,0.08);
+
+  /* ── Component accents ── */
+  --tool-bg: rgba(129, 140, 248, 0.08);
+  --tool-bg-hover: rgba(129, 140, 248, 0.12);
+  --thinking-bg: rgba(168, 85, 247, 0.06);
+  --thinking-bg-hover: rgba(168, 85, 247, 0.10);
+  --success-bg: rgba(74, 222, 128, 0.08);
+  --danger-bg: rgba(239, 68, 68, 0.08);
+  --warning-bg: rgba(250, 204, 21, 0.06);
+  --code-bg: rgba(129, 140, 248, 0.12);
+
+  /* ── Edges ── */
+  --edge-task: #818cf8;
+  --edge-status: #facc15;
+  --edge-context: #4ade80;
+
+  /* ── Note palette ── */
+  --note-blue-bg: #1a2744;
+  --note-blue-border: #1e3a5f;
+  --note-green-bg: #1a3329;
+  --note-green-border: #1e4d3d;
+  --note-orange-bg: #362014;
+  --note-orange-border: #4a2c1a;
+  --note-purple-bg: #2d1a3a;
+  --note-purple-border: #3b1f52;
+  --note-pink-bg: #3a1a2e;
+  --note-pink-border: #4a1f3a;
+  --note-slate-bg: #1e293b;
+  --note-slate-border: #334155;
+
+  /* ── Markdown ── */
+  --markdown-bg: #1a2a1a;
+  --markdown-border: #2a3a2a;
+
+  /* ── Gradients ── */
+  --gradient-primary: linear-gradient(135deg, #f0883e, #e05b2a);
+  --gradient-success: linear-gradient(135deg, #34d399, #10b981);
+  --gradient-danger: linear-gradient(135deg, #f87171, #ef4444);
 }
 
 *,
@@ -37,7 +117,18 @@ body,
 }
 
 ::selection {
-  background: rgba(240, 136, 62, 0.3);
+  background: var(--selection-bg);
+}
+
+@keyframes nodeEnter {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 @keyframes bannerSlideIn {
@@ -48,5 +139,31 @@ body,
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* Copy button: visible on hover of parent .copyable wrapper */
+.copyable:hover .copy-btn {
+  opacity: 1 !important;
+}
+.copy-btn:hover {
+  background: var(--bg-elevated) !important;
+  color: var(--text-primary) !important;
+}
+
+/* ── Canvas text-selection: disabled at the container level,
+   re-enabled for interactive elements inside nodes so users
+   can still select/copy text in inputs, textareas, etc. ── */
+input, textarea, select,
+[contenteditable="true"],
+[data-no-drag] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
   }
 }

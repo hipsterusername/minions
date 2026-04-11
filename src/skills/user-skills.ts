@@ -1,58 +1,59 @@
+/**
+ * Project Skills Management
+ *
+ * Skills are stored per-project on the server in .claude-canvas/skills.json.
+ * This module manages syncing between the in-memory registry and the server.
+ */
+
 import type { SkillTemplate } from "./types.ts";
-import { registerSkill, unregisterSkill } from "./registry.ts";
+import {
+  registerSkill,
+  unregisterSkill,
+  getAllSkills,
+  setAllSkills,
+} from "./registry.ts";
+import { getProjectSkills, saveProjectSkills } from "../api.ts";
 
-const STORAGE_KEY = "canvas-user-skills";
+let currentProjectId: string | null = null;
 
-/** Load all user skills from localStorage */
-export function loadUserSkills(): SkillTemplate[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed as SkillTemplate[];
-  } catch {
-    return [];
-  }
+/** Set the current project context for skills operations. */
+export function setSkillsProjectId(projectId: string | null): void {
+  currentProjectId = projectId;
 }
 
-function saveToStorage(skills: SkillTemplate[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(skills));
+/** Load skills from the server for the given project and populate the registry. */
+export async function loadProjectSkills(projectId: string): Promise<SkillTemplate[]> {
+  const skills = await getProjectSkills(projectId);
+  setAllSkills(skills);
+  currentProjectId = projectId;
+  return skills;
 }
 
-/** Save a user skill (create or update). Also registers it in the registry. */
-export function saveUserSkill(skill: SkillTemplate): void {
-  const skills = loadUserSkills();
-  const idx = skills.findIndex((s) => s.id === skill.id);
-  if (idx >= 0) {
-    skills[idx] = skill;
-  } else {
-    skills.push(skill);
-  }
-  saveToStorage(skills);
+/** Load skills from already-fetched data (e.g. from project open response). */
+export function loadProjectSkillsFromData(projectId: string, skills: SkillTemplate[]): void {
+  setAllSkills(skills);
+  currentProjectId = projectId;
+}
+
+/** Save a skill (create or update). Persists to the server. */
+export async function saveUserSkill(skill: SkillTemplate): Promise<void> {
   registerSkill(skill);
+  await persistToServer();
 }
 
-/** Delete a user skill by id. Also unregisters it from the registry. */
-export function deleteUserSkill(id: string): void {
-  const skills = loadUserSkills().filter((s) => s.id !== id);
-  saveToStorage(skills);
+/** Delete a skill by id. Persists to the server. */
+export async function deleteUserSkill(id: string): Promise<void> {
   unregisterSkill(id);
+  await persistToServer();
 }
 
-/** Check if a skill id is a user-created skill */
-export function isUserSkill(id: string): boolean {
-  const skills = loadUserSkills();
-  return skills.some((s) => s.id === id);
-}
-
-/** Export user skills as a JSON string for sharing */
+/** Export all project skills as a JSON string for sharing. */
 export function exportUserSkills(): string {
-  return JSON.stringify(loadUserSkills(), null, 2);
+  return JSON.stringify(getAllSkills(), null, 2);
 }
 
 /** Import skills from a JSON string. Returns count of imported skills. Merges by id. */
-export function importUserSkills(json: string): number {
+export async function importUserSkills(json: string): Promise<number> {
   const parsed: unknown = JSON.parse(json);
   if (!Array.isArray(parsed)) {
     throw new Error("Invalid import data: expected an array");
@@ -72,28 +73,21 @@ export function importUserSkills(json: string): number {
 
   if (valid.length === 0) return 0;
 
-  const existing = loadUserSkills();
-  const merged = new Map<string, SkillTemplate>();
-  for (const s of existing) merged.set(s.id, s);
-  for (const s of valid) merged.set(s.id, s);
-
-  const allSkills = Array.from(merged.values());
-  saveToStorage(allSkills);
-
-  for (const s of allSkills) {
+  // Merge into existing skills
+  for (const s of valid) {
     registerSkill(s);
   }
 
+  await persistToServer();
   return valid.length;
 }
 
-/**
- * Load user skills from localStorage and register them all in the registry.
- * Call this on app startup after built-in skills are registered.
- */
-export function initUserSkills(): void {
-  const skills = loadUserSkills();
-  for (const skill of skills) {
-    registerSkill(skill);
+/** Persist the current registry state to the server. */
+async function persistToServer(): Promise<void> {
+  if (!currentProjectId) {
+    console.warn("Cannot persist skills: no project ID set");
+    return;
   }
+  const allSkills = getAllSkills();
+  await saveProjectSkills(currentProjectId, allSkills);
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   getProjectContext,
   updateProjectContext,
@@ -11,14 +11,20 @@ import type { CanvasNode } from "./types.ts";
 import type { LeaderData } from "./nodes/LeaderNode.tsx";
 import type { MinionData } from "./nodes/MinionNode.tsx";
 import { ProjectTree, type LeaderActivity } from "./components/ProjectTree.tsx";
+import { useTheme } from "./use-theme.ts";
 
 interface ProjectPanelProps {
   projectId: string;
   projectPath: string;
   projectName: string;
   settings: ProjectSettings;
+  onSettingsChange?: (settings: ProjectSettings) => void;
   onSpawnContextExplorer: () => void;
   nodes: CanvasNode[];
+  /** Called when user clicks a file in the project tree */
+  onOpenFile?: (relativePath: string) => void;
+  /** Called when a node's data is updated from the panel (e.g. renaming a leader) */
+  onUpdateNodeData?: (nodeId: string, data: unknown) => void;
 }
 
 // ── Helpers ──────────────────────────────────────────────
@@ -55,13 +61,13 @@ type Tab = "dashboard" | "context" | "settings";
 // ── Status colors ────────────────────────────────────────
 
 const STATUS_COLORS: Record<string, { dot: string; text: string; bg: string }> = {
-  running:      { dot: "#34d399", text: "#34d399", bg: "rgba(52,211,153,0.08)" },
-  idle:         { dot: "#60a5fa", text: "#60a5fa", bg: "rgba(96,165,250,0.06)" },
-  creating:     { dot: "#fbbf24", text: "#fbbf24", bg: "rgba(251,191,36,0.06)" },
-  stopped:      { dot: "#78716c", text: "#78716c", bg: "rgba(120,113,108,0.06)" },
-  error:        { dot: "#f87171", text: "#f87171", bg: "rgba(248,113,113,0.06)" },
-  disconnected: { dot: "#57534e", text: "#57534e", bg: "transparent" },
-  waiting:      { dot: "#a78bfa", text: "#a78bfa", bg: "rgba(167,139,250,0.06)" },
+  running:      { dot: "var(--status-success)", text: "var(--status-success)", bg: "var(--success-bg)" },
+  idle:         { dot: "var(--status-idle)", text: "var(--status-idle)", bg: "var(--state-hover)" },
+  creating:     { dot: "var(--status-warning)", text: "var(--status-warning)", bg: "var(--warning-bg)" },
+  stopped:      { dot: "var(--status-stopped)", text: "var(--status-stopped)", bg: "var(--state-hover)" },
+  error:        { dot: "var(--status-error)", text: "var(--status-error)", bg: "var(--danger-bg)" },
+  disconnected: { dot: "var(--text-muted)", text: "var(--text-muted)", bg: "transparent" },
+  waiting:      { dot: "var(--status-waiting)", text: "var(--status-waiting)", bg: "var(--state-hover)" },
 };
 
 function statusOf(s: string) {
@@ -75,10 +81,15 @@ export function ProjectPanel({
   projectPath,
   projectName,
   settings,
+  onSettingsChange,
   onSpawnContextExplorer,
   nodes,
+  onOpenFile,
+  onUpdateNodeData,
 }: ProjectPanelProps) {
-  const [collapsed, setCollapsed] = useState(false);
+  const { themeId, setTheme, themes: allThemes } = useTheme();
+  const [collapsed, setCollapsed] = useState(true);
+  const userCollapsedRef = useRef(false);
   const [context, setContext] = useState<ProjectContext | null>(null);
   const [editing, setEditing] = useState(false);
   const [editBuffer, setEditBuffer] = useState("");
@@ -157,14 +168,12 @@ export function ProjectPanel({
         result.push({
           id: node.id,
           type: "leader",
-          name: d.messages?.find(m => m.content?.startsWith("Session on"))
-            ? node.id.slice(0, 8)
-            : node.id.slice(0, 8),
+          name: d.taskName ?? node.id.slice(0, 8),
           status: d.status,
           cost: d.totalCost,
           turns: d.turns,
           files,
-          minionCount: d.completedTasks?.length ?? 0,
+          minionCount: d.taskPlan?.filter((t) => t.executor === "minion" && t.status === "completed").length ?? 0,
           worktreeBranch: d.worktreeBranch ?? null,
         });
       } else if (node.type === "minion") {
@@ -190,6 +199,20 @@ export function ProjectPanel({
 
   const totalCost = agents.reduce((s, a) => s + a.cost, 0);
   const runningCount = agents.filter(a => a.status === "running").length;
+  const hasLeaderData = agents.some(a => a.type === "leader");
+
+  // Auto-expand when leader data arrives (unless user manually collapsed)
+  useEffect(() => {
+    if (hasLeaderData && !userCollapsedRef.current) {
+      setCollapsed(false);
+    }
+    if (!hasLeaderData) {
+      // Reset manual-collapse flag when all leaders disconnect,
+      // so the panel will auto-open for the next leader session
+      userCollapsedRef.current = false;
+      setCollapsed(true);
+    }
+  }, [hasLeaderData]);
 
   // ── Tabs to show ──
   const tabs: Tab[] = contextIsEmpty
@@ -215,7 +238,7 @@ export function ProjectPanel({
             display: "flex",
             alignItems: "center",
             gap: 8,
-            boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+            boxShadow: "var(--shadow-md)",
           }}
         >
           <span style={{ fontSize: 14 }}>&#9776;</span>
@@ -224,7 +247,7 @@ export function ProjectPanel({
             <span
               style={{
                 fontSize: 10,
-                color: "#34d399",
+                color: "var(--status-success)",
                 fontFamily: "var(--font-mono)",
                 display: "flex",
                 alignItems: "center",
@@ -236,8 +259,8 @@ export function ProjectPanel({
                   width: 5,
                   height: 5,
                   borderRadius: "50%",
-                  background: "#34d399",
-                  boxShadow: "0 0 6px #34d399",
+                  background: "var(--status-success)",
+                  boxShadow: "0 0 6px var(--status-success)",
                   display: "inline-block",
                 }}
               />
@@ -250,7 +273,7 @@ export function ProjectPanel({
                 width: 6,
                 height: 6,
                 borderRadius: "50%",
-                background: "#fbbf24",
+                background: "var(--status-warning)",
                 flexShrink: 0,
               }}
             />
@@ -273,7 +296,7 @@ export function ProjectPanel({
         background: "var(--bg-secondary)",
         border: "1px solid var(--border-default)",
         borderRadius: 10,
-        boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+        boxShadow: "var(--shadow-lg)",
         zIndex: 100,
         display: "flex",
         flexDirection: "column",
@@ -331,7 +354,7 @@ export function ProjectPanel({
           </div>
         </div>
         <button
-          onClick={() => setCollapsed(true)}
+          onClick={() => { userCollapsedRef.current = true; setCollapsed(true); }}
           style={{
             background: "transparent",
             border: "none",
@@ -379,21 +402,22 @@ export function ProjectPanel({
                   : "var(--text-muted)",
               cursor: "pointer",
               transition: "color 0.15s, border-color 0.15s",
-              position: "relative",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 5,
             }}
           >
             {tab}
             {tab === "dashboard" && runningCount > 0 && (
               <span
                 style={{
-                  position: "absolute",
-                  top: 4,
-                  right: "calc(50% - 28px)",
                   width: 5,
                   height: 5,
                   borderRadius: "50%",
-                  background: "#34d399",
-                  boxShadow: "0 0 6px #34d399",
+                  background: "var(--status-success)",
+                  boxShadow: "0 0 6px var(--status-success)",
+                  flexShrink: 0,
                 }}
               />
             )}
@@ -418,6 +442,9 @@ export function ProjectPanel({
             runningCount={runningCount}
             projectId={projectId}
             projectPath={projectPath}
+            onOpenFile={onOpenFile}
+            nodes={nodes}
+            onUpdateNodeData={onUpdateNodeData}
           />
         )}
 
@@ -466,10 +493,10 @@ export function ProjectPanel({
                       padding: "8px 16px",
                       fontSize: 12,
                       fontWeight: 500,
-                      background: "linear-gradient(135deg, #818cf8, #6366f1)",
+                      background: "var(--gradient-primary)",
                       border: "none",
                       borderRadius: 6,
-                      color: "#fff",
+                      color: "var(--text-primary)",
                       cursor: "pointer",
                       fontFamily: "var(--font-sans)",
                     }}
@@ -498,6 +525,7 @@ export function ProjectPanel({
                     fontFamily: "var(--font-mono)",
                     resize: "vertical",
                     outline: "none",
+                    boxSizing: "border-box",
                   }}
                   onFocus={(e) =>
                     (e.currentTarget.style.borderColor = "var(--accent)")
@@ -538,7 +566,7 @@ export function ProjectPanel({
                       background: "var(--accent)",
                       border: "none",
                       borderRadius: 4,
-                      color: "#fff",
+                      color: "var(--text-primary)",
                       cursor: saving ? "not-allowed" : "pointer",
                       opacity: saving ? 0.6 : 1,
                     }}
@@ -610,6 +638,113 @@ export function ProjectPanel({
         {/* ─── Settings Tab ─── */}
         {activeTab === "settings" && (
           <div>
+            {/* ── Theme Selector ── */}
+            <div style={{ marginBottom: 20 }}>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 11,
+                  fontFamily: "var(--font-mono)",
+                  color: "var(--text-muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
+                  marginBottom: 8,
+                }}
+              >
+                Theme
+              </label>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 6,
+                }}
+              >
+                {allThemes.map((t) => {
+                  const isActive = t.id === themeId;
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => setTheme(t.id)}
+                      title={t.description}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "7px 9px",
+                        background: isActive ? "var(--bg-elevated)" : "transparent",
+                        border: isActive
+                          ? "1px solid var(--accent)"
+                          : "1px solid var(--border-default)",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                        transition: "border-color 120ms ease, background 120ms ease",
+                        outline: "none",
+                        textAlign: "left",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isActive)
+                          (e.currentTarget as HTMLElement).style.borderColor =
+                            "var(--border-hover)";
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isActive)
+                          (e.currentTarget as HTMLElement).style.borderColor =
+                            "var(--border-default)";
+                      }}
+                    >
+                      {/* Swatch */}
+                      <div
+                        style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: 4,
+                          background: t.swatch.bg,
+                          border: `2px solid ${t.swatch.accent}`,
+                          flexShrink: 0,
+                          position: "relative",
+                          overflow: "hidden",
+                        }}
+                      >
+                        {/* Accent dot */}
+                        <div
+                          style={{
+                            position: "absolute",
+                            bottom: 1,
+                            right: 1,
+                            width: 6,
+                            height: 6,
+                            borderRadius: "50%",
+                            background: t.swatch.accent,
+                          }}
+                        />
+                      </div>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontFamily: "var(--font-sans)",
+                          color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
+                          fontWeight: isActive ? 600 : 400,
+                          lineHeight: 1.2,
+                        }}
+                      >
+                        {t.name}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* ── Separator ── */}
+            <div
+              style={{
+                height: 1,
+                background: "var(--border-default)",
+                marginBottom: 16,
+              }}
+            />
+
             <div style={{ marginBottom: 16 }}>
               <label
                 style={{
@@ -622,19 +757,76 @@ export function ProjectPanel({
                   marginBottom: 4,
                 }}
               >
-                Default Model
+                Default Permission Mode
               </label>
-              <div
+              <select
+                value={settings.defaultPermissionMode ?? "auto"}
+                onChange={(e) =>
+                  onSettingsChange?.({ ...settings, defaultPermissionMode: e.target.value })
+                }
                 style={{
+                  width: "100%",
                   fontSize: 12,
                   color: "var(--text-secondary)",
                   padding: "6px 10px",
                   background: "var(--bg-primary)",
+                  border: "1px solid var(--border-primary)",
                   borderRadius: 4,
                   fontFamily: "var(--font-mono)",
+                  cursor: "pointer",
+                  outline: "none",
                 }}
               >
-                {settings.defaultModel ?? "sonnet"}
+                <option value="auto">Auto (Safe Approve)</option>
+                <option value="bypassPermissions">Bypass Permissions</option>
+                <option value="default">Default (Ask)</option>
+              </select>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 11,
+                  fontFamily: "var(--font-mono)",
+                  color: "var(--text-muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
+                  marginBottom: 4,
+                }}
+              >
+                Default Leader Model
+              </label>
+              <select
+                value={settings.defaultLeaderModel ?? "opus"}
+                onChange={(e) =>
+                  onSettingsChange?.({ ...settings, defaultLeaderModel: e.target.value })
+                }
+                style={{
+                  width: "100%",
+                  fontSize: 12,
+                  color: "var(--text-secondary)",
+                  padding: "6px 10px",
+                  background: "var(--bg-primary)",
+                  border: "1px solid var(--border-primary)",
+                  borderRadius: 4,
+                  fontFamily: "var(--font-mono)",
+                  cursor: "pointer",
+                  outline: "none",
+                }}
+              >
+                <option value="sonnet">Sonnet</option>
+                <option value="opus">Opus</option>
+                <option value="haiku">Haiku</option>
+              </select>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: "var(--text-muted)",
+                  marginTop: 3,
+                  fontFamily: "var(--font-sans)",
+                }}
+              >
+                Model used when spawning new Leader nodes
               </div>
             </div>
             <div>
@@ -649,25 +841,120 @@ export function ProjectPanel({
                   marginBottom: 4,
                 }}
               >
-                Default Permission Mode
+                Default Minion Model
               </label>
-              <div
+              <select
+                value={settings.defaultMinionModel ?? "sonnet"}
+                onChange={(e) =>
+                  onSettingsChange?.({ ...settings, defaultMinionModel: e.target.value })
+                }
                 style={{
+                  width: "100%",
                   fontSize: 12,
                   color: "var(--text-secondary)",
                   padding: "6px 10px",
                   background: "var(--bg-primary)",
+                  border: "1px solid var(--border-primary)",
                   borderRadius: 4,
                   fontFamily: "var(--font-mono)",
+                  cursor: "pointer",
+                  outline: "none",
                 }}
               >
-                {settings.defaultPermissionMode ?? "bypassPermissions"}
+                <option value="sonnet">Sonnet</option>
+                <option value="opus">Opus</option>
+                <option value="haiku">Haiku</option>
+              </select>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: "var(--text-muted)",
+                  marginTop: 3,
+                  fontFamily: "var(--font-sans)",
+                }}
+              >
+                Model used when spawning new Minion nodes
               </div>
             </div>
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+// ── Inline editable agent name ──────────────────────────────
+
+function InlineEditName({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
+  useEffect(() => { if (editing) inputRef.current?.select(); }, [editing]);
+
+  if (!editing) {
+    return (
+      <span
+        onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
+        title={`${value} (double-click to rename)`}
+        style={{
+          fontSize: 11,
+          fontFamily: "var(--font-mono)",
+          fontWeight: 500,
+          color: "var(--text-primary)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          flex: 1,
+          minWidth: 0,
+          cursor: "default",
+        }}
+      >
+        {value}
+      </span>
+    );
+  }
+
+  const commit = () => {
+    const trimmed = draft.trim();
+    if (trimmed && trimmed !== value) onChange(trimmed);
+    setEditing(false);
+  };
+
+  return (
+    <input
+      ref={inputRef}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e: ReactKeyboardEvent) => {
+        if (e.key === "Enter") commit();
+        if (e.key === "Escape") { setDraft(value); setEditing(false); }
+        e.stopPropagation();
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
+      style={{
+        all: "unset",
+        fontSize: 11,
+        fontFamily: "var(--font-mono)",
+        fontWeight: 500,
+        color: "var(--text-primary)",
+        background: "var(--bg-primary)",
+        border: "1px solid var(--border-active)",
+        borderRadius: 3,
+        padding: "0 4px",
+        flex: 1,
+        minWidth: 0,
+        boxSizing: "border-box",
+      }}
+    />
   );
 }
 
@@ -679,6 +966,9 @@ function DashboardView({
   runningCount,
   projectId,
   projectPath,
+  onOpenFile,
+  nodes,
+  onUpdateNodeData,
 }: {
   agents: Array<{
     id: string;
@@ -695,6 +985,9 @@ function DashboardView({
   runningCount: number;
   projectId: string;
   projectPath: string;
+  onOpenFile?: (relativePath: string) => void;
+  nodes?: CanvasNode[];
+  onUpdateNodeData?: (nodeId: string, data: unknown) => void;
 }) {
   const [tree, setTree] = useState<TreeNode[] | null>(null);
   const [rootName, setRootName] = useState("");
@@ -703,20 +996,22 @@ function DashboardView({
   const [filterActive, setFilterActive] = useState(false);
   const fetchedRef = useRef(false);
 
+  const refreshTree = useCallback(async () => {
+    try {
+      const result = await getProjectTree(projectId, 3);
+      setTree(result.tree);
+      setRootName(result.root);
+    } catch {
+      setTreeError(true);
+    }
+  }, [projectId]);
+
   // Fetch tree on mount
   useEffect(() => {
     if (fetchedRef.current) return;
     fetchedRef.current = true;
-    void (async () => {
-      try {
-        const result = await getProjectTree(projectId, 3);
-        setTree(result.tree);
-        setRootName(result.root);
-      } catch {
-        setTreeError(true);
-      }
-    })();
-  }, [projectId]);
+    void refreshTree();
+  }, [refreshTree]);
 
   // Build leader activity list for the tree
   const leaderActivities: LeaderActivity[] = useMemo(() => {
@@ -724,9 +1019,11 @@ function DashboardView({
       .filter(a => a.type === "leader")
       .map((a, i) => ({
         id: a.id,
-        name: a.worktreeBranch
-          ? a.worktreeBranch.replace(/^canvas-/, "").slice(0, 16)
-          : a.name,
+        name: a.name !== a.id.slice(0, 8)
+          ? a.name  // taskName is set — use it directly
+          : a.worktreeBranch
+            ? a.worktreeBranch.replace(/^canvas-/, "").slice(0, 16)
+            : a.name,
         colorIndex: i,
         status: a.status as LeaderActivity["status"],
         files: a.files,
@@ -807,13 +1104,13 @@ function DashboardView({
                   width: 5,
                   height: 5,
                   borderRadius: "50%",
-                  background: "#34d399",
-                  boxShadow: "0 0 6px #34d399",
+                  background: "var(--status-success)",
+                  boxShadow: "0 0 6px var(--status-success)",
                   display: "inline-block",
                 }}
               />
             )}
-            <span style={{ color: runningCount > 0 ? "#34d399" : "var(--text-muted)" }}>
+            <span style={{ color: runningCount > 0 ? "var(--status-success)" : "var(--text-muted)" }}>
               {runningCount} active
             </span>
           </span>
@@ -891,8 +1188,8 @@ function DashboardView({
                   padding: "2px 8px",
                   fontSize: 9,
                   fontFamily: "var(--font-mono)",
-                  background: filterActive ? "rgba(240,136,62,0.12)" : "transparent",
-                  border: filterActive ? "1px solid rgba(240,136,62,0.25)" : "1px solid var(--border-default)",
+                  background: filterActive ? "var(--state-active)" : "transparent",
+                  border: filterActive ? "1px solid var(--accent)" : "1px solid var(--border-default)",
                   borderRadius: 4,
                   color: filterActive ? "var(--accent)" : "var(--text-muted)",
                   cursor: "pointer",
@@ -913,6 +1210,8 @@ function DashboardView({
               leaders={leaderActivities}
               projectPath={projectPath}
               filterActive={filterActive}
+              onFileClick={onOpenFile}
+              onTreeChanged={refreshTree}
             />
           ) : treeError ? (
             <div
@@ -996,30 +1295,42 @@ function DashboardView({
                       fontWeight: 600,
                       background:
                         agent.type === "leader"
-                          ? "rgba(240,136,62,0.12)"
-                          : "rgba(167,139,250,0.12)",
+                          ? "var(--state-active)"
+                          : "var(--state-hover)",
                       color:
-                        agent.type === "leader" ? "#f0883e" : "#a78bfa",
+                        agent.type === "leader" ? "var(--accent)" : "var(--accent)",
                       flexShrink: 0,
                     }}
                   >
                     {agent.type === "leader" ? "LDR" : "MIN"}
                   </span>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      fontFamily: "var(--font-mono)",
-                      fontWeight: 500,
-                      color: "var(--text-primary)",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      flex: 1,
-                      minWidth: 0,
-                    }}
-                  >
-                    {agent.name}
-                  </span>
+                  {agent.type === "leader" && onUpdateNodeData ? (
+                    <InlineEditName
+                      value={agent.name}
+                      onChange={(newName) => {
+                        const node = nodes?.find(n => n.id === agent.id);
+                        if (node) {
+                          onUpdateNodeData(agent.id, { ...(node.data as Record<string, unknown>), taskName: newName });
+                        }
+                      }}
+                    />
+                  ) : (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontFamily: "var(--font-mono)",
+                        fontWeight: 500,
+                        color: "var(--text-primary)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        flex: 1,
+                        minWidth: 0,
+                      }}
+                    >
+                      {agent.name}
+                    </span>
+                  )}
                   <span
                     style={{
                       display: "flex",
@@ -1082,7 +1393,7 @@ function DashboardView({
                       marginBottom: agent.files.length > 0 ? 6 : 0,
                       fontSize: 10,
                       fontFamily: "var(--font-mono)",
-                      color: "#a78bfa",
+                      color: "var(--accent)",
                     }}
                   >
                     <span style={{ opacity: 0.6 }}>&#9095;</span>
@@ -1138,12 +1449,12 @@ function DashboardView({
 
 // Leader color palette — shared between tree and agents view
 const LEADER_HUES = [
-  { dot: "#fb923c", ring: "rgba(251,146,60,0.3)" },
-  { dot: "#818cf8", ring: "rgba(129,140,248,0.3)" },
-  { dot: "#34d399", ring: "rgba(52,211,153,0.3)" },
-  { dot: "#f472b6", ring: "rgba(244,114,182,0.3)" },
-  { dot: "#38bdf8", ring: "rgba(56,189,248,0.3)" },
-  { dot: "#fbbf24", ring: "rgba(251,191,36,0.3)" },
-  { dot: "#a78bfa", ring: "rgba(167,139,250,0.3)" },
-  { dot: "#f87171", ring: "rgba(248,113,113,0.3)" },
+  { dot: "var(--priority-high)", ring: "color-mix(in srgb, var(--priority-high) 30%, transparent)" },
+  { dot: "var(--tool-accent)", ring: "color-mix(in srgb, var(--tool-accent) 30%, transparent)" },
+  { dot: "var(--status-success)", ring: "color-mix(in srgb, var(--status-success) 30%, transparent)" },
+  { dot: "var(--status-error)", ring: "color-mix(in srgb, var(--status-error) 30%, transparent)" },
+  { dot: "var(--streaming-color)", ring: "color-mix(in srgb, var(--streaming-color) 30%, transparent)" },
+  { dot: "var(--status-warning)", ring: "color-mix(in srgb, var(--status-warning) 30%, transparent)" },
+  { dot: "var(--status-waiting)", ring: "color-mix(in srgb, var(--status-waiting) 30%, transparent)" },
+  { dot: "var(--danger-color-text)", ring: "color-mix(in srgb, var(--danger-color-text) 30%, transparent)" },
 ];

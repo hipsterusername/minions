@@ -212,7 +212,7 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
                 fontSize: 14,
                 fontWeight: 500,
                 background: folderPath.trim() ? "var(--accent)" : "var(--bg-elevated)",
-                color: folderPath.trim() ? "#fff" : "var(--text-muted)",
+                color: folderPath.trim() ? "var(--text-primary)" : "var(--text-muted)",
                 border: "none",
                 borderRadius: 8,
                 cursor: creating || !folderPath.trim() ? "not-allowed" : "pointer",
@@ -344,7 +344,7 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
                   >
                     {formatDate(p.lastOpened)}
                     {!p.hasSidecar && (
-                      <span style={{ color: "#facc15", marginLeft: 8 }}>
+                      <span style={{ color: "var(--warning-color)", marginLeft: 8 }}>
                         No canvas data
                       </span>
                     )}
@@ -365,8 +365,8 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
                     marginLeft: 12,
                   }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = "#ef4444";
-                    e.currentTarget.style.color = "#ef4444";
+                    e.currentTarget.style.borderColor = "var(--danger-color)";
+                    e.currentTarget.style.color = "var(--danger-color)";
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.borderColor = "var(--border-default)";
