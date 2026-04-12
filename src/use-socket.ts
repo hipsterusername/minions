@@ -638,7 +638,7 @@ const KNOWN_SERVER_MESSAGE_TYPES = new Set([
   "task_completed",
   "task_failed",
   "task_name_set",
-  "render_dashboard",
+  "render_update",
 ]);
 
 function isValidServerMessage(data: unknown): data is ServerMessage {

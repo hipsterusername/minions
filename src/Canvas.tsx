@@ -22,7 +22,8 @@ import { PROTOCOL_COLORS } from "./components/PortDot.tsx";
 import type { LeaderData, TaskPlanItem } from "./nodes/LeaderNode.tsx";
 import type { MinionData, MinionTaskState } from "./nodes/MinionNode.tsx";
 import type { RenderNodeData } from "./nodes/RenderNode.tsx";
-import { emptyRenderState } from "./render-dsl.ts";
+import { emptyRenderState, applyRenderMessage } from "./render-dsl.ts";
+import type { RenderMessage } from "./render-dsl.ts";
 import { CanvasContextMenu } from "./components/CanvasContextMenu.tsx";
 import type { ContextMenuOption } from "./components/CanvasContextMenu.tsx";
 import { ConfirmModal } from "./components/ConfirmModal.tsx";
@@ -2300,6 +2301,11 @@ export function Canvas({
         spawnedRenderNodesRef.current.add(leader.id);
 
         // First render_update for this leader — spawn the render node
+        // Apply the first message's data immediately so it isn't lost
+        // (the RenderNode's own subscription hasn't mounted yet).
+        const renderMsg: RenderMessage = serverMsg as unknown as RenderMessage;
+        const initialState = applyRenderMessage(emptyRenderState(), renderMsg);
+
         const renderTypeDef = getAllNodeTypes().find((t) => t.type === "render");
         if (renderTypeDef) {
           const renderNode: CanvasNode = {
@@ -2313,7 +2319,7 @@ export function Canvas({
             data: {
               leaderSessionKey,
               leaderId: leader.id,
-              renderState: emptyRenderState(),
+              renderState: initialState,
             } satisfies RenderNodeData,
           };
           dispatch({ type: "ADD_NODE", node: renderNode });
