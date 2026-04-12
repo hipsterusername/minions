@@ -207,17 +207,13 @@ const Toolbar = memo(function Toolbar({
         <svg
           width="14"
           height="14"
-          viewBox="0 0 16 16"
+          viewBox="0 0 40 40"
           fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
         >
-          {/* Plus in circle */}
-          <circle cx="8" cy="8" r="6.5" />
-          <line x1="8" y1="4.5" x2="8" y2="11.5" />
-          <line x1="4.5" y1="8" x2="11.5" y2="8" />
+          {/* Crown hexagon leader icon */}
+          <path d="M20 4L34 12V28L20 36L6 28V12L20 4Z" fill="rgba(255,255,255,0.25)" stroke="currentColor" strokeWidth="2"/>
+          <path d="M12 24L10 16L16 20L20 14L24 20L30 16L28 24H12Z" fill="currentColor"/>
+          <circle cx="20" cy="28" r="2" fill="currentColor"/>
         </svg>
       </button>
       <button
