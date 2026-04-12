@@ -194,9 +194,12 @@ export async function mergeWorktree(
   const mergeArgs = strategy
     ? ["merge", targetBranch, "--no-edit", "-X", strategy]
     : ["merge", targetBranch, "--no-edit"];
+  console.log(`[worktree] mergeWorktree: running git ${mergeArgs.join(" ")} in ${worktreeCwd}`);
   try {
     await exec(mergeArgs, worktreeCwd);
+    console.log(`[worktree] mergeWorktree: merge succeeded cleanly`);
   } catch (err) {
+    console.log(`[worktree] mergeWorktree: merge failed — ${err instanceof Error ? err.message : String(err)}`);
     // Merge produced conflicts. If a strategy was requested, try to force-resolve
     // remaining conflicts (modify/delete, add/add, tree conflicts) that -X alone
     // can't handle, then complete the merge without aborting.
@@ -326,21 +329,24 @@ export async function mergeAndCleanup(
   targetBranch?: string,
   options?: { force?: boolean; strategy?: "ours" | "theirs" },
 ): Promise<MergeResult> {
+  console.log(`[worktree] mergeAndCleanup: path=${info.path} branch=${info.branch} options=${JSON.stringify(options)}`);
   // Auto-commit any uncommitted changes so they aren't lost on merge.
   try {
     await exec(["add", "-A"], info.path);
     const { stdout: status } = await exec(["status", "--porcelain"], info.path);
     if (status.trim()) {
+      console.log(`[worktree] mergeAndCleanup: auto-committing uncommitted changes`);
       await exec(
         ["commit", "-m", "chore: auto-commit uncommitted changes before merge"],
         info.path,
       );
     }
-  } catch {
-    // Non-fatal — proceed with merge even if auto-commit fails (e.g. nothing to commit)
+  } catch (e) {
+    console.log(`[worktree] mergeAndCleanup: auto-commit skipped (${e instanceof Error ? e.message : String(e)})`);
   }
 
   const result = await mergeWorktree(info, targetBranch, options);
+  console.log(`[worktree] mergeAndCleanup: merge result success=${result.success} summary=${result.summary}`);
 
   if (result.success) {
     // Merge succeeded — remove worktree directory + branch
