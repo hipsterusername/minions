@@ -210,9 +210,10 @@ const Toolbar = memo(function Toolbar({
           strokeLinecap="round"
           strokeLinejoin="round"
         >
-          {/* Crown / leader icon */}
-          <path d="M2 11L4 5L8 8L12 5L14 11Z" fill="currentColor" stroke="none" />
-          <rect x="2" y="11" width="12" height="2" rx="0.5" fill="currentColor" stroke="none" />
+          {/* Plus in circle */}
+          <circle cx="8" cy="8" r="6.5" />
+          <line x1="8" y1="4.5" x2="8" y2="11.5" />
+          <line x1="4.5" y1="8" x2="11.5" y2="8" />
         </svg>
       </button>
       <button
@@ -236,11 +237,18 @@ const Toolbar = memo(function Toolbar({
           width="14"
           height="14"
           viewBox="0 0 16 16"
-          fill="currentColor"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
         >
-          {/* Markdown M↓ icon */}
-          <path d="M1 3h2.5l2.5 4 2.5-4H11v10H9V7L7 10H5.5L4 7v6H1V3Z" />
-          <path d="M12.5 8v5M10.5 11l2 2 2-2" stroke="currentColor" fill="none" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          {/* Document with lines */}
+          <path d="M4 1.5h5l4 4v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1z" />
+          <path d="M9 1.5v4h4" />
+          <line x1="5.5" y1="8" x2="10.5" y2="8" />
+          <line x1="5.5" y1="10.5" x2="10.5" y2="10.5" />
+          <line x1="5.5" y1="13" x2="8" y2="13" />
         </svg>
       </button>
 
