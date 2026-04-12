@@ -534,12 +534,17 @@ function RenderNodeRenderer({
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: 10,
-              color: "var(--text-primary)",
-              fontWeight: 700,
+              overflow: "hidden",
+              flexShrink: 0,
             }}
           >
-            D
+            <img
+              src="/icons/dashboard.svg"
+              alt="Dashboard"
+              width={14}
+              height={14}
+              style={{ display: "block" }}
+            />
           </div>
           <span style={{
             fontSize: 11,
@@ -587,10 +592,15 @@ function RenderNodeRenderer({
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: 18,
               opacity: 0.5,
             }}>
-              D
+              <img
+                src="/icons/dashboard.svg"
+                alt="Dashboard"
+                width={28}
+                height={28}
+                style={{ display: "block" }}
+              />
             </div>
             <div style={{
               fontSize: 12,

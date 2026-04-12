@@ -607,17 +607,29 @@ function MinionNodeRenderer({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-          {/* Status dot */}
+          {/* Minion icon badge */}
           <div
             style={{
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              background: statusColor[data.status] ?? "var(--text-muted)",
+              width: 20,
+              height: 20,
+              borderRadius: 5,
+              background: `linear-gradient(135deg, ${statusColor[data.status] ?? "var(--text-muted)"}, ${statusColor[data.status] ?? "var(--text-muted)"}cc)`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              overflow: "hidden",
               flexShrink: 0,
               animation: data.status === "running" ? "minion-pulse 1.5s ease-in-out infinite" : "none",
             }}
-          />
+          >
+            <img
+              src="/icons/minion.svg"
+              alt="Minion"
+              width={14}
+              height={14}
+              style={{ display: "block" }}
+            />
+          </div>
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", lineHeight: 1 }}>
             Minion
           </span>
