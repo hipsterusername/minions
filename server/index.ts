@@ -1321,16 +1321,20 @@ function handleCommand(
     }
 
     case "force_merge": {
+      console.log(`[worktree] force_merge received for ${cmd.sessionKey}`);
       const forceSession = getSessionOrError(cmd.sessionKey, ws);
-      if (!forceSession) return;
+      if (!forceSession) { console.log("[worktree] force_merge: session not found"); return; }
       if (!forceSession.worktree) {
+        console.log("[worktree] force_merge: no worktree on session");
         sendControlError(ws, "force_merge", cmd.sessionKey!, cmd.requestId, "No worktree for this session");
         return;
       }
+      console.log(`[worktree] force_merge: starting merge for ${forceSession.worktree.branch} at ${forceSession.worktree.path}`);
       // Capture the project path before cleanup removes the worktree directory
       const forceProjectPath = forceSession.worktree.projectPath;
       mergeAndCleanup(forceSession.worktree, undefined, { force: true })
         .then((result) => {
+          console.log(`[worktree] force_merge result:`, JSON.stringify(result));
           if (result.success) {
             if (forceSession.taskState?.approval) {
               forceSession.taskState.approval = null;
@@ -1374,6 +1378,7 @@ function handleCommand(
           sendControlResponse(ws, "force_merge", cmd.sessionKey!, cmd.requestId, { result });
         })
         .catch((err: unknown) => {
+          console.error(`[worktree] force_merge error:`, err instanceof Error ? err.message : String(err));
           sendControlError(ws, "force_merge", cmd.sessionKey!, cmd.requestId, err instanceof Error ? err.message : String(err));
         });
       break;
