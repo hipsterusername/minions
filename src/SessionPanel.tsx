@@ -17,7 +17,7 @@ export function SessionPanel({
   onAttachSession,
   attachedSessionKeys,
 }: SessionPanelProps) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
