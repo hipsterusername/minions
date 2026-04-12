@@ -71,6 +71,8 @@ export interface LeaderData {
   /** Wait state: populated when the leader calls wait_and_continue */
   waitUntil?: number | null;
   waitReason?: string | null;
+  /** Set briefly after a successful merge to show a confirmation banner */
+  mergeConfirmed?: boolean;
   /** Merge conflict state: set when approve & merge fails due to conflicts */
   mergeConflict?: {
     conflicts: string[];
@@ -1931,6 +1933,37 @@ function ConfigFooter({
         </div>
       )}
 
+      {/* Merge confirmed banner — shown briefly after successful merge */}
+      {data.mergeConfirmed && (
+        <div
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            margin: "0 6px 6px",
+            padding: "8px 12px",
+            background: "var(--success-bg, rgba(46,160,67,0.1))",
+            border: "2px solid var(--success-color)",
+            borderRadius: 8,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--success-color)", display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 14 }}>✓</span> Merged successfully
+          </div>
+          <button
+            onClick={() => onUpdateData({ ...data, mergeConfirmed: false })}
+            style={{
+              background: "none", border: "none", color: "var(--text-muted)",
+              cursor: "pointer", fontSize: 14, padding: "0 2px", lineHeight: 1,
+            }}
+            title="Dismiss"
+          >
+            x
+          </button>
+        </div>
+      )}
+
       {/* Merge conflict panel — shown when approve & merge fails */}
       {data.approvalPending && data.mergeConflict && (
         <div
@@ -2535,6 +2568,8 @@ function LeaderNodeRenderer({
           worktreePath: null,
           worktreeBranch: null,
           worktreeStatus: "merged",
+          mergeConflict: null,
+          mergeConfirmed: true,
         });
         return;
       }
