@@ -205,8 +205,8 @@ const Toolbar = memo(function Toolbar({
         title="Add Leader node"
       >
         <svg
-          width="14"
-          height="14"
+          width="18"
+          height="18"
           viewBox="0 0 40 40"
           fill="none"
         >
