@@ -45,7 +45,7 @@ check("git installed", () => {
 // ── Claude Code CLI ────────────────────────────────────
 check("Claude Code CLI (claude)", () => {
   try {
-    const ver = execSync("claude --version 2>/dev/null", { encoding: "utf8" }).trim();
+    const ver = execSync("claude --version", { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }).trim();
     return ver;
   } catch {
     throw new Error(

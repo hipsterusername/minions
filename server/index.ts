@@ -419,7 +419,7 @@ async function runSession(
   try {
     // All sessions (leader, minion, generic) get full coding tools.
     // Leaders can also delegate parallel work to minions via assign_task MCP tool.
-    const fullTools = [
+    const codeTools = [
       "Read",
       "Write",
       "Edit",
@@ -430,6 +430,32 @@ async function runSession(
       "WebFetch",
       "WebSearch",
     ];
+
+    // MCP tools must be explicitly allowed so sessions (especially in
+    // worktree dirs) don't prompt for permission at runtime.
+    const mcpTools = role === "leader"
+      ? [
+          "mcp__task-manager__plan_task",
+          "mcp__task-manager__assign_task",
+          "mcp__task-manager__complete_task",
+          "mcp__task-manager__get_task_status",
+          "mcp__task-manager__set_task_name",
+          "mcp__task-manager__wait_and_continue",
+          "mcp__task-manager__request_approval",
+          "mcp__render-dashboard__render_set",
+          "mcp__render-dashboard__render_patch",
+          "mcp__render-dashboard__render_append",
+          "mcp__render-dashboard__render_remove",
+        ]
+      : role === "minion"
+        ? [
+            "mcp__minion-status__report_step",
+            "mcp__minion-status__report_done",
+            "mcp__minion-status__report_fail",
+          ]
+        : [];
+
+    const fullTools = [...codeTools, ...mcpTools];
 
     const options: Record<string, unknown> = {
       cwd: session.cwd,

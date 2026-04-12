@@ -2959,12 +2959,21 @@ function LeaderNodeRenderer({
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: 11,
-              color: "var(--text-primary)",
-              fontWeight: 700,
+              overflow: "hidden",
+              flexShrink: 0,
             }}
           >
-            L
+            <img
+              src={
+                data.status === "running" || data.status === "creating"
+                  ? "/icons/leader-active.svg"
+                  : "/icons/leader-idle.svg"
+              }
+              alt={data.status === "running" || data.status === "creating" ? "Active" : "Idle"}
+              width={14}
+              height={14}
+              style={{ display: "block" }}
+            />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div

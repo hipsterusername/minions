@@ -1,109 +1,152 @@
-# Minions — Project Context
+# Minions — Developer Context
 
-> Generated 2026-03-31. Read time: ~5 minutes.
+> Generated 2026-04-11. Read time: ~5–7 minutes.
+> **Status**: Early development, private testing. Expect rough edges.
 
 ---
 
 ## 1. What Is This?
 
-**Minions** is an infinite-canvas web UI for orchestrating multiple Claude Code AI agent sessions. You open a project directory, place nodes on a canvas, and connect them with typed edges. The key nodes are:
+**Minions** is a spatial canvas UI for orchestrating multi-agent Claude Code AI workflows. A user opens any project directory, places nodes on an infinite canvas, and directs a **Leader** agent with a complex task. The Leader automatically plans work, spawns parallel **Minion** agents (each isolated in a git worktree), tracks their progress on a live task board, and integrates results — all visualized in real time.
 
-- **Leader** — an orchestrating Claude session that decomposes work, plans tasks, and delegates to Minions.
-- **Minion** — a worker Claude session that receives task assignments, executes them, and reports progress/results back.
-- **ClaudeSession** — a generic Claude session node (no orchestration role).
-- **MarkdownNode / FileViewerNode** — context-providing nodes you can wire into a Leader.
-- **NoteNode** — sticky note.
-
-A **Kanban board** view sits alongside the canvas as an alternate way to create cards and launch Leaders.
+Key features:
+- **Infinite canvas** — drag, zoom, arrange agent nodes spatially
+- **Leader/Minion orchestration** — Leader plans, delegates, and monitors; Minions execute
+- **Kanban board** — card-based task planning with per-card model/skill/worktree config
+- **Git worktree isolation** — each Leader session runs in its own `git worktree` branch
+- **Live render dashboard** — Leader pushes structured UI components (metrics, tables, charts) to a side panel
+- **Skills browser** — parameterizable Markdown templates injected into Leader system prompts
+- **Persistent projects** — per-project SQLite databases, session history, cost tracking
 
 ---
 
 ## 2. Tech Stack
 
 | Layer | Technology |
-|-------|-----------|
+|---|---|
 | Frontend | React 19.2, Vite 8, TypeScript 5.9 (strict) |
-| Backend | Node.js, Express 5, `tsx` runtime |
-| Realtime | WebSocket (`ws` v8), port **3141** |
-| AI SDK | `@anthropic-ai/claude-agent-sdk` v0.2.86 — `query()` returns an async generator of SDK events |
-| MCP Tools | `createSdkMcpServer` + `tool` from the SDK (used for Leader task tools & Minion status tools) |
-| Persistence | `better-sqlite3` per-project SQLite DB + `~/.claude-canvas/recent-projects.json` |
-| Validation | Zod v4 |
-| Package manager | pnpm (workspace root) |
+| Backend | Node.js ≥22, Express 5, `tsx` runtime |
+| Realtime | WebSocket (`ws` v8) — port **3141** |
+| AI Runtime | `@anthropic-ai/claude-agent-sdk` ^0.2.86 — wraps `claude` CLI |
+| MCP Tools | `createSdkMcpServer` + `tool` from the SDK (task, render, minion-status tools) |
+| Storage | `better-sqlite3` (per-project SQLite sidecar) + global JSON index |
+| Validation | Zod 4 |
+| Package manager | pnpm |
+
+No external services, no Docker, no `.env` required for normal use.
 
 ---
 
-## 3. Directory Structure
+## 3. Architecture
 
 ```
-/
-├── index.html                  # Vite HTML entry
-├── package.json
-├── vite.config.ts
-├── tsconfig.app.json / tsconfig.node.json
-│
-├── src/                        # Frontend (React)
-│   ├── main.tsx                # React entry — mounts <App />
-│   ├── App.tsx                 # Root: ProjectList ↔ ProjectView, canvas+graph state
-│   ├── Canvas.tsx              # Infinite canvas — panning, zoom, node rendering
-│   ├── CanvasNode.tsx          # Node wrapper (drag, select, socket passthrough)
-│   ├── canvas-state.ts         # useReducer: ADD_NODE / REMOVE_NODE / MOVE_NODE / RESIZE_NODE …
-│   ├── graph.ts                # Port/protocol type definitions, contracts, canConnect()
-│   ├── graph-runtime.ts        # graphReducer (edge CRUD), dispatchMessage(), query helpers
-│   ├── EdgeRenderer.tsx        # SVG bezier edges with animated dash overlays
-│   ├── node-registry.ts        # registerNodeType() / getNodeType() / getAllNodeTypes()
-│   ├── types.ts                # Core types: Position, Size, CanvasNode, CanvasAction, NodeRenderProps
-│   ├── use-socket.ts           # WebSocket hook: auto-reconnect, ServerMessage union type
-│   ├── sdk-messages.ts         # SDK event → DisplayMessage normalisation
-│   ├── streaming.ts            # Stream delta extraction helpers
-│   ├── api.ts                  # REST fetch helpers (ProjectSummary, ProjectWithNodes, …)
-│   ├── use-autosave.ts         # Debounced canvas + graph persistence
-│   ├── SessionPanel.tsx        # Collapsible left-panel session list
-│   ├── ProjectList.tsx         # Recent projects list
-│   ├── ProjectHeader.tsx       # Top bar: canvas / kanban / skills view switcher
-│   ├── ProjectPanel.tsx        # Right-side project context panel
-│   ├── KanbanBoard.tsx         # Kanban board view
-│   ├── kanban-types.ts         # KanbanCard, KanbanColumn, KanbanAction, kanbanReducer
-│   ├── use-kanban.ts           # Kanban state hook
-│   ├── SkillsBrowser.tsx       # Skill gallery UI
-│   ├── SkillEditor.tsx         # Create/edit user skill templates
-│   │
-│   ├── nodes/                  # Node implementations (each calls registerNodeType)
-│   │   ├── LeaderNode.tsx      # Orchestrator session — LeaderData, TaskPlanItem
-│   │   ├── MinionNode.tsx      # Worker session — MinionData, MinionTaskState
-│   │   ├── ClaudeSessionNode.tsx  # Generic session with collapsible tool groups
-│   │   ├── MarkdownNode.tsx    # Editable markdown (context provider)
-│   │   └── FileViewerNode.tsx  # Read-only file viewer (context provider)
-│   │
-│   ├── prompts/
-│   │   ├── leader-system.ts    # LEADER_SYSTEM_PROMPT — task planning/delegation instructions
-│   │   ├── minion-system.ts    # MINION_SYSTEM_PROMPT — task execution instructions
-│   │   └── context-explorer.ts # CONTEXT_EXPLORER_PROMPT
-│   │
-│   ├── skills/                 # Skill template system
-│   │   ├── types.ts            # SkillTemplate, SkillVariable, compileSkills()
-│   │   ├── registry.ts         # registerSkill(), getSkill(), getAllSkills()
-│   │   ├── user-skills.ts      # LocalStorage-backed user-defined skills
-│   │   └── built-in/           # Bundled skill templates (imported for side effects in App.tsx)
-│   │
-│   └── components/             # Shared UI components
-│       ├── StatusBanner.tsx
-│       ├── StreamingBubble.tsx
-│       ├── SessionToolbar.tsx  # Model picker, permission mode, worktree toggle
-│       ├── ResizeHandle.tsx
-│       ├── AutoTextarea.tsx
-│       ├── SimpleMarkdown.tsx
-│       └── CopyButton.tsx
-│
-└── server/                     # Backend (Node/Express/WS)
-    ├── index.ts                # Main: Express + WebSocketServer, Session management
-    ├── task-tools.ts           # Leader MCP tools: plan_task, assign_task, complete_task, get_task_status, set_task_name
-    ├── minion-tools.ts         # Minion MCP tools: report_step, report_done, report_fail
-    ├── worktree.ts             # Git worktree lifecycle: create/merge/discard
-    ├── project-store.ts        # SQLite DB per project, recent-projects.json
-    ├── db.ts                   # SQLite schema initialisation
-    └── routes/
-        └── projects.ts         # REST API: /api/projects CRUD, context, settings
+Browser (localhost:5173)
+  │
+  ├── React 19 + Vite 8 (infinite canvas UI)
+  │     App.tsx → Canvas + KanbanBoard + SkillsBrowser
+  │
+  └── WebSocket (token auth) ──► Express server (localhost:3141)
+                                    │
+                                    ├── REST API  /api/projects/*  /api/files/*
+                                    │
+                                    ├── Claude Agent SDK
+                                    │     query() → claude CLI session per node
+                                    │
+                                    ├── MCP Tool Servers (in-process, per-session)
+                                    │     task-manager    → Leader orchestration
+                                    │     render-dashboard → live UI dashboard
+                                    │     minion-status   → step/done/fail reports
+                                    │
+                                    └── Git worktree manager
+                                          .canvas-worktrees/<sessionKey>/
+```
+
+### Key Directories
+
+```
+src/                          Frontend React application
+  main.tsx                    Entry point → <App />
+  App.tsx                     Root: ProjectList ↔ ProjectView; orchestrates all state
+  Canvas.tsx                  Infinite canvas (pan, zoom, node drag/resize, edge rendering)
+  CanvasNode.tsx              Node wrapper (drag, select, port dots, drop-target highlight)
+  EdgeRenderer.tsx            SVG bezier edges with animated dash overlays
+
+  nodes/                      One file per node type (each calls registerNodeType)
+    LeaderNode.tsx            Orchestrator — LeaderData, TaskPlanItem, worktree controls
+    MinionNode.tsx            Worker session — MinionData, step/done/fail display
+    ClaudeSessionNode.tsx     Generic Claude session (older direct-use node)
+    MarkdownNode.tsx          Editable markdown sticky note (context provider)
+    FileViewerNode.tsx        Read-only file viewer (context provider)
+    FolderNode.tsx            Directory browser node
+    ContextGroupNode.tsx      Groups context nodes to feed into a Leader
+    RenderNode.tsx            Displays Leader's live render dashboard
+
+  prompts/                    System prompts injected at session start
+    leader-system.ts          LEADER_SYSTEM_PROMPT (full orchestration instructions)
+    minion-system.ts          MINION_SYSTEM_PROMPT (executor instructions)
+    context-explorer.ts       CONTEXT_EXPLORER_PROMPT (spawned via ProjectPanel)
+    card-creation-system.ts   CardCreationChat system prompt
+
+  skills/                     Skill template system
+    types.ts                  SkillTemplate, SkillVariable, compileSkills(), extractVariableNames()
+    registry.ts               registerSkill(), getSkill(), getAllSkills() (in-memory)
+    user-skills.ts            Per-project skill persistence (localStorage + /api/projects/:id/skills)
+    built-in/                 12 bundled skill templates (commit, debug, refactor, etc.)
+
+  components/                 Shared UI primitives
+    SessionToolbar.tsx        Model selector, permission mode, start/stop controls, worktree toggle
+    StreamingBubble.tsx       Streaming text display with thought-bubble style
+    StatusBanner.tsx          Inline status notification stack
+    SimpleMarkdown.tsx        Lightweight markdown renderer
+    AutoTextarea.tsx          Auto-growing textarea
+    PortDot.tsx               Edge connection port dot (context-in / context-out)
+    ResizeHandle.tsx          Node resize drag handle
+    ProjectTree.tsx           File tree widget (used in ProjectPanel)
+    ConfirmModal.tsx          Generic confirmation dialog
+    CopyButton.tsx            One-click clipboard copy
+    AddAsNodeButton.tsx       "Add response as node" button on AI messages
+    CanvasContextMenu.tsx     Right-click context menu
+
+  canvas-state.ts             canvasReducer + useCanvasHistory (50-deep undo/redo)
+  canvas-utils.ts             viewportCenter(), findNonOverlappingPosition()
+  graph.ts                    Port/protocol definitions, NodeInterfaceContract, canConnect()
+  graph-runtime.ts            graphReducer, createEdge(), edge validation + CRUD
+  render-dsl.ts               RenderComponent types, RenderMessage, applyRenderMessage()
+  sdk-messages.ts             Full SdkMessage union (23 types) + type guards
+  streaming.ts                Stream delta extraction helpers
+  use-socket.ts               useSocket hook (connect, auth, reconnect, pub/sub)
+  use-autosave.ts             Debounced canvas state persistence
+  use-kanban.ts               Kanban board state hook + reducer
+  use-canvas-keyboard.ts      Canvas keyboard shortcuts (delete, undo, redo, etc.)
+  use-canvas-file-drop.ts     Drag-and-drop file → FileViewerNode
+  use-theme.ts                Theme context + persist/load helpers
+  kanban-types.ts             KanbanCard, KanbanBoard, KanbanAction types
+  node-defaults.ts            Default data factories per node type
+  node-registry.ts            registerNodeType() / getNodeType() / getUserCreatableNodeTypes()
+  palette.ts                  Color palette constants
+  themes.ts                   Theme definitions + applyTheme()
+  auto-layout.ts              Auto-layout algorithm for node positioning
+  types.ts                    Core types: CanvasNode, NodeTypeDefinition, NodeRenderProps, etc.
+  api.ts                      Typed REST API client (auth token, CRUD, skills, tree)
+
+server/
+  index.ts                    Express + WebSocketServer + session lifecycle (~700 lines)
+  db.ts                       SQLite schema init (projects + nodes tables)
+  project-store.ts            Per-project sidecar DB, context.md, settings, skills, recent list
+  worktree.ts                 Git worktree CRUD (create/merge/discard/status/cleanup)
+  task-tools.ts               MCP server: plan_task, assign_task, complete_task, get_task_status,
+                                set_task_name, wait_and_continue, request_approval
+  render-tools.ts             MCP server: render_set, render_patch, render_append, render_remove
+  minion-tools.ts             MCP server: report_step, report_done, report_fail
+  path-guard.ts               validateSessionCwd() — prevents path traversal
+  routes/
+    projects.ts               REST handlers for /api/projects/* (CRUD, context, settings, skills, tree)
+    files.ts                  REST handlers for /api/files/*
+
+scripts/
+  dev.mjs                     Orchestrates server + vite in parallel (pnpm start)
+  preflight.mjs               Checks Node ≥22, pnpm, claude CLI, git
+  setup-permissions.mjs       Auto-configures Claude Code MCP tool permissions
 ```
 
 ---
@@ -114,209 +157,353 @@ A **Kanban board** view sits alongside the canvas as an alternate way to create 
 
 ```ts
 interface CanvasNode<T = unknown> {
-  id: string; type: string; position: Position; size: Size; data: T;
+  id: string;
+  type: string;        // "leader" | "minion" | "markdown" | "file-viewer" | ...
+  position: Position;  // { x, y }
+  size: Size;          // { width, height }
+  data: T;             // node-type-specific payload
 }
 ```
 
-`CanvasAction` drives a `useReducer` in `canvas-state.ts` (`ADD_NODE`, `REMOVE_NODE`, `MOVE_NODE`, `RESIZE_NODE`, `UPDATE_NODE_DATA`, `SET_NODES`, `MOVE_GROUP`).
+`CanvasAction` is a discriminated union driving `canvasReducer`:
+`ADD_NODE | REMOVE_NODE | MOVE_NODE | RESIZE_NODE | UPDATE_NODE_DATA | SET_NODES | MOVE_GROUP`
 
-### 4.2 Node Registration Pattern (`src/node-registry.ts`)
+`useCanvasHistory` wraps the reducer with a 50-deep undo/redo history stack. `SET_NODES` is excluded from history (used for loading saved state).
 
-Each node file calls `registerNodeType({ type, label, defaultSize, render, userCreatable?, autoHeight? })` as a module side effect. `App.tsx` imports node files for their side effects.
+### 4.2 Node Registration Pattern
 
-To add a new node type:
-1. Create `src/nodes/MyNode.tsx`, call `registerNodeType(...)`.
-2. Import it in `App.tsx` (side-effect import).
-3. Add a default `data` case in `Canvas.tsx` `addNode()`.
-4. If connectable: define a contract in `graph.ts`, call `registerContract(...)` in the node file.
-
-### 4.3 Graph / Port System (`src/graph.ts`)
-
-Four **protocols** flow through edges: `task-assignment`, `task-status`, `task-result`, `context`.
-
-Each connectable node type has a `NodeInterfaceContract` declaring typed `PortDefinition` objects (direction, protocol, maxConnections). Built-in contracts:
-
-| Contract | Node Type | Ports |
-|----------|-----------|-------|
-| `LEADER_CONTRACT` | leader | task-out(out), status-in(in), result-in(in), context-in(in) |
-| `MINION_CONTRACT` | minion | task-in(in), status-out(out), result-out(out) |
-| `CONTEXT_PROVIDER_CONTRACT` | context-provider | context-out(out) |
-
-`canConnect(srcType, srcPort, tgtType, tgtPort)` validates direction + protocol compatibility.
-
-`canAcceptContextConnection()` adds a runtime guard: context edges to a Leader are locked once the Leader session starts.
-
-### 4.4 Graph Runtime (`src/graph-runtime.ts`)
-
-`graphReducer` manages edge state (`ADD_EDGE`, `REMOVE_EDGE`, `REMOVE_EDGES_FOR_NODE`, `SET_EDGES`). `dispatchMessage()` routes `EdgeMessage` objects to target nodes. Lives in `App.tsx`.
-
-### 4.5 Server Session Model (`server/index.ts`)
+Each node file in `src/nodes/` calls `registerNodeType(def)` as a **module side effect**. `App.tsx` imports these files for their side effects at the top.
 
 ```ts
-interface Session {
-  id: string;              // local key
-  sessionId: string|null;  // SDK conversation ID
-  status: "running"|"idle"|"stopped"|"error";
-  abortController: AbortController;
-  queryHandle: Query|null;
-  cwd: string;
-  eventBuffer: BufferedEvent[];  // up to 200 events for reconnect sync
-  totalCost: number; turns: number;
-  role: "leader"|"minion"|"default";
-  taskState: TaskManagerState|null;  // leader only
-  taskName: string|null;
-  worktree: WorktreeInfo|null;
+// In any node file:
+registerNodeType({
+  type: "my-node",
+  label: "My Node",
+  defaultSize: { width: 320, height: 240 },
+  render: MyNodeComponent,
+  userCreatable: true,   // appears in canvas toolbar
+  autoHeight: false,     // grows with content if true
+});
+```
+
+**To add a new node type:**
+1. Create `src/nodes/MyNode.tsx`, define and call `registerNodeType(...)`
+2. Add a side-effect import in `src/App.tsx`
+3. Optionally define edge contracts via `registerContract()` in the node file
+
+### 4.3 LeaderNode Data (`src/nodes/LeaderNode.tsx`)
+
+```ts
+interface LeaderData {
+  sessionKey: string | null;
+  status: "disconnected" | "creating" | "running" | "idle" | "stopped" | "error";
+  messages: LeaderMessage[];
+  streamingText: string;
+  totalCost: number;
+  turns: number;
+  error: string | null;
+  model: ModelOption;           // "sonnet" | "opus" | "haiku" | ...
+  permissionMode: PermissionMode;
+  taskPlan: TaskPlanItem[];
   worktreeIsolation: boolean;
+  worktreePath: string | null;
+  worktreeBranch: string | null;
+  worktreeStatus: "none" | "creating" | "active" | "merging" | "merged" | "discarded" | "failed";
+  taskName: string | null;      // set by set_task_name MCP tool
+  autoStartPrompt?: string;     // if set, session starts immediately on mount
+  skillIds: string[];
+  skillValues: Record<string, Record<string, string>>;
+  skillPanelOpen: boolean;
 }
 ```
 
-WebSocket command types include: `create_session`, `send_message`, `stop_session`, `sync_session`, `list_sessions`, `interrupt`, `set_permission_mode`, `set_model`, `stop_task`, and worktree commands.
+`TaskPlanItem` mirrors the server's `TaskRecord` with added `cost`, `sessionSummary`, and frontend-only fields.
 
-### 4.6 Leader MCP Tools (`server/task-tools.ts`)
+### 4.4 Task Manager MCP Tools (`server/task-tools.ts`)
 
-Exposed via `createSdkMcpServer` and injected into the Leader's `query()` call:
-
-| Tool | Lifecycle effect |
-|------|-----------------|
-| `set_task_name` | Sets `taskName` on the session; broadcasts `session_task_name` |
-| `plan_task` | Adds task record with status `planned` |
-| `assign_task` | Spawns a new Minion session; status → `running` |
-| `complete_task` | Leader marks task done itself; status → `completed` |
-| `get_task_status` | Returns all tasks for this leader |
-
-On every change, a `task_plan_update` WebSocket broadcast fires so the frontend stays in sync.
-
-### 4.7 Minion MCP Tools (`server/minion-tools.ts`)
+Injected as an in-process MCP server into every Leader's `query()` call:
 
 | Tool | Effect |
-|------|--------|
-| `report_step` | Broadcasts `minion_status` event with step message |
-| `report_done` | Broadcasts completion |
-| `report_fail` | Broadcasts failure |
+|---|---|
+| `plan_task(taskId, title, description, priority)` | Registers task as `planned`; broadcasts `task_plan_update` |
+| `assign_task(taskId, title, description, priority)` | Spawns a Minion session; transitions to `running`; broadcasts `minion_spawned` |
+| `complete_task(taskId, result)` | Leader marks task done itself; transitions to `completed` |
+| `get_task_status(taskId?)` | Returns one or all `TaskRecord`s |
+| `set_task_name(name)` | Sets display name; broadcasts `session_task_name` |
+| `wait_and_continue(duration_seconds, reason)` | Pauses 5s–30min; system resumes with "Continue"; broadcasts `wait_state` |
+| `request_approval(summary)` | Gathers a detailed diff and requests user approval to merge worktree; only available when worktree isolation is active |
 
-### 4.8 Skills System (`src/skills/`)
+`TaskRecord` lifecycle: `planned → running → completed | failed`
 
-Skills are **markdown templates** with `{{variable}}` placeholders. They are tagged onto a Leader node; `compileSkills()` replaces placeholders with user-provided values and the result is injected into the system prompt before session start.
+### 4.5 Render Dashboard DSL (`src/render-dsl.ts`, `server/render-tools.ts`)
+
+Leader agents push live UI components to a `RenderNode` on the canvas. Operations:
+
+| Operation | What it does |
+|---|---|
+| `render_set` | Replace entire dashboard |
+| `render_patch` | Update components by `id` |
+| `render_append` | Add new components |
+| `render_remove` | Remove components by `id` |
+
+Component types: `metric`, `progress`, `status`, `table`, `list`, `text`, `code` — each requires a unique `id` for patching.
+
+### 4.6 Minion Status Tools (`server/minion-tools.ts`)
+
+Injected into every Minion's `query()`:
+
+| Tool | Broadcasts |
+|---|---|
+| `report_step(message)` | `minion_status { trigger: "step" }` |
+| `report_done(summary)` | `minion_status { trigger: "done" }` |
+| `report_fail(reason)` | `minion_status { trigger: "fail" }` |
+
+### MCP Tool Permissions
+
+All three MCP servers (`task-manager`, `render-dashboard`, `minion-status`) are in-process servers created per-session via `createSdkMcpServer`. Their tools must be explicitly allowed in the `allowedTools` array passed to the SDK `query()` call, using the `mcp__<server>__<tool>` naming convention.
+
+This is handled in `server/index.ts` where `fullTools` is assembled per role:
+- **Leader** sessions get `codeTools` + all `task-manager` and `render-dashboard` MCP tools (11 tools)
+- **Minion** sessions get `codeTools` + all `minion-status` MCP tools (3 tools)
+- **Generic** sessions get `codeTools` only
+
+Permissions are passed inline with each `query()` call so they work regardless of session `cwd` (important for worktree-isolated sessions that run outside the project root). The project-level `.claude/settings.json` (written by `pnpm configure`) serves as a fallback and documents the full permission set.
+
+### 4.7 Skills System (`src/skills/types.ts`)
+
+Skills are Markdown templates with `{{variable_name}}` placeholders:
 
 ```ts
 interface SkillTemplate {
-  id: string; name: string; category: ...; icon: string; accentColor: string;
-  template: string;           // markdown with {{placeholders}}
+  id: string;
+  name: string;
+  description: string;
+  category: "code" | "docs" | "testing" | "devops" | "analysis" | "design" | "general";
+  icon: string;
+  accentColor: string;       // hex
+  template: string;          // Markdown with {{placeholders}}
   variables: SkillVariable[];
 }
 ```
 
-Built-in skills live under `src/skills/built-in/` (imported for side effects). User skills are stored in `localStorage` via `user-skills.ts`.
+`compileSkills(skills, allValues)` replaces placeholders and joins all skills into an `# Active Skills` section appended to the system prompt.
+
+12 built-in skills: `refactor`, `debug`, `commit`, `explain`, `code-review`, `test-generator`, `documentation`, `architect`, `api-design`, `frontend-design`, `performance`, `security-audit`, `simplify`.
+
+User skills persist per-project via `/api/projects/:id/skills`. The `user-skills.ts` module handles both localStorage (legacy) and API storage.
+
+### 4.8 Graph / Port System (`src/graph.ts`, `src/graph-runtime.ts`)
+
+Edges connect nodes through typed ports. `NodeInterfaceContract` declares valid port definitions per node type.
+
+Built-in contracts:
+- `LEADER_CONTRACT` — ports: `context-in` (in), `task-out` (out), `status-in` (in), `result-in` (in)
+- `MINION_CONTRACT` — ports: `task-in` (in), `status-out` (out), `result-out` (out)
+- `CONTEXT_PROVIDER_CONTRACT` — port: `context-out` (out)
+
+`canConnect(srcType, srcPort, tgtType, tgtPort)` validates direction + protocol compatibility. Context edges to a Leader are locked once the Leader session starts (runtime guard in `canAcceptContextConnection()`).
+
+`graphReducer` manages edge CRUD: `ADD_EDGE | REMOVE_EDGE | REMOVE_EDGES_FOR_NODE | SET_EDGES`.
 
 ### 4.9 Git Worktree Isolation (`server/worktree.ts`)
 
-Leaders can optionally run in a git worktree (isolated branch). Lifecycle states: `initializing → active → merging → cleaned` (or `failed`/`discarded`). Worktrees are created under `.canvas-worktrees/` in the project root. `cleanupStaleWorktrees()` runs on server start.
+Each Leader session optionally runs in its own git worktree:
 
-### 4.10 Kanban (`src/kanban-types.ts`, `src/use-kanban.ts`)
+```
+Lifecycle: initializing → active → merging → cleaned
+                       ↘ failed             (merge had conflicts → stays active)
+                       ↘ discarded          (user chose to discard)
+```
 
-`KanbanCard` is the richer task descriptor — it holds model, permissionMode, worktreeIsolation, skillIds, linked context node IDs, and an optional `leaderNodeId` binding. Default columns: `backlog`, `in-progress`, `halted`, `history`.
+Worktrees are created at `<projectPath>/.canvas-worktrees/<sessionKey>/` on branch `canvas/<sessionKey>`.
+
+Key functions: `createWorktree()`, `removeWorktree()`, `mergeAndCleanup()`, `getWorktreeStatus()`, `isGitRepo()`, `cleanupStaleWorktrees()`.
+
+### 4.10 Kanban Board (`src/kanban-types.ts`, `src/use-kanban.ts`)
+
+`KanbanCard` holds: `title`, `description`, `subtasks`, `priority`, `model`, `permissionMode`, `worktreeIsolation`, `skillIds`, `skillValues`, `linkedContextNodeIds`, `leaderNodeId` (binding to canvas node).
+
+Default columns: `backlog → in-progress → halted → history`
+
+Auto-transitions (in `App.tsx`):
+- Leader becomes `idle/stopped` with active worktree → card auto-moves to `halted`
+- Leader disconnects → card auto-halts with reason `"session_lost"`
+- Leader session error → card auto-halts with reason `"error"`
+- User sends message → leader resumes → card auto-resumes from `halted`
+- Worktree merged/discarded → card auto-archives to `history`
+
+Canvas → Kanban reconciliation: any active Leader node without a card gets one auto-created.
+
+### 4.11 WebSocket Auth & Connection (`src/use-socket.ts`)
+
+- Auth token fetched once from `GET /api/auth/token` (localhost only, no auth header needed)
+- Token passed as `?token=<value>` query param on WS upgrade
+- `useSocket(url)` returns `{ connected, reconnectState, send, subscribe, manualReconnect }`
+- Reconnect: exponential backoff 2s → 30s, max 10 attempts; `±500ms` jitter
+- Unknown message types are silently rejected (whitelist of ~16 known types)
 
 ---
 
 ## 5. Entry Points
 
-| Entry | Purpose |
-|-------|---------|
-| `src/main.tsx` | React app mount: `ReactDOM.createRoot` → `<App />` |
-| `server/index.ts` | Express + WS server, starts on `PORT` (default `3141`) |
-| `pnpm start` | Runs both together: `tsx server/index.ts & vite` |
-
-The frontend connects to `ws://localhost:3141` (configurable via `VITE_SERVER_PORT` env var).
-
----
-
-## 6. Persistence
-
-- **Per-project**: SQLite DB stored at `<projectPath>/.claude-canvas/db.sqlite` (sidecar). Schema initialised in `server/db.ts`. Tables: `projects`, `nodes`, `edges` (and likely `settings`/`context`).
-- **Global index**: `~/.claude-canvas/recent-projects.json` (last 20 projects).
-- **Context file**: `<projectPath>/.claude-canvas/context.md` — freeform project context injected into new sessions.
-- **Canvas autosave**: `use-autosave.ts` debounces saves via the REST API.
-- **Skills**: User-defined skills in `localStorage`; built-ins are bundled.
+| What | File |
+|---|---|
+| Browser app root | `src/main.tsx` → `src/App.tsx` |
+| Backend server | `server/index.ts` (via `npx tsx server/index.ts`) |
+| Dev orchestrator | `scripts/dev.mjs` — starts both |
+| Vite config | `vite.config.ts` |
+| TypeScript configs | `tsconfig.json` (root refs), `tsconfig.app.json` (src), `tsconfig.node.json` (server+scripts), `server/tsconfig.json` |
 
 ---
 
-## 7. REST API (`server/routes/projects.ts`)
+## 6. Development Workflow
 
-Base path: `/api/projects`. Project paths are **base64url-encoded** for URL segments.
-
-Key endpoints (inferred from route file + `src/api.ts`):
-
-```
-GET    /api/projects                       → list recent projects
-POST   /api/projects                       → create / register project
-GET    /api/projects/:encodedPath          → get project with nodes
-PUT    /api/projects/:encodedPath          → update project (nodes, transform)
-DELETE /api/projects/:encodedPath          → remove from recent list
-GET    /api/projects/:encodedPath/context  → read context.md
-PUT    /api/projects/:encodedPath/context  → write context.md
-GET    /api/projects/:encodedPath/settings → read settings
-PUT    /api/projects/:encodedPath/settings → write settings
-```
-
----
-
-## 8. WebSocket Protocol (`src/use-socket.ts`)
-
-### Client → Server commands
-
-```
-create_session      { sessionKey, cwd, systemPrompt?, model?, permissionMode?, role?, worktreeIsolation? }
-send_message        { sessionKey, message }
-stop_session        { sessionKey }
-sync_session        { sessionKey }
-list_sessions       {}
-interrupt           { sessionKey }
-set_permission_mode { sessionKey, mode }
-set_model           { sessionKey, model }
-stop_task           { sessionKey, taskId }
-+ worktree commands
-```
-
-### Server → Client events (`ServerMessage` union)
-
-```
-session_list        sessions[]
-session_created     sessionKey
-session_status      sessionKey, status
-session_error       sessionKey, error
-sdk_event           sessionKey, message: SdkMessage
-sync_response       sessionKey, found, status, events[], activeMinions[], …
-control_response    command, sessionKey, success/error, …
-session_task_name   sessionKey, taskName
-task_plan_update    leaderSessionKey, tasks[]   (broadcast from task-tools)
-minion_status       minionSessionKey, trigger, message  (broadcast from minion-tools)
-error               message
-```
-
----
-
-## 9. Development Workflow
+### Prerequisites
 
 ```bash
-pnpm install       # install deps (note: better-sqlite3 requires native build)
-pnpm start         # start both Vite dev server (5173) + WS/Express server (3141)
-pnpm dev           # Vite only
-pnpm server        # WS/Express server only
-pnpm build         # tsc -b && vite build
-pnpm typecheck     # tsc --noEmit (frontend only)
+# Check everything:
+pnpm preflight
 ```
 
-TypeScript config: `tsconfig.json` (root) references `tsconfig.app.json` (frontend, strict) and `tsconfig.node.json` (server). Server has its own `server/tsconfig.json`.
+Requires: Node.js ≥22, pnpm, `claude` CLI (authenticated), git.
+
+### Commands
+
+```bash
+pnpm install         # install deps (better-sqlite3 requires C++ compiler)
+pnpm configure           # preflight checks + auto-configure Claude Code MCP permissions
+pnpm start           # server + Vite dev → http://localhost:5173
+pnpm dev             # Vite frontend only (hot reload)
+pnpm server          # Express/WS backend only
+pnpm build           # tsc -b + vite build (production)
+pnpm typecheck       # tsc --noEmit (type checking without emit)
+pnpm preflight       # validate prerequisites only
+```
+
+### First-Time Setup
+
+After `pnpm install`, run **`pnpm configure`** to validate prerequisites and auto-configure Claude Code permissions for all MCP tools (task-manager, render-dashboard, minion-status). This is required for the Leader/Minion orchestration to work without interactive permission prompts.
+
+If `pnpm configure` fails or you prefer manual configuration, see `scripts/setup-permissions.mjs` for the full list of required tool permissions.
+
+### Environment Variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PORT` | `3141` | Backend HTTP + WS port |
+| `HOST` | `127.0.0.1` | Server bind address |
+| `VITE_SERVER_PORT` | `3141` | Frontend WS URL override |
+
+No `.env` file needed; set inline: `PORT=8080 pnpm start`
 
 ---
 
-## 10. Current State & Notes
+## 7. REST API
 
-- The project is **actively developed** — many features are production-grade (WebSocket sync with event buffering, worktree lifecycle, Kanban board, skills system).
-- **Canvas + graph state** lives in `App.tsx` (`useReducer` for nodes via `canvasReducer`, `useReducer` for edges via `graphReducer`). Both are persisted via `useAutosave`.
-- **Session reconnection**: `sync_session` replays up to 200 buffered events when a browser tab reconnects.
-- **No test suite** was observed in the project. Type-checking (`pnpm typecheck`) is the primary correctness gate.
-- **`.canvas-worktrees/`** directory in the project root is created by the worktree feature — add to `.gitignore`.
-- **Sidecar directory** `.claude-canvas/` is created at the project root for SQLite + context.md — add to `.gitignore`.
-- `better-sqlite3` requires a native build; if `pnpm install` fails on it, run `pnpm rebuild better-sqlite3`.
-- `VITE_SERVER_PORT` env var overrides the WS/Express port (default `3141`).
+Base path: `/api`. Project paths are **base64url-encoded** for URL segments.
+
+```
+GET    /api/auth/token                          Fetch WS auth token (localhost only, no auth)
+
+GET    /api/projects                            List recent projects
+POST   /api/projects                            Create/register a project { name, path }
+POST   /api/projects/open                       Open an existing directory { path }
+GET    /api/projects/:encodedId                 Get project with all nodes
+PUT    /api/projects/:encodedId                 Update project name/transform
+DELETE /api/projects/:encodedId                 Remove from recent list
+PUT    /api/projects/:encodedId/state           Save canvas state { nodes, transform }
+GET    /api/projects/:encodedId/context         Read context.md
+PUT    /api/projects/:encodedId/context         Write context.md { content }
+GET    /api/projects/:encodedId/settings        Read settings
+PUT    /api/projects/:encodedId/settings        Write settings
+GET    /api/projects/:encodedId/skills          Read per-project skills
+PUT    /api/projects/:encodedId/skills          Write per-project skills
+GET    /api/projects/:encodedId/tree?depth=N    Get directory tree
+
+GET    /api/files/*                             Serve project files
+```
+
+---
+
+## 8. WebSocket Protocol
+
+Auth: `?token=<value>` query param. Max payload: 1MB.
+
+### Client → Server
+
+```
+create_session     { sessionKey, cwd, systemPrompt, prompt, model, permissionMode,
+                     role, worktreeIsolation, initData }
+send_message       { sessionKey, message }
+stop_session       { sessionKey }
+sync_session       { sessionKey, sessionId? }      # reconnect + replay events
+list_sessions      {}
+interrupt          { sessionKey }
+set_permission_mode { sessionKey, mode }
+set_model          { sessionKey, model }
+merge_worktree     { sessionKey }
+discard_worktree   { sessionKey }
+get_worktree_status { sessionKey }
+```
+
+### Server → Client (broadcasts)
+
+```
+session_created       sessionKey
+session_status        sessionKey, status
+session_error         sessionKey, error
+sdk_event             sessionKey, message: SdkMessage
+sync_response         sessionKey, found, status, events[], activeMinions[], taskName, ...
+control_response      command, sessionKey, success, [extra fields]
+session_task_name     sessionKey, taskName
+task_plan_update      leaderSessionKey, tasks[]
+minion_spawned        leaderSessionKey, minionSessionKey, taskId, title, priority, worktreeBranch
+minion_status         minionSessionKey, trigger ("step"|"done"|"fail"), message
+render_update         leaderSessionKey, action, [components | updates | ids]
+wait_state            sessionKey, action ("started"), durationMs, reason, scheduledAt
+worktree_created      leaderSessionKey, path, branch
+worktree_failed       leaderSessionKey, error
+```
+
+---
+
+## 9. Persistence
+
+| What | Where |
+|---|---|
+| Canvas nodes | `<project>/.claude-canvas/canvas.db` — SQLite `nodes` table (data as JSON string) |
+| Project metadata | Same DB — `projects` table (name, transform_x/y/scale) |
+| context.md | `<project>/.claude-canvas/context.md` (plain file) |
+| Settings | `<project>/.claude-canvas/settings.json` |
+| Per-project skills | `<project>/.claude-canvas/skills.json` |
+| Recent projects | `~/.claude-canvas/recent-projects.json` |
+| Worktrees | `<project>/.canvas-worktrees/<sessionKey>/` (git worktrees) |
+
+Both `.claude-canvas/` and `.canvas-worktrees/` should be in `.gitignore`.
+
+Session event buffers (up to 200 events) live in-memory on the server for reconnect replay.
+
+---
+
+## 10. SdkMessage Union (`src/use-socket.ts`)
+
+The frontend models all 23 Claude Agent SDK message types as a discriminated union `SdkMessage`. Key subtypes:
+
+- **System messages** (14 subtypes): `init`, `status`, `api_retry`, `local_command_output`, `compact_boundary`, `session_state_changed`, `files_persisted`, `elicitation_complete`, `hook_started`, `hook_progress`, `hook_response`, `task_started`, `task_progress`, `task_notification`
+- **Non-system**: `assistant`, `stream_event`, `user`, `result` (success/error), `tool_progress`, `tool_use_summary`, `auth_status`, `rate_limit_event`, `prompt_suggestion`
+
+Type guards: `isSystemMessage`, `isAssistantMessage`, `isResultSuccess`, `isResultError`, `isStreamEvent`, `isSystemSubtype<S>(msg, subtype)`, etc.
+
+---
+
+## 11. Current State & Known Caveats
+
+- **No test suite** — TypeScript (`pnpm typecheck`) is the primary correctness gate
+- `server/index.ts` is large (~700+ lines) — handles session lifecycle, WS routing, worktree management, and minion spawning in one file
+- `better-sqlite3` requires native C++ — on macOS: `xcode-select --install`; Linux: `sudo apt install build-essential`
+- `ClaudeSessionNode` is an older generic node; `LeaderNode` is the primary orchestration entry point
+- Skills have two persistence paths: `localStorage` (legacy, user-wide) and the per-project API endpoint (current). `user-skills.ts` bridges both
+- The project DB `id` is the **base64url-encoded absolute path** of the project directory — this is used in all REST URLs
+- Context window compaction is handled transparently by the Claude Agent SDK; `SdkCompactBoundaryMessage` events surface in the message history UI
+- The `autoStartPrompt` field on `LeaderData` causes a Leader node to start a session immediately upon mounting — used for Kanban card launches and Skills browser
+- `wait_and_continue` wires through `scheduleWaitContinue` callback in `server/index.ts` which injects a "Continue" message after the timer fires, resuming the leader's `query()` loop

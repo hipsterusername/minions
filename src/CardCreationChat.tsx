@@ -77,6 +77,7 @@ interface CardCreationChatProps {
   socketSubscribe: (fn: (msg: ServerMessage) => void) => () => void;
   onClose: () => void;
   projectPath: string;
+  defaultWorktreeIsolation?: boolean;
 }
 
 // ─── Priority badge ───────────────────────────────────────
@@ -106,6 +107,7 @@ export function CardCreationChat({
   socketSubscribe,
   onClose,
   projectPath,
+  defaultWorktreeIsolation,
 }: CardCreationChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -244,7 +246,7 @@ export function CardCreationChat({
         createdAt: Date.now(),
         model: "sonnet",
         permissionMode: "auto",
-        worktreeIsolation: true,
+        worktreeIsolation: defaultWorktreeIsolation !== false,
         skillIds: [],
         skillValues: {},
         linkedContextNodeIds: [],
@@ -283,7 +285,7 @@ export function CardCreationChat({
           createdAt: Date.now(),
           model: "sonnet",
           permissionMode: "auto",
-          worktreeIsolation: true,
+          worktreeIsolation: defaultWorktreeIsolation !== false,
           skillIds: [],
           skillValues: {},
           linkedContextNodeIds: [],

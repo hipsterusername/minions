@@ -41,7 +41,7 @@ export function createDefaultNodeData(
         model: (projectSettings?.defaultLeaderModel as string) ?? "opus",
         permissionMode: projectSettings?.defaultPermissionMode ?? "auto",
         taskPlan: [],
-        worktreeIsolation: true,
+        worktreeIsolation: projectSettings?.defaultWorktreeIsolation !== false,
         worktreePath: null,
         worktreeBranch: null,
         worktreeStatus: "none",

@@ -12,6 +12,7 @@ import type { SkillTemplate } from "./skills/types.ts";
 import type { ServerMessage } from "./use-socket.ts";
 import { CardCreationChat } from "./CardCreationChat.tsx";
 import type { CanvasNode } from "./types.ts";
+import type { ProjectSettings } from "./api.ts";
 import type { LeaderData, TaskPlanItem } from "./nodes/LeaderNode.tsx";
 import type { DisplayMessage } from "./sdk-messages.ts";
 import { msgId } from "./sdk-messages.ts";
@@ -313,12 +314,14 @@ function CardForm({
   onCancel,
   submitLabel,
   contextNodes,
+  defaultWorktreeIsolation,
 }: {
   initial?: CardFormData;
   onSubmit: (data: CardFormData) => void;
   onCancel: () => void;
   submitLabel: string;
   contextNodes?: ContextNodeOption[];
+  defaultWorktreeIsolation?: boolean;
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
@@ -335,7 +338,7 @@ function CardForm({
     initial?.permissionMode ?? "auto",
   );
   const [worktreeIsolation, setWorktreeIsolation] = useState(
-    initial?.worktreeIsolation ?? true,
+    initial?.worktreeIsolation ?? (defaultWorktreeIsolation !== false),
   );
   const [skillIds, setSkillIds] = useState<string[]>(initial?.skillIds ?? []);
   const [skillValues, setSkillValues] = useState<Record<string, Record<string, string>>>(
@@ -676,74 +679,6 @@ function DeleteConfirm({
   );
 }
 
-function EditPopover({
-  card,
-  dispatch,
-  onClose,
-  contextNodes,
-}: {
-  card: KanbanCard;
-  dispatch: Dispatch<KanbanAction>;
-  onClose: () => void;
-  contextNodes?: ContextNodeOption[];
-}) {
-  const popoverRef = useRef<HTMLDivElement>(null);
-  useClickOutside(popoverRef, onClose, true);
-
-  return (
-    <div className="kb-popover-backdrop">
-      <div ref={popoverRef} className="kb-edit-popover" role="dialog" aria-label={`Edit ${card.title}`}>
-        <div className="kb-edit-popover__header">
-          <span className="kb-edit-popover__title">Edit Card</span>
-          <button className="kb-btn kb-btn--icon" onClick={onClose} aria-label="Close">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-              <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </button>
-        </div>
-        <CardForm
-          initial={{
-            title: card.title,
-            description: card.description,
-            context: card.context,
-            priority: card.priority,
-            subtasks: card.subtasks,
-            model: card.model ?? "sonnet",
-            permissionMode: card.permissionMode ?? "auto",
-            worktreeIsolation: card.worktreeIsolation ?? true,
-            skillIds: card.skillIds ?? [],
-            skillValues: card.skillValues ?? {},
-            linkedContextNodeIds: card.linkedContextNodeIds ?? [],
-          }}
-          submitLabel="Save"
-          onCancel={onClose}
-          contextNodes={contextNodes}
-          onSubmit={(data) => {
-            dispatch({
-              type: "UPDATE_CARD",
-              cardId: card.id,
-              data: {
-                title: data.title,
-                description: data.description,
-                context: data.context,
-                priority: data.priority,
-                subtasks: data.subtasks,
-                model: data.model,
-                permissionMode: data.permissionMode,
-                worktreeIsolation: data.worktreeIsolation,
-                skillIds: data.skillIds,
-                skillValues: data.skillValues,
-                linkedContextNodeIds: data.linkedContextNodeIds,
-              },
-            });
-            onClose();
-          }}
-        />
-      </div>
-    </div>
-  );
-}
-
 // ─── Backlog Card ────────────────────────────────────────
 
 function BacklogCard({
@@ -762,7 +697,6 @@ function BacklogCard({
   contextNodes?: ContextNodeOption[];
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -770,7 +704,7 @@ function BacklogCard({
   const totalCount = card.subtasks.length;
 
   const closeExpand = useCallback(() => setExpanded(false), []);
-  useEscapeKey(closeExpand, expanded && !editing && !confirmDelete);
+  useEscapeKey(closeExpand, expanded && !confirmDelete);
   useScrollIntoView(bodyRef, expanded);
 
   const cardModel = card.model ?? "sonnet";
@@ -860,9 +794,6 @@ function BacklogCard({
                 </svg>
                 Launch
               </button>
-              <button className="kb-btn kb-btn--ghost" onClick={() => setEditing(true)} aria-label={`Edit ${card.title}`}>
-                Edit
-              </button>
               <button className="kb-btn kb-btn--danger-ghost" onClick={() => setConfirmDelete(true)} aria-label={`Delete ${card.title}`}>
                 Del
               </button>
@@ -871,7 +802,6 @@ function BacklogCard({
         )}
       </article>
 
-      {editing && <EditPopover card={card} dispatch={dispatch} onClose={() => setEditing(false)} contextNodes={contextNodes} />}
       {confirmDelete && (
         <DeleteConfirm
           cardTitle={card.title}
@@ -1601,9 +1531,11 @@ function KanbanInspectorPanel({
   onLaunchLeader,
   onFocusNode,
   recentCards,
+  onSelectCard,
   socketSend,
   onUpdateNodeData,
   inspectorOpen,
+  contextNodes,
 }: {
   selectedCard: KanbanCard | null;
   leaderStatus?: LeaderStatus;
@@ -1616,9 +1548,11 @@ function KanbanInspectorPanel({
   onLaunchLeader: (card: KanbanCard) => void;
   onFocusNode?: (nodeId: string) => void;
   recentCards: KanbanCard[];
+  onSelectCard: (cardId: string) => void;
   socketSend: (data: unknown) => void;
   onUpdateNodeData?: (nodeId: string, data: unknown) => void;
   inspectorOpen?: boolean;
+  contextNodes?: ContextNodeOption[];
 }) {
   const [activeTab, setActiveTab] = useState<InspectorTab>("activity");
   const [chatInput, setChatInput] = useState("");
@@ -1702,7 +1636,7 @@ function KanbanInspectorPanel({
               {recentCards.map(card => {
                 const dotColor = card.columnId === "halted" ? "var(--status-warning)" : "var(--status-success)";
                 return (
-                  <div key={card.id} className="kb-panel__recent-row" onClick={() => onClose()}>
+                  <div key={card.id} className="kb-panel__recent-row" onClick={() => onSelectCard(card.id)}>
                     <span className="kb-panel__recent-dot" style={{ background: dotColor }} />
                     <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{card.title}</span>
                   </div>
@@ -1776,51 +1710,94 @@ function KanbanInspectorPanel({
 
         {activeTab === "config" && (
           <>
-            <InspectorConfigSection card={selectedCard} dispatch={dispatch} editable={isEditable} />
+            {isEditable ? (
+              <CardForm
+                key={selectedCard.id}
+                initial={{
+                  title: selectedCard.title,
+                  description: selectedCard.description,
+                  context: selectedCard.context,
+                  priority: selectedCard.priority,
+                  subtasks: selectedCard.subtasks,
+                  model: selectedCard.model ?? "sonnet",
+                  permissionMode: selectedCard.permissionMode ?? "auto",
+                  worktreeIsolation: selectedCard.worktreeIsolation ?? true,
+                  skillIds: selectedCard.skillIds ?? [],
+                  skillValues: selectedCard.skillValues ?? {},
+                  linkedContextNodeIds: selectedCard.linkedContextNodeIds ?? [],
+                }}
+                submitLabel="Save"
+                onCancel={onClose}
+                contextNodes={contextNodes}
+                onSubmit={(data) => {
+                  dispatch({
+                    type: "UPDATE_CARD",
+                    cardId: selectedCard.id,
+                    data: {
+                      title: data.title,
+                      description: data.description,
+                      context: data.context,
+                      priority: data.priority,
+                      subtasks: data.subtasks,
+                      model: data.model,
+                      permissionMode: data.permissionMode,
+                      worktreeIsolation: data.worktreeIsolation,
+                      skillIds: data.skillIds,
+                      skillValues: data.skillValues,
+                      linkedContextNodeIds: data.linkedContextNodeIds,
+                    },
+                  });
+                }}
+              />
+            ) : (
+              <>
+                <InspectorConfigSection card={selectedCard} dispatch={dispatch} editable={false} />
 
-            {/* Description */}
-            {selectedCard.description && (
-              <div className="kb-panel__section">
-                <div className="kb-panel__label">Description</div>
-                <div className="kb-panel__text">{selectedCard.description}</div>
-              </div>
+                {/* Description */}
+                {selectedCard.description && (
+                  <div className="kb-panel__section">
+                    <div className="kb-panel__label">Description</div>
+                    <div className="kb-panel__text">{selectedCard.description}</div>
+                  </div>
+                )}
+
+                {/* Context */}
+                {selectedCard.context && (
+                  <div className="kb-panel__section">
+                    <div className="kb-panel__label">Context</div>
+                    <div className="kb-panel__text kb-panel__text--mono">{selectedCard.context}</div>
+                  </div>
+                )}
+
+                {/* Linked context nodes */}
+                {(selectedCard.linkedContextNodeIds ?? []).length > 0 && (
+                  <div className="kb-panel__section">
+                    <div className="kb-panel__label">Linked Context ({(selectedCard.linkedContextNodeIds ?? []).length})</div>
+                    <div className="kb-card__linked-context">
+                      {(selectedCard.linkedContextNodeIds ?? []).map((nid) => (
+                        <span key={nid} className="kb-linked-context-tag">{"\uD83D\uDCCE"} {nid.slice(0, 8)}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Subtasks */}
+                {selectedCard.subtasks.length > 0 && (
+                  <div className="kb-panel__section">
+                    <div className="kb-panel__label">Subtasks ({selectedCard.subtasks.filter(s => s.done).length}/{selectedCard.subtasks.length})</div>
+                    {selectedCard.subtasks.map(st => (
+                      <label key={st.id} className={cx("kb-panel__subtask", st.done && "kb-panel__subtask--done")}>
+                        <input type="checkbox" checked={st.done}
+                          onChange={() => dispatch({ type: "TOGGLE_SUBTASK", cardId: selectedCard.id, subtaskId: st.id })} />
+                        {st.title}
+                      </label>
+                    ))}
+                  </div>
+                )}
+
+                <div className="kb-panel__meta">Created {new Date(selectedCard.createdAt).toLocaleDateString()}</div>
+              </>
             )}
-
-            {/* Context */}
-            {selectedCard.context && (
-              <div className="kb-panel__section">
-                <div className="kb-panel__label">Context</div>
-                <div className="kb-panel__text kb-panel__text--mono">{selectedCard.context}</div>
-              </div>
-            )}
-
-            {/* Linked context nodes */}
-            {(selectedCard.linkedContextNodeIds ?? []).length > 0 && (
-              <div className="kb-panel__section">
-                <div className="kb-panel__label">Linked Context ({(selectedCard.linkedContextNodeIds ?? []).length})</div>
-                <div className="kb-card__linked-context">
-                  {(selectedCard.linkedContextNodeIds ?? []).map((nid) => (
-                    <span key={nid} className="kb-linked-context-tag">{"\uD83D\uDCCE"} {nid.slice(0, 8)}</span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Subtasks */}
-            {selectedCard.subtasks.length > 0 && (
-              <div className="kb-panel__section">
-                <div className="kb-panel__label">Subtasks ({selectedCard.subtasks.filter(s => s.done).length}/{selectedCard.subtasks.length})</div>
-                {selectedCard.subtasks.map(st => (
-                  <label key={st.id} className={cx("kb-panel__subtask", st.done && "kb-panel__subtask--done")}>
-                    <input type="checkbox" checked={st.done}
-                      onChange={() => dispatch({ type: "TOGGLE_SUBTASK", cardId: selectedCard.id, subtaskId: st.id })} />
-                    {st.title}
-                  </label>
-                ))}
-              </div>
-            )}
-
-            <div className="kb-panel__meta">Created {new Date(selectedCard.createdAt).toLocaleDateString()}</div>
           </>
         )}
       </div>
@@ -1900,6 +1877,7 @@ interface KanbanBoardProps {
   projectPath: string;
   nodes: CanvasNode[];
   onUpdateNodeData?: (nodeId: string, data: unknown) => void;
+  projectSettings?: ProjectSettings;
 }
 
 export function KanbanBoard({
@@ -1915,6 +1893,7 @@ export function KanbanBoard({
   projectPath,
   nodes,
   onUpdateNodeData,
+  projectSettings,
 }: KanbanBoardProps) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [showChat, setShowChat] = useState(false);
@@ -2182,6 +2161,7 @@ export function KanbanBoard({
                         onSubmit={handleAddCard}
                         onCancel={() => { setShowAddForm(false); addBtnRef.current?.focus(); }}
                         contextNodes={availableContextNodes}
+                        defaultWorktreeIsolation={projectSettings?.defaultWorktreeIsolation}
                       />
                     </div>
                   ) : undefined}
@@ -2196,6 +2176,7 @@ export function KanbanBoard({
               socketSubscribe={socketSubscribe}
               onClose={() => setShowChat(false)}
               projectPath={projectPath}
+              defaultWorktreeIsolation={projectSettings?.defaultWorktreeIsolation}
             />
           )}
         </div>
@@ -2218,9 +2199,11 @@ export function KanbanBoard({
           onLaunchLeader={onLaunchLeader}
           onFocusNode={onFocusNode}
           recentCards={recentCards}
+          onSelectCard={(cardId) => { setSelectedCardId(cardId); setInspectorOpen(true); }}
           socketSend={socketSend}
           onUpdateNodeData={onUpdateNodeData}
           inspectorOpen={inspectorOpen}
+          contextNodes={availableContextNodes}
         />
       </div>
 

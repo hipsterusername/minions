@@ -279,7 +279,7 @@ function ProjectView({
         model: "sonnet",
         permissionMode: "auto",
         taskPlan: [],
-        worktreeIsolation: true,
+        worktreeIsolation: projectSettings.defaultWorktreeIsolation !== false,
         worktreePath: null,
         worktreeBranch: null,
         worktreeStatus: "none",
@@ -798,6 +798,7 @@ function ProjectView({
             projectPath={projectPath}
             nodes={nodes}
             onUpdateNodeData={(nodeId, data) => dispatch({ type: "UPDATE_NODE_DATA", id: nodeId, data })}
+            projectSettings={projectSettings}
           />
         </div>
       ) : (

@@ -962,25 +962,51 @@ export function Canvas({
     redo,
   });
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+  // Wheel handler is attached as a native DOM listener with { passive: false }
+  // so that preventDefault() actually blocks the browser's built-in pinch-zoom.
+  // React's onWheel is passive in modern browsers and cannot prevent it.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
 
-    setTransform((prev) => {
-      const zoomFactor = e.deltaY > 0 ? 0.92 : 1.08;
-      const newScale = Math.min(
-        MAX_ZOOM,
-        Math.max(MIN_ZOOM, prev.scale * zoomFactor),
-      );
-      const scaleChange = newScale / prev.scale;
-      return {
-        x: mouseX - (mouseX - prev.x) * scaleChange,
-        y: mouseY - (mouseY - prev.y) * scaleChange,
-        scale: newScale,
-      };
-    });
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+
+      // Trackpad pinch-to-zoom fires wheel events with ctrlKey=true.
+      // Ctrl+scroll on a mouse wheel also sets ctrlKey.  Both should zoom.
+      if (e.ctrlKey || e.metaKey) {
+        const rect = container.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        setTransform((prev) => {
+          // Pinch deltas are typically small (-2 … 2), mouse-wheel deltas larger.
+          // Using a continuous exponential factor keeps zoom smooth in both cases.
+          const zoomFactor = Math.pow(0.99, e.deltaY);
+          const newScale = Math.min(
+            MAX_ZOOM,
+            Math.max(MIN_ZOOM, prev.scale * zoomFactor),
+          );
+          const scaleChange = newScale / prev.scale;
+          return {
+            x: mouseX - (mouseX - prev.x) * scaleChange,
+            y: mouseY - (mouseY - prev.y) * scaleChange,
+            scale: newScale,
+          };
+        });
+      } else {
+        // Two-finger swipe on a trackpad (or regular scroll wheel without Ctrl).
+        // Pan the canvas using deltaX/deltaY — matches Figma / Zoom behaviour.
+        setTransform((prev) => ({
+          ...prev,
+          x: prev.x - e.deltaX,
+          y: prev.y - e.deltaY,
+        }));
+      }
+    };
+
+    container.addEventListener("wheel", handleWheel, { passive: false });
+    return () => container.removeEventListener("wheel", handleWheel);
   }, [setTransform]);
 
   const handleCanvasMouseDown = useCallback(
@@ -2581,7 +2607,6 @@ export function Canvas({
   return (
     <div
       ref={containerRef}
-      onWheel={handleWheel}
       onMouseDown={handleCanvasMouseDown}
       onContextMenu={handleCanvasContextMenu}
       onDragOver={handleDragOver}

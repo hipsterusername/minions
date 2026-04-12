@@ -22,6 +22,7 @@ export interface ProjectContext {
 export interface ProjectSettings {
   defaultModel?: string;
   defaultPermissionMode?: string;
+  defaultWorktreeIsolation?: boolean;
   [key: string]: unknown;
 }
 
@@ -97,6 +98,7 @@ export function initSidecar(projectPath: string): Database.Database {
     fs.writeFileSync(settingsPath, JSON.stringify({
       defaultModel: "sonnet",
       defaultPermissionMode: "auto",
+      defaultWorktreeIsolation: true,
     }, null, 2));
   }
 
@@ -138,13 +140,13 @@ export function writeContext(projectPath: string, content: string): void {
 export function readSettings(projectPath: string): ProjectSettings {
   const settingsPath = path.join(sidecarPath(projectPath), "settings.json");
   if (!fs.existsSync(settingsPath)) {
-    return { defaultModel: "sonnet", defaultPermissionMode: "auto" };
+    return { defaultModel: "sonnet", defaultPermissionMode: "auto", defaultWorktreeIsolation: true };
   }
   try {
     const raw = fs.readFileSync(settingsPath, "utf-8");
     return JSON.parse(raw) as ProjectSettings;
   } catch {
-    return { defaultModel: "sonnet", defaultPermissionMode: "auto" };
+    return { defaultModel: "sonnet", defaultPermissionMode: "auto", defaultWorktreeIsolation: true };
   }
 }
 

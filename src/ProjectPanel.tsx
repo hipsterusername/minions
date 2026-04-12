@@ -833,7 +833,7 @@ export function ProjectPanel({
                 Model used when spawning new Leader nodes
               </div>
             </div>
-            <div>
+            <div style={{ marginBottom: 16 }}>
               <label
                 style={{
                   display: "block",
@@ -878,6 +878,62 @@ export function ProjectPanel({
                 }}
               >
                 Model used when spawning new Minion nodes
+              </div>
+            </div>
+
+            {/* ── Separator ── */}
+            <div
+              style={{
+                height: 1,
+                background: "var(--border-default)",
+                margin: "16px 0",
+              }}
+            />
+
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 11,
+                  fontFamily: "var(--font-mono)",
+                  color: "var(--text-muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
+                  marginBottom: 4,
+                }}
+              >
+                Default Worktree Isolation
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontFamily: "var(--font-mono)",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={settings.defaultWorktreeIsolation !== false}
+                  onChange={(e) =>
+                    onSettingsChange?.({ ...settings, defaultWorktreeIsolation: e.target.checked })
+                  }
+                  style={{ cursor: "pointer" }}
+                />
+                Enable for new Leader nodes
+              </label>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: "var(--text-muted)",
+                  marginTop: 3,
+                  fontFamily: "var(--font-sans)",
+                }}
+              >
+                Leaders work in an isolated git worktree branch with approval-based merging
               </div>
             </div>
           </div>

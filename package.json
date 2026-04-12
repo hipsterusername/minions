@@ -10,11 +10,12 @@
   "scripts": {
     "dev": "vite",
     "server": "npx tsx server/index.ts",
-    "start": "npx tsx server/index.ts & vite --open",
+    "start": "node scripts/dev.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "preflight": "node scripts/preflight.mjs"
+    "preflight": "node scripts/preflight.mjs",
+    "configure": "node scripts/preflight.mjs && node scripts/setup-permissions.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.86",
