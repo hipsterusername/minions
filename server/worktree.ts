@@ -171,6 +171,7 @@ export async function listWorktrees(
 export async function mergeWorktree(
   info: WorktreeInfo,
   targetBranch?: string,
+  options?: { force?: boolean },
 ): Promise<MergeResult> {
   const projectCwd = info.projectPath;
   const worktreeCwd = info.path;
@@ -184,8 +185,13 @@ export async function mergeWorktree(
   // Step 1: Inside the worktree, merge the target branch INTO the canvas branch.
   // This catches up the canvas branch with any changes on main since the worktree
   // was created, and surfaces any conflicts here (in the worktree, not in main).
+  // When force=true, use -X ours to auto-resolve conflicts by keeping canvas changes.
+  const force = options?.force ?? false;
+  const mergeArgs = force
+    ? ["merge", targetBranch, "--no-edit", "-X", "ours"]
+    : ["merge", targetBranch, "--no-edit"];
   try {
-    await exec(["merge", targetBranch, "--no-edit"], worktreeCwd);
+    await exec(mergeArgs, worktreeCwd);
   } catch (err) {
     // Merge conflict — the canvas branch can't cleanly incorporate main's changes.
     let conflicts: string[] = [];
@@ -265,6 +271,7 @@ export async function mergeWorktree(
 export async function mergeAndCleanup(
   info: WorktreeInfo,
   targetBranch?: string,
+  options?: { force?: boolean },
 ): Promise<MergeResult> {
   // Auto-commit any uncommitted changes so they aren't lost on merge.
   try {
@@ -280,7 +287,7 @@ export async function mergeAndCleanup(
     // Non-fatal — proceed with merge even if auto-commit fails (e.g. nothing to commit)
   }
 
-  const result = await mergeWorktree(info, targetBranch);
+  const result = await mergeWorktree(info, targetBranch, options);
 
   if (result.success) {
     // Merge succeeded — remove worktree directory + branch
@@ -290,74 +297,6 @@ export async function mergeAndCleanup(
   // On failure the worktree stays "active" so the user can fix or discard.
 
   return result;
-}
-
-/**
- * Rebase the worktree branch onto the target branch, then attempt merge again.
- * This is an alternative conflict resolution strategy: instead of merging main
- * into the canvas branch, we rebase the canvas branch onto main, replaying
- * canvas commits on top of the latest main. If the rebase itself has conflicts,
- * it is aborted and the error is returned.
- */
-export async function rebaseAndRetry(
-  info: WorktreeInfo,
-  targetBranch?: string,
-): Promise<MergeResult> {
-  const projectCwd = info.projectPath;
-  const worktreeCwd = info.path;
-
-  if (!targetBranch) {
-    const { stdout } = await exec(["rev-parse", "--abbrev-ref", "HEAD"], projectCwd);
-    targetBranch = stdout.trim();
-  }
-
-  // Auto-commit any uncommitted changes first
-  try {
-    await exec(["add", "-A"], worktreeCwd);
-    const { stdout: status } = await exec(["status", "--porcelain"], worktreeCwd);
-    if (status.trim()) {
-      await exec(
-        ["commit", "-m", "chore: auto-commit uncommitted changes before rebase"],
-        worktreeCwd,
-      );
-    }
-  } catch {
-    // Non-fatal
-  }
-
-  // Attempt rebase of the canvas branch onto the target branch
-  try {
-    await exec(["rebase", targetBranch], worktreeCwd);
-  } catch (err) {
-    // Rebase conflict — abort and report
-    let conflicts: string[] = [];
-    try {
-      const { stdout: diffOut } = await exec(
-        ["diff", "--name-only", "--diff-filter=U"],
-        worktreeCwd,
-      );
-      conflicts = diffOut.trim().split("\n").filter(Boolean);
-    } catch {
-      // ignore
-    }
-
-    try {
-      await exec(["rebase", "--abort"], worktreeCwd);
-    } catch {
-      // ignore
-    }
-
-    const message = err instanceof Error ? err.message : String(err);
-    return {
-      success: false,
-      conflicts,
-      targetBranch,
-      summary: `Rebase failed (conflicts with ${targetBranch}): ${message}`,
-    };
-  }
-
-  // Rebase succeeded — now do the merge (should be fast-forward)
-  return mergeAndCleanup(info, targetBranch);
 }
 
 /**

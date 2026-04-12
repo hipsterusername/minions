@@ -1931,7 +1931,7 @@ function ConfigFooter({
         </div>
       )}
 
-      {/* Merge conflict resolution panel — shown when approve & merge fails */}
+      {/* Merge conflict panel — shown when approve & merge fails */}
       {data.approvalPending && data.mergeConflict && (
         <div
           onMouseDown={(e) => e.stopPropagation()}
@@ -1945,7 +1945,7 @@ function ConfigFooter({
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: "var(--status-error)", display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: 14 }}>!</span> Merge Conflicts Detected
+              <span style={{ fontSize: 14 }}>!</span> Merge Conflicts
             </div>
             <button
               onClick={() => onUpdateData({ ...data, mergeConflict: null })}
@@ -1958,9 +1958,6 @@ function ConfigFooter({
               x
             </button>
           </div>
-          <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 6, lineHeight: 1.5 }}>
-            Could not merge into <code style={{ fontFamily: "var(--font-mono)", background: "var(--bg-elevated)", padding: "1px 4px", borderRadius: 3 }}>{data.mergeConflict.targetBranch}</code> due to conflicting changes.
-          </div>
           {data.mergeConflict.conflicts.length > 0 && (
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8, fontFamily: "var(--font-mono)", background: "var(--bg-elevated)", padding: "6px 8px", borderRadius: 4, maxHeight: 80, overflowY: "auto" }}>
               {data.mergeConflict.conflicts.map((f, i) => (
@@ -1968,15 +1965,12 @@ function ConfigFooter({
               ))}
             </div>
           )}
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8 }}>
-            Choose a resolution strategy:
-          </div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 6 }}>
             <button
               onClick={() => {
                 if (socketSend && data.sessionKey) {
-                  socketSend({ type: "rebase_and_retry", sessionKey: data.sessionKey });
-                  onUpdateData({ ...data, worktreeStatus: "merging", mergeConflict: null });
+                  socketSend({ type: "force_merge", sessionKey: data.sessionKey });
+                  onUpdateData({ ...data, worktreeStatus: "merging", mergeConflict: null, approvalPending: false });
                 }
               }}
               style={{
@@ -1984,46 +1978,9 @@ function ConfigFooter({
                 background: "var(--accent)", border: "none", borderRadius: 6,
                 color: "#fff", cursor: "pointer", fontFamily: "var(--font-mono)",
               }}
-              title="Rebase your changes onto the latest target branch, then retry the merge"
+              title="Force merge — keep canvas changes on conflicts"
             >
-              Rebase & Retry
-            </button>
-            <button
-              onClick={() => {
-                if (socketSend && data.sessionKey) {
-                  socketSend({
-                    type: "request_agent_resolve",
-                    sessionKey: data.sessionKey,
-                    conflicts: data.mergeConflict?.conflicts,
-                    targetBranch: data.mergeConflict?.targetBranch,
-                  });
-                  onUpdateData({ ...data, mergeConflict: null, approvalPending: false });
-                }
-              }}
-              style={{
-                padding: "5px 12px", fontSize: 11, fontWeight: 600,
-                background: "var(--bg-elevated)", border: "1px solid var(--border-default)", borderRadius: 6,
-                color: "var(--text-secondary)", cursor: "pointer", fontFamily: "var(--font-mono)",
-              }}
-              title="Ask the AI agent to resolve the conflicts and request approval again"
-            >
-              Ask Agent to Resolve
-            </button>
-            <button
-              onClick={() => {
-                if (socketSend && data.sessionKey) {
-                  socketSend({ type: "approve_changes", sessionKey: data.sessionKey });
-                  onUpdateData({ ...data, worktreeStatus: "merging", mergeConflict: null });
-                }
-              }}
-              style={{
-                padding: "5px 12px", fontSize: 11,
-                background: "var(--bg-elevated)", border: "1px solid var(--border-default)", borderRadius: 6,
-                color: "var(--text-muted)", cursor: "pointer", fontFamily: "var(--font-mono)",
-              }}
-              title="Try the merge again (e.g. if you resolved conflicts externally)"
-            >
-              Retry Merge
+              Force Merge
             </button>
             <button
               onClick={() => {
@@ -2599,15 +2556,7 @@ function LeaderNodeRenderer({
         return;
       }
 
-      // Handle merge_conflict_cleared — user chose a resolution strategy
-      if (serverMsg.type === "merge_conflict_cleared" && serverMsg.sessionKey === current.sessionKey) {
-        emitUpdate({
-          ...current,
-          mergeConflict: null,
-          error: null,
-        });
-        return;
-      }
+
 
       // Handle worktree_removed (explicit discard)
       if (serverMsg.type === "worktree_removed" && serverMsg.sessionKey === current.sessionKey) {

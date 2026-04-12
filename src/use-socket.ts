@@ -15,7 +15,6 @@ export type ServerMessage =
   | { type: "worktree_status"; sessionKey: string; status: string; path?: string; branch?: string }
   | { type: "worktree_merged"; sessionKey: string }
   | { type: "worktree_merge_failed"; sessionKey: string; result?: { conflicts?: string[]; summary?: string; targetBranch?: string }; error?: string }
-  | { type: "merge_conflict_cleared"; sessionKey: string; timestamp: number }
   | { type: "wait_state"; sessionKey: string; action: string; reason: string; waitUntil?: number; timestamp: number }
   | { type: "error"; message: string };
 
@@ -625,7 +624,6 @@ const KNOWN_SERVER_MESSAGE_TYPES = new Set([
   "worktree_failed",
   "worktree_merged",
   "worktree_merge_failed",
-  "merge_conflict_cleared",
   "worktree_removed",
   "approval_requested",
   "approval_resolved",
