@@ -33,7 +33,8 @@ import { useCanvasFileDrop } from "./use-canvas-file-drop.ts";
 import { findNonOverlappingPosition, viewportCenter, pushNodesFromRect, snapToGrid } from "./canvas-utils.ts";
 import { computeAutoLayout } from "./auto-layout.ts";
 
-const MIN_ZOOM = 0.1;
+// Zoom-out floor: ~15% keeps the canvas readable at overview level.
+const MIN_ZOOM = 0.15;
 
 /** Height of the context-group title bar (also used by isInsideGroup). */
 const GROUP_HEADER = 36;
@@ -56,7 +57,9 @@ function isInsideGroup(node: CanvasNode, group: CanvasNode): boolean {
     cy <= group.position.y + group.size.height
   );
 }
-const MAX_ZOOM = 5;
+// Zoom-in ceiling: ~2× keeps a single leader node (560×520) roughly
+// viewport-sized without blowing past it into unusable territory.
+const MAX_ZOOM = 2;
 const GRID_SIZE = 24;
 
 /** Snap radius in world-space units — connections complete automatically when
@@ -993,13 +996,34 @@ export function Canvas({
         const mouseY = e.clientY - rect.top;
 
         setTransform((prev) => {
-          // Pinch deltas are small (-2 … 2); mouse-wheel pixel deltas are
-          // large (~100 per tick in Chrome).  Use a gentler exponent base for
-          // mouse/trackpad scroll so each tick zooms ~10% instead of ~60%.
-          // Firefox line-mode deltaY is ±3 lines — normalise to pixel-scale.
-          const dy = isFirefoxLineMode ? e.deltaY * 30 : e.deltaY;
-          const base = isPinch ? 0.99 : 0.999;
-          const zoomFactor = Math.pow(base, dy);
+          // Normalise deltaY into a zoom multiplier that feels consistent
+          // across mice, trackpads, and browsers.
+          //
+          // Mouse wheel: discrete ticks with large deltas (~100px Chrome,
+          // ~3 lines Firefox).  Normalise to ±1 notch, clamp so one tick
+          // always means exactly one step.
+          //
+          // Trackpad pinch: high-frequency continuous events with small
+          // deltas (-2…2).  Let the fractional value through so zoom
+          // speed tracks finger movement smoothly.
+          let notches: number;
+          if (isPinch) {
+            // Continuous — keep proportional, just scale down.
+            // Typical pinch deltas are ~1-4 per event at 60fps.
+            notches = e.deltaY / 4;
+          } else if (isFirefoxLineMode) {
+            notches = e.deltaY / 3;
+            notches = Math.max(-1, Math.min(1, notches));
+          } else {
+            // Discrete mouse wheel — normalise & clamp to ±1 notch.
+            notches = e.deltaY / 100;
+            notches = Math.max(-1, Math.min(1, notches));
+          }
+
+          // 5% zoom per notch — smooth, consistent, and not too aggressive.
+          // Positive notch (scroll down / pinch in) = zoom out.
+          const ZOOM_STEP = 0.05;
+          const zoomFactor = 1 - notches * ZOOM_STEP;
           const newScale = Math.min(
             MAX_ZOOM,
             Math.max(MIN_ZOOM, prev.scale * zoomFactor),
@@ -3067,8 +3091,8 @@ export function Canvas({
 
       <Toolbar
         transform={transform}
-        onZoomIn={() => zoomTo(transform.scale * 1.25)}
-        onZoomOut={() => zoomTo(transform.scale * 0.8)}
+        onZoomIn={() => zoomTo(transform.scale * 1.1)}
+        onZoomOut={() => zoomTo(transform.scale / 1.1)}
         onZoomReset={() =>
           setTransform((p) => ({
             ...p,
