@@ -29,7 +29,7 @@ import { ConfirmModal } from "./components/ConfirmModal.tsx";
 import { createDefaultNodeData } from "./node-defaults.ts";
 import { useCanvasKeyboard } from "./use-canvas-keyboard.ts";
 import { useCanvasFileDrop } from "./use-canvas-file-drop.ts";
-import { findNonOverlappingPosition, viewportCenter } from "./canvas-utils.ts";
+import { findNonOverlappingPosition, viewportCenter, pushNodesFromRect, snapToGrid } from "./canvas-utils.ts";
 import { computeAutoLayout } from "./auto-layout.ts";
 
 const MIN_ZOOM = 0.1;
@@ -860,9 +860,18 @@ export function Canvas({
       const col = Math.floor(minionCount / MINIONS_PER_COLUMN);
       const row = minionCount % MINIONS_PER_COLUMN;
 
+      // Account for existing dashboard node — minions start to the right
+      // of the dashboard if one exists, otherwise to the right of the leader.
+      const existingRender = nodesRef.current.find(
+        (n) => n.type === "render" && (n.data as RenderNodeData).leaderId === leader.id,
+      );
+      const anchorRight = existingRender
+        ? existingRender.position.x + existingRender.size.width
+        : leader.position.x + leader.size.width;
+
       const minionId = generateId();
-      const minionX = leader.position.x + leader.size.width + GAP_X + col * (minionWidth + GAP_X);
-      const minionY = leader.position.y + row * (minionHeight + GAP_Y);
+      const minionX = snapToGrid(anchorRight + GAP_X + col * (minionWidth + GAP_X));
+      const minionY = snapToGrid(leader.position.y + row * (minionHeight + GAP_Y));
 
       const taskState: MinionTaskState = {
         taskId: spawn.taskId,
@@ -2323,14 +2332,16 @@ export function Canvas({
         // First render_update for this leader — spawn the render node
         const renderTypeDef = getAllNodeTypes().find((t) => t.type === "render");
         if (renderTypeDef) {
+          const renderX = snapToGrid(leader.position.x + leader.size.width + 16);
+          const renderY = snapToGrid(leader.position.y);
+          const renderSize = { ...renderTypeDef.defaultSize };
+          const renderId = generateId();
+
           const renderNode: CanvasNode = {
-            id: generateId(),
+            id: renderId,
             type: "render",
-            position: {
-              x: leader.position.x + leader.size.width + 16,
-              y: leader.position.y,
-            },
-            size: { ...renderTypeDef.defaultSize },
+            position: { x: renderX, y: renderY },
+            size: renderSize,
             data: {
               leaderSessionKey,
               leaderId: leader.id,
@@ -2338,6 +2349,23 @@ export function Canvas({
             } satisfies RenderNodeData,
           };
           dispatch({ type: "ADD_NODE", node: renderNode });
+
+          // Push any minion nodes that overlap the new dashboard to the right
+          const minionNodes = nodesRef.current.filter(
+            (n) => n.type === "minion" && (n.data as MinionData).leaderId === leader.id,
+          );
+          if (minionNodes.length > 0) {
+            const moves = pushNodesFromRect(
+              { x: renderX, y: renderY, width: renderSize.width, height: renderSize.height },
+              minionNodes,
+              new Set([renderId, leader.id]),
+              "right",
+            );
+            if (moves.length > 0) {
+              dispatch({ type: "MOVE_GROUP", moves });
+            }
+          }
+
           console.log(`[Canvas] RenderNode spawned for leader ${leader.id} on first render_update`);
         }
         return;
