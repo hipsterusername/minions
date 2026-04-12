@@ -24,6 +24,8 @@ import {
   query,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { WebSocketServer, WebSocket } from "ws";
+import type { WorktreeInfo, DetailedDiff } from "./worktree.js";
+import { getDetailedDiff } from "./worktree.js";
 
 // ── Shared state types ─────────────────────────────────
 
@@ -51,10 +53,23 @@ export interface PendingWait {
   timerId: ReturnType<typeof setTimeout> | null;
 }
 
+export interface ApprovalState {
+  /** Whether approval has been requested */
+  requested: boolean;
+  /** Timestamp of the request */
+  requestedAt: number;
+  /** Summary provided by the leader */
+  summary: string;
+  /** Detailed diff at the time of request */
+  diff: DetailedDiff | null;
+}
+
 export interface TaskManagerState {
   tasks: Map<string, TaskRecord>;
   /** If set, the leader has requested a wait-then-continue cycle */
   pendingWait: PendingWait | null;
+  /** If set, the leader is waiting for user approval of worktree changes */
+  approval: ApprovalState | null;
 }
 
 // ── Broadcast helpers ──────────────────────────────────
@@ -105,13 +120,17 @@ export function createTaskToolsForLeader(opts: {
   existingTaskState?: TaskManagerState;
   /** Worktree branch the leader session is running in */
   worktreeBranch?: string | null;
+  /** Full worktree info — needed for detailed diff in approval workflow */
+  worktreeInfo?: WorktreeInfo | null;
+  /** Whether worktree isolation is active for this session */
+  worktreeIsolation?: boolean;
   /** Callback to schedule a delayed "Continue" message to resume the leader */
   scheduleWaitContinue: (durationMs: number, reason: string) => void;
 }) {
   const { leaderSessionKey, wss, startMinionSession, cwd, minionSystemPrompt } = opts;
 
   // Reuse existing task state on resume so get_task_status still works
-  const taskState: TaskManagerState = opts.existingTaskState ?? { tasks: new Map(), pendingWait: null };
+  const taskState: TaskManagerState = opts.existingTaskState ?? { tasks: new Map(), pendingWait: null, approval: null };
 
   // ── plan_task ──────────────────────────────────────
   // Register a task without starting it. The leader can later execute it
@@ -486,11 +505,119 @@ export function createTaskToolsForLeader(opts: {
     },
   );
 
+  // ── request_approval ────────────────────────────────
+  // When worktree isolation is active, the leader calls this to present
+  // a change summary and request user approval before merging to main.
+
+  const requestApprovalTool = tool(
+    "request_approval",
+    "REQUIRED as your final action: Request user approval to merge worktree changes into the main branch. Call this after ALL work is complete. Automatically gathers a detailed diff and triggers the Approve/Discard UI buttons for the user. IMPORTANT: Immediately after calling this tool, you MUST call render_set to display a change summary dashboard showing the diff details returned by this tool.",
+    {
+      summary: z
+        .string()
+        .describe("A concise summary of all changes made and why — this is shown to the user in the approval UI"),
+    },
+    async (args) => {
+      if (!opts.worktreeInfo) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "No worktree is active — approval workflow is only available with worktree isolation enabled.",
+            },
+          ],
+        };
+      }
+
+      // Gather detailed diff
+      let diff: DetailedDiff;
+      try {
+        diff = await getDetailedDiff(opts.worktreeInfo);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Failed to gather diff: ${msg}`,
+            },
+          ],
+        };
+      }
+
+      // Record approval state
+      taskState.approval = {
+        requested: true,
+        requestedAt: Date.now(),
+        summary: args.summary,
+        diff,
+      };
+
+      // Broadcast so the frontend can show approval UI
+      broadcast(wss, {
+        type: "approval_requested",
+        sessionKey: leaderSessionKey,
+        summary: args.summary,
+        diff,
+        timestamp: Date.now(),
+      });
+
+      // Build a response with the diff details AND explicit render instructions
+      const fileTable = diff.files.map((f) => {
+        const sign = f.status === "added" ? "+" : f.status === "deleted" ? "-" : "~";
+        return `  ${sign} ${f.file}  (+${f.insertions} -${f.deletions})`;
+      }).join("\n");
+
+      const commitList = diff.commits.length > 0
+        ? `\nCommits:\n${diff.commits.map((c) => `  • ${c}`).join("\n")}`
+        : "";
+
+      // Pre-format the file rows as JSON for the agent to use in render_set
+      const fileRows = JSON.stringify(
+        diff.files.map((f) => [f.file, f.status, `+${f.insertions}`, `-${f.deletions}`])
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: [
+              `✅ Approval requested successfully. The "Approve & Merge" and "Discard" buttons are now visible to the user.`,
+              ``,
+              `Branch: ${diff.branch}`,
+              `Files changed: ${diff.filesChanged}  (+${diff.insertions} -${diff.deletions})`,
+              fileTable,
+              commitList,
+              ``,
+              `⚠️ NEXT STEP REQUIRED: You MUST now call render_set to display a change summary dashboard. Use these values:`,
+              `- title: "Changes Ready for Review"`,
+              `- A text component with your summary`,
+              `- A table component with headers ["File", "Status", "+Lines", "-Lines"] and rows: ${fileRows}`,
+              `- A metric component: "${diff.filesChanged} files changed"`,
+              `- A metric component: "+${diff.insertions}" (color green)`,
+              `- A metric component: "-${diff.deletions}" (color red)`,
+              `- A metric component: "${diff.commits.length} commits"`,
+              `- A status component with label "Approval" state "warning" (shows "Waiting for review")`,
+              ``,
+              `After rendering the dashboard, tell the user you're waiting for their review. Do NOT continue working.`,
+            ].join("\n"),
+          },
+        ],
+      };
+    },
+  );
+
   // ── Build MCP server ───────────────────────────────
+
+  const baseTool = [planTaskTool, assignTaskTool, completeTaskTool, getTaskStatusTool, setTaskNameTool, waitAndContinueTool];
+  // Only add request_approval when worktree isolation is active
+  const allTools = (opts.worktreeIsolation && opts.worktreeInfo)
+    ? [...baseTool, requestApprovalTool]
+    : baseTool;
 
   const mcpServer = createSdkMcpServer({
     name: "task-manager",
-    tools: [planTaskTool, assignTaskTool, completeTaskTool, getTaskStatusTool, setTaskNameTool, waitAndContinueTool],
+    tools: allTools as never,
   });
 
   return { mcpServer, taskState };
