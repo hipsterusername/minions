@@ -198,7 +198,7 @@ const Toolbar = memo(function Toolbar({
         style={{
           ...btnStyle,
           background: "var(--accent)",
-          color: "var(--text-primary)",
+          color: "#000",
           border: "none",
         }}
         onClick={() => onAddNode("leader")}
