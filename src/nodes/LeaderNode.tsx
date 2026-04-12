@@ -1998,7 +1998,10 @@ function ConfigFooter({
               ))}
             </div>
           )}
-          <div style={{ display: "flex", gap: 6 }}>
+          <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 6, lineHeight: 1.4 }}>
+            Choose a resolution strategy:
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <button
               onClick={() => {
                 if (socketSend && data.sessionKey) {
@@ -2011,9 +2014,41 @@ function ConfigFooter({
                 background: "var(--accent)", border: "none", borderRadius: 6,
                 color: "var(--text-primary)", cursor: "pointer", fontFamily: "var(--font-mono)",
               }}
-              title="Force merge — keep canvas changes on conflicts"
+              title="Keep canvas branch changes where conflicts occur"
             >
-              Force Merge
+              Keep Ours
+            </button>
+            <button
+              onClick={() => {
+                if (socketSend && data.sessionKey) {
+                  socketSend({ type: "theirs_merge", sessionKey: data.sessionKey });
+                  onUpdateData({ ...data, worktreeStatus: "merging", mergeConflict: null, approvalPending: false });
+                }
+              }}
+              style={{
+                padding: "5px 12px", fontSize: 11, fontWeight: 600,
+                background: "var(--bg-elevated)", border: "1px solid var(--border-default)", borderRadius: 6,
+                color: "var(--text-secondary)", cursor: "pointer", fontFamily: "var(--font-mono)",
+              }}
+              title="Keep main branch changes where conflicts occur"
+            >
+              Keep Main
+            </button>
+            <button
+              onClick={() => {
+                if (socketSend && data.sessionKey) {
+                  socketSend({ type: "retry_merge", sessionKey: data.sessionKey });
+                  onUpdateData({ ...data, worktreeStatus: "merging", mergeConflict: null, approvalPending: false });
+                }
+              }}
+              style={{
+                padding: "5px 12px", fontSize: 11,
+                background: "var(--bg-elevated)", border: "1px solid var(--border-default)", borderRadius: 6,
+                color: "var(--text-secondary)", cursor: "pointer", fontFamily: "var(--font-mono)",
+              }}
+              title="Re-attempt a clean merge (use after manually resolving conflicts in the worktree)"
+            >
+              Retry
             </button>
             <button
               onClick={() => {

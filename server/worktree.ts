@@ -171,7 +171,7 @@ export async function listWorktrees(
 export async function mergeWorktree(
   info: WorktreeInfo,
   targetBranch?: string,
-  options?: { force?: boolean },
+  options?: { force?: boolean; strategy?: "ours" | "theirs" },
 ): Promise<MergeResult> {
   const projectCwd = info.projectPath;
   const worktreeCwd = info.path;
@@ -185,40 +185,93 @@ export async function mergeWorktree(
   // Step 1: Inside the worktree, merge the target branch INTO the canvas branch.
   // This catches up the canvas branch with any changes on main since the worktree
   // was created, and surfaces any conflicts here (in the worktree, not in main).
-  // When force=true, use -X ours to auto-resolve conflicts by keeping canvas changes.
-  const force = options?.force ?? false;
-  const mergeArgs = force
-    ? ["merge", targetBranch, "--no-edit", "-X", "ours"]
+  //
+  // Strategy options:
+  //   "ours"   → force=true or strategy="ours": keep canvas changes on conflicts
+  //   "theirs" → strategy="theirs": keep main branch changes on conflicts
+  //   (none)   → no auto-resolution, conflicts surface as errors
+  const strategy = options?.strategy ?? (options?.force ? "ours" : undefined);
+  const mergeArgs = strategy
+    ? ["merge", targetBranch, "--no-edit", "-X", strategy]
     : ["merge", targetBranch, "--no-edit"];
   try {
     await exec(mergeArgs, worktreeCwd);
   } catch (err) {
-    // Merge conflict — the canvas branch can't cleanly incorporate main's changes.
-    let conflicts: string[] = [];
-    try {
-      const { stdout: diffOut } = await exec(
-        ["diff", "--name-only", "--diff-filter=U"],
-        worktreeCwd,
-      );
-      conflicts = diffOut.trim().split("\n").filter(Boolean);
-    } catch {
-      // If diff fails too, just use the error message.
-    }
+    // Merge produced conflicts. If a strategy was requested, try to force-resolve
+    // remaining conflicts (modify/delete, add/add, tree conflicts) that -X alone
+    // can't handle, then complete the merge without aborting.
+    if (strategy) {
+      try {
+        // Identify unresolved files
+        const { stdout: diffOut } = await exec(
+          ["diff", "--name-only", "--diff-filter=U"],
+          worktreeCwd,
+        );
+        const unresolved = diffOut.trim().split("\n").filter(Boolean);
 
-    // Abort the failed merge in the worktree.
-    try {
-      await exec(["merge", "--abort"], worktreeCwd);
-    } catch {
-      // Abort may fail if there's nothing to abort; ignore.
-    }
+        if (unresolved.length > 0) {
+          // Force-resolve each conflicted file using the chosen side
+          const checkoutFlag = strategy === "ours" ? "--ours" : "--theirs";
+          for (const file of unresolved) {
+            try {
+              await exec(["checkout", checkoutFlag, "--", file], worktreeCwd);
+            } catch {
+              // File may have been deleted on one side — accept deletion
+              try {
+                await exec(["rm", "--", file], worktreeCwd);
+              } catch {
+                // Already removed or other edge case — skip
+              }
+            }
+          }
+        }
 
-    const message = err instanceof Error ? err.message : String(err);
-    return {
-      success: false,
-      conflicts,
-      targetBranch,
-      summary: `Merge failed (conflicts with ${targetBranch}): ${message}`,
-    };
+        // Stage all resolved files and complete the merge
+        await exec(["add", "-A"], worktreeCwd);
+        await exec(
+          ["commit", "--no-edit", "-m", `Merge ${targetBranch} (resolved with ${strategy} strategy)`],
+          worktreeCwd,
+        );
+        // Merge completed successfully via manual resolution — fall through to Step 2
+      } catch (resolveErr) {
+        // Manual resolution failed — abort and report
+        try { await exec(["merge", "--abort"], worktreeCwd); } catch { /* ignore */ }
+        const message = resolveErr instanceof Error ? resolveErr.message : String(resolveErr);
+        return {
+          success: false,
+          conflicts: [],
+          targetBranch,
+          summary: `Merge failed even with ${strategy} strategy: ${message}`,
+        };
+      }
+    } else {
+      // No strategy — report conflicts for user resolution
+      let conflicts: string[] = [];
+      try {
+        const { stdout: diffOut } = await exec(
+          ["diff", "--name-only", "--diff-filter=U"],
+          worktreeCwd,
+        );
+        conflicts = diffOut.trim().split("\n").filter(Boolean);
+      } catch {
+        // If diff fails too, just use the error message.
+      }
+
+      // Abort the failed merge in the worktree.
+      try {
+        await exec(["merge", "--abort"], worktreeCwd);
+      } catch {
+        // Abort may fail if there's nothing to abort; ignore.
+      }
+
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        success: false,
+        conflicts,
+        targetBranch,
+        summary: `Merge failed (conflicts with ${targetBranch}): ${message}`,
+      };
+    }
   }
 
   // Step 2: The canvas branch now contains everything from the target branch
@@ -271,7 +324,7 @@ export async function mergeWorktree(
 export async function mergeAndCleanup(
   info: WorktreeInfo,
   targetBranch?: string,
-  options?: { force?: boolean },
+  options?: { force?: boolean; strategy?: "ours" | "theirs" },
 ): Promise<MergeResult> {
   // Auto-commit any uncommitted changes so they aren't lost on merge.
   try {
