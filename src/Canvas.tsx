@@ -547,6 +547,7 @@ export function Canvas({
   const pendingMinionsRef = useRef<Map<string, PendingMinionSpawn>>(new Map());
   const revealedMinionsRef = useRef<Set<string>>(new Set());
   const spawnedMinionsRef = useRef<Set<string>>(new Set());
+  const spawnedRenderNodesRef = useRef<Set<string>>(new Set());
 
   const handleDragStart = useCallback((nodeId: string) => {
     draggingNodeIdRef.current = nodeId;
@@ -2286,12 +2287,20 @@ export function Canvas({
         );
         if (!leader) return;
 
+        // Dedup guard: prevent duplicate spawns from rapid render_update
+        // messages arriving before the first ADD_NODE dispatch is reflected
+        // in nodesRef (same pattern as spawnedMinionsRef for minion nodes).
+        if (spawnedRenderNodesRef.current.has(leader.id)) return;
+
         // If a render node already exists for this leader, nothing to do —
         // the RenderNode component's own socketSubscribe handles the update.
         const existing = nodesRef.current.find(
           (n) => n.type === "render" && (n.data as RenderNodeData).leaderId === leader.id,
         );
         if (existing) return;
+
+        // Mark as spawned BEFORE dispatching to close the race window.
+        spawnedRenderNodesRef.current.add(leader.id);
 
         // First render_update for this leader — spawn the render node
         const renderTypeDef = getAllNodeTypes().find((t) => t.type === "render");
