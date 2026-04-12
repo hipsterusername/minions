@@ -1884,88 +1884,6 @@ function ConfigFooter({
             </div>
           )}
 
-          {/* Approval pending banner */}
-          {data.approvalPending && (
-            <div
-              style={{
-                marginTop: 6,
-                padding: "8px 10px",
-                background: "var(--state-active)",
-                border: "1px solid var(--accent)",
-                borderRadius: 6,
-              }}
-            >
-              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", marginBottom: 4 }}>
-                Awaiting Approval
-              </div>
-              {data.approvalSummary && (
-                <div style={{ fontSize: 10, color: "var(--text-secondary)", marginBottom: 6, lineHeight: 1.4 }}>
-                  {data.approvalSummary}
-                </div>
-              )}
-              {data.approvalDiff && (
-                <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 6, fontFamily: "var(--font-mono)" }}>
-                  {data.approvalDiff.filesChanged} file{data.approvalDiff.filesChanged !== 1 ? "s" : ""} changed
-                  {" \u00b7 "}
-                  <span style={{ color: "var(--success-color)" }}>+{data.approvalDiff.insertions}</span>
-                  {" "}
-                  <span style={{ color: "var(--status-error)" }}>-{data.approvalDiff.deletions}</span>
-                  {data.approvalDiff.commits.length > 0 && (
-                    <span> {" \u00b7 "} {data.approvalDiff.commits.length} commit{data.approvalDiff.commits.length !== 1 ? "s" : ""}</span>
-                  )}
-                </div>
-              )}
-              <div style={{ display: "flex", gap: 6 }}>
-                <button
-                  onClick={() => {
-                    if (socketSend && data.sessionKey) {
-                      socketSend({ type: "approve_changes", sessionKey: data.sessionKey });
-                      onUpdateData({ ...data, worktreeStatus: "merging", approvalPending: false });
-                    }
-                  }}
-                  style={{
-                    padding: "4px 12px", fontSize: 11, fontWeight: 600,
-                    background: "var(--success-color)", border: "none", borderRadius: 4,
-                    color: "#fff", cursor: "pointer", fontFamily: "var(--font-mono)",
-                  }}
-                >
-                  Approve & Merge
-                </button>
-                <button
-                  onClick={() => {
-                    if (socketSend && data.sessionKey) {
-                      socketSend({ type: "get_worktree_diff", sessionKey: data.sessionKey });
-                    }
-                  }}
-                  style={{
-                    padding: "4px 10px", fontSize: 10, background: "var(--bg-elevated)",
-                    border: "1px solid var(--border-default)", borderRadius: 4,
-                    color: "var(--text-secondary)", cursor: "pointer", fontFamily: "var(--font-mono)",
-                  }}
-                >
-                  View Diff
-                </button>
-                <button
-                  onClick={() => {
-                    if (socketSend && data.sessionKey && confirm("Discard all worktree changes?")) {
-                      socketSend({ type: "discard_worktree", sessionKey: data.sessionKey });
-                    }
-                  }}
-                  style={{
-                    padding: "4px 10px", fontSize: 10, background: "var(--danger-bg)",
-                    border: "1px solid var(--danger-color)", borderRadius: 4,
-                    color: "var(--status-error)", cursor: "pointer", fontFamily: "var(--font-mono)",
-                  }}
-                >
-                  Discard
-                </button>
-              </div>
-              <div style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 4, fontStyle: "italic" }}>
-                Send a message to request changes instead
-              </div>
-            </div>
-          )}
-
           {/* Worktree actions (shown when idle with active worktree but NOT when approval is pending) */}
           {/* NOTE: No manual "Merge" button — merging happens only through the approval workflow */}
           {/* (the agent calls request_approval → user clicks "Approve & Merge"). */}
@@ -2004,6 +1922,89 @@ function ConfigFooter({
               </span>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Approval pending banner — ALWAYS visible (not gated by expanded state) */}
+      {data.approvalPending && (
+        <div
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            margin: "0 6px 6px",
+            padding: "10px 12px",
+            background: "var(--state-active)",
+            border: "2px solid var(--accent)",
+            borderRadius: 8,
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 14 }}>✓</span> Changes Ready for Review
+          </div>
+          {data.approvalSummary && (
+            <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 8, lineHeight: 1.5 }}>
+              {data.approvalSummary}
+            </div>
+          )}
+          {data.approvalDiff && (
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8, fontFamily: "var(--font-mono)" }}>
+              {data.approvalDiff.filesChanged} file{data.approvalDiff.filesChanged !== 1 ? "s" : ""} changed
+              {" · "}
+              <span style={{ color: "var(--success-color)", fontWeight: 600 }}>+{data.approvalDiff.insertions}</span>
+              {" "}
+              <span style={{ color: "var(--status-error)", fontWeight: 600 }}>-{data.approvalDiff.deletions}</span>
+              {data.approvalDiff.commits.length > 0 && (
+                <span> {" · "} {data.approvalDiff.commits.length} commit{data.approvalDiff.commits.length !== 1 ? "s" : ""}</span>
+              )}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={() => {
+                if (socketSend && data.sessionKey) {
+                  socketSend({ type: "approve_changes", sessionKey: data.sessionKey });
+                  onUpdateData({ ...data, worktreeStatus: "merging", approvalPending: false });
+                }
+              }}
+              style={{
+                padding: "6px 16px", fontSize: 12, fontWeight: 700,
+                background: "var(--success-color)", border: "none", borderRadius: 6,
+                color: "#fff", cursor: "pointer", fontFamily: "var(--font-mono)",
+              }}
+            >
+              ✓ Approve & Merge
+            </button>
+            <button
+              onClick={() => {
+                if (socketSend && data.sessionKey) {
+                  socketSend({ type: "get_worktree_diff", sessionKey: data.sessionKey });
+                }
+              }}
+              style={{
+                padding: "6px 12px", fontSize: 11, background: "var(--bg-elevated)",
+                border: "1px solid var(--border-default)", borderRadius: 6,
+                color: "var(--text-secondary)", cursor: "pointer", fontFamily: "var(--font-mono)",
+              }}
+            >
+              View Diff
+            </button>
+            <button
+              onClick={() => {
+                if (socketSend && data.sessionKey && confirm("Discard all worktree changes?")) {
+                  socketSend({ type: "discard_worktree", sessionKey: data.sessionKey });
+                }
+              }}
+              style={{
+                padding: "6px 12px", fontSize: 11, background: "var(--danger-bg)",
+                border: "1px solid var(--danger-color)", borderRadius: 6,
+                color: "var(--status-error)", cursor: "pointer", fontFamily: "var(--font-mono)",
+              }}
+            >
+              Discard
+            </button>
+          </div>
+          <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 6, fontStyle: "italic" }}>
+            Send a message to request changes instead
+          </div>
         </div>
       )}
     </div>
