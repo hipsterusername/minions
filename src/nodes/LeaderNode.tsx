@@ -2001,9 +2001,12 @@ function ConfigFooter({
           <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 6, lineHeight: 1.4 }}>
             Choose a resolution strategy:
           </div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }} data-no-drag>
             <button
-              onClick={() => {
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                console.log("[worktree] Keep Ours clicked", { socketSend: !!socketSend, sessionKey: data.sessionKey });
                 if (socketSend && data.sessionKey) {
                   socketSend({ type: "force_merge", sessionKey: data.sessionKey });
                   onUpdateData({ ...data, worktreeStatus: "merging", mergeConflict: null, approvalPending: false });
@@ -2019,7 +2022,10 @@ function ConfigFooter({
               Keep Ours
             </button>
             <button
-              onClick={() => {
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                console.log("[worktree] Keep Main clicked", { socketSend: !!socketSend, sessionKey: data.sessionKey });
                 if (socketSend && data.sessionKey) {
                   socketSend({ type: "theirs_merge", sessionKey: data.sessionKey });
                   onUpdateData({ ...data, worktreeStatus: "merging", mergeConflict: null, approvalPending: false });
@@ -2035,7 +2041,10 @@ function ConfigFooter({
               Keep Main
             </button>
             <button
-              onClick={() => {
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                console.log("[worktree] Retry clicked", { socketSend: !!socketSend, sessionKey: data.sessionKey });
                 if (socketSend && data.sessionKey) {
                   socketSend({ type: "retry_merge", sessionKey: data.sessionKey });
                   onUpdateData({ ...data, worktreeStatus: "merging", mergeConflict: null, approvalPending: false });
@@ -2051,7 +2060,9 @@ function ConfigFooter({
               Retry
             </button>
             <button
-              onClick={() => {
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
                 if (socketSend && data.sessionKey && confirm("Discard all worktree changes?")) {
                   socketSend({ type: "discard_worktree", sessionKey: data.sessionKey });
                 }
@@ -2329,6 +2340,18 @@ function LeaderNodeRenderer({
     document.addEventListener("pointerdown", handlePointerDown, true);
     return () => document.removeEventListener("pointerdown", handlePointerDown, true);
   }, [scrollLocked]);
+
+  // Native wheel listener on the scroll zone: stops the event from bubbling to
+  // the canvas container's native handler (which calls preventDefault and zooms).
+  // React's synthetic onWheel fires at the React root — above the canvas container —
+  // so it's too late to stopPropagation there. This native listener fires first.
+  useEffect(() => {
+    const zone = scrollZoneRef.current;
+    if (!zone) return;
+    const stop = (e: WheelEvent) => { e.stopPropagation(); };
+    zone.addEventListener("wheel", stop, { passive: false });
+    return () => zone.removeEventListener("wheel", stop);
+  }, []);
 
   useEffect(() => {
     if (outputRef.current) {
@@ -2999,31 +3022,17 @@ function LeaderNodeRenderer({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div
-            style={{
-              width: 20,
-              height: 20,
-              borderRadius: 5,
-              background: "var(--gradient-primary)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              overflow: "hidden",
-              flexShrink: 0,
-            }}
-          >
-            <img
-              src={
-                data.status === "running" || data.status === "creating"
-                  ? "/icons/leader-active.svg"
-                  : "/icons/leader-idle.svg"
-              }
-              alt={data.status === "running" || data.status === "creating" ? "Active" : "Idle"}
-              width={14}
-              height={14}
-              style={{ display: "block" }}
-            />
-          </div>
+          <img
+            src={
+              data.status === "running" || data.status === "creating"
+                ? "/icons/leader-active.svg"
+                : "/icons/leader-idle.svg"
+            }
+            alt={data.status === "running" || data.status === "creating" ? "Active" : "Idle"}
+            width={20}
+            height={20}
+            style={{ display: "block", flexShrink: 0 }}
+          />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div
               style={{
