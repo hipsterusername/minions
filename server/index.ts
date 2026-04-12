@@ -8,7 +8,7 @@ import { createProjectRoutes } from "./routes/projects.ts";
 import { createFileRoutes } from "./routes/files.ts";
 import { createTaskToolsForLeader, type TaskManagerState } from "./task-tools.ts";
 import { createMinionToolsForSession } from "./minion-tools.ts";
-import { createRenderToolsForLeader } from "./render-tools.ts";
+import { createRenderToolsForLeader, type RenderState } from "./render-tools.ts";
 import { MINION_SYSTEM_PROMPT } from "../src/prompts/minion-system.ts";
 import { createWorktree, removeWorktree, mergeAndCleanup, getWorktreeStatus, getDetailedDiff, isGitRepo, cleanupStaleWorktrees, type WorktreeInfo } from "./worktree.ts";
 import { validateSessionCwd } from "./path-guard.ts";
@@ -141,6 +141,8 @@ interface Session {
   worktreeIsolation: boolean;
   /** Active wait timer for wait_and_continue (leader only) */
   waitTimerId: ReturnType<typeof setTimeout> | null;
+  /** Current render dashboard state (leader only) — kept in sync by render MCP tools */
+  renderState: RenderState | null;
 }
 
 // ── WebSocket command types ─────────────────────────────
@@ -343,6 +345,7 @@ async function runSession(
     worktree: parentWorktree ?? existing?.worktree ?? null,
     worktreeIsolation: worktreeIsolation !== false,
     waitTimerId: null,
+    renderState: null,
   };
   // Clear any existing wait timer when the session resumes (it's being continued)
   if (existing?.waitTimerId) {
@@ -506,12 +509,13 @@ async function runSession(
           }, durationMs);
         },
       });
-      const { mcpServer: renderMcp } = createRenderToolsForLeader({
+      const { mcpServer: renderMcp, renderState } = createRenderToolsForLeader({
         leaderSessionKey: sessionKey,
         wss: wsServer,
       });
       options["mcpServers"] = { "task-manager": mcpServer, "render-dashboard": renderMcp };
       session.taskState = taskState;
+      session.renderState = renderState;
     }
 
     // For minion sessions, attach status-reporting MCP tools
@@ -801,6 +805,7 @@ function handleCommand(
           initData: syncSession.initData,
           worktree: syncSession.worktree,
           approval: syncSession.taskState?.approval ?? null,
+          renderState: syncSession.renderState ?? null,
           taskName: syncSession.taskName,
           role: syncSession.role,
           activeMinions: syncSession.taskState
@@ -811,6 +816,25 @@ function handleCommand(
           events: syncSession.eventBuffer,
         }),
       );
+
+      // If this session has dashboard render state, re-send it as a
+      // render_update so the RenderNode's existing subscription picks it up
+      // (handles page refresh / WebSocket reconnect recovery).
+      if (syncSession.renderState && syncSession.renderState.components.length > 0) {
+        ws.send(
+          JSON.stringify({
+            type: "render_update",
+            leaderSessionKey: cmd.sessionKey,
+            action: "set",
+            layout: {
+              title: syncSession.renderState.title,
+              columns: syncSession.renderState.columns,
+              gap: syncSession.renderState.gap,
+            },
+            components: syncSession.renderState.components,
+          }),
+        );
+      }
       break;
     }
 
