@@ -30,7 +30,7 @@ import { ConfirmModal } from "./components/ConfirmModal.tsx";
 import { createDefaultNodeData } from "./node-defaults.ts";
 import { useCanvasKeyboard } from "./use-canvas-keyboard.ts";
 import { useCanvasFileDrop } from "./use-canvas-file-drop.ts";
-import { findNonOverlappingPosition, viewportCenter } from "./canvas-utils.ts";
+import { findNonOverlappingPosition, viewportCenter, pushNodesFromRect, snapToGrid } from "./canvas-utils.ts";
 import { computeAutoLayout } from "./auto-layout.ts";
 
 const MIN_ZOOM = 0.1;
@@ -197,26 +197,31 @@ const Toolbar = memo(function Toolbar({
           background: "var(--accent)",
           color: "var(--text-primary)",
           border: "none",
-          fontWeight: 600,
-          width: "auto",
-          padding: "0 10px",
-          fontSize: 12,
-          gap: 4,
         }}
         onClick={() => onAddNode("leader")}
         title="Add Leader node"
       >
-        + Leader
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          {/* Plus in circle */}
+          <circle cx="8" cy="8" r="6.5" />
+          <line x1="8" y1="4.5" x2="8" y2="11.5" />
+          <line x1="4.5" y1="8" x2="11.5" y2="8" />
+        </svg>
       </button>
       <button
         style={{
           ...btnStyle,
           background: "var(--bg-surface)",
           color: "var(--text-secondary)",
-          fontWeight: 500,
-          width: "auto",
-          padding: "0 10px",
-          fontSize: 12,
         }}
         onClick={() => onAddNode("markdown")}
         title="Add Markdown node"
@@ -229,7 +234,23 @@ const Toolbar = memo(function Toolbar({
           e.currentTarget.style.color = "var(--text-secondary)";
         }}
       >
-        + Markdown
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          {/* Document with lines */}
+          <path d="M4 1.5h5l4 4v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1z" />
+          <path d="M9 1.5v4h4" />
+          <line x1="5.5" y1="8" x2="10.5" y2="8" />
+          <line x1="5.5" y1="10.5" x2="10.5" y2="10.5" />
+          <line x1="5.5" y1="13" x2="8" y2="13" />
+        </svg>
       </button>
 
       <div
@@ -840,9 +861,18 @@ export function Canvas({
       const col = Math.floor(minionCount / MINIONS_PER_COLUMN);
       const row = minionCount % MINIONS_PER_COLUMN;
 
+      // Account for existing dashboard node — minions start to the right
+      // of the dashboard if one exists, otherwise to the right of the leader.
+      const existingRender = nodesRef.current.find(
+        (n) => n.type === "render" && (n.data as RenderNodeData).leaderId === leader.id,
+      );
+      const anchorRight = existingRender
+        ? existingRender.position.x + existingRender.size.width
+        : leader.position.x + leader.size.width;
+
       const minionId = generateId();
-      const minionX = leader.position.x + leader.size.width + GAP_X + col * (minionWidth + GAP_X);
-      const minionY = leader.position.y + row * (minionHeight + GAP_Y);
+      const minionX = snapToGrid(anchorRight + GAP_X + col * (minionWidth + GAP_X));
+      const minionY = snapToGrid(leader.position.y + row * (minionHeight + GAP_Y));
 
       const taskState: MinionTaskState = {
         taskId: spawn.taskId,
@@ -2308,14 +2338,16 @@ export function Canvas({
 
         const renderTypeDef = getAllNodeTypes().find((t) => t.type === "render");
         if (renderTypeDef) {
+          const renderX = snapToGrid(leader.position.x + leader.size.width + 16);
+          const renderY = snapToGrid(leader.position.y);
+          const renderSize = { ...renderTypeDef.defaultSize };
+          const renderId = generateId();
+
           const renderNode: CanvasNode = {
-            id: generateId(),
+            id: renderId,
             type: "render",
-            position: {
-              x: leader.position.x + leader.size.width + 16,
-              y: leader.position.y,
-            },
-            size: { ...renderTypeDef.defaultSize },
+            position: { x: renderX, y: renderY },
+            size: renderSize,
             data: {
               leaderSessionKey,
               leaderId: leader.id,
@@ -2323,6 +2355,23 @@ export function Canvas({
             } satisfies RenderNodeData,
           };
           dispatch({ type: "ADD_NODE", node: renderNode });
+
+          // Push any minion nodes that overlap the new dashboard to the right
+          const minionNodes = nodesRef.current.filter(
+            (n) => n.type === "minion" && (n.data as MinionData).leaderId === leader.id,
+          );
+          if (minionNodes.length > 0) {
+            const moves = pushNodesFromRect(
+              { x: renderX, y: renderY, width: renderSize.width, height: renderSize.height },
+              minionNodes,
+              new Set([renderId, leader.id]),
+              "right",
+            );
+            if (moves.length > 0) {
+              dispatch({ type: "MOVE_GROUP", moves });
+            }
+          }
+
           console.log(`[Canvas] RenderNode spawned for leader ${leader.id} on first render_update`);
         }
         return;
