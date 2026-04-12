@@ -169,6 +169,9 @@ type WsCommandType =
   | "discard_worktree"
   | "get_worktree_diff"
   | "approve_changes"
+  | "force_merge"
+  | "theirs_merge"
+  | "retry_merge"
   | "remove_session"
   // File & state control
   | "rewind_files"
@@ -1155,11 +1158,14 @@ function handleCommand(
         sendControlError(ws, "merge_worktree", cmd.sessionKey!, cmd.requestId, "No worktree for this session");
         return;
       }
+      const mergeProjectPath = mergeSession.worktree.projectPath;
       mergeAndCleanup(mergeSession.worktree)
         .then((result) => {
           if (result.success) {
             // Worktree + branch have been removed by mergeAndCleanup
             mergeSession.worktree = null;
+            // Reset cwd to project path — worktree directory no longer exists
+            mergeSession.cwd = mergeProjectPath;
             broadcast(wsServer, {
               type: "worktree_merged",
               sessionKey: cmd.sessionKey,
@@ -1200,6 +1206,8 @@ function handleCommand(
       removeWorktree(worktreePath, worktreeProject)
         .then(() => {
           discardSession.worktree = null;
+          // Reset cwd to the main project path — the worktree directory no longer exists
+          discardSession.cwd = worktreeProject;
           broadcast(wsServer, {
             type: "worktree_removed",
             sessionKey: cmd.sessionKey,
@@ -1211,15 +1219,17 @@ function handleCommand(
             action: "discarded",
             timestamp: Date.now(),
           });
-          // Notify the agent that changes were discarded
+          // Notify the agent that changes were discarded.
+          // worktreeIsolation=false: session lifecycle is complete, don't create a new worktree.
           runSession(
             wsServer,
             cmd.sessionKey!,
             "The user has discarded all worktree changes. Your work has been removed. The session is now operating on the main working tree.",
-            discardSession.cwd,
+            worktreeProject,
             discardSession.sessionId ?? undefined,
             undefined,
             "leader",
+            false, // worktreeIsolation: off — lifecycle complete
           );
           sendControlResponse(ws, "discard_worktree", cmd.sessionKey!, cmd.requestId);
         })
@@ -1253,6 +1263,8 @@ function handleCommand(
         sendControlError(ws, "approve_changes", cmd.sessionKey!, cmd.requestId, "No worktree for this session");
         return;
       }
+      // Capture the project path before cleanup removes the worktree directory
+      const approveProjectPath = approveSession.worktree.projectPath;
       // NOTE: Don't clear approval state yet — wait until merge succeeds.
       // If merge fails, the approval UI should remain visible for retry.
       mergeAndCleanup(approveSession.worktree)
@@ -1263,6 +1275,8 @@ function handleCommand(
               approveSession.taskState.approval = null;
             }
             approveSession.worktree = null;
+            // Reset cwd to the main project path — the worktree directory no longer exists
+            approveSession.cwd = approveProjectPath;
             broadcast(wsServer, {
               type: "worktree_merged",
               sessionKey: cmd.sessionKey,
@@ -1277,15 +1291,17 @@ function handleCommand(
               action: "approved",
               timestamp: Date.now(),
             });
-            // Notify the agent that approval succeeded (Task G: agent feedback)
+            // Notify the agent that approval succeeded.
+            // worktreeIsolation=false: session lifecycle is complete, don't create a new worktree.
             runSession(
               wsServer,
               cmd.sessionKey!,
               "Your changes have been approved and merged successfully into the main branch. The worktree has been cleaned up.",
-              approveSession.cwd,
+              approveProjectPath,
               approveSession.sessionId ?? undefined,
               undefined,
               "leader",
+              false, // worktreeIsolation: off — lifecycle complete
             );
           } else {
             // Merge failed — keep approval state so the UI stays visible
@@ -1311,6 +1327,8 @@ function handleCommand(
         sendControlError(ws, "force_merge", cmd.sessionKey!, cmd.requestId, "No worktree for this session");
         return;
       }
+      // Capture the project path before cleanup removes the worktree directory
+      const forceProjectPath = forceSession.worktree.projectPath;
       mergeAndCleanup(forceSession.worktree, undefined, { force: true })
         .then((result) => {
           if (result.success) {
@@ -1318,6 +1336,66 @@ function handleCommand(
               forceSession.taskState.approval = null;
             }
             forceSession.worktree = null;
+            // Reset cwd to the main project path — the worktree directory no longer exists
+            forceSession.cwd = forceProjectPath;
+            broadcast(wsServer, {
+              type: "worktree_merged",
+              sessionKey: cmd.sessionKey,
+              result,
+              cleaned: true,
+              approved: true,
+              timestamp: Date.now(),
+            });
+            broadcast(wsServer, {
+              type: "approval_resolved",
+              sessionKey: cmd.sessionKey,
+              action: "approved",
+              timestamp: Date.now(),
+            });
+            // worktreeIsolation=false: session lifecycle is complete, don't create a new worktree.
+            runSession(
+              wsServer,
+              cmd.sessionKey!,
+              "Your changes have been force-merged successfully into the main branch (conflicts resolved by keeping your changes). The worktree has been cleaned up.",
+              forceProjectPath,
+              forceSession.sessionId ?? undefined,
+              undefined,
+              "leader",
+              false, // worktreeIsolation: off — lifecycle complete
+            );
+          } else {
+            broadcast(wsServer, {
+              type: "worktree_merge_failed",
+              sessionKey: cmd.sessionKey,
+              result,
+              timestamp: Date.now(),
+            });
+          }
+          sendControlResponse(ws, "force_merge", cmd.sessionKey!, cmd.requestId, { result });
+        })
+        .catch((err: unknown) => {
+          sendControlError(ws, "force_merge", cmd.sessionKey!, cmd.requestId, err instanceof Error ? err.message : String(err));
+        });
+      break;
+    }
+
+    case "theirs_merge": {
+      const theirsSession = getSessionOrError(cmd.sessionKey, ws);
+      if (!theirsSession) return;
+      if (!theirsSession.worktree) {
+        sendControlError(ws, "theirs_merge", cmd.sessionKey!, cmd.requestId, "No worktree for this session");
+        return;
+      }
+      // Merge using -X theirs: on conflicts, keep the main branch's version
+      const theirsProjectPath = theirsSession.worktree.projectPath;
+      mergeAndCleanup(theirsSession.worktree, undefined, { strategy: "theirs" })
+        .then((result) => {
+          if (result.success) {
+            if (theirsSession.taskState?.approval) {
+              theirsSession.taskState.approval = null;
+            }
+            theirsSession.worktree = null;
+            theirsSession.cwd = theirsProjectPath;
             broadcast(wsServer, {
               type: "worktree_merged",
               sessionKey: cmd.sessionKey,
@@ -1335,11 +1413,12 @@ function handleCommand(
             runSession(
               wsServer,
               cmd.sessionKey!,
-              "Your changes have been force-merged successfully into the main branch (conflicts resolved by keeping your changes). The worktree has been cleaned up.",
-              forceSession.cwd,
-              forceSession.sessionId ?? undefined,
+              "Your changes have been merged into the main branch using the 'keep main' strategy (conflicts were resolved by keeping the main branch's version). The worktree has been cleaned up.",
+              theirsProjectPath,
+              theirsSession.sessionId ?? undefined,
               undefined,
               "leader",
+              false,
             );
           } else {
             broadcast(wsServer, {
@@ -1349,10 +1428,69 @@ function handleCommand(
               timestamp: Date.now(),
             });
           }
-          sendControlResponse(ws, "force_merge", cmd.sessionKey!, cmd.requestId, { result });
+          sendControlResponse(ws, "theirs_merge", cmd.sessionKey!, cmd.requestId, { result });
         })
         .catch((err: unknown) => {
-          sendControlError(ws, "force_merge", cmd.sessionKey!, cmd.requestId, err instanceof Error ? err.message : String(err));
+          sendControlError(ws, "theirs_merge", cmd.sessionKey!, cmd.requestId, err instanceof Error ? err.message : String(err));
+        });
+      break;
+    }
+
+    case "retry_merge": {
+      // Re-attempt a clean merge after user may have manually resolved conflicts
+      // in the worktree (e.g. via terminal or editor).
+      const retrySession = getSessionOrError(cmd.sessionKey, ws);
+      if (!retrySession) return;
+      if (!retrySession.worktree) {
+        sendControlError(ws, "retry_merge", cmd.sessionKey!, cmd.requestId, "No worktree for this session");
+        return;
+      }
+      const retryProjectPath = retrySession.worktree.projectPath;
+      mergeAndCleanup(retrySession.worktree)
+        .then((result) => {
+          if (result.success) {
+            if (retrySession.taskState?.approval) {
+              retrySession.taskState.approval = null;
+            }
+            retrySession.worktree = null;
+            retrySession.cwd = retryProjectPath;
+            broadcast(wsServer, {
+              type: "worktree_merged",
+              sessionKey: cmd.sessionKey,
+              result,
+              cleaned: true,
+              approved: true,
+              timestamp: Date.now(),
+            });
+            broadcast(wsServer, {
+              type: "approval_resolved",
+              sessionKey: cmd.sessionKey,
+              action: "approved",
+              timestamp: Date.now(),
+            });
+            runSession(
+              wsServer,
+              cmd.sessionKey!,
+              "Merge retry succeeded. Your changes have been merged into the main branch. The worktree has been cleaned up.",
+              retryProjectPath,
+              retrySession.sessionId ?? undefined,
+              undefined,
+              "leader",
+              false,
+            );
+          } else {
+            // Still has conflicts — report back
+            broadcast(wsServer, {
+              type: "worktree_merge_failed",
+              sessionKey: cmd.sessionKey,
+              result,
+              timestamp: Date.now(),
+            });
+          }
+          sendControlResponse(ws, "retry_merge", cmd.sessionKey!, cmd.requestId, { result });
+        })
+        .catch((err: unknown) => {
+          sendControlError(ws, "retry_merge", cmd.sessionKey!, cmd.requestId, err instanceof Error ? err.message : String(err));
         });
       break;
     }

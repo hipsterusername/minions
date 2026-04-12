@@ -969,6 +969,11 @@ export function Canvas({
     if (!container) return;
 
     const handleWheel = (e: WheelEvent) => {
+      // If the event originated inside a [data-scroll-capture] element,
+      // let it scroll normally instead of zooming/panning the canvas.
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.("[data-scroll-capture]")) return;
+
       e.preventDefault();
 
       // --- Detect whether this event came from a mouse wheel or a trackpad ---
@@ -1016,9 +1021,9 @@ export function Canvas({
             notches = Math.max(-1, Math.min(1, notches));
           }
 
-          // 5% zoom per notch — smooth, consistent, and not too aggressive.
+          // 7% zoom per notch — smooth and consistent.
           // Positive notch (scroll down / pinch in) = zoom out.
-          const ZOOM_STEP = 0.05;
+          const ZOOM_STEP = 0.07;
           const zoomFactor = 1 - notches * ZOOM_STEP;
           const newScale = Math.min(
             MAX_ZOOM,

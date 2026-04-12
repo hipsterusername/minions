@@ -725,6 +725,8 @@ export function useSocket(url: string): SocketHandle {
   const send = useCallback((data: unknown) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(data));
+    } else {
+      console.warn("[ws] send dropped — WebSocket not open", { readyState: wsRef.current?.readyState, data });
     }
   }, []);
 
