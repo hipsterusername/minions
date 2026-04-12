@@ -2950,31 +2950,17 @@ function LeaderNodeRenderer({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div
-            style={{
-              width: 20,
-              height: 20,
-              borderRadius: 5,
-              background: "var(--gradient-primary)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              overflow: "hidden",
-              flexShrink: 0,
-            }}
-          >
-            <img
-              src={
-                data.status === "running" || data.status === "creating"
-                  ? "/icons/leader-active.svg"
-                  : "/icons/leader-idle.svg"
-              }
-              alt={data.status === "running" || data.status === "creating" ? "Active" : "Idle"}
-              width={14}
-              height={14}
-              style={{ display: "block" }}
-            />
-          </div>
+          <img
+            src={
+              data.status === "running" || data.status === "creating"
+                ? "/icons/leader-active.svg"
+                : "/icons/leader-idle.svg"
+            }
+            alt={data.status === "running" || data.status === "creating" ? "Active" : "Idle"}
+            width={20}
+            height={20}
+            style={{ display: "block", flexShrink: 0 }}
+          />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div
               style={{
