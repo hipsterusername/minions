@@ -2001,9 +2001,12 @@ function ConfigFooter({
           <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 6, lineHeight: 1.4 }}>
             Choose a resolution strategy:
           </div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }} data-no-drag>
             <button
-              onClick={() => {
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                console.log("[worktree] Keep Ours clicked", { socketSend: !!socketSend, sessionKey: data.sessionKey });
                 if (socketSend && data.sessionKey) {
                   socketSend({ type: "force_merge", sessionKey: data.sessionKey });
                   onUpdateData({ ...data, worktreeStatus: "merging", mergeConflict: null, approvalPending: false });
@@ -2019,7 +2022,10 @@ function ConfigFooter({
               Keep Ours
             </button>
             <button
-              onClick={() => {
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                console.log("[worktree] Keep Main clicked", { socketSend: !!socketSend, sessionKey: data.sessionKey });
                 if (socketSend && data.sessionKey) {
                   socketSend({ type: "theirs_merge", sessionKey: data.sessionKey });
                   onUpdateData({ ...data, worktreeStatus: "merging", mergeConflict: null, approvalPending: false });
@@ -2035,7 +2041,10 @@ function ConfigFooter({
               Keep Main
             </button>
             <button
-              onClick={() => {
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                console.log("[worktree] Retry clicked", { socketSend: !!socketSend, sessionKey: data.sessionKey });
                 if (socketSend && data.sessionKey) {
                   socketSend({ type: "retry_merge", sessionKey: data.sessionKey });
                   onUpdateData({ ...data, worktreeStatus: "merging", mergeConflict: null, approvalPending: false });
@@ -2051,7 +2060,9 @@ function ConfigFooter({
               Retry
             </button>
             <button
-              onClick={() => {
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
                 if (socketSend && data.sessionKey && confirm("Discard all worktree changes?")) {
                   socketSend({ type: "discard_worktree", sessionKey: data.sessionKey });
                 }
