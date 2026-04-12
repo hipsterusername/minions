@@ -2316,8 +2316,12 @@ function LeaderNodeRenderer({
             return;
           }
 
-          // Stream ended — just clear streaming state
+          // Stream ended — clear streaming text so stale content doesn't
+          // linger while the complete assistant message is in flight.
           if (isStreamEnd(serverMsg.message)) {
+            if (current.streamingText) {
+              emitUpdate({ ...current, streamingText: "" });
+            }
             return;
           }
           return;
@@ -2332,12 +2336,14 @@ function LeaderNodeRenderer({
             let base = current.messages;
             // When a result arrives, drop the last assistant msg if its content
             // matches the result — the SDK sends both, but we only want the
-            // green result bubble.
+            // green result bubble.  Normalize by stripping task-name tags so
+            // the comparison isn't thrown off by <!--task-name:...--> comments.
             if (serverMsg.message.type === "result") {
               const resultText = newMsgs.find((m) => m.role === "result")?.content;
               if (resultText) {
+                const normalizedResult = resultText.replace(/<!--task-name:.+?-->\s*/g, "").trim();
                 const lastIdx = base.findLastIndex((m) => m.role === "assistant");
-                if (lastIdx >= 0 && base[lastIdx].content.trim() === resultText.trim()) {
+                if (lastIdx >= 0 && base[lastIdx].content.replace(/<!--task-name:.+?-->\s*/g, "").trim() === normalizedResult) {
                   base = [...base.slice(0, lastIdx), ...base.slice(lastIdx + 1)];
                 }
               }
@@ -2368,6 +2374,11 @@ function LeaderNodeRenderer({
               streamingText: "",
             });
           }
+        } else if (serverMsg.message.type === "assistant" && current.streamingText) {
+          // Edge case: sdkToDisplayMessages returned no messages (e.g. text
+          // was entirely a <!--task-name:--> tag that got stripped).  Still
+          // need to clear stale streaming text.
+          emitUpdate({ ...current, streamingText: "" });
         }
         return;
       }

@@ -151,7 +151,7 @@ export function sdkToDisplayMessages(
       return [];
 
     case "result": {
-      const txt = sdkMsg.result ?? (sdkMsg.is_error ? "Error" : "Done");
+      const txt = (sdkMsg.result ?? (sdkMsg.is_error ? "Error" : "Done")).replace(/<!--task-name:.+?-->\s*/g, "");
       const ds = sdkMsg.duration_ms ? `${(sdkMsg.duration_ms / 1000).toFixed(1)}s` : null;
       const cs = sdkMsg.total_cost_usd ? `$${sdkMsg.total_cost_usd.toFixed(4)}` : null;
       const sfx = [ds, cs].filter(Boolean).join(" · ");

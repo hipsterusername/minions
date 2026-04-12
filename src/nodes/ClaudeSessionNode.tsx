@@ -14,7 +14,7 @@ import type { ModelOption, PermissionMode } from "../components/SessionToolbar.t
 import { StreamingBubble, StreamingIndicator } from "../components/StreamingBubble.tsx";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { AddAsNodeButton } from "../components/AddAsNodeButton.tsx";
-import { extractStreamDelta, isStreamingEvent } from "../streaming.ts";
+import { extractStreamDelta, isStreamingEvent, isStreamEnd } from "../streaming.ts";
 
 export interface SubagentInfo {
   taskId: string;
@@ -942,6 +942,10 @@ function ClaudeSessionRenderer({
               ...current,
               streamingText: (current.streamingText ?? "") + delta,
             });
+          } else if (isStreamEnd(serverMsg.message) && current.streamingText) {
+            // Stream ended — clear streaming text so stale content doesn't
+            // linger while the complete assistant message is in flight.
+            onUpdateData({ ...current, streamingText: "" });
           }
           return;
         }
@@ -997,12 +1001,13 @@ function ClaudeSessionRenderer({
           let base = current.messages;
           // When a result arrives, drop the last assistant msg if its content
           // matches the result — the SDK sends both, but we only want the
-          // green result bubble.
+          // green result bubble.  Normalize by stripping task-name tags.
           if (serverMsg.message.type === "result") {
             const resultText = newMsgs.find((m) => m.role === "result")?.content;
             if (resultText) {
+              const normalizedResult = resultText.replace(/<!--task-name:.+?-->\s*/g, "").trim();
               const lastIdx = base.findLastIndex((m) => m.role === "assistant");
-              if (lastIdx >= 0 && base[lastIdx].content.trim() === resultText.trim()) {
+              if (lastIdx >= 0 && base[lastIdx].content.replace(/<!--task-name:.+?-->\s*/g, "").trim() === normalizedResult) {
                 base = [...base.slice(0, lastIdx), ...base.slice(lastIdx + 1)];
               }
             }
