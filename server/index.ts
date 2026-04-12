@@ -12,6 +12,7 @@ import { createRenderToolsForLeader, type RenderState } from "./render-tools.ts"
 import { MINION_SYSTEM_PROMPT } from "../src/prompts/minion-system.ts";
 import { createWorktree, removeWorktree, mergeAndCleanup, getWorktreeStatus, getDetailedDiff, isGitRepo, cleanupStaleWorktrees, type WorktreeInfo } from "./worktree.ts";
 import { validateSessionCwd } from "./path-guard.ts";
+import { listRecentProjects } from "./project-store.ts";
 
 // ── Auth Token ──────────────────────────────────────────
 const AUTH_TOKEN = crypto.randomBytes(32).toString("hex");
@@ -467,8 +468,35 @@ async function runSession(
       includePartialMessages: true,
       promptSuggestions: true,
     };
+    // ── Inject worktree context into system prompt ──────
+    // When a worktree is active, append mandatory path-awareness rules
+    // so the agent is forced to work within the isolated worktree directory.
     if (systemPrompt) {
-      options["systemPrompt"] = systemPrompt;
+      let enrichedPrompt = systemPrompt;
+      if (session.worktree) {
+        const worktreeAddendum = [
+          "",
+          "",
+          "## ⚠️ WORKTREE ISOLATION — ACTIVE",
+          "",
+          `Your working directory (cwd) is an isolated git worktree:`,
+          `  **Worktree path:** \`${session.worktree.path}\``,
+          `  **Branch:** \`${session.worktree.branch}\``,
+          `  **Main project:** \`${session.worktree.projectPath}\``,
+          "",
+          "### Rules",
+          "",
+          "- **ALL file operations (Read, Write, Edit, Glob, Grep) MUST target paths within your worktree directory.**",
+          "- When you discover file paths (from Glob, Grep, error messages, git output, etc.), they will already be within your worktree — use them as-is.",
+          `- **NEVER** use paths under \`${session.worktree.projectPath}\` directly — that is the user's main working tree. Your changes go through the worktree and are merged after approval.`,
+          "- Bash commands automatically run in your worktree cwd.",
+          "- If you spawn subagents via the Agent tool, they inherit your worktree cwd.",
+          "- When delegating to minions via assign_task, they will automatically work in your worktree.",
+          "",
+        ].join("\n");
+        enrichedPrompt += worktreeAddendum;
+      }
+      options["systemPrompt"] = enrichedPrompt;
     }
     if (session.model) {
       options["model"] = session.model;
@@ -1665,10 +1693,13 @@ server.listen(PORT, HOST, () => {
   console.log(`WebSocket available on ws://${HOST}:${PORT}`);
   console.log(`[auth] Auth token: ${AUTH_TOKEN.slice(0, 8)}...`);
 
-  // Clean up stale worktrees from previous sessions
-  void cleanupStaleWorktrees(process.cwd()).catch((err) => {
-    console.warn("Worktree cleanup skipped:", err instanceof Error ? err.message : err);
-  });
+  // Clean up stale worktrees from previous sessions across all known projects
+  const recentProjects = listRecentProjects();
+  for (const project of recentProjects) {
+    void cleanupStaleWorktrees(project.path).catch((err) => {
+      console.warn(`Worktree cleanup skipped for ${project.path}:`, err instanceof Error ? err.message : err);
+    });
+  }
 });
 
 // ── Graceful shutdown: clean up all active worktrees ────────────────────────

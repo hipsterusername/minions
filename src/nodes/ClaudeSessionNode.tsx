@@ -855,6 +855,7 @@ function ClaudeSessionRenderer({
   socketSend,
   socketSubscribe,
   onAddContentNode,
+  projectPath,
 }: NodeRenderProps) {
   const data = node.data as ClaudeSessionData;
   const dataRef = useRef(data);
@@ -1066,6 +1067,7 @@ function ClaudeSessionRenderer({
       type: "create_session",
       sessionKey: key,
       prompt,
+      ...(projectPath ? { cwd: projectPath } : {}),
     });
     syncedRef.current = true;
     onUpdateData({
