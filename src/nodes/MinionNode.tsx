@@ -63,6 +63,7 @@ function MinionNodeRenderer({
   socketSubscribe,
   onResize,
   onAddContentNode,
+  projectPath,
 }: NodeRenderProps) {
   const data = node.data as MinionData;
   const dataRef = useRef(data);
@@ -454,6 +455,10 @@ function MinionNodeRenderer({
         prompt,
         systemPrompt: current.sessionKey ? undefined : MINION_SYSTEM_PROMPT,
         role: "minion",
+        // Minions don't create their own worktrees — they inherit the leader's.
+        // Pass cwd so the session runs in the project dir (not the server's cwd).
+        worktreeIsolation: false,
+        ...(projectPath ? { cwd: projectPath } : {}),
       });
 
       onUpdateData({
