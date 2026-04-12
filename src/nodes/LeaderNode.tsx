@@ -2257,8 +2257,10 @@ function LeaderNodeRenderer({
   const [input, setInput] = useState("");
   const [tasksExpanded, setTasksExpanded] = useState(false);
   const [skillFlyoutOpen, setSkillFlyoutOpen] = useState(false);
+  const [scrollLocked, setScrollLocked] = useState(false);
   const skillAnchorRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLDivElement>(null);
+  const scrollZoneRef = useRef<HTMLDivElement>(null);
   const syncedRef = useRef(false);
   const { banners, processSdkEvent, dismissBanner } = useStatusBanners();
 
@@ -2280,6 +2282,18 @@ function LeaderNodeRenderer({
       setSkillFlyoutOpen(false);
     }
   }, [canvasScale]);
+
+  // Click-outside: deactivate scroll lock when clicking outside the scroll zone
+  useEffect(() => {
+    if (!scrollLocked) return;
+    const handlePointerDown = (e: PointerEvent) => {
+      if (scrollZoneRef.current && !scrollZoneRef.current.contains(e.target as Node)) {
+        setScrollLocked(false);
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
+  }, [scrollLocked]);
 
   useEffect(() => {
     if (outputRef.current) {
@@ -3158,6 +3172,20 @@ function LeaderNodeRenderer({
         onRevealMinion={onRevealMinion}
       />
 
+      {/* Scroll-capture zone: hover or click to capture scroll, click outside to release */}
+      <div
+        ref={scrollZoneRef}
+        data-scroll-capture
+        onPointerDown={() => setScrollLocked(true)}
+        className={`leader-scroll-zone${scrollLocked ? " leader-scroll-zone--locked" : ""}`}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          position: "relative",
+        }}
+      >
       {/* Messages — P5: with markdown rendering and collapsible user messages */}
       <div
         ref={outputRef}
@@ -3365,6 +3393,7 @@ function LeaderNodeRenderer({
           {data.sessionKey ? "Send" : "Start"}
         </button>
       </div>
+      </div>{/* end scroll-capture zone */}
 
       {data.error && (
         <div

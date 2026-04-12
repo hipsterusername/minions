@@ -161,6 +161,22 @@ input, textarea, select,
   -webkit-user-select: text;
 }
 
+/* ── Leader scroll-capture zone ── */
+.leader-scroll-zone {
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  border-radius: 4px;
+  transition: outline-color 0.15s;
+}
+
+.leader-scroll-zone:hover {
+  outline-color: var(--border-hover);
+}
+
+.leader-scroll-zone--locked {
+  outline-color: var(--accent) !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
