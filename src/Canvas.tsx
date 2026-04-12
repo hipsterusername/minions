@@ -10,7 +10,7 @@ import {
 import type { CanvasTransform, CanvasNode, CanvasAction, Position, Size, ContextItem } from "./types.ts";
 import { generateId } from "./canvas-state.ts";
 import { CanvasNodeComponent } from "./CanvasNode.tsx";
-import { getUserCreatableNodeTypes, getAllNodeTypes } from "./node-registry.ts";
+import { getAllNodeTypes } from "./node-registry.ts";
 import { SessionPanel } from "./SessionPanel.tsx";
 import { EdgeRenderer } from "./EdgeRenderer.tsx";
 import type { GraphDocument } from "./graph.ts";
@@ -22,14 +22,15 @@ import { PROTOCOL_COLORS } from "./components/PortDot.tsx";
 import type { LeaderData, TaskPlanItem } from "./nodes/LeaderNode.tsx";
 import type { MinionData, MinionTaskState } from "./nodes/MinionNode.tsx";
 import type { RenderNodeData } from "./nodes/RenderNode.tsx";
-import { emptyRenderState } from "./render-dsl.ts";
+import { emptyRenderState, applyRenderMessage } from "./render-dsl.ts";
+import type { RenderMessage } from "./render-dsl.ts";
 import { CanvasContextMenu } from "./components/CanvasContextMenu.tsx";
 import type { ContextMenuOption } from "./components/CanvasContextMenu.tsx";
 import { ConfirmModal } from "./components/ConfirmModal.tsx";
 import { createDefaultNodeData } from "./node-defaults.ts";
 import { useCanvasKeyboard } from "./use-canvas-keyboard.ts";
 import { useCanvasFileDrop } from "./use-canvas-file-drop.ts";
-import { findNonOverlappingPosition, viewportCenter } from "./canvas-utils.ts";
+import { findNonOverlappingPosition, viewportCenter, pushNodesFromRect, snapToGrid } from "./canvas-utils.ts";
 import { computeAutoLayout } from "./auto-layout.ts";
 
 const MIN_ZOOM = 0.1;
@@ -157,9 +158,6 @@ const Toolbar = memo(function Toolbar({
   onFocusNextActive,
   hasActiveNodes,
 }: ToolbarProps) {
-  const [showPalette, setShowPalette] = useState(false);
-  const nodeTypes = getUserCreatableNodeTypes();
-
   const btnStyle: React.CSSProperties = {
     width: 32,
     height: 32,
@@ -193,66 +191,67 @@ const Toolbar = memo(function Toolbar({
         alignItems: "center",
       }}
     >
-      <div style={{ position: "relative" }}>
-        <button
-          style={{
-            ...btnStyle,
-            background: "var(--accent)",
-            color: "var(--text-primary)",
-            border: "none",
-            fontWeight: 600,
-          }}
-          onClick={() => setShowPalette(!showPalette)}
-          title="Add node"
+      <button
+        style={{
+          ...btnStyle,
+          background: "var(--accent)",
+          color: "var(--text-primary)",
+          border: "none",
+        }}
+        onClick={() => onAddNode("leader")}
+        title="Add Leader node"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
         >
-          +
-        </button>
-        {showPalette && (
-          <div
-            style={{
-              position: "absolute",
-              bottom: 42,
-              left: 0,
-              background: "var(--bg-secondary)",
-              border: "1px solid var(--border-default)",
-              borderRadius: 8,
-              padding: 4,
-              minWidth: 140,
-              boxShadow: "var(--shadow-lg)",
-            }}
-          >
-            {nodeTypes.map((nt) => (
-              <button
-                key={nt.type}
-                onClick={() => {
-                  onAddNode(nt.type);
-                  setShowPalette(false);
-                }}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  padding: "8px 12px",
-                  background: "transparent",
-                  border: "none",
-                  color: "var(--text-primary)",
-                  fontSize: 13,
-                  cursor: "pointer",
-                  textAlign: "left",
-                  borderRadius: 4,
-                }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.background = "var(--bg-elevated)")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.background = "transparent")
-                }
-              >
-                {nt.label}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+          {/* Plus in circle */}
+          <circle cx="8" cy="8" r="6.5" />
+          <line x1="8" y1="4.5" x2="8" y2="11.5" />
+          <line x1="4.5" y1="8" x2="11.5" y2="8" />
+        </svg>
+      </button>
+      <button
+        style={{
+          ...btnStyle,
+          background: "var(--bg-surface)",
+          color: "var(--text-secondary)",
+        }}
+        onClick={() => onAddNode("markdown")}
+        title="Add Markdown node"
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "var(--bg-elevated)";
+          e.currentTarget.style.color = "var(--text-primary)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "var(--bg-surface)";
+          e.currentTarget.style.color = "var(--text-secondary)";
+        }}
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          {/* Document with lines */}
+          <path d="M4 1.5h5l4 4v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1z" />
+          <path d="M9 1.5v4h4" />
+          <line x1="5.5" y1="8" x2="10.5" y2="8" />
+          <line x1="5.5" y1="10.5" x2="10.5" y2="10.5" />
+          <line x1="5.5" y1="13" x2="8" y2="13" />
+        </svg>
+      </button>
 
       <div
         style={{
@@ -453,7 +452,6 @@ export function Canvas({
     () => [
       { label: "New Leader", type: "leader" },
       { label: "New Markdown", type: "markdown" },
-      { label: "New Context Group", type: "context-group" },
     ],
     [],
   );
@@ -863,9 +861,18 @@ export function Canvas({
       const col = Math.floor(minionCount / MINIONS_PER_COLUMN);
       const row = minionCount % MINIONS_PER_COLUMN;
 
+      // Account for existing dashboard node — minions start to the right
+      // of the dashboard if one exists, otherwise to the right of the leader.
+      const existingRender = nodesRef.current.find(
+        (n) => n.type === "render" && (n.data as RenderNodeData).leaderId === leader.id,
+      );
+      const anchorRight = existingRender
+        ? existingRender.position.x + existingRender.size.width
+        : leader.position.x + leader.size.width;
+
       const minionId = generateId();
-      const minionX = leader.position.x + leader.size.width + GAP_X + col * (minionWidth + GAP_X);
-      const minionY = leader.position.y + row * (minionHeight + GAP_Y);
+      const minionX = snapToGrid(anchorRight + GAP_X + col * (minionWidth + GAP_X));
+      const minionY = snapToGrid(leader.position.y + row * (minionHeight + GAP_Y));
 
       const taskState: MinionTaskState = {
         taskId: spawn.taskId,
@@ -1884,8 +1891,29 @@ export function Canvas({
       };
       dispatch({ type: "ADD_NODE", node });
       setSelectedIds(new Set([node.id]));
+
+      // Focus viewport on the newly added node
+      if (container) {
+        const padding = 80;
+        const minX = position.x;
+        const minY = position.y;
+        const maxX = position.x + typeDef.defaultSize.width;
+        const maxY = position.y + typeDef.defaultSize.height;
+        const contentW = maxX - minX + padding * 2;
+        const contentH = maxY - minY + padding * 2;
+        const scaleX = container.clientWidth / contentW;
+        const scaleY = container.clientHeight / contentH;
+        const scale = Math.min(1.0, Math.max(0.4, Math.min(scaleX, scaleY)));
+        const nodeCenterX = (minX + maxX) / 2;
+        const nodeCenterY = (minY + maxY) / 2;
+        setTransform({
+          x: container.clientWidth / 2 - nodeCenterX * scale,
+          y: container.clientHeight / 2 - nodeCenterY * scale,
+          scale,
+        });
+      }
     },
-    [dispatch],
+    [dispatch, setTransform],
   );
 
   /** Add a node at a specific world position (used by context menu) */
@@ -2303,23 +2331,47 @@ export function Canvas({
         spawnedRenderNodesRef.current.add(leader.id);
 
         // First render_update for this leader — spawn the render node
+        // Apply the first message's data immediately so it isn't lost
+        // (the RenderNode's own subscription hasn't mounted yet).
+        const renderMsg: RenderMessage = serverMsg as unknown as RenderMessage;
+        const initialState = applyRenderMessage(emptyRenderState(), renderMsg);
+
         const renderTypeDef = getAllNodeTypes().find((t) => t.type === "render");
         if (renderTypeDef) {
+          const renderX = snapToGrid(leader.position.x + leader.size.width + 16);
+          const renderY = snapToGrid(leader.position.y);
+          const renderSize = { ...renderTypeDef.defaultSize };
+          const renderId = generateId();
+
           const renderNode: CanvasNode = {
-            id: generateId(),
+            id: renderId,
             type: "render",
-            position: {
-              x: leader.position.x + leader.size.width + 16,
-              y: leader.position.y,
-            },
-            size: { ...renderTypeDef.defaultSize },
+            position: { x: renderX, y: renderY },
+            size: renderSize,
             data: {
               leaderSessionKey,
               leaderId: leader.id,
-              renderState: emptyRenderState(),
+              renderState: initialState,
             } satisfies RenderNodeData,
           };
           dispatch({ type: "ADD_NODE", node: renderNode });
+
+          // Push any minion nodes that overlap the new dashboard to the right
+          const minionNodes = nodesRef.current.filter(
+            (n) => n.type === "minion" && (n.data as MinionData).leaderId === leader.id,
+          );
+          if (minionNodes.length > 0) {
+            const moves = pushNodesFromRect(
+              { x: renderX, y: renderY, width: renderSize.width, height: renderSize.height },
+              minionNodes,
+              new Set([renderId, leader.id]),
+              "right",
+            );
+            if (moves.length > 0) {
+              dispatch({ type: "MOVE_GROUP", moves });
+            }
+          }
+
           console.log(`[Canvas] RenderNode spawned for leader ${leader.id} on first render_update`);
         }
         return;

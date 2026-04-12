@@ -14,7 +14,7 @@ export type ServerMessage =
   | { type: "approval_resolved"; sessionKey: string; outcome: string; timestamp: number }
   | { type: "worktree_status"; sessionKey: string; status: string; path?: string; branch?: string }
   | { type: "worktree_merged"; sessionKey: string }
-  | { type: "worktree_merge_failed"; sessionKey: string; error: string }
+  | { type: "worktree_merge_failed"; sessionKey: string; result?: { conflicts?: string[]; summary?: string; targetBranch?: string }; error?: string }
   | { type: "wait_state"; sessionKey: string; action: string; reason: string; waitUntil?: number; timestamp: number }
   | { type: "error"; message: string };
 
@@ -638,7 +638,7 @@ const KNOWN_SERVER_MESSAGE_TYPES = new Set([
   "task_completed",
   "task_failed",
   "task_name_set",
-  "render_dashboard",
+  "render_update",
 ]);
 
 function isValidServerMessage(data: unknown): data is ServerMessage {

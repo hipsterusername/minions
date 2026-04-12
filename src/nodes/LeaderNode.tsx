@@ -71,6 +71,14 @@ export interface LeaderData {
   /** Wait state: populated when the leader calls wait_and_continue */
   waitUntil?: number | null;
   waitReason?: string | null;
+  /** Set briefly after a successful merge to show a confirmation banner */
+  mergeConfirmed?: boolean;
+  /** Merge conflict state: set when approve & merge fails due to conflicts */
+  mergeConflict?: {
+    conflicts: string[];
+    summary: string;
+    targetBranch: string;
+  } | null;
   /** Approval state: set when the leader calls request_approval */
   approvalPending?: boolean;
   approvalSummary?: string | null;
@@ -1925,8 +1933,108 @@ function ConfigFooter({
         </div>
       )}
 
-      {/* Approval pending banner — ALWAYS visible (not gated by expanded state) */}
-      {data.approvalPending && (
+      {/* Merge confirmed banner — shown briefly after successful merge */}
+      {data.mergeConfirmed && (
+        <div
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            margin: "0 6px 6px",
+            padding: "8px 12px",
+            background: "var(--success-bg, rgba(46,160,67,0.1))",
+            border: "2px solid var(--success-color)",
+            borderRadius: 8,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--success-color)", display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 14 }}>✓</span> Merged successfully
+          </div>
+          <button
+            onClick={() => onUpdateData({ ...data, mergeConfirmed: false })}
+            style={{
+              background: "none", border: "none", color: "var(--text-muted)",
+              cursor: "pointer", fontSize: 14, padding: "0 2px", lineHeight: 1,
+            }}
+            title="Dismiss"
+          >
+            x
+          </button>
+        </div>
+      )}
+
+      {/* Merge conflict panel — shown when approve & merge fails */}
+      {data.approvalPending && data.mergeConflict && (
+        <div
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            margin: "0 6px 6px",
+            padding: "10px 12px",
+            background: "var(--danger-bg)",
+            border: "2px solid var(--danger-color)",
+            borderRadius: 8,
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--status-error)", display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 14 }}>!</span> Merge Conflicts
+            </div>
+            <button
+              onClick={() => onUpdateData({ ...data, mergeConflict: null })}
+              style={{
+                background: "none", border: "none", color: "var(--text-muted)",
+                cursor: "pointer", fontSize: 14, padding: "0 2px", lineHeight: 1,
+              }}
+              title="Dismiss"
+            >
+              x
+            </button>
+          </div>
+          {data.mergeConflict.conflicts.length > 0 && (
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8, fontFamily: "var(--font-mono)", background: "var(--bg-elevated)", padding: "6px 8px", borderRadius: 4, maxHeight: 80, overflowY: "auto" }}>
+              {data.mergeConflict.conflicts.map((f, i) => (
+                <div key={i} style={{ padding: "1px 0" }}>{f}</div>
+              ))}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              onClick={() => {
+                if (socketSend && data.sessionKey) {
+                  socketSend({ type: "force_merge", sessionKey: data.sessionKey });
+                  onUpdateData({ ...data, worktreeStatus: "merging", mergeConflict: null, approvalPending: false });
+                }
+              }}
+              style={{
+                padding: "5px 12px", fontSize: 11, fontWeight: 600,
+                background: "var(--accent)", border: "none", borderRadius: 6,
+                color: "#fff", cursor: "pointer", fontFamily: "var(--font-mono)",
+              }}
+              title="Force merge — keep canvas changes on conflicts"
+            >
+              Force Merge
+            </button>
+            <button
+              onClick={() => {
+                if (socketSend && data.sessionKey && confirm("Discard all worktree changes?")) {
+                  socketSend({ type: "discard_worktree", sessionKey: data.sessionKey });
+                }
+              }}
+              style={{
+                padding: "5px 12px", fontSize: 11,
+                background: "var(--danger-bg)", border: "1px solid var(--danger-color)", borderRadius: 6,
+                color: "var(--status-error)", cursor: "pointer", fontFamily: "var(--font-mono)",
+              }}
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Approval pending banner — shown when no conflicts (normal flow) */}
+      {data.approvalPending && !data.mergeConflict && (
         <div
           onMouseDown={(e) => e.stopPropagation()}
           style={{
@@ -2471,20 +2579,30 @@ function LeaderNodeRenderer({
           worktreePath: null,
           worktreeBranch: null,
           worktreeStatus: "merged",
+          mergeConflict: null,
+          mergeConfirmed: true,
         });
         return;
       }
 
       // Handle worktree_merge_failed — conflicts, worktree still active
       if (serverMsg.type === "worktree_merge_failed" && serverMsg.sessionKey === current.sessionKey) {
-        const result = serverMsg.result as { conflicts?: string[]; summary?: string } | undefined;
+        const result = serverMsg.result as { conflicts?: string[]; summary?: string; targetBranch?: string } | undefined;
         emitUpdate({
           ...current,
           worktreeStatus: "active",
-          error: `Merge conflicts: ${result?.conflicts?.join(", ") ?? result?.summary ?? "unknown"}`,
+          approvalPending: true,
+          mergeConflict: {
+            conflicts: result?.conflicts ?? [],
+            summary: result?.summary ?? "Merge conflicts detected",
+            targetBranch: result?.targetBranch ?? "main",
+          },
+          error: null,
         });
         return;
       }
+
+
 
       // Handle worktree_removed (explicit discard)
       if (serverMsg.type === "worktree_removed" && serverMsg.sessionKey === current.sessionKey) {
@@ -3249,9 +3367,30 @@ function LeaderNodeRenderer({
             borderTop: "1px solid var(--danger-color)",
             fontFamily: "var(--font-mono)",
             wordBreak: "break-word",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: 8,
           }}
         >
-          {data.error}
+          <span style={{ flex: 1 }}>{data.error}</span>
+          <button
+            onClick={() => onUpdateData({ ...data, error: null })}
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--status-error)",
+              cursor: "pointer",
+              fontSize: 13,
+              padding: "0 2px",
+              lineHeight: 1,
+              flexShrink: 0,
+              opacity: 0.7,
+            }}
+            title="Dismiss error"
+          >
+            x
+          </button>
         </div>
       )}
     </div>

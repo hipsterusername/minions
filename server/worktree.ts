@@ -34,6 +34,7 @@ export interface MergeResult {
   success: boolean;
   conflicts: string[];
   summary: string;
+  targetBranch?: string;
 }
 
 export interface GitStatus {
@@ -170,6 +171,7 @@ export async function listWorktrees(
 export async function mergeWorktree(
   info: WorktreeInfo,
   targetBranch?: string,
+  options?: { force?: boolean },
 ): Promise<MergeResult> {
   const projectCwd = info.projectPath;
   const worktreeCwd = info.path;
@@ -183,8 +185,13 @@ export async function mergeWorktree(
   // Step 1: Inside the worktree, merge the target branch INTO the canvas branch.
   // This catches up the canvas branch with any changes on main since the worktree
   // was created, and surfaces any conflicts here (in the worktree, not in main).
+  // When force=true, use -X ours to auto-resolve conflicts by keeping canvas changes.
+  const force = options?.force ?? false;
+  const mergeArgs = force
+    ? ["merge", targetBranch, "--no-edit", "-X", "ours"]
+    : ["merge", targetBranch, "--no-edit"];
   try {
-    await exec(["merge", targetBranch, "--no-edit"], worktreeCwd);
+    await exec(mergeArgs, worktreeCwd);
   } catch (err) {
     // Merge conflict — the canvas branch can't cleanly incorporate main's changes.
     let conflicts: string[] = [];
@@ -209,6 +216,7 @@ export async function mergeWorktree(
     return {
       success: false,
       conflicts,
+      targetBranch,
       summary: `Merge failed (conflicts with ${targetBranch}): ${message}`,
     };
   }
@@ -223,6 +231,7 @@ export async function mergeWorktree(
     return {
       success: false,
       conflicts: [],
+      targetBranch,
       summary: `Failed to update ${targetBranch} ref: ${message}`,
     };
   }
@@ -248,6 +257,7 @@ export async function mergeWorktree(
   return {
     success: true,
     conflicts: [],
+    targetBranch,
     summary: `Merged ${info.branch} into ${targetBranch}`,
   };
 }
@@ -261,6 +271,7 @@ export async function mergeWorktree(
 export async function mergeAndCleanup(
   info: WorktreeInfo,
   targetBranch?: string,
+  options?: { force?: boolean },
 ): Promise<MergeResult> {
   // Auto-commit any uncommitted changes so they aren't lost on merge.
   try {
@@ -276,7 +287,7 @@ export async function mergeAndCleanup(
     // Non-fatal — proceed with merge even if auto-commit fails (e.g. nothing to commit)
   }
 
-  const result = await mergeWorktree(info, targetBranch);
+  const result = await mergeWorktree(info, targetBranch, options);
 
   if (result.success) {
     // Merge succeeded — remove worktree directory + branch

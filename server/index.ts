@@ -8,7 +8,7 @@ import { createProjectRoutes } from "./routes/projects.ts";
 import { createFileRoutes } from "./routes/files.ts";
 import { createTaskToolsForLeader, type TaskManagerState } from "./task-tools.ts";
 import { createMinionToolsForSession } from "./minion-tools.ts";
-import { createRenderToolsForLeader } from "./render-tools.ts";
+import { createRenderToolsForLeader, type RenderState } from "./render-tools.ts";
 import { MINION_SYSTEM_PROMPT } from "../src/prompts/minion-system.ts";
 import { createWorktree, removeWorktree, mergeAndCleanup, getWorktreeStatus, getDetailedDiff, isGitRepo, cleanupStaleWorktrees, type WorktreeInfo } from "./worktree.ts";
 import { validateSessionCwd } from "./path-guard.ts";
@@ -141,6 +141,8 @@ interface Session {
   worktreeIsolation: boolean;
   /** Active wait timer for wait_and_continue (leader only) */
   waitTimerId: ReturnType<typeof setTimeout> | null;
+  /** Current render dashboard state (leader only) — kept in sync by render MCP tools */
+  renderState: RenderState | null;
 }
 
 // ── WebSocket command types ─────────────────────────────
@@ -343,6 +345,7 @@ async function runSession(
     worktree: parentWorktree ?? existing?.worktree ?? null,
     worktreeIsolation: worktreeIsolation !== false,
     waitTimerId: null,
+    renderState: null,
   };
   // Clear any existing wait timer when the session resumes (it's being continued)
   if (existing?.waitTimerId) {
@@ -506,12 +509,13 @@ async function runSession(
           }, durationMs);
         },
       });
-      const { mcpServer: renderMcp } = createRenderToolsForLeader({
+      const { mcpServer: renderMcp, renderState } = createRenderToolsForLeader({
         leaderSessionKey: sessionKey,
         wss: wsServer,
       });
       options["mcpServers"] = { "task-manager": mcpServer, "render-dashboard": renderMcp };
       session.taskState = taskState;
+      session.renderState = renderState;
     }
 
     // For minion sessions, attach status-reporting MCP tools
@@ -801,6 +805,7 @@ function handleCommand(
           initData: syncSession.initData,
           worktree: syncSession.worktree,
           approval: syncSession.taskState?.approval ?? null,
+          renderState: syncSession.renderState ?? null,
           taskName: syncSession.taskName,
           role: syncSession.role,
           activeMinions: syncSession.taskState
@@ -811,6 +816,25 @@ function handleCommand(
           events: syncSession.eventBuffer,
         }),
       );
+
+      // If this session has dashboard render state, re-send it as a
+      // render_update so the RenderNode's existing subscription picks it up
+      // (handles page refresh / WebSocket reconnect recovery).
+      if (syncSession.renderState && syncSession.renderState.components.length > 0) {
+        ws.send(
+          JSON.stringify({
+            type: "render_update",
+            leaderSessionKey: cmd.sessionKey,
+            action: "set",
+            layout: {
+              title: syncSession.renderState.title,
+              columns: syncSession.renderState.columns,
+              gap: syncSession.renderState.gap,
+            },
+            components: syncSession.renderState.components,
+          }),
+        );
+      }
       break;
     }
 
@@ -1222,6 +1246,59 @@ function handleCommand(
         })
         .catch((err: unknown) => {
           sendControlError(ws, "approve_changes", cmd.sessionKey!, cmd.requestId, err instanceof Error ? err.message : String(err));
+        });
+      break;
+    }
+
+    case "force_merge": {
+      const forceSession = getSessionOrError(cmd.sessionKey, ws);
+      if (!forceSession) return;
+      if (!forceSession.worktree) {
+        sendControlError(ws, "force_merge", cmd.sessionKey!, cmd.requestId, "No worktree for this session");
+        return;
+      }
+      mergeAndCleanup(forceSession.worktree, undefined, { force: true })
+        .then((result) => {
+          if (result.success) {
+            if (forceSession.taskState?.approval) {
+              forceSession.taskState.approval = null;
+            }
+            forceSession.worktree = null;
+            broadcast(wsServer, {
+              type: "worktree_merged",
+              sessionKey: cmd.sessionKey,
+              result,
+              cleaned: true,
+              approved: true,
+              timestamp: Date.now(),
+            });
+            broadcast(wsServer, {
+              type: "approval_resolved",
+              sessionKey: cmd.sessionKey,
+              action: "approved",
+              timestamp: Date.now(),
+            });
+            runSession(
+              wsServer,
+              cmd.sessionKey!,
+              "Your changes have been force-merged successfully into the main branch (conflicts resolved by keeping your changes). The worktree has been cleaned up.",
+              forceSession.cwd,
+              forceSession.sessionId ?? undefined,
+              undefined,
+              "leader",
+            );
+          } else {
+            broadcast(wsServer, {
+              type: "worktree_merge_failed",
+              sessionKey: cmd.sessionKey,
+              result,
+              timestamp: Date.now(),
+            });
+          }
+          sendControlResponse(ws, "force_merge", cmd.sessionKey!, cmd.requestId, { result });
+        })
+        .catch((err: unknown) => {
+          sendControlError(ws, "force_merge", cmd.sessionKey!, cmd.requestId, err instanceof Error ? err.message : String(err));
         });
       break;
     }
