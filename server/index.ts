@@ -10,7 +10,7 @@ import { createTaskToolsForLeader, type TaskManagerState } from "./task-tools.ts
 import { createMinionToolsForSession } from "./minion-tools.ts";
 import { createRenderToolsForLeader } from "./render-tools.ts";
 import { MINION_SYSTEM_PROMPT } from "../src/prompts/minion-system.ts";
-import { createWorktree, removeWorktree, mergeAndCleanup, getWorktreeStatus, getDetailedDiff, isGitRepo, cleanupStaleWorktrees, type WorktreeInfo } from "./worktree.ts";
+import { createWorktree, removeWorktree, mergeAndCleanup, rebaseAndRetry, getWorktreeStatus, getDetailedDiff, isGitRepo, cleanupStaleWorktrees, type WorktreeInfo } from "./worktree.ts";
 import { validateSessionCwd } from "./path-guard.ts";
 
 // ── Auth Token ──────────────────────────────────────────
@@ -1223,6 +1223,110 @@ function handleCommand(
         .catch((err: unknown) => {
           sendControlError(ws, "approve_changes", cmd.sessionKey!, cmd.requestId, err instanceof Error ? err.message : String(err));
         });
+      break;
+    }
+
+    case "rebase_and_retry": {
+      const rebaseSession = getSessionOrError(cmd.sessionKey, ws);
+      if (!rebaseSession) return;
+      if (!rebaseSession.worktree) {
+        sendControlError(ws, "rebase_and_retry", cmd.sessionKey!, cmd.requestId, "No worktree for this session");
+        return;
+      }
+      // Clear error state — UI should clear conflict panel
+      broadcast(wsServer, {
+        type: "merge_conflict_cleared",
+        sessionKey: cmd.sessionKey,
+        timestamp: Date.now(),
+      });
+      rebaseAndRetry(rebaseSession.worktree)
+        .then((result) => {
+          if (result.success) {
+            if (rebaseSession.taskState?.approval) {
+              rebaseSession.taskState.approval = null;
+            }
+            rebaseSession.worktree = null;
+            broadcast(wsServer, {
+              type: "worktree_merged",
+              sessionKey: cmd.sessionKey,
+              result,
+              cleaned: true,
+              approved: true,
+              timestamp: Date.now(),
+            });
+            broadcast(wsServer, {
+              type: "approval_resolved",
+              sessionKey: cmd.sessionKey,
+              action: "approved",
+              timestamp: Date.now(),
+            });
+            runSession(
+              wsServer,
+              cmd.sessionKey!,
+              "Your changes have been rebased and merged successfully into the main branch. The worktree has been cleaned up.",
+              rebaseSession.cwd,
+              rebaseSession.sessionId ?? undefined,
+              undefined,
+              "leader",
+            );
+          } else {
+            broadcast(wsServer, {
+              type: "worktree_merge_failed",
+              sessionKey: cmd.sessionKey,
+              result,
+              timestamp: Date.now(),
+            });
+          }
+          sendControlResponse(ws, "rebase_and_retry", cmd.sessionKey!, cmd.requestId, { result });
+        })
+        .catch((err: unknown) => {
+          sendControlError(ws, "rebase_and_retry", cmd.sessionKey!, cmd.requestId, err instanceof Error ? err.message : String(err));
+        });
+      break;
+    }
+
+    case "request_agent_resolve": {
+      const resolveSession = getSessionOrError(cmd.sessionKey, ws);
+      if (!resolveSession) return;
+      if (!resolveSession.worktree) {
+        sendControlError(ws, "request_agent_resolve", cmd.sessionKey!, cmd.requestId, "No worktree for this session");
+        return;
+      }
+      const conflictFiles = (cmd as Record<string, unknown>).conflicts as string[] | undefined;
+      const resolveTargetBranch = (cmd as Record<string, unknown>).targetBranch as string | undefined;
+      // Clear the conflict error — agent is taking over
+      broadcast(wsServer, {
+        type: "merge_conflict_cleared",
+        sessionKey: cmd.sessionKey,
+        timestamp: Date.now(),
+      });
+      // Send a message to the agent with conflict details
+      const conflictMsg = [
+        "MERGE CONFLICT RESOLUTION NEEDED:",
+        `The user clicked "Approve & Merge" but there are merge conflicts with the target branch (${resolveTargetBranch ?? "main"}).`,
+        conflictFiles?.length ? `Conflicting files: ${conflictFiles.join(", ")}` : "",
+        "",
+        "Please resolve these conflicts by:",
+        `1. Examining the conflicting files in your worktree`,
+        `2. Running \`git merge ${resolveTargetBranch ?? "main"}\` to see the conflicts`,
+        "3. Editing the files to resolve conflicts (choose the right version of each conflicting section)",
+        "4. Staging the resolved files with `git add`",
+        "5. Completing the merge with `git commit`",
+        "6. Then call `request_approval` again so the user can re-approve the merge.",
+        "",
+        "The worktree is still active and your previous changes are preserved.",
+      ].filter(Boolean).join("\n");
+
+      runSession(
+        wsServer,
+        cmd.sessionKey!,
+        conflictMsg,
+        resolveSession.cwd,
+        resolveSession.sessionId ?? undefined,
+        undefined,
+        "leader",
+      );
+      sendControlResponse(ws, "request_agent_resolve", cmd.sessionKey!, cmd.requestId);
       break;
     }
 

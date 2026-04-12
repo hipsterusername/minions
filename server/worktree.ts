@@ -34,6 +34,7 @@ export interface MergeResult {
   success: boolean;
   conflicts: string[];
   summary: string;
+  targetBranch?: string;
 }
 
 export interface GitStatus {
@@ -209,6 +210,7 @@ export async function mergeWorktree(
     return {
       success: false,
       conflicts,
+      targetBranch,
       summary: `Merge failed (conflicts with ${targetBranch}): ${message}`,
     };
   }
@@ -223,6 +225,7 @@ export async function mergeWorktree(
     return {
       success: false,
       conflicts: [],
+      targetBranch,
       summary: `Failed to update ${targetBranch} ref: ${message}`,
     };
   }
@@ -248,6 +251,7 @@ export async function mergeWorktree(
   return {
     success: true,
     conflicts: [],
+    targetBranch,
     summary: `Merged ${info.branch} into ${targetBranch}`,
   };
 }
@@ -286,6 +290,74 @@ export async function mergeAndCleanup(
   // On failure the worktree stays "active" so the user can fix or discard.
 
   return result;
+}
+
+/**
+ * Rebase the worktree branch onto the target branch, then attempt merge again.
+ * This is an alternative conflict resolution strategy: instead of merging main
+ * into the canvas branch, we rebase the canvas branch onto main, replaying
+ * canvas commits on top of the latest main. If the rebase itself has conflicts,
+ * it is aborted and the error is returned.
+ */
+export async function rebaseAndRetry(
+  info: WorktreeInfo,
+  targetBranch?: string,
+): Promise<MergeResult> {
+  const projectCwd = info.projectPath;
+  const worktreeCwd = info.path;
+
+  if (!targetBranch) {
+    const { stdout } = await exec(["rev-parse", "--abbrev-ref", "HEAD"], projectCwd);
+    targetBranch = stdout.trim();
+  }
+
+  // Auto-commit any uncommitted changes first
+  try {
+    await exec(["add", "-A"], worktreeCwd);
+    const { stdout: status } = await exec(["status", "--porcelain"], worktreeCwd);
+    if (status.trim()) {
+      await exec(
+        ["commit", "-m", "chore: auto-commit uncommitted changes before rebase"],
+        worktreeCwd,
+      );
+    }
+  } catch {
+    // Non-fatal
+  }
+
+  // Attempt rebase of the canvas branch onto the target branch
+  try {
+    await exec(["rebase", targetBranch], worktreeCwd);
+  } catch (err) {
+    // Rebase conflict — abort and report
+    let conflicts: string[] = [];
+    try {
+      const { stdout: diffOut } = await exec(
+        ["diff", "--name-only", "--diff-filter=U"],
+        worktreeCwd,
+      );
+      conflicts = diffOut.trim().split("\n").filter(Boolean);
+    } catch {
+      // ignore
+    }
+
+    try {
+      await exec(["rebase", "--abort"], worktreeCwd);
+    } catch {
+      // ignore
+    }
+
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      success: false,
+      conflicts,
+      targetBranch,
+      summary: `Rebase failed (conflicts with ${targetBranch}): ${message}`,
+    };
+  }
+
+  // Rebase succeeded — now do the merge (should be fast-forward)
+  return mergeAndCleanup(info, targetBranch);
 }
 
 /**
