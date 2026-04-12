@@ -280,8 +280,19 @@ export async function mergeWorktree(
   // Step 2: The canvas branch now contains everything from the target branch
   // plus all worktree changes. Fast-forward the target branch ref to match.
   // This is safe because the canvas branch is a superset of the target.
+  //
+  // NOTE: We use `git update-ref` instead of `git branch -f` because git
+  // refuses to force-update a branch that is currently checked out in any
+  // worktree. `update-ref` bypasses this restriction.
   try {
-    await exec(["branch", "-f", targetBranch, info.branch], projectCwd);
+    const { stdout: canvasSha } = await exec(
+      ["rev-parse", info.branch],
+      projectCwd,
+    );
+    await exec(
+      ["update-ref", `refs/heads/${targetBranch}`, canvasSha.trim()],
+      projectCwd,
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
