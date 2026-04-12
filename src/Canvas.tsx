@@ -140,6 +140,8 @@ interface ToolbarProps {
   hasSelection: boolean;
   onAddNode: (type: string) => void;
   onTidyLayout: () => void;
+  onFocusNextActive: () => void;
+  hasActiveNodes: boolean;
 }
 
 const Toolbar = memo(function Toolbar({
@@ -152,6 +154,8 @@ const Toolbar = memo(function Toolbar({
   hasSelection,
   onAddNode,
   onTidyLayout,
+  onFocusNextActive,
+  hasActiveNodes,
 }: ToolbarProps) {
   const btnStyle: React.CSSProperties = {
     width: 32,
@@ -288,6 +292,35 @@ const Toolbar = memo(function Toolbar({
           <line x1="8" y1="13" x2="8" y2="15" />
           <line x1="1" y1="8" x2="3" y2="8" />
           <line x1="13" y1="8" x2="15" y2="8" />
+        </svg>
+      </button>
+      <button
+        style={{
+          ...btnStyle,
+          fontSize: 11,
+          opacity: hasActiveNodes ? 1 : 0.4,
+          cursor: hasActiveNodes ? "pointer" : "default",
+          ...(hasActiveNodes
+            ? { color: "var(--accent)", borderColor: "var(--accent)" }
+            : {}),
+        }}
+        onClick={hasActiveNodes ? onFocusNextActive : undefined}
+        title="Focus next active node (N)"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          {/* Animated-style target with arrow: cycle through active nodes */}
+          <circle cx="8" cy="8" r="5" />
+          <circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none" />
+          <polyline points="12,4 14,2 14,5 11,5" strokeWidth="1.5" />
         </svg>
       </button>
 
@@ -490,6 +523,7 @@ export function Canvas({
   const pendingMinionsRef = useRef<Map<string, PendingMinionSpawn>>(new Map());
   const revealedMinionsRef = useRef<Set<string>>(new Set());
   const spawnedMinionsRef = useRef<Set<string>>(new Set());
+  const spawnedRenderNodesRef = useRef<Set<string>>(new Set());
 
   const handleDragStart = useCallback((nodeId: string) => {
     draggingNodeIdRef.current = nodeId;
@@ -676,6 +710,39 @@ export function Canvas({
     [nodes, setTransform],
   );
 
+  // ── Active nodes: leaders/minions with a live session ──
+  // Includes running, idle, creating, and waiting — excludes disconnected/stopped/error
+  const INACTIVE_STATUSES = new Set(["disconnected", "stopped", "error"]);
+  const activeNodeIds = useMemo(() => {
+    return nodes
+      .filter((n) => {
+        if (n.type === "leader") {
+          const s = (n.data as LeaderData).status;
+          return !INACTIVE_STATUSES.has(s) && (n.data as LeaderData).sessionKey != null;
+        }
+        if (n.type === "minion") {
+          const s = (n.data as MinionData).status;
+          return !INACTIVE_STATUSES.has(s) && (n.data as MinionData).sessionKey != null;
+        }
+        return false;
+      })
+      .map((n) => n.id);
+  }, [nodes]);
+
+  // Track which active node we last focused, to cycle through them
+  const lastActiveIndexRef = useRef(-1);
+
+  const focusNextActive = useCallback(() => {
+    if (activeNodeIds.length === 0) return;
+    // Advance to the next active node (wrapping around)
+    let nextIndex = lastActiveIndexRef.current + 1;
+    if (nextIndex >= activeNodeIds.length) nextIndex = 0;
+    lastActiveIndexRef.current = nextIndex;
+    const id = activeNodeIds[nextIndex];
+    setSelectedIds(new Set([id]));
+    focusNodes(new Set([id]));
+  }, [activeNodeIds, focusNodes, setSelectedIds]);
+
   // Handle external focus-node requests — select AND zoom/center
   useEffect(() => {
     if (!focusNodeId) return;
@@ -859,6 +926,7 @@ export function Canvas({
     isInsideGroup,
     setPendingGroupDelete,
     focusNodes,
+    focusNextActive,
     undo,
     redo,
   });
@@ -2216,12 +2284,20 @@ export function Canvas({
         );
         if (!leader) return;
 
+        // Dedup guard: prevent duplicate spawns from rapid render_update
+        // messages arriving before the first ADD_NODE dispatch is reflected
+        // in nodesRef (same pattern as spawnedMinionsRef for minion nodes).
+        if (spawnedRenderNodesRef.current.has(leader.id)) return;
+
         // If a render node already exists for this leader, nothing to do —
         // the RenderNode component's own socketSubscribe handles the update.
         const existing = nodesRef.current.find(
           (n) => n.type === "render" && (n.data as RenderNodeData).leaderId === leader.id,
         );
         if (existing) return;
+
+        // Mark as spawned BEFORE dispatching to close the race window.
+        spawnedRenderNodesRef.current.add(leader.id);
 
         // First render_update for this leader — spawn the render node
         const renderTypeDef = getAllNodeTypes().find((t) => t.type === "render");
@@ -2920,6 +2996,8 @@ export function Canvas({
         hasSelection={selectedIds.size > 0}
         onAddNode={addNode}
         onTidyLayout={handleTidyLayout}
+        onFocusNextActive={focusNextActive}
+        hasActiveNodes={activeNodeIds.length > 0}
       />
     </div>
   );

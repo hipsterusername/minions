@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { getAuthToken } from "./api.ts";
+import { getAuthToken, clearAuthToken } from "./api.ts";
 
 export type ServerMessage =
   | { type: "session_list"; sessions: SessionInfo[] }
@@ -7,9 +7,15 @@ export type ServerMessage =
   | { type: "session_status"; sessionKey: string; status: string; sessionId?: string }
   | { type: "session_error"; sessionKey: string; error: string }
   | { type: "sdk_event"; sessionKey: string; message: SdkMessage }
-  | { type: "sync_response"; sessionKey: string; found: boolean; status?: string; sessionId?: string; totalCost?: number; turns?: number; lastError?: string | null; events?: SyncEvent[]; model?: string; permissionMode?: string; initData?: Record<string, unknown>; taskName?: string | null; role?: "leader" | "minion" | "default"; activeMinions?: ActiveMinion[] }
+  | { type: "sync_response"; sessionKey: string; found: boolean; status?: string; sessionId?: string; totalCost?: number; turns?: number; lastError?: string | null; events?: SyncEvent[]; model?: string; permissionMode?: string; initData?: Record<string, unknown>; taskName?: string | null; role?: "leader" | "minion" | "default"; activeMinions?: ActiveMinion[]; worktree?: { path: string; branch: string } | null; approval?: { requested?: boolean; summary?: string; diff?: unknown } | null }
   | { type: "control_response"; command: string; sessionKey: string; requestId: string | null; success: boolean; error?: string; [key: string]: unknown }
   | { type: "session_task_name"; sessionKey: string; taskName: string }
+  | { type: "approval_requested"; sessionKey: string; summary: string; diff: unknown; timestamp: number }
+  | { type: "approval_resolved"; sessionKey: string; outcome: string; timestamp: number }
+  | { type: "worktree_status"; sessionKey: string; status: string; path?: string; branch?: string }
+  | { type: "worktree_merged"; sessionKey: string }
+  | { type: "worktree_merge_failed"; sessionKey: string; error: string }
+  | { type: "wait_state"; sessionKey: string; action: string; reason: string; waitUntil?: number; timestamp: number }
   | { type: "error"; message: string };
 
 export interface SyncEvent {
@@ -616,7 +622,14 @@ const KNOWN_SERVER_MESSAGE_TYPES = new Set([
   // Canvas-specific broadcast events
   "worktree_created",
   "worktree_failed",
+  "worktree_merged",
+  "worktree_merge_failed",
+  "worktree_removed",
+  "approval_requested",
+  "approval_resolved",
+  "minion_spawned",
   "minion_completed",
+  "task_plan_update",
   "agent_spawned",
   "agent_task_update",
   "wait_state",
@@ -666,6 +679,9 @@ export function useSocket(url: string): SocketHandle {
 
       ws.onclose = () => {
         setConnected(false);
+        // Clear cached auth token so the next reconnect fetches a fresh one
+        // (the server generates a new token on every restart)
+        clearAuthToken();
         const nextAttempt = attemptRef.current + 1;
         attemptRef.current = nextAttempt;
         setReconnectAttempt(nextAttempt);
@@ -724,6 +740,7 @@ export function useSocket(url: string): SocketHandle {
     attemptRef.current = 0;
     setReconnectAttempt(0);
     setReconnectState("reconnecting");
+    clearAuthToken();
     // Close any existing socket before reconnecting
     if (wsRef.current) {
       // Prevent the onclose handler from scheduling its own reconnect

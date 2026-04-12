@@ -71,6 +71,17 @@ export interface LeaderData {
   /** Wait state: populated when the leader calls wait_and_continue */
   waitUntil?: number | null;
   waitReason?: string | null;
+  /** Approval state: set when the leader calls request_approval */
+  approvalPending?: boolean;
+  approvalSummary?: string | null;
+  approvalDiff?: {
+    filesChanged: number;
+    insertions: number;
+    deletions: number;
+    files: { file: string; insertions: number; deletions: number; status: string }[];
+    commits: string[];
+    branch: string;
+  } | null;
 }
 
 // LeaderMessage is now an alias for the shared DisplayMessage type
@@ -82,6 +93,111 @@ function msgId(): string {
 
 function sdkToLeaderMessages(sdkMsg: SdkMessage): LeaderMessage[] {
   return sdkToDisplayMessages(sdkMsg, "lm");
+}
+
+/* ── Session context builder for restarts ─────────────────────────── */
+
+/**
+ * Build a context block from previous session messages and task plan.
+ * Used when restarting a leader session post-disconnect so the new
+ * Claude instance understands what happened in the prior session.
+ *
+ * Returns an empty string if there's nothing meaningful to include.
+ */
+function buildSessionContext(
+  messages: LeaderMessage[],
+  taskPlan: TaskPlanItem[],
+  taskName?: string | null,
+): string {
+  // Only include user/assistant/result messages with meaningful content
+  const conversationEntries = messages
+    .filter(
+      (m) =>
+        (m.role === "user" || m.role === "assistant" || m.role === "result") &&
+        m.content.trim().length > 0,
+    )
+    .map((m) => {
+      const role = m.role === "result" ? "assistant (result)" : m.role;
+      // Truncate very long individual messages to keep context manageable
+      const content =
+        m.content.length > 2000
+          ? m.content.slice(0, 1997) + "…"
+          : m.content;
+      return `[${role}]: ${content}`;
+    });
+
+  if (conversationEntries.length === 0 && taskPlan.length === 0) {
+    return "";
+  }
+
+  const parts: string[] = [];
+
+  parts.push("<previous-session-context>");
+  parts.push(
+    "This is a RESTARTED session. The previous session was lost (server restart or disconnect).",
+  );
+  parts.push(
+    "Below is the conversation history and task state from the prior session.",
+  );
+  parts.push(
+    "Use this to maintain continuity — do NOT repeat completed work.\n",
+  );
+
+  if (taskName) {
+    parts.push(`Session name: ${taskName}\n`);
+  }
+
+  // Task plan state
+  if (taskPlan.length > 0) {
+    parts.push("<task-plan>");
+    for (const task of taskPlan) {
+      const statusEmoji =
+        task.status === "completed"
+          ? "✅"
+          : task.status === "running"
+            ? "🔄"
+            : task.status === "failed"
+              ? "❌"
+              : "📋";
+      let line = `${statusEmoji} [${task.status}] ${task.title}`;
+      if (task.result) {
+        const result =
+          task.result.length > 500
+            ? task.result.slice(0, 497) + "…"
+            : task.result;
+        line += ` → ${result}`;
+      }
+      parts.push(line);
+    }
+    parts.push("</task-plan>\n");
+  }
+
+  // Conversation history — cap at ~30k chars total to stay within context limits
+  if (conversationEntries.length > 0) {
+    parts.push("<conversation-history>");
+    let totalLen = 0;
+    const MAX_CONTEXT_CHARS = 30000;
+    // Include from newest to oldest, then reverse for chronological order
+    const included: string[] = [];
+    for (let i = conversationEntries.length - 1; i >= 0; i--) {
+      const entry = conversationEntries[i];
+      if (totalLen + entry.length > MAX_CONTEXT_CHARS) {
+        included.push(
+          `[... ${i + 1} earlier messages omitted for brevity ...]`,
+        );
+        break;
+      }
+      included.push(entry);
+      totalLen += entry.length;
+    }
+    included.reverse();
+    parts.push(included.join("\n\n"));
+    parts.push("</conversation-history>");
+  }
+
+  parts.push("</previous-session-context>");
+
+  return parts.join("\n");
 }
 
 /* ── Wait countdown component ──────────────────────────────────────── */
@@ -505,7 +621,8 @@ function LeaderToolGroup({ msgs }: { msgs: LeaderMessage[] }) {
 function LeaderThinkingGroup({ msgs }: { msgs: LeaderMessage[] }) {
   const [expanded, setExpanded] = useState(false);
   const totalLen = msgs.reduce((sum, m) => sum + m.content.length, 0);
-  const charLabel = totalLen > 1000 ? `${(totalLen / 1000).toFixed(1)}k chars` : `${totalLen} chars`;
+  const estTokens = Math.round(totalLen / 4);
+  const tokenLabel = estTokens >= 1000 ? `~${(estTokens / 1000).toFixed(1)}k tokens` : `~${estTokens} tokens`;
 
   return (
     <div style={{ marginBlock: 2 }}>
@@ -562,7 +679,7 @@ function LeaderThinkingGroup({ msgs }: { msgs: LeaderMessage[] }) {
             fontVariantNumeric: "tabular-nums",
           }}
         >
-          {charLabel}
+          {tokenLabel}
         </span>
       </button>
 
@@ -1767,9 +1884,11 @@ function ConfigFooter({
             </div>
           )}
 
-          {/* Worktree actions */}
-          {showWorktreeActions && (
-            <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+          {/* Worktree actions (shown when idle with active worktree but NOT when approval is pending) */}
+          {/* NOTE: No manual "Merge" button — merging happens only through the approval workflow */}
+          {/* (the agent calls request_approval → user clicks "Approve & Merge"). */}
+          {showWorktreeActions && !data.approvalPending && (
+            <div style={{ display: "flex", gap: 6, marginTop: 4, alignItems: "center" }}>
               <button
                 onClick={() => {
                   if (socketSend && data.sessionKey) {
@@ -1786,21 +1905,6 @@ function ConfigFooter({
               </button>
               <button
                 onClick={() => {
-                  if (socketSend && data.sessionKey) {
-                    socketSend({ type: "merge_worktree", sessionKey: data.sessionKey });
-                    onUpdateData({ ...data, worktreeStatus: "merging" });
-                  }
-                }}
-                style={{
-                  padding: "3px 8px", fontSize: 10, background: "var(--success-bg)",
-                  border: "1px solid var(--success-color)", borderRadius: 4,
-                  color: "var(--success-color)", cursor: "pointer", fontFamily: "var(--font-mono)",
-                }}
-              >
-                Merge
-              </button>
-              <button
-                onClick={() => {
                   if (socketSend && data.sessionKey && confirm("Discard all worktree changes?")) {
                     socketSend({ type: "discard_worktree", sessionKey: data.sessionKey });
                   }
@@ -1813,8 +1917,94 @@ function ConfigFooter({
               >
                 Discard
               </button>
+              <span style={{ fontSize: 9, color: "var(--text-muted)", fontStyle: "italic" }}>
+                Agent will request approval when ready to merge
+              </span>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Approval pending banner — ALWAYS visible (not gated by expanded state) */}
+      {data.approvalPending && (
+        <div
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            margin: "0 6px 6px",
+            padding: "10px 12px",
+            background: "var(--state-active)",
+            border: "2px solid var(--accent)",
+            borderRadius: 8,
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 14 }}>✓</span> Changes Ready for Review
+          </div>
+          {data.approvalSummary && (
+            <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 8, lineHeight: 1.5 }}>
+              {data.approvalSummary}
+            </div>
+          )}
+          {data.approvalDiff && (
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8, fontFamily: "var(--font-mono)" }}>
+              {data.approvalDiff.filesChanged} file{data.approvalDiff.filesChanged !== 1 ? "s" : ""} changed
+              {" · "}
+              <span style={{ color: "var(--success-color)", fontWeight: 600 }}>+{data.approvalDiff.insertions}</span>
+              {" "}
+              <span style={{ color: "var(--status-error)", fontWeight: 600 }}>-{data.approvalDiff.deletions}</span>
+              {data.approvalDiff.commits.length > 0 && (
+                <span> {" · "} {data.approvalDiff.commits.length} commit{data.approvalDiff.commits.length !== 1 ? "s" : ""}</span>
+              )}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={() => {
+                if (socketSend && data.sessionKey) {
+                  socketSend({ type: "approve_changes", sessionKey: data.sessionKey });
+                  onUpdateData({ ...data, worktreeStatus: "merging", approvalPending: false });
+                }
+              }}
+              style={{
+                padding: "6px 16px", fontSize: 12, fontWeight: 700,
+                background: "var(--success-color)", border: "none", borderRadius: 6,
+                color: "#fff", cursor: "pointer", fontFamily: "var(--font-mono)",
+              }}
+            >
+              ✓ Approve & Merge
+            </button>
+            <button
+              onClick={() => {
+                if (socketSend && data.sessionKey) {
+                  socketSend({ type: "get_worktree_diff", sessionKey: data.sessionKey });
+                }
+              }}
+              style={{
+                padding: "6px 12px", fontSize: 11, background: "var(--bg-elevated)",
+                border: "1px solid var(--border-default)", borderRadius: 6,
+                color: "var(--text-secondary)", cursor: "pointer", fontFamily: "var(--font-mono)",
+              }}
+            >
+              View Diff
+            </button>
+            <button
+              onClick={() => {
+                if (socketSend && data.sessionKey && confirm("Discard all worktree changes?")) {
+                  socketSend({ type: "discard_worktree", sessionKey: data.sessionKey });
+                }
+              }}
+              style={{
+                padding: "6px 12px", fontSize: 11, background: "var(--danger-bg)",
+                border: "1px solid var(--danger-color)", borderRadius: 6,
+                color: "var(--status-error)", cursor: "pointer", fontFamily: "var(--font-mono)",
+              }}
+            >
+              Discard
+            </button>
+          </div>
+          <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 6, fontStyle: "italic" }}>
+            Send a message to request changes instead
+          </div>
         </div>
       )}
     </div>
@@ -2076,6 +2266,20 @@ function LeaderNodeRenderer({
             syncData.taskName = serverMsg.taskName;
           }
 
+          // Restore approval state from sync if available
+          const syncApproval = (serverMsg as Record<string, unknown>).approval as {
+            requested?: boolean;
+            summary?: string;
+            diff?: LeaderData["approvalDiff"];
+          } | null | undefined;
+          if (syncApproval?.requested) {
+            syncData.approvalPending = true;
+            syncData.approvalSummary = syncApproval.summary ?? null;
+            syncData.approvalDiff = syncApproval.diff ?? null;
+          } else {
+            syncData.approvalPending = false;
+          }
+
           emitUpdate({
             ...current,
             ...syncData,
@@ -2278,6 +2482,32 @@ function LeaderNodeRenderer({
           worktreePath: null,
           worktreeBranch: null,
           worktreeStatus: "discarded",
+          approvalPending: false,
+          approvalSummary: null,
+          approvalDiff: null,
+        });
+        return;
+      }
+
+      // Handle approval_requested — leader is waiting for user to approve changes
+      if (serverMsg.type === "approval_requested" && serverMsg.sessionKey === current.sessionKey) {
+        emitUpdate({
+          ...current,
+          approvalPending: true,
+          approvalSummary: (serverMsg.summary as string) ?? null,
+          approvalDiff: (serverMsg.diff as LeaderData["approvalDiff"]) ?? null,
+        });
+        return;
+      }
+
+      // Handle approval_resolved — approval was accepted or changes requested
+      if (serverMsg.type === "approval_resolved" && serverMsg.sessionKey === current.sessionKey) {
+        emitUpdate({
+          ...current,
+          approvalPending: false,
+          approvalSummary: null,
+          approvalDiff: null,
+          // If approved, the worktree_merged event handles worktree status
         });
         return;
       }
@@ -2289,6 +2519,14 @@ function LeaderNodeRenderer({
     const key = `leader-${Date.now().toString(36)}`;
     const userPrompt =
       input.trim() || "Analyze the project and suggest how to proceed.";
+
+    // ── Build previous-session context for restarts ──────────
+    // If there are existing messages from a prior session, this is a restart.
+    // Serialize conversation + task plan so the new Claude instance has continuity.
+    const prevMessages = dataRef.current.messages;
+    const prevTaskPlan = dataRef.current.taskPlan;
+    const prevTaskName = dataRef.current.taskName;
+    const sessionContext = buildSessionContext(prevMessages, prevTaskPlan, prevTaskName);
 
     // Gather context from connected nodes
     const contextItems = getContextForNode?.() ?? [];
@@ -2305,6 +2543,11 @@ function LeaderNodeRenderer({
         })
         .join("\n");
       fullPrompt = `<connected-context>\nThe following context has been provided by the user via connected canvas nodes:\n\n${contextBlock}\n</connected-context>\n\n${userPrompt}`;
+    }
+
+    // Prepend previous session context if this is a restart
+    if (sessionContext) {
+      fullPrompt = `${sessionContext}\n\n${fullPrompt}`;
     }
 
     // Compile tagged skills into system prompt addendum
@@ -2330,6 +2573,7 @@ function LeaderNodeRenderer({
       sessionKey: key,
       status: "creating",
       messages: [
+        ...prevMessages,
         {
           id: msgId(),
           role: "user" as const,
@@ -2351,6 +2595,12 @@ function LeaderNodeRenderer({
 
     const key = `leader-${Date.now().toString(36)}`;
 
+    // ── Build previous-session context for restarts ──────────
+    const prevMessages = dataRef.current.messages;
+    const prevTaskPlan = dataRef.current.taskPlan;
+    const prevTaskName = dataRef.current.taskName;
+    const sessionContext = buildSessionContext(prevMessages, prevTaskPlan, prevTaskName);
+
     // Gather context from connected nodes
     const contextItems = getContextForNode?.() ?? [];
     let fullPrompt = prompt;
@@ -2365,6 +2615,11 @@ function LeaderNodeRenderer({
         })
         .join("\n");
       fullPrompt = `<connected-context>\nThe following context has been provided by the user via connected canvas nodes:\n\n${contextBlock}\n</connected-context>\n\n${prompt}`;
+    }
+
+    // Prepend previous session context if this is a restart
+    if (sessionContext) {
+      fullPrompt = `${sessionContext}\n\n${fullPrompt}`;
     }
 
     // Compile tagged skills
@@ -2391,6 +2646,7 @@ function LeaderNodeRenderer({
       status: "creating",
       autoStartPrompt: null, // Clear so it doesn't re-trigger
       messages: [
+        ...prevMessages,
         {
           id: msgId(),
           role: "user" as const,

@@ -827,6 +827,7 @@ function ProjectView({
             nodes={nodes}
             onOpenFile={handleOpenFile}
             onUpdateNodeData={(nodeId, data) => dispatch({ type: "UPDATE_NODE_DATA", id: nodeId, data })}
+            onFocusNode={handleFocusNode}
           />
           <SkillsBrowser
             onLaunchSkill={handleLaunchSkill}

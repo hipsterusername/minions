@@ -2158,7 +2158,6 @@ export function KanbanBoard({
                           <path
                             d="M2 2.5A2.5 2.5 0 014.5 0h7A2.5 2.5 0 0114 2.5v8a2.5 2.5 0 01-2.5 2.5H6l-3 3v-3H2.5A2.5 2.5 0 010 10.5v-8z"
                             fill="currentColor"
-                            opacity="0.8"
                           />
                         </svg>
                         <span className="kb-btn__label">{showChat ? "Close" : "AI Create"}</span>

@@ -4,6 +4,7 @@
  * - Delete/Backspace: delete selected nodes (with leader cascade + group confirmation)
  * - Ctrl/Cmd+Z: undo
  * - Ctrl/Cmd+Shift+Z / Ctrl/Cmd+Y: redo
+ * - N: focus next active (running) node
  */
 import { useEffect, type Dispatch, type MutableRefObject } from "react";
 import type { CanvasNode, CanvasAction } from "./types.ts";
@@ -40,6 +41,8 @@ export interface UseCanvasKeyboardOpts {
   } | null) => void;
   /** Focus (center + zoom) on a set of nodes */
   focusNodes?: (ids: Set<string>) => void;
+  /** Cycle focus to the next active (running) node */
+  focusNextActive?: () => void;
   undo?: () => void;
   redo?: () => void;
 }
@@ -55,6 +58,7 @@ export function useCanvasKeyboard({
   isInsideGroup,
   setPendingGroupDelete,
   focusNodes,
+  focusNextActive,
   undo,
   redo,
 }: UseCanvasKeyboardOpts): void {
@@ -130,6 +134,15 @@ export function useCanvasKeyboard({
         }
       }
 
+      // ── N: Focus next active (running) node ──
+      if (e.code === "KeyN" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        if (isTextInput(e.target)) return;
+        if (focusNextActive) {
+          e.preventDefault();
+          focusNextActive();
+        }
+      }
+
       // ── Undo/Redo ──
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key === "z" && !e.shiftKey) {
@@ -161,5 +174,5 @@ export function useCanvasKeyboard({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [selectedIds, nodes, graph, dispatch, graphDispatch, spaceRef, isInsideGroup, setPendingGroupDelete, focusNodes, undo, redo]);
+  }, [selectedIds, nodes, graph, dispatch, graphDispatch, spaceRef, isInsideGroup, setPendingGroupDelete, focusNodes, focusNextActive, undo, redo]);
 }

@@ -5,9 +5,12 @@
  * and connections:
  *
  *   - Leader nodes are anchor points.  Their context providers sit in a
- *     row above them; their minions fan out in a row below.
+ *     row above them; their child nodes (minions, dashboards) fan out
+ *     in a column to the right.
  *   - Multiple leader clusters are packed left-to-right, wrapping when
- *     the row exceeds MAX_ROW_WIDTH.
+ *     the row exceeds MAX_ROW_WIDTH.  Each cluster's bounding box
+ *     includes its right-side children so the next cluster avoids
+ *     overlap.
  *   - Unconnected (isolate) nodes are arranged below the cluster region
  *     in a horizontal flow.
  *   - Context-group containment is spatial in this codebase — contained
@@ -29,8 +32,8 @@ const NODE_GAP = 40;
 /** Vertical clearance between context row bottom and leader top. */
 const CONTEXT_GAP = 60;
 
-/** Vertical clearance between leader bottom and minion row top. */
-const MINION_GAP = 60;
+/** Horizontal clearance between leader right edge and child column left edge. */
+const CHILD_GAP_X = 40;
 
 /** Space between adjacent cluster bounding boxes. */
 const CLUSTER_GAP = 100;
@@ -125,15 +128,17 @@ export function computeAutoLayout(
   }
 
   // ── Phase 1: Build leader clusters ──────────────────────────
-  // Each leader claims its minions (task-assignment out-edges) and
-  // context providers (context in-edges).  First-come-first-served
+  // Each leader claims its child nodes (minions via task-assignment
+  // out-edges, dashboards via leaderId data field) and context
+  // providers (context in-edges).  First-come-first-served
   // deduplication prevents a shared context node from appearing in
   // two clusters simultaneously.
   const assignedIds = new Set<string>();
 
   interface Cluster {
     leader: CanvasNode;
-    minions: CanvasNode[];
+    /** Child nodes placed to the right: minions + dashboards. */
+    children: CanvasNode[];
     contextNodes: CanvasNode[];
   }
 
@@ -150,6 +155,15 @@ export function computeAutoLayout(
       .map((e) => nodeMap.get(e.targetNodeId))
       .filter((n): n is CanvasNode => !!n && !assignedIds.has(n.id));
 
+    // Dashboard (render) nodes are linked to leaders via data.leaderId,
+    // not through graph edges.
+    const dashboards = nodes.filter(
+      (n) =>
+        n.type === "render" &&
+        (n.data as { leaderId?: string | null })?.leaderId === node.id &&
+        !assignedIds.has(n.id),
+    );
+
     const contextNodes = edges
       .filter(
         (e) => e.targetNodeId === node.id && e.protocol === "context",
@@ -157,11 +171,15 @@ export function computeAutoLayout(
       .map((e) => nodeMap.get(e.sourceNodeId))
       .filter((n): n is CanvasNode => !!n && !assignedIds.has(n.id));
 
+    // Children = dashboards first, then minions (dashboard sits closest
+    // to the leader for quick glance).
+    const children = [...dashboards, ...minions];
+
     assignedIds.add(node.id);
-    for (const m of minions) assignedIds.add(m.id);
+    for (const ch of children) assignedIds.add(ch.id);
     for (const c of contextNodes) assignedIds.add(c.id);
 
-    clusters.push({ leader: node, minions, contextNodes });
+    clusters.push({ leader: node, children, contextNodes });
   }
 
   // ── Phase 2: Intra-cluster layout ────────────────────────────
@@ -174,7 +192,7 @@ export function computeAutoLayout(
 
   function layoutCluster(c: Cluster): ClusterLayout {
     const pos = new Map<string, Position>();
-    const { leader, minions, contextNodes } = c;
+    const { leader, children, contextNodes } = c;
 
     // Tallest context node determines the context row height.
     const ctxRowH =
@@ -198,16 +216,15 @@ export function computeAutoLayout(
       }
     }
 
-    // Minions: centred horizontally below the leader.
-    if (minions.length > 0) {
-      const totalW =
-        minions.reduce((s, n) => s + n.size.width, 0) +
-        NODE_GAP * (minions.length - 1);
-      let mx = leader.size.width / 2 - totalW / 2;
-      const my = leaderY + leader.size.height + MINION_GAP;
-      for (const m of minions) {
-        pos.set(m.id, { x: mx, y: my });
-        mx += m.size.width + NODE_GAP;
+    // Children (dashboards + minions): stacked vertically to the right
+    // of the leader.  The column starts at the leader's top edge and
+    // each child is placed below the previous one.
+    if (children.length > 0) {
+      const childX = leader.size.width + CHILD_GAP_X;
+      let childY = leaderY;
+      for (const ch of children) {
+        pos.set(ch.id, { x: childX, y: childY });
+        childY += ch.size.height + NODE_GAP;
       }
     }
 

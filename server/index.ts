@@ -10,7 +10,7 @@ import { createTaskToolsForLeader, type TaskManagerState } from "./task-tools.ts
 import { createMinionToolsForSession } from "./minion-tools.ts";
 import { createRenderToolsForLeader } from "./render-tools.ts";
 import { MINION_SYSTEM_PROMPT } from "../src/prompts/minion-system.ts";
-import { createWorktree, removeWorktree, mergeAndCleanup, getWorktreeStatus, isGitRepo, cleanupStaleWorktrees, type WorktreeInfo } from "./worktree.ts";
+import { createWorktree, removeWorktree, mergeAndCleanup, getWorktreeStatus, getDetailedDiff, isGitRepo, cleanupStaleWorktrees, type WorktreeInfo } from "./worktree.ts";
 import { validateSessionCwd } from "./path-guard.ts";
 
 // ── Auth Token ──────────────────────────────────────────
@@ -165,6 +165,7 @@ type WsCommandType =
   | "merge_worktree"
   | "discard_worktree"
   | "get_worktree_diff"
+  | "approve_changes"
   | "remove_session"
   // File & state control
   | "rewind_files"
@@ -471,6 +472,8 @@ async function runSession(
         minionSystemPrompt: MINION_SYSTEM_PROMPT,
         existingTaskState: session.taskState ?? undefined,
         worktreeBranch: session.worktree?.branch ?? null,
+        worktreeInfo: session.worktree ?? null,
+        worktreeIsolation: session.worktreeIsolation,
         scheduleWaitContinue: (durationMs: number, reason: string) => {
           // Cancel any previous wait timer
           if (session.waitTimerId) clearTimeout(session.waitTimerId);
@@ -712,10 +715,25 @@ function handleCommand(
         );
         return;
       }
+
+      // If the leader had requested approval and the user sends a message
+      // instead of clicking "Approve", treat it as "changes requested".
+      let prompt = cmd.prompt;
+      if (sendSession.taskState?.approval?.requested) {
+        sendSession.taskState.approval = null;
+        prompt = `[The user has reviewed your changes and is requesting modifications instead of approving. Their feedback follows.]\n\n${prompt}`;
+        broadcast(wsServer, {
+          type: "approval_resolved",
+          sessionKey: cmd.sessionKey,
+          action: "changes_requested",
+          timestamp: Date.now(),
+        });
+      }
+
       runSession(
         wsServer,
         cmd.sessionKey,
-        cmd.prompt,
+        prompt,
         sendSession.cwd,
         sendSession.sessionId ?? undefined,
         cmd.systemPrompt ?? undefined,
@@ -782,6 +800,7 @@ function handleCommand(
           permissionMode: syncSession.permissionMode,
           initData: syncSession.initData,
           worktree: syncSession.worktree,
+          approval: syncSession.taskState?.approval ?? null,
           taskName: syncSession.taskName,
           role: syncSession.role,
           activeMinions: syncSession.taskState
@@ -920,7 +939,8 @@ function handleCommand(
         // Clean up worktree if this session owns one
         if (removeSession.worktree) {
           const wtPath = removeSession.worktree.path;
-          removeWorktree(wtPath).catch((err: unknown) => {
+          const wtProject = removeSession.worktree.projectPath;
+          removeWorktree(wtPath, wtProject).catch((err: unknown) => {
             console.warn(`[worktree] Cleanup on remove_session failed for ${cmd.sessionKey}: ${err instanceof Error ? err.message : err}`);
           });
           removeSession.worktree = null;
@@ -1094,7 +1114,12 @@ function handleCommand(
         return;
       }
       const worktreePath = discardSession.worktree.path;
-      removeWorktree(worktreePath)
+      const worktreeProject = discardSession.worktree.projectPath;
+      // Clear approval state if pending
+      if (discardSession.taskState?.approval) {
+        discardSession.taskState.approval = null;
+      }
+      removeWorktree(worktreePath, worktreeProject)
         .then(() => {
           discardSession.worktree = null;
           broadcast(wsServer, {
@@ -1102,6 +1127,22 @@ function handleCommand(
             sessionKey: cmd.sessionKey,
             timestamp: Date.now(),
           });
+          broadcast(wsServer, {
+            type: "approval_resolved",
+            sessionKey: cmd.sessionKey,
+            action: "discarded",
+            timestamp: Date.now(),
+          });
+          // Notify the agent that changes were discarded
+          runSession(
+            wsServer,
+            cmd.sessionKey!,
+            "The user has discarded all worktree changes. Your work has been removed. The session is now operating on the main working tree.",
+            discardSession.cwd,
+            discardSession.sessionId ?? undefined,
+            undefined,
+            "leader",
+          );
           sendControlResponse(ws, "discard_worktree", cmd.sessionKey!, cmd.requestId);
         })
         .catch((err: unknown) => {
@@ -1117,12 +1158,70 @@ function handleCommand(
         sendControlError(ws, "get_worktree_diff", cmd.sessionKey!, cmd.requestId, "No worktree for this session");
         return;
       }
-      getWorktreeStatus(diffSession.worktree.path)
-        .then((status) => {
-          sendControlResponse(ws, "get_worktree_diff", cmd.sessionKey!, cmd.requestId, { status });
+      getDetailedDiff(diffSession.worktree)
+        .then((diff) => {
+          sendControlResponse(ws, "get_worktree_diff", cmd.sessionKey!, cmd.requestId, { diff });
         })
         .catch((err: unknown) => {
           sendControlError(ws, "get_worktree_diff", cmd.sessionKey!, cmd.requestId, err instanceof Error ? err.message : String(err));
+        });
+      break;
+    }
+
+    case "approve_changes": {
+      const approveSession = getSessionOrError(cmd.sessionKey, ws);
+      if (!approveSession) return;
+      if (!approveSession.worktree) {
+        sendControlError(ws, "approve_changes", cmd.sessionKey!, cmd.requestId, "No worktree for this session");
+        return;
+      }
+      // NOTE: Don't clear approval state yet — wait until merge succeeds.
+      // If merge fails, the approval UI should remain visible for retry.
+      mergeAndCleanup(approveSession.worktree)
+        .then((result) => {
+          if (result.success) {
+            // Now clear approval state — merge confirmed
+            if (approveSession.taskState?.approval) {
+              approveSession.taskState.approval = null;
+            }
+            approveSession.worktree = null;
+            broadcast(wsServer, {
+              type: "worktree_merged",
+              sessionKey: cmd.sessionKey,
+              result,
+              cleaned: true,
+              approved: true,
+              timestamp: Date.now(),
+            });
+            broadcast(wsServer, {
+              type: "approval_resolved",
+              sessionKey: cmd.sessionKey,
+              action: "approved",
+              timestamp: Date.now(),
+            });
+            // Notify the agent that approval succeeded (Task G: agent feedback)
+            runSession(
+              wsServer,
+              cmd.sessionKey!,
+              "Your changes have been approved and merged successfully into the main branch. The worktree has been cleaned up.",
+              approveSession.cwd,
+              approveSession.sessionId ?? undefined,
+              undefined,
+              "leader",
+            );
+          } else {
+            // Merge failed — keep approval state so the UI stays visible
+            broadcast(wsServer, {
+              type: "worktree_merge_failed",
+              sessionKey: cmd.sessionKey,
+              result,
+              timestamp: Date.now(),
+            });
+          }
+          sendControlResponse(ws, "approve_changes", cmd.sessionKey!, cmd.requestId, { result });
+        })
+        .catch((err: unknown) => {
+          sendControlError(ws, "approve_changes", cmd.sessionKey!, cmd.requestId, err instanceof Error ? err.message : String(err));
         });
       break;
     }
@@ -1477,7 +1576,7 @@ async function shutdownCleanup(): Promise<void> {
     if (session.worktree) {
       console.log(`[shutdown] Removing worktree for ${key}: ${session.worktree.branch}`);
       cleanups.push(
-        removeWorktree(session.worktree.path).catch((err: unknown) => {
+        removeWorktree(session.worktree.path, session.worktree.projectPath).catch((err: unknown) => {
           console.warn(`[shutdown] Failed to remove worktree for ${key}: ${err instanceof Error ? err.message : err}`);
         }),
       );
