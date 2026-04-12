@@ -36,7 +36,7 @@ export function ConfirmModal({ title, description, actions, onClose }: ConfirmMo
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "rgba(0,0,0,0.45)",
+        background: "var(--overlay-bg)",
         backdropFilter: "blur(4px)",
       }}
     >
@@ -48,7 +48,7 @@ export function ConfirmModal({ title, description, actions, onClose }: ConfirmMo
           padding: "20px 24px",
           minWidth: 340,
           maxWidth: 420,
-          boxShadow: "0 16px 48px rgba(0,0,0,0.3)",
+          boxShadow: "var(--shadow-lg)",
           display: "flex",
           flexDirection: "column",
           gap: 16,

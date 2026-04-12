@@ -71,7 +71,7 @@ export function CanvasContextMenu({
         borderRadius: 8,
         padding: 4,
         minWidth: 180,
-        boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
+        boxShadow: "var(--shadow-md)",
         fontFamily: "var(--font-mono)",
         fontSize: 13,
       }}

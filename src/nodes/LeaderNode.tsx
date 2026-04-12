@@ -2009,7 +2009,7 @@ function ConfigFooter({
               style={{
                 padding: "5px 12px", fontSize: 11, fontWeight: 600,
                 background: "var(--accent)", border: "none", borderRadius: 6,
-                color: "#fff", cursor: "pointer", fontFamily: "var(--font-mono)",
+                color: "var(--text-primary)", cursor: "pointer", fontFamily: "var(--font-mono)",
               }}
               title="Force merge — keep canvas changes on conflicts"
             >
@@ -2076,7 +2076,7 @@ function ConfigFooter({
               style={{
                 padding: "6px 16px", fontSize: 12, fontWeight: 700,
                 background: "var(--success-color)", border: "none", borderRadius: 6,
-                color: "#fff", cursor: "pointer", fontFamily: "var(--font-mono)",
+                color: "var(--text-primary)", cursor: "pointer", fontFamily: "var(--font-mono)",
               }}
             >
               ✓ Approve & Merge

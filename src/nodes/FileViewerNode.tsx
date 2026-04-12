@@ -86,7 +86,7 @@ function renderMarkdown(src: string): string {
       } else {
         inCodeBlock = true;
         html.push(
-          '<pre style="background:rgba(0,0,0,0.3);padding:8px 10px;border-radius:4px;overflow-x:auto;margin:6px 0"><code>',
+          '<pre style="background:var(--code-bg);padding:8px 10px;border-radius:4px;overflow-x:auto;margin:6px 0"><code>',
         );
       }
       continue;
@@ -133,7 +133,7 @@ function inlineFmt(text: string): string {
   return text
     .replace(
       /`([^`]+)`/g,
-      '<code style="background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px;font-size:0.9em">$1</code>',
+      '<code style="background:var(--code-bg);padding:1px 4px;border-radius:3px;font-size:0.9em">$1</code>',
     )
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/\*([^*]+)\*/g, "<em>$1</em>")
@@ -330,7 +330,7 @@ function FileViewerNodeRenderer({
             flexShrink: 0,
             transition: "background 0.15s",
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--state-hover)"; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = HEADER_BG; }}
         >
           <span
@@ -470,7 +470,7 @@ function FileViewerNodeRenderer({
           fontFamily: "var(--font-mono)",
           fontSize: 12,
           color: "var(--text-primary)",
-          background: "rgba(255,255,255,0.02)",
+          background: "var(--state-hover)",
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",

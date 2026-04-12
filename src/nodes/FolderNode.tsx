@@ -541,7 +541,7 @@ const pathBarStyle: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
   fontSize: 11,
   color: "var(--text-muted)",
-  background: "rgba(255,255,255,0.015)",
+  background: "var(--state-hover)",
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",

@@ -102,41 +102,45 @@ const darkSemanticVars = {
   "--gradient-success": "linear-gradient(135deg, #34d399, #10b981)",
   "--gradient-danger": "linear-gradient(135deg, #f87171, #ef4444)",
 
+  // Kanban text & shadow helpers
+  "--kb-text-on-gradient": "#ffffff",
+  "--kb-shadow-color": "0 0 0",
+
   // Streaming
   "--streaming-color": "#60a5fa",
 };
 
 const lightSemanticVars: Record<string, string> = {
-  // Status colors (slightly deeper for contrast on light bg)
-  "--status-success": "#16a34a",
-  "--status-running": "#16a34a",
+  // Status colors — darkened for WCAG AA (≥4.5:1) on light backgrounds
+  "--status-success": "#14793a",
+  "--status-running": "#14793a",
   "--status-idle": "#2563eb",
-  "--status-warning": "#d97706",
-  "--status-error": "#dc2626",
-  "--status-stopped": "#6b7280",
-  "--status-waiting": "#7c3aed",
-  "--status-creating": "#d97706",
-  "--status-disconnected": "#78716c",
+  "--status-warning": "#a84e08",
+  "--status-error": "#b91c1c",
+  "--status-stopped": "#57534e",
+  "--status-waiting": "#6d28d9",
+  "--status-creating": "#a84e08",
+  "--status-disconnected": "#64748b",
 
   // Priority colors
-  "--priority-critical": "#dc2626",
-  "--priority-high": "#ea580c",
+  "--priority-critical": "#b91c1c",
+  "--priority-high": "#c2410c",
   "--priority-medium": "#2563eb",
-  "--priority-low": "#6b7280",
+  "--priority-low": "#57534e",
 
   // Model colors
-  "--model-sonnet": "#d97706",
-  "--model-opus": "#7c3aed",
-  "--model-haiku": "#16a34a",
+  "--model-sonnet": "#a84e08",
+  "--model-opus": "#6d28d9",
+  "--model-haiku": "#14793a",
 
-  // Semantic accents
-  "--tool-accent": "#6366f1",
-  "--thinking-accent": "#9333ea",
-  "--success-color": "#16a34a",
-  "--danger-color": "#dc2626",
-  "--danger-color-text": "#dc2626",
-  "--warning-color": "#d97706",
-  "--info-color": "#2563eb",
+  // Semantic accents — darkened for AA compliance on white/light surfaces
+  "--tool-accent": "#4f46e5",
+  "--thinking-accent": "#7e22ce",
+  "--success-color": "#14793a",
+  "--danger-color": "#b91c1c",
+  "--danger-color-text": "#b91c1c",
+  "--warning-color": "#a84e08",
+  "--info-color": "#1d4ed8",
 
   // Shadows (light themes use softer, colored shadows)
   "--shadow-sm": "0 2px 8px rgba(0,0,0,0.06)",
@@ -148,19 +152,19 @@ const lightSemanticVars: Record<string, string> = {
   "--state-hover": "rgba(0,0,0,0.03)",
   "--state-active": "rgba(0,0,0,0.06)",
 
-  // Tool/thinking backgrounds
-  "--tool-bg": "rgba(99, 102, 241, 0.08)",
-  "--tool-bg-hover": "rgba(99, 102, 241, 0.14)",
-  "--thinking-bg": "rgba(147, 51, 234, 0.06)",
-  "--thinking-bg-hover": "rgba(147, 51, 234, 0.10)",
-  "--success-bg": "rgba(22, 163, 74, 0.08)",
-  "--danger-bg": "rgba(220, 38, 38, 0.08)",
-  "--warning-bg": "rgba(217, 119, 6, 0.06)",
+  // Tool/thinking backgrounds — matched to darkened accent colors
+  "--tool-bg": "rgba(79, 70, 229, 0.08)",
+  "--tool-bg-hover": "rgba(79, 70, 229, 0.14)",
+  "--thinking-bg": "rgba(126, 34, 206, 0.06)",
+  "--thinking-bg-hover": "rgba(126, 34, 206, 0.10)",
+  "--success-bg": "rgba(20, 121, 58, 0.08)",
+  "--danger-bg": "rgba(185, 28, 28, 0.08)",
+  "--warning-bg": "rgba(168, 78, 8, 0.06)",
 
-  // Edge colors
-  "--edge-task": "#6366f1",
-  "--edge-status": "#d97706",
-  "--edge-context": "#16a34a",
+  // Edge colors — darkened for light theme contrast
+  "--edge-task": "#4f46e5",
+  "--edge-status": "#a84e08",
+  "--edge-context": "#14793a",
 
   // Note palette (light)
   "--note-blue-bg": "#dbeafe",
@@ -181,15 +185,19 @@ const lightSemanticVars: Record<string, string> = {
   "--markdown-border": "#bbf7d0",
 
   // Code inline background
-  "--code-bg": "rgba(99, 102, 241, 0.1)",
+  "--code-bg": "rgba(79, 70, 229, 0.1)",
 
-  // Kanban gradients (gradient-primary is overridden per-theme to use accent)
+  // Kanban gradients — darkened for AA contrast
   "--gradient-primary": "linear-gradient(135deg, #c2410c, #9a3412)",
-  "--gradient-success": "linear-gradient(135deg, #16a34a, #15803d)",
-  "--gradient-danger": "linear-gradient(135deg, #dc2626, #b91c1c)",
+  "--gradient-success": "linear-gradient(135deg, #14793a, #166534)",
+  "--gradient-danger": "linear-gradient(135deg, #b91c1c, #991b1b)",
+
+  // Kanban text & shadow helpers (inverted for light theme)
+  "--kb-text-on-gradient": "#ffffff",
+  "--kb-shadow-color": "0 0 0",
 
   // Streaming
-  "--streaming-color": "#2563eb",
+  "--streaming-color": "#1d4ed8",
 };
 
 // ── 1. Midnight (Current) ─────────────────────────────────
@@ -212,7 +220,7 @@ const midnight: ThemeDefinition = {
     "--border-hover": "#2a3050",
     "--text-primary": "#e2e8f0",
     "--text-secondary": "#94a3b8",
-    "--text-muted": "#7b82a0",
+    "--text-muted": "#8890b0",
     "--text-dim": "#8494b4",
     "--accent": "#f0883e",
     "--accent-dark": "#e05b2a",
@@ -274,7 +282,7 @@ const deepCurrent: ThemeDefinition = {
     "--border-hover": "#2a4060",
     "--text-primary": "#cbd5e1",
     "--text-secondary": "#7e9aba",
-    "--text-muted": "#6888aa",
+    "--text-muted": "#7e9ebe",
     "--text-dim": "#7a9ec0",
     "--accent": "#14b8a6",
     "--accent-dark": "#0d9488",
@@ -319,7 +327,7 @@ const proofSheet: ThemeDefinition = {
     "--border-hover": "#444440",
     "--text-primary": "#eeeeec",
     "--text-secondary": "#aaaaaa",
-    "--text-muted": "#848484",
+    "--text-muted": "#949494",
     "--text-dim": "#969696",
     "--accent": "#ff3b30",
     "--accent-dark": "#cc2f26",
@@ -380,7 +388,7 @@ const studioWarm: ThemeDefinition = {
     "--border-hover": "#504438",
     "--text-primary": "#e8ddd0",
     "--text-secondary": "#b0a090",
-    "--text-muted": "#968672",
+    "--text-muted": "#aa9a82",
     "--text-dim": "#a89880",
     "--accent": "#c08b30",
     "--accent-dark": "#a07020",
@@ -440,7 +448,7 @@ const cathode: ThemeDefinition = {
     "--border-hover": "#254025",
     "--text-primary": "#d0ffe0",
     "--text-secondary": "#80c890",
-    "--text-muted": "#588a5e",
+    "--text-muted": "#6aa070",
     "--text-dim": "#68a870",
     "--accent": "#39ff14",
     "--accent-dark": "#28cc10",

@@ -972,17 +972,34 @@ export function Canvas({
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
 
-      // Trackpad pinch-to-zoom fires wheel events with ctrlKey=true.
-      // Ctrl+scroll on a mouse wheel also sets ctrlKey.  Both should zoom.
-      if (e.ctrlKey || e.metaKey) {
+      // --- Detect whether this event came from a mouse wheel or a trackpad ---
+      // Firefox mouse wheel uses deltaMode 1 (line-based units).
+      // Chrome/Safari: both mouse & trackpad use deltaMode 0 (pixels), but
+      // trackpad two-finger scroll almost always has a non-zero deltaX,
+      // whereas a mouse wheel fires with deltaX === 0.
+      const isFirefoxLineMode = e.deltaMode === 1;
+      const hasHorizontalScroll = e.deltaX !== 0;
+      const isPinch = e.ctrlKey || e.metaKey; // trackpad pinch, or Ctrl+scroll
+
+      // Zoom when:
+      //  • pinch-to-zoom / Ctrl+scroll (ctrlKey set by browser for pinch)
+      //  • mouse scroll wheel (no horizontal component, or Firefox line-mode)
+      const shouldZoom =
+        isPinch || isFirefoxLineMode || !hasHorizontalScroll;
+
+      if (shouldZoom) {
         const rect = container.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
 
         setTransform((prev) => {
-          // Pinch deltas are typically small (-2 … 2), mouse-wheel deltas larger.
-          // Using a continuous exponential factor keeps zoom smooth in both cases.
-          const zoomFactor = Math.pow(0.99, e.deltaY);
+          // Pinch deltas are small (-2 … 2); mouse-wheel pixel deltas are
+          // large (~100 per tick in Chrome).  Use a gentler exponent base for
+          // mouse/trackpad scroll so each tick zooms ~10% instead of ~60%.
+          // Firefox line-mode deltaY is ±3 lines — normalise to pixel-scale.
+          const dy = isFirefoxLineMode ? e.deltaY * 30 : e.deltaY;
+          const base = isPinch ? 0.99 : 0.999;
+          const zoomFactor = Math.pow(base, dy);
           const newScale = Math.min(
             MAX_ZOOM,
             Math.max(MIN_ZOOM, prev.scale * zoomFactor),
@@ -995,8 +1012,7 @@ export function Canvas({
           };
         });
       } else {
-        // Two-finger swipe on a trackpad (or regular scroll wheel without Ctrl).
-        // Pan the canvas using deltaX/deltaY — matches Figma / Zoom behaviour.
+        // Trackpad two-finger swipe (has horizontal component) → pan.
         setTransform((prev) => ({
           ...prev,
           x: prev.x - e.deltaX,
@@ -2937,11 +2953,11 @@ export function Canvas({
             alignItems: "center",
             gap: 6,
             padding: "5px 6px",
-            background: "rgba(15, 15, 25, 0.92)",
+            background: "var(--bg-elevated)",
             backdropFilter: "blur(12px)",
-            border: "1px solid rgba(192, 132, 252, 0.3)",
+            border: "1px solid var(--border-hover)",
             borderRadius: 8,
-            boxShadow: "0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(192, 132, 252, 0.08)",
+            boxShadow: "var(--shadow-lg)",
             zIndex: 200,
             pointerEvents: "auto",
             whiteSpace: "nowrap",

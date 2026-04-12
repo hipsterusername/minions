@@ -192,14 +192,14 @@ export const PortDot = memo(function PortDot({
           backgroundColor: color,
           opacity: effectiveOpacity,
           border: isSnapTarget
-            ? `2px solid #fff`
+            ? `2px solid var(--text-primary)`
             : showTargetHighlight
-              ? `2px solid #fff`
+              ? `2px solid var(--text-primary)`
               : "none",
           boxShadow: isSnapTarget
-            ? `0 0 16px ${color}, 0 0 6px #fff`
+            ? `0 0 16px ${color}, 0 0 6px var(--text-primary)`
             : showTargetHighlight
-              ? `0 0 12px ${color}, 0 0 4px #fff`
+              ? `0 0 12px ${color}, 0 0 4px var(--text-primary)`
               : hover && !locked
                 ? `0 0 8px ${color}99`
                 : isDragActive && isValidTarget

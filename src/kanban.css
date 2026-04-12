@@ -34,6 +34,10 @@
   --kb-gradient-success: var(--gradient-success);
   --kb-gradient-danger: var(--gradient-danger);
 
+  --kb-text-on-gradient: #fff;
+  --kb-shadow-color: 0 0 0;
+  --kb-backdrop-color: var(--kb-shadow-color);
+
   --kb-transition-fast: 120ms ease;
   --kb-transition-normal: 200ms ease;
   --kb-transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -279,7 +283,7 @@
   border: 1px solid var(--border-default);
   border-radius: var(--kb-radius-lg);
   margin: 0 var(--kb-space-sm) var(--kb-space-md);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 4px 12px rgba(var(--kb-shadow-color), 0.2);
   animation: kb-scale-in 200ms ease both;
   overflow: hidden;
 }
@@ -372,7 +376,7 @@
 .kb-btn--primary {
   padding: 6px 16px;
   background: var(--kb-gradient-primary);
-  color: #fff;
+  color: var(--kb-text-on-gradient);
   box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
@@ -404,7 +408,7 @@
 .kb-btn--success {
   padding: 6px 16px;
   background: var(--kb-gradient-success);
-  color: #fff;
+  color: var(--kb-text-on-gradient);
   box-shadow: 0 2px 8px color-mix(in srgb, var(--status-success) 25%, transparent);
 }
 
@@ -429,7 +433,7 @@
 .kb-btn--danger {
   padding: 6px 16px;
   background: var(--kb-gradient-danger);
-  color: #fff;
+  color: var(--kb-text-on-gradient);
   box-shadow: 0 2px 8px color-mix(in srgb, var(--danger-color) 25%, transparent);
 }
 
@@ -494,7 +498,7 @@
 
 .kb-card:hover {
   border-color: var(--kb-card-hover-border);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 12px rgba(var(--kb-shadow-color), 0.15);
 }
 
 .kb-card--history {
@@ -835,7 +839,11 @@
   cursor: pointer;
   appearance: none;
   padding-inline-end: 28px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2364748b' d='M3 5l3 3 3-3'/%3E%3C/svg%3E");
+  /* Note: CSS vars cannot be used inside data URIs. This uses a mid-gray
+     (#888) that provides reasonable contrast in both light and dark themes.
+     If the theme system adds a wrapper element, this can be replaced with
+     a mask-image approach that inherits from var(--text-muted). */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888888' d='M3 5l3 3 3-3'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 8px center;
 }
@@ -908,8 +916,8 @@
   border: 1px solid var(--border-default);
   border-radius: var(--kb-radius-lg);
   box-shadow:
-    0 12px 40px rgba(0, 0, 0, 0.4),
-    0 4px 12px rgba(0, 0, 0, 0.2);
+    0 12px 40px rgba(var(--kb-shadow-color), 0.4),
+    0 4px 12px rgba(var(--kb-shadow-color), 0.2);
   z-index: 210;
   animation: kb-scale-in 200ms ease both;
   overflow-x: hidden;
@@ -935,7 +943,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(var(--kb-backdrop-color), 0.45);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   animation: kb-fade-in 150ms ease both;
@@ -952,8 +960,8 @@
   border: 1px solid var(--border-default);
   border-radius: var(--kb-radius-lg);
   box-shadow:
-    0 20px 60px rgba(0, 0, 0, 0.5),
-    0 8px 20px rgba(0, 0, 0, 0.3);
+    0 20px 60px rgba(var(--kb-shadow-color), 0.5),
+    0 8px 20px rgba(var(--kb-shadow-color), 0.3);
   animation: kb-scale-in 200ms ease both;
 }
 
@@ -981,8 +989,8 @@
   border: 1px solid var(--border-default);
   border-radius: var(--kb-radius-lg);
   box-shadow:
-    0 20px 60px rgba(0, 0, 0, 0.5),
-    0 8px 20px rgba(0, 0, 0, 0.3);
+    0 20px 60px rgba(var(--kb-shadow-color), 0.5),
+    0 8px 20px rgba(var(--kb-shadow-color), 0.3);
   padding: var(--kb-space-xl);
   animation: kb-scale-in 200ms ease both;
 }
@@ -1126,7 +1134,7 @@
     z-index: 400;
     transform: translateX(100%);
     transition: transform var(--kb-transition-slow);
-    box-shadow: -8px 0 30px rgba(0, 0, 0, 0.3);
+    box-shadow: -8px 0 30px rgba(var(--kb-shadow-color), 0.3);
   }
 
   .kb-panel--open {
@@ -1138,7 +1146,7 @@
     position: fixed;
     inset: 0;
     z-index: 399;
-    background: rgba(0, 0, 0, 0.4);
+    background: rgba(var(--kb-backdrop-color), 0.4);
     backdrop-filter: blur(2px);
     -webkit-backdrop-filter: blur(2px);
     opacity: 0;
@@ -1178,7 +1186,7 @@
     width: min(380px, 70vw);
     z-index: 450;
     border-left: 1px solid var(--border-default);
-    box-shadow: -8px 0 30px rgba(0, 0, 0, 0.3);
+    box-shadow: -8px 0 30px rgba(var(--kb-shadow-color), 0.3);
   }
 
   /* Increase touch targets for tablet */
@@ -1613,7 +1621,7 @@
   background: var(--bg-surface);
   border: 1px solid var(--border-default);
   border-radius: var(--kb-radius-sm);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 8px 24px rgba(var(--kb-shadow-color), 0.3);
   z-index: 100;
   animation: kb-scale-in 120ms ease both;
   padding: var(--kb-space-xs) 0;
@@ -2250,7 +2258,7 @@
 }
 
 .kb-panel__metric-dot--off {
-  background: var(--text-dim, #555);
+  background: var(--text-dim);
 }
 
 .kb-panel__metric-icon {
@@ -2470,7 +2478,7 @@
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--text-dim, #666);
+  color: var(--text-dim);
   background: color-mix(in srgb, var(--text-primary) 6%, transparent);
   border-radius: var(--kb-radius-pill);
   padding: 0 5px;
@@ -2492,7 +2500,7 @@
 
 .kb-panel__livechat-empty {
   font-size: var(--kb-font-sm);
-  color: var(--text-dim, #555);
+  color: var(--text-dim);
   text-align: center;
   padding: var(--kb-space-xl) 0;
 }
@@ -2557,7 +2565,7 @@
 
 .kb-panel__chatmsg-suffix {
   font-size: 9px;
-  color: var(--text-dim, #555);
+  color: var(--text-dim);
   margin-left: auto;
 }
 
@@ -2741,7 +2749,7 @@
 }
 
 .kb-panel__input::placeholder {
-  color: var(--text-dim, #555);
+  color: var(--text-dim);
 }
 
 /* ── Empty state ── */

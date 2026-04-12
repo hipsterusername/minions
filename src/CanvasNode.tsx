@@ -347,7 +347,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
         animation: "nodeEnter 0.25s cubic-bezier(0.22, 1, 0.36, 1) both",
         // Lift effect when dragging over a group
         ...(isBeingDragged && {
-          filter: "drop-shadow(0 12px 24px rgba(0,0,0,0.4))",
+          filter: "drop-shadow(0 12px 24px var(--overlay-bg))",
         }),
       }}
     >

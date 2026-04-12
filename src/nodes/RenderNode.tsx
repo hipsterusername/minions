@@ -43,33 +43,33 @@ export interface RenderNodeData {
 // ── Color palette ─────────────────────────────────────────
 
 const DSL_COLORS: Record<string, string> = {
-  green: "#22c55e",
-  red: "#ef4444",
-  yellow: "#eab308",
-  blue: "#3b82f6",
-  gray: "#6b7280",
-  purple: "#a855f7",
-  orange: "#f97316",
+  green: "var(--status-success)",
+  red: "var(--status-error)",
+  yellow: "var(--status-warning)",
+  blue: "var(--info-color)",
+  gray: "var(--text-muted)",
+  purple: "var(--thinking-accent)",
+  orange: "var(--accent)",
 };
 
 const STATUS_CONFIG: Record<string, { color: string; icon: string; bg: string }> = {
-  success: { color: "#22c55e", icon: "\u2713", bg: "rgba(34,197,94,0.12)" },
-  error: { color: "#ef4444", icon: "\u2717", bg: "rgba(239,68,68,0.12)" },
-  warning: { color: "#eab308", icon: "!", bg: "rgba(234,179,8,0.12)" },
-  running: { color: "#3b82f6", icon: "\u25CB", bg: "rgba(59,130,246,0.12)" },
-  pending: { color: "#6b7280", icon: "\u2022", bg: "rgba(107,114,128,0.12)" },
+  success: { color: "var(--status-success)", icon: "\u2713", bg: "var(--success-bg)" },
+  error: { color: "var(--status-error)", icon: "\u2717", bg: "var(--error-bg)" },
+  warning: { color: "var(--status-warning)", icon: "!", bg: "var(--warning-bg)" },
+  running: { color: "var(--info-color)", icon: "\u25CB", bg: "var(--info-bg)" },
+  pending: { color: "var(--text-muted)", icon: "\u2022", bg: "var(--muted-bg)" },
 };
 
 const TREND_ARROWS: Record<string, { symbol: string; color: string }> = {
-  up: { symbol: "\u2191", color: "#22c55e" },
-  down: { symbol: "\u2193", color: "#ef4444" },
-  flat: { symbol: "\u2192", color: "#6b7280" },
+  up: { symbol: "\u2191", color: "var(--status-success)" },
+  down: { symbol: "\u2193", color: "var(--status-error)" },
+  flat: { symbol: "\u2192", color: "var(--text-muted)" },
 };
 
 // ── Individual component renderers ────────────────────────
 
 function MetricCard({ c }: { c: MetricComponent }) {
-  const color = c.color ? DSL_COLORS[c.color] ?? "var(--text-primary)" : "var(--text-primary)";
+  const color = c.color ? DSL_COLORS[c.color] ?? "var(--info-color)" : "var(--text-primary)";
   const trend = c.trend ? TREND_ARROWS[c.trend] : null;
 
   return (
@@ -126,7 +126,7 @@ function MetricCard({ c }: { c: MetricComponent }) {
 }
 
 function ProgressBar({ c }: { c: ProgressComponent }) {
-  const color = c.color ? DSL_COLORS[c.color] ?? "#3b82f6" : "#3b82f6";
+  const color = c.color ? DSL_COLORS[c.color] ?? "var(--info-color)" : "var(--info-color)";
   const pct = Math.max(0, Math.min(100, c.value));
 
   return (
@@ -196,7 +196,7 @@ function StatusBadge({ c }: { c: StatusComponent }) {
         height: 20,
         borderRadius: "50%",
         background: cfg.color,
-        color: "#fff",
+        color: "var(--text-primary)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -535,7 +535,7 @@ function RenderNodeRenderer({
               alignItems: "center",
               justifyContent: "center",
               fontSize: 10,
-              color: "#fff",
+              color: "var(--text-primary)",
               fontWeight: 700,
             }}
           >

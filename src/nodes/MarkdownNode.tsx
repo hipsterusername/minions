@@ -706,7 +706,7 @@ function MarkdownNodeRenderer({ node, onUpdateData, onResize, canvasScale, proje
           background: var(--bg-secondary);
           border-radius: 6px;
           border: 1px solid var(--border-default);
-          box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+          box-shadow: var(--shadow-sm);
           overflow: hidden;
           position: relative;
           font-family: var(--font-sans);
@@ -759,7 +759,7 @@ function MarkdownNodeRenderer({ node, onUpdateData, onResize, canvasScale, proje
           transition: background 0.15s;
         }
         .md-title-input:focus {
-          background: rgba(255,255,255,0.04);
+          background: var(--state-hover);
         }
         .md-title-input::placeholder {
           color: var(--text-muted);
@@ -793,7 +793,7 @@ function MarkdownNodeRenderer({ node, onUpdateData, onResize, canvasScale, proje
         .md-mode-btn[data-active="true"] {
           background: var(--bg-elevated);
           color: var(--text-primary);
-          box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+          box-shadow: var(--shadow-sm);
         }
 
         /* ── Writing surface ──────────── */
@@ -974,7 +974,7 @@ function MarkdownNodeRenderer({ node, onUpdateData, onResize, canvasScale, proje
         }
 
         .md-save-as-btn {
-          background: rgba(255,255,255,0.04);
+          background: var(--state-hover);
           border: 1px solid var(--border-default);
           border-radius: 3px;
           cursor: pointer;
@@ -989,7 +989,7 @@ function MarkdownNodeRenderer({ node, onUpdateData, onResize, canvasScale, proje
           transition: all 0.15s;
         }
         .md-save-as-btn:hover {
-          background: rgba(255,255,255,0.08);
+          background: var(--state-active);
           color: var(--text-primary);
         }
 
@@ -1052,7 +1052,7 @@ function MarkdownNodeRenderer({ node, onUpdateData, onResize, canvasScale, proje
           background: var(--bg-surface);
           border: 1px solid var(--border-default);
           border-radius: 6px;
-          box-shadow: 0 -4px 20px rgba(0,0,0,0.4);
+          box-shadow: var(--shadow-lg);
           z-index: 100;
           max-height: 300px;
           display: flex;
@@ -1108,7 +1108,7 @@ function MarkdownNodeRenderer({ node, onUpdateData, onResize, canvasScale, proje
           transition: background 0.1s;
         }
         .md-folder-item:hover {
-          background: rgba(255,255,255,0.04);
+          background: var(--state-hover);
         }
         .md-folder-empty {
           padding: 12px 10px;
@@ -1163,7 +1163,7 @@ function MarkdownNodeRenderer({ node, onUpdateData, onResize, canvasScale, proje
           background: var(--bg-surface);
           border: 1px solid var(--border-default);
           border-radius: 8px;
-          box-shadow: 0 -4px 24px rgba(0,0,0,0.5);
+          box-shadow: var(--shadow-lg);
           z-index: 90;
           padding: 12px;
           display: flex;
@@ -1243,7 +1243,7 @@ function MarkdownNodeRenderer({ node, onUpdateData, onResize, canvasScale, proje
         }
         .md-save-cancel-btn {
           padding: 5px 12px;
-          background: rgba(255,255,255,0.04);
+          background: var(--state-hover);
           border: 1px solid var(--border-default);
           border-radius: 4px;
           color: var(--text-secondary);
@@ -1253,7 +1253,7 @@ function MarkdownNodeRenderer({ node, onUpdateData, onResize, canvasScale, proje
           transition: all 0.15s;
         }
         .md-save-cancel-btn:hover {
-          background: rgba(255,255,255,0.08);
+          background: var(--state-active);
         }
         .md-save-confirm-btn {
           padding: 5px 14px;

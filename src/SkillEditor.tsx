@@ -132,7 +132,7 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
     skill?.category ?? "general",
   );
   const [accentColor, setAccentColor] = useState(
-    skill?.accentColor ?? "#3b82f6",
+    skill?.accentColor ?? "var(--info-color)",
   );
   const [description, setDescription] = useState(skill?.description ?? "");
   const [template, setTemplate] = useState(skill?.template ?? "");
