@@ -10,7 +10,7 @@ import {
 import type { CanvasTransform, CanvasNode, CanvasAction, Position, Size, ContextItem } from "./types.ts";
 import { generateId } from "./canvas-state.ts";
 import { CanvasNodeComponent } from "./CanvasNode.tsx";
-import { getUserCreatableNodeTypes, getAllNodeTypes } from "./node-registry.ts";
+import { getAllNodeTypes } from "./node-registry.ts";
 import { SessionPanel } from "./SessionPanel.tsx";
 import { EdgeRenderer } from "./EdgeRenderer.tsx";
 import type { GraphDocument } from "./graph.ts";
@@ -153,9 +153,6 @@ const Toolbar = memo(function Toolbar({
   onAddNode,
   onTidyLayout,
 }: ToolbarProps) {
-  const [showPalette, setShowPalette] = useState(false);
-  const nodeTypes = getUserCreatableNodeTypes();
-
   const btnStyle: React.CSSProperties = {
     width: 32,
     height: 32,
@@ -189,66 +186,46 @@ const Toolbar = memo(function Toolbar({
         alignItems: "center",
       }}
     >
-      <div style={{ position: "relative" }}>
-        <button
-          style={{
-            ...btnStyle,
-            background: "var(--accent)",
-            color: "var(--text-primary)",
-            border: "none",
-            fontWeight: 600,
-          }}
-          onClick={() => setShowPalette(!showPalette)}
-          title="Add node"
-        >
-          +
-        </button>
-        {showPalette && (
-          <div
-            style={{
-              position: "absolute",
-              bottom: 42,
-              left: 0,
-              background: "var(--bg-secondary)",
-              border: "1px solid var(--border-default)",
-              borderRadius: 8,
-              padding: 4,
-              minWidth: 140,
-              boxShadow: "var(--shadow-lg)",
-            }}
-          >
-            {nodeTypes.map((nt) => (
-              <button
-                key={nt.type}
-                onClick={() => {
-                  onAddNode(nt.type);
-                  setShowPalette(false);
-                }}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  padding: "8px 12px",
-                  background: "transparent",
-                  border: "none",
-                  color: "var(--text-primary)",
-                  fontSize: 13,
-                  cursor: "pointer",
-                  textAlign: "left",
-                  borderRadius: 4,
-                }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.background = "var(--bg-elevated)")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.background = "transparent")
-                }
-              >
-                {nt.label}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      <button
+        style={{
+          ...btnStyle,
+          background: "var(--accent)",
+          color: "var(--text-primary)",
+          border: "none",
+          fontWeight: 600,
+          width: "auto",
+          padding: "0 10px",
+          fontSize: 12,
+          gap: 4,
+        }}
+        onClick={() => onAddNode("leader")}
+        title="Add Leader node"
+      >
+        + Leader
+      </button>
+      <button
+        style={{
+          ...btnStyle,
+          background: "var(--bg-surface)",
+          color: "var(--text-secondary)",
+          fontWeight: 500,
+          width: "auto",
+          padding: "0 10px",
+          fontSize: 12,
+        }}
+        onClick={() => onAddNode("markdown")}
+        title="Add Markdown node"
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "var(--bg-elevated)";
+          e.currentTarget.style.color = "var(--text-primary)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "var(--bg-surface)";
+          e.currentTarget.style.color = "var(--text-secondary)";
+        }}
+      >
+        + Markdown
+      </button>
 
       <div
         style={{
@@ -420,7 +397,6 @@ export function Canvas({
     () => [
       { label: "New Leader", type: "leader" },
       { label: "New Markdown", type: "markdown" },
-      { label: "New Context Group", type: "context-group" },
     ],
     [],
   );
@@ -1816,8 +1792,29 @@ export function Canvas({
       };
       dispatch({ type: "ADD_NODE", node });
       setSelectedIds(new Set([node.id]));
+
+      // Focus viewport on the newly added node
+      if (container) {
+        const padding = 80;
+        const minX = position.x;
+        const minY = position.y;
+        const maxX = position.x + typeDef.defaultSize.width;
+        const maxY = position.y + typeDef.defaultSize.height;
+        const contentW = maxX - minX + padding * 2;
+        const contentH = maxY - minY + padding * 2;
+        const scaleX = container.clientWidth / contentW;
+        const scaleY = container.clientHeight / contentH;
+        const scale = Math.min(1.0, Math.max(0.4, Math.min(scaleX, scaleY)));
+        const nodeCenterX = (minX + maxX) / 2;
+        const nodeCenterY = (minY + maxY) / 2;
+        setTransform({
+          x: container.clientWidth / 2 - nodeCenterX * scale,
+          y: container.clientHeight / 2 - nodeCenterY * scale,
+          scale,
+        });
+      }
     },
-    [dispatch],
+    [dispatch, setTransform],
   );
 
   /** Add a node at a specific world position (used by context menu) */
