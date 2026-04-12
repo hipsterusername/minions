@@ -196,26 +196,30 @@ const Toolbar = memo(function Toolbar({
           background: "var(--accent)",
           color: "var(--text-primary)",
           border: "none",
-          fontWeight: 600,
-          width: "auto",
-          padding: "0 10px",
-          fontSize: 12,
-          gap: 4,
         }}
         onClick={() => onAddNode("leader")}
         title="Add Leader node"
       >
-        + Leader
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          {/* Crown / leader icon */}
+          <path d="M2 11L4 5L8 8L12 5L14 11Z" fill="currentColor" stroke="none" />
+          <rect x="2" y="11" width="12" height="2" rx="0.5" fill="currentColor" stroke="none" />
+        </svg>
       </button>
       <button
         style={{
           ...btnStyle,
           background: "var(--bg-surface)",
           color: "var(--text-secondary)",
-          fontWeight: 500,
-          width: "auto",
-          padding: "0 10px",
-          fontSize: 12,
         }}
         onClick={() => onAddNode("markdown")}
         title="Add Markdown node"
@@ -228,7 +232,16 @@ const Toolbar = memo(function Toolbar({
           e.currentTarget.style.color = "var(--text-secondary)";
         }}
       >
-        + Markdown
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="currentColor"
+        >
+          {/* Markdown M↓ icon */}
+          <path d="M1 3h2.5l2.5 4 2.5-4H11v10H9V7L7 10H5.5L4 7v6H1V3Z" />
+          <path d="M12.5 8v5M10.5 11l2 2 2-2" stroke="currentColor" fill="none" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </button>
 
       <div
