@@ -2948,22 +2948,6 @@ function LeaderNodeRenderer({
     [socketSend, onUpdateData],
   );
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        if (dataRef.current.status === "completed") {
-          handleNewSession();
-        } else if (dataRef.current.sessionKey) {
-          handleSend();
-        } else {
-          handleCreate();
-        }
-      }
-    },
-    [handleSend, handleCreate, handleNewSession],
-  );
-
   // P6: Reset session handler
   const handleReset = useCallback(() => {
     if (!confirm("Reset this Leader session? All messages will be cleared.")) return;
@@ -3009,6 +2993,22 @@ function LeaderNodeRenderer({
     });
     setInput("");
   }, [socketSend, emitUpdate, input]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        if (dataRef.current.status === "completed") {
+          handleNewSession();
+        } else if (dataRef.current.sessionKey) {
+          handleSend();
+        } else {
+          handleCreate();
+        }
+      }
+    },
+    [handleSend, handleCreate, handleNewSession],
+  );
 
   // P6: Export log handler
   const handleExportLog = useCallback(() => {
