@@ -347,7 +347,7 @@ async function runSession(
     role: role ?? existing?.role ?? "default",
     taskName: existing?.taskName ?? (role === "leader" ? deriveTaskName(prompt) : null),
     worktree: parentWorktree ?? existing?.worktree ?? null,
-    worktreeIsolation: worktreeIsolation !== false,
+    worktreeIsolation: worktreeIsolation === true,
     waitTimerId: null,
     renderState: null,
   };
@@ -365,7 +365,7 @@ async function runSession(
   }
 
   // ── Create worktree for leader sessions ──────────────
-  const shouldCreateWorktree = worktreeIsolation !== false; // defaults to true
+  const shouldCreateWorktree = worktreeIsolation === true; // defaults to false
   if (role === "leader" && shouldCreateWorktree) {
     if (existing?.worktree) {
       // Resume: reuse existing worktree

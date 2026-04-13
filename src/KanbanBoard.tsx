@@ -338,7 +338,7 @@ function CardForm({
     initial?.permissionMode ?? "auto",
   );
   const [worktreeIsolation, setWorktreeIsolation] = useState(
-    initial?.worktreeIsolation ?? (defaultWorktreeIsolation !== false),
+    initial?.worktreeIsolation ?? (defaultWorktreeIsolation === true),
   );
   const [skillIds, setSkillIds] = useState<string[]>(initial?.skillIds ?? []);
   const [skillValues, setSkillValues] = useState<Record<string, Record<string, string>>>(
@@ -709,7 +709,7 @@ function BacklogCard({
 
   const cardModel = card.model ?? "sonnet";
   const cardPermission = card.permissionMode ?? "auto";
-  const cardWorktree = card.worktreeIsolation ?? true;
+  const cardWorktree = card.worktreeIsolation ?? false;
   const cardSkillIds = card.skillIds ?? [];
   const taggedSkills = cardSkillIds
     .map((id) => getSkill(id))
@@ -1721,7 +1721,7 @@ function KanbanInspectorPanel({
                   subtasks: selectedCard.subtasks,
                   model: selectedCard.model ?? "sonnet",
                   permissionMode: selectedCard.permissionMode ?? "auto",
-                  worktreeIsolation: selectedCard.worktreeIsolation ?? true,
+                  worktreeIsolation: selectedCard.worktreeIsolation ?? false,
                   skillIds: selectedCard.skillIds ?? [],
                   skillValues: selectedCard.skillValues ?? {},
                   linkedContextNodeIds: selectedCard.linkedContextNodeIds ?? [],

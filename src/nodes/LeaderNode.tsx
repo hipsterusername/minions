@@ -3019,7 +3019,7 @@ function LeaderNodeRenderer({
       skillValues: current.skillValues,
       model: current.model,
       permissionMode: current.permissionMode,
-      worktreeIsolation: true, // re-enable isolation for the new session
+      worktreeIsolation: false, // worktree isolation off by default
       ...(pendingPrompt ? { autoStartPrompt: pendingPrompt } : {}),
     });
     setInput("");
@@ -3593,7 +3593,7 @@ export const LEADER_DEFAULT_DATA: LeaderData = {
   model: "opus",
   permissionMode: "auto",
   taskPlan: [],
-  worktreeIsolation: true,
+  worktreeIsolation: false,
   worktreePath: null,
   worktreeBranch: null,
   worktreeStatus: "none",
