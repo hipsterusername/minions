@@ -477,6 +477,7 @@ async function runSession(
     if (systemPrompt) {
       let enrichedPrompt = systemPrompt;
       if (session.worktree) {
+        const isMinion = role === "minion";
         const worktreeAddendum = [
           "",
           "",
@@ -493,8 +494,15 @@ async function runSession(
           "- When you discover file paths (from Glob, Grep, error messages, git output, etc.), they will already be within your worktree — use them as-is.",
           `- **NEVER** use paths under \`${session.worktree.projectPath}\` directly — that is the user's main working tree. Your changes go through the worktree and are merged after approval.`,
           "- Bash commands automatically run in your worktree cwd.",
-          "- If you spawn subagents via the Agent tool, they inherit your worktree cwd.",
-          "- When delegating to minions via assign_task, they will automatically work in your worktree.",
+          ...(isMinion
+            ? [
+                "- **Commit your work** (`git add -A && git commit -m \"...\"`) before calling `report_done`. The orchestrator has an auto-commit fallback, but explicit commits produce cleaner history.",
+                "- **Do NOT** create branches, merge, rebase, or push — the orchestrator manages all integration.",
+              ]
+            : [
+                "- If you spawn subagents via the Agent tool, they inherit your worktree cwd.",
+                "- When delegating to minions via assign_task, they will automatically work in your worktree.",
+              ]),
           "",
         ].join("\n");
         enrichedPrompt += worktreeAddendum;

@@ -171,7 +171,7 @@ export async function listWorktrees(
 export async function mergeWorktree(
   info: WorktreeInfo,
   targetBranch?: string,
-  options?: { force?: boolean; strategy?: "ours" | "theirs" },
+  options?: { force?: boolean; strategy?: "ours" | "theirs"; rebase?: boolean },
 ): Promise<MergeResult> {
   const projectCwd = info.projectPath;
   const worktreeCwd = info.path;
@@ -248,32 +248,74 @@ export async function mergeWorktree(
         };
       }
     } else {
-      // No strategy — report conflicts for user resolution
-      let conflicts: string[] = [];
-      try {
-        const { stdout: diffOut } = await exec(
-          ["diff", "--name-only", "--diff-filter=U"],
-          worktreeCwd,
-        );
-        conflicts = diffOut.trim().split("\n").filter(Boolean);
-      } catch {
-        // If diff fails too, just use the error message.
-      }
+      // No strategy — abort the failed merge, then attempt rebase.
+      //
+      // Rebase-on-conflict workflow (per agentic best practice):
+      //   1. Abort the failed merge
+      //   2. Rebase the canvas branch on top of the target branch
+      //   3. If rebase succeeds, the canvas branch is cleanly ahead — fall through to fast-forward
+      //   4. If rebase has conflicts, abort and report them for agent/user resolution
+      //
+      // This produces a linear history and gives the agent a chance to fix
+      // conflicts in its worktree before the orchestrator retries the merge.
 
-      // Abort the failed merge in the worktree.
+      // First, abort the failed merge attempt.
       try {
         await exec(["merge", "--abort"], worktreeCwd);
       } catch {
         // Abort may fail if there's nothing to abort; ignore.
       }
 
-      const message = err instanceof Error ? err.message : String(err);
-      return {
-        success: false,
-        conflicts,
-        targetBranch,
-        summary: `Merge failed (conflicts with ${targetBranch}): ${message}`,
-      };
+      // Attempt rebase (default behavior, or explicitly requested)
+      const shouldRebase = options?.rebase !== false; // default: true
+      if (shouldRebase) {
+        console.log(`[worktree] mergeWorktree: attempting rebase onto ${targetBranch} in ${worktreeCwd}`);
+        try {
+          await exec(["rebase", targetBranch!], worktreeCwd);
+          console.log(`[worktree] mergeWorktree: rebase succeeded cleanly`);
+          // Rebase succeeded — the canvas branch is now cleanly ahead of target.
+          // Fall through to Step 2 (update-ref fast-forward).
+        } catch (rebaseErr) {
+          console.log(`[worktree] mergeWorktree: rebase failed — ${rebaseErr instanceof Error ? rebaseErr.message : String(rebaseErr)}`);
+
+          // Collect conflicted files from the failed rebase
+          let conflicts: string[] = [];
+          try {
+            const { stdout: diffOut } = await exec(
+              ["diff", "--name-only", "--diff-filter=U"],
+              worktreeCwd,
+            );
+            conflicts = diffOut.trim().split("\n").filter(Boolean);
+          } catch {
+            // If diff fails too, just use the error message.
+          }
+
+          // Abort the failed rebase to restore the worktree to its pre-rebase state.
+          try {
+            await exec(["rebase", "--abort"], worktreeCwd);
+          } catch {
+            // Abort may fail if there's nothing to abort; ignore.
+          }
+
+          const message = rebaseErr instanceof Error ? rebaseErr.message : String(rebaseErr);
+          return {
+            success: false,
+            conflicts,
+            targetBranch,
+            summary: `Rebase failed (conflicts with ${targetBranch}): ${message}. The worktree is unchanged — resolve conflicts and retry.`,
+          };
+        }
+      } else {
+        // Rebase explicitly disabled — just report the original merge failure
+        let conflicts: string[] = [];
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          success: false,
+          conflicts,
+          targetBranch,
+          summary: `Merge failed (conflicts with ${targetBranch}): ${message}`,
+        };
+      }
     }
   }
 
@@ -338,7 +380,7 @@ export async function mergeWorktree(
 export async function mergeAndCleanup(
   info: WorktreeInfo,
   targetBranch?: string,
-  options?: { force?: boolean; strategy?: "ours" | "theirs" },
+  options?: { force?: boolean; strategy?: "ours" | "theirs"; rebase?: boolean },
 ): Promise<MergeResult> {
   console.log(`[worktree] mergeAndCleanup: path=${info.path} branch=${info.branch} options=${JSON.stringify(options)}`);
   // Auto-commit any uncommitted changes so they aren't lost on merge.
