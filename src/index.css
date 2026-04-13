@@ -161,6 +161,11 @@ input, textarea, select,
   -webkit-user-select: text;
 }
 
+/* ── Leader node status icon (theme-aware inversion) ── */
+[data-theme="alpine"] .leader-status-icon {
+  filter: invert(1);
+}
+
 /* ── Leader scroll-capture zone ── */
 .leader-scroll-zone {
   outline: 2px solid transparent;

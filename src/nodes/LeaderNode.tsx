@@ -3019,6 +3019,7 @@ function LeaderNodeRenderer({
             alt={data.status === "running" || data.status === "creating" ? "Active" : "Idle"}
             width={20}
             height={20}
+            className="leader-status-icon"
             style={{ display: "block", flexShrink: 0 }}
           />
           <div style={{ flex: 1, minWidth: 0 }}>
