@@ -123,7 +123,7 @@ interface BufferedEvent {
 interface Session {
   id: string;
   sessionId: string | null;
-  status: "running" | "idle" | "stopped" | "error";
+  status: "running" | "idle" | "stopped" | "error" | "completed";
   abortController: AbortController;
   queryHandle: Query | null;
   cwd: string;
@@ -1273,6 +1273,19 @@ function handleCommand(
       }
       // Capture the project path before cleanup removes the worktree directory
       const approveProjectPath = approveSession.worktree.projectPath;
+
+      // ── Abort the running agent BEFORE merge ──────────
+      // Prevents race conditions where the agent tries to operate in the
+      // worktree directory while/after it's being deleted.
+      if (approveSession.status === "running") {
+        approveSession.abortController.abort();
+      }
+      // Cancel any pending wait timer
+      if (approveSession.waitTimerId) {
+        clearTimeout(approveSession.waitTimerId);
+        approveSession.waitTimerId = null;
+      }
+
       // NOTE: Don't clear approval state yet — wait until merge succeeds.
       // If merge fails, the approval UI should remain visible for retry.
       mergeAndCleanup(approveSession.worktree)
@@ -1285,6 +1298,10 @@ function handleCommand(
             approveSession.worktree = null;
             // Reset cwd to the main project path — the worktree directory no longer exists
             approveSession.cwd = approveProjectPath;
+            // Mark session as completed — don't resume the agent.
+            // The worktree is gone; resuming would cause errors as the agent
+            // tries to operate in a deleted directory or with stale context.
+            approveSession.status = "completed";
             broadcast(wsServer, {
               type: "worktree_merged",
               sessionKey: cmd.sessionKey,
@@ -1299,18 +1316,14 @@ function handleCommand(
               action: "approved",
               timestamp: Date.now(),
             });
-            // Notify the agent that approval succeeded.
-            // worktreeIsolation=false: session lifecycle is complete, don't create a new worktree.
-            runSession(
-              wsServer,
-              cmd.sessionKey!,
-              "Your changes have been approved and merged successfully into the main branch. The worktree has been cleaned up.",
-              approveProjectPath,
-              approveSession.sessionId ?? undefined,
-              undefined,
-              "leader",
-              false, // worktreeIsolation: off — lifecycle complete
-            );
+            // Broadcast a dedicated completion event so the UI can transition
+            // to a clean "completed" state with a "New Session" option.
+            broadcast(wsServer, {
+              type: "session_completed",
+              sessionKey: cmd.sessionKey,
+              reason: "merged",
+              timestamp: Date.now(),
+            });
           } else {
             // Merge failed — keep approval state so the UI stays visible
             broadcast(wsServer, {
@@ -1340,6 +1353,16 @@ function handleCommand(
       console.log(`[worktree] force_merge: starting merge for ${forceSession.worktree.branch} at ${forceSession.worktree.path}`);
       // Capture the project path before cleanup removes the worktree directory
       const forceProjectPath = forceSession.worktree.projectPath;
+
+      // ── Abort the running agent BEFORE merge ──────────
+      if (forceSession.status === "running") {
+        forceSession.abortController.abort();
+      }
+      if (forceSession.waitTimerId) {
+        clearTimeout(forceSession.waitTimerId);
+        forceSession.waitTimerId = null;
+      }
+
       mergeAndCleanup(forceSession.worktree, undefined, { force: true })
         .then((result) => {
           console.log(`[worktree] force_merge result:`, JSON.stringify(result));
@@ -1350,6 +1373,8 @@ function handleCommand(
             forceSession.worktree = null;
             // Reset cwd to the main project path — the worktree directory no longer exists
             forceSession.cwd = forceProjectPath;
+            // Mark session as completed — don't resume the agent
+            forceSession.status = "completed";
             broadcast(wsServer, {
               type: "worktree_merged",
               sessionKey: cmd.sessionKey,
@@ -1364,17 +1389,12 @@ function handleCommand(
               action: "approved",
               timestamp: Date.now(),
             });
-            // worktreeIsolation=false: session lifecycle is complete, don't create a new worktree.
-            runSession(
-              wsServer,
-              cmd.sessionKey!,
-              "Your changes have been force-merged successfully into the main branch (conflicts resolved by keeping your changes). The worktree has been cleaned up.",
-              forceProjectPath,
-              forceSession.sessionId ?? undefined,
-              undefined,
-              "leader",
-              false, // worktreeIsolation: off — lifecycle complete
-            );
+            broadcast(wsServer, {
+              type: "session_completed",
+              sessionKey: cmd.sessionKey,
+              reason: "merged",
+              timestamp: Date.now(),
+            });
           } else {
             broadcast(wsServer, {
               type: "worktree_merge_failed",

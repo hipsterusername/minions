@@ -44,7 +44,7 @@ export interface TaskPlanItem {
 
 export interface LeaderData {
   sessionKey: string | null;
-  status: "disconnected" | "creating" | "running" | "idle" | "stopped" | "error";
+  status: "disconnected" | "creating" | "running" | "idle" | "stopped" | "error" | "completed";
   messages: LeaderMessage[];
   /** Accumulated partial text from streaming deltas */
   streamingText: string;
@@ -142,13 +142,13 @@ function buildSessionContext(
 
   parts.push("<previous-session-context>");
   parts.push(
-    "This is a RESTARTED session. The previous session was lost (server restart or disconnect).",
+    "This is a CONTINUATION session. A prior session existed in this leader node (it may have completed successfully, been restarted, or lost due to disconnect).",
   );
   parts.push(
     "Below is the conversation history and task state from the prior session.",
   );
   parts.push(
-    "Use this to maintain continuity — do NOT repeat completed work.\n",
+    "Use this to maintain continuity — do NOT repeat completed work. Build on what was already accomplished.\n",
   );
 
   if (taskName) {
@@ -1939,28 +1939,50 @@ function ConfigFooter({
           onMouseDown={(e) => e.stopPropagation()}
           style={{
             margin: "0 6px 6px",
-            padding: "8px 12px",
+            padding: "10px 12px",
             background: "var(--success-bg, rgba(46,160,67,0.1))",
             border: "2px solid var(--success-color)",
             borderRadius: 8,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
           }}
         >
-          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--success-color)", display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 14 }}>✓</span> Merged successfully
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--success-color)", display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 14 }}>✓</span> Merged successfully
+            </div>
+            <button
+              onClick={() => onUpdateData({ ...data, mergeConfirmed: false })}
+              style={{
+                background: "none", border: "none", color: "var(--text-muted)",
+                cursor: "pointer", fontSize: 14, padding: "0 2px", lineHeight: 1,
+              }}
+              title="Dismiss"
+            >
+              x
+            </button>
           </div>
-          <button
-            onClick={() => onUpdateData({ ...data, mergeConfirmed: false })}
-            style={{
-              background: "none", border: "none", color: "var(--text-muted)",
-              cursor: "pointer", fontSize: 14, padding: "0 2px", lineHeight: 1,
-            }}
-            title="Dismiss"
-          >
-            x
-          </button>
+          {data.status === "completed" && (
+            <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                Session complete.
+              </span>
+              <button
+                onClick={handleNewSession}
+                style={{
+                  padding: "4px 12px",
+                  borderRadius: 6,
+                  border: "1px solid var(--accent)",
+                  background: "var(--state-active, rgba(88,166,255,0.1))",
+                  color: "var(--accent)",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
+                New Session
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -2700,6 +2722,18 @@ function LeaderNodeRenderer({
         });
         return;
       }
+
+      // Handle session_completed — session lifecycle is done (e.g. after merge)
+      if (serverMsg.type === "session_completed" && serverMsg.sessionKey === current.sessionKey) {
+        emitUpdate({
+          ...current,
+          status: "completed",
+          waitUntil: null,
+          waitReason: null,
+          error: null,
+        });
+        return;
+      }
     });
   }, [socketSubscribe, emitUpdate, processSdkEvent]);
 
@@ -2918,14 +2952,16 @@ function LeaderNodeRenderer({
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        if (dataRef.current.sessionKey) {
+        if (dataRef.current.status === "completed") {
+          handleNewSession();
+        } else if (dataRef.current.sessionKey) {
           handleSend();
         } else {
           handleCreate();
         }
       }
     },
-    [handleSend, handleCreate],
+    [handleSend, handleCreate, handleNewSession],
   );
 
   // P6: Reset session handler
@@ -2944,6 +2980,35 @@ function LeaderNodeRenderer({
       worktreeIsolation: data.worktreeIsolation,
     });
   }, [socketSend, data, emitUpdate]);
+
+  // New Session handler — preserves conversation context for continuity.
+  // If the user has typed a prompt in the input, it becomes the autoStartPrompt
+  // for the new session so they don't have to click "Start" again.
+  const handleNewSession = useCallback(() => {
+    const current = dataRef.current;
+    const pendingPrompt = input.trim() || null;
+    // Stop the old session on the server if it's still tracked
+    if (socketSend && current.sessionKey) {
+      socketSend({ type: "stop_session", sessionKey: current.sessionKey });
+    }
+    // Reset to default state but keep messages + taskPlan so buildSessionContext
+    // can inject them as <previous-session-context> on the next handleCreate().
+    // Also preserve user preferences (model, skills, permissions, isolation).
+    syncedRef.current = false;
+    emitUpdate({
+      ...LEADER_DEFAULT_DATA,
+      messages: current.messages,
+      taskPlan: current.taskPlan,
+      taskName: current.taskName,
+      skillIds: current.skillIds,
+      skillValues: current.skillValues,
+      model: current.model,
+      permissionMode: current.permissionMode,
+      worktreeIsolation: true, // re-enable isolation for the new session
+      ...(pendingPrompt ? { autoStartPrompt: pendingPrompt } : {}),
+    });
+    setInput("");
+  }, [socketSend, emitUpdate, input]);
 
   // P6: Export log handler
   const handleExportLog = useCallback(() => {
@@ -2967,6 +3032,7 @@ function LeaderNodeRenderer({
     idle: "var(--status-idle)",
     stopped: "var(--status-error)",
     error: "var(--danger-color)",
+    completed: "var(--success-color)",
   };
 
   const taggedSkillCount = (data.skillIds ?? []).length;
@@ -3393,37 +3459,47 @@ function LeaderNodeRenderer({
           onChange={setInput}
           onKeyDown={handleKeyDown}
           placeholder={
-            data.sessionKey
-              ? "Guide the leader..."
-              : "Describe your project goal..."
+            data.status === "completed"
+              ? "Describe next goal (context preserved)..."
+              : data.sessionKey
+                ? "Guide the leader..."
+                : "Describe your project goal..."
           }
           maxRows={8}
         />
         <button
-          onClick={data.sessionKey ? handleSend : handleCreate}
+          onClick={
+            data.status === "completed"
+              ? () => { handleNewSession(); }
+              : data.sessionKey ? handleSend : handleCreate
+          }
           onMouseDown={(e) => e.stopPropagation()}
-          disabled={!input.trim() && !!data.sessionKey}
+          disabled={!input.trim() && !!data.sessionKey && data.status !== "completed"}
           style={{
             padding: "8px 14px",
             borderRadius: 6,
             border: "none",
             background:
-              input.trim() || !data.sessionKey
+              data.status === "completed"
                 ? "var(--gradient-primary)"
-                : "var(--bg-elevated)",
+                : input.trim() || !data.sessionKey
+                  ? "var(--gradient-primary)"
+                  : "var(--bg-elevated)",
             color:
-              input.trim() || !data.sessionKey
+              data.status === "completed"
                 ? "var(--text-primary)"
-                : "var(--text-muted)",
+                : input.trim() || !data.sessionKey
+                  ? "var(--text-primary)"
+                  : "var(--text-muted)",
             fontSize: 12,
             fontWeight: 600,
             cursor: "pointer",
             flexShrink: 0,
-            opacity: !input.trim() && !!data.sessionKey ? 0.4 : 1,
+            opacity: !input.trim() && !!data.sessionKey && data.status !== "completed" ? 0.4 : 1,
             marginBottom: 1,
           }}
         >
-          {data.sessionKey ? "Send" : "Start"}
+          {data.status === "completed" ? "New Session" : data.sessionKey ? "Send" : "Start"}
         </button>
       </div>
       </div>{/* end scroll-capture zone */}
