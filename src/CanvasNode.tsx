@@ -4,6 +4,7 @@ import { getNodeType } from "./node-registry.ts";
 import { getContract } from "./graph.ts";
 import { PortDot } from "./components/PortDot.tsx";
 import type { PortInfo } from "./components/PortDot.tsx";
+import { wheelDetector } from "./wheel-detector.ts";
 
 interface CanvasNodeProps {
   node: CanvasNode;
@@ -188,11 +189,21 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
     [node.id, node.position, transform.scale, isSelected, onSelect, onMove, onDragStart, onDragEnd],
   );
 
-  /** Always absorb wheel events on nodes so the canvas never zooms
-   *  while the pointer is over a node. Scrollable children still scroll
-   *  normally — we just prevent the event from reaching the canvas. */
+  /** Absorb mouse-wheel zoom events on nodes so the canvas never zooms
+   *  while the pointer is over a node. Trackpad pan events are allowed
+   *  to bubble up so two-finger panning works seamlessly over nodes.
+   *  Scrollable children inside [data-scroll-capture] zones still scroll
+   *  normally — the canvas wheel handler checks for those. */
   const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.stopPropagation();
+    const native = e.nativeEvent;
+    const isPinch = native.ctrlKey || native.metaKey;
+    const device = wheelDetector.classify(native);
+
+    if (isPinch || device === "mouse") {
+      // Zoom-type event — absorb so the canvas doesn't zoom over nodes
+      e.stopPropagation();
+    }
+    // Trackpad pan events bubble up to the canvas for seamless panning
   }, []);
 
   // Stable callback — only changes when node.id or parent handler changes,

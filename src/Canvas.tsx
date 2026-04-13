@@ -28,6 +28,7 @@ import { CanvasContextMenu } from "./components/CanvasContextMenu.tsx";
 import type { ContextMenuOption } from "./components/CanvasContextMenu.tsx";
 import { ConfirmModal } from "./components/ConfirmModal.tsx";
 import { createDefaultNodeData } from "./node-defaults.ts";
+import { wheelDetector } from "./wheel-detector.ts";
 import { useCanvasKeyboard } from "./use-canvas-keyboard.ts";
 import { useCanvasFileDrop } from "./use-canvas-file-drop.ts";
 import { findNonOverlappingPosition, viewportCenter, pushNodesFromRect, snapToGrid } from "./canvas-utils.ts";
@@ -969,27 +970,46 @@ export function Canvas({
     if (!container) return;
 
     const handleWheel = (e: WheelEvent) => {
-      // If the event originated inside a [data-scroll-capture] element,
-      // let it scroll normally instead of zooming/panning the canvas.
+      // ── Pinch-to-zoom detection (conclusive, browser-provided) ──
+      // When a trackpad pinch gesture fires, browsers set ctrlKey = true.
+      // This also covers Ctrl+mouse-wheel zoom. Always treat as zoom.
+      const isPinch = e.ctrlKey || e.metaKey;
+
+      // ── Device detection via heuristic engine ───────────────────
+      // Classifies this event as "mouse" or "trackpad" based on delta
+      // amplitude, frequency, fractional values, and horizontal component.
+      // The classification locks for the duration of a gesture (resets
+      // after 300ms of quiet) so mid-gesture events stay consistent.
+      const device = wheelDetector.classify(e);
+
+      // ── Scroll-capture zones (chat areas, message lists) ────────
+      // Only yield wheel events to scrollable [data-scroll-capture]
+      // zones when the user is NOT mid-pan. If a trackpad pan gesture
+      // is active (user is swiping to navigate the canvas), we keep
+      // panning even if the pointer crosses over a scrollable zone.
+      // This prevents the jarring "pan interrupted by chat scroll" bug.
       const target = e.target as HTMLElement | null;
-      if (target?.closest?.("[data-scroll-capture]")) return;
+      const overScrollCapture = !!target?.closest?.("[data-scroll-capture]");
+
+      if (overScrollCapture && !isPinch) {
+        if (device === "trackpad" && !wheelDetector.isPanGestureActive) {
+          // Trackpad over scroll zone, no active pan → let it scroll
+          return;
+        }
+        if (device === "mouse") {
+          // Mouse wheel over scroll zone → let it scroll (not zoom)
+          return;
+        }
+        // Otherwise: active trackpad pan gesture → fall through to pan
+      }
 
       e.preventDefault();
 
-      // --- Detect whether this event came from a mouse wheel or a trackpad ---
-      // Firefox mouse wheel uses deltaMode 1 (line-based units).
-      // Chrome/Safari: both mouse & trackpad use deltaMode 0 (pixels), but
-      // trackpad two-finger scroll almost always has a non-zero deltaX,
-      // whereas a mouse wheel fires with deltaX === 0.
-      const isFirefoxLineMode = e.deltaMode === 1;
-      const hasHorizontalScroll = e.deltaX !== 0;
-      const isPinch = e.ctrlKey || e.metaKey; // trackpad pinch, or Ctrl+scroll
-
-      // Zoom when:
-      //  • pinch-to-zoom / Ctrl+scroll (ctrlKey set by browser for pinch)
-      //  • mouse scroll wheel (no horizontal component, or Firefox line-mode)
-      const shouldZoom =
-        isPinch || isFirefoxLineMode || !hasHorizontalScroll;
+      // ── Determine action: zoom or pan ───────────────────────────
+      //  • Pinch (ctrlKey) → always zoom (trackpad pinch or Ctrl+wheel)
+      //  • Mouse scroll wheel → zoom
+      //  • Trackpad two-finger scroll → pan
+      const shouldZoom = isPinch || device === "mouse";
 
       if (shouldZoom) {
         const rect = container.getBoundingClientRect();
@@ -999,20 +1019,13 @@ export function Canvas({
         setTransform((prev) => {
           // Normalise deltaY into a zoom multiplier that feels consistent
           // across mice, trackpads, and browsers.
-          //
-          // Mouse wheel: discrete ticks with large deltas (~100px Chrome,
-          // ~3 lines Firefox).  Normalise to ±1 notch, clamp so one tick
-          // always means exactly one step.
-          //
-          // Trackpad pinch: high-frequency continuous events with small
-          // deltas (-2…2).  Let the fractional value through so zoom
-          // speed tracks finger movement smoothly.
           let notches: number;
           if (isPinch) {
-            // Continuous — keep proportional, just scale down.
+            // Continuous trackpad pinch — keep proportional, scale down.
             // Typical pinch deltas are ~1-4 per event at 60fps.
             notches = e.deltaY / 4;
-          } else if (isFirefoxLineMode) {
+          } else if (e.deltaMode === 1) {
+            // Firefox line-mode (mouse wheel)
             notches = e.deltaY / 3;
             notches = Math.max(-1, Math.min(1, notches));
           } else {
@@ -1037,7 +1050,7 @@ export function Canvas({
           };
         });
       } else {
-        // Trackpad two-finger swipe (has horizontal component) → pan.
+        // Trackpad two-finger scroll → pan the canvas.
         setTransform((prev) => ({
           ...prev,
           x: prev.x - e.deltaX,
@@ -2659,6 +2672,9 @@ export function Canvas({
         height: "100%",
         position: "relative",
         overflow: "hidden",
+        // Prevent browser from handling touch gestures (pan, zoom) natively.
+        // We manage all canvas interactions via JS wheel/pointer handlers.
+        touchAction: "none",
         // Prevent accidental text selection during canvas interactions
         // (marquee, shift-click, panning). Interactive elements inside
         // nodes re-enable selection via the CSS rule below.

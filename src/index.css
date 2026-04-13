@@ -172,6 +172,9 @@ input, textarea, select,
   outline-offset: -2px;
   border-radius: 4px;
   transition: outline-color 0.15s;
+  /* Prevent scroll chaining: when the chat area reaches its scroll
+     boundary, don't let the scroll propagate to the canvas/page. */
+  overscroll-behavior: contain;
 }
 
 .leader-scroll-zone:hover {
