@@ -2462,7 +2462,17 @@ function LeaderNodeRenderer({
             summary?: string;
             diff?: LeaderData["approvalDiff"];
           } | null | undefined;
-          if (syncApproval?.requested) {
+          if (rebuiltStatus === "completed") {
+            // Session is done — force-clear all transient state
+            syncData.approvalPending = false;
+            syncData.approvalSummary = null;
+            syncData.approvalDiff = null;
+            syncData.mergeConflict = null;
+            syncData.worktreePath = null;
+            syncData.worktreeBranch = null;
+            syncData.worktreeStatus = "merged";
+            syncData.mergeConfirmed = true;
+          } else if (syncApproval?.requested) {
             syncData.approvalPending = true;
             syncData.approvalSummary = syncApproval.summary ?? null;
             syncData.approvalDiff = syncApproval.diff ?? null;
@@ -2585,6 +2595,16 @@ function LeaderNodeRenderer({
           patch.waitUntil = null;
           patch.waitReason = null;
         }
+        // When session reaches "completed", clear all transient state
+        if (serverMsg.status === "completed") {
+          patch.approvalPending = false;
+          patch.approvalSummary = null;
+          patch.approvalDiff = null;
+          patch.mergeConflict = null;
+          patch.waitUntil = null;
+          patch.waitReason = null;
+          patch.error = null;
+        }
         emitUpdate({
           ...current,
           ...patch,
@@ -2663,6 +2683,11 @@ function LeaderNodeRenderer({
           worktreeStatus: "merged",
           mergeConflict: null,
           mergeConfirmed: true,
+          // Clear approval state inline — don't rely on approval_resolved
+          // arriving separately, as React batching may cause stale spreads.
+          approvalPending: false,
+          approvalSummary: null,
+          approvalDiff: null,
         });
         return;
       }
@@ -2728,6 +2753,12 @@ function LeaderNodeRenderer({
         emitUpdate({
           ...current,
           status: "completed",
+          // Ensure ALL transient state is cleared — don't rely on prior
+          // events having propagated due to React batching / event ordering.
+          approvalPending: false,
+          approvalSummary: null,
+          approvalDiff: null,
+          mergeConflict: null,
           waitUntil: null,
           waitReason: null,
           error: null,

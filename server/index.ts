@@ -1302,6 +1302,15 @@ function handleCommand(
             // The worktree is gone; resuming would cause errors as the agent
             // tries to operate in a deleted directory or with stale context.
             approveSession.status = "completed";
+            // Buffer a session_status event so sync picks up the completed state
+            const completedStatusEvent: BufferedEvent = {
+              type: "session_status",
+              sessionKey: cmd.sessionKey,
+              status: "completed",
+              timestamp: Date.now(),
+            };
+            bufferEvent(approveSession, completedStatusEvent);
+            broadcast(wsServer, completedStatusEvent);
             broadcast(wsServer, {
               type: "worktree_merged",
               sessionKey: cmd.sessionKey,
@@ -1375,6 +1384,15 @@ function handleCommand(
             forceSession.cwd = forceProjectPath;
             // Mark session as completed — don't resume the agent
             forceSession.status = "completed";
+            // Buffer a session_status event so sync picks up the completed state
+            const forceCompletedEvent: BufferedEvent = {
+              type: "session_status",
+              sessionKey: cmd.sessionKey,
+              status: "completed",
+              timestamp: Date.now(),
+            };
+            bufferEvent(forceSession, forceCompletedEvent);
+            broadcast(wsServer, forceCompletedEvent);
             broadcast(wsServer, {
               type: "worktree_merged",
               sessionKey: cmd.sessionKey,
@@ -1421,6 +1439,14 @@ function handleCommand(
       }
       // Merge using -X theirs: on conflicts, keep the main branch's version
       const theirsProjectPath = theirsSession.worktree.projectPath;
+      // Abort the running agent before merge
+      if (theirsSession.status === "running") {
+        theirsSession.abortController.abort();
+      }
+      if (theirsSession.waitTimerId) {
+        clearTimeout(theirsSession.waitTimerId);
+        theirsSession.waitTimerId = null;
+      }
       mergeAndCleanup(theirsSession.worktree, undefined, { strategy: "theirs" })
         .then((result) => {
           if (result.success) {
@@ -1429,6 +1455,15 @@ function handleCommand(
             }
             theirsSession.worktree = null;
             theirsSession.cwd = theirsProjectPath;
+            theirsSession.status = "completed";
+            const theirsCompletedEvent: BufferedEvent = {
+              type: "session_status",
+              sessionKey: cmd.sessionKey,
+              status: "completed",
+              timestamp: Date.now(),
+            };
+            bufferEvent(theirsSession, theirsCompletedEvent);
+            broadcast(wsServer, theirsCompletedEvent);
             broadcast(wsServer, {
               type: "worktree_merged",
               sessionKey: cmd.sessionKey,
@@ -1443,16 +1478,12 @@ function handleCommand(
               action: "approved",
               timestamp: Date.now(),
             });
-            runSession(
-              wsServer,
-              cmd.sessionKey!,
-              "Your changes have been merged into the main branch using the 'keep main' strategy (conflicts were resolved by keeping the main branch's version). The worktree has been cleaned up.",
-              theirsProjectPath,
-              theirsSession.sessionId ?? undefined,
-              undefined,
-              "leader",
-              false,
-            );
+            broadcast(wsServer, {
+              type: "session_completed",
+              sessionKey: cmd.sessionKey,
+              reason: "merged",
+              timestamp: Date.now(),
+            });
           } else {
             broadcast(wsServer, {
               type: "worktree_merge_failed",
@@ -1479,6 +1510,14 @@ function handleCommand(
         return;
       }
       const retryProjectPath = retrySession.worktree.projectPath;
+      // Abort the running agent before merge
+      if (retrySession.status === "running") {
+        retrySession.abortController.abort();
+      }
+      if (retrySession.waitTimerId) {
+        clearTimeout(retrySession.waitTimerId);
+        retrySession.waitTimerId = null;
+      }
       mergeAndCleanup(retrySession.worktree)
         .then((result) => {
           if (result.success) {
@@ -1487,6 +1526,15 @@ function handleCommand(
             }
             retrySession.worktree = null;
             retrySession.cwd = retryProjectPath;
+            retrySession.status = "completed";
+            const retryCompletedEvent: BufferedEvent = {
+              type: "session_status",
+              sessionKey: cmd.sessionKey,
+              status: "completed",
+              timestamp: Date.now(),
+            };
+            bufferEvent(retrySession, retryCompletedEvent);
+            broadcast(wsServer, retryCompletedEvent);
             broadcast(wsServer, {
               type: "worktree_merged",
               sessionKey: cmd.sessionKey,
@@ -1501,16 +1549,12 @@ function handleCommand(
               action: "approved",
               timestamp: Date.now(),
             });
-            runSession(
-              wsServer,
-              cmd.sessionKey!,
-              "Merge retry succeeded. Your changes have been merged into the main branch. The worktree has been cleaned up.",
-              retryProjectPath,
-              retrySession.sessionId ?? undefined,
-              undefined,
-              "leader",
-              false,
-            );
+            broadcast(wsServer, {
+              type: "session_completed",
+              sessionKey: cmd.sessionKey,
+              reason: "merged",
+              timestamp: Date.now(),
+            });
           } else {
             // Still has conflicts — report back
             broadcast(wsServer, {
