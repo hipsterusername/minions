@@ -25,7 +25,7 @@ export interface SessionToolbarProps {
 
 const MODEL_LABELS: Record<ModelOption, string> = {
   sonnet: "Sonnet",
-  opus: "Opus 4.6",
+  opus: "Opus 4.7",
   haiku: "Haiku",
 };
 

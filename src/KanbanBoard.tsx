@@ -107,7 +107,7 @@ interface CardFormData {
 
 const MODEL_LABELS: Record<ModelOption, string> = {
   sonnet: "Sonnet",
-  opus: "Opus",
+  opus: "Opus 4.7",
   haiku: "Haiku",
 };
 
