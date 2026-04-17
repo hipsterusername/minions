@@ -41,6 +41,7 @@ export default defineConfig({
             "server/**/*.test.ts",
             "tests/architecture/**/*.test.ts",
             "tests/contracts/**/*.test.ts",
+            "tests/harness/**/*.test.ts",
             "shared/**/*.test.ts",
             // Pure-function tests in src/ that don't need a DOM. They opt in
             // by using a `.node.test.ts` suffix or a top-of-file env hint.

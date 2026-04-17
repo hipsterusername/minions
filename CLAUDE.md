@@ -173,22 +173,28 @@ the new typecheck immediately fails on `main`.
 
 ### `pnpm build` fails on `main` today
 
-`tsc -b` surfaces ~30 pre-existing type errors in:
+`tsc -b --noEmit` surfaces **~550 lines of type errors across 31 files**
+(scope verified at start of Phase 1). Initial estimate undercounted —
+the errors are not just SDK drift in `streaming.ts` / `use-socket.ts`,
+they include broad `exactOptionalPropertyTypes` and
+`noUncheckedIndexedAccess` failures across most of `src/`.
 
-- `src/streaming.ts` / `src/streaming.test.ts` — index-signature access
-  rules + `as SdkMessage` casts that no longer overlap.
-- `src/use-socket.ts` — index-signature access, missing arguments.
-- `src/use-autosave.ts`, `src/use-kanban.ts` — missing arguments +
-  possibly-undefined access.
+Concentration:
+- `src/Canvas.tsx`, `src/CanvasNode.tsx`, `src/App.tsx` —
+  `exactOptionalPropertyTypes` violations on prop passing
+- `src/nodes/*.tsx` — most node files have one or more errors
+- `src/use-socket.ts`, `src/use-autosave.ts`, `src/use-kanban.ts`,
+  `src/streaming.ts` — index-signature + missing-args errors
+- `src/render-dsl.test.ts`, `src/sdk-messages.test.ts`,
+  `src/streaming.test.ts` — stale casts
 
-These look like drift from `@anthropic-ai/claude-agent-sdk` type updates
-against `noPropertyAccessFromIndexSignature` / `noUncheckedIndexedAccess`.
-Until they're fixed, `pnpm verify` will fail at the `build` step — same
-as CI.
+**Scope:** this is its own multi-session refactor (probably 3–5 focused
+PRs grouped by error class). Do NOT attempt as part of a feature PR.
 
-**Priority:** fix next. Until they land, the prek hook and `pnpm verify`
-both surface the errors, which is the right behaviour — they're telling
-the truth about the repo's current state.
+Until it's drained, `pnpm verify` fails at the `build` step. The
+`pnpm test:run` gate (Vitest) is unaffected — tests run regardless of
+type errors in dependencies, so the 214-test suite is the operating gate
+for now.
 
 ---
 

@@ -21,7 +21,10 @@
  */
 export const SERVER_FILE_SIZE_ALLOWLIST: Readonly<Record<string, number>> = {
   // Drained in Phase 5 (per-command handlers + thin entry).
-  "server/index.ts": 1966,
+  // Bumped 1966 → 1969 in Phase 1 pre-flight: a fresh-worktree-creation
+  // flow merged in via main added 3 lines. Functional addition, kept
+  // as-is until Phase 5 collapses this file anyway.
+  "server/index.ts": 1969,
   // Drained in Phase 3 (each MCP tool factory moves under server/agents/<role>/).
   "server/task-tools.ts": 624,
   // Already cohesive; kept for completeness, not expected to grow.
@@ -66,7 +69,9 @@ export const ALLOWED_CROSS_TREE_IMPORTS: ReadonlyArray<{
  * upper bound, not the lower bound — files may shrink freely.
  */
 export const BROADCAST_CALL_SITE_BASELINE: Readonly<Record<string, number>> = {
-  "server/index.ts": 33,
+  // Bumped 33 → 35 in Phase 1 pre-flight: the same fresh-worktree-creation
+  // flow merge added 2 status broadcasts. Drained when bus.ts lands in Phase 2.
+  "server/index.ts": 35,
   "server/task-tools.ts": 6,
   "server/render-tools.ts": 5,
   "server/minion-tools.ts": 4,
