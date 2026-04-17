@@ -8,11 +8,13 @@ test plan that operationalises this strategy against the architecture refactor.
 
 ## 1. Why this exists
 
-The repo currently ships zero automated tests. The architecture review
+The repo now ships a baseline of 214 automated tests across 12 files —
+unit, contract-shape, and architecture-fitness layers — installed as
+the test net for the upcoming refactor. The architecture review
 (`docs/architecture-review-2026-04-16.md`) outlines a five-phase refactor that
 will rewrite session hosting, the WebSocket bus, the agent role model, and the
-canvas controller. Without a test baseline, the refactor will rely on manual
-regression — which is not credible at the size of the changes (~3000 lines of
+canvas controller. Without that test baseline the refactor would rely on manual
+regression — not credible at the size of the changes (~3000 lines of
 session-hosting code is being deleted in Phase 1 alone).
 
 This document defines:
@@ -312,10 +314,15 @@ this repo.
 1. **Before changing a module, run its tests.** Confirm they pass on `main`.
 2. **Write or update tests in the same commit as the change.** Tests added
    "later" almost always slip.
-3. **Run `pnpm test --run` before pushing.** Watch mode (`pnpm test`) for
-   while you're working.
-4. **Linting / typechecking is part of the test gate.** `pnpm typecheck`
-   must pass before commit.
+3. **Watch mode while working.** `pnpm test` (no flags) keeps the suite
+   running on file save. Sub-second feedback for the layers that matter.
+4. **Before pushing, run `pnpm verify`** — a single command that runs
+   `typecheck + test:run + build`, the same gates CI runs. If `verify`
+   passes locally, CI will pass.
+5. **Local pre-commit gate.** Install `prek` once per clone
+   (`prek install`); the hook config is in `.pre-commit-config.yaml`.
+   It runs `pnpm typecheck` and `pnpm test:run` on commits touching
+   TS/JS files. Don't bypass with `--no-verify` — fix the cause.
 
 ### When refactoring
 
@@ -359,11 +366,11 @@ mechanism that prevents the same bug regressing twice.
 Required to pass before merge:
 
 - `pnpm install --frozen-lockfile`
-- `pnpm typecheck`
-- `pnpm test --run`
-- `pnpm build`
+- `pnpm verify` (typecheck + test:run + build)
 
-Architecture fitness tests run as part of `pnpm test`, so they gate too.
+Architecture fitness tests run as part of `pnpm test:run`, so they gate
+too. The CI workflow lives at `.github/workflows/ci.yml`; if you change
+the verify command, change CI too.
 
 ### Coverage
 

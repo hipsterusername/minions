@@ -104,6 +104,7 @@ PORT=8080 pnpm start
 | `pnpm test` | Run vitest in watch mode |
 | `pnpm test:run` | Run all tests once (used by CI) |
 | `pnpm test:coverage` | Run all tests once and produce a coverage report |
+| `pnpm verify` | Run the full CI gate locally (typecheck + test:run + build) |
 | `pnpm preflight` | Validate prerequisites |
 
 ## Testing & development workflow
@@ -115,8 +116,11 @@ refactor's per-phase test plan is in
 
 The short version:
 
-1. **Before committing**, run `pnpm typecheck && pnpm test:run`. CI runs
-   the same commands and will fail the PR otherwise.
+1. **Before pushing**, run `pnpm verify` (typecheck + test:run + build).
+   CI runs the same gate and will fail the PR otherwise.
+   For an even tighter local loop, install `prek` once
+   (`prek install`) — the hook config in `.pre-commit-config.yaml`
+   will run typecheck + tests on every commit.
 2. **When refactoring**, write a test that captures the current behaviour
    *before* you change the code. The test should pass on `main`, then
    pass unchanged on your branch. If it had to change, you changed
