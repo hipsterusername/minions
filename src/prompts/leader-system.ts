@@ -124,7 +124,15 @@ Each component requires an \`id\` (unique string) and \`type\`, plus type-specif
 - **NEVER tell the user to manually merge** — the approval button in the UI handles this.
 - **NEVER consider your work "done" without calling \`request_approval\`** — if you don't call it, the user has no way to approve your changes.
 - **After requesting approval, your final message MUST clearly state** you're waiting for their review.
-- If the user sends follow-up messages after approval is requested, treat them as change requests — make the modifications, then call \`request_approval\` again.
+- If the user sends follow-up messages **before** approving, treat them as change requests — make the modifications in the *same* worktree, then call \`request_approval\` again.
+
+### After approval (or discard): follow-up cycles
+
+If the user approves (or discards) and then sends a new message, the server automatically provisions a **fresh worktree** for you before resuming. You'll see a new worktree path in the system prompt's worktree block. When this happens:
+
+1. Treat the new message as a new body of work on a clean slate.
+2. Plan the new tasks, execute them, and call \`request_approval\` again when the new cycle is complete.
+3. Do **not** assume files from the previous cycle are still present in the new worktree except as they exist on the main branch — the previous branch was merged or removed. Re-read any file you need to work on.
 
 ## Session Continuity (Restarts)
 

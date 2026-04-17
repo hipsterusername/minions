@@ -893,19 +893,63 @@ function handleCommand(
         ? cmd.thinkingConfig
         : sendSession.thinkingConfig;
 
-      runSession(
-        wsServer,
-        cmd.sessionKey,
-        prompt,
-        sendSession.cwd,
-        sendSession.sessionId ?? undefined,
-        cmd.systemPrompt ?? undefined,
-        sendSession.role,
-        undefined,
-        undefined,
-        undefined,
-        turnThinking,
-      );
+      const resumeLeader = (cwd: string): void => {
+        runSession(
+          wsServer,
+          cmd.sessionKey!,
+          prompt,
+          cwd,
+          sendSession.sessionId ?? undefined,
+          cmd.systemPrompt ?? undefined,
+          sendSession.role,
+          undefined,
+          undefined,
+          undefined,
+          turnThinking,
+        );
+      };
+
+      // ── Start a fresh approval cycle when the previous worktree is gone ──
+      // After a successful merge or discard the worktree + branch are
+      // removed, but the leader session stays alive so the user can keep
+      // working. When they send a new prompt, create a fresh worktree so
+      // the next round of changes stays isolated instead of landing
+      // directly on the user's main branch.
+      const needsNewWorktree =
+        sendSession.role === "leader" &&
+        sendSession.worktreeIsolation &&
+        !sendSession.worktree;
+
+      if (needsNewWorktree) {
+        createWorktree(sendSession.cwd, cmd.sessionKey)
+          .then((worktreeInfo) => {
+            sendSession.worktree = worktreeInfo;
+            sendSession.cwd = worktreeInfo.path;
+            broadcast(wsServer, {
+              type: "worktree_created",
+              sessionKey: cmd.sessionKey,
+              worktreePath: worktreeInfo.path,
+              branch: worktreeInfo.branch,
+            });
+            resumeLeader(worktreeInfo.path);
+          })
+          .catch((err: unknown) => {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            console.error(
+              `[worktree] Failed to create follow-up worktree for ${cmd.sessionKey}: ${errMsg}`,
+            );
+            // Don't silently continue with isolation disabled — surface the
+            // failure so the user can decide (fix git state, toggle isolation
+            // off explicitly, etc.). Session stays idle.
+            broadcast(wsServer, {
+              type: "worktree_failed",
+              sessionKey: cmd.sessionKey,
+              error: `Follow-up worktree creation failed: ${errMsg}`,
+            });
+          });
+      } else {
+        resumeLeader(sendSession.cwd);
+      }
       break;
     }
 
@@ -1325,18 +1369,9 @@ function handleCommand(
             action: "discarded",
             timestamp: Date.now(),
           });
-          // Notify the agent that changes were discarded.
-          // worktreeIsolation=false: session lifecycle is complete, don't create a new worktree.
-          runSession(
-            wsServer,
-            cmd.sessionKey!,
-            "The user has discarded all worktree changes. Your work has been removed. The session is now operating on the main working tree.",
-            worktreeProject,
-            discardSession.sessionId ?? undefined,
-            undefined,
-            "leader",
-            false, // worktreeIsolation: off — lifecycle complete
-          );
+          // Leave the session idle. If the user sends a follow-up message,
+          // send_message will lazily create a fresh worktree (since
+          // session.worktreeIsolation is still true) before resuming.
           sendControlResponse(ws, "discard_worktree", cmd.sessionKey!, cmd.requestId);
         })
         .catch((err: unknown) => {
