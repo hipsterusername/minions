@@ -4,17 +4,21 @@ import { MINION_THINKING_CONFIG } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
 import { registerContract, MINION_CONTRACT } from "../graph.ts";
 import type { TaskAssignment } from "../graph.ts";
-import type { ServerMessage, SdkMessage } from "../use-socket.ts";
+import type { ServerMessage } from "../use-socket.ts";
 import { MINION_SYSTEM_PROMPT } from "../prompts/minion-system.ts";
 import { useStatusBanners, StatusBannerStack } from "../components/StatusBanner.tsx";
 import { StreamingBubble, StreamingIndicator } from "../components/StreamingBubble.tsx";
-import { extractStreamDelta, isStreamingEvent, isStreamEnd } from "../streaming.ts";
 import { SessionToolbar } from "../components/SessionToolbar.tsx";
 import type { ModelOption, PermissionMode } from "../components/SessionToolbar.tsx";
-import { sdkToDisplayMessages, msgId, type DisplayMessage } from "../sdk-messages.ts";
+import { msgId, type DisplayMessage } from "../sdk-messages.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { AddAsNodeButton } from "../components/AddAsNodeButton.tsx";
 import { STATUS_COLORS, PRIORITY_COLORS, getTaskStatusColor, COLORS } from "../palette.ts";
+import {
+  type SessionStreamState,
+  type SessionStreamStatus,
+} from "../session-stream.ts";
+import { useSessionStream } from "../use-session-stream.ts";
 
 registerContract(MINION_CONTRACT);
 
@@ -55,11 +59,28 @@ export interface MinionData {
 // MinionMessage is now an alias for the shared DisplayMessage type
 type MinionMessage = DisplayMessage;
 
-function sdkToMinionMessages(sdkMsg: SdkMessage): MinionMessage[] {
-  return sdkToDisplayMessages(sdkMsg, "mm");
+/**
+ * Project a {@link MinionData} onto the shared {@link SessionStreamState}
+ * shape consumed by {@link useSessionStream}. The "waiting" status (an
+ * initial-state marker that is never emitted by the server) is mapped to
+ * "disconnected" so the reducer can run; the inverse mapping happens in
+ * {@link applyCoreUpdate} below.
+ */
+function extractCore(d: MinionData): SessionStreamState {
+  const status: SessionStreamStatus =
+    d.status === "waiting" ? "disconnected" : d.status;
+  return {
+    sessionKey: d.sessionKey,
+    status,
+    messages: d.messages,
+    streamingText: d.streamingText,
+    totalCost: d.totalCost,
+    turns: d.turns,
+    error: d.error,
+  };
 }
 
-function MinionNodeRenderer({
+export function MinionNodeRenderer({
   node,
   onUpdateData,
   socketSend,
@@ -133,89 +154,141 @@ function MinionNodeRenderer({
     [onUpdateData],
   );
 
-  // Subscribe to WebSocket events
+  // ── Shared session-stream concerns via the controlled hook ────────
+  //
+  // The hook owns the WebSocket subscription for messages, status, cost,
+  // turns, error and streaming-text deltas. Node-specific reactions to
+  // these transitions (block in-progress tasks on stopped/error, add a
+  // "Session lost" system message on sync !found) are layered into the
+  // `onChange` below — we detect transitions on the inputs we already
+  // have, no second subscription needed for them.
+  //
+  // Things the reducer *doesn't* see live in the secondary subscription
+  // declared after this call: `minion_status` (MCP echoes), live `result`
+  // SDK events (task completion + auto-advance + send_message), and
+  // `agent_task_update` for SDK Agent-tool subagents.
+  const applyCoreUpdate = useCallback(
+    (next: SessionStreamState) => {
+      const current = dataRef.current;
+
+      // Map status: the reducer doesn't know about "waiting" (an
+      // initial-state marker we use until a real session lands). If the
+      // reducer reports "disconnected" but we were "waiting" and the key
+      // didn't change, keep "waiting" so the UI doesn't flicker.
+      const nextStatus: MinionData["status"] =
+        current.status === "waiting" &&
+        next.status === "disconnected" &&
+        current.sessionKey === next.sessionKey
+          ? "waiting"
+          : next.status;
+
+      let merged: MinionData = {
+        ...current,
+        sessionKey: next.sessionKey,
+        status: nextStatus,
+        messages: next.messages,
+        streamingText: next.streamingText,
+        totalCost: next.totalCost,
+        turns: next.turns,
+        error: next.error,
+      };
+
+      // ── sync_response !found transition ──
+      // Reducer cleared sessionKey + set "disconnected"; we add a system
+      // message and block any in-progress tasks so the user can retry.
+      if (current.sessionKey !== null && next.sessionKey === null) {
+        const blocked = current.taskQueue.map((t) =>
+          t.status === "in_progress"
+            ? {
+                ...t,
+                status: "blocked" as const,
+                activeStep: null,
+                result: "Session lost — requires user action to resume.",
+              }
+            : t,
+        );
+        merged = {
+          ...merged,
+          activeTaskIndex: -1,
+          taskQueue: blocked,
+          messages: [
+            ...merged.messages,
+            {
+              id: msgId(),
+              role: "system" as const,
+              content:
+                "Session lost after server restart. Blocked tasks require user action.",
+              timestamp: Date.now(),
+            },
+          ],
+        };
+      }
+
+      // ── session_status='stopped' transition ──
+      if (current.status !== "stopped" && next.status === "stopped") {
+        const blocked = current.taskQueue.map((t) =>
+          t.status === "in_progress"
+            ? {
+                ...t,
+                status: "blocked" as const,
+                activeStep: null,
+                result: "Session stopped — click Retry to resume.",
+              }
+            : t,
+        );
+        merged = { ...merged, activeTaskIndex: -1, taskQueue: blocked };
+      }
+
+      // ── session_error transition ──
+      if (current.status !== "error" && next.status === "error") {
+        const failed = current.taskQueue.map((t, i) =>
+          i === current.activeTaskIndex && t.status === "in_progress"
+            ? {
+                ...t,
+                status: "failed" as const,
+                activeStep: null,
+                result: next.error ?? "Session error",
+              }
+            : t,
+        );
+        merged = { ...merged, activeTaskIndex: -1, taskQueue: failed };
+      }
+
+      emitUpdate(merged);
+    },
+    [emitUpdate],
+  );
+
+  useSessionStream({
+    ...(socketSubscribe ? { socketSubscribe } : {}),
+    state: extractCore(data),
+    onChange: applyCoreUpdate,
+    prefix: "mm",
+  });
+
+  // ── Node-specific subscription (layered ON TOP of the hook) ───────
+  //
+  // Declared AFTER `useSessionStream` so it subscribes second and fires
+  // second on each message — by the time this runs, `dataRef.current`
+  // already reflects the hook's update from the same dispatch.
   useEffect(() => {
     if (!socketSubscribe) return;
     return socketSubscribe((msg: unknown) => {
       const serverMsg = msg as ServerMessage;
       const current = dataRef.current;
 
-      // Handle sync_response (session rehydration on reload)
+      // ── minion_status MCP echoes: update the active task ──
+      const m = serverMsg as Record<string, unknown>;
       if (
-        serverMsg.type === "sync_response" &&
-        serverMsg.sessionKey === current.sessionKey
+        m.type === "minion_status" &&
+        m.minionSessionKey === current.sessionKey
       ) {
-        if (serverMsg.found && serverMsg.events) {
-          // Rebuild messages from buffered events
-          const rebuiltMessages: MinionMessage[] = [];
-          let rebuiltStatus = (serverMsg.status ?? current.status) as MinionData["status"];
-          const rebuiltCost = serverMsg.totalCost ?? current.totalCost;
-          const rebuiltTurns = serverMsg.turns ?? current.turns;
-
-          const seenIds = new Set<string>();
-          for (const evt of serverMsg.events) {
-            if (evt.type === "sdk_event" && evt.message) {
-              const mms = sdkToMinionMessages(evt.message as SdkMessage);
-              for (const mm of mms) {
-                if (!seenIds.has(mm.id)) {
-                  seenIds.add(mm.id);
-                  rebuiltMessages.push(mm);
-                }
-              }
-            }
-            if (evt.type === "session_status" && evt.status) {
-              rebuiltStatus = evt.status as MinionData["status"];
-            }
-          }
-
-          emitUpdate({
-            ...current,
-            status: rebuiltStatus,
-            messages: rebuiltMessages.length > 0 ? rebuiltMessages : current.messages,
-            totalCost: rebuiltCost,
-            turns: rebuiltTurns,
-            error: serverMsg.lastError ?? null,
-            streamingText: "",
-          });
-        } else if (!serverMsg.found) {
-          // Session no longer exists on server — mark in-progress tasks as blocked
-          const blockedTasks = current.taskQueue.map((t) =>
-            t.status === "in_progress"
-              ? { ...t, status: "blocked" as const, activeStep: null, result: "Session lost — requires user action to resume." }
-              : t,
-          );
-          emitUpdate({
-            ...current,
-            status: "disconnected",
-            sessionKey: null,
-            streamingText: "",
-            error: null,
-            activeTaskIndex: -1,
-            taskQueue: blockedTasks,
-            messages: [
-              ...current.messages,
-              {
-                id: msgId(),
-                role: "system" as const,
-                content: "Session lost after server restart. Blocked tasks require user action.",
-                timestamp: Date.now(),
-              },
-            ],
-          });
-        }
-        return;
-      }
-
-      if (!current.sessionKey) return;
-
-      // ── Handle structured minion_status events from MCP tools ──
-      if (
-        (serverMsg as Record<string, unknown>).type === "minion_status" &&
-        (serverMsg as Record<string, unknown>).minionSessionKey === current.sessionKey
-      ) {
-        const trigger = (serverMsg as Record<string, unknown>).trigger as string;
-        const message = (serverMsg as Record<string, unknown>).message as string;
-        if (current.activeTaskIndex >= 0 && current.activeTaskIndex < current.taskQueue.length) {
+        const trigger = m.trigger as string;
+        const message = m.message as string;
+        if (
+          current.activeTaskIndex >= 0 &&
+          current.activeTaskIndex < current.taskQueue.length
+        ) {
           const tasks = [...current.taskQueue];
           const task = tasks[current.activeTaskIndex];
           if (task) {
@@ -246,85 +319,50 @@ function MinionNodeRenderer({
         return;
       }
 
+      // ── sdk_event: feed the banner processor + handle live results ──
       if (
         serverMsg.type === "sdk_event" &&
         serverMsg.sessionKey === current.sessionKey
       ) {
         processSdkEvent(serverMsg.message);
 
-        // Handle streaming text deltas
-        if (isStreamingEvent(serverMsg.message)) {
-          const delta = extractStreamDelta(serverMsg.message);
-          if (delta !== null) {
-            emitUpdate({
-              ...current,
-              streamingText: (current.streamingText ?? "") + delta,
-            });
-          } else if (isStreamEnd(serverMsg.message) && current.streamingText) {
-            // Stream ended — clear streaming text so stale content doesn't
-            // linger while the complete assistant message is in flight.
-            emitUpdate({ ...current, streamingText: "" });
-          }
-          return;
-        }
-
-        const mms = sdkToMinionMessages(serverMsg.message);
-        if (mms.length > 0) {
-          const existingIds = new Set(current.messages.map((m) => m.id));
-          const newMsgs = mms.filter((m) => !existingIds.has(m.id));
-          const updated = { ...current };
-          if (newMsgs.length > 0) {
-            let base = current.messages;
-            // When a result arrives, drop the last assistant msg if its content
-            // matches the result — the SDK sends both, but we only want the
-            // green result bubble.  Normalize by stripping task-name tags.
-            if (serverMsg.message.type === "result") {
-              const resultText = newMsgs.find((m) => m.role === "result")?.content;
-              if (resultText) {
-                const normalizedResult = resultText.replace(/<!--task-name:.+?-->\s*/g, "").trim();
-                const lastIdx = base.findLastIndex((m) => m.role === "assistant");
-                if (lastIdx >= 0 && base[lastIdx].content.replace(/<!--task-name:.+?-->\s*/g, "").trim() === normalizedResult) {
-                  base = [...base.slice(0, lastIdx), ...base.slice(lastIdx + 1)];
-                }
-              }
+        // Live `result` event: hook already added cost/turns + the result
+        // bubble. We layer task completion + auto-advance + send_message.
+        if (serverMsg.message.type === "result") {
+          let updated: MinionData = current;
+          if (
+            current.activeTaskIndex >= 0 &&
+            current.activeTaskIndex < current.taskQueue.length
+          ) {
+            const tasks = [...current.taskQueue];
+            const task = tasks[current.activeTaskIndex];
+            if (task && task.status === "in_progress") {
+              tasks[current.activeTaskIndex] = {
+                ...task,
+                status: "completed",
+                result: serverMsg.message.result ?? "Done",
+                activeStep: null,
+              };
             }
-            updated.messages = [...base, ...newMsgs];
+            updated = { ...updated, taskQueue: tasks };
           }
-          // Clear streaming buffer on complete assistant message
-          if (serverMsg.message.type === "assistant") {
-            updated.streamingText = "";
-          }
-          if (serverMsg.message.type === "result") {
-            updated.totalCost =
-              serverMsg.message.total_cost_usd ?? current.totalCost;
-            updated.turns =
-              serverMsg.message.num_turns ?? current.turns;
-            updated.streamingText = "";
-            // Ensure active task is marked completed if not already resolved by MCP tools
-            if (current.activeTaskIndex >= 0 && current.activeTaskIndex < current.taskQueue.length) {
-              const tasks = [...(updated.taskQueue ?? current.taskQueue)];
-              const task = tasks[current.activeTaskIndex];
-              if (task && task.status === "in_progress") {
-                tasks[current.activeTaskIndex] = {
-                  ...task,
-                  status: "completed",
-                  result: serverMsg.message.result ?? "Done",
-                  activeStep: null,
-                };
-              }
-              updated.taskQueue = tasks;
-            }
-            // Auto-advance: find next pending task and start it
-            const nextTasks = updated.taskQueue ?? current.taskQueue;
-            const nextPending = nextTasks.findIndex((t) => t.status === "pending");
-            if (nextPending >= 0 && socketSend) {
-              const nextTask = nextTasks[nextPending]!;
-              const advancedTasks = [...nextTasks];
-              advancedTasks[nextPending] = { ...nextTask, status: "in_progress" };
-              updated.taskQueue = advancedTasks;
-              updated.activeTaskIndex = nextPending;
-              updated.status = "running";
-              updated.messages = [
+          // Auto-advance: find next pending task and start it.
+          const nextPending = updated.taskQueue.findIndex(
+            (t) => t.status === "pending",
+          );
+          if (nextPending >= 0 && socketSend) {
+            const nextTask = updated.taskQueue[nextPending]!;
+            const advancedTasks = [...updated.taskQueue];
+            advancedTasks[nextPending] = {
+              ...nextTask,
+              status: "in_progress",
+            };
+            updated = {
+              ...updated,
+              taskQueue: advancedTasks,
+              activeTaskIndex: nextPending,
+              status: "running",
+              messages: [
                 ...updated.messages,
                 {
                   id: msgId("mm"),
@@ -332,84 +370,39 @@ function MinionNodeRenderer({
                   content: `Starting task: ${nextTask.title}`,
                   timestamp: Date.now(),
                 },
-              ];
-              // Send the next task to the existing session.
-              // Capture sessionKey before the timeout to avoid stale-closure issues.
-              const sessionKeyForNext = current.sessionKey;
-              setTimeout(() => {
-                socketSend({
-                  type: "send_message",
-                  sessionKey: sessionKeyForNext,
-                  prompt: `## Next Task\n\n**Task ID:** ${nextTask.taskId}\n**Title:** ${nextTask.title}\n**Priority:** ${nextTask.priority}\n\n**Description:**\n${nextTask.description}\n\nPlease execute this task now.`,
-                });
-              }, 500);
-            } else {
-              updated.status = "idle";
-            }
+              ],
+            };
+            // Capture sessionKey before the timeout to avoid stale closures.
+            const sessionKeyForNext = current.sessionKey;
+            setTimeout(() => {
+              socketSend({
+                type: "send_message",
+                sessionKey: sessionKeyForNext,
+                prompt: `## Next Task\n\n**Task ID:** ${nextTask.taskId}\n**Title:** ${nextTask.title}\n**Priority:** ${nextTask.priority}\n\n**Description:**\n${nextTask.description}\n\nPlease execute this task now.`,
+              });
+            }, 500);
+          } else {
+            updated = { ...updated, status: "idle" };
           }
           emitUpdate(updated);
         }
         return;
       }
 
-      if (
-        serverMsg.type === "session_status" &&
-        serverMsg.sessionKey === current.sessionKey
-      ) {
-        const newStatus = serverMsg.status as MinionData["status"];
-        // When a session is stopped, mark any in-progress tasks as blocked so
-        // the user can see they need attention and retry them.
-        const updatedTasks =
-          newStatus === "stopped"
-            ? current.taskQueue.map((t) =>
-                t.status === "in_progress"
-                  ? { ...t, status: "blocked" as const, activeStep: null, result: "Session stopped — click Retry to resume." }
-                  : t,
-              )
-            : current.taskQueue;
-        emitUpdate({
-          ...current,
-          status: newStatus,
-          activeTaskIndex: newStatus === "stopped" ? -1 : current.activeTaskIndex,
-          taskQueue: updatedTasks,
-        });
-        return;
-      }
-
-      if (
-        serverMsg.type === "session_error" &&
-        serverMsg.sessionKey === current.sessionKey
-      ) {
-        // Mark the active in-progress task as failed so it shows in the kanban
-        // and can be retried, rather than staying stuck as "in_progress".
-        const tasksAfterError = current.taskQueue.map((t, i) =>
-          i === current.activeTaskIndex && t.status === "in_progress"
-            ? { ...t, status: "failed" as const, activeStep: null, result: serverMsg.error ?? "Session error" }
-            : t,
-        );
-        emitUpdate({
-          ...current,
-          status: "error" as const,
-          error: serverMsg.error,
-          activeTaskIndex: -1,
-          taskQueue: tasksAfterError,
-        });
-        return;
-      }
-
-      // ── Handle Agent-tool subagent status updates ──
-      // When this minion represents an SDK Agent-tool subagent,
-      // it receives status updates via agent_task_update events
-      // rather than its own session events.
+      // ── agent_task_update: SDK Agent-tool subagent updates ──
+      // When this minion represents an SDK subagent (no own session),
+      // it receives status updates via this channel rather than its own
+      // session_status events.
       if (
         serverMsg.type === "agent_task_update" &&
         current.agentTaskId &&
-        (serverMsg as Record<string, unknown>)["taskId"] === current.agentTaskId
+        m["taskId"] === current.agentTaskId
       ) {
-        const status = (serverMsg as Record<string, unknown>)["status"] as string;
-        const summary = (serverMsg as Record<string, unknown>)["summary"] as string;
+        const status = m["status"] as string;
+        const summary = m["summary"] as string;
         const tasks = [...current.taskQueue];
-        const taskIdx = current.activeTaskIndex >= 0 ? current.activeTaskIndex : 0;
+        const taskIdx =
+          current.activeTaskIndex >= 0 ? current.activeTaskIndex : 0;
         const task = tasks[taskIdx];
         if (task) {
           const isComplete = status === "completed";
@@ -437,7 +430,7 @@ function MinionNodeRenderer({
         }
       }
     });
-  }, [socketSubscribe, emitUpdate, processSdkEvent]);
+  }, [socketSubscribe, emitUpdate, processSdkEvent, socketSend]);
 
   // Start working on a task
   const startTask = useCallback(
