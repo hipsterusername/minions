@@ -1,0 +1,17 @@
+# Synthetic SDK message stream — generic ClaudeSessionNode shape:
+# user message → assistant text → tool_use → tool_progress → tool_result
+# (carried as a synthetic user message) → tool_use_summary → assistant
+# wrap-up → result.
+#
+# Mirrors the collapsible tool-group behaviour ClaudeSessionNode renders.
+# Per the architecture review, this node is a candidate for deletion in
+# Phase 1 once SessionHost covers Leader+Minion. The fixture is kept
+# either way so the snapshot has a record of today's behaviour.
+{"message":{"type":"sdk_event","sessionKey":"session-1","message":{"type":"system","subtype":"init","session_id":"sess-001","claude_code_version":"2.0.0","cwd":"/repo","tools":["Bash","Read"],"model":"claude-opus-4-5","permissionMode":"default","apiKeySource":"env","mcp_servers":[],"slash_commands":[],"output_style":"text","skills":[],"plugins":[],"uuid":"u-init-0001"}}}
+{"message":{"type":"sdk_event","sessionKey":"session-1","message":{"type":"user","message":{"role":"user","content":"List the files in /repo"},"parent_tool_use_id":null,"uuid":"u-user-0002","session_id":"sess-001"}}}
+{"message":{"type":"sdk_event","sessionKey":"session-1","message":{"type":"assistant","message":{"id":"msg_01","type":"message","role":"assistant","content":[{"type":"text","text":"I'll run ls."},{"type":"tool_use","id":"toolu_01","name":"Bash","input":{"command":"ls /repo"}}],"model":"claude-opus-4-5","stop_reason":null,"usage":{"input_tokens":256,"output_tokens":24}},"parent_tool_use_id":null,"uuid":"u-asst-0003","session_id":"sess-001"}}}
+{"message":{"type":"sdk_event","sessionKey":"session-1","message":{"type":"tool_progress","tool_use_id":"toolu_01","tool_name":"Bash","parent_tool_use_id":null,"elapsed_time_seconds":0.4,"uuid":"u-prog-0004","session_id":"sess-001"}}}
+{"message":{"type":"sdk_event","sessionKey":"session-1","message":{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"src\nREADME.md\npackage.json\n"}]},"parent_tool_use_id":null,"isSynthetic":true,"uuid":"u-user-0005","session_id":"sess-001"}}}
+{"message":{"type":"sdk_event","sessionKey":"session-1","message":{"type":"tool_use_summary","summary":"Bash: listed 3 entries","preceding_tool_use_ids":["toolu_01"],"uuid":"u-summ-0006","session_id":"sess-001"}}}
+{"message":{"type":"sdk_event","sessionKey":"session-1","message":{"type":"assistant","message":{"id":"msg_02","type":"message","role":"assistant","content":[{"type":"text","text":"Three top-level entries: src, README.md, package.json."}],"model":"claude-opus-4-5","stop_reason":"end_turn","usage":{"input_tokens":340,"output_tokens":18}},"parent_tool_use_id":null,"uuid":"u-asst-0007","session_id":"sess-001"}}}
+{"message":{"type":"sdk_event","sessionKey":"session-1","message":{"type":"result","subtype":"success","result":"Three top-level entries: src, README.md, package.json.","is_error":false,"duration_ms":1800,"duration_api_ms":1200,"num_turns":1,"stop_reason":"end_turn","total_cost_usd":0.0061,"usage":{"input_tokens":340,"output_tokens":18},"modelUsage":{},"permission_denials":[],"uuid":"u-result-0008","session_id":"sess-001"}}}

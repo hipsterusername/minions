@@ -1,0 +1,13 @@
+# Synthetic SDK message stream — three stream_event partials followed
+# by the final assistant message and result. Today the nodes either
+# surface stream_event chunks live or fall through to the assistant
+# message. sdkToDisplayMessages currently returns [] for stream_event
+# (default branch), so the snapshot for this fixture should only show
+# the init + final assistant text + result. If that changes — e.g. a
+# refactor surfaces partials — the snapshot will catch it.
+{"message":{"type":"sdk_event","sessionKey":"leader-1","message":{"type":"system","subtype":"init","session_id":"leader-sess-003","claude_code_version":"2.0.0","cwd":"/repo","tools":[],"model":"claude-opus-4-5","permissionMode":"default","apiKeySource":"env","mcp_servers":[],"slash_commands":[],"output_style":"text","skills":[],"plugins":[],"uuid":"u-init-0001"}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","message":{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}},"parent_tool_use_id":null,"uuid":"u-strm-0002","session_id":"leader-sess-003"}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","message":{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":" world"}},"parent_tool_use_id":null,"uuid":"u-strm-0003","session_id":"leader-sess-003"}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","message":{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"end_turn"}},"parent_tool_use_id":null,"uuid":"u-strm-0004","session_id":"leader-sess-003"}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","message":{"type":"assistant","message":{"id":"msg_01","type":"message","role":"assistant","content":[{"type":"text","text":"Hello world"}],"model":"claude-opus-4-5","stop_reason":"end_turn","usage":{"input_tokens":120,"output_tokens":4}},"parent_tool_use_id":null,"uuid":"u-asst-0005","session_id":"leader-sess-003"}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","message":{"type":"result","subtype":"success","result":"Hello world","is_error":false,"duration_ms":600,"duration_api_ms":400,"num_turns":1,"stop_reason":"end_turn","total_cost_usd":0.0009,"usage":{"input_tokens":120,"output_tokens":4},"modelUsage":{},"permission_denials":[],"uuid":"u-result-0006","session_id":"leader-sess-003"}}}
