@@ -14,6 +14,9 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "preflight": "node scripts/preflight.mjs",
     "configure": "node scripts/preflight.mjs && node scripts/setup-permissions.mjs"
   },
@@ -27,6 +30,9 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@testing-library/dom": "10.4.1",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.6",
     "@types/node": "^25.5.0",
@@ -34,9 +40,12 @@
     "@types/react-dom": "19.2.3",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "6.0.1",
+    "@vitest/coverage-v8": "4.1.4",
+    "jsdom": "29.0.2",
     "tsx": "^4.21.0",
     "typescript": "5.9.3",
-    "vite": "8.0.1"
+    "vite": "8.0.1",
+    "vitest": "4.1.4"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

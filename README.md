@@ -101,7 +101,37 @@ PORT=8080 pnpm start
 | `pnpm server` | Backend server only |
 | `pnpm build` | Production build |
 | `pnpm typecheck` | TypeScript type checking |
+| `pnpm test` | Run vitest in watch mode |
+| `pnpm test:run` | Run all tests once (used by CI) |
+| `pnpm test:coverage` | Run all tests once and produce a coverage report |
 | `pnpm preflight` | Validate prerequisites |
+
+## Testing & development workflow
+
+Tests are required for all behavioural changes. The full strategy is in
+[`docs/testing-strategy.md`](./docs/testing-strategy.md); the upcoming
+refactor's per-phase test plan is in
+[`docs/refactor-test-plan.md`](./docs/refactor-test-plan.md).
+
+The short version:
+
+1. **Before committing**, run `pnpm typecheck && pnpm test:run`. CI runs
+   the same commands and will fail the PR otherwise.
+2. **When refactoring**, write a test that captures the current behaviour
+   *before* you change the code. The test should pass on `main`, then
+   pass unchanged on your branch. If it had to change, you changed
+   behaviour — call that out in the PR.
+3. **When fixing a bug**, write a failing test first, then make it pass.
+   The test stays in the suite.
+4. **Test files live next to the code they test** (`src/foo.ts` →
+   `src/foo.test.ts`). Cross-tree contract tests live under
+   `tests/contracts/`; architecture-fitness tests under
+   `tests/architecture/`.
+
+The architecture-fitness suite encodes invariants from the architecture
+review (server file size ceilings, no cross-tree imports, broadcast call
+site count) — they fail CI when a PR drifts past the documented
+allowlists in `tests/architecture/baselines.ts`.
 
 ## Architecture
 

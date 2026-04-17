@@ -1,0 +1,58 @@
+# CI — runs typecheck, tests, and build on every PR and on pushes to main.
+#
+# Per the project testing strategy (`docs/testing-strategy.md` §6), this is
+# the gate that protects main. Architecture-fitness tests run as part of
+# `pnpm test:run` so any drift past the documented allowlists fails here.
+#
+# Action versions are pinned to commit SHAs per global standards.
+# Refresh via Dependabot or by re-resolving the tag with:
+#   gh api "repos/<owner>/<repo>/git/refs/tags/<tag>" -q '.object.sha'
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-flight runs for the same PR / branch when a new commit arrives.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Workflow has no need to push or write — keep the default token read-only.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: typecheck + tests + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320  # v5.0.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test:run
+
+      - name: Build
+        run: pnpm build
