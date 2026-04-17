@@ -120,6 +120,56 @@ interface BufferedEvent {
   timestamp: number;
 }
 
+// ── Adaptive thinking (mirrors src/types.ts) ────────────
+
+type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+type ThinkingDisplay = "summarized" | "omitted";
+
+interface ThinkingConfig {
+  enabled: boolean;
+  effort: EffortLevel;
+  display: ThinkingDisplay;
+}
+
+const VALID_EFFORTS: ReadonlySet<EffortLevel> = new Set([
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
+const VALID_DISPLAYS: ReadonlySet<ThinkingDisplay> = new Set([
+  "summarized",
+  "omitted",
+]);
+
+/** Models that accept `thinking: {type: "adaptive"}` */
+const ADAPTIVE_THINKING_MODELS: ReadonlySet<string> = new Set([
+  "sonnet",
+  "opus",
+  "claude-opus-4-7",
+  "claude-opus-4-6",
+  "claude-sonnet-4-6",
+  "claude-mythos-preview",
+]);
+
+function isValidThinkingConfig(v: unknown): v is ThinkingConfig {
+  if (typeof v !== "object" || v === null) return false;
+  const cfg = v as Record<string, unknown>;
+  return (
+    typeof cfg.enabled === "boolean" &&
+    typeof cfg.effort === "string" &&
+    VALID_EFFORTS.has(cfg.effort as EffortLevel) &&
+    typeof cfg.display === "string" &&
+    VALID_DISPLAYS.has(cfg.display as ThinkingDisplay)
+  );
+}
+
+function modelSupportsAdaptive(model: string | null): boolean {
+  if (!model) return false;
+  return ADAPTIVE_THINKING_MODELS.has(model);
+}
+
 interface Session {
   id: string;
   sessionId: string | null;
@@ -133,6 +183,8 @@ interface Session {
   lastError: string | null;
   model: string | null;
   permissionMode: string | null;
+  /** Adaptive-thinking config supplied by the client. Refreshed on each turn. */
+  thinkingConfig: ThinkingConfig | null;
   initData: Record<string, unknown> | null;
   /** For leader sessions: the task manager state tracking minion tasks */
   taskState: TaskManagerState | null;
@@ -198,6 +250,8 @@ interface WsCommand {
   worktreeIsolation?: boolean;
   // Configuration params
   model?: string;
+  /** Adaptive-thinking config — may be updated on every send_message */
+  thinkingConfig?: unknown;
   projectPath?: string;
   // Task control params
   taskId?: string;
@@ -326,6 +380,7 @@ async function runSession(
   worktreeIsolation?: boolean,
   parentWorktree?: WorktreeInfo,
   initialModel?: string,
+  thinkingConfig?: ThinkingConfig | null,
 ): Promise<void> {
   const existing = sessions.get(sessionKey);
   const abortController = new AbortController();
@@ -342,6 +397,7 @@ async function runSession(
     lastError: null,
     model: existing?.model ?? initialModel ?? null,
     permissionMode: existing?.permissionMode ?? null,
+    thinkingConfig: thinkingConfig ?? existing?.thinkingConfig ?? null,
     initData: existing?.initData ?? null,
     taskState: existing?.taskState ?? null,
     role: role ?? existing?.role ?? "default",
@@ -511,6 +567,23 @@ async function runSession(
     }
     if (session.model) {
       options["model"] = session.model;
+    }
+
+    // ── Adaptive thinking ────────────────────────────────
+    // Only forward to models that support adaptive — Haiku and older
+    // Sonnet/Opus releases reject `thinking: {type:"adaptive"}`. On
+    // Opus 4.7 the API defaults `display` to "omitted", which would
+    // hide thinking blocks in the UI; explicitly setting "summarized"
+    // restores the existing purple "Thinking" group experience.
+    if (
+      session.thinkingConfig?.enabled &&
+      modelSupportsAdaptive(session.model)
+    ) {
+      options["thinking"] = {
+        type: "adaptive",
+        display: session.thinkingConfig.display,
+      };
+      options["effort"] = session.thinkingConfig.effort;
     }
 
     // For leader sessions, ALWAYS attach task management MCP tools —
@@ -754,7 +827,22 @@ function handleCommand(
         return;
       }
       const prompt = cmd.prompt ?? "Hello";
-      runSession(wsServer, key, prompt, cwd, undefined, cmd.systemPrompt, cmd.role, cmd.worktreeIsolation, undefined, cmd.model);
+      const initialThinking = isValidThinkingConfig(cmd.thinkingConfig)
+        ? cmd.thinkingConfig
+        : null;
+      runSession(
+        wsServer,
+        key,
+        prompt,
+        cwd,
+        undefined,
+        cmd.systemPrompt,
+        cmd.role,
+        cmd.worktreeIsolation,
+        undefined,
+        cmd.model,
+        initialThinking,
+      );
       ws.send(
         JSON.stringify({
           type: "session_created",
@@ -799,6 +887,12 @@ function handleCommand(
         });
       }
 
+      // Refresh the session's thinking config from the latest send_message
+      // payload — the user may have changed effort/display since session start.
+      const turnThinking = isValidThinkingConfig(cmd.thinkingConfig)
+        ? cmd.thinkingConfig
+        : sendSession.thinkingConfig;
+
       runSession(
         wsServer,
         cmd.sessionKey,
@@ -807,6 +901,10 @@ function handleCommand(
         sendSession.sessionId ?? undefined,
         cmd.systemPrompt ?? undefined,
         sendSession.role,
+        undefined,
+        undefined,
+        undefined,
+        turnThinking,
       );
       break;
     }

@@ -5,6 +5,7 @@
  * in Canvas.tsx's addNode() and addNodeAtPosition().
  */
 import type { ProjectSettings } from "./api.ts";
+import { DEFAULT_THINKING_CONFIG, MINION_THINKING_CONFIG } from "./types.ts";
 
 export function createDefaultNodeData(
   type: string,
@@ -27,6 +28,7 @@ export function createDefaultNodeData(
         subagents: [],
         promptSuggestions: [],
         initData: null,
+        thinkingConfig: { ...DEFAULT_THINKING_CONFIG },
       };
 
     case "leader":
@@ -48,6 +50,7 @@ export function createDefaultNodeData(
         skillIds: [],
         skillValues: {},
         skillPanelOpen: false,
+        thinkingConfig: { ...DEFAULT_THINKING_CONFIG },
       };
 
     case "minion":
@@ -64,6 +67,7 @@ export function createDefaultNodeData(
         error: null,
         model: (projectSettings?.defaultMinionModel as string) ?? "sonnet",
         permissionMode: projectSettings?.defaultPermissionMode ?? "auto",
+        thinkingConfig: { ...MINION_THINKING_CONFIG },
       };
 
     case "markdown":

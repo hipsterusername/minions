@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { NodeRenderProps } from "../types.ts";
+import type { NodeRenderProps, ThinkingConfig } from "../types.ts";
+import { DEFAULT_THINKING_CONFIG } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
 import type {
   ServerMessage,
@@ -42,6 +43,8 @@ export interface ClaudeSessionData {
   error: string | null;
   model: ModelOption;
   permissionMode: PermissionMode;
+  /** Adaptive-thinking config sent to the SDK on every query() call. */
+  thinkingConfig: ThinkingConfig;
   /** Streaming text from partial messages */
   streamingText: string;
   /** Per-model cost breakdown from last result */
@@ -1060,6 +1063,7 @@ function ClaudeSessionRenderer({
 
   const handleCreate = useCallback(() => {
     if (!socketSend) return;
+    const current = dataRef.current;
     const key = `sk-${Date.now().toString(36)}`;
     const prompt =
       input.trim() || "Hello! What would you like to work on?";
@@ -1067,6 +1071,8 @@ function ClaudeSessionRenderer({
       type: "create_session",
       sessionKey: key,
       prompt,
+      model: current.model,
+      thinkingConfig: current.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
       ...(projectPath ? { cwd: projectPath } : {}),
     });
     syncedRef.current = true;
@@ -1093,6 +1099,7 @@ function ClaudeSessionRenderer({
       type: "send_message",
       sessionKey: current.sessionKey,
       prompt: input.trim(),
+      thinkingConfig: current.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
     });
     onUpdateData({
       ...current,
@@ -1150,6 +1157,14 @@ function ClaudeSessionRenderer({
       }
     },
     [socketSend, onUpdateData],
+  );
+
+  const handleThinkingConfigChange = useCallback(
+    (cfg: ThinkingConfig) => {
+      const current = dataRef.current;
+      onUpdateData({ ...current, thinkingConfig: cfg });
+    },
+    [onUpdateData],
   );
 
   const handleKeyDown = useCallback(
@@ -1298,6 +1313,8 @@ function ClaudeSessionRenderer({
         onInterrupt={handleInterrupt}
         onModelChange={handleModelChange}
         onPermissionModeChange={handlePermissionModeChange}
+        thinkingConfig={data.thinkingConfig ?? DEFAULT_THINKING_CONFIG}
+        onThinkingConfigChange={handleThinkingConfigChange}
       />
 
       {/* Messages */}

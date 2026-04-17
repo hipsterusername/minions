@@ -48,6 +48,42 @@ export interface ContextItem {
   content: string;
 }
 
+// ── Adaptive thinking ────────────────────────────────────
+//
+// On Opus 4.7 adaptive is the *only* supported thinking mode and
+// thinking.display defaults to "omitted" (so thinking blocks come
+// back empty unless we explicitly opt into "summarized"). On 4.6
+// and Sonnet 4.6 adaptive is recommended; on older models it is
+// unsupported. The SDK passes these straight through to the
+// Messages API.
+//
+// We deliberately do not expose budget_tokens / maxThinkingTokens —
+// it is deprecated on 4.6+ and rejected on 4.7.
+
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+export type ThinkingDisplay = "summarized" | "omitted";
+
+export interface ThinkingConfig {
+  /** When true, request adaptive thinking from the model.  */
+  enabled: boolean;
+  /** Soft guidance on how much thinking Claude should do. */
+  effort: EffortLevel;
+  /** Whether thinking summaries should be returned in the stream. */
+  display: ThinkingDisplay;
+}
+
+export const DEFAULT_THINKING_CONFIG: ThinkingConfig = {
+  enabled: true,
+  effort: "high",
+  display: "summarized",
+};
+
+export const MINION_THINKING_CONFIG: ThinkingConfig = {
+  enabled: true,
+  effort: "medium",
+  display: "summarized",
+};
+
 export interface NodeRenderProps {
   node: CanvasNode;
   isSelected: boolean;

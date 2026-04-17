@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { NodeRenderProps } from "../types.ts";
+import type { NodeRenderProps, ThinkingConfig } from "../types.ts";
+import { MINION_THINKING_CONFIG } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
 import { registerContract, MINION_CONTRACT } from "../graph.ts";
 import type { TaskAssignment } from "../graph.ts";
@@ -41,6 +42,8 @@ export interface MinionData {
   streamingText: string;
   model: ModelOption;
   permissionMode: PermissionMode;
+  /** Adaptive-thinking config sent to the SDK on every query() call. */
+  thinkingConfig: ThinkingConfig;
   /** Set when this minion represents an SDK Agent-tool subagent (no independent session) */
   agentTaskId?: string | null;
   /** The leader's session key — used to receive subagent status updates */
@@ -455,6 +458,8 @@ function MinionNodeRenderer({
         prompt,
         systemPrompt: current.sessionKey ? undefined : MINION_SYSTEM_PROMPT,
         role: "minion",
+        model: current.model,
+        thinkingConfig: current.thinkingConfig ?? MINION_THINKING_CONFIG,
         // Minions don't create their own worktrees — they inherit the leader's.
         // Pass cwd so the session runs in the project dir (not the server's cwd).
         worktreeIsolation: false,
@@ -513,6 +518,14 @@ function MinionNodeRenderer({
       }
     },
     [socketSend, onUpdateData],
+  );
+
+  const handleThinkingConfigChange = useCallback(
+    (cfg: ThinkingConfig) => {
+      const current = dataRef.current;
+      onUpdateData({ ...current, thinkingConfig: cfg });
+    },
+    [onUpdateData],
   );
 
   const statusColor: Record<string, string> = STATUS_COLORS;
@@ -707,6 +720,8 @@ function MinionNodeRenderer({
           onInterrupt={handleInterrupt}
           onModelChange={handleModelChange}
           onPermissionModeChange={handlePermissionModeChange}
+          thinkingConfig={data.thinkingConfig ?? MINION_THINKING_CONFIG}
+          onThinkingConfigChange={handleThinkingConfigChange}
           accent="var(--success-color)"
         />
       )}
@@ -1089,5 +1104,6 @@ export const MINION_DEFAULT_DATA: MinionData = {
   error: null,
   model: "sonnet",
   permissionMode: "bypassPermissions",
+  thinkingConfig: { ...MINION_THINKING_CONFIG },
   worktreeBranch: null,
 };

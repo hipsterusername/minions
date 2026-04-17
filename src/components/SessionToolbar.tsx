@@ -1,5 +1,7 @@
 import { useState, useCallback } from "react";
 import { MODEL_COLORS, COLORS } from "../palette.ts";
+import type { EffortLevel, ThinkingConfig } from "../types.ts";
+import { getModelCapability } from "../model-meta.ts";
 
 export type ModelOption = "sonnet" | "opus" | "haiku";
 export type PermissionMode =
@@ -17,6 +19,9 @@ export interface SessionToolbarProps {
   onInterrupt: () => void;
   onModelChange: (model: ModelOption) => void;
   onPermissionModeChange: (mode: PermissionMode) => void;
+  /** Adaptive-thinking config. Hidden when the selected model doesn't support it. */
+  thinkingConfig?: ThinkingConfig;
+  onThinkingConfigChange?: (config: ThinkingConfig) => void;
   /** Optional accent color for theming (hex). Defaults to #60a5fa */
   accent?: string;
   /** Optional content rendered on the right side of the toolbar (e.g. skills button) */
@@ -45,6 +50,22 @@ const PERMISSION_DESCRIPTIONS: Record<PermissionMode, string> = {
   default: "Ask before dangerous operations",
   plan: "Require plan approval first",
   acceptEdits: "Auto-approve file edits only",
+};
+
+const EFFORT_LABELS: Record<EffortLevel, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "XHigh",
+  max: "Max",
+};
+
+const EFFORT_DESCRIPTIONS: Record<EffortLevel, string> = {
+  low: "Skip thinking when possible — fastest, cheapest",
+  medium: "Light reasoning on harder requests",
+  high: "Always think (default) — deep reasoning",
+  xhigh: "Deeper exploration — Opus 4.7 only",
+  max: "Maximum effort — no constraints on thinking depth",
 };
 
 // Shared button style base
@@ -235,17 +256,26 @@ export function SessionToolbar({
   onInterrupt,
   onModelChange,
   onPermissionModeChange,
+  thinkingConfig,
+  onThinkingConfigChange,
   skillsContent,
 }: SessionToolbarProps) {
   const [modelOpen, setModelOpen] = useState(false);
   const [permOpen, setPermOpen] = useState(false);
+  const [effortOpen, setEffortOpen] = useState(false);
 
   const isRunning = status === "running" || status === "creating";
   const hasSession = !!sessionKey;
+  const capability = getModelCapability(model);
+  const showThinkingControls =
+    capability.supportsAdaptiveThinking &&
+    !!thinkingConfig &&
+    !!onThinkingConfigChange;
 
   const closeAll = useCallback(() => {
     setModelOpen(false);
     setPermOpen(false);
+    setEffortOpen(false);
   }, []);
 
   return (
@@ -302,8 +332,65 @@ export function SessionToolbar({
         onToggle={() => {
           setPermOpen(!permOpen);
           setModelOpen(false);
+          setEffortOpen(false);
         }}
       />
+
+      {/* Effort selector + Show-thinking toggle (only when model supports adaptive) */}
+      {showThinkingControls && thinkingConfig && onThinkingConfigChange && (
+        <>
+          <Dropdown
+            value={thinkingConfig.effort}
+            options={capability.supportedEffortLevels}
+            labels={EFFORT_LABELS}
+            descriptions={EFFORT_DESCRIPTIONS}
+            onChange={(e) => {
+              onThinkingConfigChange({ ...thinkingConfig, effort: e });
+              closeAll();
+            }}
+            open={effortOpen}
+            onToggle={() => {
+              setEffortOpen(!effortOpen);
+              setModelOpen(false);
+              setPermOpen(false);
+            }}
+          />
+          <button
+            onClick={() =>
+              onThinkingConfigChange({
+                ...thinkingConfig,
+                display:
+                  thinkingConfig.display === "summarized"
+                    ? "omitted"
+                    : "summarized",
+              })
+            }
+            onMouseDown={(e) => e.stopPropagation()}
+            title={
+              thinkingConfig.display === "summarized"
+                ? "Hide thinking summaries (faster time-to-first-token)"
+                : "Show thinking summaries"
+            }
+            style={{
+              ...pillStyle,
+              color:
+                thinkingConfig.display === "summarized"
+                  ? COLORS.textSecondary
+                  : COLORS.textMuted,
+              opacity: thinkingConfig.display === "summarized" ? 1 : 0.7,
+            }}
+          >
+            <span style={{ fontSize: 11, lineHeight: 1 }}>
+              {thinkingConfig.display === "summarized" ? "\u{1F4AC}" : "\u{1F4AD}"}
+            </span>
+            <span>
+              {thinkingConfig.display === "summarized"
+                ? "Show thinking"
+                : "Hide thinking"}
+            </span>
+          </button>
+        </>
+      )}
 
       {/* Spacer */}
       <div style={{ flex: 1 }} />

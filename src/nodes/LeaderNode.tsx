@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
-import type { NodeRenderProps } from "../types.ts";
+import type { NodeRenderProps, ThinkingConfig } from "../types.ts";
+import { DEFAULT_THINKING_CONFIG } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
 import { registerContract, LEADER_CONTRACT } from "../graph.ts";
 import type { ServerMessage, SdkMessage } from "../use-socket.ts";
@@ -53,6 +54,8 @@ export interface LeaderData {
   error: string | null;
   model: ModelOption;
   permissionMode: PermissionMode;
+  /** Adaptive-thinking config sent to the SDK on every query() call. */
+  thinkingConfig: ThinkingConfig;
   taskPlan: TaskPlanItem[];
   worktreeIsolation: boolean;
   worktreePath: string | null;
@@ -626,7 +629,13 @@ function LeaderToolGroup({ msgs }: { msgs: LeaderMessage[] }) {
   );
 }
 
-function LeaderThinkingGroup({ msgs }: { msgs: LeaderMessage[] }) {
+function LeaderThinkingGroup({
+  msgs,
+  effort,
+}: {
+  msgs: LeaderMessage[];
+  effort?: ThinkingConfig["effort"];
+}) {
   const [expanded, setExpanded] = useState(false);
   const totalLen = msgs.reduce((sum, m) => sum + m.content.length, 0);
   const estTokens = Math.round(totalLen / 4);
@@ -679,6 +688,23 @@ function LeaderThinkingGroup({ msgs }: { msgs: LeaderMessage[] }) {
           &#9654;
         </span>
         <span style={{ opacity: 0.7, color: "var(--thinking-accent)" }}>Thinking</span>
+        {effort && (
+          <span
+            style={{
+              fontSize: 9,
+              padding: "1px 5px",
+              borderRadius: 3,
+              background: "var(--thinking-bg-hover)",
+              color: "var(--thinking-accent)",
+              opacity: 0.85,
+              textTransform: "lowercase",
+              letterSpacing: 0.2,
+            }}
+            title={`Adaptive thinking · effort: ${effort}`}
+          >
+            {effort}
+          </span>
+        )}
         <span
           style={{
             marginLeft: "auto",
@@ -2818,6 +2844,7 @@ function LeaderNodeRenderer({
       systemPrompt: finalSystemPrompt,
       role: "leader",
       model: data.model,
+      thinkingConfig: data.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
       worktreeIsolation: data.worktreeIsolation,
       ...(projectPath ? { cwd: projectPath } : {}),
     });
@@ -2837,7 +2864,7 @@ function LeaderNodeRenderer({
       ],
     });
     setInput("");
-  }, [socketSend, input, onUpdateData, getContextForNode, data.skillIds, data.skillValues, data.model]);
+  }, [socketSend, input, onUpdateData, getContextForNode, data.skillIds, data.skillValues, data.model, data.thinkingConfig]);
 
   // Auto-start session when autoStartPrompt is set (e.g. from Kanban launch)
   const autoStartFired = useRef(false);
@@ -2890,6 +2917,7 @@ function LeaderNodeRenderer({
       systemPrompt: finalSystemPrompt,
       role: "leader",
       model: dataRef.current.model,
+      thinkingConfig: dataRef.current.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
       worktreeIsolation: dataRef.current.worktreeIsolation,
       ...(projectPath ? { cwd: projectPath } : {}),
     });
@@ -2928,6 +2956,7 @@ function LeaderNodeRenderer({
       sessionKey: current.sessionKey,
       prompt: input.trim(),
       systemPrompt: finalSystemPrompt,
+      thinkingConfig: current.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
     });
     onUpdateData({
       ...current,
@@ -2979,6 +3008,32 @@ function LeaderNodeRenderer({
     [socketSend, onUpdateData],
   );
 
+  // Thinking config takes effect on the *next* turn — every turn re-creates
+  // the SDK query() with fresh options. We don't push a runtime command;
+  // the server reads the latest config from each send_message payload.
+  const handleThinkingConfigChange = useCallback(
+    (cfg: ThinkingConfig) => {
+      const current = dataRef.current;
+      onUpdateData({ ...current, thinkingConfig: cfg });
+    },
+    [onUpdateData],
+  );
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        if (dataRef.current.sessionKey) {
+          handleSend();
+        } else {
+          handleCreate();
+        }
+      }
+    },
+    [handleSend, handleCreate],
+  );
+
+
   // P6: Reset session handler
   const handleReset = useCallback(() => {
     if (!confirm("Reset this Leader session? All messages will be cleared.")) return;
@@ -2992,6 +3047,7 @@ function LeaderNodeRenderer({
       skillValues: data.skillValues,
       model: data.model,
       permissionMode: data.permissionMode,
+      thinkingConfig: data.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
       worktreeIsolation: data.worktreeIsolation,
     });
   }, [socketSend, data, emitUpdate]);
@@ -3229,6 +3285,8 @@ function LeaderNodeRenderer({
         onInterrupt={handleInterrupt}
         onModelChange={handleModelChange}
         onPermissionModeChange={handlePermissionModeChange}
+        thinkingConfig={data.thinkingConfig ?? DEFAULT_THINKING_CONFIG}
+        onThinkingConfigChange={handleThinkingConfigChange}
         accent="var(--accent)"
         skillsContent={
           <div
@@ -3351,7 +3409,13 @@ function LeaderNodeRenderer({
             return <LeaderToolGroup key={`tg-${gi}`} msgs={group.msgs} />;
           }
           if (group.kind === "thinking-group") {
-            return <LeaderThinkingGroup key={`thg-${gi}`} msgs={group.msgs} />;
+            return (
+              <LeaderThinkingGroup
+                key={`thg-${gi}`}
+                msgs={group.msgs}
+                effort={data.thinkingConfig?.effort}
+              />
+            );
           }
           const msg = group.msg;
 
@@ -3362,7 +3426,13 @@ function LeaderNodeRenderer({
 
           // Thinking messages (singleton — rare, usually grouped)
           if (msg.role === "thinking") {
-            return <LeaderThinkingGroup key={msg.id} msgs={[msg]} />;
+            return (
+              <LeaderThinkingGroup
+                key={msg.id}
+                msgs={[msg]}
+                effort={data.thinkingConfig?.effort}
+              />
+            );
           }
 
           // P5: Assistant messages get markdown rendering
@@ -3592,6 +3662,7 @@ export const LEADER_DEFAULT_DATA: LeaderData = {
   error: null,
   model: "opus",
   permissionMode: "auto",
+  thinkingConfig: { ...DEFAULT_THINKING_CONFIG },
   taskPlan: [],
   worktreeIsolation: false,
   worktreePath: null,
