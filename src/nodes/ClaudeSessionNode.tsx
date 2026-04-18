@@ -852,7 +852,7 @@ function MessageFeed({ messages, onAddContentNode }: { messages: SessionMessage[
 
 // ── Main renderer ───────────────────────────────────────
 
-function ClaudeSessionRenderer({
+export function ClaudeSessionRenderer({
   node,
   onUpdateData,
   socketSend,
