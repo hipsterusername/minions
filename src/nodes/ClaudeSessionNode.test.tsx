@@ -173,14 +173,15 @@ describe("ClaudeSessionNode: replays claude-session-basic fixture", () => {
     // Prompt suggestions cleared on new turn.
     expect(last.promptSuggestions).toEqual([]);
 
-    // NOTE: initData and `model` inferred from the init system event
-    // are NOT captured in the final state because the current
-    // subscription emits TWO `onUpdateData` calls per sdk_event (one
-    // for the init-specific branch at line 994, then another at line
-    // 1035 for message append). Both clone from the same pre-event
-    // `current` snapshot, so the second emit overwrites the first.
-    // This is a latent bug; a subsequent SessionHost migration should
-    // consolidate the emits (tracked in CLAUDE.md).
+    // initData from the init system event survives because the
+    // subscription now accumulates into a single `onUpdateData` per
+    // sdk_event (see single-emit accumulator in ClaudeSessionNode.tsx).
+    // The raw SDK model identifier lands in `initData.model`; the
+    // user-selected `data.model` (a ModelOption) is NOT overwritten.
+    expect(last.initData).toMatchObject({
+      model: "claude-opus-4-5",
+    });
+    expect(last.model).toBe("sonnet");
   });
 
   it("builds the message feed with the rich ResultMeta on the result bubble", async () => {
@@ -295,18 +296,68 @@ describe("ClaudeSessionNode: session_status and session_error", () => {
   });
 });
 
-// ── subagent tracking: latent double-emit bug (see file-level note) ──
+// ── subagent tracking ────────────────────────────────────
 //
-// task_started / task_notification handling currently emits TWO
-// `onUpdateData` calls per sdk_event: the subagent-specific branch
-// updates `data.subagents`, then the general message-append branch
-// clones `{...current}` (without the new subagent) and overwrites it.
-//
-// This means subagents are never observable in the final state from
-// the current subscription. Locking the *buggy* behavior as a baseline
-// would be misleading — so we omit the assertion and flag the issue
-// here. A SessionHost migration should fix this by consolidating the
-// emits, at which point a real subagent-tracking test belongs.
+// The subscription now emits a single `onUpdateData` per sdk_event by
+// accumulating into an `updated` object before emitting. That means
+// task_started + task_notification updates survive even when the same
+// event also appends to the message feed.
+
+describe("ClaudeSessionNode: subagent tracking", () => {
+  it("task_started records a subagent, task_notification marks it completed", async () => {
+    const { socket, replay } = createReplaySocket();
+    const states: ClaudeSessionData[] = [];
+
+    render(
+      <Probe
+        socket={socket}
+        initial={makeInitialData()}
+        onState={(d) => states.push(d)}
+      />,
+    );
+
+    await pump(replay, [
+      {
+        message: {
+          type: "sdk_event",
+          sessionKey: "session-1",
+          message: {
+            type: "system",
+            subtype: "task_started",
+            task_id: "t-1",
+            description: "Explore codebase",
+            session_id: "s",
+            uuid: "u-ts-1",
+          } as unknown as ServerMessage,
+        } as unknown as ServerMessage,
+      },
+      {
+        message: {
+          type: "sdk_event",
+          sessionKey: "session-1",
+          message: {
+            type: "system",
+            subtype: "task_notification",
+            task_id: "t-1",
+            status: "completed",
+            summary: "Found 4 entry points",
+            session_id: "s",
+            uuid: "u-tn-1",
+          } as unknown as ServerMessage,
+        } as unknown as ServerMessage,
+      },
+    ]);
+
+    const last = states.at(-1);
+    expect(last?.subagents).toEqual([
+      expect.objectContaining({
+        taskId: "t-1",
+        status: "completed",
+        summary: "Found 4 entry points",
+      }),
+    ]);
+  });
+});
 
 // ── prompt suggestions (node-specific) ─────────────────
 

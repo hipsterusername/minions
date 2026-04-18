@@ -938,7 +938,7 @@ export function ClaudeSessionRenderer({
       ) {
         processSdkEvent(serverMsg.message);
 
-        // Handle streaming text deltas
+        // Handle streaming text deltas (single emit, early return).
         if (isStreamingEvent(serverMsg.message)) {
           const delta = extractStreamDelta(serverMsg.message);
           if (delta !== null) {
@@ -954,55 +954,91 @@ export function ClaudeSessionRenderer({
           return;
         }
 
+        // ── Single-emit accumulator ─────────────────────────
+        // Historic bug: each branch below used to call onUpdateData
+        // independently against a clone of `current`, so the second call
+        // overwrote the first. Build the delta into `updated` and emit
+        // exactly once at the bottom.
+        let updated: ClaudeSessionData = current;
+        let changed = false;
+
         // Handle subagent task state updates
         const sdkM = serverMsg.message;
         if (sdkM.type === "system" && sdkM.subtype === "task_started" && sdkM.task_id) {
           const sa: SubagentInfo = { taskId: sdkM.task_id, description: sdkM.description ?? "", status: "running" };
-          const next = { ...current, subagents: [...(current.subagents ?? []).filter(s => s.taskId !== sdkM.task_id), sa] };
-          // Don't return — let it also add to messages below
-          onUpdateData(next);
+          updated = {
+            ...updated,
+            subagents: [
+              ...(updated.subagents ?? []).filter((s) => s.taskId !== sdkM.task_id),
+              sa,
+            ],
+          };
+          changed = true;
         }
         if (sdkM.type === "system" && sdkM.subtype === "task_progress" && sdkM.task_id) {
-          const subs = [...(current.subagents ?? [])];
-          const idx = subs.findIndex(s => s.taskId === sdkM.task_id);
+          const subs = [...(updated.subagents ?? [])];
+          const idx = subs.findIndex((s) => s.taskId === sdkM.task_id);
           if (idx >= 0) {
-            subs[idx] = { ...subs[idx]!, lastTool: sdkM.last_tool_name, summary: sdkM.summary ?? subs[idx]!.summary, tokenCount: sdkM.usage?.total_tokens as number | undefined, toolUses: sdkM.usage?.tool_uses as number | undefined };
-            onUpdateData({ ...current, subagents: subs });
+            subs[idx] = {
+              ...subs[idx]!,
+              lastTool: sdkM.last_tool_name,
+              summary: sdkM.summary ?? subs[idx]!.summary,
+              tokenCount: sdkM.usage?.total_tokens as number | undefined,
+              toolUses: sdkM.usage?.tool_uses as number | undefined,
+            };
+            onUpdateData({ ...updated, subagents: subs });
           }
-          return; // task_progress is not shown in message feed
+          return; // task_progress is never shown in the message feed
         }
         if (sdkM.type === "system" && sdkM.subtype === "task_notification" && sdkM.task_id) {
-          const subs = [...(current.subagents ?? [])];
-          const idx = subs.findIndex(s => s.taskId === sdkM.task_id);
+          const subs = [...(updated.subagents ?? [])];
+          const idx = subs.findIndex((s) => s.taskId === sdkM.task_id);
           if (idx >= 0) {
-            subs[idx] = { ...subs[idx]!, status: sdkM.status as SubagentInfo["status"] ?? "completed", summary: sdkM.summary ?? subs[idx]!.summary };
-            onUpdateData({ ...current, subagents: subs });
+            subs[idx] = {
+              ...subs[idx]!,
+              status: (sdkM.status as SubagentInfo["status"]) ?? "completed",
+              summary: sdkM.summary ?? subs[idx]!.summary,
+            };
+            updated = { ...updated, subagents: subs };
+            changed = true;
           }
-          // Fall through to also add to messages
+          // Fall through so the notification can also land in the feed.
         }
 
-        // Handle prompt suggestions
+        // Handle prompt suggestions (no message append — emit & return).
         if (sdkM.type === "prompt_suggestion" && sdkM.suggestion) {
           onUpdateData({
-            ...current,
-            promptSuggestions: [...(current.promptSuggestions ?? []).slice(-2), sdkM.suggestion],
+            ...updated,
+            promptSuggestions: [
+              ...(updated.promptSuggestions ?? []).slice(-2),
+              sdkM.suggestion,
+            ],
           });
           return;
         }
 
-        // Handle init data capture
+        // Handle init data capture. The raw SDK model string (e.g.
+        // "claude-opus-4-5") lands in `initData.model` for display; the
+        // user-selected `data.model` (a ModelOption: "sonnet" | "opus" |
+        // "haiku") is NOT overwritten — the SDK's identifier isn't a
+        // ModelOption, so a cast here would push an invalid value
+        // through toolbar capability lookups.
         if (sdkM.type === "system" && sdkM.subtype === "init") {
-          onUpdateData({
-            ...current,
-            initData: { tools: sdkM.tools, model: sdkM.model, mcp_servers: sdkM.mcp_servers, permissionMode: sdkM.permissionMode },
-            model: (sdkM.model as ModelOption) ?? current.model,
-          });
+          updated = {
+            ...updated,
+            initData: {
+              tools: sdkM.tools,
+              model: sdkM.model,
+              mcp_servers: sdkM.mcp_servers,
+              permissionMode: sdkM.permissionMode,
+            },
+          };
+          changed = true;
         }
 
         const newMsgs = sdkMessageToSessionMessages(serverMsg.message);
         if (newMsgs.length > 0) {
-          const updated = { ...current };
-          let base = current.messages;
+          let base = updated.messages;
           // When a result arrives, drop the last assistant msg if its content
           // matches the result — the SDK sends both, but we only want the
           // green result bubble.  Normalize by stripping task-name tags.
@@ -1016,7 +1052,7 @@ export function ClaudeSessionRenderer({
               }
             }
           }
-          updated.messages = [...base, ...newMsgs];
+          updated = { ...updated, messages: [...base, ...newMsgs] };
           // When a complete assistant message arrives, clear streaming buffer
           if (serverMsg.message.type === "assistant") {
             updated.streamingText = "";
@@ -1024,14 +1060,18 @@ export function ClaudeSessionRenderer({
           if (serverMsg.message.type === "result") {
             updated.status = "idle";
             updated.totalCost =
-              serverMsg.message.total_cost_usd ?? current.totalCost;
+              serverMsg.message.total_cost_usd ?? updated.totalCost;
             updated.turns =
-              serverMsg.message.num_turns ?? current.turns;
+              serverMsg.message.num_turns ?? updated.turns;
             updated.streamingText = "";
-            updated.modelUsage = serverMsg.message.modelUsage ?? current.modelUsage;
-            updated.lastDurationMs = serverMsg.message.duration_ms ?? current.lastDurationMs;
+            updated.modelUsage = serverMsg.message.modelUsage ?? updated.modelUsage;
+            updated.lastDurationMs = serverMsg.message.duration_ms ?? updated.lastDurationMs;
             updated.promptSuggestions = []; // clear old suggestions on new turn
           }
+          changed = true;
+        }
+
+        if (changed) {
           onUpdateData(updated);
         }
         return;

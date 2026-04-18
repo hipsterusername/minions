@@ -4,12 +4,13 @@ import type { NodeRenderProps, ThinkingConfig } from "../types.ts";
 import { DEFAULT_THINKING_CONFIG } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
 import { registerContract, LEADER_CONTRACT } from "../graph.ts";
-import type { ServerMessage, SdkMessage } from "../use-socket.ts";
-import { sdkToDisplayMessages, msgId as sharedMsgId, type DisplayMessage } from "../sdk-messages.ts";
+import type { ServerMessage } from "../use-socket.ts";
+import { msgId as sharedMsgId, type DisplayMessage } from "../sdk-messages.ts";
 import { LEADER_SYSTEM_PROMPT } from "../prompts/leader-system.ts";
 import { useStatusBanners, StatusBannerStack } from "../components/StatusBanner.tsx";
 import { StreamingBubble, StreamingIndicator } from "../components/StreamingBubble.tsx";
-import { extractStreamDelta, isStreamingEvent, isStreamEnd } from "../streaming.ts";
+import { type SessionStreamState } from "../session-stream.ts";
+import { useSessionStream } from "../use-session-stream.ts";
 import { SessionToolbar } from "../components/SessionToolbar.tsx";
 import type { ModelOption, PermissionMode } from "../components/SessionToolbar.tsx";
 import { getSkill, getAllSkills } from "../skills/registry.ts";
@@ -102,8 +103,21 @@ function msgId(): string {
   return sharedMsgId("lm");
 }
 
-function sdkToLeaderMessages(sdkMsg: SdkMessage): LeaderMessage[] {
-  return sdkToDisplayMessages(sdkMsg, "lm");
+/**
+ * Project a {@link LeaderData} onto the shared {@link SessionStreamState}
+ * shape consumed by {@link useSessionStream}. LeaderData's `status` union
+ * is identical to {@link SessionStreamStatus}, so no remapping is needed.
+ */
+function extractLeaderCore(d: LeaderData): SessionStreamState {
+  return {
+    sessionKey: d.sessionKey,
+    status: d.status,
+    messages: d.messages,
+    streamingText: d.streamingText,
+    totalCost: d.totalCost,
+    turns: d.turns,
+    error: d.error,
+  };
 }
 
 /* ── Session context builder for restarts ─────────────────────────── */
@@ -2332,7 +2346,7 @@ function HeaderMenu({
 
 /* ── Main component ───────────────────────────────────────────────────── */
 
-function LeaderNodeRenderer({
+export function LeaderNodeRenderer({
   node,
   onUpdateData,
   socketSend,
@@ -2411,6 +2425,56 @@ function LeaderNodeRenderer({
     [onUpdateData],
   );
 
+  // ── Shared session-stream concerns via the controlled hook ────────
+  //
+  // The hook owns the WebSocket subscription for messages, status,
+  // cost, turns, error and streaming-text deltas. Node-specific
+  // reactions to session_status (clearing waitUntil when the session
+  // resumes) are layered into applyCoreUpdate. All other node-specific
+  // events — session_task_name, wait_state, worktree_*, approval_*,
+  // and the extra worktree/taskName/approval fields on sync_response
+  // — live in the secondary subscription below.
+  const applyCoreUpdate = useCallback(
+    (next: SessionStreamState) => {
+      const current = dataRef.current;
+
+      let merged: LeaderData = {
+        ...current,
+        sessionKey: next.sessionKey,
+        status: next.status,
+        messages: next.messages,
+        streamingText: next.streamingText,
+        totalCost: next.totalCost,
+        turns: next.turns,
+        error: next.error,
+      };
+
+      // Clear wait state when the session resumes (auto-continue fired).
+      if (
+        current.status !== "running" &&
+        next.status === "running" &&
+        current.waitUntil
+      ) {
+        merged = { ...merged, waitUntil: null, waitReason: null };
+      }
+
+      emitUpdate(merged);
+    },
+    [emitUpdate],
+  );
+
+  useSessionStream({
+    ...(socketSubscribe ? { socketSubscribe } : {}),
+    state: extractLeaderCore(data),
+    onChange: applyCoreUpdate,
+    prefix: "lm",
+  });
+
+  // ── Node-specific subscription (layered ON TOP of the hook) ───────
+  //
+  // Declared AFTER `useSessionStream` so it subscribes second and fires
+  // second on each message — by the time this runs, `dataRef.current`
+  // already reflects the hook's update from the same dispatch.
   useEffect(() => {
     if (!socketSubscribe) return;
     return socketSubscribe((msg: unknown) => {
@@ -2525,161 +2589,96 @@ function LeaderNodeRenderer({
 
       if (!current.sessionKey) return;
 
+
       if (
         serverMsg.type === "sdk_event" &&
         serverMsg.sessionKey === current.sessionKey
       ) {
         processSdkEvent(serverMsg.message);
-
-        // Handle streaming text deltas
-        if (isStreamingEvent(serverMsg.message)) {
-          const delta = extractStreamDelta(serverMsg.message);
-          if (delta !== null) {
-            emitUpdate({
-              ...current,
-              streamingText: (current.streamingText ?? "") + delta,
-            });
-            return;
-          }
-
-          // Stream ended — clear streaming text so stale content doesn't
-          // linger while the complete assistant message is in flight.
-          if (isStreamEnd(serverMsg.message)) {
-            if (current.streamingText) {
-              emitUpdate({ ...current, streamingText: "" });
-            }
-            return;
-          }
-          return;
-        }
-
-        const lms = sdkToLeaderMessages(serverMsg.message);
-        if (lms.length > 0) {
-          const existingIds = new Set(current.messages.map((m) => m.id));
-          const newMsgs = lms.filter((m) => !existingIds.has(m.id));
-          if (newMsgs.length > 0) {
-            const updated = { ...current };
-            let base = current.messages;
-            // When a result arrives, drop the last assistant msg if its content
-            // matches the result — the SDK sends both, but we only want the
-            // green result bubble.  Normalize by stripping task-name tags so
-            // the comparison isn't thrown off by <!--task-name:...--> comments.
-            if (serverMsg.message.type === "result") {
-              const resultText = newMsgs.find((m) => m.role === "result")?.content;
-              if (resultText) {
-                const normalizedResult = resultText.replace(/<!--task-name:.+?-->\s*/g, "").trim();
-                const lastIdx = base.findLastIndex((m) => m.role === "assistant");
-                if (lastIdx >= 0 && base[lastIdx].content.replace(/<!--task-name:.+?-->\s*/g, "").trim() === normalizedResult) {
-                  base = [...base.slice(0, lastIdx), ...base.slice(lastIdx + 1)];
-                }
-              }
-            }
-            updated.messages = [...base, ...newMsgs];
-            // Clear streaming buffer on complete assistant message
-            if (serverMsg.message.type === "assistant") {
-              updated.streamingText = "";
-            }
-            if (serverMsg.message.type === "result") {
-              updated.status = "idle";
-              updated.totalCost =
-                serverMsg.message.total_cost_usd ?? current.totalCost;
-              updated.turns =
-                serverMsg.message.num_turns ?? current.turns;
-              updated.streamingText = "";
-            }
-            emitUpdate(updated);
-          } else if (serverMsg.message.type === "assistant") {
-            // Still clear streaming even if messages were deduped
-            emitUpdate({ ...current, streamingText: "" });
-          } else if (serverMsg.message.type === "result") {
-            emitUpdate({
-              ...current,
-              status: "idle",
-              totalCost: serverMsg.message.total_cost_usd ?? current.totalCost,
-              turns: serverMsg.message.num_turns ?? current.turns,
-              streamingText: "",
-            });
-          }
-        } else if (serverMsg.message.type === "assistant" && current.streamingText) {
-          // Edge case: sdkToDisplayMessages returned no messages (e.g. text
-          // was entirely a <!--task-name:--> tag that got stripped).  Still
-          // need to clear stale streaming text.
-          emitUpdate({ ...current, streamingText: "" });
+        if (
+          serverMsg.message.type === "result" &&
+          current.status !== "idle"
+        ) {
+          emitUpdate({ ...dataRef.current, status: "idle" });
         }
         return;
       }
 
+      // sync_response found: restore worktree/taskName/approval fields
+      // that the shared reducer doesn't know about.
       if (
-        serverMsg.type === "session_status" &&
+        serverMsg.type === "sync_response" &&
+        serverMsg.sessionKey === current.sessionKey &&
+        serverMsg.found
+      ) {
+        const syncData: Partial<LeaderData> = {};
+        const raw = serverMsg as Record<string, unknown>;
+
+        if (raw.worktree) {
+          const wt = raw.worktree as { path: string; branch: string };
+          syncData.worktreePath = wt.path;
+          syncData.worktreeBranch = wt.branch;
+          syncData.worktreeStatus = "active";
+        }
+        if (serverMsg.taskName) {
+          syncData.taskName = serverMsg.taskName;
+        }
+        const syncApproval = raw.approval as
+          | {
+              requested?: boolean;
+              summary?: string;
+              diff?: LeaderData["approvalDiff"];
+            }
+          | null
+          | undefined;
+        if (syncApproval?.requested) {
+          syncData.approvalPending = true;
+          syncData.approvalSummary = syncApproval.summary ?? null;
+          syncData.approvalDiff = syncApproval.diff ?? null;
+        } else {
+          syncData.approvalPending = false;
+        }
+
+        if (Object.keys(syncData).length > 0) {
+          emitUpdate({ ...current, ...syncData });
+        }
+        return;
+      }
+
+      // session_task_name — agent set its display name
+      if (
+        serverMsg.type === "session_task_name" &&
         serverMsg.sessionKey === current.sessionKey
       ) {
-        const patch: Partial<LeaderData> = {
-          status: serverMsg.status as LeaderData["status"],
-        };
-        // Clear wait state when the session resumes (auto-continue fired)
-        if (serverMsg.status === "running" && current.waitUntil) {
-          patch.waitUntil = null;
-          patch.waitReason = null;
-        }
-        // When session reaches "completed", clear all transient state
-        if (serverMsg.status === "completed") {
-          patch.approvalPending = false;
-          patch.approvalSummary = null;
-          patch.approvalDiff = null;
-          patch.mergeConflict = null;
-          patch.waitUntil = null;
-          patch.waitReason = null;
-          patch.error = null;
-        }
-        emitUpdate({
-          ...current,
-          ...patch,
-        });
+        emitUpdate({ ...current, taskName: serverMsg.taskName });
         return;
       }
 
+      // wait_state — leader is waiting or wait completed/cancelled
       if (
-        serverMsg.type === "session_error" &&
+        serverMsg.type === "wait_state" &&
         serverMsg.sessionKey === current.sessionKey
       ) {
-        emitUpdate({
-          ...current,
-          status: "error" as const,
-          error: serverMsg.error,
-        });
-        return;
-      }
-
-      // Handle session_task_name — agent set its display name
-      if (serverMsg.type === "session_task_name" && serverMsg.sessionKey === current.sessionKey) {
-        emitUpdate({
-          ...current,
-          taskName: serverMsg.taskName,
-        });
-        return;
-      }
-
-      // Handle wait_state — leader is waiting or wait completed/cancelled
-      if (serverMsg.type === "wait_state" && serverMsg.sessionKey === current.sessionKey) {
         if (serverMsg.action === "started") {
           emitUpdate({
             ...current,
-            waitUntil: (serverMsg.scheduledAt as number) + (serverMsg.durationMs as number),
+            waitUntil:
+              (serverMsg.scheduledAt as number) +
+              (serverMsg.durationMs as number),
             waitReason: serverMsg.reason as string,
           });
         } else {
           // completed or cancelled — clear wait state
-          emitUpdate({
-            ...current,
-            waitUntil: null,
-            waitReason: null,
-          });
+          emitUpdate({ ...current, waitUntil: null, waitReason: null });
         }
         return;
       }
 
-      // Handle worktree_created
-      if (serverMsg.type === "worktree_created" && serverMsg.sessionKey === current.sessionKey) {
+      // worktree_created
+      if (
+        serverMsg.type === "worktree_created" &&
+        serverMsg.sessionKey === current.sessionKey
+      ) {
         emitUpdate({
           ...current,
           worktreePath: serverMsg.worktreePath as string,
@@ -2689,8 +2688,11 @@ function LeaderNodeRenderer({
         return;
       }
 
-      // Handle worktree_failed — isolation was requested but creation failed
-      if (serverMsg.type === "worktree_failed" && serverMsg.sessionKey === current.sessionKey) {
+      // worktree_failed — isolation was requested but creation failed
+      if (
+        serverMsg.type === "worktree_failed" &&
+        serverMsg.sessionKey === current.sessionKey
+      ) {
         emitUpdate({
           ...current,
           worktreeStatus: "failed",
@@ -2700,8 +2702,11 @@ function LeaderNodeRenderer({
         return;
       }
 
-      // Handle worktree_merged — merge succeeded and worktree was cleaned up
-      if (serverMsg.type === "worktree_merged" && serverMsg.sessionKey === current.sessionKey) {
+      // worktree_merged — merge succeeded and worktree was cleaned up
+      if (
+        serverMsg.type === "worktree_merged" &&
+        serverMsg.sessionKey === current.sessionKey
+      ) {
         emitUpdate({
           ...current,
           worktreePath: null,
@@ -2718,9 +2723,14 @@ function LeaderNodeRenderer({
         return;
       }
 
-      // Handle worktree_merge_failed — conflicts, worktree still active
-      if (serverMsg.type === "worktree_merge_failed" && serverMsg.sessionKey === current.sessionKey) {
-        const result = serverMsg.result as { conflicts?: string[]; summary?: string; targetBranch?: string } | undefined;
+      // worktree_merge_failed — conflicts, worktree still active
+      if (
+        serverMsg.type === "worktree_merge_failed" &&
+        serverMsg.sessionKey === current.sessionKey
+      ) {
+        const result = serverMsg.result as
+          | { conflicts?: string[]; summary?: string; targetBranch?: string }
+          | undefined;
         emitUpdate({
           ...current,
           worktreeStatus: "active",
@@ -2735,10 +2745,11 @@ function LeaderNodeRenderer({
         return;
       }
 
-
-
-      // Handle worktree_removed (explicit discard)
-      if (serverMsg.type === "worktree_removed" && serverMsg.sessionKey === current.sessionKey) {
+      // worktree_removed (explicit discard)
+      if (
+        serverMsg.type === "worktree_removed" &&
+        serverMsg.sessionKey === current.sessionKey
+      ) {
         emitUpdate({
           ...current,
           worktreePath: null,
@@ -2751,25 +2762,32 @@ function LeaderNodeRenderer({
         return;
       }
 
-      // Handle approval_requested — leader is waiting for user to approve changes
-      if (serverMsg.type === "approval_requested" && serverMsg.sessionKey === current.sessionKey) {
+      // approval_requested — leader is waiting for user to approve
+      if (
+        serverMsg.type === "approval_requested" &&
+        serverMsg.sessionKey === current.sessionKey
+      ) {
         emitUpdate({
           ...current,
           approvalPending: true,
           approvalSummary: (serverMsg.summary as string) ?? null,
-          approvalDiff: (serverMsg.diff as LeaderData["approvalDiff"]) ?? null,
+          approvalDiff:
+            (serverMsg.diff as LeaderData["approvalDiff"]) ?? null,
         });
         return;
       }
 
-      // Handle approval_resolved — approval was accepted or changes requested
-      if (serverMsg.type === "approval_resolved" && serverMsg.sessionKey === current.sessionKey) {
+      // approval_resolved — approval was accepted or changes requested
+      if (
+        serverMsg.type === "approval_resolved" &&
+        serverMsg.sessionKey === current.sessionKey
+      ) {
         emitUpdate({
           ...current,
           approvalPending: false,
           approvalSummary: null,
           approvalDiff: null,
-          // If approved, the worktree_merged event handles worktree status
+          // If approved, the worktree_merged event handles worktree status.
         });
         return;
       }
