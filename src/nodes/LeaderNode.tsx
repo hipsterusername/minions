@@ -115,9 +115,9 @@ function sdkToLeaderMessages(sdkMsg: SdkMessage): LeaderMessage[] {
  *
  * Returns an empty string if there's nothing meaningful to include.
  */
-function buildSessionContext(
+export function buildSessionContext(
   messages: LeaderMessage[],
-  taskPlan: TaskPlanItem[],
+  taskPlan: TaskPlanItem[] = [],
   taskName?: string | null,
 ): string {
   // Only include user/assistant/result messages with meaningful content
@@ -2804,7 +2804,7 @@ function LeaderNodeRenderer({
     // If there are existing messages from a prior session, this is a restart.
     // Serialize conversation + task plan so the new Claude instance has continuity.
     const prevMessages = dataRef.current.messages;
-    const prevTaskPlan = dataRef.current.taskPlan;
+    const prevTaskPlan = dataRef.current.taskPlan ?? [];
     const prevTaskName = dataRef.current.taskName;
     const sessionContext = buildSessionContext(prevMessages, prevTaskPlan, prevTaskName);
 
@@ -2878,7 +2878,7 @@ function LeaderNodeRenderer({
 
     // ── Build previous-session context for restarts ──────────
     const prevMessages = dataRef.current.messages;
-    const prevTaskPlan = dataRef.current.taskPlan;
+    const prevTaskPlan = dataRef.current.taskPlan ?? [];
     const prevTaskName = dataRef.current.taskName;
     const sessionContext = buildSessionContext(prevMessages, prevTaskPlan, prevTaskName);
 
