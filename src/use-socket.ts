@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { getAuthToken, clearAuthToken } from "./api.ts";
+import {
+  wsEnvelopeSchema,
+  topicMatches,
+  type WsEnvelope,
+} from "../shared/ws-envelope.ts";
 
 export type ServerMessage =
   | { type: "session_list"; sessions: SessionInfo[] }
@@ -583,6 +588,12 @@ export function isSystemSubtype<S extends SdkSystemMessage["subtype"]>(
   return msg.type === "system" && "subtype" in msg && (msg as SdkSystemMessage).subtype === subtype;
 }
 
+/**
+ * Subscribers receive the full envelope. Its `type` / `topic` / payload
+ * fields are flattened at the top level, so `(msg) => switch (msg.type)`
+ * patterns continue to work unchanged — the handler type is structurally
+ * compatible with `ServerMessage`.
+ */
 type Listener = (msg: ServerMessage) => void;
 
 export type ReconnectState = "connected" | "reconnecting" | "failed";
@@ -599,58 +610,39 @@ function getBackoffDelay(attempt: number): number {
   return Math.max(0, exponential + jitter);
 }
 
+/**
+ * Subscribe to server → client envelopes.
+ *
+ * Two signatures:
+ *   - `subscribe(fn)` — firehose. Receives every envelope. Equivalent to
+ *     `subscribe("*", fn)`; retained so existing call sites keep working
+ *     during the Phase 2 migration.
+ *   - `subscribe(topic, fn)` — topic-filtered. Receives only envelopes
+ *     whose `topic` field matches the filter. Use `"*"` for firehose,
+ *     `"session:<key>"` / `"project:<id>"` / `"global"` for scoped.
+ */
+interface SubscribeFn {
+  (fn: Listener): () => void;
+  (topic: string, fn: Listener): () => void;
+}
+
 interface SocketHandle {
   connected: boolean;
   reconnectState: ReconnectState;
   reconnectAttempt: number;
   manualReconnect: () => void;
   send: (data: unknown) => void;
-  subscribe: (fn: Listener) => () => void;
+  subscribe: SubscribeFn;
 }
 
-/** Known server message types — reject anything not in this set */
-const KNOWN_SERVER_MESSAGE_TYPES = new Set([
-  "session_list",
-  "session_created",
-  "session_status",
-  "session_error",
-  "sdk_event",
-  "sync_response",
-  "control_response",
-  "session_task_name",
-  "error",
-  // Canvas-specific broadcast events
-  "worktree_created",
-  "worktree_failed",
-  "worktree_merged",
-  "worktree_merge_failed",
-  "worktree_removed",
-  "approval_requested",
-  "approval_resolved",
-  "minion_spawned",
-  "minion_completed",
-  "task_plan_update",
-  "agent_spawned",
-  "agent_task_update",
-  "wait_state",
-  "task_planned",
-  "task_assigned",
-  "task_completed",
-  "task_failed",
-  "task_name_set",
-  "render_update",
-]);
-
-function isValidServerMessage(data: unknown): data is ServerMessage {
-  if (typeof data !== "object" || data === null) return false;
-  const obj = data as Record<string, unknown>;
-  if (typeof obj.type !== "string") return false;
-  return KNOWN_SERVER_MESSAGE_TYPES.has(obj.type);
+interface TopicListener {
+  topic: string;
+  fn: Listener;
 }
 
 export function useSocket(url: string): SocketHandle {
   const wsRef = useRef<WebSocket | null>(null);
-  const listenersRef = useRef<Set<Listener>>(new Set());
+  const listenersRef = useRef<Set<TopicListener>>(new Set());
   const [connected, setConnected] = useState(false);
   const [reconnectState, setReconnectState] = useState<ReconnectState>("reconnecting");
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
@@ -700,12 +692,22 @@ export function useSocket(url: string): SocketHandle {
       ws.onmessage = (ev) => {
         try {
           const parsed: unknown = JSON.parse(String(ev.data));
-          if (!isValidServerMessage(parsed)) {
-            console.warn("[ws] Rejected message with unknown type:", (parsed as Record<string, unknown>)?.type);
+          const result = wsEnvelopeSchema.safeParse(parsed);
+          if (!result.success) {
+            console.warn(
+              "[ws] Rejected message failing envelope schema:",
+              (parsed as Record<string, unknown>)?.type,
+            );
             return;
           }
-          for (const fn of listenersRef.current) {
-            fn(parsed);
+          const envelope: WsEnvelope = result.data;
+          // Envelope's top-level `type` + payload fields make it
+          // structurally compatible with ServerMessage.
+          const asMessage = envelope as unknown as ServerMessage;
+          for (const listener of listenersRef.current) {
+            if (topicMatches(listener.topic, envelope.topic)) {
+              listener.fn(asMessage);
+            }
           }
         } catch {
           // ignore malformed messages
@@ -730,12 +732,14 @@ export function useSocket(url: string): SocketHandle {
     }
   }, []);
 
-  const subscribe = useCallback((fn: Listener) => {
-    listenersRef.current.add(fn);
+  const subscribe = useCallback(((...args: [Listener] | [string, Listener]) => {
+    const [topic, fn] = args.length === 1 ? ["*", args[0]] : args;
+    const entry: TopicListener = { topic, fn };
+    listenersRef.current.add(entry);
     return () => {
-      listenersRef.current.delete(fn);
+      listenersRef.current.delete(entry);
     };
-  }, []);
+  }) as SubscribeFn, []);
 
   const manualReconnect = useCallback(() => {
     clearTimeout(reconnectTimer.current);

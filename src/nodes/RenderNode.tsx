@@ -26,8 +26,8 @@ import type {
   TextComponent,
   StatusComponent,
   CodeComponent,
-} from "../render-dsl.ts";
-import { applyRenderMessage, emptyRenderState } from "../render-dsl.ts";
+} from "../../shared/render-dsl.ts";
+import { applyRenderMessage, emptyRenderState } from "../../shared/render-dsl.ts";
 
 // ── Data shape ────────────────────────────────────────────
 

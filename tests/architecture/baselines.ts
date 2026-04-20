@@ -21,14 +21,16 @@
  */
 export const SERVER_FILE_SIZE_ALLOWLIST: Readonly<Record<string, number>> = {
   // Drained in Phase 5 (per-command handlers + thin entry).
-  // Bumped 1966 → 1969 in Phase 1 pre-flight: a fresh-worktree-creation
-  // flow merged in via main added 3 lines. Functional addition, kept
-  // as-is until Phase 5 collapses this file anyway.
-  "server/index.ts": 1969,
+  // Bumped 1969 → 2072 in Phase 2 pre-flight: unrelated feature work
+  // merged to main while this refactor was in flight. Net diff from the
+  // Phase 2 bus migration itself is negative (-1). Kept as-is until Phase
+  // 5 collapses this file anyway.
+  "server/index.ts": 2072,
   // Drained in Phase 3 (each MCP tool factory moves under server/agents/<role>/).
   "server/task-tools.ts": 624,
-  // Already cohesive; kept for completeness, not expected to grow.
-  "server/worktree.ts": 604,
+  // Bumped 604 → 646 in Phase 2 pre-flight: same unrelated-feature growth
+  // on main. Not touched by this refactor.
+  "server/worktree.ts": 646,
   // REST handlers — not on the published refactor plan but flagged here
   // as debt. Should be split per-resource alongside Phase 5 cleanup.
   "server/routes/projects.ts": 596,
@@ -59,20 +61,9 @@ export const ALLOWED_CROSS_TREE_IMPORTS: ReadonlyArray<{
 ];
 
 /**
- * Snapshot of direct `broadcast(...)` call sites per file. Until
- * `server/bus.ts` lands in Phase 2, the test asserts these counts do
- * not GROW. After Phase 2, the test flips to "must equal zero outside
- * server/bus.ts."
- *
- * Counts include helper-function declarations (a `function broadcast`)
- * so the simple regex matches consistently. The tests use this as the
- * upper bound, not the lower bound — files may shrink freely.
+ * Phase 2 landed `server/bus.ts` and migrated every server file to use
+ * it. The `no-direct-broadcast` test now asserts that **no file outside
+ * `server/bus.ts`** contains a `broadcast(...)` call site. This baseline
+ * is kept empty as a historical record of where the debt used to live.
  */
-export const BROADCAST_CALL_SITE_BASELINE: Readonly<Record<string, number>> = {
-  // Bumped 33 → 35 in Phase 1 pre-flight: the same fresh-worktree-creation
-  // flow merge added 2 status broadcasts. Drained when bus.ts lands in Phase 2.
-  "server/index.ts": 35,
-  "server/task-tools.ts": 6,
-  "server/render-tools.ts": 5,
-  "server/minion-tools.ts": 4,
-};
+export const BROADCAST_CALL_SITE_BASELINE: Readonly<Record<string, number>> = {};

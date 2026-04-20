@@ -9,6 +9,7 @@ import { createFileRoutes } from "./routes/files.ts";
 import { createTaskToolsForLeader, type TaskManagerState } from "./task-tools.ts";
 import { createMinionToolsForSession } from "./minion-tools.ts";
 import { createRenderToolsForLeader, type RenderState } from "./render-tools.ts";
+import { createBus, type Bus, unicastToSession, unicastGlobal, sessionTopic } from "./bus.ts";
 import { MINION_SYSTEM_PROMPT } from "../src/prompts/minion-system.ts";
 import { createWorktree, removeWorktree, mergeAndCleanup, getWorktreeStatus, getDetailedDiff, isGitRepo, cleanupStaleWorktrees, type WorktreeInfo } from "./worktree.ts";
 import { validateSessionCwd } from "./path-guard.ts";
@@ -283,14 +284,12 @@ function bufferEvent(session: Session, event: BufferedEvent): void {
   }
 }
 
-function broadcast(wsServer: WebSocketServer, data: unknown): void {
-  const msg = JSON.stringify(data);
-  for (const client of wsServer.clients) {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(msg);
-    }
-  }
-}
+/**
+ * All outbound WebSocket traffic goes through this bus. Direct
+ * broadcast calls outside `server/bus.ts` are forbidden by the
+ * `no-direct-broadcast` architecture fitness test.
+ */
+const bus: Bus = createBus(wss);
 
 /** Helper: get session or send error, returns null on failure */
 function getSessionOrError(
@@ -298,17 +297,15 @@ function getSessionOrError(
   ws: WebSocket,
 ): Session | null {
   if (!sessionKey) {
-    ws.send(JSON.stringify({ type: "error", message: "sessionKey required" }));
+    unicastGlobal(ws, { type: "error", message: "sessionKey required" });
     return null;
   }
   const session = sessions.get(sessionKey);
   if (!session) {
-    ws.send(
-      JSON.stringify({
-        type: "error",
-        message: `Session ${sessionKey} not found`,
-      }),
-    );
+    unicastToSession(ws, sessionKey, {
+      type: "error",
+      message: `Session ${sessionKey} not found`,
+    });
     return null;
   }
   return session;
@@ -322,16 +319,14 @@ function sendControlResponse(
   requestId: string | undefined,
   data?: Record<string, unknown>,
 ): void {
-  ws.send(
-    JSON.stringify({
-      type: "control_response",
-      command,
-      sessionKey,
-      requestId: requestId ?? null,
-      success: true,
-      ...data,
-    }),
-  );
+  unicastToSession(ws, sessionKey, {
+    type: "control_response",
+    command,
+    sessionKey,
+    requestId: requestId ?? null,
+    success: true,
+    ...data,
+  });
 }
 
 /** Helper: send a control_error back to the requesting client */
@@ -342,16 +337,14 @@ function sendControlError(
   requestId: string | undefined,
   error: string,
 ): void {
-  ws.send(
-    JSON.stringify({
-      type: "control_response",
-      command,
-      sessionKey,
-      requestId: requestId ?? null,
-      success: false,
-      error,
-    }),
-  );
+  unicastToSession(ws, sessionKey, {
+    type: "control_response",
+    command,
+    sessionKey,
+    requestId: requestId ?? null,
+    success: false,
+    error,
+  });
 }
 
 /** Derive a short task name from the user prompt */
@@ -436,7 +429,7 @@ async function runSession(
           session.worktree = worktreeInfo;
           session.cwd = worktreeInfo.path;
           cwd = worktreeInfo.path;
-          broadcast(wsServer, {
+          bus.emitToSession(sessionKey, {
             type: "worktree_created",
             sessionKey,
             worktreePath: worktreeInfo.path,
@@ -446,7 +439,7 @@ async function runSession(
           // Not a git repo — worktree isolation was requested but is impossible.
           // Notify the frontend so the user knows they're working on the live tree.
           console.warn(`[worktree] ${sessionKey}: not a git repo — isolation unavailable`);
-          broadcast(wsServer, {
+          bus.emitToSession(sessionKey, {
             type: "worktree_failed",
             sessionKey,
             error: "Project is not a git repository. Worktree isolation is unavailable.",
@@ -456,7 +449,7 @@ async function runSession(
         const errMsg = err instanceof Error ? err.message : String(err);
         console.error(`[worktree] Failed to create worktree for ${sessionKey}: ${errMsg}`);
         // Do NOT silently fall back. Notify the user and let them decide.
-        broadcast(wsServer, {
+        bus.emitToSession(sessionKey, {
           type: "worktree_failed",
           sessionKey,
           error: `Worktree creation failed: ${errMsg}`,
@@ -474,7 +467,7 @@ async function runSession(
     timestamp: Date.now(),
   };
   bufferEvent(session, statusEvent);
-  broadcast(wsServer, statusEvent);
+  bus.emitToSession(sessionKey, statusEvent);
 
   try {
     // All sessions (leader, minion, generic) get full coding tools.
@@ -594,7 +587,7 @@ async function runSession(
     if (role === "leader") {
       const { mcpServer, taskState } = createTaskToolsForLeader({
         leaderSessionKey: sessionKey,
-        wss: wsServer,
+        bus,
         startMinionSession: (params) => {
           // Fire-and-forget: start a minion session in the leader's worktree
           runSession(
@@ -625,7 +618,7 @@ async function runSession(
             session.waitTimerId = null;
 
             // Broadcast that the wait has ended
-            broadcast(wsServer, {
+            bus.emitToSession(sessionKey, {
               type: "wait_state",
               sessionKey,
               action: "completed",
@@ -649,7 +642,7 @@ async function runSession(
       });
       const { mcpServer: renderMcp, renderState } = createRenderToolsForLeader({
         leaderSessionKey: sessionKey,
-        wss: wsServer,
+        bus,
       });
       options["mcpServers"] = { "task-manager": mcpServer, "render-dashboard": renderMcp };
       session.taskState = taskState;
@@ -660,7 +653,7 @@ async function runSession(
     if (role === "minion") {
       const { mcpServer: minionMcp } = createMinionToolsForSession({
         minionSessionKey: sessionKey,
-        wss: wsServer,
+        bus,
       });
       const existing = (options["mcpServers"] as Record<string, unknown>) ?? {};
       options["mcpServers"] = { ...existing, "minion-status": minionMcp };
@@ -703,7 +696,7 @@ async function runSession(
         timestamp: Date.now(),
       };
       bufferEvent(session, sdkEvent);
-      broadcast(wsServer, sdkEvent);
+      bus.emitToSession(sessionKey, sdkEvent);
 
       // ── Detect Agent tool subagent events from leader sessions ──
       // When the SDK's built-in Agent tool spawns a subagent, it emits
@@ -715,7 +708,7 @@ async function runSession(
         if (subtype === "task_started") {
           const taskId = (msg["task_id"] as string) ?? `agent-${Date.now().toString(36)}`;
           const description = (msg["description"] as string) ?? "Subagent task";
-          broadcast(wsServer, {
+          bus.emitToSession(sessionKey, {
             type: "agent_spawned",
             leaderSessionKey: sessionKey,
             taskId,
@@ -728,7 +721,7 @@ async function runSession(
           const taskId = (msg["task_id"] as string) ?? "";
           const status = (msg["status"] as string) ?? "completed";
           const summary = (msg["summary"] as string) ?? "";
-          broadcast(wsServer, {
+          bus.emitToSession(sessionKey, {
             type: "agent_task_update",
             leaderSessionKey: sessionKey,
             taskId,
@@ -753,7 +746,7 @@ async function runSession(
           timestamp: Date.now(),
         };
         bufferEvent(session, resultStatusEvent);
-        broadcast(wsServer, resultStatusEvent);
+        bus.emitToSession(sessionKey, resultStatusEvent);
 
         // ── Propagate minion completion back to leader's task state ──
         if (session.role === "minion") {
@@ -768,7 +761,7 @@ async function runSession(
                   (isError ? "Task failed" : "Task completed");
                 // Broadcast so the frontend leader node and any subscribers learn
                 // the task is done without needing to poll get_task_status.
-                broadcast(wsServer, {
+                bus.emitToSession(leaderKey, {
                   type: "minion_completed",
                   leaderSessionKey: leaderKey,
                   minionSessionKey: sessionKey,
@@ -795,7 +788,7 @@ async function runSession(
       timestamp: Date.now(),
     };
     bufferEvent(session, errorEvent);
-    broadcast(wsServer, errorEvent);
+    bus.emitToSession(sessionKey, errorEvent);
   }
 }
 
@@ -813,17 +806,17 @@ function handleCommand(
 
     case "create_session": {
       if (sessions.size >= MAX_SESSIONS) {
-        ws.send(JSON.stringify({
+        unicastGlobal(ws, {
           type: "error",
           message: `Maximum session limit (${MAX_SESSIONS}) reached. Remove unused sessions first.`,
-        }));
+        });
         return;
       }
       const key = cmd.sessionKey ?? generateKey();
       const rawCwd = cmd.cwd ?? process.cwd();
       const cwd = validateSessionCwd(rawCwd);
       if (!cwd) {
-        ws.send(JSON.stringify({ type: "error", message: "Invalid cwd: must be under home directory" }));
+        unicastGlobal(ws, { type: "error", message: "Invalid cwd: must be under home directory" });
         return;
       }
       const prompt = cmd.prompt ?? "Hello";
@@ -843,33 +836,27 @@ function handleCommand(
         cmd.model,
         initialThinking,
       );
-      ws.send(
-        JSON.stringify({
-          type: "session_created",
-          sessionKey: key,
-        }),
-      );
+      unicastToSession(ws, key, {
+        type: "session_created",
+        sessionKey: key,
+      });
       break;
     }
 
     case "send_message": {
       if (!cmd.sessionKey || !cmd.prompt) {
-        ws.send(
-          JSON.stringify({
-            type: "error",
-            message: "sessionKey and prompt required",
-          }),
-        );
+        unicastGlobal(ws, {
+          type: "error",
+          message: "sessionKey and prompt required",
+        });
         return;
       }
       const sendSession = sessions.get(cmd.sessionKey);
       if (!sendSession) {
-        ws.send(
-          JSON.stringify({
-            type: "error",
-            message: `Session ${cmd.sessionKey} not found`,
-          }),
-        );
+        unicastToSession(ws, cmd.sessionKey, {
+          type: "error",
+          message: `Session ${cmd.sessionKey} not found`,
+        });
         return;
       }
 
@@ -879,7 +866,7 @@ function handleCommand(
       if (sendSession.taskState?.approval?.requested) {
         sendSession.taskState.approval = null;
         prompt = `[The user has reviewed your changes and is requesting modifications instead of approving. Their feedback follows.]\n\n${prompt}`;
-        broadcast(wsServer, {
+        bus.emitToSession(cmd.sessionKey!, {
           type: "approval_resolved",
           sessionKey: cmd.sessionKey,
           action: "changes_requested",
@@ -925,7 +912,7 @@ function handleCommand(
           .then((worktreeInfo) => {
             sendSession.worktree = worktreeInfo;
             sendSession.cwd = worktreeInfo.path;
-            broadcast(wsServer, {
+            bus.emitToSession(cmd.sessionKey!, {
               type: "worktree_created",
               sessionKey: cmd.sessionKey,
               worktreePath: worktreeInfo.path,
@@ -941,7 +928,7 @@ function handleCommand(
             // Don't silently continue with isolation disabled — surface the
             // failure so the user can decide (fix git state, toggle isolation
             // off explicitly, etc.). Session stays idle.
-            broadcast(wsServer, {
+            bus.emitToSession(cmd.sessionKey!, {
               type: "worktree_failed",
               sessionKey: cmd.sessionKey,
               error: `Follow-up worktree creation failed: ${errMsg}`,
@@ -961,7 +948,7 @@ function handleCommand(
         if (stopSession.waitTimerId) {
           clearTimeout(stopSession.waitTimerId);
           stopSession.waitTimerId = null;
-          broadcast(wsServer, {
+          bus.emitToSession(cmd.sessionKey, {
             type: "wait_state",
             sessionKey: cmd.sessionKey,
             action: "cancelled",
@@ -978,7 +965,7 @@ function handleCommand(
           timestamp: Date.now(),
         };
         bufferEvent(stopSession, stopEvent);
-        broadcast(wsServer, stopEvent);
+        bus.emitToSession(cmd.sessionKey, stopEvent);
       }
       break;
     }
@@ -987,60 +974,54 @@ function handleCommand(
       if (!cmd.sessionKey) return;
       const syncSession = sessions.get(cmd.sessionKey);
       if (!syncSession) {
-        ws.send(
-          JSON.stringify({
-            type: "sync_response",
-            sessionKey: cmd.sessionKey,
-            found: false,
-          }),
-        );
-        return;
-      }
-      ws.send(
-        JSON.stringify({
+        unicastToSession(ws, cmd.sessionKey, {
           type: "sync_response",
           sessionKey: cmd.sessionKey,
-          found: true,
-          status: syncSession.status,
-          sessionId: syncSession.sessionId,
-          cwd: syncSession.cwd,
-          totalCost: syncSession.totalCost,
-          turns: syncSession.turns,
-          lastError: syncSession.lastError,
-          model: syncSession.model,
-          permissionMode: syncSession.permissionMode,
-          initData: syncSession.initData,
-          worktree: syncSession.worktree,
-          approval: syncSession.taskState?.approval ?? null,
-          renderState: syncSession.renderState ?? null,
-          taskName: syncSession.taskName,
-          role: syncSession.role,
-          activeMinions: syncSession.taskState
-            ? Array.from(syncSession.taskState.tasks.entries())
-                .filter(([, t]) => t.status === "planned" || t.status === "running")
-                .map(([id, t]) => ({ taskId: id, title: t.title, status: t.status, sessionKey: t.minionSessionKey }))
-            : [],
-          events: syncSession.eventBuffer,
-        }),
-      );
+          found: false,
+        });
+        return;
+      }
+      unicastToSession(ws, cmd.sessionKey, {
+        type: "sync_response",
+        sessionKey: cmd.sessionKey,
+        found: true,
+        status: syncSession.status,
+        sessionId: syncSession.sessionId,
+        cwd: syncSession.cwd,
+        totalCost: syncSession.totalCost,
+        turns: syncSession.turns,
+        lastError: syncSession.lastError,
+        model: syncSession.model,
+        permissionMode: syncSession.permissionMode,
+        initData: syncSession.initData,
+        worktree: syncSession.worktree,
+        approval: syncSession.taskState?.approval ?? null,
+        renderState: syncSession.renderState ?? null,
+        taskName: syncSession.taskName,
+        role: syncSession.role,
+        activeMinions: syncSession.taskState
+          ? Array.from(syncSession.taskState.tasks.entries())
+              .filter(([, t]) => t.status === "planned" || t.status === "running")
+              .map(([id, t]) => ({ taskId: id, title: t.title, status: t.status, sessionKey: t.minionSessionKey }))
+          : [],
+        events: syncSession.eventBuffer,
+      });
 
       // If this session has dashboard render state, re-send it as a
       // render_update so the RenderNode's existing subscription picks it up
       // (handles page refresh / WebSocket reconnect recovery).
       if (syncSession.renderState && syncSession.renderState.components.length > 0) {
-        ws.send(
-          JSON.stringify({
-            type: "render_update",
-            leaderSessionKey: cmd.sessionKey,
-            action: "set",
-            layout: {
-              title: syncSession.renderState.title,
-              columns: syncSession.renderState.columns,
-              gap: syncSession.renderState.gap,
-            },
-            components: syncSession.renderState.components,
-          }),
-        );
+        unicastToSession(ws, cmd.sessionKey, {
+          type: "render_update",
+          leaderSessionKey: cmd.sessionKey,
+          action: "set",
+          layout: {
+            title: syncSession.renderState.title,
+            columns: syncSession.renderState.columns,
+            gap: syncSession.renderState.gap,
+          },
+          components: syncSession.renderState.components,
+        });
       }
       break;
     }
@@ -1063,12 +1044,10 @@ function handleCommand(
               .map(([id, t]) => ({ taskId: id, title: t.title, status: t.status, sessionKey: t.minionSessionKey }))
           : [],
       }));
-      ws.send(
-        JSON.stringify({
-          type: "session_list",
-          sessions: sessionList,
-        }),
-      );
+      unicastGlobal(ws, {
+        type: "session_list",
+        sessions: sessionList,
+      });
       break;
     }
 
@@ -1144,14 +1123,14 @@ function handleCommand(
         timestamp: Date.now(),
       };
       bufferEvent(closeSession, closeEvent);
-      broadcast(wsServer, closeEvent);
+      bus.emitToSession(cmd.sessionKey!, closeEvent);
       sendControlResponse(ws, "close_session", cmd.sessionKey!, cmd.requestId);
       break;
     }
 
     case "remove_session": {
       if (!cmd.sessionKey) {
-        ws.send(JSON.stringify({ type: "error", message: "sessionKey required" }));
+        unicastGlobal(ws, { type: "error", message: "sessionKey required" });
         return;
       }
       const removeSession = sessions.get(cmd.sessionKey);
@@ -1197,7 +1176,7 @@ function handleCommand(
               .map(([id, t]) => ({ taskId: id, title: t.title, status: t.status, sessionKey: t.minionSessionKey }))
           : [],
       }));
-      broadcast(wsServer, { type: "session_list", sessions: updatedList });
+      bus.emitGlobal({ type: "session_list", sessions: updatedList });
       break;
     }
 
@@ -1316,7 +1295,7 @@ function handleCommand(
             mergeSession.worktree = null;
             // Reset cwd to project path — worktree directory no longer exists
             mergeSession.cwd = mergeProjectPath;
-            broadcast(wsServer, {
+            bus.emitToSession(cmd.sessionKey!, {
               type: "worktree_merged",
               sessionKey: cmd.sessionKey,
               result,
@@ -1325,7 +1304,7 @@ function handleCommand(
             });
           } else {
             // Merge had conflicts — worktree stays active for retry/discard
-            broadcast(wsServer, {
+            bus.emitToSession(cmd.sessionKey!, {
               type: "worktree_merge_failed",
               sessionKey: cmd.sessionKey,
               result,
@@ -1358,12 +1337,12 @@ function handleCommand(
           discardSession.worktree = null;
           // Reset cwd to the main project path — the worktree directory no longer exists
           discardSession.cwd = worktreeProject;
-          broadcast(wsServer, {
+          bus.emitToSession(cmd.sessionKey!, {
             type: "worktree_removed",
             sessionKey: cmd.sessionKey,
             timestamp: Date.now(),
           });
-          broadcast(wsServer, {
+          bus.emitToSession(cmd.sessionKey!, {
             type: "approval_resolved",
             sessionKey: cmd.sessionKey,
             action: "discarded",
@@ -1443,8 +1422,8 @@ function handleCommand(
               timestamp: Date.now(),
             };
             bufferEvent(approveSession, completedStatusEvent);
-            broadcast(wsServer, completedStatusEvent);
-            broadcast(wsServer, {
+            bus.emitToSession(cmd.sessionKey!, completedStatusEvent);
+            bus.emitToSession(cmd.sessionKey!, {
               type: "worktree_merged",
               sessionKey: cmd.sessionKey,
               result,
@@ -1452,7 +1431,7 @@ function handleCommand(
               approved: true,
               timestamp: Date.now(),
             });
-            broadcast(wsServer, {
+            bus.emitToSession(cmd.sessionKey!, {
               type: "approval_resolved",
               sessionKey: cmd.sessionKey,
               action: "approved",
@@ -1460,7 +1439,7 @@ function handleCommand(
             });
             // Broadcast a dedicated completion event so the UI can transition
             // to a clean "completed" state with a "New Session" option.
-            broadcast(wsServer, {
+            bus.emitToSession(cmd.sessionKey!, {
               type: "session_completed",
               sessionKey: cmd.sessionKey,
               reason: "merged",
@@ -1468,7 +1447,7 @@ function handleCommand(
             });
           } else {
             // Merge failed — keep approval state so the UI stays visible
-            broadcast(wsServer, {
+            bus.emitToSession(cmd.sessionKey!, {
               type: "worktree_merge_failed",
               sessionKey: cmd.sessionKey,
               result,
@@ -1525,8 +1504,8 @@ function handleCommand(
               timestamp: Date.now(),
             };
             bufferEvent(forceSession, forceCompletedEvent);
-            broadcast(wsServer, forceCompletedEvent);
-            broadcast(wsServer, {
+            bus.emitToSession(cmd.sessionKey!, forceCompletedEvent);
+            bus.emitToSession(cmd.sessionKey!, {
               type: "worktree_merged",
               sessionKey: cmd.sessionKey,
               result,
@@ -1534,20 +1513,20 @@ function handleCommand(
               approved: true,
               timestamp: Date.now(),
             });
-            broadcast(wsServer, {
+            bus.emitToSession(cmd.sessionKey!, {
               type: "approval_resolved",
               sessionKey: cmd.sessionKey,
               action: "approved",
               timestamp: Date.now(),
             });
-            broadcast(wsServer, {
+            bus.emitToSession(cmd.sessionKey!, {
               type: "session_completed",
               sessionKey: cmd.sessionKey,
               reason: "merged",
               timestamp: Date.now(),
             });
           } else {
-            broadcast(wsServer, {
+            bus.emitToSession(cmd.sessionKey!, {
               type: "worktree_merge_failed",
               sessionKey: cmd.sessionKey,
               result,
@@ -1596,8 +1575,8 @@ function handleCommand(
               timestamp: Date.now(),
             };
             bufferEvent(theirsSession, theirsCompletedEvent);
-            broadcast(wsServer, theirsCompletedEvent);
-            broadcast(wsServer, {
+            bus.emitToSession(cmd.sessionKey!, theirsCompletedEvent);
+            bus.emitToSession(cmd.sessionKey!, {
               type: "worktree_merged",
               sessionKey: cmd.sessionKey,
               result,
@@ -1605,20 +1584,20 @@ function handleCommand(
               approved: true,
               timestamp: Date.now(),
             });
-            broadcast(wsServer, {
+            bus.emitToSession(cmd.sessionKey!, {
               type: "approval_resolved",
               sessionKey: cmd.sessionKey,
               action: "approved",
               timestamp: Date.now(),
             });
-            broadcast(wsServer, {
+            bus.emitToSession(cmd.sessionKey!, {
               type: "session_completed",
               sessionKey: cmd.sessionKey,
               reason: "merged",
               timestamp: Date.now(),
             });
           } else {
-            broadcast(wsServer, {
+            bus.emitToSession(cmd.sessionKey!, {
               type: "worktree_merge_failed",
               sessionKey: cmd.sessionKey,
               result,
@@ -1667,8 +1646,8 @@ function handleCommand(
               timestamp: Date.now(),
             };
             bufferEvent(retrySession, retryCompletedEvent);
-            broadcast(wsServer, retryCompletedEvent);
-            broadcast(wsServer, {
+            bus.emitToSession(cmd.sessionKey!, retryCompletedEvent);
+            bus.emitToSession(cmd.sessionKey!, {
               type: "worktree_merged",
               sessionKey: cmd.sessionKey,
               result,
@@ -1676,13 +1655,13 @@ function handleCommand(
               approved: true,
               timestamp: Date.now(),
             });
-            broadcast(wsServer, {
+            bus.emitToSession(cmd.sessionKey!, {
               type: "approval_resolved",
               sessionKey: cmd.sessionKey,
               action: "approved",
               timestamp: Date.now(),
             });
-            broadcast(wsServer, {
+            bus.emitToSession(cmd.sessionKey!, {
               type: "session_completed",
               sessionKey: cmd.sessionKey,
               reason: "merged",
@@ -1690,7 +1669,7 @@ function handleCommand(
             });
           } else {
             // Still has conflicts — report back
-            broadcast(wsServer, {
+            bus.emitToSession(cmd.sessionKey!, {
               type: "worktree_merge_failed",
               sessionKey: cmd.sessionKey,
               result,
@@ -1987,12 +1966,10 @@ function handleCommand(
     }
 
     default: {
-      ws.send(
-        JSON.stringify({
-          type: "error",
-          message: `Unknown command type: ${(cmd as WsCommand).type}`,
-        }),
-      );
+      unicastGlobal(ws, {
+        type: "error",
+        message: `Unknown command type: ${(cmd as WsCommand).type}`,
+      });
     }
   }
 }
@@ -2013,12 +1990,10 @@ wss.on("connection", (ws) => {
     model: s.model,
     permissionMode: s.permissionMode,
   }));
-  ws.send(
-    JSON.stringify({
-      type: "session_list",
-      sessions: sessionList,
-    }),
-  );
+  unicastGlobal(ws, {
+    type: "session_list",
+    sessions: sessionList,
+  });
 
   ws.on("message", (raw) => {
     try {
@@ -2026,7 +2001,7 @@ wss.on("connection", (ws) => {
       handleCommand(wss, cmd, ws);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      ws.send(JSON.stringify({ type: "error", message: msg }));
+      unicastGlobal(ws, { type: "error", message: msg });
     }
   });
 

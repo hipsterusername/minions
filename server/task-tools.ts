@@ -23,7 +23,7 @@ import {
   tool,
   query,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { WebSocketServer, WebSocket } from "ws";
+import type { Bus } from "./bus.ts";
 import type { WorktreeInfo, DetailedDiff } from "./worktree.js";
 import { getDetailedDiff } from "./worktree.js";
 
@@ -74,21 +74,17 @@ export interface TaskManagerState {
 
 // ── Broadcast helpers ──────────────────────────────────
 
-function broadcast(wss: WebSocketServer, data: unknown): void {
-  const msg = JSON.stringify(data);
-  for (const client of wss.clients) {
-    if ((client as WebSocket).readyState === 1 /* OPEN */) {
-      (client as WebSocket).send(msg);
-    }
-  }
-}
-
-function broadcastTaskPlanUpdate(
-  wss: WebSocketServer,
+/**
+ * Fan out a full task-plan update on the leader's session topic. Consumers
+ * (LeaderNode, kanban views) re-derive their local state from this array,
+ * so every mutation calls this rather than emitting per-task diffs.
+ */
+function emitTaskPlanUpdate(
+  bus: Bus,
   leaderSessionKey: string,
   taskState: TaskManagerState,
 ): void {
-  broadcast(wss, {
+  bus.emitToSession(leaderSessionKey, {
     type: "task_plan_update",
     leaderSessionKey,
     tasks: Array.from(taskState.tasks.values()),
@@ -106,7 +102,7 @@ function broadcastTaskPlanUpdate(
  */
 export function createTaskToolsForLeader(opts: {
   leaderSessionKey: string;
-  wss: WebSocketServer;
+  bus: Bus;
   /** Callback the handler calls to actually start a minion session */
   startMinionSession: (params: {
     sessionKey: string;
@@ -127,7 +123,7 @@ export function createTaskToolsForLeader(opts: {
   /** Callback to schedule a delayed "Continue" message to resume the leader */
   scheduleWaitContinue: (durationMs: number, reason: string) => void;
 }) {
-  const { leaderSessionKey, wss, startMinionSession, cwd, minionSystemPrompt } = opts;
+  const { leaderSessionKey, bus, startMinionSession, cwd, minionSystemPrompt } = opts;
 
   // Reuse existing task state on resume so get_task_status still works
   const taskState: TaskManagerState = opts.existingTaskState ?? { tasks: new Map(), pendingWait: null, approval: null };
@@ -178,7 +174,7 @@ export function createTaskToolsForLeader(opts: {
       };
       taskState.tasks.set(taskId, record);
 
-      broadcastTaskPlanUpdate(wss, leaderSessionKey, taskState);
+      emitTaskPlanUpdate(bus, leaderSessionKey, taskState);
 
       return {
         content: [
@@ -271,7 +267,7 @@ export function createTaskToolsForLeader(opts: {
       });
 
       // Broadcast: minion_spawned so Canvas creates the node
-      broadcast(wss, {
+      bus.emitToSession(leaderSessionKey, {
         type: "minion_spawned",
         leaderSessionKey,
         minionSessionKey: minionKey,
@@ -284,7 +280,7 @@ export function createTaskToolsForLeader(opts: {
       });
 
       // Broadcast: full plan update so frontend reflects "running" status
-      broadcastTaskPlanUpdate(wss, leaderSessionKey, taskState);
+      emitTaskPlanUpdate(bus, leaderSessionKey, taskState);
 
       return {
         content: [
@@ -350,7 +346,7 @@ export function createTaskToolsForLeader(opts: {
       record.completedAt = Date.now();
       record.result = result;
 
-      broadcastTaskPlanUpdate(wss, leaderSessionKey, taskState);
+      emitTaskPlanUpdate(bus, leaderSessionKey, taskState);
 
       return {
         content: [
@@ -453,7 +449,7 @@ export function createTaskToolsForLeader(opts: {
       };
 
       // Broadcast so the frontend can show the countdown immediately
-      broadcast(wss, {
+      bus.emitToSession(leaderSessionKey, {
         type: "wait_state",
         sessionKey: leaderSessionKey,
         action: "started",
@@ -492,7 +488,7 @@ export function createTaskToolsForLeader(opts: {
       name: z.string().describe("Concise task name, 3-6 words"),
     },
     async (args) => {
-      broadcast(wss, {
+      bus.emitToSession(leaderSessionKey, {
         type: "session_task_name",
         sessionKey: leaderSessionKey,
         taskName: args.name,
@@ -554,7 +550,7 @@ export function createTaskToolsForLeader(opts: {
       };
 
       // Broadcast so the frontend can show approval UI
-      broadcast(wss, {
+      bus.emitToSession(leaderSessionKey, {
         type: "approval_requested",
         sessionKey: leaderSessionKey,
         summary: args.summary,

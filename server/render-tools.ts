@@ -4,13 +4,19 @@
  * Allows the leader to push structured UI components to the frontend
  * via `render_set`, `render_patch`, `render_append`, and `render_remove`.
  *
- * Each mutation broadcasts a `render_update` event over WebSocket so the
- * frontend can render a live dashboard for the leader session.
+ * Each mutation emits a `render_update` envelope on the leader's session
+ * topic via the shared `Bus` — see `server/bus.ts`. The component schema
+ * is imported from `shared/render-dsl.ts`, which is the single source of
+ * truth consumed by both server and client.
  */
 
 import { z } from "zod/v4";
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
-import type { WebSocketServer, WebSocket } from "ws";
+import type { Bus } from "./bus.ts";
+import {
+  renderComponentSchema,
+  type RenderComponent,
+} from "../shared/render-dsl.ts";
 
 // ── Types ─────────────────────────────────────────────
 
@@ -18,30 +24,8 @@ export interface RenderState {
   title: string;
   columns: number;
   gap: number;
-  components: Record<string, unknown>[];
+  components: RenderComponent[];
 }
-
-// ── Broadcast helper ──────────────────────────────────
-
-function broadcast(wss: WebSocketServer, data: unknown): void {
-  const msg = JSON.stringify(data);
-  for (const client of wss.clients) {
-    if ((client as WebSocket).readyState === 1 /* OPEN */) {
-      (client as WebSocket).send(msg);
-    }
-  }
-}
-
-// ── Component schema ──────────────────────────────────
-
-const componentSchema = z
-  .object({
-    id: z.string().describe("Unique component id"),
-    type: z
-      .enum(["metric", "progress", "table", "list", "text", "status", "code"])
-      .describe("Component type"),
-  })
-  .passthrough();
 
 // ── Factory ───────────────────────────────────────────
 
@@ -54,9 +38,9 @@ const componentSchema = z
  */
 export function createRenderToolsForLeader(opts: {
   leaderSessionKey: string;
-  wss: WebSocketServer;
+  bus: Bus;
 }) {
-  const { leaderSessionKey, wss } = opts;
+  const { leaderSessionKey, bus } = opts;
 
   const renderState: RenderState = {
     title: "",
@@ -73,7 +57,7 @@ export function createRenderToolsForLeader(opts: {
       title: z.string().optional().describe("Dashboard title"),
       columns: z.number().optional().describe("Grid columns (default 2)"),
       components: z
-        .array(componentSchema)
+        .array(renderComponentSchema)
         .describe("Full component tree to display"),
     },
     async (args) => {
@@ -81,7 +65,7 @@ export function createRenderToolsForLeader(opts: {
       renderState.columns = args.columns ?? 2;
       renderState.components = args.components;
 
-      broadcast(wss, {
+      bus.emitToSession(leaderSessionKey, {
         type: "render_update",
         leaderSessionKey,
         action: "set",
@@ -121,21 +105,23 @@ export function createRenderToolsForLeader(opts: {
       // Apply patches to local state
       for (const update of args.updates) {
         const idx = renderState.components.findIndex(
-          (c) => c.id === update.id,
+          (c) => c.id === update["id"],
         );
         if (idx !== -1) {
-          const existing = renderState.components[idx];
+          const existing = renderState.components[idx]!;
+          // Merge update into component, preserving id and type — they
+          // must not change via patch. We cast to RenderComponent because
+          // the merged object retains the original discriminant.
           renderState.components[idx] = {
             ...existing,
             ...update,
-            // Preserve id and type — they must not change via patch
             id: existing.id,
             type: existing.type,
-          };
+          } as RenderComponent;
         }
       }
 
-      broadcast(wss, {
+      bus.emitToSession(leaderSessionKey, {
         type: "render_update",
         leaderSessionKey,
         action: "patch",
@@ -159,13 +145,13 @@ export function createRenderToolsForLeader(opts: {
     "Add new components to the existing dashboard.",
     {
       components: z
-        .array(componentSchema)
+        .array(renderComponentSchema)
         .describe("Components to append"),
     },
     async (args) => {
       renderState.components.push(...args.components);
 
-      broadcast(wss, {
+      bus.emitToSession(leaderSessionKey, {
         type: "render_update",
         leaderSessionKey,
         action: "append",
@@ -193,10 +179,10 @@ export function createRenderToolsForLeader(opts: {
     async (args) => {
       const idSet = new Set(args.ids);
       renderState.components = renderState.components.filter(
-        (c) => !idSet.has(c.id as string),
+        (c) => !idSet.has(c.id),
       );
 
-      broadcast(wss, {
+      bus.emitToSession(leaderSessionKey, {
         type: "render_update",
         leaderSessionKey,
         action: "remove",

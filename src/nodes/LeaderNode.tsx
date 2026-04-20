@@ -1744,20 +1744,51 @@ function ConfigFooter({
   data,
   onUpdateData,
   socketSend,
+  socketSubscribe,
   getContextForNode,
+  onNewSession,
 }: {
   data: LeaderData;
   onUpdateData: (d: LeaderData) => void;
   socketSend?: (data: unknown) => void;
+  socketSubscribe?: (cb: (msg: unknown) => void) => () => void;
   getContextForNode?: () => import("../types.ts").ContextItem[];
+  onNewSession?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const contextCount = getContextForNode?.().length ?? 0;
   const hasSession = !!data.sessionKey;
 
+  // ── Manual worktree review state ─────────────────────────────────
+  const [manualReviewOpen, setManualReviewOpen] = useState(false);
+  const [manualDiff, setManualDiff] = useState<LeaderData["approvalDiff"] | null>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+
+  // Listen for control_response to get_worktree_diff (scoped to this session)
+  useEffect(() => {
+    if (!socketSubscribe) return;
+    return socketSubscribe((msg: unknown) => {
+      const m = msg as { type?: string; command?: string; sessionKey?: string; success?: boolean; diff?: LeaderData["approvalDiff"] };
+      if (m.type !== "control_response" || m.command !== "get_worktree_diff") return;
+      if (m.sessionKey !== data.sessionKey) return;
+      if (m.success) {
+        setManualDiff(m.diff ?? null);
+      }
+      setDiffLoading(false);
+    });
+  }, [socketSubscribe, data.sessionKey]);
+
+  // Close the manual review panel when worktree is no longer active
+  useEffect(() => {
+    if (data.worktreeStatus !== "active") {
+      setManualReviewOpen(false);
+      setManualDiff(null);
+    }
+  }, [data.worktreeStatus]);
+
   // Worktree status indicators (merged, merging, discarded, failed) shown inline
   const wtStatus = data.worktreeStatus;
-  const showWorktreeActions = wtStatus === "active" && data.status === "idle";
+  const worktreeIsActive = wtStatus === "active" || wtStatus === "creating";
   const showWorktreeStatusBadge =
     wtStatus === "merging" || wtStatus === "merged" || wtStatus === "discarded" || wtStatus === "failed";
 
@@ -1932,42 +1963,174 @@ function ConfigFooter({
             </div>
           )}
 
-          {/* Worktree actions (shown when idle with active worktree but NOT when approval is pending) */}
-          {/* NOTE: No manual "Merge" button — merging happens only through the approval workflow */}
-          {/* (the agent calls request_approval → user clicks "Approve & Merge"). */}
-          {showWorktreeActions && !data.approvalPending && (
-            <div style={{ display: "flex", gap: 6, marginTop: 4, alignItems: "center" }}>
-              <button
-                onClick={() => {
-                  if (socketSend && data.sessionKey) {
-                    socketSend({ type: "get_worktree_diff", sessionKey: data.sessionKey });
-                  }
-                }}
-                style={{
-                  padding: "3px 8px", fontSize: 10, background: "var(--bg-elevated)",
-                  border: "1px solid var(--border-default)", borderRadius: 4,
-                  color: "var(--text-secondary)", cursor: "pointer", fontFamily: "var(--font-mono)",
-                }}
-              >
-                View Diff
-              </button>
-              <button
-                onClick={() => {
-                  if (socketSend && data.sessionKey && confirm("Discard all worktree changes?")) {
-                    socketSend({ type: "discard_worktree", sessionKey: data.sessionKey });
-                  }
-                }}
-                style={{
-                  padding: "3px 8px", fontSize: 10, background: "var(--danger-bg)",
-                  border: "1px solid var(--danger-color)", borderRadius: 4,
-                  color: "var(--status-error)", cursor: "pointer", fontFamily: "var(--font-mono)",
-                }}
-              >
-                Discard
-              </button>
-              <span style={{ fontSize: 9, color: "var(--text-muted)", fontStyle: "italic" }}>
-                Agent will request approval when ready to merge
-              </span>
+          {/* Worktree actions — always available when worktree is active */}
+          {worktreeIsActive && hasSession && !data.approvalPending && (
+            <div style={{ marginTop: 4 }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <button
+                  onClick={() => {
+                    if (socketSend && data.sessionKey) {
+                      setManualReviewOpen(!manualReviewOpen);
+                      if (!manualReviewOpen) {
+                        setDiffLoading(true);
+                        setManualDiff(null);
+                        socketSend({ type: "get_worktree_diff", sessionKey: data.sessionKey });
+                      }
+                    }
+                  }}
+                  style={{
+                    padding: "3px 8px", fontSize: 10,
+                    background: manualReviewOpen ? "var(--state-active)" : "var(--bg-elevated)",
+                    border: `1px solid ${manualReviewOpen ? "var(--accent)" : "var(--border-default)"}`,
+                    borderRadius: 4,
+                    color: manualReviewOpen ? "var(--accent)" : "var(--text-secondary)",
+                    cursor: "pointer", fontFamily: "var(--font-mono)",
+                    fontWeight: manualReviewOpen ? 600 : 400,
+                  }}
+                >
+                  {manualReviewOpen ? "▾ Review & Merge" : "▸ Review & Merge"}
+                </button>
+                <button
+                  onClick={() => {
+                    if (socketSend && data.sessionKey && confirm("Discard all worktree changes?")) {
+                      socketSend({ type: "discard_worktree", sessionKey: data.sessionKey });
+                    }
+                  }}
+                  style={{
+                    padding: "3px 8px", fontSize: 10, background: "var(--danger-bg)",
+                    border: "1px solid var(--danger-color)", borderRadius: 4,
+                    color: "var(--status-error)", cursor: "pointer", fontFamily: "var(--font-mono)",
+                  }}
+                >
+                  Discard
+                </button>
+              </div>
+
+              {/* Manual review panel — inline diff + merge controls */}
+              {manualReviewOpen && (
+                <div
+                  style={{
+                    marginTop: 6,
+                    padding: "8px 10px",
+                    background: "var(--bg-surface)",
+                    border: "1px solid var(--border-default)",
+                    borderRadius: 6,
+                  }}
+                >
+                  {diffLoading && (
+                    <div style={{ fontSize: 10, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⟳</span>
+                      Loading diff...
+                    </div>
+                  )}
+                  {!diffLoading && manualDiff && (
+                    <>
+                      {/* Diff stats */}
+                      <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 6, fontFamily: "var(--font-mono)" }}>
+                        {manualDiff.filesChanged} file{manualDiff.filesChanged !== 1 ? "s" : ""} changed
+                        {" · "}
+                        <span style={{ color: "var(--success-color)", fontWeight: 600 }}>+{manualDiff.insertions}</span>
+                        {" "}
+                        <span style={{ color: "var(--status-error)", fontWeight: 600 }}>-{manualDiff.deletions}</span>
+                        {manualDiff.commits.length > 0 && (
+                          <span> · {manualDiff.commits.length} commit{manualDiff.commits.length !== 1 ? "s" : ""}</span>
+                        )}
+                      </div>
+
+                      {/* File list */}
+                      {manualDiff.files.length > 0 && (
+                        <div style={{
+                          fontSize: 10, fontFamily: "var(--font-mono)",
+                          background: "var(--bg-elevated)", borderRadius: 4,
+                          padding: "4px 6px", marginBottom: 6,
+                          maxHeight: 120, overflowY: "auto",
+                        }}>
+                          {manualDiff.files.map((f, i) => (
+                            <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 0", color: "var(--text-muted)" }}>
+                              <span style={{
+                                fontSize: 9, fontWeight: 600, minWidth: 12, textAlign: "center",
+                                color: f.status === "added" ? "var(--success-color)"
+                                  : f.status === "deleted" ? "var(--status-error)"
+                                  : "var(--accent)",
+                              }}>
+                                {f.status === "added" ? "A" : f.status === "deleted" ? "D" : "M"}
+                              </span>
+                              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {f.file}
+                              </span>
+                              <span style={{ color: "var(--success-color)", fontSize: 9 }}>+{f.insertions}</span>
+                              <span style={{ color: "var(--status-error)", fontSize: 9 }}>-{f.deletions}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* No changes state */}
+                      {manualDiff.filesChanged === 0 && (
+                        <div style={{ fontSize: 10, color: "var(--text-muted)", fontStyle: "italic", marginBottom: 6 }}>
+                          No changes to merge yet.
+                        </div>
+                      )}
+
+                      {/* Merge / Refresh actions */}
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        {manualDiff.filesChanged > 0 && (
+                          <button
+                            onClick={() => {
+                              if (socketSend && data.sessionKey && confirm("Merge worktree changes into your working tree?")) {
+                                socketSend({ type: "approve_changes", sessionKey: data.sessionKey });
+                                onUpdateData({ ...data, worktreeStatus: "merging" });
+                                setManualReviewOpen(false);
+                                setManualDiff(null);
+                              }
+                            }}
+                            style={{
+                              padding: "4px 12px", fontSize: 11, fontWeight: 700,
+                              background: "var(--success-color)", border: "none", borderRadius: 4,
+                              color: "var(--text-primary)", cursor: "pointer", fontFamily: "var(--font-mono)",
+                            }}
+                          >
+                            Merge
+                          </button>
+                        )}
+                        <button
+                          onClick={() => {
+                            if (socketSend && data.sessionKey) {
+                              setDiffLoading(true);
+                              setManualDiff(null);
+                              socketSend({ type: "get_worktree_diff", sessionKey: data.sessionKey });
+                            }
+                          }}
+                          style={{
+                            padding: "4px 8px", fontSize: 10,
+                            background: "var(--bg-elevated)",
+                            border: "1px solid var(--border-default)", borderRadius: 4,
+                            color: "var(--text-secondary)", cursor: "pointer", fontFamily: "var(--font-mono)",
+                          }}
+                        >
+                          Refresh
+                        </button>
+                      </div>
+                    </>
+                  )}
+                  {!diffLoading && !manualDiff && (
+                    <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                      Unable to load diff. <button
+                        onClick={() => {
+                          if (socketSend && data.sessionKey) {
+                            setDiffLoading(true);
+                            socketSend({ type: "get_worktree_diff", sessionKey: data.sessionKey });
+                          }
+                        }}
+                        style={{
+                          background: "none", border: "none", color: "var(--accent)",
+                          cursor: "pointer", fontSize: 10, padding: 0, textDecoration: "underline",
+                        }}
+                      >Retry</button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -2006,7 +2169,7 @@ function ConfigFooter({
                 Session complete.
               </span>
               <button
-                onClick={handleNewSession}
+                onClick={onNewSession}
                 style={{
                   padding: "4px 12px",
                   borderRadius: 6,
@@ -3037,21 +3200,6 @@ export function LeaderNodeRenderer({
     [onUpdateData],
   );
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        if (dataRef.current.sessionKey) {
-          handleSend();
-        } else {
-          handleCreate();
-        }
-      }
-    },
-    [handleSend, handleCreate],
-  );
-
-
   // P6: Reset session handler
   const handleReset = useCallback(() => {
     if (!confirm("Reset this Leader session? All messages will be cleared.")) return;
@@ -3558,7 +3706,9 @@ export function LeaderNodeRenderer({
         data={data}
         onUpdateData={(d) => emitUpdate(d)}
         socketSend={socketSend}
+        socketSubscribe={socketSubscribe}
         getContextForNode={getContextForNode}
+        onNewSession={handleNewSession}
       />
 
       {/* P2: Auto-growing input */}
