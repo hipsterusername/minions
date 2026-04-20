@@ -6,11 +6,11 @@ import { WebSocketServer, WebSocket } from "ws";
 import { query, type Query } from "@anthropic-ai/claude-agent-sdk";
 import { createProjectRoutes } from "./routes/projects.ts";
 import { createFileRoutes } from "./routes/files.ts";
-import { createTaskToolsForLeader, type TaskManagerState } from "./task-tools.ts";
-import { createMinionToolsForSession } from "./minion-tools.ts";
-import { createRenderToolsForLeader, type RenderState } from "./render-tools.ts";
+import type { TaskManagerState } from "./task-tools.ts";
+import type { RenderState } from "./render-tools.ts";
 import { createBus, type Bus, unicastToSession, unicastGlobal, sessionTopic } from "./bus.ts";
-import { MINION_SYSTEM_PROMPT } from "../src/prompts/minion-system.ts";
+import { getAgentType } from "./agents/index.ts";
+import type { AgentTypeContext } from "./agents/index.ts";
 import { createWorktree, removeWorktree, mergeAndCleanup, getWorktreeStatus, getDetailedDiff, isGitRepo, cleanupStaleWorktrees, type WorktreeInfo } from "./worktree.ts";
 import { validateSessionCwd } from "./path-guard.ts";
 import { listRecentProjects } from "./project-store.ts";
@@ -394,7 +394,7 @@ async function runSession(
     initData: existing?.initData ?? null,
     taskState: existing?.taskState ?? null,
     role: role ?? existing?.role ?? "default",
-    taskName: existing?.taskName ?? (role === "leader" ? deriveTaskName(prompt) : null),
+    taskName: existing?.taskName ?? null,
     worktree: parentWorktree ?? existing?.worktree ?? null,
     worktreeIsolation: worktreeIsolation === true,
     waitTimerId: null,
@@ -406,6 +406,14 @@ async function runSession(
   }
   sessions.set(sessionKey, session);
 
+  // ── Resolve agent type early (needed for worktree decisions) ──
+  const agentType = getAgentType(session.role);
+
+  // Derive a task name for agent types that want one (leader)
+  if (!session.taskName && agentType.wantsWorktree) {
+    session.taskName = deriveTaskName(prompt);
+  }
+
   // ── Inherit parent worktree for minion sessions ──────
   if (parentWorktree) {
     session.cwd = parentWorktree.path;
@@ -413,9 +421,9 @@ async function runSession(
     console.log(`[worktree] Minion ${sessionKey} inheriting worktree ${parentWorktree.branch} at ${parentWorktree.path}`);
   }
 
-  // ── Create worktree for leader sessions ──────────────
+  // ── Create worktree for agent types that want isolation ──
   const shouldCreateWorktree = worktreeIsolation === true; // defaults to false
-  if (role === "leader" && shouldCreateWorktree) {
+  if (agentType.wantsWorktree && shouldCreateWorktree) {
     if (existing?.worktree) {
       // Resume: reuse existing worktree
       session.worktree = existing.worktree;
@@ -470,8 +478,7 @@ async function runSession(
   bus.emitToSession(sessionKey, statusEvent);
 
   try {
-    // All sessions (leader, minion, generic) get full coding tools.
-    // Leaders can also delegate parallel work to minions via assign_task MCP tool.
+    // All sessions get full coding tools. MCP tool names come from the agent type.
     const codeTools = [
       "Read",
       "Write",
@@ -484,31 +491,76 @@ async function runSession(
       "WebSearch",
     ];
 
-    // MCP tools must be explicitly allowed so sessions (especially in
-    // worktree dirs) don't prompt for permission at runtime.
-    const mcpTools = role === "leader"
-      ? [
-          "mcp__task-manager__plan_task",
-          "mcp__task-manager__assign_task",
-          "mcp__task-manager__complete_task",
-          "mcp__task-manager__get_task_status",
-          "mcp__task-manager__set_task_name",
-          "mcp__task-manager__wait_and_continue",
-          "mcp__task-manager__request_approval",
-          "mcp__render-dashboard__render_set",
-          "mcp__render-dashboard__render_patch",
-          "mcp__render-dashboard__render_append",
-          "mcp__render-dashboard__render_remove",
-        ]
-      : role === "minion"
-        ? [
-            "mcp__minion-status__report_step",
-            "mcp__minion-status__report_done",
-            "mcp__minion-status__report_fail",
-          ]
-        : [];
+    // Build MCP context for the agent type
+    const agentCtx: AgentTypeContext = {
+      sessionKey,
+      cwd: session.cwd,
+      bus,
+      worktreeInfo: session.worktree,
+      worktreeIsolation: session.worktreeIsolation,
+      existingTaskState: session.taskState ?? undefined,
+      parentWorktree: parentWorktree,
+      startMinionSession: (params) => {
+        // Fire-and-forget: start a minion session in the leader's worktree
+        runSession(
+          wsServer,
+          params.sessionKey,
+          params.prompt,
+          params.cwd,
+          undefined,
+          params.systemPrompt,
+          "minion",
+          false,              // worktreeIsolation: false — don't create a new worktree
+          session.worktree ?? undefined,  // inherit leader's worktree
+        );
+      },
+      forEachLeaderTaskState: (fn) => {
+        for (const [leaderKey, otherSession] of sessions) {
+          if (otherSession.taskState) {
+            fn(leaderKey, otherSession.taskState);
+          }
+        }
+      },
+      scheduleWaitContinue: (durationMs: number, reason: string) => {
+        // Cancel any previous wait timer
+        if (session.waitTimerId) clearTimeout(session.waitTimerId);
 
-    const fullTools = [...codeTools, ...mcpTools];
+        console.log(`[wait] Leader ${sessionKey} waiting ${durationMs}ms: ${reason}`);
+
+        session.waitTimerId = setTimeout(() => {
+          session.waitTimerId = null;
+
+          // Broadcast that the wait has ended
+          bus.emitToSession(sessionKey, {
+            type: "wait_state",
+            sessionKey,
+            action: "completed",
+            reason,
+            timestamp: Date.now(),
+          });
+
+          // Resume the session with "Continue"
+          console.log(`[wait] Resuming leader ${sessionKey} after ${durationMs}ms wait`);
+          runSession(
+            wsServer,
+            sessionKey,
+            `Continue. The ${Math.round(durationMs / 1000)}s wait has elapsed (reason: ${reason}). Pick up where you left off.`,
+            session.cwd,
+            session.sessionId ?? undefined,
+            systemPrompt,
+            session.role,
+          );
+        }, durationMs);
+      },
+    };
+
+    // Create MCP servers via the agent type
+    const mcpResult = agentType.createMcpServers(agentCtx);
+    const fullTools = [...codeTools, ...mcpResult.mcpToolNames];
+
+    // Persist agent-produced state on the session
+    if (mcpResult.taskState) session.taskState = mcpResult.taskState;
+    if (mcpResult.renderState) session.renderState = mcpResult.renderState;
 
     const options: Record<string, unknown> = {
       cwd: session.cwd,
@@ -520,13 +572,19 @@ async function runSession(
       includePartialMessages: true,
       promptSuggestions: true,
     };
-    // ── Inject worktree context into system prompt ──────
-    // When a worktree is active, append mandatory path-awareness rules
-    // so the agent is forced to work within the isolated worktree directory.
-    if (systemPrompt) {
-      let enrichedPrompt = systemPrompt;
+
+    // Attach MCP servers if the agent type created any
+    if (Object.keys(mcpResult.mcpServers).length > 0) {
+      options["mcpServers"] = mcpResult.mcpServers;
+    }
+
+    // ── Build system prompt via agent type ──────────────
+    const basePrompt = agentType.buildSystemPrompt(agentCtx, systemPrompt);
+    if (basePrompt) {
+      let enrichedPrompt = basePrompt;
+      // When a worktree is active, append mandatory path-awareness rules
       if (session.worktree) {
-        const isMinion = role === "minion";
+        const isMinion = agentType.id === "minion";
         const worktreeAddendum = [
           "",
           "",
@@ -563,11 +621,6 @@ async function runSession(
     }
 
     // ── Adaptive thinking ────────────────────────────────
-    // Only forward to models that support adaptive — Haiku and older
-    // Sonnet/Opus releases reject `thinking: {type:"adaptive"}`. On
-    // Opus 4.7 the API defaults `display` to "omitted", which would
-    // hide thinking blocks in the UI; explicitly setting "summarized"
-    // restores the existing purple "Thinking" group experience.
     if (
       session.thinkingConfig?.enabled &&
       modelSupportsAdaptive(session.model)
@@ -577,86 +630,6 @@ async function runSession(
         display: session.thinkingConfig.display,
       };
       options["effort"] = session.thinkingConfig.effort;
-    }
-
-    // For leader sessions, ALWAYS attach task management MCP tools —
-    // even on resume.  The SDK creates a fresh MCP-server map on every
-    // query() call, so we must re-provide the server each time.
-    // We preserve the existing taskState so get_task_status still
-    // reflects previously-assigned tasks.
-    if (role === "leader") {
-      const { mcpServer, taskState } = createTaskToolsForLeader({
-        leaderSessionKey: sessionKey,
-        bus,
-        startMinionSession: (params) => {
-          // Fire-and-forget: start a minion session in the leader's worktree
-          runSession(
-            wsServer,
-            params.sessionKey,
-            params.prompt,
-            params.cwd,
-            undefined,
-            params.systemPrompt,
-            "minion",
-            false,              // worktreeIsolation: false — don't create a new worktree
-            session.worktree ?? undefined,  // inherit leader's worktree
-          );
-        },
-        cwd: session.cwd,
-        minionSystemPrompt: MINION_SYSTEM_PROMPT,
-        existingTaskState: session.taskState ?? undefined,
-        worktreeBranch: session.worktree?.branch ?? null,
-        worktreeInfo: session.worktree ?? null,
-        worktreeIsolation: session.worktreeIsolation,
-        scheduleWaitContinue: (durationMs: number, reason: string) => {
-          // Cancel any previous wait timer
-          if (session.waitTimerId) clearTimeout(session.waitTimerId);
-
-          console.log(`[wait] Leader ${sessionKey} waiting ${durationMs}ms: ${reason}`);
-
-          session.waitTimerId = setTimeout(() => {
-            session.waitTimerId = null;
-
-            // Broadcast that the wait has ended
-            bus.emitToSession(sessionKey, {
-              type: "wait_state",
-              sessionKey,
-              action: "completed",
-              reason,
-              timestamp: Date.now(),
-            });
-
-            // Resume the session with "Continue"
-            console.log(`[wait] Resuming leader ${sessionKey} after ${durationMs}ms wait`);
-            runSession(
-              wsServer,
-              sessionKey,
-              `Continue. The ${Math.round(durationMs / 1000)}s wait has elapsed (reason: ${reason}). Pick up where you left off.`,
-              session.cwd,
-              session.sessionId ?? undefined,
-              systemPrompt,
-              "leader",
-            );
-          }, durationMs);
-        },
-      });
-      const { mcpServer: renderMcp, renderState } = createRenderToolsForLeader({
-        leaderSessionKey: sessionKey,
-        bus,
-      });
-      options["mcpServers"] = { "task-manager": mcpServer, "render-dashboard": renderMcp };
-      session.taskState = taskState;
-      session.renderState = renderState;
-    }
-
-    // For minion sessions, attach status-reporting MCP tools
-    if (role === "minion") {
-      const { mcpServer: minionMcp } = createMinionToolsForSession({
-        minionSessionKey: sessionKey,
-        bus,
-      });
-      const existing = (options["mcpServers"] as Record<string, unknown>) ?? {};
-      options["mcpServers"] = { ...existing, "minion-status": minionMcp };
     }
 
     const handle = query({ prompt, options: options as never });
@@ -698,12 +671,12 @@ async function runSession(
       bufferEvent(session, sdkEvent);
       bus.emitToSession(sessionKey, sdkEvent);
 
-      // ── Detect Agent tool subagent events from leader sessions ──
+      // ── Detect Agent tool subagent events ─────────────────
       // When the SDK's built-in Agent tool spawns a subagent, it emits
       // system events with subtype "task_started" / "task_notification".
       // We convert these into canvas-aware events so the frontend can
       // create and update Minion nodes automatically.
-      if (session.role === "leader" && message.type === "system") {
+      if (agentType.detectsSubagents && message.type === "system") {
         const subtype = (msg as Record<string, unknown>)["subtype"] as string | undefined;
         if (subtype === "task_started") {
           const taskId = (msg["task_id"] as string) ?? `agent-${Date.now().toString(36)}`;
@@ -748,32 +721,9 @@ async function runSession(
         bufferEvent(session, resultStatusEvent);
         bus.emitToSession(sessionKey, resultStatusEvent);
 
-        // ── Propagate minion completion back to leader's task state ──
-        if (session.role === "minion") {
-          for (const [leaderKey, otherSession] of sessions) {
-            if (!otherSession.taskState) continue;
-            for (const [, task] of otherSession.taskState.tasks) {
-              if (task.minionSessionKey === sessionKey) {
-                const isError = !!(msg["is_error"]);
-                task.status = isError ? "failed" : "completed";
-                task.result =
-                  (msg["result"] as string) ??
-                  (isError ? "Task failed" : "Task completed");
-                // Broadcast so the frontend leader node and any subscribers learn
-                // the task is done without needing to poll get_task_status.
-                bus.emitToSession(leaderKey, {
-                  type: "minion_completed",
-                  leaderSessionKey: leaderKey,
-                  minionSessionKey: sessionKey,
-                  taskId: task.taskId,
-                  status: task.status,
-                  result: task.result,
-                  timestamp: Date.now(),
-                });
-                break;
-              }
-            }
-          }
+        // ── Post-completion hook (agent-type specific) ──────
+        if (agentType.onComplete) {
+          agentType.onComplete(agentCtx, msg);
         }
       }
     }

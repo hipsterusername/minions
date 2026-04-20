@@ -46,19 +46,14 @@ export const SERVER_FILE_SIZE_LIMIT = 400;
  * against the import statement. Removing an entry must accompany
  * removing the import.
  *
- * Drained in Phase 3 (prompts move into `server/agents/<role>/prompt.ts`).
+ * Phase 3 drained the last entry: the minion system prompt moved from
+ * `src/prompts/minion-system.ts` into `server/agents/minion.ts`.
  */
 export const ALLOWED_CROSS_TREE_IMPORTS: ReadonlyArray<{
   file: string;
   matcher: RegExp;
   reason: string;
-}> = [
-  {
-    file: "server/index.ts",
-    matcher: /from\s+["']\.\.\/src\/prompts\/minion-system\.ts["']/,
-    reason: "Phase 3 — prompts move into server/agents/<role>/prompt.ts",
-  },
-];
+}> = [];
 
 /**
  * Phase 2 landed `server/bus.ts` and migrated every server file to use

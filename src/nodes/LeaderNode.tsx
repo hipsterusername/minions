@@ -3818,6 +3818,7 @@ registerNodeType({
   label: "Leader",
   defaultSize: { width: 560, height: 520 },
   render: LeaderNodeRenderer,
+  agentType: "leader",
 });
 
 export const LEADER_DEFAULT_DATA: LeaderData = {

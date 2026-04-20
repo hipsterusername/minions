@@ -1608,4 +1608,5 @@ registerNodeType({
   defaultSize: { width: 480, height: 400 },
   render: ClaudeSessionRenderer,
   userCreatable: false,
+  agentType: "default",
 });

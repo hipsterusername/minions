@@ -1082,6 +1082,7 @@ registerNodeType({
   render: MinionNodeRenderer,
   userCreatable: false,
   autoHeight: true,
+  agentType: "minion",
 });
 
 export const MINION_DEFAULT_DATA: MinionData = {

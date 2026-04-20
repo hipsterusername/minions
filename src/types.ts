@@ -39,6 +39,8 @@ export interface NodeTypeDefinition {
   userCreatable?: boolean;
   /** When true, the node grows with content instead of using a fixed height */
   autoHeight?: boolean;
+  /** Matches server-side AgentType.id — used to select the agent behavior */
+  agentType?: string;
 }
 
 export interface ContextItem {
