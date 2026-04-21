@@ -74,21 +74,20 @@ export interface TaskManagerState {
 
 // ── Broadcast helpers ──────────────────────────────────
 
-/**
- * Fan out a full task-plan update on the leader's session topic. Consumers
- * (LeaderNode, kanban views) re-derive their local state from this array,
- * so every mutation calls this rather than emitting per-task diffs.
- */
+/** Broadcast the plan + optionally notify the persistence layer (Phase 4.4). */
 function emitTaskPlanUpdate(
   bus: Bus,
   leaderSessionKey: string,
   taskState: TaskManagerState,
+  onStateChange?: (state: TaskManagerState) => void,
 ): void {
   bus.emitToSession(leaderSessionKey, {
     type: "task_plan_update",
     leaderSessionKey,
     tasks: Array.from(taskState.tasks.values()),
   });
+  try { onStateChange?.(taskState); }
+  catch (err) { console.warn("[task-tools] onStateChange failed:", err); }
 }
 
 // ── Factory ────────────────────────────────────────────
@@ -122,8 +121,10 @@ export function createTaskToolsForLeader(opts: {
   worktreeIsolation?: boolean;
   /** Callback to schedule a delayed "Continue" message to resume the leader */
   scheduleWaitContinue: (durationMs: number, reason: string) => void;
+  /** Optional callback fired after every task-state mutation (Phase 4.4 persistence). */
+  onStateChange?: (state: TaskManagerState) => void;
 }) {
-  const { leaderSessionKey, bus, startMinionSession, cwd, minionSystemPrompt } = opts;
+  const { leaderSessionKey, bus, startMinionSession, cwd, minionSystemPrompt, onStateChange } = opts;
 
   // Reuse existing task state on resume so get_task_status still works
   const taskState: TaskManagerState = opts.existingTaskState ?? { tasks: new Map(), pendingWait: null, approval: null };
@@ -174,7 +175,7 @@ export function createTaskToolsForLeader(opts: {
       };
       taskState.tasks.set(taskId, record);
 
-      emitTaskPlanUpdate(bus, leaderSessionKey, taskState);
+      emitTaskPlanUpdate(bus, leaderSessionKey, taskState, onStateChange);
 
       return {
         content: [
@@ -280,7 +281,7 @@ export function createTaskToolsForLeader(opts: {
       });
 
       // Broadcast: full plan update so frontend reflects "running" status
-      emitTaskPlanUpdate(bus, leaderSessionKey, taskState);
+      emitTaskPlanUpdate(bus, leaderSessionKey, taskState, onStateChange);
 
       return {
         content: [
@@ -346,7 +347,7 @@ export function createTaskToolsForLeader(opts: {
       record.completedAt = Date.now();
       record.result = result;
 
-      emitTaskPlanUpdate(bus, leaderSessionKey, taskState);
+      emitTaskPlanUpdate(bus, leaderSessionKey, taskState, onStateChange);
 
       return {
         content: [

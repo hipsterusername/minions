@@ -39,15 +39,31 @@ export interface RenderState {
 export function createRenderToolsForLeader(opts: {
   leaderSessionKey: string;
   bus: Bus;
+  /**
+   * Optional callback fired after every render-state mutation. The persistence
+   * layer uses this to write the dashboard to SQLite (Phase 4.4).
+   */
+  onStateChange?: (state: RenderState) => void;
+  /** Optional initial state to preserve across resume calls */
+  existingRenderState?: RenderState;
 }) {
-  const { leaderSessionKey, bus } = opts;
+  const { leaderSessionKey, bus, onStateChange } = opts;
 
-  const renderState: RenderState = {
+  const renderState: RenderState = opts.existingRenderState ?? {
     title: "",
     columns: 2,
     gap: 12,
     components: [],
   };
+
+  function notifyStateChange(): void {
+    if (!onStateChange) return;
+    try {
+      onStateChange(renderState);
+    } catch (err) {
+      console.warn("[render-tools] onStateChange failed:", err);
+    }
+  }
 
   // ── render_set ────────────────────────────────────
   const renderSetTool = tool(
@@ -76,6 +92,8 @@ export function createRenderToolsForLeader(opts: {
         },
         components: renderState.components,
       });
+
+      notifyStateChange();
 
       return {
         content: [
@@ -128,6 +146,8 @@ export function createRenderToolsForLeader(opts: {
         updates: args.updates,
       });
 
+      notifyStateChange();
+
       return {
         content: [
           {
@@ -157,6 +177,8 @@ export function createRenderToolsForLeader(opts: {
         action: "append",
         components: args.components,
       });
+
+      notifyStateChange();
 
       return {
         content: [
@@ -188,6 +210,8 @@ export function createRenderToolsForLeader(opts: {
         action: "remove",
         ids: args.ids,
       });
+
+      notifyStateChange();
 
       return {
         content: [

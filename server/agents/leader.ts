@@ -8,6 +8,10 @@ import type { AgentType, AgentTypeContext, McpServerResult } from "./types.ts";
 import { createTaskToolsForLeader } from "../task-tools.ts";
 import { createRenderToolsForLeader } from "../render-tools.ts";
 import { MINION_SYSTEM_PROMPT } from "./minion.ts";
+import {
+  persistTaskState,
+  persistRenderState,
+} from "../session-persist.ts";
 
 // ── System prompt ─────────────────────────────────────────────────────────
 // Moved from src/prompts/leader-system.ts — content is identical.
@@ -195,8 +199,10 @@ const leaderAgent: AgentType = {
       throw new Error("Leader agent requires startMinionSession and scheduleWaitContinue callbacks");
     }
 
+    const leaderSessionKey = ctx.sessionKey;
+
     const { mcpServer, taskState } = createTaskToolsForLeader({
-      leaderSessionKey: ctx.sessionKey,
+      leaderSessionKey,
       bus: ctx.bus,
       startMinionSession: ctx.startMinionSession,
       cwd: ctx.cwd,
@@ -206,11 +212,17 @@ const leaderAgent: AgentType = {
       worktreeInfo: ctx.worktreeInfo ?? null,
       worktreeIsolation: ctx.worktreeIsolation,
       scheduleWaitContinue: ctx.scheduleWaitContinue,
+      // Phase 4.4: write-through cache — every task-state mutation is
+      // persisted to SQLite so the plan survives a server restart.
+      onStateChange: (state) => persistTaskState(leaderSessionKey, state),
     });
 
     const { mcpServer: renderMcp, renderState } = createRenderToolsForLeader({
-      leaderSessionKey: ctx.sessionKey,
+      leaderSessionKey,
       bus: ctx.bus,
+      existingRenderState: ctx.existingRenderState,
+      // Phase 4.4: persist dashboard state on every mutation.
+      onStateChange: (state) => persistRenderState(leaderSessionKey, state),
     });
 
     return {

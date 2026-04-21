@@ -21,6 +21,8 @@ export interface AgentTypeContext {
   worktreeIsolation: boolean;
   /** Existing task state to preserve across resume calls (leader only) */
   existingTaskState?: TaskManagerState;
+  /** Existing render state to preserve across resume calls (leader only) */
+  existingRenderState?: RenderState;
   /** Worktree inherited from the leader (minion only) */
   parentWorktree?: WorktreeInfo;
   /** Callback to start a minion session (leader only — wired by the server) */

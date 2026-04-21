@@ -41,6 +41,54 @@ export function initDb(dbPath?: string): Database.Database {
     );
 
     CREATE INDEX IF NOT EXISTS idx_nodes_project ON nodes(project_id);
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      session_key   TEXT PRIMARY KEY,
+      project_id    TEXT,
+      node_id       TEXT,
+      status        TEXT NOT NULL DEFAULT 'idle',
+      cwd           TEXT,
+      model         TEXT,
+      role          TEXT NOT NULL DEFAULT 'default',
+      task_name     TEXT,
+      worktree_isolation INTEGER NOT NULL DEFAULT 0,
+      total_cost    REAL NOT NULL DEFAULT 0,
+      turns         INTEGER NOT NULL DEFAULT 0,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS task_records (
+      task_id            TEXT PRIMARY KEY,
+      leader_session_key TEXT NOT NULL,
+      title              TEXT NOT NULL,
+      description        TEXT NOT NULL DEFAULT '',
+      priority           TEXT NOT NULL DEFAULT 'medium',
+      executor           TEXT NOT NULL DEFAULT 'leader',
+      minion_session_key TEXT,
+      status             TEXT NOT NULL DEFAULT 'planned',
+      result             TEXT,
+      created_at         INTEGER NOT NULL,
+      completed_at       INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_records_leader ON task_records(leader_session_key);
+
+    CREATE TABLE IF NOT EXISTS render_state (
+      session_key   TEXT PRIMARY KEY,
+      title         TEXT NOT NULL DEFAULT '',
+      columns       INTEGER NOT NULL DEFAULT 2,
+      gap           INTEGER NOT NULL DEFAULT 12,
+      components    TEXT NOT NULL DEFAULT '[]'
+    );
+
+    CREATE TABLE IF NOT EXISTS event_log (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_key   TEXT NOT NULL,
+      event_type    TEXT NOT NULL,
+      payload       TEXT NOT NULL,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_event_log_session ON event_log(session_key);
   `);
 
   return db;

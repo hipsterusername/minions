@@ -14,6 +14,7 @@ import type { AgentTypeContext } from "./agents/index.ts";
 import { createWorktree, removeWorktree, mergeAndCleanup, getWorktreeStatus, getDetailedDiff, isGitRepo, cleanupStaleWorktrees, type WorktreeInfo } from "./worktree.ts";
 import { validateSessionCwd } from "./path-guard.ts";
 import { listRecentProjects } from "./project-store.ts";
+import { hydrateSessionsFromDb, persistSession as persistSessionToDb, removePersistedSession, type PersistableSession } from "./session-persist.ts";
 
 // ── Auth Token ──────────────────────────────────────────
 const AUTH_TOKEN = crypto.randomBytes(32).toString("hex");
@@ -148,6 +149,7 @@ const VALID_DISPLAYS: ReadonlySet<ThinkingDisplay> = new Set([
 const ADAPTIVE_THINKING_MODELS: ReadonlySet<string> = new Set([
   "sonnet",
   "opus",
+  "opus-old",
   "claude-opus-4-7",
   "claude-opus-4-6",
   "claude-sonnet-4-6",
@@ -164,6 +166,23 @@ function isValidThinkingConfig(v: unknown): v is ThinkingConfig {
     typeof cfg.display === "string" &&
     VALID_DISPLAYS.has(cfg.display as ThinkingDisplay)
   );
+}
+
+/**
+ * Map short UI aliases to full model IDs so the SDK uses the intended version.
+ * Without this, the SDK resolves bare "opus" → claude-opus-4-6 (its built-in default).
+ */
+const MODEL_ALIAS_MAP: Record<string, string> = {
+  opus: "claude-opus-4-7",
+  "opus-old": "claude-opus-4-6",
+  sonnet: "claude-sonnet-4-6",
+  haiku: "claude-haiku-4-5",
+};
+
+/** Resolve a short alias to a full model ID; pass-through if already qualified. */
+function resolveModelId(model: string | null): string | null {
+  if (!model) return null;
+  return MODEL_ALIAS_MAP[model] ?? model;
 }
 
 function modelSupportsAdaptive(model: string | null): boolean {
@@ -282,6 +301,46 @@ function bufferEvent(session: Session, event: BufferedEvent): void {
   if (session.eventBuffer.length > MAX_BUFFERED_EVENTS) {
     session.eventBuffer = session.eventBuffer.slice(-MAX_BUFFERED_EVENTS);
   }
+}
+
+// ── Phase 4.4: session persistence (write-through to SQLite) ──
+
+/** Write the current session metadata to SQLite after any mutation. */
+function persistSession(s: Session): void {
+  const snap: PersistableSession = {
+    id: s.id, status: s.status, cwd: s.cwd, model: s.model, role: s.role,
+    taskName: s.taskName, worktreeIsolation: s.worktreeIsolation,
+    totalCost: s.totalCost, turns: s.turns,
+  };
+  persistSessionToDb(snap);
+}
+
+/**
+ * Restore sessions from disk at boot. Volatile fields (abortController,
+ * queryHandle, waitTimerId) are freshly initialized; restored sessions come
+ * back with status = "stopped" so the UI can show them as resumable.
+ */
+function hydrateSessionsOnBoot(): void {
+  try {
+    const hydrated = hydrateSessionsFromDb();
+    for (const { row, tasks, render } of hydrated) {
+      sessions.set(row.session_key, {
+        id: row.session_key, sessionId: null, status: "stopped",
+        abortController: new AbortController(), queryHandle: null,
+        cwd: row.cwd ?? process.cwd(), eventBuffer: [],
+        totalCost: row.total_cost, turns: row.turns, lastError: null,
+        model: row.model, permissionMode: null, thinkingConfig: null,
+        initData: null, taskState: tasks,
+        role: (row.role as Session["role"]) ?? "default",
+        taskName: row.task_name, worktree: null,
+        worktreeIsolation: row.worktree_isolation === 1,
+        waitTimerId: null, renderState: render,
+      });
+    }
+    if (hydrated.length > 0) {
+      console.log(`[session-persist] hydrated ${hydrated.length} session(s) from disk`);
+    }
+  } catch (err) { console.warn("[session-persist] hydrate failed:", err); }
 }
 
 /**
@@ -405,6 +464,7 @@ async function runSession(
     clearTimeout(existing.waitTimerId);
   }
   sessions.set(sessionKey, session);
+  persistSession(session);
 
   // ── Resolve agent type early (needed for worktree decisions) ──
   const agentType = getAgentType(session.role);
@@ -499,6 +559,7 @@ async function runSession(
       worktreeInfo: session.worktree,
       worktreeIsolation: session.worktreeIsolation,
       existingTaskState: session.taskState ?? undefined,
+      existingRenderState: session.renderState ?? undefined,
       parentWorktree: parentWorktree,
       startMinionSession: (params) => {
         // Fire-and-forget: start a minion session in the leader's worktree
@@ -617,7 +678,7 @@ async function runSession(
       options["systemPrompt"] = enrichedPrompt;
     }
     if (session.model) {
-      options["model"] = session.model;
+      options["model"] = resolveModelId(session.model);
     }
 
     // ── Adaptive thinking ────────────────────────────────
@@ -711,6 +772,7 @@ async function runSession(
         session.totalCost =
           (msg["total_cost_usd"] as number) ?? session.totalCost;
         session.turns = (msg["num_turns"] as number) ?? session.turns;
+        persistSession(session);
         const resultStatusEvent: BufferedEvent = {
           type: "session_status",
           sessionKey,
@@ -731,6 +793,7 @@ async function runSession(
     const errorMessage = err instanceof Error ? err.message : String(err);
     session.status = "error";
     session.lastError = errorMessage;
+    persistSession(session);
     const errorEvent: BufferedEvent = {
       type: "session_error",
       sessionKey,
@@ -1107,6 +1170,7 @@ function handleCommand(
         }
 
         sessions.delete(cmd.sessionKey);
+        removePersistedSession(cmd.sessionKey);
       }
       // Broadcast updated session list to all clients
       const updatedList = Array.from(sessions.entries()).map(([key, s]) => ({
@@ -1965,6 +2029,9 @@ server.listen(PORT, HOST, () => {
   console.log(`Minions server on http://${HOST}:${PORT}`);
   console.log(`WebSocket available on ws://${HOST}:${PORT}`);
   console.log(`[auth] Auth token: ${AUTH_TOKEN.slice(0, 8)}...`);
+
+  // Phase 4.4: rehydrate persisted sessions (tasks, render state) from SQLite
+  hydrateSessionsOnBoot();
 
   // Clean up stale worktrees from previous sessions across all known projects
   const recentProjects = listRecentProjects();
