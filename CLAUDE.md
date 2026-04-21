@@ -104,16 +104,16 @@ warm cache. Don't bypass it; if a hook fails, fix the cause.
 These are tracked by `tests/architecture/` and gate CI. They map directly
 to flaws in the architecture review.
 
-| Invariant | Test | Today's allowlist (in `tests/architecture/baselines.ts`) |
+| Invariant | Test | Allowlist |
 |---|---|---|
-| `server/*.ts` ≤ 400 lines | `file-size.test.ts` | `index.ts`, `task-tools.ts`, `worktree.ts` — must shrink by Phase 5 |
-| No `from "../src/"` in `server/` (or vice versa) | `no-cross-tree-imports.test.ts` | One: `server/index.ts` → `../src/prompts/minion-system.ts`. Removed in Phase 3. |
-| No `broadcast(wss, ...)` outside the bus (after Phase 2) | `no-direct-broadcast.test.ts` | Snapshotted count today; must equal zero from Phase 2 onward |
+| `server/*.ts` ≤ 400 lines | `file-size.test.ts` | **Empty** (drained in Phase 5.3). Every server file is under the hard ceiling. |
+| No `from "../src/"` in `server/` (or vice versa) | `no-cross-tree-imports.test.ts` | Empty (drained in Phase 3). |
+| No `broadcast(wss, ...)` outside the bus | `no-direct-broadcast.test.ts` | Empty (enforced as hard zero from Phase 2 onward). |
+| Every `WsCommandType` has a handler | `command-table.test.ts` | — (introduced in Phase 5.2). |
 
-When you touch any of these areas, the rule is **the count never grows
-and the allowlist never gains new entries**. Reductions are always
-welcome — when you remove a violation, edit `baselines.ts` to ratchet
-the count down so we can never regress.
+**The allowlists are now historical.** New server files must be under 400
+lines; split them if they grow. Don't re-introduce allowlist entries —
+that shipped debt is gone and adding it back reverses the refactor.
 
 ---
 
@@ -123,9 +123,12 @@ the count down so we can never regress.
 |---|---|
 | A new node type | `src/node-registry.ts`, `src/types.ts`, an existing minimal node like `src/nodes/MarkdownNode.tsx` |
 | The chat / message feed | `src/sdk-messages.ts`, `src/streaming.ts`, the relevant node component |
-| A new MCP tool for an agent | `server/task-tools.ts`, `server/render-tools.ts`, `server/minion-tools.ts` |
-| The render DSL | `src/render-dsl.ts` (client union) and `server/render-tools.ts` (server schema) — these will be unified in Phase 2 |
-| Worktree / approval flow | `server/worktree.ts`, `server/index.ts` `runSession` |
+| A new MCP tool for the leader | `server/task-tools/` (per-tool factories) + `server/render-tools.ts` |
+| A new MCP tool for a minion | `server/minion-tools.ts` |
+| The render DSL | `src/render-dsl.ts` (client union) and `server/render-tools.ts` (server schema) |
+| A new WebSocket command | `server/commands/<name>.ts` + an entry in `server/commands/index.ts` `COMMAND_TABLE` |
+| Session lifecycle (abort, query loop, persistence) | `server/session-host.ts` |
+| Worktree / approval flow | `server/worktree-*.ts`, `server/commands/approve-changes.ts`, `server/commands/*-merge.ts` |
 | Persistence | `server/db.ts`, `server/project-store.ts` |
 | Anything that looks "stringly typed" by role | the architecture review F6 / F14, `src/prompts/`, `server/index.ts:191` |
 
