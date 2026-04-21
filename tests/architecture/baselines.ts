@@ -21,11 +21,9 @@
  */
 export const SERVER_FILE_SIZE_ALLOWLIST: Readonly<Record<string, number>> = {
   // Drained in Phase 5 (per-command handlers + thin entry).
-  // Bumped 1969 → 2072 in Phase 2 pre-flight: unrelated feature work
-  // merged to main while this refactor was in flight. Net diff from the
-  // Phase 2 bus migration itself is negative (-1). Kept as-is until Phase
-  // 5 collapses this file anyway.
-  "server/index.ts": 2072,
+  // Sub-PR 5.1 extracted SessionHost + SessionRegistry: 2072 → 1460.
+  // Further drains scheduled in Sub-PR 5.2 (WS command table split).
+  "server/index.ts": 1460,
   // Drained in Phase 3 (each MCP tool factory moves under server/agents/<role>/).
   "server/task-tools.ts": 624,
   // Bumped 604 → 646 in Phase 2 pre-flight: same unrelated-feature growth

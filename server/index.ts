@@ -3,18 +3,29 @@ import type { Request, Response } from "express";
 import crypto from "crypto";
 import { createServer } from "http";
 import { WebSocketServer, WebSocket } from "ws";
-import { query, type Query } from "@anthropic-ai/claude-agent-sdk";
 import { createProjectRoutes } from "./routes/projects.ts";
 import { createFileRoutes } from "./routes/files.ts";
-import type { TaskManagerState } from "./task-tools.ts";
-import type { RenderState } from "./render-tools.ts";
-import { createBus, type Bus, unicastToSession, unicastGlobal, sessionTopic } from "./bus.ts";
-import { getAgentType } from "./agents/index.ts";
-import type { AgentTypeContext } from "./agents/index.ts";
-import { createWorktree, removeWorktree, mergeAndCleanup, getWorktreeStatus, getDetailedDiff, isGitRepo, cleanupStaleWorktrees, type WorktreeInfo } from "./worktree.ts";
+import { createBus, unicastToSession, unicastGlobal } from "./bus.ts";
+import {
+  createWorktree,
+  removeWorktree,
+  mergeAndCleanup,
+  getDetailedDiff,
+  cleanupStaleWorktrees,
+} from "./worktree.ts";
 import { validateSessionCwd } from "./path-guard.ts";
 import { listRecentProjects } from "./project-store.ts";
-import { hydrateSessionsFromDb, persistSession as persistSessionToDb, removePersistedSession, type PersistableSession } from "./session-persist.ts";
+import { removePersistedSession } from "./session-persist.ts";
+import {
+  SessionHost,
+  isValidThinkingConfig,
+  type BufferedEvent,
+  type SessionHostDeps,
+  type SessionRole,
+  type StartSessionOptions,
+  type ThinkingConfig,
+} from "./session-host.ts";
+import { SessionRegistry } from "./session-registry.ts";
 
 // ── Auth Token ──────────────────────────────────────────
 const AUTH_TOKEN = crypto.randomBytes(32).toString("hex");
@@ -109,114 +120,7 @@ const wss = new WebSocketServer({
 
 // ── Session management ──────────────────────────────────
 
-const MAX_BUFFERED_EVENTS = 200;
 const MAX_SESSIONS = 50;
-
-interface BufferedEvent {
-  type: string;
-  sessionKey: string;
-  message?: unknown;
-  status?: string;
-  error?: string;
-  sessionId?: string;
-  timestamp: number;
-}
-
-// ── Adaptive thinking (mirrors src/types.ts) ────────────
-
-type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
-type ThinkingDisplay = "summarized" | "omitted";
-
-interface ThinkingConfig {
-  enabled: boolean;
-  effort: EffortLevel;
-  display: ThinkingDisplay;
-}
-
-const VALID_EFFORTS: ReadonlySet<EffortLevel> = new Set([
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-]);
-const VALID_DISPLAYS: ReadonlySet<ThinkingDisplay> = new Set([
-  "summarized",
-  "omitted",
-]);
-
-/** Models that accept `thinking: {type: "adaptive"}` */
-const ADAPTIVE_THINKING_MODELS: ReadonlySet<string> = new Set([
-  "sonnet",
-  "opus",
-  "opus-old",
-  "claude-opus-4-7",
-  "claude-opus-4-6",
-  "claude-sonnet-4-6",
-  "claude-mythos-preview",
-]);
-
-function isValidThinkingConfig(v: unknown): v is ThinkingConfig {
-  if (typeof v !== "object" || v === null) return false;
-  const cfg = v as Record<string, unknown>;
-  return (
-    typeof cfg.enabled === "boolean" &&
-    typeof cfg.effort === "string" &&
-    VALID_EFFORTS.has(cfg.effort as EffortLevel) &&
-    typeof cfg.display === "string" &&
-    VALID_DISPLAYS.has(cfg.display as ThinkingDisplay)
-  );
-}
-
-/**
- * Map short UI aliases to full model IDs so the SDK uses the intended version.
- * Without this, the SDK resolves bare "opus" → claude-opus-4-6 (its built-in default).
- */
-const MODEL_ALIAS_MAP: Record<string, string> = {
-  opus: "claude-opus-4-7",
-  "opus-old": "claude-opus-4-6",
-  sonnet: "claude-sonnet-4-6",
-  haiku: "claude-haiku-4-5",
-};
-
-/** Resolve a short alias to a full model ID; pass-through if already qualified. */
-function resolveModelId(model: string | null): string | null {
-  if (!model) return null;
-  return MODEL_ALIAS_MAP[model] ?? model;
-}
-
-function modelSupportsAdaptive(model: string | null): boolean {
-  if (!model) return false;
-  return ADAPTIVE_THINKING_MODELS.has(model);
-}
-
-interface Session {
-  id: string;
-  sessionId: string | null;
-  status: "running" | "idle" | "stopped" | "error" | "completed";
-  abortController: AbortController;
-  queryHandle: Query | null;
-  cwd: string;
-  eventBuffer: BufferedEvent[];
-  totalCost: number;
-  turns: number;
-  lastError: string | null;
-  model: string | null;
-  permissionMode: string | null;
-  /** Adaptive-thinking config supplied by the client. Refreshed on each turn. */
-  thinkingConfig: ThinkingConfig | null;
-  initData: Record<string, unknown> | null;
-  /** For leader sessions: the task manager state tracking minion tasks */
-  taskState: TaskManagerState | null;
-  role: "leader" | "minion" | "default";
-  taskName: string | null;
-  worktree: WorktreeInfo | null;
-  worktreeIsolation: boolean;
-  /** Active wait timer for wait_and_continue (leader only) */
-  waitTimerId: ReturnType<typeof setTimeout> | null;
-  /** Current render dashboard state (leader only) — kept in sync by render MCP tools */
-  renderState: RenderState | null;
-}
 
 // ── WebSocket command types ─────────────────────────────
 
@@ -266,7 +170,7 @@ interface WsCommand {
   cwd?: string;
   permissionMode?: string;
   systemPrompt?: string;
-  role?: "leader" | "minion" | "default";
+  role?: SessionRole;
   worktreeIsolation?: boolean;
   // Configuration params
   model?: string;
@@ -288,78 +192,42 @@ interface WsCommand {
   requestId?: string;
 }
 
-const sessions = new Map<string, Session>();
-let keyCounter = 0;
+// ── Session registry + bus wiring ───────────────────────
+//
+// The in-memory Map that used to live here is now owned by SessionRegistry.
+// SessionHost instances own their own lifecycle, the SDK query loop, and
+// SQLite write-through — index.ts just dispatches WS commands against them.
+//
+// All outbound WebSocket traffic goes through `bus`. Direct broadcast calls
+// outside `server/bus.ts` are forbidden by the `no-direct-broadcast`
+// architecture fitness test.
 
+const registry = new SessionRegistry();
+const bus = createBus(wss);
+
+const sessionDeps: SessionHostDeps = {
+  bus,
+  startChildSession: (opts: StartSessionOptions) => registry.start(opts),
+  forEachLeaderTaskState: registry.forEachLeaderTaskState,
+};
+registry.setDeps(sessionDeps);
+
+let keyCounter = 0;
 function generateKey(): string {
   keyCounter += 1;
   return `session-${Date.now().toString(36)}-${keyCounter}`;
 }
 
-function bufferEvent(session: Session, event: BufferedEvent): void {
-  session.eventBuffer.push(event);
-  if (session.eventBuffer.length > MAX_BUFFERED_EVENTS) {
-    session.eventBuffer = session.eventBuffer.slice(-MAX_BUFFERED_EVENTS);
-  }
-}
-
-// ── Phase 4.4: session persistence (write-through to SQLite) ──
-
-/** Write the current session metadata to SQLite after any mutation. */
-function persistSession(s: Session): void {
-  const snap: PersistableSession = {
-    id: s.id, status: s.status, cwd: s.cwd, model: s.model, role: s.role,
-    taskName: s.taskName, worktreeIsolation: s.worktreeIsolation,
-    totalCost: s.totalCost, turns: s.turns,
-  };
-  persistSessionToDb(snap);
-}
-
-/**
- * Restore sessions from disk at boot. Volatile fields (abortController,
- * queryHandle, waitTimerId) are freshly initialized; restored sessions come
- * back with status = "stopped" so the UI can show them as resumable.
- */
-function hydrateSessionsOnBoot(): void {
-  try {
-    const hydrated = hydrateSessionsFromDb();
-    for (const { row, tasks, render } of hydrated) {
-      sessions.set(row.session_key, {
-        id: row.session_key, sessionId: null, status: "stopped",
-        abortController: new AbortController(), queryHandle: null,
-        cwd: row.cwd ?? process.cwd(), eventBuffer: [],
-        totalCost: row.total_cost, turns: row.turns, lastError: null,
-        model: row.model, permissionMode: null, thinkingConfig: null,
-        initData: null, taskState: tasks,
-        role: (row.role as Session["role"]) ?? "default",
-        taskName: row.task_name, worktree: null,
-        worktreeIsolation: row.worktree_isolation === 1,
-        waitTimerId: null, renderState: render,
-      });
-    }
-    if (hydrated.length > 0) {
-      console.log(`[session-persist] hydrated ${hydrated.length} session(s) from disk`);
-    }
-  } catch (err) { console.warn("[session-persist] hydrate failed:", err); }
-}
-
-/**
- * All outbound WebSocket traffic goes through this bus. Direct
- * broadcast calls outside `server/bus.ts` are forbidden by the
- * `no-direct-broadcast` architecture fitness test.
- */
-const bus: Bus = createBus(wss);
-
 /** Helper: get session or send error, returns null on failure */
 function getSessionOrError(
   sessionKey: string | undefined,
   ws: WebSocket,
-): Session | null {
+): SessionHost | null {
   if (!sessionKey) {
     unicastGlobal(ws, { type: "error", message: "sessionKey required" });
     return null;
   }
-  const session = sessions.get(sessionKey);
+  const session = registry.get(sessionKey);
   if (!session) {
     unicastToSession(ws, sessionKey, {
       type: "error",
@@ -406,419 +274,17 @@ function sendControlError(
   });
 }
 
-/** Derive a short task name from the user prompt */
-function deriveTaskName(prompt: string): string {
-  // Strip connected-context wrapper if present
-  let clean = prompt.replace(/<connected-context>[\s\S]*?<\/connected-context>\s*/g, "").trim();
-  // Take first line only
-  clean = (clean.split("\n")[0] ?? "").trim();
-  // Truncate to 40 chars
-  if (clean.length > 40) {
-    clean = clean.slice(0, 37) + "…";
-  }
-  return clean || "Leader Session";
-}
-
-// ── Session runner ──────────────────────────────────────
-
-async function runSession(
-  wsServer: WebSocketServer,
-  sessionKey: string,
-  prompt: string,
-  cwd: string,
-  resumeId?: string,
-  systemPrompt?: string,
-  role?: "leader" | "minion" | "default",
-  worktreeIsolation?: boolean,
-  parentWorktree?: WorktreeInfo,
-  initialModel?: string,
-  thinkingConfig?: ThinkingConfig | null,
-): Promise<void> {
-  const existing = sessions.get(sessionKey);
-  const abortController = new AbortController();
-  const session: Session = {
-    id: sessionKey,
-    sessionId: resumeId ?? existing?.sessionId ?? null,
-    status: "running",
-    abortController,
-    queryHandle: null,
-    cwd,
-    eventBuffer: existing?.eventBuffer ?? [],
-    totalCost: existing?.totalCost ?? 0,
-    turns: existing?.turns ?? 0,
-    lastError: null,
-    model: existing?.model ?? initialModel ?? null,
-    permissionMode: existing?.permissionMode ?? null,
-    thinkingConfig: thinkingConfig ?? existing?.thinkingConfig ?? null,
-    initData: existing?.initData ?? null,
-    taskState: existing?.taskState ?? null,
-    role: role ?? existing?.role ?? "default",
-    taskName: existing?.taskName ?? null,
-    worktree: parentWorktree ?? existing?.worktree ?? null,
-    worktreeIsolation: worktreeIsolation === true,
-    waitTimerId: null,
-    renderState: null,
-  };
-  // Clear any existing wait timer when the session resumes (it's being continued)
-  if (existing?.waitTimerId) {
-    clearTimeout(existing.waitTimerId);
-  }
-  sessions.set(sessionKey, session);
-  persistSession(session);
-
-  // ── Resolve agent type early (needed for worktree decisions) ──
-  const agentType = getAgentType(session.role);
-
-  // Derive a task name for agent types that want one (leader)
-  if (!session.taskName && agentType.wantsWorktree) {
-    session.taskName = deriveTaskName(prompt);
-  }
-
-  // ── Inherit parent worktree for minion sessions ──────
-  if (parentWorktree) {
-    session.cwd = parentWorktree.path;
-    cwd = parentWorktree.path;
-    console.log(`[worktree] Minion ${sessionKey} inheriting worktree ${parentWorktree.branch} at ${parentWorktree.path}`);
-  }
-
-  // ── Create worktree for agent types that want isolation ──
-  const shouldCreateWorktree = worktreeIsolation === true; // defaults to false
-  if (agentType.wantsWorktree && shouldCreateWorktree) {
-    if (existing?.worktree) {
-      // Resume: reuse existing worktree
-      session.worktree = existing.worktree;
-      session.cwd = existing.worktree.path;
-      cwd = existing.worktree.path;
-    } else {
-      try {
-        const inGitRepo = await isGitRepo(cwd);
-        if (inGitRepo) {
-          const worktreeInfo = await createWorktree(cwd, sessionKey);
-          session.worktree = worktreeInfo;
-          session.cwd = worktreeInfo.path;
-          cwd = worktreeInfo.path;
-          bus.emitToSession(sessionKey, {
-            type: "worktree_created",
-            sessionKey,
-            worktreePath: worktreeInfo.path,
-            branch: worktreeInfo.branch,
-          });
-        } else {
-          // Not a git repo — worktree isolation was requested but is impossible.
-          // Notify the frontend so the user knows they're working on the live tree.
-          console.warn(`[worktree] ${sessionKey}: not a git repo — isolation unavailable`);
-          bus.emitToSession(sessionKey, {
-            type: "worktree_failed",
-            sessionKey,
-            error: "Project is not a git repository. Worktree isolation is unavailable.",
-          });
-        }
-      } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        console.error(`[worktree] Failed to create worktree for ${sessionKey}: ${errMsg}`);
-        // Do NOT silently fall back. Notify the user and let them decide.
-        bus.emitToSession(sessionKey, {
-          type: "worktree_failed",
-          sessionKey,
-          error: `Worktree creation failed: ${errMsg}`,
-        });
-        // Session still starts, but without isolation — the user is informed.
-        session.worktreeIsolation = false;
-      }
-    }
-  }
-
-  const statusEvent: BufferedEvent = {
-    type: "session_status",
-    sessionKey,
-    status: "running",
-    timestamp: Date.now(),
-  };
-  bufferEvent(session, statusEvent);
-  bus.emitToSession(sessionKey, statusEvent);
-
-  try {
-    // All sessions get full coding tools. MCP tool names come from the agent type.
-    const codeTools = [
-      "Read",
-      "Write",
-      "Edit",
-      "Bash",
-      "Glob",
-      "Grep",
-      "Agent",
-      "WebFetch",
-      "WebSearch",
-    ];
-
-    // Build MCP context for the agent type
-    const agentCtx: AgentTypeContext = {
-      sessionKey,
-      cwd: session.cwd,
-      bus,
-      worktreeInfo: session.worktree,
-      worktreeIsolation: session.worktreeIsolation,
-      existingTaskState: session.taskState ?? undefined,
-      existingRenderState: session.renderState ?? undefined,
-      parentWorktree: parentWorktree,
-      startMinionSession: (params) => {
-        // Fire-and-forget: start a minion session in the leader's worktree
-        runSession(
-          wsServer,
-          params.sessionKey,
-          params.prompt,
-          params.cwd,
-          undefined,
-          params.systemPrompt,
-          "minion",
-          false,              // worktreeIsolation: false — don't create a new worktree
-          session.worktree ?? undefined,  // inherit leader's worktree
-        );
-      },
-      forEachLeaderTaskState: (fn) => {
-        for (const [leaderKey, otherSession] of sessions) {
-          if (otherSession.taskState) {
-            fn(leaderKey, otherSession.taskState);
-          }
-        }
-      },
-      scheduleWaitContinue: (durationMs: number, reason: string) => {
-        // Cancel any previous wait timer
-        if (session.waitTimerId) clearTimeout(session.waitTimerId);
-
-        console.log(`[wait] Leader ${sessionKey} waiting ${durationMs}ms: ${reason}`);
-
-        session.waitTimerId = setTimeout(() => {
-          session.waitTimerId = null;
-
-          // Broadcast that the wait has ended
-          bus.emitToSession(sessionKey, {
-            type: "wait_state",
-            sessionKey,
-            action: "completed",
-            reason,
-            timestamp: Date.now(),
-          });
-
-          // Resume the session with "Continue"
-          console.log(`[wait] Resuming leader ${sessionKey} after ${durationMs}ms wait`);
-          runSession(
-            wsServer,
-            sessionKey,
-            `Continue. The ${Math.round(durationMs / 1000)}s wait has elapsed (reason: ${reason}). Pick up where you left off.`,
-            session.cwd,
-            session.sessionId ?? undefined,
-            systemPrompt,
-            session.role,
-          );
-        }, durationMs);
-      },
-    };
-
-    // Create MCP servers via the agent type
-    const mcpResult = agentType.createMcpServers(agentCtx);
-    const fullTools = [...codeTools, ...mcpResult.mcpToolNames];
-
-    // Persist agent-produced state on the session
-    if (mcpResult.taskState) session.taskState = mcpResult.taskState;
-    if (mcpResult.renderState) session.renderState = mcpResult.renderState;
-
-    const options: Record<string, unknown> = {
-      cwd: session.cwd,
-      resume: resumeId,
-      allowedTools: fullTools,
-      disallowedTools: [],
-      permissionMode: "auto",
-      abortController,
-      includePartialMessages: true,
-      promptSuggestions: true,
-    };
-
-    // Attach MCP servers if the agent type created any
-    if (Object.keys(mcpResult.mcpServers).length > 0) {
-      options["mcpServers"] = mcpResult.mcpServers;
-    }
-
-    // ── Build system prompt via agent type ──────────────
-    const basePrompt = agentType.buildSystemPrompt(agentCtx, systemPrompt);
-    if (basePrompt) {
-      let enrichedPrompt = basePrompt;
-      // When a worktree is active, append mandatory path-awareness rules
-      if (session.worktree) {
-        const isMinion = agentType.id === "minion";
-        const worktreeAddendum = [
-          "",
-          "",
-          "## ⚠️ WORKTREE ISOLATION — ACTIVE",
-          "",
-          `Your working directory (cwd) is an isolated git worktree:`,
-          `  **Worktree path:** \`${session.worktree.path}\``,
-          `  **Branch:** \`${session.worktree.branch}\``,
-          `  **Main project:** \`${session.worktree.projectPath}\``,
-          "",
-          "### Rules",
-          "",
-          "- **ALL file operations (Read, Write, Edit, Glob, Grep) MUST target paths within your worktree directory.**",
-          "- When you discover file paths (from Glob, Grep, error messages, git output, etc.), they will already be within your worktree — use them as-is.",
-          `- **NEVER** use paths under \`${session.worktree.projectPath}\` directly — that is the user's main working tree. Your changes go through the worktree and are merged after approval.`,
-          "- Bash commands automatically run in your worktree cwd.",
-          ...(isMinion
-            ? [
-                "- **Commit your work** (`git add -A && git commit -m \"...\"`) before calling `report_done`. The orchestrator has an auto-commit fallback, but explicit commits produce cleaner history.",
-                "- **Do NOT** create branches, merge, rebase, or push — the orchestrator manages all integration.",
-              ]
-            : [
-                "- If you spawn subagents via the Agent tool, they inherit your worktree cwd.",
-                "- When delegating to minions via assign_task, they will automatically work in your worktree.",
-              ]),
-          "",
-        ].join("\n");
-        enrichedPrompt += worktreeAddendum;
-      }
-      options["systemPrompt"] = enrichedPrompt;
-    }
-    if (session.model) {
-      options["model"] = resolveModelId(session.model);
-    }
-
-    // ── Adaptive thinking ────────────────────────────────
-    if (
-      session.thinkingConfig?.enabled &&
-      modelSupportsAdaptive(session.model)
-    ) {
-      options["thinking"] = {
-        type: "adaptive",
-        display: session.thinkingConfig.display,
-      };
-      options["effort"] = session.thinkingConfig.effort;
-    }
-
-    const handle = query({ prompt, options: options as never });
-
-    session.queryHandle = handle;
-
-    for await (const message of handle) {
-      if (abortController.signal.aborted) break;
-
-      const msg = message as Record<string, unknown>;
-
-      // ── Capture init data from system/init event ──────
-      if (
-        message.type === "system" &&
-        "subtype" in message &&
-        message.subtype === "init"
-      ) {
-        session.sessionId = msg["session_id"] as string;
-        session.model = (msg["model"] as string) ?? null;
-        session.permissionMode = (msg["permissionMode"] as string) ?? null;
-        session.initData = {
-          tools: msg["tools"],
-          model: msg["model"],
-          mcp_servers: msg["mcp_servers"],
-          permissionMode: msg["permissionMode"],
-          slash_commands: msg["slash_commands"],
-          skills: msg["skills"],
-          claude_code_version: msg["claude_code_version"],
-        };
-      }
-
-      // ── Forward ALL SDK events to connected clients ───
-      const sdkEvent: BufferedEvent = {
-        type: "sdk_event",
-        sessionKey,
-        message,
-        timestamp: Date.now(),
-      };
-      bufferEvent(session, sdkEvent);
-      bus.emitToSession(sessionKey, sdkEvent);
-
-      // ── Detect Agent tool subagent events ─────────────────
-      // When the SDK's built-in Agent tool spawns a subagent, it emits
-      // system events with subtype "task_started" / "task_notification".
-      // We convert these into canvas-aware events so the frontend can
-      // create and update Minion nodes automatically.
-      if (agentType.detectsSubagents && message.type === "system") {
-        const subtype = (msg as Record<string, unknown>)["subtype"] as string | undefined;
-        if (subtype === "task_started") {
-          const taskId = (msg["task_id"] as string) ?? `agent-${Date.now().toString(36)}`;
-          const description = (msg["description"] as string) ?? "Subagent task";
-          bus.emitToSession(sessionKey, {
-            type: "agent_spawned",
-            leaderSessionKey: sessionKey,
-            taskId,
-            title: description,
-            description,
-            timestamp: Date.now(),
-          });
-        }
-        if (subtype === "task_notification") {
-          const taskId = (msg["task_id"] as string) ?? "";
-          const status = (msg["status"] as string) ?? "completed";
-          const summary = (msg["summary"] as string) ?? "";
-          bus.emitToSession(sessionKey, {
-            type: "agent_task_update",
-            leaderSessionKey: sessionKey,
-            taskId,
-            status,
-            summary,
-            timestamp: Date.now(),
-          });
-        }
-      }
-
-      // ── Update session metadata on result ─────────────
-      if (message.type === "result") {
-        session.status = "idle";
-        session.totalCost =
-          (msg["total_cost_usd"] as number) ?? session.totalCost;
-        session.turns = (msg["num_turns"] as number) ?? session.turns;
-        persistSession(session);
-        const resultStatusEvent: BufferedEvent = {
-          type: "session_status",
-          sessionKey,
-          status: "idle",
-          sessionId: session.sessionId ?? undefined,
-          timestamp: Date.now(),
-        };
-        bufferEvent(session, resultStatusEvent);
-        bus.emitToSession(sessionKey, resultStatusEvent);
-
-        // ── Post-completion hook (agent-type specific) ──────
-        if (agentType.onComplete) {
-          agentType.onComplete(agentCtx, msg);
-        }
-      }
-    }
-  } catch (err: unknown) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    session.status = "error";
-    session.lastError = errorMessage;
-    persistSession(session);
-    const errorEvent: BufferedEvent = {
-      type: "session_error",
-      sessionKey,
-      error: errorMessage,
-      timestamp: Date.now(),
-    };
-    bufferEvent(session, errorEvent);
-    bus.emitToSession(sessionKey, errorEvent);
-  }
-}
 
 // ── Command handler ─────────────────────────────────────
 
-function handleCommand(
-  wsServer: WebSocketServer,
-  cmd: WsCommand,
-  ws: WebSocket,
-): void {
+function handleCommand(cmd: WsCommand, ws: WebSocket): void {
   switch (cmd.type) {
     // ────────────────────────────────────────────────────
     // Session lifecycle
     // ────────────────────────────────────────────────────
 
     case "create_session": {
-      if (sessions.size >= MAX_SESSIONS) {
+      if (registry.size >= MAX_SESSIONS) {
         unicastGlobal(ws, {
           type: "error",
           message: `Maximum session limit (${MAX_SESSIONS}) reached. Remove unused sessions first.`,
@@ -833,22 +299,19 @@ function handleCommand(
         return;
       }
       const prompt = cmd.prompt ?? "Hello";
-      const initialThinking = isValidThinkingConfig(cmd.thinkingConfig)
+      const initialThinking: ThinkingConfig | null = isValidThinkingConfig(cmd.thinkingConfig)
         ? cmd.thinkingConfig
         : null;
-      runSession(
-        wsServer,
-        key,
+      registry.start({
+        sessionKey: key,
         prompt,
         cwd,
-        undefined,
-        cmd.systemPrompt,
-        cmd.role,
-        cmd.worktreeIsolation,
-        undefined,
-        cmd.model,
-        initialThinking,
-      );
+        systemPrompt: cmd.systemPrompt,
+        role: cmd.role,
+        worktreeIsolation: cmd.worktreeIsolation,
+        initialModel: cmd.model ?? null,
+        thinkingConfig: initialThinking,
+      });
       unicastToSession(ws, key, {
         type: "session_created",
         sessionKey: key,
@@ -864,7 +327,7 @@ function handleCommand(
         });
         return;
       }
-      const sendSession = sessions.get(cmd.sessionKey);
+      const sendSession = registry.get(cmd.sessionKey);
       if (!sendSession) {
         unicastToSession(ws, cmd.sessionKey, {
           type: "error",
@@ -889,24 +352,20 @@ function handleCommand(
 
       // Refresh the session's thinking config from the latest send_message
       // payload — the user may have changed effort/display since session start.
-      const turnThinking = isValidThinkingConfig(cmd.thinkingConfig)
+      const turnThinking: ThinkingConfig | null = isValidThinkingConfig(cmd.thinkingConfig)
         ? cmd.thinkingConfig
         : sendSession.thinkingConfig;
 
       const resumeLeader = (cwd: string): void => {
-        runSession(
-          wsServer,
-          cmd.sessionKey!,
+        registry.start({
+          sessionKey: cmd.sessionKey!,
           prompt,
           cwd,
-          sendSession.sessionId ?? undefined,
-          cmd.systemPrompt ?? undefined,
-          sendSession.role,
-          undefined,
-          undefined,
-          undefined,
-          turnThinking,
-        );
+          resumeId: sendSession.sessionId ?? undefined,
+          systemPrompt: cmd.systemPrompt ?? undefined,
+          role: sendSession.role,
+          thinkingConfig: turnThinking,
+        });
       };
 
       // ── Start a fresh approval cycle when the previous worktree is gone ──
@@ -955,12 +414,11 @@ function handleCommand(
 
     case "stop_session": {
       if (!cmd.sessionKey) return;
-      const stopSession = sessions.get(cmd.sessionKey);
+      const stopSession = registry.get(cmd.sessionKey);
       if (stopSession) {
         // Cancel any pending wait timer
         if (stopSession.waitTimerId) {
-          clearTimeout(stopSession.waitTimerId);
-          stopSession.waitTimerId = null;
+          stopSession.clearWaitTimer();
           bus.emitToSession(cmd.sessionKey, {
             type: "wait_state",
             sessionKey: cmd.sessionKey,
@@ -977,7 +435,7 @@ function handleCommand(
           status: "stopped",
           timestamp: Date.now(),
         };
-        bufferEvent(stopSession, stopEvent);
+        stopSession.bufferEvent(stopEvent);
         bus.emitToSession(cmd.sessionKey, stopEvent);
       }
       break;
@@ -985,7 +443,7 @@ function handleCommand(
 
     case "sync_session": {
       if (!cmd.sessionKey) return;
-      const syncSession = sessions.get(cmd.sessionKey);
+      const syncSession = registry.get(cmd.sessionKey);
       if (!syncSession) {
         unicastToSession(ws, cmd.sessionKey, {
           type: "sync_response",
@@ -1040,26 +498,9 @@ function handleCommand(
     }
 
     case "list_sessions": {
-      const sessionList = Array.from(sessions.entries()).map(([key, s]) => ({
-        sessionKey: key,
-        sessionId: s.sessionId,
-        status: s.status,
-        cwd: s.cwd,
-        totalCost: s.totalCost,
-        turns: s.turns,
-        model: s.model,
-        permissionMode: s.permissionMode,
-        taskName: s.taskName,
-        role: s.role,
-        activeMinions: s.taskState
-          ? Array.from(s.taskState.tasks.entries())
-              .filter(([, t]) => t.status === "planned" || t.status === "running")
-              .map(([id, t]) => ({ taskId: id, title: t.title, status: t.status, sessionKey: t.minionSessionKey }))
-          : [],
-      }));
       unicastGlobal(ws, {
         type: "session_list",
-        sessions: sessionList,
+        sessions: registry.snapshot(),
       });
       break;
     }
@@ -1120,10 +561,7 @@ function handleCommand(
     case "close_session": {
       const closeSession = getSessionOrError(cmd.sessionKey, ws);
       if (!closeSession) return;
-      if (closeSession.waitTimerId) {
-        clearTimeout(closeSession.waitTimerId);
-        closeSession.waitTimerId = null;
-      }
+      closeSession.clearWaitTimer();
       if (closeSession.queryHandle) {
         closeSession.queryHandle.close();
       }
@@ -1135,7 +573,7 @@ function handleCommand(
         status: "stopped",
         timestamp: Date.now(),
       };
-      bufferEvent(closeSession, closeEvent);
+      closeSession.bufferEvent(closeEvent);
       bus.emitToSession(cmd.sessionKey!, closeEvent);
       sendControlResponse(ws, "close_session", cmd.sessionKey!, cmd.requestId);
       break;
@@ -1146,13 +584,9 @@ function handleCommand(
         unicastGlobal(ws, { type: "error", message: "sessionKey required" });
         return;
       }
-      const removeSession = sessions.get(cmd.sessionKey);
+      const removeSession = registry.get(cmd.sessionKey);
       if (removeSession) {
-        // Clear any pending wait timer
-        if (removeSession.waitTimerId) {
-          clearTimeout(removeSession.waitTimerId);
-          removeSession.waitTimerId = null;
-        }
+        removeSession.clearWaitTimer();
         // Stop if still running
         if (removeSession.queryHandle) {
           removeSession.queryHandle.close();
@@ -1169,28 +603,11 @@ function handleCommand(
           removeSession.worktree = null;
         }
 
-        sessions.delete(cmd.sessionKey);
+        registry.delete(cmd.sessionKey);
         removePersistedSession(cmd.sessionKey);
       }
       // Broadcast updated session list to all clients
-      const updatedList = Array.from(sessions.entries()).map(([key, s]) => ({
-        sessionKey: key,
-        sessionId: s.sessionId,
-        status: s.status,
-        cwd: s.cwd,
-        totalCost: s.totalCost,
-        turns: s.turns,
-        model: s.model,
-        permissionMode: s.permissionMode,
-        taskName: s.taskName,
-        role: s.role,
-        activeMinions: s.taskState
-          ? Array.from(s.taskState.tasks.entries())
-              .filter(([, t]) => t.status === "planned" || t.status === "running")
-              .map(([id, t]) => ({ taskId: id, title: t.title, status: t.status, sessionKey: t.minionSessionKey }))
-          : [],
-      }));
-      bus.emitGlobal({ type: "session_list", sessions: updatedList });
+      bus.emitGlobal({ type: "session_list", sessions: registry.snapshot() });
       break;
     }
 
@@ -1407,10 +824,7 @@ function handleCommand(
         approveSession.abortController.abort();
       }
       // Cancel any pending wait timer
-      if (approveSession.waitTimerId) {
-        clearTimeout(approveSession.waitTimerId);
-        approveSession.waitTimerId = null;
-      }
+      approveSession.clearWaitTimer();
 
       // NOTE: Don't clear approval state yet — wait until merge succeeds.
       // If merge fails, the approval UI should remain visible for retry.
@@ -1435,7 +849,7 @@ function handleCommand(
               status: "completed",
               timestamp: Date.now(),
             };
-            bufferEvent(approveSession, completedStatusEvent);
+            approveSession.bufferEvent(completedStatusEvent);
             bus.emitToSession(cmd.sessionKey!, completedStatusEvent);
             bus.emitToSession(cmd.sessionKey!, {
               type: "worktree_merged",
@@ -1493,10 +907,7 @@ function handleCommand(
       if (forceSession.status === "running") {
         forceSession.abortController.abort();
       }
-      if (forceSession.waitTimerId) {
-        clearTimeout(forceSession.waitTimerId);
-        forceSession.waitTimerId = null;
-      }
+      forceSession.clearWaitTimer();
 
       mergeAndCleanup(forceSession.worktree, undefined, { force: true })
         .then((result) => {
@@ -1517,7 +928,7 @@ function handleCommand(
               status: "completed",
               timestamp: Date.now(),
             };
-            bufferEvent(forceSession, forceCompletedEvent);
+            forceSession.bufferEvent(forceCompletedEvent);
             bus.emitToSession(cmd.sessionKey!, forceCompletedEvent);
             bus.emitToSession(cmd.sessionKey!, {
               type: "worktree_merged",
@@ -1569,10 +980,7 @@ function handleCommand(
       if (theirsSession.status === "running") {
         theirsSession.abortController.abort();
       }
-      if (theirsSession.waitTimerId) {
-        clearTimeout(theirsSession.waitTimerId);
-        theirsSession.waitTimerId = null;
-      }
+      theirsSession.clearWaitTimer();
       mergeAndCleanup(theirsSession.worktree, undefined, { strategy: "theirs" })
         .then((result) => {
           if (result.success) {
@@ -1588,7 +996,7 @@ function handleCommand(
               status: "completed",
               timestamp: Date.now(),
             };
-            bufferEvent(theirsSession, theirsCompletedEvent);
+            theirsSession.bufferEvent(theirsCompletedEvent);
             bus.emitToSession(cmd.sessionKey!, theirsCompletedEvent);
             bus.emitToSession(cmd.sessionKey!, {
               type: "worktree_merged",
@@ -1640,10 +1048,7 @@ function handleCommand(
       if (retrySession.status === "running") {
         retrySession.abortController.abort();
       }
-      if (retrySession.waitTimerId) {
-        clearTimeout(retrySession.waitTimerId);
-        retrySession.waitTimerId = null;
-      }
+      retrySession.clearWaitTimer();
       mergeAndCleanup(retrySession.worktree)
         .then((result) => {
           if (result.success) {
@@ -1659,7 +1064,7 @@ function handleCommand(
               status: "completed",
               timestamp: Date.now(),
             };
-            bufferEvent(retrySession, retryCompletedEvent);
+            retrySession.bufferEvent(retryCompletedEvent);
             bus.emitToSession(cmd.sessionKey!, retryCompletedEvent);
             bus.emitToSession(cmd.sessionKey!, {
               type: "worktree_merged",
@@ -1994,25 +1399,15 @@ wss.on("connection", (ws) => {
   console.log("Client connected");
 
   // Send current session list on connect
-  const sessionList = Array.from(sessions.entries()).map(([key, s]) => ({
-    sessionKey: key,
-    sessionId: s.sessionId,
-    status: s.status,
-    cwd: s.cwd,
-    totalCost: s.totalCost,
-    turns: s.turns,
-    model: s.model,
-    permissionMode: s.permissionMode,
-  }));
   unicastGlobal(ws, {
     type: "session_list",
-    sessions: sessionList,
+    sessions: registry.snapshot(),
   });
 
   ws.on("message", (raw) => {
     try {
       const cmd = JSON.parse(String(raw)) as WsCommand;
-      handleCommand(wss, cmd, ws);
+      handleCommand(cmd, ws);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       unicastGlobal(ws, { type: "error", message: msg });
@@ -2031,7 +1426,7 @@ server.listen(PORT, HOST, () => {
   console.log(`[auth] Auth token: ${AUTH_TOKEN.slice(0, 8)}...`);
 
   // Phase 4.4: rehydrate persisted sessions (tasks, render state) from SQLite
-  hydrateSessionsOnBoot();
+  registry.hydrateFromDb();
 
   // Clean up stale worktrees from previous sessions across all known projects
   const recentProjects = listRecentProjects();
@@ -2046,7 +1441,7 @@ server.listen(PORT, HOST, () => {
 async function shutdownCleanup(): Promise<void> {
   console.log("[shutdown] Cleaning up active worktrees...");
   const cleanups: Promise<void>[] = [];
-  for (const [key, session] of sessions) {
+  for (const [key, session] of registry) {
     if (session.worktree) {
       console.log(`[shutdown] Removing worktree for ${key}: ${session.worktree.branch}`);
       cleanups.push(
