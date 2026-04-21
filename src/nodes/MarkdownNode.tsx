@@ -569,7 +569,7 @@ function SaveDialog({ projectPath, title, content, savedPath, onSaved, onClose }
 
 // ── Component ──────────────────────────────────────────
 
-function MarkdownNodeRenderer({ node, onUpdateData, onResize, canvasScale, projectPath }: NodeRenderProps) {
+function MarkdownNodeRenderer({ node, onUpdateData, onResize, projectPath }: NodeRenderProps) {
   const data = node.data as MarkdownData;
   const collapsed = data.collapsed ?? false;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1439,7 +1439,6 @@ function MarkdownNodeRenderer({ node, onUpdateData, onResize, canvasScale, proje
               minHeight={200}
               onResize={onResize}
               color="var(--text-muted)"
-              canvasScale={canvasScale}
             />
           )}
         </>
@@ -1455,4 +1454,6 @@ registerNodeType({
   label: "Markdown",
   defaultSize: { width: 420, height: 380 },
   render: MarkdownNodeRenderer,
+  providesContext: true,
+  extractContent: (data) => (data as { content?: string })?.content ?? null,
 });

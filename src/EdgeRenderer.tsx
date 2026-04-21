@@ -12,10 +12,9 @@ interface EdgeRendererProps {
 /**
  * Get the position of a port on a node.
  *
- * For hidden ports (used internally for task/status/result routing),
- * we fall back to the node center-edge since they have no visible dot.
- * For visible ports, we use the same spacing math as CanvasNode's port
- * dot rendering (only counting visible ports).
+ * All ports are visible and rendered as dots. Uses the same spacing math
+ * as CanvasNode's port dot rendering: anchorY if specified, otherwise
+ * even-spaced among same-direction ports.
  */
 function getPortPosition(
   node: CanvasNode,
@@ -32,25 +31,15 @@ function getPortPosition(
     return { x: node.position.x, y: node.position.y };
   }
 
-  // For hidden ports, anchor at the node edge midpoint
-  if (port.hidden) {
-    const y = node.position.y + node.size.height / 2;
-    if (direction === "output") {
-      return { x: node.position.x + node.size.width, y };
-    }
-    return { x: node.position.x, y };
-  }
-
-  // For visible ports, match CanvasNode spacing (only visible ports counted)
-  const visiblePorts = contract.ports.filter(
-    (p) => p.direction === direction && !p.hidden,
+  const sameDirPorts = contract.ports.filter(
+    (p) => p.direction === direction,
   );
-  const portIndex = visiblePorts.findIndex((p) => p.id === portId);
+  const portIndex = sameDirPorts.findIndex((p) => p.id === portId);
 
   // Use fixed anchorY if specified, otherwise even-space
   const y = port.anchorY != null
     ? node.position.y + node.size.height * port.anchorY
-    : node.position.y + node.size.height / (visiblePorts.length + 1) * (portIndex + 1);
+    : node.position.y + node.size.height / (sameDirPorts.length + 1) * (portIndex + 1);
 
   if (direction === "output") {
     return { x: node.position.x + node.size.width, y };
@@ -96,22 +85,19 @@ const BezierEdge = memo(function BezierEdge({
         strokeWidth={2}
         strokeOpacity={0.3}
       />
+      {/* Use CSS animation class instead of SVG <animate> element.
+          CSS animations are compositor-friendly and can be paused globally
+          via prefers-reduced-motion or a parent class. SVG <animate> triggers
+          continuous main-thread repaints on every frame. */}
       <path
+        className="edge-flow"
         d={d}
         fill="none"
         stroke={color}
         strokeWidth={1}
         strokeOpacity={0.8}
         strokeDasharray="6 4"
-      >
-        <animate
-          attributeName="stroke-dashoffset"
-          from="20"
-          to="0"
-          dur="1s"
-          repeatCount="indefinite"
-        />
-      </path>
+      />
       {/* Target dot */}
       <circle cx={x2} cy={y2} r={3} fill={color} opacity={0.6} />
       {/* Source dot */}

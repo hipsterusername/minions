@@ -317,4 +317,6 @@ registerNodeType({
   label: "Context Group",
   defaultSize: { width: 660, height: 440 },
   render: ContextGroupRenderer,
+  isContainer: true,
+  providesContext: true,
 });

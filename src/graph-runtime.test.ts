@@ -19,7 +19,14 @@ import {
   dispatchMessage,
   createEdge,
 } from "./graph-runtime.ts";
-import { makeEdge, taskAssignment } from "../tests/fixtures/builders.ts";
+import {
+  makeEdge,
+  makeStatusEdge,
+  makeResultEdge,
+  taskAssignment,
+  taskStatusUpdate,
+  taskResult,
+} from "../tests/fixtures/builders.ts";
 
 function emptyGraph(): GraphDocument {
   return { edges: [] };
@@ -289,7 +296,7 @@ describe("createEdge", () => {
     expect(edge).toBeNull();
   });
 
-  it("returns null when canAcceptContextConnection fails (leader with sessionKey set)", () => {
+  it("returns null when lifecycle guard rejects (leader context-in with active session)", () => {
     const edge = createEdge(
       "provider-1", "context-out", "context-provider",
       "leader-1", "context-in", "leader",
@@ -327,5 +334,250 @@ describe("createEdge", () => {
     );
     expect(typeof edge?.id).toBe("string");
     expect(edge?.id.length).toBeGreaterThan(0);
+  });
+});
+
+// ── Phase 4.1: Protocol-specific routing tests ─────────────
+
+describe("dispatchMessage — task-assignment protocol", () => {
+  it("delivers task assignment from leader to multiple minions", () => {
+    const graph: GraphDocument = {
+      edges: [
+        makeEdge("e1", "leader-1", "minion-1"),
+        makeEdge("e2", "leader-1", "minion-2"),
+        makeEdge("e3", "leader-1", "minion-3"),
+      ],
+    };
+    const handler = vi.fn();
+    const msg = taskAssignment("task-42");
+    dispatchMessage(graph, "leader-1", "task-out", msg, handler);
+
+    expect(handler).toHaveBeenCalledTimes(3);
+    expect(handler).toHaveBeenCalledWith("minion-1", "task-in", msg);
+    expect(handler).toHaveBeenCalledWith("minion-2", "task-in", msg);
+    expect(handler).toHaveBeenCalledWith("minion-3", "task-in", msg);
+  });
+
+  it("only routes to edges from the specified source port", () => {
+    const graph: GraphDocument = {
+      edges: [
+        makeEdge("e1", "leader-1", "minion-1"),
+        // A different port on the same source node
+        makeEdge("e2", "leader-1", "minion-2", {
+          sourcePortId: "result-in",
+          targetPortId: "result-out",
+          protocol: "task-result",
+        }),
+      ],
+    };
+    const handler = vi.fn();
+    dispatchMessage(graph, "leader-1", "task-out", taskAssignment("t1"), handler);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith("minion-1", "task-in", expect.anything());
+  });
+});
+
+describe("dispatchMessage — task-status protocol", () => {
+  it("delivers status updates from minion to leader via status edges", () => {
+    const graph: GraphDocument = {
+      edges: [makeStatusEdge("se1", "minion-1", "leader-1")],
+    };
+    const handler = vi.fn();
+    const msg = taskStatusUpdate("task-1", "in_progress");
+    dispatchMessage(graph, "minion-1", "status-out", msg, handler);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith("leader-1", "status-in", msg);
+  });
+
+  it("ignores status dispatch when no status edges exist", () => {
+    const graph: GraphDocument = {
+      edges: [makeEdge("e1", "leader-1", "minion-1")], // only task-assignment edge
+    };
+    const handler = vi.fn();
+    dispatchMessage(graph, "minion-1", "status-out", taskStatusUpdate("t1"), handler);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("delivers to multiple leaders if minion has fan-out status edges", () => {
+    const graph: GraphDocument = {
+      edges: [
+        makeStatusEdge("se1", "minion-1", "leader-1"),
+        makeStatusEdge("se2", "minion-1", "leader-2"),
+      ],
+    };
+    const handler = vi.fn();
+    dispatchMessage(graph, "minion-1", "status-out", taskStatusUpdate("t1"), handler);
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("dispatchMessage — task-result protocol", () => {
+  it("delivers results from minion to leader via result edges", () => {
+    const graph: GraphDocument = {
+      edges: [makeResultEdge("re1", "minion-1", "leader-1")],
+    };
+    const handler = vi.fn();
+    const msg = taskResult("task-1", true);
+    dispatchMessage(graph, "minion-1", "result-out", msg, handler);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith("leader-1", "result-in", msg);
+  });
+
+  it("delivers failure results correctly", () => {
+    const graph: GraphDocument = {
+      edges: [makeResultEdge("re1", "minion-1", "leader-1")],
+    };
+    const handler = vi.fn();
+    const msg = taskResult("task-1", false);
+    dispatchMessage(graph, "minion-1", "result-out", msg, handler);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    const delivered = handler.mock.calls[0][2] as { protocol: string; payload: { success: boolean } };
+    expect(delivered.protocol).toBe("task-result");
+    expect(delivered.payload.success).toBe(false);
+  });
+});
+
+describe("dispatchMessage — edge deduplication and isolation", () => {
+  it("delivers exactly once per edge (no duplicates)", () => {
+    // Even with two edges to the same target, handler is called twice
+    // (once per edge — each edge is a distinct delivery)
+    const graph: GraphDocument = {
+      edges: [
+        makeEdge("e1", "leader-1", "minion-1"),
+        makeEdge("e2", "leader-1", "minion-1", {
+          sourcePortId: "task-out",
+          targetPortId: "task-in",
+        }),
+      ],
+    };
+    const handler = vi.fn();
+    dispatchMessage(graph, "leader-1", "task-out", taskAssignment("t1"), handler);
+    // graphReducer prevents adding duplicate edges (same source+target+ports),
+    // but if two edges exist, both are delivered
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it("isolates dispatch by source node — no cross-talk between leaders", () => {
+    const graph: GraphDocument = {
+      edges: [
+        makeEdge("e1", "leader-1", "minion-1"),
+        makeEdge("e2", "leader-2", "minion-2"),
+      ],
+    };
+    const handler = vi.fn();
+    dispatchMessage(graph, "leader-1", "task-out", taskAssignment("t1"), handler);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith("minion-1", "task-in", expect.anything());
+  });
+
+  it("routes all three protocols independently through a full leader→minion graph", () => {
+    // Set up a complete bidirectional leader↔minion graph
+    const graph: GraphDocument = {
+      edges: [
+        makeEdge("e1", "leader-1", "minion-1"),           // task-assignment
+        makeStatusEdge("e2", "minion-1", "leader-1"),      // task-status
+        makeResultEdge("e3", "minion-1", "leader-1"),      // task-result
+      ],
+    };
+
+    const handler = vi.fn();
+
+    // Leader sends task assignment
+    dispatchMessage(graph, "leader-1", "task-out", taskAssignment("t1"), handler);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith("minion-1", "task-in", expect.objectContaining({ protocol: "task-assignment" }));
+
+    handler.mockClear();
+
+    // Minion sends status
+    dispatchMessage(graph, "minion-1", "status-out", taskStatusUpdate("t1", "in_progress"), handler);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith("leader-1", "status-in", expect.objectContaining({ protocol: "task-status" }));
+
+    handler.mockClear();
+
+    // Minion sends result
+    dispatchMessage(graph, "minion-1", "result-out", taskResult("t1"), handler);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith("leader-1", "result-in", expect.objectContaining({ protocol: "task-result" }));
+  });
+});
+
+describe("createEdge — status and result protocols", () => {
+  it("creates a status edge between minion output and leader input", () => {
+    const edge = createEdge(
+      "minion-1", "status-out", "minion",
+      "leader-1", "status-in", "leader",
+    );
+    expect(edge).not.toBeNull();
+    expect(edge?.protocol).toBe("task-status");
+    expect(edge?.sourcePortId).toBe("status-out");
+    expect(edge?.targetPortId).toBe("status-in");
+  });
+
+  it("creates a result edge between minion output and leader input", () => {
+    const edge = createEdge(
+      "minion-1", "result-out", "minion",
+      "leader-1", "result-in", "leader",
+    );
+    expect(edge).not.toBeNull();
+    expect(edge?.protocol).toBe("task-result");
+    expect(edge?.sourcePortId).toBe("result-out");
+    expect(edge?.targetPortId).toBe("result-in");
+  });
+
+  it("rejects status edge with wrong direction (leader→minion)", () => {
+    const edge = createEdge(
+      "leader-1", "status-in", "leader",
+      "minion-1", "status-out", "minion",
+    );
+    expect(edge).toBeNull();
+  });
+
+  it("rejects result edge with wrong direction (leader→minion)", () => {
+    const edge = createEdge(
+      "leader-1", "result-in", "leader",
+      "minion-1", "result-out", "minion",
+    );
+    expect(edge).toBeNull();
+  });
+});
+
+describe("port visibility — no hidden ports", () => {
+  it("LEADER_CONTRACT has no hidden ports", () => {
+    const { LEADER_CONTRACT } = require("./graph.ts");
+    for (const port of LEADER_CONTRACT.ports) {
+      expect(port).not.toHaveProperty("hidden");
+    }
+  });
+
+  it("MINION_CONTRACT has no hidden ports", () => {
+    const { MINION_CONTRACT } = require("./graph.ts");
+    for (const port of MINION_CONTRACT.ports) {
+      expect(port).not.toHaveProperty("hidden");
+    }
+  });
+
+  it("all leader task ports have anchorY for stable positioning", () => {
+    const { LEADER_CONTRACT } = require("./graph.ts");
+    const taskPorts = LEADER_CONTRACT.ports.filter(
+      (p: { protocol: string }) => p.protocol !== "context",
+    );
+    for (const port of taskPorts) {
+      expect(port.anchorY).toBeGreaterThan(0);
+      expect(port.anchorY).toBeLessThan(1);
+    }
+  });
+
+  it("all minion ports have anchorY for stable positioning", () => {
+    const { MINION_CONTRACT } = require("./graph.ts");
+    for (const port of MINION_CONTRACT.ports) {
+      expect(port.anchorY).toBeGreaterThan(0);
+      expect(port.anchorY).toBeLessThan(1);
+    }
   });
 });

@@ -1,14 +1,14 @@
 import { useCallback, useRef, memo } from "react";
-import type { CanvasNode, CanvasTransform, Position, Size } from "./types.ts";
+import type { CanvasNode, Position, Size } from "./types.ts";
 import { getNodeType } from "./node-registry.ts";
-import { getContract } from "./graph.ts";
+import { getContract, isPortOpen } from "./graph.ts";
 import { PortDot } from "./components/PortDot.tsx";
 import type { PortInfo } from "./components/PortDot.tsx";
 import { wheelDetector } from "./wheel-detector.ts";
+import { canvasScale } from "./canvas-scale.ts";
 
 interface CanvasNodeProps {
   node: CanvasNode;
-  transform: CanvasTransform;
   isSelected: boolean;
   onSelect: (id: string, additive: boolean) => void;
   onMove: (id: string, position: Position) => void;
@@ -39,8 +39,11 @@ interface CanvasNodeProps {
   onDragEnd?: (nodeId: string) => void;
   /** True when a droppable node is hovering over this node (context-group) */
   isDropTarget?: boolean;
-  /** ID of the node currently being dragged (null when idle) */
-  draggingNodeId?: string | null;
+  /** True when this node is currently being dragged by the user.
+   *  Pre-computed from draggingNodeId === node.id in Canvas so we pass a
+   *  stable boolean instead of the raw string ID (which would bust memo
+   *  on ALL nodes whenever any drag starts/ends). */
+  isBeingDragged?: boolean;
   /** True when this node is inside a context-group that is currently being dragged */
   isInsideDraggingGroup?: boolean;
   /** True when this node is spatially inside any context-group */
@@ -48,20 +51,15 @@ interface CanvasNodeProps {
 }
 
 /**
- * Compute the port label for context-in on leader nodes. Returns the locked
- * state based on whether the session has already started.
+ * Check whether a port is currently locked via its lifecycle callback.
+ * Used for visual lock indicators and dynamic port hiding.
  */
 function isPortLocked(node: CanvasNode, portId: string): boolean {
-  if (node.type === "leader" && portId === "context-in") {
-    const data = node.data as { sessionKey?: string | null } | undefined;
-    return !!data?.sessionKey;
-  }
-  return false;
+  return !isPortOpen(node.type, portId, node.data);
 }
 
 export const CanvasNodeComponent = memo(function CanvasNodeComponent({
   node,
-  transform,
   isSelected,
   onSelect,
   onMove,
@@ -81,7 +79,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
   onDragStart,
   onDragEnd,
   isDropTarget = false,
-  draggingNodeId,
+  isBeingDragged = false,
   isInsideDraggingGroup = false,
   isInsideContextGroup = false,
   connectedPorts,
@@ -154,11 +152,12 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
 
       const handleMouseMove = (ev: MouseEvent) => {
         if (!dragRef.current) return;
-        const dx = (ev.clientX - dragRef.current.startX) / transform.scale;
-        const dy = (ev.clientY - dragRef.current.startY) / transform.scale;
+        const scale = canvasScale.current;
+        const dx = (ev.clientX - dragRef.current.startX) / scale;
+        const dy = (ev.clientY - dragRef.current.startY) / scale;
         // Only count as a drag if we've moved at least 3px (avoids jitter
         // on click from accidentally narrowing multi-select)
-        if (!didDrag && Math.abs(dx) + Math.abs(dy) > 3 / transform.scale) {
+        if (!didDrag && Math.abs(dx) + Math.abs(dy) > 3 / scale) {
           didDrag = true;
         }
         onMove(node.id, {
@@ -186,7 +185,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseup", handleMouseUp);
     },
-    [node.id, node.position, transform.scale, isSelected, onSelect, onMove, onDragStart, onDragEnd],
+    [node.id, node.position, isSelected, onSelect, onMove, onDragStart, onDragEnd],
   );
 
   /** Absorb mouse-wheel zoom events on nodes so the canvas never zooms
@@ -223,15 +222,13 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
 
   const NodeRenderer = typeDef.render;
 
-  const isBeingDragged = draggingNodeId === node.id;
-
   // ── Port dots from contract ──────────────────────────
   const contract = getContract(node.type);
   const portDots: React.ReactNode[] = [];
 
-  // Decide whether a port should be visually hidden beyond the static `hidden` flag.
+  // Decide whether a port should be dynamically hidden based on node state.
   // - Leader input ports: hide when disabled (locked) and not connected
-  // - File-viewer / markdown output ports: hide when not connected
+  // - File-viewer / markdown output ports: hide when inside a context group and not connected
   const isPortDynamicallyHidden = (port: import("./graph.ts").PortDefinition): boolean => {
     const portKey = `${node.id}:${port.id}`;
     const isConnected = connectedPorts?.has(portKey) ?? false;
@@ -257,8 +254,8 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
   };
 
   if (contract) {
-    const inputPorts = contract.ports.filter((p) => p.direction === "input" && !p.hidden && !isPortDynamicallyHidden(p));
-    const outputPorts = contract.ports.filter((p) => p.direction === "output" && !p.hidden && !isPortDynamicallyHidden(p));
+    const inputPorts = contract.ports.filter((p) => p.direction === "input" && !isPortDynamicallyHidden(p));
+    const outputPorts = contract.ports.filter((p) => p.direction === "output" && !isPortDynamicallyHidden(p));
 
     // Same spacing math as EdgeRenderer.getPortPosition
     const height = node.size.height;
@@ -323,8 +320,13 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
       onWheel={handleWheel}
       style={{
         position: "absolute",
-        left: node.position.x,
-        top: node.position.y,
+        // Use translate3d instead of left/top — this promotes the node to its
+        // own compositor layer so position changes during drag skip layout
+        // recalculation entirely and run on the GPU.
+        left: 0,
+        top: 0,
+        transform: `translate3d(${node.position.x}px, ${node.position.y}px, 0)`,
+        willChange: isBeingDragged ? "transform" : "auto",
         width: node.size.width,
         ...(typeDef.autoHeight
           ? { minHeight: node.size.height, height: "auto" }
@@ -342,8 +344,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
         transition: isBeingDragged || isInsideDraggingGroup
           ? "outline-color 0.15s, filter 0.2s"
           : [
-            "left 0.35s cubic-bezier(0.22, 1, 0.36, 1)",
-            "top 0.35s cubic-bezier(0.22, 1, 0.36, 1)",
+            "transform 0.35s cubic-bezier(0.22, 1, 0.36, 1)",
             "outline-color 0.15s",
             "filter 0.2s",
           ].join(", "),
@@ -377,7 +378,6 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
         onResize={handleResize}
         onAddContentNode={onAddContentNode}
         onRevealMinion={onRevealMinion}
-        canvasScale={transform.scale}
         isDropTarget={isDropTarget}
         isBeingDragged={isBeingDragged}
       />

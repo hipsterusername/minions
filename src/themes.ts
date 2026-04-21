@@ -41,6 +41,7 @@ const darkSemanticVars = {
   // Model colors
   "--model-sonnet": "#f59e0b",
   "--model-opus": "#a78bfa",
+  "--model-opus-old": "#8b7ab8",
   "--model-haiku": "#34d399",
 
   // Semantic accents
@@ -70,6 +71,8 @@ const darkSemanticVars = {
   "--success-bg": "rgba(74, 222, 128, 0.08)",
   "--danger-bg": "rgba(239, 68, 68, 0.08)",
   "--warning-bg": "rgba(250, 204, 21, 0.06)",
+  "--info-bg": "rgba(96, 165, 250, 0.08)",
+  "--muted-bg": "rgba(136, 144, 176, 0.06)",
 
   // Edge colors
   "--edge-task": "#818cf8",
@@ -131,6 +134,7 @@ const lightSemanticVars: Record<string, string> = {
   // Model colors
   "--model-sonnet": "#a84e08",
   "--model-opus": "#6d28d9",
+  "--model-opus-old": "#7c5db5",
   "--model-haiku": "#14793a",
 
   // Semantic accents — darkened for AA compliance on white/light surfaces
@@ -160,6 +164,8 @@ const lightSemanticVars: Record<string, string> = {
   "--success-bg": "rgba(20, 121, 58, 0.08)",
   "--danger-bg": "rgba(185, 28, 28, 0.08)",
   "--warning-bg": "rgba(168, 78, 8, 0.06)",
+  "--info-bg": "rgba(29, 78, 216, 0.08)",
+  "--muted-bg": "rgba(100, 116, 139, 0.06)",
 
   // Edge colors — darkened for light theme contrast
   "--edge-task": "#4f46e5",

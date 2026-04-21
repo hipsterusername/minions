@@ -1,5 +1,6 @@
 import { useCallback, useRef } from "react";
 import type { Size } from "../types.ts";
+import { canvasScale } from "../canvas-scale.ts";
 
 interface ResizeHandleProps {
   currentSize: Size;
@@ -8,8 +9,6 @@ interface ResizeHandleProps {
   onResize: (size: Size) => void;
   /** Accent color for the handle dots */
   color?: string;
-  /** Current canvas zoom scale — used to compensate pixel deltas */
-  canvasScale?: number;
   /** Called when the user starts dragging the resize handle */
   onResizeStart?: () => void;
   /** Called when the user stops dragging the resize handle */
@@ -26,7 +25,6 @@ export function ResizeHandle({
   minHeight = 280,
   onResize,
   color = "var(--text-muted)",
-  canvasScale = 1,
   onResizeStart,
   onResizeEnd,
 }: ResizeHandleProps) {
@@ -53,7 +51,7 @@ export function ResizeHandle({
 
       const handleMouseMove = (ev: MouseEvent) => {
         if (!dragRef.current) return;
-        const scale = canvasScale || 1;
+        const scale = canvasScale.current;
         const dx = (ev.clientX - dragRef.current.startX) / scale;
         const dy = (ev.clientY - dragRef.current.startY) / scale;
         onResize({
@@ -74,7 +72,7 @@ export function ResizeHandle({
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseup", handleMouseUp);
     },
-    [currentSize, minWidth, minHeight, onResize, canvasScale, onResizeStart, onResizeEnd],
+    [currentSize, minWidth, minHeight, onResize, onResizeStart, onResizeEnd],
   );
 
   return (

@@ -64,7 +64,6 @@ function Probe({ socket, initial, onState }: ProbeProps) {
     socketSend: () => {
       /* no-op */
     },
-    canvasScale: 1,
   };
   return <LeaderNodeRenderer {...props} />;
 }

@@ -32,6 +32,11 @@ export const MODEL_CAPABILITIES: Record<ModelOption, ModelCapability> = {
     supportsAdaptiveThinking: true,
     supportedEffortLevels: OPUS_EFFORTS,
   },
+  // Opus 4.6: adaptive supported with standard effort levels.
+  "opus-old": {
+    supportsAdaptiveThinking: true,
+    supportedEffortLevels: STANDARD_EFFORTS,
+  },
   // Haiku 3.5 does not support adaptive thinking.
   haiku: {
     supportsAdaptiveThinking: false,

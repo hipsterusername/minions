@@ -116,7 +116,6 @@ function FolderNodeRenderer({
   projectPath,
   onResize,
   onUpdateData,
-  canvasScale,
 }: NodeRenderProps) {
   const data = node.data as FolderData;
   const collapsed = data.collapsed === true;
@@ -420,7 +419,6 @@ function FolderNodeRenderer({
           minWidth={240}
           minHeight={160}
           onResize={onResize}
-          canvasScale={canvasScale}
         />
       )}
     </div>

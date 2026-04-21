@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import type { NodeRenderProps } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
 import { registerContract, CONTEXT_OUT_PORT } from "../graph.ts";
@@ -205,7 +205,6 @@ function FileViewerNodeRenderer({
   projectPath,
   onResize,
   onUpdateData,
-  canvasScale,
 }: NodeRenderProps) {
   const data = node.data as FileViewerData;
   const collapsed = data.collapsed !== false; // default true
@@ -214,6 +213,7 @@ function FileViewerNodeRenderer({
   const [truncated, setTruncated] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const encoded = projectPath ? encodePath(projectPath) : null;
   const ext = extOf(data.filePath);
   const isMarkdown = MARKDOWN_EXTS.has(ext);
@@ -224,6 +224,16 @@ function FileViewerNodeRenderer({
   // from a drag (move the node). Without this, onMouseDown stopPropagation on
   // the collapsed header would prevent CanvasNode from ever initiating a drag.
   const clickStartRef = useRef<{ x: number; y: number } | null>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleCopy = useCallback(() => {
+    if (!content) return;
+    navigator.clipboard.writeText(content).then(() => {
+      setCopied(true);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
+    });
+  }, [content]);
 
   const toggleCollapsed = () => {
     if (collapsed) {
@@ -447,17 +457,37 @@ function FileViewerNodeRenderer({
           </span>
         </div>
         {content !== null && (
-          <span
-            style={{
-              fontSize: 10,
-              color: "var(--text-muted)",
-              fontFamily: "var(--font-mono)",
-              flexShrink: 0,
-            }}
-          >
-            {formatSize(fileSize)}
-            {truncated ? " (truncated)" : ""}
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            <button
+              onClick={handleCopy}
+              onMouseDown={(e) => e.stopPropagation()}
+              title="Copy file contents"
+              style={{
+                background: copied ? "var(--accent)" : "transparent",
+                border: `1px solid ${copied ? "var(--accent)" : "var(--border-default)"}`,
+                borderRadius: 4,
+                padding: "2px 8px",
+                cursor: "pointer",
+                fontSize: 10,
+                fontFamily: "var(--font-mono)",
+                color: copied ? "#fff" : "var(--text-muted)",
+                transition: "all 0.15s",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {copied ? "Copied!" : "Copy"}
+            </button>
+            <span
+              style={{
+                fontSize: 10,
+                color: "var(--text-muted)",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              {formatSize(fileSize)}
+              {truncated ? " (truncated)" : ""}
+            </span>
+          </div>
         )}
       </div>
 
@@ -522,7 +552,6 @@ function FileViewerNodeRenderer({
           minWidth={280}
           minHeight={200}
           onResize={onResize}
-          canvasScale={canvasScale}
         />
       )}
     </div>
@@ -560,4 +589,6 @@ registerNodeType({
   defaultSize: { width: 480, height: COLLAPSED_HEIGHT },
   render: FileViewerNodeRenderer,
   userCreatable: false,
+  providesContext: true,
+  extractContent: (data) => (data as { loadedContent?: string })?.loadedContent ?? null,
 });

@@ -88,6 +88,134 @@ export const codeComponentSchema = z.object({
   title: z.string().optional(),
 });
 
+// ── New component primitives (Beautiful Evidence) ─────
+
+/**
+ * Sparkline — Tufte's "intense, simple, word-sized graphic."
+ * Renders an SVG micro-chart inline with surrounding data.
+ * Supports line, bar, and area variants.
+ */
+export const sparklineComponentSchema = z.object({
+  id: z.string(),
+  type: z.literal("sparkline"),
+  label: z.string().optional(),
+  data: z.array(z.number()),
+  variant: z.enum(["line", "bar", "area"]).optional(), // default "line"
+  color: componentColorSchema.optional(),
+  height: z.number().optional(), // default 32
+  showRange: z.boolean().optional(), // show min/max labels at endpoints
+  referenceValue: z.number().optional(), // horizontal reference line
+});
+
+/**
+ * Key-Value — dense property sheet. More structured than text,
+ * lighter than a full table. Ideal for metadata, config, file info.
+ */
+export const kvComponentSchema = z.object({
+  id: z.string(),
+  type: z.literal("kv"),
+  title: z.string().optional(),
+  entries: z.array(
+    z.object({
+      key: z.string(),
+      value: z.string(),
+      color: componentColorSchema.optional(),
+    }),
+  ),
+  layout: z.enum(["vertical", "horizontal"]).optional(), // default "vertical"
+});
+
+/**
+ * Timeline — vertical event sequence with state indicators.
+ * Essential for showing work history, deployment events, step progression.
+ */
+export const timelineComponentSchema = z.object({
+  id: z.string(),
+  type: z.literal("timeline"),
+  title: z.string().optional(),
+  events: z.array(
+    z.object({
+      label: z.string(),
+      detail: z.string().optional(),
+      state: z.enum(["success", "error", "warning", "running", "pending"]).optional(),
+      time: z.string().optional(),
+    }),
+  ),
+});
+
+/**
+ * Callout — semantic emphasis block with visual weight.
+ * Draws attention to key findings, warnings, or highlights.
+ * Inspired by GitHub-flavored markdown alerts.
+ */
+export const calloutComponentSchema = z.object({
+  id: z.string(),
+  type: z.literal("callout"),
+  variant: z.enum(["info", "warning", "success", "error"]),
+  title: z.string().optional(),
+  content: z.string(),
+});
+
+/**
+ * Separator — visual divider with optional section label.
+ * Provides structure and breathing room without noise.
+ */
+export const separatorComponentSchema = z.object({
+  id: z.string(),
+  type: z.literal("separator"),
+  label: z.string().optional(),
+});
+
+/**
+ * Diff — before/after two-column comparison.
+ * The essence of change evidence and review.
+ */
+export const diffComponentSchema = z.object({
+  id: z.string(),
+  type: z.literal("diff"),
+  title: z.string().optional(),
+  before: z.object({
+    label: z.string().optional(),
+    content: z.string(),
+  }),
+  after: z.object({
+    label: z.string().optional(),
+    content: z.string(),
+  }),
+});
+
+/**
+ * Checklist — task list with completion states.
+ * Core to orchestration tracking and step verification.
+ */
+export const checklistComponentSchema = z.object({
+  id: z.string(),
+  type: z.literal("checklist"),
+  title: z.string().optional(),
+  items: z.array(
+    z.object({
+      label: z.string(),
+      checked: z.boolean(),
+    }),
+  ),
+});
+
+/**
+ * Tags — compact row of categorical badges.
+ * Perfect for file types, categories, technologies, statuses.
+ */
+export const tagsComponentSchema = z.object({
+  id: z.string(),
+  type: z.literal("tags"),
+  label: z.string().optional(),
+  items: z.array(
+    z.object({
+      text: z.string(),
+      color: componentColorSchema.optional(),
+    }),
+  ),
+});
+
 /**
  * Full union of render components. `z.discriminatedUnion` both narrows
  * `type` on the TS side and lets the server reject unknown component
@@ -101,6 +229,14 @@ export const renderComponentSchema = z.discriminatedUnion("type", [
   textComponentSchema,
   statusComponentSchema,
   codeComponentSchema,
+  sparklineComponentSchema,
+  kvComponentSchema,
+  timelineComponentSchema,
+  calloutComponentSchema,
+  separatorComponentSchema,
+  diffComponentSchema,
+  checklistComponentSchema,
+  tagsComponentSchema,
 ]);
 
 export type MetricComponent = z.infer<typeof metricComponentSchema>;
@@ -110,6 +246,14 @@ export type ListComponent = z.infer<typeof listComponentSchema>;
 export type TextComponent = z.infer<typeof textComponentSchema>;
 export type StatusComponent = z.infer<typeof statusComponentSchema>;
 export type CodeComponent = z.infer<typeof codeComponentSchema>;
+export type SparklineComponent = z.infer<typeof sparklineComponentSchema>;
+export type KvComponent = z.infer<typeof kvComponentSchema>;
+export type TimelineComponent = z.infer<typeof timelineComponentSchema>;
+export type CalloutComponent = z.infer<typeof calloutComponentSchema>;
+export type SeparatorComponent = z.infer<typeof separatorComponentSchema>;
+export type DiffComponent = z.infer<typeof diffComponentSchema>;
+export type ChecklistComponent = z.infer<typeof checklistComponentSchema>;
+export type TagsComponent = z.infer<typeof tagsComponentSchema>;
 export type RenderComponent = z.infer<typeof renderComponentSchema>;
 
 // ── Layout ─────────────────────────────────────────────

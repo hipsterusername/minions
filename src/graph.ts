@@ -57,16 +57,22 @@ export type EdgeMessage =
 
 export type PortDirection = "input" | "output";
 
+export type PortLifecycleState = "open" | "locked";
+
 export interface PortDefinition {
   id: string;
   label: string;
   direction: PortDirection;
   protocol: EdgeMessage["protocol"];
   maxConnections: number;
-  /** If true, port is used internally (edge routing) but not rendered as a visible dot */
-  hidden?: boolean;
   /** Fixed vertical position as a ratio (0–1) of node height. Overrides even-spacing. */
   anchorY?: number;
+  /**
+   * Optional state-aware guard for this port. Called with the owning node's
+   * data at connection time. Return "locked" to reject new connections,
+   * "open" to allow them. When omitted, the port is always open.
+   */
+  lifecycle?: (nodeData: unknown) => PortLifecycleState;
 }
 
 // ── Node interface contracts ────────────────────────────
@@ -92,7 +98,7 @@ export const LEADER_CONTRACT: NodeInterfaceContract = {
       direction: "output",
       protocol: "task-assignment",
       maxConnections: 10,
-      hidden: true,
+      anchorY: 0.2,
     },
     {
       id: "status-in",
@@ -100,7 +106,7 @@ export const LEADER_CONTRACT: NodeInterfaceContract = {
       direction: "input",
       protocol: "task-status",
       maxConnections: 10,
-      hidden: true,
+      anchorY: 0.35,
     },
     {
       id: "result-in",
@@ -108,7 +114,7 @@ export const LEADER_CONTRACT: NodeInterfaceContract = {
       direction: "input",
       protocol: "task-result",
       maxConnections: 10,
-      hidden: true,
+      anchorY: 0.5,
     },
     {
       id: "context-in",
@@ -117,6 +123,14 @@ export const LEADER_CONTRACT: NodeInterfaceContract = {
       protocol: "context",
       maxConnections: 20,
       anchorY: 0.92,
+      /**
+       * Context port locks once a session is started — context is baked into
+       * the first prompt and cannot be changed after that.
+       */
+      lifecycle: (nodeData: unknown): PortLifecycleState => {
+        const data = nodeData as { sessionKey: string | null } | undefined;
+        return data?.sessionKey ? "locked" : "open";
+      },
     },
   ],
 };
@@ -134,7 +148,7 @@ export const MINION_CONTRACT: NodeInterfaceContract = {
       direction: "input",
       protocol: "task-assignment",
       maxConnections: 1,
-      hidden: true,
+      anchorY: 0.2,
     },
     {
       id: "status-out",
@@ -142,7 +156,7 @@ export const MINION_CONTRACT: NodeInterfaceContract = {
       direction: "output",
       protocol: "task-status",
       maxConnections: 1,
-      hidden: true,
+      anchorY: 0.5,
     },
     {
       id: "result-out",
@@ -150,7 +164,7 @@ export const MINION_CONTRACT: NodeInterfaceContract = {
       direction: "output",
       protocol: "task-result",
       maxConnections: 1,
-      hidden: true,
+      anchorY: 0.8,
     },
   ],
 };
@@ -251,21 +265,19 @@ export function canConnect(
 }
 
 /**
- * State-aware guard for context connections.
+ * Generic lifecycle guard for any port.
  *
- * Context edges are only valid when the target Leader has NOT yet
- * started a session (sessionKey is null). Once a session is created
- * the context is baked into the first prompt and the port is locked.
- *
- * Returns true if the connection should be allowed.
+ * Consults the port's optional `lifecycle` callback to determine whether
+ * it is currently accepting new connections. Returns true (open) when:
+ * - The port has no lifecycle callback (always open), or
+ * - The lifecycle callback returns "open".
  */
-export function canAcceptContextConnection(
-  targetNodeType: string,
-  targetPortId: string,
-  targetNodeData: unknown,
+export function isPortOpen(
+  nodeType: string,
+  portId: string,
+  nodeData: unknown,
 ): boolean {
-  // Only applies to leader context-in port
-  if (targetNodeType !== "leader" || targetPortId !== "context-in") return true;
-  const data = targetNodeData as { sessionKey: string | null } | undefined;
-  return !data?.sessionKey;
+  const port = getPortDef(nodeType, portId);
+  if (!port?.lifecycle) return true;
+  return port.lifecycle(nodeData) === "open";
 }

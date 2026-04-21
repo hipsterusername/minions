@@ -4,7 +4,7 @@ export interface KanbanSubtask {
   done: boolean;
 }
 
-export type ModelOption = "sonnet" | "opus" | "haiku";
+export type ModelOption = "sonnet" | "opus" | "opus-old" | "haiku";
 export type PermissionMode = "auto" | "bypassPermissions" | "default" | "plan" | "acceptEdits";
 
 export type BlockReason =

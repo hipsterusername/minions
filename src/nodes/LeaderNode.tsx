@@ -2396,23 +2396,22 @@ function HeaderMenu({
   onReset,
   onExportLog,
   data,
-  canvasScale,
 }: {
   onReset: () => void;
   onExportLog: () => void;
   data: LeaderData;
-  canvasScale?: number;
 }) {
   const [open, setOpen] = useState(false);
 
-  // Close menu when canvas zoom level changes
-  const prevScaleRef = useRef(canvasScale);
+  // Close menu on any wheel event (covers both zoom and pan).
+  // This replaces the old canvasScale-prop approach which caused
+  // every node to re-render on every zoom frame.
   useEffect(() => {
-    if (prevScaleRef.current !== canvasScale) {
-      prevScaleRef.current = canvasScale;
-      setOpen(false);
-    }
-  }, [canvasScale]);
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener("wheel", close, { passive: true, once: true });
+    return () => window.removeEventListener("wheel", close);
+  }, [open]);
 
   return (
     <div style={{ position: "relative" }}>
@@ -2519,7 +2518,6 @@ export function LeaderNodeRenderer({
   onResize,
   onAddContentNode,
   onRevealMinion,
-  canvasScale,
 }: NodeRenderProps) {
   const data = node.data as LeaderData;
   const dataRef = useRef(data);
@@ -2545,14 +2543,14 @@ export function LeaderNodeRenderer({
     prevPlanCountRef.current = count;
   }, [data.taskPlan]);
 
-  // Close flyout panels when canvas zoom level changes
-  const prevScaleRef = useRef(canvasScale);
+  // Close flyout panels on any wheel event (covers zoom + scroll).
+  // Replaces the old canvasScale-prop approach to avoid busting React.memo.
   useEffect(() => {
-    if (prevScaleRef.current !== canvasScale) {
-      prevScaleRef.current = canvasScale;
-      setSkillFlyoutOpen(false);
-    }
-  }, [canvasScale]);
+    if (!skillFlyoutOpen) return;
+    const close = () => setSkillFlyoutOpen(false);
+    window.addEventListener("wheel", close, { passive: true, once: true });
+    return () => window.removeEventListener("wheel", close);
+  }, [skillFlyoutOpen]);
 
   // Click-outside: deactivate scroll lock when clicking outside the scroll zone
   useEffect(() => {
@@ -3312,7 +3310,6 @@ export function LeaderNodeRenderer({
           minHeight={320}
           onResize={onResize}
           color="var(--accent)"
-          canvasScale={canvasScale}
         />
       )}
 
@@ -3437,7 +3434,6 @@ export function LeaderNodeRenderer({
             onReset={handleReset}
             onExportLog={handleExportLog}
             data={data}
-            canvasScale={canvasScale}
           />
         </div>
       </div>
@@ -3819,6 +3815,7 @@ registerNodeType({
   defaultSize: { width: 560, height: 520 },
   render: LeaderNodeRenderer,
   agentType: "leader",
+  ownsChildrenOfType: ["minion", "render"],
 });
 
 export const LEADER_DEFAULT_DATA: LeaderData = {

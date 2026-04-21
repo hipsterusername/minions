@@ -24,11 +24,14 @@ export function canvasReducer(
       );
     case "SET_NODES":
       return action.nodes;
-    case "MOVE_GROUP":
+    case "MOVE_GROUP": {
+      // Build a Map for O(1) lookups instead of O(n×m) Array.find per node.
+      const moveMap = new Map(action.moves.map((m) => [m.id, m.position]));
       return state.map((n) => {
-        const move = action.moves.find((m) => m.id === n.id);
-        return move ? { ...n, position: move.position } : n;
+        const pos = moveMap.get(n.id);
+        return pos ? { ...n, position: pos } : n;
       });
+    }
   }
 }
 

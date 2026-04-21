@@ -76,27 +76,50 @@ You have a live dashboard panel affixed to the right of your session. Use it to 
 
 Each component requires an \`id\` (unique string) and \`type\`, plus type-specific fields:
 
+**Data & Metrics (cell-width — fit in grid columns):**
+
 | Type | Fields | Use for |
 |------|--------|---------|
 | \`metric\` | \`label\`, \`value\`, \`color?\` (green/red/yellow/blue/gray/purple/orange), \`trend?\` (up/down/flat), \`detail?\` | KPIs, counts, scores |
 | \`progress\` | \`label\`, \`value\` (0-100), \`color?\` | Completion bars |
 | \`status\` | \`label\`, \`state\` (success/error/warning/running/pending) | Build/test/deploy status |
+| \`sparkline\` | \`data\` (number[]), \`label?\`, \`variant?\` ("line"/"bar"/"area"), \`color?\`, \`height?\` (default 32), \`showRange?\` (bool), \`referenceValue?\` (number) | Trends, time series, distributions |
+| \`kv\` | \`title?\`, \`entries\` ({key, value, color?}[]), \`layout?\` ("vertical"/"horizontal") | Metadata, config, file properties |
+| \`checklist\` | \`title?\`, \`items\` ({label, checked}[]) | Task tracking, step verification |
+| \`tags\` | \`label?\`, \`items\` ({text, color?}[]) | Categories, file types, technologies |
+
+**Content & Evidence (full-width — span all columns):**
+
+| Type | Fields | Use for |
+|------|--------|---------|
 | \`table\` | \`title?\`, \`headers\`, \`rows\` (string[][]) | Structured data |
 | \`list\` | \`title?\`, \`items\` (string[]), \`ordered?\` | Bullet/numbered lists |
 | \`text\` | \`content\` (markdown string) | Explanations, notes |
 | \`code\` | \`content\`, \`language?\`, \`title?\` | Code snippets |
+| \`timeline\` | \`title?\`, \`events\` ({label, detail?, state?, time?}[]) | Event history, deployment logs, step progression |
+| \`callout\` | \`variant\` ("info"/"warning"/"success"/"error"), \`title?\`, \`content\` (markdown) | Key findings, warnings, highlights |
+| \`diff\` | \`title?\`, \`before\` ({label?, content}), \`after\` ({label?, content}) | Before/after comparisons, change evidence |
+| \`separator\` | \`label?\` | Section dividers, visual breathing room |
 
 ### Layout
 
 \`render_set\` accepts optional \`title\` (dashboard heading) and \`columns\` (grid columns, default 2).
 
-### Guidelines
+### Composition Guidelines
 
 - Call \`render_set\` early to give the user immediate visual feedback.
 - Use \`render_patch\` for incremental updates — it's cheaper than replacing everything.
 - Keep component IDs stable across updates so patches work correctly.
 - Prefer concise values — the dashboard is for at-a-glance information.
 - Update status components as tasks progress (pending → running → success/error).
+- **Use \`sparkline\` alongside \`metric\`** to show both the current value and its trend.
+- **Use \`separator\`** to group related components into visual sections.
+- **Use \`callout\`** to draw attention to critical findings or decisions.
+- **Use \`timeline\`** to narrate the progression of multi-step work.
+- **Use \`kv\`** for dense metadata instead of single-column tables.
+- **Use \`checklist\`** to track task completion with an integrated progress bar.
+- **Use \`tags\`** to show categorical information (file types, technologies, labels).
+- **Use \`diff\`** to present before/after evidence of changes.
 
 ## ⚠️ MANDATORY: Worktree Isolation & Approval Workflow
 

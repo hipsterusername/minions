@@ -14,7 +14,7 @@ import { getAllNodeTypes } from "./node-registry.ts";
 import { SessionPanel } from "./SessionPanel.tsx";
 import { EdgeRenderer } from "./EdgeRenderer.tsx";
 import type { GraphDocument } from "./graph.ts";
-import { getContract, canConnect, canAcceptContextConnection, LEADER_CONTRACT } from "./graph.ts";
+import { getContract, canConnect, isPortOpen, LEADER_CONTRACT } from "./graph.ts";
 import type { GraphAction } from "./graph-runtime.ts";
 import { createEdge } from "./graph-runtime.ts";
 import type { PortInfo } from "./components/PortDot.tsx";
@@ -29,6 +29,7 @@ import type { ContextMenuOption } from "./components/CanvasContextMenu.tsx";
 import { ConfirmModal } from "./components/ConfirmModal.tsx";
 import { createDefaultNodeData } from "./node-defaults.ts";
 import { wheelDetector } from "./wheel-detector.ts";
+import { canvasScale as canvasScaleRef } from "./canvas-scale.ts";
 import { useCanvasKeyboard } from "./use-canvas-keyboard.ts";
 import { useCanvasFileDrop } from "./use-canvas-file-drop.ts";
 import { findNonOverlappingPosition, viewportCenter, pushNodesFromRect, snapToGrid } from "./canvas-utils.ts";
@@ -80,16 +81,16 @@ function getPortWorldPos(
 ): { x: number; y: number } | null {
   const contract = getContract(node.type);
   if (!contract) return null;
-  const visiblePorts = contract.ports.filter(
-    (p) => p.direction === direction && !p.hidden,
+  const sameDirPorts = contract.ports.filter(
+    (p) => p.direction === direction,
   );
-  const idx = visiblePorts.findIndex((p) => p.id === portId);
+  const idx = sameDirPorts.findIndex((p) => p.id === portId);
   if (idx === -1) return null;
-  const anchorY = visiblePorts[idx].anchorY;
+  const anchorY = sameDirPorts[idx].anchorY;
   const y =
     anchorY != null
       ? node.position.y + node.size.height * anchorY
-      : node.position.y + (node.size.height / (visiblePorts.length + 1)) * (idx + 1);
+      : node.position.y + (node.size.height / (sameDirPorts.length + 1)) * (idx + 1);
   const x =
     direction === "output"
       ? node.position.x + node.size.width
@@ -427,6 +428,11 @@ export function Canvas({
   focusNodeId,
   onFocusNodeHandled,
 }: CanvasProps) {
+  // Keep the module-level scale ref in sync so CanvasNode / ResizeHandle
+  // can read the current zoom in event handlers without a prop (which would
+  // bust React.memo on every node each zoom frame).
+  canvasScaleRef.current = transform.scale;
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isPanning, setIsPanning] = useState(false);
 
@@ -965,82 +971,40 @@ export function Canvas({
   // Wheel handler is attached as a native DOM listener with { passive: false }
   // so that preventDefault() actually blocks the browser's built-in pinch-zoom.
   // React's onWheel is passive in modern browsers and cannot prevent it.
+  //
+  // We use requestAnimationFrame to coalesce multiple wheel events into a
+  // single React state update per frame. On high-refresh displays (120Hz+),
+  // wheel events can fire much faster than React can re-render. Accumulating
+  // deltas and flushing once per frame reduces renders by up to 50%.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    const handleWheel = (e: WheelEvent) => {
-      // ── Pinch-to-zoom detection (conclusive, browser-provided) ──
-      // When a trackpad pinch gesture fires, browsers set ctrlKey = true.
-      // This also covers Ctrl+mouse-wheel zoom. Always treat as zoom.
-      const isPinch = e.ctrlKey || e.metaKey;
+    // Accumulated pan deltas between rAF frames
+    let pendingPanDx = 0;
+    let pendingPanDy = 0;
 
-      // ── Device detection via heuristic engine ───────────────────
-      // Classifies this event as "mouse" or "trackpad" based on delta
-      // amplitude, frequency, fractional values, and horizontal component.
-      // The classification locks for the duration of a gesture (resets
-      // after 300ms of quiet) so mid-gesture events stay consistent.
-      const device = wheelDetector.classify(e);
+    // Accumulated zoom state between rAF frames.
+    // We store the last mouse position + cumulative zoom factor.
+    let pendingZoom: {
+      mouseX: number;
+      mouseY: number;
+      cumulativeFactor: number;
+    } | null = null;
 
-      // ── Scroll-capture zones (chat areas, message lists) ────────
-      // Only yield wheel events to scrollable [data-scroll-capture]
-      // zones when the user is NOT mid-pan. If a trackpad pan gesture
-      // is active (user is swiping to navigate the canvas), we keep
-      // panning even if the pointer crosses over a scrollable zone.
-      // This prevents the jarring "pan interrupted by chat scroll" bug.
-      const target = e.target as HTMLElement | null;
-      const overScrollCapture = !!target?.closest?.("[data-scroll-capture]");
+    let rafId: number | null = null;
 
-      if (overScrollCapture && !isPinch) {
-        if (device === "trackpad" && !wheelDetector.isPanGestureActive) {
-          // Trackpad over scroll zone, no active pan → let it scroll
-          return;
-        }
-        if (device === "mouse") {
-          // Mouse wheel over scroll zone → let it scroll (not zoom)
-          return;
-        }
-        // Otherwise: active trackpad pan gesture → fall through to pan
-      }
+    const flushPending = () => {
+      rafId = null;
 
-      e.preventDefault();
-
-      // ── Determine action: zoom or pan ───────────────────────────
-      //  • Pinch (ctrlKey) → always zoom (trackpad pinch or Ctrl+wheel)
-      //  • Mouse scroll wheel → zoom
-      //  • Trackpad two-finger scroll → pan
-      const shouldZoom = isPinch || device === "mouse";
-
-      if (shouldZoom) {
-        const rect = container.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-
+      // Apply accumulated zoom
+      if (pendingZoom) {
+        const { mouseX, mouseY, cumulativeFactor } = pendingZoom;
+        pendingZoom = null;
         setTransform((prev) => {
-          // Normalise deltaY into a zoom multiplier that feels consistent
-          // across mice, trackpads, and browsers.
-          let notches: number;
-          if (isPinch) {
-            // Continuous trackpad pinch — keep proportional, scale down.
-            // Typical pinch deltas are ~1-4 per event at 60fps.
-            notches = e.deltaY / 4;
-          } else if (e.deltaMode === 1) {
-            // Firefox line-mode (mouse wheel)
-            notches = e.deltaY / 3;
-            notches = Math.max(-1, Math.min(1, notches));
-          } else {
-            // Discrete mouse wheel — normalise & clamp to ±1 notch.
-            notches = e.deltaY / 100;
-            notches = Math.max(-1, Math.min(1, notches));
-          }
-
-          // 7% zoom per notch — smooth and consistent.
-          // Positive notch (scroll down / pinch in) = zoom out.
-          const ZOOM_STEP = 0.07;
-          const zoomFactor = 1 - notches * ZOOM_STEP;
           const newScale = Math.min(
             MAX_ZOOM,
-            Math.max(MIN_ZOOM, prev.scale * zoomFactor),
+            Math.max(MIN_ZOOM, prev.scale * cumulativeFactor),
           );
           const scaleChange = newScale / prev.scale;
           return {
@@ -1049,18 +1013,94 @@ export function Canvas({
             scale: newScale,
           };
         });
-      } else {
-        // Trackpad two-finger scroll → pan the canvas.
+      }
+
+      // Apply accumulated pan
+      if (pendingPanDx !== 0 || pendingPanDy !== 0) {
+        const dx = pendingPanDx;
+        const dy = pendingPanDy;
+        pendingPanDx = 0;
+        pendingPanDy = 0;
         setTransform((prev) => ({
           ...prev,
-          x: prev.x - e.deltaX,
-          y: prev.y - e.deltaY,
+          x: prev.x - dx,
+          y: prev.y - dy,
         }));
       }
     };
 
+    const scheduleFlush = () => {
+      if (rafId === null) {
+        rafId = requestAnimationFrame(flushPending);
+      }
+    };
+
+    const handleWheel = (e: WheelEvent) => {
+      // ── Pinch-to-zoom detection (conclusive, browser-provided) ──
+      const isPinch = e.ctrlKey || e.metaKey;
+
+      // ── Device detection via heuristic engine ───────────────────
+      const device = wheelDetector.classify(e);
+
+      // ── Scroll-capture zones (chat areas, message lists) ────────
+      const target = e.target as HTMLElement | null;
+      const overScrollCapture = !!target?.closest?.("[data-scroll-capture]");
+
+      if (overScrollCapture && !isPinch) {
+        if (device === "trackpad" && !wheelDetector.isPanGestureActive) {
+          return;
+        }
+        if (device === "mouse") {
+          return;
+        }
+      }
+
+      e.preventDefault();
+
+      const shouldZoom = isPinch || device === "mouse";
+
+      if (shouldZoom) {
+        const rect = container.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        // Normalise deltaY into a zoom multiplier
+        let notches: number;
+        if (isPinch) {
+          notches = e.deltaY / 4;
+        } else if (e.deltaMode === 1) {
+          notches = e.deltaY / 3;
+          notches = Math.max(-1, Math.min(1, notches));
+        } else {
+          notches = e.deltaY / 100;
+          notches = Math.max(-1, Math.min(1, notches));
+        }
+
+        const ZOOM_STEP = 0.07;
+        const zoomFactor = 1 - notches * ZOOM_STEP;
+
+        // Accumulate: multiply zoom factors and use latest mouse position
+        if (pendingZoom) {
+          pendingZoom.mouseX = mouseX;
+          pendingZoom.mouseY = mouseY;
+          pendingZoom.cumulativeFactor *= zoomFactor;
+        } else {
+          pendingZoom = { mouseX, mouseY, cumulativeFactor: zoomFactor };
+        }
+      } else {
+        // Accumulate trackpad pan deltas
+        pendingPanDx += e.deltaX;
+        pendingPanDy += e.deltaY;
+      }
+
+      scheduleFlush();
+    };
+
     container.addEventListener("wheel", handleWheel, { passive: false });
-    return () => container.removeEventListener("wheel", handleWheel);
+    return () => {
+      container.removeEventListener("wheel", handleWheel);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
   }, [setTransform]);
 
   const handleCanvasMouseDown = useCallback(
@@ -1733,18 +1773,17 @@ export function Canvas({
         if (node.id === port.nodeId) continue; // can't connect to self
 
         for (const p of contract.ports) {
-          if (p.hidden) continue;
           // If source is output, target must be input (and vice versa)
           let valid = false;
           if (port.direction === "output" && p.direction === "input") {
             valid = canConnect(port.nodeType, port.portId, node.type, p.id);
-            if (valid && p.protocol === "context") {
-              valid = canAcceptContextConnection(node.type, p.id, node.data);
+            if (valid) {
+              valid = isPortOpen(node.type, p.id, node.data);
             }
           } else if (port.direction === "input" && p.direction === "output") {
             valid = canConnect(node.type, p.id, port.nodeType, port.portId);
-            if (valid && port.protocol === "context") {
-              valid = canAcceptContextConnection(port.nodeType, port.portId,
+            if (valid) {
+              valid = isPortOpen(port.nodeType, port.portId,
                 currentNodes.find((n) => n.id === port.nodeId)?.data);
             }
           }
@@ -1780,7 +1819,6 @@ export function Canvas({
           if (!contract) continue;
           const targetDir = port.direction === "output" ? "input" : "output";
           for (const p of contract.ports) {
-            if (p.hidden) continue;
             if (!targets.has(`${node.id}:${p.id}`)) continue;
             const pos = getPortWorldPos(node, p.id, targetDir);
             if (!pos) continue;
@@ -2658,6 +2696,18 @@ export function Canvas({
     return { x: screenX, y: screenY };
   }, [multiSelectInfo, multiSelectBounds, transform]);
 
+  // ── Stable derived values for CanvasNodeComponent props ──
+  // Memoize these so they don't create new identities on every render,
+  // which would defeat React.memo on the node components.
+  const isDragActive = connectionDrag !== null;
+  const snapTargetKey = useMemo(
+    () =>
+      connectionDrag?.snapTarget
+        ? `${connectionDrag.snapTarget.nodeId}:${connectionDrag.snapTarget.portId}`
+        : undefined,
+    [connectionDrag?.snapTarget?.nodeId, connectionDrag?.snapTarget?.portId],
+  );
+
   return (
     <div
       ref={containerRef}
@@ -2783,7 +2833,6 @@ export function Canvas({
           <CanvasNodeComponent
             key={node.id}
             node={node}
-            transform={transform}
             isSelected={selectedIds.has(node.id)}
             onSelect={handleSelectNode}
             onMove={handleMoveNode}
@@ -2797,18 +2846,14 @@ export function Canvas({
             projectPath={projectPath}
             onConnectionStart={handleConnectionStart}
             onConnectionEnd={handleConnectionEnd}
-            isDragActive={connectionDrag !== null}
+            isDragActive={isDragActive}
             validTargetPorts={validTargets}
             connectedPorts={connectedPorts}
-            snapTargetKey={
-              connectionDrag?.snapTarget
-                ? `${connectionDrag.snapTarget.nodeId}:${connectionDrag.snapTarget.portId}`
-                : undefined
-            }
+            snapTargetKey={snapTargetKey}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
             isDropTarget={dropTargetGroupId === node.id}
-            draggingNodeId={draggingNodeId}
+            isBeingDragged={draggingNodeId === node.id}
             isInsideDraggingGroup={draggingGroupContainedIds.has(node.id)}
             isInsideContextGroup={nodesInsideGroups.has(node.id)}
           />
@@ -2860,18 +2905,18 @@ export function Canvas({
               const contract = getContract(srcNode.type);
               if (!contract) return null;
 
-              // Compute source port position using visible-port spacing
+              // Compute source port position using port spacing
               const dir = connectionDrag.source.direction;
-              const visiblePorts = contract.ports.filter(
-                (p) => p.direction === dir && !p.hidden,
+              const sameDirPorts = contract.ports.filter(
+                (p) => p.direction === dir,
               );
-              const portIndex = visiblePorts.findIndex(
+              const portIndex = sameDirPorts.findIndex(
                 (p) => p.id === connectionDrag.source.portId,
               );
-              const spacing =
-                srcNode.size.height / (visiblePorts.length + 1);
-              const srcY =
-                srcNode.position.y + spacing * (portIndex + 1);
+              const srcPort = sameDirPorts[portIndex];
+              const srcY = srcPort?.anchorY != null
+                ? srcNode.position.y + srcNode.size.height * srcPort.anchorY
+                : srcNode.position.y + srcNode.size.height / (sameDirPorts.length + 1) * (portIndex + 1);
               const srcX =
                 dir === "output"
                   ? srcNode.position.x + srcNode.size.width

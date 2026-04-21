@@ -3,7 +3,7 @@
  *
  * Covers connection validation and the contract registry:
  *   - canConnect: direction, protocol, and existence checks
- *   - canAcceptContextConnection: state-aware leader port guard
+ *   - isPortOpen: declarative lifecycle guard (replaces canAcceptContextConnection)
  *   - getPortDef: lookup by nodeType + portId
  *   - getAllContracts: built-in registrations
  *   - registerContract / getContract: round-trip a custom contract
@@ -12,13 +12,13 @@
 import { describe, it, expect } from "vitest";
 import {
   canConnect,
-  canAcceptContextConnection,
+  isPortOpen,
   getPortDef,
   getContract,
   getAllContracts,
   registerContract,
 } from "./graph.ts";
-import type { NodeInterfaceContract } from "./graph.ts";
+import type { NodeInterfaceContract, PortLifecycleState } from "./graph.ts";
 
 describe("canConnect", () => {
   it("returns true for leader.task-out → minion.task-in", () => {
@@ -63,33 +63,97 @@ describe("canConnect", () => {
   });
 });
 
-describe("canAcceptContextConnection", () => {
-  it("returns true for a non-leader node type", () => {
-    expect(canAcceptContextConnection("minion", "context-in", {})).toBe(true);
+describe("isPortOpen (lifecycle guard)", () => {
+  it("returns true for a port with no lifecycle callback", () => {
+    // minion.task-in has no lifecycle callback → always open
+    expect(isPortOpen("minion", "task-in", {})).toBe(true);
   });
 
-  it("returns true for a leader on a non-context-in port", () => {
-    expect(
-      canAcceptContextConnection("leader", "task-out", { sessionKey: "active" }),
-    ).toBe(true);
+  it("returns true for leader.task-out (no lifecycle)", () => {
+    expect(isPortOpen("leader", "task-out", { sessionKey: "active" })).toBe(true);
   });
 
   it("returns true for leader.context-in when sessionKey is null", () => {
-    expect(
-      canAcceptContextConnection("leader", "context-in", { sessionKey: null }),
-    ).toBe(true);
+    expect(isPortOpen("leader", "context-in", { sessionKey: null })).toBe(true);
   });
 
   it("returns true for leader.context-in when sessionKey is missing", () => {
-    expect(canAcceptContextConnection("leader", "context-in", {})).toBe(true);
+    expect(isPortOpen("leader", "context-in", {})).toBe(true);
   });
 
-  it("returns false for leader.context-in when sessionKey is set", () => {
-    expect(
-      canAcceptContextConnection("leader", "context-in", {
-        sessionKey: "active-key",
-      }),
-    ).toBe(false);
+  it("returns false (locked) for leader.context-in when sessionKey is set", () => {
+    expect(isPortOpen("leader", "context-in", { sessionKey: "active-key" })).toBe(false);
+  });
+
+  it("returns true for an unknown port (no definition → always open)", () => {
+    expect(isPortOpen("ghost-type", "ghost-port", {})).toBe(true);
+  });
+});
+
+describe("port lifecycle — custom lifecycle callbacks", () => {
+  it("a port with lifecycle returning 'locked' rejects connections", () => {
+    const custom: NodeInterfaceContract = {
+      nodeType: "test-lifecycle-locked",
+      label: "Locked Test",
+      description: "Port always locked",
+      ports: [
+        {
+          id: "data-in",
+          label: "Data",
+          direction: "input",
+          protocol: "context",
+          maxConnections: 1,
+          lifecycle: () => "locked" as PortLifecycleState,
+        },
+      ],
+    };
+    registerContract(custom);
+    expect(isPortOpen("test-lifecycle-locked", "data-in", {})).toBe(false);
+  });
+
+  it("a port with lifecycle returning 'open' allows connections", () => {
+    const custom: NodeInterfaceContract = {
+      nodeType: "test-lifecycle-open",
+      label: "Open Test",
+      description: "Port always open",
+      ports: [
+        {
+          id: "data-in",
+          label: "Data",
+          direction: "input",
+          protocol: "context",
+          maxConnections: 1,
+          lifecycle: () => "open" as PortLifecycleState,
+        },
+      ],
+    };
+    registerContract(custom);
+    expect(isPortOpen("test-lifecycle-open", "data-in", {})).toBe(true);
+  });
+
+  it("lifecycle callback receives node data and can decide based on it", () => {
+    const custom: NodeInterfaceContract = {
+      nodeType: "test-lifecycle-data-aware",
+      label: "Data Aware",
+      description: "Locks when initialized",
+      ports: [
+        {
+          id: "config-in",
+          label: "Config",
+          direction: "input",
+          protocol: "context",
+          maxConnections: 1,
+          lifecycle: (nodeData: unknown) => {
+            const data = nodeData as { initialized?: boolean };
+            return data?.initialized ? "locked" : "open";
+          },
+        },
+      ],
+    };
+    registerContract(custom);
+    expect(isPortOpen("test-lifecycle-data-aware", "config-in", { initialized: false })).toBe(true);
+    expect(isPortOpen("test-lifecycle-data-aware", "config-in", { initialized: true })).toBe(false);
+    expect(isPortOpen("test-lifecycle-data-aware", "config-in", {})).toBe(true);
   });
 });
 

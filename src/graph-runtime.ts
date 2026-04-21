@@ -9,7 +9,7 @@
  */
 
 import type { GraphEdge, GraphDocument, EdgeMessage } from "./graph.ts";
-import { canConnect, canAcceptContextConnection, getPortDef, getAllContracts } from "./graph.ts";
+import { canConnect, isPortOpen, getPortDef, getAllContracts } from "./graph.ts";
 
 // ── Edge state reducer ──────────────────────────────────
 
@@ -131,10 +131,10 @@ export function createEdge(
   if (!canConnect(sourceNodeType, sourcePortId, targetNodeType, targetPortId)) {
     return null;
   }
-  // State-aware guard: block context connections to initialized leaders
+  // Lifecycle guard: consult the target port's lifecycle callback
   if (
     targetNodeData !== undefined &&
-    !canAcceptContextConnection(targetNodeType, targetPortId, targetNodeData)
+    !isPortOpen(targetNodeType, targetPortId, targetNodeData)
   ) {
     return null;
   }

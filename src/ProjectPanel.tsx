@@ -819,7 +819,8 @@ export function ProjectPanel({
                 }}
               >
                 <option value="sonnet">Sonnet</option>
-                <option value="opus">Opus</option>
+                <option value="opus">Opus 4.7</option>
+                <option value="opus-old">Opus 4.6</option>
                 <option value="haiku">Haiku</option>
               </select>
               <div
@@ -866,7 +867,8 @@ export function ProjectPanel({
                 }}
               >
                 <option value="sonnet">Sonnet</option>
-                <option value="opus">Opus</option>
+                <option value="opus">Opus 4.7</option>
+                <option value="opus-old">Opus 4.6</option>
                 <option value="haiku">Haiku</option>
               </select>
               <div

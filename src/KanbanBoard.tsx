@@ -108,6 +108,7 @@ interface CardFormData {
 const MODEL_LABELS: Record<ModelOption, string> = {
   sonnet: "Sonnet",
   opus: "Opus 4.7",
+  "opus-old": "Opus 4.6",
   haiku: "Haiku",
 };
 
@@ -556,7 +557,8 @@ function CardForm({
                 onChange={(e) => setModel(e.target.value as ModelOption)}
               >
                 <option value="sonnet">Sonnet</option>
-                <option value="opus">Opus</option>
+                <option value="opus">Opus 4.7</option>
+                <option value="opus-old">Opus 4.6</option>
                 <option value="haiku">Haiku</option>
               </select>
             </div>
@@ -1448,7 +1450,7 @@ function InspectorConfigSection({
         <div className="kb-panel__config-label">Model</div>
         {editable ? (
           <div className="kb-panel__config-options">
-            {(["sonnet", "opus", "haiku"] as ModelOption[]).map(m => (
+            {(["sonnet", "opus", "opus-old", "haiku"] as ModelOption[]).map(m => (
               <button
                 key={m}
                 className={cx("kb-panel__config-opt", card.model === m && "kb-panel__config-opt--active")}

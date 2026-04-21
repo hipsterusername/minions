@@ -41,6 +41,16 @@ export interface NodeTypeDefinition {
   autoHeight?: boolean;
   /** Matches server-side AgentType.id — used to select the agent behavior */
   agentType?: string;
+  /** Node types that this node owns/manages as children (e.g., leader owns ["minion", "render"]) */
+  ownsChildrenOfType?: string[];
+  /** When true, this node can provide context content (text) to connected nodes */
+  providesContext?: boolean;
+  /** When true, this node acts as a spatial container — nodes inside it are "grouped" */
+  isContainer?: boolean;
+  /** Function to extract text content from this node's data for context injection */
+  extractContent?: (data: unknown) => string | null;
+  /** Function to reset stale status fields when loading from persistence */
+  sanitizeOnLoad?: (data: unknown) => unknown;
 }
 
 export interface ContextItem {
@@ -101,8 +111,6 @@ export interface NodeRenderProps {
   onAddContentNode?: (content: string) => void;
   /** Callback to reveal (create or scroll-to) a minion node for a given session key */
   onRevealMinion?: (minionSessionKey: string) => void;
-  /** Current canvas zoom scale — useful for closing popups on zoom */
-  canvasScale?: number;
   /** True when a compatible node is being dragged over this node (drop target) */
   isDropTarget?: boolean;
   /** True when this node is currently being dragged by the user */

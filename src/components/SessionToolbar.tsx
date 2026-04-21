@@ -3,7 +3,7 @@ import { MODEL_COLORS, COLORS } from "../palette.ts";
 import type { EffortLevel, ThinkingConfig } from "../types.ts";
 import { getModelCapability } from "../model-meta.ts";
 
-export type ModelOption = "sonnet" | "opus" | "haiku";
+export type ModelOption = "sonnet" | "opus" | "opus-old" | "haiku";
 export type PermissionMode =
   | "auto"
   | "bypassPermissions"
@@ -31,6 +31,7 @@ export interface SessionToolbarProps {
 const MODEL_LABELS: Record<ModelOption, string> = {
   sonnet: "Sonnet",
   opus: "Opus 4.7",
+  "opus-old": "Opus 4.6",
   haiku: "Haiku",
 };
 
@@ -296,7 +297,7 @@ export function SessionToolbar({
       {/* Model selector */}
       <Dropdown
         value={model}
-        options={["sonnet", "opus", "haiku"] as ModelOption[]}
+        options={["sonnet", "opus", "opus-old", "haiku"] as ModelOption[]}
         labels={MODEL_LABELS}
         colors={MODEL_COLOR}
         onChange={(m) => {

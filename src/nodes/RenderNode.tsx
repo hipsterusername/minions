@@ -26,6 +26,14 @@ import type {
   TextComponent,
   StatusComponent,
   CodeComponent,
+  SparklineComponent,
+  KvComponent,
+  TimelineComponent,
+  CalloutComponent,
+  SeparatorComponent,
+  DiffComponent,
+  ChecklistComponent,
+  TagsComponent,
 } from "../../shared/render-dsl.ts";
 import { applyRenderMessage, emptyRenderState } from "../../shared/render-dsl.ts";
 
@@ -66,39 +74,71 @@ const TREND_ARROWS: Record<string, { symbol: string; color: string }> = {
   flat: { symbol: "\u2192", color: "var(--text-muted)" },
 };
 
+// ── Shared CSS class names (injected via injectStyles) ────
+
+const CLS = {
+  card: "rd-card",
+  cardHover: "rd-card--hover",
+  tableRow: "rd-table-row",
+  checkItem: "rd-check-item",
+  fadeIn: "rd-fade-in",
+  shimmer: "rd-shimmer",
+  pulseRing: "rd-pulse-ring",
+  scrollArea: "rd-scroll",
+  kvRow: "rd-kv-row",
+  listItem: "rd-list-item",
+  tagPill: "rd-tag-pill",
+} as const;
+
 // ── Individual component renderers ────────────────────────
 
 function MetricCard({ c }: { c: MetricComponent }) {
-  const color = c.color ? DSL_COLORS[c.color] ?? "var(--info-color)" : "var(--text-primary)";
+  const color = c.color ? DSL_COLORS[c.color] ?? "var(--info-color)" : undefined;
   const trend = c.trend ? TREND_ARROWS[c.trend] : null;
 
   return (
-    <div style={{
-      padding: "12px 14px",
-      background: "var(--bg-secondary)",
-      borderRadius: 8,
-      border: "1px solid var(--border-default)",
-      display: "flex",
-      flexDirection: "column",
-      gap: 4,
-    }}>
+    <div
+      className={`${CLS.card} ${CLS.cardHover} ${CLS.fadeIn}`}
+      style={{
+        padding: "14px 16px 12px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 2,
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      {/* Accent bar at top — only when color is specified */}
+      {color && (
+        <div style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 2,
+          background: color,
+          opacity: 0.7,
+        }} />
+      )}
       <div style={{
-        fontSize: 11,
+        fontSize: 10,
         color: "var(--text-muted)",
         fontFamily: "var(--font-mono)",
         textTransform: "uppercase",
-        letterSpacing: 0.5,
+        letterSpacing: "0.06em",
         lineHeight: 1.2,
+        fontWeight: 500,
       }}>
         {c.label}
       </div>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 2 }}>
         <span style={{
-          fontSize: 22,
+          fontSize: 24,
           fontWeight: 700,
-          color,
+          color: color ?? "var(--text-primary)",
           lineHeight: 1.1,
           fontFamily: "var(--font-mono)",
+          letterSpacing: "-0.02em",
         }}>
           {c.value}
         </span>
@@ -107,6 +147,7 @@ function MetricCard({ c }: { c: MetricComponent }) {
             fontSize: 14,
             color: trend.color,
             fontWeight: 600,
+            lineHeight: 1,
           }}>
             {trend.symbol}
           </span>
@@ -116,7 +157,8 @@ function MetricCard({ c }: { c: MetricComponent }) {
         <div style={{
           fontSize: 10,
           color: "var(--text-muted)",
-          lineHeight: 1.3,
+          lineHeight: 1.4,
+          marginTop: 2,
         }}>
           {c.detail}
         </div>
@@ -128,33 +170,38 @@ function MetricCard({ c }: { c: MetricComponent }) {
 function ProgressBar({ c }: { c: ProgressComponent }) {
   const color = c.color ? DSL_COLORS[c.color] ?? "var(--info-color)" : "var(--info-color)";
   const pct = Math.max(0, Math.min(100, c.value));
+  const isComplete = pct >= 100;
 
   return (
-    <div style={{
-      padding: "10px 14px",
-      background: "var(--bg-secondary)",
-      borderRadius: 8,
-      border: "1px solid var(--border-default)",
-      display: "flex",
-      flexDirection: "column",
-      gap: 6,
-    }}>
+    <div
+      className={`${CLS.card} ${CLS.fadeIn}`}
+      style={{
+        padding: "12px 16px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
       <div style={{
         display: "flex",
         justifyContent: "space-between",
-        alignItems: "center",
+        alignItems: "baseline",
       }}>
         <span style={{
-          fontSize: 11,
-          color: "var(--text-secondary)",
+          fontSize: 10,
+          color: "var(--text-muted)",
           fontFamily: "var(--font-mono)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          fontWeight: 500,
         }}>
           {c.label}
         </span>
         <span style={{
-          fontSize: 11,
-          color: "var(--text-muted)",
+          fontSize: 12,
+          color: isComplete ? color : "var(--text-secondary)",
           fontFamily: "var(--font-mono)",
+          fontWeight: 600,
         }}>
           {pct}%
         </span>
@@ -164,14 +211,21 @@ function ProgressBar({ c }: { c: ProgressComponent }) {
         background: "var(--bg-elevated)",
         borderRadius: 3,
         overflow: "hidden",
+        boxShadow: "inset 0 1px 2px rgba(0,0,0,0.15)",
       }}>
-        <div style={{
-          height: "100%",
-          width: `${pct}%`,
-          background: color,
-          borderRadius: 3,
-          transition: "width 0.3s ease",
-        }} />
+        <div
+          className={!isComplete ? CLS.shimmer : undefined}
+          style={{
+            height: "100%",
+            width: `${pct}%`,
+            background: isComplete
+              ? color
+              : `linear-gradient(90deg, ${color}, color-mix(in srgb, ${color} 75%, white))`,
+            borderRadius: 3,
+            transition: "width 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
+            position: "relative",
+          }}
+        />
       </div>
     </div>
   );
@@ -182,37 +236,54 @@ function StatusBadge({ c }: { c: StatusComponent }) {
   const isRunning = c.state === "running";
 
   return (
-    <div style={{
-      padding: "10px 14px",
-      background: cfg.bg,
-      borderRadius: 8,
-      border: `1px solid ${cfg.color}33`,
-      display: "flex",
-      alignItems: "center",
-      gap: 8,
-    }}>
-      <span style={{
-        width: 20,
-        height: 20,
-        borderRadius: "50%",
-        background: cfg.color,
-        color: "var(--text-primary)",
+    <div
+      className={`${CLS.card} ${CLS.fadeIn}`}
+      style={{
+        padding: "10px 14px",
+        background: cfg.bg,
+        borderColor: `color-mix(in srgb, ${cfg.color} 20%, transparent)`,
         display: "flex",
         alignItems: "center",
-        justifyContent: "center",
-        fontSize: 11,
-        fontWeight: 700,
-        flexShrink: 0,
-        ...(isRunning ? {
-          animation: "render-pulse 1.5s ease-in-out infinite",
-        } : {}),
-      }}>
-        {cfg.icon}
+        gap: 10,
+      }}
+    >
+      <span style={{ position: "relative", flexShrink: 0 }}>
+        {/* Pulse ring for running state */}
+        {isRunning && (
+          <span
+            className={CLS.pulseRing}
+            style={{
+              position: "absolute",
+              inset: -3,
+              borderRadius: "50%",
+              border: `1.5px solid ${cfg.color}`,
+            }}
+          />
+        )}
+        <span style={{
+          width: 20,
+          height: 20,
+          borderRadius: "50%",
+          background: `color-mix(in srgb, ${cfg.color} 18%, transparent)`,
+          border: `1.5px solid ${cfg.color}`,
+          color: cfg.color,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 10,
+          fontWeight: 700,
+          ...(isRunning ? {
+            animation: "render-pulse 2s ease-in-out infinite",
+          } : {}),
+        }}>
+          {cfg.icon}
+        </span>
       </span>
       <span style={{
         fontSize: 12,
         color: "var(--text-primary)",
         fontWeight: 500,
+        lineHeight: 1.3,
       }}>
         {c.label}
       </span>
@@ -222,27 +293,23 @@ function StatusBadge({ c }: { c: StatusComponent }) {
 
 function DataTable({ c }: { c: TableComponent }) {
   return (
-    <div style={{
-      background: "var(--bg-secondary)",
-      borderRadius: 8,
-      border: "1px solid var(--border-default)",
-      overflow: "hidden",
-    }}>
+    <div className={`${CLS.card} ${CLS.fadeIn}`} style={{ overflow: "hidden", padding: 0 }}>
       {c.title && (
         <div style={{
-          padding: "8px 12px",
-          fontSize: 11,
+          padding: "8px 14px",
+          fontSize: 10,
           fontWeight: 600,
-          color: "var(--text-secondary)",
+          color: "var(--text-muted)",
           borderBottom: "1px solid var(--border-default)",
           fontFamily: "var(--font-mono)",
           textTransform: "uppercase",
-          letterSpacing: 0.5,
+          letterSpacing: "0.06em",
+          background: "var(--bg-elevated)",
         }}>
           {c.title}
         </div>
       )}
-      <div style={{ overflowX: "auto" }}>
+      <div style={{ overflowX: "auto" }} className={CLS.scrollArea}>
         <table style={{
           width: "100%",
           borderCollapse: "collapse",
@@ -253,7 +320,7 @@ function DataTable({ c }: { c: TableComponent }) {
             <tr>
               {c.headers.map((h, i) => (
                 <th key={i} style={{
-                  padding: "6px 10px",
+                  padding: "8px 14px 7px",
                   textAlign: "left",
                   color: "var(--text-muted)",
                   fontWeight: 600,
@@ -261,7 +328,8 @@ function DataTable({ c }: { c: TableComponent }) {
                   whiteSpace: "nowrap",
                   fontSize: 10,
                   textTransform: "uppercase",
-                  letterSpacing: 0.5,
+                  letterSpacing: "0.06em",
+                  background: "var(--bg-elevated)",
                 }}>
                   {h}
                 </th>
@@ -270,14 +338,21 @@ function DataTable({ c }: { c: TableComponent }) {
           </thead>
           <tbody>
             {c.rows.map((row, ri) => (
-              <tr key={ri} style={{
-                borderBottom: ri < c.rows.length - 1 ? "1px solid var(--border-default)" : "none",
-              }}>
+              <tr
+                key={ri}
+                className={CLS.tableRow}
+                style={{
+                  borderBottom: ri < c.rows.length - 1 ? "1px solid var(--border-default)" : "none",
+                  background: ri % 2 === 1 ? "var(--state-hover)" : "transparent",
+                }}
+              >
                 {row.map((cell, ci) => (
                   <td key={ci} style={{
-                    padding: "5px 10px",
-                    color: "var(--text-primary)",
+                    padding: "6px 14px",
+                    color: ci === 0 ? "var(--text-primary)" : "var(--text-secondary)",
+                    fontWeight: ci === 0 ? 500 : 400,
                     whiteSpace: "nowrap",
+                    lineHeight: 1.5,
                   }}>
                     {cell}
                   </td>
@@ -292,56 +367,70 @@ function DataTable({ c }: { c: TableComponent }) {
 }
 
 function DataList({ c }: { c: ListComponent }) {
-  const Tag = c.ordered ? "ol" : "ul";
-
   return (
-    <div style={{
-      padding: "10px 14px",
-      background: "var(--bg-secondary)",
-      borderRadius: 8,
-      border: "1px solid var(--border-default)",
-    }}>
+    <div className={`${CLS.card} ${CLS.fadeIn}`} style={{ padding: 0, overflow: "hidden" }}>
       {c.title && (
         <div style={{
-          fontSize: 11,
+          padding: "8px 14px",
+          fontSize: 10,
           fontWeight: 600,
-          color: "var(--text-secondary)",
-          marginBottom: 6,
+          color: "var(--text-muted)",
+          borderBottom: "1px solid var(--border-default)",
           fontFamily: "var(--font-mono)",
           textTransform: "uppercase",
-          letterSpacing: 0.5,
+          letterSpacing: "0.06em",
+          background: "var(--bg-elevated)",
         }}>
           {c.title}
         </div>
       )}
-      <Tag style={{
-        margin: 0,
-        paddingLeft: 18,
-        fontSize: 12,
-        color: "var(--text-primary)",
-        lineHeight: 1.6,
-      }}>
+      <div style={{ padding: "8px 0" }}>
         {c.items.map((item, i) => (
-          <li key={i} style={{ color: "var(--text-secondary)" }}>
-            <span style={{ color: "var(--text-primary)" }}>{item}</span>
-          </li>
+          <div
+            key={i}
+            className={CLS.listItem}
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              gap: 10,
+              padding: "4px 14px",
+              fontSize: 12,
+              lineHeight: 1.6,
+              color: "var(--text-primary)",
+            }}
+          >
+            <span style={{
+              color: c.ordered ? "var(--text-muted)" : "var(--accent)",
+              fontFamily: "var(--font-mono)",
+              fontSize: c.ordered ? 10 : 6,
+              fontWeight: 600,
+              flexShrink: 0,
+              width: c.ordered ? 18 : "auto",
+              textAlign: "right",
+              lineHeight: "inherit",
+              userSelect: "none",
+            }}>
+              {c.ordered ? `${i + 1}.` : "\u25CF"}
+            </span>
+            <span style={{ flex: 1, minWidth: 0 }}>{item}</span>
+          </div>
         ))}
-      </Tag>
+      </div>
     </div>
   );
 }
 
 function TextBlock({ c }: { c: TextComponent }) {
   return (
-    <div style={{
-      padding: "10px 14px",
-      background: "var(--bg-secondary)",
-      borderRadius: 8,
-      border: "1px solid var(--border-default)",
-      fontSize: 12,
-      color: "var(--text-primary)",
-      lineHeight: 1.5,
-    }}>
+    <div
+      className={`${CLS.card} ${CLS.fadeIn}`}
+      style={{
+        padding: "12px 16px",
+        fontSize: 12,
+        color: "var(--text-primary)",
+        lineHeight: 1.6,
+      }}
+    >
       <SimpleMarkdown text={c.content} />
     </div>
   );
@@ -349,43 +438,818 @@ function TextBlock({ c }: { c: TextComponent }) {
 
 function CodeBlock({ c }: { c: CodeComponent }) {
   return (
-    <div style={{
-      background: "var(--bg-secondary)",
-      borderRadius: 8,
-      border: "1px solid var(--border-default)",
-      overflow: "hidden",
-    }}>
+    <div className={`${CLS.card} ${CLS.fadeIn}`} style={{ overflow: "hidden", padding: 0 }}>
       {(c.title || c.language) && (
         <div style={{
-          padding: "6px 12px",
+          padding: "6px 14px",
           fontSize: 10,
           color: "var(--text-muted)",
           borderBottom: "1px solid var(--border-default)",
           fontFamily: "var(--font-mono)",
           display: "flex",
           justifyContent: "space-between",
+          alignItems: "center",
+          background: "var(--bg-elevated)",
         }}>
-          <span>{c.title ?? ""}</span>
+          <span style={{ fontWeight: 500 }}>{c.title ?? ""}</span>
           {c.language && (
-            <span style={{ textTransform: "uppercase", letterSpacing: 0.5 }}>
+            <span style={{
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              fontSize: 9,
+              padding: "1px 6px",
+              borderRadius: 3,
+              background: "var(--code-bg)",
+              color: "var(--accent)",
+              fontWeight: 600,
+            }}>
               {c.language}
             </span>
           )}
         </div>
       )}
-      <pre style={{
-        margin: 0,
-        padding: "10px 12px",
-        fontSize: 11,
-        fontFamily: "var(--font-mono)",
-        color: "var(--text-primary)",
-        overflowX: "auto",
-        lineHeight: 1.5,
-        whiteSpace: "pre-wrap",
-        wordBreak: "break-all",
-      }}>
+      <pre
+        className={CLS.scrollArea}
+        style={{
+          margin: 0,
+          padding: "12px 14px",
+          fontSize: 11,
+          fontFamily: "var(--font-mono)",
+          color: "var(--text-primary)",
+          overflowX: "auto",
+          lineHeight: 1.6,
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-all",
+          tabSize: 2,
+        }}
+      >
         {c.content}
       </pre>
+    </div>
+  );
+}
+
+// ── New component renderers (Beautiful Evidence) ─────────
+
+/**
+ * Sparkline — Tufte's "intense, simple, word-sized graphic."
+ * Pure SVG micro-chart. No axes, no gridlines — just data.
+ */
+function SparklineChart({ c }: { c: SparklineComponent }) {
+  const color = c.color ? DSL_COLORS[c.color] ?? "var(--info-color)" : "var(--info-color)";
+  const h = c.height ?? 32;
+  const variant = c.variant ?? "line";
+  const data = c.data;
+
+  if (data.length === 0) return null;
+
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const range = max - min || 1;
+
+  const viewW = 200;
+  const viewH = h;
+  const pad = 2;
+  const usableH = viewH - pad * 2;
+  const step = data.length > 1 ? (viewW - pad * 2) / (data.length - 1) : 0;
+
+  const points = data.map((v, i) => ({
+    x: pad + i * step,
+    y: pad + usableH - ((v - min) / range) * usableH,
+  }));
+
+  const polyline = points.map((p) => `${p.x},${p.y}`).join(" ");
+
+  // Area path for area variant (or subtle fill for line variant)
+  const areaPath = `M${points[0]!.x},${points[0]!.y} ` +
+    points.slice(1).map((p) => `L${p.x},${p.y}`).join(" ") +
+    ` L${points[points.length - 1]!.x},${viewH - pad} L${points[0]!.x},${viewH - pad} Z`;
+
+  // Reference line
+  const refY = c.referenceValue != null
+    ? pad + usableH - ((c.referenceValue - min) / range) * usableH
+    : null;
+
+  return (
+    <div
+      className={`${CLS.card} ${CLS.fadeIn}`}
+      style={{
+        padding: "12px 16px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+      }}
+    >
+      {c.label && (
+        <div style={{
+          fontSize: 10,
+          color: "var(--text-muted)",
+          fontFamily: "var(--font-mono)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          fontWeight: 500,
+        }}>
+          {c.label}
+        </div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <svg
+          viewBox={`0 0 ${viewW} ${viewH}`}
+          width="100%"
+          height={h}
+          preserveAspectRatio="none"
+          style={{ display: "block", flex: 1 }}
+        >
+          {/* Reference line */}
+          {refY != null && (
+            <line
+              x1={pad} y1={refY} x2={viewW - pad} y2={refY}
+              stroke="var(--text-muted)"
+              strokeWidth="0.5"
+              strokeDasharray="3,3"
+              opacity={0.4}
+            />
+          )}
+
+          {variant === "bar" ? (
+            data.map((v, i) => {
+              const barW = Math.max(1, (viewW - pad * 2) / data.length - 1.5);
+              const barH = ((v - min) / range) * usableH;
+              const x = pad + i * ((viewW - pad * 2) / data.length);
+              return (
+                <rect
+                  key={i}
+                  x={x}
+                  y={viewH - pad - barH}
+                  width={barW}
+                  height={barH}
+                  fill={color}
+                  opacity={0.75}
+                  rx={1}
+                />
+              );
+            })
+          ) : (
+            <>
+              {/* Subtle area fill for both line and area variants */}
+              <path
+                d={areaPath}
+                fill={color}
+                opacity={variant === "area" ? 0.15 : 0.06}
+              />
+              <polyline
+                points={polyline}
+                fill="none"
+                stroke={color}
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </>
+          )}
+
+          {/* Endpoint dots */}
+          {variant !== "bar" && points.length > 1 && (
+            <>
+              <circle cx={points[0]!.x} cy={points[0]!.y} r="2" fill={color} opacity={0.5} />
+              <circle cx={points[points.length - 1]!.x} cy={points[points.length - 1]!.y} r="2.5" fill={color} />
+            </>
+          )}
+        </svg>
+
+        {/* Min/max range labels */}
+        {c.showRange && (
+          <div style={{
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "space-between",
+            height: h,
+            fontSize: 9,
+            fontFamily: "var(--font-mono)",
+            color: "var(--text-muted)",
+            flexShrink: 0,
+            lineHeight: 1,
+            opacity: 0.7,
+          }}>
+            <span>{max}</span>
+            <span>{min}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * KeyValueSheet — dense property list. Alternating rows,
+ * clear key-value separation. Supports horizontal layout.
+ */
+function KeyValueSheet({ c }: { c: KvComponent }) {
+  const isHorizontal = c.layout === "horizontal";
+
+  return (
+    <div className={`${CLS.card} ${CLS.fadeIn}`} style={{ overflow: "hidden", padding: 0 }}>
+      {c.title && (
+        <div style={{
+          padding: "8px 14px",
+          fontSize: 10,
+          fontWeight: 600,
+          color: "var(--text-muted)",
+          borderBottom: "1px solid var(--border-default)",
+          fontFamily: "var(--font-mono)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          background: "var(--bg-elevated)",
+        }}>
+          {c.title}
+        </div>
+      )}
+      <div style={{
+        display: isHorizontal ? "flex" : "block",
+        flexWrap: isHorizontal ? "wrap" : undefined,
+      }}>
+        {c.entries.map((entry, i) => {
+          const valColor = entry.color ? DSL_COLORS[entry.color] ?? "var(--text-primary)" : "var(--text-primary)";
+
+          if (isHorizontal) {
+            return (
+              <div key={i} style={{
+                padding: "10px 14px",
+                borderRight: i < c.entries.length - 1 ? "1px solid var(--border-default)" : "none",
+                display: "flex",
+                flexDirection: "column",
+                gap: 3,
+                flex: "1 1 auto",
+                minWidth: 80,
+              }}>
+                <span style={{
+                  fontSize: 9,
+                  color: "var(--text-muted)",
+                  fontFamily: "var(--font-mono)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  fontWeight: 500,
+                }}>
+                  {entry.key}
+                </span>
+                <span style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: valColor,
+                  fontFamily: "var(--font-mono)",
+                  letterSpacing: "-0.01em",
+                }}>
+                  {entry.value}
+                </span>
+              </div>
+            );
+          }
+
+          return (
+            <div
+              key={i}
+              className={CLS.kvRow}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "baseline",
+                padding: "6px 14px",
+                borderBottom: i < c.entries.length - 1 ? "1px solid var(--border-default)" : "none",
+                gap: 12,
+                background: i % 2 === 1 ? "var(--state-hover)" : "transparent",
+              }}
+            >
+              <span style={{
+                fontSize: 11,
+                color: "var(--text-muted)",
+                fontFamily: "var(--font-mono)",
+                flexShrink: 0,
+              }}>
+                {entry.key}
+              </span>
+              <span style={{
+                fontSize: 11,
+                color: valColor,
+                fontFamily: "var(--font-mono)",
+                fontWeight: 500,
+                textAlign: "right",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}>
+                {entry.value}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * TimelineView — vertical sequence with state-colored dots and connector line.
+ * Compact and scannable for event history.
+ */
+function TimelineView({ c }: { c: TimelineComponent }) {
+  return (
+    <div className={`${CLS.card} ${CLS.fadeIn}`} style={{ overflow: "hidden", padding: 0 }}>
+      {c.title && (
+        <div style={{
+          padding: "8px 14px",
+          fontSize: 10,
+          fontWeight: 600,
+          color: "var(--text-muted)",
+          borderBottom: "1px solid var(--border-default)",
+          fontFamily: "var(--font-mono)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          background: "var(--bg-elevated)",
+        }}>
+          {c.title}
+        </div>
+      )}
+      <div style={{ padding: "12px 14px" }}>
+        {c.events.map((event, i) => {
+          const cfg = STATUS_CONFIG[event.state ?? "pending"] ?? STATUS_CONFIG.pending;
+          const isLast = i === c.events.length - 1;
+          const isRunning = event.state === "running";
+
+          return (
+            <div key={i} style={{
+              display: "flex",
+              gap: 12,
+              minHeight: isLast ? "auto" : 40,
+            }}>
+              {/* Connector column: dot + line */}
+              <div style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                width: 16,
+                flexShrink: 0,
+              }}>
+                <div style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: "50%",
+                  background: `color-mix(in srgb, ${cfg.color} 20%, transparent)`,
+                  border: `2px solid ${cfg.color}`,
+                  flexShrink: 0,
+                  marginTop: 3,
+                  boxSizing: "border-box",
+                  ...(isRunning ? {
+                    animation: "render-pulse 2s ease-in-out infinite",
+                    background: cfg.color,
+                  } : {}),
+                }} />
+                {!isLast && (
+                  <div style={{
+                    width: 1.5,
+                    flex: 1,
+                    background: `color-mix(in srgb, ${cfg.color} 25%, var(--border-default))`,
+                    marginTop: 3,
+                    marginBottom: 3,
+                    borderRadius: 1,
+                  }} />
+                )}
+              </div>
+              {/* Content column */}
+              <div style={{
+                flex: 1,
+                paddingBottom: isLast ? 0 : 8,
+                minWidth: 0,
+              }}>
+                <div style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "baseline",
+                  gap: 8,
+                }}>
+                  <span style={{
+                    fontSize: 11,
+                    fontWeight: 500,
+                    color: "var(--text-primary)",
+                    lineHeight: 1.3,
+                  }}>
+                    {event.label}
+                  </span>
+                  {event.time && (
+                    <span style={{
+                      fontSize: 9,
+                      color: "var(--text-muted)",
+                      fontFamily: "var(--font-mono)",
+                      flexShrink: 0,
+                      whiteSpace: "nowrap",
+                      opacity: 0.7,
+                    }}>
+                      {event.time}
+                    </span>
+                  )}
+                </div>
+                {event.detail && (
+                  <div style={{
+                    fontSize: 10,
+                    color: "var(--text-muted)",
+                    lineHeight: 1.5,
+                    marginTop: 3,
+                  }}>
+                    {event.detail}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Callout variant configuration */
+const CALLOUT_CONFIG: Record<string, { color: string; bg: string; icon: string }> = {
+  info: { color: "var(--info-color)", bg: "var(--info-bg)", icon: "\u2139" },
+  warning: { color: "var(--status-warning)", bg: "var(--warning-bg)", icon: "\u26A0" },
+  success: { color: "var(--status-success)", bg: "var(--success-bg)", icon: "\u2713" },
+  error: { color: "var(--status-error)", bg: "var(--error-bg)", icon: "\u2717" },
+};
+
+/**
+ * CalloutBlock — semantic emphasis with colored left border and icon.
+ * Highlights key findings, warnings, or important notes.
+ */
+function CalloutBlock({ c }: { c: CalloutComponent }) {
+  const cfg = CALLOUT_CONFIG[c.variant] ?? CALLOUT_CONFIG.info;
+
+  return (
+    <div
+      className={CLS.fadeIn}
+      style={{
+        background: cfg.bg,
+        borderRadius: 8,
+        border: `1px solid color-mix(in srgb, ${cfg.color} 15%, transparent)`,
+        borderLeft: `3px solid ${cfg.color}`,
+        padding: "12px 16px",
+        display: "flex",
+        gap: 12,
+        alignItems: "flex-start",
+      }}
+    >
+      <span style={{
+        width: 20,
+        height: 20,
+        borderRadius: 5,
+        background: `color-mix(in srgb, ${cfg.color} 15%, transparent)`,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 11,
+        lineHeight: 1,
+        flexShrink: 0,
+        color: cfg.color,
+        fontWeight: 700,
+      }}>
+        {cfg.icon}
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {c.title && (
+          <div style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: cfg.color,
+            marginBottom: 4,
+            lineHeight: 1.3,
+          }}>
+            {c.title}
+          </div>
+        )}
+        <div style={{
+          fontSize: 11,
+          color: "var(--text-primary)",
+          lineHeight: 1.6,
+        }}>
+          <SimpleMarkdown text={c.content} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * SeparatorLine — visual divider with optional centered label.
+ * Provides section breaks and visual breathing room.
+ */
+function SeparatorLine({ c }: { c: SeparatorComponent }) {
+  if (c.label) {
+    return (
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "6px 0",
+      }}>
+        <div style={{
+          flex: 1,
+          height: 1,
+          background: "var(--border-default)",
+        }} />
+        <span style={{
+          fontSize: 9,
+          color: "var(--text-muted)",
+          fontFamily: "var(--font-mono)",
+          textTransform: "uppercase",
+          letterSpacing: "0.08em",
+          flexShrink: 0,
+          fontWeight: 500,
+          opacity: 0.7,
+        }}>
+          {c.label}
+        </span>
+        <div style={{
+          flex: 1,
+          height: 1,
+          background: "var(--border-default)",
+        }} />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      height: 1,
+      background: "var(--border-default)",
+      margin: "6px 0",
+    }} />
+  );
+}
+
+/**
+ * DiffView — side-by-side before/after comparison.
+ * Color-coded columns for change evidence.
+ */
+function DiffView({ c }: { c: DiffComponent }) {
+  return (
+    <div className={`${CLS.card} ${CLS.fadeIn}`} style={{ overflow: "hidden", padding: 0 }}>
+      {c.title && (
+        <div style={{
+          padding: "8px 14px",
+          fontSize: 10,
+          fontWeight: 600,
+          color: "var(--text-muted)",
+          borderBottom: "1px solid var(--border-default)",
+          fontFamily: "var(--font-mono)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          background: "var(--bg-elevated)",
+        }}>
+          {c.title}
+        </div>
+      )}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        gap: 0,
+      }}>
+        {/* Before column */}
+        <div style={{
+          borderRight: "1px solid var(--border-default)",
+          background: `color-mix(in srgb, var(--status-error) 4%, transparent)`,
+        }}>
+          <div style={{
+            padding: "6px 12px",
+            fontSize: 9,
+            color: "var(--status-error)",
+            fontFamily: "var(--font-mono)",
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+            fontWeight: 600,
+            borderBottom: "1px solid var(--border-default)",
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+          }}>
+            <span style={{ fontSize: 8 }}>{"\u2212"}</span>
+            {c.before.label ?? "Before"}
+          </div>
+          <pre
+            className={CLS.scrollArea}
+            style={{
+              margin: 0,
+              padding: "10px 12px",
+              fontSize: 10,
+              fontFamily: "var(--font-mono)",
+              color: "var(--text-primary)",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-all",
+              lineHeight: 1.6,
+            }}
+          >
+            {c.before.content}
+          </pre>
+        </div>
+        {/* After column */}
+        <div style={{
+          background: `color-mix(in srgb, var(--status-success) 4%, transparent)`,
+        }}>
+          <div style={{
+            padding: "6px 12px",
+            fontSize: 9,
+            color: "var(--status-success)",
+            fontFamily: "var(--font-mono)",
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+            fontWeight: 600,
+            borderBottom: "1px solid var(--border-default)",
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+          }}>
+            <span style={{ fontSize: 8 }}>+</span>
+            {c.after.label ?? "After"}
+          </div>
+          <pre
+            className={CLS.scrollArea}
+            style={{
+              margin: 0,
+              padding: "10px 12px",
+              fontSize: 10,
+              fontFamily: "var(--font-mono)",
+              color: "var(--text-primary)",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-all",
+              lineHeight: 1.6,
+            }}
+          >
+            {c.after.content}
+          </pre>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ChecklistView — task list with completion indicators.
+ * Checked items get a subtle strikethrough and dimmed color.
+ */
+function ChecklistView({ c }: { c: ChecklistComponent }) {
+  const done = c.items.filter((i) => i.checked).length;
+  const total = c.items.length;
+  const isComplete = total > 0 && done === total;
+
+  return (
+    <div className={`${CLS.card} ${CLS.fadeIn}`} style={{ overflow: "hidden", padding: 0 }}>
+      {(c.title || total > 0) && (
+        <div style={{
+          padding: "8px 14px",
+          fontSize: 10,
+          fontWeight: 600,
+          color: "var(--text-muted)",
+          borderBottom: "1px solid var(--border-default)",
+          fontFamily: "var(--font-mono)",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          background: "var(--bg-elevated)",
+        }}>
+          <span style={{ textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            {c.title ?? "Checklist"}
+          </span>
+          <span style={{
+            fontSize: 10,
+            color: isComplete ? "var(--status-success)" : "var(--text-muted)",
+            fontWeight: 600,
+            transition: "color 0.3s ease",
+          }}>
+            {done}/{total}
+          </span>
+        </div>
+      )}
+      {/* Progress micro-bar */}
+      {total > 0 && (
+        <div style={{
+          height: 2,
+          background: "var(--bg-elevated)",
+        }}>
+          <div style={{
+            height: "100%",
+            width: `${(done / total) * 100}%`,
+            background: isComplete ? "var(--status-success)" : "var(--info-color)",
+            transition: "width 0.4s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s ease",
+          }} />
+        </div>
+      )}
+      <div style={{ padding: "6px 0" }}>
+        {c.items.map((item, i) => (
+          <div
+            key={i}
+            className={CLS.checkItem}
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 10,
+              padding: "5px 14px",
+              fontSize: 11,
+              color: item.checked ? "var(--text-muted)" : "var(--text-primary)",
+              lineHeight: 1.5,
+              transition: "color 0.2s ease",
+            }}
+          >
+            <span style={{
+              width: 16,
+              height: 16,
+              borderRadius: 4,
+              border: item.checked
+                ? "1.5px solid var(--status-success)"
+                : "1.5px solid var(--border-hover)",
+              background: item.checked
+                ? "color-mix(in srgb, var(--status-success) 15%, transparent)"
+                : "transparent",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+              marginTop: 1,
+              fontSize: 9,
+              color: "var(--status-success)",
+              fontWeight: 700,
+              transition: "all 0.2s ease",
+            }}>
+              {item.checked ? "\u2713" : ""}
+            </span>
+            <span style={{
+              textDecoration: item.checked ? "line-through" : "none",
+              opacity: item.checked ? 0.55 : 1,
+              transition: "opacity 0.2s ease",
+              flex: 1,
+              minWidth: 0,
+            }}>
+              {item.label}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * TagsRow — compact flex-wrapped row of categorical badges.
+ * Each tag is a small rounded pill with optional color coding.
+ */
+function TagsRow({ c }: { c: TagsComponent }) {
+  return (
+    <div
+      className={`${CLS.card} ${CLS.fadeIn}`}
+      style={{
+        padding: "12px 16px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      {c.label && (
+        <div style={{
+          fontSize: 10,
+          color: "var(--text-muted)",
+          fontFamily: "var(--font-mono)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          fontWeight: 500,
+        }}>
+          {c.label}
+        </div>
+      )}
+      <div style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 5,
+      }}>
+        {c.items.map((tag, i) => {
+          const color = tag.color ? DSL_COLORS[tag.color] ?? "var(--text-muted)" : "var(--text-muted)";
+          return (
+            <span
+              key={i}
+              className={CLS.tagPill}
+              style={{
+                padding: "3px 9px",
+                borderRadius: 10,
+                fontSize: 10,
+                fontFamily: "var(--font-mono)",
+                fontWeight: 500,
+                color,
+                background: `color-mix(in srgb, ${color} 10%, transparent)`,
+                border: `1px solid color-mix(in srgb, ${color} 20%, transparent)`,
+                whiteSpace: "nowrap",
+                letterSpacing: "0.01em",
+                lineHeight: 1.4,
+              }}
+            >
+              {tag.text}
+            </span>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -408,6 +1272,22 @@ function RenderComponentView({ component }: { component: RenderComponent }) {
       return <TextBlock c={component} />;
     case "code":
       return <CodeBlock c={component} />;
+    case "sparkline":
+      return <SparklineChart c={component} />;
+    case "kv":
+      return <KeyValueSheet c={component} />;
+    case "timeline":
+      return <TimelineView c={component} />;
+    case "callout":
+      return <CalloutBlock c={component} />;
+    case "separator":
+      return <SeparatorLine c={component} />;
+    case "diff":
+      return <DiffView c={component} />;
+    case "checklist":
+      return <ChecklistView c={component} />;
+    case "tags":
+      return <TagsRow c={component} />;
     default:
       return null;
   }
@@ -416,10 +1296,19 @@ function RenderComponentView({ component }: { component: RenderComponent }) {
 // ── Determine if a component should span full width ───────
 
 function isFullWidth(c: RenderComponent): boolean {
-  return c.type === "table" || c.type === "code" || c.type === "text";
+  return (
+    c.type === "table" ||
+    c.type === "code" ||
+    c.type === "text" ||
+    c.type === "list" ||
+    c.type === "timeline" ||
+    c.type === "diff" ||
+    c.type === "separator" ||
+    c.type === "callout"
+  );
 }
 
-// ── Pulse animation (injected once) ──────────────────────
+// ── CSS injection ────────────────────────────────────────
 
 let styleInjected = false;
 function injectStyles() {
@@ -427,9 +1316,148 @@ function injectStyles() {
   styleInjected = true;
   const style = document.createElement("style");
   style.textContent = `
+    /* ── Dashboard component base card ── */
+    .${CLS.card} {
+      background: var(--bg-secondary);
+      border-radius: 8px;
+      border: 1px solid var(--border-default);
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .${CLS.cardHover}:hover {
+      border-color: var(--border-hover);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+
+    /* ── Fade-in animation ── */
+    .${CLS.fadeIn} {
+      animation: render-fadeIn 0.25s ease-out both;
+    }
+
+    @keyframes render-fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(4px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* ── Pulse animation ── */
     @keyframes render-pulse {
       0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
+      50% { opacity: 0.4; }
+    }
+
+    /* ── Pulse ring (expanding circle) for running status ── */
+    .${CLS.pulseRing} {
+      animation: render-ring 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+    }
+
+    @keyframes render-ring {
+      0% {
+        transform: scale(0.8);
+        opacity: 0.6;
+      }
+      100% {
+        transform: scale(1.8);
+        opacity: 0;
+      }
+    }
+
+    /* ── Shimmer for active progress bars ── */
+    .${CLS.shimmer}::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(255,255,255,0.12),
+        transparent
+      );
+      animation: render-shimmer 2s ease-in-out infinite;
+    }
+
+    @keyframes render-shimmer {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
+
+    /* ── Table row hover ── */
+    .${CLS.tableRow} {
+      transition: background 0.15s ease;
+    }
+    .${CLS.tableRow}:hover {
+      background: var(--state-hover) !important;
+    }
+
+    /* ── KV row hover ── */
+    .${CLS.kvRow} {
+      transition: background 0.15s ease;
+    }
+    .${CLS.kvRow}:hover {
+      background: var(--state-active) !important;
+    }
+
+    /* ── List item hover ── */
+    .${CLS.listItem} {
+      transition: background 0.15s ease;
+      border-radius: 4px;
+    }
+    .${CLS.listItem}:hover {
+      background: var(--state-hover);
+    }
+
+    /* ── Checklist item hover ── */
+    .${CLS.checkItem} {
+      transition: background 0.15s ease;
+    }
+    .${CLS.checkItem}:hover {
+      background: var(--state-hover);
+    }
+
+    /* ── Tag pill hover ── */
+    .${CLS.tagPill} {
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .${CLS.tagPill}:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+
+    /* ── Scrollbar styling for dashboard areas ── */
+    .${CLS.scrollArea}::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    .${CLS.scrollArea}::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .${CLS.scrollArea}::-webkit-scrollbar-thumb {
+      background: var(--border-hover);
+      border-radius: 3px;
+    }
+    .${CLS.scrollArea}::-webkit-scrollbar-thumb:hover {
+      background: var(--text-muted);
+    }
+
+    /* ── Reduced motion ── */
+    @media (prefers-reduced-motion: reduce) {
+      .${CLS.fadeIn} {
+        animation: none;
+      }
+      .${CLS.shimmer}::after {
+        animation: none;
+      }
+      .${CLS.pulseRing} {
+        animation: none;
+      }
+      .${CLS.tagPill}:hover {
+        transform: none;
+      }
     }
   `;
   document.head.appendChild(style);
@@ -442,7 +1470,6 @@ function RenderNodeRenderer({
   onUpdateData,
   socketSubscribe,
   onResize,
-  canvasScale,
 }: NodeRenderProps) {
   const data = node.data as RenderNodeData;
   const dataRef = useRef(data);
@@ -508,20 +1535,19 @@ function RenderNodeRenderer({
           minHeight={200}
           onResize={onResize}
           color="var(--accent)"
-          canvasScale={canvasScale}
         />
       )}
 
       {/* Header */}
       <div
         style={{
-          padding: "6px 12px",
+          padding: "8px 14px",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
           borderBottom: "1px solid var(--border-default)",
           flexShrink: 0,
-          background: "linear-gradient(135deg, var(--bg-surface) 0%, var(--bg-secondary) 100%)",
+          background: "var(--bg-secondary)",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -547,9 +1573,10 @@ function RenderNodeRenderer({
             />
           </div>
           <span style={{
-            fontSize: 11,
+            fontSize: 12,
             fontWeight: 600,
             color: "var(--text-primary)",
+            letterSpacing: "-0.01em",
           }}>
             {layout.title || "Dashboard"}
           </span>
@@ -559,6 +1586,7 @@ function RenderNodeRenderer({
             fontSize: 9,
             color: "var(--text-muted)",
             fontFamily: "var(--font-mono)",
+            opacity: 0.7,
           }}>
             {components.length} component{components.length !== 1 ? "s" : ""}
           </span>
@@ -567,6 +1595,7 @@ function RenderNodeRenderer({
 
       {/* Content area */}
       <div
+        className={hasContent ? CLS.scrollArea : undefined}
         style={{
           flex: 1,
           overflow: "auto",
@@ -580,15 +1609,16 @@ function RenderNodeRenderer({
             alignItems: "center",
             justifyContent: "center",
             flexDirection: "column",
-            gap: 8,
+            gap: 10,
             color: "var(--text-muted)",
             padding: 24,
           }}>
             <div style={{
-              width: 40,
-              height: 40,
-              borderRadius: 10,
+              width: 44,
+              height: 44,
+              borderRadius: 12,
               background: "var(--bg-secondary)",
+              border: "1px solid var(--border-default)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -605,11 +1635,11 @@ function RenderNodeRenderer({
             <div style={{
               fontSize: 12,
               textAlign: "center",
-              lineHeight: 1.5,
+              lineHeight: 1.6,
             }}>
               Waiting for dashboard data...
               <br />
-              <span style={{ fontSize: 10, opacity: 0.7 }}>
+              <span style={{ fontSize: 10, opacity: 0.6 }}>
                 The Leader agent will populate this panel
               </span>
             </div>
@@ -620,6 +1650,7 @@ function RenderNodeRenderer({
               display: "grid",
               gridTemplateColumns: `repeat(${columns}, 1fr)`,
               gap,
+              alignContent: "start",
             }}
           >
             {components.map((c) => (

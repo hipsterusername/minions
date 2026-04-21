@@ -718,7 +718,7 @@ function ModelUsageBar({ modelUsage }: { modelUsage: Record<string, ModelUsage> 
   if (entries.length === 0) return null;
   const totalCost = entries.reduce((s, [, u]) => s + u.costUSD, 0);
   const MODEL_COLORS: Record<string, string> = {
-    opus: "var(--model-opus)", sonnet: "var(--model-sonnet)", haiku: "var(--model-haiku)",
+    opus: "var(--model-opus)", "opus-old": "var(--model-opus-old)", sonnet: "var(--model-sonnet)", haiku: "var(--model-haiku)",
   };
 
   return (
