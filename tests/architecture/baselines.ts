@@ -20,9 +20,9 @@
  * Phases referenced map to `docs/refactor-test-plan.md`.
  */
 export const SERVER_FILE_SIZE_ALLOWLIST: Readonly<Record<string, number>> = {
-  // Drained in Phase 3 (each MCP tool factory moves under server/agents/<role>/).
-  "server/task-tools.ts": 624,
-// Phase 5.3 split server/routes/projects.ts into per-resource modules
+  // Phase 5.3 split server/task-tools.ts into per-tool modules
+  // under server/task-tools/ — barrel is now under 400 lines.
+  // Phase 5.3 split server/routes/projects.ts into per-resource modules
   // under server/routes/projects/ — barrel is now under 400 lines.
   // Phase 5.1 + 5.2 retired server/index.ts from the allowlist — it
   // dropped from 2072 → 243 after extracting SessionHost and splitting
