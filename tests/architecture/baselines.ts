@@ -22,12 +22,8 @@
 export const SERVER_FILE_SIZE_ALLOWLIST: Readonly<Record<string, number>> = {
   // Drained in Phase 3 (each MCP tool factory moves under server/agents/<role>/).
   "server/task-tools.ts": 624,
-  // Bumped 604 → 646 in Phase 2 pre-flight: same unrelated-feature growth
-  // on main. Not touched by this refactor.
-  "server/worktree.ts": 646,
-  // REST handlers — not on the published refactor plan but flagged here
-  // as debt. Should be split per-resource alongside Phase 5 cleanup.
-  "server/routes/projects.ts": 596,
+// Phase 5.3 split server/routes/projects.ts into per-resource modules
+  // under server/routes/projects/ — barrel is now under 400 lines.
   // Phase 5.1 + 5.2 retired server/index.ts from the allowlist — it
   // dropped from 2072 → 243 after extracting SessionHost and splitting
   // the command dispatcher into per-file handlers under server/commands/.
