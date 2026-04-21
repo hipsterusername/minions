@@ -1294,18 +1294,62 @@ function RenderComponentView({ component }: { component: RenderComponent }) {
 }
 
 // ── Determine if a component should span full width ───────
+//
+// Precedence:
+//   1. Explicit `span` override on the component (agent opt-in)
+//   2. Intrinsically full-width types (structurally wide content)
+//   3. Length-based promotion for cell-width primitives whose content
+//      would otherwise leave unavoidable negative space next to shorter
+//      neighbors (see dashboard audit).
+//
+// Length thresholds are intentionally conservative — agents that want
+// a different balance can use the `span` override.
 
-function isFullWidth(c: RenderComponent): boolean {
-  return (
-    c.type === "table" ||
-    c.type === "code" ||
-    c.type === "text" ||
-    c.type === "list" ||
-    c.type === "timeline" ||
-    c.type === "diff" ||
-    c.type === "separator" ||
-    c.type === "callout"
-  );
+const ALWAYS_FULL_WIDTH = new Set<RenderComponent["type"]>([
+  "table",
+  "code",
+  "text",
+  "list",
+  "timeline",
+  "diff",
+  "separator",
+  "callout",
+]);
+
+function isFullWidth(c: RenderComponent, columns: number): boolean {
+  // 1. Explicit span override wins
+  if (c.span === "full") return true;
+  if (typeof c.span === "number") return c.span >= columns;
+
+  // 2. Intrinsic width
+  if (ALWAYS_FULL_WIDTH.has(c.type)) return true;
+
+  // 3. Length-based promotion
+  switch (c.type) {
+    case "checklist":
+      return c.items.length >= 6;
+    case "kv":
+      return (c.layout ?? "vertical") === "vertical" && c.entries.length >= 6;
+    case "tags":
+      return c.items.length >= 9;
+    case "sparkline":
+      return c.data.length >= 40;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Compute explicit column span for a component.
+ * Returns a `gridColumn` CSS value or `undefined` to let auto-placement decide.
+ */
+function gridColumnFor(c: RenderComponent, columns: number): string | undefined {
+  if (isFullWidth(c, columns)) return "1 / -1";
+  // Numeric span less than columns → span that many
+  if (typeof c.span === "number" && c.span > 1 && c.span < columns) {
+    return `span ${c.span}`;
+  }
+  return undefined;
 }
 
 // ── CSS injection ────────────────────────────────────────
@@ -1442,6 +1486,31 @@ function injectStyles() {
     }
     .${CLS.scrollArea}::-webkit-scrollbar-thumb:hover {
       background: var(--text-muted);
+    }
+
+    /* ── Responsive columns via container queries ───────
+       The agent-declared \`--rd-max-cols\` is treated as a maximum.
+       The actual column count (\`--rd-cols\`) steps down as the
+       dashboard container narrows so long lists and other items
+       don't get squeezed into unreadable columns. */
+    .rd-grid-container {
+      container-type: inline-size;
+    }
+    .rd-grid {
+      /* Default: use the agent-declared max */
+      --rd-cols: var(--rd-max-cols, 2);
+    }
+    /* Below ~720px: cap at 3 */
+    @container (max-width: 720px) {
+      .rd-grid { --rd-cols: min(var(--rd-max-cols, 2), 3); }
+    }
+    /* Below ~520px: cap at 2 */
+    @container (max-width: 520px) {
+      .rd-grid { --rd-cols: min(var(--rd-max-cols, 2), 2); }
+    }
+    /* Below ~360px: collapse to single column */
+    @container (max-width: 360px) {
+      .rd-grid { --rd-cols: 1; }
     }
 
     /* ── Reduced motion ── */
@@ -1646,24 +1715,51 @@ function RenderNodeRenderer({
           </div>
         ) : (
           <div
+            className="rd-grid-container"
             style={{
-              display: "grid",
-              gridTemplateColumns: `repeat(${columns}, 1fr)`,
-              gap,
-              alignContent: "start",
+              // Container query lets the grid step down to fewer columns
+              // when the node is resized narrow, independent of the
+              // agent-declared `columns` (which is treated as a maximum).
+              containerType: "inline-size",
+              // Expose the declared max column count to the CSS via a
+              // custom property so the @container rules can clamp it.
+              ["--rd-max-cols" as string]: String(columns),
+              ["--rd-gap" as string]: `${gap}px`,
             }}
           >
-            {components.map((c) => (
-              <div
-                key={c.id}
-                style={{
-                  gridColumn: isFullWidth(c) ? `1 / -1` : undefined,
-                  minWidth: 0,
-                }}
-              >
-                <RenderComponentView component={c} />
-              </div>
-            ))}
+            <div
+              className="rd-grid"
+              style={{
+                display: "grid",
+                // `minmax(0, 1fr)` prevents overflow when a child has
+                // intrinsic min-content wider than its track.
+                gridTemplateColumns: `repeat(var(--rd-cols, ${columns}), minmax(0, 1fr))`,
+                gap,
+                // `start` on both axes + `min-content` rows stops short
+                // components from being stretched to match a tall sibling.
+                alignContent: "start",
+                alignItems: "start",
+                gridAutoRows: "min-content",
+                // Dense packing backfills holes created by full-width
+                // items or size-mismatched rows.
+                gridAutoFlow: "dense",
+              }}
+            >
+              {components.map((c) => {
+                const col = gridColumnFor(c, columns);
+                return (
+                  <div
+                    key={c.id}
+                    style={{
+                      gridColumn: col,
+                      minWidth: 0,
+                    }}
+                  >
+                    <RenderComponentView component={c} />
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>

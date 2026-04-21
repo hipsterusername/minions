@@ -31,6 +31,25 @@ export const componentColorSchema = z.enum([
 
 export type ComponentColor = z.infer<typeof componentColorSchema>;
 
+// ── Span override ──────────────────────────────────────
+//
+// Every component accepts an optional `span` field. This is the explicit
+// escape hatch for agents that need to override the default width logic:
+//   - "auto" (default): decided by `isFullWidth()` on the client
+//   - "full":            span the entire row (equivalent to gridColumn: 1/-1)
+//   - number:            span exactly N columns (clamped to layout.columns)
+//
+// The renderer also length-promotes some cell-width primitives to full-width
+// automatically — see `isFullWidth()` in `src/nodes/RenderNode.tsx`.
+
+export const spanSchema = z.union([
+  z.literal("auto"),
+  z.literal("full"),
+  z.number().int().min(1),
+]);
+
+export type ComponentSpan = z.infer<typeof spanSchema>;
+
 // ── Component primitives ───────────────────────────────
 
 export const metricComponentSchema = z.object({
@@ -41,6 +60,7 @@ export const metricComponentSchema = z.object({
   color: componentColorSchema.optional(),
   trend: z.enum(["up", "down", "flat"]).optional(),
   detail: z.string().optional(),
+  span: spanSchema.optional(),
 });
 
 export const progressComponentSchema = z.object({
@@ -49,6 +69,7 @@ export const progressComponentSchema = z.object({
   label: z.string(),
   value: z.number(),
   color: componentColorSchema.optional(),
+  span: spanSchema.optional(),
 });
 
 export const tableComponentSchema = z.object({
@@ -57,6 +78,7 @@ export const tableComponentSchema = z.object({
   title: z.string().optional(),
   headers: z.array(z.string()),
   rows: z.array(z.array(z.string())),
+  span: spanSchema.optional(),
 });
 
 export const listComponentSchema = z.object({
@@ -65,12 +87,14 @@ export const listComponentSchema = z.object({
   title: z.string().optional(),
   items: z.array(z.string()),
   ordered: z.boolean().optional(),
+  span: spanSchema.optional(),
 });
 
 export const textComponentSchema = z.object({
   id: z.string(),
   type: z.literal("text"),
   content: z.string(),
+  span: spanSchema.optional(),
 });
 
 export const statusComponentSchema = z.object({
@@ -78,6 +102,7 @@ export const statusComponentSchema = z.object({
   type: z.literal("status"),
   label: z.string(),
   state: z.enum(["success", "error", "warning", "running", "pending"]),
+  span: spanSchema.optional(),
 });
 
 export const codeComponentSchema = z.object({
@@ -86,6 +111,7 @@ export const codeComponentSchema = z.object({
   language: z.string().optional(),
   content: z.string(),
   title: z.string().optional(),
+  span: spanSchema.optional(),
 });
 
 // ── New component primitives (Beautiful Evidence) ─────
@@ -105,6 +131,7 @@ export const sparklineComponentSchema = z.object({
   height: z.number().optional(), // default 32
   showRange: z.boolean().optional(), // show min/max labels at endpoints
   referenceValue: z.number().optional(), // horizontal reference line
+  span: spanSchema.optional(),
 });
 
 /**
@@ -123,6 +150,7 @@ export const kvComponentSchema = z.object({
     }),
   ),
   layout: z.enum(["vertical", "horizontal"]).optional(), // default "vertical"
+  span: spanSchema.optional(),
 });
 
 /**
@@ -141,6 +169,7 @@ export const timelineComponentSchema = z.object({
       time: z.string().optional(),
     }),
   ),
+  span: spanSchema.optional(),
 });
 
 /**
@@ -154,6 +183,7 @@ export const calloutComponentSchema = z.object({
   variant: z.enum(["info", "warning", "success", "error"]),
   title: z.string().optional(),
   content: z.string(),
+  span: spanSchema.optional(),
 });
 
 /**
@@ -164,6 +194,7 @@ export const separatorComponentSchema = z.object({
   id: z.string(),
   type: z.literal("separator"),
   label: z.string().optional(),
+  span: spanSchema.optional(),
 });
 
 /**
@@ -182,6 +213,7 @@ export const diffComponentSchema = z.object({
     label: z.string().optional(),
     content: z.string(),
   }),
+  span: spanSchema.optional(),
 });
 
 /**
@@ -198,6 +230,7 @@ export const checklistComponentSchema = z.object({
       checked: z.boolean(),
     }),
   ),
+  span: spanSchema.optional(),
 });
 
 /**
@@ -214,6 +247,7 @@ export const tagsComponentSchema = z.object({
       color: componentColorSchema.optional(),
     }),
   ),
+  span: spanSchema.optional(),
 });
 
 /**

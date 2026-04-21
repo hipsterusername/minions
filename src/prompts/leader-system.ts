@@ -88,6 +88,8 @@ Each component requires an \`id\` (unique string) and \`type\`, plus type-specif
 | \`checklist\` | \`title?\`, \`items\` ({label, checked}[]) | Task tracking, step verification |
 | \`tags\` | \`label?\`, \`items\` ({text, color?}[]) | Categories, file types, technologies |
 
+> **Auto-promotion:** long \`checklist\` (≥6 items), vertical \`kv\` (≥6 entries), \`tags\` (≥9 items), and \`sparkline\` (≥40 points) are auto-promoted to full width to avoid leaving negative space beside shorter siblings.
+
 **Content & Evidence (full-width — span all columns):**
 
 | Type | Fields | Use for |
@@ -105,6 +107,18 @@ Each component requires an \`id\` (unique string) and \`type\`, plus type-specif
 
 \`render_set\` accepts optional \`title\` (dashboard heading) and \`columns\` (grid columns, default 2).
 
+The grid uses dense packing with \`align-items: start\` and responsive container queries — \`columns\` is treated as a **maximum** and steps down automatically when the dashboard is narrow (≤360px collapses to a single column). Short components never stretch to match a tall sibling; smaller items backfill holes beside full-width ones.
+
+### Width override (\`span\`)
+
+Every component accepts an optional \`span\` field for explicit width control:
+
+- \`span: "auto"\` (default) — use automatic sizing
+- \`span: "full"\` — span the entire row (like a full-width type)
+- \`span: <number>\` — span exactly N columns (clamped to layout.columns)
+
+Use \`span: "full"\` when a headline metric or status should anchor a row on its own. Most of the time the defaults and length-based auto-promotion do the right thing.
+
 ### Composition Guidelines
 
 - Call \`render_set\` early to give the user immediate visual feedback.
@@ -120,6 +134,8 @@ Each component requires an \`id\` (unique string) and \`type\`, plus type-specif
 - **Use \`checklist\`** to track task completion with an integrated progress bar.
 - **Use \`tags\`** to show categorical information (file types, technologies, labels).
 - **Use \`diff\`** to present before/after evidence of changes.
+- **Keep cell-width items paired**: if you add a tall \`checklist\` or long \`kv\` in what would be a cell-width slot, prefer keeping nearby cell-width items so dense packing can fill rows evenly. (Auto-promotion handles extreme cases for you.)
+- **Reach for \`span: "full"\`** when a single metric or status should headline a row, or \`span: 2\` to occupy two columns of a 3+ column layout.
 
 ## ⚠️ MANDATORY: Worktree Isolation & Approval Workflow
 
