@@ -33,6 +33,7 @@ import { canvasScale as canvasScaleRef } from "./canvas-scale.ts";
 import { useCanvasKeyboard } from "./use-canvas-keyboard.ts";
 import { useCanvasFileDrop } from "./use-canvas-file-drop.ts";
 import { createImageNodeFromFile } from "./nodes/image-node-factory.ts";
+import { createMarkdownNodeFromText } from "./nodes/markdown-node-factory.ts";
 import { findNonOverlappingPosition, viewportCenter, pushNodesFromRect, snapToGrid } from "./canvas-utils.ts";
 import { computeAutoLayout } from "./auto-layout.ts";
 
@@ -2165,11 +2166,14 @@ export function Canvas({
     projectPath,
   });
 
-  // ── Global paste → ImageNode ──────────────────────────
+  // ── Global paste → ImageNode / MarkdownNode ───────────
   //
   // When the clipboard carries an image and no text-editable element
-  // is focused, drop a new ImageNode into the viewport. Delegates all
-  // markup state to the node itself.
+  // is focused, drop a new ImageNode into the viewport. When it carries
+  // plain text, drop a MarkdownNode with that text as its content.
+  // Placement goes through findNonOverlappingPosition so the new node
+  // lands near the viewport center without sitting on top of an
+  // existing node.
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent): void => {
       // Skip when the user is pasting into an input / textarea / contenteditable.
@@ -2179,20 +2183,38 @@ export function Canvas({
         const editable = target.isContentEditable === true;
         if (editable || tag === "INPUT" || tag === "TEXTAREA") return;
       }
-      const item = Array.from(e.clipboardData?.items ?? []).find(
+
+      const clipboard = e.clipboardData;
+      if (!clipboard) return;
+
+      // 1. Image file on the clipboard → ImageNode.
+      const imageItem = Array.from(clipboard.items).find(
         (it) => it.kind === "file" && it.type.startsWith("image/"),
       );
-      if (!item) return;
-      const file = item.getAsFile();
-      if (!file) return;
-      e.preventDefault();
-      void createImageNodeFromFile(
-        file,
+      if (imageItem) {
+        const file = imageItem.getAsFile();
+        if (!file) return;
+        e.preventDefault();
+        void createImageNodeFromFile(
+          file,
+          dispatch,
+          setSelectedIds,
+          transformRef.current,
+          nodesRef.current,
+        );
+        return;
+      }
+
+      // 2. Plain text on the clipboard → MarkdownNode.
+      const text = clipboard.getData("text/plain");
+      const created = createMarkdownNodeFromText(
+        text,
         dispatch,
         setSelectedIds,
         transformRef.current,
         nodesRef.current,
       );
+      if (created) e.preventDefault();
     };
     window.addEventListener("paste", handlePaste);
     return () => window.removeEventListener("paste", handlePaste);
