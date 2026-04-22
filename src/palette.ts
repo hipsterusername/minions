@@ -133,6 +133,5 @@ export const COLORS = {
 
   // Edges
   edgeTask: "var(--edge-task)",
-  edgeStatus: "var(--edge-status)",
   edgeContext: "var(--edge-context)",
 } as const;

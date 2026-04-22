@@ -20,24 +20,6 @@ export interface TaskAssignment {
   assignedAt: number;
 }
 
-export interface TaskStatusUpdate {
-  taskId: string;
-  status: "pending" | "in_progress" | "completed" | "failed";
-  activeStep: string | null;
-  progress: string[];
-  result: string | null;
-  updatedAt: number;
-}
-
-export interface TaskResult {
-  taskId: string;
-  success: boolean;
-  summary: string;
-  artifacts: string[];
-  completedAt: number;
-  cost: number;
-}
-
 export interface ContextPayload {
   sourceNodeId: string;
   sourceNodeType: string;
@@ -49,8 +31,6 @@ export interface ContextPayload {
 // Union of all messages that can flow through edges
 export type EdgeMessage =
   | { protocol: "task-assignment"; payload: TaskAssignment }
-  | { protocol: "task-status"; payload: TaskStatusUpdate }
-  | { protocol: "task-result"; payload: TaskResult }
   | { protocol: "context"; payload: ContextPayload };
 
 // ── Port definitions ────────────────────────────────────
@@ -101,28 +81,12 @@ export const LEADER_CONTRACT: NodeInterfaceContract = {
       anchorY: 0.2,
     },
     {
-      id: "status-in",
-      label: "Status Updates",
-      direction: "input",
-      protocol: "task-status",
-      maxConnections: 10,
-      anchorY: 0.35,
-    },
-    {
-      id: "result-in",
-      label: "Results",
-      direction: "input",
-      protocol: "task-result",
-      maxConnections: 10,
-      anchorY: 0.5,
-    },
-    {
       id: "context-in",
       label: "Context",
       direction: "input",
       protocol: "context",
       maxConnections: 20,
-      anchorY: 0.92,
+      anchorY: 0.95,
       /**
        * Context port locks once a session is started — context is baked into
        * the first prompt and cannot be changed after that.
@@ -148,23 +112,7 @@ export const MINION_CONTRACT: NodeInterfaceContract = {
       direction: "input",
       protocol: "task-assignment",
       maxConnections: 1,
-      anchorY: 0.2,
-    },
-    {
-      id: "status-out",
-      label: "Status",
-      direction: "output",
-      protocol: "task-status",
-      maxConnections: 1,
       anchorY: 0.5,
-    },
-    {
-      id: "result-out",
-      label: "Result",
-      direction: "output",
-      protocol: "task-result",
-      maxConnections: 1,
-      anchorY: 0.8,
     },
   ],
 };

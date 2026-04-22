@@ -5,8 +5,6 @@ import { useState, useCallback, useEffect, memo } from "react";
  */
 export const PROTOCOL_COLORS: Record<string, string> = {
   "task-assignment": "var(--accent)",
-  "task-status": "var(--edge-status)",
-  "task-result": "var(--success-color)",
   context: "var(--accent)",
 };
 

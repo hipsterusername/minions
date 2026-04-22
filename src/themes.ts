@@ -76,7 +76,6 @@ const darkSemanticVars = {
 
   // Edge colors
   "--edge-task": "#818cf8",
-  "--edge-status": "#facc15",
   "--edge-context": "#4ade80",
 
   // Note palette (dark)
@@ -169,7 +168,6 @@ const lightSemanticVars: Record<string, string> = {
 
   // Edge colors — darkened for light theme contrast
   "--edge-task": "#4f46e5",
-  "--edge-status": "#a84e08",
   "--edge-context": "#14793a",
 
   // Note palette (light)
@@ -348,7 +346,6 @@ const proofSheet: ThemeDefinition = {
     "--thinking-bg": "rgba(136, 136, 136, 0.05)",
     "--thinking-bg-hover": "rgba(136, 136, 136, 0.08)",
     "--edge-task": "#aaaaaa",
-    "--edge-status": "#eeeeec",
     "--edge-context": "#aaaaaa",
     "--streaming-color": "#eeeeec",
     "--gradient-primary": "linear-gradient(135deg, #ff3b30, #cc2f26)",
@@ -409,7 +406,6 @@ const studioWarm: ThemeDefinition = {
     "--thinking-bg": "rgba(176, 96, 96, 0.06)",
     "--thinking-bg-hover": "rgba(176, 96, 96, 0.10)",
     "--edge-task": "#d4a76a",
-    "--edge-status": "#c08b30",
     "--edge-context": "#6bab6b",
     "--streaming-color": "#d4a76a",
     // Warm-tinted note palette
@@ -472,7 +468,6 @@ const cathode: ThemeDefinition = {
     "--thinking-bg": "rgba(32, 204, 64, 0.05)",
     "--thinking-bg-hover": "rgba(32, 204, 64, 0.08)",
     "--edge-task": "#39ff14",
-    "--edge-status": "#ffbf00",
     "--edge-context": "#39ff14",
     // Green-tinted notes
     "--note-blue-bg": "#08140e",

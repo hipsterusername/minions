@@ -37,8 +37,10 @@ describe("canConnect", () => {
   });
 
   it("returns false when the target port is an output", () => {
-    // minion.status-out is direction "output" — cannot be a target
-    expect(canConnect("leader", "task-out", "minion", "status-out")).toBe(false);
+    // context-provider.context-out is direction "output" — cannot be a target
+    expect(
+      canConnect("leader", "task-out", "context-provider", "context-out"),
+    ).toBe(false);
   });
 
   it("returns false when protocols mismatch", () => {

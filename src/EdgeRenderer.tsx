@@ -70,11 +70,7 @@ const BezierEdge = memo(function BezierEdge({
   const color =
     protocol === "task-assignment"
       ? "var(--accent)"
-      : protocol === "task-status"
-        ? "var(--edge-status)"
-        : protocol === "context"
-          ? "var(--edge-context)"
-          : "var(--edge-context)";
+      : "var(--edge-context)";
 
   return (
     <>

@@ -341,7 +341,14 @@ sessions survive server restarts.
 This is the highest-risk phase. We split it into four sub-PRs, each
 with its own test set.
 
-### Sub-PR 4.1 — Un-hide leader ports, route through `dispatchMessage`
+### Sub-PR 4.1 — Route task/status/result through `dispatchMessage`
+
+> **Note.** The speculative `status-in` / `result-in` ports on the leader
+> (and paired `status-out` / `result-out` on the minion) were removed as
+> dead code — they were declared in the contract but nothing emitted,
+> received, or rendered them. When this sub-PR lands, re-add those ports
+> to `LEADER_CONTRACT` / `MINION_CONTRACT` alongside the new dispatch
+> wiring; don't reintroduce them ahead of the wiring.
 
 #### Pre-flight
 
@@ -365,8 +372,9 @@ with its own test set.
 
 #### Exit criteria for 4.1
 
-- Hidden flag removed from leader-out / status-in / result-in ports
-  (`src/graph.ts`).
+- Leader `status-in` / `result-in` and minion `status-out` / `result-out`
+  ports are re-added to `src/graph.ts` and wired through
+  `dispatchMessage`.
 - Every routed protocol has a delivery test.
 
 ### Sub-PR 4.2 — Generalised port lifecycle
