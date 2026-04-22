@@ -25,6 +25,18 @@ import {
   type BufferedEvent,
 } from "./session-host-config.ts";
 import type { SessionHost, StartSessionOptions } from "./session-host.ts";
+import { execSync } from "node:child_process";
+
+function resolveClaudePath(): string {
+  if (process.env["CLAUDE_CODE_PATH"]) return process.env["CLAUDE_CODE_PATH"];
+  try {
+    return execSync("which claude", { encoding: "utf8" }).trim();
+  } catch {
+    return "claude";
+  }
+}
+
+const CLAUDE_EXECUTABLE = resolveClaudePath();
 
 const CODE_TOOLS = [
   "Read",
@@ -141,6 +153,7 @@ export function buildQueryOptions(
     abortController,
     includePartialMessages: true,
     promptSuggestions: true,
+    pathToClaudeCodeExecutable: CLAUDE_EXECUTABLE,
   };
 
   if (Object.keys(mcpResult.mcpServers).length > 0) {
