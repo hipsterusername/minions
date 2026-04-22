@@ -150,7 +150,6 @@ export const PortDot = memo(function PortDot({
       onMouseLeave={() => setHover(false)}
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}
-      title={locked ? `${label} (locked)` : label}
       style={{
         position: "absolute",
         [side]: hitOffset,
@@ -207,6 +206,35 @@ export const PortDot = memo(function PortDot({
           flexShrink: 0,
         }}
       />
+
+      {/* Tooltip — appears on hover, positioned opposite the port direction */}
+      {hover && !isDragActive && (
+        <div
+          role="tooltip"
+          style={{
+            position: "absolute",
+            // For input ports (left side), show tooltip to the right of the dot;
+            // for output ports (right side), show tooltip to the left.
+            [direction === "input" ? "left" : "right"]: hitSize + 4,
+            top: "50%",
+            transform: "translateY(-50%)",
+            padding: "4px 8px",
+            borderRadius: 4,
+            backgroundColor: "var(--bg-tooltip, #1a1a1a)",
+            color: "var(--text-primary, #fff)",
+            fontSize: 11,
+            fontWeight: 500,
+            lineHeight: 1.2,
+            whiteSpace: "nowrap",
+            boxShadow: "0 2px 8px rgba(0, 0, 0, 0.35)",
+            pointerEvents: "none",
+            zIndex: 30,
+            opacity: 0.95,
+          }}
+        >
+          {locked ? `${label} (locked)` : label}
+        </div>
+      )}
     </div>
   );
 });
