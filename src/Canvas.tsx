@@ -32,6 +32,7 @@ import { wheelDetector } from "./wheel-detector.ts";
 import { canvasScale as canvasScaleRef } from "./canvas-scale.ts";
 import { useCanvasKeyboard } from "./use-canvas-keyboard.ts";
 import { useCanvasFileDrop } from "./use-canvas-file-drop.ts";
+import { createImageNodeFromFile } from "./nodes/image-node-factory.ts";
 import { findNonOverlappingPosition, viewportCenter, pushNodesFromRect, snapToGrid } from "./canvas-utils.ts";
 import { computeAutoLayout } from "./auto-layout.ts";
 
@@ -2163,6 +2164,39 @@ export function Canvas({
     nodesRef,
     projectPath,
   });
+
+  // ── Global paste → ImageNode ──────────────────────────
+  //
+  // When the clipboard carries an image and no text-editable element
+  // is focused, drop a new ImageNode into the viewport. Delegates all
+  // markup state to the node itself.
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent): void => {
+      // Skip when the user is pasting into an input / textarea / contenteditable.
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        const editable = target.isContentEditable === true;
+        if (editable || tag === "INPUT" || tag === "TEXTAREA") return;
+      }
+      const item = Array.from(e.clipboardData?.items ?? []).find(
+        (it) => it.kind === "file" && it.type.startsWith("image/"),
+      );
+      if (!item) return;
+      const file = item.getAsFile();
+      if (!file) return;
+      e.preventDefault();
+      void createImageNodeFromFile(
+        file,
+        dispatch,
+        setSelectedIds,
+        transformRef.current,
+        nodesRef.current,
+      );
+    };
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [dispatch, setSelectedIds]);
 
   const zoomTo = useCallback(
     (newScale: number) => {

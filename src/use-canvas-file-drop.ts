@@ -9,6 +9,7 @@ import type { CanvasNode, CanvasAction, CanvasTransform } from "./types.ts";
 import { generateId } from "./canvas-state.ts";
 import { getAllNodeTypes } from "./node-registry.ts";
 import { findNonOverlappingPosition } from "./canvas-utils.ts";
+import { createImageNodeFromFile } from "./nodes/image-node-factory.ts";
 
 /** Default expanded height for folder nodes created via drag-drop. */
 const DEFAULT_EXPANDED_HEIGHT_FOLDER = 360;
@@ -168,9 +169,31 @@ export function useCanvasFileDrop({
       const fileViewerType = allTypes.find((t) => t.type === "file-viewer");
       if (!fileViewerType) return;
 
-      // Upload each file and create nodes
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
+      // Image files → ImageNode (visual-context plan, Phase 3).
+      // Handled separately so we don't attempt to upload binary
+      // images as text via the file-upload route.
+      const imageFiles = files.filter((f) => f?.type.startsWith("image/"));
+      if (imageFiles.length > 0) {
+        for (let i = 0; i < imageFiles.length; i++) {
+          const file = imageFiles[i];
+          if (!file) continue;
+          await createImageNodeFromFile(
+            file,
+            dispatch,
+            setSelectedIds,
+            t,
+            nodesRef.current,
+            { x: dropX, y: dropY + i * 60 },
+          );
+        }
+        const nonImages = files.filter((f) => !f?.type.startsWith("image/"));
+        if (nonImages.length === 0) return;
+      }
+
+      // Upload each non-image file and create nodes
+      const remaining = files.filter((f) => !f?.type.startsWith("image/"));
+      for (let i = 0; i < remaining.length; i++) {
+        const file = remaining[i];
         if (!file) continue;
 
         // Position each subsequent file-viewer below the previous one

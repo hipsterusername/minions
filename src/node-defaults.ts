@@ -6,6 +6,7 @@
  */
 import type { ProjectSettings } from "./api.ts";
 import { DEFAULT_THINKING_CONFIG, MINION_THINKING_CONFIG } from "./types.ts";
+import { createImageNodeDefaultData } from "./nodes/ImageNode.tsx";
 
 export function createDefaultNodeData(
   type: string,
@@ -81,6 +82,9 @@ export function createDefaultNodeData(
 
     case "context-group":
       return { name: "" };
+
+    case "image":
+      return createImageNodeDefaultData();
 
     default:
       return {};
