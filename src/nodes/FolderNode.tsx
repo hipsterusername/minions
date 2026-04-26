@@ -140,7 +140,11 @@ function FolderNodeRenderer({
     }
   }, [collapsed, data, node.size, onUpdateData, onResize]);
 
-  // Fetch directory listing
+  // Fetch directory listing for this folder. We hit /ls directly with
+  // the relative path so we get immediate children regardless of depth —
+  // the previous tree-based approach failed for nested paths and a second
+  // "deeper fetch" effect that listed `loading` in its deps cancelled
+  // itself, leaving the UI stuck on "Scanning…" forever.
   useEffect(() => {
     if (!encoded || !data.folderPath) {
       setEntries([]);
@@ -151,54 +155,35 @@ function FolderNodeRenderer({
     setLoading(true);
     setError(null);
 
-    // Use the tree endpoint with depth=1 to get immediate children
+    const relPath = data.folderPath === "." ? "" : data.folderPath;
+
     getAuthToken()
       .then((token) =>
         fetch(
-          `/api/projects/${encoded}/tree?depth=1`,
+          `/api/projects/${encoded}/ls?path=${encodeURIComponent(relPath)}`,
           { headers: { Authorization: `Bearer ${token}` } },
         ),
       )
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json() as Promise<{
-          root: string;
-          tree: Array<{ name: string; path: string; type: "dir" | "file"; children?: unknown[] }>;
+          path: string;
+          entries: DirEntry[];
         }>;
       })
       .then((json) => {
         if (cancelled) return;
-
-        // Navigate into the folder path within the tree
-        let nodes = json.tree;
-        if (data.folderPath && data.folderPath !== ".") {
-          const segments = data.folderPath.split("/");
-          for (const seg of segments) {
-            const found = nodes.find(
-              (n) => n.name === seg && n.type === "dir",
-            );
-            if (found && Array.isArray(found.children)) {
-              nodes = found.children as typeof nodes;
-            } else {
-              // Path segment not found at depth=1, try deeper fetch
-              nodes = [];
-              break;
-            }
-          }
-        }
-
-        const result: DirEntry[] = nodes.map((n) => ({
-          name: n.name,
-          type: n.type,
-        }));
-
+        const result = json.entries ?? [];
         setEntries(result);
 
-        // Build context string for the context system
+        // Build context string so connected leader nodes can consume the
+        // listing via the registered extractContent.
+        const localDirCount = result.filter((e) => e.type === "dir").length;
+        const localFileCount = result.filter((e) => e.type === "file").length;
         const listing = result
           .map((e) => `${e.type === "dir" ? "📁" : "  "} ${e.name}`)
           .join("\n");
-        const contextStr = `Folder: ${data.folderPath}\n${dirCount} directories, ${fileCount} files\n\n${listing}`;
+        const contextStr = `Folder: ${data.folderPath}\n${localDirCount} directories, ${localFileCount} files\n\n${listing}`;
         onUpdateData({ ...data, loadedContent: contextStr });
       })
       .catch((err) => {
@@ -213,64 +198,12 @@ function FolderNodeRenderer({
     return () => {
       cancelled = true;
     };
+    // `data` and `onUpdateData` are intentionally omitted: re-running this
+    // effect on every parent re-render (which produces a new `data`
+    // reference after onUpdateData) would loop forever. The folder path
+    // and project encoding are the only inputs that should refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [encoded, data.folderPath]);
-
-  // Try a deeper fetch if we got nothing
-  useEffect(() => {
-    if (!encoded || !data.folderPath || loading || error || entries.length > 0) return;
-
-    let cancelled = false;
-    setLoading(true);
-
-    getAuthToken()
-      .then((token) =>
-        fetch(`/api/projects/${encoded}/tree?depth=4`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-      )
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json() as Promise<{
-          root: string;
-          tree: Array<{ name: string; path: string; type: "dir" | "file"; children?: unknown[] }>;
-        }>;
-      })
-      .then((json) => {
-        if (cancelled) return;
-
-        let nodes = json.tree;
-        if (data.folderPath && data.folderPath !== ".") {
-          const segments = data.folderPath.split("/");
-          for (const seg of segments) {
-            const found = nodes.find(
-              (n) => n.name === seg && n.type === "dir",
-            );
-            if (found && Array.isArray(found.children)) {
-              nodes = found.children as typeof nodes;
-            } else {
-              nodes = [];
-              break;
-            }
-          }
-        }
-
-        const result: DirEntry[] = nodes.map((n) => ({
-          name: n.name,
-          type: n.type,
-        }));
-        setEntries(result);
-      })
-      .catch(() => {
-        if (!cancelled) setError("Folder not found in project tree");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [encoded, data.folderPath, entries.length, loading, error]);
 
   // ── Collapsed view ────────────────────────────────────
 
@@ -653,4 +586,6 @@ registerNodeType({
   defaultSize: { width: 320, height: COLLAPSED_HEIGHT },
   render: FolderNodeRenderer,
   userCreatable: false,
+  providesContext: true,
+  extractContent: (data) => (data as { loadedContent?: string })?.loadedContent ?? null,
 });

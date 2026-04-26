@@ -45,6 +45,11 @@ export function createTaskToolsForLeader(opts: {
     systemPrompt: string;
   }) => void;
   cwd: string;
+  /**
+   * Canonical project path (sidecar root) — see `TaskToolContext.projectPath`.
+   * Defaults to `cwd` when omitted (no-worktree case).
+   */
+  projectPath?: string;
   minionSystemPrompt: string;
   existingTaskState?: TaskManagerState;
   worktreeBranch?: string | null;
@@ -64,6 +69,7 @@ export function createTaskToolsForLeader(opts: {
     bus: opts.bus,
     startMinionSession: opts.startMinionSession,
     cwd: opts.cwd,
+    projectPath: opts.projectPath ?? opts.cwd,
     minionSystemPrompt: opts.minionSystemPrompt,
     taskState,
     onStateChange: opts.onStateChange,

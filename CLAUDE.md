@@ -9,17 +9,11 @@ narrows them to this codebase. **Where the two conflict, this file wins.**
 ## North star
 
 Minions is an infinite canvas in front of the Claude Agent SDK. The
-codebase is in the middle of a five-phase architecture refactor described
-in `docs/architecture-review-2026-04-16.md`. The refactor moves us from a
-WebSocket firehose + monolithic `server/index.ts` toward a typed bus, an
-agent-type registry, and a graph-as-bus routing model.
+architecture uses a typed event bus, an agent-type registry, and
+graph-as-bus routing.
 
-Two documents govern day-to-day work:
-
-| Doc | What it gives you |
-|---|---|
-| `docs/testing-strategy.md` | Layering model, file locations, what to test and what not to test. The working agreement. |
-| `docs/refactor-test-plan.md` | Per-phase pre-flight / in-flight / post-flight test gates. Read the section for the phase you're touching before you write code. |
+`docs/testing-strategy.md` describes the layering model, file locations,
+what to test and what not to test. It is the working agreement.
 
 If you are about to change behaviour, the answer to "do I need a test?"
 is yes by default. The next two sections say how.
@@ -46,7 +40,7 @@ This is the hard rule for this repo:
 If you can't figure out where a test should live, default to colocated
 and ask in the PR.
 
-### When refactoring (the situation we are in)
+### When refactoring
 
 Use the test-first arrow from `docs/testing-strategy.md` §6:
 
@@ -58,8 +52,7 @@ Use the test-first arrow from `docs/testing-strategy.md` §6:
 ```
 
 If step 4 forces you to change the test, you've changed behaviour. Stop,
-revert, or call it out in the PR with reasoning. This is the safety net
-that lets us delete ~3000 lines in Phase 1 without holding our breath.
+revert, or call it out in the PR with reasoning.
 
 ### When fixing a bug
 
@@ -101,19 +94,16 @@ warm cache. Don't bypass it; if a hook fails, fix the cause.
 
 ## Architectural invariants the suite enforces
 
-These are tracked by `tests/architecture/` and gate CI. They map directly
-to flaws in the architecture review.
+These are tracked by `tests/architecture/` and gate CI.
 
-| Invariant | Test | Allowlist |
-|---|---|---|
-| `server/*.ts` ≤ 400 lines | `file-size.test.ts` | **Empty** (drained in Phase 5.3). Every server file is under the hard ceiling. |
-| No `from "../src/"` in `server/` (or vice versa) | `no-cross-tree-imports.test.ts` | Empty (drained in Phase 3). |
-| No `broadcast(wss, ...)` outside the bus | `no-direct-broadcast.test.ts` | Empty (enforced as hard zero from Phase 2 onward). |
-| Every `WsCommandType` has a handler | `command-table.test.ts` | — (introduced in Phase 5.2). |
+| Invariant | Test |
+|---|---|
+| `server/*.ts` ≤ 400 lines | `file-size.test.ts` |
+| No `from "../src/"` in `server/` (or vice versa) | `no-cross-tree-imports.test.ts` |
+| No `broadcast(wss, ...)` outside the bus | `no-direct-broadcast.test.ts` |
+| Every `WsCommandType` has a handler | `command-table.test.ts` |
 
-**The allowlists are now historical.** New server files must be under 400
-lines; split them if they grow. Don't re-introduce allowlist entries —
-that shipped debt is gone and adding it back reverses the refactor.
+New server files must be under 400 lines; split them if they grow.
 
 ---
 
@@ -130,24 +120,22 @@ that shipped debt is gone and adding it back reverses the refactor.
 | Session lifecycle (abort, query loop, persistence) | `server/session-host.ts` |
 | Worktree / approval flow | `server/worktree-*.ts`, `server/commands/approve-changes.ts`, `server/commands/*-merge.ts` |
 | Persistence | `server/db.ts`, `server/project-store.ts` |
-| Anything that looks "stringly typed" by role | the architecture review F6 / F14, `src/prompts/`, `server/index.ts:191` |
+| Anything that looks "stringly typed" by role | `src/prompts/`, `server/index.ts` |
 
 ---
 
 ## Conventions worth repeating
 
 - **Replace, don't deprecate.** When the new shape lands, delete the
-  old one. No dual config formats, no compat shims. The architecture
-  review's Phase 1 explicitly suggests removing `ClaudeSessionNode` if
-  `SessionHost` covers its uses.
+  old one. No dual config formats, no compat shims.
 - **No `setTimeout("wait for state")` in tests.** Use
   `await waitFor(...)` from `@testing-library/react`, or change the
   code to expose a promise.
 - **No new mocks of our own modules.** Mock at boundaries (WS, FS, SDK).
   If you can't test a module without mocking it, the module needs a
   refactor first.
-- **No new `broadcast(wss, ...)` call sites** outside `server/bus.ts`
-  once Phase 2 lands. The architecture test already counts them.
+- **No new `broadcast(wss, ...)` call sites** outside `server/bus.ts`.
+  The architecture test enforces this.
 - **Files this codebase asks you to keep small:**
   `server/index.ts`, `src/Canvas.tsx`, `src/nodes/LeaderNode.tsx`,
   `src/nodes/ClaudeSessionNode.tsx`. They are oversized today and

@@ -16,11 +16,17 @@ export type ServerMessage =
   | { type: "control_response"; command: string; sessionKey: string; requestId: string | null; success: boolean; error?: string; [key: string]: unknown }
   | { type: "session_task_name"; sessionKey: string; taskName: string }
   | { type: "approval_requested"; sessionKey: string; summary: string; diff: unknown; timestamp: number }
-  | { type: "approval_resolved"; sessionKey: string; outcome: string; timestamp: number }
+  | { type: "approval_resolved"; sessionKey: string; action: string; timestamp: number }
   | { type: "worktree_status"; sessionKey: string; status: string; path?: string; branch?: string }
+  | { type: "worktree_created"; sessionKey: string; worktreePath: string; branch: string }
+  | { type: "worktree_failed"; sessionKey: string; error: string }
+  | { type: "worktree_removed"; sessionKey: string; timestamp: number }
   | { type: "worktree_merged"; sessionKey: string }
   | { type: "worktree_merge_failed"; sessionKey: string; result?: { conflicts?: string[]; summary?: string; targetBranch?: string }; error?: string }
-  | { type: "wait_state"; sessionKey: string; action: string; reason: string; waitUntil?: number; timestamp: number }
+  | { type: "session_completed"; sessionKey: string; reason: string; timestamp: number }
+  | { type: "agent_task_update"; leaderSessionKey: string; taskId: string; status: string; summary?: string; timestamp: number }
+  | { type: "render_update"; leaderSessionKey: string; action: "set" | "patch" | "append" | "remove"; layout?: { title?: string | null; columns?: number; components?: unknown[] }; updates?: unknown[]; components?: unknown[]; ids?: string[] }
+  | { type: "wait_state"; sessionKey: string; action: string; reason: string; waitUntil?: number; scheduledAt?: number; durationMs?: number; timestamp?: number }
   | { type: "error"; message: string };
 
 export interface SyncEvent {
@@ -646,7 +652,7 @@ export function useSocket(url: string): SocketHandle {
   const [connected, setConnected] = useState(false);
   const [reconnectState, setReconnectState] = useState<ReconnectState>("reconnecting");
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const attemptRef = useRef(0);
 
   const connect = useCallback(() => {
@@ -696,7 +702,7 @@ export function useSocket(url: string): SocketHandle {
           if (!result.success) {
             console.warn(
               "[ws] Rejected message failing envelope schema:",
-              (parsed as Record<string, unknown>)?.type,
+              (parsed as Record<string, unknown>)?.["type"],
             );
             return;
           }

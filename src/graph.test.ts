@@ -19,6 +19,8 @@ import {
   registerContract,
 } from "./graph.ts";
 import type { NodeInterfaceContract, PortLifecycleState } from "./graph.ts";
+// Side-effect import — RenderNode registers its `context-out` contract on load.
+import "./nodes/RenderNode.tsx";
 
 describe("canConnect", () => {
   it("returns true for leader.task-out → minion.task-in", () => {
@@ -29,6 +31,12 @@ describe("canConnect", () => {
     expect(
       canConnect("context-provider", "context-out", "leader", "context-in"),
     ).toBe(true);
+  });
+
+  it("returns true for render.context-out → leader.context-in (dashboards as context)", () => {
+    expect(canConnect("render", "context-out", "leader", "context-in")).toBe(
+      true,
+    );
   });
 
   it("returns false when the source port is an input", () => {

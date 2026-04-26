@@ -12,6 +12,9 @@
 import { useEffect, useRef, useMemo, useCallback } from "react";
 import type { NodeRenderProps } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
+import { CONTEXT_OUT_PORT, registerContract } from "../graph.ts";
+import type { NodeInterfaceContract } from "../graph.ts";
+import { flattenRenderStateToText } from "../render-flatten.ts";
 import type { ServerMessage } from "../use-socket.ts";
 import { SimpleMarkdown } from "../components/SimpleMarkdown.tsx";
 import { ResizeHandle } from "../components/ResizeHandle.tsx";
@@ -1620,27 +1623,13 @@ function RenderNodeRenderer({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div
-            style={{
-              width: 20,
-              height: 20,
-              borderRadius: 5,
-              background: "linear-gradient(135deg, #3b82f6, #8b5cf6)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              overflow: "hidden",
-              flexShrink: 0,
-            }}
-          >
-            <img
-              src="/icons/dashboard.svg"
-              alt="Dashboard"
-              width={14}
-              height={14}
-              style={{ display: "block" }}
-            />
-          </div>
+          <img
+            src="/icons/dashboard.svg"
+            alt="Dashboard"
+            width={20}
+            height={20}
+            style={{ display: "block", flexShrink: 0 }}
+          />
           <span style={{
             fontSize: 12,
             fontWeight: 600,
@@ -1767,6 +1756,26 @@ function RenderNodeRenderer({
   );
 }
 
+// ── Graph contract ────────────────────────────────────────
+//
+// Render nodes expose a `context-out` port so the dashboard a Leader
+// has built up can be wired into another Leader as context. The node
+// is still not user-creatable from the palette — it's auto-spawned
+// alongside its paired Leader — but once it exists on the canvas it
+// can act as any other context provider.
+
+const RENDER_CONTRACT: NodeInterfaceContract = {
+  nodeType: "render",
+  label: "Dashboard",
+  description:
+    "Live agent-driven dashboard. Connect its context-out port to a " +
+    "Leader's context-in port to feed the rendered components into the " +
+    "next session as text.",
+  ports: [CONTEXT_OUT_PORT],
+};
+
+registerContract(RENDER_CONTRACT);
+
 // ── Register ──────────────────────────────────────────────
 
 registerNodeType({
@@ -1775,4 +1784,11 @@ registerNodeType({
   defaultSize: { width: 460, height: 500 },
   render: RenderNodeRenderer,
   userCreatable: false,  // Only auto-spawned with Leaders
+  providesContext: true,
+  extractContent: (data) => {
+    const renderState = (data as RenderNodeData | undefined)?.renderState;
+    if (!renderState) return null;
+    const text = flattenRenderStateToText(renderState);
+    return text.length > 0 ? text : null;
+  },
 });

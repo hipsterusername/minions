@@ -51,6 +51,7 @@ export function initDb(dbPath?: string): Database.Database {
       model         TEXT,
       role          TEXT NOT NULL DEFAULT 'default',
       task_name     TEXT,
+      session_id    TEXT,
       worktree_isolation INTEGER NOT NULL DEFAULT 0,
       total_cost    REAL NOT NULL DEFAULT 0,
       turns         INTEGER NOT NULL DEFAULT 0,
@@ -91,5 +92,27 @@ export function initDb(dbPath?: string): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_event_log_session ON event_log(session_key);
   `);
 
+  // Idempotent migration: older databases were created before `session_id`
+  // existed on the `sessions` table. Without this column the SDK
+  // session_id is lost across restarts, and `send_message` cannot resume —
+  // it starts a brand-new conversation with no transcript.
+  ensureColumn(db, "sessions", "session_id", "TEXT");
+
   return db;
+}
+
+/**
+ * Add `column` of `type` to `table` if it doesn't already exist.
+ * SQLite doesn't support `ADD COLUMN IF NOT EXISTS`, so we inspect
+ * `PRAGMA table_info` first.
+ */
+function ensureColumn(
+  db: Database.Database,
+  table: string,
+  column: string,
+  type: string,
+): void {
+  const rows = db.pragma(`table_info(${table})`) as Array<{ name: string }>;
+  if (rows.some((r) => r.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }

@@ -162,7 +162,7 @@ function resultMsg(
     permission_denials: [],
     uuid,
     ...overrides,
-  } as SdkMessage;
+  } as unknown as SdkMessage;
 }
 
 // ── msgId ─────────────────────────────────────────────────────────────────────
@@ -432,12 +432,12 @@ describe("sdkToDisplayMessages", () => {
       expect(msgs[0]?.suffix).toBeUndefined();
     });
 
-    it("uses 'Error' content when is_error is true and result field is absent", () => {
+    it("falls back to 'Error' when is_error is true and the errors array is empty", () => {
       const msg: SdkMessage = {
         type: "result",
         subtype: "error_during_execution",
         is_error: true,
-        errors: ["oops"],
+        errors: [],
         duration_ms: 0,
         duration_api_ms: 0,
         num_turns: 1,
@@ -451,6 +451,27 @@ describe("sdkToDisplayMessages", () => {
       } as SdkMessage;
       const msgs = sdkToDisplayMessages(msg);
       expect(msgs[0]?.content).toBe("Error");
+    });
+
+    it("surfaces the first error message when is_error is true and errors is populated", () => {
+      const msg: SdkMessage = {
+        type: "result",
+        subtype: "error_during_execution",
+        is_error: true,
+        errors: ["network timeout", "second error"],
+        duration_ms: 0,
+        duration_api_ms: 0,
+        num_turns: 1,
+        stop_reason: null,
+        total_cost_usd: 0,
+        usage: { input_tokens: 5, output_tokens: 2 },
+        modelUsage: {},
+        permission_denials: [],
+        uuid: "u-err",
+        session_id: "s1",
+      } as SdkMessage;
+      const msgs = sdkToDisplayMessages(msg);
+      expect(msgs[0]?.content).toBe("network timeout");
     });
 
     it("strips task-name markers from result content", () => {

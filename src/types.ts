@@ -49,8 +49,34 @@ export interface NodeTypeDefinition {
   isContainer?: boolean;
   /** Function to extract text content from this node's data for context injection */
   extractContent?: (data: unknown) => string | null;
+  /**
+   * Extract non-text attachments (today: images) for multimodal context.
+   * Return null or an empty array when the node has nothing binary to
+   * contribute. Runs alongside `extractContent`; text and attachments
+   * travel together inside the {@link ContextItem}.
+   */
+  extractAttachments?: (data: unknown) => ContextAttachment[] | null;
   /** Function to reset stale status fields when loading from persistence */
   sanitizeOnLoad?: (data: unknown) => unknown;
+}
+
+/**
+ * A binary attachment that rides along with a {@link ContextItem}.
+ * Today only images are supported; future phases may add PDFs / audio.
+ *
+ * `data` is a raw base64 string (no `data:` prefix). The server
+ * forwards it to the SDK as an {@link ImageBlockParam} with a
+ * Base64ImageSource source so the model sees the actual pixels, not
+ * just a text description.
+ */
+export interface ContextAttachment {
+  kind: "image";
+  /** Original filename, if available — purely cosmetic. */
+  filename?: string;
+  /** IANA media type. Only JPEG/PNG/GIF/WebP are currently accepted by the API. */
+  mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+  /** Pure base64 payload — no `data:...;base64,` prefix. */
+  data: string;
 }
 
 export interface ContextItem {
@@ -58,6 +84,12 @@ export interface ContextItem {
   nodeType: string;
   label: string;
   content: string;
+  /**
+   * Binary attachments contributed by this node. Omitted when empty.
+   * Flows through `LeaderNode` into `create_session`'s `attachments`
+   * field so the SDK can attach real image blocks to the user turn.
+   */
+  attachments?: ContextAttachment[];
 }
 
 // ── Adaptive thinking ────────────────────────────────────

@@ -50,11 +50,26 @@ export type WsCommandType =
   | "reconnect_mcp_server"
   | "toggle_mcp_server";
 
+/**
+ * Binary attachment the client pins to a user turn — today only images.
+ * The server converts these into SDK {@link ImageBlockParam} blocks so
+ * the model actually sees the pixels, not just a text description.
+ */
+export interface WsImageAttachment {
+  kind: "image";
+  filename?: string;
+  mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+  /** Raw base64 payload, no `data:...;base64,` prefix. */
+  data: string;
+}
+
 /** The full WebSocket command envelope clients send. */
 export interface WsCommand {
   type: WsCommandType;
   sessionKey?: string;
   prompt?: string;
+  /** Multimodal attachments that accompany `prompt` on the first user turn. */
+  attachments?: WsImageAttachment[];
   cwd?: string;
   permissionMode?: string;
   systemPrompt?: string;

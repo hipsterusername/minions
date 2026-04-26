@@ -21,6 +21,12 @@ export interface SessionRow {
   model: string | null;
   role: string;
   task_name: string | null;
+  /**
+   * SDK session id captured from the first `system/init` event. Persisted
+   * so `send_message` can pass it as `resume:` after a server restart —
+   * without it, the SDK starts a fresh conversation with no transcript.
+   */
+  session_id: string | null;
   worktree_isolation: number;
   total_cost: number;
   turns: number;
@@ -41,10 +47,12 @@ export function upsertSession(db: Database.Database, row: SessionRow): void {
   const stmt = db.prepare(`
     INSERT INTO sessions (
       session_key, project_id, node_id, status, cwd, model, role,
-      task_name, worktree_isolation, total_cost, turns, created_at, updated_at
+      task_name, session_id, worktree_isolation, total_cost, turns,
+      created_at, updated_at
     ) VALUES (
       @session_key, @project_id, @node_id, @status, @cwd, @model, @role,
-      @task_name, @worktree_isolation, @total_cost, @turns, @created_at, @updated_at
+      @task_name, @session_id, @worktree_isolation, @total_cost, @turns,
+      @created_at, @updated_at
     )
     ON CONFLICT(session_key) DO UPDATE SET
       project_id = excluded.project_id,
@@ -54,6 +62,7 @@ export function upsertSession(db: Database.Database, row: SessionRow): void {
       model = excluded.model,
       role = excluded.role,
       task_name = excluded.task_name,
+      session_id = excluded.session_id,
       worktree_isolation = excluded.worktree_isolation,
       total_cost = excluded.total_cost,
       turns = excluded.turns,
@@ -238,4 +247,35 @@ export function getEvents(
     "SELECT id, event_type, payload, created_at FROM event_log WHERE session_key = ? ORDER BY id",
   );
   return stmt.all(sessionKey) as EventRow[];
+}
+
+/**
+ * Return the most recent `limit` events for a session in chronological
+ * (ASC) order. Used by hydration to restore the in-memory `eventBuffer`
+ * with only the tail an active session would have kept anyway.
+ */
+export function getRecentEvents(
+  db: Database.Database,
+  sessionKey: string,
+  limit: number,
+): EventRow[] {
+  const stmt = db.prepare(
+    "SELECT id, event_type, payload, created_at FROM event_log WHERE session_key = ? ORDER BY id DESC LIMIT ?",
+  );
+  const rows = stmt.all(sessionKey, limit) as EventRow[];
+  return rows.reverse();
+}
+
+/**
+ * Bulk-delete every event row for a session. Called on session removal so
+ * disposed sessions don't leave orphan event_log entries behind. Distinct
+ * from per-event deletion (which the repo deliberately does not expose)
+ * because session lifecycle cleanup is a separate concern from event
+ * mutation.
+ */
+export function purgeEventsForSession(
+  db: Database.Database,
+  sessionKey: string,
+): void {
+  db.prepare("DELETE FROM event_log WHERE session_key = ?").run(sessionKey);
 }

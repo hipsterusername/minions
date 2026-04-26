@@ -13,6 +13,7 @@
 import { unicastGlobal, unicastToSession } from "../bus.ts";
 import { createWorktree } from "../worktree.ts";
 import { isValidThinkingConfig, type ThinkingConfig } from "../session-host.ts";
+import { sanitizeAttachments } from "./attachment-sanitize.ts";
 import { errToMessage } from "./helpers.ts";
 import type { CommandHandler } from "./types.ts";
 
@@ -54,6 +55,10 @@ export const sendMessage: CommandHandler = (ctx, cmd, ws) => {
     ? cmd.thinkingConfig
     : host.thinkingConfig;
 
+  // Follow-up turns may also carry image attachments (e.g. the user
+  // connects a new image node and sends another prompt mid-conversation).
+  const attachments = sanitizeAttachments(cmd.attachments);
+
   const resumeLeader = (cwd: string): void => {
     ctx.registry.start({
       sessionKey: cmd.sessionKey!,
@@ -63,6 +68,7 @@ export const sendMessage: CommandHandler = (ctx, cmd, ws) => {
       systemPrompt: cmd.systemPrompt ?? undefined,
       role: host.role,
       thinkingConfig: turnThinking,
+      ...(attachments ? { attachments } : {}),
     });
   };
 

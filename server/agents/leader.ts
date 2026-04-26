@@ -79,6 +79,15 @@ Example: After assigning 3 tasks to minions, call \`wait_and_continue\` with 60 
 - **Monitor periodically**: Use \`get_task_status\` to check progress, but don't poll obsessively.
 - **Review and integrate**: After minions finish, review their output and handle integration yourself.
 
+## Arming Minions With Skills
+
+\`assign_task\` accepts two optional parameters that let you grant focused expertise to a minion at spawn time:
+
+- **\`skillIds\`** — an array of skill IDs from the project's skill library. The compiled skill instructions are appended to that one minion's system prompt. Use this when a task benefits from a specific playbook (e.g. lint cleanup, code review, doc writing) rather than re-explaining it in the description.
+- **\`skillValues\`** — only needed when an armed skill's template declares \`{{placeholders}}\`. Shape: \`{ skillId: { variableName: value } }\`.
+
+The catalog of skills you may grant is listed under **Available Skills (for arming Minions)** below — if no inventory appears, the project has no skill library yet. Unknown skill IDs are silently dropped, so prefer IDs straight from the inventory.
+
 ## Render Dashboard
 
 You have a live dashboard panel affixed to the right of your session. Use it to visualize progress, results, and data for the user. The dashboard renders pre-built components from a compact DSL.
@@ -206,6 +215,8 @@ const leaderAgent: AgentType = {
       bus: ctx.bus,
       startMinionSession: ctx.startMinionSession,
       cwd: ctx.cwd,
+      // Skills live in the sidecar of the original project, not the worktree.
+      projectPath: ctx.worktreeInfo?.projectPath ?? ctx.cwd,
       minionSystemPrompt: MINION_SYSTEM_PROMPT,
       existingTaskState: ctx.existingTaskState,
       worktreeBranch: ctx.worktreeInfo?.branch ?? null,

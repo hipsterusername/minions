@@ -5,8 +5,12 @@ import { DEFAULT_THINKING_CONFIG } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
 import { registerContract, LEADER_CONTRACT } from "../graph.ts";
 import type { ServerMessage } from "../use-socket.ts";
-import { msgId as sharedMsgId, type DisplayMessage } from "../sdk-messages.ts";
-import { LEADER_SYSTEM_PROMPT } from "../prompts/leader-system.ts";
+import {
+  msgId as sharedMsgId,
+  sdkToDisplayMessages,
+  type DisplayMessage,
+} from "../sdk-messages.ts";
+import { buildLeaderSystemPrompt } from "../prompts/build-leader-prompt.ts";
 import { useStatusBanners, StatusBannerStack } from "../components/StatusBanner.tsx";
 import { StreamingBubble, StreamingIndicator } from "../components/StreamingBubble.tsx";
 import { type SessionStreamState } from "../session-stream.ts";
@@ -14,7 +18,6 @@ import { useSessionStream } from "../use-session-stream.ts";
 import { SessionToolbar } from "../components/SessionToolbar.tsx";
 import type { ModelOption, PermissionMode } from "../components/SessionToolbar.tsx";
 import { getSkill, getAllSkills } from "../skills/registry.ts";
-import { compileSkills } from "../skills/types.ts";
 import type { SkillTemplate } from "../skills/types.ts";
 import { ResizeHandle } from "../components/ResizeHandle.tsx";
 import { AutoTextarea } from "../components/AutoTextarea.tsx";
@@ -50,6 +53,13 @@ export interface LeaderData {
   messages: LeaderMessage[];
   /** Accumulated partial text from streaming deltas */
   streamingText: string;
+  /**
+   * Anthropic content block index that {@link streamingText} belongs to,
+   * or `null` when no block is currently streaming. Used to flush the
+   * preview buffer when a new content block starts so deltas from
+   * `[text, tool_use, text]` don't merge across blocks.
+   */
+  streamingBlockIndex?: number | null | undefined;
   totalCost: number;
   turns: number;
   error: string | null;
@@ -69,23 +79,23 @@ export interface LeaderData {
   /** Whether the skill config panel is expanded */
   skillPanelOpen: boolean;
   /** If set, auto-start a session with this prompt (then clear it) */
-  autoStartPrompt?: string | null;
+  autoStartPrompt?: string | null | undefined;
   /** Display name set by the agent via set_task_name */
-  taskName?: string | null;
+  taskName?: string | null | undefined;
   /** Wait state: populated when the leader calls wait_and_continue */
-  waitUntil?: number | null;
-  waitReason?: string | null;
+  waitUntil?: number | null | undefined;
+  waitReason?: string | null | undefined;
   /** Set briefly after a successful merge to show a confirmation banner */
-  mergeConfirmed?: boolean;
+  mergeConfirmed?: boolean | undefined;
   /** Merge conflict state: set when approve & merge fails due to conflicts */
   mergeConflict?: {
     conflicts: string[];
     summary: string;
     targetBranch: string;
-  } | null;
+  } | null | undefined;
   /** Approval state: set when the leader calls request_approval */
-  approvalPending?: boolean;
-  approvalSummary?: string | null;
+  approvalPending?: boolean | undefined;
+  approvalSummary?: string | null | undefined;
   approvalDiff?: {
     filesChanged: number;
     insertions: number;
@@ -93,7 +103,7 @@ export interface LeaderData {
     files: { file: string; insertions: number; deletions: number; status: string }[];
     commits: string[];
     branch: string;
-  } | null;
+  } | null | undefined;
 }
 
 // LeaderMessage is now an alias for the shared DisplayMessage type
@@ -114,6 +124,7 @@ function extractLeaderCore(d: LeaderData): SessionStreamState {
     status: d.status,
     messages: d.messages,
     streamingText: d.streamingText,
+    streamingBlockIndex: d.streamingBlockIndex ?? null,
     totalCost: d.totalCost,
     turns: d.turns,
     error: d.error,
@@ -206,6 +217,7 @@ export function buildSessionContext(
     const included: string[] = [];
     for (let i = conversationEntries.length - 1; i >= 0; i--) {
       const entry = conversationEntries[i];
+      if (entry === undefined) continue;
       if (totalLen + entry.length > MAX_CONTEXT_CHARS) {
         included.push(
           `[... ${i + 1} earlier messages omitted for brevity ...]`,
@@ -417,23 +429,23 @@ function formatToolInput(toolName: string, input?: Record<string, unknown>): str
   // Show the most relevant field(s) based on tool type
   switch (toolName) {
     case "Read":
-      return input.file_path as string ?? null;
+      return (input["file_path"] as string) ?? null;
     case "Write":
-      return input.file_path as string ?? null;
+      return (input["file_path"] as string) ?? null;
     case "Edit":
-      return input.file_path as string ?? null;
+      return (input["file_path"] as string) ?? null;
     case "Bash":
-      return input.command as string ?? null;
+      return (input["command"] as string) ?? null;
     case "Glob":
-      return input.pattern as string ?? null;
+      return (input["pattern"] as string) ?? null;
     case "Grep":
-      return input.pattern as string ?? null;
+      return (input["pattern"] as string) ?? null;
     case "Agent":
-      return input.description as string ?? input.prompt as string ?? null;
+      return (input["description"] as string) ?? (input["prompt"] as string) ?? null;
     case "WebFetch":
-      return input.url as string ?? null;
+      return (input["url"] as string) ?? null;
     case "WebSearch":
-      return input.query as string ?? null;
+      return (input["query"] as string) ?? null;
     default: {
       // Generic: show first string value
       for (const v of Object.values(input)) {
@@ -860,7 +872,7 @@ function TaskPlanPanel({
   taskPlan: TaskPlanItem[];
   expanded: boolean;
   onToggle: () => void;
-  onRevealMinion?: (minionSessionKey: string) => void;
+  onRevealMinion?: ((minionSessionKey: string) => void) | undefined;
 }) {
   const [hoveredTask, setHoveredTask] = useState<number | null>(null);
   const [tooltipAnchor, setTooltipAnchor] = useState<DOMRect | null>(null);
@@ -1750,10 +1762,10 @@ function ConfigFooter({
 }: {
   data: LeaderData;
   onUpdateData: (d: LeaderData) => void;
-  socketSend?: (data: unknown) => void;
-  socketSubscribe?: (cb: (msg: unknown) => void) => () => void;
-  getContextForNode?: () => import("../types.ts").ContextItem[];
-  onNewSession?: () => void;
+  socketSend?: ((data: unknown) => void) | undefined;
+  socketSubscribe?: ((cb: (msg: unknown) => void) => () => void) | undefined;
+  getContextForNode?: (() => import("../types.ts").ContextItem[]) | undefined;
+  onNewSession?: (() => void) | undefined;
 }) {
   const [expanded, setExpanded] = useState(false);
   const contextCount = getContextForNode?.().length ?? 0;
@@ -2605,6 +2617,7 @@ export function LeaderNodeRenderer({
         status: next.status,
         messages: next.messages,
         streamingText: next.streamingText,
+        streamingBlockIndex: next.streamingBlockIndex,
         totalCost: next.totalCost,
         turns: next.turns,
         error: next.error,
@@ -2658,14 +2671,15 @@ export function LeaderNodeRenderer({
           const seenIds = new Set<string>();
           for (const evt of serverMsg.events) {
             if (evt.type === "sdk_event" && evt.message) {
-              const lms = sdkToLeaderMessages(evt.message);
+              const lms: DisplayMessage[] = sdkToDisplayMessages(evt.message, "lm");
               // When a result arrives, drop the last assistant msg if its
               // content matches — avoids duplicate bubble on sync rebuild.
               if (evt.message.type === "result") {
                 const resultText = lms.find((m) => m.role === "result")?.content;
                 if (resultText) {
                   const lastIdx = rebuiltMessages.findLastIndex((m) => m.role === "assistant");
-                  if (lastIdx >= 0 && rebuiltMessages[lastIdx].content.trim() === resultText.trim()) {
+                  const lastMsg = lastIdx >= 0 ? rebuiltMessages[lastIdx] : undefined;
+                  if (lastMsg && lastMsg.content.trim() === resultText.trim()) {
                     rebuiltMessages.splice(lastIdx, 1);
                   }
                 }
@@ -2691,12 +2705,13 @@ export function LeaderNodeRenderer({
             totalCost: rebuiltCost,
             turns: rebuiltTurns,
             streamingText: "",
+            streamingBlockIndex: null,
             error: serverMsg.lastError ?? null,
           };
 
           // Restore worktree info from sync if available
-          if ((serverMsg as Record<string, unknown>).worktree) {
-            const wt = (serverMsg as Record<string, unknown>).worktree as { path: string; branch: string };
+          if (serverMsg.worktree) {
+            const wt = serverMsg.worktree;
             syncData.worktreePath = wt.path;
             syncData.worktreeBranch = wt.branch;
             syncData.worktreeStatus = "active";
@@ -2708,7 +2723,7 @@ export function LeaderNodeRenderer({
           }
 
           // Restore approval state from sync if available
-          const syncApproval = (serverMsg as Record<string, unknown>).approval as {
+          const syncApproval = serverMsg.approval as {
             requested?: boolean;
             summary?: string;
             diff?: LeaderData["approvalDiff"];
@@ -2742,6 +2757,7 @@ export function LeaderNodeRenderer({
             status: "disconnected",
             sessionKey: null,
             streamingText: "",
+            streamingBlockIndex: null,
             error: null,
           });
         }
@@ -2773,10 +2789,9 @@ export function LeaderNodeRenderer({
         serverMsg.found
       ) {
         const syncData: Partial<LeaderData> = {};
-        const raw = serverMsg as Record<string, unknown>;
 
-        if (raw.worktree) {
-          const wt = raw.worktree as { path: string; branch: string };
+        if (serverMsg.worktree) {
+          const wt = serverMsg.worktree;
           syncData.worktreePath = wt.path;
           syncData.worktreeBranch = wt.branch;
           syncData.worktreeStatus = "active";
@@ -2784,7 +2799,7 @@ export function LeaderNodeRenderer({
         if (serverMsg.taskName) {
           syncData.taskName = serverMsg.taskName;
         }
-        const syncApproval = raw.approval as
+        const syncApproval = serverMsg.approval as
           | {
               requested?: boolean;
               summary?: string;
@@ -2990,6 +3005,10 @@ export function LeaderNodeRenderer({
     // Gather context from connected nodes
     const contextItems = getContextForNode?.() ?? [];
     let fullPrompt = userPrompt;
+    // Binary attachments (images for now) hoisted out of ContextItems so
+    // the server can pack them as real multimodal content blocks rather
+    // than stringifying into the prompt.
+    const attachments = contextItems.flatMap((item) => item.attachments ?? []);
 
     if (contextItems.length > 0) {
       const contextBlock = contextItems
@@ -3001,7 +3020,10 @@ export function LeaderNodeRenderer({
           return `${openTag}\n${item.content}\n</context-group>`;
         })
         .join("\n");
-      fullPrompt = `<connected-context>\nThe following context has been provided by the user via connected canvas nodes:\n\n${contextBlock}\n</connected-context>\n\n${userPrompt}`;
+      const attachmentHint = attachments.length > 0
+        ? `\n\nThe user has also attached ${attachments.length} image${attachments.length === 1 ? "" : "s"} — see the image block${attachments.length === 1 ? "" : "s"} in this turn.`
+        : "";
+      fullPrompt = `<connected-context>\nThe following context has been provided by the user via connected canvas nodes:\n\n${contextBlock}${attachmentHint}\n</connected-context>\n\n${userPrompt}`;
     }
 
     // Prepend previous session context if this is a restart
@@ -3009,12 +3031,11 @@ export function LeaderNodeRenderer({
       fullPrompt = `${sessionContext}\n\n${fullPrompt}`;
     }
 
-    // Compile tagged skills into system prompt addendum
-    const taggedSkills = (data.skillIds ?? [])
-      .map((id) => getSkill(id))
-      .filter((s): s is SkillTemplate => s !== undefined);
-    const skillsAddendum = compileSkills(taggedSkills, data.skillValues ?? {});
-    const finalSystemPrompt = LEADER_SYSTEM_PROMPT + skillsAddendum;
+    // Build the full Leader system prompt (active skills + arming inventory)
+    const finalSystemPrompt = buildLeaderSystemPrompt({
+      skillIds: data.skillIds ?? [],
+      skillValues: data.skillValues ?? {},
+    });
 
     socketSend({
       type: "create_session",
@@ -3025,6 +3046,7 @@ export function LeaderNodeRenderer({
       model: data.model,
       thinkingConfig: data.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
       worktreeIsolation: data.worktreeIsolation,
+      ...(attachments.length > 0 ? { attachments } : {}),
       ...(projectPath ? { cwd: projectPath } : {}),
     });
     syncedRef.current = true;
@@ -3064,6 +3086,7 @@ export function LeaderNodeRenderer({
     // Gather context from connected nodes
     const contextItems = getContextForNode?.() ?? [];
     let fullPrompt = prompt;
+    const attachments = contextItems.flatMap((item) => item.attachments ?? []);
     if (contextItems.length > 0) {
       const contextBlock = contextItems
         .map((item) => {
@@ -3074,7 +3097,10 @@ export function LeaderNodeRenderer({
           return `${openTag}\n${item.content}\n</context-group>`;
         })
         .join("\n");
-      fullPrompt = `<connected-context>\nThe following context has been provided by the user via connected canvas nodes:\n\n${contextBlock}\n</connected-context>\n\n${prompt}`;
+      const attachmentHint = attachments.length > 0
+        ? `\n\nThe user has also attached ${attachments.length} image${attachments.length === 1 ? "" : "s"} — see the image block${attachments.length === 1 ? "" : "s"} in this turn.`
+        : "";
+      fullPrompt = `<connected-context>\nThe following context has been provided by the user via connected canvas nodes:\n\n${contextBlock}${attachmentHint}\n</connected-context>\n\n${prompt}`;
     }
 
     // Prepend previous session context if this is a restart
@@ -3082,12 +3108,11 @@ export function LeaderNodeRenderer({
       fullPrompt = `${sessionContext}\n\n${fullPrompt}`;
     }
 
-    // Compile tagged skills
-    const taggedSkills = (dataRef.current.skillIds ?? [])
-      .map((id) => getSkill(id))
-      .filter((s): s is SkillTemplate => s !== undefined);
-    const skillsAddendum = compileSkills(taggedSkills, dataRef.current.skillValues ?? {});
-    const finalSystemPrompt = LEADER_SYSTEM_PROMPT + skillsAddendum;
+    // Build the full Leader system prompt (active skills + arming inventory)
+    const finalSystemPrompt = buildLeaderSystemPrompt({
+      skillIds: dataRef.current.skillIds ?? [],
+      skillValues: dataRef.current.skillValues ?? {},
+    });
 
     socketSend({
       type: "create_session",
@@ -3098,6 +3123,7 @@ export function LeaderNodeRenderer({
       model: dataRef.current.model,
       thinkingConfig: dataRef.current.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
       worktreeIsolation: dataRef.current.worktreeIsolation,
+      ...(attachments.length > 0 ? { attachments } : {}),
       ...(projectPath ? { cwd: projectPath } : {}),
     });
     syncedRef.current = true;
@@ -3122,13 +3148,19 @@ export function LeaderNodeRenderer({
     const current = dataRef.current;
     if (!socketSend || !input.trim() || !current.sessionKey) return;
 
-    // Compile current skills into system prompt so mid-session skill
-    // additions/removals take effect on the next turn
-    const taggedSkills = (current.skillIds ?? [])
-      .map((id) => getSkill(id))
-      .filter((s): s is SkillTemplate => s !== undefined);
-    const skillsAddendum = compileSkills(taggedSkills, current.skillValues ?? {});
-    const finalSystemPrompt = LEADER_SYSTEM_PROMPT + skillsAddendum;
+    // Rebuild the system prompt so mid-session skill additions/removals
+    // (and freshly-added library skills available for arming) take effect
+    // on the next turn.
+    const finalSystemPrompt = buildLeaderSystemPrompt({
+      skillIds: current.skillIds ?? [],
+      skillValues: current.skillValues ?? {},
+    });
+
+    // Re-gather context on each turn so image nodes attached *after* the
+    // initial send still reach the model. Text context already flows via
+    // the session transcript, so we only forward binary attachments here.
+    const contextItems = getContextForNode?.() ?? [];
+    const attachments = contextItems.flatMap((item) => item.attachments ?? []);
 
     socketSend({
       type: "send_message",
@@ -3136,6 +3168,7 @@ export function LeaderNodeRenderer({
       prompt: input.trim(),
       systemPrompt: finalSystemPrompt,
       thinkingConfig: current.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
+      ...(attachments.length > 0 ? { attachments } : {}),
     });
     onUpdateData({
       ...current,
@@ -3151,7 +3184,7 @@ export function LeaderNodeRenderer({
       ],
     });
     setInput("");
-  }, [socketSend, input, onUpdateData]);
+  }, [socketSend, input, onUpdateData, getContextForNode]);
 
   const handleStop = useCallback(() => {
     const current = dataRef.current;
@@ -3823,6 +3856,7 @@ export const LEADER_DEFAULT_DATA: LeaderData = {
   status: "disconnected",
   messages: [],
   streamingText: "",
+  streamingBlockIndex: null,
   totalCost: 0,
   turns: 0,
   error: null,

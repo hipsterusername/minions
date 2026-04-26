@@ -10,26 +10,9 @@ import type { CanvasAction, CanvasNode, CanvasTransform } from "../types.ts";
 import { generateId } from "../canvas-state.ts";
 import { findNonOverlappingPosition, viewportCenter } from "../canvas-utils.ts";
 import { createImageNodeDefaultData, type ImageNodeData } from "./ImageNode.tsx";
+import { loadImageFromFile } from "./image-loader.ts";
 
 const IMAGE_NODE_SIZE = { width: 480, height: 420 };
-
-function readFileAsDataURL(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(reader.error ?? new Error("File read failed"));
-    reader.readAsDataURL(file);
-  });
-}
-
-function loadImageDimensions(src: string): Promise<{ width: number; height: number }> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
-    img.onerror = () => reject(new Error("Image decode failed"));
-    img.src = src;
-  });
-}
 
 /**
  * Create an ImageNode on the canvas from a File.
@@ -48,12 +31,13 @@ export async function createImageNodeFromFile(
 ): Promise<void> {
   if (!file.type.startsWith("image/")) return;
 
-  const src = await readFileAsDataURL(file);
-  let dims = { width: 0, height: 0 };
+  let loaded;
   try {
-    dims = await loadImageDimensions(src);
+    loaded = await loadImageFromFile(file);
   } catch {
-    // Non-fatal — the node still shows the image without a dimension badge.
+    // Decode failed — nothing sensible to render, skip the node entirely
+    // rather than spawning an empty slot the user has to clean up.
+    return;
   }
 
   const anchor = worldPoint ?? viewportCenter(transform);
@@ -69,11 +53,11 @@ export async function createImageNodeFromFile(
 
   const data: ImageNodeData = {
     ...createImageNodeDefaultData(),
-    src,
-    filename: file.name && file.name !== "" ? file.name : "Pasted image",
+    src: loaded.src,
+    filename: loaded.filename,
+    naturalWidth: loaded.naturalWidth,
+    naturalHeight: loaded.naturalHeight,
   };
-  if (dims.width > 0) data.naturalWidth = dims.width;
-  if (dims.height > 0) data.naturalHeight = dims.height;
 
   const node: CanvasNode = {
     id: generateId(),

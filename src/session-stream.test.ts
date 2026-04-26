@@ -69,10 +69,34 @@ function resultMsg(text: string, cost = 0.01, turns = 1, uuid = "u-res"): SdkMes
   } as SdkMessage;
 }
 
-function streamDelta(text: string, uuid = "u-stm"): SdkMessage {
+function streamDelta(
+  text: string,
+  uuid = "u-stm",
+  index = 0,
+  parentToolUseId: string | null = null,
+): SdkMessage {
   return {
     type: "stream_event",
-    event: { type: "content_block_delta", delta: { type: "text_delta", text } },
+    event: { type: "content_block_delta", index, delta: { type: "text_delta", text } },
+    parent_tool_use_id: parentToolUseId,
+    uuid,
+    session_id: "s1",
+  } as SdkMessage;
+}
+
+function streamBlockStart(
+  index: number,
+  blockType: "text" | "tool_use" | "thinking" = "text",
+  initialText = "",
+  uuid = "u-bls",
+): SdkMessage {
+  return {
+    type: "stream_event",
+    event: {
+      type: "content_block_start",
+      index,
+      content_block: blockType === "text" ? { type: "text", text: initialText } : { type: blockType },
+    },
     parent_tool_use_id: null,
     uuid,
     session_id: "s1",
@@ -136,22 +160,89 @@ describe("sessionStreamReducer: reference equality", () => {
 // ── sdk_event: streaming deltas ────────────────────────
 
 describe("sessionStreamReducer: streaming deltas", () => {
-  it("appends delta text to streamingText", () => {
-    const s0 = freshState({ streamingText: "Hel" });
+  it("appends delta text to streamingText for the same block index", () => {
+    const s0 = freshState({ streamingText: "Hel", streamingBlockIndex: 0 });
     const s1 = sessionStreamReducer(s0, sdkEvent("k1", streamDelta("lo")), "t");
     expect(s1.streamingText).toBe("Hello");
+    expect(s1.streamingBlockIndex).toBe(0);
     expect(s1.messages).toBe(s0.messages);
   });
 
-  it("clears streamingText on stream end", () => {
-    const s0 = freshState({ streamingText: "Hello" });
+  it("clears streamingText on stream end (message_stop)", () => {
+    const s0 = freshState({ streamingText: "Hello", streamingBlockIndex: 0 });
     const s1 = sessionStreamReducer(s0, sdkEvent("k1", streamEnd()), "t");
     expect(s1.streamingText).toBe("");
+    expect(s1.streamingBlockIndex).toBeNull();
   });
 
-  it("returns same reference on stream end when streamingText already empty", () => {
-    const s0 = freshState({ streamingText: "" });
+  it("returns same reference on stream end when buffer is already empty", () => {
+    const s0 = freshState({ streamingText: "", streamingBlockIndex: null });
     const s1 = sessionStreamReducer(s0, sdkEvent("k1", streamEnd()), "t");
+    expect(s1).toBe(s0);
+  });
+
+  // ── Multi-block isolation (regression for the conflict bug) ──
+
+  it("resets streamingText when a delta arrives for a different block index", () => {
+    // Block 0 streams "Let me check..."
+    const s0 = freshState({ streamingText: "Let me check...", streamingBlockIndex: 0 });
+    // Block 2 (post-tool_use) starts streaming "Now I'll..."
+    const s1 = sessionStreamReducer(
+      s0,
+      sdkEvent("k1", streamDelta("Now I'll", "u-2", 2)),
+      "t",
+    );
+    expect(s1.streamingText).toBe("Now I'll");
+    expect(s1.streamingBlockIndex).toBe(2);
+  });
+
+  it("appends across multiple deltas of the same block, but resets on boundary", () => {
+    let s = freshState();
+    s = sessionStreamReducer(s, sdkEvent("k1", streamDelta("Hello", "u1", 0)), "t");
+    s = sessionStreamReducer(s, sdkEvent("k1", streamDelta(" world", "u2", 0)), "t");
+    expect(s.streamingText).toBe("Hello world");
+    expect(s.streamingBlockIndex).toBe(0);
+    // New text block (index 2 — block 1 was tool_use, ignored).
+    s = sessionStreamReducer(s, sdkEvent("k1", streamDelta("Next", "u3", 2)), "t");
+    expect(s.streamingText).toBe("Next");
+    expect(s.streamingBlockIndex).toBe(2);
+  });
+
+  it("seeds streamingText from content_block_start of a text block at a new index", () => {
+    const s0 = freshState({ streamingText: "old", streamingBlockIndex: 0 });
+    const s1 = sessionStreamReducer(
+      s0,
+      sdkEvent("k1", streamBlockStart(2, "text", "fresh")),
+      "t",
+    );
+    expect(s1.streamingText).toBe("fresh");
+    expect(s1.streamingBlockIndex).toBe(2);
+  });
+
+  // ── Sub-agent isolation (regression for the conflict bug) ──
+
+  it("drops stream_event deltas from a sub-agent (parent_tool_use_id non-null)", () => {
+    const s0 = freshState({ streamingText: "parent text", streamingBlockIndex: 0 });
+    const s1 = sessionStreamReducer(
+      s0,
+      sdkEvent("k1", streamDelta("subagent says hi", "u-sub", 0, "tool-abc")),
+      "t",
+    );
+    expect(s1).toBe(s0);
+  });
+
+  // ── Tightened isStreamEnd (no-op on message_delta) ──
+
+  it("does NOT clear streamingText on message_delta (only message_stop ends the stream)", () => {
+    const s0 = freshState({ streamingText: "Hello", streamingBlockIndex: 0 });
+    const messageDelta: SdkMessage = {
+      type: "stream_event",
+      event: { type: "message_delta", delta: { stop_reason: "end_turn" } },
+      parent_tool_use_id: null,
+      uuid: "u-md",
+      session_id: "s1",
+    } as SdkMessage;
+    const s1 = sessionStreamReducer(s0, sdkEvent("k1", messageDelta), "t");
     expect(s1).toBe(s0);
   });
 });
@@ -392,6 +483,7 @@ describe("emptySessionStreamState", () => {
       status: "disconnected",
       messages: [],
       streamingText: "",
+      streamingBlockIndex: null,
       totalCost: 0,
       turns: 0,
       error: null,

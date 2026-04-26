@@ -10,7 +10,8 @@ import {
 import type { CanvasTransform, CanvasNode, CanvasAction, Position, Size, ContextItem } from "./types.ts";
 import { generateId } from "./canvas-state.ts";
 import { CanvasNodeComponent } from "./CanvasNode.tsx";
-import { getAllNodeTypes } from "./node-registry.ts";
+import { getAllNodeTypes, isContextProvider } from "./node-registry.ts";
+import { extractContextItem } from "./context-extraction.ts";
 import { SessionPanel } from "./SessionPanel.tsx";
 import { EdgeRenderer } from "./EdgeRenderer.tsx";
 import type { GraphDocument } from "./graph.ts";
@@ -1104,6 +1105,29 @@ export function Canvas({
       if (rafId !== null) cancelAnimationFrame(rafId);
     };
   }, [setTransform]);
+
+  // Suppress the browser's native middle-button behaviours (Linux PRIMARY
+  // selection paste, Windows/Linux middle-click autoscroll) that otherwise
+  // interrupt the pan gesture. Many child components stopPropagation on
+  // mousedown, so the Canvas onMouseDown handler never sees the event and
+  // therefore can't call preventDefault. We install a capture-phase listener
+  // on the container so our preventDefault runs before any child handler or
+  // the browser's default action.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const suppressMiddleButton = (e: MouseEvent) => {
+      if (e.button === 1) e.preventDefault();
+    };
+
+    container.addEventListener("mousedown", suppressMiddleButton, true);
+    container.addEventListener("auxclick", suppressMiddleButton, true);
+    return () => {
+      container.removeEventListener("mousedown", suppressMiddleButton, true);
+      container.removeEventListener("auxclick", suppressMiddleButton, true);
+    };
+  }, []);
 
   const handleCanvasMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -2553,42 +2577,21 @@ export function Canvas({
     });
   }, [socketSubscribe, dispatch, graphDispatch]);
 
-  /** Extract a ContextItem from a single context-providing node. */
-  const extractContextItem = useCallback((sourceNode: CanvasNode): ContextItem | null => {
-    let content = "";
-    let label = "";
-
-    if (sourceNode.type === "markdown") {
-      const mdData = sourceNode.data as { title: string; content: string; viewMode: string };
-      content = mdData.content;
-      label = mdData.title || "Markdown";
-    } else if (sourceNode.type === "file-viewer") {
-      const fvData = sourceNode.data as { filePath: string; loadedContent?: string };
-      content = fvData.loadedContent ?? "";
-      label = fvData.filePath || "File";
-    } else if (sourceNode.type === "note") {
-      const noteData = sourceNode.data as { text: string; color: string };
-      content = noteData.text;
-      label = "Note";
-    }
-
-    if (!content.trim()) return null;
-    return { nodeId: sourceNode.id, nodeType: sourceNode.type, label, content };
-  }, []);
-
-  /** Gather context items for nodes spatially inside a context-group. */
+  /** Gather context items for nodes spatially inside a context-group.
+   *  Any node whose type registers `providesContext: true` is eligible —
+   *  including ImageNode, not just the hand-listed legacy types.
+   *  See `./context-extraction.ts` for the per-node flattener. */
   const getContextFromGroup = useCallback((groupNode: CanvasNode): ContextItem[] => {
     const items: ContextItem[] = [];
-    const contextNodeTypes = new Set(["markdown", "note", "file-viewer"]);
     for (const n of nodes) {
       if (n.id === groupNode.id) continue;
-      if (!contextNodeTypes.has(n.type)) continue;
+      if (!isContextProvider(n.type)) continue;
       if (!isInsideGroup(n, groupNode)) continue;
       const item = extractContextItem(n);
       if (item) items.push(item);
     }
     return items;
-  }, [nodes, isInsideGroup, extractContextItem]);
+  }, [nodes, isInsideGroup]);
 
   const getContextForNode = useCallback((nodeId: string): ContextItem[] => {
     const targetNode = nodes.find((n) => n.id === nodeId);

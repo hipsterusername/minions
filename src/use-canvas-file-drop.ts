@@ -10,6 +10,7 @@ import { generateId } from "./canvas-state.ts";
 import { getAllNodeTypes } from "./node-registry.ts";
 import { findNonOverlappingPosition } from "./canvas-utils.ts";
 import { createImageNodeFromFile } from "./nodes/image-node-factory.ts";
+import { getAuthToken } from "./api.ts";
 
 /** Default expanded height for folder nodes created via drag-drop. */
 const DEFAULT_EXPANDED_HEIGHT_FOLDER = 360;
@@ -222,9 +223,13 @@ export function useCanvasFileDrop({
               reader.readAsDataURL(file);
             });
 
+            const token = await getAuthToken();
             const resp = await fetch("/api/files/upload", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
               body: JSON.stringify({
                 projectPath,
                 filePath: file.name,

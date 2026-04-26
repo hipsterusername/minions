@@ -19,13 +19,15 @@ import { createServer } from "http";
 import { WebSocketServer } from "ws";
 import { createProjectRoutes } from "./routes/projects.ts";
 import { createFileRoutes } from "./routes/files.ts";
-import { createBus, unicastGlobal } from "./bus.ts";
+import { createBus } from "./bus.ts";
+import { attachConnectionListeners } from "./ws-connection.ts";
 import { removeWorktree, cleanupStaleWorktrees } from "./worktree.ts";
 import { listRecentProjects } from "./project-store.ts";
 import type { SessionHostDeps, StartSessionOptions } from "./session-host.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import { dispatchCommand } from "./commands/index.ts";
-import type { CommandContext, WsCommand } from "./commands/index.ts";
+import type { CommandContext } from "./commands/index.ts";
+import { WS_MAX_PAYLOAD_BYTES } from "./ws-config.ts";
 
 // ── Auth Token ──────────────────────────────────────────
 const AUTH_TOKEN = crypto.randomBytes(32).toString("hex");
@@ -109,7 +111,7 @@ function isAllowedOrigin(origin: string | undefined): boolean {
 
 const wss = new WebSocketServer({
   server,
-  maxPayload: 1 * 1024 * 1024, // 1MB max message size
+  maxPayload: WS_MAX_PAYLOAD_BYTES,
   verifyClient: (info) => {
     const origin = info.origin ?? info.req.headers["origin"];
     if (!isAllowedOrigin(origin)) {
@@ -169,27 +171,17 @@ const commandContext: CommandContext = {
 
 // ── WebSocket handlers ───────────────────────────────────
 
+// Server-level errors (handshake failures, listener errors). Without this
+// listener an emitted `'error'` would crash the Node process.
+wss.on("error", (err: unknown) => {
+  const msg = err instanceof Error ? err.message : String(err);
+  console.warn(`[ws] Server error: ${msg}`);
+});
+
 wss.on("connection", (ws) => {
-  console.log("Client connected");
-
-  // Send current session list on connect
-  unicastGlobal(ws, {
-    type: "session_list",
-    sessions: registry.snapshot(),
-  });
-
-  ws.on("message", (raw) => {
-    try {
-      const cmd = JSON.parse(String(raw)) as WsCommand;
-      dispatchCommand(commandContext, cmd, ws);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      unicastGlobal(ws, { type: "error", message: msg });
-    }
-  });
-
-  ws.on("close", () => {
-    console.log("Client disconnected");
+  attachConnectionListeners(ws, {
+    snapshotSessions: () => registry.snapshot(),
+    dispatch: (cmd, target) => dispatchCommand(commandContext, cmd, target),
   });
 });
 

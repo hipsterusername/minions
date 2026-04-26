@@ -36,25 +36,25 @@ export interface KanbanCard {
   /** IDs of canvas context nodes (markdown, file-viewer) linked to this card */
   linkedContextNodeIds: string[];
   /** The canvas node ID of the Leader node working on this card */
-  leaderNodeId?: string;
+  leaderNodeId?: string | undefined;
   /** Summary of the agent's work (filled when moved to history) */
-  agentSummary?: string;
+  agentSummary?: string | undefined;
   /** Total cost of the agent session */
-  agentCost?: number;
+  agentCost?: number | undefined;
   /** Archived messages from the leader session (preserved when card moves to history) */
-  archivedMessages?: import("./sdk-messages.ts").DisplayMessage[];
+  archivedMessages?: import("./sdk-messages.ts").DisplayMessage[] | undefined;
   /** Archived task plan from the leader session */
-  archivedTaskPlan?: import("./nodes/LeaderNode.tsx").TaskPlanItem[];
+  archivedTaskPlan?: import("./nodes/LeaderNode.tsx").TaskPlanItem[] | undefined;
   /** Archived task name set by the agent */
-  archivedTaskName?: string | null;
+  archivedTaskName?: string | null | undefined;
   /** Archived turn count */
-  archivedTurns?: number;
+  archivedTurns?: number | undefined;
   /** Why this card is halted (only relevant when columnId === "halted") */
-  blockReason?: BlockReason;
+  blockReason?: BlockReason | undefined;
   /** Human-readable detail about the block */
-  blockDetail?: string;
+  blockDetail?: string | undefined;
   /** True if this card was auto-created to represent a canvas agent (not manually created from backlog) */
-  autoSynced?: boolean;
+  autoSynced?: boolean | undefined;
 }
 
 export interface KanbanColumn {
@@ -80,16 +80,16 @@ export type KanbanAction =
   | { type: "REMOVE_CARD"; cardId: string }
   | { type: "CLEAR_ARCHIVE" }
   | { type: "UPDATE_CARD"; cardId: string; data: Partial<Omit<KanbanCard, "id">> }
-  | { type: "MOVE_CARD"; cardId: string; targetColumnId: string; targetIndex?: number }
+  | { type: "MOVE_CARD"; cardId: string; targetColumnId: string; targetIndex?: number | undefined }
   | { type: "TOGGLE_SUBTASK"; cardId: string; subtaskId: string }
   | { type: "ADD_SUBTASK"; cardId: string; subtask: KanbanSubtask }
   | { type: "REMOVE_SUBTASK"; cardId: string; subtaskId: string }
   | { type: "SET_BOARD"; board: KanbanBoard }
   | { type: "BIND_LEADER"; cardId: string; leaderNodeId: string }
-  | { type: "COMPLETE_CARD"; cardId: string; summary?: string; cost?: number; archivedMessages?: import("./sdk-messages.ts").DisplayMessage[]; archivedTaskPlan?: import("./nodes/LeaderNode.tsx").TaskPlanItem[]; archivedTaskName?: string | null; archivedTurns?: number }
-  | { type: "BLOCK_CARD"; cardId: string; reason: BlockReason; detail?: string }
+  | { type: "COMPLETE_CARD"; cardId: string; summary?: string | undefined; cost?: number | undefined; archivedMessages?: import("./sdk-messages.ts").DisplayMessage[] | undefined; archivedTaskPlan?: import("./nodes/LeaderNode.tsx").TaskPlanItem[] | undefined; archivedTaskName?: string | null | undefined; archivedTurns?: number | undefined }
+  | { type: "BLOCK_CARD"; cardId: string; reason: BlockReason; detail?: string | undefined }
   | { type: "UNBLOCK_CARD"; cardId: string }
-  | { type: "HALT_CARD"; cardId: string; reason: BlockReason; detail?: string }
+  | { type: "HALT_CARD"; cardId: string; reason: BlockReason; detail?: string | undefined }
   | { type: "RESUME_HALTED_CARD"; cardId: string };
 
 export function kanbanReducer(state: KanbanBoard, action: KanbanAction): KanbanBoard {

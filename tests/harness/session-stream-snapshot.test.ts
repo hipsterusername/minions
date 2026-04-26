@@ -187,10 +187,12 @@ describe("sessionStreamReducer: snapshot baseline against fixtures", () => {
     s = sessionStreamReducer(s, entries[1]!.message, "test");
     s = sessionStreamReducer(s, entries[2]!.message, "test");
     expect(s.streamingText).toBe("Hello world");
-    // message_delta (stream end)
+    // message_delta — pre-stop usage update; buffer must NOT clear here.
+    // (Historic behaviour cleared on message_delta, causing the live
+    // preview to flicker out a tick before the final assistant arrived.)
     s = sessionStreamReducer(s, entries[3]!.message, "test");
-    expect(s.streamingText).toBe("");
-    // final assistant
+    expect(s.streamingText).toBe("Hello world");
+    // final assistant — clears the buffer.
     s = sessionStreamReducer(s, entries[4]!.message, "test");
     expect(s.streamingText).toBe("");
     expect(s.messages.map((m) => m.content)).toEqual([
@@ -221,6 +223,99 @@ describe("sessionStreamReducer: snapshot baseline against fixtures", () => {
     ]);
     expect(view.totalCost).toBe(0.0114);
     expect(view.turns).toBe(3);
+  });
+
+  it("leader-multi-text-blocks.jsonl: live preview never mashes non-adjacent text blocks", () => {
+    // Regression for the live-streaming bug:
+    //   • A single assistant message with content [text, tool_use, text]
+    //     used to stream the two text blocks into one buffer with no
+    //     separator, producing "Let me check the file.Now I'll edit…"
+    //   • Sub-agent (`Agent`/`Task` tool) deltas used to interleave with
+    //     the parent's preview because they share the same sessionKey.
+    //   • `message_delta` used to be treated as stream end and flushed
+    //     the buffer one tick before the final assistant arrived.
+    // This fixture and walk-through pin the corrected behaviour.
+    const entries = loadFixture("leader-multi-text-blocks.jsonl");
+    let s = emptySessionStreamState("leader-1");
+    s = { ...s, status: "running" };
+
+    // [0] system init — system bubble appears, no streaming yet.
+    s = sessionStreamReducer(s, entries[0]!.message, "test");
+    expect(s.streamingText).toBe("");
+    expect(s.streamingBlockIndex).toBeNull();
+
+    // [1] content_block_start index=0 (text) — buffer locks to block 0.
+    s = sessionStreamReducer(s, entries[1]!.message, "test");
+    expect(s.streamingBlockIndex).toBe(0);
+    expect(s.streamingText).toBe("");
+
+    // [2,3] block 0 deltas accumulate.
+    s = sessionStreamReducer(s, entries[2]!.message, "test");
+    s = sessionStreamReducer(s, entries[3]!.message, "test");
+    expect(s.streamingText).toBe("Let me check the file.");
+    expect(s.streamingBlockIndex).toBe(0);
+
+    // [4] sub-agent delta (parent_tool_use_id non-null) — must be dropped.
+    const beforeSub = s;
+    s = sessionStreamReducer(s, entries[4]!.message, "test");
+    expect(s).toBe(beforeSub);
+    expect(s.streamingText).toBe("Let me check the file.");
+
+    // [5] content_block_stop index=0 — no-op for the reducer.
+    s = sessionStreamReducer(s, entries[5]!.message, "test");
+    expect(s.streamingText).toBe("Let me check the file.");
+
+    // [6,7,8] tool_use start / input_json_delta / stop — buffer untouched.
+    s = sessionStreamReducer(s, entries[6]!.message, "test");
+    s = sessionStreamReducer(s, entries[7]!.message, "test");
+    s = sessionStreamReducer(s, entries[8]!.message, "test");
+    expect(s.streamingText).toBe("Let me check the file.");
+    expect(s.streamingBlockIndex).toBe(0);
+
+    // [9] content_block_start index=2 (text) — block boundary RESETS the
+    // buffer to this block's content (empty initial text). Without this
+    // reset the next deltas would concatenate onto block 0's text.
+    s = sessionStreamReducer(s, entries[9]!.message, "test");
+    expect(s.streamingText).toBe("");
+    expect(s.streamingBlockIndex).toBe(2);
+
+    // [10,11] block 2 deltas — accumulate cleanly with no block-0 leakage.
+    s = sessionStreamReducer(s, entries[10]!.message, "test");
+    s = sessionStreamReducer(s, entries[11]!.message, "test");
+    expect(s.streamingText).toBe("Now I'll edit the file.");
+    expect(s.streamingBlockIndex).toBe(2);
+
+    // [12] content_block_stop index=2 — no-op.
+    s = sessionStreamReducer(s, entries[12]!.message, "test");
+    expect(s.streamingText).toBe("Now I'll edit the file.");
+
+    // [13] message_delta — pre-stop usage update; buffer survives.
+    s = sessionStreamReducer(s, entries[13]!.message, "test");
+    expect(s.streamingText).toBe("Now I'll edit the file.");
+    expect(s.streamingBlockIndex).toBe(2);
+
+    // [14] message_stop — clears the buffer.
+    s = sessionStreamReducer(s, entries[14]!.message, "test");
+    expect(s.streamingText).toBe("");
+    expect(s.streamingBlockIndex).toBeNull();
+
+    // [15] final assistant — produces three separate DisplayMessages
+    // (text, tool, text) — one per content block.
+    s = sessionStreamReducer(s, entries[15]!.message, "test");
+    expect(s.streamingText).toBe("");
+    const stable = s.messages.map(({ id: _i, timestamp: _t, ...rest }) => rest);
+    expect(stable.map((m) => m.role)).toEqual([
+      "system",
+      "assistant",
+      "tool",
+      "assistant",
+    ]);
+    expect(stable.map((m) => m.content)).toEqual([
+      "Session on claude-opus-4-5",
+      "Let me check the file.",
+      "Read",
+      "Now I'll edit the file.",
+    ]);
   });
 
   it("claude-session-basic.jsonl: the wrap-up assistant matches the result and collapses", () => {

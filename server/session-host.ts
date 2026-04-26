@@ -19,12 +19,14 @@
  */
 
 import { query, type Query } from "@anthropic-ai/claude-agent-sdk";
+import { buildQueryPrompt } from "./multimodal-prompt.ts";
 import type { Bus } from "./bus.ts";
 import { getAgentType, type AgentTypeContext } from "./agents/index.ts";
 import type { WorktreeInfo } from "./worktree.ts";
 import type { TaskManagerState } from "./task-tools.ts";
 import type { RenderState } from "./render-tools.ts";
 import {
+  persistEvent as persistEventToDb,
   persistSession as persistSessionToDb,
   type PersistableSession,
 } from "./session-persist.ts";
@@ -76,6 +78,19 @@ export interface SessionHostDeps {
   ) => void;
 }
 
+/**
+ * Binary image attachment pinned to the first user turn. The host
+ * converts each one into a Base64-source {@link ImageBlockParam} so
+ * the SDK sends real pixels to the model.
+ */
+export interface ImageAttachment {
+  kind: "image";
+  filename?: string;
+  mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+  /** Pure base64 payload — no `data:` prefix. */
+  data: string;
+}
+
 export interface StartSessionOptions {
   sessionKey: string;
   prompt: string;
@@ -87,6 +102,8 @@ export interface StartSessionOptions {
   parentWorktree?: WorktreeInfo | undefined;
   initialModel?: string | null | undefined;
   thinkingConfig?: ThinkingConfig | null | undefined;
+  /** Multimodal attachments riding on the first user message. */
+  attachments?: ImageAttachment[] | undefined;
 }
 
 // ── SessionHost ────────────────────────────────────────────
@@ -135,12 +152,18 @@ export class SessionHost {
 
   // ── Small helpers ───────────────────────────────────
 
-  /** Push an event onto the buffer, trimming to the retention cap. */
+  /**
+   * Push an event onto the buffer, trimming to the retention cap, and
+   * write it through to the on-disk event_log so it survives a restart.
+   * Persistence failures are swallowed inside `persistEventToDb` so the
+   * SDK loop keeps running even if the DB is unavailable.
+   */
   bufferEvent(event: BufferedEvent): void {
     this.eventBuffer.push(event);
     if (this.eventBuffer.length > MAX_BUFFERED_EVENTS) {
       this.eventBuffer = this.eventBuffer.slice(-MAX_BUFFERED_EVENTS);
     }
+    persistEventToDb(this.id, event);
   }
 
   /** Write-through persistence to SQLite (idempotent). */
@@ -152,6 +175,7 @@ export class SessionHost {
       model: this.model,
       role: this.role,
       taskName: this.taskName,
+      sessionId: this.sessionId,
       worktreeIsolation: this.worktreeIsolation,
       totalCost: this.totalCost,
       turns: this.turns,
@@ -295,7 +319,10 @@ export class SessionHost {
         abortController,
       });
 
-      const handle = query({ prompt: opts.prompt, options: options as never });
+      const handle = query({
+        prompt: buildQueryPrompt(opts),
+        options: options as never,
+      });
       this.queryHandle = handle;
 
       for await (const message of handle) {

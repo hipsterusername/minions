@@ -474,9 +474,13 @@ function SaveDialog({ projectPath, title, content, savedPath, onSaved, onClose }
     setErrorMsg(null);
 
     try {
+      const token = await getAuthToken();
       const res = await fetch("/api/files/save", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ projectPath, filePath, content }),
       });
       if (!res.ok) {
@@ -569,7 +573,7 @@ function SaveDialog({ projectPath, title, content, savedPath, onSaved, onClose }
 
 // ── Component ──────────────────────────────────────────
 
-function MarkdownNodeRenderer({ node, onUpdateData, onResize, projectPath }: NodeRenderProps) {
+export function MarkdownNodeRenderer({ node, onUpdateData, onResize, projectPath }: NodeRenderProps) {
   const data = node.data as MarkdownData;
   const collapsed = data.collapsed ?? false;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -589,9 +593,13 @@ function MarkdownNodeRenderer({ node, onUpdateData, onResize, projectPath }: Nod
   const handleQuickSave = async () => {
     if (!data.savedPath || !projectPath) return;
     try {
+      const token = await getAuthToken();
       const res = await fetch("/api/files/save", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           projectPath,
           filePath: data.savedPath,

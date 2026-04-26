@@ -104,3 +104,28 @@ export function compileSkills(
 
   return `\n\n# Active Skills\n\nThe following skills are active for this session. Follow their instructions.\n\n${sections.join("\n\n---\n\n")}`;
 }
+
+/**
+ * Build a markdown inventory of skills the Leader may "arm" a Minion
+ * with via `assign_task`'s `skillIds` parameter. Lists each skill's
+ * ID, name, and description so the LLM knows what's available without
+ * the full template body. Returns empty string when there are no
+ * skills in the library.
+ */
+export function buildArmingInventory(skills: SkillTemplate[]): string {
+  if (skills.length === 0) return "";
+  const lines = skills.map((s) => {
+    const desc = s.description?.trim() || "(no description)";
+    return `- \`${s.id}\` — **${s.name}**: ${desc}`;
+  });
+  return (
+    `\n\n# Available Skills (for arming Minions)\n\n` +
+    `When delegating with \`assign_task\`, you may pass \`skillIds\` to ` +
+    `arm the Minion with one or more of the skills below. The compiled ` +
+    `skill instructions will be appended to the Minion's system prompt. ` +
+    `Use this when a task needs focused expertise (e.g. lint cleanup, ` +
+    `code review, doc writing). Pass \`skillValues\` only for skills ` +
+    `whose templates have \`{{placeholders}}\`.\n\n` +
+    `${lines.join("\n")}`
+  );
+}

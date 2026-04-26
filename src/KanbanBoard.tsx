@@ -16,8 +16,7 @@ import type { ProjectSettings } from "./api.ts";
 import type { LeaderData, TaskPlanItem } from "./nodes/LeaderNode.tsx";
 import type { DisplayMessage } from "./sdk-messages.ts";
 import { msgId } from "./sdk-messages.ts";
-import { LEADER_SYSTEM_PROMPT } from "./prompts/leader-system.ts";
-import { compileSkills } from "./skills/types.ts";
+import { buildLeaderSystemPrompt } from "./prompts/build-leader-prompt.ts";
 import "./kanban.css";
 
 // ─── Helpers ──────────────────────────────────────────────
@@ -1577,12 +1576,11 @@ function KanbanInspectorPanel({
   const handleChatSend = useCallback(() => {
     if (!chatInput.trim() || !selectedCard?.leaderNodeId || !leaderData?.sessionKey) return;
 
-    // Compile skills into system prompt
-    const taggedSkills = (leaderData.skillIds ?? [])
-      .map((id) => getSkill(id))
-      .filter((s): s is SkillTemplate => s !== undefined);
-    const skillsAddendum = compileSkills(taggedSkills, leaderData.skillValues ?? {});
-    const finalSystemPrompt = LEADER_SYSTEM_PROMPT + skillsAddendum;
+    // Build the full Leader system prompt (active skills + arming inventory)
+    const finalSystemPrompt = buildLeaderSystemPrompt({
+      skillIds: leaderData.skillIds ?? [],
+      skillValues: leaderData.skillValues ?? {},
+    });
 
     socketSend({
       type: "send_message",

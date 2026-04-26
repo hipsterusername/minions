@@ -13,7 +13,7 @@ import type { ModelOption, PermissionMode } from "../components/SessionToolbar.t
 import { msgId, type DisplayMessage } from "../sdk-messages.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { AddAsNodeButton } from "../components/AddAsNodeButton.tsx";
-import { STATUS_COLORS, PRIORITY_COLORS, getTaskStatusColor, COLORS } from "../palette.ts";
+import { STATUS_COLORS, PRIORITY_COLORS } from "../palette.ts";
 import {
   type SessionStreamState,
   type SessionStreamStatus,
@@ -35,7 +35,7 @@ export interface MinionTaskState {
 
 export interface MinionData {
   sessionKey: string | null;
-  status: "disconnected" | "waiting" | "creating" | "running" | "idle" | "stopped" | "error";
+  status: "disconnected" | "waiting" | "creating" | "running" | "idle" | "stopped" | "completed" | "error";
   leaderId: string | null;
   taskQueue: MinionTaskState[];
   activeTaskIndex: number;
@@ -44,16 +44,23 @@ export interface MinionData {
   turns: number;
   error: string | null;
   streamingText: string;
+  /**
+   * Anthropic content block index that {@link streamingText} belongs to,
+   * or `null` when no block is currently streaming. Used to flush the
+   * preview buffer when a new content block starts so deltas from
+   * `[text, tool_use, text]` don't merge across blocks.
+   */
+  streamingBlockIndex?: number | null | undefined;
   model: ModelOption;
   permissionMode: PermissionMode;
   /** Adaptive-thinking config sent to the SDK on every query() call. */
   thinkingConfig: ThinkingConfig;
   /** Set when this minion represents an SDK Agent-tool subagent (no independent session) */
-  agentTaskId?: string | null;
+  agentTaskId?: string | null | undefined;
   /** The leader's session key — used to receive subagent status updates */
-  parentSessionKey?: string | null;
+  parentSessionKey?: string | null | undefined;
   /** Git worktree branch this minion is working on */
-  worktreeBranch?: string | null;
+  worktreeBranch?: string | null | undefined;
 }
 
 // MinionMessage is now an alias for the shared DisplayMessage type
@@ -74,6 +81,7 @@ function extractCore(d: MinionData): SessionStreamState {
     status,
     messages: d.messages,
     streamingText: d.streamingText,
+    streamingBlockIndex: d.streamingBlockIndex ?? null,
     totalCost: d.totalCost,
     turns: d.turns,
     error: d.error,
@@ -128,6 +136,7 @@ export function MinionNodeRenderer({
         ...data,
         status: "idle",
         streamingText: "",
+        streamingBlockIndex: null,
         activeTaskIndex: -1,
         taskQueue: blockedTasks,
         messages: [
@@ -188,6 +197,7 @@ export function MinionNodeRenderer({
         status: nextStatus,
         messages: next.messages,
         streamingText: next.streamingText,
+        streamingBlockIndex: next.streamingBlockIndex,
         totalCost: next.totalCost,
         turns: next.turns,
         error: next.error,
@@ -280,11 +290,11 @@ export function MinionNodeRenderer({
       // ── minion_status MCP echoes: update the active task ──
       const m = serverMsg as Record<string, unknown>;
       if (
-        m.type === "minion_status" &&
-        m.minionSessionKey === current.sessionKey
+        m["type"] === "minion_status" &&
+        m["minionSessionKey"] === current.sessionKey
       ) {
-        const trigger = m.trigger as string;
-        const message = m.message as string;
+        const trigger = m["trigger"] as string;
+        const message = m["message"] as string;
         if (
           current.activeTaskIndex >= 0 &&
           current.activeTaskIndex < current.taskQueue.length
@@ -340,7 +350,9 @@ export function MinionNodeRenderer({
               tasks[current.activeTaskIndex] = {
                 ...task,
                 status: "completed",
-                result: serverMsg.message.result ?? "Done",
+                result: serverMsg.message.is_error
+                  ? (serverMsg.message.errors[0] ?? "Error")
+                  : serverMsg.message.result,
                 activeStep: null,
               };
             }
@@ -528,7 +540,6 @@ export function MinionNodeRenderer({
       ? data.taskQueue[data.activeTaskIndex]
       : undefined;
 
-  const toolCount = data.messages.filter((m) => m.role === "tool").length;
   const completedCount = data.taskQueue.filter((t) => t.status === "completed").length;
   const totalTasks = data.taskQueue.length;
   const progressPct = totalTasks > 0 ? (completedCount / totalTasks) * 100 : 0;
@@ -1093,6 +1104,7 @@ export const MINION_DEFAULT_DATA: MinionData = {
   activeTaskIndex: -1,
   messages: [],
   streamingText: "",
+  streamingBlockIndex: null,
   totalCost: 0,
   turns: 0,
   error: null,

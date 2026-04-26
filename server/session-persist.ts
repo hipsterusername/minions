@@ -28,6 +28,10 @@ import { initDb } from "./db.ts";
 import * as repo from "./session-repo.ts";
 import type { TaskManagerState } from "./task-tools.ts";
 import type { RenderState } from "./render-tools.ts";
+import {
+  MAX_BUFFERED_EVENTS,
+  type BufferedEvent,
+} from "./session-host-config.ts";
 
 // ── Connection management ───────────────────────────────
 
@@ -105,6 +109,13 @@ export interface PersistableSession {
   model: string | null;
   role: string;
   taskName: string | null;
+  /**
+   * SDK session id from the first `system/init` event. May be `null`
+   * before the SDK has handed one out (e.g. during the brief
+   * `creating → running` window). Persisting it lets `send_message`
+   * pass `resume:` after a server restart.
+   */
+  sessionId: string | null;
   worktreeIsolation: boolean;
   totalCost: number;
   turns: number;
@@ -123,6 +134,7 @@ function sessionToRow(
     model: s.model,
     role: s.role,
     task_name: s.taskName,
+    session_id: s.sessionId,
     worktree_isolation: s.worktreeIsolation ? 1 : 0,
     total_cost: s.totalCost,
     turns: s.turns,
@@ -154,6 +166,7 @@ export function removePersistedSession(sessionKey: string): void {
   try {
     repo.deleteSession(db, sessionKey);
     repo.deleteRenderState(db, sessionKey);
+    repo.purgeEventsForSession(db, sessionKey);
     // task records are cascaded logically (we delete rows whose leader key
     // matches) — no FK so we do it explicitly.
     db.prepare(
@@ -161,6 +174,48 @@ export function removePersistedSession(sessionKey: string): void {
     ).run(sessionKey);
   } catch (err) {
     console.warn("[session-persist] removePersistedSession failed:", err);
+  }
+}
+
+/**
+ * Append a single buffered event to the on-disk event_log so it survives
+ * a restart. Called from `SessionHost.bufferEvent` as a write-through
+ * cache — every event the server fans out to clients also lands on disk.
+ *
+ * Without this, completed/stopped sessions hydrate with an empty buffer
+ * and the client has nothing to rebuild chat history from.
+ */
+export function persistEvent(
+  sessionKey: string,
+  event: BufferedEvent,
+): void {
+  const db = ensureDb();
+  if (!db) return;
+  try {
+    repo.appendEvent(db, sessionKey, event.type, event);
+  } catch (err) {
+    console.warn("[session-persist] persistEvent failed:", err);
+  }
+}
+
+/**
+ * Load the tail of the event log for a session, capped to the same
+ * retention window the in-memory `eventBuffer` keeps. Returned events
+ * are in chronological (ASC) order so they slot directly into the
+ * buffer.
+ */
+export function loadRecentEvents(
+  sessionKey: string,
+  limit: number = MAX_BUFFERED_EVENTS,
+): BufferedEvent[] {
+  const db = ensureDb();
+  if (!db) return [];
+  try {
+    const rows = repo.getRecentEvents(db, sessionKey, limit);
+    return rows.map((r) => JSON.parse(r.payload) as BufferedEvent);
+  } catch (err) {
+    console.warn("[session-persist] loadRecentEvents failed:", err);
+    return [];
   }
 }
 
@@ -217,6 +272,7 @@ export interface HydratedSession {
   row: repo.SessionRow;
   tasks: TaskManagerState | null;
   render: RenderState | null;
+  events: BufferedEvent[];
 }
 
 export function hydrateSessionsFromDb(): HydratedSession[] {
@@ -244,7 +300,8 @@ export function hydrateSessionsFromDb(): HydratedSession[] {
       }
     }
     const render = repo.getRenderState(db, row.session_key);
-    out.push({ row, tasks, render });
+    const events = loadRecentEvents(row.session_key);
+    out.push({ row, tasks, render, events });
   }
   return out;
 }

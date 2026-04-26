@@ -44,6 +44,11 @@ export const MODEL_CAPABILITIES: Record<ModelOption, ModelCapability> = {
   },
 };
 
+const FALLBACK_CAPABILITY: ModelCapability = {
+  supportsAdaptiveThinking: false,
+  supportedEffortLevels: [],
+};
+
 export function getModelCapability(model: ModelOption): ModelCapability {
-  return MODEL_CAPABILITIES[model];
+  return MODEL_CAPABILITIES[model] ?? FALLBACK_CAPABILITY;
 }

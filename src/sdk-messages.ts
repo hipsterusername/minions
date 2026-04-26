@@ -15,12 +15,12 @@ export interface DisplayMessage {
   role: "user" | "assistant" | "tool" | "system" | "result" | "thinking";
   content: string;
   timestamp: number;
-  toolName?: string;
-  toolInput?: Record<string, unknown>;
+  toolName?: string | undefined;
+  toolInput?: Record<string, unknown> | undefined;
   /** e.g. "8.6s · $0.0288" */
-  suffix?: string;
+  suffix?: string | undefined;
   /** SDK message UUID — used for deduplication */
-  sdkUuid?: string;
+  sdkUuid?: string | undefined;
 }
 
 // ── Helpers ────────────────────────────────────────────
@@ -99,6 +99,7 @@ export function sdkToDisplayMessages(
 
       for (let i = 0; i < blocks.length; i++) {
         const block = blocks[i];
+        if (!block) continue;
 
         if (block.type === "thinking" && block.thinking) {
           msgs.push({
@@ -151,7 +152,10 @@ export function sdkToDisplayMessages(
       return [];
 
     case "result": {
-      const txt = (sdkMsg.result ?? (sdkMsg.is_error ? "Error" : "Done")).replace(/<!--task-name:.+?-->\s*/g, "");
+      const rawTxt = sdkMsg.is_error
+        ? (sdkMsg.errors[0] ?? "Error")
+        : sdkMsg.result;
+      const txt = rawTxt.replace(/<!--task-name:.+?-->\s*/g, "");
       const ds = sdkMsg.duration_ms ? `${(sdkMsg.duration_ms / 1000).toFixed(1)}s` : null;
       const cs = sdkMsg.total_cost_usd ? `$${sdkMsg.total_cost_usd.toFixed(4)}` : null;
       const sfx = [ds, cs].filter(Boolean).join(" · ");
@@ -173,5 +177,5 @@ export function sdkToDisplayMessage(
   prefix = "m",
 ): DisplayMessage | null {
   const msgs = sdkToDisplayMessages(sdkMsg, prefix);
-  return msgs.length > 0 ? msgs[0] : null;
+  return msgs[0] ?? null;
 }

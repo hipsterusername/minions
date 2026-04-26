@@ -15,7 +15,9 @@ import {
   closePersistDb,
   disablePersistence,
   hydrateSessionsFromDb,
+  loadRecentEvents,
   openPersistDb,
+  persistEvent,
   persistRenderState,
   persistSession,
   persistTaskState,
@@ -24,6 +26,10 @@ import {
 } from "./session-persist.ts";
 import type { TaskManagerState, TaskRecord } from "./task-tools.ts";
 import type { RenderState } from "./render-tools.ts";
+import {
+  MAX_BUFFERED_EVENTS,
+  type BufferedEvent,
+} from "./session-host-config.ts";
 
 function makeTmpDbPath(): string {
   return path.join(
@@ -50,6 +56,7 @@ function makeSession(overrides: Partial<PersistableSession> = {}): PersistableSe
     model: "sonnet",
     role: "leader",
     taskName: "Phase 4",
+    sessionId: null,
     worktreeIsolation: true,
     totalCost: 0.15,
     turns: 5,
@@ -159,15 +166,95 @@ describe("session-persist integration", () => {
     expect(hydrated[0]?.render?.components[0]?.id).toBe("s");
   });
 
-  it("removePersistedSession deletes the row + task records + render state", () => {
+  it("removePersistedSession deletes the row + task records + render state + events", () => {
     persistSession(makeSession());
     persistTaskState("sess-1", makeTaskState([makeTaskRecord()]));
     persistRenderState("sess-1", makeRenderState());
+    persistEvent("sess-1", {
+      type: "sdk_event",
+      sessionKey: "sess-1",
+      timestamp: 1,
+    });
 
     removePersistedSession("sess-1");
 
     const hydrated = hydrateSessionsFromDb();
     expect(hydrated).toEqual([]);
+    expect(loadRecentEvents("sess-1")).toEqual([]);
+  });
+
+  it("persisted events round-trip via hydrate (regression: completed leader chat history was lost on restart)", () => {
+    persistSession(makeSession());
+    const evt1: BufferedEvent = {
+      type: "sdk_event",
+      sessionKey: "sess-1",
+      message: { type: "assistant", content: "first turn" },
+      timestamp: 1000,
+    };
+    const evt2: BufferedEvent = {
+      type: "session_status",
+      sessionKey: "sess-1",
+      status: "completed",
+      timestamp: 2000,
+    };
+    persistEvent("sess-1", evt1);
+    persistEvent("sess-1", evt2);
+
+    const hydrated = hydrateSessionsFromDb();
+    expect(hydrated).toHaveLength(1);
+    expect(hydrated[0]?.events).toHaveLength(2);
+    expect(hydrated[0]?.events[0]).toEqual(evt1);
+    expect(hydrated[0]?.events[1]).toEqual(evt2);
+  });
+
+  it("hydrate caps restored events at MAX_BUFFERED_EVENTS, returning the most recent in chronological order", () => {
+    persistSession(makeSession());
+    const overflow = MAX_BUFFERED_EVENTS + 25;
+    for (let i = 0; i < overflow; i++) {
+      persistEvent("sess-1", {
+        type: "sdk_event",
+        sessionKey: "sess-1",
+        message: { i },
+        timestamp: i,
+      });
+    }
+    const hydrated = hydrateSessionsFromDb();
+    const events = hydrated[0]?.events ?? [];
+    expect(events).toHaveLength(MAX_BUFFERED_EVENTS);
+    // The first restored event is the (overflow - MAX) th written.
+    const firstMessage = events[0]?.message as { i: number };
+    const lastMessage = events.at(-1)?.message as { i: number };
+    expect(firstMessage.i).toBe(overflow - MAX_BUFFERED_EVENTS);
+    expect(lastMessage.i).toBe(overflow - 1);
+  });
+
+  it("simulated restart of a completed session: events survive, eventBuffer is restorable", () => {
+    persistSession(makeSession({ status: "completed" }));
+    persistEvent("sess-1", {
+      type: "sdk_event",
+      sessionKey: "sess-1",
+      message: { type: "user", content: "hello" },
+      timestamp: 1,
+    });
+    persistEvent("sess-1", {
+      type: "sdk_event",
+      sessionKey: "sess-1",
+      message: { type: "assistant", content: "world" },
+      timestamp: 2,
+    });
+
+    closePersistDb();
+    openPersistDb(dbPath);
+
+    const hydrated = hydrateSessionsFromDb();
+    expect(hydrated).toHaveLength(1);
+    expect(hydrated[0]?.row.status).toBe("completed");
+    expect(hydrated[0]?.events).toHaveLength(2);
+    const messages = hydrated[0]?.events.map((e) => e.message) as Array<{
+      type: string;
+      content: string;
+    }>;
+    expect(messages.map((m) => m.content)).toEqual(["hello", "world"]);
   });
 
   it("simulated server restart: close the handle, reopen, and state is intact", () => {

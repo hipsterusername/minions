@@ -1,6 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type { ServerMessage, SessionInfo, ActiveMinion } from "./use-socket.ts";
+import { isResultMessage } from "./use-socket.ts";
 import { STATUS_COLORS, COLORS } from "./palette.ts";
+import { UsageSection } from "./UsagePopover.tsx";
+import {
+  emptySessionUsage,
+  mergeResultIntoSession,
+  type SessionUsage,
+} from "./usage-aggregator.ts";
 
 interface SessionPanelProps {
   socketSend?: (data: unknown) => void;
@@ -21,6 +28,9 @@ export function SessionPanel({
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
+  const [usageBySession, setUsageBySession] = useState<
+    ReadonlyMap<string, SessionUsage>
+  >(new Map());
 
   useEffect(() => {
     if (!socketSubscribe) return;
@@ -83,6 +93,22 @@ export function SessionPanel({
             },
           ];
         });
+        return;
+      }
+
+      // Per-session usage roll-up — fed by the SDK `result` event that closes
+      // every turn. Used by the usage section to show per-model token totals.
+      if (serverMsg.type === "sdk_event" && isResultMessage(serverMsg.message)) {
+        const key = serverMsg.sessionKey;
+        const result = serverMsg.message;
+        setUsageBySession((prev) => {
+          const next = new Map(prev);
+          next.set(
+            key,
+            mergeResultIntoSession(prev.get(key) ?? emptySessionUsage(), result),
+          );
+          return next;
+        });
       }
     });
   }, [socketSubscribe]);
@@ -111,10 +137,14 @@ export function SessionPanel({
   };
 
   const totalCost = sessions.reduce((sum, s) => sum + (s.totalCost ?? 0), 0);
+  // Memoize the usage map identity so UsageSection only re-renders when an
+  // SDK result actually folds new tokens in.
+  const usageView = useMemo(() => usageBySession, [usageBySession]);
 
   if (collapsed) {
     return (
       <button
+        data-testid="sessions-expand"
         onClick={() => setCollapsed(false)}
         style={{
           position: "absolute",
@@ -459,6 +489,16 @@ export function SessionPanel({
             </div>
           );
         })}
+      </div>
+
+      {/* Usage section — pinned at the bottom of the panel */}
+      <div
+        style={{
+          borderTop: "1px solid var(--border-default)",
+          flexShrink: 0,
+        }}
+      >
+        <UsageSection sessions={usageView} />
       </div>
     </div>
   );

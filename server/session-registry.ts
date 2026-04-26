@@ -68,6 +68,24 @@ export class SessionRegistry {
     return this.map.size;
   }
 
+  /**
+   * Number of sessions currently consuming live runtime resources
+   * (open SDK query, MCP servers, worktree). Hydrated-but-never-resumed
+   * sessions come back as `status: "stopped"` and are excluded.
+   *
+   * `MAX_SESSIONS` is meant to cap concurrent compute, not on-disk
+   * history — without this distinction, a project with N saved
+   * sessions where N === MAX_SESSIONS makes every new `create_session`
+   * fail at boot (regression observed after Phase 4.4 hydration).
+   */
+  activeCount(): number {
+    let n = 0;
+    for (const host of this.map.values()) {
+      if (host.status !== "stopped") n += 1;
+    }
+    return n;
+  }
+
   values(): IterableIterator<SessionHost> {
     return this.map.values();
   }
@@ -157,7 +175,7 @@ export class SessionRegistry {
   hydrateFromDb(): number {
     try {
       const hydrated = hydrateSessionsFromDb();
-      for (const { row, tasks, render } of hydrated) {
+      for (const { row, tasks, render, events } of hydrated) {
         const host = new SessionHost(
           row.session_key,
           row.cwd ?? process.cwd(),
@@ -168,9 +186,18 @@ export class SessionRegistry {
         host.model = row.model;
         host.role = (row.role as SessionRole) ?? "default";
         host.taskName = row.task_name;
+        // Restore the SDK session id so a follow-up `send_message` can
+        // pass it as `resume:` and the SDK picks the conversation back up
+        // mid-stream. Pre-migration rows return `null` here, in which
+        // case the next turn starts a fresh SDK session — same behaviour
+        // as before this fix.
+        host.sessionId = row.session_id;
         host.worktreeIsolation = row.worktree_isolation === 1;
         host.taskState = tasks;
         host.renderState = render;
+        // Restore the event buffer in place — using bufferEvent() here
+        // would re-persist every event we just loaded.
+        host.eventBuffer = events;
         this.map.set(row.session_key, host);
       }
       if (hydrated.length > 0) {

@@ -18,7 +18,7 @@ export function AddAsNodeButton({
   onAdd,
 }: {
   text: string;
-  onAdd?: (content: string) => void;
+  onAdd?: ((content: string) => void) | undefined;
 }) {
   const [added, setAdded] = useState(false);
 

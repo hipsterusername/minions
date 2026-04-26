@@ -1,4 +1,4 @@
-import type { NodeTypeDefinition } from "./types.ts";
+import type { ContextAttachment, NodeTypeDefinition } from "./types.ts";
 
 const registry = new Map<string, NodeTypeDefinition>();
 
@@ -37,4 +37,11 @@ export function isContextProvider(type: string): boolean {
 /** Returns the content extractor function for the given node type, if registered. */
 export function getContentExtractor(type: string): ((data: unknown) => string | null) | undefined {
   return registry.get(type)?.extractContent;
+}
+
+/** Returns the attachment extractor (images, etc.) for the given node type, if registered. */
+export function getAttachmentExtractor(
+  type: string,
+): ((data: unknown) => ContextAttachment[] | null) | undefined {
+  return registry.get(type)?.extractAttachments;
 }

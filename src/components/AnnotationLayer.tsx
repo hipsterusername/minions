@@ -6,6 +6,19 @@
  *
  * Coordinates are always stored as ratios of the container's rendered
  * size. Pixel math happens on read/write at the event boundary.
+ *
+ * Interaction model — standard "create/edit" with one active tool
+ * (Pin or Rect). The tool acts on empty space; existing marks are
+ * always editable in place:
+ *   - Click empty space ⇒ create a new mark of the active tool's kind
+ *     (pin: tap, rect: drag-to-size).
+ *   - Click an existing mark ⇒ select it.
+ *   - Drag a selected mark by its body ⇒ move it.
+ *   - Drag a selected rect's corner handle ⇒ resize it.
+ * No separate "Select" mode: the assumption is that placing a new mark
+ * exactly on top of an existing one is rare, and dispatching by hit-test
+ * (mark vs. empty space) covers the common cases without an extra modal
+ * tool the user must remember to switch out of.
  */
 import {
   useRef,
@@ -14,7 +27,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
-export type AnnotationTool = "select" | "pin" | "rect";
+export type AnnotationTool = "pin" | "rect";
 
 export interface PinAnnotation {
   id: string;
@@ -53,6 +66,13 @@ export interface AnnotationLayerProps {
   onUpdate: (id: string, patch: Partial<Annotation>) => void;
   /** Draws annotations but disables edit interactions. */
   readOnly?: boolean;
+  /**
+   * width/height aspect ratio of the host's content box. Used to size the
+   * SVG viewBox so a circle renders as an actual circle and a resize
+   * handle stays square — regardless of how non-square the image is.
+   * Defaults to 1 (square) for hosts that don't pass it.
+   */
+  aspectRatio?: number;
 }
 
 /** Stable id using the time and a short random — fine for local-only IDs. */
@@ -77,6 +97,38 @@ function toNormalized(
   };
 }
 
+/** Next stable order value: one above the current max, or 1 when empty.
+ *  Using the max (rather than `length + 1`) keeps numbers unique across
+ *  delete cycles — important now that we no longer renumber on delete. */
+function nextOrderFor(annotations: ReadonlyArray<Annotation>): number {
+  let max = 0;
+  for (const a of annotations) if (a.order > max) max = a.order;
+  return max + 1;
+}
+
+/** Which of the eight resize anchors is being dragged. */
+type RectHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
+
+interface RectMoveDrag {
+  kind: "move";
+  id: string;
+  pointerId: number;
+  /** Grab offset from the rect's top-left, in normalized units. */
+  offset: { x: number; y: number };
+}
+
+interface RectResizeDrag {
+  kind: "resize";
+  id: string;
+  pointerId: number;
+  handle: RectHandle;
+  /** The rect's state at drag start — we reshape against this, not the
+   *  current render, so mid-drag rounding doesn't drift. */
+  origin: { x: number; y: number; w: number; h: number };
+}
+
+type RectDrag = RectMoveDrag | RectResizeDrag;
+
 export function AnnotationLayer({
   annotations,
   tool,
@@ -86,15 +138,39 @@ export function AnnotationLayer({
   onAdd,
   onUpdate,
   readOnly = false,
+  aspectRatio = 1,
 }: AnnotationLayerProps): React.JSX.Element {
+  // Build a viewBox whose aspect ratio matches the host content box. With
+  // a matching aspect we can use the default `preserveAspectRatio` (no
+  // `none`) and circles stay circular at any image proportion.
+  // The shorter axis is normalised to 100 units; the longer axis is
+  // 100 * aspectRatio (or 100 / aspectRatio). Coordinates remain stored
+  // as 0–1 normalised — render math just multiplies by vbW / vbH.
+  const safeAspect = Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : 1;
+  const vbW = safeAspect >= 1 ? 100 * safeAspect : 100;
+  const vbH = safeAspect >= 1 ? 100 : 100 / safeAspect;
+  // Visual sizes scale off the SHORTER side so marks read at a consistent
+  // size whether the image is wide, tall, or square.
+  const shortSide = Math.min(vbW, vbH);
+  const PIN_R = shortSide * 0.022;
+  const PIN_R_SELECTED = shortSide * 0.027;
+  const PIN_HALO_R = shortSide * 0.042;
+  const PIN_LABEL_FONT = shortSide * 0.024;
+  const RECT_LABEL_FONT = shortSide * 0.034;
+  const RECT_STROKE = shortSide * 0.0035;
+  const RECT_STROKE_SELECTED = shortSide * 0.008;
+  const HANDLE_SIZE = shortSide * 0.018;
+  const HANDLE_STROKE = shortSide * 0.005;
+  const PIN_STROKE = shortSide * 0.005;
   const svgRef = useRef<SVGSVGElement>(null);
   const [dragRect, setDragRect] = useState<{
     start: { x: number; y: number };
     current: { x: number; y: number };
   } | null>(null);
   const pinDragRef = useRef<{ id: string; pointerId: number } | null>(null);
+  const rectDragRef = useRef<RectDrag | null>(null);
 
-  const nextOrder = annotations.length + 1;
+  const nextOrder = nextOrderFor(annotations);
 
   const handlePointerDown = useCallback(
     (e: ReactPointerEvent<SVGSVGElement>) => {
@@ -119,13 +195,9 @@ export function AnnotationLayer({
         onSelect(pin.id);
         return;
       }
-      if (tool === "rect") {
-        setDragRect({ start: p, current: p });
-        svg.setPointerCapture(e.pointerId);
-        return;
-      }
-      // select tool — clicking empty space deselects
-      onSelect(null);
+      // tool === "rect"
+      setDragRect({ start: p, current: p });
+      svg.setPointerCapture(e.pointerId);
     },
     [readOnly, tool, defaultColor, nextOrder, onAdd, onSelect],
   );
@@ -144,9 +216,46 @@ export function AnnotationLayer({
       const pinDrag = pinDragRef.current;
       if (pinDrag) {
         onUpdate(pinDrag.id, { x: p.x, y: p.y });
+        return;
+      }
+      const rd = rectDragRef.current;
+      if (!rd) return;
+      if (rd.kind === "move") {
+        // Keep the rect fully inside [0,1]; we know w/h from the current annotation.
+        const target = annotations.find((a) => a.id === rd.id);
+        if (!target || target.kind !== "rect") return;
+        const nx = clamp01(p.x - rd.offset.x);
+        const ny = clamp01(p.y - rd.offset.y);
+        const clampedX = Math.min(nx, 1 - target.w);
+        const clampedY = Math.min(ny, 1 - target.h);
+        onUpdate(rd.id, { x: clampedX, y: clampedY });
+      } else {
+        const o = rd.origin;
+        let { x, y, w, h } = o;
+        if (rd.handle.includes("n")) {
+          const dy = p.y - o.y;
+          y = clamp01(o.y + dy);
+          h = clamp01(o.h - dy);
+        }
+        if (rd.handle.includes("s")) {
+          h = clamp01(p.y - o.y);
+        }
+        if (rd.handle.includes("w")) {
+          const dx = p.x - o.x;
+          x = clamp01(o.x + dx);
+          w = clamp01(o.w - dx);
+        }
+        if (rd.handle.includes("e")) {
+          w = clamp01(p.x - o.x);
+        }
+        // Don't flip through zero — keep a minimum footprint.
+        const MIN = 0.005;
+        if (w < MIN) w = MIN;
+        if (h < MIN) h = MIN;
+        onUpdate(rd.id, { x, y, w, h });
       }
     },
-    [dragRect, onUpdate],
+    [dragRect, onUpdate, annotations],
   );
 
   const handlePointerUp = useCallback(
@@ -179,35 +288,69 @@ export function AnnotationLayer({
         }
       }
       pinDragRef.current = null;
+      rectDragRef.current = null;
     },
     [dragRect, defaultColor, nextOrder, onAdd, onSelect],
   );
 
   const startPinDrag = useCallback(
     (e: ReactPointerEvent<SVGGElement>, id: string) => {
-      if (readOnly || tool !== "select") return;
+      if (readOnly) return;
       e.stopPropagation();
       onSelect(id);
+      // Existing marks are always editable in place — drag works under
+      // any active tool. The "select" modal mode is gone; create-vs-edit
+      // is decided by hit test (mark vs. empty space).
       pinDragRef.current = { id, pointerId: e.pointerId };
       svgRef.current?.setPointerCapture(e.pointerId);
     },
-    [readOnly, tool, onSelect],
+    [readOnly, onSelect],
   );
 
-  const cursor = readOnly
-    ? "default"
-    : tool === "pin"
-      ? "crosshair"
-      : tool === "rect"
-        ? "crosshair"
-        : "default";
+  const startRectDrag = useCallback(
+    (e: ReactPointerEvent<SVGGElement>, rect: RectAnnotation) => {
+      if (readOnly) return;
+      e.stopPropagation();
+      onSelect(rect.id);
+      const svg = svgRef.current;
+      if (!svg) return;
+      const svgRect = svg.getBoundingClientRect();
+      const p = toNormalized(e.clientX, e.clientY, svgRect);
+      rectDragRef.current = {
+        kind: "move",
+        id: rect.id,
+        pointerId: e.pointerId,
+        offset: { x: p.x - rect.x, y: p.y - rect.y },
+      };
+      svg.setPointerCapture(e.pointerId);
+    },
+    [readOnly, onSelect],
+  );
+
+  const startRectResize = useCallback(
+    (e: ReactPointerEvent<SVGRectElement>, rect: RectAnnotation, handle: RectHandle) => {
+      if (readOnly) return;
+      e.stopPropagation();
+      rectDragRef.current = {
+        kind: "resize",
+        id: rect.id,
+        pointerId: e.pointerId,
+        handle,
+        origin: { x: rect.x, y: rect.y, w: rect.w, h: rect.h },
+      };
+      svgRef.current?.setPointerCapture(e.pointerId);
+    },
+    [readOnly],
+  );
+
+  const cursor = readOnly ? "default" : "crosshair";
 
   return (
     <svg
       ref={svgRef}
       data-testid="annotation-layer"
-      viewBox="0 0 100 100"
-      preserveAspectRatio="none"
+      data-no-drag
+      viewBox={`0 0 ${vbW} ${vbH}`}
       style={{
         position: "absolute",
         inset: 0,
@@ -226,35 +369,59 @@ export function AnnotationLayer({
         a.kind === "rect" ? (
           <g
             key={a.id}
-            onPointerDown={(e) => {
-              if (readOnly || tool !== "select") return;
-              e.stopPropagation();
-              onSelect(a.id);
-            }}
+            data-testid={`rect-${a.id}`}
+            onPointerDown={(e) => startRectDrag(e, a)}
+            style={{ cursor: readOnly ? "default" : "move" }}
           >
             <rect
-              x={a.x * 100}
-              y={a.y * 100}
-              width={a.w * 100}
-              height={a.h * 100}
+              x={a.x * vbW}
+              y={a.y * vbH}
+              width={a.w * vbW}
+              height={a.h * vbH}
+              rx={shortSide * 0.004}
               fill={a.color}
-              fillOpacity={selectedId === a.id ? 0.18 : 0.1}
+              fillOpacity={selectedId === a.id ? 0.18 : 0.08}
               stroke={a.color}
-              strokeWidth={selectedId === a.id ? 0.5 : 0.3}
-              strokeDasharray="1 0.6"
+              strokeWidth={selectedId === a.id ? RECT_STROKE_SELECTED : RECT_STROKE}
+              strokeDasharray={
+                selectedId === a.id ? undefined : `${shortSide * 0.012} ${shortSide * 0.008}`
+              }
               vectorEffect="non-scaling-stroke"
-              style={{ cursor: readOnly ? "default" : "pointer" }}
             />
-            <text
-              x={a.x * 100 + 0.8}
-              y={a.y * 100 + 3.2}
-              fill={a.color}
-              fontSize={3}
-              fontWeight={600}
-              style={{ pointerEvents: "none", fontFamily: "var(--font-mono)" }}
-            >
-              {a.order}
-            </text>
+            {/* Order chip — a filled pill on the rect's top-left corner so
+                the number reads regardless of the rect's fill colour. */}
+            <g pointerEvents="none">
+              <circle
+                cx={a.x * vbW + shortSide * 0.026}
+                cy={a.y * vbH + shortSide * 0.026}
+                r={shortSide * 0.022}
+                fill={a.color}
+                stroke="#fff"
+                strokeWidth={shortSide * 0.004}
+                vectorEffect="non-scaling-stroke"
+              />
+              <text
+                x={a.x * vbW + shortSide * 0.026}
+                y={a.y * vbH + shortSide * 0.026 + RECT_LABEL_FONT * 0.36}
+                fill="#fff"
+                fontSize={RECT_LABEL_FONT * 0.78}
+                fontWeight={700}
+                textAnchor="middle"
+                style={{ fontFamily: "var(--font-mono)" }}
+              >
+                {a.order}
+              </text>
+            </g>
+            {selectedId === a.id && !readOnly && (
+              <RectHandles
+                rect={a}
+                vbW={vbW}
+                vbH={vbH}
+                size={HANDLE_SIZE}
+                strokeWidth={HANDLE_STROKE}
+                onStart={startRectResize}
+              />
+            )}
           </g>
         ) : (
           <g
@@ -263,20 +430,34 @@ export function AnnotationLayer({
             onPointerDown={(e) => startPinDrag(e, a.id)}
             style={{ cursor: readOnly ? "default" : "grab" }}
           >
+            {/* Halo for the selected pin so it reads at a glance amid peers. */}
+            {selectedId === a.id && (
+              <circle
+                cx={a.x * vbW}
+                cy={a.y * vbH}
+                r={PIN_HALO_R}
+                fill="none"
+                stroke={a.color}
+                strokeOpacity={0.5}
+                strokeWidth={PIN_STROKE * 1.6}
+                vectorEffect="non-scaling-stroke"
+                pointerEvents="none"
+              />
+            )}
             <circle
-              cx={a.x * 100}
-              cy={a.y * 100}
-              r={selectedId === a.id ? 2.2 : 1.8}
+              cx={a.x * vbW}
+              cy={a.y * vbH}
+              r={selectedId === a.id ? PIN_R_SELECTED : PIN_R}
               fill={a.color}
               stroke="#fff"
-              strokeWidth={0.4}
+              strokeWidth={PIN_STROKE}
               vectorEffect="non-scaling-stroke"
             />
             <text
-              x={a.x * 100}
-              y={a.y * 100 + 0.7}
+              x={a.x * vbW}
+              y={a.y * vbH + PIN_LABEL_FONT * 0.36}
               fill="#fff"
-              fontSize={1.9}
+              fontSize={PIN_LABEL_FONT}
               fontWeight={700}
               textAnchor="middle"
               style={{ pointerEvents: "none", fontFamily: "var(--font-mono)" }}
@@ -288,19 +469,79 @@ export function AnnotationLayer({
       )}
       {dragRect && (
         <rect
-          x={Math.min(dragRect.start.x, dragRect.current.x) * 100}
-          y={Math.min(dragRect.start.y, dragRect.current.y) * 100}
-          width={Math.abs(dragRect.current.x - dragRect.start.x) * 100}
-          height={Math.abs(dragRect.current.y - dragRect.start.y) * 100}
+          x={Math.min(dragRect.start.x, dragRect.current.x) * vbW}
+          y={Math.min(dragRect.start.y, dragRect.current.y) * vbH}
+          width={Math.abs(dragRect.current.x - dragRect.start.x) * vbW}
+          height={Math.abs(dragRect.current.y - dragRect.start.y) * vbH}
+          rx={shortSide * 0.004}
           fill={defaultColor}
-          fillOpacity={0.15}
+          fillOpacity={0.14}
           stroke={defaultColor}
-          strokeWidth={0.3}
-          strokeDasharray="1 0.6"
+          strokeWidth={RECT_STROKE}
+          strokeDasharray={`${shortSide * 0.012} ${shortSide * 0.008}`}
           vectorEffect="non-scaling-stroke"
           pointerEvents="none"
         />
       )}
     </svg>
+  );
+}
+
+// ── Rect resize handles ────────────────────────────────
+
+interface RectHandlesProps {
+  rect: RectAnnotation;
+  vbW: number;
+  vbH: number;
+  size: number;
+  strokeWidth: number;
+  onStart: (
+    e: ReactPointerEvent<SVGRectElement>,
+    rect: RectAnnotation,
+    handle: RectHandle,
+  ) => void;
+}
+
+const HANDLE_POSITIONS: ReadonlyArray<{ handle: RectHandle; at: (r: RectAnnotation) => { x: number; y: number }; cursor: string }> = [
+  { handle: "nw", at: (r) => ({ x: r.x, y: r.y }), cursor: "nwse-resize" },
+  { handle: "n",  at: (r) => ({ x: r.x + r.w / 2, y: r.y }), cursor: "ns-resize" },
+  { handle: "ne", at: (r) => ({ x: r.x + r.w, y: r.y }), cursor: "nesw-resize" },
+  { handle: "e",  at: (r) => ({ x: r.x + r.w, y: r.y + r.h / 2 }), cursor: "ew-resize" },
+  { handle: "se", at: (r) => ({ x: r.x + r.w, y: r.y + r.h }), cursor: "nwse-resize" },
+  { handle: "s",  at: (r) => ({ x: r.x + r.w / 2, y: r.y + r.h }), cursor: "ns-resize" },
+  { handle: "sw", at: (r) => ({ x: r.x, y: r.y + r.h }), cursor: "nesw-resize" },
+  { handle: "w",  at: (r) => ({ x: r.x, y: r.y + r.h / 2 }), cursor: "ew-resize" },
+];
+
+function RectHandles({
+  rect,
+  vbW,
+  vbH,
+  size,
+  strokeWidth,
+  onStart,
+}: RectHandlesProps): React.JSX.Element {
+  return (
+    <g data-testid={`rect-handles-${rect.id}`}>
+      {HANDLE_POSITIONS.map(({ handle, at, cursor }) => {
+        const { x, y } = at(rect);
+        return (
+          <rect
+            key={handle}
+            data-testid={`rect-handle-${rect.id}-${handle}`}
+            x={x * vbW - size / 2}
+            y={y * vbH - size / 2}
+            width={size}
+            height={size}
+            fill="#fff"
+            stroke={rect.color}
+            strokeWidth={strokeWidth}
+            vectorEffect="non-scaling-stroke"
+            style={{ cursor }}
+            onPointerDown={(e) => onStart(e, rect, handle)}
+          />
+        );
+      })}
+    </g>
   );
 }

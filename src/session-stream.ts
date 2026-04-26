@@ -33,6 +33,7 @@ import {
   type DisplayMessage,
 } from "./sdk-messages.ts";
 import {
+  extractParentToolUseId,
   extractStreamDelta,
   isStreamEnd,
   isStreamingEvent,
@@ -46,6 +47,7 @@ export type SessionStreamStatus =
   | "running"
   | "idle"
   | "stopped"
+  | "completed"
   | "error";
 
 /**
@@ -63,6 +65,15 @@ export interface SessionStreamState {
   messages: DisplayMessage[];
   /** Live partial-text buffer; cleared on assistant/result/stream-end. */
   streamingText: string;
+  /**
+   * Anthropic content block index that {@link streamingText} belongs to,
+   * or `null` when no block is currently streaming. The reducer flushes
+   * the buffer whenever a delta arrives for a different index — without
+   * this, text from `[text, tool_use, text]` would mash blocks 0 and 2
+   * into a single preview bubble while the static render correctly
+   * splits them.
+   */
+  streamingBlockIndex: number | null;
   totalCost: number;
   turns: number;
   error: string | null;
@@ -111,6 +122,7 @@ function reduceSyncResponse(
       status: "disconnected",
       sessionKey: null,
       streamingText: "",
+      streamingBlockIndex: null,
       error: null,
     };
   }
@@ -154,6 +166,7 @@ function reduceSyncResponse(
     status,
     messages: rebuilt.length > 0 ? rebuilt : state.messages,
     streamingText: "",
+    streamingBlockIndex: null,
     totalCost: cost,
     turns,
     error: msg.lastError ?? null,
@@ -172,15 +185,33 @@ function reduceSdkEvent(
 
   // ── Streaming deltas ──
   if (isStreamingEvent(sdk)) {
+    // Drop stream events that belong to a sub-agent (Agent/Task tool).
+    // Their deltas would otherwise interleave with the parent session's
+    // streaming preview because they share the same sessionKey.
+    if (extractParentToolUseId(sdk) !== null) {
+      return state;
+    }
+
     const delta = extractStreamDelta(sdk);
     if (delta !== null) {
+      // Block boundary: a delta arrived for a different content block.
+      // Reset the buffer to this block's text rather than concatenating
+      // — text from `[text, tool_use, text]` must not merge in the
+      // preview, since the static render splits per block.
+      if (state.streamingBlockIndex !== delta.index) {
+        return {
+          ...state,
+          streamingText: delta.text,
+          streamingBlockIndex: delta.index,
+        };
+      }
       return {
         ...state,
-        streamingText: (state.streamingText ?? "") + delta,
+        streamingText: (state.streamingText ?? "") + delta.text,
       };
     }
-    if (isStreamEnd(sdk) && state.streamingText) {
-      return { ...state, streamingText: "" };
+    if (isStreamEnd(sdk) && (state.streamingText || state.streamingBlockIndex !== null)) {
+      return { ...state, streamingText: "", streamingBlockIndex: null };
     }
     return state;
   }
@@ -192,8 +223,8 @@ function reduceSdkEvent(
   // No new messages and no field changes → bail with same reference,
   // unless we still need to clear stale streamingText on assistant/result.
   if (collapse.appended.length === 0 && collapse.dropAssistantIdx < 0) {
-    if (sdk.type === "assistant" && state.streamingText) {
-      return { ...state, streamingText: "" };
+    if (sdk.type === "assistant" && (state.streamingText || state.streamingBlockIndex !== null)) {
+      return { ...state, streamingText: "", streamingBlockIndex: null };
     }
     if (sdk.type === "result") {
       return {
@@ -201,6 +232,7 @@ function reduceSdkEvent(
         totalCost: sdk.total_cost_usd ?? state.totalCost,
         turns: sdk.num_turns ?? state.turns,
         streamingText: "",
+        streamingBlockIndex: null,
       };
     }
     return state;
@@ -220,8 +252,8 @@ function reduceSdkEvent(
       nextMessages = [...nextMessages, ...dedup];
     } else if (nextMessages === state.messages && collapse.dropAssistantIdx < 0) {
       // Nothing new and no drop — bail.
-      if (sdk.type === "assistant" && state.streamingText) {
-        return { ...state, streamingText: "" };
+      if (sdk.type === "assistant" && (state.streamingText || state.streamingBlockIndex !== null)) {
+        return { ...state, streamingText: "", streamingBlockIndex: null };
       }
       if (sdk.type === "result") {
         return {
@@ -229,6 +261,7 @@ function reduceSdkEvent(
           totalCost: sdk.total_cost_usd ?? state.totalCost,
           turns: sdk.num_turns ?? state.turns,
           streamingText: "",
+          streamingBlockIndex: null,
         };
       }
       return state;
@@ -238,8 +271,10 @@ function reduceSdkEvent(
   const next: SessionStreamState = { ...state, messages: nextMessages };
   if (sdk.type === "assistant") {
     next.streamingText = "";
+    next.streamingBlockIndex = null;
   } else if (sdk.type === "result") {
     next.streamingText = "";
+    next.streamingBlockIndex = null;
     next.totalCost = sdk.total_cost_usd ?? state.totalCost;
     next.turns = sdk.num_turns ?? state.turns;
   }
@@ -321,6 +356,7 @@ export function emptySessionStreamState(
     status: "disconnected",
     messages: [],
     streamingText: "",
+    streamingBlockIndex: null,
     totalCost: 0,
     turns: 0,
     error: null,

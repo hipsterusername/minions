@@ -62,6 +62,13 @@ export interface TaskToolContext {
     systemPrompt: string;
   }) => void;
   cwd: string;
+  /**
+   * The canonical project path (sidecar root). When the leader is running
+   * inside a git worktree, `cwd` points at the worktree but `projectPath`
+   * still points at the original checkout where `.claude-canvas/skills.json`
+   * lives. Falls back to `cwd` when no worktree is in use.
+   */
+  projectPath: string;
   minionSystemPrompt: string;
   taskState: TaskManagerState;
   onStateChange?: (state: TaskManagerState) => void;

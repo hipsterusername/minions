@@ -1,15 +1,17 @@
 /**
  * Unit tests for streaming utility functions.
  *
- * Covers extractStreamDelta, isStreamEnd, isCompleteAssistant, and
- * isStreamingEvent from streaming.ts. Message shapes are constructed as plain
- * literals and cast to SdkMessage — the union is wide enough to accept them
- * for well-typed variants; unknown top-level types use `as unknown as SdkMessage`.
+ * Covers extractStreamDelta, isStreamEnd, isCompleteAssistant,
+ * isStreamingEvent, and extractParentToolUseId from streaming.ts.
+ * Message shapes are constructed as plain literals and cast to
+ * SdkMessage — the union is wide enough to accept them for well-typed
+ * variants; unknown top-level types use `as unknown as SdkMessage`.
  */
 
 import { describe, it, expect } from "vitest";
 import type { SdkMessage } from "./use-socket.ts";
 import {
+  extractParentToolUseId,
   extractStreamDelta,
   isStreamEnd,
   isCompleteAssistant,
@@ -19,41 +21,87 @@ import {
 // ── extractStreamDelta ────────────────────────────────────────────────────────
 
 describe("extractStreamDelta", () => {
-  it("returns delta text for stream_event with content_block_delta", () => {
+  it("returns text + index for stream_event with content_block_delta (text_delta)", () => {
     const msg = {
       type: "stream_event",
-      event: { type: "content_block_delta", delta: { text: "hello" } },
-    } as SdkMessage;
-    expect(extractStreamDelta(msg)).toBe("hello");
+      event: {
+        type: "content_block_delta",
+        index: 2,
+        delta: { type: "text_delta", text: "hello" },
+      },
+    } as unknown as SdkMessage;
+    expect(extractStreamDelta(msg)).toEqual({ text: "hello", index: 2 });
   });
 
-  it("returns initial text for stream_event with content_block_start carrying text", () => {
+  it("falls back to text without an explicit delta.type for old payloads", () => {
+    const msg = {
+      type: "stream_event",
+      event: { type: "content_block_delta", index: 0, delta: { text: "hello" } },
+    } as unknown as SdkMessage;
+    expect(extractStreamDelta(msg)).toEqual({ text: "hello", index: 0 });
+  });
+
+  it("returns null for input_json_delta (tool input streaming)", () => {
+    const msg = {
+      type: "stream_event",
+      event: {
+        type: "content_block_delta",
+        index: 1,
+        delta: { type: "input_json_delta", partial_json: '{"a":1}' },
+      },
+    } as unknown as SdkMessage;
+    expect(extractStreamDelta(msg)).toBeNull();
+  });
+
+  it("returns null for thinking_delta (not surfaced in the streaming preview)", () => {
+    const msg = {
+      type: "stream_event",
+      event: {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "thinking_delta", thinking: "musing..." },
+      },
+    } as unknown as SdkMessage;
+    expect(extractStreamDelta(msg)).toBeNull();
+  });
+
+  it("returns initial text + index for content_block_start carrying text", () => {
     const msg = {
       type: "stream_event",
       event: {
         type: "content_block_start",
+        index: 3,
         content_block: { type: "text", text: "initial" },
       },
-    } as SdkMessage;
-    expect(extractStreamDelta(msg)).toBe("initial");
+    } as unknown as SdkMessage;
+    expect(extractStreamDelta(msg)).toEqual({ text: "initial", index: 3 });
   });
 
-  it("returns null for content_block_start where content_block has no text", () => {
+  it("returns empty text + index for content_block_start where text is missing", () => {
     const msg = {
       type: "stream_event",
       event: {
         type: "content_block_start",
+        index: 0,
         content_block: { type: "text" },
       },
-    } as SdkMessage;
-    expect(extractStreamDelta(msg)).toBeNull();
+    } as unknown as SdkMessage;
+    expect(extractStreamDelta(msg)).toEqual({ text: "", index: 0 });
+  });
+
+  it("defaults index to 0 when omitted", () => {
+    const msg = {
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "x" } },
+    } as unknown as SdkMessage;
+    expect(extractStreamDelta(msg)).toEqual({ text: "x", index: 0 });
   });
 
   it("returns null for stream_event with message_stop", () => {
     const msg = {
       type: "stream_event",
       event: { type: "message_stop" },
-    } as SdkMessage;
+    } as unknown as SdkMessage;
     expect(extractStreamDelta(msg)).toBeNull();
   });
 
@@ -64,24 +112,8 @@ describe("extractStreamDelta", () => {
       status: "compacting",
       uuid: "u1",
       session_id: "s1",
-    } as SdkMessage;
+    } as unknown as SdkMessage;
     expect(extractStreamDelta(msg)).toBeNull();
-  });
-
-  it("returns text from top-level delta for direct content_block_delta shape", () => {
-    const msg = {
-      type: "content_block_delta",
-      delta: { text: "world" },
-    } as unknown as SdkMessage;
-    expect(extractStreamDelta(msg)).toBe("world");
-  });
-
-  it("returns text from event.delta for direct content_block_delta with event wrapper", () => {
-    const msg = {
-      type: "content_block_delta",
-      event: { delta: { text: "via-event" } },
-    } as unknown as SdkMessage;
-    expect(extractStreamDelta(msg)).toBe("via-event");
   });
 });
 
@@ -92,23 +124,23 @@ describe("isStreamEnd", () => {
     const msg = {
       type: "stream_event",
       event: { type: "message_stop" },
-    } as SdkMessage;
+    } as unknown as SdkMessage;
     expect(isStreamEnd(msg)).toBe(true);
   });
 
-  it("returns true for stream_event with message_delta", () => {
+  it("returns FALSE for stream_event with message_delta — that's a pre-stop usage update, not stream end", () => {
     const msg = {
       type: "stream_event",
       event: { type: "message_delta", delta: { stop_reason: "end_turn" } },
-    } as SdkMessage;
-    expect(isStreamEnd(msg)).toBe(true);
+    } as unknown as SdkMessage;
+    expect(isStreamEnd(msg)).toBe(false);
   });
 
   it("returns false for stream_event with content_block_delta", () => {
     const msg = {
       type: "stream_event",
-      event: { type: "content_block_delta", delta: { text: "hi" } },
-    } as SdkMessage;
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "hi" } },
+    } as unknown as SdkMessage;
     expect(isStreamEnd(msg)).toBe(false);
   });
 
@@ -127,7 +159,7 @@ describe("isStreamEnd", () => {
       parent_tool_use_id: null,
       uuid: "u1",
       session_id: "s1",
-    } as SdkMessage;
+    } as unknown as SdkMessage;
     expect(isStreamEnd(msg)).toBe(false);
   });
 });
@@ -150,7 +182,7 @@ describe("isCompleteAssistant", () => {
       parent_tool_use_id: null,
       uuid: "u1",
       session_id: "s1",
-    } as SdkMessage;
+    } as unknown as SdkMessage;
     expect(isCompleteAssistant(msg)).toBe(true);
   });
 
@@ -168,15 +200,15 @@ describe("isCompleteAssistant", () => {
       parent_tool_use_id: null,
       uuid: "u1",
       session_id: "s1",
-    } as SdkMessage;
+    } as unknown as SdkMessage;
     expect(isCompleteAssistant(msg)).toBe(false);
   });
 
   it("returns false for non-assistant messages", () => {
     const msg = {
       type: "stream_event",
-      event: { type: "content_block_delta", delta: { text: "partial" } },
-    } as SdkMessage;
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "partial" } },
+    } as unknown as SdkMessage;
     expect(isCompleteAssistant(msg)).toBe(false);
   });
 });
@@ -187,8 +219,8 @@ describe("isStreamingEvent", () => {
   it("returns true for a stream_event carrying a text delta", () => {
     const msg = {
       type: "stream_event",
-      event: { type: "content_block_delta", delta: { text: "hi" } },
-    } as SdkMessage;
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "hi" } },
+    } as unknown as SdkMessage;
     expect(isStreamingEvent(msg)).toBe(true);
   });
 
@@ -196,7 +228,7 @@ describe("isStreamingEvent", () => {
     const msg = {
       type: "stream_event",
       event: { type: "message_stop" },
-    } as SdkMessage;
+    } as unknown as SdkMessage;
     expect(isStreamingEvent(msg)).toBe(true);
   });
 
@@ -236,7 +268,50 @@ describe("isStreamingEvent", () => {
       parent_tool_use_id: null,
       uuid: "u1",
       session_id: "s1",
-    } as SdkMessage;
+    } as unknown as SdkMessage;
     expect(isStreamingEvent(msg)).toBe(false);
+  });
+});
+
+// ── extractParentToolUseId ────────────────────────────────────────────────────
+
+describe("extractParentToolUseId", () => {
+  it("returns the id when set", () => {
+    const msg = {
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "x" } },
+      parent_tool_use_id: "tool-abc",
+      uuid: "u",
+      session_id: "s",
+    } as unknown as SdkMessage;
+    expect(extractParentToolUseId(msg)).toBe("tool-abc");
+  });
+
+  it("returns null when explicitly null", () => {
+    const msg = {
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "x" } },
+      parent_tool_use_id: null,
+      uuid: "u",
+      session_id: "s",
+    } as unknown as SdkMessage;
+    expect(extractParentToolUseId(msg)).toBeNull();
+  });
+
+  it("returns null when missing", () => {
+    const msg = {
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "x" } },
+    } as unknown as SdkMessage;
+    expect(extractParentToolUseId(msg)).toBeNull();
+  });
+
+  it("returns null for empty-string ids", () => {
+    const msg = {
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "x" } },
+      parent_tool_use_id: "",
+    } as unknown as SdkMessage;
+    expect(extractParentToolUseId(msg)).toBeNull();
   });
 });

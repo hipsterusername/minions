@@ -25,6 +25,8 @@ import {
   deleteRenderState,
   appendEvent,
   getEvents,
+  getRecentEvents,
+  purgeEventsForSession,
   type SessionRow,
 } from "./session-repo.ts";
 import type { TaskRecord } from "./task-tools.ts";
@@ -48,6 +50,7 @@ function makeSessionRow(overrides: Partial<SessionRow> = {}): SessionRow {
     model: "sonnet",
     role: "leader",
     task_name: "Phase 4",
+    session_id: null,
     worktree_isolation: 1,
     total_cost: 0.42,
     turns: 3,
@@ -319,12 +322,40 @@ describe("session-repo / event_log", () => {
   });
 
   it("is append-only — no mutation API exposed", async () => {
-    // The repo deliberately has no updateEvent/deleteEvent function;
-    // if one were added this test would need a reason.
+    // The repo deliberately has no per-event updateEvent/deleteEvent
+    // function. `purgeEventsForSession` is a bulk session-cleanup helper
+    // (called from removePersistedSession) — it does not violate the
+    // append-only property of the per-event API.
     const mod = await import("./session-repo.ts");
     const keys = Object.keys(mod);
     expect(keys).not.toContain("updateEvent");
     expect(keys).not.toContain("deleteEvent");
+  });
+
+  it("getRecentEvents returns the last N events in chronological order", () => {
+    for (let i = 0; i < 10; i++) {
+      appendEvent(db, "tail", "x", { i });
+    }
+    const recent = getRecentEvents(db, "tail", 3);
+    expect(recent).toHaveLength(3);
+    expect(recent.map((r) => JSON.parse(r.payload).i)).toEqual([7, 8, 9]);
+  });
+
+  it("getRecentEvents returns everything when limit exceeds row count", () => {
+    appendEvent(db, "small", "x", { i: 0 });
+    appendEvent(db, "small", "x", { i: 1 });
+    const recent = getRecentEvents(db, "small", 100);
+    expect(recent).toHaveLength(2);
+    expect(recent.map((r) => JSON.parse(r.payload).i)).toEqual([0, 1]);
+  });
+
+  it("purgeEventsForSession deletes only that session's rows", () => {
+    appendEvent(db, "a", "x", { i: 1 });
+    appendEvent(db, "a", "x", { i: 2 });
+    appendEvent(db, "b", "x", { i: 1 });
+    purgeEventsForSession(db, "a");
+    expect(getEvents(db, "a")).toEqual([]);
+    expect(getEvents(db, "b")).toHaveLength(1);
   });
 });
 

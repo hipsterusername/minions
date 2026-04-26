@@ -8,6 +8,7 @@
 
 import { useState, useMemo, useCallback, type CSSProperties, type ReactNode } from "react";
 import type { TreeNode } from "../api.ts";
+import { getAuthToken } from "../api.ts";
 
 // ── Inline tooltip (CSS-only, no portal) ──
 
@@ -436,9 +437,13 @@ function TreeRow({
     if (fromPath === toPath) return;
 
     try {
+      const token = await getAuthToken();
       const resp = await fetch("/api/files/move", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ projectPath, fromPath, toPath }),
       });
       const json = await resp.json() as { ok?: boolean; error?: string };
@@ -470,9 +475,13 @@ function TreeRow({
     const parentDir = node.path.includes("/") ? node.path.slice(0, node.path.lastIndexOf("/")) : "";
     const toPath = parentDir ? parentDir + "/" + renameValue : renameValue;
     try {
+      const token = await getAuthToken();
       const resp = await fetch("/api/files/move", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ projectPath, fromPath: node.path, toPath }),
       });
       const json = await resp.json() as { ok?: boolean };
@@ -487,9 +496,13 @@ function TreeRow({
     if (!projectPath) return;
     if (!window.confirm(`Delete "${node.name}"?`)) return;
     try {
+      const token = await getAuthToken();
       const resp = await fetch("/api/files/delete", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ projectPath, filePath: node.path }),
       });
       const json = await resp.json() as { ok?: boolean };
@@ -505,9 +518,13 @@ function TreeRow({
     const name = window.prompt("New folder name:");
     if (!name) return;
     try {
+      const token = await getAuthToken();
       const resp = await fetch("/api/files/mkdir", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ projectPath, dirPath: node.path + "/" + name }),
       });
       const json = await resp.json() as { ok?: boolean };

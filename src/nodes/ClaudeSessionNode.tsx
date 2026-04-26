@@ -5,7 +5,6 @@ import { registerNodeType } from "../node-registry.ts";
 import type {
   ServerMessage,
   SdkMessage,
-  ContentBlock,
   SyncEvent,
   ModelUsage,
 } from "../use-socket.ts";
@@ -15,17 +14,22 @@ import type { ModelOption, PermissionMode } from "../components/SessionToolbar.t
 import { StreamingBubble, StreamingIndicator } from "../components/StreamingBubble.tsx";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { AddAsNodeButton } from "../components/AddAsNodeButton.tsx";
-import { extractStreamDelta, isStreamingEvent, isStreamEnd } from "../streaming.ts";
+import {
+  extractParentToolUseId,
+  extractStreamDelta,
+  isStreamEnd,
+  isStreamingEvent,
+} from "../streaming.ts";
 
 export interface SubagentInfo {
   taskId: string;
   description: string;
   status: "running" | "completed" | "failed" | "stopped";
-  lastTool?: string;
-  summary?: string;
-  tokenCount?: number;
-  toolUses?: number;
-  durationMs?: number;
+  lastTool?: string | undefined;
+  summary?: string | undefined;
+  tokenCount?: number | undefined;
+  toolUses?: number | undefined;
+  durationMs?: number | undefined;
 }
 
 export interface ClaudeSessionData {
@@ -47,6 +51,13 @@ export interface ClaudeSessionData {
   thinkingConfig: ThinkingConfig;
   /** Streaming text from partial messages */
   streamingText: string;
+  /**
+   * Anthropic content block index that {@link streamingText} belongs to,
+   * or `null` when no block is currently streaming. Used to flush the
+   * preview buffer when a new content block starts so deltas from
+   * `[text, tool_use, text]` don't merge across blocks.
+   */
+  streamingBlockIndex?: number | null | undefined;
   /** Per-model cost breakdown from last result */
   modelUsage: Record<string, ModelUsage> | null;
   /** Duration of last turn in ms */
@@ -66,44 +77,25 @@ interface SessionMessage {
   role: SessionMessageRole;
   content: string;
   timestamp: number;
-  toolName?: string;
-  toolInput?: Record<string, unknown>;
+  toolName?: string | undefined;
+  toolInput?: Record<string, unknown> | undefined;
   /** For result messages: structured metadata */
-  meta?: ResultMeta;
+  meta?: ResultMeta | undefined;
 }
 
 interface ResultMeta {
-  durationMs?: number;
-  durationApiMs?: number;
-  costUsd?: number;
-  turns?: number;
-  stopReason?: string | null;
-  modelUsage?: Record<string, ModelUsage>;
-  isError?: boolean;
-  errors?: string[];
+  durationMs?: number | undefined;
+  durationApiMs?: number | undefined;
+  costUsd?: number | undefined;
+  turns?: number | undefined;
+  stopReason?: string | null | undefined;
+  modelUsage?: Record<string, ModelUsage> | undefined;
+  isError?: boolean | undefined;
+  errors?: string[] | undefined;
 }
 
 function msgId(): string {
   return `m-${crypto.randomUUID()}`;
-}
-
-function extractText(blocks: ContentBlock[]): string {
-  const parts: string[] = [];
-  for (const block of blocks) {
-    if (block.type === "text" && block.text) {
-      parts.push(block.text);
-    } else if (block.type === "tool_use" && block.name) {
-      const inputStr = block.input
-        ? JSON.stringify(block.input, null, 2)
-        : "";
-      const preview =
-        inputStr.length > 200 ? inputStr.slice(0, 200) + "..." : inputStr;
-      parts.push(`[Tool: ${block.name}]\n${preview}`);
-    } else if (block.type === "tool_result" && block.text) {
-      parts.push(block.text);
-    }
-  }
-  return parts.join("\n");
 }
 
 function sdkMessageToSessionMessages(
@@ -164,8 +156,8 @@ function sdkMessageToSessionMessages(
               toolName: block.name,
               toolInput: block.input as Record<string, unknown> | undefined,
             });
-          } else if (block.type === "tool_result" && block.text) {
-            textParts.push(block.text);
+          } else if (block.type === "tool_result" && typeof block.content === "string") {
+            textParts.push(block.content);
           }
         }
         if (textParts.length > 0) {
@@ -190,7 +182,9 @@ function sdkMessageToSessionMessages(
       break;
     case "result": {
       const isErr = sdkMsg.is_error;
-      const txt = sdkMsg.result ?? (isErr ? (sdkMsg.errors?.join("; ") ?? "Error") : "Done");
+      const txt = isErr
+        ? (sdkMsg.errors.join("; ") || "Error")
+        : sdkMsg.result;
       out.push({
         id: msgId(), role: "result",
         content: txt,
@@ -202,8 +196,8 @@ function sdkMessageToSessionMessages(
           turns: sdkMsg.num_turns ?? undefined,
           stopReason: sdkMsg.stop_reason,
           modelUsage: sdkMsg.modelUsage ?? undefined,
-          isError: isErr ?? undefined,
-          errors: sdkMsg.errors ?? undefined,
+          isError: isErr,
+          errors: isErr ? sdkMsg.errors : undefined,
         },
       });
       break;
@@ -240,11 +234,13 @@ function rebuildFromSyncEvents(
     status: serverStatus as ClaudeSessionData["status"],
     messages,
     streamingText: "",
+    streamingBlockIndex: null,
     totalCost: serverCost,
     turns: serverTurns,
     error: serverError,
     model: (serverModel as ModelOption) ?? "sonnet",
     permissionMode: (serverPermissionMode as PermissionMode) ?? "bypassPermissions",
+    thinkingConfig: DEFAULT_THINKING_CONFIG,
     modelUsage: null,
     lastDurationMs: null,
     subagents: [],
@@ -298,15 +294,15 @@ const TOOL_ICONS: Record<string, string> = {
 function formatToolInput(toolName: string, input?: Record<string, unknown>): string | null {
   if (!input || Object.keys(input).length === 0) return null;
   switch (toolName) {
-    case "Read": return input.file_path as string ?? null;
-    case "Write": return input.file_path as string ?? null;
-    case "Edit": return input.file_path as string ?? null;
-    case "Bash": return input.command as string ?? null;
-    case "Glob": return input.pattern as string ?? null;
-    case "Grep": return input.pattern as string ?? null;
-    case "Agent": return input.description as string ?? input.prompt as string ?? null;
-    case "WebFetch": return input.url as string ?? null;
-    case "WebSearch": return input.query as string ?? null;
+    case "Read": return (input["file_path"] as string) ?? null;
+    case "Write": return (input["file_path"] as string) ?? null;
+    case "Edit": return (input["file_path"] as string) ?? null;
+    case "Bash": return (input["command"] as string) ?? null;
+    case "Glob": return (input["pattern"] as string) ?? null;
+    case "Grep": return (input["pattern"] as string) ?? null;
+    case "Agent": return (input["description"] as string) ?? (input["prompt"] as string) ?? null;
+    case "WebFetch": return (input["url"] as string) ?? null;
+    case "WebSearch": return (input["query"] as string) ?? null;
     default: {
       for (const v of Object.values(input)) {
         if (typeof v === "string" && v.length > 0) return v;
@@ -940,16 +936,37 @@ export function ClaudeSessionRenderer({
 
         // Handle streaming text deltas (single emit, early return).
         if (isStreamingEvent(serverMsg.message)) {
+          // Drop stream events from sub-agents (Agent/Task tool) — their
+          // deltas would otherwise interleave with the parent session's
+          // streaming preview because they share the same sessionKey.
+          if (extractParentToolUseId(serverMsg.message) !== null) {
+            return;
+          }
           const delta = extractStreamDelta(serverMsg.message);
           if (delta !== null) {
-            onUpdateData({
-              ...current,
-              streamingText: (current.streamingText ?? "") + delta,
-            });
-          } else if (isStreamEnd(serverMsg.message) && current.streamingText) {
+            const activeIndex = current.streamingBlockIndex ?? null;
+            // Block boundary: a delta arrived for a different content
+            // block. Reset the buffer so text from `[text, tool_use,
+            // text]` doesn't merge across blocks in the live preview.
+            if (activeIndex !== delta.index) {
+              onUpdateData({
+                ...current,
+                streamingText: delta.text,
+                streamingBlockIndex: delta.index,
+              });
+            } else {
+              onUpdateData({
+                ...current,
+                streamingText: (current.streamingText ?? "") + delta.text,
+              });
+            }
+          } else if (
+            isStreamEnd(serverMsg.message) &&
+            (current.streamingText || current.streamingBlockIndex != null)
+          ) {
             // Stream ended — clear streaming text so stale content doesn't
             // linger while the complete assistant message is in flight.
-            onUpdateData({ ...current, streamingText: "" });
+            onUpdateData({ ...current, streamingText: "", streamingBlockIndex: null });
           }
           return;
         }
@@ -1056,6 +1073,7 @@ export function ClaudeSessionRenderer({
           // When a complete assistant message arrives, clear streaming buffer
           if (serverMsg.message.type === "assistant") {
             updated.streamingText = "";
+            updated.streamingBlockIndex = null;
           }
           if (serverMsg.message.type === "result") {
             updated.status = "idle";
@@ -1064,6 +1082,7 @@ export function ClaudeSessionRenderer({
             updated.turns =
               serverMsg.message.num_turns ?? updated.turns;
             updated.streamingText = "";
+            updated.streamingBlockIndex = null;
             updated.modelUsage = serverMsg.message.modelUsage ?? updated.modelUsage;
             updated.lastDurationMs = serverMsg.message.duration_ms ?? updated.lastDurationMs;
             updated.promptSuggestions = []; // clear old suggestions on new turn

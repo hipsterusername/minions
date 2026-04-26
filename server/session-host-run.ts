@@ -216,6 +216,10 @@ export function processSdkMessage(
       skills: m["skills"],
       claude_code_version: m["claude_code_version"],
     };
+    // Persist the SDK session id immediately. Otherwise a session that
+    // never reaches a `result` (e.g. user stops mid-turn, server crashes)
+    // would lose its resume id and have to start fresh next time.
+    host.persist();
   }
 
   // Forward all SDK events to the bus
