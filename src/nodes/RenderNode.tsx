@@ -1259,7 +1259,7 @@ function TagsRow({ c }: { c: TagsComponent }) {
 
 // ── Component dispatcher ──────────────────────────────────
 
-function RenderComponentView({ component }: { component: RenderComponent }) {
+export function RenderComponentView({ component }: { component: RenderComponent }) {
   switch (component.type) {
     case "metric":
       return <MetricCard c={component} />;
@@ -1346,7 +1346,7 @@ function isFullWidth(c: RenderComponent, columns: number): boolean {
  * Compute explicit column span for a component.
  * Returns a `gridColumn` CSS value or `undefined` to let auto-placement decide.
  */
-function gridColumnFor(c: RenderComponent, columns: number): string | undefined {
+export function gridColumnFor(c: RenderComponent, columns: number): string | undefined {
   if (isFullWidth(c, columns)) return "1 / -1";
   // Numeric span less than columns → span that many
   if (typeof c.span === "number" && c.span > 1 && c.span < columns) {
@@ -1358,7 +1358,7 @@ function gridColumnFor(c: RenderComponent, columns: number): string | undefined 
 // ── CSS injection ────────────────────────────────────────
 
 let styleInjected = false;
-function injectStyles() {
+export function injectStyles() {
   if (styleInjected) return;
   styleInjected = true;
   const style = document.createElement("style");
