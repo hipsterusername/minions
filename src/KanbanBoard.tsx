@@ -17,7 +17,106 @@ import type { LeaderData, TaskPlanItem } from "./nodes/LeaderNode.tsx";
 import type { DisplayMessage } from "./sdk-messages.ts";
 import { msgId } from "./sdk-messages.ts";
 import { buildLeaderSystemPrompt } from "./prompts/build-leader-prompt.ts";
+import {
+  RenderComponentView,
+  gridColumnFor,
+  injectStyles as injectRenderStyles,
+} from "./nodes/RenderNode.tsx";
+import type { RenderNodeData } from "./nodes/RenderNode.tsx";
+import type { RenderState } from "../shared/render-dsl.ts";
 import "./kanban.css";
+
+// ─── Inspector chat: tool-call filtering ──────────────────
+//
+// Tool messages from the SDK fall into two buckets:
+//
+//   1. **Pure plumbing** — set_task_name, get_task_status, wait_and_continue,
+//      render_set/patch/append/remove, TodoWrite. These either mutate other
+//      surfaces (the Dashboard tab, the task plan section, the wait countdown
+//      in the toolbar) or are zero-payload queries. Showing them in the chat
+//      is just noise; the same info is already on screen.
+//
+//   2. **Substantive work** — Read, Edit, Bash, Grep, Glob, Write, plan_task,
+//      assign_task, complete_task, etc. These have user-relevant payloads
+//      (filenames, commands, task titles). We *keep* them but consolidate
+//      consecutive runs into a single grouped chip so a long Read/Edit
+//      sequence doesn't drown the chat.
+//
+// Naming: the SDK delivers MCP-registered tools as `mcp__<server>__<tool>`
+// so we match both the bare name and the prefix.
+
+const HIDDEN_TOOL_BARE_NAMES = new Set<string>([
+  "set_task_name",
+  "get_task_status",
+  "wait_and_continue",
+  "render_set",
+  "render_patch",
+  "render_append",
+  "render_remove",
+  "TodoWrite",
+]);
+
+const HIDDEN_MCP_PREFIXES = [
+  "mcp__render-dashboard__",
+];
+
+function isHiddenTool(toolName: string | undefined | null): boolean {
+  if (!toolName) return false;
+  // Strip mcp__server__ prefix if present so "mcp__task-manager__set_task_name"
+  // matches "set_task_name" in the bare set.
+  const bare = toolName.includes("__")
+    ? toolName.slice(toolName.lastIndexOf("__") + 2)
+    : toolName;
+  if (HIDDEN_TOOL_BARE_NAMES.has(bare)) return true;
+  return HIDDEN_MCP_PREFIXES.some((p) => toolName.startsWith(p));
+}
+
+/** Strip `mcp__server__` for display so chips read cleanly. */
+function shortToolName(toolName: string): string {
+  return toolName.includes("__")
+    ? toolName.slice(toolName.lastIndexOf("__") + 2)
+    : toolName;
+}
+
+type ChatGroup =
+  | { kind: "msg"; msg: DisplayMessage }
+  | { kind: "tools"; id: string; toolNames: string[]; count: number };
+
+/**
+ * Walk the message list once, producing a render plan that:
+ *   - drops hidden tool messages entirely
+ *   - batches consecutive remaining tool messages into one group
+ *   - leaves all other roles untouched and in order
+ */
+function groupChatMessages(messages: DisplayMessage[]): ChatGroup[] {
+  const out: ChatGroup[] = [];
+  let bucket: DisplayMessage[] | null = null;
+
+  const flush = () => {
+    if (!bucket || bucket.length === 0) return;
+    const head = bucket[0]!;
+    out.push({
+      kind: "tools",
+      id: `tools-${head.id}`,
+      toolNames: bucket.map((m) => shortToolName(m.toolName ?? "tool")),
+      count: bucket.length,
+    });
+    bucket = null;
+  };
+
+  for (const msg of messages) {
+    if (msg.role === "tool") {
+      if (isHiddenTool(msg.toolName)) continue;
+      if (!bucket) bucket = [];
+      bucket.push(msg);
+      continue;
+    }
+    flush();
+    out.push({ kind: "msg", msg });
+  }
+  flush();
+  return out;
+}
 
 // ─── Helpers ──────────────────────────────────────────────
 
@@ -1253,19 +1352,22 @@ function ColumnBadge({ columnId, blockReason }: { columnId: string; blockReason?
 
 // ─── Persistent Inspector Panel ─────────────────────────
 
-type InspectorTab = "activity" | "config";
+type InspectorTab = "activity" | "dashboard" | "config";
 
 function InspectorTabBar({
   activeTab,
   onChange,
   hasActivity,
+  hasDashboard,
 }: {
   activeTab: InspectorTab;
   onChange: (tab: InspectorTab) => void;
   hasActivity: boolean;
+  hasDashboard: boolean;
 }) {
   const tabs: { id: InspectorTab; label: string; hasIndicator?: boolean }[] = [
     { id: "activity", label: "Activity", hasIndicator: hasActivity },
+    { id: "dashboard", label: "Dashboard", hasIndicator: hasDashboard },
     { id: "config", label: "Config" },
   ];
   return (
@@ -1362,6 +1464,45 @@ function TaskPlanSection({ taskPlan }: { taskPlan: TaskPlanItem[] }) {
   );
 }
 
+/**
+ * Compact pill summarising a run of consecutive tool calls in chat.
+ *
+ * Shows up to four unique tool names plus an overflow count, and the total
+ * call count. Click to toggle a flat list of every call in the group, in
+ * order, so a long Read/Edit sweep doesn't drown the surrounding messages
+ * but the detail is still one click away.
+ */
+function ChatToolGroup({ toolNames, count }: { toolNames: string[]; count: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const unique = Array.from(new Set(toolNames));
+  const head = unique.slice(0, 4).join(", ");
+  const overflow = unique.length > 4 ? ` +${unique.length - 4}` : "";
+  return (
+    <div className="kb-panel__chatmsg kb-panel__chatmsg--tool-group">
+      <button
+        type="button"
+        className="kb-panel__chatmsg-tool-group-btn"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        aria-label={`${count} tool call${count !== 1 ? "s" : ""}: ${head}${overflow}`}
+      >
+        <ChevronIcon open={expanded} />
+        <span className="kb-panel__chatmsg-tool-group-summary">{head}{overflow}</span>
+        <span className="kb-panel__chatmsg-tool-group-count">{count}</span>
+      </button>
+      {expanded && (
+        <ul className="kb-panel__chatmsg-tool-list" aria-label="Tool calls in this run">
+          {toolNames.map((t, i) => (
+            <li key={`${t}-${i}`} className="kb-panel__chatmsg-tool-list-item">
+              <span className="kb-panel__chatmsg-tool">{t}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function LiveChatView({
   messages,
   streamingText,
@@ -1393,29 +1534,31 @@ function LiveChatView({
   const visibleMessages = messages.filter(
     m => m.role === "user" || m.role === "assistant" || m.role === "system" || m.role === "result" || m.role === "tool"
   );
+  const groups = useMemo(() => groupChatMessages(visibleMessages), [visibleMessages]);
+  const hasContent = groups.length > 0 || streamingText.length > 0;
 
   return (
     <div ref={chatRef} className="kb-panel__livechat">
-      {visibleMessages.length === 0 && !streamingText && (
+      {!hasContent && (
         <div className="kb-panel__livechat-empty">No messages yet</div>
       )}
-      {visibleMessages.map(msg => (
-        <div key={msg.id} className={cx("kb-panel__chatmsg", `kb-panel__chatmsg--${msg.role}`)}>
-          <div className="kb-panel__chatmsg-header">
-            <span className="kb-panel__chatmsg-role">
-              {msg.role === "user" ? "You" : msg.role === "assistant" ? "Agent" : msg.role === "tool" ? (msg.toolName ?? "Tool") : msg.role === "result" ? "Result" : "System"}
-            </span>
-            {msg.suffix && <span className="kb-panel__chatmsg-suffix">{msg.suffix}</span>}
+      {groups.map((g) => {
+        if (g.kind === "tools") {
+          return <ChatToolGroup key={g.id} toolNames={g.toolNames} count={g.count} />;
+        }
+        const msg = g.msg;
+        return (
+          <div key={msg.id} className={cx("kb-panel__chatmsg", `kb-panel__chatmsg--${msg.role}`)}>
+            <div className="kb-panel__chatmsg-header">
+              <span className="kb-panel__chatmsg-role">
+                {msg.role === "user" ? "You" : msg.role === "assistant" ? "Agent" : msg.role === "result" ? "Result" : "System"}
+              </span>
+              {msg.suffix && <span className="kb-panel__chatmsg-suffix">{msg.suffix}</span>}
+            </div>
+            <div className="kb-panel__chatmsg-body">{msg.content}</div>
           </div>
-          <div className="kb-panel__chatmsg-body">
-            {msg.role === "tool" && msg.toolName ? (
-              <span className="kb-panel__chatmsg-tool">{msg.toolName}</span>
-            ) : (
-              msg.content
-            )}
-          </div>
-        </div>
-      ))}
+        );
+      })}
       {streamingText && (
         <div className="kb-panel__chatmsg kb-panel__chatmsg--assistant kb-panel__chatmsg--streaming">
           <div className="kb-panel__chatmsg-header">
@@ -1425,6 +1568,72 @@ function LiveChatView({
           <div className="kb-panel__chatmsg-body">{streamingText}</div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Inline render of the Leader's live dashboard inside the inspector tab.
+ *
+ * The same renderer the canvas RenderNode uses (`RenderComponentView` +
+ * `gridColumnFor`) is reused so a component looks identical in both
+ * surfaces. There is no separate state — we read from the paired
+ * RenderNode's `renderState` so updates are automatic via React.
+ */
+function DashboardView({ renderState }: { renderState: RenderState | null }) {
+  // Inject the shared dashboard CSS the first time we render in this surface.
+  useEffect(() => { injectRenderStyles(); }, []);
+
+  if (!renderState || renderState.components.length === 0) {
+    return (
+      <div className="kb-panel__dashboard-empty" role="status">
+        No dashboard yet.
+        <br />
+        <span style={{ fontSize: 11, opacity: 0.7 }}>
+          The agent renders here as it makes progress.
+        </span>
+      </div>
+    );
+  }
+
+  const columns = renderState.layout.columns ?? 2;
+  const gap = renderState.layout.gap ?? 12;
+
+  return (
+    <div className="kb-panel__dashboard">
+      {renderState.layout.title && (
+        <div className="kb-panel__label">{renderState.layout.title}</div>
+      )}
+      <div
+        className="rd-grid-container"
+        style={{
+          containerType: "inline-size",
+          ["--rd-max-cols" as string]: String(columns),
+          ["--rd-gap" as string]: `${gap}px`,
+        }}
+      >
+        <div
+          className="rd-grid"
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(var(--rd-cols, ${columns}), minmax(0, 1fr))`,
+            gap,
+            alignContent: "start",
+            alignItems: "start",
+            gridAutoRows: "min-content",
+            gridAutoFlow: "dense",
+          }}
+        >
+          {renderState.components.map((c) => {
+            const col = gridColumnFor(c, columns);
+            return (
+              <div key={c.id} style={{ gridColumn: col, minWidth: 0 }}>
+                <RenderComponentView component={c} />
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1537,6 +1746,7 @@ function KanbanInspectorPanel({
   onUpdateNodeData,
   inspectorOpen,
   contextNodes,
+  nodes,
 }: {
   selectedCard: KanbanCard | null;
   leaderStatus?: LeaderStatus;
@@ -1554,6 +1764,7 @@ function KanbanInspectorPanel({
   onUpdateNodeData?: (nodeId: string, data: unknown) => void;
   inspectorOpen?: boolean;
   contextNodes?: ContextNodeOption[];
+  nodes: CanvasNode[];
 }) {
   const [activeTab, setActiveTab] = useState<InspectorTab>("activity");
   const [chatInput, setChatInput] = useState("");
@@ -1620,6 +1831,22 @@ function KanbanInspectorPanel({
     socketSend({ type: "stop_session", sessionKey: leaderData.sessionKey });
   }, [leaderData?.sessionKey, socketSend]);
 
+  // Resolve the paired RenderNode (if any) by matching its leaderSessionKey
+  // to the selected card's leader session. The dashboard lives on the
+  // canvas RenderNode — we read it here so the inspector tab and the
+  // canvas always show the same state. Computed *before* any early return
+  // so the hook order is stable across renders with/without a selection.
+  const dashboardState = useMemo<RenderState | null>(() => {
+    if (!leaderData?.sessionKey) return null;
+    const paired = nodes.find(
+      (n) =>
+        n.type === "render" &&
+        (n.data as RenderNodeData | undefined)?.leaderSessionKey === leaderData.sessionKey,
+    );
+    if (!paired) return null;
+    return (paired.data as RenderNodeData).renderState ?? null;
+  }, [nodes, leaderData?.sessionKey]);
+
   if (!selectedCard) {
     return (
       <div className={cx("kb-panel", inspectorOpen && "kb-panel--open")}>
@@ -1654,6 +1881,7 @@ function KanbanInspectorPanel({
   const taskPlan = leaderData?.taskPlan ?? [];
   const hasSession = !!leaderData?.sessionKey;
   const isRunning = leaderData?.status === "running";
+  const hasDashboard = !!dashboardState && dashboardState.components.length > 0;
 
   return (
     <div className={cx("kb-panel", inspectorOpen && "kb-panel--open")}>
@@ -1684,10 +1912,19 @@ function KanbanInspectorPanel({
       )}
 
       {/* Tab bar */}
-      <InspectorTabBar activeTab={activeTab} onChange={setActiveTab} hasActivity={hasActivity} />
+      <InspectorTabBar
+        activeTab={activeTab}
+        onChange={setActiveTab}
+        hasActivity={hasActivity}
+        hasDashboard={hasDashboard}
+      />
 
       {/* Tab content — scrollable */}
       <div className="kb-panel__body">
+        {activeTab === "dashboard" && (
+          <DashboardView renderState={dashboardState} />
+        )}
+
         {activeTab === "activity" && (
           <>
             {/* Task plan progress */}
@@ -2119,7 +2356,7 @@ export function KanbanBoard({
                     <div className="kb-column__actions">
                       <button
                         className="kb-btn kb-btn--sm kb-btn--danger-ghost"
-                        onClick={() => setConfirmClearArchive(true)}
+                        onClick={() => setConfirmClearDone(true)}
                       >
                         Clear
                       </button>
@@ -2200,6 +2437,7 @@ export function KanbanBoard({
           onFocusNode={onFocusNode}
           recentCards={recentCards}
           onSelectCard={(cardId) => { setSelectedCardId(cardId); setInspectorOpen(true); }}
+          nodes={nodes}
           socketSend={socketSend}
           onUpdateNodeData={onUpdateNodeData}
           inspectorOpen={inspectorOpen}
@@ -2210,8 +2448,8 @@ export function KanbanBoard({
       {confirmClearDone && (
         <DeleteConfirm
           cardTitle={`all ${doneCount} history card${doneCount !== 1 ? "s" : ""}`}
-          onConfirm={() => { dispatch({ type: "CLEAR_ARCHIVE" }); setConfirmClearArchive(false); }}
-          onCancel={() => setConfirmClearArchive(false)}
+          onConfirm={() => { dispatch({ type: "CLEAR_ARCHIVE" }); setConfirmClearDone(false); }}
+          onCancel={() => setConfirmClearDone(false)}
         />
       )}
     </div>
