@@ -26,6 +26,7 @@ import type { NodeRenderProps, RoutineLeaderSpawnEvent } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
 import { ResizeHandle } from "../components/ResizeHandle.tsx";
 import type {
+  DagStepState,
   Routine,
   RoutineRunSnapshot,
 } from "../../shared/routines/types.ts";
@@ -349,6 +350,25 @@ function RunningView({
   if (!snapshot) {
     return <div className="rn-empty">Spinning up…</div>;
   }
+  if (snapshot.mode === "dag" && snapshot.dagSteps) {
+    return (
+      <DagView
+        dagSteps={snapshot.dagSteps}
+        error={snapshot.error}
+        onRevealLeader={onRevealLeader}
+      />
+    );
+  }
+  return <PhasesView snapshot={snapshot} onRevealLeader={onRevealLeader} />;
+}
+
+function PhasesView({
+  snapshot,
+  onRevealLeader,
+}: {
+  snapshot: RoutineRunSnapshot;
+  onRevealLeader?: (sessionKey: string) => void;
+}) {
   return (
     <div className="rn-body">
       {snapshot.phases.map((phase) => (
@@ -389,6 +409,46 @@ function RunningView({
       {snapshot.error && (
         <div className="rn-error">Run failed: {snapshot.error}</div>
       )}
+    </div>
+  );
+}
+
+function DagView({
+  dagSteps,
+  error,
+  onRevealLeader,
+}: {
+  dagSteps: DagStepState[];
+  error?: string;
+  onRevealLeader?: (sessionKey: string) => void;
+}) {
+  return (
+    <div className="rn-body">
+      <ul className="rn-steps rn-steps--dag">
+        {dagSteps.map((step) => (
+          <li key={step.stepId} className="rn-step">
+            <span className={`rn-dot rn-dot--${step.outcome ?? step.state}`} />
+            <span className="rn-step-label">{step.label}</span>
+            {step.dependsOn.length > 0 && (
+              <span className="rn-step-deps">
+                ← {step.dependsOn.join(", ")}
+              </span>
+            )}
+            {step.summary && (
+              <span className="rn-step-summary">{step.summary}</span>
+            )}
+            {step.sessionKey && onRevealLeader && (
+              <button
+                className="rn-link"
+                onClick={() => onRevealLeader(step.sessionKey!)}
+              >
+                open
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {error && <div className="rn-error">Run failed: {error}</div>}
     </div>
   );
 }
@@ -568,9 +628,17 @@ const ROUTINE_CSS = `
   align-self: center;
 }
 .rn-dot--pending { background: var(--text-muted); opacity: 0.4; }
+.rn-dot--running { background: var(--info-color); opacity: 0.8; }
 .rn-dot--success { background: var(--status-success); }
 .rn-dot--error,
+.rn-dot--skipped,
 .rn-dot--aborted { background: var(--status-error); }
+.rn-step-deps {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.rn-steps--dag { gap: 6px; }
 .rn-link {
   background: transparent;
   border: none;

@@ -270,6 +270,71 @@ describe("RoutineNode", () => {
     });
   });
 
+  it("renders a flat DAG step list when snapshot.mode === 'dag'", () => {
+    const ref: { current: ProbeHandle | null } = { current: null };
+    render(
+      <Probe
+        ref={ref}
+        initialData={{ phase: "running", runId: "run-dag" }}
+      />,
+    );
+
+    const dagSnapshot: RoutineRunSnapshot = {
+      runId: "run-dag",
+      routineId: "demo",
+      routineName: "Demo routine",
+      state: "running",
+      inputs: {},
+      mode: "dag",
+      phases: [
+        {
+          phaseId: "main",
+          label: "Main",
+          state: "pending",
+          steps: [
+            { stepId: "a", label: "Step A" },
+            { stepId: "b", label: "Step B" },
+          ],
+        },
+      ],
+      dagSteps: [
+        {
+          stepId: "a",
+          label: "Step A",
+          phaseId: "main",
+          dependsOn: [],
+          state: "success",
+          outcome: "success",
+          summary: "a summary",
+        },
+        {
+          stepId: "b",
+          label: "Step B",
+          phaseId: "main",
+          dependsOn: ["a"],
+          state: "running",
+        },
+      ],
+      startedAt: "2026-04-26T00:00:00.000Z",
+    };
+
+    act(() => {
+      ref.current!.emit({
+        type: "routine_progress",
+        runId: "run-dag",
+        snapshot: dagSnapshot,
+      });
+    });
+
+    // DAG view renders a flat step list — no phase pills.
+    expect(screen.getByText("Step A")).toBeTruthy();
+    expect(screen.getByText("Step B")).toBeTruthy();
+    // DAG mode shows dep arrows.
+    expect(screen.getByText(/← a/)).toBeTruthy();
+    // Phase pills (the "pending" pill for "Main" phase) should NOT appear.
+    expect(screen.queryByText("Main")).toBeNull();
+  });
+
   it("ignores routine_step_leader_spawned for a different runId", () => {
     const spawnFn = vi.fn();
     const ref: { current: ProbeHandle | null } = { current: null };

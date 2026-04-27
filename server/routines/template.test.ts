@@ -118,6 +118,65 @@ describe("renderTemplate — misses", () => {
   });
 });
 
+describe("renderTemplate — depends paths (DAG mode)", () => {
+  const depends = {
+    steps: {
+      "step-a": { summary: "A done", outcome: "success", outputs: { count: 7 } },
+      "step-b": { summary: "B done", outcome: "error", outputs: {} },
+    },
+    facts: { "step-a.count": 7, "step-a.label": "hello" },
+  };
+
+  it("substitutes {{depends.<stepId>.summary}}", () => {
+    const r = renderTemplate("From A: {{depends.step-a.summary}}", {
+      inputs: {},
+      depends,
+    });
+    expect(r.text).toBe("From A: A done");
+    expect(r.unresolved).toEqual([]);
+  });
+
+  it("substitutes {{depends.<stepId>.outcome}}", () => {
+    const r = renderTemplate("B outcome: {{depends.step-b.outcome}}", {
+      inputs: {},
+      depends,
+    });
+    expect(r.text).toBe("B outcome: error");
+  });
+
+  it("substitutes {{depends.facts.<stepId>.<key>}}", () => {
+    const r = renderTemplate("count={{depends.facts.step-a.count}}", {
+      inputs: {},
+      depends,
+    });
+    expect(r.text).toBe("count=7");
+  });
+
+  it("renders empty and surfaces unresolved for an unknown dep step", () => {
+    const r = renderTemplate("{{depends.nonexistent.summary}}", {
+      inputs: {},
+      depends,
+    });
+    expect(r.text).toBe("");
+    expect(r.unresolved).toEqual(["depends.nonexistent.summary"]);
+  });
+
+  it("renders empty and surfaces unresolved when depends context is absent", () => {
+    const r = renderTemplate("{{depends.step-a.summary}}", { inputs: {} });
+    expect(r.text).toBe("");
+    expect(r.unresolved).toEqual(["depends.step-a.summary"]);
+  });
+
+  it("renders empty for unknown depends.facts key", () => {
+    const r = renderTemplate("{{depends.facts.step-a.missing}}", {
+      inputs: {},
+      depends,
+    });
+    expect(r.text).toBe("");
+    expect(r.unresolved).toEqual(["depends.facts.step-a.missing"]);
+  });
+});
+
 describe("renderTemplate — edge cases", () => {
   it("tolerates whitespace inside the braces", () => {
     const r = renderTemplate("{{ inputs.topic }}", {
