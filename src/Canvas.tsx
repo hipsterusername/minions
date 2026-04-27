@@ -7,7 +7,7 @@ import {
   useEffect,
   type Dispatch,
 } from "react";
-import type { CanvasTransform, CanvasNode, CanvasAction, Position, Size, ContextItem } from "./types.ts";
+import type { CanvasTransform, CanvasNode, CanvasAction, Position, Size, ContextItem, RoutineLeaderSpawnEvent } from "./types.ts";
 import { generateId } from "./canvas-state.ts";
 import { CanvasNodeComponent } from "./CanvasNode.tsx";
 import { getAllNodeTypes, isContextProvider } from "./node-registry.ts";
@@ -23,6 +23,8 @@ import { PROTOCOL_COLORS } from "./components/PortDot.tsx";
 import type { LeaderData, TaskPlanItem } from "./nodes/LeaderNode.tsx";
 import type { MinionData, MinionTaskState } from "./nodes/MinionNode.tsx";
 import type { RenderNodeData } from "./nodes/RenderNode.tsx";
+import type { RoutineNodeData } from "./nodes/RoutineNode.tsx";
+import { RoutineConnectors } from "./components/RoutineConnectors.tsx";
 import { emptyRenderState, applyRenderMessage } from "../shared/render-dsl.ts";
 import type { RenderMessage } from "../shared/render-dsl.ts";
 import { CanvasContextMenu } from "./components/CanvasContextMenu.tsx";
@@ -405,8 +407,6 @@ interface CanvasProps {
   projectSettings?: import("./api.ts").ProjectSettings;
   undo?: () => void;
   redo?: () => void;
-  canUndo?: boolean;
-  canRedo?: boolean;
   /** When set, auto-selects this node (then clear it) */
   focusNodeId?: string | null;
   onFocusNodeHandled?: () => void;
@@ -426,8 +426,6 @@ export function Canvas({
   projectSettings,
   undo,
   redo,
-  canUndo,
-  canRedo,
   focusNodeId,
   onFocusNodeHandled,
 }: CanvasProps) {
@@ -952,6 +950,75 @@ export function Canvas({
       console.log(`[Canvas] Minion revealed: ${minionSessionKey} for task "${spawn.title}"`);
     },
     [dispatch, graphDispatch, setTransform],
+  );
+
+  // ── Spawn a Leader child node when a routine step fires routine_step_leader_spawned ──
+  // Called from RoutineNodeRenderer via the onSpawnLeaderChild prop.
+  const spawnLeaderChild = useCallback(
+    ({ runId, phaseId, stepId, sessionKey }: RoutineLeaderSpawnEvent) => {
+      const routineNode = nodesRef.current.find(
+        (n) => n.type === "routine" && (n.data as RoutineNodeData).runId === runId,
+      );
+      if (!routineNode) return;
+
+      // Dedup: leader already on canvas for this session + run
+      const alreadyExists = nodesRef.current.some(
+        (n) =>
+          n.type === "leader" &&
+          (n.data as LeaderData).routineRunId === runId &&
+          (n.data as LeaderData).sessionKey === sessionKey,
+      );
+      if (alreadyExists) return;
+
+      const rd = routineNode.data as RoutineNodeData;
+      const phases = rd.snapshot?.phases ?? [];
+      const phaseIdx = Math.max(0, phases.findIndex((p) => p.phaseId === phaseId));
+
+      const existingInPhase = nodesRef.current.filter(
+        (n) =>
+          n.type === "leader" &&
+          (n.data as LeaderData).routineRunId === runId &&
+          (n.data as LeaderData).routinePhaseId === phaseId,
+      ).length;
+
+      const leaderTypeDef = getAllNodeTypes().find((t) => t.type === "leader");
+      if (!leaderTypeDef) return;
+
+      const CHILD_GAP_X = 40;
+      const CHILD_GAP_Y = 20;
+      const lw = leaderTypeDef.defaultSize.width;
+      const lh = leaderTypeDef.defaultSize.height;
+
+      const x = snapToGrid(
+        routineNode.position.x + routineNode.size.width + CHILD_GAP_X +
+        phaseIdx * (lw + CHILD_GAP_X),
+      );
+      const y = snapToGrid(
+        routineNode.position.y + existingInPhase * (lh + CHILD_GAP_Y),
+      );
+
+      const leaderBase = createDefaultNodeData("leader", projectSettingsRef.current) as LeaderData;
+      const leaderData: LeaderData = {
+        ...leaderBase,
+        sessionKey,
+        status: "idle",
+        routineRunId: runId,
+        routinePhaseId: phaseId,
+        routineStepId: stepId,
+      };
+
+      dispatch({
+        type: "ADD_NODE",
+        node: {
+          id: generateId(),
+          type: "leader",
+          position: { x, y },
+          size: { ...leaderTypeDef.defaultSize },
+          data: leaderData,
+        },
+      });
+    },
+    [dispatch],
   );
 
   // Keyboard shortcuts: space (pan), delete, undo/redo
@@ -1633,6 +1700,27 @@ export function Canvas({
         const moves = [
           { id, position },
           ...contained.map((n) => ({
+            id: n.id,
+            position: { x: n.position.x + dx, y: n.position.y + dy },
+          })),
+        ];
+        dispatch({ type: "MOVE_GROUP", moves });
+      } else if (currentNode.type === "routine") {
+        // Routine node drags all routine-spawned Leader children with it so the
+        // visual cluster stays cohesive. Children are identified by their
+        // routineRunId matching the routine's active run.
+        const rd = currentNode.data as RoutineNodeData;
+        const runId = rd.runId;
+        const children = runId
+          ? nodesRef.current.filter(
+              (n) =>
+                n.type === "leader" &&
+                (n.data as LeaderData).routineRunId === runId,
+            )
+          : [];
+        const moves = [
+          { id, position },
+          ...children.map((n) => ({
             id: n.id,
             position: { x: n.position.x + dx, y: n.position.y + dy },
           })),
@@ -2888,6 +2976,9 @@ export function Canvas({
           willChange: "transform",
         }}
       >
+        {/* Routine → Leader connector lines rendered behind all nodes */}
+        <RoutineConnectors nodes={nodes} />
+
         {nodes.map((node) => (
           <CanvasNodeComponent
             key={node.id}
@@ -2899,6 +2990,7 @@ export function Canvas({
             onResize={handleResizeNode}
             onAddContentNode={addContentNode}
             onRevealMinion={revealMinion}
+            onSpawnLeaderChild={spawnLeaderChild}
             socketSend={socketSend}
             socketSubscribe={socketSubscribe}
             getContextForNode={getStableContextGetter(node.id)}
