@@ -32,7 +32,7 @@ interface ProjectPanelProps {
 // ── Helpers ──────────────────────────────────────────────
 
 /** Extract file paths mentioned in tool messages */
-function extractFilePaths(messages: Array<{ role: string; content: string; toolName?: string }>): string[] {
+function extractFilePaths(messages: Array<{ role: string; content: string; toolName?: string | undefined }>): string[] {
   const paths = new Set<string>();
   for (const msg of messages) {
     if (msg.toolName === "Read" || msg.toolName === "Write" || msg.toolName === "Edit") {
@@ -72,8 +72,8 @@ const STATUS_COLORS: Record<string, { dot: string; text: string; bg: string }> =
   waiting:      { dot: "var(--status-waiting)", text: "var(--status-waiting)", bg: "var(--state-hover)" },
 };
 
-function statusOf(s: string) {
-  return STATUS_COLORS[s] ?? STATUS_COLORS.disconnected;
+function statusOf(s: string): { dot: string; text: string; bg: string } {
+  return STATUS_COLORS[s] ?? STATUS_COLORS["disconnected"]!;
 }
 
 // ── Component ────────────────────────────────────────────
@@ -1048,10 +1048,10 @@ function DashboardView({
   runningCount: number;
   projectId: string;
   projectPath: string;
-  onOpenFile?: (relativePath: string) => void;
-  nodes?: CanvasNode[];
-  onUpdateNodeData?: (nodeId: string, data: unknown) => void;
-  onFocusNode?: (nodeId: string) => void;
+  onOpenFile?: ((relativePath: string) => void) | undefined;
+  nodes?: CanvasNode[] | undefined;
+  onUpdateNodeData?: ((nodeId: string, data: unknown) => void) | undefined;
+  onFocusNode?: ((nodeId: string) => void) | undefined;
 }) {
   const [tree, setTree] = useState<TreeNode[] | null>(null);
   const [rootName, setRootName] = useState("");
@@ -1339,9 +1339,9 @@ function DashboardView({
                         width: 7,
                         height: 7,
                         borderRadius: "50%",
-                        background: LEADER_HUES[colorIdx % LEADER_HUES.length].dot,
+                        background: LEADER_HUES[colorIdx % LEADER_HUES.length]!.dot,
                         boxShadow: agent.status === "running"
-                          ? `0 0 6px ${LEADER_HUES[colorIdx % LEADER_HUES.length].ring}`
+                          ? `0 0 6px ${LEADER_HUES[colorIdx % LEADER_HUES.length]!.ring}`
                           : "none",
                         display: "inline-block",
                         flexShrink: 0,

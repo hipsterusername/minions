@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import type { ServerMessage, SessionInfo, ActiveMinion } from "./use-socket.ts";
+import type { ServerMessage, SessionInfo } from "./use-socket.ts";
 import { isResultMessage } from "./use-socket.ts";
-import { STATUS_COLORS, COLORS } from "./palette.ts";
 import { UsageSection } from "./UsagePopover.tsx";
 import {
   emptySessionUsage,
@@ -10,9 +9,9 @@ import {
 } from "./usage-aggregator.ts";
 
 interface SessionPanelProps {
-  socketSend?: (data: unknown) => void;
-  socketSubscribe?: (fn: (msg: unknown) => void) => () => void;
-  socketConnected?: boolean;
+  socketSend?: ((data: unknown) => void) | undefined;
+  socketSubscribe?: ((fn: (msg: unknown) => void) => () => void) | undefined;
+  socketConnected?: boolean | undefined;
   onAttachSession: (sessionKey: string, role?: "leader" | "minion" | "default") => void;
   attachedSessionKeys: Set<string>;
 }

@@ -63,8 +63,8 @@ const LEADER_HUES = [
   { bg: "color-mix(in srgb, var(--danger-color-text) 14%, transparent)", dot: "var(--danger-color-text)", text: "var(--danger-color-text)", ring: "color-mix(in srgb, var(--danger-color-text) 30%, transparent)" },
 ];
 
-function getLeaderColor(index: number) {
-  return LEADER_HUES[index % LEADER_HUES.length];
+function getLeaderColor(index: number): (typeof LEADER_HUES)[number] {
+  return LEADER_HUES[index % LEADER_HUES.length]!;
 }
 
 // ── File extension → icon mapping ──
@@ -150,13 +150,13 @@ interface ProjectTreeProps {
   rootName: string;
   leaders: LeaderActivity[];
   /** Absolute project root path — used to normalize absolute file paths */
-  projectPath?: string;
+  projectPath?: string | undefined;
   /** When true, only show paths with active leader work */
-  filterActive?: boolean;
+  filterActive?: boolean | undefined;
   /** Called when the user clicks a file entry (relative path) */
-  onFileClick?: (relativePath: string) => void;
+  onFileClick?: ((relativePath: string) => void) | undefined;
   /** Called after a file/dir is moved or renamed (triggers tree refresh) */
-  onTreeChanged?: () => void;
+  onTreeChanged?: (() => void) | undefined;
 }
 
 // ── Helpers ──
@@ -168,7 +168,7 @@ function buildActivityMap(leaders: LeaderActivity[], projectPath?: string): Map<
   const prefix = projectPath ? (projectPath.endsWith("/") ? projectPath : projectPath + "/") : null;
 
   for (let i = 0; i < leaders.length; i++) {
-    for (const filePath of leaders[i].files) {
+    for (const filePath of leaders[i]!.files) {
       let normalized = filePath;
       // Strip absolute project path prefix if present
       if (prefix && normalized.startsWith(prefix)) {
@@ -368,9 +368,9 @@ function TreeRow({
   activityMap: Map<string, Set<number>>;
   leaders: LeaderActivity[];
   filterActive: boolean;
-  onFileClick?: (relativePath: string) => void;
-  projectPath?: string;
-  onTreeChanged?: () => void;
+  onFileClick?: ((relativePath: string) => void) | undefined;
+  projectPath?: string | undefined;
+  onTreeChanged?: (() => void) | undefined;
 }) {
   const [expanded, setExpanded] = useState(() => {
     // Auto-expand directories that have activity
@@ -543,7 +543,7 @@ function TreeRow({
   const rowBg = isDirectlyTouched && node.type === "file"
     ? (() => {
         // Use the first leader's color as tint
-        const firstIdx = [...leaderIndices!][0];
+        const firstIdx = [...leaderIndices!][0]!;
         const c = getLeaderColor(firstIdx);
         return c.bg;
       })()
@@ -570,7 +570,7 @@ function TreeRow({
           borderLeft: isDragOver
             ? "2px solid rgba(192, 132, 252, 0.6)"
             : isDirectlyTouched && node.type === "file"
-              ? `2px solid ${getLeaderColor([...leaderIndices!][0]).dot}`
+              ? `2px solid ${getLeaderColor([...leaderIndices!][0]!).dot}`
               : "2px solid transparent",
           transition: "background 0.2s ease",
           userSelect: "none",

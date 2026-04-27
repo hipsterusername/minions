@@ -242,8 +242,8 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
 
   const handleSave = () => {
     const errs: Record<string, string> = {};
-    if (!name.trim()) errs.name = "Name is required";
-    if (!template.trim()) errs.template = "Template is required";
+    if (!name.trim()) errs["name"] = "Name is required";
+    if (!template.trim()) errs["template"] = "Template is required";
     if (Object.keys(errs).length > 0) {
       setErrors(errs);
       return;
@@ -312,7 +312,7 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
               <input
                 style={{
                   ...inputStyle,
-                  borderColor: errors.name
+                  borderColor: errors["name"]
                     ? "var(--danger-color)"
                     : "var(--border-default)",
                 }}
@@ -320,9 +320,9 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="My Skill"
               />
-              {errors.name && (
+              {errors["name"] && (
                 <div style={{ color: "var(--danger-color)", fontSize: 11, marginTop: 2 }}>
-                  {errors.name}
+                  {errors["name"]}
                 </div>
               )}
             </div>
@@ -412,7 +412,7 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
               minHeight: 160,
               resize: "vertical",
               lineHeight: 1.5,
-              borderColor: errors.template
+              borderColor: errors["template"]
                 ? "var(--danger-color)"
                 : "var(--border-default)",
             }}
@@ -420,9 +420,9 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
             onChange={(e) => setTemplate(e.target.value)}
             placeholder={"# My Skill\n\nInstructions here...\n\nFocus on: {{focus_area}}"}
           />
-          {errors.template && (
+          {errors["template"] && (
             <div style={{ color: "var(--danger-color)", fontSize: 11, marginTop: 2 }}>
-              {errors.template}
+              {errors["template"]}
             </div>
           )}
           <div
