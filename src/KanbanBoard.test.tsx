@@ -58,7 +58,7 @@ function makeLeaderNode(sessionKey: string, messages: DisplayMessage[] = []): Ca
     error: null,
     model: "sonnet",
     permissionMode: "auto",
-    thinkingConfig: { type: "disabled" } as LeaderData["thinkingConfig"],
+    thinkingConfig: { enabled: false, effort: "low" as const, display: "omitted" as const },
     taskPlan: [],
     worktreeIsolation: false,
     worktreePath: null,
@@ -66,6 +66,7 @@ function makeLeaderNode(sessionKey: string, messages: DisplayMessage[] = []): Ca
     worktreeStatus: "none",
     skillIds: [],
     skillValues: {},
+    skillPanelOpen: false,
   } as LeaderData;
   return {
     id: "leader-" + sessionKey,
