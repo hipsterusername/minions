@@ -62,6 +62,8 @@ function formatComponent(c: RenderComponent): string {
       return formatChecklist(c);
     case "tags":
       return formatTags(c);
+    case "copyable":
+      return formatCopyable(c);
   }
 }
 
@@ -151,4 +153,14 @@ function formatChecklist(
 function formatTags(c: Extract<RenderComponent, { type: "tags" }>): string {
   const prefix = c.label ? `**${c.label}**: ` : "";
   return `${prefix}${c.items.map((t) => t.text).join(", ")}`;
+}
+
+function formatCopyable(
+  c: Extract<RenderComponent, { type: "copyable" }>,
+): string {
+  const lines: string[] = [];
+  if (c.label) lines.push(`**${c.label}**`);
+  if (c.description) lines.push(c.description);
+  lines.push(`\`\`\`${c.language ?? ""}\n${c.content}\n\`\`\``);
+  return lines.join("\n");
 }

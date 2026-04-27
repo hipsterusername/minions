@@ -75,6 +75,47 @@ describe("render-dsl: component schema", () => {
     expect(renderComponentSchema.parse(example)).toEqual(example);
   });
 
+  it("accepts a copyable component with only required fields", () => {
+    const example: RenderComponent = {
+      id: "cp1",
+      type: "copyable",
+      content: "ssh-rsa AAAA...",
+    };
+    expect(renderComponentSchema.parse(example)).toEqual(example);
+  });
+
+  it("accepts a copyable component with all optional fields", () => {
+    const example: RenderComponent = {
+      id: "cp2",
+      type: "copyable",
+      content: "git checkout -b feature/foo",
+      label: "Run this in your terminal",
+      description: "Creates and switches to the feature branch.",
+      language: "bash",
+      variant: "block",
+    };
+    expect(renderComponentSchema.parse(example)).toEqual(example);
+  });
+
+  it("rejects a copyable with an invalid variant", () => {
+    const res = renderComponentSchema.safeParse({
+      id: "cp",
+      type: "copyable",
+      content: "x",
+      variant: "tooltip",
+    });
+    expect(res.success).toBe(false);
+  });
+
+  it("rejects a copyable missing content", () => {
+    const res = renderComponentSchema.safeParse({
+      id: "cp",
+      type: "copyable",
+      label: "no content",
+    });
+    expect(res.success).toBe(false);
+  });
+
   it("rejects an unknown component type", () => {
     const res = renderComponentSchema.safeParse({
       id: "x",

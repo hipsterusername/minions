@@ -22,6 +22,8 @@ interface CanvasNodeProps {
   onAddContentNode?: (content: string) => void;
   /** Callback to reveal (create or scroll-to) a minion node for a given session key */
   onRevealMinion?: (minionSessionKey: string) => void;
+  /** Callback for RoutineNode: create a Leader child node when a step spawns one */
+  onSpawnLeaderChild?: (event: import("./types.ts").RoutineLeaderSpawnEvent) => void;
   /** Connection drag callbacks — threaded from Canvas */
   onConnectionStart?: (port: PortInfo, e: React.MouseEvent) => void;
   onConnectionEnd?: (port: PortInfo) => void;
@@ -71,6 +73,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
   onResize,
   onAddContentNode,
   onRevealMinion,
+  onSpawnLeaderChild,
   onConnectionStart,
   onConnectionEnd,
   isDragActive = false,
@@ -378,6 +381,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
         onResize={handleResize}
         onAddContentNode={onAddContentNode}
         onRevealMinion={onRevealMinion}
+        onSpawnLeaderChild={onSpawnLeaderChild}
         isDropTarget={isDropTarget}
         isBeingDragged={isBeingDragged}
       />

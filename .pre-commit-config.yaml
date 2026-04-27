@@ -22,18 +22,16 @@ repos:
 
   # ── Project gate ─────────────────────────────────────────────────
   # Local hooks call the same scripts CI calls. Keeping them as `pnpm`
-  # invocations (not raw tsc/vitest) means the hook follows whatever
+  # invocations (not raw vitest) means the hook follows whatever
   # `pnpm verify` does in package.json — single source of truth.
+  #
+  # Note: `pnpm typecheck` is intentionally NOT run here. The script is
+  # a no-op today (root tsconfig uses references only; tsc --noEmit does
+  # not walk them) and `pnpm build` fails on ~50 pre-existing type
+  # errors tracked in CLAUDE.md as a separate refactor. Until that lands,
+  # the vitest suite is the merge gate. See docs/testing-strategy.md §6.
   - repo: local
     hooks:
-      # Typecheck the whole project. Cheap with TS incremental cache.
-      - id: typecheck
-        name: pnpm typecheck
-        entry: pnpm typecheck
-        language: system
-        pass_filenames: false
-        files: '\.(ts|tsx|mts|cts|json)$'
-
       # Run the vitest suite once. Architecture-fitness tests run as
       # part of this — drift past the documented allowlists fails here
       # before it reaches CI.

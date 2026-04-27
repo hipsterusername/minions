@@ -104,6 +104,18 @@ export interface StartSessionOptions {
   thinkingConfig?: ThinkingConfig | null | undefined;
   /** Multimodal attachments riding on the first user message. */
   attachments?: ImageAttachment[] | undefined;
+  /**
+   * External MCP servers resolved from a routine step's `mcpServerIds`.
+   * Merged into the session's `mcpServers` dict alongside the agent's
+   * built-in servers. Shape: server name → SDK-compatible config object.
+   */
+  externalMcpServers?: Record<string, unknown> | undefined;
+  /**
+   * Formatted tool names for servers in `externalMcpServers`.
+   * Each name follows the `mcp__<serverId>__<toolName>` convention and
+   * is appended to `allowedTools` so the agent can call without prompts.
+   */
+  externalMcpToolNames?: string[] | undefined;
 }
 
 // ── SessionHost ────────────────────────────────────────────

@@ -7,8 +7,12 @@
  *   - Leader nodes are anchor points.  Their context providers sit in a
  *     row above them; their child nodes (minions, dashboards) fan out
  *     in a column to the right.
- *   - Multiple leader clusters are packed left-to-right, wrapping when
- *     the row exceeds MAX_ROW_WIDTH.  Each cluster's bounding box
+ *   - Chained leaders (where leader A's dashboard feeds leader B's
+ *     context-in port via a context edge) are sequenced horizontally
+ *     on a single row in producer-first order so the data-flow reads
+ *     left-to-right.
+ *   - Remaining leader clusters are packed left-to-right, wrapping
+ *     when the row exceeds MAX_ROW_WIDTH.  Each cluster's bounding box
  *     includes its right-side children so the next cluster avoids
  *     overlap.
  *   - Unconnected (isolate) nodes are arranged below the cluster region
@@ -248,7 +252,143 @@ export function computeAutoLayout(
     ...layoutCluster(c),
   }));
 
-  // ── Phase 3: Determine layout origin ─────────────────────────
+  // ── Phase 3: Detect chains and group clusters into rows ──────
+  // A "chain" is two or more leaders connected via dashboard→leader
+  // context edges: LeaderA owns DashboardA (data.leaderId === A),
+  // and DashboardA is the source of a context edge whose target is
+  // LeaderB's context-in port.  Chains are sequenced horizontally
+  // on a single row so the data-flow reads left-to-right.
+  type LaidOutCluster = (typeof clusterLayouts)[number];
+
+  const clusterByLeaderId = new Map<string, LaidOutCluster>();
+  for (const cl of clusterLayouts) {
+    clusterByLeaderId.set(cl.cluster.leader.id, cl);
+  }
+
+  const chainOut = new Map<string, string[]>();
+  const chainIn = new Map<string, string[]>();
+  for (const cl of clusterLayouts) {
+    chainOut.set(cl.cluster.leader.id, []);
+    chainIn.set(cl.cluster.leader.id, []);
+  }
+
+  for (const cl of clusterLayouts) {
+    const dashboards = cl.cluster.children.filter((n) => n.type === "render");
+    for (const d of dashboards) {
+      for (const e of edges) {
+        if (
+          e.sourceNodeId !== d.id ||
+          e.protocol !== "context" ||
+          !clusterByLeaderId.has(e.targetNodeId) ||
+          e.targetNodeId === cl.cluster.leader.id
+        ) {
+          continue;
+        }
+        const upstream = cl.cluster.leader.id;
+        const downstream = e.targetNodeId;
+        const outs = chainOut.get(upstream)!;
+        if (!outs.includes(downstream)) {
+          outs.push(downstream);
+          chainIn.get(downstream)!.push(upstream);
+        }
+      }
+    }
+  }
+
+  // Group clusters into weakly-connected components, then order each
+  // component via topological sort (Kahn) so producers come first.
+  const visitedLeaders = new Set<string>();
+  const orderedGroups: LaidOutCluster[][] = [];
+
+  for (const cl of clusterLayouts) {
+    const startId = cl.cluster.leader.id;
+    if (visitedLeaders.has(startId)) continue;
+
+    const componentIds = new Set<string>();
+    const queue: string[] = [startId];
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      if (componentIds.has(id)) continue;
+      componentIds.add(id);
+      for (const n of chainOut.get(id) ?? []) {
+        if (!componentIds.has(n)) queue.push(n);
+      }
+      for (const n of chainIn.get(id) ?? []) {
+        if (!componentIds.has(n)) queue.push(n);
+      }
+    }
+    for (const id of componentIds) visitedLeaders.add(id);
+
+    const indeg = new Map<string, number>();
+    for (const id of componentIds) {
+      indeg.set(
+        id,
+        (chainIn.get(id) ?? []).filter((p) => componentIds.has(p)).length,
+      );
+    }
+    const ready: string[] = [];
+    for (const id of componentIds) {
+      if ((indeg.get(id) ?? 0) === 0) ready.push(id);
+    }
+    const ordered: string[] = [];
+    const orderedSet = new Set<string>();
+    while (ready.length > 0) {
+      const id = ready.shift()!;
+      ordered.push(id);
+      orderedSet.add(id);
+      for (const next of chainOut.get(id) ?? []) {
+        if (!componentIds.has(next)) continue;
+        indeg.set(next, (indeg.get(next) ?? 0) - 1);
+        if (indeg.get(next) === 0) ready.push(next);
+      }
+    }
+    // Cycles: append remaining members in input order so nothing is dropped.
+    for (const id of componentIds) {
+      if (!orderedSet.has(id)) ordered.push(id);
+    }
+
+    orderedGroups.push(ordered.map((id) => clusterByLeaderId.get(id)!));
+  }
+
+  const chainRows = orderedGroups.filter((g) => g.length > 1);
+  const singletonClusters = orderedGroups
+    .filter((g) => g.length === 1)
+    .map((g) => g[0]!);
+
+  // Wrap singleton clusters into rows that respect MAX_ROW_WIDTH so
+  // unrelated clusters keep the previous packing behaviour.
+  const singletonRows: LaidOutCluster[][] = [];
+  {
+    let row: LaidOutCluster[] = [];
+    let rowW = 0;
+    for (const cl of singletonClusters) {
+      const addW = (row.length > 0 ? CLUSTER_GAP : 0) + cl.rect.w;
+      if (row.length > 0 && rowW + addW > MAX_ROW_WIDTH) {
+        singletonRows.push(row);
+        row = [cl];
+        rowW = cl.rect.w;
+      } else {
+        row.push(cl);
+        rowW += addW;
+      }
+    }
+    if (row.length > 0) singletonRows.push(row);
+  }
+
+  const allRows: LaidOutCluster[][] = [...chainRows, ...singletonRows];
+
+  function rowDimensions(row: LaidOutCluster[]): { w: number; h: number } {
+    if (row.length === 0) return { w: 0, h: 0 };
+    const w =
+      row.reduce((s, cl) => s + cl.rect.w, 0) +
+      CLUSTER_GAP * (row.length - 1);
+    const h = row.reduce((m, cl) => Math.max(m, cl.rect.h), 0);
+    return { w, h };
+  }
+
+  const rowDims = allRows.map(rowDimensions);
+
+  // ── Phase 4: Determine layout origin ─────────────────────────
   // Centre the entire pack on the requested point, falling back to
   // the centroid of all current node positions.
   const centre = options.center ?? {
@@ -260,41 +400,37 @@ export function computeAutoLayout(
       nodes.length,
   };
 
-  const totalClusterW =
-    clusterLayouts.reduce((s, { rect }) => s + rect.w, 0) +
-    CLUSTER_GAP * Math.max(0, clusterLayouts.length - 1);
-  const totalClusterH = clusterLayouts.reduce(
-    (s, { rect }) => Math.max(s, rect.h),
-    0,
-  );
+  const totalClusterW = rowDims.reduce((m, r) => Math.max(m, r.w), 0);
+  const totalClusterH =
+    rowDims.reduce((s, r) => s + r.h, 0) +
+    CLUSTER_GAP * Math.max(0, rowDims.length - 1);
 
   const originX = centre.x - totalClusterW / 2;
   const originY = centre.y - totalClusterH / 2;
 
-  // ── Phase 4: Pack clusters left-to-right ─────────────────────
+  // ── Phase 5: Pack rows top-to-bottom, clusters left-to-right ─
   const finalPositions = new Map<string, Position>();
-  let curX = originX;
   let curY = originY;
-  let rowH = 0;
 
-  for (const { positions, rect } of clusterLayouts) {
-    // Wrap to a new row when this cluster would exceed max width.
-    if (curX + rect.w > originX + MAX_ROW_WIDTH && curX > originX) {
-      curX = originX;
-      curY += rowH + CLUSTER_GAP;
-      rowH = 0;
+  for (let i = 0; i < allRows.length; i++) {
+    const row = allRows[i]!;
+    const dim = rowDims[i]!;
+    // Centre each row horizontally within the overall layout width.
+    let curX = originX + (totalClusterW - dim.w) / 2;
+    for (const cl of row) {
+      for (const [id, p] of cl.positions) {
+        finalPositions.set(id, {
+          x: Math.round(curX + p.x),
+          y: Math.round(curY + p.y),
+        });
+      }
+      curX += cl.rect.w + CLUSTER_GAP;
     }
-    for (const [id, p] of positions) {
-      finalPositions.set(id, {
-        x: Math.round(curX + p.x),
-        y: Math.round(curY + p.y),
-      });
-    }
-    curX += rect.w + CLUSTER_GAP;
-    rowH = Math.max(rowH, rect.h);
+    curY += dim.h;
+    if (i < allRows.length - 1) curY += CLUSTER_GAP;
   }
 
-  // ── Phase 5: Place isolates ──────────────────────────────────
+  // ── Phase 6: Place isolates ──────────────────────────────────
   // Nodes not owned by any cluster and not inside a context-group.
   const isolates = nodes.filter(
     (n) => !assignedIds.has(n.id) && !insideGroupIds.has(n.id),
@@ -302,9 +438,7 @@ export function computeAutoLayout(
 
   if (isolates.length > 0) {
     let ix = originX;
-    let iy =
-      originY +
-      (clusterLayouts.length > 0 ? totalClusterH + ISOLATE_GAP : 0);
+    let iy = allRows.length > 0 ? curY + ISOLATE_GAP : originY;
     let iRowH = 0;
 
     for (const n of isolates) {
@@ -319,7 +453,7 @@ export function computeAutoLayout(
     }
   }
 
-  // ── Phase 6: Propagate context-group → member deltas ─────────
+  // ── Phase 7: Propagate context-group → member deltas ─────────
   // Contained nodes move by the same vector as their group so the
   // spatial membership check continues to hold after layout.
   for (const [groupId, memberIds] of memberMap) {

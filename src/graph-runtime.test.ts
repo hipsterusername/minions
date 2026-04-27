@@ -19,6 +19,7 @@ import {
   dispatchMessage,
   createEdge,
 } from "./graph-runtime.ts";
+import { LEADER_CONTRACT, MINION_CONTRACT } from "./graph.ts";
 import { makeEdge, taskAssignment } from "../tests/fixtures/builders.ts";
 
 function emptyGraph(): GraphDocument {
@@ -410,23 +411,20 @@ describe("dispatchMessage — edge deduplication and isolation", () => {
 
 describe("port visibility — no hidden ports", () => {
   it("LEADER_CONTRACT has no hidden ports", () => {
-    const { LEADER_CONTRACT } = require("./graph.ts");
     for (const port of LEADER_CONTRACT.ports) {
       expect(port).not.toHaveProperty("hidden");
     }
   });
 
   it("MINION_CONTRACT has no hidden ports", () => {
-    const { MINION_CONTRACT } = require("./graph.ts");
     for (const port of MINION_CONTRACT.ports) {
       expect(port).not.toHaveProperty("hidden");
     }
   });
 
   it("all leader task ports have anchorY for stable positioning", () => {
-    const { LEADER_CONTRACT } = require("./graph.ts");
     const taskPorts = LEADER_CONTRACT.ports.filter(
-      (p: { protocol: string }) => p.protocol !== "context",
+      (p) => p.protocol !== "context",
     );
     for (const port of taskPorts) {
       expect(port.anchorY).toBeGreaterThan(0);
@@ -435,7 +433,6 @@ describe("port visibility — no hidden ports", () => {
   });
 
   it("all minion ports have anchorY for stable positioning", () => {
-    const { MINION_CONTRACT } = require("./graph.ts");
     for (const port of MINION_CONTRACT.ports) {
       expect(port.anchorY).toBeGreaterThan(0);
       expect(port.anchorY).toBeLessThan(1);

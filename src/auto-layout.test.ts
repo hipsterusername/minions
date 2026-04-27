@@ -150,6 +150,54 @@ describe("computeAutoLayout", () => {
     expect(moves).toHaveLength(3);
   });
 
+  it("chained leaders (dashboard→context-in) sequence horizontally on the same row", () => {
+    // Setup:
+    //   leader A owns dashboard dA (data.leaderId = "A")
+    //   dA has a context edge into leader B's context-in port
+    //   leader X is unrelated and should NOT split the chain
+    const leaderA = makeLeader("A");
+    const dashA = makeNode("dA", {
+      type: "render",
+      data: { leaderId: "A" },
+      size: { width: 320, height: 200 },
+    });
+    const leaderB = makeLeader("B");
+    const leaderX = makeLeader("X");
+
+    const chainEdge = {
+      id: "chain",
+      sourceNodeId: dashA.id,
+      sourcePortId: "context-out",
+      targetNodeId: leaderB.id,
+      targetPortId: "context-in",
+      protocol: "context" as const,
+    };
+
+    // Pass leaderX between A and B in input order to verify chain
+    // ordering wins over input order.
+    const moves = computeAutoLayout(
+      [leaderA, leaderX, dashA, leaderB],
+      [chainEdge],
+    );
+    const mA = moves.find((m) => m.id === "A")!;
+    const mB = moves.find((m) => m.id === "B")!;
+    const mDashA = moves.find((m) => m.id === "dA")!;
+    const mX = moves.find((m) => m.id === "X")!;
+
+    // B sits to the right of A's cluster (which includes dashA on the right).
+    expect(mB.position.x).toBeGreaterThan(
+      mDashA.position.x + dashA.size.width,
+    );
+    // A and B share the same row (top y matches within the cluster's
+    // own internal vertical layout — they are clusters of equal height).
+    expect(mA.position.y).toBe(mB.position.y);
+    // The unrelated leader X must not appear between A and B horizontally
+    // on the chain row.  It either sits before A or after B (chain row
+    // takes priority and X falls into a separate singleton row, so its
+    // y differs from the chain row).
+    expect(mX.position.y).not.toBe(mA.position.y);
+  });
+
   it("all returned positions are integers (Math.round was applied)", () => {
     const leader = makeLeader("l");
     const minion = makeMinion("m");

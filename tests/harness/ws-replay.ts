@@ -1,3 +1,4 @@
+/// <reference types="node" />
 /**
  * WebSocket replay harness for Phase 1 SessionHost extraction.
  *

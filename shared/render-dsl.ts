@@ -234,6 +234,37 @@ export const checklistComponentSchema = z.object({
 });
 
 /**
+ * Copyable — a labeled block of text the user can copy to clipboard with one click.
+ *
+ * Use when the agent is reporting something the user is likely to copy/paste
+ * elsewhere: generated commands, URLs, API keys, snippets, error messages,
+ * commit hashes, file paths, env-var values, etc. Different from `code` in
+ * that the affordance to copy is the primary purpose, not syntax display.
+ */
+export const copyableComponentSchema = z.object({
+  id: z.string(),
+  type: z.literal("copyable"),
+  /** The text the user will copy. */
+  content: z.string(),
+  /** Optional short headline shown above the copyable block. */
+  label: z.string().optional(),
+  /** Optional explanatory caption shown beneath the label. */
+  description: z.string().optional(),
+  /**
+   * Optional language hint. When set, the block renders monospaced and
+   * shows the language as a small badge — same vocabulary as `code`.
+   */
+  language: z.string().optional(),
+  /**
+   * Render hint: "block" (multi-line, monospaced, default for content with
+   * newlines) or "inline" (single-line ellipsized, default for short
+   * single-line content). When omitted the renderer picks based on content.
+   */
+  variant: z.enum(["inline", "block"]).optional(),
+  span: spanSchema.optional(),
+});
+
+/**
  * Tags — compact row of categorical badges.
  * Perfect for file types, categories, technologies, statuses.
  */
@@ -271,6 +302,7 @@ export const renderComponentSchema = z.discriminatedUnion("type", [
   diffComponentSchema,
   checklistComponentSchema,
   tagsComponentSchema,
+  copyableComponentSchema,
 ]);
 
 export type MetricComponent = z.infer<typeof metricComponentSchema>;
@@ -288,6 +320,7 @@ export type SeparatorComponent = z.infer<typeof separatorComponentSchema>;
 export type DiffComponent = z.infer<typeof diffComponentSchema>;
 export type ChecklistComponent = z.infer<typeof checklistComponentSchema>;
 export type TagsComponent = z.infer<typeof tagsComponentSchema>;
+export type CopyableComponent = z.infer<typeof copyableComponentSchema>;
 export type RenderComponent = z.infer<typeof renderComponentSchema>;
 
 // ── Layout ─────────────────────────────────────────────

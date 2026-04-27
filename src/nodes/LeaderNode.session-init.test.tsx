@@ -67,37 +67,6 @@ function disconnectedLeaderData(overrides: Partial<LeaderData> = {}): LeaderData
   };
 }
 
-interface ProbeProps {
-  socket: ReturnType<typeof createReplaySocket>["socket"];
-  initial: LeaderData;
-  onState?: (d: LeaderData) => void;
-}
-
-function Probe({ socket, initial, onState }: ProbeProps) {
-  const [data, setData] = useState<LeaderData>(initial);
-  const node: CanvasNode = {
-    id: "leader-test",
-    type: "leader",
-    position: { x: 0, y: 0 },
-    size: { width: 480, height: 400 },
-    data,
-  };
-  const props: NodeRenderProps = {
-    node,
-    isSelected: false,
-    onUpdateData: (next) => {
-      const nextData = next as LeaderData;
-      setData(nextData);
-      onState?.(nextData);
-    },
-    socketSubscribe: socket.subscribe,
-    socketSend: () => {
-      /* no-op — we drive state mutations directly via setData below */
-    },
-  };
-  return <LeaderNodeRenderer {...props} />;
-}
-
 /**
  * Synthetic SDK event sequence that mirrors what the SDK emits for a
  * one-turn assistant reply. Crafted so the streaming preview should

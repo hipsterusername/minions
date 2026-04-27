@@ -49,6 +49,9 @@ const EXPECTED_COMMANDS: readonly WsCommandType[] = [
   "get_mcp_server_status",
   "reconnect_mcp_server",
   "toggle_mcp_server",
+  "list_routines",
+  "start_routine",
+  "abort_routine",
 ];
 
 describe("commands/index — COMMAND_TABLE contract", () => {

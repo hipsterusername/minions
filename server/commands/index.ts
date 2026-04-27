@@ -42,6 +42,9 @@ import {
   getMcpServerStatus,
 } from "./info-queries.ts";
 import { reconnectMcpServer, toggleMcpServer } from "./mcp-control.ts";
+import { listRoutinesCommand } from "./list-routines.ts";
+import { startRoutine } from "./start-routine.ts";
+import { abortRoutine } from "./abort-routine.ts";
 import type { CommandContext, CommandTable, WsCommand } from "./types.ts";
 import type { WebSocket } from "ws";
 
@@ -88,6 +91,10 @@ export const COMMAND_TABLE: CommandTable = {
   // MCP server control
   reconnect_mcp_server: reconnectMcpServer,
   toggle_mcp_server: toggleMcpServer,
+  // Routines
+  list_routines: listRoutinesCommand,
+  start_routine: startRoutine,
+  abort_routine: abortRoutine,
 };
 
 /**

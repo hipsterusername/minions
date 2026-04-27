@@ -14,20 +14,20 @@ import { architectSkill } from "./architect.ts";
 import { apiDesignSkill } from "./api-design.ts";
 
 export function registerBuiltinSkills(): void {
-  registerSkill(codeReviewSkill, { builtIn: true });
-  registerSkill(testGeneratorSkill, { builtIn: true });
-  registerSkill(refactorSkill, { builtIn: true });
-  registerSkill(documentationSkill, { builtIn: true });
-  registerSkill(debugSkill, { builtIn: true });
-  registerSkill(explainSkill, { builtIn: true });
-  registerSkill(commitSkill, { builtIn: true });
+  registerSkill(codeReviewSkill);
+  registerSkill(testGeneratorSkill);
+  registerSkill(refactorSkill);
+  registerSkill(documentationSkill);
+  registerSkill(debugSkill);
+  registerSkill(explainSkill);
+  registerSkill(commitSkill);
   // Superpowers skills
-  registerSkill(frontendDesignSkill, { builtIn: true });
-  registerSkill(simplifySkill, { builtIn: true });
-  registerSkill(performanceSkill, { builtIn: true });
-  registerSkill(securityAuditSkill, { builtIn: true });
-  registerSkill(architectSkill, { builtIn: true });
-  registerSkill(apiDesignSkill, { builtIn: true });
+  registerSkill(frontendDesignSkill);
+  registerSkill(simplifySkill);
+  registerSkill(performanceSkill);
+  registerSkill(securityAuditSkill);
+  registerSkill(architectSkill);
+  registerSkill(apiDesignSkill);
 }
 
 // Side-effect registration

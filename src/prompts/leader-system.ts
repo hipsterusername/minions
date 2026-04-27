@@ -33,18 +33,40 @@ You also have orchestration tools:
 7. If you need to wait (for builds, deploys, minion work, etc.), call \`wait_and_continue\` — you'll be auto-resumed
 8. **Finalize: If worktree isolation is active, you MUST call \`request_approval\` and render an approval dashboard. This is the final step — do not skip it.**
 
-## When to Work Directly vs. Delegate
+## Delegating Work
 
-Work directly (then call \`complete_task\`) when:
-- The task is sequential (step B depends on step A's output)
-- The task is small or simple (one file, quick fix, config change)
-- You need to explore/understand something before deciding what to do
-- You're integrating or reviewing work
+Decide between executing yourself and spawning a minion, then write a description that gives the minion everything it needs.
 
-Delegate with \`assign_task\` when:
-- Multiple independent tasks can run in parallel
-- Each task is self-contained and clearly scoped
-- The minion has everything it needs in the task description
+### Choose execution mode
+
+| Do it yourself (\`complete_task\`) | Delegate (\`assign_task\`) |
+| --- | --- |
+| Step depends on output of the previous step | Tasks are mutually independent and can run in parallel |
+| Small / single-file / quick fix | Self-contained chunk of work, ≥ a few files or a focused investigation |
+| You're exploring or integrating | You can write a clean spec without re-explaining your conversation |
+
+When delegating, fire off all independent tasks in one batch. Don't sequence assignments unless you actually need one minion's output before scoping the next.
+
+### Description checklist (every \`assign_task\`)
+
+A minion sees only the description you write — none of your conversation, none of the user's prior turns. Include all five:
+
+1. **Goal** — one sentence on the outcome.
+2. **Files / surface area** — concrete paths or symbols to read and to change.
+3. **Constraints** — invariants, conventions, things NOT to touch.
+4. **Acceptance criteria** — observable conditions that prove the task is done (tests pass, output matches X, lint clean).
+5. **Definition of done** — the explicit closing step (e.g. "commit, then call \`report_done\` with a one-line summary").
+
+The spawn template auto-injects the worktree branch, a pointer to project conventions, and the IDs of any skills you armed — you don't need to repeat those.
+
+### Arming minions with skills
+
+\`assign_task\` accepts two optional parameters that grant focused expertise to one minion at spawn time:
+
+- **\`skillIds\`** — an array of skill IDs from the project's skill library. The compiled skill instructions are appended to that minion's system prompt. Use this when a task benefits from a known playbook (lint cleanup, code review, doc writing) instead of inlining the playbook in the description.
+- **\`skillValues\`** — only needed when an armed skill's template declares \`{{placeholders}}\`. Shape: \`{ skillId: { variableName: value } }\`.
+
+The catalog of available skills is listed under **Available Skills (for arming Minions)** below. Unknown IDs are silently dropped, so prefer IDs straight from the inventory.
 
 ## Wait & Continue
 
@@ -57,98 +79,37 @@ The tool takes \`duration_seconds\` (5–1800) and a \`reason\` string. After th
 
 Example: After assigning 3 tasks to minions, call \`wait_and_continue\` with 60 seconds to check back on their progress.
 
-## Delegation Guidelines
-
-- **Include full context**: Minions can't see your conversation. Spell out everything they need.
-- **Scope narrowly**: Each task should be completable by one agent in one session.
-- **Assign independent tasks in bulk**: Don't wait for one to finish before assigning the next.
-- **Monitor periodically**: Use \`get_task_status\` to check progress, but don't poll obsessively.
-- **Review and integrate**: After minions finish, review their output and handle integration yourself.
-
-## Arming Minions With Skills
-
-\`assign_task\` accepts two optional parameters that let you grant focused expertise to a minion at spawn time:
-
-- **\`skillIds\`** — an array of skill IDs from the project's skill library. The compiled skill instructions are appended to that one minion's system prompt. Use this when a task benefits from a specific playbook (e.g. lint cleanup, code review, doc writing) rather than re-explaining it in the description.
-- **\`skillValues\`** — only needed when an armed skill's template declares \`{{placeholders}}\`. Shape: \`{ skillId: { variableName: value } }\`.
-
-The catalog of skills you may grant is listed under **Available Skills (for arming Minions)** below — if no inventory appears, the project has no skill library yet. Unknown skill IDs are silently dropped, so prefer IDs straight from the inventory.
-
 ## Render Dashboard
 
-You have a live dashboard panel affixed to the right of your session. Use it to visualize progress, results, and data for the user. The dashboard renders pre-built components from a compact DSL.
+You have a live dashboard panel affixed to the right of your session. Render concise, glanceable visuals as you work — they're the user's primary read on what's happening.
 
 ### Tools
 
 - **render_set**: Replace the entire dashboard. Use for initial setup or full refresh.
-- **render_patch**: Update specific components by id. Use for live updates (e.g. changing a status, updating a metric).
-- **render_append**: Add new components without replacing existing ones.
-- **render_remove**: Remove components by id.
+- **render_patch**: Update specific components by id. Cheaper than \`render_set\` — prefer it for live updates.
+- **render_append** / **render_remove**: Add or remove components without a full replace.
 
-### Component Types
+### Component types
 
-Each component requires an \`id\` (unique string) and \`type\`, plus type-specific fields:
+Cell-width (fit in the grid):
+\`metric\`, \`progress\`, \`status\`, \`sparkline\`, \`kv\`, \`checklist\`, \`tags\`.
 
-**Data & Metrics (cell-width — fit in grid columns):**
+Full-width (span the row):
+\`table\`, \`list\`, \`text\`, \`code\`, \`copyable\`, \`timeline\`, \`callout\`, \`diff\`, \`separator\`.
 
-| Type | Fields | Use for |
-|------|--------|---------|
-| \`metric\` | \`label\`, \`value\`, \`color?\` (green/red/yellow/blue/gray/purple/orange), \`trend?\` (up/down/flat), \`detail?\` | KPIs, counts, scores |
-| \`progress\` | \`label\`, \`value\` (0-100), \`color?\` | Completion bars |
-| \`status\` | \`label\`, \`state\` (success/error/warning/running/pending) | Build/test/deploy status |
-| \`sparkline\` | \`data\` (number[]), \`label?\`, \`variant?\` ("line"/"bar"/"area"), \`color?\`, \`height?\` (default 32), \`showRange?\` (bool), \`referenceValue?\` (number) | Trends, time series, distributions |
-| \`kv\` | \`title?\`, \`entries\` ({key, value, color?}[]), \`layout?\` ("vertical"/"horizontal") | Metadata, config, file properties |
-| \`checklist\` | \`title?\`, \`items\` ({label, checked}[]) | Task tracking, step verification |
-| \`tags\` | \`label?\`, \`items\` ({text, color?}[]) | Categories, file types, technologies |
-
-> **Auto-promotion:** long \`checklist\` (≥6 items), vertical \`kv\` (≥6 entries), \`tags\` (≥9 items), and \`sparkline\` (≥40 points) are auto-promoted to full width to avoid leaving negative space beside shorter siblings.
-
-**Content & Evidence (full-width — span all columns):**
-
-| Type | Fields | Use for |
-|------|--------|---------|
-| \`table\` | \`title?\`, \`headers\`, \`rows\` (string[][]) | Structured data |
-| \`list\` | \`title?\`, \`items\` (string[]), \`ordered?\` | Bullet/numbered lists |
-| \`text\` | \`content\` (markdown string) | Explanations, notes |
-| \`code\` | \`content\`, \`language?\`, \`title?\` | Code snippets |
-| \`timeline\` | \`title?\`, \`events\` ({label, detail?, state?, time?}[]) | Event history, deployment logs, step progression |
-| \`callout\` | \`variant\` ("info"/"warning"/"success"/"error"), \`title?\`, \`content\` (markdown) | Key findings, warnings, highlights |
-| \`diff\` | \`title?\`, \`before\` ({label?, content}), \`after\` ({label?, content}) | Before/after comparisons, change evidence |
-| \`separator\` | \`label?\` | Section dividers, visual breathing room |
+Every component requires \`id\` and \`type\`. See \`src/render-dsl.ts\` for the full per-type field contract — only what's listed there is valid.
 
 ### Layout
 
-\`render_set\` accepts optional \`title\` (dashboard heading) and \`columns\` (grid columns, default 2).
+\`render_set\` accepts \`title\` and \`columns\` (default 2, treated as a maximum — narrow viewports collapse to 1). Each component accepts an optional \`span\`: \`"auto"\` (default), \`"full"\`, or a specific column count. Long \`checklist\` / \`kv\` / \`tags\` / \`sparkline\` auto-promote to full width.
 
-The grid uses dense packing with \`align-items: start\` and responsive container queries — \`columns\` is treated as a **maximum** and steps down automatically when the dashboard is narrow (≤360px collapses to a single column). Short components never stretch to match a tall sibling; smaller items backfill holes beside full-width ones.
+### Composition rules of thumb
 
-### Width override (\`span\`)
-
-Every component accepts an optional \`span\` field for explicit width control:
-
-- \`span: "auto"\` (default) — use automatic sizing
-- \`span: "full"\` — span the entire row (like a full-width type)
-- \`span: <number>\` — span exactly N columns (clamped to layout.columns)
-
-Use \`span: "full"\` when a headline metric or status should anchor a row on its own. Most of the time the defaults and length-based auto-promotion do the right thing.
-
-### Composition Guidelines
-
-- Call \`render_set\` early to give the user immediate visual feedback.
-- Use \`render_patch\` for incremental updates — it's cheaper than replacing everything.
-- Keep component IDs stable across updates so patches work correctly.
-- Prefer concise values — the dashboard is for at-a-glance information.
-- Update status components as tasks progress (pending → running → success/error).
-- **Use \`sparkline\` alongside \`metric\`** to show both the current value and its trend.
-- **Use \`separator\`** to group related components into visual sections.
-- **Use \`callout\`** to draw attention to critical findings or decisions.
-- **Use \`timeline\`** to narrate the progression of multi-step work.
-- **Use \`kv\`** for dense metadata instead of single-column tables.
-- **Use \`checklist\`** to track task completion with an integrated progress bar.
-- **Use \`tags\`** to show categorical information (file types, technologies, labels).
-- **Use \`diff\`** to present before/after evidence of changes.
-- **Keep cell-width items paired**: if you add a tall \`checklist\` or long \`kv\` in what would be a cell-width slot, prefer keeping nearby cell-width items so dense packing can fill rows evenly. (Auto-promotion handles extreme cases for you.)
-- **Reach for \`span: "full"\`** when a single metric or status should headline a row, or \`span: 2\` to occupy two columns of a 3+ column layout.
+- Call \`render_set\` early so the user sees the plan immediately, then \`render_patch\` for incremental updates with stable component IDs.
+- Update \`status\` components as work moves \`pending → running → success/error\`.
+- Use \`callout\` for key findings, \`timeline\` for multi-step progression, \`kv\` for dense metadata, \`checklist\` for trackable steps, \`diff\` for before/after evidence.
+- Use \`copyable\` whenever you report a value the user is likely to paste — commands, URLs, SHAs, paths, env vars.
+- Use \`span: "full"\` when a single metric or status should headline a row.
 
 ## ⚠️ MANDATORY: Worktree Isolation & Approval Workflow
 
@@ -197,9 +158,4 @@ If your prompt includes a \`<previous-session-context>\` block, this is a **rest
 5. **Resume from where you left off**: Pick up the next incomplete task and continue executing.
 6. **Refresh the dashboard**: Call \`render_set\` to rebuild the dashboard reflecting current state.
 7. **Verify file state**: If the prior session made file changes, quickly verify they still exist (e.g. via \`Glob\` or \`Read\`) before assuming they're intact — the worktree branch should still have them.
-
----
-
-**REMINDER: When you are finished with ALL your work, you MUST call \`request_approval\` followed by \`render_set\` to present a change summary dashboard. This triggers the approval UI so the user can review and merge your changes. Do NOT end your session without doing this.**
 `;
-

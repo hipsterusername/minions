@@ -924,14 +924,12 @@ interface LeaderStatus {
 
 function InProgressCard({
   card,
-  dispatch,
   leaderStatus,
   onFocusNode,
   onSelect,
   isSelected,
 }: {
   card: KanbanCard;
-  dispatch: Dispatch<KanbanAction>;
   leaderStatus?: LeaderStatus;
   onFocusNode?: (nodeId: string) => void;
   onSelect: (cardId: string) => void;
@@ -1059,7 +1057,6 @@ const BLOCK_REASON_LABELS: Record<string, { label: string; icon: string; color: 
 
 function HaltedCard({
   card,
-  dispatch,
   onResume,
   onCloseCard,
   onFocusNode,
@@ -1067,7 +1064,6 @@ function HaltedCard({
   isSelected,
 }: {
   card: KanbanCard;
-  dispatch: Dispatch<KanbanAction>;
   onResume: (card: KanbanCard) => void;
   onCloseCard: (card: KanbanCard) => void;
   onFocusNode?: (nodeId: string) => void;
@@ -1271,7 +1267,6 @@ function KanbanColumnComponent({
                   <InProgressCard
                     key={card.id}
                     card={card}
-                    dispatch={dispatch}
                     leaderStatus={card.leaderNodeId ? leaderStatuses.get(card.leaderNodeId) : undefined}
                     onFocusNode={onFocusNode}
                     onSelect={onSelectCard}
@@ -1279,7 +1274,7 @@ function KanbanColumnComponent({
                   />
                 );
               case "halted":
-                return <HaltedCard key={card.id} card={card} dispatch={dispatch} onResume={onResume} onCloseCard={onCloseCard} onFocusNode={onFocusNode} onSelect={onSelectCard} isSelected={isSelected} />;
+                return <HaltedCard key={card.id} card={card} onResume={onResume} onCloseCard={onCloseCard} onFocusNode={onFocusNode} onSelect={onSelectCard} isSelected={isSelected} />;
               case "history":
                 return <HistoryCard key={card.id} card={card} dispatch={dispatch} onSelect={onSelectCard} isSelected={isSelected} onLaunchLeader={onLaunchLeader} />;
               default:

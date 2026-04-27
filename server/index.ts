@@ -25,6 +25,7 @@ import { removeWorktree, cleanupStaleWorktrees } from "./worktree.ts";
 import { listRecentProjects } from "./project-store.ts";
 import type { SessionHostDeps, StartSessionOptions } from "./session-host.ts";
 import { SessionRegistry } from "./session-registry.ts";
+import { RoutineRunRegistry } from "./routine-registry.ts";
 import { dispatchCommand } from "./commands/index.ts";
 import type { CommandContext } from "./commands/index.ts";
 import { WS_MAX_PAYLOAD_BYTES } from "./ws-config.ts";
@@ -160,6 +161,14 @@ function generateKey(): string {
   return `session-${Date.now().toString(36)}-${keyCounter}`;
 }
 
+// ── Routine runtime ─────────────────────────────────────
+//
+// Owns live routine runs. Spawns its child Leaders through the same
+// SessionRegistry as everything else, so a Routine-spawned Leader is
+// indistinguishable from a hand-spawned one on the canvas — except that
+// it also has a `report_phase_result` MCP tool wired in via step-tools.
+const routines = new RoutineRunRegistry({ bus, sessionRegistry: registry });
+
 // ── Command dispatcher context ──────────────────────────
 
 const commandContext: CommandContext = {
@@ -167,6 +176,7 @@ const commandContext: CommandContext = {
   bus,
   generateKey,
   maxSessions: MAX_SESSIONS,
+  routines,
 };
 
 // ── WebSocket handlers ───────────────────────────────────

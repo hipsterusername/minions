@@ -128,6 +128,14 @@ export const MINION_THINKING_CONFIG: ThinkingConfig = {
   display: "summarized",
 };
 
+/** Payload emitted when a routine step spawns a Leader session on the server. */
+export interface RoutineLeaderSpawnEvent {
+  runId: string;
+  phaseId: string;
+  stepId: string;
+  sessionKey: string;
+}
+
 export interface NodeRenderProps {
   node: CanvasNode;
   isSelected: boolean;
@@ -143,6 +151,11 @@ export interface NodeRenderProps {
   onAddContentNode?: (content: string) => void;
   /** Callback to reveal (create or scroll-to) a minion node for a given session key */
   onRevealMinion?: (minionSessionKey: string) => void;
+  /**
+   * Callback invoked when this RoutineNode receives a `routine_step_leader_spawned`
+   * event for its current runId. Canvas.tsx handles it by creating the leader node.
+   */
+  onSpawnLeaderChild?: (event: RoutineLeaderSpawnEvent) => void;
   /** True when a compatible node is being dragged over this node (drop target) */
   isDropTarget?: boolean;
   /** True when this node is currently being dragged by the user */

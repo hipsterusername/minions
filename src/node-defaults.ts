@@ -7,6 +7,7 @@
 import type { ProjectSettings } from "./api.ts";
 import { DEFAULT_THINKING_CONFIG, MINION_THINKING_CONFIG } from "./types.ts";
 import { createImageNodeDefaultData } from "./nodes/ImageNode.tsx";
+import { createRoutineNodeDefaultData } from "./nodes/RoutineNode.tsx";
 
 export function createDefaultNodeData(
   type: string,
@@ -88,6 +89,9 @@ export function createDefaultNodeData(
 
     case "image":
       return createImageNodeDefaultData();
+
+    case "routine":
+      return createRoutineNodeDefaultData();
 
     default:
       return {};

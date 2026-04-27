@@ -5,14 +5,15 @@
  */
 
 import { useMemo } from "react";
+import type { ReactElement } from "react";
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 /** Parse inline formatting within a single line */
-function renderInline(text: string): (string | JSX.Element)[] {
-  const parts: (string | JSX.Element)[] = [];
+function renderInline(text: string): (string | ReactElement)[] {
+  const parts: (string | ReactElement)[] = [];
   // Match: `code`, **bold**, *italic*
   const regex = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g;
   let lastIndex = 0;
@@ -90,14 +91,14 @@ function parseBlocks(text: string): Block[] {
 
     // Headings
     const headingMatch = line.match(/^(#{1,3})\s+(.+)/);
-    if (headingMatch) {
+    if (headingMatch && headingMatch[1] !== undefined && headingMatch[2] !== undefined) {
       blocks.push({ type: "heading", content: headingMatch[2], level: headingMatch[1].length });
       continue;
     }
 
     // List items (-, *, •, 1., 2))
     const listMatch = line.match(/^\s*(?:[-*•]\s+|\d+[.)]\s+)(.+)/);
-    if (listMatch) {
+    if (listMatch && listMatch[1] !== undefined) {
       blocks.push({ type: "list-item", content: listMatch[1] });
       continue;
     }

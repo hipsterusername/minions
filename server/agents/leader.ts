@@ -12,6 +12,7 @@ import {
   persistTaskState,
   persistRenderState,
 } from "../session-persist.ts";
+import { createStepToolsForSession } from "../routines/step-tools.ts";
 
 // ── System prompt ─────────────────────────────────────────────────────────
 // Moved from src/prompts/leader-system.ts — content is identical.
@@ -236,9 +237,24 @@ const leaderAgent: AgentType = {
       onStateChange: (state) => persistRenderState(leaderSessionKey, state),
     });
 
+    // When this leader was spawned as a routine step the runner has
+    // pre-registered a completion context against its sessionKey; in that
+    // case we expose `report_phase_result` so the agent can hand a
+    // structured result back to the scheduler.
+    const stepTools = createStepToolsForSession(leaderSessionKey);
+    const mcpServers: Record<string, unknown> = {
+      "task-manager": mcpServer,
+      "render-dashboard": renderMcp,
+    };
+    let mcpToolNames = LEADER_MCP_TOOLS;
+    if (stepTools) {
+      mcpServers["routine-step"] = stepTools.mcpServer;
+      mcpToolNames = [...LEADER_MCP_TOOLS, ...stepTools.toolNames];
+    }
+
     return {
-      mcpServers: { "task-manager": mcpServer, "render-dashboard": renderMcp },
-      mcpToolNames: LEADER_MCP_TOOLS,
+      mcpServers,
+      mcpToolNames,
       taskState,
       renderState,
     };

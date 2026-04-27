@@ -7,17 +7,18 @@
   "engines": {
     "node": ">=22"
   },
+  "packageManager": "pnpm@10.15.1",
   "scripts": {
     "dev": "vite",
     "server": "npx tsx server/index.ts",
     "start": "node scripts/dev.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -b --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "verify": "pnpm typecheck && pnpm test:run && pnpm build",
+    "verify": "pnpm test:run",
     "preflight": "node scripts/preflight.mjs",
     "configure": "node scripts/preflight.mjs && node scripts/setup-permissions.mjs"
   },

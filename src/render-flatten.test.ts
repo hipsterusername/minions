@@ -229,6 +229,29 @@ describe("flattenRenderStateToText", () => {
     expect(out).toBe("**Stack**: ts, react, vite");
   });
 
+  it("formats copyable as a fenced block with optional label, description, and language", () => {
+    const minimal = flattenRenderStateToText(
+      state([{ id: "cp", type: "copyable", content: "abc123" }]),
+    );
+    expect(minimal).toBe("```\nabc123\n```");
+
+    const full = flattenRenderStateToText(
+      state([
+        {
+          id: "cp",
+          type: "copyable",
+          label: "Token",
+          description: "Use within 1 hour.",
+          language: "bash",
+          content: "export TOKEN=xyz",
+        },
+      ]),
+    );
+    expect(full).toContain("**Token**");
+    expect(full).toContain("Use within 1 hour.");
+    expect(full).toContain("```bash\nexport TOKEN=xyz\n```");
+  });
+
   it("joins multiple components with blank-line separators", () => {
     const out = flattenRenderStateToText(
       state([

@@ -9,6 +9,7 @@ import type { WebSocket } from "ws";
 import type { Bus } from "../bus.ts";
 import type { SessionRegistry } from "../session-registry.ts";
 import type { SessionRole } from "../session-host.ts";
+import type { RoutineRunRegistry } from "../routine-registry.ts";
 
 /** Every WebSocket command recognised by the server. */
 export type WsCommandType =
@@ -48,7 +49,11 @@ export type WsCommandType =
   | "get_mcp_server_status"
   // MCP server control
   | "reconnect_mcp_server"
-  | "toggle_mcp_server";
+  | "toggle_mcp_server"
+  // Routines
+  | "list_routines"
+  | "start_routine"
+  | "abort_routine";
 
 /**
  * Binary attachment the client pins to a user turn — today only images.
@@ -91,6 +96,10 @@ export interface WsCommand {
   // MCP server params
   serverName?: string;
   enabled?: boolean;
+  // Routine params
+  routineId?: string;
+  runId?: string;
+  routineInputs?: Record<string, unknown>;
   // Request ID for correlating async responses
   requestId?: string;
 }
@@ -108,6 +117,11 @@ export interface CommandContext {
   generateKey: () => string;
   /** Upper bound on simultaneous sessions. */
   maxSessions: number;
+  /**
+   * Live routine-run tracker. Only the routines/* command handlers use it;
+   * everything else can ignore it.
+   */
+  routines: RoutineRunRegistry;
 }
 
 /** A command handler takes context + command + the originating socket. */

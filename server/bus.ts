@@ -68,6 +68,18 @@ export interface Bus {
 
   /** Send an event every connected client should see. */
   emitGlobal(payload: BusPayload): void;
+
+  /**
+   * Subscribe to every envelope emitted on the bus. Used by in-process
+   * consumers (e.g. the routine runtime watching for session-end events)
+   * — frontend clients receive the same events through the WebSocket
+   * fan-out and should never call this.
+   *
+   * Returns an unsubscribe function. Handlers are invoked synchronously
+   * after the WebSocket fan-out and must not throw — exceptions are
+   * caught and logged so one bad subscriber cannot stall the bus.
+   */
+  subscribe(handler: (envelope: WsEnvelope) => void): () => void;
 }
 
 /**
@@ -111,18 +123,40 @@ export function unicastGlobal(ws: WebSocket, payload: BusPayload): void {
  * object is stable for the lifetime of the server.
  */
 export function createBus(wss: WebSocketServer): Bus {
+  const subscribers = new Set<(envelope: WsEnvelope) => void>();
+
+  function fanOut(envelope: WsEnvelope): void {
+    broadcast(wss, envelope);
+    for (const handler of subscribers) {
+      try {
+        handler(envelope);
+      } catch (err) {
+        console.warn(
+          "[bus] in-process subscriber threw:",
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+  }
+
   return {
     emit(envelope) {
-      broadcast(wss, envelope);
+      fanOut(envelope);
     },
     emitToSession(sessionKey, payload) {
-      broadcast(wss, wrap(sessionTopic(sessionKey), payload));
+      fanOut(wrap(sessionTopic(sessionKey), payload));
     },
     emitToProject(projectId, payload) {
-      broadcast(wss, wrap(projectTopic(projectId), payload));
+      fanOut(wrap(projectTopic(projectId), payload));
     },
     emitGlobal(payload) {
-      broadcast(wss, wrap(GLOBAL_TOPIC, payload));
+      fanOut(wrap(GLOBAL_TOPIC, payload));
+    },
+    subscribe(handler) {
+      subscribers.add(handler);
+      return () => {
+        subscribers.delete(handler);
+      };
     },
   };
 }
