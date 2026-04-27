@@ -7,6 +7,7 @@ import "./nodes/FolderNode.tsx";
 import "./nodes/ContextGroupNode.tsx";
 import "./nodes/RenderNode.tsx";
 import "./nodes/ImageNode.tsx";
+import "./nodes/RoutineNode.tsx";
 import { loadProjectSkillsFromData, saveUserSkill, deleteUserSkill as removeUserSkill, exportUserSkills, importUserSkills } from "./skills/user-skills.ts";
 import { useState, useEffect, useReducer, useCallback, useMemo, useRef } from "react";
 import { Canvas } from "./Canvas.tsx";
@@ -29,8 +30,10 @@ import type { LeaderData } from "./nodes/LeaderNode.tsx";
 import { useKanban } from "./use-kanban.ts";
 import { KanbanBoard } from "./KanbanBoard.tsx";
 import type { KanbanCard } from "./kanban-types.ts";
+import { McpServersBrowser } from "./McpServersBrowser.tsx";
 import { SkillsBrowser } from "./SkillsBrowser.tsx";
 import { SkillEditor } from "./SkillEditor.tsx";
+import { RoutineEditor } from "./RoutineEditor.tsx";
 import type { SkillTemplate } from "./skills/types.ts";
 import { getSkill } from "./skills/registry.ts";
 import { themes, themeMap, applyTheme, DEFAULT_THEME_ID } from "./themes.ts";
@@ -126,6 +129,9 @@ function ProjectView({
   const [skillEditorOpen, setSkillEditorOpen] = useState(false);
   const [editingSkill, setEditingSkill] = useState<SkillTemplate | null>(null);
   const [skillsRefreshKey, setSkillsRefreshKey] = useState(0);
+
+  // Routine editor state
+  const [routineEditorOpen, setRoutineEditorOpen] = useState(false);
 
   // Load project from API
   useEffect(() => {
@@ -840,6 +846,7 @@ function ProjectView({
             onExportSkills={handleExportSkills}
             refreshKey={skillsRefreshKey}
           />
+          <McpServersBrowser projectId={projectId} />
           {skillEditorOpen && (
             <SkillEditor
               skill={editingSkill}
@@ -848,6 +855,38 @@ function ProjectView({
                 setSkillEditorOpen(false);
                 setEditingSkill(null);
               }}
+            />
+          )}
+          <button
+            onClick={() => setRoutineEditorOpen(true)}
+            onMouseDown={(e) => e.stopPropagation()}
+            title="Edit routines"
+            aria-label="Edit routines"
+            style={{
+              position: "absolute",
+              bottom: 56,
+              right: 16,
+              zIndex: 100,
+              width: 40,
+              height: 40,
+              borderRadius: 20,
+              border: "1px solid var(--border-default)",
+              background: "var(--bg-secondary)",
+              color: "var(--text-secondary)",
+              cursor: "pointer",
+              fontSize: 18,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+            }}
+          >
+            ⚡
+          </button>
+          {routineEditorOpen && (
+            <RoutineEditor
+              projectId={projectId}
+              onClose={() => setRoutineEditorOpen(false)}
             />
           )}
         </div>

@@ -9,6 +9,11 @@ import {
   writeSkills,
 } from "../../project-store.ts";
 import type { ProjectSettings } from "../../project-store.ts";
+import {
+  listMcpServers,
+  saveMcpServer,
+  deleteMcpServer,
+} from "../../mcp-server-store.ts";
 import { validateProjectPath } from "../../path-guard.ts";
 import { decodePath, param } from "./helpers.ts";
 
@@ -82,4 +87,51 @@ export function mountSettingsRoutes(router: Router): void {
     writeSkills(projectPath, skills);
     res.json({ ok: true });
   });
+
+  // ── MCP server routes ───────────────────────────────────
+
+  router.get("/:encodedPath/mcp-servers", (req: Request, res: Response) => {
+    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    if (!projectPath) {
+      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      return;
+    }
+    res.json(listMcpServers(projectPath));
+  });
+
+  router.put(
+    "/:encodedPath/mcp-servers/:serverId",
+    (req: Request, res: Response) => {
+      const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+      if (!projectPath) {
+        res.status(403).json({ error: "Project path not registered or outside home directory" });
+        return;
+      }
+      try {
+        const entry = saveMcpServer(projectPath, req.body as Parameters<typeof saveMcpServer>[1]);
+        res.json(entry);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        res.status(400).json({ error: message });
+      }
+    },
+  );
+
+  router.delete(
+    "/:encodedPath/mcp-servers/:serverId",
+    (req: Request, res: Response) => {
+      const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+      if (!projectPath) {
+        res.status(403).json({ error: "Project path not registered or outside home directory" });
+        return;
+      }
+      const serverId = param(req, "serverId");
+      const removed = deleteMcpServer(projectPath, serverId);
+      if (!removed) {
+        res.status(404).json({ error: `MCP server "${serverId}" not found` });
+        return;
+      }
+      res.json({ ok: true });
+    },
+  );
 }
