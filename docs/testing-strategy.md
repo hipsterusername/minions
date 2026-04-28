@@ -368,9 +368,27 @@ Required to pass before merge:
 - `pnpm install --frozen-lockfile`
 - `pnpm verify` (typecheck + test:run + build)
 
-Architecture fitness tests run as part of `pnpm test:run`, so they gate
-too. The CI workflow lives at `.github/workflows/ci.yml`; if you change
+Each of the three legs catches a different class of regression:
+
+- **`pnpm typecheck`** — `tsc -b --noEmit`, walks `tsconfig.app.json`
+  with all strict flags (`strict`, `noUncheckedIndexedAccess`,
+  `exactOptionalPropertyTypes`, `noPropertyAccessFromIndexSignature`).
+  Catches type-shape regressions.
+- **`pnpm test:run`** — the full vitest suite, including the
+  architecture-fitness tests under `tests/architecture/`. Catches
+  behaviour regressions and drift past the documented allowlists.
+- **`pnpm build`** — `tsc -b && vite build`. Confirms the production
+  bundle compiles.
+
+The CI workflow lives at `.github/workflows/ci.yml`; if you change
 the verify command, change CI too.
+
+**Scope note.** `pnpm typecheck` only walks the tsconfig project
+references. Today that's `tsconfig.app.json` (covering `src/`) and
+`tsconfig.node.json` (covering only `vite.config.ts`). The `server/`,
+`tests/`, and `scripts/` trees are validated indirectly by vitest via
+`tsx`, not by `tsc -b`. Broadening typecheck to those trees is tracked
+as a separate scope expansion in CLAUDE.md "Known scope gaps".
 
 ### Coverage
 

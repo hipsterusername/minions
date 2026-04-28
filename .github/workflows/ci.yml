@@ -1,21 +1,10 @@
-# CI — runs the vitest suite on every PR and on pushes to main.
+# CI — runs typecheck, the vitest suite, and the production build on
+# every PR and on pushes to main.
 #
 # Per the project testing strategy (`docs/testing-strategy.md` §6), the
-# real merge gate is `pnpm test:run` (the 800+ vitest suite, including
-# the architecture-fitness tests under `tests/architecture/`). It is the
-# only one of the original three `pnpm verify` steps that currently
-# reflects reality:
-#
-#   • `pnpm typecheck` → no-op today (root tsconfig has `files: []` and
-#     only `references`; `tsc --noEmit` does not walk references). It
-#     would lull us into trusting a green light that checks nothing.
-#   • `pnpm build` → fails with ~50 pre-existing type errors, tracked in
-#     CLAUDE.md "Known issues" as a dedicated multi-session refactor.
-#     Per the project rule, that refactor must NOT be smuggled into
-#     feature PRs, so build cannot gate.
-#
-# When the type-debt PR drains those errors, re-add `tsc -b --noEmit`
-# (typecheck) and `pnpm build` here as additional steps in the same job.
+# merge gate is `pnpm verify` — typecheck + test:run + build. All three
+# legs must stay green. Architecture-fitness tests under
+# `tests/architecture/` run as part of `pnpm test:run`.
 #
 # Action versions are pinned to commit SHAs per global standards.
 # Refresh via Dependabot or by re-resolving the tag with:
@@ -38,8 +27,8 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: tests
+  verify:
+    name: typecheck + tests + build
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -63,5 +52,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Typecheck
+        run: pnpm typecheck
+
       - name: Test
         run: pnpm test:run
+
+      - name: Build
+        run: pnpm build

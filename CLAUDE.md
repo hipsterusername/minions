@@ -68,18 +68,14 @@ revert, or call it out in the PR with reasoning.
 |---|---|
 | `pnpm test` | Watch mode. Run while you're working. |
 | `pnpm test:run` | One-shot. Run before you stage. |
-| `pnpm verify` | One-shot mirror of CI: `pnpm test:run`. Run before you push. |
+| `pnpm typecheck` | Run before you commit. CI runs the same. |
+| `pnpm verify` | One-shot mirror of CI: `pnpm typecheck && pnpm test:run && pnpm build`. Run before you push. |
 | `pnpm test:coverage` | Look at blind spots. Coverage is reported, not gated. |
 | `prek run` | Local pre-commit gate (see `.pre-commit-config.yaml`). |
 
 The CI workflow (`.github/workflows/ci.yml`) runs the same commands as
 `pnpm verify` plus `pnpm install --frozen-lockfile`. If `pnpm verify`
 passes locally, CI will pass too — that's the whole design.
-
-`pnpm typecheck` is intentionally absent from the table. The script is a
-no-op today (see "Known issues" below) and `pnpm build` carries
-~50 pre-existing type errors that are scoped to a separate refactor.
-Both are excluded from `verify`/CI/pre-commit until that refactor lands.
 
 ### Pre-commit hook (one-time setup)
 
@@ -89,10 +85,10 @@ Per the global standard, install `prek` once per clone:
 prek install
 ```
 
-`.pre-commit-config.yaml` configures the hook to run `pnpm test:run`
-on commits that touch TS/TSX/JS/MJS files. It is intentionally cheap —
-the suite finishes in well under a second on a warm cache. Don't
-bypass it; if a hook fails, fix the cause.
+`.pre-commit-config.yaml` configures the hook to run `pnpm typecheck`
+and `pnpm test:run` on commits that touch TS/TSX/JS/MJS files. It is
+intentionally cheap — the suite finishes in well under a second on a
+warm cache. Don't bypass it; if a hook fails, fix the cause.
 
 ---
 
@@ -149,50 +145,16 @@ New server files must be under 400 lines; split them if they grow.
 
 ---
 
-## Known issues (fix-first before expanding scope)
+## Known scope gaps (broader typecheck coverage)
 
-These were discovered while wiring the workflow-integration in this
-repo and are **not fixed** here — they deserve their own focused PR.
-List them up top so any new session notices immediately.
-
-### `pnpm typecheck` is currently a no-op
-
-The root `tsconfig.json` has `"files": []` with only `references`.
-`tsc --noEmit` in reference-mode without `-b` typechecks nothing.
-
-Because of this, `pnpm typecheck` is **not** wired into CI, the
-pre-commit hook, or `pnpm verify` — letting it gate would light a
-green check that proves nothing.
-
-**Fix:** change `"typecheck": "tsc --noEmit"` to
-`"typecheck": "tsc -b --noEmit"` so the same project references are walked.
-Before flipping the switch, fix the pre-existing build errors below —
-otherwise the new typecheck immediately fails on `main`. Re-add the
-`Typecheck` step to `.github/workflows/ci.yml` and the pre-commit hook
-in the same PR that drains the errors.
-
-### `pnpm build` fails on `main` today
-
-`tsc -b --noEmit` (run as part of `pnpm build`) surfaces **~50 type
-errors across the `src/` tree**, including broad
-`exactOptionalPropertyTypes` and `noUncheckedIndexedAccess` failures.
-
-Concentration:
-- `src/nodes/RenderNode.tsx` — index-signature + possibly-undefined errors
-- `src/skills/built-in/index.ts`, `src/skills/user-skills.ts` —
-  arity + index-signature errors
-- `src/use-autosave.ts`, `src/use-kanban.ts` — arity + possibly-undefined
-- `src/use-session-stream.test.tsx`,
-  `tests/harness/ws-replay.ts` — stale exactOptional casts and
-  missing `node:fs`/`node:path` types
-
-**Scope:** this is its own multi-session refactor (probably 3–5 focused
-PRs grouped by error class). Do NOT attempt as part of a feature PR.
-
-Until it's drained, `pnpm build` is **not** in the CI workflow. The
-`pnpm test:run` Vitest suite (839 tests across 56 files) is the
-operating merge gate. When the type-debt PR lands, re-add `pnpm build`
-to `.github/workflows/ci.yml` and to `pnpm verify` in the same PR.
+The strict TypeScript flags only walk what's in the tsconfig project
+references. Today that's `tsconfig.app.json` (covers `src/`) and
+`tsconfig.node.json` (covers only `vite.config.ts`). The
+`server/`, `tests/`, and `scripts/` trees are **not** typechecked by
+`pnpm typecheck` — they're only validated indirectly when vitest runs
+them via `tsx`. Adding a tsconfig project that covers those trees is
+a follow-up; surfaces additional type-strictness work but no longer
+blocks the CI gate (typecheck + tests + build all pass on `src/`).
 
 ---
 

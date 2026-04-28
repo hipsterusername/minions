@@ -18,7 +18,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "verify": "pnpm test:run",
+    "verify": "pnpm typecheck && pnpm test:run && pnpm build",
     "preflight": "node scripts/preflight.mjs",
     "configure": "node scripts/preflight.mjs && node scripts/setup-permissions.mjs"
   },
