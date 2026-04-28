@@ -32,21 +32,21 @@ interface PortDotProps {
    */
   topPx: number;
   /** If true, show a locked/dimmed state (e.g. session already started) */
-  locked?: boolean;
+  locked?: boolean | undefined;
   /** Port identity — required for drag-to-connect */
   nodeId: string;
   portId: string;
   nodeType: string;
   /** Called when user starts dragging from this port */
-  onConnectionStart?: (port: PortInfo, e: React.MouseEvent) => void;
+  onConnectionStart?: ((port: PortInfo, e: React.MouseEvent) => void) | undefined;
   /** Called when user drops on this port (end of drag) */
-  onConnectionEnd?: (port: PortInfo) => void;
+  onConnectionEnd?: ((port: PortInfo) => void) | undefined;
   /** Whether a connection drag is currently in progress */
-  isDragActive?: boolean;
+  isDragActive?: boolean | undefined;
   /** Whether this port is a valid drop target for the current drag */
-  isValidTarget?: boolean;
+  isValidTarget?: boolean | undefined;
   /** Whether the dragging cursor is currently snapping to this port */
-  isSnapTarget?: boolean;
+  isSnapTarget?: boolean | undefined;
 }
 
 /**

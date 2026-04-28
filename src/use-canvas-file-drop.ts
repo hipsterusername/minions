@@ -24,7 +24,7 @@ export interface UseCanvasFileDropOpts {
   transformRef: MutableRefObject<CanvasTransform>;
   /** Ref to the current nodes array */
   nodesRef: MutableRefObject<CanvasNode[]>;
-  projectPath?: string;
+  projectPath?: string | undefined;
 }
 
 export interface UseCanvasFileDropResult {

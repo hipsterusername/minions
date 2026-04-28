@@ -84,8 +84,9 @@ function migrateBoard(board: KanbanBoard): KanbanBoard {
       // Find nearest preceding column that already exists to anchor insertion
       let insertAfterIdx = -1;
       for (let i = defaultIdx - 1; i >= 0; i--) {
-        const anchorId = DEFAULT_COLUMNS[i].id;
-        const found = migrated.columns.findIndex((c) => c.id === anchorId);
+        const anchor = DEFAULT_COLUMNS[i];
+        if (!anchor) continue;
+        const found = migrated.columns.findIndex((c) => c.id === anchor.id);
         if (found !== -1) { insertAfterIdx = found; break; }
       }
       const cols = [...migrated.columns];
@@ -128,7 +129,7 @@ export function useKanban(projectId: string): {
   const boardRef = useRef(board);
   boardRef.current = board;
 
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const initialRef = useRef(true);
 
   const saveToStorage = useCallback(() => {

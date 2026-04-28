@@ -8,6 +8,7 @@ import {
   type Dispatch,
 } from "react";
 import type { CanvasTransform, CanvasNode, CanvasAction, Position, Size, ContextItem, RoutineLeaderSpawnEvent } from "./types.ts";
+import { MINION_THINKING_CONFIG } from "./types.ts";
 import { generateId } from "./canvas-state.ts";
 import { CanvasNodeComponent } from "./CanvasNode.tsx";
 import { getAllNodeTypes, isContextProvider } from "./node-registry.ts";
@@ -91,7 +92,7 @@ function getPortWorldPos(
   );
   const idx = sameDirPorts.findIndex((p) => p.id === portId);
   if (idx === -1) return null;
-  const anchorY = sameDirPorts[idx].anchorY;
+  const anchorY = sameDirPorts[idx]?.anchorY;
   const y =
     anchorY != null
       ? node.position.y + node.size.height * anchorY
@@ -545,9 +546,9 @@ export function Canvas({
     title: string;
     description: string;
     priority: "low" | "medium" | "high" | "critical";
-    worktreeBranch?: string | null;
-    isAgent?: boolean;
-    parentSessionKey?: string;
+    worktreeBranch?: string | null | undefined;
+    isAgent?: boolean | undefined;
+    parentSessionKey?: string | undefined;
   }
   const pendingMinionsRef = useRef<Map<string, PendingMinionSpawn>>(new Map());
   const revealedMinionsRef = useRef<Set<string>>(new Set());
@@ -655,7 +656,7 @@ export function Canvas({
         ? (container.clientHeight / 2 - transform.y) / transform.scale
         : 300;
 
-      const defaultData = createDefaultNodeData(nodeType);
+      const defaultData = createDefaultNodeData(nodeType) as Record<string, unknown>;
       const sessionData = {
         ...defaultData,
         sessionKey,
@@ -768,6 +769,7 @@ export function Canvas({
     if (nextIndex >= activeNodeIds.length) nextIndex = 0;
     lastActiveIndexRef.current = nextIndex;
     const id = activeNodeIds[nextIndex];
+    if (!id) return;
     setSelectedIds(new Set([id]));
     focusNodes(new Set([id]));
   }, [activeNodeIds, focusNodes, setSelectedIds]);
@@ -912,6 +914,7 @@ export function Canvas({
         error: null,
         model: "sonnet" as const,
         permissionMode: "bypassPermissions" as const,
+        thinkingConfig: { ...MINION_THINKING_CONFIG },
         ...(spawn.worktreeBranch ? { worktreeBranch: spawn.worktreeBranch } : {}),
         ...(spawn.isAgent
           ? { agentTaskId: spawn.taskId, parentSessionKey: spawn.parentSessionKey }
@@ -2415,7 +2418,7 @@ export function Canvas({
       // task records into the leader's taskPlan, preserving any
       // frontend-only fields (cost, sessionSummary) accumulated at close.
       if (serverMsg.type === "task_plan_update") {
-        const { leaderSessionKey, tasks } = serverMsg as {
+        const { leaderSessionKey, tasks } = serverMsg as unknown as {
           leaderSessionKey: string;
           tasks: Array<{
             taskId: string;
@@ -2480,7 +2483,7 @@ export function Canvas({
           description,
           priority,
           worktreeBranch,
-        } = serverMsg as {
+        } = serverMsg as unknown as {
           leaderSessionKey: string;
           minionSessionKey: string;
           taskId: string;
@@ -2524,7 +2527,7 @@ export function Canvas({
           taskId,
           title,
           description,
-        } = serverMsg as {
+        } = serverMsg as unknown as {
           leaderSessionKey: string;
           taskId: string;
           title: string;
@@ -2593,7 +2596,7 @@ export function Canvas({
       // The render node is NOT created when the leader session starts; it only
       // appears once the leader actually calls a render tool (render_set, etc.).
       if (serverMsg.type === "render_update") {
-        const { leaderSessionKey } = serverMsg as { leaderSessionKey: string };
+        const { leaderSessionKey } = serverMsg as unknown as { leaderSessionKey: string };
 
         // Find the leader node that owns this session
         const leader = nodesRef.current.find(

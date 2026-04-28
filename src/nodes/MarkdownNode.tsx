@@ -289,9 +289,9 @@ function handleEnterKey(textarea: HTMLTextAreaElement): string | null {
   }
 
   // Auto-increment numbered lists
-  let nextMarker = marker;
-  const numMatch = marker.match(/^(\d+)\.\s+/);
-  if (numMatch) {
+  let nextMarker = marker ?? "";
+  const numMatch = nextMarker.match(/^(\d+)\.\s+/);
+  if (numMatch && numMatch[1]) {
     nextMarker = `${parseInt(numMatch[1]) + 1}. `;
   }
 
