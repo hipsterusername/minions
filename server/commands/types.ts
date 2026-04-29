@@ -53,7 +53,9 @@ export type WsCommandType =
   // Routines
   | "list_routines"
   | "start_routine"
-  | "abort_routine";
+  | "abort_routine"
+  // Render-DSL interactive components
+  | "submit_form";
 
 /**
  * Binary attachment the client pins to a user turn — today only images.
@@ -100,6 +102,9 @@ export interface WsCommand {
   routineId?: string;
   runId?: string;
   routineInputs?: Record<string, unknown>;
+  // Render-DSL interactive submit_form command params
+  formComponentId?: string;
+  formAnswers?: Record<string, unknown>;
   // Request ID for correlating async responses
   requestId?: string;
 }

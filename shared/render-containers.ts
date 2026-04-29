@@ -12,8 +12,12 @@
  */
 
 import { z } from "zod/v4";
-import { spanSchema } from "./render-dsl.ts";
-import type { RenderComponent, ComponentSpan } from "./render-dsl.ts";
+import { spanSchema } from "./render-base.ts";
+import type { ComponentSpan } from "./render-base.ts";
+// `RenderComponent` lives in render-dsl.ts and the union there imports
+// these container schemas. The cycle is type-only (no runtime value
+// import), which TypeScript handles via `import type`.
+import type { RenderComponent } from "./render-dsl.ts";
 
 // Children schema is loose at parse time to avoid z.lazy + discriminatedUnion
 // incompatibility. Runtime validation of nested children is a no-op for v1.
@@ -50,29 +54,32 @@ export const tabsComponentSchema = z.object({
 
 // ── TypeScript types (recursive via RenderComponent) ──────
 
+// Optional fields use `T | undefined` explicitly so the manual interfaces
+// stay assignable from the zod-inferred shapes under
+// `exactOptionalPropertyTypes: true`.
 export interface SectionComponent {
   id: string;
   type: "section";
   title: string;
-  defaultOpen?: boolean;
-  badge?: string;
+  defaultOpen?: boolean | undefined;
+  badge?: string | undefined;
   components: RenderComponent[];
-  span?: ComponentSpan;
+  span?: ComponentSpan | undefined;
 }
 
 export interface TabItem {
   id: string;
   label: string;
-  badge?: string;
+  badge?: string | undefined;
   components: RenderComponent[];
 }
 
 export interface TabsComponent {
   id: string;
   type: "tabs";
-  activeTabId?: string;
+  activeTabId?: string | undefined;
   tabs: TabItem[];
-  span?: ComponentSpan;
+  span?: ComponentSpan | undefined;
 }
 
 // ── Markdown format helpers ────────────────────────────────

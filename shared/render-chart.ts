@@ -9,7 +9,7 @@
  */
 
 import { z } from "zod/v4";
-import { spanSchema, componentColorSchema } from "./render-dsl.ts";
+import { spanSchema, componentColorSchema } from "./render-base.ts";
 
 // ── Point and series schemas ───────────────────────────────────────────────
 

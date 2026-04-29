@@ -12,7 +12,7 @@
  */
 
 import { z } from "zod/v4";
-import { spanSchema } from "./render-dsl.ts";
+import { spanSchema } from "./render-base.ts";
 
 // ── Field kind vocabulary ──────────────────────────────────
 
