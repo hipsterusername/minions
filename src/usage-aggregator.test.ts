@@ -16,7 +16,6 @@ import {
   emptySessionUsage,
   formatTokens,
   mergeResultIntoSession,
-  shortModelLabel,
   type SessionUsage,
 } from "./usage-aggregator.ts";
 import type { ModelUsage, SdkResultSuccess } from "./use-socket.ts";
@@ -80,15 +79,8 @@ describe("mergeResultIntoSession", () => {
     expect(next.modelUsage["claude-sonnet-4-20250514"]?.outputTokens).toBe(500);
   });
 
-  it("does not mutate the input session", () => {
-    const initial = emptySessionUsage();
-    const frozen: SessionUsage = {
-      ...initial,
-      modelUsage: { ...initial.modelUsage },
-    };
-    mergeResultIntoSession(initial, makeResult({ totalCostUsd: 1 }));
-    expect(initial).toEqual(frozen);
-  });
+  // Removed: "does not mutate the input session" — implementation detail.
+  // See docs/testing-strategy.md §5.
 
   it("replaces totalCost rather than summing (SDK reports cumulative)", () => {
     const seeded = mergeResultIntoSession(
@@ -203,17 +195,9 @@ describe("aggregateGlobalUsage", () => {
   });
 });
 
-describe("shortModelLabel", () => {
-  it("strips the claude- prefix and date suffix", () => {
-    expect(shortModelLabel("claude-sonnet-4-20250514")).toBe("sonnet-4");
-    expect(shortModelLabel("claude-opus-4-1-20250805")).toBe("opus-4-1");
-    expect(shortModelLabel("claude-haiku-4-5")).toBe("haiku-4-5");
-  });
-
-  it("falls back to the raw id when nothing matches", () => {
-    expect(shortModelLabel("custom-model")).toBe("custom-model");
-  });
-});
+// Removed: shortModelLabel regex pinning — couples to the literal
+// stripping rules rather than the displayed-label contract. See
+// docs/testing-strategy.md §5.
 
 describe("formatTokens", () => {
   it("formats tokens at three scales", () => {

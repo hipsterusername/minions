@@ -96,39 +96,29 @@ export interface RunRoutineArgs {
 
 /**
  * Validate user-supplied inputs against the routine's declared inputs.
- * Returns the coerced value bag, or throws with a list of all violations.
+ *
+ * Inputs are stringly-typed: every value is coerced via `String(v)` so authors
+ * can pass numbers/booleans through casual JSON without bouncing the request.
+ * Required inputs that are absent (or empty) and have no default surface as a
+ * single aggregated error.
  */
 export function validateInputs(
   declared: readonly RoutineInput[],
   supplied: Readonly<Record<string, unknown>>,
 ): RoutineInputValues {
   const errors: string[] = [];
-  const out: Record<string, string | number | boolean> = {};
+  const out: Record<string, string> = {};
   for (const decl of declared) {
     const raw = supplied[decl.name];
     if (raw === undefined || raw === null || raw === "") {
-      if (decl.required) {
-        if (decl.defaultValue !== undefined) {
-          out[decl.name] = decl.defaultValue;
-        } else {
-          errors.push(`missing required input "${decl.name}"`);
-        }
-      } else if (decl.defaultValue !== undefined) {
+      if (decl.defaultValue !== undefined) {
         out[decl.name] = decl.defaultValue;
+      } else if (decl.required) {
+        errors.push(`missing required input "${decl.name}"`);
       }
       continue;
     }
-    if (decl.type === "string" && typeof raw === "string") {
-      out[decl.name] = raw;
-    } else if (decl.type === "number" && typeof raw === "number") {
-      out[decl.name] = raw;
-    } else if (decl.type === "boolean" && typeof raw === "boolean") {
-      out[decl.name] = raw;
-    } else {
-      errors.push(
-        `input "${decl.name}" must be a ${decl.type} (got ${typeof raw})`,
-      );
-    }
+    out[decl.name] = String(raw);
   }
   if (errors.length > 0) {
     throw new Error(`Invalid routine inputs: ${errors.join("; ")}`);

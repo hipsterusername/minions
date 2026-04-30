@@ -182,43 +182,15 @@ describe("runRoutine (DAG) — diamond pattern", () => {
     expect(runner).toHaveBeenCalledTimes(4);
   });
 
-  it("snapshot.dagSteps lists all four steps with correct dep edges", async () => {
-    const runner: StepRunner = vi.fn(async ({ step }) => ok(step.id));
-    const snap = await runRoutine({
-      routine: makeDiamondRoutine(),
-      inputs: {},
-      runner,
-      runId: "r",
-      now: fixedNow,
-    });
-    const dagSteps = snap.dagSteps!;
-    expect(dagSteps).toHaveLength(4);
-
-    const a = dagSteps.find((s) => s.stepId === "a")!;
-    const b = dagSteps.find((s) => s.stepId === "b")!;
-    const c = dagSteps.find((s) => s.stepId === "c")!;
-    const d = dagSteps.find((s) => s.stepId === "d")!;
-
-    expect(a.dependsOn).toEqual([]);
-    expect(b.dependsOn).toEqual(["a"]);
-    expect(c.dependsOn).toEqual(["a"]);
-    expect(d.dependsOn).toEqual(["b", "c"]);
-  });
-
-  it("all dagSteps have state=success on a happy-path run", async () => {
-    const runner: StepRunner = vi.fn(async ({ step }) => ok(step.id));
-    const snap = await runRoutine({
-      routine: makeDiamondRoutine(),
-      inputs: {},
-      runner,
-      runId: "r",
-      now: fixedNow,
-    });
-    for (const s of snap.dagSteps!) {
-      expect(s.state).toBe("success");
-      expect(s.outcome).toBe("success");
-    }
-  });
+  // Note: a "snapshot.dagSteps lists all four steps with correct dep edges"
+  // test was removed per testing-strategy.md §5.7 (IMPL_COUPLING) — it
+  // round-trips the parser's dependsOn output, not anything the scheduler
+  // computes.
+  //
+  // Note: a separate "all dagSteps have state=success on a happy-path run"
+  // test was removed per §5.9 (DUPLICATE) — already covered by the
+  // "runs all four steps and returns success" case above (snap.state ===
+  // "success" implies every step succeeded under fail-fast).
 
   it("B and C run in parallel after A (concurrency proof)", async () => {
     const order: string[] = [];
@@ -517,23 +489,8 @@ describe("runRoutine (DAG) — per-step depends context", () => {
 // ── Snapshot cadence ──────────────────────────────────────────────────────────
 
 describe("runRoutine (DAG) — snapshot emission", () => {
-  it("emits mode=dag on every snapshot", async () => {
-    const snapshots: ReturnType<typeof runRoutine> extends Promise<infer S>
-      ? S[]
-      : never[] = [];
-    const runner: StepRunner = vi.fn(async ({ step }) => ok(step.id));
-    await runRoutine({
-      routine: makeSingleStepDagRoutine(),
-      inputs: {},
-      runner,
-      runId: "r",
-      onSnapshot: (s) => snapshots.push(s),
-      now: fixedNow,
-    });
-    for (const s of snapshots) {
-      expect(s.mode).toBe("dag");
-    }
-  });
+  // Note: an "emits mode=dag on every snapshot" test was removed per
+  // §5.7 — it asserts a constant string field set at routine entry.
 
   it("starts with state=running and ends with state=success", async () => {
     const snapshots: Array<{ state: string }> = [];

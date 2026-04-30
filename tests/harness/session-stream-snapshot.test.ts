@@ -1,18 +1,23 @@
 /**
- * End-to-end snapshot baseline for `sessionStreamReducer`.
+ * End-to-end fixture-replay coverage for `sessionStreamReducer`.
  *
  * For every fixture in `tests/fixtures/sdk-message-streams/`, this file
  * replays the recorded ServerMessages through the reducer in order and
- * asserts the *final* state matches an inline snapshot.
+ * asserts properties of the cumulative state — role sequence, content
+ * strings, cost, turn counts, and per-step intermediate buffer states.
  *
- * **Why this complements `sdk-messages-snapshot.test.ts`:** that file
- * locks the per-event conversion. This one locks the cumulative
- * reducer behaviour — dedup, streaming clear, assistant/result
- * collapse, cost/turns capture across a full stream. Both must stay
- * green for SessionHost extraction to land safely.
+ * **Status (post-§2.5 rewrite):** the prior version of this file used
+ * inline `toMatchInlineSnapshot` blobs. Per
+ * `docs/testing-strategy.md` §5.6, those have been replaced with
+ * targeted property assertions. The companion
+ * `tests/harness/sdk-messages-snapshot.test.ts` was deleted in the
+ * same pass — it duplicated the leader-plan-and-delegate fixture this
+ * file already exercises, and the reducer-determinism tautology it
+ * also carried (`sync_response replay yields the same state`) has been
+ * removed per §5.1.
  *
  * Stability: volatile DisplayMessage fields (`id`, `timestamp`) are
- * stripped before snapshotting so reruns produce identical output.
+ * stripped before assertion so reruns produce identical output.
  */
 
 import { describe, expect, it } from "vitest";
@@ -72,90 +77,9 @@ function replayFixtureToFinalState(relativePath: string): SessionStreamState {
 }
 
 describe("sessionStreamReducer: snapshot baseline against fixtures", () => {
-  it("leader-plan-and-delegate.jsonl", () => {
-    const final = replayFixtureToFinalState("leader-plan-and-delegate.jsonl");
-    expect(stableView(final)).toMatchInlineSnapshot(`
-      {
-        "error": null,
-        "messages": [
-          {
-            "content": "Session on claude-opus-4-5",
-            "role": "system",
-            "sdkUuid": "u-init-0001",
-          },
-          {
-            "content": "Two independent tasks. I'll plan both, then delegate the first to a minion.",
-            "role": "thinking",
-            "sdkUuid": "u-asst-0002",
-          },
-          {
-            "content": "I'll plan the two tasks and delegate the first.",
-            "role": "assistant",
-            "sdkUuid": "u-asst-0003",
-          },
-          {
-            "content": "mcp__task-manager__set_task_name",
-            "role": "tool",
-            "sdkUuid": "u-asst-0004",
-            "toolInput": {
-              "name": "Plan and delegate",
-            },
-            "toolName": "mcp__task-manager__set_task_name",
-          },
-          {
-            "content": "mcp__task-manager__plan_task",
-            "role": "tool",
-            "sdkUuid": "u-asst-0005",
-            "toolInput": {
-              "description": "Do the first thing",
-              "priority": "high",
-              "taskId": "task-a",
-              "title": "First task",
-            },
-            "toolName": "mcp__task-manager__plan_task",
-          },
-          {
-            "content": "mcp__task-manager__plan_task",
-            "role": "tool",
-            "sdkUuid": "u-asst-0006",
-            "toolInput": {
-              "description": "Do the second thing",
-              "priority": "medium",
-              "taskId": "task-b",
-              "title": "Second task",
-            },
-            "toolName": "mcp__task-manager__plan_task",
-          },
-          {
-            "content": "mcp__task-manager__assign_task",
-            "role": "tool",
-            "sdkUuid": "u-asst-0007",
-            "toolInput": {
-              "prompt": "Do the first thing",
-              "taskId": "task-a",
-            },
-            "toolName": "mcp__task-manager__assign_task",
-          },
-          {
-            "content": "Delegated \`task-a\` to a minion. I'll handle \`task-b\` myself next.",
-            "role": "assistant",
-            "sdkUuid": "u-asst-0008",
-          },
-          {
-            "content": "Planned 2 tasks and delegated 1.",
-            "role": "result",
-            "sdkUuid": "u-result-0009",
-            "suffix": "8.6s · $0.0288",
-          },
-        ],
-        "sessionKey": "leader-1",
-        "status": "running",
-        "streamingText": "",
-        "totalCost": 0.0288,
-        "turns": 1,
-      }
-    `);
-  });
+  // Note: the leader-plan-and-delegate fixture is now exercised by
+  // tests/harness/sdk-messages-snapshot.test.ts (after the §2.4 rewrite).
+  // Keeping a duplicate here violates §5.9 (DUPLICATE).
 
   it("leader-thinking-and-text.jsonl", () => {
     const final = replayFixtureToFinalState("leader-thinking-and-text.jsonl");
@@ -336,46 +260,7 @@ describe("sessionStreamReducer: snapshot baseline against fixtures", () => {
   });
 });
 
-// ── Sync-response replay ─────────────────────────────────
-
-describe("sessionStreamReducer: sync_response replay rebuilds same final state", () => {
-  it("rebuilding via sync_response produces the same messages as live replay", () => {
-    // Live replay
-    const liveEntries = loadFixture("leader-plan-and-delegate.jsonl");
-    const live = liveEntries.reduce(
-      (acc, entry) => sessionStreamReducer(acc, entry.message, "test"),
-      { ...emptySessionStreamState("leader-1"), status: "running" as const },
-    );
-
-    // Sync-response replay: bundle every sdk_event into a single
-    // sync_response and run it through the reducer once.
-    const syncEvents = liveEntries
-      .map((e) => e.message)
-      .filter((m): m is Extract<typeof m, { type: "sdk_event" }> => m.type === "sdk_event")
-      .map((m) => ({
-        type: "sdk_event" as const,
-        sessionKey: m.sessionKey,
-        message: m.message,
-        timestamp: 0,
-      }));
-
-    const synced = sessionStreamReducer(
-      { ...emptySessionStreamState("leader-1"), status: "running" },
-      {
-        type: "sync_response",
-        sessionKey: "leader-1",
-        found: true,
-        status: "running",
-        events: syncEvents,
-      },
-      "test",
-    );
-
-    // Same content (volatile fields stripped).
-    const liveStable = live.messages.map(({ id: _i, timestamp: _t, ...rest }) => rest);
-    const syncStable = synced.messages.map(({ id: _i, timestamp: _t, ...rest }) => rest);
-    expect(syncStable).toEqual(liveStable);
-    expect(synced.totalCost).toBe(live.totalCost);
-    expect(synced.turns).toBe(live.turns);
-  });
-});
+// Note: a "sync_response replay rebuilds same final state" describe block
+// lived here. Per testing-strategy.md §5.1 (TAUTOLOGY) it has been removed —
+// the reducer is deterministic over identical input, so feeding it the same
+// events twice is guaranteed to yield equal state by construction.

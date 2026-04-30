@@ -77,7 +77,11 @@ export function createRenderToolsForLeader(opts: {
         .describe("Full component tree to display"),
     },
     async (args) => {
-      renderState.title = args.title ?? renderState.title;
+      // `set` is a full replace: title and columns both fall back to their
+      // documented defaults when the agent omits them, mirroring the way
+      // components is replaced wholesale. (Earlier code preserved title but
+      // reset columns, which was inconsistent.)
+      renderState.title = args.title ?? "";
       renderState.columns = args.columns ?? 2;
       renderState.components = args.components;
 
@@ -169,7 +173,15 @@ export function createRenderToolsForLeader(opts: {
         .describe("Components to append"),
     },
     async (args) => {
-      renderState.components.push(...args.components);
+      // Match the client-side `applyRenderMessage("append")` semantics: a
+      // component whose id already exists is treated as a replace, not a
+      // duplicate. Without this the server's persisted state diverges from
+      // the dashboard the user actually sees.
+      const incomingIds = new Set(args.components.map((c) => c.id));
+      renderState.components = [
+        ...renderState.components.filter((c) => !incomingIds.has(c.id)),
+        ...args.components,
+      ];
 
       bus.emitToSession(leaderSessionKey, {
         type: "render_update",
@@ -226,10 +238,20 @@ export function createRenderToolsForLeader(opts: {
 
   // ── Build MCP server ───────────────────────────────
 
+  const tools = [
+    renderSetTool,
+    renderPatchTool,
+    renderAppendTool,
+    renderRemoveTool,
+  ] as const;
+
   const mcpServer = createSdkMcpServer({
     name: "render-dashboard",
-    tools: [renderSetTool, renderPatchTool, renderAppendTool, renderRemoveTool],
+    tools: [...tools],
   });
 
-  return { mcpServer, renderState };
+  // `tools` is exposed alongside `mcpServer` so tests (and any future
+  // in-process driver) can invoke handlers directly without spinning up
+  // an MCP transport.
+  return { mcpServer, tools, renderState };
 }

@@ -17,7 +17,6 @@ import {
   clearSkills,
   registerSkill,
 } from "../skills/registry.ts";
-import { buildArmingInventory } from "../skills/types.ts";
 import type { SkillTemplate } from "../skills/types.ts";
 
 function makeSkill(over: Partial<SkillTemplate> = {}): SkillTemplate {
@@ -85,10 +84,7 @@ describe("buildLeaderSystemPrompt", () => {
     expect(out).toContain("`review` — **Review**: Read code");
   });
 
-  it("renders empty descriptions as '(no description)'", () => {
-    const text = buildArmingInventory([
-      makeSkill({ id: "x", name: "Nameless", description: "" }),
-    ]);
-    expect(text).toContain("`x` — **Nameless**: (no description)");
-  });
+  // Removed: '(no description)' substring assertion — implementation-coupled
+  // copy pinning of buildArmingInventory output. See
+  // docs/testing-strategy.md §5.
 });

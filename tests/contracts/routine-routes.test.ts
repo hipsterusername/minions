@@ -64,7 +64,7 @@ const VALID_ROUTINE = {
   name: "My Routine",
   description: "Contract test routine",
   version: 1,
-  inputs: [{ name: "topic", type: "string", label: "Topic", required: true }],
+  inputs: [{ name: "topic", label: "Topic", required: true }],
   phases: [
     {
       id: "phase-1",

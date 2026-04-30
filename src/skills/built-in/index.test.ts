@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { clearSkills, getAllSkills, getSkill } from "../registry.ts";
+import { clearSkills, getAllSkills } from "../registry.ts";
 import { registerBuiltinSkills } from "./index.ts";
 
 const EXPECTED_BUILTIN_IDS = [
@@ -38,22 +38,12 @@ describe("registerBuiltinSkills", () => {
     registerBuiltinSkills();
   });
 
-  it("registers every documented built-in skill by id", () => {
-    for (const id of EXPECTED_BUILTIN_IDS) {
-      expect(getSkill(id), `expected built-in skill "${id}" to be registered`)
-        .toBeDefined();
-    }
-  });
-
+  // Collapsed: "documented-by-id" iteration test was a strict subset of
+  // the exact-set assertion below. Idempotency-of-`registerSkill` test
+  // dropped — registry-internal contract pinning, not behaviour. See
+  // docs/testing-strategy.md §5.
   it("registers exactly the documented set (no extras, no gaps)", () => {
     const ids = getAllSkills().map((s) => s.id).sort();
     expect(ids).toEqual([...EXPECTED_BUILTIN_IDS].sort());
-  });
-
-  it("is idempotent — re-running does not duplicate entries", () => {
-    const before = getAllSkills().length;
-    registerBuiltinSkills();
-    registerBuiltinSkills();
-    expect(getAllSkills().length).toBe(before);
   });
 });

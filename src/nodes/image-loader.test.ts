@@ -10,7 +10,6 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_IMAGE_EDGE_PX,
-  MAX_IMAGE_BYTES,
   planImageDownscale,
 } from "./image-loader.ts";
 
@@ -26,16 +25,8 @@ describe("planImageDownscale", () => {
     ).toBeNull();
   });
 
-  it("returns null at exactly the edge cap and size cap", () => {
-    expect(
-      planImageDownscale({
-        width: MAX_IMAGE_EDGE_PX,
-        height: 1000,
-        byteSize: MAX_IMAGE_BYTES,
-        mediaType: "image/jpeg",
-      }),
-    ).toBeNull();
-  });
+  // Removed: exact-cap boundary case — duplicate of the within-budget
+  // case above. See docs/testing-strategy.md §5.
 
   it("caps landscape long edge at MAX_IMAGE_EDGE_PX and preserves aspect", () => {
     const plan = planImageDownscale({

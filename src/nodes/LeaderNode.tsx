@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useLayoutEffect } from "react";
+import { useState, useEffect, useRef, useCallback, useLayoutEffect, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import type { NodeRenderProps, ThinkingConfig } from "../types.ts";
 import { DEFAULT_THINKING_CONFIG } from "../types.ts";
@@ -24,6 +24,8 @@ import { AutoTextarea } from "../components/AutoTextarea.tsx";
 import { SimpleMarkdown } from "../components/SimpleMarkdown.tsx";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { AddAsNodeButton } from "../components/AddAsNodeButton.tsx";
+import { debugFlagStore } from "../debug.ts";
+import { DebugInspector } from "../components/DebugInspector.tsx";
 
 registerContract(LEADER_CONTRACT);
 
@@ -2550,6 +2552,11 @@ export function LeaderNodeRenderer({
   const scrollZoneRef = useRef<HTMLDivElement>(null);
   const syncedRef = useRef(false);
   const { banners, processSdkEvent, dismissBanner } = useStatusBanners();
+  const debugEnabled = useSyncExternalStore(
+    debugFlagStore.subscribe,
+    debugFlagStore.getSnapshot,
+    debugFlagStore.getSnapshot,
+  );
 
   // Auto-expand the plan panel when the first task is registered
   const prevPlanCountRef = useRef(0);
@@ -3742,6 +3749,15 @@ export function LeaderNodeRenderer({
         ) : data.status === "running" && data.messages.length > 0 ? (
           <StreamingIndicator label="Leader is thinking..." />
         ) : null}
+        {debugEnabled && data.sessionKey && (
+          <DebugInspector
+            sessionKey={data.sessionKey}
+            streamingText={data.streamingText}
+            streamingBlockIndex={data.streamingBlockIndex ?? null}
+            messages={data.messages}
+            label="leader"
+          />
+        )}
         {/* Wait countdown timer */}
         {data.waitUntil && data.waitUntil > Date.now() && (
           <WaitCountdown waitUntil={data.waitUntil} reason={data.waitReason ?? "Waiting..."} />

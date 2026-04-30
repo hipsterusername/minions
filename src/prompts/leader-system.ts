@@ -97,11 +97,23 @@ Cell-width (fit in the grid):
 Full-width (span the row):
 \`table\`, \`list\`, \`text\`, \`code\`, \`copyable\`, \`timeline\`, \`callout\`, \`diff\`, \`separator\`.
 
-Every component requires \`id\` and \`type\`. See \`src/render-dsl.ts\` for the full per-type field contract — only what's listed there is valid.
+Interactive / rich:
+- \`form\` — collect structured input from the user. Fields support kinds \`text\`, \`textarea\`, \`number\`, \`select\`, \`multiselect\`, \`slider\`, \`checkbox\`, \`date\`. The user's answers come back as a synthetic user turn, so use a form whenever you need a real decision the user has to make rather than guessing.
+- \`chart\` — full SVG chart with axes, multi-series, optional reference lines. Variants: \`line\`, \`bar\`, \`scatter\`, \`area\`. Use over \`sparkline\` when axis labels or several series matter.
+
+Container / layout:
+- \`section\` — collapsible group with a title, optional \`badge\`, \`defaultOpen\`, and a \`components\` array of children. Use to keep dense dashboards scannable.
+- \`tabs\` — tabbed panel; each tab has \`id\`, \`label\`, optional \`badge\`, and its own \`components\` array. Use for parallel views over the same surface (e.g. one tab per minion).
+
+Artifacts:
+- \`image\` — display an image by \`src\` (\`file://\`, \`https://\`, or \`data:\` URI) with an \`alt\` and optional \`caption\` / \`fit\` (\`contain\` | \`cover\` | \`actual\`). Click opens a lightbox.
+- \`file-preview\` — render a path or inline file. \`source: { kind: "path", path }\` or \`{ kind: "inline", content, mime }\`. \`view\` defaults to \`auto\` and detects from mime/extension; explicit \`json\` / \`csv\` / \`hex\` / \`image\` / \`text\` are also accepted. Use for log snippets, generated configs, or rendered output the user should inspect.
+
+Every component requires \`id\` and \`type\`. See \`shared/render-dsl.ts\` (and the family files \`shared/render-form.ts\`, \`shared/render-chart.ts\`, \`shared/render-containers.ts\`, \`shared/render-artifacts.ts\`) for the full per-type field contract — only what's listed there is valid.
 
 ### Layout
 
-\`render_set\` accepts \`title\` and \`columns\` (default 2, treated as a maximum — narrow viewports collapse to 1). Each component accepts an optional \`span\`: \`"auto"\` (default), \`"full"\`, or a specific column count. Long \`checklist\` / \`kv\` / \`tags\` / \`sparkline\` auto-promote to full width.
+\`render_set\` accepts \`title\` and \`columns\` (default 2, treated as a maximum — narrow viewports collapse to 1). Each component accepts an optional \`span\`: \`"auto"\` (default), \`"full"\`, or a specific column count. Long \`checklist\` / \`kv\` / \`tags\` / \`sparkline\` auto-promote to full width. \`form\`, \`chart\`, \`section\`, \`tabs\`, \`image\`, and \`file-preview\` are intrinsically full-width — use \`span\` if you want to narrow them.
 
 ### Composition rules of thumb
 
@@ -109,6 +121,8 @@ Every component requires \`id\` and \`type\`. See \`src/render-dsl.ts\` for the 
 - Update \`status\` components as work moves \`pending → running → success/error\`.
 - Use \`callout\` for key findings, \`timeline\` for multi-step progression, \`kv\` for dense metadata, \`checklist\` for trackable steps, \`diff\` for before/after evidence.
 - Use \`copyable\` whenever you report a value the user is likely to paste — commands, URLs, SHAs, paths, env vars.
+- Use \`form\` for any decision you'd otherwise ask the user about in chat — it's a real input surface, not a stand-in.
+- Reach for \`section\` / \`tabs\` once the dashboard has more than a handful of components; nesting beats scrolling.
 - Use \`span: "full"\` when a single metric or status should headline a row.
 
 ## ⚠️ MANDATORY: Worktree Isolation & Approval Workflow

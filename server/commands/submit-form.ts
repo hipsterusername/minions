@@ -5,18 +5,8 @@
  * turn that carries the form component ID and a structured JSON object of
  * submitted answers, then resumes the leader session with that turn.
  *
- * The handler intentionally does NOT modify `server/commands/index.ts` or
- * `server/commands/types.ts` — the Leader wires that in.
- *
- * Extension shape for WsCommand (add fields documented below when the Leader
- * registers this handler):
- *
- * ```
- * WsCommandFormFields = {
- *   formComponentId?: string;        // id of the FormComponent the user filled
- *   formAnswers?: Record<string, unknown>; // raw answer map from FormComponent
- * }
- * ```
+ * `formComponentId` and `formAnswers` are declared on `WsCommand` in
+ * `./types.ts`, so the handler reads them directly off `cmd`.
  */
 
 import { unicastGlobal, unicastToSession } from "../bus.ts";
@@ -37,19 +27,12 @@ function buildFormPrompt(
 // ── Handler ───────────────────────────────────────────────
 
 export const submitForm: CommandHandler = (ctx, cmd, ws) => {
-  // Validate required fields. `formComponentId` and `formAnswers` are
-  // carry-on fields not yet declared on WsCommand — read via index access.
-  const ext = cmd as typeof cmd & {
-    formComponentId?: string;
-    formAnswers?: Record<string, unknown>;
-  };
-
   if (!cmd.sessionKey) {
     unicastGlobal(ws, { type: "error", message: "sessionKey required" });
     return;
   }
 
-  if (!ext.formComponentId) {
+  if (!cmd.formComponentId) {
     unicastToSession(ws, cmd.sessionKey, {
       type: "error",
       message: "formComponentId required",
@@ -58,9 +41,9 @@ export const submitForm: CommandHandler = (ctx, cmd, ws) => {
   }
 
   if (
-    ext.formAnswers == null ||
-    typeof ext.formAnswers !== "object" ||
-    Array.isArray(ext.formAnswers)
+    cmd.formAnswers == null ||
+    typeof cmd.formAnswers !== "object" ||
+    Array.isArray(cmd.formAnswers)
   ) {
     unicastToSession(ws, cmd.sessionKey, {
       type: "error",
@@ -78,7 +61,7 @@ export const submitForm: CommandHandler = (ctx, cmd, ws) => {
     return;
   }
 
-  const prompt = buildFormPrompt(ext.formComponentId, ext.formAnswers);
+  const prompt = buildFormPrompt(cmd.formComponentId, cmd.formAnswers);
 
   ctx.registry.start({
     sessionKey: cmd.sessionKey,

@@ -80,10 +80,15 @@ export function createMinionToolsForSession(opts: {
     },
   );
 
+  const tools = [reportStepTool, reportDoneTool, reportFailTool] as const;
+
   const mcpServer = createSdkMcpServer({
     name: "minion-status",
-    tools: [reportStepTool, reportDoneTool, reportFailTool],
+    tools: [...tools],
   });
 
-  return { mcpServer };
+  // `tools` is exposed so tests (and any future in-process driver) can invoke
+  // handlers directly without spinning up an MCP transport — same pattern as
+  // `createRenderToolsForLeader`.
+  return { mcpServer, tools };
 }

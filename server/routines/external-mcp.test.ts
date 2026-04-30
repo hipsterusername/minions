@@ -47,26 +47,15 @@ describe("buildExternalMcpServers", () => {
     expect(Object.keys(mcpServers)).toEqual(["real"]);
   });
 
-  it("returns empty when all ids are unknown", () => {
-    expect(buildExternalMcpServers(projectDir, ["a", "b", "c"])).toEqual({
-      mcpServers: {},
-      toolNames: [],
-    });
-  });
+  // Note: a "returns empty when all ids are unknown" duplicate of the
+  // empty-ids case above was removed per §5.9.
 
   // ── stdio transport ─────────────────────────────────────────────────────────
 
   describe("stdio transport", () => {
-    it("builds config with command only (no optional fields)", () => {
-      saveMcpServer(projectDir, {
-        id: "stdio-bare",
-        name: "Bare",
-        transport: "stdio",
-        command: "node",
-      });
-      const { mcpServers } = buildExternalMcpServers(projectDir, ["stdio-bare"]);
-      expect(mcpServers["stdio-bare"]).toEqual({ command: "node" });
-    });
+    // Note: a "command only (no optional fields)" trivial was removed per
+    // §5.7 — the stdio-full / stdio-args / stdio-env cases below already
+    // cover the bare command via their happy paths.
 
     it("includes args when non-empty", () => {
       saveMcpServer(projectDir, {
@@ -144,103 +133,42 @@ describe("buildExternalMcpServers", () => {
     });
   });
 
-  // ── SSE transport ───────────────────────────────────────────────────────────
+  // ── HTTP-style transports (sse + http) ──────────────────────────────────────
+  // Both transports share the same config shape: `{ type, url, [headers] }`.
+  // Parameterised per §5.9 (DUPLICATE) — three describes were collapsed into
+  // one matrix.
 
-  describe("SSE transport", () => {
-    it("builds config with type=sse and url", () => {
-      saveMcpServer(projectDir, {
-        id: "my-sse",
-        name: "SSE",
-        transport: "sse",
-        url: "https://example.com/sse",
-      });
-      const { mcpServers } = buildExternalMcpServers(projectDir, ["my-sse"]);
-      expect(mcpServers["my-sse"]).toEqual({
-        type: "sse",
-        url: "https://example.com/sse",
-      });
+  describe.each([
+    {
+      transport: "sse" as const,
+      url: "https://example.com/sse",
+      headers: { Authorization: "Bearer tok" },
+    },
+    {
+      transport: "http" as const,
+      url: "https://example.com/mcp",
+      headers: { "X-API-Key": "key123" },
+    },
+  ])("$transport transport", ({ transport, url, headers }) => {
+    it("builds config with type and url", () => {
+      const id = `${transport}-bare`;
+      saveMcpServer(projectDir, { id, name: id, transport, url });
+      const { mcpServers } = buildExternalMcpServers(projectDir, [id]);
+      expect(mcpServers[id]).toEqual({ type: transport, url });
     });
 
     it("includes headers when present", () => {
-      saveMcpServer(projectDir, {
-        id: "sse-headers",
-        name: "SSE Headers",
-        transport: "sse",
-        url: "https://example.com/sse",
-        headers: { Authorization: "Bearer tok" },
-      });
-      const { mcpServers } = buildExternalMcpServers(projectDir, [
-        "sse-headers",
-      ]);
-      expect(mcpServers["sse-headers"]).toEqual({
-        type: "sse",
-        url: "https://example.com/sse",
-        headers: { Authorization: "Bearer tok" },
-      });
+      const id = `${transport}-headers`;
+      saveMcpServer(projectDir, { id, name: id, transport, url, headers });
+      const { mcpServers } = buildExternalMcpServers(projectDir, [id]);
+      expect(mcpServers[id]).toEqual({ type: transport, url, headers });
     });
 
     it("omits headers key when headers is empty object", () => {
-      saveMcpServer(projectDir, {
-        id: "sse-noheaders",
-        name: "SSE No Headers",
-        transport: "sse",
-        url: "https://example.com/sse",
-        headers: {},
-      });
-      const { mcpServers } = buildExternalMcpServers(projectDir, [
-        "sse-noheaders",
-      ]);
-      expect(mcpServers["sse-noheaders"]).not.toHaveProperty("headers");
-    });
-  });
-
-  // ── HTTP transport ──────────────────────────────────────────────────────────
-
-  describe("HTTP transport", () => {
-    it("builds config with type=http and url", () => {
-      saveMcpServer(projectDir, {
-        id: "my-http",
-        name: "HTTP",
-        transport: "http",
-        url: "https://example.com/mcp",
-      });
-      const { mcpServers } = buildExternalMcpServers(projectDir, ["my-http"]);
-      expect(mcpServers["my-http"]).toEqual({
-        type: "http",
-        url: "https://example.com/mcp",
-      });
-    });
-
-    it("includes headers when present", () => {
-      saveMcpServer(projectDir, {
-        id: "http-headers",
-        name: "HTTP Headers",
-        transport: "http",
-        url: "https://example.com/mcp",
-        headers: { "X-API-Key": "key123" },
-      });
-      const { mcpServers } = buildExternalMcpServers(projectDir, [
-        "http-headers",
-      ]);
-      expect(mcpServers["http-headers"]).toEqual({
-        type: "http",
-        url: "https://example.com/mcp",
-        headers: { "X-API-Key": "key123" },
-      });
-    });
-
-    it("omits headers key when headers is empty object", () => {
-      saveMcpServer(projectDir, {
-        id: "http-noheaders",
-        name: "HTTP No Headers",
-        transport: "http",
-        url: "https://example.com/mcp",
-        headers: {},
-      });
-      const { mcpServers } = buildExternalMcpServers(projectDir, [
-        "http-noheaders",
-      ]);
-      expect(mcpServers["http-noheaders"]).not.toHaveProperty("headers");
+      const id = `${transport}-noheaders`;
+      saveMcpServer(projectDir, { id, name: id, transport, url, headers: {} });
+      const { mcpServers } = buildExternalMcpServers(projectDir, [id]);
+      expect(mcpServers[id]).not.toHaveProperty("headers");
     });
   });
 

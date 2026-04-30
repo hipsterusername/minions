@@ -31,6 +31,7 @@
 
 import { useEffect, useRef } from "react";
 
+import { recordWsMessageForDebug } from "./debug-record-bridge.ts";
 import {
   sessionStreamReducer,
   type SessionStreamState,
@@ -89,9 +90,17 @@ export function useSessionStream(opts: UseSessionStreamOptions): void {
     if (!socketSubscribe) return;
     return socketSubscribe((msg: unknown) => {
       const current = stateRef.current;
+      const serverMsg = msg as ServerMessage;
+      // Debug capture — no-ops when debug mode is off, scoped to the
+      // node prefix so leader/minion buffers don't collide.
+      recordWsMessageForDebug(
+        current.sessionKey,
+        serverMsg,
+        prefixRef.current,
+      );
       const next = sessionStreamReducer(
         current,
-        msg as ServerMessage,
+        serverMsg,
         prefixRef.current,
       );
       if (next !== current) {

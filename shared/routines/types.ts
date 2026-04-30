@@ -48,22 +48,37 @@ export const idSchema = z
 
 // ── Inputs ─────────────────────────────────────────────────────────────────
 
-/** A typed input the user supplies when triggering a Routine run. */
+/**
+ * An input the user supplies when triggering a Routine run.
+ *
+ * Inputs are always strings — they exist to fill `{{inputs.<name>}}` slots in
+ * step prompts, and the prompt is text. Earlier versions carried a typed
+ * `type: "string" | "number" | "boolean"` field; that knob added no value
+ * (everything stringified at render time anyway) so it's been removed.
+ *
+ * Legacy routine files that include `type` or non-string defaults are still
+ * loadable: the unknown `type` field is dropped and `defaultValue` is coerced
+ * to a string by the schema's transform.
+ */
 export const routineInputSchema = z.object({
   name: idSchema,
-  type: z.enum(["string", "number", "boolean"]),
   label: z.string().min(1),
   description: z.string().optional(),
   required: z.boolean().default(true),
-  defaultValue: z.union([z.string(), z.number(), z.boolean()]).optional(),
+  /**
+   * Optional default value. Always stored as a string. Legacy routine files
+   * with `defaultValue: 3` or `defaultValue: true` are coerced.
+   */
+  defaultValue: z
+    .union([z.string(), z.number(), z.boolean()])
+    .transform((v) => (v === undefined ? undefined : String(v)))
+    .optional(),
 });
 
 export type RoutineInput = z.infer<typeof routineInputSchema>;
 
 /** Concrete value bag the runtime hands to template rendering. */
-export type RoutineInputValues = Readonly<
-  Record<string, string | number | boolean>
->;
+export type RoutineInputValues = Readonly<Record<string, string>>;
 
 // ── Steps ──────────────────────────────────────────────────────────────────
 

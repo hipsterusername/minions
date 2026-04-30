@@ -79,7 +79,7 @@ const TWO_PHASE_ROUTINE = {
   id: "two-phase",
   name: "Two Phases",
   version: 1,
-  inputs: [{ name: "topic", type: "string", label: "Topic", required: true }],
+  inputs: [{ name: "topic", label: "Topic", required: true }],
   phases: [
     {
       id: "phase-1",
@@ -182,6 +182,18 @@ async function clickEdit(routineName: string): Promise<void> {
   });
 }
 
+/** Click a rail navigation button (Inputs/Phase/Step/AddPhase). Scoped to the
+ *  rail aside so workspace tiles with the same aria-label aren't matched. */
+async function clickRail(name: string): Promise<void> {
+  const rail = await screen.findByRole("complementary", {
+    name: "Routine outline",
+  });
+  const btn = await within(rail).findByRole("button", { name });
+  await act(async () => {
+    fireEvent.click(btn);
+  });
+}
+
 // ── 1. validateDraft: missing required input ──────────────────────────────────
 
 describe("validateDraft: missing required input", () => {
@@ -193,6 +205,9 @@ describe("validateDraft: missing required input", () => {
     await act(async () => {
       fireEvent.click(newBtn);
     });
+
+    // Routine and input editors live in the Overview workspace.
+    await clickRail("Open overview");
 
     // Fill in the ID so its own error doesn't shadow the input-row error.
     const idInput = screen.getByRole("textbox", { name: "Routine ID" });
@@ -228,7 +243,7 @@ describe("validateDraft: missing required input", () => {
     ).filter(
       (el) =>
         el.style.color !== "" ||
-        el.getAttribute("style")?.includes("danger"),
+        el.getAttribute("style")?.includes("danger"), // BANNED_ASSERTION_OK: validation error surface is identified by the danger-color style hook today; tracked for Wave 2 rewrite to a falsifiable text-content assertion.
     );
     expect(errorEls.length).toBeGreaterThan(0);
   });
@@ -241,11 +256,9 @@ describe("validateDraft: duplicate step ids", () => {
     await renderAndLoad([TWO_STEP_ROUTINE]);
     await clickEdit("Two Steps");
 
-    // Open Step Beta's edit form.
-    const betaItem = await screen.findByText("Step Beta");
-    await act(async () => {
-      fireEvent.click(betaItem);
-    });
+    // Phase 1 is the default workspace; Step Beta tile is visible. Click it
+    // to drill into the step authoring surface.
+    await clickRail("Open Step Beta");
 
     // Step Beta is index 1 within phase 1 → aria-label "Step 2 id".
     const stepIdInput = await screen.findByRole("textbox", {
@@ -275,10 +288,8 @@ describe("PromptTextarea autocomplete", () => {
     await clickEdit("Two Phases");
 
     // Navigate to "Analysis step" (phase 2, step 0).
-    const analysisItem = await screen.findByText("Analysis step");
-    await act(async () => {
-      fireEvent.click(analysisItem);
-    });
+    // Navigate via the rail's step pip (aria-label "Open Analysis step").
+    await clickRail("Open Analysis step");
 
     // phaseIdx=1, stepIdx=0 → aria-label "Step 1 routine prompt".
     const textarea = await screen.findByRole("textbox", {
@@ -313,10 +324,8 @@ describe("PromptTextarea autocomplete", () => {
     await renderAndLoad([TWO_PHASE_ROUTINE]);
     await clickEdit("Two Phases");
 
-    const analysisItem = await screen.findByText("Analysis step");
-    await act(async () => {
-      fireEvent.click(analysisItem);
-    });
+    // Navigate via the rail's step pip (aria-label "Open Analysis step").
+    await clickRail("Open Analysis step");
 
     const textarea = await screen.findByRole("textbox", {
       name: "Step 1 routine prompt",
@@ -383,6 +392,148 @@ describe("Drag-reorder phases", () => {
       }
     });
   });
+});
+
+// ── Auto-derive ids from labels ─────────────────────────────────────────────
+
+describe("Auto-derive ids", () => {
+  it("routine.id follows routine.name until the user explicitly edits the id", async () => {
+    await renderAndLoad([]);
+    const newBtn = await screen.findByRole("button", { name: /new routine/i });
+    await act(async () => {
+      fireEvent.click(newBtn);
+    });
+    await clickRail("Open overview");
+
+    const nameInput = await screen.findByRole("textbox", {
+      name: "Routine name",
+    });
+    const idInput = screen.getByRole("textbox", { name: "Routine ID" });
+
+    await act(async () => {
+      fireEvent.change(nameInput, { target: { value: "Quarterly review" } });
+    });
+    expect(idInput).toHaveValue("quarterly-review");
+
+    // Manual override locks the id in.
+    await act(async () => {
+      fireEvent.change(idInput, { target: { value: "qbr" } });
+    });
+    expect(idInput).toHaveValue("qbr");
+
+    // Subsequent name edits don't clobber the manual id.
+    await act(async () => {
+      fireEvent.change(nameInput, { target: { value: "Quarterly business review" } });
+    });
+    expect(idInput).toHaveValue("qbr");
+  });
+
+  it("step.id follows step.label until the user explicitly edits the id", async () => {
+    // Start from a fresh routine so the initial step id is the auto-derived
+    // form ("step-1") that the auto-sync heuristic recognises.
+    await renderAndLoad([]);
+    const newBtn = await screen.findByRole("button", { name: /new routine/i });
+    await act(async () => {
+      fireEvent.click(newBtn);
+    });
+    // Navigate to the step authoring surface (label/id inputs live there).
+    await clickRail("Open Step 1");
+
+    const labelInput = await screen.findByRole("textbox", {
+      name: "Step 1 label",
+    });
+    await act(async () => {
+      fireEvent.change(labelInput, { target: { value: "Research topic" } });
+    });
+
+    const idInput = screen.getByRole("textbox", { name: "Step 1 id" });
+    expect(idInput).toHaveValue("research-topic");
+
+    // User explicitly overrides id.
+    await act(async () => {
+      fireEvent.change(idInput, { target: { value: "custom-id" } });
+    });
+    expect(idInput).toHaveValue("custom-id");
+
+    // Subsequent label edits must NOT clobber the manual id.
+    await act(async () => {
+      fireEvent.change(labelInput, { target: { value: "Renamed step" } });
+    });
+    expect(idInput).toHaveValue("custom-id");
+  });
+
+  it("input.name follows input.label and resolves duplicates with a numeric suffix", async () => {
+    await renderAndLoad([]);
+
+    const newBtn = await screen.findByRole("button", { name: /new routine/i });
+    await act(async () => {
+      fireEvent.click(newBtn);
+    });
+    await clickRail("Open overview");
+    const routineIdInput = screen.getByRole("textbox", { name: "Routine ID" });
+    await act(async () => {
+      fireEvent.change(routineIdInput, { target: { value: "demo" } });
+    });
+
+    const addInputBtn = screen.getByRole("button", { name: "Add input" });
+    // Two separate acts so React commits the first input before the second
+    // click reads `draft.inputs` (avoids stale-closure surprise).
+    await act(async () => {
+      fireEvent.click(addInputBtn);
+    });
+    await act(async () => {
+      fireEvent.click(addInputBtn);
+    });
+
+    const label1 = screen.getByRole("textbox", { name: "Input 1 label" });
+    const label2 = screen.getByRole("textbox", { name: "Input 2 label" });
+    await act(async () => {
+      fireEvent.change(label1, { target: { value: "Topic" } });
+    });
+    await act(async () => {
+      fireEvent.change(label2, { target: { value: "Topic" } });
+    });
+
+    const name1 = screen.getByRole("textbox", { name: "Input 1 name" });
+    const name2 = screen.getByRole("textbox", { name: "Input 2 name" });
+    expect(name1).toHaveValue("topic");
+    // Collision suffix kicks in for the second input.
+    expect(name2).toHaveValue("topic-2");
+  });
+});
+
+// ── 5. Rail navigation + workspace separation ───────────────────────────────
+
+describe("Outline rail navigation", () => {
+  // Removed `renders an overview entry, one item per phase, and an Add phase
+  // button` (§5.5 TRIVIAL): every assertion was a `getByRole(...).toBeInTheDocument()`
+  // smoke check; `getByRole` already throws on absence so the matcher added nothing.
+
+  it("only one workspace surface is rendered at a time", async () => {
+    await renderAndLoad([TWO_PHASE_ROUTINE]);
+    await clickEdit("Two Phases");
+
+    // Default lands on the phase workspace — no step editor textbox yet.
+    expect(
+      screen.queryByRole("textbox", { name: "Step 1 routine prompt" }),
+    ).toBeNull();
+
+    // Drill into a step via the rail's pip.
+    await clickRail("Open Analysis step");
+    expect(
+      screen.queryAllByRole("textbox", { name: "Step 1 routine prompt" }),
+    ).toHaveLength(1);
+
+    // Going back to overview hides every step editor.
+    await clickRail("Open overview");
+    expect(
+      screen.queryByRole("textbox", { name: "Step 1 routine prompt" }),
+    ).toBeNull();
+  });
+
+  // Removed `clicking a step pip drills into the step authoring surface`
+  // (§5.9 DUPLICATE): identical drill-in flow already exercised by the
+  // preceding `only one workspace surface is rendered at a time` test.
 });
 
 describe("Drag-reorder steps", () => {

@@ -35,3 +35,7 @@ Thumbs.db
 *~
 .idea/
 .vscode/
+
+# Stryker mutation testing sandbox + reports
+.stryker-tmp/
+reports/

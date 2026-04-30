@@ -6,12 +6,9 @@ import { describe, expect, it } from "vitest";
 import { sanitizeAttachments } from "./attachment-sanitize.ts";
 
 describe("sanitizeAttachments", () => {
-  it("returns undefined for non-arrays", () => {
-    expect(sanitizeAttachments(undefined)).toBeUndefined();
-    expect(sanitizeAttachments(null)).toBeUndefined();
-    expect(sanitizeAttachments({})).toBeUndefined();
-    expect(sanitizeAttachments("not an array")).toBeUndefined();
-  });
+  // Note: a "returns undefined for non-arrays" check was removed per
+  // testing-strategy.md §5.1 — it asserted `Array.isArray` semantics, not
+  // anything about sanitisation.
 
   it("returns undefined for empty arrays", () => {
     expect(sanitizeAttachments([])).toBeUndefined();

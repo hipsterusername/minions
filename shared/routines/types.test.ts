@@ -10,8 +10,6 @@ import { describe, expect, it } from "vitest";
 import {
   findDuplicateIds,
   parseRoutine,
-  routineRunSnapshotSchema,
-  routineSchema,
   safeParseRoutine,
   type Routine,
 } from "./types.ts";
@@ -55,10 +53,9 @@ describe("routineSchema — happy path", () => {
       name: "Research Flow",
       description: "Research, analyze, report",
       inputs: [
-        { name: "topic", type: "string", label: "Topic", required: true },
+        { name: "topic", label: "Topic", required: true },
         {
           name: "depth",
-          type: "number",
           label: "Depth",
           required: false,
           defaultValue: 3,
@@ -101,71 +98,12 @@ describe("routineSchema — happy path", () => {
   });
 });
 
-describe("routineSchema — rejects invalid shapes", () => {
-  it("rejects a routine with no phases", () => {
-    const result = routineSchema.safeParse({
-      id: "x",
-      name: "X",
-      phases: [],
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects a phase with no steps", () => {
-    const result = routineSchema.safeParse({
-      id: "x",
-      name: "X",
-      phases: [{ id: "p", label: "P", steps: [] }],
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects an id with uppercase letters", () => {
-    const result = routineSchema.safeParse({
-      id: "BadId",
-      name: "X",
-      phases: [
-        {
-          id: "p",
-          label: "P",
-          steps: [{ id: "s", label: "S", routinePrompt: "x" }],
-        },
-      ],
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects an empty routinePrompt", () => {
-    const result = routineSchema.safeParse({
-      id: "x",
-      name: "X",
-      phases: [
-        {
-          id: "p",
-          label: "P",
-          steps: [{ id: "s", label: "S", routinePrompt: "" }],
-        },
-      ],
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects an unknown failurePolicy", () => {
-    const result = routineSchema.safeParse({
-      id: "x",
-      name: "X",
-      failurePolicy: "continue-with-partial",
-      phases: [
-        {
-          id: "p",
-          label: "P",
-          steps: [{ id: "s", label: "S", routinePrompt: "x" }],
-        },
-      ],
-    });
-    expect(result.success).toBe(false);
-  });
-});
+// Note: a "rejects invalid shapes" describe block was removed per
+// testing-strategy.md §5.4 — every assertion re-asserted a zod rule
+// (.min(1), .regex(...), .enum(...)) against a hand-built literal
+// parsed through its own schema. The §2.2 rewrite ("one round-trip per
+// failure-policy / step-type combination, exercising a real producer
+// and the scheduler consumer") lands in Wave 2.
 
 describe("safeParseRoutine", () => {
   it("returns ok=true and the parsed routine on success", () => {
@@ -242,8 +180,8 @@ describe("findDuplicateIds", () => {
       id: "x",
       name: "X",
       inputs: [
-        { name: "a", type: "string", label: "A" },
-        { name: "a", type: "string", label: "A2" },
+        { name: "a", label: "A" },
+        { name: "a", label: "A2" },
       ],
       phases: [
         {
@@ -277,120 +215,9 @@ describe("findDuplicateIds", () => {
   });
 });
 
-// ── Gap 1: Schema regression ─────────────────────────────────────────────────
-
-describe("routineStepSchema — timeoutMs / retries defaults", () => {
-  it("timeoutMs is undefined when omitted — the field is absent from JSON output", () => {
-    const r = minimalRoutine();
-    const step = r.phases[0]!.steps[0]!;
-    expect(step.timeoutMs).toBeUndefined();
-    // JSON.stringify omits undefined values, so the key must not appear.
-    const json = JSON.stringify(step);
-    const parsed = JSON.parse(json) as Record<string, unknown>;
-    expect("timeoutMs" in parsed).toBe(false);
-  });
-
-  it("retries defaults to 0 when omitted — fail-fast preserved, scheduler sees 0", () => {
-    const r = minimalRoutine();
-    const step = r.phases[0]!.steps[0]!;
-    expect(step.retries).toBe(0);
-  });
-
-  it("an existing routine serialised without timeoutMs/retries round-trips cleanly", () => {
-    // Simulate a stored routine file that was created before these fields existed.
-    const legacyJson = JSON.stringify({
-      id: "legacy",
-      name: "Legacy routine",
-      phases: [
-        {
-          id: "p1",
-          label: "Phase 1",
-          steps: [
-            { id: "s1", label: "Step 1", routinePrompt: "Do the thing." },
-          ],
-        },
-      ],
-    });
-    const result = routineSchema.safeParse(JSON.parse(legacyJson));
-    expect(result.success).toBe(true);
-    if (result.success) {
-      const step = result.data.phases[0]!.steps[0]!;
-      // New fields must not corrupt the schema: retries gets its default, timeoutMs stays absent.
-      expect(step.retries).toBe(0);
-      expect(step.timeoutMs).toBeUndefined();
-    }
-  });
-});
-
-// ── Gap 4: routineRunSnapshotSchema round-trip ───────────────────────────────
-
-describe("routineRunSnapshotSchema — attempts + lastError round-trip", () => {
-  it("attempts and lastError survive JSON.stringify → safeParse", () => {
-    const rawSnapshot = {
-      runId: "run-1",
-      routineId: "my-routine",
-      routineName: "My Routine",
-      state: "error",
-      inputs: {},
-      phases: [
-        {
-          phaseId: "p1",
-          label: "Phase 1",
-          state: "error",
-          steps: [
-            {
-              stepId: "s1",
-              label: "Step 1",
-              outcome: "error",
-              summary: "step failed after retries",
-              attempts: 3,
-              lastError: "attempt-3-failed",
-              sessionKey: "sess-abc",
-            },
-          ],
-        },
-      ],
-      startedAt: "2026-04-26T00:00:00.000Z",
-      endedAt: "2026-04-26T00:01:00.000Z",
-      error: "step s1 failed",
-    };
-
-    const roundTripped = JSON.parse(JSON.stringify(rawSnapshot)) as unknown;
-    const result = routineRunSnapshotSchema.safeParse(roundTripped);
-
-    expect(result.success).toBe(true);
-    if (result.success) {
-      const step = result.data.phases[0]!.steps[0]!;
-      expect(step.attempts).toBe(3);
-      expect(step.lastError).toBe("attempt-3-failed");
-      expect(step.sessionKey).toBe("sess-abc");
-    }
-  });
-
-  it("attempts and lastError are optional — snapshot without them parses fine", () => {
-    const rawSnapshot = {
-      runId: "run-2",
-      routineId: "my-routine",
-      routineName: "My Routine",
-      state: "success",
-      inputs: {},
-      phases: [
-        {
-          phaseId: "p1",
-          label: "Phase 1",
-          state: "success",
-          steps: [{ stepId: "s1", label: "Step 1", outcome: "success", summary: "done" }],
-        },
-      ],
-      startedAt: "2026-04-26T00:00:00.000Z",
-    };
-
-    const result = routineRunSnapshotSchema.safeParse(rawSnapshot);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      const step = result.data.phases[0]!.steps[0]!;
-      expect(step.attempts).toBeUndefined();
-      expect(step.lastError).toBeUndefined();
-    }
-  });
-});
+// Note: the "routineStepSchema — timeoutMs / retries defaults" and
+// "routineRunSnapshotSchema — attempts + lastError round-trip" describe
+// blocks were removed per testing-strategy.md §5.4 — they re-asserted
+// zod's `.default(0)` / `.optional()` rules against literals authored
+// next to the schema. The §2.2 rewrite (real-producer round-trips)
+// lands in Wave 2.

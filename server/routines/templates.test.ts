@@ -9,11 +9,10 @@ import os from "node:os";
 import path from "node:path";
 import {
   BUILT_IN_ROUTINES,
-  RESEARCH_ANALYZE_REPORT,
   getBuiltInRoutine,
   seedBuiltInRoutine,
 } from "./templates.ts";
-import { findDuplicateIds, parseRoutine } from "../../shared/routines/types.ts";
+import { findDuplicateIds } from "../../shared/routines/types.ts";
 import { loadRoutineById } from "../routine-store.ts";
 
 describe("BUILT_IN_ROUTINES", () => {
@@ -22,11 +21,10 @@ describe("BUILT_IN_ROUTINES", () => {
     expect(getBuiltInRoutine("research-analyze-report")).toBeDefined();
   });
 
-  it("every built-in routine round-trips through the schema", () => {
-    for (const r of BUILT_IN_ROUTINES) {
-      expect(() => parseRoutine(r)).not.toThrow();
-    }
-  });
+  // Note: a "every built-in routine round-trips through the schema" check
+  // was removed per testing-strategy.md §5.4 — BUILT_IN_ROUTINES is typed
+  // at construction; if a template stops parsing, TypeScript catches it
+  // before vitest runs.
 
   it("every built-in routine has unique phase + step + input ids", () => {
     for (const r of BUILT_IN_ROUTINES) {
@@ -39,31 +37,10 @@ describe("BUILT_IN_ROUTINES", () => {
   });
 });
 
-describe("RESEARCH_ANALYZE_REPORT", () => {
-  it("declares three phases with the expected ids", () => {
-    expect(RESEARCH_ANALYZE_REPORT.phases.map((p) => p.id)).toEqual([
-      "source",
-      "analyze",
-      "report",
-    ]);
-  });
-
-  it("first phase runs two parallel sourcing steps", () => {
-    expect(RESEARCH_ANALYZE_REPORT.phases[0]!.steps).toHaveLength(2);
-    expect(
-      RESEARCH_ANALYZE_REPORT.phases[0]!.steps.map((s) => s.id).sort(),
-    ).toEqual(["external", "internal"]);
-  });
-
-  it("phase 2 and 3 reference {{handoff.brief}} for context flow", () => {
-    expect(RESEARCH_ANALYZE_REPORT.phases[1]!.steps[0]!.routinePrompt).toContain(
-      "{{handoff.brief}}",
-    );
-    expect(RESEARCH_ANALYZE_REPORT.phases[2]!.steps[0]!.routinePrompt).toContain(
-      "{{handoff.brief}}",
-    );
-  });
-});
+// Note: a `describe("RESEARCH_ANALYZE_REPORT")` block was removed per
+// testing-strategy.md §5.7 — every assertion pinned literal content of
+// the template (phase ids, step counts, {{handoff.brief}} mentions). A
+// template change in normal authoring should not require a test diff.
 
 describe("seedBuiltInRoutine", () => {
   let projectDir: string;

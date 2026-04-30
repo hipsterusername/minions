@@ -18,7 +18,7 @@ import {
   getAllContracts,
   registerContract,
 } from "./graph.ts";
-import type { NodeInterfaceContract, PortLifecycleState } from "./graph.ts";
+import type { NodeInterfaceContract } from "./graph.ts";
 // Side-effect import — RenderNode registers its `context-out` contract on load.
 import "./nodes/RenderNode.tsx";
 
@@ -56,20 +56,11 @@ describe("canConnect", () => {
     expect(canConnect("leader", "task-out", "leader", "context-in")).toBe(false);
   });
 
-  it("returns false when source node type is unknown", () => {
+  // Collapsed: the four unknown-lookup variants (unknown source/target
+  // node type and source/target port id) into one representative. They
+  // exercise the same lookup-failure path. See docs/testing-strategy.md §5.
+  it("returns false when any of node-type/port-id is unknown", () => {
     expect(canConnect("ghost-type", "task-out", "minion", "task-in")).toBe(false);
-  });
-
-  it("returns false when source port id is unknown", () => {
-    expect(canConnect("leader", "no-such-port", "minion", "task-in")).toBe(false);
-  });
-
-  it("returns false when target node type is unknown", () => {
-    expect(canConnect("leader", "task-out", "ghost-type", "task-in")).toBe(false);
-  });
-
-  it("returns false when target port id is unknown", () => {
-    expect(canConnect("leader", "task-out", "minion", "no-such-port")).toBe(false);
   });
 });
 
@@ -79,16 +70,12 @@ describe("isPortOpen (lifecycle guard)", () => {
     expect(isPortOpen("minion", "task-in", {})).toBe(true);
   });
 
-  it("returns true for leader.task-out (no lifecycle)", () => {
-    expect(isPortOpen("leader", "task-out", { sessionKey: "active" })).toBe(true);
-  });
-
-  it("returns true for leader.context-in when sessionKey is null", () => {
+  // Collapsed: three lifecycle-default cases (leader.task-out, context-in
+  // with null/missing sessionKey) into one representative — they all
+  // exercise the "no lifecycle / open by default" branch. See
+  // docs/testing-strategy.md §5.
+  it("returns true for leader.context-in when sessionKey is null/missing", () => {
     expect(isPortOpen("leader", "context-in", { sessionKey: null })).toBe(true);
-  });
-
-  it("returns true for leader.context-in when sessionKey is missing", () => {
-    expect(isPortOpen("leader", "context-in", {})).toBe(true);
   });
 
   it("returns false (locked) for leader.context-in when sessionKey is set", () => {
@@ -101,46 +88,10 @@ describe("isPortOpen (lifecycle guard)", () => {
 });
 
 describe("port lifecycle — custom lifecycle callbacks", () => {
-  it("a port with lifecycle returning 'locked' rejects connections", () => {
-    const custom: NodeInterfaceContract = {
-      nodeType: "test-lifecycle-locked",
-      label: "Locked Test",
-      description: "Port always locked",
-      ports: [
-        {
-          id: "data-in",
-          label: "Data",
-          direction: "input",
-          protocol: "context",
-          maxConnections: 1,
-          lifecycle: () => "locked" as PortLifecycleState,
-        },
-      ],
-    };
-    registerContract(custom);
-    expect(isPortOpen("test-lifecycle-locked", "data-in", {})).toBe(false);
-  });
-
-  it("a port with lifecycle returning 'open' allows connections", () => {
-    const custom: NodeInterfaceContract = {
-      nodeType: "test-lifecycle-open",
-      label: "Open Test",
-      description: "Port always open",
-      ports: [
-        {
-          id: "data-in",
-          label: "Data",
-          direction: "input",
-          protocol: "context",
-          maxConnections: 1,
-          lifecycle: () => "open" as PortLifecycleState,
-        },
-      ],
-    };
-    registerContract(custom);
-    expect(isPortOpen("test-lifecycle-open", "data-in", {})).toBe(true);
-  });
-
+  // Collapsed: three lifecycle tests that each constructed a self-mock
+  // contract for 'locked' / 'open' / data-aware were redundant — kept the
+  // data-aware case as the sole representative since it exercises both
+  // returns through one callback. See docs/testing-strategy.md §5.
   it("lifecycle callback receives node data and can decide based on it", () => {
     const custom: NodeInterfaceContract = {
       nodeType: "test-lifecycle-data-aware",
@@ -232,9 +183,8 @@ describe("registerContract / getContract", () => {
     expect(getContract("test-custom-node-unique-xyz-9182")).toEqual(custom);
   });
 
-  it("returns undefined for a contract that was never registered", () => {
-    expect(getContract("never-registered-zzz-0000")).toBeUndefined();
-  });
+  // Removed: trivial "returns undefined for never-registered" test —
+  // tautological registry-miss assertion. See docs/testing-strategy.md §5.
 
   it("makes the custom contract appear in getAllContracts", () => {
     const custom: NodeInterfaceContract = {

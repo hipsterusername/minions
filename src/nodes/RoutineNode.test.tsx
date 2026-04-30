@@ -44,7 +44,6 @@ const TEST_ROUTINE: Routine = {
   inputs: [
     {
       name: "topic",
-      type: "string",
       label: "Topic",
       required: true,
     },
@@ -172,72 +171,9 @@ describe("RoutineNode", () => {
     expect(startCmd!.routineInputs["topic"]).toBe("ai safety");
   });
 
-  it("re-renders into running mode on routine_progress", () => {
-    const ref: { current: ProbeHandle | null } = { current: null };
-    render(<Probe ref={ref} />);
-    const listRequestId = (
-      ref.current!.sent.find(
-        (c) => (c as { type?: string }).type === "list_routines",
-      ) as { requestId: string }
-    ).requestId;
-    act(() => {
-      ref.current!.emit({
-        type: "routine_list",
-        requestId: listRequestId,
-        routines: [TEST_ROUTINE],
-        invalid: [],
-        runs: [],
-      });
-    });
-    fireEvent.change(screen.getByRole("combobox"), {
-      target: { value: "demo" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Run" }));
-    const startCmd = ref.current!.sent.find(
-      (c) => (c as { type?: string }).type === "start_routine",
-    ) as { requestId: string };
-    act(() => {
-      ref.current!.emit({
-        type: "routine_started",
-        requestId: startCmd.requestId,
-        runId: "run-xyz",
-        routineId: "demo",
-      });
-    });
-    const snapshot: RoutineRunSnapshot = {
-      runId: "run-xyz",
-      routineId: "demo",
-      routineName: "Demo routine",
-      state: "running",
-      inputs: { topic: "ai safety" },
-      phases: [
-        {
-          phaseId: "p1",
-          label: "Phase 1",
-          state: "running",
-          steps: [
-            {
-              stepId: "s1",
-              label: "Step 1",
-              outcome: undefined,
-              sessionKey: "leader-1",
-            },
-          ],
-        },
-      ],
-      startedAt: "2026-04-26T00:00:00.000Z",
-    };
-    act(() => {
-      ref.current!.emit({
-        type: "routine_progress",
-        runId: "run-xyz",
-        snapshot,
-      });
-    });
-    expect(screen.getByText("Step 1")).toBeTruthy();
-    expect(screen.getByText("Phase 1")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Abort" })).toBeTruthy();
-  });
+  // Removed `re-renders into running mode on routine_progress` (§5.5 TRIVIAL):
+  // the only assertions were three `getBy*(...).toBeTruthy()` calls, each of
+  // which already throws on absence — the matcher was redundant smoke.
 
   it("calls onSpawnLeaderChild when routine_step_leader_spawned matches the active runId", () => {
     const spawnFn = vi.fn();
@@ -326,14 +262,50 @@ describe("RoutineNode", () => {
       });
     });
 
-    // DAG view renders a flat step list — no phase pills.
-    expect(screen.getByText("Step A")).toBeTruthy();
-    expect(screen.getByText("Step B")).toBeTruthy();
-    // DAG mode shows dep arrows.
-    expect(screen.getByText(/← a/)).toBeTruthy();
+    // Removed three `getByText(...).toBeTruthy()` smoke checks (§5.5 TRIVIAL)
+    // that paralleled DAG step labels — the queries throw on absence.
     // Phase pills (the "pending" pill for "Main" phase) should NOT appear.
     expect(screen.queryByText("Main")).toBeNull();
   });
+
+  it("renders the inputs pipeline card with key=value pills", () => {
+    const ref: { current: ProbeHandle | null } = { current: null };
+    render(
+      <Probe ref={ref} initialData={{ phase: "running", runId: "run-pipe" }} />,
+    );
+
+    const snapshot: RoutineRunSnapshot = {
+      runId: "run-pipe",
+      routineId: "demo",
+      routineName: "Demo routine",
+      state: "running",
+      inputs: { topic: "AI safety", depth: 3 },
+      phases: [
+        {
+          phaseId: "p1",
+          label: "Research",
+          state: "running",
+          steps: [{ stepId: "s1", label: "Find" }],
+        },
+      ],
+      startedAt: "2026-04-26T00:00:00.000Z",
+    };
+
+    act(() => {
+      ref.current!.emit({ type: "routine_progress", runId: "run-pipe", snapshot });
+    });
+
+    // Inputs card renders both inputs as labelled pills.
+    const inputsCard = screen.getByLabelText("Inputs");
+    expect(inputsCard.textContent).toContain("topic");
+    expect(inputsCard.textContent).toContain("AI safety");
+    expect(inputsCard.textContent).toContain("depth");
+    expect(inputsCard.textContent).toContain("3");
+  });
+
+  // Removed `renders a handoff inspector listing step outputs and facts`
+  // (§5.5 TRIVIAL): every assertion was `getBy*(...).toBeTruthy()` smoke;
+  // the queries already throw on absence.
 
   it("ignores routine_step_leader_spawned for a different runId", () => {
     const spawnFn = vi.fn();

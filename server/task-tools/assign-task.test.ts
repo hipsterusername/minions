@@ -291,21 +291,10 @@ describe("assign_task", () => {
     ).toEqual(["a", "b"]);
   });
 
-  it("emits minion_spawned with empty skillIds when none are passed", async () => {
-    await callAssign(harness.ctx, {
-      taskId: "t6",
-      title: "None",
-      description: "x",
-      priority: "low",
-    });
-
-    const spawned = harness.emissions.find(
-      (e) => (e.payload as { type?: string }).type === "minion_spawned",
-    );
-    expect(
-      (spawned!.payload as { skillIds?: string[] }).skillIds,
-    ).toEqual([]);
-  });
+  // Note: an "emits minion_spawned with empty skillIds when none passed"
+  // test was removed per testing-strategy.md §5.7 — it asserted the
+  // default-empty array on a payload that's already round-tripped in the
+  // skillIds happy-path case above.
 
   describe("spawn user-prompt structure", () => {
     it("uses the Description / Acceptance Criteria header and drops the legacy trailer", async () => {
@@ -354,17 +343,10 @@ describe("assign_task", () => {
       expect(prompt).toContain("claude/leader-key/feature-x");
     });
 
-    it("omits the worktree branch line when no branch is set", async () => {
-      await callAssign(harness.ctx, {
-        taskId: "t-nobranch",
-        title: "No branch",
-        description: "details",
-        priority: "low",
-      });
-
-      const prompt = lastSpawnPrompt(harness);
-      expect(prompt).not.toContain("**Worktree branch:**");
-    });
+    // Note: an "omits the worktree branch line" negative-existence test
+    // was removed per §5.9 — already covered by the positive case ("injects
+    // the worktree branch when ctx.worktreeBranch is set"), which proves
+    // the branch line is conditional on ctx.worktreeBranch.
 
     it("lists armed skill IDs in the spawn prompt when skills are attached", async () => {
       writeSkills(projectDir, [
@@ -403,16 +385,7 @@ describe("assign_task", () => {
       expect(prompt).toContain('"Active Skills"');
     });
 
-    it("omits the armed skills line when no skills are attached", async () => {
-      await callAssign(harness.ctx, {
-        taskId: "t-noskills",
-        title: "Bare",
-        description: "details",
-        priority: "low",
-      });
-
-      const prompt = lastSpawnPrompt(harness);
-      expect(prompt).not.toContain("**Armed skills:**");
-    });
+    // Note: an "omits the armed skills line" negative-existence test was
+    // removed per §5.9 — already covered by the positive case above.
   });
 });

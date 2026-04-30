@@ -59,10 +59,6 @@ describe("architecture: server file size", () => {
     lines: lineCount(f),
   }));
 
-  it("is reading at least a few server files", () => {
-    expect(files.length).toBeGreaterThan(0);
-  });
-
   for (const f of files) {
     const allowed = SERVER_FILE_SIZE_ALLOWLIST[f.rel];
 

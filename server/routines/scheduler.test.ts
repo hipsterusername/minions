@@ -28,7 +28,7 @@ function makeRoutine(): Routine {
   return parseRoutine({
     id: "two-phase",
     name: "Two phase",
-    inputs: [{ name: "topic", type: "string", label: "Topic" }],
+    inputs: [{ name: "topic", label: "Topic" }],
     phases: [
       {
         id: "phase-a",
@@ -78,47 +78,50 @@ const fixedNow = () => "2026-04-26T00:00:00.000Z";
 describe("validateInputs", () => {
   it("returns the validated bag when all required inputs present", () => {
     const out = validateInputs(
-      [{ name: "x", type: "string", label: "X", required: true }],
+      [{ name: "x", label: "X", required: true }],
       { x: "hello" },
     );
     expect(out).toEqual({ x: "hello" });
   });
 
-  it("applies defaults for absent values", () => {
+  it("applies string defaults for absent values", () => {
     const out = validateInputs(
       [
         {
           name: "depth",
-          type: "number",
           label: "D",
           required: false,
-          defaultValue: 3,
+          defaultValue: "3",
         },
       ],
       {},
     );
-    expect(out).toEqual({ depth: 3 });
+    expect(out).toEqual({ depth: "3" });
   });
 
   it("throws listing every missing required input at once", () => {
     expect(() =>
       validateInputs(
         [
-          { name: "a", type: "string", label: "A", required: true },
-          { name: "b", type: "string", label: "B", required: true },
+          { name: "a", label: "A", required: true },
+          { name: "b", label: "B", required: true },
         ],
         {},
       ),
     ).toThrow(/missing required input "a".*missing required input "b"/);
   });
 
-  it("throws on type mismatches", () => {
-    expect(() =>
-      validateInputs(
-        [{ name: "depth", type: "number", label: "D", required: true }],
-        { depth: "three" },
-      ),
-    ).toThrow(/must be a number/);
+  it("coerces non-string supplied values to strings", () => {
+    // Inputs are stringly-typed: a number or boolean from JSON survives by
+    // being coerced, rather than bouncing the whole request.
+    const out = validateInputs(
+      [
+        { name: "depth", label: "Depth", required: true },
+        { name: "verbose", label: "Verbose", required: true },
+      ],
+      { depth: 3, verbose: true },
+    );
+    expect(out).toEqual({ depth: "3", verbose: "true" });
   });
 });
 

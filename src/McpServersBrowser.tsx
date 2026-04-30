@@ -11,6 +11,17 @@ import {
   deleteProjectMcpServer,
 } from "./api.ts";
 import type { McpServerEntry } from "../shared/mcp-servers/types.ts";
+import {
+  DockPanel,
+  DockPanelHeader,
+  useDockBadge,
+  useDockPanelOpen,
+} from "./BottomRightDock.tsx";
+import {
+  parsePastedMcpConfig,
+  splitArgsLine,
+  type PastedDraft,
+} from "./mcp-paste-parser.ts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -93,10 +104,7 @@ function draftToEntry(d: DraftEntry): McpServerEntry {
   };
 
   if (d.transport === "stdio") {
-    const args = d.args
-      .split(/\s+/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const args = splitArgsLine(d.args);
     const env = parseKvLines(d.env);
     return {
       ...base,
@@ -169,6 +177,197 @@ const labelStyle: React.CSSProperties = {
   marginBottom: 3,
 };
 
+// ── Paste-to-prefill ──────────────────────────────────────────────────────────
+
+/**
+ * Merge a parser-produced partial draft into the existing draft. Only
+ * fields the parser inferred get overwritten — anything the user already
+ * typed into a field the parser left blank is preserved.
+ */
+function mergePastedDraft(prev: DraftEntry, pasted: PastedDraft): DraftEntry {
+  const next: DraftEntry = { ...prev, transport: pasted.transport };
+  // Switching transports clears the inputs that no longer apply so stale
+  // values from the prior transport don't get silently saved.
+  if (pasted.transport === "stdio") {
+    next.url = "";
+    next.headers = "";
+  } else {
+    next.command = "";
+    next.args = "";
+    next.env = "";
+  }
+  if (pasted.id !== undefined) next.id = pasted.id;
+  if (pasted.name !== undefined) next.name = pasted.name;
+  if (pasted.description !== undefined) next.description = pasted.description;
+  if (pasted.command !== undefined) next.command = pasted.command;
+  if (pasted.args !== undefined) next.args = pasted.args;
+  if (pasted.env !== undefined) next.env = pasted.env;
+  if (pasted.url !== undefined) next.url = pasted.url;
+  if (pasted.headers !== undefined) next.headers = pasted.headers;
+  if (pasted.toolNames !== undefined) next.toolNames = pasted.toolNames;
+  return next;
+}
+
+interface PasteBoxProps {
+  /** Called with the parsed draft when the user clicks Prefill. */
+  onApply(draft: PastedDraft, warnings: string[]): void;
+}
+
+/**
+ * Paste-first entry point for adding a new MCP server. Always-visible
+ * textarea: vendors publish copy-paste install lines and this is the
+ * primary way to get them in. Manual fields live behind the Advanced
+ * disclosure rendered by McpServerForm.
+ */
+function PasteBox({ onApply }: PasteBoxProps) {
+  const [raw, setRaw] = useState("");
+  const [error, setError] = useState("");
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [prefilled, setPrefilled] = useState(false);
+
+  const handleParse = () => {
+    setError("");
+    setWarnings([]);
+    setPrefilled(false);
+    const result = parsePastedMcpConfig(raw);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    setWarnings(result.warnings);
+    onApply(result.draft, result.warnings);
+    setPrefilled(true);
+    setRaw("");
+  };
+
+  return (
+    <div
+      style={{
+        padding: "10px 12px",
+        borderBottom: "1px solid var(--border-default)",
+        background: "var(--bg-surface)",
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          color: "var(--text-muted)",
+          textTransform: "uppercase",
+          letterSpacing: 0.5,
+          fontFamily: "var(--font-mono)",
+          marginBottom: 4,
+        }}
+      >
+        Paste install line, JSON, or URL
+      </div>
+      <textarea
+        value={raw}
+        onChange={(e) => {
+          setRaw(e.target.value);
+          if (prefilled) setPrefilled(false);
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+        placeholder={
+          "npx -y @modelcontextprotocol/server-filesystem ~/Documents\n" +
+          "— or —\n" +
+          "claude mcp add filesystem -- npx -y @modelcontextprotocol/server-filesystem ~\n" +
+          "— or —\n" +
+          '{"mcpServers": {"filesystem": {"command": "npx", "args": [...]}}}'
+        }
+        rows={4}
+        style={{ ...inputStyle, resize: "vertical", marginBottom: 6 }}
+      />
+      <div style={{ display: "flex", gap: 6 }}>
+        <button
+          type="button"
+          onClick={handleParse}
+          disabled={!raw.trim()}
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            padding: "5px 12px",
+            fontSize: 11,
+            background: "var(--accent)",
+            border: "none",
+            borderRadius: 4,
+            color: "#fff",
+            cursor: raw.trim() ? "pointer" : "not-allowed",
+            fontFamily: "var(--font-mono)",
+            opacity: raw.trim() ? 1 : 0.5,
+          }}
+        >
+          Prefill form
+        </button>
+        {raw && (
+          <button
+            type="button"
+            onClick={() => {
+              setRaw("");
+              setError("");
+              setWarnings([]);
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              padding: "5px 12px",
+              fontSize: 11,
+              background: "transparent",
+              border: "1px solid var(--border-default)",
+              borderRadius: 4,
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      {prefilled && !error && (
+        <div
+          style={{
+            marginTop: 6,
+            fontSize: 11,
+            color: "var(--success-color, #4caf50)",
+            fontFamily: "var(--font-mono)",
+          }}
+        >
+          ✓ Prefilled. Review fields below and Save.
+        </div>
+      )}
+      {error && (
+        <div
+          style={{
+            marginTop: 6,
+            fontSize: 11,
+            color: "var(--danger-color)",
+            padding: "4px 8px",
+            borderRadius: 4,
+            border: "1px solid var(--danger-color)",
+            background: "var(--bg-primary)",
+          }}
+        >
+          {error}
+        </div>
+      )}
+      {warnings.length > 0 && (
+        <ul
+          style={{
+            marginTop: 6,
+            marginBottom: 4,
+            paddingLeft: 18,
+            fontSize: 11,
+            color: "var(--text-muted)",
+          }}
+        >
+          {warnings.map((w, idx) => (
+            <li key={idx}>{w}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // ── Form ──────────────────────────────────────────────────────────────────────
 
 interface FormProps {
@@ -181,7 +380,7 @@ interface FormProps {
   onCancel(): void;
 }
 
-function McpServerForm({
+export function McpServerForm({
   draft,
   isNew,
   saving,
@@ -190,6 +389,11 @@ function McpServerForm({
   onSave,
   onCancel,
 }: FormProps) {
+  // Manual fields are collapsed by default for a new server (paste-first
+  // workflow) and expanded when editing (paste isn't shown). A successful
+  // paste auto-expands the section so the user can review.
+  const [advancedOpen, setAdvancedOpen] = useState<boolean>(!isNew);
+
   const field = (key: keyof DraftEntry) => ({
     value: draft[key],
     onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
@@ -200,135 +404,179 @@ function McpServerForm({
 
   return (
     <div
-      style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}
       onMouseDown={(e) => e.stopPropagation()}
+      style={{ display: "flex", flexDirection: "column" }}
     >
-      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 2 }}>
-        {isNew ? "Add MCP Server" : "Edit MCP Server"}
-      </div>
-
-      <div>
-        <label style={labelStyle}>ID</label>
-        <input {...field("id")} disabled={!isNew} placeholder="my-server" />
-      </div>
-      <div>
-        <label style={labelStyle}>Display Name</label>
-        <input {...field("name")} placeholder="My Server" />
-      </div>
-      <div>
-        <label style={labelStyle}>Description (optional)</label>
-        <input {...field("description")} placeholder="What this server does" />
-      </div>
-      <div>
-        <label style={labelStyle}>Transport</label>
-        <select
-          value={draft.transport}
-          onChange={(e) =>
-            onChange({ ...draft, transport: e.target.value as Transport })
-          }
-          style={{ ...inputStyle, cursor: "pointer" }}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <option value="stdio">stdio</option>
-          <option value="sse">SSE</option>
-          <option value="http">HTTP</option>
-        </select>
-      </div>
-
-      {draft.transport === "stdio" ? (
-        <>
-          <div>
-            <label style={labelStyle}>Command</label>
-            <input {...field("command")} placeholder="npx" />
-          </div>
-          <div>
-            <label style={labelStyle}>Args (space-separated)</label>
-            <input {...field("args")} placeholder="-y my-mcp-package" />
-          </div>
-          <div>
-            <label style={labelStyle}>Env vars (KEY=VALUE, one per line)</label>
-            <textarea
-              {...field("env")}
-              rows={3}
-              placeholder={"API_KEY=abc\nDEBUG=true"}
-              style={{ ...inputStyle, resize: "vertical" }}
-            />
-          </div>
-        </>
-      ) : (
-        <>
-          <div>
-            <label style={labelStyle}>URL</label>
-            <input {...field("url")} placeholder="https://example.com/mcp" />
-          </div>
-          <div>
-            <label style={labelStyle}>Headers (KEY=VALUE, one per line)</label>
-            <textarea
-              {...field("headers")}
-              rows={3}
-              placeholder="Authorization=Bearer token"
-              style={{ ...inputStyle, resize: "vertical" }}
-            />
-          </div>
-        </>
+      {isNew && (
+        <PasteBox
+          onApply={(pasted) => {
+            onChange(mergePastedDraft(draft, pasted));
+            setAdvancedOpen(true);
+          }}
+        />
       )}
 
-      <div>
-        <label style={labelStyle}>Tool names (comma-separated, optional)</label>
-        <input {...field("toolNames")} placeholder="read_file, write_file" />
-      </div>
-
-      {error && (
-        <div
-          style={{
-            fontSize: 11,
-            color: "var(--danger-color)",
-            background: "var(--bg-primary)",
-            padding: "4px 8px",
-            borderRadius: 4,
-            border: "1px solid var(--danger-color)",
-          }}
-        >
-          {error}
+      <div
+        style={{
+          padding: "10px 12px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+        }}
+      >
+        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)" }}>
+          {isNew ? "Add MCP Server" : "Edit MCP Server"}
         </div>
-      )}
 
-      <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
-        <button
-          onClick={onSave}
-          disabled={saving}
-          onMouseDown={(e) => e.stopPropagation()}
-          style={{
-            flex: 1,
-            padding: "5px 0",
-            fontSize: 11,
-            background: "var(--accent)",
-            border: "none",
-            borderRadius: 5,
-            color: "#fff",
-            cursor: saving ? "not-allowed" : "pointer",
-            fontFamily: "var(--font-mono)",
-            opacity: saving ? 0.7 : 1,
-          }}
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
-        <button
-          onClick={onCancel}
-          onMouseDown={(e) => e.stopPropagation()}
-          style={{
-            padding: "5px 12px",
-            fontSize: 11,
-            background: "var(--bg-surface)",
-            border: "1px solid var(--border-default)",
-            borderRadius: 5,
-            color: "var(--text-secondary)",
-            cursor: "pointer",
-            fontFamily: "var(--font-mono)",
-          }}
-        >
-          Cancel
-        </button>
+        {/* Advanced disclosure — manual fields */}
+        {isNew ? (
+          <button
+            type="button"
+            onClick={() => setAdvancedOpen((v) => !v)}
+            onMouseDown={(e) => e.stopPropagation()}
+            aria-expanded={advancedOpen}
+            style={{
+              alignSelf: "flex-start",
+              background: "transparent",
+              border: "none",
+              color: "var(--text-secondary)",
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              cursor: "pointer",
+              padding: 0,
+            }}
+          >
+            {advancedOpen ? "▾" : "▸"} Advanced (edit fields manually)
+          </button>
+        ) : null}
+
+        {advancedOpen && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div>
+              <label style={labelStyle}>ID</label>
+              <input {...field("id")} disabled={!isNew} placeholder="my-server" />
+            </div>
+            <div>
+              <label style={labelStyle}>Display Name</label>
+              <input {...field("name")} placeholder="My Server" />
+            </div>
+            <div>
+              <label style={labelStyle}>Description (optional)</label>
+              <input {...field("description")} placeholder="What this server does" />
+            </div>
+            <div>
+              <label style={labelStyle}>Transport</label>
+              <select
+                value={draft.transport}
+                onChange={(e) =>
+                  onChange({ ...draft, transport: e.target.value as Transport })
+                }
+                style={{ ...inputStyle, cursor: "pointer" }}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <option value="stdio">stdio</option>
+                <option value="sse">SSE</option>
+                <option value="http">HTTP</option>
+              </select>
+            </div>
+
+            {draft.transport === "stdio" ? (
+              <>
+                <div>
+                  <label style={labelStyle}>Command</label>
+                  <input {...field("command")} placeholder="npx" />
+                </div>
+                <div>
+                  <label style={labelStyle}>Args (space-separated)</label>
+                  <input {...field("args")} placeholder="-y my-mcp-package" />
+                </div>
+                <div>
+                  <label style={labelStyle}>Env vars (KEY=VALUE, one per line)</label>
+                  <textarea
+                    {...field("env")}
+                    rows={3}
+                    placeholder={"API_KEY=abc\nDEBUG=true"}
+                    style={{ ...inputStyle, resize: "vertical" }}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <label style={labelStyle}>URL</label>
+                  <input {...field("url")} placeholder="https://example.com/mcp" />
+                </div>
+                <div>
+                  <label style={labelStyle}>Headers (KEY=VALUE, one per line)</label>
+                  <textarea
+                    {...field("headers")}
+                    rows={3}
+                    placeholder="Authorization=Bearer token"
+                    style={{ ...inputStyle, resize: "vertical" }}
+                  />
+                </div>
+              </>
+            )}
+
+            <div>
+              <label style={labelStyle}>Tool names (comma-separated, optional)</label>
+              <input {...field("toolNames")} placeholder="read_file, write_file" />
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--danger-color)",
+              background: "var(--bg-primary)",
+              padding: "4px 8px",
+              borderRadius: 4,
+              border: "1px solid var(--danger-color)",
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+          <button
+            onClick={onSave}
+            disabled={saving}
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              flex: 1,
+              padding: "5px 0",
+              fontSize: 11,
+              background: "var(--accent)",
+              border: "none",
+              borderRadius: 5,
+              color: "#fff",
+              cursor: saving ? "not-allowed" : "pointer",
+              fontFamily: "var(--font-mono)",
+              opacity: saving ? 0.7 : 1,
+            }}
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+          <button
+            onClick={onCancel}
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              padding: "5px 12px",
+              fontSize: 11,
+              background: "var(--bg-surface)",
+              border: "1px solid var(--border-default)",
+              borderRadius: 5,
+              color: "var(--text-secondary)",
+              cursor: "pointer",
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -342,7 +590,7 @@ export interface McpServersBrowserProps {
 }
 
 export function McpServersBrowser({ projectId, refreshKey }: McpServersBrowserProps) {
-  const [collapsed, setCollapsed] = useState(true);
+  const isOpen = useDockPanelOpen("mcp");
   const [entries, setEntries] = useState<McpServerEntry[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -363,8 +611,19 @@ export function McpServersBrowser({ projectId, refreshKey }: McpServersBrowserPr
   }, [projectId]);
 
   useEffect(() => {
-    if (!collapsed) load();
-  }, [collapsed, load, refreshKey]);
+    if (isOpen) load();
+  }, [isOpen, load, refreshKey]);
+
+  // Surface entry count as a live badge on the dock pill, even while
+  // collapsed. Loads once on first projectId.
+  useEffect(() => {
+    if (!projectId) return;
+    listProjectMcpServers(projectId)
+      .then(({ entries: e }) => setEntries(e))
+      .catch(() => {});
+  }, [projectId]);
+
+  useDockBadge("mcp", { count: entries.length });
 
   const openNew = () => {
     setEditingDraft(emptyDraft());
@@ -406,117 +665,26 @@ export function McpServersBrowser({ projectId, refreshKey }: McpServersBrowserPr
     }
   };
 
-  // ── Collapsed button ──
-
-  if (collapsed) {
-    return (
-      <button
-        onClick={() => setCollapsed(false)}
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{
-          position: "absolute",
-          bottom: 56,
-          right: 16,
-          zIndex: 100,
-          padding: "8px 12px",
-          background: "var(--bg-secondary)",
-          border: "1px solid var(--border-default)",
-          borderRadius: 8,
-          color: "var(--text-secondary)",
-          fontSize: 12,
-          fontFamily: "var(--font-mono)",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          boxShadow: "var(--shadow-md)",
-        }}
-      >
-        <span style={{ fontSize: 14 }}>&#x1F50C;</span>
-        MCP
-        {entries.length > 0 && (
-          <span
-            style={{
-              fontSize: 10,
-              color: "var(--text-muted)",
-              background: "var(--bg-primary)",
-              padding: "1px 5px",
-              borderRadius: 8,
-            }}
-          >
-            {entries.length}
-          </span>
-        )}
-      </button>
-    );
-  }
+  if (!isOpen) return null;
 
   // ── Expanded panel ──
 
   return (
-    <div
-      style={{
-        position: "absolute",
-        bottom: 56,
-        right: 16,
-        zIndex: 100,
-        width: 320,
-        maxHeight: "calc(100% - 120px)",
-        background: "var(--bg-secondary)",
-        border: "1px solid var(--border-default)",
-        borderRadius: 10,
-        boxShadow: "var(--shadow-lg)",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-      }}
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      {/* Header */}
-      <div
-        style={{
-          padding: "10px 12px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          borderBottom: "1px solid var(--border-default)",
-          flexShrink: 0,
-        }}
-      >
-        <span
-          style={{
-            fontSize: 11,
-            color: "var(--text-secondary)",
-            fontFamily: "var(--font-mono)",
-            textTransform: "uppercase",
-            letterSpacing: 1,
-            fontWeight: 600,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          <span style={{ fontSize: 14 }}>&#x1F50C;</span>
-          MCP Servers ({entries.length})
-        </span>
-        <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+    <DockPanel id="mcp" width={320}>
+      <DockPanelHeader
+        title={<>MCP Servers ({entries.length})</>}
+        actions={
           <button
             onClick={openNew}
             onMouseDown={(e) => e.stopPropagation()}
             title="Add MCP Server"
+            aria-label="Add MCP server"
             style={actionButtonStyle}
           >
             +
           </button>
-          <button
-            onClick={() => { setShowForm(false); setCollapsed(true); }}
-            onMouseDown={(e) => e.stopPropagation()}
-            style={{ ...actionButtonStyle, fontSize: 14, padding: "0 4px" }}
-          >
-            &#9654;
-          </button>
-        </div>
-      </div>
+        }
+      />
 
       {/* Form */}
       {showForm && (
@@ -676,6 +844,6 @@ export function McpServersBrowser({ projectId, refreshKey }: McpServersBrowserPr
           </div>
         ))}
       </div>
-    </div>
+    </DockPanel>
   );
 }

@@ -2,7 +2,7 @@
  * Annotation layer — an SVG overlay that owns pin and rectangle markup
  * in normalized (0–1) coordinates, so annotations survive container
  * resize / zoom. Reused by ImageNode today and by WebPreviewNode /
- * PdfPageNode later (Phase 4 of docs/visual-context-plan.md).
+ * PdfPageNode later (Phase 4 of docs/archive/visual-context-plan.md).
  *
  * Coordinates are always stored as ratios of the container's rendered
  * size. Pixel math happens on read/write at the event boundary.

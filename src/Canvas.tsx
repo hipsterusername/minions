@@ -1115,15 +1115,30 @@ export function Canvas({
       // ── Device detection via heuristic engine ───────────────────
       const device = wheelDetector.classify(e);
 
-      // ── Scroll-capture zones (chat areas, message lists) ────────
+      // ── Scroll-capture zones (chat areas, dashboards, etc.) ─────
+      // Any element marked with `data-scroll-capture` (or an ancestor of
+      // the wheel target so marked) opts out of canvas pan/zoom and lets
+      // the browser scroll its content natively.
+      //
+      // Two cases:
+      //   1. Mouse wheel: always route to native scroll. Mice can't pinch
+      //      and don't mid-gesture-drift between regions, so there is no
+      //      gesture-continuity concern.
+      //   2. Trackpad pan: route to native scroll only when no canvas pan
+      //      is currently in progress. If the user started panning the
+      //      canvas over the background and drifted over a scroll-capture
+      //      zone mid-gesture, keep panning the canvas (gesture continuity).
+      //
+      // Pinch (ctrlKey/metaKey + wheel) always zooms the canvas regardless
+      // of where the cursor is.
       const target = e.target as HTMLElement | null;
       const overScrollCapture = !!target?.closest?.("[data-scroll-capture]");
 
       if (overScrollCapture && !isPinch) {
-        if (device === "trackpad" && !wheelDetector.isPanGestureActive) {
+        if (device === "mouse") {
           return;
         }
-        if (device === "mouse") {
+        if (device === "trackpad" && !wheelDetector.isPanGestureActive) {
           return;
         }
       }
@@ -1161,9 +1176,13 @@ export function Canvas({
           pendingZoom = { mouseX, mouseY, cumulativeFactor: zoomFactor };
         }
       } else {
-        // Accumulate trackpad pan deltas
+        // Accumulate trackpad pan deltas. Mark the wheel detector as actively
+        // panning so subsequent events in the same gesture continue to pan
+        // the canvas even if the pointer drifts over a scroll-capture zone
+        // mid-gesture (gesture continuity).
         pendingPanDx += e.deltaX;
         pendingPanDy += e.deltaY;
+        wheelDetector.markPanGestureActive();
       }
 
       scheduleFlush();

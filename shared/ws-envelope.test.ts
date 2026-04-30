@@ -7,71 +7,17 @@
 
 import { describe, it, expect } from "vitest";
 import {
-  wsEnvelopeSchema,
-  topicSchema,
   sessionTopic,
   projectTopic,
   sessionKeyFromTopic,
   topicMatches,
-  GLOBAL_TOPIC,
 } from "./ws-envelope.ts";
 
-describe("ws-envelope: topic schema", () => {
-  it("accepts session topics", () => {
-    expect(topicSchema.parse("session:leader-abc")).toBe("session:leader-abc");
-    expect(topicSchema.parse("session:m-1")).toBe("session:m-1");
-  });
-
-  it("accepts project topics", () => {
-    expect(topicSchema.parse("project:p123")).toBe("project:p123");
-  });
-
-  it("accepts the global sentinel", () => {
-    expect(topicSchema.parse("global")).toBe("global");
-  });
-
-  it("rejects an empty session topic", () => {
-    expect(topicSchema.safeParse("session:").success).toBe(false);
-  });
-
-  it("rejects an unknown topic prefix", () => {
-    expect(topicSchema.safeParse("unknown:foo").success).toBe(false);
-    expect(topicSchema.safeParse("leader-abc").success).toBe(false);
-  });
-});
-
-describe("ws-envelope: envelope schema", () => {
-  it("parses an envelope and preserves passthrough payload fields", () => {
-    const env = {
-      topic: "session:abc",
-      type: "task_plan_update",
-      leaderSessionKey: "abc",
-      tasks: [{ taskId: "t1", status: "planned" }],
-    };
-    const parsed = wsEnvelopeSchema.parse(env);
-    expect(parsed.topic).toBe("session:abc");
-    expect(parsed.type).toBe("task_plan_update");
-    expect((parsed as Record<string, unknown>)["tasks"]).toEqual(env.tasks);
-  });
-
-  it("rejects an envelope without a topic", () => {
-    const res = wsEnvelopeSchema.safeParse({ type: "session_status" });
-    expect(res.success).toBe(false);
-  });
-
-  it("rejects an envelope without a type", () => {
-    const res = wsEnvelopeSchema.safeParse({ topic: "global" });
-    expect(res.success).toBe(false);
-  });
-
-  it("rejects an envelope with a malformed topic", () => {
-    const res = wsEnvelopeSchema.safeParse({
-      topic: "bogus",
-      type: "x",
-    });
-    expect(res.success).toBe(false);
-  });
-});
+// Note: per testing-strategy.md §5.4 (SCHEMA_REDUNDANT) the topic-regex
+// pass/fail and envelope-required-field pass/fail describes have been
+// removed — they re-asserted zod's own parse rules against literals
+// authored next to the schema. The §2.3 rewrite ("every server bus.emit*
+// produces a payload that parses through the envelope") lands in Wave 2.
 
 describe("ws-envelope: helpers", () => {
   it("sessionTopic builds a `session:<key>` topic", () => {
@@ -112,7 +58,5 @@ describe("ws-envelope: helpers", () => {
     expect(topicMatches("*", "global")).toBe(true);
   });
 
-  it("GLOBAL_TOPIC is the literal 'global'", () => {
-    expect(GLOBAL_TOPIC).toBe("global");
-  });
+  // Note: a `expect(GLOBAL_TOPIC).toBe("global")` tautology was removed per §5.7.
 });

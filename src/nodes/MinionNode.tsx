@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from "react";
 import type { NodeRenderProps, ThinkingConfig } from "../types.ts";
 import { MINION_THINKING_CONFIG } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
@@ -19,6 +19,8 @@ import {
   type SessionStreamStatus,
 } from "../session-stream.ts";
 import { useSessionStream } from "../use-session-stream.ts";
+import { debugFlagStore } from "../debug.ts";
+import { DebugInspector } from "../components/DebugInspector.tsx";
 
 registerContract(MINION_CONTRACT);
 
@@ -108,6 +110,11 @@ export function MinionNodeRenderer({
   const contentRef = useRef<HTMLDivElement>(null);
   const { banners, processSdkEvent, dismissBanner } = useStatusBanners();
   const syncedRef = useRef(false);
+  const debugEnabled = useSyncExternalStore(
+    debugFlagStore.subscribe,
+    debugFlagStore.getSnapshot,
+    debugFlagStore.getSnapshot,
+  );
 
   useEffect(() => {
     if (outputRef.current) {
@@ -1024,6 +1031,15 @@ export function MinionNodeRenderer({
             ) : data.status === "running" ? (
               <StreamingIndicator label="Working..." />
             ) : null}
+            {debugEnabled && data.sessionKey && (
+              <DebugInspector
+                sessionKey={data.sessionKey}
+                streamingText={data.streamingText}
+                streamingBlockIndex={data.streamingBlockIndex ?? null}
+                messages={data.messages}
+                label="minion"
+              />
+            )}
           </div>
         )}
 

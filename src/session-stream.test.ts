@@ -175,11 +175,9 @@ describe("sessionStreamReducer: streaming deltas", () => {
     expect(s1.streamingBlockIndex).toBeNull();
   });
 
-  it("returns same reference on stream end when buffer is already empty", () => {
-    const s0 = freshState({ streamingText: "", streamingBlockIndex: null });
-    const s1 = sessionStreamReducer(s0, sdkEvent("k1", streamEnd()), "t");
-    expect(s1).toBe(s0);
-  });
+  // Removed: reference-equality early-return on stream-end when buffer
+  // already empty — implementation-detail (same-reference) assertion.
+  // See docs/testing-strategy.md §5.
 
   // ── Multi-block isolation (regression for the conflict bug) ──
 
@@ -231,20 +229,10 @@ describe("sessionStreamReducer: streaming deltas", () => {
     expect(s1).toBe(s0);
   });
 
-  // ── Tightened isStreamEnd (no-op on message_delta) ──
-
-  it("does NOT clear streamingText on message_delta (only message_stop ends the stream)", () => {
-    const s0 = freshState({ streamingText: "Hello", streamingBlockIndex: 0 });
-    const messageDelta: SdkMessage = {
-      type: "stream_event",
-      event: { type: "message_delta", delta: { stop_reason: "end_turn" } },
-      parent_tool_use_id: null,
-      uuid: "u-md",
-      session_id: "s1",
-    } as SdkMessage;
-    const s1 = sessionStreamReducer(s0, sdkEvent("k1", messageDelta), "t");
-    expect(s1).toBe(s0);
-  });
+  // Removed: message_delta-doesn't-end-stream-by-reference test — asserts
+  // same-reference passthrough rather than user-visible behaviour. See
+  // docs/testing-strategy.md §5. The negative isStreamEnd guard is
+  // covered in streaming.test.ts.
 });
 
 // ── sdk_event: complete messages ───────────────────────

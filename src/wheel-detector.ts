@@ -83,16 +83,40 @@ class WheelDeviceDetector {
   private lockedDevice: WheelDevice | null = null;
 
   /**
-   * Whether we're currently mid-pan (trackpad two-finger gesture producing
-   * canvas pan). This stays true as long as trackpad events keep arriving
-   * and resets after the gesture timeout.
+   * Whether the canvas is currently being panned via wheel events. Set
+   * explicitly by the canvas through `markPanGestureActive()` whenever it
+   * actually consumes a wheel event as a pan, and auto-clears after the
+   * gesture timeout (no further pan events).
+   *
+   * The detector itself does NOT touch this flag — classification and pan
+   * tracking are separate concerns. If they were coupled, simply asking
+   * "is this a trackpad event?" while hovering a scroll-capture zone would
+   * mark the canvas as panning, which would then prevent subsequent events
+   * in the same gesture from scrolling the zone.
    */
   private _isPanGestureActive = false;
   private panGestureTimer: ReturnType<typeof setTimeout> | null = null;
 
-  /** Returns true if a trackpad pan gesture is currently in progress. */
+  /** True while the canvas is actively consuming wheel events as a pan. */
   get isPanGestureActive(): boolean {
     return this._isPanGestureActive;
+  }
+
+  /**
+   * The canvas calls this every time it actually pans in response to a
+   * wheel event. The flag stays true until `GESTURE_TIMEOUT_MS` of silence,
+   * at which point it auto-resets so the next wheel gesture is evaluated
+   * fresh.
+   */
+  markPanGestureActive(): void {
+    this._isPanGestureActive = true;
+    if (this.panGestureTimer !== null) {
+      clearTimeout(this.panGestureTimer);
+    }
+    this.panGestureTimer = setTimeout(() => {
+      this._isPanGestureActive = false;
+      this.panGestureTimer = null;
+    }, GESTURE_TIMEOUT_MS);
   }
 
   /**
@@ -127,7 +151,6 @@ class WheelDeviceDetector {
 
     // ── Return locked classification if we have one ───────────────
     if (this.lockedDevice !== null) {
-      this.updatePanGestureState(this.lockedDevice);
       return this.lockedDevice;
     }
 
@@ -136,7 +159,6 @@ class WheelDeviceDetector {
 
     // Lock after first classification so the gesture stays consistent.
     this.lockedDevice = device;
-    this.updatePanGestureState(device);
     return device;
   }
 
@@ -225,28 +247,6 @@ class WheelDeviceDetector {
     // panning when you meant to zoom is less disruptive than accidentally
     // zooming when you meant to pan.
     return mouseScore > trackpadScore + 1 ? "mouse" : "trackpad";
-  }
-
-  /**
-   * Mark the current pan gesture as active/inactive and manage the
-   * auto-reset timer.
-   */
-  private updatePanGestureState(device: WheelDevice): void {
-    if (device === "trackpad") {
-      this._isPanGestureActive = true;
-
-      // Reset the timeout — gesture is still going
-      if (this.panGestureTimer !== null) {
-        clearTimeout(this.panGestureTimer);
-      }
-      this.panGestureTimer = setTimeout(() => {
-        this._isPanGestureActive = false;
-        this.panGestureTimer = null;
-      }, GESTURE_TIMEOUT_MS);
-    }
-    // For mouse events, don't touch the pan gesture state — a mouse
-    // zoom shouldn't cancel an ongoing trackpad pan (edge case with
-    // both devices connected).
   }
 
   /** Force-reset all state. Useful for testing or cleanup. */

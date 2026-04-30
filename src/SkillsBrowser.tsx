@@ -1,6 +1,12 @@
 import { useState, useMemo } from "react";
 import { getAllSkills } from "./skills/registry.ts";
 import type { SkillTemplate } from "./skills/types.ts";
+import {
+  DockPanel,
+  DockPanelHeader,
+  useDockBadge,
+  useDockPanelOpen,
+} from "./BottomRightDock.tsx";
 
 interface SkillsBrowserProps {
   onLaunchSkill: (skillId: string) => void;
@@ -47,13 +53,15 @@ export function SkillsBrowser({
   onExportSkills,
   refreshKey,
 }: SkillsBrowserProps) {
-  const [collapsed, setCollapsed] = useState(true);
+  const isOpen = useDockPanelOpen("skills");
   const [search, setSearch] = useState("");
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(
     new Set(),
   );
 
   const allSkills = useMemo(() => getAllSkills(), [refreshKey]);
+
+  useDockBadge("skills", { count: allSkills.length });
 
   const filtered = useMemo(() => {
     if (!search.trim()) return allSkills;
@@ -88,153 +96,62 @@ export function SkillsBrowser({
     });
   };
 
-  if (collapsed) {
-    return (
-      <button
-        onClick={() => setCollapsed(false)}
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{
-          position: "absolute",
-          bottom: 16,
-          right: 16,
-          zIndex: 100,
-          padding: "8px 12px",
-          background: "var(--bg-secondary)",
-          border: "1px solid var(--border-default)",
-          borderRadius: 8,
-          color: "var(--text-secondary)",
-          fontSize: 12,
-          fontFamily: "var(--font-mono)",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          boxShadow: "var(--shadow-md)",
-        }}
-      >
-        <span style={{ fontSize: 14 }}>&#9889;</span>
-        Skills
-        {allSkills.length > 0 && (
-          <span
-            style={{
-              fontSize: 10,
-              color: "var(--text-muted)",
-              background: "var(--bg-primary)",
-              padding: "1px 5px",
-              borderRadius: 8,
-            }}
-          >
-            {allSkills.length}
-          </span>
-        )}
-      </button>
-    );
-  }
+  if (!isOpen) return null;
 
   return (
-    <div
-      style={{
-        position: "absolute",
-        bottom: 16,
-        right: 16,
-        zIndex: 100,
-        width: 300,
-        maxHeight: "calc(100% - 80px)",
-        background: "var(--bg-secondary)",
-        border: "1px solid var(--border-default)",
-        borderRadius: 10,
-        boxShadow: "var(--shadow-lg)",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-      }}
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      {/* Header */}
-      <div
-        style={{
-          padding: "10px 12px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          borderBottom: "1px solid var(--border-default)",
-          flexShrink: 0,
-        }}
-      >
-        <span
-          style={{
-            fontSize: 11,
-            color: "var(--text-secondary)",
-            fontFamily: "var(--font-mono)",
-            textTransform: "uppercase",
-            letterSpacing: 1,
-            fontWeight: 600,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          <span style={{ fontSize: 14 }}>&#9889;</span>
-          Skills ({allSkills.length})
-        </span>
-
-        {/* Action buttons */}
-        <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-          <button
-            onClick={onCreateSkill}
-            onMouseDown={(e) => e.stopPropagation()}
-            title="New Skill"
-            style={actionButtonStyle}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = "var(--text-secondary)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = "var(--text-muted)";
-            }}
-          >
-            +
-          </button>
-          <button
-            onClick={onImportSkills}
-            onMouseDown={(e) => e.stopPropagation()}
-            title="Import Skills"
-            style={actionButtonStyle}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = "var(--text-secondary)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = "var(--text-muted)";
-            }}
-          >
-            &#8595;
-          </button>
-          <button
-            onClick={onExportSkills}
-            onMouseDown={(e) => e.stopPropagation()}
-            title="Export Skills"
-            style={actionButtonStyle}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = "var(--text-secondary)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = "var(--text-muted)";
-            }}
-          >
-            &#8593;
-          </button>
-          <button
-            onClick={() => setCollapsed(true)}
-            onMouseDown={(e) => e.stopPropagation()}
-            style={{
-              ...actionButtonStyle,
-              fontSize: 14,
-              padding: "0 4px",
-            }}
-          >
-            &#9654;
-          </button>
-        </div>
-      </div>
+    <DockPanel id="skills" width={300}>
+      <DockPanelHeader
+        title={<>Skills ({allSkills.length})</>}
+        actions={
+          <>
+            <button
+              onClick={onCreateSkill}
+              onMouseDown={(e) => e.stopPropagation()}
+              title="New Skill"
+              aria-label="New skill"
+              style={actionButtonStyle}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = "var(--text-secondary)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = "var(--text-muted)";
+              }}
+            >
+              +
+            </button>
+            <button
+              onClick={onImportSkills}
+              onMouseDown={(e) => e.stopPropagation()}
+              title="Import Skills"
+              aria-label="Import skills"
+              style={actionButtonStyle}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = "var(--text-secondary)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = "var(--text-muted)";
+              }}
+            >
+              &#8595;
+            </button>
+            <button
+              onClick={onExportSkills}
+              onMouseDown={(e) => e.stopPropagation()}
+              title="Export Skills"
+              aria-label="Export skills"
+              style={actionButtonStyle}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = "var(--text-secondary)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = "var(--text-muted)";
+              }}
+            >
+              &#8593;
+            </button>
+          </>
+        }
+      />
 
       {/* Search */}
       <div
@@ -529,6 +446,6 @@ export function SkillsBrowser({
           );
         })}
       </div>
-    </div>
+    </DockPanel>
   );
 }

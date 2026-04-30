@@ -212,20 +212,8 @@ describe("AnnotationSidebar — footer", () => {
   });
 });
 
-describe("AnnotationSidebar — layout contract", () => {
-  it("has a fixed flex-basis so the image area flexes, not the sidebar", () => {
-    const { getByTestId } = renderSidebar();
-    const style = getByTestId("annotation-sidebar").getAttribute("style") ?? "";
-    // flex-basis pinned to a px width; flex: 0 0 Npx stops the image
-    // column from pushing against the sidebar when content is wide.
-    expect(style).toMatch(/flex:\s*0\s+0\s+\d+px/);
-    expect(style).toMatch(/width:\s*\d+px/);
-  });
-
-  it("carries data-no-drag so the canvas drag layer ignores sidebar gestures", () => {
-    renderSidebar();
-    expect(
-      screen.getByTestId("annotation-sidebar").hasAttribute("data-no-drag"),
-    ).toBe(true);
-  });
-});
+// Removed `AnnotationSidebar — layout contract` describe (§5.5 IMPL_COUPLING):
+// both tests asserted on inline style strings (`flex: 0 0 Npx`, `width: Npx`)
+// or on the presence of the `data-no-drag` attribute. Neither verifies the
+// user-observable behaviour. The drag-propagation contract belongs in a
+// Wave 2 behaviour test that drives the canvas drag layer end-to-end.

@@ -68,12 +68,9 @@ describe("mcp-server-store", () => {
       expect(listMcpServers(projectDir)).toEqual({ entries: [], invalid: [] });
     });
 
-    it("returns empty results for an empty JSON array", () => {
-      const p = mcpServersFilePath(projectDir);
-      fs.mkdirSync(path.dirname(p), { recursive: true });
-      fs.writeFileSync(p, "[]");
-      expect(listMcpServers(projectDir)).toEqual({ entries: [], invalid: [] });
-    });
+    // Note: an "empty JSON array" case was collapsed into the missing-file
+    // case per testing-strategy.md §5.7 (TRIVIAL) — both branches funnel
+    // through the same parser and assert the same shape.
 
     it("returns entries sorted by id", () => {
       saveMcpServer(projectDir, makeStdio({ id: "zulu", name: "Z" }));
@@ -155,23 +152,17 @@ describe("mcp-server-store", () => {
   // ── saveMcpServer ───────────────────────────────────────────────────────────
 
   describe("saveMcpServer", () => {
-    it("creates a new stdio entry", () => {
-      const saved = saveMcpServer(projectDir, makeStdio({ id: "new-srv" }));
-      expect(saved.id).toBe("new-srv");
-      expect(saved.transport).toBe("stdio");
-      expect(listMcpServers(projectDir).entries).toHaveLength(1);
-    });
-
-    it("creates a new SSE entry", () => {
-      saveMcpServer(projectDir, makeSse({ id: "my-sse" }));
+    it.each([
+      { kind: "stdio", make: () => makeStdio({ id: "new-srv" }) },
+      { kind: "sse", make: () => makeSse({ id: "my-sse" }) },
+      { kind: "http", make: () => makeHttp({ id: "my-http" }) },
+    ])("creates a new $kind entry and round-trips its transport", ({ kind, make }) => {
+      const entry = make();
+      saveMcpServer(projectDir, entry);
       const { entries } = listMcpServers(projectDir);
-      expect(entries[0]!.transport).toBe("sse");
-    });
-
-    it("creates a new HTTP entry", () => {
-      saveMcpServer(projectDir, makeHttp({ id: "my-http" }));
-      const { entries } = listMcpServers(projectDir);
-      expect(entries[0]!.transport).toBe("http");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.id).toBe(entry.id);
+      expect(entries[0]!.transport).toBe(kind);
     });
 
     it("replaces an existing entry with the same id", () => {
@@ -212,13 +203,9 @@ describe("mcp-server-store", () => {
       expect(listMcpServers(projectDir).entries).toHaveLength(0);
     });
 
-    it("keeps list sorted by id after each save", () => {
-      saveMcpServer(projectDir, makeStdio({ id: "zulu" }));
-      saveMcpServer(projectDir, makeStdio({ id: "alpha" }));
-      saveMcpServer(projectDir, makeStdio({ id: "mike" }));
-      const { entries } = listMcpServers(projectDir);
-      expect(entries.map((e) => e.id)).toEqual(["alpha", "mike", "zulu"]);
-    });
+    // Note: a "keeps list sorted by id after each save" check was removed
+    // per §5.9 — already covered by the listMcpServers describe above
+    // (sort is a property of listMcpServers, not of saveMcpServer).
   });
 
   // ── deleteMcpServer ─────────────────────────────────────────────────────────

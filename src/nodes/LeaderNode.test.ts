@@ -43,13 +43,12 @@ function task(
 // ── buildSessionContext ───────────────────────────────────────────────────────
 
 describe("buildSessionContext", () => {
+  // Collapsed: three empty-input early-exit tests (empty messages + plan,
+  // tool/system whitespace, empty + undefined plan) into one
+  // representative. The undefined-taskPlan regression test below is the
+  // load-bearing case. See docs/testing-strategy.md §5.
   it("returns empty string when both messages and taskPlan are empty", () => {
     expect(buildSessionContext([], [])).toBe("");
-  });
-
-  it("returns empty string when messages have no meaningful content", () => {
-    const messages = [msg("tool", ""), msg("system", "   ")];
-    expect(buildSessionContext(messages, [])).toBe("");
   });
 
   // Regression: nodes serialised before taskPlan was added have undefined here.
@@ -58,11 +57,6 @@ describe("buildSessionContext", () => {
     // Simulate legacy data by casting — the real bug was passing undefined
     const legacyTaskPlan = undefined as unknown as TaskPlanItem[];
     expect(() => buildSessionContext(messages, legacyTaskPlan)).not.toThrow();
-  });
-
-  it("returns empty string when taskPlan is undefined and messages are empty", () => {
-    const legacyTaskPlan = undefined as unknown as TaskPlanItem[];
-    expect(buildSessionContext([], legacyTaskPlan)).toBe("");
   });
 
   it("includes conversation entries from user and assistant messages", () => {

@@ -35,14 +35,12 @@ export const RESEARCH_ANALYZE_REPORT: Routine = parseRoutine({
   inputs: [
     {
       name: "topic",
-      type: "string",
       label: "Topic",
       description: "The subject to research.",
       required: true,
     },
     {
       name: "audience",
-      type: "string",
       label: "Audience",
       description: "Who the final report is for.",
       required: false,

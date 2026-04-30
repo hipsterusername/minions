@@ -34,6 +34,8 @@ import { McpServersBrowser } from "./McpServersBrowser.tsx";
 import { SkillsBrowser } from "./SkillsBrowser.tsx";
 import { SkillEditor } from "./SkillEditor.tsx";
 import { RoutineEditor } from "./RoutineEditor.tsx";
+import { DockProvider, DockBar } from "./BottomRightDock.tsx";
+import { DebugModeAffordance } from "./components/DebugModeAffordance.tsx";
 import type { SkillTemplate } from "./skills/types.ts";
 import { getSkill } from "./skills/registry.ts";
 import { themes, themeMap, applyTheme, DEFAULT_THEME_ID } from "./themes.ts";
@@ -809,87 +811,64 @@ function ProjectView({
           />
         </div>
       ) : (
-        <div style={{ position: "absolute", top: 44, left: 0, right: 0, bottom: 0 }}>
-          <Canvas
-            nodes={nodes}
-            dispatch={dispatch}
-            graph={graph}
-            graphDispatch={graphDispatch}
-            transform={transform}
-            setTransform={setTransform}
-            socketSend={socket.send}
-            socketSubscribe={socket.subscribe}
-            socketConnected={socket.connected}
-            projectPath={projectPath}
-            projectSettings={projectSettings}
-            focusNodeId={focusNodeId}
-            onFocusNodeHandled={handleFocusNodeHandled}
-          />
-          <ProjectPanel
-            projectId={projectId}
-            projectPath={projectPath}
-            projectName={projectName}
-            settings={projectSettings}
-            onSettingsChange={handleSettingsChange}
-            onSpawnContextExplorer={handleSpawnContextExplorer}
-            nodes={nodes}
-            onOpenFile={handleOpenFile}
-            onUpdateNodeData={(nodeId, data) => dispatch({ type: "UPDATE_NODE_DATA", id: nodeId, data })}
-            onFocusNode={handleFocusNode}
-          />
-          <SkillsBrowser
-            onLaunchSkill={handleLaunchSkill}
-            onCreateSkill={handleCreateSkill}
-            onEditSkill={handleEditSkill}
-            onDeleteSkill={handleDeleteSkill}
-            onImportSkills={handleImportSkills}
-            onExportSkills={handleExportSkills}
-            refreshKey={skillsRefreshKey}
-          />
-          <McpServersBrowser projectId={projectId} />
-          {skillEditorOpen && (
-            <SkillEditor
-              skill={editingSkill}
-              onSave={handleSaveSkill}
-              onClose={() => {
-                setSkillEditorOpen(false);
-                setEditingSkill(null);
-              }}
+        <DockProvider>
+          <div style={{ position: "absolute", top: 44, left: 0, right: 0, bottom: 0 }}>
+            <Canvas
+              nodes={nodes}
+              dispatch={dispatch}
+              graph={graph}
+              graphDispatch={graphDispatch}
+              transform={transform}
+              setTransform={setTransform}
+              socketSend={socket.send}
+              socketSubscribe={socket.subscribe}
+              socketConnected={socket.connected}
+              projectPath={projectPath}
+              projectSettings={projectSettings}
+              focusNodeId={focusNodeId}
+              onFocusNodeHandled={handleFocusNodeHandled}
             />
-          )}
-          <button
-            onClick={() => setRoutineEditorOpen(true)}
-            onMouseDown={(e) => e.stopPropagation()}
-            title="Edit routines"
-            aria-label="Edit routines"
-            style={{
-              position: "absolute",
-              bottom: 56,
-              right: 16,
-              zIndex: 100,
-              width: 40,
-              height: 40,
-              borderRadius: 20,
-              border: "1px solid var(--border-default)",
-              background: "var(--bg-secondary)",
-              color: "var(--text-secondary)",
-              cursor: "pointer",
-              fontSize: 18,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-            }}
-          >
-            ⚡
-          </button>
-          {routineEditorOpen && (
-            <RoutineEditor
+            <ProjectPanel
               projectId={projectId}
-              onClose={() => setRoutineEditorOpen(false)}
+              projectPath={projectPath}
+              projectName={projectName}
+              settings={projectSettings}
+              onSettingsChange={handleSettingsChange}
+              onSpawnContextExplorer={handleSpawnContextExplorer}
+              nodes={nodes}
+              onOpenFile={handleOpenFile}
+              onUpdateNodeData={(nodeId, data) => dispatch({ type: "UPDATE_NODE_DATA", id: nodeId, data })}
+              onFocusNode={handleFocusNode}
             />
-          )}
-        </div>
+            <SkillsBrowser
+              onLaunchSkill={handleLaunchSkill}
+              onCreateSkill={handleCreateSkill}
+              onEditSkill={handleEditSkill}
+              onDeleteSkill={handleDeleteSkill}
+              onImportSkills={handleImportSkills}
+              onExportSkills={handleExportSkills}
+              refreshKey={skillsRefreshKey}
+            />
+            <McpServersBrowser projectId={projectId} />
+            {skillEditorOpen && (
+              <SkillEditor
+                skill={editingSkill}
+                onSave={handleSaveSkill}
+                onClose={() => {
+                  setSkillEditorOpen(false);
+                  setEditingSkill(null);
+                }}
+              />
+            )}
+            <DockBar onOpenRoutines={() => setRoutineEditorOpen(true)} />
+            {routineEditorOpen && (
+              <RoutineEditor
+                projectId={projectId}
+                onClose={() => setRoutineEditorOpen(false)}
+              />
+            )}
+          </div>
+        </DockProvider>
       )}
     </div>
   );
@@ -926,6 +905,7 @@ export default function App() {
         <ProjectList
           onOpenProject={(id, projectPath) => setCurrentProject({ id, path: projectPath })}
         />
+        <DebugModeAffordance />
       </ThemeContext.Provider>
     );
   }
@@ -938,6 +918,7 @@ export default function App() {
         projectPath={currentProject.path}
         onClose={() => setCurrentProject(null)}
       />
+      <DebugModeAffordance />
     </ThemeContext.Provider>
   );
 }

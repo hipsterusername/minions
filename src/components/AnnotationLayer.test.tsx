@@ -1,7 +1,7 @@
 /**
  * AnnotationLayer — pin and rectangle creation, pin drag, selection.
  *
- * Covers the behavior contract described in docs/visual-context-plan.md
+ * Covers the behavior contract described in docs/archive/visual-context-plan.md
  * Phase 3's in-flight gates: pin add/move/delete and rect drag-to-create.
  */
 import { act, fireEvent, render, screen } from "@testing-library/react";

@@ -1970,13 +1970,20 @@ function RenderNodeRenderer({
         )}
       </div>
 
-      {/* Content area */}
+      {/* Content area — scroll-capture zone so mouse wheel and trackpad
+          two-finger scroll over the dashboard scroll its content instead of
+          zooming/panning the canvas. The Canvas wheel handler checks for
+          `data-scroll-capture` on the event target's ancestors. */}
       <div
         className={hasContent ? CLS.scrollArea : undefined}
+        data-scroll-capture
         style={{
           flex: 1,
           overflow: "auto",
           padding: hasContent ? gap : 0,
+          // Prevent scroll chaining: when the dashboard reaches its scroll
+          // boundary, don't let the scroll propagate to the canvas/page.
+          overscrollBehavior: "contain",
         }}
       >
         {!hasContent ? (

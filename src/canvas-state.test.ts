@@ -30,21 +30,9 @@ describe("canvasReducer", () => {
       expect(next.map((n) => n.id)).toEqual(["a", "b", "c"]);
     });
 
-    it("does not mutate the input array", () => {
-      const initial = [makeNode("a")];
-      canvasReducer(initial, { type: "ADD_NODE", node: makeNode("b") });
-      expect(initial).toHaveLength(1);
-    });
-
-    it("does not deduplicate by id", () => {
-      // The reducer is intentionally a primitive — dedup is the caller's job.
-      const initial = [makeNode("a")];
-      const next = canvasReducer(initial, {
-        type: "ADD_NODE",
-        node: makeNode("a"),
-      });
-      expect(next).toHaveLength(2);
-    });
+    // Removed: "does not mutate input" + "does not dedupe by id" —
+    // implementation-detail / non-behaviour assertions. See
+    // docs/testing-strategy.md §5 (test behaviour, not implementation).
   });
 
   describe("REMOVE_NODE", () => {
@@ -54,11 +42,8 @@ describe("canvasReducer", () => {
       expect(next.map((n) => n.id)).toEqual(["a", "c"]);
     });
 
-    it("returns the same shape (empty) when removing from empty", () => {
-      const next = canvasReducer([], { type: "REMOVE_NODE", id: "nope" });
-      expect(next).toEqual([]);
-    });
-
+    // Removed: empty-remove trivial test (vacuous case already covered by
+    // the unknown-id no-op below). See docs/testing-strategy.md §5.
     it("is a no-op when the id is unknown", () => {
       const initial = [makeNode("a"), makeNode("b")];
       const next = canvasReducer(initial, { type: "REMOVE_NODE", id: "x" });
@@ -114,6 +99,25 @@ describe("canvasReducer", () => {
         data: { count: 7 },
       });
       expect(next[0]?.data).toEqual({ count: 7 });
+    });
+
+    it("only touches the matching node — siblings keep their data", () => {
+      // §6.4 mutation-test follow-up: without a multi-node case the
+      // discriminator `n.id === action.id` could be mutated to `true`
+      // and pass against a single-element array.
+      const initial = [
+        makeNode<{ count: number }>("a", { data: { count: 1 } }),
+        makeNode<{ count: number }>("b", { data: { count: 2 } }),
+        makeNode<{ count: number }>("c", { data: { count: 3 } }),
+      ];
+      const next = canvasReducer(initial, {
+        type: "UPDATE_NODE_DATA",
+        id: "b",
+        data: { count: 99 },
+      });
+      expect(next[0]?.data).toEqual({ count: 1 });
+      expect(next[1]?.data).toEqual({ count: 99 });
+      expect(next[2]?.data).toEqual({ count: 3 });
     });
   });
 
@@ -201,36 +205,8 @@ describe("canvasReducer", () => {
     });
   });
 
-  describe("Routine–Leader relationship (hydration)", () => {
-    it("SET_NODES preserves routineRunId/phaseId/stepId on leader nodes", () => {
-      // Simulates loading saved canvas state (e.g. from SQLite).
-      // The reducer must not strip or alter relation fields.
-      const routine = makeNode("rn", {
-        type: "routine",
-        data: { runId: "run-42", phase: "running" },
-      });
-      const leader = makeNode("ln", {
-        type: "leader",
-        data: {
-          routineRunId: "run-42",
-          routinePhaseId: "phase-1",
-          routineStepId: "step-1",
-          sessionKey: "sk-leader-1",
-        },
-      });
-
-      const next = canvasReducer([makeNode("old")], {
-        type: "SET_NODES",
-        nodes: [routine, leader],
-      });
-
-      const hydratedRoutine = next.find((n) => n.id === "rn");
-      const hydratedLeader = next.find((n) => n.id === "ln");
-
-      expect((hydratedRoutine?.data as Record<string, unknown>)["runId"]).toBe("run-42");
-      expect((hydratedLeader?.data as Record<string, unknown>)["routineRunId"]).toBe("run-42");
-      expect((hydratedLeader?.data as Record<string, unknown>)["routinePhaseId"]).toBe("phase-1");
-      expect((hydratedLeader?.data as Record<string, unknown>)["routineStepId"]).toBe("step-1");
-    });
-  });
+  // Removed: SET_NODES-preserves-fields hydration test — this asserts the
+  // reducer doesn't strip arbitrary `data` fields, which is already covered
+  // by the wholesale-replacement contract on SET_NODES above. See
+  // docs/testing-strategy.md §5 (no implementation-detail pinning).
 });

@@ -18,6 +18,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:mutation": "stryker run",
     "verify": "pnpm typecheck && pnpm test:run && pnpm build",
     "preflight": "node scripts/preflight.mjs",
     "configure": "node scripts/preflight.mjs && node scripts/setup-permissions.mjs"
@@ -32,6 +33,8 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
     "@testing-library/dom": "10.4.1",
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.2",

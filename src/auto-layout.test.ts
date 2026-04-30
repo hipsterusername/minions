@@ -27,12 +27,9 @@ describe("computeAutoLayout", () => {
     expect(computeAutoLayout([], [])).toEqual([]);
   });
 
-  it("returns exactly one move for a single isolate node", () => {
-    const node = makeNode("a");
-    const moves = computeAutoLayout([node], []);
-    expect(moves).toHaveLength(1);
-    expect(moves[0]?.id).toBe("a");
-  });
+  // Removed: duplicate single-isolate-node test and single-leader-no-edges
+  // test. Both restated the multi-node coverage below; failed §5.x in
+  // docs/testing-strategy.md (redundant with broader cases).
 
   it("a single leader with no edges produces exactly one move", () => {
     const leader = makeLeader("l");
@@ -198,15 +195,7 @@ describe("computeAutoLayout", () => {
     expect(mX.position.y).not.toBe(mA.position.y);
   });
 
-  it("all returned positions are integers (Math.round was applied)", () => {
-    const leader = makeLeader("l");
-    const minion = makeMinion("m");
-    const edge = makeEdge("e", "l", "m");
-
-    const moves = computeAutoLayout([leader, minion], [edge]);
-    for (const move of moves) {
-      expect(Number.isInteger(move.position.x)).toBe(true);
-      expect(Number.isInteger(move.position.y)).toBe(true);
-    }
-  });
+  // Removed: Number.isInteger pinning of move positions — implementation
+  // detail (asserts Math.round was applied), not behaviour. See
+  // docs/testing-strategy.md §5 (test behaviour, not implementation).
 });

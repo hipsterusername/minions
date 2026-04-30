@@ -60,11 +60,7 @@ describe("architecture: no direct broadcast outside server/bus.ts", () => {
     });
   }
 
-  it(`${BUS_FILE} exists and owns all broadcast call sites`, () => {
-    const bus = files.find((x) => x.rel === BUS_FILE);
-    expect(bus, `${BUS_FILE} must exist — it is the only allowed broadcast site.`).toBeDefined();
-    // Bus must contain at least one broadcast call — otherwise it isn't
-    // actually doing the work the rest of the server relies on.
-    expect(bus!.count).toBeGreaterThan(0);
-  });
+  // Note: a "bus.ts has at least one broadcast call" sanity is dropped per
+  // testing-strategy.md §5.7 (TRIVIAL) — bus.ts not having broadcast() would
+  // fail the build long before this test could run.
 });

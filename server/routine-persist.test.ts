@@ -16,7 +16,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { initDb } from "./db.ts";
 import { closePersistDb, openPersistDb } from "./session-persist.ts";
 import {
   disableRoutinePersist,
@@ -393,17 +392,8 @@ describe("routine-persist / disable + enable", () => {
     expect(loaded).toHaveLength(1);
   });
 
-  it("enableRoutinePersist re-enables persistence after disable", () => {
-    disableRoutinePersist();
-    enableRoutinePersist();
-
-    const snap = makeSnapshot({ state: "success" });
-    persistRun(snap, "/p");
-
-    const loaded = loadRecentRuns("/p", 10);
-    expect(loaded).toHaveLength(1);
-    expect(loaded[0]?.runId).toBe(snap.runId);
-  });
+  // Note: a "re-enables persistence after disable" inverse-operation
+  // tautology was removed per testing-strategy.md §5.7.
 });
 
 // ── RoutineRunRegistry hydration contract ────────────────────────────────────
@@ -515,58 +505,8 @@ describe("routine-persist / RoutineRunRegistry hydration", () => {
   });
 });
 
-// ── Migration smoke test ─────────────────────────────────────────────────────
-
-describe("routine-persist / migration smoke", () => {
-  it("initDb creates the routine_runs table with expected columns", () => {
-    const db = initDb(":memory:");
-    try {
-      const tableInfo = db.pragma("table_info(routine_runs)") as Array<{
-        name: string;
-      }>;
-      const cols = tableInfo.map((r) => r.name);
-      expect(cols).toContain("run_id");
-      expect(cols).toContain("routine_id");
-      expect(cols).toContain("project_path");
-      expect(cols).toContain("snapshot_json");
-      expect(cols).toContain("started_at");
-      expect(cols).toContain("ended_at");
-      expect(cols).toContain("state");
-    } finally {
-      db.close();
-    }
-  });
-
-  it("routine_runs table is indexed on (project_path, started_at DESC)", () => {
-    const db = initDb(":memory:");
-    try {
-      const indexes = db.pragma("index_list(routine_runs)") as Array<{
-        name: string;
-      }>;
-      const names = indexes.map((i) => i.name);
-      expect(names).toContain("idx_routine_runs_project");
-    } finally {
-      db.close();
-    }
-  });
-
-  it("openPersistDb on a fresh file creates the routine_runs table", () => {
-    const tmpPath = tmpDbPath();
-    process.env["MINIONS_SERVER_DB"] = tmpPath;
-    closePersistDb();
-    try {
-      const db = openPersistDb(tmpPath);
-      const tableInfo = db.pragma("table_info(routine_runs)") as Array<{
-        name: string;
-      }>;
-      expect(tableInfo.length).toBeGreaterThan(0);
-      const cols = tableInfo.map((r) => r.name);
-      expect(cols).toContain("run_id");
-      expect(cols).toContain("state");
-    } finally {
-      closePersistDb();
-      delete process.env["MINIONS_SERVER_DB"];
-      rmDb(tmpPath);
-    }
-  });
-});
+// Note: a `describe("routine-persist / migration smoke")` block was removed
+// per testing-strategy.md §5.4 (SCHEMA_REDUNDANT) and §5.9 (DUPLICATE) — the
+// pragma table_info / index_list / openPersistDb-on-fresh-file checks
+// re-asserted SQLite's own DDL semantics. Migrations are exercised by the
+// real persist + load round-trips in the cases above.
