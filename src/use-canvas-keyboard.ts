@@ -40,11 +40,11 @@ export interface UseCanvasKeyboardOpts {
     otherIds: string[];
   } | null) => void;
   /** Focus (center + zoom) on a set of nodes */
-  focusNodes?: (ids: Set<string>) => void;
+  focusNodes?: ((ids: Set<string>) => void) | undefined;
   /** Cycle focus to the next active (running) node */
-  focusNextActive?: () => void;
-  undo?: () => void;
-  redo?: () => void;
+  focusNextActive?: (() => void) | undefined;
+  undo?: (() => void) | undefined;
+  redo?: (() => void) | undefined;
 }
 
 export function useCanvasKeyboard({

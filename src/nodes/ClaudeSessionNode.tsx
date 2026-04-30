@@ -511,7 +511,7 @@ function ToolGroup({ msgs }: { msgs: SessionMessage[] }) {
   );
 }
 
-function AssistantBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAddContentNode?: (content: string) => void }) {
+function AssistantBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAddContentNode?: ((content: string) => void) | undefined }) {
   const [expanded, setExpanded] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const [isOverflowing, setIsOverflowing] = useState(false);
@@ -747,7 +747,7 @@ function ModelUsageBar({ modelUsage }: { modelUsage: Record<string, ModelUsage> 
   );
 }
 
-function ResultBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAddContentNode?: (content: string) => void }) {
+function ResultBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAddContentNode?: ((content: string) => void) | undefined }) {
   const [expanded, setExpanded] = useState(false);
   const isLong = msg.content.length > 300;
   const meta = msg.meta;
@@ -820,7 +820,7 @@ function ResultBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAddCon
   );
 }
 
-function MessageFeed({ messages, onAddContentNode }: { messages: SessionMessage[]; onAddContentNode?: (content: string) => void }) {
+function MessageFeed({ messages, onAddContentNode }: { messages: SessionMessage[]; onAddContentNode?: ((content: string) => void) | undefined }) {
   const groups = groupMessages(messages);
   return (
     <>
@@ -1064,7 +1064,7 @@ export function ClaudeSessionRenderer({
             if (resultText) {
               const normalizedResult = resultText.replace(/<!--task-name:.+?-->\s*/g, "").trim();
               const lastIdx = base.findLastIndex((m) => m.role === "assistant");
-              if (lastIdx >= 0 && base[lastIdx].content.replace(/<!--task-name:.+?-->\s*/g, "").trim() === normalizedResult) {
+              if (lastIdx >= 0 && base[lastIdx]?.content.replace(/<!--task-name:.+?-->\s*/g, "").trim() === normalizedResult) {
                 base = [...base.slice(0, lastIdx), ...base.slice(lastIdx + 1)];
               }
             }

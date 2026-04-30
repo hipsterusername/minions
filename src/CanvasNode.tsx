@@ -13,43 +13,43 @@ interface CanvasNodeProps {
   onSelect: (id: string, additive: boolean) => void;
   onMove: (id: string, position: Position) => void;
   onUpdateData: (id: string, data: unknown) => void;
-  socketSend?: (data: unknown) => void;
-  socketSubscribe?: (fn: (msg: unknown) => void) => () => void;
-  getContextForNode?: () => import("./types.ts").ContextItem[];
-  projectPath?: string;
-  onResize?: (id: string, size: Size) => void;
+  socketSend?: ((data: unknown) => void) | undefined;
+  socketSubscribe?: ((fn: (msg: unknown) => void) => () => void) | undefined;
+  getContextForNode?: (() => import("./types.ts").ContextItem[]) | undefined;
+  projectPath?: string | undefined;
+  onResize?: ((id: string, size: Size) => void) | undefined;
   /** Callback to add text content as a new markdown node */
-  onAddContentNode?: (content: string) => void;
+  onAddContentNode?: ((content: string) => void) | undefined;
   /** Callback to reveal (create or scroll-to) a minion node for a given session key */
-  onRevealMinion?: (minionSessionKey: string) => void;
+  onRevealMinion?: ((minionSessionKey: string) => void) | undefined;
   /** Callback for RoutineNode: create a Leader child node when a step spawns one */
-  onSpawnLeaderChild?: (event: import("./types.ts").RoutineLeaderSpawnEvent) => void;
+  onSpawnLeaderChild?: ((event: import("./types.ts").RoutineLeaderSpawnEvent) => void) | undefined;
   /** Connection drag callbacks — threaded from Canvas */
-  onConnectionStart?: (port: PortInfo, e: React.MouseEvent) => void;
-  onConnectionEnd?: (port: PortInfo) => void;
+  onConnectionStart?: ((port: PortInfo, e: React.MouseEvent) => void) | undefined;
+  onConnectionEnd?: ((port: PortInfo) => void) | undefined;
   /** Whether a connection drag is currently in progress */
-  isDragActive?: boolean;
+  isDragActive?: boolean | undefined;
   /** Port IDs that are valid drop targets for the current drag */
-  validTargetPorts?: Set<string>;
+  validTargetPorts?: Set<string> | undefined;
   /** "nodeId:portId" of the port currently being snapped to, if any */
-  snapTargetKey?: string;
+  snapTargetKey?: string | undefined;
   /** Set of "nodeId:portId" keys for all ports that have at least one edge */
-  connectedPorts?: Set<string>;
+  connectedPorts?: Set<string> | undefined;
   /** Called when the user starts dragging this node */
-  onDragStart?: (nodeId: string) => void;
+  onDragStart?: ((nodeId: string) => void) | undefined;
   /** Called when the user stops dragging this node */
-  onDragEnd?: (nodeId: string) => void;
+  onDragEnd?: ((nodeId: string) => void) | undefined;
   /** True when a droppable node is hovering over this node (context-group) */
-  isDropTarget?: boolean;
+  isDropTarget?: boolean | undefined;
   /** True when this node is currently being dragged by the user.
    *  Pre-computed from draggingNodeId === node.id in Canvas so we pass a
    *  stable boolean instead of the raw string ID (which would bust memo
    *  on ALL nodes whenever any drag starts/ends). */
-  isBeingDragged?: boolean;
+  isBeingDragged?: boolean | undefined;
   /** True when this node is inside a context-group that is currently being dragged */
-  isInsideDraggingGroup?: boolean;
+  isInsideDraggingGroup?: boolean | undefined;
   /** True when this node is spatially inside any context-group */
-  isInsideContextGroup?: boolean;
+  isInsideContextGroup?: boolean | undefined;
 }
 
 /**
@@ -263,8 +263,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
     // Same spacing math as EdgeRenderer.getPortPosition
     const height = node.size.height;
 
-    for (let i = 0; i < inputPorts.length; i++) {
-      const port = inputPorts[i];
+    for (const [i, port] of inputPorts.entries()) {
       const topPx = port.anchorY != null
         ? height * port.anchorY
         : height / (inputPorts.length + 1) * (i + 1);
@@ -289,8 +288,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
       );
     }
 
-    for (let i = 0; i < outputPorts.length; i++) {
-      const port = outputPorts[i];
+    for (const [i, port] of outputPorts.entries()) {
       const topPx = port.anchorY != null
         ? height * port.anchorY
         : height / (outputPorts.length + 1) * (i + 1);

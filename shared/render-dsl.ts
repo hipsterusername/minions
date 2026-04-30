@@ -16,39 +16,56 @@
  */
 
 import { z } from "zod/v4";
+import {
+  componentColorSchema,
+  spanSchema,
+  type ComponentColor,
+  type ComponentSpan,
+} from "./render-base.ts";
+import {
+  formComponentSchema,
+  type FormComponent,
+} from "./render-form.ts";
+import {
+  chartComponentSchema,
+  type ChartComponent,
+} from "./render-chart.ts";
+import {
+  sectionComponentSchema,
+  tabsComponentSchema,
+  type SectionComponent,
+  type TabsComponent,
+} from "./render-containers.ts";
+import {
+  imageComponentSchema,
+  filePreviewComponentSchema,
+  type ImageComponent,
+  type FilePreviewComponent,
+} from "./render-artifacts.ts";
 
-// ── Color vocabulary ───────────────────────────────────
+// Re-export the shared primitives so existing imports (`from "./render-dsl"`)
+// keep working without changes.
+export { componentColorSchema, spanSchema };
+export type { ComponentColor, ComponentSpan };
 
-export const componentColorSchema = z.enum([
-  "green",
-  "red",
-  "yellow",
-  "blue",
-  "gray",
-  "purple",
-  "orange",
-]);
-
-export type ComponentColor = z.infer<typeof componentColorSchema>;
-
-// ── Span override ──────────────────────────────────────
-//
-// Every component accepts an optional `span` field. This is the explicit
-// escape hatch for agents that need to override the default width logic:
-//   - "auto" (default): decided by `isFullWidth()` on the client
-//   - "full":            span the entire row (equivalent to gridColumn: 1/-1)
-//   - number:            span exactly N columns (clamped to layout.columns)
-//
-// The renderer also length-promotes some cell-width primitives to full-width
-// automatically — see `isFullWidth()` in `src/nodes/RenderNode.tsx`.
-
-export const spanSchema = z.union([
-  z.literal("auto"),
-  z.literal("full"),
-  z.number().int().min(1),
-]);
-
-export type ComponentSpan = z.infer<typeof spanSchema>;
+// Re-export new family schemas + types so existing single-import callers
+// continue to find every component type via render-dsl.
+export {
+  formComponentSchema,
+  chartComponentSchema,
+  sectionComponentSchema,
+  tabsComponentSchema,
+  imageComponentSchema,
+  filePreviewComponentSchema,
+};
+export type {
+  FormComponent,
+  ChartComponent,
+  SectionComponent,
+  TabsComponent,
+  ImageComponent,
+  FilePreviewComponent,
+};
 
 // ── Component primitives ───────────────────────────────
 
@@ -303,6 +320,12 @@ export const renderComponentSchema = z.discriminatedUnion("type", [
   checklistComponentSchema,
   tagsComponentSchema,
   copyableComponentSchema,
+  formComponentSchema,
+  chartComponentSchema,
+  sectionComponentSchema,
+  tabsComponentSchema,
+  imageComponentSchema,
+  filePreviewComponentSchema,
 ]);
 
 export type MetricComponent = z.infer<typeof metricComponentSchema>;
@@ -321,7 +344,23 @@ export type DiffComponent = z.infer<typeof diffComponentSchema>;
 export type ChecklistComponent = z.infer<typeof checklistComponentSchema>;
 export type TagsComponent = z.infer<typeof tagsComponentSchema>;
 export type CopyableComponent = z.infer<typeof copyableComponentSchema>;
-export type RenderComponent = z.infer<typeof renderComponentSchema>;
+
+/**
+ * Inferred union from zod minus the container types — those have manual
+ * recursive interfaces (`SectionComponent`, `TabsComponent`) since zod's
+ * `discriminatedUnion` does not compose with `z.lazy`. The exported
+ * `RenderComponent` substitutes the manual interfaces back in so callers
+ * see fully-typed nested children.
+ */
+type InferredRenderComponent = z.infer<typeof renderComponentSchema>;
+type NonContainerRenderComponent = Exclude<
+  InferredRenderComponent,
+  { type: "section" } | { type: "tabs" }
+>;
+export type RenderComponent =
+  | NonContainerRenderComponent
+  | SectionComponent
+  | TabsComponent;
 
 // ── Layout ─────────────────────────────────────────────
 
@@ -396,7 +435,11 @@ export function applyRenderMessage(
     case "set":
       return {
         layout: msg.layout ?? state.layout,
-        components: msg.components,
+        // Container children come back from zod as `unknown[]` because the
+        // `discriminatedUnion` + `z.lazy` incompatibility forces their inner
+        // schemas to stay loose. Runtime shape matches the manual
+        // recursive `RenderComponent` interfaces, so the cast is sound.
+        components: msg.components as RenderComponent[],
       };
 
     case "patch": {
@@ -426,7 +469,7 @@ export function applyRenderMessage(
       const filtered = state.components.filter((c) => !existingIds.has(c.id));
       return {
         ...state,
-        components: [...filtered, ...msg.components],
+        components: [...filtered, ...(msg.components as RenderComponent[])],
       };
     }
   }

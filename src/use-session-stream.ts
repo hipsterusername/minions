@@ -47,7 +47,7 @@ export interface UseSessionStreamOptions {
    * The subscription primitive. May be `undefined` while the socket is
    * still being established — the hook is a no-op in that case.
    */
-  socketSubscribe?: SocketSubscribe;
+  socketSubscribe?: SocketSubscribe | undefined;
   /** Current shared state. The caller owns this and persists it. */
   state: SessionStreamState;
   /**

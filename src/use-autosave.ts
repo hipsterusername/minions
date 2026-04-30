@@ -24,8 +24,8 @@ export function useAutosave(
   const [status, setStatus] = useState<SaveStatus>("idle");
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [retryCount, setRetryCount] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const nodesRef = useRef(nodes);
   const transformRef = useRef(transform);
   const projectIdRef = useRef(projectId);

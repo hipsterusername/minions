@@ -9,7 +9,7 @@ export interface StatusBannerItem {
   id: string;
   kind: BannerKind;
   message: string;
-  detail?: string;
+  detail?: string | undefined;
   timestamp: number;
   /** Auto-dismiss after this many ms (0 = manual dismiss) */
   ttl: number;
@@ -166,7 +166,7 @@ export function classifySdkEvent(sdkMsg: SdkMessage): StatusBannerItem | null {
 
   // ── result errors ──
   if (sdkMsg.type === "result" && sdkMsg.is_error) {
-    const errText = sdkMsg.errors?.join("; ") ?? sdkMsg.result ?? "Unknown error";
+    const errText = sdkMsg.errors?.join("; ") ?? "Unknown error";
     return {
       id: nextBannerId(),
       kind: "warning",

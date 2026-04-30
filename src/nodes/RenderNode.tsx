@@ -38,8 +38,24 @@ import type {
   ChecklistComponent,
   TagsComponent,
   CopyableComponent,
+  FormComponent as FormDslComponent,
+  ChartComponent as ChartDslComponent,
+  SectionComponent,
+  TabsComponent,
+  ImageComponent,
+  FilePreviewComponent,
 } from "../../shared/render-dsl.ts";
 import { applyRenderMessage } from "../../shared/render-dsl.ts";
+import { FormComponent } from "./render/FormComponent.tsx";
+import { ChartComponent } from "./render/ChartComponent.tsx";
+import {
+  SectionRenderer,
+  TabsRenderer,
+} from "./render/ContainerComponents.tsx";
+import {
+  ImageRenderer,
+  FilePreviewRenderer,
+} from "./render/ArtifactComponents.tsx";
 
 // ── Data shape ────────────────────────────────────────────
 
@@ -1470,7 +1486,27 @@ function CopyableBlock({ c }: { c: CopyableComponent }) {
 
 // ── Component dispatcher ──────────────────────────────────
 
-export function RenderComponentView({ component }: { component: RenderComponent }) {
+/**
+ * Per-render context passed down through the dispatcher. Lets interactive
+ * components (form) reach back to the WebSocket and lets containers
+ * (section, tabs) recursively render their children with the same context.
+ */
+export interface RenderViewContext {
+  /**
+   * Fired when a `form` component is submitted. The dashboard sends the
+   * answers to the server via `submit_form` so the agent receives them as
+   * a synthetic user turn.
+   */
+  onSubmitForm?: ((componentId: string, answers: Record<string, unknown>) => void) | undefined;
+}
+
+export function RenderComponentView({
+  component,
+  context,
+}: {
+  component: RenderComponent;
+  context?: RenderViewContext | undefined;
+}) {
   switch (component.type) {
     case "metric":
       return <MetricCard c={component} />;
@@ -1504,6 +1540,39 @@ export function RenderComponentView({ component }: { component: RenderComponent 
       return <TagsRow c={component} />;
     case "copyable":
       return <CopyableBlock c={component} />;
+    case "form":
+      return (
+        <FormComponent
+          component={component as FormDslComponent}
+          onSubmit={(answers) => {
+            context?.onSubmitForm?.(component.id, answers);
+          }}
+        />
+      );
+    case "chart":
+      return <ChartComponent component={component as ChartDslComponent} />;
+    case "section":
+      return (
+        <SectionRenderer
+          c={component as SectionComponent}
+          renderChild={(child) => (
+            <RenderComponentView component={child} context={context} />
+          )}
+        />
+      );
+    case "tabs":
+      return (
+        <TabsRenderer
+          c={component as TabsComponent}
+          renderChild={(child) => (
+            <RenderComponentView component={child} context={context} />
+          )}
+        />
+      );
+    case "image":
+      return <ImageRenderer c={component as ImageComponent} />;
+    case "file-preview":
+      return <FilePreviewRenderer c={component as FilePreviewComponent} />;
     default:
       return null;
   }
@@ -1530,6 +1599,14 @@ const ALWAYS_FULL_WIDTH = new Set<RenderComponent["type"]>([
   "diff",
   "separator",
   "callout",
+  // New families: forms, charts, containers, and large artifacts are
+  // intrinsically wide. Agents can still narrow with an explicit `span`.
+  "form",
+  "chart",
+  "section",
+  "tabs",
+  "image",
+  "file-preview",
 ]);
 
 function isFullWidth(c: RenderComponent, columns: number): boolean {
@@ -1762,11 +1839,32 @@ function RenderNodeRenderer({
   node,
   onUpdateData,
   socketSubscribe,
+  socketSend,
   onResize,
 }: NodeRenderProps) {
   const data = node.data as RenderNodeData;
   const dataRef = useRef(data);
   dataRef.current = data;
+
+  // Build the dispatcher context once per render so interactive children
+  // (e.g. `form`) can post user input back to the paired Leader session.
+  // The `submit_form` command is dispatched server-side in
+  // `server/commands/submit-form.ts`.
+  const renderViewContext = useCallback(
+    (): RenderViewContext => ({
+      onSubmitForm: (componentId, answers) => {
+        const sessionKey = dataRef.current.leaderSessionKey;
+        if (!sessionKey || !socketSend) return;
+        socketSend({
+          type: "submit_form",
+          sessionKey,
+          formComponentId: componentId,
+          formAnswers: answers,
+        });
+      },
+    }),
+    [socketSend],
+  );
 
   // Inject CSS animation
   useEffect(() => { injectStyles(); }, []);
@@ -1965,7 +2063,10 @@ function RenderNodeRenderer({
                       minWidth: 0,
                     }}
                   >
-                    <RenderComponentView component={c} />
+                    <RenderComponentView
+                      component={c}
+                      context={renderViewContext()}
+                    />
                   </div>
                 );
               })}
