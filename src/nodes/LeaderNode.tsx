@@ -2582,6 +2582,18 @@ export function LeaderNodeRenderer({
     return () => document.removeEventListener("pointerdown", handlePointerDown, true);
   }, [scrollLocked]);
 
+  // Native wheel listener on the scroll zone: stops the event from bubbling to
+  // the canvas container's native handler (which calls preventDefault and zooms).
+  // React's synthetic onWheel fires at the React root — above the canvas container —
+  // so it's too late to stopPropagation there. This native listener fires first.
+  useEffect(() => {
+    const zone = scrollZoneRef.current;
+    if (!zone) return;
+    const stop = (e: WheelEvent) => { e.stopPropagation(); };
+    zone.addEventListener("wheel", stop, { passive: false });
+    return () => zone.removeEventListener("wheel", stop);
+  }, []);
+
   useEffect(() => {
     if (outputRef.current) {
       outputRef.current.scrollTop = outputRef.current.scrollHeight;
