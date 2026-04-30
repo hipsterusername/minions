@@ -25,7 +25,7 @@ import type { CanvasNode, NodeRenderProps } from "../types.ts";
 import type {
   Routine,
   RoutineRunSnapshot,
-} from "../../../shared/routines/types.ts";
+} from "../../shared/routines/types.ts";
 
 beforeAll(() => {
   if (typeof globalThis.ResizeObserver === "undefined") {
@@ -53,7 +53,7 @@ const TEST_ROUTINE: Routine = {
     {
       id: "p1",
       label: "Phase 1",
-      steps: [{ id: "s1", label: "Step 1", routinePrompt: "do x", agent: "leader", skillIds: [], skillValues: {}, mcpServerIds: [] }],
+      steps: [{ id: "s1", label: "Step 1", routinePrompt: "do x", agent: "leader", skillIds: [], skillValues: {}, mcpServerIds: [], retries: 0 }],
     },
   ],
   failurePolicy: "fail-fast",
@@ -169,7 +169,7 @@ describe("RoutineNode", () => {
       | undefined;
     expect(startCmd).toBeDefined();
     expect(startCmd!.routineId).toBe("demo");
-    expect(startCmd!.routineInputs.topic).toBe("ai safety");
+    expect(startCmd!.routineInputs["topic"]).toBe("ai safety");
   });
 
   it("re-renders into running mode on routine_progress", () => {

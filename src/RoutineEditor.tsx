@@ -71,6 +71,7 @@ function newStep(phaseIdx: number, stepIdx: number): RoutineStep {
     skillIds: [],
     skillValues: {},
     mcpServerIds: [],
+    retries: 0,
   };
 }
 
@@ -349,7 +350,7 @@ interface InputRowProps {
   idx: number;
   onChange: (idx: number, field: keyof RoutineInput, value: unknown) => void;
   onRemove: (idx: number) => void;
-  error?: string;
+  error?: string | undefined;
 }
 
 function InputRow({ input, idx, onChange, onRemove, error }: InputRowProps) {
@@ -452,24 +453,24 @@ function MetadataSection({ draft, onChange, errors }: MetadataSectionProps) {
         <div>
           <label style={labelSt}>Name *</label>
           <input
-            style={{ ...inputSt, borderColor: errors.name ? "var(--danger-color)" : undefined }}
+            style={{ ...inputSt, borderColor: errors["name"] ? "var(--danger-color)" : undefined }}
             value={draft.name}
             onChange={(e) => onChange("name", e.target.value)}
             placeholder="My Routine"
             aria-label="Routine name"
           />
-          {errors.name && <div style={fieldErrSt}>{errors.name}</div>}
+          {errors["name"] && <div style={fieldErrSt}>{errors["name"]}</div>}
         </div>
         <div>
           <label style={labelSt}>ID *</label>
           <input
-            style={{ ...inputSt, borderColor: errors.id ? "var(--danger-color)" : undefined }}
+            style={{ ...inputSt, borderColor: errors["id"] ? "var(--danger-color)" : undefined }}
             value={draft.id}
             onChange={(e) => onChange("id", e.target.value)}
             placeholder="my-routine"
             aria-label="Routine ID"
           />
-          {errors.id && <div style={fieldErrSt}>{errors.id}</div>}
+          {errors["id"] && <div style={fieldErrSt}>{errors["id"]}</div>}
         </div>
       </div>
       <div>

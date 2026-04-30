@@ -52,6 +52,7 @@ const EXPECTED_COMMANDS: readonly WsCommandType[] = [
   "list_routines",
   "start_routine",
   "abort_routine",
+  "submit_form",
 ];
 
 describe("commands/index — COMMAND_TABLE contract", () => {

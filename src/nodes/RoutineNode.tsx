@@ -345,7 +345,7 @@ function RunningView({
   onRevealLeader,
 }: {
   snapshot: RoutineRunSnapshot | null;
-  onRevealLeader?: (sessionKey: string) => void;
+  onRevealLeader?: ((sessionKey: string) => void) | undefined;
 }) {
   if (!snapshot) {
     return <div className="rn-empty">Spinning up…</div>;
@@ -367,7 +367,7 @@ function PhasesView({
   onRevealLeader,
 }: {
   snapshot: RoutineRunSnapshot;
-  onRevealLeader?: (sessionKey: string) => void;
+  onRevealLeader?: ((sessionKey: string) => void) | undefined;
 }) {
   return (
     <div className="rn-body">
@@ -419,8 +419,8 @@ function DagView({
   onRevealLeader,
 }: {
   dagSteps: DagStepState[];
-  error?: string;
-  onRevealLeader?: (sessionKey: string) => void;
+  error?: string | undefined;
+  onRevealLeader?: ((sessionKey: string) => void) | undefined;
 }) {
   return (
     <div className="rn-body">
