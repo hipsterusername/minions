@@ -54,6 +54,8 @@ export interface ProjectContext {
 
 export interface ProjectSettings {
   defaultModel?: string;
+  defaultLeaderModel?: string;
+  defaultMinionModel?: string;
   defaultPermissionMode?: string;
   defaultWorktreeIsolation?: boolean;
   [key: string]: unknown;
@@ -185,6 +187,38 @@ export function saveProjectSkills(
   });
 }
 
+// ── MCP servers (per-project) ────────────────────────────
+
+import type { McpServerEntry } from "../shared/mcp-servers/types.ts";
+
+export interface ListMcpServersResult {
+  entries: McpServerEntry[];
+  invalid: { index: number; errors: { path: string; message: string }[] }[];
+}
+
+export function listProjectMcpServers(id: string): Promise<ListMcpServersResult> {
+  return apiFetch(`/projects/${id}/mcp-servers`);
+}
+
+export function saveProjectMcpServer(
+  id: string,
+  entry: McpServerEntry,
+): Promise<McpServerEntry> {
+  return apiFetch(`/projects/${id}/mcp-servers/${entry.id}`, {
+    method: "PUT",
+    body: JSON.stringify(entry),
+  });
+}
+
+export function deleteProjectMcpServer(
+  id: string,
+  serverId: string,
+): Promise<{ ok: true }> {
+  return apiFetch(`/projects/${id}/mcp-servers/${serverId}`, {
+    method: "DELETE",
+  });
+}
+
 // ── Directory tree ──────────────────────────────────────
 
 export interface TreeNode {
@@ -201,6 +235,39 @@ export interface ProjectTree {
 
 export function getProjectTree(id: string, depth = 2): Promise<ProjectTree> {
   return apiFetch(`/projects/${id}/tree?depth=${depth}`);
+}
+
+// ── Routines (per-project) ───────────────────────────────
+
+import type { Routine } from "../shared/routines/types.ts";
+
+export interface RoutineListResult {
+  routines: Routine[];
+  invalid: { file: string; errors: { path: string; message: string }[] }[];
+}
+
+export function listProjectRoutines(id: string): Promise<RoutineListResult> {
+  return apiFetch(`/projects/${id}/routines`);
+}
+
+export function getProjectRoutine(id: string, routineId: string): Promise<Routine> {
+  return apiFetch(`/projects/${id}/routines/${routineId}`);
+}
+
+export function saveProjectRoutine(id: string, routine: Routine): Promise<Routine> {
+  return apiFetch(`/projects/${id}/routines/${routine.id}`, {
+    method: "PUT",
+    body: JSON.stringify(routine),
+  });
+}
+
+export function deleteProjectRoutine(
+  id: string,
+  routineId: string,
+): Promise<{ ok: true }> {
+  return apiFetch(`/projects/${id}/routines/${routineId}`, {
+    method: "DELETE",
+  });
 }
 
 // Re-export encodePath for consumers that need to convert raw paths to IDs

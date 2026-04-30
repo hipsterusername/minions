@@ -12,6 +12,7 @@ import type { SkillTemplate } from "./skills/types.ts";
 import type { ServerMessage } from "./use-socket.ts";
 import { CardCreationChat } from "./CardCreationChat.tsx";
 import type { CanvasNode } from "./types.ts";
+import { DEFAULT_THINKING_CONFIG } from "./types.ts";
 import type { ProjectSettings } from "./api.ts";
 import type { LeaderData, TaskPlanItem } from "./nodes/LeaderNode.tsx";
 import type { DisplayMessage } from "./sdk-messages.ts";
@@ -419,8 +420,8 @@ function CardForm({
   onSubmit: (data: CardFormData) => void;
   onCancel: () => void;
   submitLabel: string;
-  contextNodes?: ContextNodeOption[];
-  defaultWorktreeIsolation?: boolean;
+  contextNodes?: ContextNodeOption[] | undefined;
+  defaultWorktreeIsolation?: boolean | undefined;
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
@@ -924,16 +925,14 @@ interface LeaderStatus {
 
 function InProgressCard({
   card,
-  dispatch,
   leaderStatus,
   onFocusNode,
   onSelect,
   isSelected,
 }: {
   card: KanbanCard;
-  dispatch: Dispatch<KanbanAction>;
-  leaderStatus?: LeaderStatus;
-  onFocusNode?: (nodeId: string) => void;
+  leaderStatus?: LeaderStatus | undefined;
+  onFocusNode?: ((nodeId: string) => void) | undefined;
   onSelect: (cardId: string) => void;
   isSelected: boolean;
 }) {
@@ -1059,7 +1058,6 @@ const BLOCK_REASON_LABELS: Record<string, { label: string; icon: string; color: 
 
 function HaltedCard({
   card,
-  dispatch,
   onResume,
   onCloseCard,
   onFocusNode,
@@ -1067,10 +1065,9 @@ function HaltedCard({
   isSelected,
 }: {
   card: KanbanCard;
-  dispatch: Dispatch<KanbanAction>;
   onResume: (card: KanbanCard) => void;
   onCloseCard: (card: KanbanCard) => void;
-  onFocusNode?: (nodeId: string) => void;
+  onFocusNode?: ((nodeId: string) => void) | undefined;
   onSelect: (cardId: string) => void;
   isSelected: boolean;
 }) {
@@ -1081,7 +1078,7 @@ function HaltedCard({
   useScrollIntoView(bodyRef, expanded);
 
   const reason = card.blockReason ?? "session_lost";
-  const info = BLOCK_REASON_LABELS[reason] ?? BLOCK_REASON_LABELS.session_lost;
+  const info = BLOCK_REASON_LABELS[reason] ?? BLOCK_REASON_LABELS["session_lost"]!;
 
   return (
     <article className={cx("kb-card", "kb-card--halted", `kb-card--${card.priority}`, isSelected && "kb-card--selected")} aria-label={`${card.title} - Halted`} onClick={() => onSelect(card.id)}>
@@ -1235,12 +1232,12 @@ function KanbanColumnComponent({
   onResume: (card: KanbanCard) => void;
   leaderStatuses: Map<string, LeaderStatus>;
   contextNodes: ContextNodeOption[];
-  onFocusNode?: (nodeId: string) => void;
-  headerActions?: React.ReactNode;
-  belowHeader?: React.ReactNode;
+  onFocusNode?: ((nodeId: string) => void) | undefined;
+  headerActions?: React.ReactNode | undefined;
+  belowHeader?: React.ReactNode | undefined;
   selectedCardId: string | null;
   onSelectCard: (cardId: string) => void;
-  extraClassName?: string;
+  extraClassName?: string | undefined;
 }) {
   return (
     <section className={cx("kb-column", extraClassName)} aria-label={`${column.title} column`}>
@@ -1271,7 +1268,6 @@ function KanbanColumnComponent({
                   <InProgressCard
                     key={card.id}
                     card={card}
-                    dispatch={dispatch}
                     leaderStatus={card.leaderNodeId ? leaderStatuses.get(card.leaderNodeId) : undefined}
                     onFocusNode={onFocusNode}
                     onSelect={onSelectCard}
@@ -1279,7 +1275,7 @@ function KanbanColumnComponent({
                   />
                 );
               case "halted":
-                return <HaltedCard key={card.id} card={card} dispatch={dispatch} onResume={onResume} onCloseCard={onCloseCard} onFocusNode={onFocusNode} onSelect={onSelectCard} isSelected={isSelected} />;
+                return <HaltedCard key={card.id} card={card} onResume={onResume} onCloseCard={onCloseCard} onFocusNode={onFocusNode} onSelect={onSelectCard} isSelected={isSelected} />;
               case "history":
                 return <HistoryCard key={card.id} card={card} dispatch={dispatch} onSelect={onSelectCard} isSelected={isSelected} onLaunchLeader={onLaunchLeader} />;
               default:
@@ -1319,9 +1315,9 @@ const COLUMN_BADGE_MAP: Record<string, { label: string; color: string }> = {
   history: { label: "Agent History", color: "var(--status-success)" },
 };
 
-function ColumnBadge({ columnId, blockReason }: { columnId: string; blockReason?: string }) {
+function ColumnBadge({ columnId, blockReason }: { columnId: string; blockReason?: string | undefined }) {
   if (columnId === "halted" && blockReason) {
-    const info = BLOCK_REASON_LABELS[blockReason] ?? BLOCK_REASON_LABELS.session_lost;
+    const info = BLOCK_REASON_LABELS[blockReason] ?? BLOCK_REASON_LABELS["session_lost"]!;
     return (
       <span
         className="kb-badge--blocked"
@@ -1390,7 +1386,7 @@ function InspectorMetricsBar({
   leaderStatus,
   leaderData,
 }: {
-  leaderStatus?: LeaderStatus;
+  leaderStatus?: LeaderStatus | undefined;
   leaderData: LeaderData | null;
 }) {
   const isRunning = leaderData?.status === "running";
@@ -1749,7 +1745,7 @@ function KanbanInspectorPanel({
   nodes,
 }: {
   selectedCard: KanbanCard | null;
-  leaderStatus?: LeaderStatus;
+  leaderStatus?: LeaderStatus | undefined;
   leaderMessages: DisplayMessage[];
   leaderData: LeaderData | null;
   dispatch: Dispatch<KanbanAction>;
@@ -1757,13 +1753,13 @@ function KanbanInspectorPanel({
   onResume: (card: KanbanCard) => void;
   onCloseCard: (card: KanbanCard) => void;
   onLaunchLeader: (card: KanbanCard) => void;
-  onFocusNode?: (nodeId: string) => void;
+  onFocusNode?: ((nodeId: string) => void) | undefined;
   recentCards: KanbanCard[];
   onSelectCard: (cardId: string) => void;
   socketSend: (data: unknown) => void;
-  onUpdateNodeData?: (nodeId: string, data: unknown) => void;
-  inspectorOpen?: boolean;
-  contextNodes?: ContextNodeOption[];
+  onUpdateNodeData?: ((nodeId: string, data: unknown) => void) | undefined;
+  inspectorOpen?: boolean | undefined;
+  contextNodes?: ContextNodeOption[] | undefined;
   nodes: CanvasNode[];
 }) {
   const [activeTab, setActiveTab] = useState<InspectorTab>("activity");
@@ -2232,6 +2228,7 @@ export function KanbanBoard({
         error: null,
         model: card.model,
         permissionMode: card.permissionMode,
+        thinkingConfig: { ...DEFAULT_THINKING_CONFIG },
         taskPlan: card.archivedTaskPlan ?? [],
         worktreeIsolation: card.worktreeIsolation,
         worktreePath: null,
@@ -2413,7 +2410,7 @@ export function KanbanBoard({
               socketSubscribe={socketSubscribe}
               onClose={() => setShowChat(false)}
               projectPath={projectPath}
-              defaultWorktreeIsolation={projectSettings?.defaultWorktreeIsolation}
+              defaultWorktreeIsolation={projectSettings?.defaultWorktreeIsolation ?? false}
             />
           )}
         </div>

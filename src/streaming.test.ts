@@ -105,16 +105,6 @@ describe("extractStreamDelta", () => {
     expect(extractStreamDelta(msg)).toBeNull();
   });
 
-  it("returns null for non-stream_event messages", () => {
-    const msg = {
-      type: "system",
-      subtype: "status",
-      status: "compacting",
-      uuid: "u1",
-      session_id: "s1",
-    } as unknown as SdkMessage;
-    expect(extractStreamDelta(msg)).toBeNull();
-  });
 });
 
 // ── isStreamEnd ───────────────────────────────────────────────────────────────
@@ -127,40 +117,54 @@ describe("isStreamEnd", () => {
     } as unknown as SdkMessage;
     expect(isStreamEnd(msg)).toBe(true);
   });
+});
 
-  it("returns FALSE for stream_event with message_delta — that's a pre-stop usage update, not stream end", () => {
-    const msg = {
-      type: "stream_event",
-      event: { type: "message_delta", delta: { stop_reason: "end_turn" } },
-    } as unknown as SdkMessage;
-    expect(isStreamEnd(msg)).toBe(false);
-  });
+// ── Type-guard negative cases (collapsed) ────────────────────────────────────
+// Collapsed: 5+ near-identical "wrong-input-shape returns null/false"
+// cases across extractStreamDelta / isStreamEnd / isStreamingEvent into a
+// single parameterised case. Each row covers the same negative branch in
+// a different guard. See docs/testing-strategy.md §5.
 
-  it("returns false for stream_event with content_block_delta", () => {
-    const msg = {
-      type: "stream_event",
-      event: { type: "content_block_delta", delta: { type: "text_delta", text: "hi" } },
-    } as unknown as SdkMessage;
-    expect(isStreamEnd(msg)).toBe(false);
-  });
+describe("type-guard negative branches", () => {
+  const systemMsg = {
+    type: "system",
+    subtype: "status",
+    status: "compacting",
+    uuid: "u1",
+    session_id: "s1",
+  } as unknown as SdkMessage;
+  const assistantComplete = {
+    type: "assistant",
+    message: {
+      id: "m1",
+      type: "message",
+      role: "assistant",
+      content: [{ type: "text", text: "done" }],
+      model: "claude-3",
+      stop_reason: "end_turn",
+      usage: { input_tokens: 0, output_tokens: 0 },
+    },
+    parent_tool_use_id: null,
+    uuid: "u1",
+    session_id: "s1",
+  } as unknown as SdkMessage;
+  const messageDelta = {
+    type: "stream_event",
+    event: { type: "message_delta", delta: { stop_reason: "end_turn" } },
+  } as unknown as SdkMessage;
+  const contentBlockDelta = {
+    type: "stream_event",
+    event: { type: "content_block_delta", delta: { type: "text_delta", text: "hi" } },
+  } as unknown as SdkMessage;
 
-  it("returns false for non-stream_event messages", () => {
-    const msg = {
-      type: "assistant",
-      message: {
-        id: "m1",
-        type: "message",
-        role: "assistant",
-        content: [{ type: "text", text: "done" }],
-        model: "claude-3",
-        stop_reason: "end_turn",
-        usage: { input_tokens: 0, output_tokens: 0 },
-      },
-      parent_tool_use_id: null,
-      uuid: "u1",
-      session_id: "s1",
-    } as unknown as SdkMessage;
-    expect(isStreamEnd(msg)).toBe(false);
+  it.each([
+    ["extractStreamDelta on non-stream_event", () => extractStreamDelta(systemMsg), null],
+    ["isStreamEnd on message_delta (pre-stop usage update)", () => isStreamEnd(messageDelta), false],
+    ["isStreamEnd on content_block_delta", () => isStreamEnd(contentBlockDelta), false],
+    ["isStreamEnd on non-stream_event", () => isStreamEnd(assistantComplete), false],
+    ["isStreamingEvent on system message", () => isStreamingEvent(systemMsg), false],
+  ] as const)("%s", (_label, run, expected) => {
+    expect(run()).toBe(expected);
   });
 });
 
@@ -232,45 +236,10 @@ describe("isStreamingEvent", () => {
     expect(isStreamingEvent(msg)).toBe(true);
   });
 
-  it("returns false for system messages", () => {
-    const msg: SdkMessage = {
-      type: "system",
-      subtype: "init",
-      session_id: "s1",
-      claude_code_version: "1.0",
-      cwd: "/",
-      tools: [],
-      model: "m",
-      permissionMode: "auto",
-      apiKeySource: "env",
-      mcp_servers: [],
-      slash_commands: [],
-      output_style: "default",
-      skills: [],
-      plugins: [],
-      uuid: "u1",
-    };
-    expect(isStreamingEvent(msg)).toBe(false);
-  });
-
-  it("returns false for complete assistant messages", () => {
-    const msg = {
-      type: "assistant",
-      message: {
-        id: "m1",
-        type: "message",
-        role: "assistant",
-        content: [{ type: "text", text: "complete" }],
-        model: "claude-3",
-        stop_reason: "end_turn",
-        usage: { input_tokens: 0, output_tokens: 0 },
-      },
-      parent_tool_use_id: null,
-      uuid: "u1",
-      session_id: "s1",
-    } as unknown as SdkMessage;
-    expect(isStreamingEvent(msg)).toBe(false);
-  });
+  // Removed: "returns false for system messages" + "returns false for
+  // complete assistant messages" — folded into the parameterised
+  // type-guard negative-branch suite above. See
+  // docs/testing-strategy.md §5.
 });
 
 // ── extractParentToolUseId ────────────────────────────────────────────────────

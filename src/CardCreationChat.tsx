@@ -15,14 +15,25 @@ function cardId(): string {
   return `kb-${Date.now()}-${++_cardIdCounter}`;
 }
 
+/** Shape of a parsed `card` JSON block before validation. */
+interface RawCardBlock {
+  title?: unknown;
+  description?: unknown;
+  context?: unknown;
+  priority?: unknown;
+  subtasks?: unknown;
+}
+
 /** Parse ```card JSON blocks from assistant text */
 function parseCardBlocks(text: string): ParsedCard[] {
   const cards: ParsedCard[] = [];
   const regex = /```card\s*\n([\s\S]*?)```/g;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(text)) !== null) {
+    const body = match[1];
+    if (!body) continue;
     try {
-      const raw = JSON.parse(match[1]) as Record<string, unknown>;
+      const raw = JSON.parse(body) as RawCardBlock;
       if (typeof raw.title === "string" && raw.title.trim()) {
         cards.push({
           title: raw.title,
@@ -30,7 +41,7 @@ function parseCardBlocks(text: string): ParsedCard[] {
           context: typeof raw.context === "string" ? raw.context : "",
           priority: isValidPriority(raw.priority) ? raw.priority : "medium",
           subtasks: Array.isArray(raw.subtasks)
-            ? (raw.subtasks as unknown[])
+            ? raw.subtasks
                 .filter((s): s is string => typeof s === "string")
                 .map((s) => ({ id: chatId(), title: s, done: false }))
             : [],
@@ -165,9 +176,9 @@ export function CardCreationChat({
 
         // Handle streaming text
         if (sdkMsg.type === "stream_event") {
-          const evt = sdkMsg.event as Record<string, unknown>;
+          const evt = sdkMsg.event as { type?: unknown; delta?: { type?: unknown; text?: unknown } };
           if (evt.type === "content_block_delta") {
-            const delta = evt.delta as Record<string, unknown> | undefined;
+            const delta = evt.delta;
             if (delta && delta.type === "text_delta" && typeof delta.text === "string") {
               pendingTextRef.current += delta.text;
               setStreamingText(pendingTextRef.current);

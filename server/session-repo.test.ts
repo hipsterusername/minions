@@ -6,10 +6,7 @@
  * schema, so schema drift breaks tests immediately.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import { describe, it, expect, beforeEach } from "vitest";
 import { initDb } from "./db.ts";
 import type Database from "better-sqlite3";
 import {
@@ -141,21 +138,9 @@ describe("session-repo / sessions", () => {
     expect(getSession(db, row.session_key)).toBeNull();
   });
 
-  it("handles null project_id / node_id / cwd / model / task_name", () => {
-    const row = makeSessionRow({
-      session_key: "sparse",
-      project_id: null,
-      node_id: null,
-      cwd: null,
-      model: null,
-      task_name: null,
-    });
-    upsertSession(db, row);
-    const got = getSession(db, "sparse");
-    expect(got?.project_id).toBeNull();
-    expect(got?.cwd).toBeNull();
-    expect(got?.model).toBeNull();
-  });
+  // Note: a "handles null project_id / node_id / cwd / model / task_name"
+  // test was removed per testing-strategy.md §5.7 — it asserted that
+  // SQLite stores NULLs as NULL via columns declared NULLABLE.
 });
 
 describe("session-repo / task_records", () => {
@@ -321,16 +306,9 @@ describe("session-repo / event_log", () => {
     expect(JSON.parse(limited[0]!.payload)).toEqual({ i: 0 });
   });
 
-  it("is append-only — no mutation API exposed", async () => {
-    // The repo deliberately has no per-event updateEvent/deleteEvent
-    // function. `purgeEventsForSession` is a bulk session-cleanup helper
-    // (called from removePersistedSession) — it does not violate the
-    // append-only property of the per-event API.
-    const mod = await import("./session-repo.ts");
-    const keys = Object.keys(mod);
-    expect(keys).not.toContain("updateEvent");
-    expect(keys).not.toContain("deleteEvent");
-  });
+  // Note: a "is append-only — no mutation API exposed" check was removed
+  // per testing-strategy.md §5.7 — it pinned the export shape of the
+  // module via `Object.keys`. TypeScript already enforces the public API.
 
   it("getRecentEvents returns the last N events in chronological order", () => {
     for (let i = 0; i < 10; i++) {
@@ -359,72 +337,6 @@ describe("session-repo / event_log", () => {
   });
 });
 
-describe("session-repo / restart recovery", () => {
-  let dbPath: string;
-  afterEach(() => {
-    if (dbPath && fs.existsSync(dbPath)) {
-      try {
-        fs.rmSync(dbPath, { force: true });
-        fs.rmSync(`${dbPath}-wal`, { force: true });
-        fs.rmSync(`${dbPath}-shm`, { force: true });
-      } catch {
-        /* ignore */
-      }
-    }
-  });
-
-  it("full round-trip: leader + tasks + render state + events survive a server restart", () => {
-    dbPath = path.join(
-      os.tmpdir(),
-      `session-repo-restart-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
-    );
-
-    // ── First "server run": seed state, then close ──
-    const db1 = initDb(dbPath);
-    upsertSession(
-      db1,
-      makeSessionRow({ session_key: "L", role: "leader" }),
-    );
-    upsertTaskRecord(
-      db1,
-      makeTaskRecord({
-        taskId: "t-plan",
-        leaderSessionKey: "L",
-        status: "planned",
-      }),
-    );
-    upsertTaskRecord(
-      db1,
-      makeTaskRecord({
-        taskId: "t-run",
-        leaderSessionKey: "L",
-        status: "running",
-        minionSessionKey: "M1",
-      }),
-    );
-    upsertRenderState(db1, "L", makeRenderState({ title: "live" }));
-    appendEvent(db1, "L", "task_plan_update", { n: 2 });
-    db1.close();
-
-    // ── Second "server run": re-open the file, verify state is intact ──
-    const db2 = initDb(dbPath);
-
-    const sessions = getAllSessions(db2);
-    expect(sessions).toHaveLength(1);
-    expect(sessions[0]?.session_key).toBe("L");
-
-    const tasks = getTaskRecordsForLeader(db2, "L");
-    expect(tasks.map((t) => t.taskId).sort()).toEqual(["t-plan", "t-run"]);
-    const runTask = tasks.find((t) => t.taskId === "t-run");
-    expect(runTask?.minionSessionKey).toBe("M1");
-    expect(runTask?.status).toBe("running");
-
-    const render = getRenderState(db2, "L");
-    expect(render?.title).toBe("live");
-
-    const events = getEvents(db2, "L");
-    expect(events).toHaveLength(1);
-
-    db2.close();
-  });
-});
+// Note: a `describe("session-repo / restart recovery")` block was removed
+// per testing-strategy.md §5.9 — the close-and-reopen-file contract is
+// already exercised by the equivalent test in server/session-persist.test.ts.

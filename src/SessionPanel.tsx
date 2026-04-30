@@ -1,18 +1,23 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import type { ServerMessage, SessionInfo, ActiveMinion } from "./use-socket.ts";
+import { useEffect, useCallback, useMemo, useRef, useState } from "react";
+import type { ServerMessage, SessionInfo } from "./use-socket.ts";
 import { isResultMessage } from "./use-socket.ts";
-import { STATUS_COLORS, COLORS } from "./palette.ts";
 import { UsageSection } from "./UsagePopover.tsx";
 import {
   emptySessionUsage,
   mergeResultIntoSession,
   type SessionUsage,
 } from "./usage-aggregator.ts";
+import {
+  DockPanel,
+  DockPanelHeader,
+  useDockBadge,
+  useDockPanelOpen,
+} from "./BottomRightDock.tsx";
 
 interface SessionPanelProps {
-  socketSend?: (data: unknown) => void;
-  socketSubscribe?: (fn: (msg: unknown) => void) => () => void;
-  socketConnected?: boolean;
+  socketSend?: ((data: unknown) => void) | undefined;
+  socketSubscribe?: ((fn: (msg: unknown) => void) => () => void) | undefined;
+  socketConnected?: boolean | undefined;
   onAttachSession: (sessionKey: string, role?: "leader" | "minion" | "default") => void;
   attachedSessionKeys: Set<string>;
 }
@@ -24,7 +29,7 @@ export function SessionPanel({
   onAttachSession,
   attachedSessionKeys,
 }: SessionPanelProps) {
-  const [collapsed, setCollapsed] = useState(true);
+  const isOpen = useDockPanelOpen("sessions");
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
@@ -141,123 +146,41 @@ export function SessionPanel({
   // SDK result actually folds new tokens in.
   const usageView = useMemo(() => usageBySession, [usageBySession]);
 
-  if (collapsed) {
-    return (
-      <button
-        data-testid="sessions-expand"
-        onClick={() => setCollapsed(false)}
-        style={{
-          position: "absolute",
-          bottom: 80,
-          right: 16,
-          zIndex: 100,
-          padding: "6px 10px",
-          background: "var(--bg-secondary)",
-          border: "1px solid var(--border-default)",
-          borderRadius: 8,
-          color: "var(--text-secondary)",
-          fontSize: 11,
-          fontFamily: "var(--font-mono)",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-        }}
-      >
-        <span style={{ fontSize: 14 }}>&#9664;</span>
-        {sessions.filter((s) => s.role !== "minion").length}
-        {totalCost > 0 && (
-          <span style={{ color: "var(--text-muted)" }}>
-            · ${totalCost.toFixed(2)}
-          </span>
-        )}
-        {sessions.filter((s) => s.status === "running" && s.role !== "minion").length > 0 && (
-          <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              background: "var(--status-success)",
-              boxShadow: "0 0 6px var(--status-success)",
-              display: "inline-block",
-            }}
-          />
-        )}
-      </button>
-    );
-  }
+  const visibleSessions = sessions.filter((s) => s.role !== "minion");
+  const runningCount = visibleSessions.filter((s) => s.status === "running").length;
+
+  // Surface live count + running indicator + cost on the dock pill.
+  useDockBadge("sessions", {
+    count: visibleSessions.length,
+    dot: runningCount > 0 ? "success" : undefined,
+    tail: totalCost > 0 ? `$${totalCost.toFixed(2)}` : undefined,
+  });
+
+  if (!isOpen) return null;
 
   return (
-    <div
-      style={{
-        position: "absolute",
-        bottom: 80,
-        right: 16,
-        zIndex: 100,
-        width: 260,
-        maxHeight: "calc(100% - 160px)",
-        background: "var(--bg-secondary)",
-        border: "1px solid var(--border-default)",
-        borderRadius: 10,
-        boxShadow: "var(--shadow-lg)",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-      }}
-    >
-      {/* Header */}
-      <div
-        style={{
-          padding: "10px 12px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          borderBottom: "1px solid var(--border-default)",
-          flexShrink: 0,
-        }}
-      >
-        <span
-          style={{
-            fontSize: 11,
-            color: "var(--text-secondary)",
-            fontFamily: "var(--font-mono)",
-            textTransform: "uppercase",
-            letterSpacing: 1,
-            fontWeight: 600,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          Sessions ({sessions.filter((s) => s.role !== "minion").length})
-          {totalCost > 0 && (
-            <span
-              style={{
-                color: "var(--text-muted)",
-                fontFamily: "var(--font-mono)",
-                textTransform: "none",
-                letterSpacing: 0,
-                fontWeight: 400,
-              }}
-            >
-              · ${totalCost.toFixed(4)}
-            </span>
-          )}
-        </span>
-        <button
-          onClick={() => setCollapsed(true)}
-          style={{
-            background: "none",
-            border: "none",
-            color: "var(--text-muted)",
-            fontSize: 14,
-            cursor: "pointer",
-            padding: "0 4px",
-          }}
-        >
-          &#9654;
-        </button>
-      </div>
+    <DockPanel id="sessions" width={260}>
+      <DockPanelHeader
+        title={
+          <>
+            Sessions ({visibleSessions.length})
+            {totalCost > 0 && (
+              <span
+                style={{
+                  color: "var(--text-muted)",
+                  fontFamily: "var(--font-mono)",
+                  textTransform: "none",
+                  letterSpacing: 0,
+                  fontWeight: 400,
+                  marginLeft: 4,
+                }}
+              >
+                · ${totalCost.toFixed(4)}
+              </span>
+            )}
+          </>
+        }
+      />
 
       {/* Session list */}
       <div
@@ -500,6 +423,6 @@ export function SessionPanel({
       >
         <UsageSection sessions={usageView} />
       </div>
-    </div>
+    </DockPanel>
   );
 }

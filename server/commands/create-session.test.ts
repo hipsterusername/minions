@@ -43,6 +43,7 @@ function makeBus(): Bus {
     emitToSession: () => {},
     emitToProject: () => {},
     emitGlobal: () => {},
+    subscribe: () => () => {},
   };
 }
 

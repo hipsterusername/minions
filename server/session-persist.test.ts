@@ -228,34 +228,11 @@ describe("session-persist integration", () => {
     expect(lastMessage.i).toBe(overflow - 1);
   });
 
-  it("simulated restart of a completed session: events survive, eventBuffer is restorable", () => {
-    persistSession(makeSession({ status: "completed" }));
-    persistEvent("sess-1", {
-      type: "sdk_event",
-      sessionKey: "sess-1",
-      message: { type: "user", content: "hello" },
-      timestamp: 1,
-    });
-    persistEvent("sess-1", {
-      type: "sdk_event",
-      sessionKey: "sess-1",
-      message: { type: "assistant", content: "world" },
-      timestamp: 2,
-    });
-
-    closePersistDb();
-    openPersistDb(dbPath);
-
-    const hydrated = hydrateSessionsFromDb();
-    expect(hydrated).toHaveLength(1);
-    expect(hydrated[0]?.row.status).toBe("completed");
-    expect(hydrated[0]?.events).toHaveLength(2);
-    const messages = hydrated[0]?.events.map((e) => e.message) as Array<{
-      type: string;
-      content: string;
-    }>;
-    expect(messages.map((m) => m.content)).toEqual(["hello", "world"]);
-  });
+  // Note: a "simulated restart of a completed session: events survive"
+  // test was removed per testing-strategy.md §5.9 (DUPLICATE) — the
+  // restart-and-reopen contract is exercised by the case below; the
+  // events-survive property is exercised by the live persistEvent tests
+  // earlier in the file.
 
   it("simulated server restart: close the handle, reopen, and state is intact", () => {
     const leader = makeSession({ id: "L", role: "leader", taskName: "Phase 4" });
@@ -293,15 +270,7 @@ describe("session-persist integration", () => {
   });
 });
 
-describe("session-persist safety", () => {
-  it("disablePersistence causes every helper to no-op safely", () => {
-    disablePersistence();
-    expect(() => persistSession(makeSession())).not.toThrow();
-    expect(() =>
-      persistTaskState("x", makeTaskState([makeTaskRecord()])),
-    ).not.toThrow();
-    expect(() => persistRenderState("x", makeRenderState())).not.toThrow();
-    expect(() => removePersistedSession("x")).not.toThrow();
-    expect(hydrateSessionsFromDb()).toEqual([]);
-  });
-});
+// Note: a `describe("session-persist safety")` with a single
+// `disablePersistence` no-op chain was removed per testing-strategy.md §5.7
+// (TRIVIAL) — calling no-op helpers on a disabled persister is the
+// definition of disablePersistence().

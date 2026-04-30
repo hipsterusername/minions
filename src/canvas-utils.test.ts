@@ -16,22 +16,11 @@ import {
 import { makeNode } from "../tests/fixtures/builders.ts";
 
 describe("snapToGrid", () => {
-  it("snaps 0 to 0", () => {
-    expect(snapToGrid(0)).toBe(0);
-  });
-
-  it("leaves exact multiples of 24 unchanged", () => {
-    expect(snapToGrid(24)).toBe(24);
-    expect(snapToGrid(48)).toBe(48);
-    expect(snapToGrid(96)).toBe(96);
-  });
-
+  // Removed: arithmetic-identity tests (snaps 0→0, leaves multiples
+  // unchanged, rounds 11→0). They restate the rounding rule. See
+  // docs/testing-strategy.md §5 — keeping a single boundary case.
   it("rounds 12 up to 24 (halfway rounds toward +Infinity)", () => {
     expect(snapToGrid(12)).toBe(24);
-  });
-
-  it("rounds 11 down to 0", () => {
-    expect(snapToGrid(11)).toBe(0);
   });
 });
 

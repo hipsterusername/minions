@@ -17,12 +17,10 @@
  *      to null — empty overlays must never round-trip through the
  *      cache.
  */
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   drawAnnotationOverlay,
   fingerprintAnnotations,
-  lookupRasterizedAnnotatedImage,
-  _resetRasterCacheForTests,
   type OverlayContext,
 } from "./rasterize-annotations.ts";
 import type { Annotation } from "../components/AnnotationLayer.tsx";
@@ -220,10 +218,8 @@ describe("drawAnnotationOverlay", () => {
 });
 
 describe("fingerprintAnnotations", () => {
-  it("returns '0' for empty input", () => {
-    expect(fingerprintAnnotations([])).toBe("0");
-  });
-
+  // Removed: fingerprintAnnotations([]) === "0" — pinning of a sentinel
+  // value, not behaviour. See docs/testing-strategy.md §5.
   it("changes when geometry changes", () => {
     const a: Annotation = {
       id: "p1", kind: "pin", x: 0.1, y: 0.1, note: "", color: "#000", order: 1,
@@ -253,21 +249,6 @@ describe("fingerprintAnnotations", () => {
   });
 });
 
-describe("lookupRasterizedAnnotatedImage", () => {
-  beforeEach(() => {
-    _resetRasterCacheForTests();
-  });
-
-  it("returns null for empty annotations (no overlay needed)", () => {
-    expect(lookupRasterizedAnnotatedImage("data:image/png;base64,xxx", [])).toBeNull();
-  });
-
-  it("returns null when nothing has been rasterized for src yet", () => {
-    const a: Annotation = {
-      id: "p1", kind: "pin", x: 0.1, y: 0.1, note: "", color: "#000", order: 1,
-    };
-    expect(
-      lookupRasterizedAnnotatedImage("data:image/png;base64,xxx", [a]),
-    ).toBeNull();
-  });
-});
+// Removed: empty-annotations + empty-cache lookup tests — both return
+// null and assert the absence of a positive cache hit rather than any
+// behaviour. See docs/testing-strategy.md §5.

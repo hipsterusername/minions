@@ -59,20 +59,10 @@ function makePersisted(
 }
 
 describe("SessionRegistry.activeCount", () => {
-  it("returns 0 for an empty registry", () => {
-    const r = new SessionRegistry();
-    expect(r.activeCount()).toBe(0);
-  });
-
-  it("excludes hosts with status 'stopped'", () => {
-    const r = new SessionRegistry();
-    const h = new SessionHost("a", "/tmp");
-    h.status = "stopped";
-    // Reach into the internal map via `start` would require deps;
-    // we use the public `entries()` shape via direct map insertion.
-    (r as unknown as { map: Map<string, SessionHost> }).map.set("a", h);
-    expect(r.activeCount()).toBe(0);
-  });
+  // Note: an "empty registry returns 0" trivial was removed per
+  // testing-strategy.md §5.7, and an "excludes hosts with status 'stopped'"
+  // single-host case was removed per §5.2 — both branches are exercised by
+  // the multi-status case below, which already includes one stopped host.
 
   it("counts hosts with non-stopped statuses", () => {
     const r = new SessionRegistry();

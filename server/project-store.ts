@@ -177,3 +177,31 @@ export function writeSkills(projectPath: string, skills: unknown[]): void {
   fs.mkdirSync(path.dirname(skillsPath), { recursive: true });
   fs.writeFileSync(skillsPath, JSON.stringify(skills, null, 2));
 }
+
+// ── MCP server operations ─────────────────────────────
+
+/**
+ * Read raw MCP server entries from the sidecar. Returns an empty array
+ * when the file is missing or malformed — callers do their own schema
+ * validation via mcp-server-store.
+ */
+export function readMcpServers(projectPath: string): unknown[] {
+  const filePath = path.join(sidecarPath(projectPath), "mcp-servers.json");
+  if (!fs.existsSync(filePath)) return [];
+  try {
+    const raw = fs.readFileSync(filePath, "utf-8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function writeMcpServers(
+  projectPath: string,
+  servers: unknown[],
+): void {
+  const filePath = path.join(sidecarPath(projectPath), "mcp-servers.json");
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(servers, null, 2));
+}

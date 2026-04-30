@@ -9,6 +9,10 @@
  *   4. Unknown skill IDs are silently dropped and surfaced in the tool
  *      result text.
  *   5. The minion_spawned event carries armedSkillIds.
+ *   6. The spawn user-prompt structure: Description / Acceptance Criteria
+ *      header, project-context pointer, no "execute now" trailer.
+ *   7. The worktree branch is injected into the spawn prompt when set.
+ *   8. The armed skill IDs are injected into the spawn prompt when armed.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -50,6 +54,7 @@ function makeHarness(projectDir: string): Harness {
     },
     emitToProject: () => {},
     emitGlobal: () => {},
+    subscribe: () => () => {},
   };
 
   const taskState: TaskManagerState = {
@@ -92,6 +97,12 @@ async function callAssign(
     throw new Error("Expected text content block from assign_task");
   }
   return { text: block.text };
+}
+
+function lastSpawnPrompt(harness: Harness): string {
+  const last = harness.spawns[harness.spawns.length - 1];
+  if (!last) throw new Error("No spawn captured");
+  return last.prompt;
 }
 
 describe("assign_task", () => {
@@ -280,19 +291,101 @@ describe("assign_task", () => {
     ).toEqual(["a", "b"]);
   });
 
-  it("emits minion_spawned with empty skillIds when none are passed", async () => {
-    await callAssign(harness.ctx, {
-      taskId: "t6",
-      title: "None",
-      description: "x",
-      priority: "low",
+  // Note: an "emits minion_spawned with empty skillIds when none passed"
+  // test was removed per testing-strategy.md §5.7 — it asserted the
+  // default-empty array on a payload that's already round-tripped in the
+  // skillIds happy-path case above.
+
+  describe("spawn user-prompt structure", () => {
+    it("uses the Description / Acceptance Criteria header and drops the legacy trailer", async () => {
+      await callAssign(harness.ctx, {
+        taskId: "t-struct",
+        title: "Add a thing",
+        description: "Add a button to LeaderNode that does X.",
+        priority: "medium",
+      });
+
+      const prompt = lastSpawnPrompt(harness);
+      expect(prompt).toContain("## Task Assignment");
+      expect(prompt).toContain("**Task ID:** t-struct");
+      expect(prompt).toContain("**Title:** Add a thing");
+      expect(prompt).toContain("**Priority:** medium");
+      expect(prompt).toContain("## Description / Acceptance Criteria");
+      expect(prompt).toContain("Add a button to LeaderNode that does X.");
+      expect(prompt).not.toContain("Please execute this task now.");
     });
 
-    const spawned = harness.emissions.find(
-      (e) => (e.payload as { type?: string }).type === "minion_spawned",
-    );
-    expect(
-      (spawned!.payload as { skillIds?: string[] }).skillIds,
-    ).toEqual([]);
+    it("always includes the project-context pointer to CLAUDE.md", async () => {
+      await callAssign(harness.ctx, {
+        taskId: "t-ctx",
+        title: "Anything",
+        description: "details",
+        priority: "low",
+      });
+
+      const prompt = lastSpawnPrompt(harness);
+      expect(prompt).toContain("**Project context:**");
+      expect(prompt).toContain("CLAUDE.md");
+    });
+
+    it("injects the worktree branch when ctx.worktreeBranch is set", async () => {
+      harness.ctx.worktreeBranch = "claude/leader-key/feature-x";
+
+      await callAssign(harness.ctx, {
+        taskId: "t-branch",
+        title: "Branch test",
+        description: "details",
+        priority: "low",
+      });
+
+      const prompt = lastSpawnPrompt(harness);
+      expect(prompt).toContain("**Worktree branch:**");
+      expect(prompt).toContain("claude/leader-key/feature-x");
+    });
+
+    // Note: an "omits the worktree branch line" negative-existence test
+    // was removed per §5.9 — already covered by the positive case ("injects
+    // the worktree branch when ctx.worktreeBranch is set"), which proves
+    // the branch line is conditional on ctx.worktreeBranch.
+
+    it("lists armed skill IDs in the spawn prompt when skills are attached", async () => {
+      writeSkills(projectDir, [
+        {
+          id: "lint",
+          name: "Lint",
+          description: "",
+          category: "code",
+          icon: "🧹",
+          accentColor: "#000",
+          template: "Lint stuff",
+          variables: [],
+        },
+        {
+          id: "review",
+          name: "Review",
+          description: "",
+          category: "code",
+          icon: "👀",
+          accentColor: "#000",
+          template: "Review stuff",
+          variables: [],
+        },
+      ]);
+
+      await callAssign(harness.ctx, {
+        taskId: "t-skills",
+        title: "Armed",
+        description: "details",
+        priority: "low",
+        skillIds: ["lint", "review"],
+      });
+
+      const prompt = lastSpawnPrompt(harness);
+      expect(prompt).toContain("**Armed skills:** lint, review");
+      expect(prompt).toContain('"Active Skills"');
+    });
+
+    // Note: an "omits the armed skills line" negative-existence test was
+    // removed per §5.9 — already covered by the positive case above.
   });
 });

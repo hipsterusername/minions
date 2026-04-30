@@ -55,7 +55,7 @@ function Probe({ initial }: { initial: MarkdownData }) {
 const TEST_TOKEN = "test-token-123";
 
 function mockFetch(): ReturnType<typeof vi.fn> {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     if (url.includes("/api/auth/token")) {
       return new Response(JSON.stringify({ token: TEST_TOKEN }), { status: 200 });

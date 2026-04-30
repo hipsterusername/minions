@@ -25,9 +25,7 @@ function uniqueHomePath(label: string): string {
 }
 
 describe("isUnderHomeDir", () => {
-  it("accepts the home directory itself", () => {
-    expect(isUnderHomeDir(os.homedir())).toBe(true);
-  });
+  // Note: a "accepts the home directory itself" tautology was removed per §5.1.
 
   it("accepts a subdirectory under home", () => {
     expect(isUnderHomeDir(path.join(os.homedir(), "sub"))).toBe(true);
@@ -62,12 +60,9 @@ describe("registerProjectPath", () => {
   });
 });
 
-describe("isRegisteredProject", () => {
-  it("returns false for a path that was never registered", () => {
-    const p = uniqueHomePath("never-registered");
-    expect(isRegisteredProject(p)).toBe(false);
-  });
-});
+// Note: a standalone `describe("isRegisteredProject")` block was removed
+// per testing-strategy.md §5.9 — its single assertion duplicated the
+// negative branch already exercised by registerProjectPath's round-trip.
 
 describe("validateProjectPath", () => {
   it("returns the resolved path for a registered project", () => {
@@ -94,10 +89,8 @@ describe("unregisterProjectPath", () => {
 });
 
 describe("validateSessionCwd", () => {
-  it("accepts a path under the home directory", () => {
-    const p = path.join(os.homedir(), "some-project");
-    expect(validateSessionCwd(p)).toBe(path.resolve(p));
-  });
+  // Note: a "accepts a path under the home directory" duplicate of
+  // isUnderHomeDir was removed per §5.9.
 
   it("rejects a path outside the home directory", () => {
     expect(validateSessionCwd("/var/run/something")).toBeNull();

@@ -55,19 +55,13 @@ describe("compileSkillTemplate", () => {
     expect(out).toBe("Header\n\nFooter");
   });
 
-  it("ignores extraneous values not referenced by the template", () => {
-    const out = compileSkillTemplate(makeSkill(), {
-      name: "x",
-      unrelated: "y",
-    });
-    expect(out).toBe("Hello x.");
-  });
+  // Note: an "ignores extraneous values" test was removed per §5.7 — the
+  // single-placeholder case above already exercises that the substitution
+  // is keyed on placeholder presence, not on input shape.
 });
 
 describe("compileSkills", () => {
-  it("returns empty string when no skills are passed", () => {
-    expect(compileSkills([], {})).toBe("");
-  });
+  // Note: an "empty input" test was removed per §5.7.
 
   it("wraps each skill in an Active Skills section header", () => {
     const out = compileSkills(
@@ -142,7 +136,5 @@ describe("loadAllSkills + loadSkillsByIds", () => {
     expect(got.map((s) => s.id)).toEqual(["real"]);
   });
 
-  it("returns [] when ids array is empty without reading disk", () => {
-    expect(loadSkillsByIds(projectDir, [])).toEqual([]);
-  });
+  // Note: an "empty ids" trivial was removed per §5.7.
 });

@@ -7,7 +7,8 @@ import {
   useEffect,
   type Dispatch,
 } from "react";
-import type { CanvasTransform, CanvasNode, CanvasAction, Position, Size, ContextItem } from "./types.ts";
+import type { CanvasTransform, CanvasNode, CanvasAction, Position, Size, ContextItem, RoutineLeaderSpawnEvent } from "./types.ts";
+import { MINION_THINKING_CONFIG } from "./types.ts";
 import { generateId } from "./canvas-state.ts";
 import { CanvasNodeComponent } from "./CanvasNode.tsx";
 import { getAllNodeTypes, isContextProvider } from "./node-registry.ts";
@@ -23,6 +24,8 @@ import { PROTOCOL_COLORS } from "./components/PortDot.tsx";
 import type { LeaderData, TaskPlanItem } from "./nodes/LeaderNode.tsx";
 import type { MinionData, MinionTaskState } from "./nodes/MinionNode.tsx";
 import type { RenderNodeData } from "./nodes/RenderNode.tsx";
+import type { RoutineNodeData } from "./nodes/RoutineNode.tsx";
+import { RoutineConnectors } from "./components/RoutineConnectors.tsx";
 import { emptyRenderState, applyRenderMessage } from "../shared/render-dsl.ts";
 import type { RenderMessage } from "../shared/render-dsl.ts";
 import { CanvasContextMenu } from "./components/CanvasContextMenu.tsx";
@@ -89,7 +92,7 @@ function getPortWorldPos(
   );
   const idx = sameDirPorts.findIndex((p) => p.id === portId);
   if (idx === -1) return null;
-  const anchorY = sameDirPorts[idx].anchorY;
+  const anchorY = sameDirPorts[idx]?.anchorY;
   const y =
     anchorY != null
       ? node.position.y + node.size.height * anchorY
@@ -405,8 +408,6 @@ interface CanvasProps {
   projectSettings?: import("./api.ts").ProjectSettings;
   undo?: () => void;
   redo?: () => void;
-  canUndo?: boolean;
-  canRedo?: boolean;
   /** When set, auto-selects this node (then clear it) */
   focusNodeId?: string | null;
   onFocusNodeHandled?: () => void;
@@ -426,8 +427,6 @@ export function Canvas({
   projectSettings,
   undo,
   redo,
-  canUndo,
-  canRedo,
   focusNodeId,
   onFocusNodeHandled,
 }: CanvasProps) {
@@ -547,9 +546,9 @@ export function Canvas({
     title: string;
     description: string;
     priority: "low" | "medium" | "high" | "critical";
-    worktreeBranch?: string | null;
-    isAgent?: boolean;
-    parentSessionKey?: string;
+    worktreeBranch?: string | null | undefined;
+    isAgent?: boolean | undefined;
+    parentSessionKey?: string | undefined;
   }
   const pendingMinionsRef = useRef<Map<string, PendingMinionSpawn>>(new Map());
   const revealedMinionsRef = useRef<Set<string>>(new Set());
@@ -657,7 +656,7 @@ export function Canvas({
         ? (container.clientHeight / 2 - transform.y) / transform.scale
         : 300;
 
-      const defaultData = createDefaultNodeData(nodeType);
+      const defaultData = createDefaultNodeData(nodeType) as Record<string, unknown>;
       const sessionData = {
         ...defaultData,
         sessionKey,
@@ -770,6 +769,7 @@ export function Canvas({
     if (nextIndex >= activeNodeIds.length) nextIndex = 0;
     lastActiveIndexRef.current = nextIndex;
     const id = activeNodeIds[nextIndex];
+    if (!id) return;
     setSelectedIds(new Set([id]));
     focusNodes(new Set([id]));
   }, [activeNodeIds, focusNodes, setSelectedIds]);
@@ -914,6 +914,7 @@ export function Canvas({
         error: null,
         model: "sonnet" as const,
         permissionMode: "bypassPermissions" as const,
+        thinkingConfig: { ...MINION_THINKING_CONFIG },
         ...(spawn.worktreeBranch ? { worktreeBranch: spawn.worktreeBranch } : {}),
         ...(spawn.isAgent
           ? { agentTaskId: spawn.taskId, parentSessionKey: spawn.parentSessionKey }
@@ -952,6 +953,75 @@ export function Canvas({
       console.log(`[Canvas] Minion revealed: ${minionSessionKey} for task "${spawn.title}"`);
     },
     [dispatch, graphDispatch, setTransform],
+  );
+
+  // ── Spawn a Leader child node when a routine step fires routine_step_leader_spawned ──
+  // Called from RoutineNodeRenderer via the onSpawnLeaderChild prop.
+  const spawnLeaderChild = useCallback(
+    ({ runId, phaseId, stepId, sessionKey }: RoutineLeaderSpawnEvent) => {
+      const routineNode = nodesRef.current.find(
+        (n) => n.type === "routine" && (n.data as RoutineNodeData).runId === runId,
+      );
+      if (!routineNode) return;
+
+      // Dedup: leader already on canvas for this session + run
+      const alreadyExists = nodesRef.current.some(
+        (n) =>
+          n.type === "leader" &&
+          (n.data as LeaderData).routineRunId === runId &&
+          (n.data as LeaderData).sessionKey === sessionKey,
+      );
+      if (alreadyExists) return;
+
+      const rd = routineNode.data as RoutineNodeData;
+      const phases = rd.snapshot?.phases ?? [];
+      const phaseIdx = Math.max(0, phases.findIndex((p) => p.phaseId === phaseId));
+
+      const existingInPhase = nodesRef.current.filter(
+        (n) =>
+          n.type === "leader" &&
+          (n.data as LeaderData).routineRunId === runId &&
+          (n.data as LeaderData).routinePhaseId === phaseId,
+      ).length;
+
+      const leaderTypeDef = getAllNodeTypes().find((t) => t.type === "leader");
+      if (!leaderTypeDef) return;
+
+      const CHILD_GAP_X = 40;
+      const CHILD_GAP_Y = 20;
+      const lw = leaderTypeDef.defaultSize.width;
+      const lh = leaderTypeDef.defaultSize.height;
+
+      const x = snapToGrid(
+        routineNode.position.x + routineNode.size.width + CHILD_GAP_X +
+        phaseIdx * (lw + CHILD_GAP_X),
+      );
+      const y = snapToGrid(
+        routineNode.position.y + existingInPhase * (lh + CHILD_GAP_Y),
+      );
+
+      const leaderBase = createDefaultNodeData("leader", projectSettingsRef.current) as LeaderData;
+      const leaderData: LeaderData = {
+        ...leaderBase,
+        sessionKey,
+        status: "idle",
+        routineRunId: runId,
+        routinePhaseId: phaseId,
+        routineStepId: stepId,
+      };
+
+      dispatch({
+        type: "ADD_NODE",
+        node: {
+          id: generateId(),
+          type: "leader",
+          position: { x, y },
+          size: { ...leaderTypeDef.defaultSize },
+          data: leaderData,
+        },
+      });
+    },
+    [dispatch],
   );
 
   // Keyboard shortcuts: space (pan), delete, undo/redo
@@ -1045,15 +1115,30 @@ export function Canvas({
       // ── Device detection via heuristic engine ───────────────────
       const device = wheelDetector.classify(e);
 
-      // ── Scroll-capture zones (chat areas, message lists) ────────
+      // ── Scroll-capture zones (chat areas, dashboards, etc.) ─────
+      // Any element marked with `data-scroll-capture` (or an ancestor of
+      // the wheel target so marked) opts out of canvas pan/zoom and lets
+      // the browser scroll its content natively.
+      //
+      // Two cases:
+      //   1. Mouse wheel: always route to native scroll. Mice can't pinch
+      //      and don't mid-gesture-drift between regions, so there is no
+      //      gesture-continuity concern.
+      //   2. Trackpad pan: route to native scroll only when no canvas pan
+      //      is currently in progress. If the user started panning the
+      //      canvas over the background and drifted over a scroll-capture
+      //      zone mid-gesture, keep panning the canvas (gesture continuity).
+      //
+      // Pinch (ctrlKey/metaKey + wheel) always zooms the canvas regardless
+      // of where the cursor is.
       const target = e.target as HTMLElement | null;
       const overScrollCapture = !!target?.closest?.("[data-scroll-capture]");
 
       if (overScrollCapture && !isPinch) {
-        if (device === "trackpad" && !wheelDetector.isPanGestureActive) {
+        if (device === "mouse") {
           return;
         }
-        if (device === "mouse") {
+        if (device === "trackpad" && !wheelDetector.isPanGestureActive) {
           return;
         }
       }
@@ -1091,9 +1176,13 @@ export function Canvas({
           pendingZoom = { mouseX, mouseY, cumulativeFactor: zoomFactor };
         }
       } else {
-        // Accumulate trackpad pan deltas
+        // Accumulate trackpad pan deltas. Mark the wheel detector as actively
+        // panning so subsequent events in the same gesture continue to pan
+        // the canvas even if the pointer drifts over a scroll-capture zone
+        // mid-gesture (gesture continuity).
         pendingPanDx += e.deltaX;
         pendingPanDy += e.deltaY;
+        wheelDetector.markPanGestureActive();
       }
 
       scheduleFlush();
@@ -1633,6 +1722,27 @@ export function Canvas({
         const moves = [
           { id, position },
           ...contained.map((n) => ({
+            id: n.id,
+            position: { x: n.position.x + dx, y: n.position.y + dy },
+          })),
+        ];
+        dispatch({ type: "MOVE_GROUP", moves });
+      } else if (currentNode.type === "routine") {
+        // Routine node drags all routine-spawned Leader children with it so the
+        // visual cluster stays cohesive. Children are identified by their
+        // routineRunId matching the routine's active run.
+        const rd = currentNode.data as RoutineNodeData;
+        const runId = rd.runId;
+        const children = runId
+          ? nodesRef.current.filter(
+              (n) =>
+                n.type === "leader" &&
+                (n.data as LeaderData).routineRunId === runId,
+            )
+          : [];
+        const moves = [
+          { id, position },
+          ...children.map((n) => ({
             id: n.id,
             position: { x: n.position.x + dx, y: n.position.y + dy },
           })),
@@ -2327,7 +2437,7 @@ export function Canvas({
       // task records into the leader's taskPlan, preserving any
       // frontend-only fields (cost, sessionSummary) accumulated at close.
       if (serverMsg.type === "task_plan_update") {
-        const { leaderSessionKey, tasks } = serverMsg as {
+        const { leaderSessionKey, tasks } = serverMsg as unknown as {
           leaderSessionKey: string;
           tasks: Array<{
             taskId: string;
@@ -2392,7 +2502,7 @@ export function Canvas({
           description,
           priority,
           worktreeBranch,
-        } = serverMsg as {
+        } = serverMsg as unknown as {
           leaderSessionKey: string;
           minionSessionKey: string;
           taskId: string;
@@ -2436,7 +2546,7 @@ export function Canvas({
           taskId,
           title,
           description,
-        } = serverMsg as {
+        } = serverMsg as unknown as {
           leaderSessionKey: string;
           taskId: string;
           title: string;
@@ -2505,7 +2615,7 @@ export function Canvas({
       // The render node is NOT created when the leader session starts; it only
       // appears once the leader actually calls a render tool (render_set, etc.).
       if (serverMsg.type === "render_update") {
-        const { leaderSessionKey } = serverMsg as { leaderSessionKey: string };
+        const { leaderSessionKey } = serverMsg as unknown as { leaderSessionKey: string };
 
         // Find the leader node that owns this session
         const leader = nodesRef.current.find(
@@ -2888,6 +2998,9 @@ export function Canvas({
           willChange: "transform",
         }}
       >
+        {/* Routine → Leader connector lines rendered behind all nodes */}
+        <RoutineConnectors nodes={nodes} />
+
         {nodes.map((node) => (
           <CanvasNodeComponent
             key={node.id}
@@ -2899,6 +3012,7 @@ export function Canvas({
             onResize={handleResizeNode}
             onAddContentNode={addContentNode}
             onRevealMinion={revealMinion}
+            onSpawnLeaderChild={spawnLeaderChild}
             socketSend={socketSend}
             socketSubscribe={socketSubscribe}
             getContextForNode={getStableContextGetter(node.id)}

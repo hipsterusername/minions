@@ -90,6 +90,18 @@ export function initDb(dbPath?: string): Database.Database {
       created_at    TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_event_log_session ON event_log(session_key);
+
+    CREATE TABLE IF NOT EXISTS routine_runs (
+      run_id        TEXT PRIMARY KEY,
+      routine_id    TEXT NOT NULL,
+      project_path  TEXT NOT NULL,
+      snapshot_json TEXT NOT NULL,
+      started_at    TEXT NOT NULL,
+      ended_at      TEXT,
+      state         TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_routine_runs_project
+      ON routine_runs(project_path, started_at DESC);
   `);
 
   // Idempotent migration: older databases were created before `session_id`

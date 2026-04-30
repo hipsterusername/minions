@@ -128,23 +128,36 @@ export const MINION_THINKING_CONFIG: ThinkingConfig = {
   display: "summarized",
 };
 
+/** Payload emitted when a routine step spawns a Leader session on the server. */
+export interface RoutineLeaderSpawnEvent {
+  runId: string;
+  phaseId: string;
+  stepId: string;
+  sessionKey: string;
+}
+
 export interface NodeRenderProps {
   node: CanvasNode;
   isSelected: boolean;
   onUpdateData: (data: unknown) => void;
-  socketSend?: (data: unknown) => void;
-  socketSubscribe?: (fn: (msg: unknown) => void) => () => void;
+  socketSend?: ((data: unknown) => void) | undefined;
+  socketSubscribe?: ((fn: (msg: unknown) => void) => () => void) | undefined;
   /** Returns text content from all context-protocol nodes connected to this node */
-  getContextForNode?: () => ContextItem[];
-  projectPath?: string;
+  getContextForNode?: (() => ContextItem[]) | undefined;
+  projectPath?: string | undefined;
   /** Callback to resize this node on the canvas */
-  onResize?: (size: Size) => void;
+  onResize?: ((size: Size) => void) | undefined;
   /** Callback to add a text response as a new markdown node on the canvas */
-  onAddContentNode?: (content: string) => void;
+  onAddContentNode?: ((content: string) => void) | undefined;
   /** Callback to reveal (create or scroll-to) a minion node for a given session key */
-  onRevealMinion?: (minionSessionKey: string) => void;
+  onRevealMinion?: ((minionSessionKey: string) => void) | undefined;
+  /**
+   * Callback invoked when this RoutineNode receives a `routine_step_leader_spawned`
+   * event for its current runId. Canvas.tsx handles it by creating the leader node.
+   */
+  onSpawnLeaderChild?: ((event: RoutineLeaderSpawnEvent) => void) | undefined;
   /** True when a compatible node is being dragged over this node (drop target) */
-  isDropTarget?: boolean;
+  isDropTarget?: boolean | undefined;
   /** True when this node is currently being dragged by the user */
-  isBeingDragged?: boolean;
+  isBeingDragged?: boolean | undefined;
 }

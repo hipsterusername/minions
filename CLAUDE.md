@@ -69,7 +69,7 @@ revert, or call it out in the PR with reasoning.
 | `pnpm test` | Watch mode. Run while you're working. |
 | `pnpm test:run` | One-shot. Run before you stage. |
 | `pnpm typecheck` | Run before you commit. CI runs the same. |
-| `pnpm verify` | One-shot mirror of CI: typecheck + test:run + build. Run before you push. |
+| `pnpm verify` | One-shot mirror of CI: `pnpm typecheck && pnpm test:run && pnpm build`. Run before you push. |
 | `pnpm test:coverage` | Look at blind spots. Coverage is reported, not gated. |
 | `prek run` | Local pre-commit gate (see `.pre-commit-config.yaml`). |
 
@@ -145,47 +145,16 @@ New server files must be under 400 lines; split them if they grow.
 
 ---
 
-## Known issues (fix-first before expanding scope)
+## Known scope gaps (broader typecheck coverage)
 
-These were discovered while wiring the workflow-integration in this
-repo and are **not fixed** here — they deserve their own focused PR.
-List them up top so any new session notices immediately.
-
-### `pnpm typecheck` is currently a no-op
-
-The root `tsconfig.json` has `"files": []` with only `references`.
-`tsc --noEmit` in reference-mode without `-b` typechecks nothing.
-The real type gate today is `pnpm build`, which runs `tsc -b && vite build`.
-
-**Fix:** change `"typecheck": "tsc --noEmit"` to
-`"typecheck": "tsc -b --noEmit"` so the same project references are walked.
-Before flipping the switch, fix the pre-existing errors below — otherwise
-the new typecheck immediately fails on `main`.
-
-### `pnpm build` fails on `main` today
-
-`tsc -b --noEmit` surfaces **~550 lines of type errors across 31 files**
-(scope verified at start of Phase 1). Initial estimate undercounted —
-the errors are not just SDK drift in `streaming.ts` / `use-socket.ts`,
-they include broad `exactOptionalPropertyTypes` and
-`noUncheckedIndexedAccess` failures across most of `src/`.
-
-Concentration:
-- `src/Canvas.tsx`, `src/CanvasNode.tsx`, `src/App.tsx` —
-  `exactOptionalPropertyTypes` violations on prop passing
-- `src/nodes/*.tsx` — most node files have one or more errors
-- `src/use-socket.ts`, `src/use-autosave.ts`, `src/use-kanban.ts`,
-  `src/streaming.ts` — index-signature + missing-args errors
-- `src/render-dsl.test.ts`, `src/sdk-messages.test.ts`,
-  `src/streaming.test.ts` — stale casts
-
-**Scope:** this is its own multi-session refactor (probably 3–5 focused
-PRs grouped by error class). Do NOT attempt as part of a feature PR.
-
-Until it's drained, `pnpm verify` fails at the `build` step. The
-`pnpm test:run` gate (Vitest) is unaffected — tests run regardless of
-type errors in dependencies, so the 214-test suite is the operating gate
-for now.
+The strict TypeScript flags only walk what's in the tsconfig project
+references. Today that's `tsconfig.app.json` (covers `src/`) and
+`tsconfig.node.json` (covers only `vite.config.ts`). The
+`server/`, `tests/`, and `scripts/` trees are **not** typechecked by
+`pnpm typecheck` — they're only validated indirectly when vitest runs
+them via `tsx`. Adding a tsconfig project that covers those trees is
+a follow-up; surfaces additional type-strictness work but no longer
+blocks the CI gate (typecheck + tests + build all pass on `src/`).
 
 ---
 

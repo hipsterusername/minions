@@ -8,8 +8,10 @@
  *   2. Create `./<new-command>.ts` exporting a `CommandHandler`
  *   3. Register it in `COMMAND_TABLE` below
  *
- * The architecture test `tests/contracts/command-table.test.ts` guarantees
- * every `WsCommandType` has a registered handler.
+ * Exhaustiveness is enforced at the type level: `COMMAND_TABLE` is annotated
+ * `CommandTable = Readonly<Record<WsCommandType, CommandHandler>>` and uses
+ * `satisfies` so a missing or extra entry is a compile error. No runtime
+ * fitness test required.
  */
 
 import { unicastGlobal } from "../bus.ts";
@@ -42,6 +44,10 @@ import {
   getMcpServerStatus,
 } from "./info-queries.ts";
 import { reconnectMcpServer, toggleMcpServer } from "./mcp-control.ts";
+import { listRoutinesCommand } from "./list-routines.ts";
+import { startRoutine } from "./start-routine.ts";
+import { abortRoutine } from "./abort-routine.ts";
+import { submitForm } from "./submit-form.ts";
 import type { CommandContext, CommandTable, WsCommand } from "./types.ts";
 import type { WebSocket } from "ws";
 
@@ -50,7 +56,7 @@ import type { WebSocket } from "ws";
  * as a `Readonly<Record<WsCommandType, CommandHandler>>` so the type
  * checker will flag any missing entry.
  */
-export const COMMAND_TABLE: CommandTable = {
+export const COMMAND_TABLE = {
   // Session lifecycle
   create_session: createSession,
   send_message: sendMessage,
@@ -88,7 +94,13 @@ export const COMMAND_TABLE: CommandTable = {
   // MCP server control
   reconnect_mcp_server: reconnectMcpServer,
   toggle_mcp_server: toggleMcpServer,
-};
+  // Routines
+  list_routines: listRoutinesCommand,
+  start_routine: startRoutine,
+  abort_routine: abortRoutine,
+  // Render-DSL interactive components
+  submit_form: submitForm,
+} satisfies CommandTable;
 
 /**
  * Look up and invoke the handler for a command envelope. Unknown command

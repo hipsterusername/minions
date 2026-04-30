@@ -78,16 +78,6 @@ export function createAssignTaskTool(ctx: TaskToolContext) {
         ctx.taskState.tasks.set(taskId, record);
       }
 
-      // Build the minion's initial prompt
-      const prompt = [
-        "## Task Assignment\n",
-        `**Task ID:** ${taskId}`,
-        `**Title:** ${title}`,
-        `**Priority:** ${priority}\n`,
-        `**Description:**\n${description}\n`,
-        "Please execute this task now.",
-      ].join("\n");
-
       // Arm the minion with any requested skills by appending their
       // compiled instructions to the minion's system prompt. Unknown
       // skill IDs are silently dropped by `loadSkillsByIds`.
@@ -96,6 +86,39 @@ export function createAssignTaskTool(ctx: TaskToolContext) {
       const armedSkillIds = skills.map((s) => s.id);
       const skillsAddendum = compileSkills(skills, skillValues ?? {});
       const minionSystemPrompt = ctx.minionSystemPrompt + skillsAddendum;
+
+      // Build the minion's initial prompt. Inject the worktree branch,
+      // a project-context pointer, and the IDs of any armed skills so
+      // the minion has the cheap signals it needs without the Leader
+      // having to repeat them in every description.
+      const headerLines: string[] = [
+        "## Task Assignment",
+        "",
+        `**Task ID:** ${taskId}`,
+        `**Title:** ${title}`,
+        `**Priority:** ${priority}`,
+      ];
+      if (ctx.worktreeBranch) {
+        headerLines.push(
+          `**Worktree branch:** \`${ctx.worktreeBranch}\` — your cwd is already inside it. Commit here; the orchestrator handles merging.`,
+        );
+      }
+      if (armedSkillIds.length > 0) {
+        headerLines.push(
+          `**Armed skills:** ${armedSkillIds.join(", ")} — detailed instructions are in your system prompt under "Active Skills".`,
+        );
+      }
+      headerLines.push(
+        `**Project context:** Skim \`CLAUDE.md\` at the repo root before significant work — it captures conventions and testing rules the Leader expects.`,
+      );
+
+      const prompt = [
+        ...headerLines,
+        "",
+        "## Description / Acceptance Criteria",
+        "",
+        description,
+      ].join("\n");
 
       // Start the minion session on the server
       ctx.startMinionSession({

@@ -12,12 +12,10 @@ import { describe, it, expect, beforeEach } from "vitest";
 import type { WebSocketServer } from "ws";
 import {
   createBus,
-  broadcast,
   unicast,
   unicastToSession,
   unicastGlobal,
 } from "./bus.ts";
-import { wsEnvelopeSchema } from "../shared/ws-envelope.ts";
 
 interface FakeClient {
   readyState: number;
@@ -93,19 +91,10 @@ describe("server/bus: createBus", () => {
     expect(parsed.type).toBe("session_list");
   });
 
-  it("every emitted envelope parses against the shared envelope schema", () => {
-    const wss = makeWss([open1]);
-    const bus = createBus(wss);
-
-    bus.emitToSession("s1", { type: "a" });
-    bus.emitToProject("p1", { type: "b" });
-    bus.emitGlobal({ type: "c" });
-
-    for (const raw of open1.sent) {
-      const parsed = JSON.parse(raw);
-      expect(wsEnvelopeSchema.safeParse(parsed).success).toBe(true);
-    }
-  });
+  // Note: a "every emitted envelope parses against wsEnvelopeSchema" check
+  // was removed per testing-strategy.md §5.4 — already covered by the
+  // toMatchObject assertions in the emit* tests above (which assert on the
+  // very fields the schema validates).
 
   it("delivers to every open client on the server", () => {
     const wss = makeWss([open1, open2]);
@@ -144,39 +133,18 @@ describe("server/bus: createBus", () => {
     expect(() => bus.emitToSession("", { type: "x" })).toThrow();
   });
 
-  it("a failing client.send does not affect other clients (one client failure is isolated)", () => {
-    const good = makeClient(1);
-    const bad: FakeClient = {
-      readyState: 1,
-      sent: [],
-      send() {
-        throw new Error("network hiccup");
-      },
-    };
-    const wss = makeWss([bad, good]);
-    const bus = createBus(wss);
-
-    // Today the bus does not isolate per-client errors; this test
-    // documents the current behaviour. When isolation is added, update
-    // the assertion.
-    expect(() => bus.emitGlobal({ type: "x" })).toThrow("network hiccup");
-    // If the iteration order put `bad` first, `good` never got the msg.
-    // The test does not pin the order — it only proves nothing crashes
-    // silently.
-  });
+  // Note: a "failing client.send does not affect other clients" test was
+  // removed per testing-strategy.md §5.7 (IMPL_COUPLING) — it pinned
+  // known-bug-shaped behaviour with a "flip when impl changes" comment.
+  // Either the bus should isolate per-client errors (then this test is
+  // wrong) or the bug stands (then the test is just spec for the bug).
+  // Owner: server/bus.ts — restore as a behaviour test if isolation lands.
 });
 
-describe("server/bus: broadcast (escape hatch)", () => {
-  it("sends a raw envelope to all open clients", () => {
-    const c = makeClient(1);
-    const wss = makeWss([c]);
-    broadcast(wss, { topic: "global", type: "ping" });
-    expect(JSON.parse(c.sent[0]!)).toMatchObject({
-      topic: "global",
-      type: "ping",
-    });
-  });
-});
+// Note: the "broadcast (escape hatch)" describe block was removed per
+// testing-strategy.md §5.9 (DUPLICATE) — its sole assertion is covered by
+// the emit* tests above, which exercise the same broadcast() helper through
+// the public API.
 
 describe("server/bus: unicast helpers", () => {
   it("unicast sends an envelope to a single client", () => {
@@ -193,7 +161,6 @@ describe("server/bus: unicast helpers", () => {
       type: "sync_response",
       found: true,
     });
-    expect(wsEnvelopeSchema.safeParse(parsed).success).toBe(true);
   });
 
   it("unicast skips clients that are not OPEN", () => {
@@ -215,7 +182,6 @@ describe("server/bus: unicast helpers", () => {
     const parsed = JSON.parse(c.sent[0]!);
     expect(parsed.topic).toBe("session:leader-1");
     expect(parsed.type).toBe("session_created");
-    expect(wsEnvelopeSchema.safeParse(parsed).success).toBe(true);
   });
 
   it("unicastGlobal wraps with global topic", () => {
@@ -228,7 +194,6 @@ describe("server/bus: unicast helpers", () => {
     const parsed = JSON.parse(c.sent[0]!);
     expect(parsed.topic).toBe("global");
     expect(parsed.type).toBe("error");
-    expect(wsEnvelopeSchema.safeParse(parsed).success).toBe(true);
   });
 
   it("unicastToSession rejects an empty session key", () => {

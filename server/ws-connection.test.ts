@@ -55,17 +55,10 @@ describe("attachConnectionListeners", () => {
     expect(() => ws.emit("error", err)).not.toThrow();
   });
 
-  it("logs the error message via console.warn", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const ws = new FakeWs();
-    attachConnectionListeners(ws as unknown as WebSocket, makeDeps());
-
-    ws.emit("error", new Error("boom"));
-
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("Connection error: boom"),
-    );
-  });
+  // Note: a "logs the error via console.warn" test was removed per
+  // testing-strategy.md §5.8 (LOG_SPY) — log content is not the contract.
+  // The "does not crash on error" case above already proves the listener
+  // is wired.
 
   it("sends the session_list snapshot on attach", () => {
     const ws = new FakeWs();

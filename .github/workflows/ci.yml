@@ -1,8 +1,10 @@
-# CI — runs typecheck, tests, and build on every PR and on pushes to main.
+# CI — runs typecheck, the vitest suite, and the production build on
+# every PR and on pushes to main.
 #
-# Per the project testing strategy (`docs/testing-strategy.md` §6), this is
-# the gate that protects main. Architecture-fitness tests run as part of
-# `pnpm test:run` so any drift past the documented allowlists fails here.
+# Per the project testing strategy (`docs/testing-strategy.md` §6), the
+# merge gate is `pnpm verify` — typecheck + test:run + build. All three
+# legs must stay green. Architecture-fitness tests under
+# `tests/architecture/` run as part of `pnpm test:run`.
 #
 # Action versions are pinned to commit SHAs per global standards.
 # Refresh via Dependabot or by re-resolving the tag with:
@@ -25,7 +27,7 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  verify:
     name: typecheck + tests + build
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -36,6 +38,8 @@ jobs:
         with:
           persist-credentials: false
 
+      # pnpm version is read from `packageManager` in package.json so the
+      # local pnpm and CI pnpm cannot drift apart.
       - name: Set up pnpm
         uses: pnpm/action-setup@078e9d416474b29c0c387560859308974f7e9c53  # v6.0.1
 

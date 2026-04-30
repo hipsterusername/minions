@@ -292,7 +292,7 @@ function ViewTab({
   active: boolean;
   onClick: () => void;
   icon: React.ReactNode;
-  badge?: number;
+  badge?: number | undefined;
 }) {
   return (
     <button

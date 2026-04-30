@@ -1,0 +1,31 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "_comment": "Mutation-testing config per docs/testing-strategy.md §6.4. This is NOT a CI gate — it's a quarterly chore. Per the rotation, the first run targets src/canvas-state.ts + src/graph-runtime.ts.",
+  "packageManager": "pnpm",
+  "testRunner": "vitest",
+  "plugins": ["@stryker-mutator/vitest-runner"],
+  "vitest": {
+    "configFile": "vitest.config.ts"
+  },
+  "reporters": ["progress", "clear-text", "html"],
+  "htmlReporter": {
+    "fileName": "reports/mutation/index.html"
+  },
+  "thresholds": {
+    "high": 80,
+    "low": 60,
+    "break": null
+  },
+  "mutate": [
+    "src/canvas-state.ts",
+    "src/graph-runtime.ts"
+  ],
+  "concurrency": 4,
+  "timeoutMS": 30000,
+  "ignorePatterns": [
+    ".canvas-worktrees",
+    "dist",
+    "build",
+    "reports"
+  ]
+}

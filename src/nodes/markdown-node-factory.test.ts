@@ -20,20 +20,10 @@ function identityTransform(): CanvasTransform {
 }
 
 describe("createMarkdownNodeFromText", () => {
-  it("returns false for empty / whitespace-only text and dispatches nothing", () => {
-    const dispatch = vi.fn<(action: CanvasAction) => void>();
-    const setSelectedIds = vi.fn<(ids: Set<string>) => void>();
-
-    expect(
-      createMarkdownNodeFromText("", dispatch, setSelectedIds, identityTransform(), []),
-    ).toBe(false);
-    expect(
-      createMarkdownNodeFromText("   \n  \t  ", dispatch, setSelectedIds, identityTransform(), []),
-    ).toBe(false);
-
-    expect(dispatch).not.toHaveBeenCalled();
-    expect(setSelectedIds).not.toHaveBeenCalled();
-  });
+  // Removed: empty/whitespace early-exit cluster with not-called dispatch
+  // assertions — implementation-detail spy pinning. The positive-path
+  // tests below cover the meaningful behaviour. See
+  // docs/testing-strategy.md §5.
 
   it("dispatches ADD_NODE with the pasted text as markdown content and selects the new node", () => {
     const dispatch = vi.fn<(action: CanvasAction) => void>();

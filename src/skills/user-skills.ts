@@ -64,11 +64,11 @@ export async function importUserSkills(json: string): Promise<number> {
       typeof item === "object" &&
       item !== null &&
       "id" in item &&
-      typeof (item as Record<string, unknown>).id === "string" &&
+      typeof (item as Record<string, unknown>)["id"] === "string" &&
       "name" in item &&
-      typeof (item as Record<string, unknown>).name === "string" &&
+      typeof (item as Record<string, unknown>)["name"] === "string" &&
       "template" in item &&
-      typeof (item as Record<string, unknown>).template === "string",
+      typeof (item as Record<string, unknown>)["template"] === "string",
   ) as SkillTemplate[];
 
   if (valid.length === 0) return 0;

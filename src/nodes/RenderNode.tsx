@@ -9,7 +9,7 @@
  * when a Leader session starts.
  */
 
-import { useEffect, useRef, useMemo, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { NodeRenderProps } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
 import { CONTEXT_OUT_PORT, registerContract } from "../graph.ts";
@@ -37,8 +37,25 @@ import type {
   DiffComponent,
   ChecklistComponent,
   TagsComponent,
+  CopyableComponent,
+  FormComponent as FormDslComponent,
+  ChartComponent as ChartDslComponent,
+  SectionComponent,
+  TabsComponent,
+  ImageComponent,
+  FilePreviewComponent,
 } from "../../shared/render-dsl.ts";
-import { applyRenderMessage, emptyRenderState } from "../../shared/render-dsl.ts";
+import { applyRenderMessage } from "../../shared/render-dsl.ts";
+import { FormComponent } from "./render/FormComponent.tsx";
+import { ChartComponent } from "./render/ChartComponent.tsx";
+import {
+  SectionRenderer,
+  TabsRenderer,
+} from "./render/ContainerComponents.tsx";
+import {
+  ImageRenderer,
+  FilePreviewRenderer,
+} from "./render/ArtifactComponents.tsx";
 
 // ── Data shape ────────────────────────────────────────────
 
@@ -53,7 +70,13 @@ export interface RenderNodeData {
 
 // ── Color palette ─────────────────────────────────────────
 
-const DSL_COLORS: Record<string, string> = {
+// Typed as plain literal records (not Record<string, …>) so dot access works
+// under noPropertyAccessFromIndexSignature, AND lookups by a literal-keyed
+// fallback like `?? STATUS_CONFIG.pending` are guaranteed defined under
+// noUncheckedIndexedAccess.
+
+type DslColorKey = "green" | "red" | "yellow" | "blue" | "gray" | "purple" | "orange";
+const DSL_COLORS: { [K in DslColorKey]: string } = {
   green: "var(--status-success)",
   red: "var(--status-error)",
   yellow: "var(--status-warning)",
@@ -63,7 +86,8 @@ const DSL_COLORS: Record<string, string> = {
   orange: "var(--accent)",
 };
 
-const STATUS_CONFIG: Record<string, { color: string; icon: string; bg: string }> = {
+type StatusKey = "success" | "error" | "warning" | "running" | "pending";
+const STATUS_CONFIG: { [K in StatusKey]: { color: string; icon: string; bg: string } } = {
   success: { color: "var(--status-success)", icon: "\u2713", bg: "var(--success-bg)" },
   error: { color: "var(--status-error)", icon: "\u2717", bg: "var(--error-bg)" },
   warning: { color: "var(--status-warning)", icon: "!", bg: "var(--warning-bg)" },
@@ -71,7 +95,8 @@ const STATUS_CONFIG: Record<string, { color: string; icon: string; bg: string }>
   pending: { color: "var(--text-muted)", icon: "\u2022", bg: "var(--muted-bg)" },
 };
 
-const TREND_ARROWS: Record<string, { symbol: string; color: string }> = {
+type TrendKey = "up" | "down" | "flat";
+const TREND_ARROWS: { [K in TrendKey]: { symbol: string; color: string } } = {
   up: { symbol: "\u2191", color: "var(--status-success)" },
   down: { symbol: "\u2193", color: "var(--status-error)" },
   flat: { symbol: "\u2192", color: "var(--text-muted)" },
@@ -870,7 +895,8 @@ function TimelineView({ c }: { c: TimelineComponent }) {
 }
 
 /** Callout variant configuration */
-const CALLOUT_CONFIG: Record<string, { color: string; bg: string; icon: string }> = {
+type CalloutVariant = "info" | "warning" | "success" | "error";
+const CALLOUT_CONFIG: { [K in CalloutVariant]: { color: string; bg: string; icon: string } } = {
   info: { color: "var(--info-color)", bg: "var(--info-bg)", icon: "\u2139" },
   warning: { color: "var(--status-warning)", bg: "var(--warning-bg)", icon: "\u26A0" },
   success: { color: "var(--status-success)", bg: "var(--success-bg)", icon: "\u2713" },
@@ -1257,9 +1283,230 @@ function TagsRow({ c }: { c: TagsComponent }) {
   );
 }
 
+/**
+ * CopyableBlock — labeled text with a click-to-copy affordance.
+ *
+ * Designed for content the user is likely to paste somewhere else: a
+ * generated command, URL, hash, snippet, error message, etc. The whole
+ * block acts as a copy target plus an explicit button so the affordance
+ * is visible.
+ */
+function CopyableBlock({ c }: { c: CopyableComponent }) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Auto-pick layout: explicit `variant` wins, otherwise multi-line or
+  // long content renders as a block; short single-line as inline.
+  const isBlock =
+    c.variant === "block" ||
+    (c.variant !== "inline" &&
+      (c.content.includes("\n") || c.content.length > 60));
+
+  const onCopy = useCallback(async () => {
+    try {
+      // Prefer the async clipboard API; fall back to a hidden textarea
+      // so non-secure contexts (older Electron, http://) still work.
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(c.content);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = c.content;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
+      setCopied(true);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setCopied(false), 1500);
+    } catch (err) {
+      console.warn("[copyable] clipboard write failed:", err);
+    }
+  }, [c.content]);
+
+  useEffect(() => () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+  }, []);
+
+  const copyButton = (
+    <button
+      type="button"
+      onClick={onCopy}
+      aria-label={copied ? "Copied" : "Copy to clipboard"}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        padding: "3px 8px",
+        fontSize: 10,
+        fontFamily: "var(--font-mono)",
+        fontWeight: 600,
+        textTransform: "uppercase",
+        letterSpacing: "0.06em",
+        color: copied ? "var(--status-success)" : "var(--accent)",
+        background: copied
+          ? "color-mix(in srgb, var(--status-success) 12%, transparent)"
+          : "color-mix(in srgb, var(--accent) 10%, transparent)",
+        border: copied
+          ? "1px solid color-mix(in srgb, var(--status-success) 35%, transparent)"
+          : "1px solid color-mix(in srgb, var(--accent) 25%, transparent)",
+        borderRadius: 4,
+        cursor: "pointer",
+        flexShrink: 0,
+        transition: "color 0.2s ease, background 0.2s ease, border-color 0.2s ease",
+      }}
+    >
+      <span style={{ fontSize: 10, lineHeight: 1 }}>
+        {copied ? "✓" : "⎘"}
+      </span>
+      <span>{copied ? "Copied" : "Copy"}</span>
+    </button>
+  );
+
+  return (
+    <div className={`${CLS.card} ${CLS.fadeIn}`} style={{ overflow: "hidden", padding: 0 }}>
+      {(c.label || c.description) && (
+        <div style={{
+          padding: "8px 14px",
+          borderBottom: "1px solid var(--border-default)",
+          background: "var(--bg-elevated)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 3,
+        }}>
+          {c.label && (
+            <div style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color: "var(--text-muted)",
+              fontFamily: "var(--font-mono)",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+            }}>
+              {c.label}
+            </div>
+          )}
+          {c.description && (
+            <div style={{
+              fontSize: 11,
+              color: "var(--text-secondary)",
+              lineHeight: 1.5,
+            }}>
+              {c.description}
+            </div>
+          )}
+        </div>
+      )}
+      {isBlock ? (
+        <div style={{ position: "relative" }}>
+          {/* Floating copy button in top-right of block */}
+          <div style={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            zIndex: 1,
+          }}>
+            {c.language && (
+              <span style={{
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                fontSize: 9,
+                padding: "1px 6px",
+                borderRadius: 3,
+                background: "var(--code-bg)",
+                color: "var(--accent)",
+                fontWeight: 600,
+                fontFamily: "var(--font-mono)",
+              }}>
+                {c.language}
+              </span>
+            )}
+            {copyButton}
+          </div>
+          <pre
+            className={CLS.scrollArea}
+            style={{
+              margin: 0,
+              padding: "12px 14px",
+              paddingRight: 90,
+              fontSize: 11,
+              fontFamily: "var(--font-mono)",
+              color: "var(--text-primary)",
+              overflowX: "auto",
+              lineHeight: 1.6,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-all",
+              tabSize: 2,
+              userSelect: "all",
+            }}
+          >
+            {c.content}
+          </pre>
+        </div>
+      ) : (
+        <div style={{
+          padding: "10px 12px",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+        }}>
+          <code
+            style={{
+              flex: 1,
+              minWidth: 0,
+              fontSize: 12,
+              fontFamily: "var(--font-mono)",
+              color: "var(--text-primary)",
+              background: "var(--code-bg, var(--bg-elevated))",
+              padding: "5px 9px",
+              borderRadius: 4,
+              border: "1px solid var(--border-default)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              userSelect: "all",
+              lineHeight: 1.5,
+            }}
+            title={c.content}
+          >
+            {c.content}
+          </code>
+          {copyButton}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Component dispatcher ──────────────────────────────────
 
-export function RenderComponentView({ component }: { component: RenderComponent }) {
+/**
+ * Per-render context passed down through the dispatcher. Lets interactive
+ * components (form) reach back to the WebSocket and lets containers
+ * (section, tabs) recursively render their children with the same context.
+ */
+export interface RenderViewContext {
+  /**
+   * Fired when a `form` component is submitted. The dashboard sends the
+   * answers to the server via `submit_form` so the agent receives them as
+   * a synthetic user turn.
+   */
+  onSubmitForm?: ((componentId: string, answers: Record<string, unknown>) => void) | undefined;
+}
+
+export function RenderComponentView({
+  component,
+  context,
+}: {
+  component: RenderComponent;
+  context?: RenderViewContext | undefined;
+}) {
   switch (component.type) {
     case "metric":
       return <MetricCard c={component} />;
@@ -1291,6 +1538,41 @@ export function RenderComponentView({ component }: { component: RenderComponent 
       return <ChecklistView c={component} />;
     case "tags":
       return <TagsRow c={component} />;
+    case "copyable":
+      return <CopyableBlock c={component} />;
+    case "form":
+      return (
+        <FormComponent
+          component={component as FormDslComponent}
+          onSubmit={(answers) => {
+            context?.onSubmitForm?.(component.id, answers);
+          }}
+        />
+      );
+    case "chart":
+      return <ChartComponent component={component as ChartDslComponent} />;
+    case "section":
+      return (
+        <SectionRenderer
+          c={component as SectionComponent}
+          renderChild={(child) => (
+            <RenderComponentView component={child} context={context} />
+          )}
+        />
+      );
+    case "tabs":
+      return (
+        <TabsRenderer
+          c={component as TabsComponent}
+          renderChild={(child) => (
+            <RenderComponentView component={child} context={context} />
+          )}
+        />
+      );
+    case "image":
+      return <ImageRenderer c={component as ImageComponent} />;
+    case "file-preview":
+      return <FilePreviewRenderer c={component as FilePreviewComponent} />;
     default:
       return null;
   }
@@ -1317,6 +1599,14 @@ const ALWAYS_FULL_WIDTH = new Set<RenderComponent["type"]>([
   "diff",
   "separator",
   "callout",
+  // New families: forms, charts, containers, and large artifacts are
+  // intrinsically wide. Agents can still narrow with an explicit `span`.
+  "form",
+  "chart",
+  "section",
+  "tabs",
+  "image",
+  "file-preview",
 ]);
 
 function isFullWidth(c: RenderComponent, columns: number): boolean {
@@ -1337,6 +1627,14 @@ function isFullWidth(c: RenderComponent, columns: number): boolean {
       return c.items.length >= 9;
     case "sparkline":
       return c.data.length >= 40;
+    case "copyable":
+      // Promote to full width whenever the content needs a real block:
+      // explicit "block" variant, multi-line, or longer than a row of inline text.
+      return (
+        c.variant === "block" ||
+        (c.variant !== "inline" &&
+          (c.content.includes("\n") || c.content.length > 60))
+      );
     default:
       return false;
   }
@@ -1541,11 +1839,32 @@ function RenderNodeRenderer({
   node,
   onUpdateData,
   socketSubscribe,
+  socketSend,
   onResize,
 }: NodeRenderProps) {
   const data = node.data as RenderNodeData;
   const dataRef = useRef(data);
   dataRef.current = data;
+
+  // Build the dispatcher context once per render so interactive children
+  // (e.g. `form`) can post user input back to the paired Leader session.
+  // The `submit_form` command is dispatched server-side in
+  // `server/commands/submit-form.ts`.
+  const renderViewContext = useCallback(
+    (): RenderViewContext => ({
+      onSubmitForm: (componentId, answers) => {
+        const sessionKey = dataRef.current.leaderSessionKey;
+        if (!sessionKey || !socketSend) return;
+        socketSend({
+          type: "submit_form",
+          sessionKey,
+          formComponentId: componentId,
+          formAnswers: answers,
+        });
+      },
+    }),
+    [socketSend],
+  );
 
   // Inject CSS animation
   useEffect(() => { injectStyles(); }, []);
@@ -1651,13 +1970,20 @@ function RenderNodeRenderer({
         )}
       </div>
 
-      {/* Content area */}
+      {/* Content area — scroll-capture zone so mouse wheel and trackpad
+          two-finger scroll over the dashboard scroll its content instead of
+          zooming/panning the canvas. The Canvas wheel handler checks for
+          `data-scroll-capture` on the event target's ancestors. */}
       <div
         className={hasContent ? CLS.scrollArea : undefined}
+        data-scroll-capture
         style={{
           flex: 1,
           overflow: "auto",
           padding: hasContent ? gap : 0,
+          // Prevent scroll chaining: when the dashboard reaches its scroll
+          // boundary, don't let the scroll propagate to the canvas/page.
+          overscrollBehavior: "contain",
         }}
       >
         {!hasContent ? (
@@ -1744,7 +2070,10 @@ function RenderNodeRenderer({
                       minWidth: 0,
                     }}
                   >
-                    <RenderComponentView component={c} />
+                    <RenderComponentView
+                      component={c}
+                      context={renderViewContext()}
+                    />
                   </div>
                 );
               })}

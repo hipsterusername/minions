@@ -106,20 +106,7 @@ describe("architecture: no cross-tree imports", () => {
     ).toEqual([]);
   });
 
-  it("every allowlisted cross-tree import is still present (otherwise drop the entry)", () => {
-    const files = listSourceFiles(join(REPO_ROOT, "server"));
-    const hits = findCrossTreeImports(files, /from\s+["']\.\.\/src\//);
-
-    for (const rule of ALLOWED_CROSS_TREE_IMPORTS) {
-      const ruleRel = rule.file.replace(/\\/g, "/");
-      const found = hits.some(
-        (h) => h.rel === ruleRel && rule.matcher.test(h.text),
-      );
-      expect(
-        found,
-        `Allowlist entry ${rule.file} (${rule.matcher}) no longer matches anything ` +
-          `in the source. Remove it from ALLOWED_CROSS_TREE_IMPORTS.`,
-      ).toBe(true);
-    }
-  });
+  // Note: per testing-strategy.md §6.2 the allowlist is intentionally empty
+  // and stays empty — no per-entry "still in use" check. If an entry is ever
+  // re-introduced, this test file is the right place to add that guard back.
 });

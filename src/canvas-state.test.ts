@@ -30,21 +30,9 @@ describe("canvasReducer", () => {
       expect(next.map((n) => n.id)).toEqual(["a", "b", "c"]);
     });
 
-    it("does not mutate the input array", () => {
-      const initial = [makeNode("a")];
-      canvasReducer(initial, { type: "ADD_NODE", node: makeNode("b") });
-      expect(initial).toHaveLength(1);
-    });
-
-    it("does not deduplicate by id", () => {
-      // The reducer is intentionally a primitive — dedup is the caller's job.
-      const initial = [makeNode("a")];
-      const next = canvasReducer(initial, {
-        type: "ADD_NODE",
-        node: makeNode("a"),
-      });
-      expect(next).toHaveLength(2);
-    });
+    // Removed: "does not mutate input" + "does not dedupe by id" —
+    // implementation-detail / non-behaviour assertions. See
+    // docs/testing-strategy.md §5 (test behaviour, not implementation).
   });
 
   describe("REMOVE_NODE", () => {
@@ -54,11 +42,8 @@ describe("canvasReducer", () => {
       expect(next.map((n) => n.id)).toEqual(["a", "c"]);
     });
 
-    it("returns the same shape (empty) when removing from empty", () => {
-      const next = canvasReducer([], { type: "REMOVE_NODE", id: "nope" });
-      expect(next).toEqual([]);
-    });
-
+    // Removed: empty-remove trivial test (vacuous case already covered by
+    // the unknown-id no-op below). See docs/testing-strategy.md §5.
     it("is a no-op when the id is unknown", () => {
       const initial = [makeNode("a"), makeNode("b")];
       const next = canvasReducer(initial, { type: "REMOVE_NODE", id: "x" });
@@ -115,6 +100,25 @@ describe("canvasReducer", () => {
       });
       expect(next[0]?.data).toEqual({ count: 7 });
     });
+
+    it("only touches the matching node — siblings keep their data", () => {
+      // §6.4 mutation-test follow-up: without a multi-node case the
+      // discriminator `n.id === action.id` could be mutated to `true`
+      // and pass against a single-element array.
+      const initial = [
+        makeNode<{ count: number }>("a", { data: { count: 1 } }),
+        makeNode<{ count: number }>("b", { data: { count: 2 } }),
+        makeNode<{ count: number }>("c", { data: { count: 3 } }),
+      ];
+      const next = canvasReducer(initial, {
+        type: "UPDATE_NODE_DATA",
+        id: "b",
+        data: { count: 99 },
+      });
+      expect(next[0]?.data).toEqual({ count: 1 });
+      expect(next[1]?.data).toEqual({ count: 99 });
+      expect(next[2]?.data).toEqual({ count: 3 });
+    });
   });
 
   describe("SET_NODES", () => {
@@ -161,5 +165,48 @@ describe("canvasReducer", () => {
       });
       expect(next[0]?.position).toEqual({ x: 1, y: 1 });
     });
+
+    it("moves routine node and its spawned leader children together", () => {
+      // Simulates the group-move emitted when a RoutineNode is dragged: the
+      // canvas moves the routine node + all leaders whose routineRunId matches.
+      const routine = makeNode("rn", {
+        type: "routine",
+        position: { x: 100, y: 100 },
+        data: { runId: "run-1" },
+      });
+      const leader1 = makeNode("l1", {
+        type: "leader",
+        position: { x: 600, y: 100 },
+        data: { routineRunId: "run-1", sessionKey: "s1" },
+      });
+      const leader2 = makeNode("l2", {
+        type: "leader",
+        position: { x: 600, y: 260 },
+        data: { routineRunId: "run-1", sessionKey: "s2" },
+      });
+      const unrelated = makeNode("u1", { position: { x: 0, y: 0 } });
+
+      const initial = [routine, leader1, leader2, unrelated];
+      // Simulate Canvas's MOVE_GROUP dispatch: move each node by dx=50, dy=30
+      const next = canvasReducer(initial, {
+        type: "MOVE_GROUP",
+        moves: [
+          { id: "rn", position: { x: 150, y: 130 } },
+          { id: "l1", position: { x: 650, y: 130 } },
+          { id: "l2", position: { x: 650, y: 290 } },
+        ],
+      });
+
+      expect(next.find((n) => n.id === "rn")?.position).toEqual({ x: 150, y: 130 });
+      expect(next.find((n) => n.id === "l1")?.position).toEqual({ x: 650, y: 130 });
+      expect(next.find((n) => n.id === "l2")?.position).toEqual({ x: 650, y: 290 });
+      // Unrelated node must not move
+      expect(next.find((n) => n.id === "u1")?.position).toEqual({ x: 0, y: 0 });
+    });
   });
+
+  // Removed: SET_NODES-preserves-fields hydration test — this asserts the
+  // reducer doesn't strip arbitrary `data` fields, which is already covered
+  // by the wholesale-replacement contract on SET_NODES above. See
+  // docs/testing-strategy.md §5 (no implementation-detail pinning).
 });

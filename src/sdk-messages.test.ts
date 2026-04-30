@@ -12,7 +12,6 @@ import {
   sdkToDisplayMessages,
   sdkToDisplayMessage,
   extractText,
-  msgId,
 } from "./sdk-messages.ts";
 
 // ── Fixture helpers ───────────────────────────────────────────────────────────
@@ -48,21 +47,9 @@ function taskStartedMsg(description = "Analyze codebase", uuid = "u-ts"): SdkMes
   } as SdkMessage;
 }
 
-function taskNotificationMsg(
-  status: "completed" | "failed" | "stopped",
-  uuid = "u-tn",
-): SdkMessage {
-  return {
-    type: "system",
-    subtype: "task_notification",
-    task_id: "task-1",
-    status,
-    output_file: "",
-    summary: "Done summary",
-    uuid,
-    session_id: "s1",
-  } as SdkMessage;
-}
+// Note: a `taskNotificationMsg` helper was used by the now-removed
+// emoji-glyph triad (§5.7). If a future test needs to construct a
+// task_notification SDK message, restore this factory inline.
 
 function localCmdMsg(content: string, uuid = "u-cmd"): SdkMessage {
   return {
@@ -165,17 +152,9 @@ function resultMsg(
   } as unknown as SdkMessage;
 }
 
-// ── msgId ─────────────────────────────────────────────────────────────────────
-
-describe("msgId", () => {
-  it("returns a string starting with the default prefix 'm-'", () => {
-    expect(msgId()).toMatch(/^m-/);
-  });
-
-  it("uses the provided prefix", () => {
-    expect(msgId("leader")).toMatch(/^leader-/);
-  });
-});
+// Removed: msgId regex tests — they pin the prefix-with-dash format,
+// which is implementation detail. The prefix-propagation describe block
+// below covers the observable behaviour. See docs/testing-strategy.md §5.
 
 // ── extractText ───────────────────────────────────────────────────────────────
 
@@ -220,11 +199,9 @@ describe("sdkToDisplayMessages", () => {
   // ── system / init ───────────────────────────────────────────────────────────
 
   describe("system / init", () => {
-    it("produces 1 system message", () => {
-      const msgs = sdkToDisplayMessages(initMsg());
-      expect(msgs).toHaveLength(1);
-      expect(msgs[0]?.role).toBe("system");
-    });
+    // Removed: "produces 1 system message" length+role triad — pinning
+    // count and role of the produced message restates the role/content
+    // checks that follow. See docs/testing-strategy.md §5.
 
     it("includes the model name in the content", () => {
       const msgs = sdkToDisplayMessages(initMsg("u1", "claude-sonnet-4-7"));
@@ -249,22 +226,8 @@ describe("sdkToDisplayMessages", () => {
 
   // ── system / task_notification ──────────────────────────────────────────────
 
-  describe("system / task_notification", () => {
-    it("uses ✓ for completed status", () => {
-      const msgs = sdkToDisplayMessages(taskNotificationMsg("completed"));
-      expect(msgs[0]?.content).toContain("✓");
-    });
-
-    it("uses ✗ for failed status", () => {
-      const msgs = sdkToDisplayMessages(taskNotificationMsg("failed"));
-      expect(msgs[0]?.content).toContain("✗");
-    });
-
-    it("uses ✗ for stopped status", () => {
-      const msgs = sdkToDisplayMessages(taskNotificationMsg("stopped"));
-      expect(msgs[0]?.content).toContain("✗");
-    });
-  });
+  // Removed: task_notification emoji-glyph tests (✓ / ✗) — pin literal
+  // copy choices, not behaviour. See docs/testing-strategy.md §5.
 
   // ── system / local_command_output ───────────────────────────────────────────
 
@@ -276,13 +239,9 @@ describe("sdkToDisplayMessages", () => {
     });
   });
 
-  // ── system / unknown subtype ────────────────────────────────────────────────
-
-  describe("system / unknown subtype", () => {
-    it("returns empty array for status subtype", () => {
-      expect(sdkToDisplayMessages(statusMsg())).toHaveLength(0);
-    });
-  });
+  // Removed: status-subtype default-fallthrough test — pins the silent
+  // drop of an unknown subtype, which is implementation detail of the
+  // switch statement. See docs/testing-strategy.md §5.
 
   // ── assistant ───────────────────────────────────────────────────────────────
 

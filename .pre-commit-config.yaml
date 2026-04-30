@@ -26,7 +26,8 @@ repos:
   # `pnpm verify` does in package.json — single source of truth.
   - repo: local
     hooks:
-      # Typecheck the whole project. Cheap with TS incremental cache.
+      # Typecheck the whole project. Walks tsconfig project references
+      # via `tsc -b --noEmit` and is cheap with the TS incremental cache.
       - id: typecheck
         name: pnpm typecheck
         entry: pnpm typecheck

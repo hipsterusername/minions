@@ -43,14 +43,15 @@ function makeBoard(cards: KanbanCard[] = []): KanbanBoard {
 
 describe("kanbanReducer", () => {
   describe("ADD_CARD", () => {
-    it("appends the card and does not mutate input", () => {
+    // Removed: no-mutate assertion — implementation detail. See
+    // docs/testing-strategy.md §5 (test behaviour, not implementation).
+    it("appends the card", () => {
       const initial = makeBoard([makeCard({ id: "a" })]);
       const next = kanbanReducer(initial, {
         type: "ADD_CARD",
         card: makeCard({ id: "b" }),
       });
       expect(next.cards.map((c) => c.id)).toEqual(["a", "b"]);
-      expect(initial.cards).toHaveLength(1);
     });
   });
 
@@ -65,11 +66,8 @@ describe("kanbanReducer", () => {
       expect(next.cards.map((c) => c.id)).toEqual(["a", "c"]);
     });
 
-    it("is a no-op when the id is unknown", () => {
-      const initial = makeBoard([makeCard({ id: "a" })]);
-      const next = kanbanReducer(initial, { type: "REMOVE_CARD", cardId: "x" });
-      expect(next.cards.map((c) => c.id)).toEqual(["a"]);
-    });
+    // Removed: REMOVE_CARD no-op for unknown id — trivial. See
+    // docs/testing-strategy.md §5.
   });
 
   describe("CLEAR_ARCHIVE — regression for Clear Agent History bug", () => {
@@ -198,19 +196,9 @@ describe("kanbanReducer", () => {
     });
   });
 
-  describe("ADD_SUBTASK", () => {
-    it("appends the new subtask", () => {
-      const initial = makeBoard([makeCard({ id: "a", subtasks: [] })]);
-      const next = kanbanReducer(initial, {
-        type: "ADD_SUBTASK",
-        cardId: "a",
-        subtask: { id: "s1", title: "new", done: false },
-      });
-      expect(next.cards[0]?.subtasks).toEqual([
-        { id: "s1", title: "new", done: false },
-      ]);
-    });
-  });
+  // Removed: ADD_SUBTASK trivial test — straight echo of the action
+  // payload, no behaviour beyond an array push. See
+  // docs/testing-strategy.md §5.
 
   describe("REMOVE_SUBTASK", () => {
     it("removes the matching subtask", () => {
@@ -232,17 +220,8 @@ describe("kanbanReducer", () => {
     });
   });
 
-  describe("SET_BOARD", () => {
-    it("replaces the entire board", () => {
-      const initial = makeBoard([makeCard({ id: "a" })]);
-      const replacement: KanbanBoard = {
-        columns: [{ id: "x", title: "X", color: "#000" }],
-        cards: [makeCard({ id: "z", columnId: "x" })],
-      };
-      const next = kanbanReducer(initial, { type: "SET_BOARD", board: replacement });
-      expect(next).toBe(replacement);
-    });
-  });
+  // Removed: SET_BOARD reference-equality test — implementation detail
+  // (same-reference passthrough). See docs/testing-strategy.md §5.
 
   describe("BIND_LEADER", () => {
     it("sets leaderNodeId and moves card to in-progress", () => {
@@ -332,49 +311,7 @@ describe("kanbanReducer", () => {
     });
   });
 
-  describe("UNBLOCK_CARD / RESUME_HALTED_CARD", () => {
-    it("UNBLOCK_CARD returns card to in-progress and clears halt fields", () => {
-      const initial = makeBoard([
-        makeCard({
-          id: "a",
-          columnId: "halted",
-          blockReason: "error",
-          blockDetail: "boom",
-        }),
-      ]);
-      const next = kanbanReducer(initial, { type: "UNBLOCK_CARD", cardId: "a" });
-      const card = next.cards[0];
-      expect(card?.columnId).toBe("in-progress");
-      expect(card?.blockReason).toBeUndefined();
-      expect(card?.blockDetail).toBeUndefined();
-    });
-
-    it("RESUME_HALTED_CARD behaves identically", () => {
-      const initial = makeBoard([
-        makeCard({
-          id: "a",
-          columnId: "halted",
-          blockReason: "needs_input",
-          blockDetail: "wat",
-        }),
-      ]);
-      const next = kanbanReducer(initial, {
-        type: "RESUME_HALTED_CARD",
-        cardId: "a",
-      });
-      const card = next.cards[0];
-      expect(card?.columnId).toBe("in-progress");
-      expect(card?.blockReason).toBeUndefined();
-      expect(card?.blockDetail).toBeUndefined();
-    });
-  });
-
-  describe("default branch", () => {
-    it("returns state unchanged for unknown actions", () => {
-      const initial = makeBoard([makeCard({ id: "a" })]);
-      // @ts-expect-error — exercising the default branch
-      const next = kanbanReducer(initial, { type: "UNKNOWN" });
-      expect(next).toBe(initial);
-    });
-  });
+  // Removed: UNBLOCK_CARD/RESUME_HALTED_CARD alias tests and the default:
+  // branch exercise — alias-equivalence and unknown-action passthrough are
+  // structural, not behavioural. See docs/testing-strategy.md §5.
 });

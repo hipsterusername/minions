@@ -2,6 +2,7 @@ import { useCallback, useRef, memo } from "react";
 import type { CanvasNode, Position, Size } from "./types.ts";
 import { getNodeType } from "./node-registry.ts";
 import { getContract, isPortOpen } from "./graph.ts";
+import type { PortDefinition } from "./graph.ts";
 import { PortDot } from "./components/PortDot.tsx";
 import type { PortInfo } from "./components/PortDot.tsx";
 import { wheelDetector } from "./wheel-detector.ts";
@@ -13,41 +14,43 @@ interface CanvasNodeProps {
   onSelect: (id: string, additive: boolean) => void;
   onMove: (id: string, position: Position) => void;
   onUpdateData: (id: string, data: unknown) => void;
-  socketSend?: (data: unknown) => void;
-  socketSubscribe?: (fn: (msg: unknown) => void) => () => void;
-  getContextForNode?: () => import("./types.ts").ContextItem[];
-  projectPath?: string;
-  onResize?: (id: string, size: Size) => void;
+  socketSend?: ((data: unknown) => void) | undefined;
+  socketSubscribe?: ((fn: (msg: unknown) => void) => () => void) | undefined;
+  getContextForNode?: (() => import("./types.ts").ContextItem[]) | undefined;
+  projectPath?: string | undefined;
+  onResize?: ((id: string, size: Size) => void) | undefined;
   /** Callback to add text content as a new markdown node */
-  onAddContentNode?: (content: string) => void;
+  onAddContentNode?: ((content: string) => void) | undefined;
   /** Callback to reveal (create or scroll-to) a minion node for a given session key */
-  onRevealMinion?: (minionSessionKey: string) => void;
+  onRevealMinion?: ((minionSessionKey: string) => void) | undefined;
+  /** Callback for RoutineNode: create a Leader child node when a step spawns one */
+  onSpawnLeaderChild?: ((event: import("./types.ts").RoutineLeaderSpawnEvent) => void) | undefined;
   /** Connection drag callbacks — threaded from Canvas */
-  onConnectionStart?: (port: PortInfo, e: React.MouseEvent) => void;
-  onConnectionEnd?: (port: PortInfo) => void;
+  onConnectionStart?: ((port: PortInfo, e: React.MouseEvent) => void) | undefined;
+  onConnectionEnd?: ((port: PortInfo) => void) | undefined;
   /** Whether a connection drag is currently in progress */
-  isDragActive?: boolean;
+  isDragActive?: boolean | undefined;
   /** Port IDs that are valid drop targets for the current drag */
-  validTargetPorts?: Set<string>;
+  validTargetPorts?: Set<string> | undefined;
   /** "nodeId:portId" of the port currently being snapped to, if any */
-  snapTargetKey?: string;
+  snapTargetKey?: string | undefined;
   /** Set of "nodeId:portId" keys for all ports that have at least one edge */
-  connectedPorts?: Set<string>;
+  connectedPorts?: Set<string> | undefined;
   /** Called when the user starts dragging this node */
-  onDragStart?: (nodeId: string) => void;
+  onDragStart?: ((nodeId: string) => void) | undefined;
   /** Called when the user stops dragging this node */
-  onDragEnd?: (nodeId: string) => void;
+  onDragEnd?: ((nodeId: string) => void) | undefined;
   /** True when a droppable node is hovering over this node (context-group) */
-  isDropTarget?: boolean;
+  isDropTarget?: boolean | undefined;
   /** True when this node is currently being dragged by the user.
    *  Pre-computed from draggingNodeId === node.id in Canvas so we pass a
    *  stable boolean instead of the raw string ID (which would bust memo
    *  on ALL nodes whenever any drag starts/ends). */
-  isBeingDragged?: boolean;
+  isBeingDragged?: boolean | undefined;
   /** True when this node is inside a context-group that is currently being dragged */
-  isInsideDraggingGroup?: boolean;
+  isInsideDraggingGroup?: boolean | undefined;
   /** True when this node is spatially inside any context-group */
-  isInsideContextGroup?: boolean;
+  isInsideContextGroup?: boolean | undefined;
 }
 
 /**
@@ -56,6 +59,65 @@ interface CanvasNodeProps {
  */
 function isPortLocked(node: CanvasNode, portId: string): boolean {
   return !isPortOpen(node.type, portId, node.data);
+}
+
+/** Context values that drive dynamic port visibility decisions. */
+export interface PortVisibilityContext {
+  node: CanvasNode;
+  connectedPorts: Set<string> | undefined;
+  /** Set of "nodeId:portId" keys that are valid targets for the current drag. */
+  validTargetPorts: Set<string> | undefined;
+  isInsideContextGroup: boolean;
+}
+
+/**
+ * Returns true when `port` should not be rendered on the canvas.
+ *
+ * Rules:
+ * - Leader input ports: hidden when locked (session active) and unconnected.
+ * - Leader task-out port: hidden when no minion is connected, unless a
+ *   connection drag is currently targeting this port (so the user can still
+ *   drop onto it from a minion's task-in).
+ * - File-viewer / markdown output ports: hidden when the node sits inside a
+ *   context-group and has no edge (the group's port handles the connection).
+ *
+ * Exported for unit testing.
+ */
+export function isPortDynamicallyHidden(
+  port: PortDefinition,
+  ctx: PortVisibilityContext,
+): boolean {
+  const { node, connectedPorts, validTargetPorts, isInsideContextGroup } = ctx;
+  const portKey = `${node.id}:${port.id}`;
+  const isConnected = connectedPorts?.has(portKey) ?? false;
+
+  // Leader: hide locked input ports that have no edges
+  if (node.type === "leader" && port.direction === "input") {
+    if (isPortLocked(node, port.id) && !isConnected) return true;
+  }
+
+  // Leader: hide the task-out port when no minion is connected.
+  // Exception: reveal it while a connection drag is targeting it so the user
+  // can complete the connection (snap detection is mathematical, not DOM-based,
+  // but the port must be rendered to show the visual drop indicator).
+  if (node.type === "leader" && port.id === "task-out" && !isConnected) {
+    const isValidDragTarget = validTargetPorts?.has(portKey) ?? false;
+    if (!isValidDragTarget) return true;
+  }
+
+  // File-viewer & markdown: hide output ports when inside a context-group
+  // and not connected (the group's own port handles the connection instead).
+  // When outside a group, always show the port so the user can connect it.
+  if (
+    (node.type === "file-viewer" || node.type === "markdown") &&
+    port.direction === "output" &&
+    isInsideContextGroup &&
+    !isConnected
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 export const CanvasNodeComponent = memo(function CanvasNodeComponent({
@@ -71,6 +133,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
   onResize,
   onAddContentNode,
   onRevealMinion,
+  onSpawnLeaderChild,
   onConnectionStart,
   onConnectionEnd,
   isDragActive = false,
@@ -226,42 +289,25 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
   const contract = getContract(node.type);
   const portDots: React.ReactNode[] = [];
 
-  // Decide whether a port should be dynamically hidden based on node state.
-  // - Leader input ports: hide when disabled (locked) and not connected
-  // - File-viewer / markdown output ports: hide when inside a context group and not connected
-  const isPortDynamicallyHidden = (port: import("./graph.ts").PortDefinition): boolean => {
-    const portKey = `${node.id}:${port.id}`;
-    const isConnected = connectedPorts?.has(portKey) ?? false;
-
-    // Leader: hide disabled (locked) input ports that have no edges
-    if (node.type === "leader" && port.direction === "input") {
-      if (isPortLocked(node, port.id) && !isConnected) return true;
-    }
-
-    // File-viewer & markdown: hide output ports when inside a context-group
-    // and not connected (the group's own port handles the connection instead).
-    // When outside a group, always show the port so the user can connect it.
-    if (
-      (node.type === "file-viewer" || node.type === "markdown") &&
-      port.direction === "output" &&
-      isInsideContextGroup &&
-      !isConnected
-    ) {
-      return true;
-    }
-
-    return false;
+  const portVisibilityCtx: PortVisibilityContext = {
+    node,
+    connectedPorts,
+    validTargetPorts,
+    isInsideContextGroup,
   };
 
   if (contract) {
-    const inputPorts = contract.ports.filter((p) => p.direction === "input" && !isPortDynamicallyHidden(p));
-    const outputPorts = contract.ports.filter((p) => p.direction === "output" && !isPortDynamicallyHidden(p));
+    const inputPorts = contract.ports.filter(
+      (p) => p.direction === "input" && !isPortDynamicallyHidden(p, portVisibilityCtx),
+    );
+    const outputPorts = contract.ports.filter(
+      (p) => p.direction === "output" && !isPortDynamicallyHidden(p, portVisibilityCtx),
+    );
 
     // Same spacing math as EdgeRenderer.getPortPosition
     const height = node.size.height;
 
-    for (let i = 0; i < inputPorts.length; i++) {
-      const port = inputPorts[i];
+    for (const [i, port] of inputPorts.entries()) {
       const topPx = port.anchorY != null
         ? height * port.anchorY
         : height / (inputPorts.length + 1) * (i + 1);
@@ -286,8 +332,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
       );
     }
 
-    for (let i = 0; i < outputPorts.length; i++) {
-      const port = outputPorts[i];
+    for (const [i, port] of outputPorts.entries()) {
       const topPx = port.anchorY != null
         ? height * port.anchorY
         : height / (outputPorts.length + 1) * (i + 1);
@@ -378,6 +423,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
         onResize={handleResize}
         onAddContentNode={onAddContentNode}
         onRevealMinion={onRevealMinion}
+        onSpawnLeaderChild={onSpawnLeaderChild}
         isDropTarget={isDropTarget}
         isBeingDragged={isBeingDragged}
       />

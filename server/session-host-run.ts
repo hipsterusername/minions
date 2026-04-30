@@ -142,7 +142,8 @@ export function buildQueryOptions(
   input: QueryOptionsInput,
 ): { options: Record<string, unknown>; allowedTools: string[] } {
   const { host, opts, agentType, agentCtx, mcpResult, abortController } = input;
-  const allowedTools = [...CODE_TOOLS, ...mcpResult.mcpToolNames];
+  const externalToolNames = opts.externalMcpToolNames ?? [];
+  const allowedTools = [...CODE_TOOLS, ...mcpResult.mcpToolNames, ...externalToolNames];
 
   const options: Record<string, unknown> = {
     cwd: host.cwd,
@@ -156,8 +157,12 @@ export function buildQueryOptions(
     pathToClaudeCodeExecutable: CLAUDE_EXECUTABLE,
   };
 
-  if (Object.keys(mcpResult.mcpServers).length > 0) {
-    options["mcpServers"] = mcpResult.mcpServers;
+  const allMcpServers = {
+    ...mcpResult.mcpServers,
+    ...(opts.externalMcpServers ?? {}),
+  };
+  if (Object.keys(allMcpServers).length > 0) {
+    options["mcpServers"] = allMcpServers;
   }
 
   const basePrompt = agentType.buildSystemPrompt(agentCtx, opts.systemPrompt);

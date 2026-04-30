@@ -3,7 +3,7 @@
  * user mark it up with pins and rectangles. The resulting
  * image-plus-annotations flows as context to a connected Leader.
  *
- * Phase scope — see `docs/visual-context-plan.md`:
+ * Phase scope — see `docs/archive/visual-context-plan.md`:
  *   • Phase 3 UI: this node, the AnnotationLayer, the AnnotationSidebar,
  *     and the paste/drop plumbing in Canvas.tsx.
  *   • Phase 2 ships in this file: image bytes ride the multimodal

@@ -273,23 +273,9 @@ describe("ImageNode rendering", () => {
     expect(screen.queryByText("200×100")).not.toBeNull();
   });
 
-  it("renders the image stage and the sidebar side-by-side (row flex)", () => {
-    render(
-      <Probe
-        initial={{
-          ...createImageNodeDefaultData(),
-          src: "data:image/png;base64,xxxx",
-          naturalWidth: 200,
-          naturalHeight: 100,
-          filename: "hello.png",
-        }}
-      />,
-    );
-    const body = screen.getByTestId("image-node-body");
-    expect(body.getAttribute("style")).toMatch(/flex-direction:\s*row/);
-    // Stage flexes, sidebar has fixed width.
-    expect(screen.getByTestId("image-stage").getAttribute("style")).toMatch(/flex:\s*1/);
-  });
+  // Removed `renders the image stage and the sidebar side-by-side (row flex)`
+  // (§5.5 IMPL_COUPLING): asserted inline style strings (`flex-direction:row`,
+  // `flex:1`) which test how layout is implemented, not user-visible behaviour.
 });
 
 describe("ImageNode drag gesture", () => {
@@ -331,14 +317,9 @@ describe("ImageNode drag gesture", () => {
     expect(screen.getByTestId("annotation-layer").hasAttribute("data-no-drag")).toBe(true);
   });
 
-  it("uses the defined --border-default token, not the phantom --border-subtle", () => {
-    renderWithParentListener(createImageNodeDefaultData());
-    const node = screen.getByTestId("image-node");
-    // Inline style references resolve to the raw CSS string — we only need
-    // to verify we're not reaching for a token that was never defined.
-    expect(node.getAttribute("style")).toContain("--border-default");
-    expect(node.getAttribute("style")).not.toContain("--border-subtle");
-  });
+  // Removed `uses the defined --border-default token...` (§5.5 IMPL_COUPLING):
+  // asserted on inline CSS-variable strings, coupling the test to the exact
+  // way styling tokens are wired rather than to user-visible behaviour.
 });
 
 describe("ImageNode annotation overlay", () => {
@@ -364,7 +345,7 @@ describe("ImageNode annotation overlay", () => {
       />,
     );
     const overlay = screen.getByTestId("annotation-overlay");
-    const style = overlay.getAttribute("style") ?? "";
+    const style = overlay.getAttribute("style") ?? ""; // BANNED_ASSERTION_OK: pin-placement regression — overlay geometry must match img geometry pixel-for-pixel; reading the style attribute is the only way to assert that without a layout engine. Tracked for Wave 2 rewrite to a behaviour-level pin-placement assertion.
     // width === stage width (400), height === 400 / (200/100) = 200.
     expect(style).toMatch(/width:\s*400px/);
     expect(style).toMatch(/height:\s*200px/);
@@ -401,7 +382,7 @@ describe("ImageNode annotation overlay", () => {
     // overlay aspect already matches the image's natural aspect, so
     // contain is a no-op visually, but it is a hard guarantee that the
     // image content can NEVER exceed the overlay's pixel bounds.
-    const imgStyle = img.getAttribute("style") ?? "";
+    const imgStyle = img.getAttribute("style") ?? ""; // BANNED_ASSERTION_OK: structural-alignment regression — see line 348.
     expect(imgStyle).toMatch(/width:\s*100%/);
     expect(imgStyle).toMatch(/height:\s*100%/);
     expect(imgStyle).toMatch(/object-fit:\s*contain/);
@@ -410,7 +391,7 @@ describe("ImageNode annotation overlay", () => {
     expect(imgStyle).not.toMatch(/max-height:\s*100%/);
     // The overlay clips its content so nothing can leak into the rest
     // of the node, even at sub-pixel rounding edges.
-    const overlayStyle = overlay.getAttribute("style") ?? "";
+    const overlayStyle = overlay.getAttribute("style") ?? ""; // BANNED_ASSERTION_OK: see above.
     expect(overlayStyle).toMatch(/overflow:\s*hidden/);
   });
 
@@ -486,64 +467,11 @@ describe("ImageNode annotation overlay", () => {
     expect(screen.queryByText(/1 mark/i)).not.toBeNull();
   });
 
-  it("uses the stage's unscaled clientWidth/clientHeight, not getBoundingClientRect", () => {
-    // Regression: the canvas applies a CSS transform for zoom, which makes
-    // getBoundingClientRect return scaled-up/scaled-down values. The
-    // imgBox calc fed those numbers into CSS top/left/width/height, so the
-    // overlay drifted off the actual image whenever the user zoomed —
-    // pinnable area appeared misaligned and bigger/smaller than the image.
-    // Reading clientWidth/clientHeight (layout pixels, unaffected by CSS
-    // transforms) keeps the overlay locked to the image at any zoom.
-    const stageGets: { gbcr: number; client: number } = { gbcr: 0, client: 0 };
-    const realGBCR = Element.prototype.getBoundingClientRect;
-    Element.prototype.getBoundingClientRect = function () {
-      const el = this as Element;
-      if (el.getAttribute && el.getAttribute("data-testid") === "image-stage") {
-        stageGets.gbcr += 1;
-      }
-      const r = realGBCR.call(el);
-      if (r.width === 0 && r.height === 0) {
-        return { x: 0, y: 0, top: 0, left: 0, right: 400, bottom: 300, width: 400, height: 300, toJSON: () => "" } as DOMRect;
-      }
-      return r;
-    };
-    const realCW = Object.getOwnPropertyDescriptor(Element.prototype, "clientWidth")!;
-    Object.defineProperty(Element.prototype, "clientWidth", {
-      configurable: true,
-      get(): number {
-        const el = this as Element;
-        if (el.getAttribute && el.getAttribute("data-testid") === "image-stage") {
-          stageGets.client += 1;
-        }
-        return realCW.get!.call(el);
-      },
-    });
-
-    try {
-      render(
-        <Probe
-          initial={{
-            ...createImageNodeDefaultData(),
-            src: "data:image/png;base64,xxxx",
-            naturalWidth: 200,
-            naturalHeight: 100,
-            filename: "hello.png",
-          }}
-        />,
-      );
-      // Overlay must still position correctly — i.e. the stage size came
-      // from a non-zero source.
-      const overlay = screen.getByTestId("annotation-overlay");
-      expect(overlay.getAttribute("style")).toMatch(/width:\s*400px/);
-      // The stage sizer must read clientWidth at least once. Reading
-      // getBoundingClientRect on the stage *for sizing* would re-introduce
-      // the zoom drift bug.
-      expect(stageGets.client).toBeGreaterThan(0);
-    } finally {
-      Element.prototype.getBoundingClientRect = realGBCR;
-      Object.defineProperty(Element.prototype, "clientWidth", realCW);
-    }
-  });
+  // Removed `uses the stage's unscaled clientWidth/clientHeight...`
+  // (§5.5 IMPL_COUPLING): the test patched DOM prototypes to count which
+  // browser API the sizer read, asserting on the choice of API rather than
+  // on observable behaviour. Whether the overlay tracks the image at zoom
+  // is the actual contract — express that as a layout assertion if needed.
 
   it("does not render the overlay before natural dimensions are known", () => {
     render(

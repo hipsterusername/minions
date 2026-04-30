@@ -76,13 +76,9 @@ describe("loadFixture", () => {
     }
   });
 
-  it("skips `#` comment lines and blank lines", () => {
-    const entries = loadFixture("leader-plan-and-delegate.jsonl");
-    // The fixture starts with a long comment block and one blank line
-    // between sections. If those weren't skipped, parsing would throw
-    // before we got here.
-    expect(entries.length).toBeGreaterThan(0);
-  });
+  // Note: a "skips comment + blank lines" check is dropped per
+  // testing-strategy.md §5.7 (TRIVIAL) — every other test in this file would
+  // throw at parse time if those lines weren't skipped, so it adds no signal.
 
   it("throws with line number on malformed JSON", () => {
     const name = writeTempFixture(
@@ -176,15 +172,8 @@ describe("createReplaySocket", () => {
     expect(socket.subscriberCount).toBe(1);
   });
 
-  it("captures send() payloads in order", () => {
-    const { socket } = createReplaySocket();
-    socket.send({ type: "control", command: "start" });
-    socket.send({ type: "control", command: "stop" });
-
-    expect(socket.sent).toHaveLength(2);
-    expect((socket.sent[0] as { command: string }).command).toBe("start");
-    expect((socket.sent[1] as { command: string }).command).toBe("stop");
-  });
+  // Note: a "captures send() payloads in order" check is dropped per §5.7 —
+  // it tested the harness against itself (Array.push semantics).
 
   it("honours delayMs between messages with fake timers", async () => {
     vi.useFakeTimers();
@@ -213,15 +202,9 @@ describe("createReplaySocket", () => {
     }
   });
 
-  it("exposes connected/reconnect state expected by SocketHandle consumers", () => {
-    const { socket } = createReplaySocket();
-    expect(socket.connected).toBe(true);
-    expect(socket.reconnectState).toBe("connected");
-    expect(socket.reconnectAttempt).toBe(0);
-    expect(typeof socket.manualReconnect).toBe("function");
-    // manualReconnect is a no-op but must exist.
-    expect(() => socket.manualReconnect()).not.toThrow();
-  });
+  // Note: a "exposes connected/reconnect state" check is dropped per §5.7 —
+  // it tested the harness's own constants. Real consumers (use-socket.ts)
+  // exercise these fields through their behaviour.
 });
 
 // ── loadAndReplay (integration) ─────────────────────────

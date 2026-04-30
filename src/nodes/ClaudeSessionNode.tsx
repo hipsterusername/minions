@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from "react";
 import type { NodeRenderProps, ThinkingConfig } from "../types.ts";
 import { DEFAULT_THINKING_CONFIG } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
@@ -20,6 +20,9 @@ import {
   isStreamEnd,
   isStreamingEvent,
 } from "../streaming.ts";
+import { recordWsMessageForDebug } from "../debug-record-bridge.ts";
+import { debugFlagStore } from "../debug.ts";
+import { DebugInspector } from "../components/DebugInspector.tsx";
 
 export interface SubagentInfo {
   taskId: string;
@@ -511,7 +514,7 @@ function ToolGroup({ msgs }: { msgs: SessionMessage[] }) {
   );
 }
 
-function AssistantBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAddContentNode?: (content: string) => void }) {
+function AssistantBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAddContentNode?: ((content: string) => void) | undefined }) {
   const [expanded, setExpanded] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const [isOverflowing, setIsOverflowing] = useState(false);
@@ -747,7 +750,7 @@ function ModelUsageBar({ modelUsage }: { modelUsage: Record<string, ModelUsage> 
   );
 }
 
-function ResultBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAddContentNode?: (content: string) => void }) {
+function ResultBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAddContentNode?: ((content: string) => void) | undefined }) {
   const [expanded, setExpanded] = useState(false);
   const isLong = msg.content.length > 300;
   const meta = msg.meta;
@@ -820,7 +823,7 @@ function ResultBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAddCon
   );
 }
 
-function MessageFeed({ messages, onAddContentNode }: { messages: SessionMessage[]; onAddContentNode?: (content: string) => void }) {
+function MessageFeed({ messages, onAddContentNode }: { messages: SessionMessage[]; onAddContentNode?: ((content: string) => void) | undefined }) {
   const groups = groupMessages(messages);
   return (
     <>
@@ -866,6 +869,11 @@ export function ClaudeSessionRenderer({
   const userScrolledUpRef = useRef(false);
   const syncedRef = useRef(false);
   const { banners, processSdkEvent, dismissBanner } = useStatusBanners();
+  const debugEnabled = useSyncExternalStore(
+    debugFlagStore.subscribe,
+    debugFlagStore.getSnapshot,
+    debugFlagStore.getSnapshot,
+  );
 
   // Scroll handler: detect if user scrolled up
   const handleMessagesScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
@@ -900,6 +908,10 @@ export function ClaudeSessionRenderer({
     return socketSubscribe((msg: unknown) => {
       const serverMsg = msg as ServerMessage;
       const current = dataRef.current;
+      // Debug capture for the ad-hoc subscription. ClaudeSessionNode
+      // does NOT use `useSessionStream`, so we instrument here so the
+      // DebugInspector still sees every event for this session.
+      recordWsMessageForDebug(current.sessionKey, serverMsg, "claude");
 
       if (
         serverMsg.type === "sync_response" &&
@@ -1064,7 +1076,7 @@ export function ClaudeSessionRenderer({
             if (resultText) {
               const normalizedResult = resultText.replace(/<!--task-name:.+?-->\s*/g, "").trim();
               const lastIdx = base.findLastIndex((m) => m.role === "assistant");
-              if (lastIdx >= 0 && base[lastIdx].content.replace(/<!--task-name:.+?-->\s*/g, "").trim() === normalizedResult) {
+              if (lastIdx >= 0 && base[lastIdx]?.content.replace(/<!--task-name:.+?-->\s*/g, "").trim() === normalizedResult) {
                 base = [...base.slice(0, lastIdx), ...base.slice(lastIdx + 1)];
               }
             }
@@ -1415,6 +1427,15 @@ export function ClaudeSessionRenderer({
         ) : data.status === "running" && data.messages.length > 0 ? (
           <StreamingIndicator />
         ) : null}
+        {debugEnabled && data.sessionKey && (
+          <DebugInspector
+            sessionKey={data.sessionKey}
+            streamingText={data.streamingText}
+            streamingBlockIndex={data.streamingBlockIndex ?? null}
+            messages={data.messages}
+            label="claude-session"
+          />
+        )}
         {showJumpToBottom && (
           <div
             style={{
