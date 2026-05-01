@@ -1,10 +1,10 @@
-# Synthetic SDK message stream — assistant emits a single message with
-# thinking + text + tool_use blocks all together. Exercises the per-block
-# split inside sdkToDisplayMessages: one assistant SDK message → three
-# DisplayMessages (role thinking / assistant / tool).
-#
-# Also asserts the `<!--task-name:...-->` marker is stripped from text
-# but NOT from tool_use payloads.
-{"message":{"type":"sdk_event","sessionKey":"leader-1","message":{"type":"system","subtype":"init","session_id":"leader-sess-002","claude_code_version":"2.0.0","cwd":"/repo","tools":["Read"],"model":"claude-opus-4-5","permissionMode":"default","apiKeySource":"env","mcp_servers":[],"slash_commands":[],"output_style":"text","skills":[],"plugins":[],"uuid":"u-init-0001"}}}
-{"message":{"type":"sdk_event","sessionKey":"leader-1","message":{"type":"assistant","message":{"id":"msg_01","type":"message","role":"assistant","content":[{"type":"thinking","thinking":"I should read the file before deciding."},{"type":"text","text":"<!--task-name:Read and decide-->\nLooking at the source now."},{"type":"tool_use","id":"toolu_01","name":"Read","input":{"file_path":"/repo/src/index.ts"}}],"model":"claude-opus-4-5","stop_reason":null,"usage":{"input_tokens":512,"output_tokens":80}},"parent_tool_use_id":null,"uuid":"u-asst-0002","session_id":"leader-sess-002"}}}
-{"message":{"type":"sdk_event","sessionKey":"leader-1","message":{"type":"result","subtype":"success","result":"Read complete.","is_error":false,"duration_ms":1200,"duration_api_ms":900,"num_turns":1,"stop_reason":"end_turn","total_cost_usd":0.0042,"usage":{"input_tokens":512,"output_tokens":80},"modelUsage":{},"permission_denials":[],"uuid":"u-result-0003","session_id":"leader-sess-002"}}}
+# Synthetic SDK message stream — assistant emits thinking + text + tool_call.
+# Phase 3 format: each content block becomes a separate NormalizedEvent.
+# Exercises the per-event split that normalizedToDisplayMessages produces:
+# one thinking → one text → one tool → one usage → one done.
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"init","sessionId":"leader-sess-002","model":"claude-opus-4-5","permissionMode":"default"}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"thinking","text":"I should read the file before deciding."}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"text","text":"<!--task-name:Read and decide-->\nLooking at the source now.","role":"assistant"}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"tool_call","id":"toolu_01","name":"Read","input":{"file_path":"/repo/src/index.ts"}}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"usage","input":512,"output":80,"costUSD":0.0042}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"done","reason":"completed","result":"Read complete.","turns":1}}}

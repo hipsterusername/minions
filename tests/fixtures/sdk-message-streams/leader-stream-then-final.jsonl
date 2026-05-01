@@ -1,13 +1,21 @@
-# Synthetic SDK message stream — three stream_event partials followed
-# by the final assistant message and result. Today the nodes either
-# surface stream_event chunks live or fall through to the assistant
-# message. sdkToDisplayMessages currently returns [] for stream_event
-# (default branch), so the snapshot for this fixture should only show
-# the init + final assistant text + result. If that changes — e.g. a
-# refactor surfaces partials — the snapshot will catch it.
-{"message":{"type":"sdk_event","sessionKey":"leader-1","message":{"type":"system","subtype":"init","session_id":"leader-sess-003","claude_code_version":"2.0.0","cwd":"/repo","tools":[],"model":"claude-opus-4-5","permissionMode":"default","apiKeySource":"env","mcp_servers":[],"slash_commands":[],"output_style":"text","skills":[],"plugins":[],"uuid":"u-init-0001"}}}
-{"message":{"type":"sdk_event","sessionKey":"leader-1","message":{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}},"parent_tool_use_id":null,"uuid":"u-strm-0002","session_id":"leader-sess-003"}}}
-{"message":{"type":"sdk_event","sessionKey":"leader-1","message":{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":" world"}},"parent_tool_use_id":null,"uuid":"u-strm-0003","session_id":"leader-sess-003"}}}
-{"message":{"type":"sdk_event","sessionKey":"leader-1","message":{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"end_turn"}},"parent_tool_use_id":null,"uuid":"u-strm-0004","session_id":"leader-sess-003"}}}
-{"message":{"type":"sdk_event","sessionKey":"leader-1","message":{"type":"assistant","message":{"id":"msg_01","type":"message","role":"assistant","content":[{"type":"text","text":"Hello world"}],"model":"claude-opus-4-5","stop_reason":"end_turn","usage":{"input_tokens":120,"output_tokens":4}},"parent_tool_use_id":null,"uuid":"u-asst-0005","session_id":"leader-sess-003"}}}
-{"message":{"type":"sdk_event","sessionKey":"leader-1","message":{"type":"result","subtype":"success","result":"Hello world","is_error":false,"duration_ms":600,"duration_api_ms":400,"num_turns":1,"stop_reason":"end_turn","total_cost_usd":0.0009,"usage":{"input_tokens":120,"output_tokens":4},"modelUsage":{},"permission_denials":[],"uuid":"u-result-0006","session_id":"leader-sess-003"}}}
+# Synthetic SDK message stream — streaming deltas followed by the final
+# assistant message and result.
+# Phase 3 format: stream deltas are text_delta events; the old message_delta
+# (pre-stop usage update) maps to a usage event without costUSD so the
+# streaming buffer is NOT cleared. The final result splits into usage + done.
+#
+# Entry layout (0-indexed):
+#  [0] init
+#  [1] text_delta "Hello"
+#  [2] text_delta " world"
+#  [3] usage (no costUSD — pre-stop, does not clear buffer)
+#  [4] text "Hello world" (complete assistant — clears buffer)
+#  [5] usage (costUSD:0.0009 — session cost)
+#  [6] done "Hello world" (collapses the matching assistant)
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"init","sessionId":"leader-sess-003","model":"claude-opus-4-5","permissionMode":"default"}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"text_delta","text":"Hello","blockIndex":0}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"text_delta","text":" world","blockIndex":0}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"usage","input":120,"output":4}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"text","text":"Hello world","role":"assistant"}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"usage","input":120,"output":4,"costUSD":0.0009}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"done","reason":"completed","result":"Hello world","turns":1}}}

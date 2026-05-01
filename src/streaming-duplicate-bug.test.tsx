@@ -6,12 +6,12 @@
  * and after the message is committed.
  *
  * The shared `sessionStreamReducer` is well-covered and dedups by
- * SDK uuid (see `src/session-stream.test.ts` "dedups by id"). The
+ * content-derived ID (see `src/session-stream.test.ts` "dedups by id"). The
  * ad-hoc subscription in {@link import("./nodes/ClaudeSessionNode")}
  * does NOT use the shared reducer; it has its own
- * `sdkMessageToSessionMessages` that mints a fresh `crypto.randomUUID()`
+ * `normalizedToSessionMessages` that mints a fresh `crypto.randomUUID()`
  * for every produced message, and appends without deduplicating by
- * SDK uuid.
+ * content.
  *
  * This file pins the difference behaviorally:
  *
@@ -38,7 +38,8 @@ import {
   sessionStreamReducer,
   type SessionStreamState,
 } from "./session-stream.ts";
-import type { ServerMessage, SdkMessage } from "./use-socket.ts";
+import type { ServerMessage } from "./use-socket.ts";
+import type { NormalizedEvent } from "../shared/normalized-event.ts";
 import {
   ClaudeSessionRenderer,
   type ClaudeSessionData,
@@ -61,54 +62,20 @@ beforeAll(() => {
 
 // ── Builders ────────────────────────────────────────────
 
-function assistantSdk(text: string, uuid: string): SdkMessage {
-  return {
-    type: "assistant",
-    message: {
-      id: "msg",
-      type: "message",
-      role: "assistant",
-      content: [{ type: "text", text }],
-      model: "claude-opus-4-5",
-      stop_reason: null,
-      usage: { input_tokens: 1, output_tokens: 1 },
-    },
-    parent_tool_use_id: null,
-    uuid,
-    session_id: "s1",
-  } as SdkMessage;
+function assistantEvent(text: string): NormalizedEvent {
+  return { kind: "text", text, role: "assistant" };
 }
 
-function streamDelta(
-  text: string,
-  uuid: string,
-  index = 0,
-): SdkMessage {
-  return {
-    type: "stream_event",
-    event: {
-      type: "content_block_delta",
-      index,
-      delta: { type: "text_delta", text },
-    },
-    parent_tool_use_id: null,
-    uuid,
-    session_id: "s1",
-  } as SdkMessage;
+function streamDelta(text: string, index = 0): NormalizedEvent {
+  return { kind: "text_delta", text, blockIndex: index };
 }
 
-function streamStop(uuid: string): SdkMessage {
-  return {
-    type: "stream_event",
-    event: { type: "message_stop" },
-    parent_tool_use_id: null,
-    uuid,
-    session_id: "s1",
-  } as SdkMessage;
+function streamStop(): NormalizedEvent {
+  return { kind: "stream_end" };
 }
 
-function sdkEnvelope(sdk: SdkMessage): ServerMessage {
-  return { type: "sdk_event", sessionKey: "session-1", message: sdk };
+function sdkEnvelope(event: NormalizedEvent): ServerMessage {
+  return { type: "sdk_event", sessionKey: "session-1", event };
 }
 
 function freshState(
@@ -125,7 +92,7 @@ function freshState(
 
 describe("sessionStreamReducer is robust to duplicate / interleaved events", () => {
   it("dedups when the same complete assistant arrives twice", () => {
-    const evt = sdkEnvelope(assistantSdk("Hello world", "uuid-aa"));
+    const evt = sdkEnvelope(assistantEvent("Hello world"));
     let s = freshState();
     s = sessionStreamReducer(s, evt, "x");
     s = sessionStreamReducer(s, evt, "x");
@@ -135,12 +102,12 @@ describe("sessionStreamReducer is robust to duplicate / interleaved events", () 
 
   it("handles a burst of deltas followed by the same-content complete assistant", () => {
     let s = freshState();
-    s = sessionStreamReducer(s, sdkEnvelope(streamDelta("Hello", "u1", 0)), "x");
-    s = sessionStreamReducer(s, sdkEnvelope(streamDelta(" world", "u2", 0)), "x");
+    s = sessionStreamReducer(s, sdkEnvelope(streamDelta("Hello", 0)), "x");
+    s = sessionStreamReducer(s, sdkEnvelope(streamDelta(" world", 0)), "x");
     expect(s.streamingText).toBe("Hello world");
-    s = sessionStreamReducer(s, sdkEnvelope(streamStop("u3")), "x");
+    s = sessionStreamReducer(s, sdkEnvelope(streamStop()), "x");
     expect(s.streamingText).toBe("");
-    s = sessionStreamReducer(s, sdkEnvelope(assistantSdk("Hello world", "u4")), "x");
+    s = sessionStreamReducer(s, sdkEnvelope(assistantEvent("Hello world")), "x");
     expect(s.messages).toHaveLength(1);
     expect(s.streamingText).toBe("");
     expect(findDuplicateContent(s.messages)).toEqual([]);
@@ -148,11 +115,11 @@ describe("sessionStreamReducer is robust to duplicate / interleaved events", () 
 
   it("handles a sync_response that re-delivers events already in messages", () => {
     let s = freshState();
-    const evt = assistantSdk("Hello world", "uuid-aa");
-    s = sessionStreamReducer(s, sdkEnvelope(evt), "x");
+    const event = assistantEvent("Hello world");
+    s = sessionStreamReducer(s, sdkEnvelope(event), "x");
     expect(s.messages).toHaveLength(1);
 
-    // Server replays same UUID via sync_response — must not double-up.
+    // Server replays same content via sync_response — must not double-up.
     s = sessionStreamReducer(
       s,
       {
@@ -160,7 +127,7 @@ describe("sessionStreamReducer is robust to duplicate / interleaved events", () 
         sessionKey: "session-1",
         found: true,
         events: [
-          { type: "sdk_event", sessionKey: "session-1", message: evt, timestamp: 0 },
+          { type: "sdk_event", sessionKey: "session-1", event, timestamp: 0 },
         ],
       },
       "x",
@@ -215,7 +182,6 @@ function makeInitial(): ClaudeSessionData {
     model: "sonnet",
     permissionMode: "bypassPermissions",
     thinkingConfig: { ...DEFAULT_THINKING_CONFIG },
-    modelUsage: null,
     lastDurationMs: null,
     subagents: [],
     promptSuggestions: [],
@@ -225,15 +191,15 @@ function makeInitial(): ClaudeSessionData {
 
 describe("ClaudeSessionNode: duplicate-text bug pinning", () => {
   it("DOES duplicate when the same assistant event is delivered twice", async () => {
-    // Bug capture: ClaudeSessionNode's `sdkMessageToSessionMessages`
+    // Bug capture: ClaudeSessionNode's `normalizedToSessionMessages`
     // generates a fresh crypto.randomUUID() per message and the
-    // subscription appends with no UUID-based dedup. So re-delivery
-    // of the same SDK event produces two assistant bubbles with
+    // subscription appends with no content-based dedup. So re-delivery
+    // of the same NormalizedEvent produces two assistant bubbles with
     // different display IDs but identical content.
     //
     // NOTE: when this is fixed (e.g. by switching to the shared
-    // reducer or hashing on `uuid`), flip this assertion to
-    // `toHaveLength(1)` and the regression net catches a future
+    // reducer or deriving stable IDs from content), flip this assertion
+    // to `toHaveLength(1)` and the regression net catches a future
     // backslide.
     const { socket, replay } = createReplaySocket();
     const states: ClaudeSessionData[] = [];
@@ -246,7 +212,7 @@ describe("ClaudeSessionNode: duplicate-text bug pinning", () => {
     );
 
     const evt = {
-      message: sdkEnvelope(assistantSdk("Hello world", "uuid-bb")),
+      message: sdkEnvelope(assistantEvent("Hello world")),
     };
     await act(async () => {
       await replay([evt]);
@@ -286,12 +252,12 @@ describe("ClaudeSessionNode: duplicate-text bug pinning", () => {
 
     await act(async () => {
       await replay([
-        { message: sdkEnvelope(streamDelta("Hello", "u1", 0)) },
-        { message: sdkEnvelope(streamDelta(" world", "u2", 0)) },
+        { message: sdkEnvelope(streamDelta("Hello", 0)) },
+        { message: sdkEnvelope(streamDelta(" world", 0)) },
       ]);
     });
     await act(async () => {
-      await replay([{ message: sdkEnvelope(streamStop("u3")) }]);
+      await replay([{ message: sdkEnvelope(streamStop()) }]);
     });
 
     const lastAfterStop = states.at(-1);

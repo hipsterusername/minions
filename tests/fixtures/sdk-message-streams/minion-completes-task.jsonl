@@ -1,16 +1,27 @@
-# Synthetic SDK message stream — minion-side: receives a task,
-# narrates a step, then reports done.
+# Synthetic SDK stream — minion-side: receives a task, narrates a step,
+# then reports done.
+#
+# Phase 3 format: streaming events use NormalizedEvent kinds.
 #
 # Minion contract (server/minion-tools.ts) exposes:
 #   • mcp__minion__report_step  — progress narration
 #   • mcp__minion__report_done  — final result
 #   • mcp__minion__report_fail  — failure path
 #
-# This fixture covers the success path. A separate minion-fails fixture
-# is deferred until we touch the failure rendering.
-{"message":{"type":"sdk_event","sessionKey":"minion-task-a","message":{"type":"system","subtype":"init","session_id":"minion-sess-001","claude_code_version":"2.0.0","cwd":"/repo","tools":["Read","Write"],"model":"claude-sonnet-4-5","permissionMode":"acceptEdits","apiKeySource":"env","mcp_servers":[{"name":"minion","status":"connected"}],"slash_commands":[],"output_style":"text","skills":[],"plugins":[],"uuid":"u-init-0001"}}}
-{"message":{"type":"sdk_event","sessionKey":"minion-task-a","message":{"type":"assistant","message":{"id":"msg_01","type":"message","role":"assistant","content":[{"type":"text","text":"Starting task-a. I'll read the file then patch it."}],"model":"claude-sonnet-4-5","stop_reason":null,"usage":{"input_tokens":256,"output_tokens":18}},"parent_tool_use_id":null,"uuid":"u-asst-0002","session_id":"minion-sess-001"}}}
-{"message":{"type":"sdk_event","sessionKey":"minion-task-a","message":{"type":"assistant","message":{"id":"msg_02","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"mcp__minion__report_step","input":{"summary":"Reading source file"}}],"model":"claude-sonnet-4-5","stop_reason":null,"usage":{"input_tokens":256,"output_tokens":24}},"parent_tool_use_id":null,"uuid":"u-asst-0003","session_id":"minion-sess-001"}}}
-{"message":{"type":"sdk_event","sessionKey":"minion-task-a","message":{"type":"tool_progress","tool_use_id":"toolu_99","tool_name":"Read","parent_tool_use_id":null,"elapsed_time_seconds":0.3,"uuid":"u-prog-0004","session_id":"minion-sess-001"}}}
-{"message":{"type":"sdk_event","sessionKey":"minion-task-a","message":{"type":"assistant","message":{"id":"msg_03","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_02","name":"mcp__minion__report_done","input":{"summary":"Patched 1 file","details":"Updated header copy in src/index.ts"}}],"model":"claude-sonnet-4-5","stop_reason":null,"usage":{"input_tokens":380,"output_tokens":40}},"parent_tool_use_id":null,"uuid":"u-asst-0005","session_id":"minion-sess-001"}}}
-{"message":{"type":"sdk_event","sessionKey":"minion-task-a","message":{"type":"result","subtype":"success","result":"Patched 1 file","is_error":false,"duration_ms":4200,"duration_api_ms":3000,"num_turns":3,"stop_reason":"end_turn","total_cost_usd":0.0114,"usage":{"input_tokens":380,"output_tokens":40},"modelUsage":{},"permission_denials":[],"uuid":"u-result-0006","session_id":"minion-sess-001"}}}
+# This fixture covers the success path.
+#
+# Entry layout (0-indexed):
+#  [0] init
+#  [1] text "Starting task-a..."  (assistant narration)
+#  [2] tool_call mcp__minion__report_step
+#  [3] tool_progress Read (tool executing)
+#  [4] tool_call mcp__minion__report_done
+#  [5] usage (costUSD:0.0114)
+#  [6] done  (result:"Patched 1 file", turns:3)
+{"message":{"type":"sdk_event","sessionKey":"minion-task-a","event":{"kind":"init","sessionId":"minion-sess-001","model":"claude-sonnet-4-5","permissionMode":"acceptEdits"}}}
+{"message":{"type":"sdk_event","sessionKey":"minion-task-a","event":{"kind":"text","text":"Starting task-a. I'll read the file then patch it.","role":"assistant"}}}
+{"message":{"type":"sdk_event","sessionKey":"minion-task-a","event":{"kind":"tool_call","id":"toolu_01","name":"mcp__minion__report_step","input":{"summary":"Reading source file"}}}}
+{"message":{"type":"sdk_event","sessionKey":"minion-task-a","event":{"kind":"tool_progress","id":"toolu_99","name":"Read","elapsedSeconds":0.3}}}
+{"message":{"type":"sdk_event","sessionKey":"minion-task-a","event":{"kind":"tool_call","id":"toolu_02","name":"mcp__minion__report_done","input":{"summary":"Patched 1 file","details":"Updated header copy in src/index.ts"}}}}
+{"message":{"type":"sdk_event","sessionKey":"minion-task-a","event":{"kind":"usage","input":380,"output":40,"costUSD":0.0114}}}
+{"message":{"type":"sdk_event","sessionKey":"minion-task-a","event":{"kind":"done","reason":"completed","result":"Patched 1 file","turns":3}}}

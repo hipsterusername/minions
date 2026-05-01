@@ -1,26 +1,20 @@
 /**
  * Pure reducer for the shared session-stream state.
  *
- * This is the first extraction of Phase 1 (`docs/refactor-test-plan.md`).
- * It captures the WebSocket-handling shape that LeaderNode, MinionNode,
- * and ClaudeSessionNode currently re-implement nearly identically:
+ * Phase 3: operates on NormalizedEvent (discriminated by `kind`) rather than
+ * the legacy SdkMessage union. The public interface is unchanged — callers
+ * pass a `ServerMessage` (whose `sdk_event` variant now carries
+ * `event: NormalizedEvent`) and get back a new or same-reference state.
  *
+ * Key behaviours preserved:
  *   • `sync_response` → rebuild messages / cost / turns / status / error,
  *     or reset to "disconnected" when the server says the session is gone.
  *   • `sdk_event` → either accumulate streaming deltas, clear them on
- *     stream end, or run the message through `sdkToDisplayMessages`,
+ *     stream end, or convert through `normalizedToDisplayMessages`,
  *     deduplicate by `id`, collapse the duplicated assistant-then-result
- *     bubble, and capture cost/turns from `result` events.
+ *     bubble, and capture cost/turns from usage/done events.
  *   • `session_status` → status update.
  *   • `session_error` → status:"error" + capture error text.
- *
- * Anything node-specific (LeaderNode's worktree/approval restore,
- * MinionNode's task queue + auto-advance, ClaudeSessionNode's tool
- * groups) stays in the node and runs *around* the reducer.
- *
- * The reducer is pure: same inputs → same output, no side effects, no
- * React. It is the testable core that the upcoming `useSessionStream`
- * hook (and eventually `<SessionHost>`) will wrap.
  *
  * **Reference equality contract:** when a message is irrelevant (wrong
  * `sessionKey`, unhandled type, or no observable change) the reducer
@@ -29,16 +23,17 @@
  */
 
 import {
-  sdkToDisplayMessages,
+  normalizedToDisplayMessages,
   type DisplayMessage,
 } from "./sdk-messages.ts";
 import {
-  extractParentToolUseId,
+  extractParentId,
   extractStreamDelta,
   isStreamEnd,
   isStreamingEvent,
 } from "./streaming.ts";
-import type { ServerMessage, SdkMessage } from "./use-socket.ts";
+import type { ServerMessage } from "./use-socket.ts";
+import type { NormalizedEvent } from "../shared/normalized-event.ts";
 
 /** Statuses tracked by the shared session stream. */
 export type SessionStreamStatus =
@@ -84,7 +79,7 @@ export interface SessionStreamState {
  *
  * @param state   current shared state
  * @param msg     inbound WebSocket message
- * @param prefix  passed to `sdkToDisplayMessages` for stable, scoped IDs
+ * @param prefix  passed to `normalizedToDisplayMessages` for stable, scoped IDs
  * @returns       next state, or the same `state` reference if nothing changed
  */
 export function sessionStreamReducer(
@@ -136,10 +131,10 @@ function reduceSyncResponse(
     (msg.status as SessionStreamStatus | undefined) ?? state.status;
 
   for (const evt of events) {
-    if (evt.type === "sdk_event" && evt.message) {
-      const sdk = evt.message;
-      const produced = sdkToDisplayMessages(sdk, prefix);
-      const filtered = collapseAssistantResultDup(rebuilt, produced, sdk);
+    if (evt.type === "sdk_event" && evt.event) {
+      const event = evt.event;
+      const produced = normalizedToDisplayMessages(event, prefix);
+      const filtered = collapseAssistantResultDup(rebuilt, produced, event);
       for (const m of filtered.appended) {
         if (!seen.has(m.id)) {
           seen.add(m.id);
@@ -152,9 +147,11 @@ function reduceSyncResponse(
         if (dropped) seen.delete(dropped.id);
         rebuilt.splice(filtered.dropAssistantIdx, 1);
       }
-      if (sdk.type === "result") {
-        cost = sdk.total_cost_usd ?? cost;
-        turns = sdk.num_turns ?? turns;
+      if (event.kind === "usage" && event.costUSD != null) {
+        cost = event.costUSD;
+      }
+      if (event.kind === "done" && event.turns != null) {
+        turns = event.turns;
       }
     } else if (evt.type === "session_status" && evt.status) {
       status = evt.status as SessionStreamStatus;
@@ -181,23 +178,21 @@ function reduceSdkEvent(
   prefix: string,
 ): SessionStreamState {
   if (!state.sessionKey || msg.sessionKey !== state.sessionKey) return state;
-  const sdk: SdkMessage = msg.message;
+  const event: NormalizedEvent = msg.event;
 
   // ── Streaming deltas ──
-  if (isStreamingEvent(sdk)) {
+  if (isStreamingEvent(event)) {
     // Drop stream events that belong to a sub-agent (Agent/Task tool).
     // Their deltas would otherwise interleave with the parent session's
     // streaming preview because they share the same sessionKey.
-    if (extractParentToolUseId(sdk) !== null) {
+    if (extractParentId(event) !== null) {
       return state;
     }
 
-    const delta = extractStreamDelta(sdk);
+    const delta = extractStreamDelta(event);
     if (delta !== null) {
       // Block boundary: a delta arrived for a different content block.
-      // Reset the buffer to this block's text rather than concatenating
-      // — text from `[text, tool_use, text]` must not merge in the
-      // preview, since the static render splits per block.
+      // Reset the buffer to this block's text rather than concatenating.
       if (state.streamingBlockIndex !== delta.index) {
         return {
           ...state,
@@ -210,30 +205,62 @@ function reduceSdkEvent(
         streamingText: (state.streamingText ?? "") + delta.text,
       };
     }
-    if (isStreamEnd(sdk) && (state.streamingText || state.streamingBlockIndex !== null)) {
+    if (isStreamEnd(event) && (state.streamingText || state.streamingBlockIndex !== null)) {
       return { ...state, streamingText: "", streamingBlockIndex: null };
     }
     return state;
   }
 
-  // ── Complete messages ──
-  const produced = sdkToDisplayMessages(sdk, prefix);
-  const collapse = collapseAssistantResultDup(state.messages, produced, sdk);
+  // ── Usage event: replace totalCost ──
+  if (event.kind === "usage") {
+    if (event.costUSD != null) {
+      return { ...state, totalCost: event.costUSD };
+    }
+    return state;
+  }
+
+  // ── Done event: capture turns, produce result/error message ──
+  if (event.kind === "done") {
+    const produced = normalizedToDisplayMessages(event, prefix);
+    const next: SessionStreamState = {
+      ...state,
+      streamingText: "",
+      streamingBlockIndex: null,
+    };
+    if (event.turns != null) next.turns = event.turns;
+
+    if (produced.length > 0) {
+      const collapse = collapseAssistantResultDup(state.messages, produced, event);
+      let nextMessages = state.messages;
+      if (collapse.dropAssistantIdx >= 0) {
+        nextMessages = [
+          ...nextMessages.slice(0, collapse.dropAssistantIdx),
+          ...nextMessages.slice(collapse.dropAssistantIdx + 1),
+        ];
+      }
+      if (collapse.appended.length > 0) {
+        const existing = new Set(nextMessages.map((m) => m.id));
+        const dedup = collapse.appended.filter((m) => !existing.has(m.id));
+        if (dedup.length > 0) {
+          nextMessages = [...nextMessages, ...dedup];
+        }
+      }
+      next.messages = nextMessages;
+    }
+    return next;
+  }
+
+  // ── Complete messages (text, thinking, tool_call, tool_progress) ──
+  const produced = normalizedToDisplayMessages(event, prefix);
+  const collapse = collapseAssistantResultDup(state.messages, produced, event);
 
   // No new messages and no field changes → bail with same reference,
-  // unless we still need to clear stale streamingText on assistant/result.
+  // unless we still need to clear stale streamingText on text/thinking.
   if (collapse.appended.length === 0 && collapse.dropAssistantIdx < 0) {
-    if (sdk.type === "assistant" && (state.streamingText || state.streamingBlockIndex !== null)) {
-      return { ...state, streamingText: "", streamingBlockIndex: null };
-    }
-    if (sdk.type === "result") {
-      return {
-        ...state,
-        totalCost: sdk.total_cost_usd ?? state.totalCost,
-        turns: sdk.num_turns ?? state.turns,
-        streamingText: "",
-        streamingBlockIndex: null,
-      };
+    if ((event.kind === "text" && event.role === "assistant") || event.kind === "thinking") {
+      if (state.streamingText || state.streamingBlockIndex !== null) {
+        return { ...state, streamingText: "", streamingBlockIndex: null };
+      }
     }
     return state;
   }
@@ -252,31 +279,20 @@ function reduceSdkEvent(
       nextMessages = [...nextMessages, ...dedup];
     } else if (nextMessages === state.messages && collapse.dropAssistantIdx < 0) {
       // Nothing new and no drop — bail.
-      if (sdk.type === "assistant" && (state.streamingText || state.streamingBlockIndex !== null)) {
-        return { ...state, streamingText: "", streamingBlockIndex: null };
-      }
-      if (sdk.type === "result") {
-        return {
-          ...state,
-          totalCost: sdk.total_cost_usd ?? state.totalCost,
-          turns: sdk.num_turns ?? state.turns,
-          streamingText: "",
-          streamingBlockIndex: null,
-        };
+      if ((event.kind === "text" && event.role === "assistant") || event.kind === "thinking") {
+        if (state.streamingText || state.streamingBlockIndex !== null) {
+          return { ...state, streamingText: "", streamingBlockIndex: null };
+        }
       }
       return state;
     }
   }
 
   const next: SessionStreamState = { ...state, messages: nextMessages };
-  if (sdk.type === "assistant") {
+  // Clear streaming buffer when a complete assistant text or thinking block arrives.
+  if ((event.kind === "text" && event.role === "assistant") || event.kind === "thinking") {
     next.streamingText = "";
     next.streamingBlockIndex = null;
-  } else if (sdk.type === "result") {
-    next.streamingText = "";
-    next.streamingBlockIndex = null;
-    next.totalCost = sdk.total_cost_usd ?? state.totalCost;
-    next.turns = sdk.num_turns ?? state.turns;
   }
   return next;
 }
@@ -304,23 +320,19 @@ function reduceSessionError(
 // ── Helpers ──────────────────────────────────────────────
 
 /**
- * The SDK sends both the final `assistant` text and the `result` envelope
+ * The SDK sends both the final assistant text and the `done` envelope
  * carrying the same content. Today's UI only wants the green result bubble.
  *
- * If the incoming SDK message is a `result` and the most recent assistant
- * message in `existing` has matching content (after stripping
+ * If the incoming event is a `done` with a result and the most recent
+ * assistant message in `existing` has matching content (after stripping
  * `<!--task-name:...-->` markers), report which assistant index to drop.
- *
- * Returns:
- *   - `appended`: the produced messages, unmodified
- *   - `dropAssistantIdx`: index in `existing` to drop, or -1 if no collapse
  */
 function collapseAssistantResultDup(
   existing: ReadonlyArray<DisplayMessage>,
   produced: ReadonlyArray<DisplayMessage>,
-  sdk: SdkMessage,
+  event: NormalizedEvent,
 ): { appended: ReadonlyArray<DisplayMessage>; dropAssistantIdx: number } {
-  if (sdk.type !== "result") {
+  if (event.kind !== "done") {
     return { appended: produced, dropAssistantIdx: -1 };
   }
   const resultMsg = produced.find((m) => m.role === "result");
@@ -334,9 +346,7 @@ function collapseAssistantResultDup(
       if (stripTaskNameMarker(m.content).trim() === normalized) {
         return { appended: produced, dropAssistantIdx: i };
       }
-      // Most recent assistant didn't match — don't keep walking; the SDK
-      // contract is that the duplicate is the *immediately preceding*
-      // assistant, not any earlier one.
+      // Most recent assistant didn't match — don't keep walking.
       return { appended: produced, dropAssistantIdx: -1 };
     }
   }

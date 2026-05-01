@@ -11,9 +11,6 @@
  *   4. Captures `send()` payloads and exposes them.
  *   5. Honours `delayMs` between messages.
  *   6. Tolerates a subscriber unsubscribing mid-flight.
- *
- * If this file goes red, every downstream snapshot test is suspect —
- * fix this first.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -57,22 +54,24 @@ afterEach(() => {
 // ── loadFixture ─────────────────────────────────────────
 
 describe("loadFixture", () => {
-  it("loads the leader-plan-and-delegate fixture and returns 11 entries", () => {
+  it("loads the leader-plan-and-delegate fixture and returns 12 entries", () => {
     const entries = loadFixture("leader-plan-and-delegate.jsonl");
-    expect(entries).toHaveLength(11);
+    // Phase 3: the old single result/success SdkMessage is now two events
+    // (usage + done), so fixture is 12 entries (was 11).
+    expect(entries).toHaveLength(12);
 
-    // First entry should be the system/init.
+    // First entry should be the sdk_event/init.
     const first = entries[0]?.message;
     expect(first?.type).toBe("sdk_event");
     if (first?.type === "sdk_event") {
-      expect(first.message.type).toBe("system");
+      expect(first.event.kind).toBe("init");
     }
 
-    // Last entry should be the result/success.
+    // Last entry should be the done NormalizedEvent.
     const last = entries.at(-1)?.message;
     expect(last?.type).toBe("sdk_event");
     if (last?.type === "sdk_event") {
-      expect(last.message.type).toBe("result");
+      expect(last.event.kind).toBe("done");
     }
   });
 
@@ -219,28 +218,29 @@ describe("loadAndReplay", () => {
 
     expect(seen).toHaveLength(entries.length);
 
-    // Spot-check the recorded shape: assistant tool_use for set_task_name
-    // arrives before the session_task_name echo.
+    // Spot-check: the set_task_name tool_call arrives before the
+    // session_task_name echo. Phase 3: the tool_call is a NormalizedEvent
+    // of kind "tool_call", not an SdkMessage assistant block.
     const setTaskNameIdx = seen.findIndex(
       (m) =>
         m.type === "sdk_event" &&
-        m.message.type === "assistant" &&
-        m.message.message.content.some(
-          (b) => b.type === "tool_use" && b.name === "mcp__task-manager__set_task_name",
-        ),
+        m.event.kind === "tool_call" &&
+        m.event.name === "mcp__task-manager__set_task_name",
     );
     const taskNameEchoIdx = seen.findIndex((m) => m.type === "session_task_name");
     expect(setTaskNameIdx).toBeGreaterThanOrEqual(0);
     expect(taskNameEchoIdx).toBeGreaterThan(setTaskNameIdx);
 
-    // Final message must be a result/success carrying the cost we set.
-    const last = seen.at(-1);
-    if (last?.type !== "sdk_event" || last.message.type !== "result") {
-      throw new Error("expected last entry to be a result sdk_event");
+    // Usage event must carry the session cost.
+    const usageMsg = seen.find(
+      (m) =>
+        m.type === "sdk_event" &&
+        m.event.kind === "usage" &&
+        (m.event as { costUSD?: number }).costUSD != null,
+    );
+    if (!usageMsg || usageMsg.type !== "sdk_event" || usageMsg.event.kind !== "usage") {
+      throw new Error("expected a usage event with costUSD");
     }
-    expect(last.message.subtype).toBe("success");
-    if (last.message.subtype === "success") {
-      expect(last.message.total_cost_usd).toBe(0.0288);
-    }
+    expect(usageMsg.event.costUSD).toBe(0.0288);
   });
 });

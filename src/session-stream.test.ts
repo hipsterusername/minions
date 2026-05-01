@@ -1,7 +1,8 @@
 /**
  * Unit tests for `sessionStreamReducer`.
  *
- * Each test pins one transition in isolation. The reducer is pure, so
+ * Phase 3: all builders create NormalizedEvent objects (discriminated by
+ * `kind`) rather than the legacy SdkMessage union. The reducer is pure, so
  * every test builds a hand-crafted ServerMessage, runs it through the
  * reducer, and asserts both the resulting state *and* the
  * reference-equality contract (same input → same reference when nothing
@@ -18,7 +19,8 @@ import {
   sessionStreamReducer,
   type SessionStreamState,
 } from "./session-stream.ts";
-import type { ServerMessage, SdkMessage } from "./use-socket.ts";
+import type { ServerMessage } from "./use-socket.ts";
+import type { NormalizedEvent } from "../shared/normalized-event.ts";
 
 // ── Builders (kept tiny — only what these tests need) ──
 
@@ -28,89 +30,44 @@ function freshState(
   return { ...emptySessionStreamState("k1"), status: "running", ...overrides };
 }
 
-function sdkEvent(sessionKey: string, message: SdkMessage): ServerMessage {
-  return { type: "sdk_event", sessionKey, message };
+function sdkEvent(sessionKey: string, event: NormalizedEvent): ServerMessage {
+  return { type: "sdk_event", sessionKey, event };
 }
 
-function assistantText(text: string, uuid = "u-asst"): SdkMessage {
-  return {
-    type: "assistant",
-    message: {
-      id: "msg",
-      type: "message",
-      role: "assistant",
-      content: [{ type: "text", text }],
-      model: "claude-opus-4-5",
-      stop_reason: null,
-      usage: { input_tokens: 1, output_tokens: 1 },
-    },
-    parent_tool_use_id: null,
-    uuid,
-    session_id: "s1",
-  } as SdkMessage;
+function assistantText(text: string): NormalizedEvent {
+  return { kind: "text", text, role: "assistant" };
 }
 
-function resultMsg(text: string, cost = 0.01, turns = 1, uuid = "u-res"): SdkMessage {
-  return {
-    type: "result",
-    subtype: "success",
-    result: text,
-    is_error: false,
-    duration_ms: 1000,
-    duration_api_ms: 800,
-    num_turns: turns,
-    stop_reason: "end_turn",
-    total_cost_usd: cost,
-    usage: { input_tokens: 1, output_tokens: 1 },
-    modelUsage: {},
-    permission_denials: [],
-    uuid,
-    session_id: "s1",
-  } as SdkMessage;
+function doneEvent(
+  text: string,
+  turns = 1,
+  reason: "completed" | "stop" | "error" | "abort" = "completed",
+): NormalizedEvent {
+  return { kind: "done", reason, result: text, turns };
+}
+
+function usageEvent(costUSD: number): NormalizedEvent {
+  return { kind: "usage", input: 1, output: 1, costUSD };
 }
 
 function streamDelta(
   text: string,
-  uuid = "u-stm",
   index = 0,
-  parentToolUseId: string | null = null,
-): SdkMessage {
-  return {
-    type: "stream_event",
-    event: { type: "content_block_delta", index, delta: { type: "text_delta", text } },
-    parent_tool_use_id: parentToolUseId,
-    uuid,
-    session_id: "s1",
-  } as SdkMessage;
+  parentId?: string,
+): NormalizedEvent {
+  if (parentId !== undefined) {
+    return { kind: "text_delta", text, blockIndex: index, parentId };
+  }
+  return { kind: "text_delta", text, blockIndex: index };
 }
 
-function streamBlockStart(
-  index: number,
-  blockType: "text" | "tool_use" | "thinking" = "text",
-  initialText = "",
-  uuid = "u-bls",
-): SdkMessage {
-  return {
-    type: "stream_event",
-    event: {
-      type: "content_block_start",
-      index,
-      content_block: blockType === "text" ? { type: "text", text: initialText } : { type: blockType },
-    },
-    parent_tool_use_id: null,
-    uuid,
-    session_id: "s1",
-  } as SdkMessage;
+function streamBlockStart(index: number, initialText = ""): NormalizedEvent {
+  // In Phase 3, content_block_start maps to a text_delta with the initial text.
+  return { kind: "text_delta", text: initialText, blockIndex: index };
 }
 
-function streamEnd(uuid = "u-end"): SdkMessage {
-  return {
-    type: "stream_event",
-    event: { type: "message_stop" },
-    parent_tool_use_id: null,
-    uuid,
-    session_id: "s1",
-  } as SdkMessage;
+function streamEnd(): NormalizedEvent {
+  return { kind: "stream_end" };
 }
 
 // ── Reference-equality contract ────────────────────────
@@ -175,10 +132,6 @@ describe("sessionStreamReducer: streaming deltas", () => {
     expect(s1.streamingBlockIndex).toBeNull();
   });
 
-  // Removed: reference-equality early-return on stream-end when buffer
-  // already empty — implementation-detail (same-reference) assertion.
-  // See docs/testing-strategy.md §5.
-
   // ── Multi-block isolation (regression for the conflict bug) ──
 
   it("resets streamingText when a delta arrives for a different block index", () => {
@@ -187,7 +140,7 @@ describe("sessionStreamReducer: streaming deltas", () => {
     // Block 2 (post-tool_use) starts streaming "Now I'll..."
     const s1 = sessionStreamReducer(
       s0,
-      sdkEvent("k1", streamDelta("Now I'll", "u-2", 2)),
+      sdkEvent("k1", streamDelta("Now I'll", 2)),
       "t",
     );
     expect(s1.streamingText).toBe("Now I'll");
@@ -196,12 +149,12 @@ describe("sessionStreamReducer: streaming deltas", () => {
 
   it("appends across multiple deltas of the same block, but resets on boundary", () => {
     let s = freshState();
-    s = sessionStreamReducer(s, sdkEvent("k1", streamDelta("Hello", "u1", 0)), "t");
-    s = sessionStreamReducer(s, sdkEvent("k1", streamDelta(" world", "u2", 0)), "t");
+    s = sessionStreamReducer(s, sdkEvent("k1", streamDelta("Hello", 0)), "t");
+    s = sessionStreamReducer(s, sdkEvent("k1", streamDelta(" world", 0)), "t");
     expect(s.streamingText).toBe("Hello world");
     expect(s.streamingBlockIndex).toBe(0);
     // New text block (index 2 — block 1 was tool_use, ignored).
-    s = sessionStreamReducer(s, sdkEvent("k1", streamDelta("Next", "u3", 2)), "t");
+    s = sessionStreamReducer(s, sdkEvent("k1", streamDelta("Next", 2)), "t");
     expect(s.streamingText).toBe("Next");
     expect(s.streamingBlockIndex).toBe(2);
   });
@@ -210,7 +163,7 @@ describe("sessionStreamReducer: streaming deltas", () => {
     const s0 = freshState({ streamingText: "old", streamingBlockIndex: 0 });
     const s1 = sessionStreamReducer(
       s0,
-      sdkEvent("k1", streamBlockStart(2, "text", "fresh")),
+      sdkEvent("k1", streamBlockStart(2, "fresh")),
       "t",
     );
     expect(s1.streamingText).toBe("fresh");
@@ -223,16 +176,11 @@ describe("sessionStreamReducer: streaming deltas", () => {
     const s0 = freshState({ streamingText: "parent text", streamingBlockIndex: 0 });
     const s1 = sessionStreamReducer(
       s0,
-      sdkEvent("k1", streamDelta("subagent says hi", "u-sub", 0, "tool-abc")),
+      sdkEvent("k1", streamDelta("subagent says hi", 0, "tool-abc")),
       "t",
     );
     expect(s1).toBe(s0);
   });
-
-  // Removed: message_delta-doesn't-end-stream-by-reference test — asserts
-  // same-reference passthrough rather than user-visible behaviour. See
-  // docs/testing-strategy.md §5. The negative isStreamEnd guard is
-  // covered in streaming.test.ts.
 });
 
 // ── sdk_event: complete messages ───────────────────────
@@ -249,23 +197,27 @@ describe("sessionStreamReducer: complete messages", () => {
 
   it("dedups by id (does not double-append the same assistant)", () => {
     const s0 = freshState();
-    const evt = sdkEvent("k1", assistantText("Hi", "u-same"));
+    // Phase 3 dedup is content-based: same text → same derived ID.
+    const evt = sdkEvent("k1", assistantText("Hi"));
     const s1 = sessionStreamReducer(s0, evt, "t");
     const s2 = sessionStreamReducer(s1, evt, "t");
     expect(s2.messages).toHaveLength(1);
     expect(s2.messages).toBe(s1.messages); // same reference — nothing changed
   });
 
-  it("captures cost and turns from result", () => {
+  it("captures cost from usage event and turns from done event", () => {
     const s0 = freshState();
-    const s1 = sessionStreamReducer(
-      s0,
-      sdkEvent("k1", resultMsg("done", 0.0288, 3)),
+    // Usage event → updates totalCost only.
+    const s1 = sessionStreamReducer(s0, sdkEvent("k1", usageEvent(0.0288)), "t");
+    expect(s1.totalCost).toBe(0.0288);
+    // Done event → updates turns (and adds result message).
+    const s2 = sessionStreamReducer(
+      s1,
+      sdkEvent("k1", doneEvent("done", 3)),
       "t",
     );
-    expect(s1.totalCost).toBe(0.0288);
-    expect(s1.turns).toBe(3);
-    expect(s1.streamingText).toBe("");
+    expect(s2.turns).toBe(3);
+    expect(s2.streamingText).toBe("");
   });
 
   it("collapses the duplicate assistant when a matching result arrives", () => {
@@ -274,7 +226,7 @@ describe("sessionStreamReducer: complete messages", () => {
     expect(s.messages).toHaveLength(1);
     expect(s.messages[0]?.role).toBe("assistant");
 
-    s = sessionStreamReducer(s, sdkEvent("k1", resultMsg("Done.")), "t");
+    s = sessionStreamReducer(s, sdkEvent("k1", doneEvent("Done.")), "t");
     // Assistant collapsed; only the result bubble remains.
     expect(s.messages).toHaveLength(1);
     expect(s.messages[0]?.role).toBe("result");
@@ -283,7 +235,7 @@ describe("sessionStreamReducer: complete messages", () => {
   it("does NOT collapse when assistant content differs from result content", () => {
     let s = freshState();
     s = sessionStreamReducer(s, sdkEvent("k1", assistantText("Doing the work")), "t");
-    s = sessionStreamReducer(s, sdkEvent("k1", resultMsg("All done!")), "t");
+    s = sessionStreamReducer(s, sdkEvent("k1", doneEvent("All done!")), "t");
     expect(s.messages).toHaveLength(2);
     expect(s.messages[0]?.role).toBe("assistant");
     expect(s.messages[1]?.role).toBe("result");
@@ -298,7 +250,7 @@ describe("sessionStreamReducer: complete messages", () => {
     );
     s = sessionStreamReducer(
       s,
-      sdkEvent("k1", resultMsg("<!--task-name:Foo-->Done.")),
+      sdkEvent("k1", doneEvent("<!--task-name:Foo-->Done.")),
       "t",
     );
     expect(s.messages).toHaveLength(1);
@@ -359,20 +311,26 @@ describe("sessionStreamReducer: sync_response", () => {
           {
             type: "sdk_event",
             sessionKey: "k1",
-            message: assistantText("Hello", "u-1"),
+            event: { kind: "text", text: "Hello", role: "assistant" },
             timestamp: 0,
           },
           {
-            // Duplicate — must not appear twice.
+            // Duplicate — must not appear twice (content-based dedup).
             type: "sdk_event",
             sessionKey: "k1",
-            message: assistantText("Hello", "u-1"),
+            event: { kind: "text", text: "Hello", role: "assistant" },
             timestamp: 0,
           },
           {
             type: "sdk_event",
             sessionKey: "k1",
-            message: resultMsg("Done", 0.1, 3, "u-2"),
+            event: { kind: "usage", input: 1, output: 1, costUSD: 0.1 },
+            timestamp: 0,
+          },
+          {
+            type: "sdk_event",
+            sessionKey: "k1",
+            event: { kind: "done", reason: "completed", result: "Done", turns: 3 },
             timestamp: 0,
           },
         ],
@@ -399,13 +357,13 @@ describe("sessionStreamReducer: sync_response", () => {
           {
             type: "sdk_event",
             sessionKey: "k1",
-            message: assistantText("All done.", "u-a"),
+            event: { kind: "text", text: "All done.", role: "assistant" },
             timestamp: 0,
           },
           {
             type: "sdk_event",
             sessionKey: "k1",
-            message: resultMsg("All done.", 0.01, 1, "u-r"),
+            event: { kind: "done", reason: "completed", result: "All done.", turns: 1 },
             timestamp: 0,
           },
         ],

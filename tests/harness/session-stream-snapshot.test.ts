@@ -6,15 +6,11 @@
  * asserts properties of the cumulative state — role sequence, content
  * strings, cost, turn counts, and per-step intermediate buffer states.
  *
- * **Status (post-§2.5 rewrite):** the prior version of this file used
- * inline `toMatchInlineSnapshot` blobs. Per
- * `docs/testing-strategy.md` §5.6, those have been replaced with
- * targeted property assertions. The companion
- * `tests/harness/sdk-messages-snapshot.test.ts` was deleted in the
- * same pass — it duplicated the leader-plan-and-delegate fixture this
- * file already exercises, and the reducer-determinism tautology it
- * also carried (`sync_response replay yields the same state`) has been
- * removed per §5.1.
+ * **Status (post-Phase 3 rewrite):** all fixtures use NormalizedEvent
+ * format. The `sdk_event` wire message carries `event: NormalizedEvent`
+ * (not `message: SdkMessage`). The legacy `result/success` SdkMessage
+ * is represented by two NormalizedEvents: `{kind:"usage", costUSD}` +
+ * `{kind:"done", result, turns}`.
  *
  * Stability: volatile DisplayMessage fields (`id`, `timestamp`) are
  * stripped before assertion so reruns produce identical output.
@@ -77,10 +73,6 @@ function replayFixtureToFinalState(relativePath: string): SessionStreamState {
 }
 
 describe("sessionStreamReducer: snapshot baseline against fixtures", () => {
-  // Note: the leader-plan-and-delegate fixture is now exercised by
-  // tests/harness/sdk-messages-snapshot.test.ts (after the §2.4 rewrite).
-  // Keeping a duplicate here violates §5.9 (DUPLICATE).
-
   it("leader-thinking-and-text.jsonl", () => {
     const final = replayFixtureToFinalState("leader-thinking-and-text.jsonl");
     const view = stableView(final);
@@ -100,34 +92,41 @@ describe("sessionStreamReducer: snapshot baseline against fixtures", () => {
   });
 
   it("leader-stream-then-final.jsonl: streaming deltas accumulate then clear on assistant", () => {
-    // Replay only the system + 3 stream_event partials so we can observe
-    // the intermediate streaming buffer state.
+    // Replay entries step by step to observe intermediate buffer states.
+    // Phase 3 fixture layout:
+    //   [0] init
+    //   [1] text_delta "Hello"
+    //   [2] text_delta " world"
+    //   [3] usage (no costUSD — pre-stop, does not clear buffer)
+    //   [4] text "Hello world" (complete assistant — clears buffer)
+    //   [5] usage (costUSD:0.0009 — session cost)
+    //   [6] done "Hello world" (collapses the matching assistant)
     const entries = loadFixture("leader-stream-then-final.jsonl");
     let s = emptySessionStreamState("leader-1");
     s = { ...s, status: "running" };
-    // init
+    // [0] init
     s = sessionStreamReducer(s, entries[0]!.message, "test");
-    // stream deltas
+    // [1,2] stream deltas
     s = sessionStreamReducer(s, entries[1]!.message, "test");
     s = sessionStreamReducer(s, entries[2]!.message, "test");
     expect(s.streamingText).toBe("Hello world");
-    // message_delta — pre-stop usage update; buffer must NOT clear here.
-    // (Historic behaviour cleared on message_delta, causing the live
-    // preview to flicker out a tick before the final assistant arrived.)
+    // [3] pre-stop usage (no costUSD) — buffer must NOT clear here.
     s = sessionStreamReducer(s, entries[3]!.message, "test");
     expect(s.streamingText).toBe("Hello world");
-    // final assistant — clears the buffer.
+    // [4] final assistant — clears the buffer.
     s = sessionStreamReducer(s, entries[4]!.message, "test");
     expect(s.streamingText).toBe("");
     expect(s.messages.map((m) => m.content)).toEqual([
       "Session on claude-opus-4-5",
       "Hello world",
     ]);
-    // result with content matching the assistant — collapse should drop
-    // the assistant bubble.
+    // [5] usage with costUSD — updates totalCost only, does NOT collapse.
     s = sessionStreamReducer(s, entries[5]!.message, "test");
-    expect(s.messages.map((m) => m.role)).toEqual(["system", "result"]);
     expect(s.totalCost).toBe(0.0009);
+    expect(s.messages.map((m) => m.role)).toEqual(["system", "assistant"]);
+    // [6] done — collapses the matching assistant, adds result.
+    s = sessionStreamReducer(s, entries[6]!.message, "test");
+    expect(s.messages.map((m) => m.role)).toEqual(["system", "result"]);
   });
 
   it("minion-completes-task.jsonl: result collapses no assistant (tool-driven turn)", () => {
@@ -159,6 +158,23 @@ describe("sessionStreamReducer: snapshot baseline against fixtures", () => {
     //   • `message_delta` used to be treated as stream end and flushed
     //     the buffer one tick before the final assistant arrived.
     // This fixture and walk-through pin the corrected behaviour.
+    //
+    // Phase 3 fixture layout (18 entries, 0-indexed):
+    //   [0]  init
+    //   [1]  text_delta ""    blockIndex=0  (content_block_start, empty seed)
+    //   [2]  text_delta "Let me check "  blockIndex=0
+    //   [3]  text_delta "the file."  blockIndex=0
+    //   [4]  text_delta " SUBAGENT-LEAK"  blockIndex=0  parentId=... (filtered)
+    //   [5..8]  usage no-costUSD x4  (no-ops)
+    //   [9]  text_delta ""    blockIndex=2  (block boundary reset)
+    //   [10] text_delta "Now I'll edit "  blockIndex=2
+    //   [11] text_delta "the file."  blockIndex=2
+    //   [12] usage no-costUSD  (no-op)
+    //   [13] usage no-costUSD  (no-op)
+    //   [14] stream_end  (clears buffer)
+    //   [15] text "Let me check the file."  (first complete text block)
+    //   [16] tool_call "Read"  (tool block)
+    //   [17] text "Now I'll edit the file."  (second complete text block)
     const entries = loadFixture("leader-multi-text-blocks.jsonl");
     let s = emptySessionStreamState("leader-1");
     s = { ...s, status: "running" };
@@ -179,17 +195,14 @@ describe("sessionStreamReducer: snapshot baseline against fixtures", () => {
     expect(s.streamingText).toBe("Let me check the file.");
     expect(s.streamingBlockIndex).toBe(0);
 
-    // [4] sub-agent delta (parent_tool_use_id non-null) — must be dropped.
+    // [4] sub-agent delta (parentId non-null) — must be dropped.
     const beforeSub = s;
     s = sessionStreamReducer(s, entries[4]!.message, "test");
     expect(s).toBe(beforeSub);
     expect(s.streamingText).toBe("Let me check the file.");
 
-    // [5] content_block_stop index=0 — no-op for the reducer.
+    // [5..8] usage no-ops — buffer untouched.
     s = sessionStreamReducer(s, entries[5]!.message, "test");
-    expect(s.streamingText).toBe("Let me check the file.");
-
-    // [6,7,8] tool_use start / input_json_delta / stop — buffer untouched.
     s = sessionStreamReducer(s, entries[6]!.message, "test");
     s = sessionStreamReducer(s, entries[7]!.message, "test");
     s = sessionStreamReducer(s, entries[8]!.message, "test");
@@ -209,23 +222,21 @@ describe("sessionStreamReducer: snapshot baseline against fixtures", () => {
     expect(s.streamingText).toBe("Now I'll edit the file.");
     expect(s.streamingBlockIndex).toBe(2);
 
-    // [12] content_block_stop index=2 — no-op.
+    // [12,13] usage no-ops — buffer survives.
     s = sessionStreamReducer(s, entries[12]!.message, "test");
-    expect(s.streamingText).toBe("Now I'll edit the file.");
-
-    // [13] message_delta — pre-stop usage update; buffer survives.
     s = sessionStreamReducer(s, entries[13]!.message, "test");
     expect(s.streamingText).toBe("Now I'll edit the file.");
     expect(s.streamingBlockIndex).toBe(2);
 
-    // [14] message_stop — clears the buffer.
+    // [14] stream_end — clears the buffer.
     s = sessionStreamReducer(s, entries[14]!.message, "test");
     expect(s.streamingText).toBe("");
     expect(s.streamingBlockIndex).toBeNull();
 
-    // [15] final assistant — produces three separate DisplayMessages
-    // (text, tool, text) — one per content block.
+    // [15,16,17] text + tool_call + text — three separate DisplayMessages.
     s = sessionStreamReducer(s, entries[15]!.message, "test");
+    s = sessionStreamReducer(s, entries[16]!.message, "test");
+    s = sessionStreamReducer(s, entries[17]!.message, "test");
     expect(s.streamingText).toBe("");
     const stable = s.messages.map(({ id: _i, timestamp: _t, ...rest }) => rest);
     expect(stable.map((m) => m.role)).toEqual([
@@ -245,15 +256,15 @@ describe("sessionStreamReducer: snapshot baseline against fixtures", () => {
   it("claude-session-basic.jsonl: the wrap-up assistant matches the result and collapses", () => {
     const final = replayFixtureToFinalState("claude-session-basic.jsonl");
     const view = stableView(final);
-    // The assistant wrap-up text and the result text are identical, so
-    // the assistant should collapse. The earlier "I'll run ls." assistant
-    // is left intact (different content).
+    // Phase 3 fixture: init → text "I'll run ls." → tool_call Bash →
+    // tool_progress Bash → text "Three top-level..." → usage → done.
+    // The wrap-up assistant matches the result → collapses.
+    // No tool_use_summary in Phase 3 fixtures.
     expect(view.messages.map((m) => m.role)).toEqual([
       "system",
       "assistant", // "I'll run ls."
-      "tool",      // Bash
-      "tool",      // Bash (0.4s)
-      "system",    // tool_use_summary
+      "tool",      // Bash (tool_call)
+      "tool",      // Bash (tool_progress 0.4s)
       "result",    // collapsed wrap-up
     ]);
     expect(view.totalCost).toBe(0.0061);

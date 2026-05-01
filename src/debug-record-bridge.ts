@@ -8,43 +8,14 @@
  *   2. {@link import("./nodes/ClaudeSessionNode")} (which still has its
  *      own ad-hoc subscription instead of using the shared hook) can
  *      reuse the same digest format — keeping the recorder useful for
- *      the very component most likely to harbour the duplicate-text
- *      bug.
+ *      the very component most likely to harbour the duplicate-text bug.
  *
  * The bridge only inspects fields. It never holds onto the raw
- * SdkMessage / ServerMessage, so debug buffers stay small.
+ * NormalizedEvent / ServerMessage, so debug buffers stay small.
  */
 
 import { recordDebug } from "./debug.ts";
-import type { ServerMessage, SdkMessage } from "./use-socket.ts";
-
-interface StreamEventPeek {
-  type?: string;
-  index?: number;
-  delta?: { type?: string; text?: string };
-}
-
-function streamEventDigest(
-  sdk: SdkMessage,
-): { streamEventType?: string; blockIndex?: number; deltaTextLen?: number } {
-  if (sdk.type !== "stream_event" || !("event" in sdk) || !sdk.event) return {};
-  const evt = sdk.event as StreamEventPeek;
-  const out: { streamEventType?: string; blockIndex?: number; deltaTextLen?: number } = {};
-  if (evt.type) out.streamEventType = evt.type;
-  if (typeof evt.index === "number") out.blockIndex = evt.index;
-  if (typeof evt.delta?.text === "string") out.deltaTextLen = evt.delta.text.length;
-  return out;
-}
-
-function pickUuid(sdk: SdkMessage): string | undefined {
-  const u = (sdk as { uuid?: string }).uuid;
-  return typeof u === "string" && u.length > 0 ? u : undefined;
-}
-
-function pickParentToolUseId(sdk: SdkMessage): string | null {
-  const id = (sdk as { parent_tool_use_id?: string | null }).parent_tool_use_id;
-  return typeof id === "string" && id.length > 0 ? id : null;
-}
+import type { ServerMessage } from "./use-socket.ts";
 
 /**
  * Append a digest of `msg` to the debug buffer scoped to `sessionKey`.
@@ -60,7 +31,7 @@ export function recordWsMessageForDebug(
 ): void {
   if (!sessionKey) return;
 
-  // Cheap top-level cases first — they don't carry an SDK message.
+  // Cheap top-level cases first — they don't carry an event payload.
   if (msg.type === "session_status") {
     recordDebug(sessionKey, {
       source: "ws",
@@ -91,18 +62,11 @@ export function recordWsMessageForDebug(
   // Filter for-this-session events — the same socket multiplexes many.
   if (msg.sessionKey !== sessionKey) return;
 
-  const sdk = msg.message;
-  const uuid = pickUuid(sdk);
-  const parentToolUseId = pickParentToolUseId(sdk);
-  const streamFields = streamEventDigest(sdk);
-
+  const event = msg.event;
   recordDebug(sessionKey, {
     source: "ws",
     type: "sdk_event",
-    sdkType: sdk.type,
-    ...streamFields,
-    ...(uuid ? { uuid } : {}),
-    parentToolUseId,
+    sdkType: event.kind,
     ...(note ? { note } : {}),
   });
 }

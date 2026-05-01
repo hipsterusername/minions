@@ -4,10 +4,9 @@ import { DEFAULT_THINKING_CONFIG } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
 import type {
   ServerMessage,
-  SdkMessage,
   SyncEvent,
-  ModelUsage,
 } from "../use-socket.ts";
+import type { NormalizedEvent } from "../../shared/normalized-event.ts";
 import { useStatusBanners, StatusBannerStack } from "../components/StatusBanner.tsx";
 import { SessionToolbar } from "../components/SessionToolbar.tsx";
 import type { ModelOption, PermissionMode } from "../components/SessionToolbar.tsx";
@@ -15,7 +14,7 @@ import { StreamingBubble, StreamingIndicator } from "../components/StreamingBubb
 import { CopyButton } from "../components/CopyButton.tsx";
 import { AddAsNodeButton } from "../components/AddAsNodeButton.tsx";
 import {
-  extractParentToolUseId,
+  extractParentId,
   extractStreamDelta,
   isStreamEnd,
   isStreamingEvent,
@@ -61,8 +60,6 @@ export interface ClaudeSessionData {
    * `[text, tool_use, text]` don't merge across blocks.
    */
   streamingBlockIndex?: number | null | undefined;
-  /** Per-model cost breakdown from last result */
-  modelUsage: Record<string, ModelUsage> | null;
   /** Duration of last turn in ms */
   lastDurationMs: number | null;
   /** Active subagent tasks */
@@ -87,130 +84,77 @@ interface SessionMessage {
 }
 
 interface ResultMeta {
-  durationMs?: number | undefined;
-  durationApiMs?: number | undefined;
-  costUsd?: number | undefined;
-  turns?: number | undefined;
-  stopReason?: string | null | undefined;
-  modelUsage?: Record<string, ModelUsage> | undefined;
   isError?: boolean | undefined;
-  errors?: string[] | undefined;
+  error?: string | undefined;
 }
 
 function msgId(): string {
   return `m-${crypto.randomUUID()}`;
 }
 
-function sdkMessageToSessionMessages(
-  sdkMsg: SdkMessage,
-): SessionMessage[] {
+/**
+ * Convert a NormalizedEvent into zero or more SessionMessages for the
+ * ClaudeSessionNode chat feed. Uses simple random IDs since ClaudeSessionNode
+ * has its own subscription and doesn't need cross-session dedup.
+ */
+function normalizedToSessionMessages(event: NormalizedEvent): SessionMessage[] {
   const out: SessionMessage[] = [];
   const now = Date.now();
-  switch (sdkMsg.type) {
-    case "system": {
-      const sub = sdkMsg.subtype;
-      if (sub === "init") {
-        const model = sdkMsg.model ?? "unknown";
-        const tc = sdkMsg.tools?.length ?? 0;
-        const mc = sdkMsg.mcp_servers?.length ?? 0;
-        const p = [`Session on ${model}`];
-        if (tc > 0) p.push(`${tc} tools`);
-        if (mc > 0) p.push(`${mc} MCP`);
-        out.push({ id: msgId(), role: "system", content: p.join(" \u00B7 "), timestamp: now });
-      } else if (sub === "local_command_output" && sdkMsg.content) {
-        out.push({ id: msgId(), role: "system", content: sdkMsg.content, timestamp: now });
-      } else if (sub === "task_started") {
-        out.push({ id: msgId(), role: "system", content: `Subagent: ${sdkMsg.description ?? sdkMsg.task_id ?? "task"}`, timestamp: now });
-      } else if (sub === "task_notification") {
-        const ico = sdkMsg.status === "completed" ? "\u2713" : sdkMsg.status === "failed" ? "\u2717" : "\u25A0";
-        out.push({ id: msgId(), role: "system", content: `${ico} Subagent ${sdkMsg.status}: ${sdkMsg.summary ?? sdkMsg.task_id ?? ""}`, timestamp: now });
-      } else if (sub === "hook_started") {
-        out.push({ id: msgId(), role: "system", content: `Hook: ${sdkMsg.hook_name ?? sdkMsg.hook_event ?? "running"}...`, timestamp: now });
-      } else if (sub === "hook_response" && sdkMsg.outcome === "error") {
-        out.push({ id: msgId(), role: "system", content: `Hook failed: ${sdkMsg.hook_name ?? ""} (exit ${sdkMsg.exit_code ?? "?"})`, timestamp: now });
-      } else if (sub === "files_persisted" && sdkMsg.files && sdkMsg.files.length > 0) {
-        out.push({ id: msgId(), role: "system", content: `Files saved: ${sdkMsg.files.map(f => f.filename).join(", ")}`, timestamp: now });
-      } else if (sub === "elicitation_complete") {
-        out.push({ id: msgId(), role: "system", content: `MCP input done (${sdkMsg.mcp_server_name ?? "server"})`, timestamp: now });
-      }
-      // api_retry, compact_boundary, status, session_state_changed, hook_progress, task_progress
-      // handled by StatusBanner or subagent state updates
+  switch (event.kind) {
+    case "init":
+      out.push({ id: msgId(), role: "system", content: `Session on ${event.model}`, timestamp: now });
       break;
-    }
-    case "assistant":
-      if (sdkMsg.message?.content) {
-        const blocks = sdkMsg.message.content;
-        // Split content blocks into separate messages for proper grouping
-        const textParts: string[] = [];
-        for (const block of blocks) {
-          if (block.type === "text" && block.text) {
-            textParts.push(block.text);
-          } else if (block.type === "tool_use" && block.name) {
-            // Flush accumulated text first
-            if (textParts.length > 0) {
-              const joined = textParts.join("\n").trim();
-              if (joined) out.push({ id: msgId(), role: "assistant", content: joined, timestamp: now });
-              textParts.length = 0;
-            }
-            out.push({
-              id: msgId(), role: "tool",
-              content: block.name,
-              timestamp: now,
-              toolName: block.name,
-              toolInput: block.input as Record<string, unknown> | undefined,
-            });
-          } else if (block.type === "tool_result" && typeof block.content === "string") {
-            textParts.push(block.content);
-          }
-        }
-        if (textParts.length > 0) {
-          const joined = textParts.join("\n").trim();
-          if (joined) out.push({ id: msgId(), role: "assistant", content: joined, timestamp: now });
+    case "text":
+      if (event.role === "assistant") {
+        const text = event.text.replace(/<!--task-name:.+?-->\s*/g, "");
+        if (text.trim()) {
+          out.push({ id: msgId(), role: "assistant", content: text, timestamp: now });
         }
       }
       break;
-    case "stream_event":
-      break; // handled separately for live streaming text
+    case "thinking":
+      // thinking blocks not shown in the generic session node
+      break;
+    case "tool_call":
+      if (event.parentId == null) {
+        out.push({
+          id: msgId(), role: "tool",
+          content: event.name,
+          timestamp: now,
+          toolName: event.name,
+          toolInput: event.input as Record<string, unknown>,
+        });
+      }
+      break;
     case "tool_progress":
-      out.push({
-        id: msgId(), role: "tool",
-        content: `${sdkMsg.tool_name} (${sdkMsg.elapsed_time_seconds?.toFixed(1)}s)`,
-        timestamp: now, toolName: sdkMsg.tool_name,
-      });
-      break;
-    case "tool_use_summary":
-      if (sdkMsg.summary) {
-        out.push({ id: msgId(), role: "system", content: sdkMsg.summary, timestamp: now });
+      if (event.parentId == null) {
+        out.push({
+          id: msgId(), role: "tool",
+          content: `${event.name} (${event.elapsedSeconds.toFixed(1)}s)`,
+          timestamp: now, toolName: event.name,
+        });
       }
       break;
-    case "result": {
-      const isErr = sdkMsg.is_error;
-      const txt = isErr
-        ? (sdkMsg.errors.join("; ") || "Error")
-        : sdkMsg.result;
-      out.push({
-        id: msgId(), role: "result",
-        content: txt,
-        timestamp: now,
-        meta: {
-          durationMs: sdkMsg.duration_ms ?? undefined,
-          durationApiMs: sdkMsg.duration_api_ms ?? undefined,
-          costUsd: sdkMsg.total_cost_usd ?? undefined,
-          turns: sdkMsg.num_turns ?? undefined,
-          stopReason: sdkMsg.stop_reason,
-          modelUsage: sdkMsg.modelUsage ?? undefined,
-          isError: isErr,
-          errors: isErr ? sdkMsg.errors : undefined,
-        },
-      });
+    case "done": {
+      if (event.reason === "error") {
+        const errText = event.error ?? "Error";
+        out.push({ id: msgId(), role: "result", content: errText, timestamp: now,
+          meta: { isError: true, error: errText } });
+      } else if ((event.reason === "completed" || event.reason === "stop") && event.result) {
+        const txt = event.result.replace(/<!--task-name:.+?-->\s*/g, "");
+        if (txt.trim()) {
+          out.push({ id: msgId(), role: "result", content: txt, timestamp: now });
+        }
+      }
       break;
     }
-    case "auth_status":
-      if (sdkMsg.error) {
-        out.push({ id: msgId(), role: "system", content: `Auth: ${sdkMsg.error}`, timestamp: now });
-      }
+    case "permission_denial":
+      out.push({ id: msgId(), role: "system",
+        content: `Permission denied: ${event.tool}`, timestamp: now });
       break;
-    // prompt_suggestion, rate_limit_event handled via data state / StatusBanner
+    // usage, text_delta, stream_end, tool_result, api_retry, rate_limit \u2192 no feed message
+    default:
+      break;
   }
   return out;
 }
@@ -227,8 +171,8 @@ function rebuildFromSyncEvents(
 ): ClaudeSessionData {
   const messages: SessionMessage[] = [];
   for (const evt of events) {
-    if (evt.type === "sdk_event" && evt.message) {
-      const msgs = sdkMessageToSessionMessages(evt.message);
+    if (evt.type === "sdk_event" && evt.event) {
+      const msgs = normalizedToSessionMessages(evt.event);
       messages.push(...msgs);
     }
   }
@@ -244,7 +188,6 @@ function rebuildFromSyncEvents(
     model: (serverModel as ModelOption) ?? "sonnet",
     permissionMode: (serverPermissionMode as PermissionMode) ?? "bypassPermissions",
     thinkingConfig: DEFAULT_THINKING_CONFIG,
-    modelUsage: null,
     lastDurationMs: null,
     subagents: [],
     promptSuggestions: [],
@@ -712,49 +655,10 @@ function SystemBubble({ msg }: { msg: SessionMessage }) {
   );
 }
 
-function ModelUsageBar({ modelUsage }: { modelUsage: Record<string, ModelUsage> }) {
-  const entries = Object.entries(modelUsage);
-  if (entries.length === 0) return null;
-  const totalCost = entries.reduce((s, [, u]) => s + u.costUSD, 0);
-  const MODEL_COLORS: Record<string, string> = {
-    opus: "var(--model-opus)", "opus-old": "var(--model-opus-old)", sonnet: "var(--model-sonnet)", haiku: "var(--model-haiku)",
-  };
-
-  return (
-    <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 3 }}>
-      <div style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: 0.5 }}>
-        Model usage
-      </div>
-      {entries.map(([model, usage]) => {
-        const pct = totalCost > 0 ? (usage.costUSD / totalCost) * 100 : 0;
-        const shortName = model.replace(/claude-/, "").replace(/-\d.*$/, "");
-        const color = MODEL_COLORS[shortName] ?? "var(--streaming-color)";
-        return (
-          <div key={model} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 9, fontFamily: "var(--font-mono)", color, minWidth: 48, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
-              {shortName}
-            </span>
-            <div style={{ flex: 1, height: 4, background: "var(--bg-elevated)", borderRadius: 2, overflow: "hidden" }}>
-              <div style={{ width: `${Math.max(pct, 2)}%`, height: "100%", background: color, borderRadius: 2, opacity: 0.7, transition: "width 0.3s" }} />
-            </div>
-            <span style={{ fontSize: 9, fontFamily: "var(--font-mono)", color: "var(--text-muted)", minWidth: 52, textAlign: "right" }}>
-              ${usage.costUSD.toFixed(4)}
-            </span>
-            <span style={{ fontSize: 8, fontFamily: "var(--font-mono)", color: "var(--text-muted)", opacity: 0.6 }}>
-              {((usage.inputTokens + usage.outputTokens) / 1000).toFixed(0)}k
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 function ResultBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAddContentNode?: ((content: string) => void) | undefined }) {
   const [expanded, setExpanded] = useState(false);
   const isLong = msg.content.length > 300;
   const meta = msg.meta;
-  const hasUsage = meta?.modelUsage && Object.keys(meta.modelUsage).length > 0;
 
   return (
     <div style={{ marginBlock: 4 }} className="copyable">
@@ -778,27 +682,8 @@ function ResultBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAddCon
         <CopyButton text={msg.content} />
         <AddAsNodeButton text={msg.content} onAdd={onAddContentNode} />
         {msg.content}
-        {meta && (() => {
-          const ds = meta.durationMs ? `${(meta.durationMs / 1000).toFixed(1)}s` : null;
-          const cs = meta.costUsd ? `$${meta.costUsd.toFixed(4)}` : null;
-          const ts = meta.turns ? `${meta.turns}T` : null;
-          const sfx = [ds, cs, ts].filter(Boolean).join(" · ");
-          return sfx ? (
-            <span style={{ display: "inline-block", marginLeft: 6, fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", opacity: 0.7 }}>
-              {sfx}
-            </span>
-          ) : null;
-        })()}
-        {expanded && hasUsage && meta?.modelUsage && (
-          <ModelUsageBar modelUsage={meta.modelUsage} />
-        )}
-        {expanded && meta?.stopReason && meta.stopReason !== "end_turn" && (
-          <div style={{ marginTop: 4, fontSize: 9, fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
-            stop: {meta.stopReason}
-          </div>
-        )}
       </div>
-      {(isLong || hasUsage) && (
+      {isLong && (
         <button
           onClick={() => setExpanded(!expanded)}
           onMouseDown={(e) => e.stopPropagation()}
@@ -816,7 +701,7 @@ function ResultBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAddCon
             marginInline: "auto",
           }}
         >
-          {expanded ? "Show less" : hasUsage ? "Show details" : "Show more"}
+          {expanded ? "Show less" : "Show more"}
         </button>
       )}
     </div>
@@ -868,7 +753,7 @@ export function ClaudeSessionRenderer({
   const outputRef = useRef<HTMLDivElement>(null);
   const userScrolledUpRef = useRef(false);
   const syncedRef = useRef(false);
-  const { banners, processSdkEvent, dismissBanner } = useStatusBanners();
+  const { banners, processNormalizedEvent, dismissBanner } = useStatusBanners();
   const debugEnabled = useSyncExternalStore(
     debugFlagStore.subscribe,
     debugFlagStore.getSnapshot,
@@ -944,17 +829,18 @@ export function ClaudeSessionRenderer({
         serverMsg.type === "sdk_event" &&
         serverMsg.sessionKey === current.sessionKey
       ) {
-        processSdkEvent(serverMsg.message);
+        const ev = serverMsg.event;
+        processNormalizedEvent(ev);
 
         // Handle streaming text deltas (single emit, early return).
-        if (isStreamingEvent(serverMsg.message)) {
+        if (isStreamingEvent(ev)) {
           // Drop stream events from sub-agents (Agent/Task tool) — their
           // deltas would otherwise interleave with the parent session's
           // streaming preview because they share the same sessionKey.
-          if (extractParentToolUseId(serverMsg.message) !== null) {
+          if (extractParentId(ev) !== null) {
             return;
           }
-          const delta = extractStreamDelta(serverMsg.message);
+          const delta = extractStreamDelta(ev);
           if (delta !== null) {
             const activeIndex = current.streamingBlockIndex ?? null;
             // Block boundary: a delta arrived for a different content
@@ -973,7 +859,7 @@ export function ClaudeSessionRenderer({
               });
             }
           } else if (
-            isStreamEnd(serverMsg.message) &&
+            isStreamEnd(ev) &&
             (current.streamingText || current.streamingBlockIndex != null)
           ) {
             // Stream ended — clear streaming text so stale content doesn't
@@ -984,120 +870,48 @@ export function ClaudeSessionRenderer({
         }
 
         // ── Single-emit accumulator ─────────────────────────
-        // Historic bug: each branch below used to call onUpdateData
-        // independently against a clone of `current`, so the second call
-        // overwrote the first. Build the delta into `updated` and emit
-        // exactly once at the bottom.
         let updated: ClaudeSessionData = current;
         let changed = false;
 
-        // Handle subagent task state updates
-        const sdkM = serverMsg.message;
-        if (sdkM.type === "system" && sdkM.subtype === "task_started" && sdkM.task_id) {
-          const sa: SubagentInfo = { taskId: sdkM.task_id, description: sdkM.description ?? "", status: "running" };
-          updated = {
-            ...updated,
-            subagents: [
-              ...(updated.subagents ?? []).filter((s) => s.taskId !== sdkM.task_id),
-              sa,
-            ],
-          };
+        // Handle usage and done events (no feed message, but update cost/turns/status).
+        if (ev.kind === "usage" && ev.costUSD != null) {
+          updated = { ...updated, totalCost: ev.costUSD };
           changed = true;
         }
-        if (sdkM.type === "system" && sdkM.subtype === "task_progress" && sdkM.task_id) {
-          const subs = [...(updated.subagents ?? [])];
-          const idx = subs.findIndex((s) => s.taskId === sdkM.task_id);
-          if (idx >= 0) {
-            subs[idx] = {
-              ...subs[idx]!,
-              lastTool: sdkM.last_tool_name,
-              summary: sdkM.summary ?? subs[idx]!.summary,
-              tokenCount: sdkM.usage?.total_tokens as number | undefined,
-              toolUses: sdkM.usage?.tool_uses as number | undefined,
-            };
-            onUpdateData({ ...updated, subagents: subs });
-          }
-          return; // task_progress is never shown in the message feed
-        }
-        if (sdkM.type === "system" && sdkM.subtype === "task_notification" && sdkM.task_id) {
-          const subs = [...(updated.subagents ?? [])];
-          const idx = subs.findIndex((s) => s.taskId === sdkM.task_id);
-          if (idx >= 0) {
-            subs[idx] = {
-              ...subs[idx]!,
-              status: (sdkM.status as SubagentInfo["status"]) ?? "completed",
-              summary: sdkM.summary ?? subs[idx]!.summary,
-            };
-            updated = { ...updated, subagents: subs };
-            changed = true;
-          }
-          // Fall through so the notification can also land in the feed.
-        }
-
-        // Handle prompt suggestions (no message append — emit & return).
-        if (sdkM.type === "prompt_suggestion" && sdkM.suggestion) {
-          onUpdateData({
-            ...updated,
-            promptSuggestions: [
-              ...(updated.promptSuggestions ?? []).slice(-2),
-              sdkM.suggestion,
-            ],
-          });
-          return;
-        }
-
-        // Handle init data capture. The raw SDK model string (e.g.
-        // "claude-opus-4-5") lands in `initData.model` for display; the
-        // user-selected `data.model` (a ModelOption: "sonnet" | "opus" |
-        // "haiku") is NOT overwritten — the SDK's identifier isn't a
-        // ModelOption, so a cast here would push an invalid value
-        // through toolbar capability lookups.
-        if (sdkM.type === "system" && sdkM.subtype === "init") {
+        if (ev.kind === "done") {
           updated = {
             ...updated,
-            initData: {
-              tools: sdkM.tools,
-              model: sdkM.model,
-              mcp_servers: sdkM.mcp_servers,
-              permissionMode: sdkM.permissionMode,
-            },
+            status: "idle" as const,
+            streamingText: "",
+            streamingBlockIndex: null,
+            promptSuggestions: [],
           };
+          if (ev.turns != null) updated = { ...updated, turns: ev.turns };
           changed = true;
         }
 
-        const newMsgs = sdkMessageToSessionMessages(serverMsg.message);
+        const newMsgs = normalizedToSessionMessages(ev);
         if (newMsgs.length > 0) {
           let base = updated.messages;
-          // When a result arrives, drop the last assistant msg if its content
-          // matches the result — the SDK sends both, but we only want the
-          // green result bubble.  Normalize by stripping task-name tags.
-          if (serverMsg.message.type === "result") {
+          // When a done event arrives with a result, drop the last assistant
+          // msg if its content matches — the SDK sends both, but we only
+          // want the green result bubble. Normalize by stripping task-name tags.
+          if (ev.kind === "done") {
             const resultText = newMsgs.find((m) => m.role === "result")?.content;
             if (resultText) {
               const normalizedResult = resultText.replace(/<!--task-name:.+?-->\s*/g, "").trim();
               const lastIdx = base.findLastIndex((m) => m.role === "assistant");
-              if (lastIdx >= 0 && base[lastIdx]?.content.replace(/<!--task-name:.+?-->\s*/g, "").trim() === normalizedResult) {
+              if (lastIdx >= 0 &&
+                  (base[lastIdx]?.content ?? "").replace(/<!--task-name:.+?-->\s*/g, "").trim() === normalizedResult) {
                 base = [...base.slice(0, lastIdx), ...base.slice(lastIdx + 1)];
               }
             }
           }
           updated = { ...updated, messages: [...base, ...newMsgs] };
-          // When a complete assistant message arrives, clear streaming buffer
-          if (serverMsg.message.type === "assistant") {
+          // When a complete assistant text arrives, clear streaming buffer
+          if (ev.kind === "text" && ev.role === "assistant") {
             updated.streamingText = "";
             updated.streamingBlockIndex = null;
-          }
-          if (serverMsg.message.type === "result") {
-            updated.status = "idle";
-            updated.totalCost =
-              serverMsg.message.total_cost_usd ?? updated.totalCost;
-            updated.turns =
-              serverMsg.message.num_turns ?? updated.turns;
-            updated.streamingText = "";
-            updated.streamingBlockIndex = null;
-            updated.modelUsage = serverMsg.message.modelUsage ?? updated.modelUsage;
-            updated.lastDurationMs = serverMsg.message.duration_ms ?? updated.lastDurationMs;
-            updated.promptSuggestions = []; // clear old suggestions on new turn
           }
           changed = true;
         }
@@ -1128,9 +942,26 @@ export function ClaudeSessionRenderer({
           status: "error" as const,
           error: serverMsg.error,
         });
+        return;
+      }
+
+      if (
+        serverMsg.type === "session_cleared" &&
+        serverMsg.sessionKey === current.sessionKey
+      ) {
+        onUpdateData({
+          ...current,
+          messages: [],
+          streamingText: "",
+          streamingBlockIndex: null,
+          totalCost: 0,
+          turns: 0,
+          subagents: [],
+          promptSuggestions: [],
+        });
       }
     });
-  }, [socketSubscribe, onUpdateData, processSdkEvent]);
+  }, [socketSubscribe, onUpdateData, processNormalizedEvent]);
 
   const handleCreate = useCallback(() => {
     if (!socketSend) return;
@@ -1198,6 +1029,12 @@ export function ClaudeSessionRenderer({
     const current = dataRef.current;
     if (!socketSend || !current.sessionKey) return;
     socketSend({ type: "interrupt", sessionKey: current.sessionKey });
+  }, [socketSend]);
+
+  const handleClear = useCallback(() => {
+    const current = dataRef.current;
+    if (!socketSend || !current.sessionKey) return;
+    socketSend({ type: "clear_session", sessionKey: current.sessionKey });
   }, [socketSend]);
 
   const handleModelChange = useCallback(
@@ -1351,6 +1188,27 @@ export function ClaudeSessionRenderer({
               {data.turns}T
             </span>
           )}
+          {data.sessionKey &&
+            data.status !== "running" &&
+            data.status !== "creating" &&
+            data.messages.length > 0 && (
+              <button
+                onClick={handleClear}
+                onMouseDown={(e) => e.stopPropagation()}
+                style={{
+                  padding: "2px 8px",
+                  fontSize: 10,
+                  background: "transparent",
+                  border: "1px solid var(--border-default)",
+                  borderRadius: 4,
+                  color: "var(--text-muted)",
+                  cursor: "pointer",
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
+                Clear
+              </button>
+            )}
           {data.status === "running" && (
             <button
               onClick={handleStop}
