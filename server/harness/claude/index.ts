@@ -19,6 +19,51 @@
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { registerHarness } from "../index.ts";
+
+// ── Phase 2 transitional exports ──────────────────────────────────────────────
+
+/**
+ * Duck-typed subset of the SDK's Query interface.
+ *
+ * Exposes only the methods that session-host.ts and its command handlers
+ * actually call. Defining this here — rather than importing `Query` from
+ * the SDK — keeps @anthropic-ai/claude-agent-sdk isolated inside
+ * server/harness/claude/ as required by the architecture test added in
+ * Phase 2.
+ *
+ * TODO(phase3): delete when session-host.ts switches to harness.start()
+ * and the query handle is no longer exposed directly.
+ */
+export interface QueryHandleLike extends AsyncIterable<unknown> {
+  close(): Promise<void>;
+  interrupt(): Promise<void>;
+  getContextUsage(): Promise<unknown>;
+  supportedModels(): Promise<unknown>;
+  supportedCommands(): Promise<unknown>;
+  supportedAgents(): Promise<unknown>;
+  accountInfo(): Promise<unknown>;
+  mcpServerStatus(): Promise<unknown>;
+}
+
+/**
+ * Wrap the SDK's `query()` call so session-host.ts can open a query loop
+ * without importing @anthropic-ai/claude-agent-sdk directly.
+ *
+ * The `prompt` parameter accepts `string | AsyncIterable<…>` (whatever
+ * `buildQueryPrompt` returns) typed as `unknown` so session-host.ts need
+ * not import any SDK type to pass it in.
+ *
+ * TODO(phase3): delete when session-host.ts is fully switched to harness.start().
+ */
+export function runClaudeQuery(
+  prompt: unknown,
+  options: Record<string, unknown>,
+): QueryHandleLike {
+  return query({
+    prompt: prompt as never,
+    options: options as never,
+  }) as unknown as QueryHandleLike;
+}
 import type {
   AgentHarness,
   HarnessCapabilities,
