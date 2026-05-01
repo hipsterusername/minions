@@ -268,21 +268,7 @@ describe("useSessionStream: respects the reducer's reference-equality contract",
         message: {
           type: "sdk_event",
           sessionKey: "other",
-          message: {
-            type: "assistant",
-            message: {
-              id: "m",
-              type: "message",
-              role: "assistant",
-              content: [{ type: "text", text: "hi" }],
-              model: "claude",
-              stop_reason: null,
-              usage: { input_tokens: 1, output_tokens: 1 },
-            },
-            parent_tool_use_id: null,
-            uuid: "u",
-            session_id: "s",
-          },
+          event: { kind: "text", text: "hi", role: "assistant" },
         },
       },
     ]);

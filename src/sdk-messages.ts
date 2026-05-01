@@ -1,12 +1,20 @@
 /**
- * Shared SDK message → display message conversion.
+ * NormalizedEvent → display message conversion.
  *
- * De-duplicates logic previously copied between LeaderNode and MinionNode.
- * Splits assistant content blocks into separate display messages so the UI
- * can differentiate thinking, tool-use, and chat text.
+ * Phase 3: operates on NormalizedEvent (discriminated by `kind`) rather than
+ * the legacy SdkMessage union. Each NormalizedEvent maps to zero or more
+ * DisplayMessages shown in the chat feed.
+ *
+ * ID generation strategy:
+ *   - For events with a natural ID (tool_call.id, tool_progress.id): use it
+ *     to produce a stable, deterministic message ID.
+ *   - For text/thinking/done/init: derive a semi-stable key from content so
+ *     the same event processed twice produces the same message ID and
+ *     deduplication in the session-stream reducer works correctly.
+ *   - For everything else: use `msgId(prefix)` (random UUID).
  */
 
-import type { SdkMessage, ContentBlock } from "./use-socket.ts";
+import type { NormalizedEvent } from "../shared/normalized-event.ts";
 
 // ── Display message (rendered in both Leader & Minion nodes) ──
 
@@ -29,153 +37,146 @@ export function msgId(prefix = "m"): string {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
-/** Extract only readable *text* from content blocks (no tool markers). */
-export function extractText(blocks: ContentBlock[]): string {
-  const parts: string[] = [];
-  for (const block of blocks) {
-    if (block.type === "text" && block.text) {
-      parts.push(block.text);
-    }
-  }
-  return parts.join("\n").replace(/<!--task-name:.+?-->\s*/g, "");
+/**
+ * Derive a semi-stable, URL-safe key from content so that the same event
+ * produces the same message ID when processed twice (enabling dedup).
+ */
+function stableKey(content: string): string {
+  // Take the first 40 chars, replace non-word chars with underscores.
+  return content.slice(0, 40).replace(/\W+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function derivedId(prefix: string, kind: string, key: string): string {
+  return `${prefix}-${kind}-${stableKey(key)}`;
 }
 
 /**
- * Convert a raw SDK event into one or more DisplayMessages for the chat log.
- * Returns an empty array for events that shouldn't be rendered.
+ * Convert a NormalizedEvent into zero or more DisplayMessages for the chat
+ * feed. Returns an empty array for events that don't produce UI output.
  *
- * For `assistant` messages, content blocks are split:
- *   - `thinking` blocks → role "thinking"
- *   - `text` blocks → role "assistant"
- *   - `tool_use` blocks → role "tool" (with toolName + toolInput)
- *
- * This eliminates the old pattern of jamming "[Tool: name]" into assistant
- * text, which caused visual duplication with tool_progress messages.
+ * Mapping:
+ *   init       → system "Session on <model>"
+ *   text/asst  → assistant (strips task-name markers; drops if empty)
+ *   thinking   → thinking
+ *   tool_call  → tool (top-level only; parentId calls dropped)
+ *   tool_progress → tool (top-level only; parentId calls dropped)
+ *   done/error → result with error text
+ *   done/completed → result with result text (if non-empty)
+ *   api_retry  → system "Retrying..."
+ *   rate_limit → system "Rate limited..."
+ *   permission_denial → system "Permission denied: <tool>"
+ *   everything else (usage, text_delta, stream_end, tool_result) → []
  */
-export function sdkToDisplayMessages(
-  sdkMsg: SdkMessage,
+export function normalizedToDisplayMessages(
+  event: NormalizedEvent,
   prefix = "m",
 ): DisplayMessage[] {
   const now = Date.now();
-  const uuid = "uuid" in sdkMsg ? (sdkMsg as { uuid?: string }).uuid : undefined;
 
-  switch (sdkMsg.type) {
-    case "system": {
-      const sub = sdkMsg.subtype;
-      if (sub === "init") {
-        const model = sdkMsg.model ?? "unknown";
-        return [{ id: msgId(prefix), role: "system", content: `Session on ${model}`, timestamp: now, sdkUuid: uuid }];
-      }
-      if (sub === "task_started") {
-        return [{
-          id: msgId(prefix),
-          role: "system",
-          content: `Subagent: ${sdkMsg.description ?? sdkMsg.task_id ?? "task"}`,
-          timestamp: now,
-          sdkUuid: uuid,
-        }];
-      }
-      if (sub === "task_notification") {
-        const ico = sdkMsg.status === "completed" ? "\u2713" : "\u2717";
-        return [{
-          id: msgId(prefix),
-          role: "system",
-          content: `${ico} Subagent ${sdkMsg.status}: ${sdkMsg.summary ?? ""}`,
-          timestamp: now,
-          sdkUuid: uuid,
-        }];
-      }
-      if (sub === "local_command_output" && sdkMsg.content) {
-        return [{ id: msgId(prefix), role: "system", content: sdkMsg.content, timestamp: now, sdkUuid: uuid }];
-      }
-      return [];
-    }
-
-    case "assistant": {
-      if (!sdkMsg.message?.content) return [];
-
-      const msgs: DisplayMessage[] = [];
-      const blocks = sdkMsg.message.content;
-
-      for (let i = 0; i < blocks.length; i++) {
-        const block = blocks[i];
-        if (!block) continue;
-
-        if (block.type === "thinking" && block.thinking) {
-          msgs.push({
-            id: `${prefix}-${uuid ?? msgId(prefix)}-think-${i}`,
-            role: "thinking",
-            content: block.thinking,
-            timestamp: now,
-            sdkUuid: uuid,
-          });
-        } else if (block.type === "text" && block.text) {
-          const text = block.text.replace(/<!--task-name:.+?-->\s*/g, "");
-          if (text.trim()) {
-            msgs.push({
-              id: `${prefix}-${uuid ?? msgId(prefix)}-text-${i}`,
-              role: "assistant",
-              content: text,
-              timestamp: now,
-              sdkUuid: uuid,
-            });
-          }
-        } else if (block.type === "tool_use" && block.name) {
-          msgs.push({
-            id: `${prefix}-${uuid ?? msgId(prefix)}-tool-${i}`,
-            role: "tool",
-            content: block.name,
-            timestamp: now,
-            toolName: block.name,
-            toolInput: block.input,
-            sdkUuid: uuid,
-          });
-        }
-      }
-      return msgs;
-    }
-
-    case "tool_progress":
+  switch (event.kind) {
+    case "init":
       return [{
-        id: msgId(prefix),
-        role: "tool",
-        content: `${sdkMsg.tool_name} (${sdkMsg.elapsed_time_seconds?.toFixed(1)}s)`,
+        id: derivedId(prefix, "init", event.model),
+        role: "system",
+        content: `Session on ${event.model}`,
         timestamp: now,
-        toolName: sdkMsg.tool_name,
-        sdkUuid: uuid,
       }];
 
-    case "tool_use_summary":
-      if (sdkMsg.summary) {
-        return [{ id: msgId(prefix), role: "system", content: sdkMsg.summary, timestamp: now, sdkUuid: uuid }];
-      }
-      return [];
-
-    case "result": {
-      const rawTxt = sdkMsg.is_error
-        ? (sdkMsg.errors[0] ?? "Error")
-        : sdkMsg.result;
-      const txt = rawTxt.replace(/<!--task-name:.+?-->\s*/g, "");
-      const ds = sdkMsg.duration_ms ? `${(sdkMsg.duration_ms / 1000).toFixed(1)}s` : null;
-      const cs = sdkMsg.total_cost_usd ? `$${sdkMsg.total_cost_usd.toFixed(4)}` : null;
-      const sfx = [ds, cs].filter(Boolean).join(" · ");
-      return [{ id: msgId(prefix), role: "result", content: txt, timestamp: now, suffix: sfx || undefined, sdkUuid: uuid }];
+    case "text": {
+      if (event.role !== "assistant") return [];
+      const text = event.text.replace(/<!--task-name:.+?-->\s*/g, "");
+      if (!text.trim()) return [];
+      return [{
+        id: derivedId(prefix, "text", text),
+        role: "assistant",
+        content: text,
+        timestamp: now,
+      }];
     }
 
+    case "thinking":
+      return [{
+        id: derivedId(prefix, "think", event.text),
+        role: "thinking",
+        content: event.text,
+        timestamp: now,
+      }];
+
+    case "tool_call": {
+      if (event.parentId != null) return [];
+      return [{
+        id: `${prefix}-call-${event.id}`,
+        role: "tool",
+        content: event.name,
+        timestamp: now,
+        toolName: event.name,
+        toolInput: event.input as Record<string, unknown>,
+      }];
+    }
+
+    case "tool_progress": {
+      if (event.parentId != null) return [];
+      return [{
+        id: `${prefix}-prog-${event.id}`,
+        role: "tool",
+        content: `${event.name} (${event.elapsedSeconds.toFixed(1)}s)`,
+        timestamp: now,
+        toolName: event.name,
+      }];
+    }
+
+    case "done": {
+      if (event.reason === "error") {
+        const errText = event.error ?? "Error";
+        return [{
+          id: derivedId(prefix, "done-err", errText),
+          role: "result",
+          content: errText,
+          timestamp: now,
+        }];
+      }
+      if (event.reason === "completed" || event.reason === "stop") {
+        if (!event.result) return [];
+        const txt = event.result.replace(/<!--task-name:.+?-->\s*/g, "");
+        if (!txt.trim()) return [];
+        return [{
+          id: derivedId(prefix, "done-ok", txt),
+          role: "result",
+          content: txt,
+          timestamp: now,
+        }];
+      }
+      return [];
+    }
+
+    case "api_retry":
+      return [{
+        id: msgId(prefix),
+        role: "system",
+        content: `Retrying (attempt ${event.attempt}): ${event.reason}`,
+        timestamp: now,
+      }];
+
+    case "rate_limit": {
+      const waitSec = event.retryAfterMs > 0 ? Math.ceil(event.retryAfterMs / 1000) : 0;
+      return [{
+        id: msgId(prefix),
+        role: "system",
+        content: `Rate limited${waitSec > 0 ? `; resuming in ${waitSec}s` : ""}`,
+        timestamp: now,
+      }];
+    }
+
+    case "permission_denial":
+      return [{
+        id: derivedId(prefix, "perm", event.tool),
+        role: "system",
+        content: `Permission denied: ${event.tool}`,
+        timestamp: now,
+      }];
+
+    // usage, text_delta, stream_end, tool_result → no display
     default:
       return [];
   }
-}
-
-/**
- * Legacy single-message wrapper for backward compatibility.
- * Returns the first display message or null.
- * @deprecated Use sdkToDisplayMessages for full fidelity.
- */
-export function sdkToDisplayMessage(
-  sdkMsg: SdkMessage,
-  prefix = "m",
-): DisplayMessage | null {
-  const msgs = sdkToDisplayMessages(sdkMsg, prefix);
-  return msgs[0] ?? null;
 }

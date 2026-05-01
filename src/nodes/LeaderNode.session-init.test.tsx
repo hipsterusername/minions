@@ -10,16 +10,17 @@
  *   2. The user populates `sessionKey` + `status: "creating"` via the
  *      same `onUpdateData` path that `handleCreate` uses.
  *   3. Server replies `session_created`, then `session_status: "running"`,
- *      then a stream of `sdk_event`s (system init, message_start,
- *      content_block_start text, text_delta, message_delta, message_stop,
- *      complete assistant, result).
+ *      then a stream of `sdk_event`s (init, text_delta x2, stream_end,
+ *      complete assistant text, usage, done).
  *   4. The final state must:
  *      - Reach `status: "idle"` (driven by the local subscription on
- *        result), not stay stuck on "creating" or "running".
- *      - Contain the user's prompt + system bubble + assistant content +
- *        result bubble in order.
+ *        done), not stay stuck on "creating" or "running".
+ *      - Contain the user's prompt + system bubble + result bubble in
+ *        order (done collapses the matching assistant).
  *      - Have an empty `streamingText` and `streamingBlockIndex: null`.
- *      - Capture cost / turns from the result envelope.
+ *      - Capture cost / turns from the usage + done events.
+ *
+ * Phase 3: all sdk_event messages use `event: NormalizedEvent`.
  */
 
 import { act, render } from "@testing-library/react";
@@ -68,13 +69,22 @@ function disconnectedLeaderData(overrides: Partial<LeaderData> = {}): LeaderData
 }
 
 /**
- * Synthetic SDK event sequence that mirrors what the SDK emits for a
- * one-turn assistant reply. Crafted so the streaming preview should
- * accumulate "Hello world" then clear when the final assistant lands,
- * and `result` should collapse the duplicate assistant bubble.
+ * Synthetic NormalizedEvent sequence that mirrors what the SDK emits for a
+ * one-turn assistant reply. Phase 3 format: all sdk_events carry
+ * `event: NormalizedEvent`.
+ *
+ * Sequence:
+ *   session_status "running"
+ *   init → system bubble "Session on claude-opus-4-5"
+ *   text_delta "" blockIndex=0   → seeds streaming buffer
+ *   text_delta "Hello" blockIndex=0
+ *   text_delta " world" blockIndex=0
+ *   stream_end → clears buffer
+ *   text "Hello world" role=assistant → assistant bubble, clears buffer
+ *   usage costUSD:0.0021 → updates totalCost
+ *   done result:"Hello world" turns:1 → collapses assistant, adds result, status→"idle"
  */
 function buildInitMessages(sessionKey: string): ServerMessage[] {
-  const sid = "leader-sess-init";
   return [
     // Server: session is now running.
     { type: "session_status", sessionKey, status: "running" },
@@ -82,162 +92,54 @@ function buildInitMessages(sessionKey: string): ServerMessage[] {
     {
       type: "sdk_event",
       sessionKey,
-      message: {
-        type: "system",
-        subtype: "init",
-        session_id: sid,
-        claude_code_version: "2.0.0",
-        cwd: "/repo",
-        tools: [],
+      event: {
+        kind: "init",
+        sessionId: "leader-sess-init",
         model: "claude-opus-4-5",
         permissionMode: "default",
-        apiKeySource: "env",
-        mcp_servers: [],
-        slash_commands: [],
-        output_style: "text",
-        skills: [],
-        plugins: [],
-        uuid: "u-init",
       },
     },
-    // SDK: message_start (no-op for the reducer).
+    // SDK: content_block_start index=0 — seeds the block.
     {
       type: "sdk_event",
       sessionKey,
-      message: {
-        type: "stream_event",
-        event: { type: "message_start", message: { id: "m1", role: "assistant" } },
-        parent_tool_use_id: null,
-        uuid: "u-ms",
-        session_id: sid,
-      },
-    },
-    // SDK: content_block_start, index=0, type=text — block 0 begins.
-    {
-      type: "sdk_event",
-      sessionKey,
-      message: {
-        type: "stream_event",
-        event: {
-          type: "content_block_start",
-          index: 0,
-          content_block: { type: "text", text: "" },
-        },
-        parent_tool_use_id: null,
-        uuid: "u-cbs",
-        session_id: sid,
-      },
+      event: { kind: "text_delta", text: "", blockIndex: 0 },
     },
     // SDK: text_delta x2 — accumulates "Hello world".
     {
       type: "sdk_event",
       sessionKey,
-      message: {
-        type: "stream_event",
-        event: {
-          type: "content_block_delta",
-          index: 0,
-          delta: { type: "text_delta", text: "Hello" },
-        },
-        parent_tool_use_id: null,
-        uuid: "u-d1",
-        session_id: sid,
-      },
+      event: { kind: "text_delta", text: "Hello", blockIndex: 0 },
     },
     {
       type: "sdk_event",
       sessionKey,
-      message: {
-        type: "stream_event",
-        event: {
-          type: "content_block_delta",
-          index: 0,
-          delta: { type: "text_delta", text: " world" },
-        },
-        parent_tool_use_id: null,
-        uuid: "u-d2",
-        session_id: sid,
-      },
+      event: { kind: "text_delta", text: " world", blockIndex: 0 },
     },
-    // SDK: content_block_stop, message_delta (pre-stop usage), message_stop.
+    // SDK: message_stop — clears the buffer.
     {
       type: "sdk_event",
       sessionKey,
-      message: {
-        type: "stream_event",
-        event: { type: "content_block_stop", index: 0 },
-        parent_tool_use_id: null,
-        uuid: "u-cbe",
-        session_id: sid,
-      },
-    },
-    {
-      type: "sdk_event",
-      sessionKey,
-      message: {
-        type: "stream_event",
-        event: {
-          type: "message_delta",
-          delta: { stop_reason: "end_turn" },
-          usage: { output_tokens: 4 },
-        },
-        parent_tool_use_id: null,
-        uuid: "u-md",
-        session_id: sid,
-      },
-    },
-    {
-      type: "sdk_event",
-      sessionKey,
-      message: {
-        type: "stream_event",
-        event: { type: "message_stop" },
-        parent_tool_use_id: null,
-        uuid: "u-mst",
-        session_id: sid,
-      },
+      event: { kind: "stream_end" },
     },
     // SDK: complete assistant — clears streaming buffer, adds final bubble.
     {
       type: "sdk_event",
       sessionKey,
-      message: {
-        type: "assistant",
-        message: {
-          id: "msg_01",
-          type: "message",
-          role: "assistant",
-          content: [{ type: "text", text: "Hello world" }],
-          model: "claude-opus-4-5",
-          stop_reason: "end_turn",
-          usage: { input_tokens: 5, output_tokens: 4 },
-        },
-        parent_tool_use_id: null,
-        uuid: "u-asst",
-        session_id: sid,
-      },
+      event: { kind: "text", text: "Hello world", role: "assistant" },
     },
-    // SDK: result — flips status to "idle" via local subscription, captures
-    // cost/turns, collapses the matching assistant bubble.
+    // SDK: usage — updates totalCost.
     {
       type: "sdk_event",
       sessionKey,
-      message: {
-        type: "result",
-        subtype: "success",
-        result: "Hello world",
-        is_error: false,
-        duration_ms: 800,
-        duration_api_ms: 600,
-        num_turns: 1,
-        stop_reason: "end_turn",
-        total_cost_usd: 0.0021,
-        usage: { input_tokens: 5, output_tokens: 4 },
-        modelUsage: {},
-        permission_denials: [],
-        uuid: "u-res",
-        session_id: sid,
-      },
+      event: { kind: "usage", input: 5, output: 4, costUSD: 0.0021 },
+    },
+    // SDK: done — flips status to "idle" via local subscription, captures
+    // turns, collapses the matching assistant bubble.
+    {
+      type: "sdk_event",
+      sessionKey,
+      event: { kind: "done", reason: "completed", result: "Hello world", turns: 1 },
     },
   ] as ServerMessage[];
 }
@@ -307,7 +209,7 @@ describe("LeaderNode: new-session initiation", () => {
     expect(last).toBeDefined();
     if (!last) return;
 
-    // Status reaches "idle" (driven by the local subscription on result).
+    // Status reaches "idle" (driven by the local subscription on done).
     expect(last.status).toBe("idle");
 
     // Streaming buffer fully cleared.
@@ -320,7 +222,7 @@ describe("LeaderNode: new-session initiation", () => {
     expect(last.messages[0]?.content).toBe("Plan and execute.");
 
     // The reducer's collapse logic drops the duplicate "Hello world"
-    // assistant when the result arrives with matching content. Final
+    // assistant when the done event arrives with matching content. Final
     // ordering: user → system → result.
     expect(last.messages.map((m) => m.role)).toEqual([
       "user",
@@ -329,7 +231,7 @@ describe("LeaderNode: new-session initiation", () => {
     ]);
     expect(last.messages.at(-1)?.content).toBe("Hello world");
 
-    // Cost / turns captured from result.
+    // Cost / turns captured from usage + done events.
     expect(last.totalCost).toBe(0.0021);
     expect(last.turns).toBe(1);
   });

@@ -312,21 +312,7 @@ describe("MinionNode: ignores messages for other sessionKeys", () => {
         message: {
           type: "sdk_event",
           sessionKey: "some-other-session",
-          message: {
-            type: "assistant",
-            message: {
-              id: "msg_x",
-              type: "message",
-              role: "assistant",
-              content: [{ type: "text", text: "noise" }],
-              model: "claude",
-              stop_reason: null,
-              usage: { input_tokens: 1, output_tokens: 1 },
-            },
-            parent_tool_use_id: null,
-            uuid: "u-noise",
-            session_id: "s",
-          },
+          event: { kind: "text", text: "noise", role: "assistant" },
         },
       },
     ]);

@@ -5,23 +5,18 @@
  * (see Canvas.tsx:638) and owns a ~160-line subscription effect that
  * mixes:
  *   • shared session-stream concerns (status, error, sync_response,
- *     streaming text deltas) that are candidates for migration onto
- *     `useSessionStream`
- *   • node-specific handling (rich ResultMeta, subagent tracking,
- *     init-data capture, prompt suggestions, hook/auth subtypes)
+ *     streaming text deltas)
+ *   • node-specific handling (init data capture)
  *
- * The node's local `sdkMessageToSessionMessages` diverges from the
- * shared `sdkToDisplayMessages` in meaningful ways (richer result
- * metadata, hook/auth subtypes, no `thinking` role). A naive migration
- * to the shared reducer would regress rendering.
+ * Phase 3: all sdk_event messages now carry `event: NormalizedEvent`
+ * (not `message: SdkMessage`). The node's local `normalizedToSessionMessages`
+ * handles the NormalizedEvent union directly. Legacy subtypes that had no
+ * NormalizedEvent equivalent (task_started, task_notification,
+ * prompt_suggestion) are no longer delivered over the wire.
  *
  * This file is the **test-first arrow guardrail** for any subsequent
  * migration: it locks observable behavior end-to-end so a future
  * refactor cannot silently change what the UI sees.
- *
- * Strategy: mount the renderer with a controlled ClaudeSessionData +
- * the replay socket, drive a fixture, and assert the data the node
- * pushed back through `onUpdateData`.
  */
 
 import { act, render } from "@testing-library/react";
@@ -128,7 +123,6 @@ function makeInitialData(
     model: "sonnet",
     permissionMode: "bypassPermissions",
     thinkingConfig: { ...DEFAULT_THINKING_CONFIG },
-    modelUsage: null,
     lastDurationMs: null,
     subagents: [],
     promptSuggestions: [],
@@ -140,7 +134,7 @@ function makeInitialData(
 // ── End-to-end fixture replay ──────────────────────────
 
 describe("ClaudeSessionNode: replays claude-session-basic fixture", () => {
-  it("captures cost/turns, records init data, and collapses the wrap-up into result", async () => {
+  it("captures cost/turns and collapses the wrap-up assistant into result", async () => {
     const { socket, replay } = createReplaySocket();
     const entries = loadFixture("claude-session-basic.jsonl");
     const states: ClaudeSessionData[] = [];
@@ -159,32 +153,21 @@ describe("ClaudeSessionNode: replays claude-session-basic fixture", () => {
     expect(last).toBeDefined();
     if (!last) return;
 
-    // Cost / turns captured from the result envelope.
+    // Cost / turns captured from the usage + done events.
     expect(last.totalCost).toBe(0.0061);
     expect(last.turns).toBe(1);
-    expect(last.lastDurationMs).toBe(1800);
 
-    // Status drops to "idle" on result.
+    // Status drops to "idle" on done.
     expect(last.status).toBe("idle");
 
-    // Streaming buffer cleared on result.
+    // Streaming buffer cleared on done.
     expect(last.streamingText).toBe("");
 
-    // Prompt suggestions cleared on new turn.
+    // Prompt suggestions cleared on done.
     expect(last.promptSuggestions).toEqual([]);
-
-    // initData from the init system event survives because the
-    // subscription now accumulates into a single `onUpdateData` per
-    // sdk_event (see single-emit accumulator in ClaudeSessionNode.tsx).
-    // The raw SDK model identifier lands in `initData.model`; the
-    // user-selected `data.model` (a ModelOption) is NOT overwritten.
-    expect(last.initData).toMatchObject({
-      model: "claude-opus-4-5",
-    });
-    expect(last.model).toBe("sonnet");
   });
 
-  it("builds the message feed with the rich ResultMeta on the result bubble", async () => {
+  it("builds the message feed with the correct role sequence", async () => {
     const { socket, replay } = createReplaySocket();
     const entries = loadFixture("claude-session-basic.jsonl");
     const states: ClaudeSessionData[] = [];
@@ -202,38 +185,28 @@ describe("ClaudeSessionNode: replays claude-session-basic fixture", () => {
     const last = states.at(-1);
     if (!last) throw new Error("no state captured");
 
-    // The wrap-up assistant content matches the result content, so the
-    // node's assistant/result collapse strips the dupe assistant before
-    // appending result. Expected role sequence:
-    //   system (init)
-    //   assistant ("I'll run ls.")
-    //   tool (Bash)
-    //   tool (Bash 0.4s from tool_progress)
-    //   system (tool_use_summary)
-    //   result (the collapsed wrap-up)
+    // Phase 3 fixture: init → text "I'll run ls." → tool_call Bash →
+    // tool_progress Bash → text "Three top-level..." → usage → done.
+    // The wrap-up assistant matches the result content → collapses.
+    // Expected roles: system, assistant("I'll run ls."), tool, tool, result.
     expect(last.messages.map((m) => m.role)).toEqual([
       "system",
       "assistant",
       "tool",
       "tool",
-      "system",
       "result",
     ]);
 
-    // The init system message includes tool count (local renderer adds
-    // " · N tools" which the shared sdkToDisplayMessages does NOT).
-    expect(last.messages[0]?.content).toBe("Session on claude-opus-4-5 · 2 tools");
+    // System bubble comes from the init event.
+    expect(last.messages[0]?.content).toBe("Session on claude-opus-4-5");
 
-    // Result bubble carries rich metadata the shared reducer drops.
+    // Result bubble carries the collapsed wrap-up text.
     const result = last.messages.find((m) => m.role === "result");
-    expect(result?.meta).toMatchObject({
-      durationMs: 1800,
-      durationApiMs: 1200,
-      costUsd: 0.0061,
-      turns: 1,
-      stopReason: "end_turn",
-      isError: false,
-    });
+    expect(result?.content).toBe(
+      "Three top-level entries: src, README.md, package.json.",
+    );
+    // Phase 3: meta is only set for error results; success results don't carry it.
+    expect(result?.meta?.isError).toBeUndefined();
   });
 });
 
@@ -296,119 +269,6 @@ describe("ClaudeSessionNode: session_status and session_error", () => {
   });
 });
 
-// ── subagent tracking ────────────────────────────────────
-//
-// The subscription now emits a single `onUpdateData` per sdk_event by
-// accumulating into an `updated` object before emitting. That means
-// task_started + task_notification updates survive even when the same
-// event also appends to the message feed.
-
-describe("ClaudeSessionNode: subagent tracking", () => {
-  it("task_started records a subagent, task_notification marks it completed", async () => {
-    const { socket, replay } = createReplaySocket();
-    const states: ClaudeSessionData[] = [];
-
-    render(
-      <Probe
-        socket={socket}
-        initial={makeInitialData()}
-        onState={(d) => states.push(d)}
-      />,
-    );
-
-    await pump(replay, [
-      {
-        message: {
-          type: "sdk_event",
-          sessionKey: "session-1",
-          message: {
-            type: "system",
-            subtype: "task_started",
-            task_id: "t-1",
-            description: "Explore codebase",
-            session_id: "s",
-            uuid: "u-ts-1",
-          } as unknown as ServerMessage,
-        } as unknown as ServerMessage,
-      },
-      {
-        message: {
-          type: "sdk_event",
-          sessionKey: "session-1",
-          message: {
-            type: "system",
-            subtype: "task_notification",
-            task_id: "t-1",
-            status: "completed",
-            summary: "Found 4 entry points",
-            session_id: "s",
-            uuid: "u-tn-1",
-          } as unknown as ServerMessage,
-        } as unknown as ServerMessage,
-      },
-    ]);
-
-    const last = states.at(-1);
-    expect(last?.subagents).toEqual([
-      expect.objectContaining({
-        taskId: "t-1",
-        status: "completed",
-        summary: "Found 4 entry points",
-      }),
-    ]);
-  });
-});
-
-// ── prompt suggestions (node-specific) ─────────────────
-
-describe("ClaudeSessionNode: prompt suggestions", () => {
-  it("accumulates prompt_suggestion events (keeps last 3)", async () => {
-    const { socket, replay } = createReplaySocket();
-    const states: ClaudeSessionData[] = [];
-
-    render(
-      <Probe
-        socket={socket}
-        initial={makeInitialData()}
-        onState={(d) => states.push(d)}
-      />,
-    );
-
-    await pump(replay, [
-      {
-        message: {
-          type: "sdk_event",
-          sessionKey: "session-1",
-          message: {
-            type: "prompt_suggestion",
-            suggestion: "Ask about schemas",
-            uuid: "u-ps-1",
-            session_id: "sess-001",
-          } as unknown as ServerMessage,
-        } as unknown as ServerMessage,
-      },
-      {
-        message: {
-          type: "sdk_event",
-          sessionKey: "session-1",
-          message: {
-            type: "prompt_suggestion",
-            suggestion: "Show call sites",
-            uuid: "u-ps-2",
-            session_id: "sess-001",
-          } as unknown as ServerMessage,
-        } as unknown as ServerMessage,
-      },
-    ]);
-
-    const last = states.at(-1);
-    expect(last?.promptSuggestions).toEqual([
-      "Ask about schemas",
-      "Show call sites",
-    ]);
-  });
-});
-
 // ── sessionKey filtering ───────────────────────────────
 
 describe("ClaudeSessionNode: ignores messages for other sessionKeys", () => {
@@ -429,21 +289,7 @@ describe("ClaudeSessionNode: ignores messages for other sessionKeys", () => {
         message: {
           type: "sdk_event",
           sessionKey: "some-other-session",
-          message: {
-            type: "assistant",
-            message: {
-              id: "msg_x",
-              type: "message",
-              role: "assistant",
-              content: [{ type: "text", text: "noise" }],
-              model: "claude",
-              stop_reason: null,
-              usage: { input_tokens: 1, output_tokens: 1 },
-            },
-            parent_tool_use_id: null,
-            uuid: "u-noise",
-            session_id: "s",
-          },
+          event: { kind: "text", text: "noise", role: "assistant" },
         },
       },
     ]);
