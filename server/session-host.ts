@@ -18,7 +18,7 @@
  *     `server/worktree.ts`; the host merely holds the handle).
  */
 
-import { query, type Query } from "@anthropic-ai/claude-agent-sdk";
+import { runClaudeQuery, type QueryHandleLike } from "./harness/claude/index.ts";
 import { buildQueryPrompt } from "./multimodal-prompt.ts";
 import type { Bus } from "./bus.ts";
 import { getAgentType, type AgentTypeContext } from "./agents/index.ts";
@@ -140,7 +140,7 @@ export class SessionHost {
 
   // ── Volatile runtime state ─────────────────────────
   abortController: AbortController = new AbortController();
-  queryHandle: Query | null = null;
+  queryHandle: QueryHandleLike | null = null;
   eventBuffer: BufferedEvent[] = [];
   lastError: string | null = null;
   model: string | null = null;
@@ -331,10 +331,7 @@ export class SessionHost {
         abortController,
       });
 
-      const handle = query({
-        prompt: buildQueryPrompt(opts),
-        options: options as never,
-      });
+      const handle = runClaudeQuery(buildQueryPrompt(opts), options);
       this.queryHandle = handle;
 
       for await (const message of handle) {
