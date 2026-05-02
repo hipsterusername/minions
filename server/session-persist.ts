@@ -1,7 +1,7 @@
 /**
  * Server-side session persistence glue.
  *
- * Owns a single SQLite connection at `~/.claude-canvas/server.db` (overridable
+ * Owns a single SQLite connection at `~/.minions/server.db` (overridable
  * via the `MINIONS_SERVER_DB` env var) and exposes small, synchronous helpers
  * that map the in-memory `Session` shape used by `server/index.ts` onto the
  * repo layer in `session-repo.ts`.
@@ -43,7 +43,7 @@ function defaultDbPath(): string {
   if (process.env["MINIONS_SERVER_DB"]) {
     return process.env["MINIONS_SERVER_DB"]!;
   }
-  const dir = path.join(os.homedir(), ".claude-canvas");
+  const dir = path.join(os.homedir(), ".minions");
   fs.mkdirSync(dir, { recursive: true });
   return path.join(dir, "server.db");
 }
@@ -244,6 +244,22 @@ export function persistTaskState(
     }
   } catch (err) {
     console.warn("[session-persist] persistTaskState failed:", err);
+  }
+}
+
+/**
+ * Wipe every persisted event for a session without removing the session row
+ * itself. Used by `clear_session` to make the event history disappear from
+ * both the in-memory buffer and the on-disk log so it doesn't re-appear on
+ * reconnect.
+ */
+export function clearSessionEvents(sessionKey: string): void {
+  const db = ensureDb();
+  if (!db) return;
+  try {
+    repo.purgeEventsForSession(db, sessionKey);
+  } catch (err) {
+    console.warn("[session-persist] clearSessionEvents failed:", err);
   }
 }
 

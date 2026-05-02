@@ -9,7 +9,7 @@ import "./nodes/RenderNode.tsx";
 import "./nodes/ImageNode.tsx";
 import "./nodes/RoutineNode.tsx";
 import { loadProjectSkillsFromData, saveUserSkill, deleteUserSkill as removeUserSkill, exportUserSkills, importUserSkills } from "./skills/user-skills.ts";
-import { useState, useEffect, useReducer, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useReducer, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 import { Canvas } from "./Canvas.tsx";
 import { useSocket } from "./use-socket.ts";
 import type { ServerMessage } from "./use-socket.ts";
@@ -36,6 +36,7 @@ import { SkillEditor } from "./SkillEditor.tsx";
 import { RoutineEditor } from "./RoutineEditor.tsx";
 import { DockProvider, DockBar } from "./BottomRightDock.tsx";
 import { DebugModeAffordance } from "./components/DebugModeAffordance.tsx";
+import { featureFlagStore } from "./feature-flags.ts";
 import type { SkillTemplate } from "./skills/types.ts";
 import { getSkill } from "./skills/registry.ts";
 import { themes, themeMap, applyTheme, DEFAULT_THEME_ID } from "./themes.ts";
@@ -132,8 +133,15 @@ function ProjectView({
   const [editingSkill, setEditingSkill] = useState<SkillTemplate | null>(null);
   const [skillsRefreshKey, setSkillsRefreshKey] = useState(0);
 
-  // Routine editor state
+  // Routine editor state. Gated by the `routines` feature flag — when
+  // the flag is off the editor and its dock pill are not rendered at all.
   const [routineEditorOpen, setRoutineEditorOpen] = useState(false);
+  const routinesFlagStore = useMemo(() => featureFlagStore("routines"), []);
+  const routinesEnabled = useSyncExternalStore(
+    routinesFlagStore.subscribe,
+    routinesFlagStore.getSnapshot,
+    routinesFlagStore.getSnapshot,
+  );
 
   // Load project from API
   useEffect(() => {
@@ -860,8 +868,12 @@ function ProjectView({
                 }}
               />
             )}
-            <DockBar onOpenRoutines={() => setRoutineEditorOpen(true)} />
-            {routineEditorOpen && (
+            <DockBar
+              onOpenRoutines={
+                routinesEnabled ? () => setRoutineEditorOpen(true) : undefined
+              }
+            />
+            {routinesEnabled && routineEditorOpen && (
               <RoutineEditor
                 projectId={projectId}
                 onClose={() => setRoutineEditorOpen(false)}

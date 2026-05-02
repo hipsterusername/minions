@@ -7,12 +7,13 @@ import { registerContract, LEADER_CONTRACT } from "../graph.ts";
 import type { ServerMessage } from "../use-socket.ts";
 import {
   msgId as sharedMsgId,
-  sdkToDisplayMessages,
+  normalizedToDisplayMessages,
   type DisplayMessage,
 } from "../sdk-messages.ts";
 import { buildLeaderSystemPrompt } from "../prompts/build-leader-prompt.ts";
 import { useStatusBanners, StatusBannerStack } from "../components/StatusBanner.tsx";
 import { StreamingBubble, StreamingIndicator } from "../components/StreamingBubble.tsx";
+import { chatRoleStyle } from "../chat-bubble-style.ts";
 import { type SessionStreamState } from "../session-stream.ts";
 import { useSessionStream } from "../use-session-stream.ts";
 import { SessionToolbar } from "../components/SessionToolbar.tsx";
@@ -23,6 +24,7 @@ import { ResizeHandle } from "../components/ResizeHandle.tsx";
 import { AutoTextarea } from "../components/AutoTextarea.tsx";
 import { SimpleMarkdown } from "../components/SimpleMarkdown.tsx";
 import { CopyButton } from "../components/CopyButton.tsx";
+import { UserContextHeader } from "../components/UserContextHeader.tsx";
 import { AddAsNodeButton } from "../components/AddAsNodeButton.tsx";
 import { debugFlagStore } from "../debug.ts";
 import { DebugInspector } from "../components/DebugInspector.tsx";
@@ -761,20 +763,9 @@ function LeaderThinkingGroup({
         <div style={{ overflow: "hidden" }}>
           <div
             style={{
-              paddingBlock: 4,
-              paddingInline: 10,
+              ...chatRoleStyle("thinking"),
               maxHeight: 200,
               overflowY: "auto",
-              fontSize: 11,
-              fontFamily: "var(--font-mono)",
-              color: "var(--text-muted)",
-              lineHeight: 1.6,
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-              overflowWrap: "break-word",
-              fontStyle: "italic",
-              borderLeft: "2px solid var(--thinking-accent)",
-              marginLeft: 8,
             }}
           >
             {msgs.map((m) => m.content).join("\n\n")}
@@ -812,20 +803,12 @@ function UserMessageBubble({ msg }: { msg: LeaderMessage }) {
     <div
       className="copyable"
       style={{
-        padding: "6px 10px",
-        borderRadius: 6,
-        fontSize: 12,
-        lineHeight: 1.6,
-        fontFamily: "var(--font-sans)",
-        color: "var(--accent)",
-        borderLeft: "2px solid var(--accent)",
-        whiteSpace: "pre-wrap",
-        wordBreak: "break-word",
-        overflowWrap: "break-word",
+        ...chatRoleStyle("user"),
         position: "relative",
       }}
     >
       <CopyButton text={msg.content} />
+      <UserContextHeader />
       {collapsed ? msg.content.slice(0, 200) + "…" : msg.content}
       {isLong && (
         <button
@@ -947,6 +930,7 @@ function TaskPlanPanel({
       {/* Task list */}
       {expanded && (
         <div
+          data-scroll-capture
           onMouseDown={(e) => e.stopPropagation()}
           style={{
             maxHeight: 220,
@@ -2551,7 +2535,7 @@ export function LeaderNodeRenderer({
   const outputRef = useRef<HTMLDivElement>(null);
   const scrollZoneRef = useRef<HTMLDivElement>(null);
   const syncedRef = useRef(false);
-  const { banners, processSdkEvent, dismissBanner } = useStatusBanners();
+  const { banners, processNormalizedEvent, dismissBanner } = useStatusBanners();
   const debugEnabled = useSyncExternalStore(
     debugFlagStore.subscribe,
     debugFlagStore.getSnapshot,
@@ -2695,11 +2679,12 @@ export function LeaderNodeRenderer({
 
           const seenIds = new Set<string>();
           for (const evt of serverMsg.events) {
-            if (evt.type === "sdk_event" && evt.message) {
-              const lms: DisplayMessage[] = sdkToDisplayMessages(evt.message, "lm");
-              // When a result arrives, drop the last assistant msg if its
+            if (evt.type === "sdk_event" && evt.event) {
+              const event = evt.event;
+              const lms: DisplayMessage[] = normalizedToDisplayMessages(event, "lm");
+              // When a done event arrives, drop the last assistant msg if its
               // content matches — avoids duplicate bubble on sync rebuild.
-              if (evt.message.type === "result") {
+              if (event.kind === "done") {
                 const resultText = lms.find((m) => m.role === "result")?.content;
                 if (resultText) {
                   const lastIdx = rebuiltMessages.findLastIndex((m) => m.role === "assistant");
@@ -2715,9 +2700,11 @@ export function LeaderNodeRenderer({
                   rebuiltMessages.push(lm);
                 }
               }
-              if (evt.message.type === "result") {
-                rebuiltCost = evt.message.total_cost_usd ?? rebuiltCost;
-                rebuiltTurns = evt.message.num_turns ?? rebuiltTurns;
+              if (event.kind === "usage" && event.costUSD != null) {
+                rebuiltCost = event.costUSD;
+              }
+              if (event.kind === "done" && event.turns != null) {
+                rebuiltTurns = event.turns;
               }
             } else if (evt.type === "session_status") {
               rebuiltStatus = (evt.status as LeaderData["status"]) ?? rebuiltStatus;
@@ -2796,11 +2783,8 @@ export function LeaderNodeRenderer({
         serverMsg.type === "sdk_event" &&
         serverMsg.sessionKey === current.sessionKey
       ) {
-        processSdkEvent(serverMsg.message);
-        if (
-          serverMsg.message.type === "result" &&
-          current.status !== "idle"
-        ) {
+        processNormalizedEvent(serverMsg.event);
+        if (serverMsg.event.kind === "done" && current.status !== "idle") {
           emitUpdate({ ...dataRef.current, status: "idle" });
         }
         return;
@@ -3011,7 +2995,7 @@ export function LeaderNodeRenderer({
         return;
       }
     });
-  }, [socketSubscribe, emitUpdate, processSdkEvent]);
+  }, [socketSubscribe, emitUpdate, processNormalizedEvent]);
 
   const handleCreate = useCallback(() => {
     if (!socketSend) return;
@@ -3662,16 +3646,8 @@ export function LeaderNodeRenderer({
                 key={msg.id}
                 className="copyable"
                 style={{
+                  ...chatRoleStyle("assistant"),
                   position: "relative",
-                  padding: "6px 10px",
-                  borderRadius: 6,
-                  fontSize: 12,
-                  lineHeight: 1.6,
-                  fontFamily: "var(--font-sans)",
-                  color: "var(--text-primary)",
-                  borderLeft: "2px solid var(--accent)",
-                  wordBreak: "break-word",
-                  overflowWrap: "break-word",
                 }}
               >
                 <CopyButton text={msg.content} />
@@ -3693,16 +3669,8 @@ export function LeaderNodeRenderer({
                 key={msg.id}
                 className="copyable"
                 style={{
+                  ...chatRoleStyle("result"),
                   position: "relative",
-                  padding: "6px 10px",
-                  borderRadius: 6,
-                  fontSize: 12,
-                  lineHeight: 1.6,
-                  fontFamily: "var(--font-sans)",
-                  color: "var(--text-primary)",
-                  borderLeft: "2px solid var(--success-color)",
-                  wordBreak: "break-word",
-                  overflowWrap: "break-word",
                 }}
               >
                 <CopyButton text={msg.content} />
@@ -3721,18 +3689,7 @@ export function LeaderNodeRenderer({
           return (
             <div
               key={msg.id}
-              style={{
-                padding: "4px 10px",
-                borderRadius: 6,
-                fontSize: 10,
-                lineHeight: 1.6,
-                fontFamily: "var(--font-sans)",
-                color: "var(--text-primary)",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                overflowWrap: "break-word",
-                opacity: 0.5,
-              }}
+              style={chatRoleStyle("system")}
             >
               {msg.content}
               {msg.suffix && (
@@ -3745,7 +3702,7 @@ export function LeaderNodeRenderer({
         })}
         {/* Streaming partial text with blinking cursor */}
         {data.streamingText ? (
-          <StreamingBubble text={data.streamingText.replace(/<!--task-name:.+?-->\s*/g, "")} borderColor="var(--accent)" />
+          <StreamingBubble text={data.streamingText.replace(/<!--task-name:.+?-->\s*/g, "")} role="assistant" />
         ) : data.status === "running" && data.messages.length > 0 ? (
           <StreamingIndicator label="Leader is thinking..." />
         ) : null}

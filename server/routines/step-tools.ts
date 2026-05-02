@@ -8,7 +8,7 @@
  *
  * Why a module-level registry of pending step contexts
  * ────────────────────────────────────────────────────
- *   The leader MCP server is constructed inside `leader.createMcpServers()`
+ *   The leader MCP server is constructed inside `leader.getToolGroups()`
  *   which only sees `AgentTypeContext.sessionKey`. We need to expose extra
  *   tools to *just* routine-spawned leaders without changing the
  *   `AgentTypeContext` shape for everyone. A small in-process map keyed by
@@ -20,7 +20,7 @@
  */
 
 import { z } from "zod/v4";
-import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
+import type { NormalizedToolDef } from "../harness/types.ts";
 import type {
   Artifact,
   StepOutcome,
@@ -75,24 +75,29 @@ export function __resetStepContextsForTests(): void {
 }
 
 /**
- * Build the MCP server that exposes `report_phase_result` to a leader
+ * Build the tool definition that exposes `report_phase_result` to a leader
  * spawned for a routine step. Returned only when the session has a
  * registered step context; otherwise the leader uses its default tool set.
+ *
+ * Returns NormalizedToolDef[] which agents/leader.ts places into a toolGroup
+ * keyed "routine-step". ClaudeHarness.registerTools() wraps them as a
+ * named MCP server so tool calls follow the mcp__routine-step__* pattern.
  */
 export function createStepToolsForSession(sessionKey: string): {
-  mcpServer: unknown;
+  toolDefs: NormalizedToolDef[];
   toolNames: string[];
 } | null {
   const ctx = getStepContext(sessionKey);
   if (!ctx) return null;
 
-  const reportPhaseResultTool = tool(
-    "report_phase_result",
-    "Report the result of this routine phase step. Call exactly once when " +
+  const reportPhaseResultDef: NormalizedToolDef = {
+    name: "report_phase_result",
+    description:
+      "Report the result of this routine phase step. Call exactly once when " +
       "you have finished the work the routine prompt asked for. The summary " +
       "and outputs you supply will be reduced into the handoff brief that " +
       "the next phase's agents see, so be specific and structured.",
-    {
+    inputSchema: z.object({
       outcome: z
         .enum(["success", "error", "aborted"])
         .default("success")
@@ -124,8 +129,14 @@ export function createStepToolsForSession(sessionKey: string): {
           "Optional artifacts produced (file paths, URLs). Prefer `ref` " +
             "over inlining content via `excerpt`.",
         ),
-    },
-    async (args) => {
+    }),
+    handler: async (input: unknown) => {
+      const args = input as {
+        outcome: "success" | "error" | "aborted";
+        summary: string;
+        outputs?: Record<string, unknown>;
+        artifacts?: Array<{ label: string; ref?: string; excerpt?: string }>;
+      };
       if (ctx.isSettled()) {
         return {
           content: [
@@ -156,15 +167,10 @@ export function createStepToolsForSession(sessionKey: string): {
         ],
       };
     },
-  );
-
-  const mcpServer = createSdkMcpServer({
-    name: "routine-step",
-    tools: [reportPhaseResultTool] as never,
-  });
+  };
 
   return {
-    mcpServer,
+    toolDefs: [reportPhaseResultDef],
     toolNames: ["mcp__routine-step__report_phase_result"],
   };
 }

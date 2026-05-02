@@ -45,8 +45,11 @@ function BadgeProbe({
   return null;
 }
 
-function renderDock(props?: { onOpenRoutines?: () => void }) {
-  const onOpenRoutines = props?.onOpenRoutines ?? (() => {});
+function renderDock(props?: { onOpenRoutines?: (() => void) | undefined }) {
+  const onOpenRoutines =
+    props && "onOpenRoutines" in props
+      ? props.onOpenRoutines
+      : () => {};
   return render(
     <DockProvider>
       <BadgeProbe id="sessions" count={3} dot="success" tail="$0.42" />
@@ -147,6 +150,13 @@ describe("BottomRightDock", () => {
       fireEvent.mouseDown(bar);
     });
     expect(screen.queryByTestId("panel-sessions-body")).not.toBeNull();
+  });
+
+  it("hides the Routines pill when onOpenRoutines is undefined", () => {
+    renderDock({ onOpenRoutines: undefined });
+    expect(screen.queryByLabelText("Routines")).toBeNull();
+    // Sibling pills are unaffected.
+    expect(screen.getByLabelText("Sessions")).toBeInTheDocument();
   });
 
   it("active pill exposes aria-pressed=true and data-active=true", () => {

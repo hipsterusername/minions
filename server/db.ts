@@ -83,11 +83,12 @@ export function initDb(dbPath?: string): Database.Database {
     );
 
     CREATE TABLE IF NOT EXISTS event_log (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_key   TEXT NOT NULL,
-      event_type    TEXT NOT NULL,
-      payload       TEXT NOT NULL,
-      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_key    TEXT NOT NULL,
+      event_type     TEXT NOT NULL,
+      payload        TEXT NOT NULL,
+      schema_version INTEGER NOT NULL DEFAULT 2,
+      created_at     TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_event_log_session ON event_log(session_key);
 
@@ -109,6 +110,19 @@ export function initDb(dbPath?: string): Database.Database {
   // session_id is lost across restarts, and `send_message` cannot resume —
   // it starts a brand-new conversation with no transcript.
   ensureColumn(db, "sessions", "session_id", "TEXT");
+
+  // Phase 3 migration: add schema_version to event_log if the column was
+  // added after the table was first created. Existing rows pre-date Phase 3
+  // and carry raw SDK payloads (schema v1) — drop them so the client only
+  // ever replays normalized events. event_log is a 5-minute replay buffer,
+  // not durable history; row loss here is acceptable (spec §6.2).
+  const hasSchemaVersion = (
+    db.pragma("table_info(event_log)") as Array<{ name: string }>
+  ).some((r) => r.name === "schema_version");
+  if (!hasSchemaVersion) {
+    db.exec("ALTER TABLE event_log ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1");
+    db.exec("DELETE FROM event_log WHERE schema_version < 2");
+  }
 
   return db;
 }

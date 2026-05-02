@@ -6,10 +6,16 @@
  * per-harness capability flags.
  *
  * Phase 0: types only, no callers yet.
+ * Phase 3: NormalizedEvent moved to shared/normalized-event.ts so both
+ *          server and client can import it from the same source.
  * See docs/model-agnosticism-spec.md §3 for the full design rationale.
  */
 
 import type { ZodTypeAny } from "zod/v4";
+
+// Re-export the canonical type so server-internal code that was importing
+// NormalizedEvent from here continues to work unchanged.
+export type { NormalizedEvent } from "../../shared/normalized-event.ts";
 
 // ── Capability flags ──────────────────────────────────────────────────────────
 
@@ -30,6 +36,15 @@ export interface HarnessCapabilities {
   resume: boolean;
   /** Whether the harness emits content_block_delta-style streaming partials. */
   partialMessages: boolean;
+  /**
+   * Whether the harness ships built-in filesystem tools (Read, Write, Edit,
+   * Bash, etc.) via a local binary. True for ClaudeHarness (claude-code
+   * executable); false for harnesses that rely purely on MCP tools.
+   *
+   * Replaces the `harness.name === "claude"` check in session-host-run.ts
+   * so callers branch on capability, not identity.
+   */
+  builtInFilesystem: boolean;
 }
 
 // ── Start options ─────────────────────────────────────────────────────────────
@@ -57,6 +72,12 @@ export interface HarnessStartOptions {
   /** Optional session ID for resume (harness-opaque string). */
   resumeId?: string;
   /**
+   * Pre-wrapped MCP server objects from user-configured external servers
+   * (e.g. sidecar mcp-servers.json). Typed as `unknown` because each harness
+   * uses its own native server type. Non-MCP harnesses ignore this field.
+   */
+  externalMcpServers?: Record<string, unknown>;
+  /**
    * Thinking configuration. Only consulted when capabilities.thinking is true.
    * Harnesses that do not support thinking ignore this field entirely.
    */
@@ -65,39 +86,6 @@ export interface HarnessStartOptions {
     display: "summarized" | "omitted";
   };
 }
-
-// ── Normalized event union ────────────────────────────────────────────────────
-
-/**
- * Normalized event union — the wire format on the WebSocket (Phase 3+) and
- * the persisted payload in event_log. Discriminated by `kind`.
- *
- * Invariants (all harnesses must satisfy):
- *   - `init` is always the first event emitted.
- *   - `done` is always the last event emitted.
- *   - `thinking` events are optional; consumers must tolerate their absence.
- *   - `usage.cacheRead` / `cacheCreation` are optional; consumers default to 0.
- *   - `tool_call.parentId` is undefined for top-level calls; sub-agent calls
- *     carry the parent tool-use ID (Anthropic parent_tool_use_id semantics).
- */
-export type NormalizedEvent =
-  | { kind: "init"; sessionId: string; model: string; permissionMode?: string }
-  | { kind: "text"; text: string; role: "assistant" | "user" }
-  | { kind: "thinking"; text: string }
-  | { kind: "tool_call"; id: string; name: string; input: unknown; parentId?: string }
-  | { kind: "tool_result"; callId: string; output: unknown; isError: boolean }
-  | {
-      kind: "usage";
-      input: number;
-      output: number;
-      cacheRead?: number;
-      cacheCreation?: number;
-      costUSD?: number;
-    }
-  | { kind: "permission_denial"; tool: string; reason: string }
-  | { kind: "rate_limit"; retryAfterMs: number; message?: string }
-  | { kind: "api_retry"; attempt: number; reason: string }
-  | { kind: "done"; reason: "stop" | "abort" | "error" | "completed"; error?: string };
 
 // ── Normalized tool types ─────────────────────────────────────────────────────
 
@@ -147,6 +135,19 @@ export interface AgentHarness {
   readonly capabilities: HarnessCapabilities;
 
   /**
+   * Built-in tool names the harness makes available to the agent without
+   * any MCP server registration — e.g. the Claude Code built-in file tools.
+   *
+   * The session host adds these to `allowedTools` alongside the MCP tool
+   * names so the agent knows which tools it may call. Harnesses that do not
+   * expose built-in tools return an empty array.
+   *
+   * Phase 5: replaces the hard-coded `CODE_TOOLS` constant in
+   * `server/session-host-run.ts`.
+   */
+  readonly builtInTools: string[];
+
+  /**
    * Start the session. Returns an AsyncIterable the host pulls until the
    * `done` event is emitted. Must emit `init` first and `done` last.
    */
@@ -156,11 +157,15 @@ export interface AgentHarness {
   abort(): void;
 
   /**
-   * Translate normalized tool definitions into whatever format this harness
-   * expects. Called before start(). The harness stores the result internally
-   * and uses it during the query loop.
+   * Register tool definitions, grouped by MCP server name.
+   * Called before start(). The harness stores the groups internally and
+   * wraps them into its native tool format during start().
+   *
+   * Keys become MCP server names so tool call names follow the pattern
+   * `mcp__<serverName>__<toolName>` (matching the allowedTools list).
+   * Harnesses without native MCP flatten the groups and dispatch by tool name.
    */
-  registerTools(defs: NormalizedToolDef[]): void;
+  registerTools(toolGroups: Record<string, NormalizedToolDef[]>): void;
 
   /**
    * Map a user-supplied alias ("opus", "sonnet", "small", "fast") to a

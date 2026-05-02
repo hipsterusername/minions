@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { SdkMessage } from "../use-socket.ts";
+import type { NormalizedEvent } from "../../shared/normalized-event.ts";
 
 // ── Banner types ────────────────────────────────────────
 
@@ -53,124 +53,39 @@ const BANNER_CONFIG: Record<
   },
 };
 
-// ── Hook: classify SDK events into banners ──────────────
+// ── Classify NormalizedEvent into a banner ──────────────
 
-export function classifySdkEvent(sdkMsg: SdkMessage): StatusBannerItem | null {
+export function classifyNormalizedEvent(event: NormalizedEvent): StatusBannerItem | null {
   const now = Date.now();
 
-  // ── rate_limit_event ──
-  if (sdkMsg.type === "rate_limit_event" && sdkMsg.rate_limit_info) {
-    const info = sdkMsg.rate_limit_info;
-    if (info.status === "rejected") {
-      const resetsAt = info.resetsAt;
-      const waitStr = resetsAt
-        ? ` Resets ${new Date(resetsAt).toLocaleTimeString()}`
-        : "";
-      return {
-        id: nextBannerId(),
-        kind: "rate_limit",
-        message: `Rate limited (${info.rateLimitType ?? "unknown"}).${waitStr}`,
-        detail: info.utilization != null ? `${Math.round(info.utilization * 100)}% utilized` : undefined,
-        timestamp: now,
-        ttl: resetsAt ? Math.min(resetsAt - now + 2000, 120000) : 30000,
-      };
-    }
-    if (info.status === "allowed_warning") {
-      return {
-        id: nextBannerId(),
-        kind: "warning",
-        message: `Approaching rate limit (${Math.round((info.surpassedThreshold ?? info.utilization ?? 0) * 100)}%)`,
-        detail: info.rateLimitType ?? undefined,
-        timestamp: now,
-        ttl: 10000,
-      };
-    }
-    return null;
+  if (event.kind === "rate_limit") {
+    const waitSec = event.retryAfterMs > 0 ? Math.ceil(event.retryAfterMs / 1000) : 0;
+    return {
+      id: nextBannerId(),
+      kind: "rate_limit",
+      message: `Rate limited${waitSec > 0 ? `. Resuming in ${waitSec}s` : ""}`,
+      timestamp: now,
+      ttl: event.retryAfterMs > 0 ? event.retryAfterMs + 2000 : 30000,
+    };
   }
 
-  // ── api_retry (system subtype) ──
-  if (sdkMsg.type === "system" && sdkMsg.subtype === "api_retry") {
-    const attemptStr = sdkMsg.attempt != null ? ` (${sdkMsg.attempt}/${sdkMsg.max_retries})` : "";
-    const delayStr = sdkMsg.retry_delay_ms ? ` in ${(sdkMsg.retry_delay_ms / 1000).toFixed(1)}s` : "";
-    const statusStr = sdkMsg.error_status ? ` [${sdkMsg.error_status}]` : "";
+  if (event.kind === "api_retry") {
     return {
       id: nextBannerId(),
       kind: "retry",
-      message: `Retrying API request${attemptStr}${delayStr}${statusStr}`,
-      detail: sdkMsg.error ?? undefined,
+      message: `Retrying API request (attempt ${event.attempt})`,
+      detail: event.reason !== "unknown" ? event.reason : undefined,
       timestamp: now,
-      ttl: (sdkMsg.retry_delay_ms ?? 5000) + 3000,
+      ttl: 8000,
     };
   }
 
-  // ── compact_boundary ──
-  if (sdkMsg.type === "system" && sdkMsg.subtype === "compact_boundary") {
-    const trigger = sdkMsg.compact_metadata?.trigger ?? "auto";
-    const tokens = sdkMsg.compact_metadata?.pre_tokens;
-    const tokenStr = tokens ? ` (${Math.round(tokens / 1000)}k tokens)` : "";
-    return {
-      id: nextBannerId(),
-      kind: "compaction",
-      message: `Context compacted (${trigger})${tokenStr}`,
-      timestamp: now,
-      ttl: 6000,
-    };
-  }
-
-  // ── status: compacting ──
-  if (sdkMsg.type === "system" && sdkMsg.subtype === "status" && sdkMsg.status === "compacting") {
-    return {
-      id: nextBannerId(),
-      kind: "compaction",
-      message: "Compacting conversation context...",
-      timestamp: now,
-      ttl: 15000,
-    };
-  }
-
-  // ── hook events ──
-  if (sdkMsg.type === "system" && sdkMsg.subtype === "hook_started") {
+  if (event.kind === "done" && event.reason === "error") {
+    const errText = event.error ?? "Unknown error";
     return {
       id: nextBannerId(),
       kind: "warning",
-      message: `Hook running: ${sdkMsg.hook_name ?? sdkMsg.hook_event ?? "unknown"}`,
-      timestamp: now,
-      ttl: 10000,
-    };
-  }
-  if (sdkMsg.type === "system" && sdkMsg.subtype === "hook_response") {
-    if (sdkMsg.outcome === "error") {
-      return {
-        id: nextBannerId(),
-        kind: "warning",
-        message: `Hook failed: ${sdkMsg.hook_name ?? "unknown"} (exit ${sdkMsg.exit_code ?? "?"})`,
-        detail: sdkMsg.output || sdkMsg.stderr || undefined,
-        timestamp: now,
-        ttl: 8000,
-      };
-    }
-    return null;
-  }
-
-  // ── auth_status ──
-  if (sdkMsg.type === "auth_status" && sdkMsg.isAuthenticating) {
-    return {
-      id: nextBannerId(),
-      kind: "warning",
-      message: "Authenticating...",
-      detail: sdkMsg.error ?? undefined,
-      timestamp: now,
-      ttl: 20000,
-    };
-  }
-
-  // ── result errors ──
-  if (sdkMsg.type === "result" && sdkMsg.is_error) {
-    const errText = sdkMsg.errors?.join("; ") ?? "Unknown error";
-    return {
-      id: nextBannerId(),
-      kind: "warning",
-      message: `Turn ended with error: ${sdkMsg.subtype ?? "unknown"}`,
+      message: "Turn ended with error",
       detail: errText,
       timestamp: now,
       ttl: 12000,
@@ -223,9 +138,9 @@ export function useStatusBanners() {
     });
   }, []);
 
-  const processSdkEvent = useCallback(
-    (sdkMsg: SdkMessage) => {
-      const banner = classifySdkEvent(sdkMsg);
+  const processNormalizedEvent = useCallback(
+    (event: NormalizedEvent) => {
+      const banner = classifyNormalizedEvent(event);
       if (banner) addBanner(banner);
     },
     [addBanner],
@@ -240,7 +155,7 @@ export function useStatusBanners() {
     };
   }, []);
 
-  return { banners, processSdkEvent, dismissBanner };
+  return { banners, processNormalizedEvent, dismissBanner };
 }
 
 // ── StatusBanner component ──────────────────────────────

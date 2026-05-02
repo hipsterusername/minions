@@ -2,7 +2,7 @@
  * Routine file storage.
  *
  * Routines live as one JSON file per routine at
- * `<projectPath>/.claude-canvas/routines/<id>.json`. This mirrors the
+ * `<projectPath>/.minions/routines/<id>.json`. This mirrors the
  * pattern set by `skills.json` in `project-store.ts` but uses one-file-per
  * because routines are coarser-grained, edited individually, and benefit
  * from independent diffs.
@@ -20,7 +20,7 @@ import {
   type Routine,
 } from "../shared/routines/types.ts";
 
-const SIDECAR_DIR = ".claude-canvas";
+const SIDECAR_DIR = ".minions";
 const ROUTINES_DIR = "routines";
 
 /** Absolute path to the routines folder for a project. */
@@ -135,7 +135,7 @@ export function loadRoutineByIdStrict(
 /**
  * Save a routine to disk. Validates against the schema before writing —
  * the store is the only path through which routines reach the filesystem,
- * so this guarantees `.claude-canvas/routines/` never holds a structurally
+ * so this guarantees `.minions/routines/` never holds a structurally
  * invalid file produced by our own code.
  *
  * Stamps `updatedAt` on every write so the UI can sort by recency.

@@ -55,7 +55,9 @@ export type WsCommandType =
   | "start_routine"
   | "abort_routine"
   // Render-DSL interactive components
-  | "submit_form";
+  | "submit_form"
+  // Session history
+  | "clear_session";
 
 /**
  * Binary attachment the client pins to a user turn — today only images.

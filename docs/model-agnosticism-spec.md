@@ -1,6 +1,6 @@
 # Model Agnosticism — Spec
 
-**Status:** Draft. Not yet implemented.
+**Status:** Complete. All 8 phases shipped.
 **Companion documents:** [`testing-strategy.md`](./testing-strategy.md), the project `CLAUDE.md`.
 **Owner:** TBD.
 

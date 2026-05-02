@@ -8,11 +8,13 @@ import type { ServerMessage } from "../use-socket.ts";
 import { MINION_SYSTEM_PROMPT } from "../prompts/minion-system.ts";
 import { useStatusBanners, StatusBannerStack } from "../components/StatusBanner.tsx";
 import { StreamingBubble, StreamingIndicator } from "../components/StreamingBubble.tsx";
+import { chatRoleStyle, type ChatRole } from "../chat-bubble-style.ts";
 import { SessionToolbar } from "../components/SessionToolbar.tsx";
 import type { ModelOption, PermissionMode } from "../components/SessionToolbar.tsx";
 import { msgId, type DisplayMessage } from "../sdk-messages.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { AddAsNodeButton } from "../components/AddAsNodeButton.tsx";
+import { UserContextHeader } from "../components/UserContextHeader.tsx";
 import { STATUS_COLORS, PRIORITY_COLORS } from "../palette.ts";
 import {
   type SessionStreamState,
@@ -108,7 +110,7 @@ export function MinionNodeRenderer({
   const [showTaskList, setShowTaskList] = useState(false);
   const outputRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const { banners, processSdkEvent, dismissBanner } = useStatusBanners();
+  const { banners, processNormalizedEvent, dismissBanner } = useStatusBanners();
   const syncedRef = useRef(false);
   const debugEnabled = useSyncExternalStore(
     debugFlagStore.subscribe,
@@ -341,11 +343,12 @@ export function MinionNodeRenderer({
         serverMsg.type === "sdk_event" &&
         serverMsg.sessionKey === current.sessionKey
       ) {
-        processSdkEvent(serverMsg.message);
+        processNormalizedEvent(serverMsg.event);
 
-        // Live `result` event: hook already added cost/turns + the result
+        // Live `done` event: hook already added cost/turns + the result
         // bubble. We layer task completion + auto-advance + send_message.
-        if (serverMsg.message.type === "result") {
+        if (serverMsg.event.kind === "done") {
+          const doneEvent = serverMsg.event;
           let updated: MinionData = current;
           if (
             current.activeTaskIndex >= 0 &&
@@ -357,9 +360,9 @@ export function MinionNodeRenderer({
               tasks[current.activeTaskIndex] = {
                 ...task,
                 status: "completed",
-                result: serverMsg.message.is_error
-                  ? (serverMsg.message.errors[0] ?? "Error")
-                  : serverMsg.message.result,
+                result: doneEvent.reason === "error"
+                  ? (doneEvent.error ?? "Error")
+                  : (doneEvent.result ?? ""),
                 activeStep: null,
               };
             }
@@ -449,7 +452,7 @@ export function MinionNodeRenderer({
         }
       }
     });
-  }, [socketSubscribe, emitUpdate, processSdkEvent, socketSend]);
+  }, [socketSubscribe, emitUpdate, processNormalizedEvent, socketSend]);
 
   // Start working on a task
   const startTask = useCallback(
@@ -994,29 +997,15 @@ export function MinionNodeRenderer({
                   key={msg.id}
                   className={msg.role === "assistant" ? "copyable" : undefined}
                   style={{
+                    ...chatRoleStyle(msg.role as ChatRole, { density: "compact" }),
                     position: "relative",
-                    padding: "4px 8px",
-                    borderRadius: 4,
-                    fontSize: 11,
-                    lineHeight: 1.6,
-                    fontFamily: "var(--font-sans)",
-                    color:
-                      msg.role === "user"
-                        ? "var(--accent)"
-                        : "var(--text-primary)",
-                    borderLeft:
-                      msg.role === "assistant"
-                        ? "2px solid var(--success-color)"
-                        : "none",
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
                     maxHeight: 120,
                     overflow: "hidden",
-                    opacity: msg.role === "system" ? 0.5 : 1,
                   }}
                 >
                   {msg.role === "assistant" && <CopyButton text={msg.content} />}
                   {msg.role === "assistant" && <AddAsNodeButton text={msg.content} onAdd={onAddContentNode} />}
+                  {msg.role === "user" && <UserContextHeader />}
                   {msg.content}
                   {msg.suffix && (
                     <span style={{ display: "inline-block", marginLeft: 6, fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", opacity: 0.7 }}>
@@ -1027,7 +1016,7 @@ export function MinionNodeRenderer({
               ))}
             {/* Streaming partial text in log */}
             {data.streamingText ? (
-              <StreamingBubble text={data.streamingText} borderColor="var(--success-color)" />
+              <StreamingBubble text={data.streamingText} role="assistant" density="compact" />
             ) : data.status === "running" ? (
               <StreamingIndicator label="Working..." />
             ) : null}

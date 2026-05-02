@@ -3,15 +3,16 @@
  */
 
 import { z } from "zod/v4";
-import { tool } from "@anthropic-ai/claude-agent-sdk";
+import type { NormalizedToolDef } from "../harness/types.ts";
 import type { TaskToolContext, TaskRecord } from "./types.ts";
 import { emitTaskPlanUpdate } from "./shared.ts";
 
-export function createPlanTaskTool(ctx: TaskToolContext) {
-  return tool(
-    "plan_task",
-    "Register a task in the plan without executing it yet. Use this to outline your work upfront. Each task can later be executed by you directly with complete_task, or delegated to a Minion with assign_task.",
-    {
+export function createPlanTaskToolDef(ctx: TaskToolContext): NormalizedToolDef {
+  return {
+    name: "plan_task",
+    description:
+      "Register a task in the plan without executing it yet. Use this to outline your work upfront. Each task can later be executed by you directly with complete_task, or delegated to a Minion with assign_task.",
+    inputSchema: z.object({
       taskId: z.string().describe("Unique identifier for this task"),
       title: z.string().describe("Short title for the task"),
       description: z
@@ -20,8 +21,14 @@ export function createPlanTaskTool(ctx: TaskToolContext) {
       priority: z
         .enum(["low", "medium", "high", "critical"])
         .describe("Task priority level"),
-    },
-    async (args) => {
+    }),
+    handler: async (input: unknown) => {
+      const args = input as {
+        taskId: string;
+        title: string;
+        description: string;
+        priority: "low" | "medium" | "high" | "critical";
+      };
       const { taskId, title, description, priority } = args;
 
       if (ctx.taskState.tasks.has(taskId)) {
@@ -61,5 +68,5 @@ export function createPlanTaskTool(ctx: TaskToolContext) {
         ],
       };
     },
-  );
+  };
 }

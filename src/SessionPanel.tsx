@@ -1,10 +1,10 @@
 import { useEffect, useCallback, useMemo, useRef, useState } from "react";
 import type { ServerMessage, SessionInfo } from "./use-socket.ts";
-import { isResultMessage } from "./use-socket.ts";
 import { UsageSection } from "./UsagePopover.tsx";
 import {
   emptySessionUsage,
-  mergeResultIntoSession,
+  mergeUsageEvent,
+  mergeDoneEvent,
   type SessionUsage,
 } from "./usage-aggregator.ts";
 import {
@@ -101,19 +101,26 @@ export function SessionPanel({
         return;
       }
 
-      // Per-session usage roll-up — fed by the SDK `result` event that closes
-      // every turn. Used by the usage section to show per-model token totals.
-      if (serverMsg.type === "sdk_event" && isResultMessage(serverMsg.message)) {
+      // Per-session usage roll-up — fed by NormalizedEvent usage/done events.
+      if (serverMsg.type === "sdk_event") {
         const key = serverMsg.sessionKey;
-        const result = serverMsg.message;
-        setUsageBySession((prev) => {
-          const next = new Map(prev);
-          next.set(
-            key,
-            mergeResultIntoSession(prev.get(key) ?? emptySessionUsage(), result),
-          );
-          return next;
-        });
+        const ev = serverMsg.event;
+        if (ev.kind === "usage" && ev.costUSD != null) {
+          const costUSD = ev.costUSD;
+          setUsageBySession((prev) => {
+            const next = new Map(prev);
+            next.set(key, mergeUsageEvent(prev.get(key) ?? emptySessionUsage(), costUSD));
+            return next;
+          });
+        }
+        if (ev.kind === "done" && ev.turns != null) {
+          const turns = ev.turns;
+          setUsageBySession((prev) => {
+            const next = new Map(prev);
+            next.set(key, mergeDoneEvent(prev.get(key) ?? emptySessionUsage(), turns));
+            return next;
+          });
+        }
       }
     });
   }, [socketSubscribe]);
@@ -148,6 +155,22 @@ export function SessionPanel({
 
   const visibleSessions = sessions.filter((s) => s.role !== "minion");
   const runningCount = visibleSessions.filter((s) => s.status === "running").length;
+
+  // Prevent wheel events from bubbling to the canvas zoom handler.
+  // Canvas uses a native addEventListener so React's onWheel stopPropagation
+  // is ineffective — we need a native listener that fires first.
+  // Depend on isOpen: the panel returns null when closed, so listRef.current
+  // is null on initial mount. Re-running when isOpen becomes true ensures
+  // the listener attaches after the div is in the DOM.
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isOpen) return;
+    const el = listRef.current;
+    if (!el) return;
+    const stop = (e: WheelEvent) => { e.stopPropagation(); };
+    el.addEventListener("wheel", stop, { passive: false });
+    return () => el.removeEventListener("wheel", stop);
+  }, [isOpen]);
 
   // Surface live count + running indicator + cost on the dock pill.
   useDockBadge("sessions", {
@@ -184,6 +207,7 @@ export function SessionPanel({
 
       {/* Session list */}
       <div
+        ref={listRef}
         style={{
           flex: 1,
           overflow: "auto",

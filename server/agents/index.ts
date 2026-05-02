@@ -8,4 +8,4 @@ import "./minion.ts";
 import "./default.ts";
 
 export { getAgentType, getAgentTypeOrDefault, registerAgentType } from "./registry.ts";
-export type { AgentType, AgentTypeContext, McpServerResult } from "./types.ts";
+export type { AgentType, AgentTypeContext, AgentToolResult } from "./types.ts";

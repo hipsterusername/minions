@@ -770,7 +770,7 @@
   font-family: var(--font-sans);
   color: var(--text-secondary);
   line-height: 1.5;
-  border-bottom: 1px solid var(--kb-border);
+  border-bottom: 1px solid var(--border-default);
   background: color-mix(in srgb, var(--danger-color) 4%, transparent);
 }
 

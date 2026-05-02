@@ -2,10 +2,8 @@
  * Claude model alias resolution.
  *
  * Maps short UI aliases ("opus", "sonnet") to concrete Anthropic model IDs.
- * Mirrors the alias table in server/session-host-config.ts; Phase 2 will
- * make that file delegate here instead of maintaining its own copy.
- *
- * Phase 1: standalone module, no callers outside the Claude harness.
+ * Single source of truth — session-host-run.ts delegates to harness.resolveModel(),
+ * which calls resolveModelAlias() here. No duplicate table elsewhere.
  */
 
 /**

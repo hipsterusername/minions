@@ -1,9 +1,14 @@
 /**
  * StreamingBubble – renders partial assistant text with a blinking cursor.
  * Shared across ClaudeSessionNode, MinionNode, and LeaderNode.
+ *
+ * Styled via chatRoleStyle() so the streaming line sits in the same
+ * indent column and body color as the eventual finished message — no
+ * visual jump when streaming completes.
  */
 
 import { useEffect, useRef } from "react";
+import { chatRoleStyle, type ChatRole } from "../chat-bubble-style.ts";
 
 const CURSOR_KEYFRAMES = `
 @keyframes streamCursorBlink {
@@ -24,13 +29,20 @@ function injectStyle() {
 interface StreamingBubbleProps {
   /** Accumulated partial text so far */
   text: string;
-  /** Border color to match the node's theme (default: var(--streaming-color)) */
-  borderColor?: string;
+  /**
+   * Which role this stream will resolve to. Drives indent + body color
+   * so the streaming line matches the eventual finished message.
+   * Default: assistant.
+   */
+  role?: ChatRole;
+  /** Density variant matching the host surface. Default: default. */
+  density?: "default" | "compact";
 }
 
 export function StreamingBubble({
   text,
-  borderColor = "var(--streaming-color)",
+  role = "assistant",
+  density = "default",
 }: StreamingBubbleProps) {
   const elRef = useRef<HTMLDivElement>(null);
 
@@ -45,17 +57,7 @@ export function StreamingBubble({
     <div
       ref={elRef}
       style={{
-        padding: "8px 10px",
-        borderRadius: 6,
-        fontSize: 12,
-        lineHeight: 1.6,
-        fontFamily: "var(--font-sans)",
-        color: "var(--text-primary)",
-        borderLeft: `2px solid ${borderColor}`,
-        whiteSpace: "pre-wrap",
-        wordBreak: "break-word",
-        overflowWrap: "break-word",
-        marginBlock: 2,
+        ...chatRoleStyle(role, { density }),
         position: "relative",
       }}
     >
@@ -66,7 +68,7 @@ export function StreamingBubble({
           width: 2,
           height: "1.1em",
           marginLeft: 1,
-          background: borderColor,
+          background: "currentColor",
           verticalAlign: "text-bottom",
           animation: "streamCursorBlink 0.8s ease-in-out infinite",
         }}

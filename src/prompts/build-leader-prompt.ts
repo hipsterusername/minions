@@ -10,7 +10,10 @@
  * chat send) builds the prompt the same way.
  */
 
-import { LEADER_SYSTEM_PROMPT } from "./leader-system.ts";
+import {
+  buildBaseLeaderPrompt,
+  CLAUDE_BUILT_IN_TOOLS,
+} from "./leader-system.ts";
 import { getAllSkills, getSkill } from "../skills/registry.ts";
 import {
   buildArmingInventory,
@@ -23,13 +26,19 @@ export interface BuildLeaderPromptInput {
   skillIds: readonly string[];
   /** Variable values for the leader's tagged skills. */
   skillValues: Record<string, Record<string, string>>;
+  /**
+   * Coding tool names to inject into the "Your Capabilities" section.
+   * Defaults to the Claude built-in tool list.
+   */
+  tools?: readonly string[];
 }
 
 export function buildLeaderSystemPrompt(input: BuildLeaderPromptInput): string {
+  const tools = input.tools ?? CLAUDE_BUILT_IN_TOOLS;
   const taggedSkills = input.skillIds
     .map((id) => getSkill(id))
     .filter((s): s is SkillTemplate => s !== undefined);
   const activeAddendum = compileSkills(taggedSkills, input.skillValues);
   const inventory = buildArmingInventory(getAllSkills());
-  return LEADER_SYSTEM_PROMPT + activeAddendum + inventory;
+  return buildBaseLeaderPrompt(tools) + activeAddendum + inventory;
 }

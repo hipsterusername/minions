@@ -65,7 +65,7 @@ export interface TaskToolContext {
   /**
    * The canonical project path (sidecar root). When the leader is running
    * inside a git worktree, `cwd` points at the worktree but `projectPath`
-   * still points at the original checkout where `.claude-canvas/skills.json`
+   * still points at the original checkout where `.minions/skills.json`
    * lives. Falls back to `cwd` when no worktree is in use.
    */
   projectPath: string;

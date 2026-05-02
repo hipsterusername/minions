@@ -5,7 +5,6 @@
  * 400-line architecture ceiling. Contains:
  *   - Shared type aliases (roles, statuses, buffered events)
  *   - Adaptive-thinking config + validation
- *   - Model-alias resolution table
  *   - `deriveTaskName` prompt helper
  *   - Buffer cap constant
  *
@@ -16,6 +15,8 @@
 // ── Buffer cap ─────────────────────────────────────────────
 
 export const MAX_BUFFERED_EVENTS = 200;
+
+import type { NormalizedEvent } from "./harness/types.ts";
 
 // ── Shared types ───────────────────────────────────────────
 
@@ -31,6 +32,16 @@ export type SessionStatus =
 export interface BufferedEvent {
   type: string;
   sessionKey: string;
+  /**
+   * For type="sdk_event" (Phase 3+): the normalized event payload.
+   * The client reads this field on inbound `sdk_event` envelopes.
+   */
+  event?: NormalizedEvent;
+  /**
+   * Legacy field retained so existing test fixtures that create
+   * hand-crafted BufferedEvent objects (e.g. the buffer-cap test) do not
+   * need to be updated. New sdk_event writes set `event`, not `message`.
+   */
   message?: unknown;
   status?: string;
   error?: string;
@@ -70,17 +81,6 @@ const ADAPTIVE_THINKING_MODELS: ReadonlySet<string> = new Set([
   "claude-mythos-preview",
 ]);
 
-/**
- * Map short UI aliases to full model IDs so the SDK uses the intended version.
- * Without this, the SDK resolves bare "opus" → claude-opus-4-6 (its built-in default).
- */
-const MODEL_ALIAS_MAP: Record<string, string> = {
-  opus: "claude-opus-4-7",
-  "opus-old": "claude-opus-4-6",
-  sonnet: "claude-sonnet-4-6",
-  haiku: "claude-haiku-4-5",
-};
-
 export function isValidThinkingConfig(v: unknown): v is ThinkingConfig {
   if (typeof v !== "object" || v === null) return false;
   const cfg = v as Record<string, unknown>;
@@ -91,11 +91,6 @@ export function isValidThinkingConfig(v: unknown): v is ThinkingConfig {
     typeof cfg.display === "string" &&
     VALID_DISPLAYS.has(cfg.display as ThinkingDisplay)
   );
-}
-
-export function resolveModelId(model: string | null): string | null {
-  if (!model) return null;
-  return MODEL_ALIAS_MAP[model] ?? model;
 }
 
 export function modelSupportsAdaptive(model: string | null): boolean {

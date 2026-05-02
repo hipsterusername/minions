@@ -18,7 +18,8 @@
  *     `server/worktree.ts`; the host merely holds the handle).
  */
 
-import { runClaudeQuery, type QueryHandleLike } from "./harness/claude/index.ts";
+import "./harness/claude/index.ts"; // side-effect: registers ClaudeHarness
+import { getHarness } from "./harness/index.ts";
 import { buildQueryPrompt } from "./multimodal-prompt.ts";
 import type { Bus } from "./bus.ts";
 import { getAgentType, type AgentTypeContext } from "./agents/index.ts";
@@ -40,8 +41,8 @@ import {
 } from "./session-host-config.ts";
 import {
   ensureWorktree,
-  buildQueryOptions,
-  processSdkMessage,
+  buildHarnessStartOpts,
+  processNormalizedEvent,
 } from "./session-host-run.ts";
 
 // Re-export shared types so callers can import everything from session-host.
@@ -116,6 +117,12 @@ export interface StartSessionOptions {
    * is appended to `allowedTools` so the agent can call without prompts.
    */
   externalMcpToolNames?: string[] | undefined;
+  /**
+   * Name of the registered AgentHarness to use for this session.
+   * Defaults to "claude". Pass a different name to route the session
+   * through a non-Claude harness registered via `registerHarness()`.
+   */
+  harness?: string | undefined;
 }
 
 // ── SessionHost ────────────────────────────────────────────
@@ -139,8 +146,10 @@ export class SessionHost {
   turns = 0;
 
   // ── Volatile runtime state ─────────────────────────
+  /** Registered harness name for this session (e.g. "claude"). */
+  harnessName = "claude";
   abortController: AbortController = new AbortController();
-  queryHandle: QueryHandleLike | null = null;
+  queryHandle: AsyncIterable<unknown> | null = null;
   eventBuffer: BufferedEvent[] = [];
   lastError: string | null = null;
   model: string | null = null;
@@ -253,6 +262,7 @@ export class SessionHost {
             resumeId: this.sessionId ?? undefined,
             systemPrompt: opts.systemPrompt,
             role: this.role,
+            harness: this.harnessName,
           });
         }, durationMs);
       },
@@ -288,6 +298,7 @@ export class SessionHost {
     this.lastError = null;
     this.role = resolvedRole;
     if (opts.resumeId) this.sessionId = opts.resumeId;
+    if (opts.harness) this.harnessName = opts.harness;
     if (opts.initialModel && !this.model) this.model = opts.initialModel;
     if (opts.thinkingConfig !== undefined) {
       this.thinkingConfig = opts.thinkingConfig ?? this.thinkingConfig;
@@ -314,29 +325,36 @@ export class SessionHost {
     this.bufferEvent(statusEvent);
     deps.bus.emitToSession(this.id, statusEvent);
 
-    // ── Run the SDK query ─────────────────────────────
+    // ── Run the harness query ─────────────────────────
     try {
       const agentCtx = this.buildAgentContext(opts, deps);
-      const mcpResult = agentType.createMcpServers(agentCtx);
+      const toolResult = agentType.getToolGroups(agentCtx);
 
-      if (mcpResult.taskState) this.taskState = mcpResult.taskState;
-      if (mcpResult.renderState) this.renderState = mcpResult.renderState;
+      if (toolResult.taskState) this.taskState = toolResult.taskState;
+      if (toolResult.renderState) this.renderState = toolResult.renderState;
 
-      const { options } = buildQueryOptions({
+      const harness = getHarness(this.harnessName);
+
+      // Register tools with the harness (grouped by MCP server name).
+      harness.registerTools(toolResult.toolGroups);
+
+      const { startOpts } = buildHarnessStartOpts({
         host: this,
         opts,
         agentType,
         agentCtx,
-        mcpResult,
+        toolResult,
         abortController,
+        harness,
+        prompt: buildQueryPrompt(opts) as string | AsyncIterable<{ role: "user"; content: string }>,
       });
 
-      const handle = runClaudeQuery(buildQueryPrompt(opts), options);
-      this.queryHandle = handle;
+      const eventStream = harness.start(startOpts);
+      this.queryHandle = eventStream;
 
-      for await (const message of handle) {
+      for await (const event of eventStream) {
         if (abortController.signal.aborted) break;
-        processSdkMessage(this, deps.bus, agentType, agentCtx, message);
+        processNormalizedEvent(this, deps.bus, agentType, agentCtx, event);
       }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);

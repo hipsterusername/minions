@@ -8,12 +8,15 @@
  *   - result (success)  → [usage] + [permission_denial*] + [done]
  *   - result (error)    → [done]
  *   - rate_limit_event  → [rate_limit]
+ *   - stream_event      → [text_delta] or [stream_end] or []
+ *   - tool_progress     → [tool_progress]
  *   - everything else   → []
  *
  * This is a pure function with no side effects. All SDK coupling lives here.
  *
  * Phase 1: new module, not yet wired into session-host.ts.
- * See docs/model-agnosticism-spec.md §3.3 and Phase 1.
+ * Phase 3: extended to handle streaming events and tool_progress.
+ * See docs/model-agnosticism-spec.md §3.3.
  */
 
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -61,6 +64,12 @@ export function sdkToNormalized(msg: SDKMessage): NormalizedEvent[] {
     case "rate_limit_event":
       return translateRateLimit(msg as RateLimitLike);
 
+    case "stream_event":
+      return translateStreamEvent(msg as StreamEventLike);
+
+    case "tool_progress":
+      return translateToolProgress(msg as ToolProgressLike);
+
     default:
       return [];
   }
@@ -96,6 +105,7 @@ interface ResultLike {
   result?: string;
   errors?: string[];
   total_cost_usd?: number;
+  num_turns?: number;
   usage?: RawUsage;
   permission_denials?: Array<{ tool_name: string }>;
 }
@@ -103,6 +113,25 @@ interface ResultLike {
 interface RateLimitLike {
   type: "rate_limit_event";
   rate_limit_info?: { resetsAt?: number };
+}
+
+interface StreamEventLike {
+  type: "stream_event";
+  parent_tool_use_id?: string | null;
+  event: {
+    type?: string;
+    index?: number;
+    delta?: { type?: string; text?: string };
+    content_block?: { type?: string; text?: string };
+  };
+}
+
+interface ToolProgressLike {
+  type: "tool_progress";
+  tool_use_id?: string;
+  tool_name?: string;
+  parent_tool_use_id?: string | null;
+  elapsed_time_seconds?: number;
 }
 
 function translateSystem(msg: SystemLike): NormalizedEvent[] {
@@ -131,6 +160,7 @@ function translateSystem(msg: SystemLike): NormalizedEvent[] {
 }
 
 function translateAssistant(msg: AssistantLike): NormalizedEvent[] {
+  if (!msg.message?.content) return [];
   const events: NormalizedEvent[] = [];
   const parentId = msg.parent_tool_use_id ?? undefined;
 
@@ -174,7 +204,15 @@ function translateResult(msg: ResultLike): NormalizedEvent[] {
     events.push({ kind: "permission_denial", tool: denial.tool_name, reason: "denied" });
   }
 
-  events.push({ kind: "done", reason: "completed" });
+  events.push({
+    kind: "done",
+    reason: "completed",
+    ...(msg.result != null && { result: msg.result }),
+    ...(msg.num_turns != null && { turns: msg.num_turns }),
+    // Include total cost on done so processNormalizedEvent can capture it even
+    // when result carries total_cost_usd but no usage breakdown.
+    ...(msg.total_cost_usd != null && { costUSD: msg.total_cost_usd }),
+  });
   return events;
 }
 
@@ -193,4 +231,58 @@ function usageFromRaw(u: RawUsage, costUSD: number | undefined): NormalizedEvent
     ...(u.cache_creation_input_tokens != null && { cacheCreation: u.cache_creation_input_tokens }),
     ...(costUSD != null && { costUSD }),
   };
+}
+
+function translateStreamEvent(msg: StreamEventLike): NormalizedEvent[] {
+  const { event } = msg;
+  const parentId = msg.parent_tool_use_id ?? undefined;
+  const index = typeof event.index === "number" ? event.index : 0;
+
+  if (event.type === "content_block_delta") {
+    const delta = event.delta;
+    // text_delta carries a new text chunk for the active content block.
+    if (delta?.type === "text_delta" && typeof delta.text === "string") {
+      return [{ kind: "text_delta", text: delta.text, blockIndex: index, parentId }];
+    }
+    // Some SDK versions omit delta.type but still carry delta.text.
+    if (!delta?.type && typeof delta?.text === "string") {
+      return [{ kind: "text_delta", text: delta.text, blockIndex: index, parentId }];
+    }
+    // input_json_delta, thinking_delta, etc. — not surfaced as streaming events.
+    return [];
+  }
+
+  if (event.type === "content_block_start" && event.content_block?.type === "text") {
+    // Initial text for a new text block — treat as an empty-or-prefilled delta.
+    const initial = event.content_block.text ?? "";
+    return initial ? [{ kind: "text_delta", text: initial, blockIndex: index, parentId }] : [];
+  }
+
+  if (event.type === "message_stop") {
+    return [{ kind: "stream_end" }];
+  }
+
+  return [];
+}
+
+function translateToolProgress(msg: ToolProgressLike): NormalizedEvent[] {
+  const parentId = msg.parent_tool_use_id ?? undefined;
+  return [
+    {
+      kind: "tool_progress",
+      id: msg.tool_use_id ?? "",
+      name: msg.tool_name ?? "",
+      elapsedSeconds: msg.elapsed_time_seconds ?? 0,
+      ...(parentId !== undefined && { parentId }),
+    },
+  ];
+}
+
+/**
+ * Accepts an opaque `unknown` value so callers outside the harness directory
+ * can translate SDK messages without importing `SDKMessage` directly.
+ * Internally casts to `SDKMessage`; all SDK coupling stays in this file.
+ */
+export function translateSdkMessage(msg: unknown): NormalizedEvent[] {
+  return sdkToNormalized(msg as SDKMessage);
 }

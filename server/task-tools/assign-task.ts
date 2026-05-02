@@ -3,17 +3,22 @@
  */
 
 import { z } from "zod/v4";
-import { tool } from "@anthropic-ai/claude-agent-sdk";
+import type { NormalizedToolDef } from "../harness/types.ts";
 import type { TaskToolContext, TaskRecord } from "./types.ts";
 import { emitTaskPlanUpdate } from "./shared.ts";
 import { compileSkills, loadSkillsByIds } from "../skills.ts";
 
-export function createAssignTaskTool(ctx: TaskToolContext) {
-  return tool(
-    "assign_task",
-    "Delegate a task to a new Minion agent. Creates a minion session that will execute the task autonomously. If the task was registered with plan_task, it will transition from planned to running. Optionally arm the minion with one or more skills from the project's skill library via `skillIds`.",
-    {
-      taskId: z.string().describe("Unique identifier for this task (use the same ID as plan_task if pre-planned)"),
+export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef {
+  return {
+    name: "assign_task",
+    description:
+      "Delegate a task to a new Minion agent. Creates a minion session that will execute the task autonomously. If the task was registered with plan_task, it will transition from planned to running. Optionally arm the minion with one or more skills from the project's skill library via `skillIds`.",
+    inputSchema: z.object({
+      taskId: z
+        .string()
+        .describe(
+          "Unique identifier for this task (use the same ID as plan_task if pre-planned)",
+        ),
       title: z.string().describe("Short title for the task"),
       description: z
         .string()
@@ -35,8 +40,16 @@ export function createAssignTaskTool(ctx: TaskToolContext) {
         .describe(
           "Optional values for skill template variables, shaped as { skillId: { variableName: value } }. Only needed for skills whose templates declare {{placeholders}}.",
         ),
-    },
-    async (args) => {
+    }),
+    handler: async (input: unknown) => {
+      const args = input as {
+        taskId: string;
+        title: string;
+        description: string;
+        priority: "low" | "medium" | "high" | "critical";
+        skillIds?: string[];
+        skillValues?: Record<string, Record<string, string>>;
+      };
       const { taskId, title, description, priority, skillIds, skillValues } =
         args;
 
@@ -165,5 +178,5 @@ export function createAssignTaskTool(ctx: TaskToolContext) {
         ],
       };
     },
-  );
+  };
 }

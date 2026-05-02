@@ -8,15 +8,20 @@
  * topic via the shared `Bus` — see `server/bus.ts`. The component schema
  * is imported from `shared/render-dsl.ts`, which is the single source of
  * truth consumed by both server and client.
+ *
+ * Returns NormalizedToolDef[] which agents/leader.ts places into a toolGroup
+ * keyed "render-dashboard". ClaudeHarness.registerTools() wraps them as a
+ * named MCP server so tool calls follow the mcp__render-dashboard__* pattern.
  */
 
 import { z } from "zod/v4";
-import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
+import type { NormalizedToolDef } from "./harness/types.ts";
 import type { Bus } from "./bus.ts";
 import {
   renderComponentSchema,
   type RenderComponent,
 } from "../shared/render-dsl.ts";
+import { elideDefaults } from "../shared/render-defaults.ts";
 
 // ── Types ─────────────────────────────────────────────
 
@@ -30,11 +35,11 @@ export interface RenderState {
 // ── Factory ───────────────────────────────────────────
 
 /**
- * Create render dashboard MCP tools bound to a specific leader session.
+ * Create render dashboard tool definitions bound to a specific leader session.
  *
  * Returns:
- *  - `mcpServer` config to pass into `query()` options.mcpServers
- *  - `renderState` so the server can inspect the dashboard externally
+ *  - `toolDefs` — flat NormalizedToolDef[] to pass to wrapTools().
+ *  - `renderState` so the server can inspect the dashboard externally.
  */
 export function createRenderToolsForLeader(opts: {
   leaderSessionKey: string;
@@ -46,7 +51,7 @@ export function createRenderToolsForLeader(opts: {
   onStateChange?: (state: RenderState) => void;
   /** Optional initial state to preserve across resume calls */
   existingRenderState?: RenderState;
-}) {
+}): { toolDefs: NormalizedToolDef[]; renderState: RenderState } {
   const { leaderSessionKey, bus, onStateChange } = opts;
 
   const renderState: RenderState = opts.existingRenderState ?? {
@@ -66,24 +71,31 @@ export function createRenderToolsForLeader(opts: {
   }
 
   // ── render_set ────────────────────────────────────
-  const renderSetTool = tool(
-    "render_set",
-    "Replace the entire dashboard. Use this for initial setup or full refreshes.",
-    {
+
+  const renderSetDef: NormalizedToolDef = {
+    name: "render_set",
+    description: "Replace the entire dashboard. Use this for initial setup or full refreshes.",
+    inputSchema: z.object({
       title: z.string().optional().describe("Dashboard title"),
       columns: z.number().optional().describe("Grid columns (default 2)"),
       components: z
         .array(renderComponentSchema)
         .describe("Full component tree to display"),
-    },
-    async (args) => {
+    }),
+    handler: async (input: unknown) => {
+      const args = input as {
+        title?: string;
+        columns?: number;
+        components: RenderComponent[];
+      };
       // `set` is a full replace: title and columns both fall back to their
       // documented defaults when the agent omits them, mirroring the way
-      // components is replaced wholesale. (Earlier code preserved title but
-      // reset columns, which was inconsistent.)
+      // components is replaced wholesale.
       renderState.title = args.title ?? "";
       renderState.columns = args.columns ?? 2;
-      renderState.components = args.components;
+      // Strip fields equal to their documented defaults so persisted state
+      // and the broadcast envelope stay lean.
+      renderState.components = args.components.map(elideDefaults);
 
       bus.emitToSession(leaderSessionKey, {
         type: "render_update",
@@ -108,13 +120,14 @@ export function createRenderToolsForLeader(opts: {
         ],
       };
     },
-  );
+  };
 
   // ── render_patch ──────────────────────────────────
-  const renderPatchTool = tool(
-    "render_patch",
-    "Update specific components by id without replacing the whole dashboard.",
-    {
+
+  const renderPatchDef: NormalizedToolDef = {
+    name: "render_patch",
+    description: "Update specific components by id without replacing the whole dashboard.",
+    inputSchema: z.object({
       updates: z
         .array(
           z
@@ -122,8 +135,9 @@ export function createRenderToolsForLeader(opts: {
             .passthrough(),
         )
         .describe("Array of partial component updates, each must include id"),
-    },
-    async (args) => {
+    }),
+    handler: async (input: unknown) => {
+      const args = input as { updates: Array<Record<string, unknown>> };
       // Apply patches to local state
       for (const update of args.updates) {
         const idx = renderState.components.findIndex(
@@ -131,15 +145,12 @@ export function createRenderToolsForLeader(opts: {
         );
         if (idx !== -1) {
           const existing = renderState.components[idx]!;
-          // Merge update into component, preserving id and type — they
-          // must not change via patch. We cast to RenderComponent because
-          // the merged object retains the original discriminant.
-          renderState.components[idx] = {
+          renderState.components[idx] = elideDefaults({
             ...existing,
             ...update,
             id: existing.id,
             type: existing.type,
-          } as RenderComponent;
+          } as RenderComponent);
         }
       }
 
@@ -161,33 +172,35 @@ export function createRenderToolsForLeader(opts: {
         ],
       };
     },
-  );
+  };
 
   // ── render_append ─────────────────────────────────
-  const renderAppendTool = tool(
-    "render_append",
-    "Add new components to the existing dashboard.",
-    {
+
+  const renderAppendDef: NormalizedToolDef = {
+    name: "render_append",
+    description: "Add new components to the existing dashboard.",
+    inputSchema: z.object({
       components: z
         .array(renderComponentSchema)
         .describe("Components to append"),
-    },
-    async (args) => {
+    }),
+    handler: async (input: unknown) => {
+      const args = input as { components: RenderComponent[] };
       // Match the client-side `applyRenderMessage("append")` semantics: a
       // component whose id already exists is treated as a replace, not a
-      // duplicate. Without this the server's persisted state diverges from
-      // the dashboard the user actually sees.
-      const incomingIds = new Set(args.components.map((c) => c.id));
+      // duplicate.
+      const elided = args.components.map(elideDefaults);
+      const incomingIds = new Set(elided.map((c) => c.id));
       renderState.components = [
         ...renderState.components.filter((c) => !incomingIds.has(c.id)),
-        ...args.components,
+        ...elided,
       ];
 
       bus.emitToSession(leaderSessionKey, {
         type: "render_update",
         leaderSessionKey,
         action: "append",
-        components: args.components,
+        components: elided,
       });
 
       notifyStateChange();
@@ -201,16 +214,18 @@ export function createRenderToolsForLeader(opts: {
         ],
       };
     },
-  );
+  };
 
   // ── render_remove ─────────────────────────────────
-  const renderRemoveTool = tool(
-    "render_remove",
-    "Remove components from the dashboard by their ids.",
-    {
+
+  const renderRemoveDef: NormalizedToolDef = {
+    name: "render_remove",
+    description: "Remove components from the dashboard by their ids.",
+    inputSchema: z.object({
       ids: z.array(z.string()).describe("Component ids to remove"),
-    },
-    async (args) => {
+    }),
+    handler: async (input: unknown) => {
+      const args = input as { ids: string[] };
       const idSet = new Set(args.ids);
       renderState.components = renderState.components.filter(
         (c) => !idSet.has(c.id),
@@ -234,24 +249,10 @@ export function createRenderToolsForLeader(opts: {
         ],
       };
     },
-  );
+  };
 
-  // ── Build MCP server ───────────────────────────────
-
-  const tools = [
-    renderSetTool,
-    renderPatchTool,
-    renderAppendTool,
-    renderRemoveTool,
-  ] as const;
-
-  const mcpServer = createSdkMcpServer({
-    name: "render-dashboard",
-    tools: [...tools],
-  });
-
-  // `tools` is exposed alongside `mcpServer` so tests (and any future
-  // in-process driver) can invoke handlers directly without spinning up
-  // an MCP transport.
-  return { mcpServer, tools, renderState };
+  return {
+    toolDefs: [renderSetDef, renderPatchDef, renderAppendDef, renderRemoveDef],
+    renderState,
+  };
 }

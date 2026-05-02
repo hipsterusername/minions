@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, type Dispatch } from "react";
 import type { KanbanCard, KanbanAction } from "./kanban-types.ts";
-import type { ServerMessage, SdkMessage, ContentBlock } from "./use-socket.ts";
+import type { ServerMessage } from "./use-socket.ts";
 import { CARD_CREATION_SYSTEM_PROMPT } from "./prompts/card-creation-system.ts";
 
 // ─── Helpers ──────────────────────────────────────────────
@@ -172,26 +172,23 @@ export function CardCreationChat({
       }
 
       if (msg.type === "sdk_event" && msg.sessionKey === sessionKey) {
-        const sdkMsg: SdkMessage = msg.message;
+        const ev = msg.event;
 
-        // Handle streaming text
-        if (sdkMsg.type === "stream_event") {
-          const evt = sdkMsg.event as { type?: unknown; delta?: { type?: unknown; text?: unknown } };
-          if (evt.type === "content_block_delta") {
-            const delta = evt.delta;
-            if (delta && delta.type === "text_delta" && typeof delta.text === "string") {
-              pendingTextRef.current += delta.text;
-              setStreamingText(pendingTextRef.current);
-            }
-          }
+        // Handle streaming text delta
+        if (ev.kind === "text_delta" && ev.parentId == null) {
+          pendingTextRef.current += ev.text;
+          setStreamingText(pendingTextRef.current);
         }
 
-        // Handle complete assistant message
-        if (sdkMsg.type === "assistant") {
-          const textBlocks = sdkMsg.message.content.filter(
-            (b: ContentBlock) => b.type === "text",
-          ) as { type: "text"; text: string }[];
-          const fullText = textBlocks.map((b) => b.text).join("\n");
+        // Handle stream end — commit streaming text
+        if (ev.kind === "stream_end") {
+          // Will be committed when the complete text event arrives.
+          // Don't clear yet — the text event comes shortly after.
+        }
+
+        // Handle complete assistant text
+        if (ev.kind === "text" && ev.role === "assistant") {
+          const fullText = ev.text;
           const cards = parseCardBlocks(fullText);
           const displayText = stripCardBlocks(fullText);
 
@@ -210,8 +207,8 @@ export function CardCreationChat({
           setIsThinking(false);
         }
 
-        // Handle result (session back to idle)
-        if (sdkMsg.type === "result") {
+        // Handle done (session back to idle)
+        if (ev.kind === "done") {
           setIsThinking(false);
           pendingTextRef.current = "";
           setStreamingText("");

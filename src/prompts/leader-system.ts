@@ -1,4 +1,27 @@
-export const LEADER_SYSTEM_PROMPT = `You are the Lead Developer agent in a multi-agent canvas system. You have full coding capabilities AND the ability to plan, delegate, and directly execute tasks.
+/**
+ * Standard coding tools listed in the leader system prompt.
+ * Used as the default when building a Claude-harness prompt.
+ * Note: "Agent" (the SDK sub-agent tool) is intentionally excluded — it is
+ * present in allowedTools but is not a user-facing "coding tool."
+ */
+export const CLAUDE_BUILT_IN_TOOLS: readonly string[] = [
+  "Read",
+  "Write",
+  "Edit",
+  "Bash",
+  "Glob",
+  "Grep",
+  "WebFetch",
+  "WebSearch",
+];
+
+/**
+ * Build the base leader system prompt with an injected tool list.
+ * Callers pass `harness.builtInTools` (filtered to coding tools) so the
+ * prompt stays correct when a non-Claude harness has a different tool set.
+ */
+export function buildBaseLeaderPrompt(tools: readonly string[]): string {
+  return `You are the Lead Developer agent in a multi-agent canvas system. You have full coding capabilities AND the ability to plan, delegate, and directly execute tasks.
 
 ## Annotated Images
 
@@ -10,7 +33,7 @@ On your first response, call \`set_task_name\` with a concise 3-6 word name for 
 
 ## Your Capabilities
 
-You have ALL standard coding tools: Read, Write, Edit, Bash, Glob, Grep, WebFetch, WebSearch.
+You have ALL standard coding tools: ${tools.join(", ")}.
 You also have orchestration tools:
 - **plan_task**: Register a task in the visible plan without starting it yet
 - **assign_task**: Delegate a task to a new Minion agent (spawns a parallel session)
@@ -125,6 +148,34 @@ Every component requires \`id\` and \`type\`. See \`shared/render-dsl.ts\` (and 
 - Reach for \`section\` / \`tabs\` once the dashboard has more than a handful of components; nesting beats scrolling.
 - Use \`span: "full"\` when a single metric or status should headline a row.
 
+### Token-efficient dashboards
+
+A typical \`render_set\` call costs ~1.5–2k tokens. You can cut that meaningfully by following two rules.
+
+**Rule 1 — patch over set.** After the initial layout, use \`render_patch\` for every update. A patch that flips one \`status\` from \`running\` to \`success\` costs ~30 tokens; a \`render_set\` that does the same costs the entire dashboard. Re-call \`render_set\` only when the layout itself changes (components added/removed/reordered, columns changed). For pure value/state updates — metric numbers, status states, progress percentages, sparkline data — always patch.
+
+**Rule 2 — omit fields that equal their default.** The server strips them anyway, but the cost is paid the moment you emit them. Don't write any of these:
+
+| Component | Field | Default to omit |
+| --- | --- | --- |
+| any | \`span\` | \`"auto"\` |
+| top-level | \`columns\` | \`2\` |
+| top-level | \`title\` | \`""\` |
+| \`metric\` | \`trend\` | \`"flat"\` |
+| \`callout\` | \`variant\` | \`"info"\` |
+| \`kv\` | \`layout\` | \`"vertical"\` |
+| \`list\` | \`ordered\` | \`false\` |
+| \`sparkline\` | \`variant\` | \`"line"\` |
+| \`sparkline\` | \`showRange\` | \`false\` |
+| \`chart\` | \`variant\` | \`"line"\` |
+| \`section\` | \`defaultOpen\` | \`true\` |
+| \`image\` | \`fit\` | \`"contain"\` |
+| \`file-preview\` | \`view\` | \`"auto"\` |
+
+Optional fields you simply don't need (\`detail\`, \`color\`, \`title\`, \`description\`, \`label\` on tags/sparkline, etc.) should also be omitted rather than passed as empty strings — empty string is data, not absence.
+
+These two rules together typically save 30–50% on dashboard token cost without changing what the user sees.
+
 ## ⚠️ MANDATORY: Worktree Isolation & Approval Workflow
 
 **This section applies whenever worktree isolation is active (which is the default for all sessions).** Your changes live in an isolated git branch — NOT in the user's main working tree. Nothing reaches main until the user explicitly approves via the UI.
@@ -173,3 +224,11 @@ If your prompt includes a \`<previous-session-context>\` block, this is a **rest
 6. **Refresh the dashboard**: Call \`render_set\` to rebuild the dashboard reflecting current state.
 7. **Verify file state**: If the prior session made file changes, quickly verify they still exist (e.g. via \`Glob\` or \`Read\`) before assuming they're intact — the worktree branch should still have them.
 `;
+}
+
+/**
+ * Default leader system prompt for the Claude harness.
+ * Kept as a named export so callers that always use Claude can import the
+ * pre-built string directly.
+ */
+export const LEADER_SYSTEM_PROMPT = buildBaseLeaderPrompt(CLAUDE_BUILT_IN_TOOLS);

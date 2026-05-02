@@ -1,17 +1,17 @@
 /**
  * server/minion-tools — MCP tools the minion uses to report progress.
  *
- * Each handler is invoked directly via the `tools` array the factory returns;
- * the test asserts on the captured `minion_status` envelope the bus emits and
- * on the SDK-shaped tool result. We cover the three triggers (`step`, `done`,
- * `fail`) by parameterised cases — per docs/testing-strategy.md §5.9, three
- * near-identical describe blocks would be a duplicate.
+ * Each handler is invoked directly via the `toolDefs` array the factory
+ * returns; the test asserts on the captured `minion_status` envelope the bus
+ * emits and on the NormalizedToolResult. We cover the three triggers (`step`,
+ * `done`, `fail`) by parameterised cases — per docs/testing-strategy.md §5.9,
+ * three near-identical describe blocks would be a duplicate.
  */
 import { describe, it, expect } from "vitest";
 import type { WebSocketServer } from "ws";
 import { createBus, type Bus } from "./bus.ts";
 import { createMinionToolsForSession } from "./minion-tools.ts";
-import type { SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
+import type { NormalizedToolDef } from "./harness/types.ts";
 
 interface CapturedEnvelope {
   topic?: string;
@@ -34,26 +34,19 @@ function makeBus(): { bus: Bus; sent: CapturedEnvelope[] } {
 }
 
 function findTool(
-  tools: ReadonlyArray<SdkMcpToolDefinition>,
+  toolDefs: ReadonlyArray<NormalizedToolDef>,
   name: string,
-): SdkMcpToolDefinition {
-  const t = tools.find((x) => x.name === name);
+): NormalizedToolDef {
+  const t = toolDefs.find((x) => x.name === name);
   if (!t) throw new Error(`tool ${name} missing`);
   return t;
 }
 
-async function call<T extends { name: string }>(
-  tool: T,
+async function call(
+  def: NormalizedToolDef,
   args: unknown,
 ): Promise<{ content: { type: "text"; text: string }[] }> {
-  return (await (
-    tool as unknown as {
-      handler: (
-        a: unknown,
-        e: unknown,
-      ) => Promise<{ content: { type: "text"; text: string }[] }>;
-    }
-  ).handler(args, undefined));
+  return (await def.handler(args)) as { content: { type: "text"; text: string }[] };
 }
 
 describe("minion-tools", () => {
@@ -86,14 +79,14 @@ describe("minion-tools", () => {
     ({ tool: toolName, arg, trigger, expectedMessage, ackPrefix }) => {
       it("emits a minion_status envelope on the minion's session topic", async () => {
         const { bus, sent } = makeBus();
-        const { tools } = createMinionToolsForSession({
+        const { toolDefs } = createMinionToolsForSession({
           minionSessionKey: "minion-1",
           bus,
         });
-        const tool = findTool(tools, toolName);
+        const def = findTool(toolDefs, toolName);
         const before = Date.now();
 
-        await call(tool, arg);
+        await call(def, arg);
 
         // Exactly one envelope, on the right topic, with the right payload.
         expect(sent).toHaveLength(1);
@@ -110,15 +103,15 @@ describe("minion-tools", () => {
         expect(ts).toBeLessThanOrEqual(Date.now());
       });
 
-      it("returns an SDK-shaped acknowledgement that contains the agent's payload", async () => {
+      it("returns an acknowledgement that contains the agent's payload", async () => {
         const { bus } = makeBus();
-        const { tools } = createMinionToolsForSession({
+        const { toolDefs } = createMinionToolsForSession({
           minionSessionKey: "minion-2",
           bus,
         });
-        const tool = findTool(tools, toolName);
+        const def = findTool(toolDefs, toolName);
 
-        const result = await call(tool, arg);
+        const result = await call(def, arg);
 
         expect(result.content).toHaveLength(1);
         expect(result.content[0]!.type).toBe("text");
@@ -131,15 +124,15 @@ describe("minion-tools", () => {
 
   it("multiple report_step calls produce one envelope per call, preserving order", async () => {
     const { bus, sent } = makeBus();
-    const { tools } = createMinionToolsForSession({
+    const { toolDefs } = createMinionToolsForSession({
       minionSessionKey: "m",
       bus,
     });
-    const stepTool = findTool(tools, "report_step");
+    const stepDef = findTool(toolDefs, "report_step");
 
-    await call(stepTool, { message: "first" });
-    await call(stepTool, { message: "second" });
-    await call(stepTool, { message: "third" });
+    await call(stepDef, { message: "first" });
+    await call(stepDef, { message: "second" });
+    await call(stepDef, { message: "third" });
 
     expect(sent.map((e) => e["message"])).toEqual([
       "first",

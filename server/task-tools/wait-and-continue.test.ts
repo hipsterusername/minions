@@ -5,8 +5,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { WebSocketServer } from "ws";
 import { createBus } from "../bus.ts";
-import { createWaitAndContinueTool } from "./wait-and-continue.ts";
+import { createWaitAndContinueToolDef } from "./wait-and-continue.ts";
 import type { TaskToolContext } from "./types.ts";
+import type { NormalizedToolDef } from "../harness/types.ts";
 
 function makeCtx() {
   const sent: Record<string, unknown>[] = [];
@@ -36,22 +37,16 @@ function makeCtx() {
 }
 
 async function call(
-  tool: ReturnType<typeof createWaitAndContinueTool>,
+  def: NormalizedToolDef,
   args: unknown,
 ): Promise<{ content: { type: "text"; text: string }[] }> {
-  return (await (
-    tool as unknown as {
-      handler: (a: unknown, e: unknown) => Promise<{
-        content: { type: "text"; text: string }[];
-      }>;
-    }
-  ).handler(args, undefined));
+  return (await def.handler(args)) as { content: { type: "text"; text: string }[] };
 }
 
 describe("wait_and_continue", () => {
   it("records the pendingWait on task state, broadcasts wait_state, and calls scheduleWaitContinue", async () => {
     const ctx = makeCtx();
-    const tool = createWaitAndContinueTool(ctx);
+    const tool = createWaitAndContinueToolDef(ctx);
 
     await call(tool, { duration_seconds: 30, reason: "waiting on minion" });
 
@@ -79,7 +74,7 @@ describe("wait_and_continue", () => {
 
   it("formats the user-facing duration text for sub-minute and multi-minute waits", async () => {
     const ctx1 = makeCtx();
-    const out1 = await call(createWaitAndContinueTool(ctx1), {
+    const out1 = await call(createWaitAndContinueToolDef(ctx1), {
       duration_seconds: 45,
       reason: "x",
     });
@@ -88,7 +83,7 @@ describe("wait_and_continue", () => {
     expect(out1.content[0]!.text).toContain("45s");
 
     const ctx2 = makeCtx();
-    const out2 = await call(createWaitAndContinueTool(ctx2), {
+    const out2 = await call(createWaitAndContinueToolDef(ctx2), {
       duration_seconds: 125,
       reason: "x",
     });
@@ -97,7 +92,7 @@ describe("wait_and_continue", () => {
     expect(out2.content[0]!.text).toContain("5s");
 
     const ctx3 = makeCtx();
-    const out3 = await call(createWaitAndContinueTool(ctx3), {
+    const out3 = await call(createWaitAndContinueToolDef(ctx3), {
       duration_seconds: 120,
       reason: "x",
     });

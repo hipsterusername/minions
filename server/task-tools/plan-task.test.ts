@@ -7,8 +7,9 @@
 import { describe, expect, it } from "vitest";
 import type { WebSocketServer } from "ws";
 import { createBus, type Bus } from "../bus.ts";
-import { createPlanTaskTool } from "./plan-task.ts";
+import { createPlanTaskToolDef } from "./plan-task.ts";
 import type { TaskManagerState, TaskToolContext } from "./types.ts";
+import type { NormalizedToolDef } from "../harness/types.ts";
 
 interface CapturedEnvelope {
   topic?: string;
@@ -49,22 +50,16 @@ function makeCtx(): TaskToolContext & { sent: CapturedEnvelope[] } {
 }
 
 async function callHandler(
-  tool: ReturnType<typeof createPlanTaskTool>,
+  def: NormalizedToolDef,
   args: unknown,
 ): Promise<{ content: { type: "text"; text: string }[] }> {
-  return (await (
-    tool as unknown as {
-      handler: (a: unknown, e: unknown) => Promise<{
-        content: { type: "text"; text: string }[];
-      }>;
-    }
-  ).handler(args, undefined));
+  return (await def.handler(args)) as { content: { type: "text"; text: string }[] };
 }
 
 describe("plan_task", () => {
   it("registers a new task and emits task_plan_update with the task in the list", async () => {
     const ctx = makeCtx();
-    const tool = createPlanTaskTool(ctx);
+    const tool = createPlanTaskToolDef(ctx);
     await callHandler(tool, {
       taskId: "t1",
       title: "Do the thing",
@@ -92,7 +87,7 @@ describe("plan_task", () => {
 
   it("is idempotent — registering the same taskId twice does NOT replace or reset the existing record", async () => {
     const ctx = makeCtx();
-    const tool = createPlanTaskTool(ctx);
+    const tool = createPlanTaskToolDef(ctx);
     await callHandler(tool, {
       taskId: "t1",
       title: "Original",
@@ -120,7 +115,7 @@ describe("plan_task", () => {
     const ctx = makeCtx();
     const observed: TaskManagerState[] = [];
     ctx.onStateChange = (s) => observed.push(s);
-    const tool = createPlanTaskTool(ctx);
+    const tool = createPlanTaskToolDef(ctx);
     await callHandler(tool, {
       taskId: "x",
       title: "x",

@@ -3,7 +3,7 @@
  */
 
 import { registerAgentType } from "./registry.ts";
-import type { AgentType, AgentTypeContext, McpServerResult } from "./types.ts";
+import type { AgentType, AgentTypeContext, AgentToolResult } from "./types.ts";
 
 const defaultAgent: AgentType = {
   id: "default",
@@ -12,9 +12,9 @@ const defaultAgent: AgentType = {
     return customPrompt;
   },
 
-  createMcpServers(_ctx: AgentTypeContext): McpServerResult {
+  getToolGroups(_ctx: AgentTypeContext): AgentToolResult {
     return {
-      mcpServers: {},
+      toolGroups: {},
       mcpToolNames: [],
     };
   },

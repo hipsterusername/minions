@@ -4,8 +4,9 @@
 import { describe, expect, it } from "vitest";
 import type { WebSocketServer } from "ws";
 import { createBus } from "../bus.ts";
-import { createSetTaskNameTool } from "./set-task-name.ts";
+import { createSetTaskNameToolDef } from "./set-task-name.ts";
 import type { TaskToolContext } from "./types.ts";
+import type { NormalizedToolDef } from "../harness/types.ts";
 
 function makeCtx(): TaskToolContext & { sent: Record<string, unknown>[] } {
   const sent: Record<string, unknown>[] = [];
@@ -30,22 +31,16 @@ function makeCtx(): TaskToolContext & { sent: Record<string, unknown>[] } {
 }
 
 async function call(
-  tool: ReturnType<typeof createSetTaskNameTool>,
+  def: NormalizedToolDef,
   args: unknown,
 ): Promise<{ content: { type: "text"; text: string }[] }> {
-  return (await (
-    tool as unknown as {
-      handler: (a: unknown, e: unknown) => Promise<{
-        content: { type: "text"; text: string }[];
-      }>;
-    }
-  ).handler(args, undefined));
+  return (await def.handler(args)) as { content: { type: "text"; text: string }[] };
 }
 
 describe("set_task_name", () => {
   it("emits session_task_name on the leader's session topic with the supplied name", async () => {
     const ctx = makeCtx();
-    const tool = createSetTaskNameTool(ctx);
+    const tool = createSetTaskNameToolDef(ctx);
     await call(tool, { name: "Audit Performative Tests" });
 
     expect(ctx.sent).toHaveLength(1);
@@ -58,7 +53,7 @@ describe("set_task_name", () => {
 
   it("forwards the name verbatim including punctuation and unicode", async () => {
     const ctx = makeCtx();
-    const tool = createSetTaskNameTool(ctx);
+    const tool = createSetTaskNameToolDef(ctx);
     const name = "Phase 5 — split index.ts (✂)";
     await call(tool, { name });
     expect(ctx.sent[0]!["taskName"]).toBe(name);

@@ -3,9 +3,14 @@
  *
  * This barrel re-exports public types and assembles per-tool factories
  * into a single `createTaskToolsForLeader` entry point.
+ *
+ * Each per-tool factory returns a `NormalizedToolDef`. The barrel collects
+ * them into a flat `NormalizedToolDef[]` which agents/leader.ts places into
+ * toolGroups. ClaudeHarness.registerTools() wraps each group as a named MCP
+ * server so tool calls follow the mcp__task-manager__* pattern.
  */
 
-import { createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import type { NormalizedToolDef } from "./harness/types.ts";
 import type { Bus } from "./bus.ts";
 import type { WorktreeInfo } from "./worktree.js";
 
@@ -18,22 +23,23 @@ export type {
 } from "./task-tools/types.ts";
 
 import type { TaskManagerState, TaskToolContext } from "./task-tools/types.ts";
-import { createPlanTaskTool } from "./task-tools/plan-task.ts";
-import { createAssignTaskTool } from "./task-tools/assign-task.ts";
-import { createCompleteTaskTool } from "./task-tools/complete-task.ts";
-import { createGetTaskStatusTool } from "./task-tools/get-task-status.ts";
-import { createWaitAndContinueTool } from "./task-tools/wait-and-continue.ts";
-import { createSetTaskNameTool } from "./task-tools/set-task-name.ts";
-import { createRequestApprovalTool } from "./task-tools/request-approval.ts";
+import { createPlanTaskToolDef } from "./task-tools/plan-task.ts";
+import { createAssignTaskToolDef } from "./task-tools/assign-task.ts";
+import { createCompleteTaskToolDef } from "./task-tools/complete-task.ts";
+import { createGetTaskStatusToolDef } from "./task-tools/get-task-status.ts";
+import { createWaitAndContinueToolDef } from "./task-tools/wait-and-continue.ts";
+import { createSetTaskNameToolDef } from "./task-tools/set-task-name.ts";
+import { createRequestApprovalToolDef } from "./task-tools/request-approval.ts";
 
 // ── Factory ────────────────────────────────────────────
 
 /**
- * Create task management MCP tools bound to a specific leader session.
+ * Create task management tool definitions bound to a specific leader session.
  *
  * Returns:
- *  - `mcpServer` config to pass into `query()` options.mcpServers
- *  - `taskState` so the server can inspect tasks externally
+ *  - `toolDefs` — flat NormalizedToolDef[] to pass to harness.registerTools()
+ *    (or wrapTools() for the Claude harness).
+ *  - `taskState` so the server can inspect tasks externally.
  */
 export function createTaskToolsForLeader(opts: {
   leaderSessionKey: string;
@@ -57,7 +63,7 @@ export function createTaskToolsForLeader(opts: {
   worktreeIsolation?: boolean;
   scheduleWaitContinue: (durationMs: number, reason: string) => void;
   onStateChange?: (state: TaskManagerState) => void;
-}) {
+}): { toolDefs: NormalizedToolDef[]; taskState: TaskManagerState } {
   const taskState: TaskManagerState = opts.existingTaskState ?? {
     tasks: new Map(),
     pendingWait: null,
@@ -79,24 +85,20 @@ export function createTaskToolsForLeader(opts: {
     scheduleWaitContinue: opts.scheduleWaitContinue,
   };
 
-  const baseTools = [
-    createPlanTaskTool(ctx),
-    createAssignTaskTool(ctx),
-    createCompleteTaskTool(ctx),
-    createGetTaskStatusTool(ctx),
-    createSetTaskNameTool(ctx),
-    createWaitAndContinueTool(ctx),
+  const baseDefs = [
+    createPlanTaskToolDef(ctx),
+    createAssignTaskToolDef(ctx),
+    createCompleteTaskToolDef(ctx),
+    createGetTaskStatusToolDef(ctx),
+    createSetTaskNameToolDef(ctx),
+    createWaitAndContinueToolDef(ctx),
   ];
 
   // Only add request_approval when worktree isolation is active
-  const allTools = (opts.worktreeIsolation && opts.worktreeInfo)
-    ? [...baseTools, createRequestApprovalTool(ctx)]
-    : baseTools;
+  const toolDefs: NormalizedToolDef[] =
+    opts.worktreeIsolation && opts.worktreeInfo
+      ? [...baseDefs, createRequestApprovalToolDef(ctx)]
+      : baseDefs;
 
-  const mcpServer = createSdkMcpServer({
-    name: "task-manager",
-    tools: allTools as never,
-  });
-
-  return { mcpServer, taskState };
+  return { toolDefs, taskState };
 }

@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createAssignTaskTool } from "./assign-task.ts";
+import { createAssignTaskToolDef } from "./assign-task.ts";
 import type {
   TaskManagerState,
   TaskToolContext,
@@ -90,8 +90,8 @@ async function callAssign(
     skillValues?: Record<string, Record<string, string>>;
   },
 ): Promise<{ text: string }> {
-  const tool = createAssignTaskTool(ctx);
-  const result = await tool.handler(args as never, {});
+  const tool = createAssignTaskToolDef(ctx);
+  const result = (await tool.handler(args)) as { content: Array<{ type: string; text: string }> };
   const block = result.content[0];
   if (!block || block.type !== "text") {
     throw new Error("Expected text content block from assign_task");

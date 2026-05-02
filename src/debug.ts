@@ -104,6 +104,8 @@ export interface DebugRecord {
   source: "ws" | "state";
   /** Top-level WS or SDK type, e.g. `sdk_event`, `sync_response`. */
   type: string;
+  /** NormalizedEvent `kind` discriminant (Phase 3+). */
+  eventKind?: string;
   /** Inner SDK message type (`assistant`, `result`, `stream_event`, …). */
   sdkType?: string;
   /** Stream event sub-type (`content_block_delta`, `message_stop`, …). */

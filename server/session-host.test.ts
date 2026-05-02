@@ -120,13 +120,14 @@ describe("SessionHost.start — happy-path lifecycle", () => {
     expect(host.totalCost).toBe(0.42);
     expect(host.turns).toBe(3);
 
-    // The bus saw: running, sdk_event(init), sdk_event(result), idle.
+    // The bus saw: running, sdk_event(init), idle.
+    // The `result` message translates to a `done` NormalizedEvent which is
+    // signalled as session_status(idle), NOT emitted as an sdk_event.
     const types = envelopes.map((e) => e.type);
     expect(types).toEqual([
       "session_status", // running
-      "sdk_event",
-      "sdk_event",
-      "session_status", // idle
+      "sdk_event",      // init
+      "session_status", // idle (from done)
     ]);
 
     const statuses = envelopes
@@ -163,18 +164,25 @@ describe("SessionHost.start — happy-path lifecycle", () => {
     const { host, deps } = makeHarness();
     sdkQueueRef.queue = [
       { type: "system", subtype: "init", session_id: "s" },
-      { type: "assistant", text: "hello" },
-      { type: "assistant", text: "world" },
+      {
+        type: "assistant",
+        parent_tool_use_id: null,
+        message: { content: [{ type: "text", text: "hello" }] },
+      },
+      {
+        type: "assistant",
+        parent_tool_use_id: null,
+        message: { content: [{ type: "text", text: "world" }] },
+      },
       { type: "result" },
     ];
 
     await host.start({ sessionKey: host.id, prompt: "p", cwd: host.cwd }, deps);
 
-    // running + 4 sdk_events + idle = 6 buffered events (the bus fan-out
-    // is independent of the buffer; both get the same set).
+    // running + 3 sdk_events (init, text, text) + idle = 5 buffered events.
+    // The `result` message → done NormalizedEvent → session_status(idle), not sdk_event.
     expect(host.eventBuffer.map((e) => e.type)).toEqual([
       "session_status",
-      "sdk_event",
       "sdk_event",
       "sdk_event",
       "sdk_event",
@@ -255,10 +263,22 @@ describe("SessionHost.start — abort", () => {
       return (async function* () {
         const msgs: SdkMessage[] = [
           { type: "system", subtype: "init", session_id: "s" },
-          { type: "assistant", text: "first" },
-          { type: "assistant", text: "second" },
-          { type: "assistant", text: "third" },
-          { type: "result" },
+          {
+            type: "assistant",
+            parent_tool_use_id: null,
+            message: { content: [{ type: "text", text: "first" }] },
+          } as unknown as SdkMessage,
+          {
+            type: "assistant",
+            parent_tool_use_id: null,
+            message: { content: [{ type: "text", text: "second" }] },
+          } as unknown as SdkMessage,
+          {
+            type: "assistant",
+            parent_tool_use_id: null,
+            message: { content: [{ type: "text", text: "third" }] },
+          } as unknown as SdkMessage,
+          { type: "result" } as unknown as SdkMessage,
         ];
         for (const m of msgs) {
           yield m;
@@ -279,8 +299,9 @@ describe("SessionHost.start — abort", () => {
       (sdk as { query: unknown }).query = original;
     }
 
-    // We consumed init + first; then aborted; "second", "third", and
-    // "result" never reached the bus.
+    // We consumed init + first assistant; then aborted. "second", "third",
+    // and "result" never reached the bus.
+    // init → [init] = 1 sdk_event; first assistant → [text] = 1 sdk_event → 2 total.
     const sdkEvents = envelopes.filter((e) => e.type === "sdk_event");
     expect(sdkEvents).toHaveLength(2);
     // No idle status — abort short-circuits before result.

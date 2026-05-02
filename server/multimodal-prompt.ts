@@ -13,8 +13,19 @@
  * the generator-backed path adds a fence the older resume/minion flows
  * don't need to cross.
  */
-import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { StartSessionOptions } from "./session-host.ts";
+
+/**
+ * Minimal shape of the SDK user-turn message used by query()'s iterable
+ * prompt path. Defined locally so this file does not import the SDK
+ * (only server/harness/claude/ may do that after Phase 4).
+ */
+interface SDKUserMessage {
+  type: "user";
+  parent_tool_use_id: null;
+  message: { role: "user"; content: unknown[] };
+  uuid: string;
+}
 
 /** UUID v4 — lightweight, avoids dragging in `crypto.randomUUID` polyfills. */
 function uuid(): string {

@@ -4,7 +4,8 @@
  * Verifies:
  *   - the badge is hidden when debug mode is off,
  *   - Ctrl+Shift+D toggles the flag,
- *   - clicking the badge disables debug mode.
+ *   - clicking the pill opens the feature-flags panel,
+ *   - the panel's "Disable debug" button turns debug off.
  */
 
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -19,18 +20,19 @@ beforeEach(() => {
 
 afterEach(() => {
   setDebugEnabled(false);
+  window.localStorage.clear();
 });
 
 describe("DebugModeAffordance", () => {
   it("renders nothing when debug mode is disabled", () => {
     render(<DebugModeAffordance />);
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByText(/debug/i)).toBeNull();
   });
 
   it("shows the DEBUG pill when enabled", () => {
     setDebugEnabled(true);
     render(<DebugModeAffordance />);
-    expect(screen.getByRole("button", { name: /debug/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /open debug menu/i })).toBeInTheDocument();
   });
 
   it("Ctrl+Shift+D toggles the debug flag", () => {
@@ -54,11 +56,22 @@ describe("DebugModeAffordance", () => {
     expect(isDebugEnabled()).toBe(false);
   });
 
-  it("clicking the pill disables debug mode", () => {
+  it("clicking the pill opens the feature-flags panel", () => {
     setDebugEnabled(true);
     render(<DebugModeAffordance />);
-    const btn = screen.getByRole("button", { name: /debug/i });
-    fireEvent.click(btn);
+    expect(screen.queryByRole("dialog", { name: /feature flags/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /open debug menu/i }));
+    expect(screen.getByRole("dialog", { name: /feature flags/i })).toBeInTheDocument();
+    // Clicking again closes it.
+    fireEvent.click(screen.getByRole("button", { name: /open debug menu/i }));
+    expect(screen.queryByRole("dialog", { name: /feature flags/i })).toBeNull();
+  });
+
+  it("the panel's 'Disable debug' button turns debug mode off", () => {
+    setDebugEnabled(true);
+    render(<DebugModeAffordance />);
+    fireEvent.click(screen.getByRole("button", { name: /open debug menu/i }));
+    fireEvent.click(screen.getByRole("button", { name: /disable debug/i }));
     expect(isDebugEnabled()).toBe(false);
   });
 });
