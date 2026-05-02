@@ -5,9 +5,10 @@
 import { describe, expect, it } from "vitest";
 import type { WebSocketServer } from "ws";
 import { createBus, type Bus } from "../bus.ts";
-import { createPlanTaskTool } from "./plan-task.ts";
-import { createCompleteTaskTool } from "./complete-task.ts";
+import { createPlanTaskToolDef } from "./plan-task.ts";
+import { createCompleteTaskToolDef } from "./complete-task.ts";
 import type { TaskManagerState, TaskToolContext } from "./types.ts";
+import type { NormalizedToolDef } from "../harness/types.ts";
 
 function makeCtx(): TaskToolContext & { sent: Record<string, unknown>[] } {
   const sent: Record<string, unknown>[] = [];
@@ -38,23 +39,17 @@ function makeCtx(): TaskToolContext & { sent: Record<string, unknown>[] } {
 }
 
 async function call(
-  tool: ReturnType<typeof createCompleteTaskTool>,
+  def: NormalizedToolDef,
   args: unknown,
 ): Promise<{ content: { type: "text"; text: string }[] }> {
-  return (await (
-    tool as unknown as {
-      handler: (a: unknown, e: unknown) => Promise<{
-        content: { type: "text"; text: string }[];
-      }>;
-    }
-  ).handler(args, undefined));
+  return (await def.handler(args)) as { content: { type: "text"; text: string }[] };
 }
 
 describe("complete_task", () => {
   it("marks a planned task as completed with the supplied result", async () => {
     const ctx = makeCtx();
-    const planTool = createPlanTaskTool(ctx);
-    const completeTool = createCompleteTaskTool(ctx);
+    const planTool = createPlanTaskToolDef(ctx);
+    const completeTool = createCompleteTaskToolDef(ctx);
 
     await call(planTool, {
       taskId: "t1",
@@ -76,7 +71,7 @@ describe("complete_task", () => {
 
   it("auto-creates a record when the leader completes an unplanned task", async () => {
     const ctx = makeCtx();
-    const tool = createCompleteTaskTool(ctx);
+    const tool = createCompleteTaskToolDef(ctx);
 
     expect(ctx.taskState.tasks.has("rogue")).toBe(false);
     await call(tool, { taskId: "rogue", result: "done" });
@@ -90,7 +85,7 @@ describe("complete_task", () => {
 
   it("is a no-op for an already-completed task — does not overwrite the prior result or fire another emission", async () => {
     const ctx = makeCtx();
-    const tool = createCompleteTaskTool(ctx);
+    const tool = createCompleteTaskToolDef(ctx);
     await call(tool, { taskId: "t1", result: "first" });
     ctx.sent.length = 0;
 
@@ -105,7 +100,7 @@ describe("complete_task", () => {
 
   it("sets executor='leader' even when the task was previously delegated to a minion", async () => {
     const ctx = makeCtx();
-    const completeTool = createCompleteTaskTool(ctx);
+    const completeTool = createCompleteTaskToolDef(ctx);
 
     // Seed a task that was delegated.
     ctx.taskState.tasks.set("t1", {

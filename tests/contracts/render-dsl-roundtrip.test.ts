@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
 import type { WebSocketServer } from "ws";
 import { createBus } from "../../server/bus.ts";
 import { createRenderToolsForLeader } from "../../server/render-tools.ts";
+import type { NormalizedToolDef } from "../../server/harness/types.ts";
 import {
   applyRenderMessage,
   emptyRenderState,
@@ -52,25 +53,24 @@ function lastRenderMessage(envelopes: CapturedEnvelope[]): RenderMessage {
   return payload as unknown as RenderMessage;
 }
 
-async function callTool<T extends { name: string }>(
-  tool: T,
-  args: unknown,
-): Promise<unknown> {
-  return (await (
-    tool as unknown as {
-      handler: (a: unknown, e: unknown) => Promise<unknown>;
-    }
-  ).handler(args, undefined));
+async function callTool(def: NormalizedToolDef, args: unknown): Promise<unknown> {
+  return await def.handler(args);
+}
+
+function findTool(defs: ReadonlyArray<NormalizedToolDef>, name: string): NormalizedToolDef {
+  const t = defs.find((d) => d.name === name);
+  if (!t) throw new Error(`tool ${name} missing`);
+  return t;
 }
 
 describe("render-DSL producer↔consumer round-trip", () => {
   it("render_set ⇒ applyRenderMessage replays the dashboard onto a fresh client", async () => {
     const { bus, captured } = rig();
-    const { tools } = createRenderToolsForLeader({
+    const { toolDefs } = createRenderToolsForLeader({
       leaderSessionKey: "leader-1",
       bus,
     });
-    const setTool = tools.find((t) => t.name === "render_set")!;
+    const setTool = findTool(toolDefs, "render_set");
 
     await callTool(setTool, {
       title: "My dashboard",
@@ -91,12 +91,12 @@ describe("render-DSL producer↔consumer round-trip", () => {
 
   it("render_set → render_patch composes by id on the consumer side", async () => {
     const { bus, captured } = rig();
-    const { tools } = createRenderToolsForLeader({
+    const { toolDefs } = createRenderToolsForLeader({
       leaderSessionKey: "leader-1",
       bus,
     });
-    const setTool = tools.find((t) => t.name === "render_set")!;
-    const patchTool = tools.find((t) => t.name === "render_patch")!;
+    const setTool = findTool(toolDefs, "render_set");
+    const patchTool = findTool(toolDefs, "render_patch");
 
     let state: RenderState = emptyRenderState();
 
@@ -124,12 +124,12 @@ describe("render-DSL producer↔consumer round-trip", () => {
 
   it("render_append dedupes by id on both producer and consumer sides", async () => {
     const { bus, captured } = rig();
-    const { tools, renderState } = createRenderToolsForLeader({
+    const { toolDefs, renderState } = createRenderToolsForLeader({
       leaderSessionKey: "leader-1",
       bus,
     });
-    const setTool = tools.find((t) => t.name === "render_set")!;
-    const appendTool = tools.find((t) => t.name === "render_append")!;
+    const setTool = findTool(toolDefs, "render_set");
+    const appendTool = findTool(toolDefs, "render_append");
 
     await callTool(setTool, {
       components: [
@@ -162,12 +162,12 @@ describe("render-DSL producer↔consumer round-trip", () => {
 
   it("render_remove drops the same ids from server state and client state", async () => {
     const { bus, captured } = rig();
-    const { tools, renderState } = createRenderToolsForLeader({
+    const { toolDefs, renderState } = createRenderToolsForLeader({
       leaderSessionKey: "leader-1",
       bus,
     });
-    const setTool = tools.find((t) => t.name === "render_set")!;
-    const removeTool = tools.find((t) => t.name === "render_remove")!;
+    const setTool = findTool(toolDefs, "render_set");
+    const removeTool = findTool(toolDefs, "render_remove");
 
     await callTool(setTool, {
       components: [
@@ -187,11 +187,11 @@ describe("render-DSL producer↔consumer round-trip", () => {
 
   it("every component variant emitted by the producer parses cleanly on the consumer", async () => {
     const { bus, captured } = rig();
-    const { tools } = createRenderToolsForLeader({
+    const { toolDefs } = createRenderToolsForLeader({
       leaderSessionKey: "leader-1",
       bus,
     });
-    const setTool = tools.find((t) => t.name === "render_set")!;
+    const setTool = findTool(toolDefs, "render_set");
 
     // One representative of each major component family. If any of these
     // diverge between the server and client schemas, the consumer's parse

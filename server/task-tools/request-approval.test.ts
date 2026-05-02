@@ -33,7 +33,8 @@ vi.mock("../worktree.js", () => ({
   getDetailedDiff: (info: WorktreeInfo) => diffMock(info),
 }));
 
-import { createRequestApprovalTool } from "./request-approval.ts";
+import { createRequestApprovalToolDef } from "./request-approval.ts";
+import type { NormalizedToolDef } from "../harness/types.ts";
 
 beforeEach(() => {
   diffShouldThrow = false;
@@ -82,22 +83,16 @@ function makeCtx(opts?: { worktreeInfo?: WorktreeInfo | null }) {
 }
 
 async function call(
-  tool: ReturnType<typeof createRequestApprovalTool>,
+  def: NormalizedToolDef,
   args: unknown,
 ): Promise<{ content: { type: "text"; text: string }[] }> {
-  return (await (
-    tool as unknown as {
-      handler: (a: unknown, e: unknown) => Promise<{
-        content: { type: "text"; text: string }[];
-      }>;
-    }
-  ).handler(args, undefined));
+  return (await def.handler(args)) as { content: { type: "text"; text: string }[] };
 }
 
 describe("request_approval", () => {
   it("records approval state, fetches the diff, and broadcasts approval_requested", async () => {
     const ctx = makeCtx();
-    const tool = createRequestApprovalTool(ctx);
+    const tool = createRequestApprovalToolDef(ctx);
 
     await call(tool, { summary: "Refactored the parser" });
 
@@ -119,7 +114,7 @@ describe("request_approval", () => {
 
   it("returns the early no-worktree message and does NOT touch state when worktreeInfo is null", async () => {
     const ctx = makeCtx({ worktreeInfo: null });
-    const tool = createRequestApprovalTool(ctx);
+    const tool = createRequestApprovalToolDef(ctx);
 
     const out = await call(tool, { summary: "x" });
 
@@ -132,7 +127,7 @@ describe("request_approval", () => {
   it("surfaces a typed error message when getDetailedDiff throws", async () => {
     diffShouldThrow = true;
     const ctx = makeCtx();
-    const tool = createRequestApprovalTool(ctx);
+    const tool = createRequestApprovalToolDef(ctx);
 
     const out = await call(tool, { summary: "x" });
 
@@ -144,7 +139,7 @@ describe("request_approval", () => {
 
   it("the response text references the per-file change summary the agent will need", async () => {
     const ctx = makeCtx();
-    const tool = createRequestApprovalTool(ctx);
+    const tool = createRequestApprovalToolDef(ctx);
 
     const out = await call(tool, { summary: "Refactored the parser" });
 

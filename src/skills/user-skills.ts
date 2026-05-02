@@ -1,7 +1,7 @@
 /**
  * Project Skills Management
  *
- * Skills are stored per-project on the server in .claude-canvas/skills.json.
+ * Skills are stored per-project on the server in .minions/skills.json.
  * This module manages syncing between the in-memory registry and the server.
  */
 

@@ -4,8 +4,9 @@
 import { describe, expect, it } from "vitest";
 import type { WebSocketServer } from "ws";
 import { createBus } from "../bus.ts";
-import { createGetTaskStatusTool } from "./get-task-status.ts";
+import { createGetTaskStatusToolDef } from "./get-task-status.ts";
 import type { TaskManagerState, TaskToolContext } from "./types.ts";
+import type { NormalizedToolDef } from "../harness/types.ts";
 
 function makeCtx(): TaskToolContext {
   const wss = { clients: new Set() } as unknown as WebSocketServer;
@@ -22,16 +23,10 @@ function makeCtx(): TaskToolContext {
 }
 
 async function call(
-  tool: ReturnType<typeof createGetTaskStatusTool>,
+  def: NormalizedToolDef,
   args: unknown,
 ): Promise<{ content: { type: "text"; text: string }[] }> {
-  return (await (
-    tool as unknown as {
-      handler: (a: unknown, e: unknown) => Promise<{
-        content: { type: "text"; text: string }[];
-      }>;
-    }
-  ).handler(args, undefined));
+  return (await def.handler(args)) as { content: { type: "text"; text: string }[] };
 }
 
 describe("get_task_status", () => {
@@ -51,7 +46,7 @@ describe("get_task_status", () => {
       result: null,
     });
 
-    const tool = createGetTaskStatusTool(ctx);
+    const tool = createGetTaskStatusToolDef(ctx);
     const out = await call(tool, { taskId: "t1" });
     const parsed = JSON.parse(out.content[0]!.text);
     expect(parsed).toMatchObject({
@@ -64,7 +59,7 @@ describe("get_task_status", () => {
 
   it("surfaces a 'not found' message when taskId is unknown", async () => {
     const ctx = makeCtx();
-    const tool = createGetTaskStatusTool(ctx);
+    const tool = createGetTaskStatusToolDef(ctx);
     const out = await call(tool, { taskId: "ghost" });
     expect(out.content[0]!.text).toContain("ghost");
     expect(out.content[0]!.text.toLowerCase()).toContain("not found");
@@ -72,7 +67,7 @@ describe("get_task_status", () => {
 
   it("returns the documented empty-state message when no taskId and no tasks exist", async () => {
     const ctx = makeCtx();
-    const tool = createGetTaskStatusTool(ctx);
+    const tool = createGetTaskStatusToolDef(ctx);
     const out = await call(tool, {});
     // Don't pin the literal copy (§5.7) — assert structure: not JSON, and
     // mentions "tasks".
@@ -108,7 +103,7 @@ describe("get_task_status", () => {
       result: null,
     });
 
-    const tool = createGetTaskStatusTool(ctx);
+    const tool = createGetTaskStatusToolDef(ctx);
     const out = await call(tool, {});
     const parsed = JSON.parse(out.content[0]!.text);
     expect(parsed).toHaveLength(2);

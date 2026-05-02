@@ -3,22 +3,24 @@
  */
 
 import { z } from "zod/v4";
-import { tool } from "@anthropic-ai/claude-agent-sdk";
+import type { NormalizedToolDef } from "../harness/types.ts";
 import type { TaskToolContext } from "./types.ts";
 
-export function createGetTaskStatusTool(ctx: TaskToolContext) {
-  return tool(
-    "get_task_status",
-    "Check the status of one or all tasks. Returns current status, executor, and any results.",
-    {
+export function createGetTaskStatusToolDef(ctx: TaskToolContext): NormalizedToolDef {
+  return {
+    name: "get_task_status",
+    description:
+      "Check the status of one or all tasks. Returns current status, executor, and any results.",
+    inputSchema: z.object({
       taskId: z
         .string()
         .optional()
         .describe(
           "Specific task ID to check. If omitted, returns status of all tasks.",
         ),
-    },
-    async (args) => {
+    }),
+    handler: async (input: unknown) => {
+      const args = input as { taskId?: string };
       if (args.taskId) {
         const record = ctx.taskState.tasks.get(args.taskId);
         if (!record) {
@@ -64,5 +66,5 @@ export function createGetTaskStatusTool(ctx: TaskToolContext) {
         ],
       };
     },
-  );
+  };
 }

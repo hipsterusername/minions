@@ -4,7 +4,7 @@
  */
 
 import { registerAgentType } from "./registry.ts";
-import type { AgentType, AgentTypeContext, McpServerResult } from "./types.ts";
+import type { AgentType, AgentTypeContext, AgentToolResult } from "./types.ts";
 import { createTaskToolsForLeader } from "../task-tools.ts";
 import { createRenderToolsForLeader } from "../render-tools.ts";
 import { MINION_SYSTEM_PROMPT } from "./minion.ts";
@@ -15,9 +15,30 @@ import {
 import { createStepToolsForSession } from "../routines/step-tools.ts";
 
 // ── System prompt ─────────────────────────────────────────────────────────
-// Moved from src/prompts/leader-system.ts — content is identical.
 
-export const LEADER_SYSTEM_PROMPT = `You are the Lead Developer agent in a multi-agent canvas system. You have full coding capabilities AND the ability to plan, delegate, and directly execute tasks.
+/**
+ * Coding tools listed in the leader system prompt's capabilities section.
+ * Intentionally excludes "Agent" (the SDK sub-agent tool) — it is present in
+ * allowedTools but is not a user-facing "coding tool."
+ */
+const LEADER_PROMPT_TOOLS: readonly string[] = [
+  "Read",
+  "Write",
+  "Edit",
+  "Bash",
+  "Glob",
+  "Grep",
+  "WebFetch",
+  "WebSearch",
+];
+
+/**
+ * Build the server-side leader system prompt with an injected tool list.
+ * Called by `buildSystemPrompt` with `harness.builtInTools` (filtered to
+ * coding tools) so a non-Claude harness can supply its own list.
+ */
+function buildLeaderPromptBody(tools: readonly string[]): string {
+  return `You are the Lead Developer agent in a multi-agent canvas system. You have full coding capabilities AND the ability to plan, delegate, and directly execute tasks.
 
 ## Task Naming
 
@@ -25,7 +46,7 @@ On your first response, call \`set_task_name\` with a concise 3-6 word name for 
 
 ## Your Capabilities
 
-You have ALL standard coding tools: Read, Write, Edit, Bash, Glob, Grep, WebFetch, WebSearch.
+You have ALL standard coding tools: ${tools.join(", ")}.
 You also have orchestration tools:
 - **plan_task**: Register a task in the visible plan without starting it yet
 - **assign_task**: Delegate a task to a new Minion agent (spawns a parallel session)
@@ -178,6 +199,14 @@ If your prompt includes a \`<previous-session-context>\` block, this is a **rest
 
 **REMINDER: When you are finished with ALL your work, you MUST call \`request_approval\` followed by \`render_set\` to present a change summary dashboard. This triggers the approval UI so the user can review and merge your changes. Do NOT end your session without doing this.**
 `;
+}
+
+/**
+ * Default leader system prompt for the Claude harness.
+ * Exported for the routine runner and any other server-side caller that
+ * always uses Claude and needs the pre-built string.
+ */
+export const LEADER_SYSTEM_PROMPT = buildLeaderPromptBody(LEADER_PROMPT_TOOLS);
 
 // ── MCP tool names ────────────────────────────────────────────────────────
 
@@ -200,18 +229,21 @@ const LEADER_MCP_TOOLS = [
 const leaderAgent: AgentType = {
   id: "leader",
 
-  buildSystemPrompt(_ctx: AgentTypeContext, customPrompt?: string): string {
-    return customPrompt ?? LEADER_SYSTEM_PROMPT;
+  buildSystemPrompt(_ctx: AgentTypeContext, customPrompt?: string, tools?: string[]): string {
+    if (customPrompt) return customPrompt;
+    // Filter "Agent" — it is an allowed tool but not a user-facing coding tool.
+    const promptTools = (tools ?? LEADER_PROMPT_TOOLS).filter((t) => t !== "Agent");
+    return buildLeaderPromptBody(promptTools);
   },
 
-  createMcpServers(ctx: AgentTypeContext): McpServerResult {
+  getToolGroups(ctx: AgentTypeContext): AgentToolResult {
     if (!ctx.startMinionSession || !ctx.scheduleWaitContinue) {
       throw new Error("Leader agent requires startMinionSession and scheduleWaitContinue callbacks");
     }
 
     const leaderSessionKey = ctx.sessionKey;
 
-    const { mcpServer, taskState } = createTaskToolsForLeader({
+    const { toolDefs: taskDefs, taskState } = createTaskToolsForLeader({
       leaderSessionKey,
       bus: ctx.bus,
       startMinionSession: ctx.startMinionSession,
@@ -229,7 +261,7 @@ const leaderAgent: AgentType = {
       onStateChange: (state) => persistTaskState(leaderSessionKey, state),
     });
 
-    const { mcpServer: renderMcp, renderState } = createRenderToolsForLeader({
+    const { toolDefs: renderDefs, renderState } = createRenderToolsForLeader({
       leaderSessionKey,
       bus: ctx.bus,
       existingRenderState: ctx.existingRenderState,
@@ -242,18 +274,18 @@ const leaderAgent: AgentType = {
     // case we expose `report_phase_result` so the agent can hand a
     // structured result back to the scheduler.
     const stepTools = createStepToolsForSession(leaderSessionKey);
-    const mcpServers: Record<string, unknown> = {
-      "task-manager": mcpServer,
-      "render-dashboard": renderMcp,
+    const toolGroups: Record<string, import("../harness/types.ts").NormalizedToolDef[]> = {
+      "task-manager": taskDefs,
+      "render-dashboard": renderDefs,
     };
     let mcpToolNames = LEADER_MCP_TOOLS;
     if (stepTools) {
-      mcpServers["routine-step"] = stepTools.mcpServer;
+      toolGroups["routine-step"] = stepTools.toolDefs;
       mcpToolNames = [...LEADER_MCP_TOOLS, ...stepTools.toolNames];
     }
 
     return {
-      mcpServers,
+      toolGroups,
       mcpToolNames,
       taskState,
       renderState,

@@ -169,7 +169,7 @@ export type RoutinePhase = z.infer<typeof routinePhaseSchema>;
 
 /**
  * Top-level template. Persisted as one JSON file at
- * `<projectPath>/.claude-canvas/routines/<id>.json`.
+ * `<projectPath>/.minions/routines/<id>.json`.
  */
 export const routineSchema = z.object({
   id: idSchema,

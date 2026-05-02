@@ -3,21 +3,21 @@
  */
 
 import { z } from "zod/v4";
-import { tool } from "@anthropic-ai/claude-agent-sdk";
+import type { NormalizedToolDef } from "../harness/types.ts";
 import type { TaskToolContext, TaskRecord } from "./types.ts";
 import { emitTaskPlanUpdate } from "./shared.ts";
 
-export function createCompleteTaskTool(ctx: TaskToolContext) {
-  return tool(
-    "complete_task",
-    "Mark a task as completed by you (the leader) directly. Use this when you have executed a task yourself without delegating to a minion.",
-    {
+export function createCompleteTaskToolDef(ctx: TaskToolContext): NormalizedToolDef {
+  return {
+    name: "complete_task",
+    description:
+      "Mark a task as completed by you (the leader) directly. Use this when you have executed a task yourself without delegating to a minion.",
+    inputSchema: z.object({
       taskId: z.string().describe("The task ID to mark as completed"),
-      result: z
-        .string()
-        .describe("Summary of what was done and the outcome"),
-    },
-    async (args) => {
+      result: z.string().describe("Summary of what was done and the outcome"),
+    }),
+    handler: async (input: unknown) => {
+      const args = input as { taskId: string; result: string };
       const { taskId, result } = args;
 
       let record = ctx.taskState.tasks.get(taskId);
@@ -67,5 +67,5 @@ export function createCompleteTaskTool(ctx: TaskToolContext) {
         ],
       };
     },
-  );
+  };
 }

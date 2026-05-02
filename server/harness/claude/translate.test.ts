@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { sdkToNormalized } from "./translate.ts";
+import { sdkToNormalized, translateSdkMessage } from "./translate.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -378,12 +378,13 @@ describe("sdkToNormalized: pass-through / no-op messages", () => {
     ).toEqual([]);
   });
 
-  it("returns [] for tool_progress", () => {
+  it("returns a tool_progress NormalizedEvent for tool_progress", () => {
+    // tool_progress is no longer a no-op — Phase 3 surfaces it.
     expect(
       sdkToNormalized(
-        msg({ type: "tool_progress", tool_name: "Read", elapsed_time_seconds: 1, session_id: "s" }),
+        msg({ type: "tool_progress", tool_use_id: "tu-1", tool_name: "Read", elapsed_time_seconds: 1.5, session_id: "s" }),
       ),
-    ).toEqual([]);
+    ).toEqual([{ kind: "tool_progress", id: "tu-1", name: "Read", elapsedSeconds: 1.5 }]);
   });
 
   it("returns [] for tool_use_summary", () => {
@@ -410,5 +411,47 @@ describe("sdkToNormalized: pass-through / no-op messages", () => {
 
   it("returns [] for completely unknown types", () => {
     expect(sdkToNormalized(msg({ type: "future_unknown_type" }))).toEqual([]);
+  });
+
+  it("returns [] for assistant messages with missing message.content", () => {
+    // Defensive guard: malformed assistant messages should not throw.
+    expect(
+      sdkToNormalized(msg({ type: "assistant", text: "hello" })),
+    ).toEqual([]);
+  });
+});
+
+// ── done event extras ─────────────────────────────────────────────────────────
+
+describe("sdkToNormalized: result done extras", () => {
+  it("includes result text on done when result is present", () => {
+    const events = sdkToNormalized(
+      msg({ type: "result", is_error: false, result: "42", num_turns: 2, session_id: "s" }),
+    );
+    const done = events.find((e) => e.kind === "done");
+    expect(done).toMatchObject({ kind: "done", reason: "completed", result: "42", turns: 2 });
+  });
+
+  it("omits result and turns from done when absent", () => {
+    const events = sdkToNormalized(
+      msg({ type: "result", session_id: "s" }),
+    );
+    const done = events.find((e) => e.kind === "done");
+    expect(done).toEqual({ kind: "done", reason: "completed" });
+  });
+});
+
+// ── translateSdkMessage ───────────────────────────────────────────────────────
+
+describe("translateSdkMessage", () => {
+  it("accepts unknown and delegates to sdkToNormalized", () => {
+    const result = translateSdkMessage(
+      msg({ type: "system", subtype: "init", session_id: "x", model: "opus" }),
+    );
+    expect(result).toEqual([{ kind: "init", sessionId: "x", model: "opus" }]);
+  });
+
+  it("returns [] for unknown message types", () => {
+    expect(translateSdkMessage({ type: "bogus" })).toEqual([]);
   });
 });

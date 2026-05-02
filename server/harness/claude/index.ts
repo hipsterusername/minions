@@ -18,52 +18,20 @@
  */
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { execSync } from "node:child_process";
 import { registerHarness } from "../index.ts";
 
-// ── Phase 2 transitional exports ──────────────────────────────────────────────
-
-/**
- * Duck-typed subset of the SDK's Query interface.
- *
- * Exposes only the methods that session-host.ts and its command handlers
- * actually call. Defining this here — rather than importing `Query` from
- * the SDK — keeps @anthropic-ai/claude-agent-sdk isolated inside
- * server/harness/claude/ as required by the architecture test added in
- * Phase 2.
- *
- * TODO(phase3): delete when session-host.ts switches to harness.start()
- * and the query handle is no longer exposed directly.
- */
-export interface QueryHandleLike extends AsyncIterable<unknown> {
-  close(): Promise<void>;
-  interrupt(): Promise<void>;
-  getContextUsage(): Promise<unknown>;
-  supportedModels(): Promise<unknown>;
-  supportedCommands(): Promise<unknown>;
-  supportedAgents(): Promise<unknown>;
-  accountInfo(): Promise<unknown>;
-  mcpServerStatus(): Promise<unknown>;
+function resolveClaudePath(): string {
+  if (process.env["CLAUDE_CODE_PATH"]) return process.env["CLAUDE_CODE_PATH"];
+  try {
+    return execSync("which claude", { encoding: "utf8" }).trim();
+  } catch {
+    return "claude";
+  }
 }
 
-/**
- * Wrap the SDK's `query()` call so session-host.ts can open a query loop
- * without importing @anthropic-ai/claude-agent-sdk directly.
- *
- * The `prompt` parameter accepts `string | AsyncIterable<…>` (whatever
- * `buildQueryPrompt` returns) typed as `unknown` so session-host.ts need
- * not import any SDK type to pass it in.
- *
- * TODO(phase3): delete when session-host.ts is fully switched to harness.start().
- */
-export function runClaudeQuery(
-  prompt: unknown,
-  options: Record<string, unknown>,
-): QueryHandleLike {
-  return query({
-    prompt: prompt as never,
-    options: options as never,
-  }) as unknown as QueryHandleLike;
-}
+const CLAUDE_EXECUTABLE = resolveClaudePath();
+
 import type {
   AgentHarness,
   HarnessCapabilities,
@@ -84,20 +52,44 @@ const CLAUDE_CAPABILITIES: HarnessCapabilities = {
   permissionPrompts: true,
   resume: true,
   partialMessages: true,
+  builtInFilesystem: true,
 };
+
+/**
+ * Built-in tools the Claude Code binary exposes to the agent without any MCP
+ * server. Phase 5: moved here from the `CODE_TOOLS` constant in
+ * `server/session-host-run.ts` so that non-Claude harnesses can declare a
+ * different (or empty) list.
+ */
+const CLAUDE_BUILT_IN_TOOLS = [
+  "Read",
+  "Write",
+  "Edit",
+  "Bash",
+  "Glob",
+  "Grep",
+  "Agent",
+  "WebFetch",
+  "WebSearch",
+] as const;
 
 // ── ClaudeHarness ─────────────────────────────────────────────────────────────
 
 class ClaudeHarness implements AgentHarness {
   readonly name = "claude";
   readonly capabilities = CLAUDE_CAPABILITIES;
+  readonly builtInTools: string[] = [...CLAUDE_BUILT_IN_TOOLS];
 
   private abortController: AbortController | null = null;
-  private registeredDefs: NormalizedToolDef[] = [];
+  private registeredGroups: Record<string, NormalizedToolDef[]> = {};
 
-  /** Register tool definitions. Called before start(). */
-  registerTools(defs: NormalizedToolDef[]): void {
-    this.registeredDefs = defs;
+  /**
+   * Register tool definitions grouped by MCP server name.
+   * Each key becomes a separate MCP server so tool call names remain
+   * `mcp__<serverName>__<toolName>` as before.
+   */
+  registerTools(toolGroups: Record<string, NormalizedToolDef[]>): void {
+    this.registeredGroups = toolGroups;
   }
 
   /**
@@ -127,28 +119,37 @@ class ClaudeHarness implements AgentHarness {
     // Wire the caller's AbortSignal into our controller.
     opts.abortSignal.addEventListener("abort", () => abortController.abort(), { once: true });
 
+    // Wrap each registered group as a separate named MCP server so tool call
+    // names follow the `mcp__<serverName>__<toolName>` pattern.
     const mcpServers: Record<string, unknown> = {};
-    if (this.registeredDefs.length > 0) {
-      const server = wrapTools("minions-tools", this.registeredDefs);
-      mcpServers["minions-tools"] = server;
+    for (const [serverName, defs] of Object.entries(this.registeredGroups)) {
+      if (defs.length > 0) {
+        mcpServers[serverName] = wrapTools(serverName, defs);
+      }
     }
 
     const options: Record<string, unknown> = {
       cwd: opts.cwd,
       resume: opts.resumeId,
       allowedTools: opts.allowedTools,
+      // permissionMode: Claude-specific permission model — gated by capabilities.
       permissionMode: "auto",
       abortController,
       includePartialMessages: true,
       systemPrompt: opts.systemPrompt,
       model: opts.model,
+      // Claude executable path — Claude-specific; other harnesses omit this.
+      pathToClaudeCodeExecutable: CLAUDE_EXECUTABLE,
     };
 
-    if (Object.keys(mcpServers).length > 0) {
-      options["mcpServers"] = mcpServers;
+    // Merge externally-supplied pre-wrapped MCP servers (e.g. from the project
+    // sidecar's mcp-servers.json) alongside the tool-group servers.
+    const allServers = { ...mcpServers, ...(opts.externalMcpServers ?? {}) };
+    if (Object.keys(allServers).length > 0) {
+      options["mcpServers"] = allServers;
     }
 
-    if (opts.thinking && supportsAdaptiveThinking(opts.model)) {
+    if (opts.thinking && this.capabilities.thinking && supportsAdaptiveThinking(opts.model)) {
       options["thinking"] = { type: "adaptive", display: opts.thinking.display };
       options["effort"] = opts.thinking.effort;
     }
@@ -164,6 +165,53 @@ class ClaudeHarness implements AgentHarness {
 
       for await (const msg of handle) {
         if (abortController.signal.aborted) break;
+
+        // Intercept Claude Agent-tool sub-agent system events before the
+        // generic translator so they become NormalizedEvent variants.
+        const raw = msg as { type?: string; subtype?: string } & Record<string, unknown>;
+        if (raw.type === "system") {
+          if (raw.subtype === "task_started") {
+            yield {
+              kind: "agent_spawned",
+              taskId: (raw["task_id"] as string) ?? `agent-${Date.now().toString(36)}`,
+              description: (raw["description"] as string) ?? "Subagent task",
+            };
+            continue;
+          }
+          if (raw.subtype === "task_notification") {
+            yield {
+              kind: "agent_task_update",
+              taskId: (raw["task_id"] as string) ?? "",
+              status: (raw["status"] as string) ?? "completed",
+              summary: (raw["summary"] as string) ?? "",
+            };
+            continue;
+          }
+          // system/init: attach raw Claude meta so the host can populate initData.
+          if (raw.subtype === "init") {
+            const normalized = sdkToNormalized(msg);
+            for (const evt of normalized) {
+              if (evt.kind === "init") {
+                yield {
+                  ...evt,
+                  meta: {
+                    tools: raw["tools"],
+                    model: raw["model"],
+                    mcp_servers: raw["mcp_servers"],
+                    permissionMode: raw["permissionMode"],
+                    slash_commands: raw["slash_commands"],
+                    skills: raw["skills"],
+                    claude_code_version: raw["claude_code_version"],
+                  },
+                };
+              } else {
+                yield evt;
+              }
+            }
+            continue;
+          }
+        }
+
         const events = sdkToNormalized(msg);
         for (const evt of events) {
           yield evt;

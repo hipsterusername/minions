@@ -1,7 +1,7 @@
 /**
  * MCP server catalog types — shared between server and client.
  *
- * Entries live at `<projectPath>/.claude-canvas/mcp-servers.json`.
+ * Entries live at `<projectPath>/.minions/mcp-servers.json`.
  * The transport field is the discriminant; the remaining fields match
  * the SDK's McpStdioServerConfig / McpSSEServerConfig / McpHttpServerConfig
  * exactly so the store can pass them straight through to `query()`.

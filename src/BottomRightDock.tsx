@@ -415,14 +415,19 @@ function DockPill({
 }
 
 interface DockBarProps {
-  onOpenRoutines: () => void;
+  /**
+   * When provided, the Routines pill is shown and clicking it invokes
+   * this callback. When undefined (e.g. the `routines` feature flag is
+   * off), the pill is omitted entirely.
+   */
+  onOpenRoutines?: (() => void) | undefined;
 }
 
 export function DockBar({ onOpenRoutines }: DockBarProps) {
   const { activePanel, togglePanel, badges } = useDock();
 
-  const buttons: DockButtonConfig[] = useMemo(
-    () => [
+  const buttons: DockButtonConfig[] = useMemo(() => {
+    const list: DockButtonConfig[] = [
       {
         id: "sessions",
         label: "Sessions",
@@ -438,15 +443,17 @@ export function DockBar({ onOpenRoutines }: DockBarProps) {
         label: "Skills",
         icon: <SkillsIcon />,
       },
-      {
+    ];
+    if (onOpenRoutines) {
+      list.push({
         id: "routines",
         label: "Routines",
         icon: <RoutinesIcon />,
         onAction: onOpenRoutines,
-      },
-    ],
-    [onOpenRoutines],
-  );
+      });
+    }
+    return list;
+  }, [onOpenRoutines]);
 
   return (
     <div

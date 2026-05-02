@@ -48,6 +48,7 @@ import { listRoutinesCommand } from "./list-routines.ts";
 import { startRoutine } from "./start-routine.ts";
 import { abortRoutine } from "./abort-routine.ts";
 import { submitForm } from "./submit-form.ts";
+import { clearSession } from "./clear-session.ts";
 import type { CommandContext, CommandTable, WsCommand } from "./types.ts";
 import type { WebSocket } from "ws";
 
@@ -100,6 +101,8 @@ export const COMMAND_TABLE = {
   abort_routine: abortRoutine,
   // Render-DSL interactive components
   submit_form: submitForm,
+  // Session history
+  clear_session: clearSession,
 } satisfies CommandTable;
 
 /**

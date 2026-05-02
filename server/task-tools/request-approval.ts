@@ -3,21 +3,25 @@
  */
 
 import { z } from "zod/v4";
-import { tool } from "@anthropic-ai/claude-agent-sdk";
+import type { NormalizedToolDef } from "../harness/types.ts";
 import type { DetailedDiff } from "../worktree.js";
 import { getDetailedDiff } from "../worktree.js";
 import type { TaskToolContext } from "./types.ts";
 
-export function createRequestApprovalTool(ctx: TaskToolContext) {
-  return tool(
-    "request_approval",
-    "REQUIRED as your final action: Request user approval to merge worktree changes into the main branch. Call this after ALL work is complete. Automatically gathers a detailed diff and triggers the Approve/Discard UI buttons for the user. IMPORTANT: Immediately after calling this tool, you MUST call render_set to display a change summary dashboard showing the diff details returned by this tool.",
-    {
+export function createRequestApprovalToolDef(ctx: TaskToolContext): NormalizedToolDef {
+  return {
+    name: "request_approval",
+    description:
+      "REQUIRED as your final action: Request user approval to merge worktree changes into the main branch. Call this after ALL work is complete. Automatically gathers a detailed diff and triggers the Approve/Discard UI buttons for the user. IMPORTANT: Immediately after calling this tool, you MUST call render_set to display a change summary dashboard showing the diff details returned by this tool.",
+    inputSchema: z.object({
       summary: z
         .string()
-        .describe("A concise summary of all changes made and why — this is shown to the user in the approval UI"),
-    },
-    async (args) => {
+        .describe(
+          "A concise summary of all changes made and why — this is shown to the user in the approval UI",
+        ),
+    }),
+    handler: async (input: unknown) => {
+      const args = input as { summary: string };
       if (!ctx.worktreeInfo) {
         return {
           content: [
@@ -105,5 +109,5 @@ export function createRequestApprovalTool(ctx: TaskToolContext) {
         ],
       };
     },
-  );
+  };
 }

@@ -2,7 +2,7 @@
  * MCP server file storage.
  *
  * Server configs live in one JSON file at
- * `<projectPath>/.claude-canvas/mcp-servers.json`. This mirrors the flat
+ * `<projectPath>/.minions/mcp-servers.json`. This mirrors the flat
  * array format used by `skills.json` in `project-store.ts`: one file for
  * all entries, parsed as an array, each entry validated independently.
  *
@@ -19,7 +19,7 @@ import {
   type McpServerEntry,
 } from "../shared/mcp-servers/types.ts";
 
-const SIDECAR_DIR = ".claude-canvas";
+const SIDECAR_DIR = ".minions";
 const MCP_SERVERS_FILE = "mcp-servers.json";
 
 // ── Paths ───────────────────────────────────────────────────────────────────

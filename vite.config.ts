@@ -12,7 +12,7 @@ export default defineConfig({
       // Ignore sidecar data and worktree directories so that autosave DB writes,
       // settings changes, and worktree operations don't trigger Vite full-reloads.
       ignored: [
-        "**/.claude-canvas/**",
+        "**/.minions/**",
         "**/.canvas-worktrees/**",
       ],
     },

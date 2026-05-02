@@ -22,8 +22,12 @@
 
 export type NormalizedEvent =
   // ── Spec-defined variants ──────────────────────────────────────────────────
-  /** Session initialization — carries sessionId, model, and permission mode. */
-  | { kind: "init"; sessionId: string; model: string; permissionMode?: string }
+  /**
+   * Session initialization — carries sessionId, model, and permission mode.
+   * `meta` holds harness-specific init data (e.g. Claude's tools/mcp_servers
+   * fields). Consumers that only need the normalised fields ignore it.
+   */
+  | { kind: "init"; sessionId: string; model: string; permissionMode?: string; meta?: Record<string, unknown> }
   /** Complete text block from an assistant turn. */
   | { kind: "text"; text: string; role: "assistant" | "user" }
   /** Complete thinking block (extended thinking / chain-of-thought). */
@@ -56,7 +60,24 @@ export type NormalizedEvent =
       result?: string;
       /** Total number of turns for the session (mirrors SDK result.num_turns). */
       turns?: number;
+      /**
+       * Total session cost in USD. Present when the harness provides it on the
+       * result message (e.g. Claude SDK total_cost_usd). Absent on abort/error.
+       */
+      costUSD?: number;
     }
+
+  // ── Sub-agent events (Claude Agent-tool sub-agents) ───────────────────────
+  /**
+   * A Claude Agent-tool sub-agent task has started. Emitted by ClaudeHarness
+   * when it sees a `system/task_started` SDK event. Non-Claude harnesses
+   * that have no sub-agent concept never emit this.
+   */
+  | { kind: "agent_spawned"; taskId: string; description: string }
+  /**
+   * A Claude Agent-tool sub-agent task has a status update or has completed.
+   */
+  | { kind: "agent_task_update"; taskId: string; status: string; summary: string }
 
   // ── Phase 3 extensions for streaming and tool visibility ──────────────────
   /**

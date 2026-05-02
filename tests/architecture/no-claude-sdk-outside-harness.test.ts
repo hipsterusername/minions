@@ -31,26 +31,10 @@ const SDK_IMPORT_RE =
   /^(?:import|export)\b[^\n]*\bfrom\s+['"]@anthropic-ai\/claude-agent-sdk['"]/m;
 
 // ── Phase 4 pending ───────────────────────────────────────────────────────────
-// Files outside server/harness/claude/ that still import the SDK.
-// Each will be migrated to NormalizedToolDef in Phase 4; remove the entry
-// once the import is gone. Leaving a stale entry here causes the sanity
-// check below to fail.
-const PHASE_4_PENDING = new Set([
-  "server/render-tools.ts",
-  "server/render-tools.test.ts",
-  "server/minion-tools.ts",
-  "server/minion-tools.test.ts",
-  "server/multimodal-prompt.ts",
-  "server/task-tools.ts",
-  "server/task-tools/assign-task.ts",
-  "server/task-tools/complete-task.ts",
-  "server/task-tools/get-task-status.ts",
-  "server/task-tools/plan-task.ts",
-  "server/task-tools/request-approval.ts",
-  "server/task-tools/set-task-name.ts",
-  "server/task-tools/wait-and-continue.ts",
-  "server/routines/step-tools.ts",
-]);
+// Phase 4 complete — all tool files have been migrated to NormalizedToolDef.
+// The allowlist is now empty. Any new file that accidentally imports the SDK
+// outside server/harness/claude/ will be caught by the main gate below.
+const PHASE_4_PENDING = new Set<string>();
 
 // ── File discovery ────────────────────────────────────────────────────────────
 
@@ -104,26 +88,10 @@ describe("architecture: @anthropic-ai/claude-agent-sdk isolated to server/harnes
     });
   }
 
-  // Sanity check: every PHASE_4_PENDING entry must still import the SDK.
-  // When Phase 4 removes an import, this test fails until the entry is
-  // removed from PHASE_4_PENDING — keeping the allowlist honest.
-  describe("PHASE_4_PENDING allowlist is current (no stale entries)", () => {
-    for (const pending of PHASE_4_PENDING) {
-      it(`${pending} still imports the SDK (remove from allowlist when migrated)`, () => {
-        const absPath = join(REPO_ROOT, pending);
-        if (!existsSync(absPath)) {
-          expect.fail(
-            `PHASE_4_PENDING entry "${pending}" does not exist. ` +
-              `Remove it from the allowlist.`,
-          );
-          return;
-        }
-        expect(
-          hasSdkImport(absPath),
-          `PHASE_4_PENDING entry "${pending}" no longer imports the SDK. ` +
-            `Remove it from the allowlist in this file.`,
-        ).toBe(true);
-      });
-    }
+  // Phase 4 is complete: the allowlist is empty. This test confirms it stays
+  // that way — any future file added to PHASE_4_PENDING by mistake will fail
+  // the main gate above without needing this secondary check.
+  it("PHASE_4_PENDING allowlist is empty — Phase 4 migration complete", () => {
+    expect(PHASE_4_PENDING.size).toBe(0);
   });
 });

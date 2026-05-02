@@ -1,5 +1,19 @@
 // ── Theme Definitions ─────────────────────────────────────
-// Each theme maps to CSS custom properties applied on :root
+// Each theme maps to CSS custom properties applied on :root.
+//
+// Design notes:
+//   • Every theme keeps a clear 4-step text hierarchy
+//     (--text-primary > --text-secondary > --text-muted > --text-dim).
+//   • Background scales 4 deep (primary → secondary → surface → elevated).
+//   • Status colours preserve red/yellow/green semantics in every theme,
+//     even monochromatic ones (Cathode keeps amber for warning, red for error).
+//   • Each theme is opinionated about a colour-theory move:
+//       Midnight       — complementary  (deep navy × warm saffron)
+//       Alpine         — warm analogous (cream + ink + rust)
+//       Deep Current   — split-complementary (teal × amber/coral)
+//       Proof Sheet    — neutral + signal (achromatic + signal red)
+//       Studio Warm    — warm analogous (espresso → ochre → wine)
+//       Cathode        — monochromatic phosphor (with amber/red kept for status)
 
 export interface ThemeDefinition {
   id: string;
@@ -21,9 +35,10 @@ export interface ThemeDefinition {
 // Dark themes use the same vibrant status colors; light themes soften them.
 
 const darkSemanticVars = {
-  // Status colors
+  // Status colors. `running` is intentionally distinct from `success`
+  // (sky-blue vs emerald) so an in-progress badge doesn't read as done.
   "--status-success": "#34d399",
-  "--status-running": "#34d399",
+  "--status-running": "#38bdf8",
   "--status-idle": "#60a5fa",
   "--status-warning": "#fbbf24",
   "--status-error": "#f87171",
@@ -70,6 +85,9 @@ const darkSemanticVars = {
   "--thinking-bg-hover": "rgba(168, 85, 247, 0.10)",
   "--success-bg": "rgba(74, 222, 128, 0.08)",
   "--danger-bg": "rgba(239, 68, 68, 0.08)",
+  // Alias kept for components that ask for an `error` rather than `danger`
+  // background (e.g. RenderNode status, RoutineNode aborted state).
+  "--error-bg": "rgba(239, 68, 68, 0.08)",
   "--warning-bg": "rgba(250, 204, 21, 0.06)",
   "--info-bg": "rgba(96, 165, 250, 0.08)",
   "--muted-bg": "rgba(136, 144, 176, 0.06)",
@@ -100,7 +118,7 @@ const darkSemanticVars = {
   "--code-bg": "rgba(129, 140, 248, 0.12)",
 
   // Kanban gradients (gradient-primary is overridden per-theme to use accent)
-  "--gradient-primary": "linear-gradient(135deg, #f0883e, #e05b2a)",
+  "--gradient-primary": "linear-gradient(135deg, #f59e3b, #d97a1c)",
   "--gradient-success": "linear-gradient(135deg, #34d399, #10b981)",
   "--gradient-danger": "linear-gradient(135deg, #f87171, #ef4444)",
 
@@ -113,10 +131,12 @@ const darkSemanticVars = {
 };
 
 const lightSemanticVars: Record<string, string> = {
-  // Status colors — darkened for WCAG AA (≥4.5:1) on light backgrounds
-  "--status-success": "#14793a",
-  "--status-running": "#14793a",
-  "--status-idle": "#2563eb",
+  // Status colors — darkened for WCAG AA (≥4.5:1) on light backgrounds.
+  // `running` is distinct from `success` so an in-progress badge is
+  // visually separable from a completed one.
+  "--status-success": "#15803d",
+  "--status-running": "#0369a1",
+  "--status-idle": "#1d4ed8",
   "--status-warning": "#a84e08",
   "--status-error": "#b91c1c",
   "--status-stopped": "#57534e",
@@ -127,74 +147,75 @@ const lightSemanticVars: Record<string, string> = {
   // Priority colors
   "--priority-critical": "#b91c1c",
   "--priority-high": "#c2410c",
-  "--priority-medium": "#2563eb",
+  "--priority-medium": "#1d4ed8",
   "--priority-low": "#57534e",
 
   // Model colors
   "--model-sonnet": "#a84e08",
   "--model-opus": "#6d28d9",
   "--model-opus-old": "#7c5db5",
-  "--model-haiku": "#14793a",
+  "--model-haiku": "#15803d",
 
   // Semantic accents — darkened for AA compliance on white/light surfaces
-  "--tool-accent": "#4f46e5",
+  "--tool-accent": "#4338ca",
   "--thinking-accent": "#7e22ce",
-  "--success-color": "#14793a",
+  "--success-color": "#15803d",
   "--danger-color": "#b91c1c",
   "--danger-color-text": "#b91c1c",
   "--warning-color": "#a84e08",
   "--info-color": "#1d4ed8",
 
-  // Shadows (light themes use softer, colored shadows)
-  "--shadow-sm": "0 2px 8px rgba(0,0,0,0.06)",
-  "--shadow-md": "0 8px 24px rgba(0,0,0,0.1)",
-  "--shadow-lg": "0 8px 32px rgba(0,0,0,0.12)",
-  "--overlay-bg": "rgba(0,0,0,0.3)",
+  // Shadows (light themes use softer shadows)
+  "--shadow-sm": "0 2px 8px rgba(60, 50, 35, 0.06)",
+  "--shadow-md": "0 8px 24px rgba(60, 50, 35, 0.10)",
+  "--shadow-lg": "0 8px 32px rgba(60, 50, 35, 0.14)",
+  "--overlay-bg": "rgba(40, 30, 20, 0.32)",
 
   // Interactive state overlays
   "--state-hover": "rgba(0,0,0,0.03)",
   "--state-active": "rgba(0,0,0,0.06)",
 
   // Tool/thinking backgrounds — matched to darkened accent colors
-  "--tool-bg": "rgba(79, 70, 229, 0.08)",
-  "--tool-bg-hover": "rgba(79, 70, 229, 0.14)",
+  "--tool-bg": "rgba(67, 56, 202, 0.07)",
+  "--tool-bg-hover": "rgba(67, 56, 202, 0.12)",
   "--thinking-bg": "rgba(126, 34, 206, 0.06)",
   "--thinking-bg-hover": "rgba(126, 34, 206, 0.10)",
-  "--success-bg": "rgba(20, 121, 58, 0.08)",
+  "--success-bg": "rgba(21, 128, 61, 0.08)",
   "--danger-bg": "rgba(185, 28, 28, 0.08)",
+  "--error-bg": "rgba(185, 28, 28, 0.08)",
   "--warning-bg": "rgba(168, 78, 8, 0.06)",
   "--info-bg": "rgba(29, 78, 216, 0.08)",
   "--muted-bg": "rgba(100, 116, 139, 0.06)",
 
   // Edge colors — darkened for light theme contrast
-  "--edge-task": "#4f46e5",
-  "--edge-context": "#14793a",
+  "--edge-task": "#4338ca",
+  "--edge-context": "#15803d",
 
-  // Note palette (light)
-  "--note-blue-bg": "#dbeafe",
-  "--note-blue-border": "#93c5fd",
-  "--note-green-bg": "#dcfce7",
-  "--note-green-border": "#86efac",
-  "--note-orange-bg": "#ffedd5",
-  "--note-orange-border": "#fdba74",
-  "--note-purple-bg": "#ede9fe",
-  "--note-purple-border": "#c4b5fd",
-  "--note-pink-bg": "#fce7f3",
-  "--note-pink-border": "#f9a8d4",
-  "--note-slate-bg": "#f1f5f9",
-  "--note-slate-border": "#cbd5e1",
+  // Note palette (light) — warm-paper biased so they sit on cream surfaces
+  "--note-blue-bg": "#dde7f5",
+  "--note-blue-border": "#a8c1e0",
+  "--note-green-bg": "#dceadc",
+  "--note-green-border": "#9bc59b",
+  "--note-orange-bg": "#fbe6cf",
+  "--note-orange-border": "#e8b97c",
+  "--note-purple-bg": "#e6dcf0",
+  "--note-purple-border": "#bfa8d6",
+  "--note-pink-bg": "#f3dde2",
+  "--note-pink-border": "#d8a8b4",
+  "--note-slate-bg": "#ede8df",
+  "--note-slate-border": "#c5beb0",
 
-  // Markdown node
-  "--markdown-bg": "#f0fdf4",
-  "--markdown-border": "#bbf7d0",
+  // Markdown node — cream tinted for paper feel
+  "--markdown-bg": "#f4f1e8",
+  "--markdown-border": "#d8d2c4",
 
   // Code inline background
-  "--code-bg": "rgba(79, 70, 229, 0.1)",
+  "--code-bg": "rgba(67, 56, 202, 0.09)",
 
   // Kanban gradients — darkened for AA contrast
-  "--gradient-primary": "linear-gradient(135deg, #c2410c, #9a3412)",
-  "--gradient-success": "linear-gradient(135deg, #14793a, #166534)",
-  "--gradient-danger": "linear-gradient(135deg, #b91c1c, #991b1b)",
+  "--gradient-primary": "linear-gradient(135deg, #b8451f, #8a3216)",
+  "--gradient-success": "linear-gradient(135deg, #15803d, #14532d)",
+  "--gradient-danger": "linear-gradient(135deg, #b91c1c, #7f1d1d)",
 
   // Kanban text & shadow helpers (inverted for light theme)
   "--kb-text-on-gradient": "#ffffff",
@@ -204,290 +225,344 @@ const lightSemanticVars: Record<string, string> = {
   "--streaming-color": "#1d4ed8",
 };
 
-// ── 1. Midnight (Current) ─────────────────────────────────
+// ── 1. Midnight ───────────────────────────────────────────
+// Complementary: deep navy × warm saffron.
+// The accent is pulled slightly warmer than the previous orange so it
+// reads as ember-against-water rather than pumpkin-against-slate.
 const midnight: ThemeDefinition = {
   id: "midnight",
   name: "Midnight",
-  description: "The original dark canvas — cool-toned with orange accents",
+  description: "Deep navy canvas warmed by a saffron accent",
   fonts: {
     sans: '"DM Sans", "Segoe UI", system-ui, sans-serif',
     mono: '"JetBrains Mono", "Fira Code", monospace',
   },
   googleFontsQuery: "family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600",
-  swatch: { bg: "#0a0c14", accent: "#f0883e", text: "#e2e8f0" },
+  swatch: { bg: "#0a0e1a", accent: "#f59e3b", text: "#e6ecf5" },
   vars: {
-    "--bg-primary": "#0a0c14",
-    "--bg-secondary": "#0f1117",
-    "--bg-surface": "#141620",
-    "--bg-elevated": "#181c2a",
-    "--border-default": "#1e2030",
-    "--border-hover": "#2a3050",
-    "--text-primary": "#e2e8f0",
-    "--text-secondary": "#94a3b8",
-    "--text-muted": "#8890b0",
-    "--text-dim": "#8494b4",
-    "--accent": "#f0883e",
-    "--accent-dark": "#e05b2a",
-    "--dot-grid": "#1a1d2e",
-    "--selection-bg": "rgba(240, 136, 62, 0.3)",
+    "--bg-primary": "#0a0e1a",
+    "--bg-secondary": "#10131f",
+    "--bg-surface": "#161a26",
+    "--bg-elevated": "#1c2030",
+    "--border-default": "#232940",
+    "--border-hover": "#313a5a",
+    "--text-primary": "#e6ecf5",
+    "--text-secondary": "#aab3c5",
+    "--text-muted": "#7c849a",
+    "--text-dim": "#5c637a",
+    "--accent": "#f59e3b",
+    "--accent-dark": "#d97a1c",
+    "--dot-grid": "#1a2036",
+    "--selection-bg": "rgba(245, 158, 59, 0.28)",
     ...darkSemanticVars,
+    "--gradient-primary": "linear-gradient(135deg, #f59e3b, #d97a1c)",
   },
 };
 
 // ── 2. Alpine Workshop ────────────────────────────────────
+// Warm analogous: cream + ink + rust. Surfaces are tinted cream
+// rather than pure white so the paper metaphor holds together.
 const alpine: ThemeDefinition = {
   id: "alpine",
   name: "Alpine Workshop",
-  description: "Warm light theme — editorial precision, papery tones",
+  description: "Cream paper, deep ink, a rust accent — editorial warmth",
   fonts: {
     sans: '"Space Grotesk", "Segoe UI", system-ui, sans-serif',
     mono: '"IBM Plex Mono", "Fira Code", monospace',
   },
   googleFontsQuery:
     "family=Space+Grotesk:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600",
-  swatch: { bg: "#faf8f5", accent: "#c2410c", text: "#1c1917" },
+  swatch: { bg: "#f4f1e8", accent: "#b8451f", text: "#1a1614" },
   vars: {
-    "--bg-primary": "#f5f2ed",
-    "--bg-secondary": "#faf8f5",
-    "--bg-surface": "#ffffff",
+    "--bg-primary": "#ede9dd",
+    "--bg-secondary": "#f4f1e8",
+    "--bg-surface": "#fbf8f0",
     "--bg-elevated": "#ffffff",
-    "--border-default": "#d6d3cd",
-    "--border-hover": "#b8b3a8",
-    "--text-primary": "#1c1917",
-    "--text-secondary": "#57534e",
-    "--text-muted": "#706860",
-    "--text-dim": "#635b52",
-    "--accent": "#c2410c",
-    "--accent-dark": "#9a3412",
-    "--dot-grid": "#d6d3cd",
-    "--selection-bg": "rgba(194, 65, 12, 0.15)",
+    "--border-default": "#d8d2c4",
+    "--border-hover": "#b8b0a0",
+    "--text-primary": "#1a1614",
+    "--text-secondary": "#4a443e",
+    "--text-muted": "#756c62",
+    "--text-dim": "#9a907f",
+    "--accent": "#b8451f",
+    "--accent-dark": "#8a3216",
+    "--dot-grid": "#d6d0c0",
+    "--selection-bg": "rgba(184, 69, 31, 0.18)",
     ...lightSemanticVars,
   },
 };
 
 // ── 3. Deep Current ───────────────────────────────────────
+// Split-complementary: teal accent against an abyssal navy floor,
+// with warm amber for tool surfaces and coral for thinking. The
+// warm pair is what makes the cool dominant feel deliberate instead
+// of monotone.
 const deepCurrent: ThemeDefinition = {
   id: "deep-current",
   name: "Deep Current",
-  description: "Oceanic dark — navy depths with teal and amber accents",
+  description: "Abyssal navy, teal phosphorescence, amber lantern light",
   fonts: {
     sans: '"Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif',
     mono: '"IBM Plex Mono", "Fira Code", monospace',
   },
   googleFontsQuery:
     "family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600",
-  swatch: { bg: "#0c1220", accent: "#0d9488", text: "#cbd5e1" },
+  swatch: { bg: "#08111e", accent: "#2dd4bf", text: "#d4e4f0" },
   vars: {
-    "--bg-primary": "#0c1220",
-    "--bg-secondary": "#101828",
-    "--bg-surface": "#162032",
-    "--bg-elevated": "#1c2a3e",
-    "--border-default": "#1e3048",
-    "--border-hover": "#2a4060",
-    "--text-primary": "#cbd5e1",
-    "--text-secondary": "#7e9aba",
-    "--text-muted": "#7e9ebe",
-    "--text-dim": "#7a9ec0",
-    "--accent": "#14b8a6",
-    "--accent-dark": "#0d9488",
-    "--dot-grid": "#162840",
-    "--selection-bg": "rgba(13, 148, 136, 0.25)",
+    "--bg-primary": "#08111e",
+    "--bg-secondary": "#0c1726",
+    "--bg-surface": "#122036",
+    "--bg-elevated": "#182b46",
+    "--border-default": "#1f3556",
+    "--border-hover": "#2c4870",
+    "--text-primary": "#d4e4f0",
+    "--text-secondary": "#98b3cc",
+    "--text-muted": "#6a8aa8",
+    "--text-dim": "#4d6a86",
+    "--accent": "#2dd4bf",
+    "--accent-dark": "#14b8a6",
+    "--dot-grid": "#102240",
+    "--selection-bg": "rgba(45, 212, 191, 0.22)",
     ...darkSemanticVars,
-    // Deep Current overrides: teal-tinted tool accents
-    "--edge-task": "#0d9488",
-    "--tool-accent": "#0ea5e9",
-    "--tool-bg": "rgba(14, 165, 233, 0.08)",
-    "--tool-bg-hover": "rgba(14, 165, 233, 0.12)",
-    "--streaming-color": "#0ea5e9",
-    // Warmer note tones
+    // Split-complementary warm pair
+    "--tool-accent": "#fbbf24",
+    "--thinking-accent": "#fb923c",
+    "--tool-bg": "rgba(251, 191, 36, 0.07)",
+    "--tool-bg-hover": "rgba(251, 191, 36, 0.12)",
+    "--thinking-bg": "rgba(251, 146, 60, 0.06)",
+    "--thinking-bg-hover": "rgba(251, 146, 60, 0.10)",
+    "--edge-task": "#2dd4bf",
+    "--edge-context": "#fbbf24",
+    "--streaming-color": "#2dd4bf",
+    "--code-bg": "rgba(45, 212, 191, 0.10)",
+    // Cooler note tones biased toward sea/sand
     "--note-blue-bg": "#0c1e38",
     "--note-blue-border": "#1a3558",
-    "--note-orange-bg": "#2a1a10",
-    "--note-orange-border": "#3a2818",
+    "--note-green-bg": "#0c2a26",
+    "--note-green-border": "#16433d",
+    "--note-orange-bg": "#2a1d0c",
+    "--note-orange-border": "#3e2c14",
+    "--note-purple-bg": "#1a1c34",
+    "--note-purple-border": "#2a2e4a",
+    "--note-pink-bg": "#2a1a24",
+    "--note-pink-border": "#3a2434",
+    "--note-slate-bg": "#162236",
+    "--note-slate-border": "#243650",
     "--markdown-bg": "#0c2018",
     "--markdown-border": "#1a3528",
-    "--gradient-primary": "linear-gradient(135deg, #0d9488, #0f766e)",
+    "--gradient-primary": "linear-gradient(135deg, #2dd4bf, #0d9488)",
+    "--gradient-success": "linear-gradient(135deg, #2dd4bf, #14b8a6)",
   },
 };
 
 // ── 4. Proof Sheet ────────────────────────────────────────
+// Achromatic + signal: brutalist black/white with a single signal red.
+// Gray hierarchy widened to four distinct steps. Surfaces drift very
+// slightly cool so the warm signal red feels surgical, not decorative.
 const proofSheet: ThemeDefinition = {
   id: "proof-sheet",
   name: "Proof Sheet",
-  description: "Brutalist high-contrast — black, white, and signal red",
+  description: "Brutalist neutrals with a single signal red",
   fonts: {
     sans: '"Instrument Sans", "Segoe UI", system-ui, sans-serif',
     mono: '"Space Mono", "Fira Code", monospace',
   },
   googleFontsQuery:
     "family=Instrument+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700",
-  swatch: { bg: "#111110", accent: "#ff3b30", text: "#eeeeec" },
+  swatch: { bg: "#0d0d0d", accent: "#ed2024", text: "#f5f5f3" },
   vars: {
-    "--bg-primary": "#111110",
-    "--bg-secondary": "#191918",
-    "--bg-surface": "#222220",
-    "--bg-elevated": "#2a2a28",
-    "--border-default": "#333330",
-    "--border-hover": "#444440",
-    "--text-primary": "#eeeeec",
-    "--text-secondary": "#aaaaaa",
-    "--text-muted": "#949494",
-    "--text-dim": "#969696",
-    "--accent": "#ff3b30",
-    "--accent-dark": "#cc2f26",
-    "--dot-grid": "#222220",
-    "--selection-bg": "rgba(255, 59, 48, 0.2)",
+    "--bg-primary": "#0d0d0d",
+    "--bg-secondary": "#161616",
+    "--bg-surface": "#1f1f1f",
+    "--bg-elevated": "#292929",
+    "--border-default": "#353533",
+    "--border-hover": "#4d4d4a",
+    "--text-primary": "#f5f5f3",
+    "--text-secondary": "#b8b8b6",
+    "--text-muted": "#888886",
+    "--text-dim": "#585856",
+    "--accent": "#ed2024",
+    "--accent-dark": "#b8181c",
+    "--dot-grid": "#222222",
+    "--selection-bg": "rgba(237, 32, 36, 0.22)",
     ...darkSemanticVars,
-    // Proof Sheet: red-centric overrides
-    "--tool-accent": "#aaaaaa",
-    "--thinking-accent": "#888888",
-    "--tool-bg": "rgba(170, 170, 170, 0.06)",
-    "--tool-bg-hover": "rgba(170, 170, 170, 0.10)",
-    "--thinking-bg": "rgba(136, 136, 136, 0.05)",
-    "--thinking-bg-hover": "rgba(136, 136, 136, 0.08)",
-    "--edge-task": "#aaaaaa",
-    "--edge-context": "#aaaaaa",
-    "--streaming-color": "#eeeeec",
-    "--gradient-primary": "linear-gradient(135deg, #ff3b30, #cc2f26)",
+    // Brutalist: tool/thinking are neutral, the only colour in the room is signal red
+    "--tool-accent": "#b8b8b6",
+    "--thinking-accent": "#888886",
+    "--tool-bg": "rgba(184, 184, 182, 0.05)",
+    "--tool-bg-hover": "rgba(184, 184, 182, 0.09)",
+    "--thinking-bg": "rgba(136, 136, 134, 0.05)",
+    "--thinking-bg-hover": "rgba(136, 136, 134, 0.08)",
+    "--edge-task": "#b8b8b6",
+    "--edge-context": "#888886",
+    "--streaming-color": "#f5f5f3",
+    "--gradient-primary": "linear-gradient(135deg, #ed2024, #b8181c)",
     "--gradient-success": "linear-gradient(135deg, #34d399, #10b981)",
-    "--gradient-danger": "linear-gradient(135deg, #ff3b30, #cc2f26)",
-    // Neutral note palette
-    "--note-blue-bg": "#1a1a20",
-    "--note-blue-border": "#2a2a32",
-    "--note-green-bg": "#181e18",
-    "--note-green-border": "#282e28",
-    "--note-orange-bg": "#201a14",
-    "--note-orange-border": "#302a22",
-    "--note-purple-bg": "#1e1a22",
-    "--note-purple-border": "#2e2a32",
-    "--note-pink-bg": "#221a1e",
-    "--note-pink-border": "#322a2e",
-    "--note-slate-bg": "#1e1e1e",
-    "--note-slate-border": "#303030",
+    "--gradient-danger": "linear-gradient(135deg, #ed2024, #b8181c)",
+    // Notes hold a near-neutral palette with subtle hue drift so the user
+    // can still tell them apart, but nothing competes with the red signal.
+    "--note-blue-bg": "#181a20",
+    "--note-blue-border": "#262a32",
+    "--note-green-bg": "#181c18",
+    "--note-green-border": "#262c26",
+    "--note-orange-bg": "#1f1a14",
+    "--note-orange-border": "#2e2820",
+    "--note-purple-bg": "#1c181f",
+    "--note-purple-border": "#2c272f",
+    "--note-pink-bg": "#1f181c",
+    "--note-pink-border": "#2e262b",
+    "--note-slate-bg": "#1c1c1c",
+    "--note-slate-border": "#2c2c2c",
     "--markdown-bg": "#181818",
     "--markdown-border": "#282828",
-    "--code-bg": "rgba(170, 170, 170, 0.08)",
+    "--code-bg": "rgba(184, 184, 182, 0.07)",
   },
 };
 
 // ── 5. Studio Warm ────────────────────────────────────────
+// Warm analogous through and through: espresso shadows, ochre as
+// dominant accent, wine for thinking, sand for tools. The previous
+// muddy red thinking-accent and cool blue note are gone; the cool
+// "blue" note slot still exists for the note picker but is biased
+// toward dusk-slate so it complements the warm field rather than
+// fighting it.
 const studioWarm: ThemeDefinition = {
   id: "studio-warm",
   name: "Studio Warm",
-  description: "Cozy dark — espresso tones, golden ochre, creative warmth",
+  description: "Espresso shadows, ochre, wine — full warm analogous",
   fonts: {
     sans: '"Nunito Sans", "Segoe UI", system-ui, sans-serif',
     mono: '"JetBrains Mono", "Fira Code", monospace',
   },
   googleFontsQuery:
     "family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,700&family=Nunito+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600",
-  swatch: { bg: "#1a1614", accent: "#c08b30", text: "#e8ddd0" },
+  swatch: { bg: "#1a1410", accent: "#d4a04c", text: "#f0e4d2" },
   vars: {
-    "--bg-primary": "#1a1614",
-    "--bg-secondary": "#211c18",
-    "--bg-surface": "#2c2420",
-    "--bg-elevated": "#362e28",
-    "--border-default": "#3e342c",
-    "--border-hover": "#504438",
-    "--text-primary": "#e8ddd0",
-    "--text-secondary": "#b0a090",
-    "--text-muted": "#aa9a82",
-    "--text-dim": "#a89880",
-    "--accent": "#c08b30",
-    "--accent-dark": "#a07020",
-    "--dot-grid": "#2a2218",
-    "--selection-bg": "rgba(192, 139, 48, 0.25)",
+    "--bg-primary": "#1a1410",
+    "--bg-secondary": "#221a14",
+    "--bg-surface": "#2c241c",
+    "--bg-elevated": "#382e22",
+    "--border-default": "#423629",
+    "--border-hover": "#5a4a38",
+    "--text-primary": "#f0e4d2",
+    "--text-secondary": "#c2b09a",
+    "--text-muted": "#8e7d68",
+    "--text-dim": "#685a48",
+    "--accent": "#d4a04c",
+    "--accent-dark": "#a87830",
+    "--dot-grid": "#2a2018",
+    "--selection-bg": "rgba(212, 160, 76, 0.25)",
     ...darkSemanticVars,
-    // Warm overrides
+    // Warm-analogous overrides
     "--tool-accent": "#d4a76a",
-    "--thinking-accent": "#b06060",
+    "--thinking-accent": "#a04958",
     "--tool-bg": "rgba(212, 167, 106, 0.08)",
     "--tool-bg-hover": "rgba(212, 167, 106, 0.12)",
-    "--thinking-bg": "rgba(176, 96, 96, 0.06)",
-    "--thinking-bg-hover": "rgba(176, 96, 96, 0.10)",
+    "--thinking-bg": "rgba(160, 73, 88, 0.07)",
+    "--thinking-bg-hover": "rgba(160, 73, 88, 0.11)",
     "--edge-task": "#d4a76a",
-    "--edge-context": "#6bab6b",
+    "--edge-context": "#8aa56a",
     "--streaming-color": "#d4a76a",
-    // Warm-tinted note palette
-    "--note-blue-bg": "#1e2030",
+    "--code-bg": "rgba(212, 167, 106, 0.10)",
+    // Notes: the cool slot stays cool (dusk slate) but desaturated so it
+    // sits with the warm field. The warm slots get richer earth tones.
+    "--note-blue-bg": "#1c2030",
     "--note-blue-border": "#2a3045",
-    "--note-green-bg": "#1e2818",
-    "--note-green-border": "#2a3822",
+    "--note-green-bg": "#1f2818",
+    "--note-green-border": "#2c3822",
     "--note-orange-bg": "#2c2014",
     "--note-orange-border": "#3e2e1c",
-    "--note-purple-bg": "#281e28",
-    "--note-purple-border": "#3a2e3a",
+    "--note-purple-bg": "#281e26",
+    "--note-purple-border": "#3a2e38",
     "--note-pink-bg": "#2e1c22",
     "--note-pink-border": "#402a32",
-    "--note-slate-bg": "#242018",
-    "--note-slate-border": "#363020",
+    "--note-slate-bg": "#241e18",
+    "--note-slate-border": "#36302a",
     "--markdown-bg": "#22201a",
     "--markdown-border": "#34302a",
-    "--code-bg": "rgba(212, 167, 106, 0.1)",
-    "--gradient-primary": "linear-gradient(135deg, #d4a76a, #c08b30)",
-    "--gradient-success": "linear-gradient(135deg, #6bab6b, #4a8a4a)",
-    "--gradient-danger": "linear-gradient(135deg, #c06060, #a04040)",
+    "--gradient-primary": "linear-gradient(135deg, #d4a04c, #a87830)",
+    "--gradient-success": "linear-gradient(135deg, #8aa56a, #5a7a48)",
+    "--gradient-danger": "linear-gradient(135deg, #b85050, #8a3030)",
   },
 };
 
 // ── 6. Cathode ────────────────────────────────────────────
+// Monochromatic phosphor with disciplined intensity gradations.
+// The accent steps back from neon (#39ff14 → #4ade80) so it stops
+// burning at small text sizes. Status semantics survive: warning
+// keeps amber, error keeps red — the green-on-green identity is
+// loud enough already.
 const cathode: ThemeDefinition = {
   id: "cathode",
   name: "Cathode",
-  description: "Retro-future terminal — phosphor green on black",
+  description: "Phosphor green on black — terminal monochrome with kept semantics",
   fonts: {
     sans: '"JetBrains Mono", "Fira Code", monospace',
     mono: '"JetBrains Mono", "Fira Code", monospace',
   },
   googleFontsQuery: "family=JetBrains+Mono:wght@300;400;500;600;700",
-  swatch: { bg: "#050505", accent: "#39ff14", text: "#d0ffe0" },
+  swatch: { bg: "#050805", accent: "#4ade80", text: "#c8e8d0" },
   vars: {
     "--bg-primary": "#050805",
     "--bg-secondary": "#0a120a",
     "--bg-surface": "#0e180e",
     "--bg-elevated": "#142014",
-    "--border-default": "#1a2e1a",
-    "--border-hover": "#254025",
-    "--text-primary": "#d0ffe0",
-    "--text-secondary": "#80c890",
-    "--text-muted": "#6aa070",
-    "--text-dim": "#68a870",
-    "--accent": "#39ff14",
-    "--accent-dark": "#28cc10",
+    "--border-default": "#1c2e1c",
+    "--border-hover": "#2a4a2a",
+    "--text-primary": "#c8e8d0",
+    "--text-secondary": "#88b890",
+    "--text-muted": "#5e8866",
+    "--text-dim": "#3e5e44",
+    "--accent": "#4ade80",
+    "--accent-dark": "#22c55e",
     "--dot-grid": "#0e1e0e",
-    "--selection-bg": "rgba(57, 255, 20, 0.15)",
+    "--selection-bg": "rgba(74, 222, 128, 0.18)",
     ...darkSemanticVars,
-    // Cathode: phosphor-green overrides
-    "--tool-accent": "#39ff14",
-    "--thinking-accent": "#20cc40",
-    "--success-color": "#39ff14",
-    "--info-color": "#39ff14",
-    "--streaming-color": "#39ff14",
-    "--tool-bg": "rgba(57, 255, 20, 0.06)",
-    "--tool-bg-hover": "rgba(57, 255, 20, 0.10)",
-    "--thinking-bg": "rgba(32, 204, 64, 0.05)",
-    "--thinking-bg-hover": "rgba(32, 204, 64, 0.08)",
-    "--edge-task": "#39ff14",
-    "--edge-context": "#39ff14",
-    // Green-tinted notes
-    "--note-blue-bg": "#08140e",
+    // Monochromatic phosphor for tool + accent surfaces, but warning
+    // and error stay amber/red so dashboards remain legible.
+    "--tool-accent": "#4ade80",
+    "--thinking-accent": "#2dd4bf",
+    "--success-color": "#4ade80",
+    "--info-color": "#67e8f9",
+    "--streaming-color": "#4ade80",
+    "--status-success": "#4ade80",
+    // Cyan phosphor for in-progress so it doesn't collide with the
+    // success-green badge in monochrome dashboards.
+    "--status-running": "#67e8f9",
+    "--status-idle": "#67e8f9",
+    "--status-warning": "#fbbf24",
+    "--status-creating": "#fbbf24",
+    "--status-error": "#ef4444",
+    "--warning-color": "#fbbf24",
+    "--priority-critical": "#ef4444",
+    "--priority-high": "#fbbf24",
+    "--priority-medium": "#67e8f9",
+    "--priority-low": "#5e8866",
+    "--tool-bg": "rgba(74, 222, 128, 0.06)",
+    "--tool-bg-hover": "rgba(74, 222, 128, 0.10)",
+    "--thinking-bg": "rgba(45, 212, 191, 0.05)",
+    "--thinking-bg-hover": "rgba(45, 212, 191, 0.08)",
+    "--edge-task": "#4ade80",
+    "--edge-context": "#67e8f9",
+    // Monochrome-tinted notes — every note slot lives on the green axis
+    "--note-blue-bg": "#08160e",
     "--note-blue-border": "#102818",
     "--note-green-bg": "#0a1a0a",
     "--note-green-border": "#142e14",
-    "--note-orange-bg": "#141208",
-    "--note-orange-border": "#282410",
-    "--note-purple-bg": "#0e1014",
-    "--note-purple-border": "#1a2028",
-    "--note-pink-bg": "#14100e",
-    "--note-pink-border": "#28201a",
+    "--note-orange-bg": "#16140a",
+    "--note-orange-border": "#262410",
+    "--note-purple-bg": "#0e1218",
+    "--note-purple-border": "#1a2228",
+    "--note-pink-bg": "#16100c",
+    "--note-pink-border": "#262018",
     "--note-slate-bg": "#0c120c",
     "--note-slate-border": "#182418",
     "--markdown-bg": "#081208",
     "--markdown-border": "#102410",
-    "--code-bg": "rgba(57, 255, 20, 0.08)",
-    "--gradient-primary": "linear-gradient(135deg, #39ff14, #28cc10)",
-    "--gradient-success": "linear-gradient(135deg, #39ff14, #20aa10)",
-    "--gradient-danger": "linear-gradient(135deg, #ff4040, #cc2020)",
+    "--code-bg": "rgba(74, 222, 128, 0.09)",
+    "--gradient-primary": "linear-gradient(135deg, #4ade80, #22c55e)",
+    "--gradient-success": "linear-gradient(135deg, #4ade80, #16a34a)",
+    "--gradient-danger": "linear-gradient(135deg, #ef4444, #b91c1c)",
   },
 };
 

@@ -11,7 +11,9 @@ import { useStatusBanners, StatusBannerStack } from "../components/StatusBanner.
 import { SessionToolbar } from "../components/SessionToolbar.tsx";
 import type { ModelOption, PermissionMode } from "../components/SessionToolbar.tsx";
 import { StreamingBubble, StreamingIndicator } from "../components/StreamingBubble.tsx";
+import { chatRoleStyle } from "../chat-bubble-style.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
+import { UserContextHeader } from "../components/UserContextHeader.tsx";
 import { AddAsNodeButton } from "../components/AddAsNodeButton.tsx";
 import {
   extractParentId,
@@ -483,16 +485,7 @@ function AssistantBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAdd
       <div
         ref={contentRef}
         style={{
-          padding: "8px 10px",
-          borderRadius: 6,
-          fontSize: 12,
-          lineHeight: 1.6,
-          fontFamily: "var(--font-sans)",
-          color: "var(--text-primary)",
-          borderLeft: "2px solid var(--streaming-color)",
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-          overflowWrap: "break-word",
+          ...chatRoleStyle("assistant"),
           maxHeight:
             expanded || !isOverflowing ? "none" : COLLAPSED_HEIGHT,
           overflow: "hidden",
@@ -617,21 +610,8 @@ function AssistantBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAdd
 
 function UserBubble({ msg }: { msg: SessionMessage }) {
   return (
-    <div
-      style={{
-        padding: "8px 10px",
-        borderRadius: 6,
-        fontSize: 12,
-        lineHeight: 1.6,
-        fontFamily: "var(--font-sans)",
-        color: "var(--accent)",
-        borderLeft: "2px solid var(--accent)",
-        whiteSpace: "pre-wrap",
-        wordBreak: "break-word",
-        overflowWrap: "break-word",
-        marginBlock: 2,
-      }}
-    >
+    <div style={{ ...chatRoleStyle("user"), marginBlock: 2 }}>
+      <UserContextHeader />
       {msg.content}
     </div>
   );
@@ -639,17 +619,7 @@ function UserBubble({ msg }: { msg: SessionMessage }) {
 
 function SystemBubble({ msg }: { msg: SessionMessage }) {
   return (
-    <div
-      style={{
-        padding: "4px 10px",
-        fontSize: 10,
-        fontFamily: "var(--font-mono)",
-        color: "var(--text-muted)",
-        textAlign: "center",
-        opacity: 0.6,
-        marginBlock: 2,
-      }}
-    >
+    <div style={{ ...chatRoleStyle("system"), marginBlock: 2 }}>
       {msg.content}
     </div>
   );
@@ -664,16 +634,7 @@ function ResultBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAddCon
     <div style={{ marginBlock: 4 }} className="copyable">
       <div
         style={{
-          padding: "8px 10px",
-          borderRadius: 6,
-          fontSize: 12,
-          lineHeight: 1.6,
-          fontFamily: "var(--font-sans)",
-          color: meta?.isError ? "var(--status-error)" : "var(--text-primary)",
-          borderLeft: `2px solid ${meta?.isError ? "var(--danger-color)" : "var(--tool-accent)"}`,
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-          overflowWrap: "break-word",
+          ...chatRoleStyle("result", { isError: !!meta?.isError }),
           maxHeight: expanded || !isLong ? "none" : 120,
           overflow: "hidden",
           position: "relative",
@@ -1281,7 +1242,7 @@ export function ClaudeSessionRenderer({
         <MessageFeed messages={data.messages} onAddContentNode={onAddContentNode} />
         {/* Streaming partial text with blinking cursor */}
         {data.streamingText ? (
-          <StreamingBubble text={data.streamingText} borderColor="var(--streaming-color)" />
+          <StreamingBubble text={data.streamingText} role="assistant" />
         ) : data.status === "running" && data.messages.length > 0 ? (
           <StreamingIndicator />
         ) : null}

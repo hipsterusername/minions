@@ -1,7 +1,7 @@
 /**
  * server/render-tools: MCP tools the leader uses to drive its dashboard.
  *
- * These tests invoke the tool handlers directly via the `tools` array the
+ * These tests invoke the tool handlers directly via the `toolDefs` array the
  * factory exposes, then assert on the locally-held `renderState` and on the
  * `render_update` envelopes the bus emits. We mock the bus surface (not the
  * tool logic) so the tests live close to the dispatcher contract.
@@ -17,7 +17,7 @@ import { describe, it, expect } from "vitest";
 import type { WebSocketServer } from "ws";
 import { createBus, type Bus } from "./bus.ts";
 import { createRenderToolsForLeader } from "./render-tools.ts";
-import type { SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
+import type { NormalizedToolDef } from "./harness/types.ts";
 
 interface FakeClient {
   readyState: number;
@@ -41,31 +41,28 @@ function makeBus(): { bus: Bus; sent: object[] } {
 }
 
 function findTool(
-  tools: ReadonlyArray<SdkMcpToolDefinition>,
+  toolDefs: ReadonlyArray<NormalizedToolDef>,
   name: string,
-): SdkMcpToolDefinition {
-  const t = tools.find((x) => x.name === name);
+): NormalizedToolDef {
+  const t = toolDefs.find((x) => x.name === name);
   if (!t) throw new Error(`tool ${name} missing`);
   return t;
 }
 
-async function call<T extends { name: string }>(tool: T, args: unknown) {
-  // The handler is the only field we exercise; cast to the SDK shape.
-  return await (
-    tool as unknown as { handler: (a: unknown, e: unknown) => Promise<unknown> }
-  ).handler(args, undefined);
+async function call(def: NormalizedToolDef, args: unknown) {
+  return await def.handler(args);
 }
 
 describe("render-tools", () => {
   describe("render_append", () => {
     it("dedupes by id, mirroring the client reducer", async () => {
       const { bus } = makeBus();
-      const { tools, renderState } = createRenderToolsForLeader({
+      const { toolDefs, renderState } = createRenderToolsForLeader({
         leaderSessionKey: "s1",
         bus,
       });
-      const setTool = findTool(tools, "render_set");
-      const appendTool = findTool(tools, "render_append");
+      const setTool = findTool(toolDefs, "render_set");
+      const appendTool = findTool(toolDefs, "render_append");
 
       await call(setTool, {
         components: [
@@ -97,7 +94,7 @@ describe("render-tools", () => {
   describe("render_set", () => {
     it("clears the prior title when the agent omits one", async () => {
       const { bus } = makeBus();
-      const { tools, renderState } = createRenderToolsForLeader({
+      const { toolDefs, renderState } = createRenderToolsForLeader({
         leaderSessionKey: "s2",
         bus,
         existingRenderState: {
@@ -107,7 +104,7 @@ describe("render-tools", () => {
           components: [],
         },
       });
-      const setTool = findTool(tools, "render_set");
+      const setTool = findTool(toolDefs, "render_set");
 
       await call(setTool, { components: [] });
 
@@ -119,11 +116,11 @@ describe("render-tools", () => {
 
     it("respects explicit title and columns", async () => {
       const { bus } = makeBus();
-      const { tools, renderState } = createRenderToolsForLeader({
+      const { toolDefs, renderState } = createRenderToolsForLeader({
         leaderSessionKey: "s3",
         bus,
       });
-      const setTool = findTool(tools, "render_set");
+      const setTool = findTool(toolDefs, "render_set");
 
       await call(setTool, {
         title: "Hello",
@@ -136,20 +133,90 @@ describe("render-tools", () => {
     });
   });
 
+  describe("default elision", () => {
+    it("strips fields equal to documented defaults from render_set inputs", async () => {
+      const { bus } = makeBus();
+      const { toolDefs, renderState } = createRenderToolsForLeader({
+        leaderSessionKey: "s-elide-set",
+        bus,
+      });
+      const setTool = findTool(toolDefs, "render_set");
+
+      await call(setTool, {
+        components: [
+          {
+            id: "m",
+            type: "metric",
+            label: "Builds",
+            value: "1",
+            trend: "flat",
+            span: "auto",
+          },
+          {
+            id: "c",
+            type: "callout",
+            variant: "info",
+            content: "hi",
+            span: "auto",
+          },
+        ],
+      });
+
+      // trend=flat, span=auto, variant=info are all dropped by the
+      // elider. The rest of the component shape is untouched.
+      const [metric, callout] = renderState.components;
+      expect(metric).toEqual({
+        id: "m",
+        type: "metric",
+        label: "Builds",
+        value: "1",
+      });
+      expect(callout).toEqual({ id: "c", type: "callout", content: "hi" });
+    });
+
+    it("does not re-introduce defaults via render_patch", async () => {
+      const { bus } = makeBus();
+      const { toolDefs, renderState } = createRenderToolsForLeader({
+        leaderSessionKey: "s-elide-patch",
+        bus,
+      });
+      const setTool = findTool(toolDefs, "render_set");
+      const patchTool = findTool(toolDefs, "render_patch");
+
+      await call(setTool, {
+        components: [
+          { id: "m", type: "metric", label: "L", value: "1", trend: "up" },
+        ],
+      });
+
+      // Agent restates trend=flat in the patch — should be elided.
+      await call(patchTool, {
+        updates: [{ id: "m", value: "2", trend: "flat" }],
+      });
+
+      expect(renderState.components[0]).toEqual({
+        id: "m",
+        type: "metric",
+        label: "L",
+        value: "2",
+      });
+    });
+  });
+
   describe("onStateChange", () => {
     it("fires after every mutation", async () => {
       const { bus } = makeBus();
       const calls: number[] = [];
-      const { tools } = createRenderToolsForLeader({
+      const { toolDefs } = createRenderToolsForLeader({
         leaderSessionKey: "s4",
         bus,
         onStateChange: (state) => {
           calls.push(state.components.length);
         },
       });
-      const setTool = findTool(tools, "render_set");
-      const appendTool = findTool(tools, "render_append");
-      const removeTool = findTool(tools, "render_remove");
+      const setTool = findTool(toolDefs, "render_set");
+      const appendTool = findTool(toolDefs, "render_append");
+      const removeTool = findTool(toolDefs, "render_remove");
 
       await call(setTool, {
         components: [{ id: "a", type: "text", content: "hi" }],

@@ -3,9 +3,9 @@
  *
  * Contains the pure-ish pieces of `SessionHost.start()` that are large
  * enough to warrant their own home:
- *   - `ensureWorktree` — resolves the effective cwd/worktree for this run
- *   - `buildQueryOptions` — assembles the options bag passed to `query()`
- *   - `processSdkMessage` — the per-message body of the `for await` loop
+ *   - `ensureWorktree`       — resolves the effective cwd/worktree for this run
+ *   - `buildHarnessStartOpts` — assembles the HarnessStartOptions for harness.start()
+ *   - `processNormalizedEvent` — the per-event body of the `for await` loop
  *
  * Kept as free functions that take an explicit `SessionHost` reference so
  * the class file stays under the architecture line-count ceiling.
@@ -14,41 +14,18 @@
 import type {
   AgentType,
   AgentTypeContext,
-  McpServerResult,
+  AgentToolResult,
 } from "./agents/index.ts";
+import type { AgentHarness, HarnessStartOptions } from "./harness/types.ts";
+import type { NormalizedEvent } from "../shared/normalized-event.ts";
 import type { Bus } from "./bus.ts";
 import { createWorktree, isGitRepo, type WorktreeInfo } from "./worktree.ts";
 import {
   enrichSystemPromptForWorktree,
   modelSupportsAdaptive,
-  resolveModelId,
   type BufferedEvent,
 } from "./session-host-config.ts";
 import type { SessionHost, StartSessionOptions } from "./session-host.ts";
-import { execSync } from "node:child_process";
-
-function resolveClaudePath(): string {
-  if (process.env["CLAUDE_CODE_PATH"]) return process.env["CLAUDE_CODE_PATH"];
-  try {
-    return execSync("which claude", { encoding: "utf8" }).trim();
-  } catch {
-    return "claude";
-  }
-}
-
-const CLAUDE_EXECUTABLE = resolveClaudePath();
-
-const CODE_TOOLS = [
-  "Read",
-  "Write",
-  "Edit",
-  "Bash",
-  "Glob",
-  "Grep",
-  "Agent",
-  "WebFetch",
-  "WebSearch",
-];
 
 /**
  * Ensure the host has the correct cwd + worktree wiring before the SDK
@@ -100,197 +77,199 @@ export async function ensureWorktree(
         worktreePath: worktreeInfo.path,
         branch: worktreeInfo.branch,
       });
-      return worktreeInfo.path;
+      console.log(
+        `[worktree] Created worktree for ${host.id} at ${worktreeInfo.path} (branch: ${worktreeInfo.branch})`,
+      );
+      effectiveCwd = worktreeInfo.path;
     }
-    console.warn(
-      `[worktree] ${host.id}: not a git repo — isolation unavailable`,
-    );
-    bus.emitToSession(host.id, {
-      type: "worktree_failed",
-      sessionKey: host.id,
-      error:
-        "Project is not a git repository. Worktree isolation is unavailable.",
-    });
-    return effectiveCwd;
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    console.error(
-      `[worktree] Failed to create worktree for ${host.id}: ${errMsg}`,
-    );
+    console.error(`[worktree] Failed to create worktree for ${host.id}: ${errMsg}`);
     bus.emitToSession(host.id, {
-      type: "worktree_failed",
+      type: "worktree_error",
       sessionKey: host.id,
       error: `Worktree creation failed: ${errMsg}`,
     });
     host.worktreeIsolation = false;
     return effectiveCwd;
   }
+  return effectiveCwd;
 }
 
-/** Parameters for `buildQueryOptions`. */
-export interface QueryOptionsInput {
+/** Parameters for `buildHarnessStartOpts`. */
+export interface HarnessStartInput {
   host: SessionHost;
   opts: StartSessionOptions;
   agentType: AgentType;
   agentCtx: AgentTypeContext;
-  mcpResult: McpServerResult;
+  toolResult: AgentToolResult;
   abortController: AbortController;
-}
-
-/** Assemble the options bag that gets passed to the SDK's `query()`. */
-export function buildQueryOptions(
-  input: QueryOptionsInput,
-): { options: Record<string, unknown>; allowedTools: string[] } {
-  const { host, opts, agentType, agentCtx, mcpResult, abortController } = input;
-  const externalToolNames = opts.externalMcpToolNames ?? [];
-  const allowedTools = [...CODE_TOOLS, ...mcpResult.mcpToolNames, ...externalToolNames];
-
-  const options: Record<string, unknown> = {
-    cwd: host.cwd,
-    resume: opts.resumeId,
-    allowedTools,
-    disallowedTools: [],
-    permissionMode: "auto",
-    abortController,
-    includePartialMessages: true,
-    promptSuggestions: true,
-    pathToClaudeCodeExecutable: CLAUDE_EXECUTABLE,
-  };
-
-  const allMcpServers = {
-    ...mcpResult.mcpServers,
-    ...(opts.externalMcpServers ?? {}),
-  };
-  if (Object.keys(allMcpServers).length > 0) {
-    options["mcpServers"] = allMcpServers;
-  }
-
-  const basePrompt = agentType.buildSystemPrompt(agentCtx, opts.systemPrompt);
-  if (basePrompt) {
-    options["systemPrompt"] = host.worktree
-      ? enrichSystemPromptForWorktree(
-          basePrompt,
-          host.worktree,
-          agentType.id === "minion",
-        )
-      : basePrompt;
-  }
-
-  if (host.model) {
-    options["model"] = resolveModelId(host.model);
-  }
-
-  if (host.thinkingConfig?.enabled && modelSupportsAdaptive(host.model)) {
-    options["thinking"] = {
-      type: "adaptive",
-      display: host.thinkingConfig.display,
-    };
-    options["effort"] = host.thinkingConfig.effort;
-  }
-
-  return { options, allowedTools };
+  harness: AgentHarness;
+  prompt: string | AsyncIterable<{ role: "user"; content: string }>;
 }
 
 /**
- * Handle a single SDK event: capture init data, fan the event out, and
- * rebroadcast Agent-tool subagent signals as canvas-aware events.
+ * Assemble the HarnessStartOptions passed to `harness.start()`.
+ *
+ * Harness-agnostic: each Claude-specific option lives inside ClaudeHarness
+ * itself. This function only assembles the normalized contract fields.
  */
-export function processSdkMessage(
+export function buildHarnessStartOpts(
+  input: HarnessStartInput,
+): { startOpts: HarnessStartOptions; allowedTools: string[] } {
+  const { host, opts, agentType, agentCtx, toolResult, abortController, harness, prompt } = input;
+  const externalToolNames = opts.externalMcpToolNames ?? [];
+  const allowedTools = [
+    ...harness.builtInTools,
+    ...toolResult.mcpToolNames,
+    ...externalToolNames,
+  ];
+
+  const basePrompt = agentType.buildSystemPrompt(agentCtx, opts.systemPrompt, harness.builtInTools);
+  const systemPrompt = basePrompt
+    ? host.worktree
+      ? enrichSystemPromptForWorktree(basePrompt, host.worktree, agentType.id === "minion")
+      : basePrompt
+    : "";
+
+  const resolvedModel = host.model ? (harness.resolveModel(host.model) ?? host.model) : "";
+
+  const startOpts: HarnessStartOptions = {
+    cwd: host.cwd,
+    prompt,
+    systemPrompt,
+    model: resolvedModel,
+    allowedTools,
+    abortSignal: abortController.signal,
+    resumeId: opts.resumeId,
+    externalMcpServers: opts.externalMcpServers,
+  };
+
+  if (
+    harness.capabilities.thinking &&
+    host.thinkingConfig?.enabled &&
+    modelSupportsAdaptive(host.model)
+  ) {
+    startOpts.thinking = {
+      effort: host.thinkingConfig.effort as "low" | "medium" | "high",
+      display: host.thinkingConfig.display,
+    };
+  }
+
+  return { startOpts, allowedTools };
+}
+
+/**
+ * Handle a single NormalizedEvent from `harness.start()`:
+ *   - Capture session metadata from `init`.
+ *   - Fan every event out to the bus as an `sdk_event` envelope.
+ *   - Rebroadcast sub-agent events as canvas-aware bus events.
+ *   - Update session status and trigger `onComplete` on `done`.
+ */
+export function processNormalizedEvent(
   host: SessionHost,
   bus: Bus,
   agentType: AgentType,
   agentCtx: AgentTypeContext,
-  message: unknown,
+  event: NormalizedEvent,
 ): void {
-  const m = message as { type?: string; subtype?: string } & Record<
-    string,
-    unknown
-  >;
+  const now = Date.now();
 
-  // Capture init data from system/init event
-  if (m.type === "system" && m.subtype === "init") {
-    host.sessionId = m["session_id"] as string;
-    host.model = (m["model"] as string) ?? null;
-    host.permissionMode = (m["permissionMode"] as string) ?? null;
-    host.initData = {
-      tools: m["tools"],
-      model: m["model"],
-      mcp_servers: m["mcp_servers"],
-      permissionMode: m["permissionMode"],
-      slash_commands: m["slash_commands"],
-      skills: m["skills"],
-      claude_code_version: m["claude_code_version"],
-    };
-    // Persist the SDK session id immediately. Otherwise a session that
-    // never reaches a `result` (e.g. user stops mid-turn, server crashes)
-    // would lose its resume id and have to start fresh next time.
+  // ── Capture session metadata ────────────────────────────────────────────
+  if (event.kind === "init") {
+    host.sessionId = event.sessionId;
+    if (event.model) host.model = event.model;
+    host.permissionMode = event.permissionMode ?? null;
+    // `meta` carries Claude-specific init data (tools, mcp_servers, etc.).
+    if (event.meta) host.initData = event.meta;
     host.persist();
   }
 
-  // Forward all SDK events to the bus
+  // ── Sub-agent events (Claude Agent-tool) ────────────────────────────────
+  if (event.kind === "agent_spawned" && agentType.detectsSubagents) {
+    bus.emitToSession(host.id, {
+      type: "agent_spawned",
+      leaderSessionKey: host.id,
+      taskId: event.taskId,
+      title: event.description,
+      description: event.description,
+      timestamp: now,
+    });
+    return; // not emitted as sdk_event — it's a canvas-level event
+  }
+
+  if (event.kind === "agent_task_update" && agentType.detectsSubagents) {
+    bus.emitToSession(host.id, {
+      type: "agent_task_update",
+      leaderSessionKey: host.id,
+      taskId: event.taskId,
+      status: event.status,
+      summary: event.summary,
+      timestamp: now,
+    });
+    return; // not emitted as sdk_event
+  }
+
+  // ── Accumulate cost from usage events ──────────────────────────────────
+  if (event.kind === "usage" && event.costUSD != null) {
+    host.totalCost = event.costUSD;
+  }
+
+  // ── Session completion ──────────────────────────────────────────────────
+  if (event.kind === "done") {
+    if (event.turns != null) host.turns = event.turns;
+    if (event.costUSD != null) host.totalCost = event.costUSD;
+
+    if (event.reason === "error") {
+      host.status = "error";
+      host.lastError = event.error ?? "unknown";
+      host.persist();
+
+      const errEvent: BufferedEvent = {
+        type: "session_error",
+        sessionKey: host.id,
+        error: host.lastError,
+        timestamp: now,
+      };
+      host.bufferEvent(errEvent);
+      bus.emitToSession(host.id, errEvent);
+    } else {
+      host.status = "idle";
+      host.persist();
+
+      const idleEvent: BufferedEvent = {
+        type: "session_status",
+        sessionKey: host.id,
+        status: "idle",
+        sessionId: host.sessionId ?? undefined,
+        timestamp: now,
+      };
+      host.bufferEvent(idleEvent);
+      bus.emitToSession(host.id, idleEvent);
+    }
+
+    if (agentType.onComplete) {
+      void agentType.onComplete(agentCtx, {
+        is_error: event.reason === "error",
+        result: event.result ?? null,
+      });
+    }
+    return; // `done` is not emitted as sdk_event (signalled via session_status or session_error)
+  }
+
+  // ── Fan all remaining events to the bus as sdk_events ──────────────────
   const sdkEvent: BufferedEvent = {
     type: "sdk_event",
     sessionKey: host.id,
-    message,
-    timestamp: Date.now(),
+    event,
+    timestamp: now,
   };
   host.bufferEvent(sdkEvent);
   bus.emitToSession(host.id, sdkEvent);
-
-  // Detect Agent-tool subagent events and rebroadcast as canvas-aware events
-  if (agentType.detectsSubagents && m.type === "system") {
-    if (m.subtype === "task_started") {
-      const taskId =
-        (m["task_id"] as string) ?? `agent-${Date.now().toString(36)}`;
-      const description = (m["description"] as string) ?? "Subagent task";
-      bus.emitToSession(host.id, {
-        type: "agent_spawned",
-        leaderSessionKey: host.id,
-        taskId,
-        title: description,
-        description,
-        timestamp: Date.now(),
-      });
-    }
-    if (m.subtype === "task_notification") {
-      const taskId = (m["task_id"] as string) ?? "";
-      const status = (m["status"] as string) ?? "completed";
-      const summary = (m["summary"] as string) ?? "";
-      bus.emitToSession(host.id, {
-        type: "agent_task_update",
-        leaderSessionKey: host.id,
-        taskId,
-        status,
-        summary,
-        timestamp: Date.now(),
-      });
-    }
-  }
-
-  // Update session metadata on result
-  if (m.type === "result") {
-    host.status = "idle";
-    host.totalCost = (m["total_cost_usd"] as number) ?? host.totalCost;
-    host.turns = (m["num_turns"] as number) ?? host.turns;
-    host.persist();
-    const resultStatusEvent: BufferedEvent = {
-      type: "session_status",
-      sessionKey: host.id,
-      status: "idle",
-      sessionId: host.sessionId ?? undefined,
-      timestamp: Date.now(),
-    };
-    host.bufferEvent(resultStatusEvent);
-    bus.emitToSession(host.id, resultStatusEvent);
-
-    if (agentType.onComplete) {
-      agentType.onComplete(agentCtx, m);
-    }
-  }
 }
 
 /**
- * Type export for the agent's MCP-server construction result shape.
+ * Type export for the agent's tool-group result shape.
  * Re-exported here rather than pulled from the full agent module to
  * keep the import arrow into `session-host.ts` narrow.
  */

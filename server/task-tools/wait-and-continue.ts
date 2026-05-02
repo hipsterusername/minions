@@ -3,14 +3,15 @@
  */
 
 import { z } from "zod/v4";
-import { tool } from "@anthropic-ai/claude-agent-sdk";
+import type { NormalizedToolDef } from "../harness/types.ts";
 import type { TaskToolContext } from "./types.ts";
 
-export function createWaitAndContinueTool(ctx: TaskToolContext) {
-  return tool(
-    "wait_and_continue",
-    "Pause execution for a specified duration, then the system will automatically resume your session with a \"Continue\" message. Use this when you need to wait for external processes (builds, deploys, tests) or to periodically check on long-running minion tasks. Maximum wait: 30 minutes.",
-    {
+export function createWaitAndContinueToolDef(ctx: TaskToolContext): NormalizedToolDef {
+  return {
+    name: "wait_and_continue",
+    description:
+      'Pause execution for a specified duration, then the system will automatically resume your session with a "Continue" message. Use this when you need to wait for external processes (builds, deploys, tests) or to periodically check on long-running minion tasks. Maximum wait: 30 minutes.',
+    inputSchema: z.object({
       duration_seconds: z
         .number()
         .min(5)
@@ -19,8 +20,9 @@ export function createWaitAndContinueTool(ctx: TaskToolContext) {
       reason: z
         .string()
         .describe("Why you are waiting (shown to the user in the UI)"),
-    },
-    async (args) => {
+    }),
+    handler: async (input: unknown) => {
+      const args = input as { duration_seconds: number; reason: string };
       const durationMs = args.duration_seconds * 1000;
 
       // Record the pending wait on the task state
@@ -59,5 +61,5 @@ export function createWaitAndContinueTool(ctx: TaskToolContext) {
         ],
       };
     },
-  );
+  };
 }

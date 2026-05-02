@@ -20,11 +20,11 @@
  * **Why we mock `node:os` here.** `server/project-store.ts` captures
  * `os.homedir()` at module-load time:
  *
- *   const GLOBAL_DIR = path.join(os.homedir(), ".claude-canvas");
+ *   const GLOBAL_DIR = path.join(os.homedir(), ".minions");
  *   const RECENT_PROJECTS_FILE = path.join(GLOBAL_DIR, "recent-projects.json");
  *
  * Without the mock, `POST /` (which writes via `addRecentProject`) lands
- * entries in the developer's REAL `~/.claude-canvas/recent-projects.json`
+ * entries in the developer's REAL `~/.minions/recent-projects.json`
  * and the entries appear in the live app's recent-projects list — every
  * pre-commit / CI run pollutes the user's home. The hoisted mock below
  * mirrors `server/project-store.test.ts` and points the recent-projects
@@ -148,9 +148,9 @@ describe("POST /  — create project", () => {
     expect(typeof body["createdAt"]).toBe("string");
 
     // Sidecar materialised on disk.
-    expect(fs.existsSync(path.join(newPath, ".claude-canvas"))).toBe(true);
+    expect(fs.existsSync(path.join(newPath, ".minions"))).toBe(true);
     expect(
-      fs.existsSync(path.join(newPath, ".claude-canvas", "context.md")),
+      fs.existsSync(path.join(newPath, ".minions", "context.md")),
     ).toBe(true);
 
     fs.rmSync(newPath, { recursive: true, force: true });

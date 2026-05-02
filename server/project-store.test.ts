@@ -2,7 +2,7 @@
  * server/project-store — sidecar + per-project file accessors.
  *
  * IMPORTANT: `project-store.ts` captures `os.homedir()` at MODULE LOAD time
- * (`const GLOBAL_DIR = path.join(os.homedir(), ".claude-canvas")`). Tests
+ * (`const GLOBAL_DIR = path.join(os.homedir(), ".minions")`). Tests
  * MUST mock `node:os` BEFORE importing project-store so the recent-projects
  * file lands in a tmpdir, not in the user's real home. The `vi.mock`
  * factory below uses a synchronous tmpdir creation so the mocked
@@ -21,7 +21,7 @@ import {
   it,
   vi,
 } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -48,6 +48,8 @@ import {
   hasSidecar,
   initSidecar,
   listRecentProjects,
+  migrateGlobalDir,
+  migrateSidecar,
   openProjectDb,
   readContext,
   readMcpServers,
@@ -80,7 +82,7 @@ beforeEach(() => {
 afterEach(() => {
   while (cleanup.length) cleanup.pop()!();
   // Reset the recent-projects.json between tests so they're independent.
-  rmSync(join(FAKE_HOME, ".claude-canvas", "recent-projects.json"), {
+  rmSync(join(FAKE_HOME, ".minions", "recent-projects.json"), {
     force: true,
   });
 });
@@ -133,7 +135,7 @@ describe("context / settings / skills / mcp-servers round-trip", () => {
   });
 
   it("readContext returns the default for a missing file (does not throw)", () => {
-    rmSync(join(project, ".claude-canvas", "context.md"));
+    rmSync(join(project, ".minions", "context.md"));
     const ctx = readContext(project);
     expect(ctx).toEqual({ content: "", exists: false });
   });
@@ -217,5 +219,96 @@ describe("recent-projects index", () => {
     expect(recent).toHaveLength(20);
     expect(recent[0]!.path).toBe("/projects/p24");
     expect(recent.at(-1)!.path).toBe("/projects/p5");
+  });
+});
+
+// ── Migration tests ────────────────────────────────────────────────────────
+
+describe("migrateSidecar", () => {
+  it("renames .claude-canvas → .minions when only the old sidecar exists", () => {
+    const oldSidecar = join(project, ".claude-canvas");
+    const newSidecar = join(project, ".minions");
+    mkdirSync(join(oldSidecar, "routines"), { recursive: true });
+    writeFileSync(join(oldSidecar, "skills.json"), "[]");
+
+    expect(existsSync(oldSidecar)).toBe(true);
+    expect(existsSync(newSidecar)).toBe(false);
+
+    migrateSidecar(project);
+
+    expect(existsSync(oldSidecar)).toBe(false);
+    expect(existsSync(newSidecar)).toBe(true);
+    expect(existsSync(join(newSidecar, "skills.json"))).toBe(true);
+  });
+
+  it("is a no-op when .claude-canvas does not exist", () => {
+    const newSidecar = join(project, ".minions");
+    expect(existsSync(join(project, ".claude-canvas"))).toBe(false);
+
+    migrateSidecar(project);
+
+    expect(existsSync(newSidecar)).toBe(false);
+  });
+
+  it("is idempotent — calling again after migration completes is a no-op", () => {
+    const oldSidecar = join(project, ".claude-canvas");
+    mkdirSync(oldSidecar, { recursive: true });
+
+    migrateSidecar(project); // first call: renames
+    expect(existsSync(oldSidecar)).toBe(false);
+    expect(existsSync(join(project, ".minions"))).toBe(true);
+
+    migrateSidecar(project); // second call: no-op (old dir gone)
+    expect(existsSync(join(project, ".minions"))).toBe(true);
+  });
+
+  it("leaves both directories intact when .minions already exists", () => {
+    const oldSidecar = join(project, ".claude-canvas");
+    const newSidecar = join(project, ".minions");
+    mkdirSync(oldSidecar, { recursive: true });
+    mkdirSync(newSidecar, { recursive: true });
+
+    migrateSidecar(project);
+
+    // Both still present — migration warns and bails
+    expect(existsSync(oldSidecar)).toBe(true);
+    expect(existsSync(newSidecar)).toBe(true);
+  });
+});
+
+describe("migrateGlobalDir", () => {
+  it("renames ~/.claude-canvas → ~/.minions when only the old dir exists", () => {
+    const oldDir = join(FAKE_HOME, ".claude-canvas");
+    const newDir = join(FAKE_HOME, ".minions");
+    mkdirSync(oldDir, { recursive: true });
+    writeFileSync(join(oldDir, "recent-projects.json"), "[]");
+    rmSync(newDir, { recursive: true, force: true });
+
+    migrateGlobalDir();
+
+    expect(existsSync(oldDir)).toBe(false);
+    expect(existsSync(newDir)).toBe(true);
+    expect(existsSync(join(newDir, "recent-projects.json"))).toBe(true);
+  });
+
+  it("is a no-op when ~/.claude-canvas does not exist", () => {
+    const oldDir = join(FAKE_HOME, ".claude-canvas");
+    rmSync(oldDir, { recursive: true, force: true });
+
+    migrateGlobalDir(); // should not throw
+
+    expect(existsSync(oldDir)).toBe(false);
+  });
+
+  it("leaves both directories intact when ~/.minions already exists", () => {
+    const oldDir = join(FAKE_HOME, ".claude-canvas");
+    const newDir = join(FAKE_HOME, ".minions");
+    mkdirSync(oldDir, { recursive: true });
+    mkdirSync(newDir, { recursive: true });
+
+    migrateGlobalDir();
+
+    expect(existsSync(oldDir)).toBe(true);
+    expect(existsSync(newDir)).toBe(true);
   });
 });

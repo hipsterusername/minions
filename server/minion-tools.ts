@@ -6,10 +6,14 @@
  *
  * Every status event is emitted on the minion's session topic via the
  * shared `Bus` — see `server/bus.ts`.
+ *
+ * Returns NormalizedToolDef[] which agents/minion.ts places into a toolGroup
+ * keyed "minion-status". ClaudeHarness.registerTools() wraps them as a
+ * named MCP server so tool calls follow the mcp__minion-status__* pattern.
  */
 
 import { z } from "zod/v4";
-import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
+import type { NormalizedToolDef } from "./harness/types.ts";
 import type { Bus } from "./bus.ts";
 
 // ── Factory ────────────────────────────────────────────
@@ -17,16 +21,18 @@ import type { Bus } from "./bus.ts";
 export function createMinionToolsForSession(opts: {
   minionSessionKey: string;
   bus: Bus;
-}) {
+}): { toolDefs: NormalizedToolDef[] } {
   const { minionSessionKey, bus } = opts;
 
-  const reportStepTool = tool(
-    "report_step",
-    "Report a progress step to the UI. Call this when starting a meaningful phase of work (e.g. reading files, implementing, testing).",
-    {
+  const reportStepDef: NormalizedToolDef = {
+    name: "report_step",
+    description:
+      "Report a progress step to the UI. Call this when starting a meaningful phase of work (e.g. reading files, implementing, testing).",
+    inputSchema: z.object({
       message: z.string().describe("Short description of what you're doing now"),
-    },
-    async (args) => {
+    }),
+    handler: async (input: unknown) => {
+      const args = input as { message: string };
       bus.emitToSession(minionSessionKey, {
         type: "minion_status",
         minionSessionKey,
@@ -38,15 +44,17 @@ export function createMinionToolsForSession(opts: {
         content: [{ type: "text" as const, text: `Step reported: ${args.message}` }],
       };
     },
-  );
+  };
 
-  const reportDoneTool = tool(
-    "report_done",
-    "Report task completion. Call exactly once when the current task is finished successfully.",
-    {
+  const reportDoneDef: NormalizedToolDef = {
+    name: "report_done",
+    description:
+      "Report task completion. Call exactly once when the current task is finished successfully.",
+    inputSchema: z.object({
       summary: z.string().describe("One-line summary of what was accomplished"),
-    },
-    async (args) => {
+    }),
+    handler: async (input: unknown) => {
+      const args = input as { summary: string };
       bus.emitToSession(minionSessionKey, {
         type: "minion_status",
         minionSessionKey,
@@ -58,15 +66,17 @@ export function createMinionToolsForSession(opts: {
         content: [{ type: "text" as const, text: `Task completed: ${args.summary}` }],
       };
     },
-  );
+  };
 
-  const reportFailTool = tool(
-    "report_fail",
-    "Report task failure. Call exactly once if you cannot complete the current task.",
-    {
+  const reportFailDef: NormalizedToolDef = {
+    name: "report_fail",
+    description:
+      "Report task failure. Call exactly once if you cannot complete the current task.",
+    inputSchema: z.object({
       reason: z.string().describe("One-line reason for failure"),
-    },
-    async (args) => {
+    }),
+    handler: async (input: unknown) => {
+      const args = input as { reason: string };
       bus.emitToSession(minionSessionKey, {
         type: "minion_status",
         minionSessionKey,
@@ -78,17 +88,7 @@ export function createMinionToolsForSession(opts: {
         content: [{ type: "text" as const, text: `Task failed: ${args.reason}` }],
       };
     },
-  );
+  };
 
-  const tools = [reportStepTool, reportDoneTool, reportFailTool] as const;
-
-  const mcpServer = createSdkMcpServer({
-    name: "minion-status",
-    tools: [...tools],
-  });
-
-  // `tools` is exposed so tests (and any future in-process driver) can invoke
-  // handlers directly without spinning up an MCP transport — same pattern as
-  // `createRenderToolsForLeader`.
-  return { mcpServer, tools };
+  return { toolDefs: [reportStepDef, reportDoneDef, reportFailDef] };
 }
