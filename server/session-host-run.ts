@@ -16,7 +16,12 @@ import type {
   AgentTypeContext,
   AgentToolResult,
 } from "./agents/index.ts";
-import type { AgentHarness, HarnessStartOptions } from "./harness/types.ts";
+import type {
+  AgentHarness,
+  HarnessStartOptions,
+  NormalizedAttachment,
+  NormalizedPermissionMode,
+} from "./harness/types.ts";
 import type { NormalizedEvent } from "../shared/normalized-event.ts";
 import type { Bus } from "./bus.ts";
 import { createWorktree, isGitRepo, type WorktreeInfo } from "./worktree.ts";
@@ -145,6 +150,14 @@ export function buildHarnessStartOpts(
     resumeId: opts.resumeId,
     externalMcpServers: opts.externalMcpServers,
   };
+
+  if (opts.attachments && opts.attachments.length > 0) {
+    startOpts.attachments = opts.attachments as ReadonlyArray<NormalizedAttachment>;
+  }
+  const persistedPermissionMode = host.permissionMode;
+  if (isNormalizedPermissionMode(persistedPermissionMode)) {
+    startOpts.permissionMode = persistedPermissionMode;
+  }
 
   if (
     harness.capabilities.thinking &&
@@ -275,3 +288,16 @@ export function processNormalizedEvent(
  * keep the import arrow into `session-host.ts` narrow.
  */
 export type { WorktreeInfo };
+
+const VALID_PERMISSION_MODES: ReadonlySet<NormalizedPermissionMode> = new Set([
+  "default",
+  "auto",
+  "bypassPermissions",
+  "plan",
+]);
+
+function isNormalizedPermissionMode(
+  v: string | null | undefined,
+): v is NormalizedPermissionMode {
+  return typeof v === "string" && VALID_PERMISSION_MODES.has(v as NormalizedPermissionMode);
+}

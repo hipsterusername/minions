@@ -45,6 +45,7 @@ import type {
 import { sdkToNormalized } from "./translate.ts";
 import { wrapTools } from "./tools.ts";
 import { resolveModelAlias, supportsAdaptiveThinking } from "./models.ts";
+import { buildClaudePrompt } from "./prompt.ts";
 
 // ── Capability declaration ────────────────────────────────────────────────────
 
@@ -185,8 +186,8 @@ class ClaudeHarness implements AgentHarness {
         cwd: opts.cwd,
         resume: opts.resumeId,
         allowedTools: opts.allowedTools,
-        // permissionMode: Claude-specific permission model — gated by capabilities.
-        permissionMode: "auto",
+        // permissionMode: Claude consumes the normalized mode verbatim.
+        permissionMode: opts.permissionMode ?? "auto",
         abortController,
         includePartialMessages: true,
         systemPrompt: opts.systemPrompt,
@@ -207,18 +208,20 @@ class ClaudeHarness implements AgentHarness {
         options["effort"] = opts.thinking.effort;
       }
 
-      const prompt =
-        typeof opts.prompt === "string" ? opts.prompt : collectPrompt(opts.prompt);
-
-      // Open the SDK handle lazily on first iteration. The double-cast bypasses
-      // the structural overlap check between the SDK's opaque Query type and our
-      // local SdkQueryHandle interface.
-      handle = query({
-        prompt: typeof prompt === "string" ? prompt : (prompt as never),
-        options: options as never,
-      }) as unknown as SdkQueryHandle;
+      const sdkPrompt = await buildClaudePrompt(opts);
 
       try {
+        // Open the SDK handle lazily on first iteration. The double-cast
+        // bypasses the structural overlap check between the SDK's opaque
+        // Query type and our local SdkQueryHandle interface. Keep this
+        // inside the try so a synchronous SDK setup failure is reported
+        // as a normalized done(error) instead of bubbling out of the
+        // generator.
+        handle = query({
+          prompt: typeof sdkPrompt === "string" ? sdkPrompt : (sdkPrompt as never),
+          options: options as never,
+        }) as unknown as SdkQueryHandle;
+
         for await (const msg of handle) {
           if (abortController.signal.aborted) break;
 
@@ -314,19 +317,6 @@ class ClaudeHarness implements AgentHarness {
 
     return { events: makeEvents(), control };
   }
-}
-
-// ── Prompt helpers ────────────────────────────────────────────────────────────
-
-/** Collect an async-iterable of user messages into a single string. */
-async function collectPrompt(
-  iter: AsyncIterable<{ role: "user"; content: string }>,
-): Promise<string> {
-  const parts: string[] = [];
-  for await (const msg of iter) {
-    parts.push(msg.content);
-  }
-  return parts.join("\n");
 }
 
 // ── Self-registration ─────────────────────────────────────────────────────────

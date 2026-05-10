@@ -19,12 +19,13 @@
  */
 
 import "./harness/claude/index.ts"; // side-effect: registers ClaudeHarness
+import "./harness/echo/index.ts"; // side-effect: registers EchoHarness
+import "./harness/codex/index.ts"; // side-effect: registers CodexHarness
 import { getHarness } from "./harness/index.ts";
 import type {
   HarnessRunControl,
   NormalizedEvent,
 } from "./harness/types.ts";
-import { buildQueryPrompt } from "./multimodal-prompt.ts";
 import type { Bus } from "./bus.ts";
 import { getAgentType, type AgentTypeContext } from "./agents/index.ts";
 import type { WorktreeInfo } from "./worktree.ts";
@@ -205,6 +206,7 @@ export class SessionHost {
       worktreeIsolation: this.worktreeIsolation,
       totalCost: this.totalCost,
       turns: this.turns,
+      harnessName: this.harnessName,
     };
     persistSessionToDb(snap);
   }
@@ -234,6 +236,9 @@ export class SessionHost {
       worktreeIsolation: this.worktreeIsolation,
       forEachLeaderTaskState: deps.forEachLeaderTaskState,
       startMinionSession: (params) => {
+        // Default the spawned minion to the leader's current harness so a
+        // non-Claude leader spawns same-harness minions unless the caller
+        // explicitly overrides it.
         deps.startChildSession({
           sessionKey: params.sessionKey,
           prompt: params.prompt,
@@ -242,6 +247,7 @@ export class SessionHost {
           role: "minion",
           worktreeIsolation: false,
           parentWorktree: this.worktree ?? undefined,
+          harness: params.harness ?? this.harnessName,
         });
       },
       scheduleWaitContinue: (durationMs, reason) => {
@@ -352,7 +358,7 @@ export class SessionHost {
         toolResult,
         abortController,
         harness,
-        prompt: buildQueryPrompt(opts) as string | AsyncIterable<{ role: "user"; content: string }>,
+        prompt: opts.prompt,
       });
 
       const { events, control } = harness.start(startOpts);
