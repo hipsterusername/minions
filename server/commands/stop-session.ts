@@ -5,6 +5,7 @@
  * resume after the user explicitly stopped it.
  */
 
+import type { BusPayload } from "../bus.ts";
 import type { BufferedEvent } from "../session-host.ts";
 import type { CommandHandler } from "./types.ts";
 
@@ -32,5 +33,5 @@ export const stopSession: CommandHandler = (ctx, cmd) => {
     timestamp: Date.now(),
   };
   host.bufferEvent(stopEvent);
-  ctx.bus.emitToSession(cmd.sessionKey, stopEvent);
+  ctx.bus.emitToSession(cmd.sessionKey, stopEvent as BusPayload);
 };

@@ -1,15 +1,18 @@
 /**
- * stop_task — asks the SDK to cancel a subagent Task by id.
+ * stop_task — asks the harness to cancel a subagent Task by id.
+ *
+ * Phase A: updated to use setRunControl / fakeRunControl. Adds tests for
+ * "No active query" and "unsupported by harness".
  */
 import { describe, expect, it, vi } from "vitest";
 import { stopTask } from "./stop-task.ts";
-import { setup, cmd } from "./test-harness.ts";
+import { setup, cmd, fakeRunControl } from "./test-harness.ts";
 
 describe("stop_task", () => {
-  it("calls queryHandle.stopTask with the supplied taskId", async () => {
+  it("calls runControl.stopTask with the supplied taskId", async () => {
     const h = setup();
     const stop = vi.fn(async () => undefined);
-    h.setQueryHandle({ stopTask: stop });
+    h.setRunControl(fakeRunControl({ stopTask: stop }));
 
     stopTask(h.ctx, cmd({ type: "stop_task", taskId: "task-42" }), h.ws);
     await Promise.resolve();
@@ -22,7 +25,7 @@ describe("stop_task", () => {
 
   it("rejects when taskId is missing", () => {
     const h = setup();
-    h.setQueryHandle({ stopTask: vi.fn() });
+    h.setRunControl(fakeRunControl());
     stopTask(
       h.ctx,
       cmd({ type: "stop_task", taskId: undefined }),
@@ -32,7 +35,7 @@ describe("stop_task", () => {
     expect(h.wsSent[0]!["error"]).toContain("taskId required");
   });
 
-  it("replies with control_error when no queryHandle is attached", () => {
+  it("replies with control_error when no runControl is attached (No active query)", () => {
     const h = setup();
     stopTask(
       h.ctx,
@@ -43,13 +46,23 @@ describe("stop_task", () => {
     expect(h.wsSent[0]!["error"]).toContain("No active query");
   });
 
+  it("replies 'unsupported by harness' when stopTask is absent on the control", () => {
+    const h = setup();
+    h.host.harnessName = "echo";
+    h.setRunControl({ abort() {} });
+
+    stopTask(h.ctx, cmd({ type: "stop_task", taskId: "t" }), h.ws);
+
+    expect(h.wsSent[0]!["success"]).toBe(false);
+    expect(h.wsSent[0]!["error"]).toMatch(/"stop_task"/);
+    expect(h.wsSent[0]!["error"]).toMatch(/"echo"/);
+  });
+
   it("propagates the SDK rejection as control_error", async () => {
     const h = setup();
-    h.setQueryHandle({
-      stopTask: vi.fn(async () => {
-        throw new Error("task not found");
-      }),
-    });
+    h.setRunControl(fakeRunControl({
+      stopTask: vi.fn(async () => { throw new Error("task not found"); }),
+    }));
     stopTask(h.ctx, cmd({ type: "stop_task", taskId: "t" }), h.ws);
     await Promise.resolve();
     await Promise.resolve();

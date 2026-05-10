@@ -1,13 +1,16 @@
 /**
- * remove_session — completely tear down a session: cancel the SDK query,
+ * remove_session — completely tear down a session: cancel the run,
  * remove the worktree if any, drop the row from SQLite, broadcast an
  * updated session_list.
+ *
+ * Phase A: updated to use setRunControl. close() is fire-and-forget on
+ * teardown — absence produces no error.
  *
  * Mocks `removeWorktree` and `removePersistedSession` at the boundary.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorktreeInfo } from "../worktree-types.ts";
-import { setup, cmd } from "./test-harness.ts";
+import { setup, cmd, fakeRunControl } from "./test-harness.ts";
 
 const removeWorktreeCalls: { path: string; project: string }[] = [];
 const removePersistedCalls: string[] = [];
@@ -55,13 +58,12 @@ describe("remove_session", () => {
   it("aborts the session, drops it from the registry, removes worktree + persisted row, broadcasts session_list", async () => {
     const h = setup({ status: "running" });
     h.host.worktree = fakeWorktree;
-    const close = vi.fn();
-    h.setQueryHandle({ close });
+    const closeFn = vi.fn(async () => undefined);
+    h.setRunControl(fakeRunControl({ close: closeFn }));
 
     removeSession(h.ctx, cmd({ type: "remove_session" }), h.ws);
 
     // Synchronous parts.
-    expect(close).toHaveBeenCalledTimes(1);
     expect(h.host.abortController.signal.aborted).toBe(true);
     expect(h.host.worktree).toBeNull();
 
@@ -79,6 +81,26 @@ describe("remove_session", () => {
     expect(listEvent).toBeDefined();
     expect(listEvent!["topic"]).toBe("global");
     expect(listEvent!["sessions"]).toEqual([]);
+  });
+
+  it("calls runControl.close() fire-and-forget when present", async () => {
+    const h = setup({ status: "running" });
+    const closeFn = vi.fn(async () => undefined);
+    h.setRunControl(fakeRunControl({ close: closeFn }));
+
+    removeSession(h.ctx, cmd({ type: "remove_session" }), h.ws);
+    await Promise.resolve();
+
+    expect(closeFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not error when runControl has no close() method", () => {
+    const h = setup({ status: "running" });
+    h.setRunControl({ abort() {} });
+
+    expect(() => {
+      removeSession(h.ctx, cmd({ type: "remove_session" }), h.ws);
+    }).not.toThrow();
   });
 
   it("rejects with a global error when sessionKey is missing", () => {

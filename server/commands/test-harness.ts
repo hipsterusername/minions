@@ -2,8 +2,7 @@
  * Shared test harness for `server/commands/*.test.ts`.
  *
  * The dispatcher contract is: `(ctx, cmd, ws) => void`. Every handler
- * looks up the session via the registry, makes some assertions about the
- * SessionHost's queryHandle, and either:
+ * looks up the session via the registry, checks `host.runControl`, and either:
  *   - replies via `unicast*(ws, ...)` (sent into ws.send), OR
  *   - emits via `bus.emitTo*(...)` (captured by the bus subscription)
  *
@@ -15,6 +14,11 @@
  *
  * Per docs/testing-strategy.md §5.2, only the WebSocket boundary is faked.
  * The bus, registry, and SessionHost are real instances.
+ *
+ * Phase A: replaced `setQueryHandle`/`fakeQueryHandle` with
+ * `setRunControl`/`fakeRunControl` to match the new HarnessRunControl surface.
+ * Also imports the EchoHarness side-effect so tests that call `getHarness()`
+ * for staticInfo queries have a registered harness available.
  */
 
 import type { WebSocket, WebSocketServer } from "ws";
@@ -22,7 +26,12 @@ import { vi } from "vitest";
 import { createBus, type Bus } from "../bus.ts";
 import { SessionHost } from "../session-host.ts";
 import { SessionRegistry } from "../session-registry.ts";
+import type { HarnessRunControl } from "../harness/types.ts";
 import type { CommandContext, WsCommand } from "./types.ts";
+
+// Side-effect: register EchoHarness so tests that set harnessName = "echo"
+// can call getHarness("echo").staticInfo() without errors.
+import "../harness/echo/index.ts";
 
 export interface CapturedEnvelope {
   topic?: string;
@@ -38,8 +47,10 @@ export interface CommandHarness {
   busSent: CapturedEnvelope[];
   /** Every payload sent directly to `ws.send` via `unicast*`. */
   wsSent: CapturedEnvelope[];
-  /** Mutable handle to swap in a fake queryHandle per test. */
-  setQueryHandle: (handle: unknown) => void;
+  /** Set host.runControl for the current test. */
+  setRunControl: (control: HarnessRunControl | null) => void;
+  /** Set host.eventStream for the current test (rarely needed). */
+  setEventStream: (stream: AsyncIterable<unknown> | null) => void;
 }
 
 export function setup(opts?: {
@@ -97,25 +108,33 @@ export function setup(opts?: {
     ws,
     busSent,
     wsSent,
-    setQueryHandle(handle: unknown) {
-      host.queryHandle = handle as never;
+    setRunControl(control: HarnessRunControl | null) {
+      host.runControl = control;
+    },
+    setEventStream(stream: AsyncIterable<unknown> | null) {
+      host.eventStream = stream as never;
     },
   };
 }
 
-/** Helper: build a fake queryHandle that resolves the named method to a value. */
-export function fakeQueryHandle(
-  responses: Partial<Record<string, unknown>> = {},
-): Record<string, unknown> {
-  const handle: Record<string, unknown> = {};
-  for (const [name, value] of Object.entries(responses)) {
-    if (typeof value === "function") {
-      handle[name] = value;
-    } else {
-      handle[name] = vi.fn(async () => value);
-    }
-  }
-  return handle;
+/**
+ * Build a fake HarnessRunControl for use in command tests.
+ *
+ * Pass any subset of HarnessRunControl methods; the result is cast as a full
+ * HarnessRunControl so TypeScript accepts it in `setRunControl(...)`. Methods
+ * not provided are simply absent at runtime — command handlers detect this and
+ * return the "unsupported by harness" error.
+ *
+ * Example:
+ *   setRunControl(fakeRunControl({ interrupt: vi.fn(async () => undefined) }))
+ */
+export function fakeRunControl(
+  overrides: Partial<HarnessRunControl> = {},
+): HarnessRunControl {
+  return {
+    abort() {},
+    ...overrides,
+  } as HarnessRunControl;
 }
 
 /** Build a WsCommand quickly. */

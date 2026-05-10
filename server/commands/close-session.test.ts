@@ -1,27 +1,34 @@
 /**
- * close_session — closes the SDK query, sets status=stopped, emits
+ * close_session — closes the harness run, sets status=stopped, emits
  * session_status, and replies with a control_response.
+ *
+ * Phase A: updated to use setRunControl. close() is fire-and-forget —
+ * absence does NOT produce an error.
  */
 import { describe, expect, it, vi } from "vitest";
 import { closeSession } from "./close-session.ts";
 import { disablePersistence } from "../session-persist.ts";
-import { setup, cmd } from "./test-harness.ts";
+import { setup, cmd, fakeRunControl } from "./test-harness.ts";
 
 beforeEach(() => disablePersistence());
 
 import { beforeEach } from "vitest";
 
 describe("close_session", () => {
-  it("closes the queryHandle, transitions status to 'stopped', and emits session_status", () => {
+  it("calls runControl.close(), transitions status to 'stopped', and emits session_status", async () => {
     const h = setup({ status: "running" });
-    const close = vi.fn();
-    h.setQueryHandle({ close });
+    const closeFn = vi.fn(async () => undefined);
+    h.setRunControl(fakeRunControl({ close: closeFn }));
 
     closeSession(h.ctx, cmd({ type: "close_session" }), h.ws);
 
-    expect(close).toHaveBeenCalledTimes(1);
+    // close() is fire-and-forget — let it settle
+    await Promise.resolve();
+
+    expect(closeFn).toHaveBeenCalledTimes(1);
     expect(h.host.status).toBe("stopped");
-    expect(h.host.queryHandle).toBeNull();
+    expect(h.host.runControl).toBeNull();
+    expect(h.host.eventStream).toBeNull();
 
     // bus emission
     const statusEvent = h.busSent.find((e) => e.type === "session_status");
@@ -30,9 +37,7 @@ describe("close_session", () => {
     expect(statusEvent!["status"]).toBe("stopped");
 
     // event also pushed to host's eventBuffer
-    expect(h.host.eventBuffer.some((e) => e.type === "session_status")).toBe(
-      true,
-    );
+    expect(h.host.eventBuffer.some((e) => e.type === "session_status")).toBe(true);
 
     // control_response back to the caller
     const ack = h.wsSent.find((e) => e["type"] === "control_response");
@@ -40,11 +45,25 @@ describe("close_session", () => {
     expect(ack!["success"]).toBe(true);
   });
 
-  it("works when no queryHandle is attached (idle session)", () => {
+  it("works when no runControl is attached (idle session) — close absence is a no-op", () => {
     const h = setup({ status: "idle" });
     closeSession(h.ctx, cmd({ type: "close_session" }), h.ws);
     expect(h.host.status).toBe("stopped");
+    expect(h.host.runControl).toBeNull();
     expect(h.busSent.some((e) => e.type === "session_status")).toBe(true);
+  });
+
+  it("does NOT emit 'unsupported by harness' when close() is absent — it is best-effort", () => {
+    const h = setup({ status: "running" });
+    // runControl with abort() only, no close()
+    h.setRunControl({ abort() {} });
+
+    closeSession(h.ctx, cmd({ type: "close_session" }), h.ws);
+
+    // Only one message: the control_response success — no error
+    const errors = h.wsSent.filter((e) => e["success"] === false);
+    expect(errors).toHaveLength(0);
+    expect(h.host.status).toBe("stopped");
   });
 
   it("clears any active wait timer so the session does not auto-resume", () => {
