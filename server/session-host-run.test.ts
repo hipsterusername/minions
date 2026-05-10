@@ -36,8 +36,16 @@ function fakeHarness(
       ...caps,
     },
     builtInTools: builtIns,
-    async *start() {},
-    abort() {},
+    start: () => ({
+      events: (async function* () {})(),
+      control: { abort: () => {} },
+    }),
+    staticInfo: () => ({
+      models: [],
+      commands: [],
+      agents: [],
+      account: { provider: "test" },
+    }),
     registerTools() {},
     resolveModel: () => null,
   };

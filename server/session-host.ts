@@ -20,6 +20,10 @@
 
 import "./harness/claude/index.ts"; // side-effect: registers ClaudeHarness
 import { getHarness } from "./harness/index.ts";
+import type {
+  HarnessRunControl,
+  NormalizedEvent,
+} from "./harness/types.ts";
 import { buildQueryPrompt } from "./multimodal-prompt.ts";
 import type { Bus } from "./bus.ts";
 import { getAgentType, type AgentTypeContext } from "./agents/index.ts";
@@ -149,7 +153,8 @@ export class SessionHost {
   /** Registered harness name for this session (e.g. "claude"). */
   harnessName = "claude";
   abortController: AbortController = new AbortController();
-  queryHandle: AsyncIterable<unknown> | null = null;
+  eventStream: AsyncIterable<NormalizedEvent> | null = null;
+  runControl: HarnessRunControl | null = null;
   eventBuffer: BufferedEvent[] = [];
   lastError: string | null = null;
   model: string | null = null;
@@ -294,7 +299,8 @@ export class SessionHost {
     const abortController = new AbortController();
     this.status = "running";
     this.abortController = abortController;
-    this.queryHandle = null;
+    this.eventStream = null;
+    this.runControl = null;
     this.lastError = null;
     this.role = resolvedRole;
     if (opts.resumeId) this.sessionId = opts.resumeId;
@@ -349,12 +355,17 @@ export class SessionHost {
         prompt: buildQueryPrompt(opts) as string | AsyncIterable<{ role: "user"; content: string }>,
       });
 
-      const eventStream = harness.start(startOpts);
-      this.queryHandle = eventStream;
-
-      for await (const event of eventStream) {
-        if (abortController.signal.aborted) break;
-        processNormalizedEvent(this, deps.bus, agentType, agentCtx, event);
+      const { events, control } = harness.start(startOpts);
+      this.eventStream = events;
+      this.runControl = control;
+      try {
+        for await (const event of events) {
+          if (abortController.signal.aborted) break;
+          processNormalizedEvent(this, deps.bus, agentType, agentCtx, event);
+        }
+      } finally {
+        this.eventStream = null;
+        this.runControl = null;
       }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);

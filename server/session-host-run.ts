@@ -135,6 +135,7 @@ export function buildHarnessStartOpts(
   const resolvedModel = host.model ? (harness.resolveModel(host.model) ?? host.model) : "";
 
   const startOpts: HarnessStartOptions = {
+    sessionKey: host.id,
     cwd: host.cwd,
     prompt,
     systemPrompt,
