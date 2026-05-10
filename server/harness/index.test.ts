@@ -25,19 +25,31 @@ const STUB_CAPABILITIES: HarnessCapabilities = {
   permissionPrompts: false,
   resume: false,
   partialMessages: false,
+  builtInFilesystem: false,
 };
 
 function makeStubHarness(name: string): AgentHarness {
   return {
     name,
     capabilities: { ...STUB_CAPABILITIES },
-    start(): AsyncIterable<never> {
-      throw new Error(`${name}.start() not implemented in stub`);
+    builtInTools: [],
+    start() {
+      return {
+        events: (async function* () {})(),
+        control: { abort() {} },
+      };
     },
-    abort() {},
-    registerTools(_defs: NormalizedToolDef[]) {},
+    registerTools(_defs: Record<string, NormalizedToolDef[]>) {},
     resolveModel() {
       return null;
+    },
+    staticInfo() {
+      return {
+        models: [],
+        commands: [],
+        agents: [],
+        account: { provider: name },
+      };
     },
   };
 }

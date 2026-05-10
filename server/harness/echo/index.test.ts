@@ -5,7 +5,7 @@
  *   - name / capabilities / builtInTools are correct
  *   - start() emits init → text → done with the prompt text
  *   - abort via AbortSignal stops before the text event
- *   - abort via harness.abort() stops before the text event
+ *   - abort via control.abort() stops before the text event
  *   - resolveModel returns the alias unchanged (any non-empty string)
  *   - resolveModel returns null for empty / falsy input
  *   - registerTools stores defs without throwing
@@ -14,7 +14,7 @@
  * See docs/model-agnosticism-spec.md §5 Phase 8.
  */
 
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { NormalizedEvent } from "../../../shared/normalized-event.ts";
 import type { NormalizedToolDef } from "../types.ts";
 import { registeredHarnessNames } from "../index.ts";
@@ -36,8 +36,9 @@ async function collect(
     model: "echo",
     allowedTools: [],
     abortSignal: controller.signal,
+    sessionKey: "test-session",
     ...opts,
-  })) {
+  }).events) {
     events.push(ev);
   }
   return events;
@@ -105,6 +106,18 @@ describe("registerTools", () => {
   });
 });
 
+// ── staticInfo ────────────────────────────────────────────────────────────────
+
+describe("staticInfo", () => {
+  it("returns provider 'echo'", () => {
+    expect(echoHarness.staticInfo().account.provider).toBe("echo");
+  });
+
+  it("returns at least one model entry", () => {
+    expect(echoHarness.staticInfo().models.length).toBeGreaterThan(0);
+  });
+});
+
 // ── start(): event contract ──────────────────────────────────────────────────
 
 describe("start() — event sequence", () => {
@@ -168,8 +181,9 @@ describe("start() — event sequence", () => {
       model: "echo",
       allowedTools: [],
       abortSignal: controller.signal,
+      sessionKey: "test-session",
       prompt: parts(),
-    })) {
+    }).events) {
       events.push(ev);
     }
     const textEv = events.find((e) => e.kind === "text");
@@ -195,8 +209,9 @@ describe("start() — abort via AbortSignal", () => {
       model: "echo",
       allowedTools: [],
       abortSignal: controller.signal,
+      sessionKey: "test-session",
       prompt: "should not echo",
-    })) {
+    }).events) {
       events.push(ev);
     }
 
@@ -209,20 +224,12 @@ describe("start() — abort via AbortSignal", () => {
   });
 });
 
-describe("start() — abort via harness.abort()", () => {
-  // Re-instantiate to ensure a clean aborted flag between tests.
-  // (The exported singleton is shared; we deliberately test it directly to
-  // confirm the flag resets on each start() call.)
-  beforeEach(() => {
-    // Reset internal state by calling abort(); start() will flip it back.
-    echoHarness.abort();
-  });
-
-  it("emits done(abort) when abort() is called between init and text", async () => {
+describe("start() — abort via AbortSignal mid-stream", () => {
+  it("emits done(abort) when AbortSignal is triggered between init and text", async () => {
     const controller = new AbortController();
     const events: NormalizedEvent[] = [];
 
-    // We need to interleave abort() between the init yield and the text yield.
+    // We need to interleave abort between the init yield and the text yield.
     // Strategy: consume events one by one, abort after receiving init.
     const iter = echoHarness.start({
       cwd: "/tmp",
@@ -230,13 +237,14 @@ describe("start() — abort via harness.abort()", () => {
       model: "echo",
       allowedTools: [],
       abortSignal: controller.signal,
+      sessionKey: "test-session",
       prompt: "should not appear",
-    });
+    }).events;
 
     for await (const ev of iter) {
       events.push(ev);
       if (ev.kind === "init") {
-        echoHarness.abort();
+        controller.abort();
       }
     }
 
