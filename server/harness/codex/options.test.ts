@@ -1,0 +1,146 @@
+/**
+ * Unit tests for Codex option/model mapping helpers.
+ *
+ * Table-driven; covers every mapping row and edge case.
+ * No I/O — all functions under test are pure.
+ */
+
+import { describe, expect, it } from "vitest";
+import { CODEX_STATIC_MODELS, resolveCodexModel } from "./models.ts";
+import { mapPermission, mapReasoningEffort, mapSandboxMode } from "./options.ts";
+
+// ── resolveCodexModel ─────────────────────────────────────────────────────────
+
+describe("resolveCodexModel", () => {
+  it("returns null for null", () => {
+    expect(resolveCodexModel(null)).toBeNull();
+  });
+
+  it("returns null for empty string", () => {
+    expect(resolveCodexModel("")).toBeNull();
+  });
+
+  it("returns null for undefined", () => {
+    expect(resolveCodexModel(undefined)).toBeNull();
+  });
+
+  it.each([
+    ["codex", "gpt-5-codex"],
+    ["default", "gpt-5-codex"],
+    ["fast", "gpt-5-codex-mini"],
+  ] as const)("maps alias '%s' to '%s'", (alias, expected) => {
+    expect(resolveCodexModel(alias)).toBe(expected);
+  });
+
+  it.each([
+    ["CODEX", "gpt-5-codex"],
+    ["Default", "gpt-5-codex"],
+    ["FAST", "gpt-5-codex-mini"],
+    ["Codex", "gpt-5-codex"],
+  ] as const)("resolves alias '%s' case-insensitively", (alias, expected) => {
+    expect(resolveCodexModel(alias)).toBe(expected);
+  });
+
+  it("passes through unknown aliases unchanged", () => {
+    expect(resolveCodexModel("gpt-5-codex")).toBe("gpt-5-codex");
+    expect(resolveCodexModel("some-custom-model-id")).toBe("some-custom-model-id");
+    expect(resolveCodexModel("gpt-4o")).toBe("gpt-4o");
+  });
+});
+
+// ── CODEX_STATIC_MODELS ───────────────────────────────────────────────────────
+
+describe("CODEX_STATIC_MODELS", () => {
+  it("contains entries where every id is a non-empty string", () => {
+    for (const entry of CODEX_STATIC_MODELS) {
+      expect(typeof entry.id).toBe("string");
+      expect(entry.id.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("contains entries where every label is a non-empty string", () => {
+    for (const entry of CODEX_STATIC_MODELS) {
+      expect(typeof entry.label).toBe("string");
+      expect(entry.label.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("includes the three expected model IDs", () => {
+    const ids = CODEX_STATIC_MODELS.map((m) => m.id);
+    expect(ids).toContain("gpt-5-codex");
+    expect(ids).toContain("gpt-5-codex-mini");
+    expect(ids).toContain("gpt-5");
+  });
+});
+
+// ── mapPermission ─────────────────────────────────────────────────────────────
+
+describe("mapPermission", () => {
+  it.each([
+    [
+      "bypassPermissions" as const,
+      { approvalPolicy: "never", sandboxMode: "workspace-write", unsupported: false },
+    ],
+    [
+      "auto" as const,
+      { approvalPolicy: "on-failure", sandboxMode: "workspace-write", unsupported: false },
+    ],
+    [
+      "default" as const,
+      { approvalPolicy: "on-request", sandboxMode: "workspace-write", unsupported: false },
+    ],
+    [
+      "plan" as const,
+      { approvalPolicy: "on-request", sandboxMode: "read-only", unsupported: true },
+    ],
+  ])("maps permissionMode '%s' to the correct Codex options", (mode, expected) => {
+    expect(mapPermission(mode)).toEqual(expected);
+  });
+
+  it("treats undefined as auto — returns on-failure / workspace-write / unsupported:false", () => {
+    expect(mapPermission(undefined)).toEqual({
+      approvalPolicy: "on-failure",
+      sandboxMode: "workspace-write",
+      unsupported: false,
+    });
+  });
+});
+
+// ── mapReasoningEffort ────────────────────────────────────────────────────────
+
+describe("mapReasoningEffort", () => {
+  it.each([
+    ["low" as const, "low"],
+    ["medium" as const, "medium"],
+    ["high" as const, "high"],
+  ] as const)("maps effort '%s' to '%s'", (input, expected) => {
+    expect(mapReasoningEffort(input)).toBe(expected);
+  });
+});
+
+// ── mapSandboxMode ────────────────────────────────────────────────────────────
+
+describe("mapSandboxMode", () => {
+  it("returns 'read-only' when permissionMode is 'plan' regardless of worktreeIsolation", () => {
+    expect(mapSandboxMode({ worktreeIsolation: false, permissionMode: "plan" })).toBe("read-only");
+    expect(mapSandboxMode({ worktreeIsolation: true, permissionMode: "plan" })).toBe("read-only");
+  });
+
+  it.each([
+    ["bypassPermissions" as const],
+    ["auto" as const],
+    ["default" as const],
+  ])("returns 'workspace-write' when permissionMode is '%s'", (mode) => {
+    expect(mapSandboxMode({ worktreeIsolation: false, permissionMode: mode })).toBe(
+      "workspace-write",
+    );
+    expect(mapSandboxMode({ worktreeIsolation: true, permissionMode: mode })).toBe(
+      "workspace-write",
+    );
+  });
+
+  it("returns 'workspace-write' when permissionMode is undefined", () => {
+    expect(mapSandboxMode({ worktreeIsolation: false })).toBe("workspace-write");
+    expect(mapSandboxMode({ worktreeIsolation: true })).toBe("workspace-write");
+  });
+});
