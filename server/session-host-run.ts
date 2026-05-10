@@ -193,7 +193,12 @@ export function processNormalizedEvent(
   if (event.kind === "init") {
     host.sessionId = event.sessionId;
     if (event.model) host.model = event.model;
-    host.permissionMode = event.permissionMode ?? null;
+    // Only refresh `host.permissionMode` when the harness reports one on init.
+    // Harnesses that don't surface a permission mode in their init event
+    // (Codex, Echo) leave the existing seed from `StartSessionOptions` /
+    // `set_permission_mode` in place — Claude is the only one that overwrites
+    // here, and only when the SDK actually returns a value.
+    if (event.permissionMode) host.permissionMode = event.permissionMode;
     // `meta` carries Claude-specific init data (tools, mcp_servers, etc.).
     if (event.meta) host.initData = event.meta;
     host.persist();

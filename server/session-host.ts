@@ -122,12 +122,10 @@ export interface StartSessionOptions {
    * is appended to `allowedTools` so the agent can call without prompts.
    */
   externalMcpToolNames?: string[] | undefined;
-  /**
-   * Name of the registered AgentHarness to use for this session.
-   * Defaults to "claude". Pass a different name to route the session
-   * through a non-Claude harness registered via `registerHarness()`.
-   */
+  /** Registered AgentHarness name. Defaults to "claude". */
   harness?: string | undefined;
+  /** Initial permission mode; only honoured on the first start. */
+  permissionMode?: string | undefined;
 }
 
 // ── SessionHost ────────────────────────────────────────────
@@ -296,49 +294,55 @@ export class SessionHost {
    * Safe to call repeatedly — each call supersedes the previous run.
    */
   async start(opts: StartSessionOptions, deps: SessionHostDeps): Promise<void> {
-    // Derive a task name for agent types that want one (leader) — done
-    // before we might mutate cwd based on worktree.
-    const resolvedRole: SessionRole = opts.role ?? this.role ?? "default";
-    const agentType = getAgentType(resolvedRole);
-
-    // ── Reset per-run volatile state ──────────────────
     const abortController = new AbortController();
-    this.status = "running";
-    this.abortController = abortController;
-    this.eventStream = null;
-    this.runControl = null;
-    this.lastError = null;
-    this.role = resolvedRole;
-    if (opts.resumeId) this.sessionId = opts.resumeId;
-    if (opts.harness) this.harnessName = opts.harness;
-    if (opts.initialModel && !this.model) this.model = opts.initialModel;
-    if (opts.thinkingConfig !== undefined) {
-      this.thinkingConfig = opts.thinkingConfig ?? this.thinkingConfig;
-    }
-    this.worktreeIsolation = opts.worktreeIsolation === true;
 
-    // Clear any existing wait timer when the session resumes.
-    this.clearWaitTimer();
-
-    if (!this.taskName && agentType.wantsWorktree) {
-      this.taskName = deriveTaskName(opts.prompt);
-    }
-
-    await ensureWorktree(this, opts, deps.bus, agentType);
-    this.persist();
-
-    // ── Broadcast running status ──────────────────────
-    const statusEvent: BufferedEvent = {
-      type: "session_status",
-      sessionKey: this.id,
-      status: "running",
-      timestamp: Date.now(),
-    };
-    this.bufferEvent(statusEvent);
-    deps.bus.emitToSession(this.id, statusEvent);
-
-    // ── Run the harness query ─────────────────────────
     try {
+      // Derive a task name for agent types that want one (leader) — done
+      // before we might mutate cwd based on worktree.
+      const resolvedRole: SessionRole = opts.role ?? this.role ?? "default";
+      const agentType = getAgentType(resolvedRole);
+
+      // ── Reset per-run volatile state ──────────────────
+      this.status = "running";
+      this.abortController = abortController;
+      this.eventStream = null;
+      this.runControl = null;
+      this.lastError = null;
+      this.role = resolvedRole;
+      if (opts.resumeId) this.sessionId = opts.resumeId;
+      if (opts.harness) this.harnessName = opts.harness;
+      if (opts.initialModel && !this.model) this.model = opts.initialModel;
+      // Seed permission mode from create_session on the first run only;
+      // resume / wait_and_continue keep the persisted live value.
+      if (opts.permissionMode && !this.permissionMode) {
+        this.permissionMode = opts.permissionMode;
+      }
+      if (opts.thinkingConfig !== undefined) {
+        this.thinkingConfig = opts.thinkingConfig ?? this.thinkingConfig;
+      }
+      this.worktreeIsolation = opts.worktreeIsolation === true;
+
+      // Clear any existing wait timer when the session resumes.
+      this.clearWaitTimer();
+
+      if (!this.taskName && agentType.wantsWorktree) {
+        this.taskName = deriveTaskName(opts.prompt);
+      }
+
+      await ensureWorktree(this, opts, deps.bus, agentType);
+      this.persist();
+
+      // ── Broadcast running status ──────────────────────
+      const statusEvent: BufferedEvent = {
+        type: "session_status",
+        sessionKey: this.id,
+        status: "running",
+        timestamp: Date.now(),
+      };
+      this.bufferEvent(statusEvent);
+      deps.bus.emitToSession(this.id, statusEvent);
+
+      // ── Run the harness query ─────────────────────────
       const agentCtx = this.buildAgentContext(opts, deps);
       const toolResult = agentType.getToolGroups(agentCtx);
 
@@ -389,4 +393,3 @@ export class SessionHost {
     }
   }
 }
-

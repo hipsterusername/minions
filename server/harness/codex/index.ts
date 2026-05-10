@@ -121,6 +121,23 @@ class CodexHarness implements AgentHarness {
       let bridgeReg: McpBridgeRegistration | null = null;
       let scratch: CodexAttachmentScratch | null = null;
       try {
+        // Reject permission modes Codex cannot honor before any I/O. `plan`
+        // is unsupported for MVP per docs/codex-harness-spec.md Open Questions
+        // §5; surface a clean terminal error instead of silently mapping it to
+        // a half-correct approvalPolicy/sandboxMode pair. UI gating for `plan`
+        // on Codex sessions lands in Phase E.
+        const permissionMapping = mapPermission(opts.permissionMode);
+        if (permissionMapping.unsupported) {
+          yield {
+            kind: "done",
+            reason: "error",
+            error:
+              `Permission mode "${opts.permissionMode ?? "default"}" is not ` +
+              `supported by harness "codex".`,
+          };
+          return;
+        }
+
         // Materialize image attachments to disk if any.
         if (opts.attachments && opts.attachments.length > 0) {
           scratch = await writeCodexAttachments({
@@ -147,6 +164,16 @@ class CodexHarness implements AgentHarness {
           bridgeEnv = rendered.env;
         }
 
+        // External user-configured MCP servers (`opts.externalMcpServers`) are
+        // intentionally NOT rendered here. Phase D wires Minions-internal tool
+        // groups through the bridge only; external MCP renderers per-harness
+        // (Codex stdio + streamable HTTP shape) are deferred to a follow-up
+        // because the source representation in `server/routines/external-mcp.ts`
+        // is still Claude SDK-shaped. See docs/codex-harness-spec.md §"External
+        // MCP" — silently passing the Claude config object into Codex would
+        // either be dropped by the SDK or render incorrectly, so we drop it on
+        // the floor here until the normalization lands. Capabilities and
+        // staticInfo do not advertise external MCP support.
         const codexOpts: CodexOptions = {
           ...resolveCodexCredentials(),
         };
@@ -178,6 +205,13 @@ class CodexHarness implements AgentHarness {
         try {
           runResult = await thread.runStreamed(input, { signal: ac.signal });
         } catch (err) {
+          // SDK rejection after abort is bookkeeping noise from the abort
+          // path itself — surface as `abort`, not `error`, so command
+          // handlers don't show a phantom failure message.
+          if (ac.signal.aborted) {
+            yield { kind: "done", reason: "abort" };
+            return;
+          }
           yield { kind: "done", reason: "error", error: errorMessage(err) };
           return;
         }
@@ -195,6 +229,13 @@ class CodexHarness implements AgentHarness {
             }
           }
         } catch (err) {
+          // Same reasoning as the runStreamed catch above: an abort that
+          // cancels in-flight `await for` iteration commonly bubbles as a
+          // rejection. Treat it as an abort, not an error.
+          if (ac.signal.aborted) {
+            yield { kind: "done", reason: "abort" };
+            return;
+          }
           yield { kind: "done", reason: "error", error: errorMessage(err) };
           return;
         }

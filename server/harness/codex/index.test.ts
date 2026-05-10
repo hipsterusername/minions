@@ -376,3 +376,118 @@ describe("CodexHarness attachments", () => {
     expect(inputs[1]?.path).toMatch(/minions-codex-attachments[/\\]att-1[/\\]/);
   });
 });
+
+// ── permissionMode end-to-end ─────────────────────────────────────────────────
+
+describe("CodexHarness permission mode", () => {
+  it("forwards opts.permissionMode to startThread via mapPermission", async () => {
+    codexHarness.registerTools({});
+    await collect(
+      codexHarness.start(baseOpts({ permissionMode: "bypassPermissions" })).events,
+    );
+    const startThreadOpts = sdkMock.calls.startThread[0] as {
+      approvalPolicy?: string;
+      sandboxMode?: string;
+    };
+    // bypassPermissions → approvalPolicy "never" + sandboxMode "workspace-write"
+    expect(startThreadOpts.approvalPolicy).toBe("never");
+    expect(startThreadOpts.sandboxMode).toBe("workspace-write");
+  });
+
+  it("uses the auto fallback when permissionMode is omitted", async () => {
+    codexHarness.registerTools({});
+    await collect(codexHarness.start(baseOpts()).events);
+    const startThreadOpts = sdkMock.calls.startThread[0] as {
+      approvalPolicy?: string;
+      sandboxMode?: string;
+    };
+    expect(startThreadOpts.approvalPolicy).toBe("on-failure");
+    expect(startThreadOpts.sandboxMode).toBe("workspace-write");
+  });
+
+  it("rejects plan mode with a single done(error) and never opens a thread", async () => {
+    codexHarness.registerTools({});
+    const out = await collect(
+      codexHarness.start(baseOpts({ permissionMode: "plan" })).events,
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      kind: "done",
+      reason: "error",
+    });
+    expect((out[0] as { error?: string }).error ?? "").toMatch(
+      /not supported by harness "codex"/,
+    );
+    expect(sdkMock.calls.startThread).toHaveLength(0);
+    expect(sdkMock.calls.resumeThread).toHaveLength(0);
+  });
+});
+
+// ── Deterministic abort ───────────────────────────────────────────────────────
+
+describe("CodexHarness abort determinism", () => {
+  it("treats runStreamed rejection after abort as done(reason: abort), not error", async () => {
+    const ac = new AbortController();
+    // Replace the thread.runStreamed implementation so the *promise* it
+    // returns rejects after abort, mimicking the SDK's normal abort
+    // bookkeeping where the in-flight call hangs and then throws once the
+    // signal fires.
+    sdkMock.setNextEvents(
+      (async function* () {
+        // Empty — runStreamed will reject before yielding anything.
+      })(),
+    );
+    // Patch the next-call thread.runStreamed to await abort and reject.
+    const originalCodex = sdkMock.Codex.prototype as unknown as {
+      startThread: (opts?: unknown) => unknown;
+    };
+    const stash = originalCodex.startThread;
+    originalCodex.startThread = function patched(opts?: unknown) {
+      sdkMock.calls.startThread.push(opts);
+      return {
+        id: null,
+        runStreamed: async (
+          input: unknown,
+          turnOpts?: { signal?: AbortSignal },
+        ) => {
+          sdkMock.calls.runStreamed.push({
+            input,
+            turnOpts: turnOpts ?? null,
+          });
+          await new Promise((_resolve, reject) => {
+            const sig = turnOpts?.signal;
+            if (!sig) return reject(new Error("missing signal"));
+            sig.addEventListener("abort", () => reject(new Error("aborted")), {
+              once: true,
+            });
+          });
+          throw new Error("unreachable");
+        },
+        run: vi.fn(),
+      };
+    };
+
+    try {
+      const { events, control } = codexHarness.start(
+        baseOpts({ abortSignal: ac.signal }),
+      );
+      const collected: NormalizedEvent[] = [];
+      const iter = (async () => {
+        for await (const ev of events) collected.push(ev);
+      })();
+      // Give the generator a tick to call runStreamed, then abort.
+      await new Promise((r) => setTimeout(r, 10));
+      control.abort();
+      ac.abort();
+      await iter;
+      const last = collected[collected.length - 1];
+      expect(last).toMatchObject({ kind: "done", reason: "abort" });
+      const errs = collected.filter(
+        (e) => e.kind === "done" && (e as { reason: string }).reason === "error",
+      );
+      expect(errs).toHaveLength(0);
+    } finally {
+      originalCodex.startThread = stash;
+    }
+  });
+});
