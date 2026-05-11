@@ -1,48 +1,53 @@
 /**
- * Regression tests for the multimodal prompt builder.
+ * Regression tests for the Claude-internal `buildClaudePrompt` (formerly
+ * the shared `multimodal-prompt.ts`). Pins the multimodal first-turn
+ * shape so an image dropped onto the canvas reaches the Anthropic SDK
+ * as a real `image` content block, not a stringified base64 blob.
  *
- * Anchors the bug where an image dropped onto the canvas never reached
- * the model — before this path existed, `query()` was called with a
- * plain string, so only the text description flowed and the model
- * happily hallucinated what the image contained.
+ * The function lives inside the Claude harness now; non-Claude harnesses
+ * own their own attachment formatting (see `server/harness/codex/attachments.ts`).
  */
-import { describe, expect, it } from "vitest";
-import { buildQueryPrompt } from "./multimodal-prompt.ts";
-import type { StartSessionOptions } from "./session-host.ts";
 
-function baseOpts(over: Partial<StartSessionOptions> = {}): StartSessionOptions {
+import { describe, expect, it } from "vitest";
+import { buildClaudePrompt } from "./prompt.ts";
+import type {
+  HarnessStartOptions,
+  NormalizedAttachment,
+} from "../types.ts";
+
+function baseOpts(over: Partial<HarnessStartOptions> = {}): HarnessStartOptions {
   return {
     sessionKey: "k",
-    prompt: "hello",
     cwd: "/tmp",
+    prompt: "hello",
+    systemPrompt: "",
+    model: "claude-sonnet-4-6",
+    allowedTools: [],
+    abortSignal: new AbortController().signal,
     ...over,
   };
 }
 
-describe("buildQueryPrompt", () => {
-  it("returns the raw string when there are no attachments", () => {
-    const out = buildQueryPrompt(baseOpts());
+describe("buildClaudePrompt", () => {
+  it("returns the raw string when there are no attachments", async () => {
+    const out = await buildClaudePrompt(baseOpts());
     expect(out).toBe("hello");
   });
 
-  it("returns the raw string when the attachments array is empty", () => {
-    const out = buildQueryPrompt(baseOpts({ attachments: [] }));
+  it("returns the raw string when the attachments array is empty", async () => {
+    const out = await buildClaudePrompt(baseOpts({ attachments: [] }));
     expect(out).toBe("hello");
   });
 
   it("yields one SDKUserMessage with text + image blocks when attachments are present", async () => {
-    const out = buildQueryPrompt(
-      baseOpts({
-        prompt: "what is in this image?",
-        attachments: [
-          {
-            kind: "image",
-            mediaType: "image/png",
-            data: "AAAAAAAA",
-            filename: "cat.png",
-          },
-        ],
-      }),
+    const att: NormalizedAttachment = {
+      kind: "image",
+      mediaType: "image/png",
+      data: "AAAAAAAA",
+      filename: "cat.png",
+    };
+    const out = await buildClaudePrompt(
+      baseOpts({ prompt: "what is in this image?", attachments: [att] }),
     );
     expect(typeof out).not.toBe("string");
     const msgs: unknown[] = [];
@@ -52,7 +57,6 @@ describe("buildQueryPrompt", () => {
       type: string;
       message: { role: string; content: unknown[] };
       parent_tool_use_id: null;
-      uuid?: string;
     };
     expect(msg.type).toBe("user");
     expect(msg.parent_tool_use_id).toBeNull();
@@ -67,7 +71,7 @@ describe("buildQueryPrompt", () => {
   });
 
   it("emits one image block per attachment, preserving order", async () => {
-    const out = buildQueryPrompt(
+    const out = await buildClaudePrompt(
       baseOpts({
         attachments: [
           { kind: "image", mediaType: "image/png", data: "ONE" },
@@ -76,10 +80,10 @@ describe("buildQueryPrompt", () => {
       }),
     );
     const iter = out as AsyncIterable<unknown>;
-    const firstIt = iter[Symbol.asyncIterator]();
-    const { value } = await firstIt.next();
+    const it1 = iter[Symbol.asyncIterator]();
+    const { value } = await it1.next();
     const content = (value as { message: { content: unknown[] } }).message.content;
-    expect(content).toHaveLength(3); // text + 2 images
+    expect(content).toHaveLength(3);
     expect((content[1] as { source: { data: string } }).source.data).toBe("ONE");
     expect((content[2] as { source: { data: string } }).source.data).toBe("TWO");
   });

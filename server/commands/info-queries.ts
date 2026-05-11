@@ -1,75 +1,110 @@
 /**
- * Read-only queries that simply delegate to the SDK `query()` handle:
- *   - get_context_usage
- *   - get_supported_models
- *   - get_supported_commands
- *   - get_supported_agents
- *   - get_account_info
- *   - get_mcp_server_status
+ * Read-only info queries.
  *
- * Each one is a single line of glue because `runQueryOp` handles the
- * session-lookup / queryHandle-check / response-or-error boilerplate.
+ * Split into two groups after Phase A:
+ *
+ * Run-dependent (route through host.runControl):
+ *   - get_context_usage      → runControl.getContextUsage()
+ *   - get_mcp_server_status  → runControl.mcpServerStatus()
+ *
+ * Run-independent (route through harness.staticInfo()):
+ *   - get_supported_models   → harness.staticInfo().models
+ *   - get_supported_commands → harness.staticInfo().commands
+ *   - get_supported_agents   → harness.staticInfo().agents
+ *   - get_account_info       → harness.staticInfo().account
+ *
+ * The staticInfo queries work even when no run is live, so they never
+ * return "No active query".
  */
 
-import { runQueryOp } from "./helpers.ts";
+import { getHarness } from "../harness/index.ts";
+import {
+  getSessionOrError,
+  sendControlError,
+  sendControlResponse,
+  unsupportedByHarness,
+  errToMessage,
+} from "./helpers.ts";
 import type { CommandHandler } from "./types.ts";
 
-export const getContextUsage: CommandHandler = (ctx, cmd, ws) =>
-  runQueryOp(
-    ctx,
-    cmd,
-    ws,
-    "get_context_usage",
-    (h) => (h.queryHandle ? h.queryHandle.getContextUsage() : null),
-    (usage) => ({ usage }),
-  );
+// ── Run-dependent queries ─────────────────────────────────────
 
-export const getSupportedModels: CommandHandler = (ctx, cmd, ws) =>
-  runQueryOp(
-    ctx,
-    cmd,
-    ws,
-    "get_supported_models",
-    (h) => (h.queryHandle ? h.queryHandle.supportedModels() : null),
-    (models) => ({ models }),
-  );
+export const getContextUsage: CommandHandler = (ctx, cmd, ws) => {
+  const host = getSessionOrError(ctx.registry, cmd.sessionKey, ws);
+  if (!host) return;
+  if (!host.runControl) {
+    sendControlError(ws, "get_context_usage", host.id, cmd.requestId, "No active query");
+    return;
+  }
+  const fn = host.runControl.getContextUsage;
+  if (!fn) {
+    unsupportedByHarness(ws, "get_context_usage", host, cmd.requestId);
+    return;
+  }
+  fn.call(host.runControl)
+    .then((usage) =>
+      sendControlResponse(ws, "get_context_usage", host.id, cmd.requestId, { usage }),
+    )
+    .catch((err: unknown) =>
+      sendControlError(ws, "get_context_usage", host.id, cmd.requestId, errToMessage(err)),
+    );
+};
 
-export const getSupportedCommands: CommandHandler = (ctx, cmd, ws) =>
-  runQueryOp(
-    ctx,
-    cmd,
-    ws,
-    "get_supported_commands",
-    (h) => (h.queryHandle ? h.queryHandle.supportedCommands() : null),
-    (commands) => ({ commands }),
-  );
+export const getMcpServerStatus: CommandHandler = (ctx, cmd, ws) => {
+  const host = getSessionOrError(ctx.registry, cmd.sessionKey, ws);
+  if (!host) return;
+  if (!host.runControl) {
+    sendControlError(ws, "get_mcp_server_status", host.id, cmd.requestId, "No active query");
+    return;
+  }
+  const fn = host.runControl.mcpServerStatus;
+  if (!fn) {
+    unsupportedByHarness(ws, "get_mcp_server_status", host, cmd.requestId);
+    return;
+  }
+  fn.call(host.runControl)
+    .then((servers) =>
+      sendControlResponse(ws, "get_mcp_server_status", host.id, cmd.requestId, { servers }),
+    )
+    .catch((err: unknown) =>
+      sendControlError(ws, "get_mcp_server_status", host.id, cmd.requestId, errToMessage(err)),
+    );
+};
 
-export const getSupportedAgents: CommandHandler = (ctx, cmd, ws) =>
-  runQueryOp(
-    ctx,
-    cmd,
-    ws,
-    "get_supported_agents",
-    (h) => (h.queryHandle ? h.queryHandle.supportedAgents() : null),
-    (agents) => ({ agents }),
-  );
+// ── Run-independent queries (harness.staticInfo()) ────────────
 
-export const getAccountInfo: CommandHandler = (ctx, cmd, ws) =>
-  runQueryOp(
-    ctx,
-    cmd,
-    ws,
-    "get_account_info",
-    (h) => (h.queryHandle ? h.queryHandle.accountInfo() : null),
-    (account) => ({ account }),
-  );
+export const getSupportedModels: CommandHandler = (ctx, cmd, ws) => {
+  const host = getSessionOrError(ctx.registry, cmd.sessionKey, ws);
+  if (!host) return;
+  const harness = getHarness(host.harnessName);
+  sendControlResponse(ws, "get_supported_models", host.id, cmd.requestId, {
+    models: harness.staticInfo().models,
+  });
+};
 
-export const getMcpServerStatus: CommandHandler = (ctx, cmd, ws) =>
-  runQueryOp(
-    ctx,
-    cmd,
-    ws,
-    "get_mcp_server_status",
-    (h) => (h.queryHandle ? h.queryHandle.mcpServerStatus() : null),
-    (servers) => ({ servers }),
-  );
+export const getSupportedCommands: CommandHandler = (ctx, cmd, ws) => {
+  const host = getSessionOrError(ctx.registry, cmd.sessionKey, ws);
+  if (!host) return;
+  const harness = getHarness(host.harnessName);
+  sendControlResponse(ws, "get_supported_commands", host.id, cmd.requestId, {
+    commands: harness.staticInfo().commands,
+  });
+};
+
+export const getSupportedAgents: CommandHandler = (ctx, cmd, ws) => {
+  const host = getSessionOrError(ctx.registry, cmd.sessionKey, ws);
+  if (!host) return;
+  const harness = getHarness(host.harnessName);
+  sendControlResponse(ws, "get_supported_agents", host.id, cmd.requestId, {
+    agents: harness.staticInfo().agents,
+  });
+};
+
+export const getAccountInfo: CommandHandler = (ctx, cmd, ws) => {
+  const host = getSessionOrError(ctx.registry, cmd.sessionKey, ws);
+  if (!host) return;
+  const harness = getHarness(host.harnessName);
+  sendControlResponse(ws, "get_account_info", host.id, cmd.requestId, {
+    account: harness.staticInfo().account,
+  });
+};

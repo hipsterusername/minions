@@ -72,6 +72,7 @@ export interface SessionStreamState {
   totalCost: number;
   turns: number;
   error: string | null;
+  fullError?: string | null;
 }
 
 /**
@@ -119,6 +120,7 @@ function reduceSyncResponse(
       streamingText: "",
       streamingBlockIndex: null,
       error: null,
+      fullError: null,
     };
   }
 
@@ -127,6 +129,8 @@ function reduceSyncResponse(
   const seen = new Set<string>();
   let cost = msg.totalCost ?? state.totalCost;
   let turns = msg.turns ?? state.turns;
+  let error = msg.lastError ?? null;
+  let fullError = msg.lastErrorFull ?? error;
   let status: SessionStreamStatus =
     (msg.status as SessionStreamStatus | undefined) ?? state.status;
 
@@ -155,6 +159,10 @@ function reduceSyncResponse(
       }
     } else if (evt.type === "session_status" && evt.status) {
       status = evt.status as SessionStreamStatus;
+    } else if (evt.type === "session_error" && evt.error) {
+      status = "error";
+      error = evt.error;
+      fullError = evt.fullError ?? evt.error;
     }
   }
 
@@ -166,7 +174,8 @@ function reduceSyncResponse(
     streamingBlockIndex: null,
     totalCost: cost,
     turns,
-    error: msg.lastError ?? null,
+    error,
+    fullError,
   };
 }
 
@@ -314,7 +323,12 @@ function reduceSessionError(
   msg: Extract<ServerMessage, { type: "session_error" }>,
 ): SessionStreamState {
   if (msg.sessionKey !== state.sessionKey) return state;
-  return { ...state, status: "error", error: msg.error };
+  return {
+    ...state,
+    status: "error",
+    error: msg.error,
+    fullError: msg.fullError ?? msg.error,
+  };
 }
 
 // ── Helpers ──────────────────────────────────────────────
@@ -370,5 +384,6 @@ export function emptySessionStreamState(
     totalCost: 0,
     turns: 0,
     error: null,
+    fullError: null,
   };
 }

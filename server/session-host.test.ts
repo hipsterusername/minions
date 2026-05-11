@@ -2,13 +2,14 @@
  * SessionHost — lifecycle tests.
  *
  * These pin the contract `SessionHost` exposes to `server/index.ts` and the
- * registry: it owns one SDK `query()` per `start()`, fans every event out
+ * registry: it owns one harness run per `start()`, fans every event out
  * onto the bus wrapped as a `sdk_event`, advances `status` correctly on
  * init/result/error, and respects the abort controller.
  *
  * Boundary mocks (per docs/testing-strategy.md §5.2):
- *   - `@anthropic-ai/claude-agent-sdk.query` — replaced with a generator
- *     the test drives directly.
+ *   - `./harness/index.ts` — replaced with a fake AgentHarness whose
+ *     start() returns { events, control }. The test drives `events` directly
+ *     using NormalizedEvent values, staying above the SDK translation layer.
  *   - `./session-persist.ts` — disabled via the production `disablePersistence()`
  *     toggle so no SQLite is touched.
  *
@@ -16,33 +17,67 @@
  *   - `Bus` capture (the real `createBus` over a fake `WebSocketServer`
  *     that records every fan-out).
  *   - `SessionHost` itself.
- *   - The `default` agent (no MCP, no worktree) — keeps the test focused
+ *   - The registered agents (no SDK calls in the agent implementations) — keeps the test focused
  *     on lifecycle, not agent wiring.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Boundary mock — declared before the imports under test so vitest hoists
-// the factory to module-load time.
-type SdkMessage = Record<string, unknown>;
-const sdkQueueRef: { queue: SdkMessage[]; aborted: boolean } = {
-  queue: [],
-  aborted: false,
-};
+import type { NormalizedEvent } from "./harness/types.ts";
 
-vi.mock("@anthropic-ai/claude-agent-sdk", () => {
-  return {
-    query: () => {
-      const ref = sdkQueueRef;
-      return (async function* () {
-        for (const msg of ref.queue) {
-          if (ref.aborted) break;
-          yield msg;
-        }
-      })();
+// ── Harness mock ─────────────────────────────────────────────────────────────
+
+/**
+ * Module-level mutable state for the fake harness. The mock factory closes
+ * over this object so individual tests can push events or override start().
+ * Reset in beforeEach.
+ */
+const harnessRef: {
+  events: NormalizedEvent[];
+  startFnOverride: (() => {
+    events: AsyncIterable<NormalizedEvent>;
+    control: { abort: () => void };
+  }) | null;
+} = { events: [], startFnOverride: null };
+
+// Declared before imports — vitest hoists vi.mock() calls above the ESM
+// import graph, so the factory runs before any module under test is loaded.
+vi.mock("./harness/index.ts", () => ({
+  getHarness: () => ({
+    name: "claude",
+    capabilities: {
+      thinking: false,
+      promptCaching: false,
+      mcp: true,
+      permissionPrompts: false,
+      resume: false,
+      partialMessages: false,
+      builtInFilesystem: false,
     },
-  };
-});
+    builtInTools: [] as string[],
+    staticInfo: () => ({
+      models: [],
+      commands: [],
+      agents: [],
+      account: { provider: "claude" },
+    }),
+    registerTools: () => {},
+    resolveModel: () => null,
+    start: () => {
+      if (harnessRef.startFnOverride) return harnessRef.startFnOverride();
+      const eventsToYield = [...harnessRef.events];
+      return {
+        events: (async function* () {
+          for (const event of eventsToYield) {
+            yield event;
+          }
+        })(),
+        control: { abort: () => {} },
+      };
+    },
+  }),
+  registerHarness: () => {},
+}));
 
 import { SessionHost, type SessionHostDeps } from "./session-host.ts";
 import { createBus, type Bus } from "./bus.ts";
@@ -50,7 +85,7 @@ import {
   disablePersistence,
   closePersistDb,
 } from "./session-persist.ts";
-import "./agents/index.ts"; // registers leader/minion/default
+import "./agents/index.ts"; // registers agent types
 
 interface CapturedEnvelope {
   topic: string;
@@ -90,9 +125,9 @@ function makeHarness(id = "host-1", cwd = "/tmp/fake-cwd"): Harness {
 }
 
 beforeEach(() => {
-  // Fresh queue + reset abort flag per test.
-  sdkQueueRef.queue = [];
-  sdkQueueRef.aborted = false;
+  // Fresh event queue + reset override per test.
+  harnessRef.events = [];
+  harnessRef.startFnOverride = null;
   // Disable SQLite persistence for the duration of these tests.
   disablePersistence();
 });
@@ -102,12 +137,12 @@ afterEach(() => {
 });
 
 describe("SessionHost.start — happy-path lifecycle", () => {
-  it("transitions running → idle when the SDK closes with a result event", async () => {
+  it("transitions running → idle when the harness closes with a done event", async () => {
     const { host, deps, envelopes } = makeHarness();
 
-    sdkQueueRef.queue = [
-      { type: "system", subtype: "init", session_id: "sess-1", model: "sonnet" },
-      { type: "result", total_cost_usd: 0.42, num_turns: 3 },
+    harnessRef.events = [
+      { kind: "init", sessionId: "sess-1", model: "sonnet" },
+      { kind: "done", reason: "stop", costUSD: 0.42, turns: 3 },
     ];
 
     await host.start(
@@ -121,8 +156,8 @@ describe("SessionHost.start — happy-path lifecycle", () => {
     expect(host.turns).toBe(3);
 
     // The bus saw: running, sdk_event(init), idle.
-    // The `result` message translates to a `done` NormalizedEvent which is
-    // signalled as session_status(idle), NOT emitted as an sdk_event.
+    // The `done` NormalizedEvent is signalled as session_status(idle),
+    // NOT emitted as an sdk_event.
     const types = envelopes.map((e) => e.type);
     expect(types).toEqual([
       "session_status", // running
@@ -138,16 +173,16 @@ describe("SessionHost.start — happy-path lifecycle", () => {
 
   it("captures init metadata into host.initData and persists session_id immediately", async () => {
     const { host, deps } = makeHarness();
-    sdkQueueRef.queue = [
+
+    harnessRef.events = [
       {
-        type: "system",
-        subtype: "init",
-        session_id: "captured-id",
+        kind: "init",
+        sessionId: "captured-id",
         model: "sonnet",
         permissionMode: "auto",
-        tools: ["Read", "Write"],
+        meta: { tools: ["Read", "Write"], model: "sonnet" },
       },
-      { type: "result" },
+      { kind: "done", reason: "stop" },
     ];
 
     await host.start({ sessionKey: host.id, prompt: "p", cwd: host.cwd }, deps);
@@ -162,25 +197,18 @@ describe("SessionHost.start — happy-path lifecycle", () => {
 
   it("buffers every SDK event onto host.eventBuffer", async () => {
     const { host, deps } = makeHarness();
-    sdkQueueRef.queue = [
-      { type: "system", subtype: "init", session_id: "s" },
-      {
-        type: "assistant",
-        parent_tool_use_id: null,
-        message: { content: [{ type: "text", text: "hello" }] },
-      },
-      {
-        type: "assistant",
-        parent_tool_use_id: null,
-        message: { content: [{ type: "text", text: "world" }] },
-      },
-      { type: "result" },
+
+    harnessRef.events = [
+      { kind: "init", sessionId: "s", model: "" },
+      { kind: "text", text: "hello", role: "assistant" },
+      { kind: "text", text: "world", role: "assistant" },
+      { kind: "done", reason: "stop" },
     ];
 
     await host.start({ sessionKey: host.id, prompt: "p", cwd: host.cwd }, deps);
 
     // running + 3 sdk_events (init, text, text) + idle = 5 buffered events.
-    // The `result` message → done NormalizedEvent → session_status(idle), not sdk_event.
+    // The `done` NormalizedEvent → session_status(idle), not sdk_event.
     expect(host.eventBuffer.map((e) => e.type)).toEqual([
       "session_status",
       "sdk_event",
@@ -192,28 +220,22 @@ describe("SessionHost.start — happy-path lifecycle", () => {
 });
 
 describe("SessionHost.start — error path", () => {
-  it("transitions to status='error' and emits a session_error event when the SDK throws synchronously", async () => {
+  it("transitions to status='error' and emits a session_error event when the harness throws synchronously", async () => {
     const { host, deps, envelopes } = makeHarness();
 
-    // Override the mocked query to throw on iteration.
-    const sdk = await import("@anthropic-ai/claude-agent-sdk");
-    const original = sdk.query;
-    (sdk as { query: unknown }).query = () => {
-      return (async function* () {
+    harnessRef.startFnOverride = () => ({
+      events: (async function* () {
         throw new Error("boom");
         // eslint-disable-next-line no-unreachable
         yield {} as never;
-      })();
-    };
+      })(),
+      control: { abort: () => {} },
+    });
 
-    try {
-      await host.start(
-        { sessionKey: host.id, prompt: "p", cwd: host.cwd },
-        deps,
-      );
-    } finally {
-      (sdk as { query: unknown }).query = original;
-    }
+    await host.start(
+      { sessionKey: host.id, prompt: "p", cwd: host.cwd },
+      deps,
+    );
 
     expect(host.status).toBe("error");
     expect(host.lastError).toBe("boom");
@@ -227,24 +249,19 @@ describe("SessionHost.start — error path", () => {
     host.totalCost = 1.23;
     host.turns = 7;
 
-    const sdk = await import("@anthropic-ai/claude-agent-sdk");
-    const original = sdk.query;
-    (sdk as { query: unknown }).query = () => {
-      return (async function* () {
+    harnessRef.startFnOverride = () => ({
+      events: (async function* () {
         throw new Error("network");
         // eslint-disable-next-line no-unreachable
         yield {} as never;
-      })();
-    };
+      })(),
+      control: { abort: () => {} },
+    });
 
-    try {
-      await host.start(
-        { sessionKey: host.id, prompt: "p", cwd: host.cwd },
-        deps,
-      );
-    } finally {
-      (sdk as { query: unknown }).query = original;
-    }
+    await host.start(
+      { sessionKey: host.id, prompt: "p", cwd: host.cwd },
+      deps,
+    );
 
     expect(host.totalCost).toBe(1.23);
     expect(host.turns).toBe(7);
@@ -255,30 +272,17 @@ describe("SessionHost.start — abort", () => {
   it("breaks out of the for-await loop when the abort controller fires mid-stream", async () => {
     const { host, deps, envelopes } = makeHarness();
 
-    // Queue four messages but mark aborted after the second is consumed.
+    // Queue five events; abort after the second is consumed so "second",
+    // "third", and "done" never reach processNormalizedEvent.
     let consumed = 0;
-    const sdk = await import("@anthropic-ai/claude-agent-sdk");
-    const original = sdk.query;
-    (sdk as { query: unknown }).query = () => {
-      return (async function* () {
-        const msgs: SdkMessage[] = [
-          { type: "system", subtype: "init", session_id: "s" },
-          {
-            type: "assistant",
-            parent_tool_use_id: null,
-            message: { content: [{ type: "text", text: "first" }] },
-          } as unknown as SdkMessage,
-          {
-            type: "assistant",
-            parent_tool_use_id: null,
-            message: { content: [{ type: "text", text: "second" }] },
-          } as unknown as SdkMessage,
-          {
-            type: "assistant",
-            parent_tool_use_id: null,
-            message: { content: [{ type: "text", text: "third" }] },
-          } as unknown as SdkMessage,
-          { type: "result" } as unknown as SdkMessage,
+    harnessRef.startFnOverride = () => {
+      const events = (async function* () {
+        const msgs: NormalizedEvent[] = [
+          { kind: "init", sessionId: "s", model: "" },
+          { kind: "text", text: "first", role: "assistant" },
+          { kind: "text", text: "second", role: "assistant" },
+          { kind: "text", text: "third", role: "assistant" },
+          { kind: "done", reason: "stop" },
         ];
         for (const m of msgs) {
           yield m;
@@ -288,28 +292,25 @@ describe("SessionHost.start — abort", () => {
           }
         }
       })();
+      return { events, control: { abort: () => {} } };
     };
 
-    try {
-      await host.start(
-        { sessionKey: host.id, prompt: "p", cwd: host.cwd },
-        deps,
-      );
-    } finally {
-      (sdk as { query: unknown }).query = original;
-    }
+    await host.start(
+      { sessionKey: host.id, prompt: "p", cwd: host.cwd },
+      deps,
+    );
 
     // We consumed init + first assistant; then aborted. "second", "third",
-    // and "result" never reached the bus.
-    // init → [init] = 1 sdk_event; first assistant → [text] = 1 sdk_event → 2 total.
+    // and "done" never reached the bus.
+    // init → sdk_event #1; text "first" → sdk_event #2.
     const sdkEvents = envelopes.filter((e) => e.type === "sdk_event");
     expect(sdkEvents).toHaveLength(2);
-    // No idle status — abort short-circuits before result.
+    // No idle status — abort short-circuits before done.
     const statuses = envelopes
       .filter((e) => e.type === "session_status")
       .map((e) => e.payload["status"]);
     expect(statuses).toEqual(["running"]);
-    // status stays "running" because no result and no throw fired.
+    // status stays "running" because no done and no throw fired.
     expect(host.status).toBe("running");
   });
 });
@@ -361,9 +362,10 @@ describe("SessionHost.clearWaitTimer", () => {
 describe("SessionHost.start — role + agent context", () => {
   it("uses the role passed in opts, falling back to the host's existing role", async () => {
     const { host, deps } = makeHarness();
-    sdkQueueRef.queue = [
-      { type: "system", subtype: "init", session_id: "s" },
-      { type: "result" },
+
+    harnessRef.events = [
+      { kind: "init", sessionId: "s", model: "" },
+      { kind: "done", reason: "stop" },
     ];
 
     await host.start(
@@ -373,9 +375,9 @@ describe("SessionHost.start — role + agent context", () => {
     expect(host.role).toBe("default");
 
     // No role in opts — sticks with what was set last time.
-    sdkQueueRef.queue = [
-      { type: "system", subtype: "init", session_id: "s2" },
-      { type: "result" },
+    harnessRef.events = [
+      { kind: "init", sessionId: "s2", model: "" },
+      { kind: "done", reason: "stop" },
     ];
     await host.start({ sessionKey: host.id, prompt: "p2", cwd: host.cwd }, deps);
     expect(host.role).toBe("default");
@@ -388,9 +390,9 @@ describe("SessionHost.start — role + agent context", () => {
       timerFired = true;
     }, 1);
 
-    sdkQueueRef.queue = [
-      { type: "system", subtype: "init", session_id: "s" },
-      { type: "result" },
+    harnessRef.events = [
+      { kind: "init", sessionId: "s", model: "" },
+      { kind: "done", reason: "stop" },
     ];
     await host.start({ sessionKey: host.id, prompt: "p", cwd: host.cwd }, deps);
 
@@ -398,5 +400,34 @@ describe("SessionHost.start — role + agent context", () => {
     await new Promise((r) => setTimeout(r, 5));
     expect(timerFired).toBe(false);
     expect(host.waitTimerId).toBeNull();
+  });
+
+  it("reports an unknown role as a session error instead of rejecting", async () => {
+    const { host, deps, envelopes } = makeHarness();
+
+    await expect(
+      host.start(
+        {
+          sessionKey: host.id,
+          prompt: "p",
+          cwd: host.cwd,
+          role: "missing-agent" as never,
+        },
+        deps,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(host.status).toBe("error");
+    expect(host.lastError).toMatch(/Unknown agent type "missing-agent"/);
+    expect(envelopes).toContainEqual(
+      expect.objectContaining({
+        topic: `session:${host.id}`,
+        type: "session_error",
+        payload: expect.objectContaining({
+          sessionKey: host.id,
+          error: expect.stringMatching(/Unknown agent type "missing-agent"/),
+        }),
+      }),
+    );
   });
 });

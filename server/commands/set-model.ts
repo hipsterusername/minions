@@ -1,26 +1,39 @@
 /**
- * set_model — swap the SDK model mid-run and mirror it onto the host.
+ * set_model — swap the harness model mid-run and mirror it onto the host.
+ *
+ * Phase A: migrated from queryHandle to runControl, with the two-step check:
+ * (1) no active run → "No active query", (2) method absent → unsupported.
  */
 
-import { getSessionOrError, sendControlError, sendControlResponse, errToMessage } from "./helpers.ts";
+import {
+  getSessionOrError,
+  sendControlError,
+  sendControlResponse,
+  unsupportedByHarness,
+  errToMessage,
+} from "./helpers.ts";
 import type { CommandHandler } from "./types.ts";
 
 export const setModel: CommandHandler = (ctx, cmd, ws) => {
   const host = getSessionOrError(ctx.registry, cmd.sessionKey, ws);
   if (!host) return;
-  if (!host.queryHandle) {
-    sendControlError(ws, "set_model", cmd.sessionKey!, cmd.requestId, "No active query");
+  if (!host.runControl) {
+    sendControlError(ws, "set_model", host.id, cmd.requestId, "No active query");
     return;
   }
-  host.queryHandle
-    .setModel(cmd.model)
+  const fn = host.runControl.setModel;
+  if (!fn) {
+    unsupportedByHarness(ws, "set_model", host, cmd.requestId);
+    return;
+  }
+  fn.call(host.runControl, cmd.model as string)
     .then(() => {
       host.model = cmd.model ?? null;
-      sendControlResponse(ws, "set_model", cmd.sessionKey!, cmd.requestId, {
+      sendControlResponse(ws, "set_model", host.id, cmd.requestId, {
         model: cmd.model,
       });
     })
     .catch((err: unknown) => {
-      sendControlError(ws, "set_model", cmd.sessionKey!, cmd.requestId, errToMessage(err));
+      sendControlError(ws, "set_model", host.id, cmd.requestId, errToMessage(err));
     });
 };

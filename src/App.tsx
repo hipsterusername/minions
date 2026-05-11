@@ -13,6 +13,7 @@ import { useState, useEffect, useReducer, useCallback, useMemo, useRef, useSyncE
 import { Canvas } from "./Canvas.tsx";
 import { useSocket } from "./use-socket.ts";
 import type { ServerMessage } from "./use-socket.ts";
+import { HarnessListProvider } from "./use-harness-list.tsx";
 import { useAutosave } from "./use-autosave.ts";
 import { ProjectList } from "./ProjectList.tsx";
 import { ProjectHeader, type ActiveView } from "./ProjectHeader.tsx";
@@ -21,6 +22,8 @@ import { getProject, updateProject, updateProjectSettings } from "./api.ts";
 import type { ProjectSettings } from "./api.ts";
 import { canvasReducer, generateId } from "./canvas-state.ts";
 import { viewportCenter, findNonOverlappingPosition } from "./canvas-utils.ts";
+import { createImageNodeFromProjectPath } from "./nodes/image-node-factory.ts";
+import { isImagePath } from "./nodes/image-loader-from-path.ts";
 import { graphReducer, createEdge } from "./graph-runtime.ts";
 import type { GraphDocument } from "./graph.ts";
 import type { CanvasTransform, CanvasNode } from "./types.ts";
@@ -36,6 +39,7 @@ import { SkillEditor } from "./SkillEditor.tsx";
 import { RoutineEditor } from "./RoutineEditor.tsx";
 import { DockProvider, DockBar } from "./BottomRightDock.tsx";
 import { DebugModeAffordance } from "./components/DebugModeAffordance.tsx";
+import { LeaderLoadingScreen } from "./LeaderLoadingScreen.tsx";
 import { featureFlagStore } from "./feature-flags.ts";
 import type { SkillTemplate } from "./skills/types.ts";
 import { getSkill } from "./skills/registry.ts";
@@ -126,6 +130,12 @@ function ProjectView({
   const [projectName, setProjectName] = useState("Loading...");
   const [projectSettings, setProjectSettings] = useState<ProjectSettings>({});
   const [loaded, setLoaded] = useState(false);
+  // Loader-overlay state machine: the LeaderLoadingScreen plays its
+  // one-shot animation + 1s hold, then signals `loaderAnimDone`.
+  // Once both `loaded` and `loaderAnimDone` are true we fade the
+  // overlay out, and on transitionend we unmount it.
+  const [loaderAnimDone, setLoaderAnimDone] = useState(false);
+  const [loaderUnmounted, setLoaderUnmounted] = useState(false);
   const [activeView, setActiveView] = useState<ActiveView>("kanban");
 
   // Skills customization state
@@ -222,8 +232,9 @@ function ProjectView({
         totalCost: 0,
         turns: 0,
         error: null,
-        model: "sonnet",
-        permissionMode: "auto",
+        model: projectSettings.defaultLeaderModel ?? projectSettings.defaultModel ?? "claude-opus-4-7",
+        permissionMode: projectSettings.defaultPermissionMode ?? "auto",
+        harness: projectSettings.defaultLeaderHarness ?? "claude",
         // Special flag: auto-start with context explorer prompt
         autoStartPrompt: CONTEXT_EXPLORER_PROMPT(projectPath),
         skillIds: [],
@@ -232,11 +243,27 @@ function ProjectView({
       },
     };
     dispatch({ type: "ADD_NODE", node });
-  }, [projectPath, positionInViewport]);
+  }, [projectPath, positionInViewport, projectSettings]);
 
-  // Open a file in a new File Viewer node
+  // Open a file from the project tree. Images spawn an ImageNode so the
+  // user gets a real preview (and annotation surface); everything else
+  // opens in a FileViewer. If the image fetch/decode fails we fall back
+  // to FileViewer rather than leaving the user with no affordance.
   const handleOpenFile = useCallback(
-    (relativePath: string) => {
+    async (relativePath: string) => {
+      if (isImagePath(relativePath) && projectPath) {
+        const noop = (): void => {};
+        const ok = await createImageNodeFromProjectPath(
+          projectPath,
+          relativePath,
+          dispatch,
+          noop,
+          transform,
+          nodes,
+        );
+        if (ok) return;
+      }
+
       const typeDef = getAllNodeTypes().find((t) => t.type === "file-viewer");
       if (!typeDef) return;
 
@@ -249,7 +276,7 @@ function ProjectView({
       };
       dispatch({ type: "ADD_NODE", node });
     },
-    [positionInViewport],
+    [positionInViewport, projectPath, transform, nodes],
   );
 
   // Focus-node state for Kanban → Canvas navigation
@@ -293,8 +320,9 @@ function ProjectView({
         totalCost: 0,
         turns: 0,
         error: null,
-        model: "sonnet",
-        permissionMode: "auto",
+        model: projectSettings.defaultLeaderModel ?? projectSettings.defaultModel ?? "claude-opus-4-7",
+        permissionMode: projectSettings.defaultPermissionMode ?? "auto",
+        harness: projectSettings.defaultLeaderHarness ?? "claude",
         taskPlan: [],
         worktreeIsolation: projectSettings.defaultWorktreeIsolation === true,
         worktreePath: null,
@@ -306,7 +334,7 @@ function ProjectView({
       },
     };
     dispatch({ type: "ADD_NODE", node });
-  }, [dispatch, positionInViewport]);
+  }, [dispatch, positionInViewport, projectSettings]);
 
   // Skills customization handlers
   const handleCreateSkill = useCallback(() => {
@@ -761,33 +789,60 @@ function ProjectView({
     });
   }, [loaded, socket, kanbanDispatch]);
 
+  // The loader overlay sits on top of the project until both data is
+  // ready AND the one-shot animation + hold are done. Then it fades
+  // out (350ms) and unmounts. Project content renders unconditionally
+  // beneath, so it can fade in through the overlay seamlessly.
+  const loaderFadingOut = loaded && loaderAnimDone;
+
+  const kanbanBlockedCount = !loaded
+    ? 0
+    : activeView === "kanban"
+      ? 0
+      : kanbanBoard.cards.filter((c) => c.columnId === "halted").length;
+
+  const loaderOverlay = !loaderUnmounted ? (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        zIndex: 1000,
+        opacity: loaderFadingOut ? 0 : 1,
+        transition: "opacity 350ms ease-out",
+        pointerEvents: loaderFadingOut ? "none" : "auto",
+      }}
+      onTransitionEnd={(e) => {
+        if (e.propertyName === "opacity" && loaderFadingOut) {
+          setLoaderUnmounted(true);
+        }
+      }}
+    >
+      <LeaderLoadingScreen
+        message="Loading project"
+        oneShot
+        onComplete={() => setLoaderAnimDone(true)}
+      />
+    </div>
+  ) : null;
+
+  // Until data is loaded, only the loader is shown — render nothing
+  // beneath to avoid layout flashes from an empty project.
   if (!loaded) {
     return (
-      <div
-        style={{
-          width: "100%",
-          height: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "var(--bg-primary)",
-          color: "var(--text-muted)",
-          fontFamily: "var(--font-mono)",
-          fontSize: 14,
-        }}
-      >
-        Loading project...
+      <div style={{ width: "100%", height: "100%", position: "relative" }}>
+        {loaderOverlay}
       </div>
     );
   }
 
-  const kanbanBlockedCount =
-    activeView === "kanban"
-      ? 0
-      : kanbanBoard.cards.filter((c) => c.columnId === "halted").length;
-
   return (
+    <HarnessListProvider
+      send={socket.send}
+      subscribe={socket.subscribe}
+      connected={socket.connected}
+    >
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
+      {loaderOverlay}
       <ProjectHeader
         name={projectName}
         saveStatus={saveStatus}
@@ -799,6 +854,8 @@ function ProjectView({
         activeView={activeView}
         onViewChange={setActiveView}
         kanbanBlockedCount={kanbanBlockedCount}
+        settings={projectSettings}
+        onSettingsChange={handleSettingsChange}
       />
       {activeView === "kanban" ? (
         <div style={{ position: "absolute", top: 44, left: 0, right: 0, bottom: 0 }}>
@@ -840,8 +897,6 @@ function ProjectView({
               projectId={projectId}
               projectPath={projectPath}
               projectName={projectName}
-              settings={projectSettings}
-              onSettingsChange={handleSettingsChange}
               onSpawnContextExplorer={handleSpawnContextExplorer}
               nodes={nodes}
               onOpenFile={handleOpenFile}
@@ -883,6 +938,7 @@ function ProjectView({
         </DockProvider>
       )}
     </div>
+    </HarnessListProvider>
   );
 }
 

@@ -1,31 +1,44 @@
 /**
- * set_permission_mode — update the SDK permission mode on the in-flight
- * query and mirror it onto the session struct.
+ * set_permission_mode — update the harness permission mode on the in-flight
+ * run and mirror it onto the session struct.
+ *
+ * Phase A: migrated from queryHandle to runControl, with the two-step check:
+ * (1) no active run → "No active query", (2) method absent → unsupported.
  */
 
-import { getSessionOrError, sendControlError, sendControlResponse, errToMessage } from "./helpers.ts";
+import {
+  getSessionOrError,
+  sendControlError,
+  sendControlResponse,
+  unsupportedByHarness,
+  errToMessage,
+} from "./helpers.ts";
 import type { CommandHandler } from "./types.ts";
 
 export const setPermissionMode: CommandHandler = (ctx, cmd, ws) => {
   const host = getSessionOrError(ctx.registry, cmd.sessionKey, ws);
   if (!host) return;
   if (!cmd.permissionMode) {
-    sendControlError(ws, "set_permission_mode", cmd.sessionKey!, cmd.requestId, "permissionMode required");
+    sendControlError(ws, "set_permission_mode", host.id, cmd.requestId, "permissionMode required");
     return;
   }
-  if (!host.queryHandle) {
-    sendControlError(ws, "set_permission_mode", cmd.sessionKey!, cmd.requestId, "No active query");
+  if (!host.runControl) {
+    sendControlError(ws, "set_permission_mode", host.id, cmd.requestId, "No active query");
     return;
   }
-  host.queryHandle
-    .setPermissionMode(cmd.permissionMode as never)
+  const fn = host.runControl.setPermissionMode;
+  if (!fn) {
+    unsupportedByHarness(ws, "set_permission_mode", host, cmd.requestId);
+    return;
+  }
+  fn.call(host.runControl, cmd.permissionMode)
     .then(() => {
       host.permissionMode = cmd.permissionMode!;
-      sendControlResponse(ws, "set_permission_mode", cmd.sessionKey!, cmd.requestId, {
+      sendControlResponse(ws, "set_permission_mode", host.id, cmd.requestId, {
         permissionMode: cmd.permissionMode,
       });
     })
     .catch((err: unknown) => {
-      sendControlError(ws, "set_permission_mode", cmd.sessionKey!, cmd.requestId, errToMessage(err));
+      sendControlError(ws, "set_permission_mode", host.id, cmd.requestId, errToMessage(err));
     });
 };

@@ -112,40 +112,56 @@ The catalog of skills you may grant is listed under **Available Skills (for armi
 
 ## Render Dashboard
 
-You have a live dashboard panel affixed to the right of your session. Use it to visualize progress, results, and data for the user. The dashboard renders pre-built components from a compact DSL.
+You have a live dashboard panel affixed to the right of your session. Render concise, glanceable visuals as you work. Use it for progress, evidence, results, choices, and review data the user should be able to scan without reading the full chat. The dashboard renders pre-built components from a compact JSON DSL; it is not an arbitrary HTML surface.
+
+Important argument rule: \`components\`, nested \`components\`, and tab \`components\` are arrays of JSON objects. Never pass a component as a JSON string, HTML string, markdown string, or JSX string. Every component object requires a stable \`id\` and a valid \`type\`.
 
 ### Tools
 
 - **render_set**: Replace the entire dashboard. Use for initial setup or full refresh.
-- **render_patch**: Update specific components by id. Use for live updates (e.g. changing a status, updating a metric).
-- **render_append**: Add new components without replacing existing ones.
-- **render_remove**: Remove components by id.
+- **render_patch**: Update specific components by id. Cheaper than \`render_set\`; prefer it for live updates.
+- **render_append** / **render_remove**: Add or remove components without a full replace.
 
-### Component Types
+### Component types
 
-Each component requires an \`id\` (unique string) and \`type\`, plus type-specific fields:
+Cell-width:
+\`metric\`, \`progress\`, \`status\`, \`sparkline\`, \`kv\`, \`checklist\`, \`tags\`.
 
-| Type | Fields | Use for |
-|------|--------|---------|
-| \`metric\` | \`label\`, \`value\`, \`color?\` (green/red/yellow/blue/gray/purple/orange), \`trend?\` (up/down/flat), \`detail?\` | KPIs, counts, scores |
-| \`progress\` | \`label\`, \`value\` (0-100), \`color?\` | Completion bars |
-| \`status\` | \`label\`, \`state\` (success/error/warning/running/pending) | Build/test/deploy status |
-| \`table\` | \`title?\`, \`headers\`, \`rows\` (string[][]) | Structured data |
-| \`list\` | \`title?\`, \`items\` (string[]), \`ordered?\` | Bullet/numbered lists |
-| \`text\` | \`content\` (markdown string) | Explanations, notes |
-| \`code\` | \`content\`, \`language?\`, \`title?\` | Code snippets |
+Full-width:
+\`table\`, \`list\`, \`text\`, \`code\`, \`copyable\`, \`timeline\`, \`callout\`, \`diff\`, \`separator\`.
+
+Interactive / rich:
+- \`form\` collects structured user input. Field kinds: \`text\`, \`textarea\`, \`number\`, \`select\`, \`multiselect\`, \`slider\`, \`checkbox\`, \`date\`.
+- \`chart\` renders SVG charts with axes, multi-series data, and optional reference lines. Variants: \`line\`, \`bar\`, \`scatter\`, \`area\`.
+
+Container / layout:
+- \`section\` is a collapsible group with \`title\`, optional \`badge\`, optional \`defaultOpen\`, and child \`components\`.
+- \`tabs\` contains tabs with \`id\`, \`label\`, optional \`badge\`, and child \`components\`.
+
+Artifacts:
+- \`image\` displays an image by \`src\` (\`file://\`, \`https://\`, or \`data:\` URI), with \`alt\` and optional \`caption\` / \`fit\`.
+- \`file-preview\` renders a path or inline file. Use \`source: { kind: "path", path }\` or \`{ kind: "inline", content, mime }\`.
+
+Examples:
+
+\`\`\`json
+{ "id": "tests", "type": "status", "label": "Tests", "state": "running" }
+{ "id": "summary", "type": "text", "content": "Implemented bridge validation.", "span": "full" }
+{ "id": "files", "type": "table", "headers": ["File", "Change"], "rows": [["server/render-tools.ts", "validated components"]] }
+\`\`\`
 
 ### Layout
 
-\`render_set\` accepts optional \`title\` (dashboard heading) and \`columns\` (grid columns, default 2).
+\`render_set\` accepts \`title\` and \`columns\` (default 2). Each component accepts optional \`span\`: \`"auto"\`, \`"full"\`, or a column count. \`form\`, \`chart\`, \`section\`, \`tabs\`, \`image\`, and \`file-preview\` are intrinsically full-width unless you override \`span\`.
 
 ### Guidelines
 
 - Call \`render_set\` early to give the user immediate visual feedback.
-- Use \`render_patch\` for incremental updates — it's cheaper than replacing everything.
+- Use \`render_patch\` for incremental updates; it is cheaper than replacing everything.
 - Keep component IDs stable across updates so patches work correctly.
-- Prefer concise values — the dashboard is for at-a-glance information.
+- Prefer concise values; the dashboard is for at-a-glance information.
 - Update status components as tasks progress (pending → running → success/error).
+- Use \`callout\` for findings, \`timeline\` for step history, \`kv\` for metadata, \`checklist\` for tracked work, \`diff\` for before/after evidence, and \`copyable\` for values the user may paste.
 
 ## ⚠️ MANDATORY: Worktree Isolation & Approval Workflow
 

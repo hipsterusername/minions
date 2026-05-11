@@ -7,6 +7,7 @@ import type { NormalizedToolDef } from "../harness/types.ts";
 import type { TaskToolContext, TaskRecord } from "./types.ts";
 import { emitTaskPlanUpdate } from "./shared.ts";
 import { compileSkills, loadSkillsByIds } from "../skills.ts";
+import { readSettings } from "../project-store.ts";
 
 export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef {
   return {
@@ -132,6 +133,17 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
         "",
         description,
       ].join("\n");
+      const settings = readSettings(ctx.projectPath);
+      const minionHarness =
+        typeof settings.defaultMinionHarness === "string"
+          ? settings.defaultMinionHarness
+          : undefined;
+      const minionModel =
+        typeof settings.defaultMinionModel === "string"
+          ? settings.defaultMinionModel
+          : typeof settings.defaultModel === "string"
+            ? settings.defaultModel
+            : undefined;
 
       // Start the minion session on the server
       ctx.startMinionSession({
@@ -139,6 +151,8 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
         prompt,
         cwd: ctx.cwd,
         systemPrompt: minionSystemPrompt,
+        ...(minionModel ? { model: minionModel } : {}),
+        ...(minionHarness ? { harness: minionHarness } : {}),
       });
 
       // Broadcast: minion_spawned so Canvas creates the node
@@ -152,6 +166,8 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
         priority,
         worktreeBranch: ctx.worktreeBranch ?? null,
         skillIds: armedSkillIds,
+        model: minionModel ?? null,
+        harness: minionHarness ?? null,
         timestamp: Date.now(),
       });
 

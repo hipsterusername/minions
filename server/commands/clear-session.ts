@@ -17,7 +17,7 @@ export const clearSession: CommandHandler = (ctx, cmd) => {
   const host = ctx.registry.get(cmd.sessionKey);
   if (!host) return;
 
-  if (host.status === "running" || host.status === "creating") return;
+  if (host.status === "running") return;
 
   host.eventBuffer = [];
   host.totalCost = 0;

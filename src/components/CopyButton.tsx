@@ -11,8 +11,22 @@ import { useState, useCallback } from "react";
  *     ...children
  *   </div>
  */
-export function CopyButton({ text }: { text: string }) {
+export function CopyButton({
+  text,
+  layout = "absolute",
+  alwaysVisible = false,
+  title = "Copy to clipboard",
+}: {
+  text: string;
+  layout?: "absolute" | "inline";
+  alwaysVisible?: boolean;
+  title?: string;
+}) {
   const [copied, setCopied] = useState(false);
+  const placementStyle =
+    layout === "absolute"
+      ? { position: "absolute" as const, top: 4, right: 4 }
+      : { position: "static" as const, flex: "0 0 auto" };
 
   const handleCopy = useCallback(
     (e: React.MouseEvent) => {
@@ -29,12 +43,10 @@ export function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={handleCopy}
-      title="Copy to clipboard"
+      title={title}
       className="copy-btn"
       style={{
-        position: "absolute",
-        top: 4,
-        right: 4,
+        ...placementStyle,
         width: 24,
         height: 24,
         display: "flex",
@@ -44,7 +56,7 @@ export function CopyButton({ text }: { text: string }) {
         border: `1px solid ${copied ? "var(--success-color)" : "var(--border-default)"}`,
         borderRadius: 4,
         cursor: "pointer",
-        opacity: 0,
+        opacity: alwaysVisible ? 1 : 0,
         transition: "opacity 150ms ease, background 150ms ease",
         zIndex: 5,
         padding: 0,

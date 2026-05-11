@@ -19,6 +19,8 @@ import {
   type SessionStatus,
 } from "./session-host.ts";
 import { hydrateSessionsFromDb } from "./session-persist.ts";
+import { getHarness } from "./harness/index.ts";
+import type { HarnessCapabilities } from "./harness/types.ts";
 import type { TaskManagerState } from "./task-tools.ts";
 
 /** Compact shape broadcast to clients in `session_list` messages. */
@@ -33,12 +35,36 @@ export interface SessionListItem {
   permissionMode: string | null;
   taskName: string | null;
   role: SessionRole;
+  /**
+   * Registered harness driving this session. Mirrors the field on
+   * `sync_response` so the sessions panel can render harness-aware
+   * affordances without an extra round-trip per session.
+   */
+  harness: string;
+  /**
+   * Capabilities of the resolved harness, or `null` when the harness
+   * name is no longer registered (e.g. a hydrated session whose harness
+   * module has been removed). Clients treat `null` as "fall back to safe
+   * defaults" rather than throwing.
+   */
+  harnessCapabilities: HarnessCapabilities | null;
   activeMinions: Array<{
     taskId: string;
     title: string;
     status: string;
     sessionKey: string | null;
   }>;
+}
+
+function harnessMeta(name: string): {
+  harness: string;
+  harnessCapabilities: HarnessCapabilities | null;
+} {
+  try {
+    return { harness: name, harnessCapabilities: getHarness(name).capabilities };
+  } catch {
+    return { harness: name, harnessCapabilities: null };
+  }
 }
 
 export class SessionRegistry {
@@ -138,30 +164,35 @@ export class SessionRegistry {
 
   /** Flatten the current registry into the `session_list` broadcast shape. */
   snapshot(): SessionListItem[] {
-    return Array.from(this.map.entries()).map(([key, s]) => ({
-      sessionKey: key,
-      sessionId: s.sessionId,
-      status: s.status,
-      cwd: s.cwd,
-      totalCost: s.totalCost,
-      turns: s.turns,
-      model: s.model,
-      permissionMode: s.permissionMode,
-      taskName: s.taskName,
-      role: s.role,
-      activeMinions: s.taskState
-        ? Array.from(s.taskState.tasks.entries())
-            .filter(
-              ([, t]) => t.status === "planned" || t.status === "running",
-            )
-            .map(([id, t]) => ({
-              taskId: id,
-              title: t.title,
-              status: t.status,
-              sessionKey: t.minionSessionKey,
-            }))
-        : [],
-    }));
+    return Array.from(this.map.entries()).map(([key, s]) => {
+      const { harness, harnessCapabilities } = harnessMeta(s.harnessName);
+      return {
+        sessionKey: key,
+        sessionId: s.sessionId,
+        status: s.status,
+        cwd: s.cwd,
+        totalCost: s.totalCost,
+        turns: s.turns,
+        model: s.model,
+        permissionMode: s.permissionMode,
+        taskName: s.taskName,
+        role: s.role,
+        harness,
+        harnessCapabilities,
+        activeMinions: s.taskState
+          ? Array.from(s.taskState.tasks.entries())
+              .filter(
+                ([, t]) => t.status === "planned" || t.status === "running",
+              )
+              .map(([id, t]) => ({
+                taskId: id,
+                title: t.title,
+                status: t.status,
+                sessionKey: t.minionSessionKey,
+              }))
+          : [],
+      };
+    });
   }
 
   // ── Boot hydration ─────────────────────────────────
@@ -193,6 +224,10 @@ export class SessionRegistry {
         // as before this fix.
         host.sessionId = row.session_id;
         host.worktreeIsolation = row.worktree_isolation === 1;
+        // Restore the harness so a resumed session keeps running on the
+        // harness it started with. Pre-migration rows return "claude"
+        // via the schema default — no behaviour change for old DBs.
+        host.harnessName = row.harness_name || "claude";
         host.taskState = tasks;
         host.renderState = render;
         // Restore the event buffer in place — using bufferEvent() here

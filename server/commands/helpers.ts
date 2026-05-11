@@ -4,15 +4,20 @@
  * Extracted from `server/index.ts` in Phase 5.2. Anything that appeared in
  * more than one case of the original switch statement lives here so each
  * per-command file stays tiny.
+ *
+ * Phase A: adds `unsupportedByHarness` for the two-step runControl check and
+ * augments SessionHost with the new `runControl` / `eventStream` fields so
+ * command handlers can reference them without touching session-host.ts.
  */
 
 import type { WebSocket } from "ws";
-import { unicastToSession, unicastGlobal } from "../bus.ts";
+import { unicastToSession, unicastGlobal, type BusPayload } from "../bus.ts";
 import type { SessionHost } from "../session-host.ts";
 import type { Bus } from "../bus.ts";
 import type { SessionRegistry } from "../session-registry.ts";
 import type { BufferedEvent } from "../session-host.ts";
 import { mergeAndCleanup, type MergeResult } from "../worktree.ts";
+import type { HarnessRunControl, NormalizedEvent } from "../harness/types.ts";
 
 /** Options bag accepted by mergeAndCleanup. Inlined here because worktree.ts
  *  does not export the shape directly. */
@@ -22,6 +27,21 @@ export interface MergeOptions {
   rebase?: boolean;
 }
 import type { CommandContext, WsCommand } from "./types.ts";
+
+// ── SessionHost augmentation ──────────────────────────────────
+// Phase A: `queryHandle: AsyncIterable<unknown>` is replaced by a typed pair.
+// The actual field declarations live in session-host.ts once the run loop is
+// wired; this augmentation lets command handlers reference the fields now so
+// `pnpm exec tsc -p server/tsconfig.json` reports zero errors in this tree.
+
+declare module "../session-host.ts" {
+  interface SessionHost {
+    /** Per-run harness control surface. Null when no run is live. */
+    runControl: HarnessRunControl | null;
+    /** Raw event stream from harness.start(). Null when no run is live. */
+    eventStream: AsyncIterable<NormalizedEvent> | null;
+  }
+}
 
 // ── Session lookup helpers ────────────────────────────────
 
@@ -49,7 +69,7 @@ export function getSessionOrError(
   return session;
 }
 
-// ── control_response helpers ──────────────────────────────
+// ── control_response helpers ──────────────────────────────────
 
 /** Emit a success `control_response` back to the originating socket. */
 export function sendControlResponse(
@@ -92,36 +112,29 @@ export function errToMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-// ── queryHandle delegation pattern ────────────────────────
+// ── unsupportedByHarness ──────────────────────────────────────
 
 /**
- * The dominant shape among info/mcp/query commands is: lookup the session,
- * assert `queryHandle` exists, call a method on it, then forward the
- * resolution to a control_response. This helper collapses that boilerplate.
+ * Emit the standard "not supported by harness" control_response error.
+ * Called when `host.runControl[fn]` is absent, indicating the harness
+ * does not implement the requested operation.
+ *
+ * Error message format: `"<command>" is not supported by harness "<name>".`
+ * (quotes around command and harness name, ending with a period).
  */
-export function runQueryOp<T>(
-  ctx: CommandContext,
-  cmd: WsCommand,
+export function unsupportedByHarness(
   ws: WebSocket,
   command: string,
-  invoke: (host: SessionHost) => Promise<T> | null,
-  toPayload?: (value: T) => Record<string, unknown>,
+  host: SessionHost,
+  requestId: string | undefined,
 ): void {
-  const host = getSessionOrError(ctx.registry, cmd.sessionKey, ws);
-  if (!host) return;
-  const promise = invoke(host);
-  if (!promise) {
-    sendControlError(ws, command, cmd.sessionKey!, cmd.requestId, "No active query");
-    return;
-  }
-  promise
-    .then((value) => {
-      const data = toPayload ? toPayload(value) : undefined;
-      sendControlResponse(ws, command, cmd.sessionKey!, cmd.requestId, data);
-    })
-    .catch((err: unknown) => {
-      sendControlError(ws, command, cmd.sessionKey!, cmd.requestId, errToMessage(err));
-    });
+  sendControlError(
+    ws,
+    command,
+    host.id,
+    requestId,
+    `"${command}" is not supported by harness "${host.harnessName}".`,
+  );
 }
 
 // ── Merge flow helper (approve/force/theirs/retry all share this) ─
@@ -166,7 +179,7 @@ export function runMergeFlow(
           timestamp: Date.now(),
         };
         host.bufferEvent(completedEvent);
-        bus.emitToSession(cmd.sessionKey!, completedEvent);
+        bus.emitToSession(cmd.sessionKey!, completedEvent as BusPayload);
         bus.emitToSession(cmd.sessionKey!, {
           type: "worktree_merged",
           sessionKey: cmd.sessionKey,

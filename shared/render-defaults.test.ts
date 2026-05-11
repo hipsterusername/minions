@@ -13,7 +13,11 @@ import {
   elideDefaults,
   elideLayoutDefaults,
 } from "./render-defaults.ts";
-import { renderComponentSchema, type RenderComponent } from "./render-dsl.ts";
+import {
+  RENDER_COMPONENT_TYPES,
+  renderComponentSchema,
+  type RenderComponent,
+} from "./render-dsl.ts";
 
 describe("elideDefaults", () => {
   it("strips span=auto from any component", () => {
@@ -221,6 +225,7 @@ describe("COMPONENT_DEFAULTS — schema parity", () => {
     const schemaTypes = options.map((o) => o.shape.type.value).sort();
     const tableTypes = Object.keys(COMPONENT_DEFAULTS).sort();
     expect(tableTypes).toEqual(schemaTypes);
+    expect([...RENDER_COMPONENT_TYPES].sort()).toEqual(schemaTypes);
   });
 
   it("LAYOUT_DEFAULTS keys match render_set's accepted layout fields", () => {

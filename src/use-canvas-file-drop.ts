@@ -9,7 +9,11 @@ import type { CanvasNode, CanvasAction, CanvasTransform } from "./types.ts";
 import { generateId } from "./canvas-state.ts";
 import { getAllNodeTypes } from "./node-registry.ts";
 import { findNonOverlappingPosition } from "./canvas-utils.ts";
-import { createImageNodeFromFile } from "./nodes/image-node-factory.ts";
+import {
+  createImageNodeFromFile,
+  createImageNodeFromProjectPath,
+} from "./nodes/image-node-factory.ts";
+import { isImagePath } from "./nodes/image-loader-from-path.ts";
 import { getAuthToken } from "./api.ts";
 
 /** Default expanded height for folder nodes created via drag-drop. */
@@ -126,6 +130,23 @@ export function useCanvasFileDrop({
         const rect = container.getBoundingClientRect();
         const dropX = (e.clientX - rect.left - t.x) / t.scale;
         const dropY = (e.clientY - rect.top - t.y) / t.scale;
+
+        // Images take the ImageNode path so a dropped .png renders as an
+        // image and not as a binary text dump.
+        if (isImagePath(treePath) && projectPath) {
+          const ok = await createImageNodeFromProjectPath(
+            projectPath,
+            treePath,
+            dispatch,
+            setSelectedIds,
+            t,
+            nodesRef.current,
+            { x: dropX, y: dropY },
+          );
+          if (ok) return;
+          // Fall through to FileViewer on failure rather than leaving
+          // the user with no node at all.
+        }
 
         const allTypes = getAllNodeTypes();
         const fileViewerType = allTypes.find((td) => td.type === "file-viewer");

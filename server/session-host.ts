@@ -19,8 +19,13 @@
  */
 
 import "./harness/claude/index.ts"; // side-effect: registers ClaudeHarness
+import "./harness/echo/index.ts"; // side-effect: registers EchoHarness
+import "./harness/codex/index.ts"; // side-effect: registers CodexHarness
 import { getHarness } from "./harness/index.ts";
-import { buildQueryPrompt } from "./multimodal-prompt.ts";
+import type {
+  HarnessRunControl,
+  NormalizedEvent,
+} from "./harness/types.ts";
 import type { Bus } from "./bus.ts";
 import { getAgentType, type AgentTypeContext } from "./agents/index.ts";
 import type { WorktreeInfo } from "./worktree.ts";
@@ -117,12 +122,10 @@ export interface StartSessionOptions {
    * is appended to `allowedTools` so the agent can call without prompts.
    */
   externalMcpToolNames?: string[] | undefined;
-  /**
-   * Name of the registered AgentHarness to use for this session.
-   * Defaults to "claude". Pass a different name to route the session
-   * through a non-Claude harness registered via `registerHarness()`.
-   */
+  /** Registered AgentHarness name. Defaults to "claude". */
   harness?: string | undefined;
+  /** Initial permission mode; only honoured on the first start. */
+  permissionMode?: string | undefined;
 }
 
 // ── SessionHost ────────────────────────────────────────────
@@ -149,9 +152,11 @@ export class SessionHost {
   /** Registered harness name for this session (e.g. "claude"). */
   harnessName = "claude";
   abortController: AbortController = new AbortController();
-  queryHandle: AsyncIterable<unknown> | null = null;
+  eventStream: AsyncIterable<NormalizedEvent> | null = null;
+  runControl: HarnessRunControl | null = null;
   eventBuffer: BufferedEvent[] = [];
   lastError: string | null = null;
+  lastErrorFull: string | null = null;
   model: string | null = null;
   permissionMode: string | null = null;
   /** Adaptive-thinking config supplied by the client. Refreshed on each turn. */
@@ -200,6 +205,7 @@ export class SessionHost {
       worktreeIsolation: this.worktreeIsolation,
       totalCost: this.totalCost,
       turns: this.turns,
+      harnessName: this.harnessName,
     };
     persistSessionToDb(snap);
   }
@@ -229,6 +235,9 @@ export class SessionHost {
       worktreeIsolation: this.worktreeIsolation,
       forEachLeaderTaskState: deps.forEachLeaderTaskState,
       startMinionSession: (params) => {
+        // Default the spawned minion to the leader's current harness so a
+        // non-Claude leader spawns same-harness minions unless the caller
+        // explicitly overrides it.
         deps.startChildSession({
           sessionKey: params.sessionKey,
           prompt: params.prompt,
@@ -237,6 +246,8 @@ export class SessionHost {
           role: "minion",
           worktreeIsolation: false,
           parentWorktree: this.worktree ?? undefined,
+          initialModel: params.model ?? null,
+          harness: params.harness ?? this.harnessName,
         });
       },
       scheduleWaitContinue: (durationMs, reason) => {
@@ -285,48 +296,56 @@ export class SessionHost {
    * Safe to call repeatedly — each call supersedes the previous run.
    */
   async start(opts: StartSessionOptions, deps: SessionHostDeps): Promise<void> {
-    // Derive a task name for agent types that want one (leader) — done
-    // before we might mutate cwd based on worktree.
-    const resolvedRole: SessionRole = opts.role ?? this.role ?? "default";
-    const agentType = getAgentType(resolvedRole);
-
-    // ── Reset per-run volatile state ──────────────────
     const abortController = new AbortController();
-    this.status = "running";
-    this.abortController = abortController;
-    this.queryHandle = null;
-    this.lastError = null;
-    this.role = resolvedRole;
-    if (opts.resumeId) this.sessionId = opts.resumeId;
-    if (opts.harness) this.harnessName = opts.harness;
-    if (opts.initialModel && !this.model) this.model = opts.initialModel;
-    if (opts.thinkingConfig !== undefined) {
-      this.thinkingConfig = opts.thinkingConfig ?? this.thinkingConfig;
-    }
-    this.worktreeIsolation = opts.worktreeIsolation === true;
 
-    // Clear any existing wait timer when the session resumes.
-    this.clearWaitTimer();
-
-    if (!this.taskName && agentType.wantsWorktree) {
-      this.taskName = deriveTaskName(opts.prompt);
-    }
-
-    await ensureWorktree(this, opts, deps.bus, agentType);
-    this.persist();
-
-    // ── Broadcast running status ──────────────────────
-    const statusEvent: BufferedEvent = {
-      type: "session_status",
-      sessionKey: this.id,
-      status: "running",
-      timestamp: Date.now(),
-    };
-    this.bufferEvent(statusEvent);
-    deps.bus.emitToSession(this.id, statusEvent);
-
-    // ── Run the harness query ─────────────────────────
     try {
+      // Derive a task name for agent types that want one (leader) — done
+      // before we might mutate cwd based on worktree.
+      const resolvedRole: SessionRole = opts.role ?? this.role ?? "default";
+      const agentType = getAgentType(resolvedRole);
+
+      // ── Reset per-run volatile state ──────────────────
+      this.status = "running";
+      this.abortController = abortController;
+      this.eventStream = null;
+      this.runControl = null;
+      this.lastError = null;
+      this.lastErrorFull = null;
+      this.role = resolvedRole;
+      if (opts.resumeId) this.sessionId = opts.resumeId;
+      if (opts.harness) this.harnessName = opts.harness;
+      if (opts.initialModel && !this.model) this.model = opts.initialModel;
+      // Seed permission mode from create_session on the first run only;
+      // resume / wait_and_continue keep the persisted live value.
+      if (opts.permissionMode && !this.permissionMode) {
+        this.permissionMode = opts.permissionMode;
+      }
+      if (opts.thinkingConfig !== undefined) {
+        this.thinkingConfig = opts.thinkingConfig ?? this.thinkingConfig;
+      }
+      this.worktreeIsolation = opts.worktreeIsolation === true;
+
+      // Clear any existing wait timer when the session resumes.
+      this.clearWaitTimer();
+
+      if (!this.taskName && agentType.wantsWorktree) {
+        this.taskName = deriveTaskName(opts.prompt);
+      }
+
+      await ensureWorktree(this, opts, deps.bus, agentType);
+      this.persist();
+
+      // ── Broadcast running status ──────────────────────
+      const statusEvent: BufferedEvent = {
+        type: "session_status",
+        sessionKey: this.id,
+        status: "running",
+        timestamp: Date.now(),
+      };
+      this.bufferEvent(statusEvent);
+      deps.bus.emitToSession(this.id, statusEvent);
+
+      // ── Run the harness query ─────────────────────────
       const agentCtx = this.buildAgentContext(opts, deps);
       const toolResult = agentType.getToolGroups(agentCtx);
 
@@ -346,25 +365,32 @@ export class SessionHost {
         toolResult,
         abortController,
         harness,
-        prompt: buildQueryPrompt(opts) as string | AsyncIterable<{ role: "user"; content: string }>,
+        prompt: opts.prompt,
       });
 
-      const eventStream = harness.start(startOpts);
-      this.queryHandle = eventStream;
-
-      for await (const event of eventStream) {
-        if (abortController.signal.aborted) break;
-        processNormalizedEvent(this, deps.bus, agentType, agentCtx, event);
+      const { events, control } = harness.start(startOpts);
+      this.eventStream = events;
+      this.runControl = control;
+      try {
+        for await (const event of events) {
+          if (abortController.signal.aborted) break;
+          processNormalizedEvent(this, deps.bus, agentType, agentCtx, event);
+        }
+      } finally {
+        this.eventStream = null;
+        this.runControl = null;
       }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       this.status = "error";
       this.lastError = errorMessage;
+      this.lastErrorFull = errorMessage;
       this.persist();
       const errorEvent: BufferedEvent = {
         type: "session_error",
         sessionKey: this.id,
         error: errorMessage,
+        fullError: errorMessage,
         timestamp: Date.now(),
       };
       this.bufferEvent(errorEvent);
@@ -372,4 +398,3 @@ export class SessionHost {
     }
   }
 }
-

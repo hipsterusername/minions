@@ -24,7 +24,7 @@ const fakeDiff: DetailedDiff = {
 };
 
 let diffShouldThrow = false;
-const diffMock = vi.fn(async (): Promise<DetailedDiff> => {
+const diffMock = vi.fn(async (_info: WorktreeInfo): Promise<DetailedDiff> => {
   if (diffShouldThrow) throw new Error("git failed");
   return fakeDiff;
 });

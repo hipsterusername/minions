@@ -20,7 +20,7 @@ import type { NormalizedEvent } from "./harness/types.ts";
 
 // ── Shared types ───────────────────────────────────────────
 
-export type SessionRole = "leader" | "minion" | "default";
+export type SessionRole = "leader" | "minion" | "default" | "card-composer";
 
 export type SessionStatus =
   | "running"
@@ -47,6 +47,13 @@ export interface BufferedEvent {
   error?: string;
   sessionId?: string;
   timestamp: number;
+  /**
+   * Allow harnesses/handlers to attach arbitrary fields without losing
+   * BusPayload compatibility. BusPayload requires `{ type: string } &
+   * Record<string, unknown>`; this index signature satisfies that constraint
+   * so BufferedEvent can be passed directly to bus.emitToSession().
+   */
+  [key: string]: unknown;
 }
 
 export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";

@@ -260,6 +260,8 @@ describe("MinionNode: minion_status MCP echoes update the active task", () => {
     const last = states.at(-1);
     expect(last?.taskQueue[0]?.activeStep).toBe("Reading source file");
     expect(last?.taskQueue[0]?.progress).toEqual(["Reading source file"]);
+    expect(last?.messages.at(-1)?.role).toBe("system");
+    expect(last?.messages.at(-1)?.content).toBe("Step: Reading source file");
   });
 
   it("trigger='done' marks the task completed", async () => {
@@ -289,6 +291,8 @@ describe("MinionNode: minion_status MCP echoes update the active task", () => {
     expect(last?.taskQueue[0]?.status).toBe("completed");
     expect(last?.taskQueue[0]?.result).toBe("Patched 1 file");
     expect(last?.taskQueue[0]?.activeStep).toBeNull();
+    expect(last?.messages.at(-1)?.role).toBe("system");
+    expect(last?.messages.at(-1)?.content).toBe("Done: Patched 1 file");
   });
 });
 

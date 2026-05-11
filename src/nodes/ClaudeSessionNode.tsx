@@ -51,6 +51,8 @@ export interface ClaudeSessionData {
   error: string | null;
   model: ModelOption;
   permissionMode: PermissionMode;
+  /** Active harness driving this session (e.g. "claude", "echo", "codex"). */
+  harness?: string;
   /** Adaptive-thinking config sent to the SDK on every query() call. */
   thinkingConfig: ThinkingConfig;
   /** Streaming text from partial messages */
@@ -170,6 +172,7 @@ function rebuildFromSyncEvents(
   sessionKey: string,
   serverModel?: string | null,
   serverPermissionMode?: string | null,
+  serverHarness?: string | undefined,
 ): ClaudeSessionData {
   const messages: SessionMessage[] = [];
   for (const evt of events) {
@@ -189,6 +192,7 @@ function rebuildFromSyncEvents(
     error: serverError,
     model: (serverModel as ModelOption) ?? "sonnet",
     permissionMode: (serverPermissionMode as PermissionMode) ?? "bypassPermissions",
+    ...(serverHarness ? { harness: serverHarness } : {}),
     thinkingConfig: DEFAULT_THINKING_CONFIG,
     lastDurationMs: null,
     subagents: [],
@@ -773,6 +777,7 @@ export function ClaudeSessionRenderer({
             current.sessionKey!,
             serverMsg.model,
             serverMsg.permissionMode,
+            serverMsg.harness,
           );
           onUpdateData(rebuilt);
         } else if (!serverMsg.found) {
@@ -936,6 +941,7 @@ export function ClaudeSessionRenderer({
       prompt,
       model: current.model,
       thinkingConfig: current.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
+      ...(current.harness ? { harness: current.harness } : {}),
       ...(projectPath ? { cwd: projectPath } : {}),
     });
     syncedRef.current = true;
@@ -999,9 +1005,9 @@ export function ClaudeSessionRenderer({
   }, [socketSend]);
 
   const handleModelChange = useCallback(
-    (model: ModelOption) => {
+    (model: string) => {
       const current = dataRef.current;
-      onUpdateData({ ...current, model });
+      onUpdateData({ ...current, model: model as ModelOption });
       if (socketSend && current.sessionKey) {
         socketSend({
           type: "set_model",
@@ -1011,6 +1017,24 @@ export function ClaudeSessionRenderer({
       }
     },
     [socketSend, onUpdateData],
+  );
+
+  const handleHarnessChange = useCallback(
+    (harness: string, defaultModel?: string) => {
+      const current = dataRef.current;
+      // Mid-session swap is intentionally unsupported — the toolbar
+      // disables this control once `sessionKey` is set.
+      if (current.sessionKey) return;
+      // Apply harness + model atomically. Two separate onUpdateData calls
+      // would both read the stale `dataRef.current` and the second would
+      // clobber the harness update.
+      onUpdateData({
+        ...current,
+        harness,
+        ...(defaultModel ? { model: defaultModel as ModelOption } : {}),
+      });
+    },
+    [onUpdateData],
   );
 
   const handlePermissionModeChange = useCallback(
@@ -1205,6 +1229,8 @@ export function ClaudeSessionRenderer({
         onPermissionModeChange={handlePermissionModeChange}
         thinkingConfig={data.thinkingConfig ?? DEFAULT_THINKING_CONFIG}
         onThinkingConfigChange={handleThinkingConfigChange}
+        harness={data.harness ?? "claude"}
+        onHarnessChange={handleHarnessChange}
       />
 
       {/* Messages */}

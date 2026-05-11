@@ -26,12 +26,21 @@ export interface AgentTypeContext {
   existingRenderState?: RenderState;
   /** Worktree inherited from the leader (minion only) */
   parentWorktree?: WorktreeInfo;
-  /** Callback to start a minion session (leader only — wired by the server) */
+  /**
+   * Callback to start a minion session (leader only — wired by the server).
+   *
+   * The optional `harness` field selects which AgentHarness drives the
+   * spawned minion. When omitted, the host wrapper defaults it to the
+   * leader's current `harnessName` so a Codex leader spawns Codex minions
+   * unless an agent type explicitly overrides it.
+   */
   startMinionSession?: (params: {
     sessionKey: string;
     prompt: string;
     cwd: string;
     systemPrompt: string;
+    model?: string;
+    harness?: string;
   }) => void;
   /** Callback to schedule a delayed "Continue" resume (leader only) */
   scheduleWaitContinue?: (durationMs: number, reason: string) => void;

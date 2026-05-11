@@ -1,16 +1,19 @@
 /**
- * reconnect_mcp_server / toggle_mcp_server — both delegate to query-handle
- * methods. Same shape; collapsed into a parameterised describe per §5.9.
+ * reconnect_mcp_server / toggle_mcp_server — both delegate to run-control
+ * methods. Same shape; collapsed into parameterised describes per §5.9.
+ *
+ * Phase A: updated to use setRunControl / fakeRunControl. Adds tests for
+ * "No active query" and "unsupported by harness".
  */
 import { describe, expect, it, vi } from "vitest";
 import { reconnectMcpServer, toggleMcpServer } from "./mcp-control.ts";
-import { setup, cmd } from "./test-harness.ts";
+import { setup, cmd, fakeRunControl } from "./test-harness.ts";
 
 describe("reconnect_mcp_server", () => {
-  it("invokes queryHandle.reconnectMcpServer with serverName and replies success", async () => {
+  it("invokes runControl.reconnectMcpServer with serverName and replies success", async () => {
     const h = setup();
     const reconnect = vi.fn(async () => undefined);
-    h.setQueryHandle({ reconnectMcpServer: reconnect });
+    h.setRunControl(fakeRunControl({ reconnectMcpServer: reconnect }));
 
     reconnectMcpServer(
       h.ctx,
@@ -27,7 +30,7 @@ describe("reconnect_mcp_server", () => {
 
   it("rejects when serverName is missing", () => {
     const h = setup();
-    h.setQueryHandle({ reconnectMcpServer: vi.fn() });
+    h.setRunControl(fakeRunControl({ reconnectMcpServer: vi.fn() }));
     reconnectMcpServer(
       h.ctx,
       cmd({ type: "reconnect_mcp_server", serverName: undefined }),
@@ -37,13 +40,38 @@ describe("reconnect_mcp_server", () => {
     expect(h.wsSent[0]!["error"]).toContain("serverName required");
   });
 
+  it("replies with control_error when no runControl is attached (No active query)", () => {
+    const h = setup();
+    reconnectMcpServer(
+      h.ctx,
+      cmd({ type: "reconnect_mcp_server", serverName: "x" }),
+      h.ws,
+    );
+    expect(h.wsSent[0]!["success"]).toBe(false);
+    expect(h.wsSent[0]!["error"]).toContain("No active query");
+  });
+
+  it("replies 'unsupported by harness' when reconnectMcpServer is absent on the control", () => {
+    const h = setup();
+    h.host.harnessName = "echo";
+    h.setRunControl({ abort() {} });
+
+    reconnectMcpServer(
+      h.ctx,
+      cmd({ type: "reconnect_mcp_server", serverName: "x" }),
+      h.ws,
+    );
+
+    expect(h.wsSent[0]!["success"]).toBe(false);
+    expect(h.wsSent[0]!["error"]).toMatch(/"reconnect_mcp_server"/);
+    expect(h.wsSent[0]!["error"]).toMatch(/"echo"/);
+  });
+
   it("propagates the SDK rejection as control_error", async () => {
     const h = setup();
-    h.setQueryHandle({
-      reconnectMcpServer: vi.fn(async () => {
-        throw new Error("server gone");
-      }),
-    });
+    h.setRunControl(fakeRunControl({
+      reconnectMcpServer: vi.fn(async () => { throw new Error("server gone"); }),
+    }));
     reconnectMcpServer(
       h.ctx,
       cmd({ type: "reconnect_mcp_server", serverName: "x" }),
@@ -57,10 +85,10 @@ describe("reconnect_mcp_server", () => {
 });
 
 describe("toggle_mcp_server", () => {
-  it("invokes queryHandle.toggleMcpServer with serverName + enabled and replies success", async () => {
+  it("invokes runControl.toggleMcpServer with serverName + enabled and replies success", async () => {
     const h = setup();
     const toggle = vi.fn(async () => undefined);
-    h.setQueryHandle({ toggleMcpServer: toggle });
+    h.setRunControl(fakeRunControl({ toggleMcpServer: toggle }));
 
     toggleMcpServer(
       h.ctx,
@@ -82,7 +110,7 @@ describe("toggle_mcp_server", () => {
 
   it("rejects when either serverName or enabled is missing", () => {
     const h = setup();
-    h.setQueryHandle({ toggleMcpServer: vi.fn() });
+    h.setRunControl(fakeRunControl({ toggleMcpServer: vi.fn() }));
 
     toggleMcpServer(
       h.ctx,
@@ -100,5 +128,32 @@ describe("toggle_mcp_server", () => {
     );
     expect(h.wsSent[0]!["success"]).toBe(false);
     expect(h.wsSent[0]!["error"]).toContain("required");
+  });
+
+  it("replies with control_error when no runControl is attached (No active query)", () => {
+    const h = setup();
+    toggleMcpServer(
+      h.ctx,
+      cmd({ type: "toggle_mcp_server", serverName: "x", enabled: true }),
+      h.ws,
+    );
+    expect(h.wsSent[0]!["success"]).toBe(false);
+    expect(h.wsSent[0]!["error"]).toContain("No active query");
+  });
+
+  it("replies 'unsupported by harness' when toggleMcpServer is absent on the control", () => {
+    const h = setup();
+    h.host.harnessName = "echo";
+    h.setRunControl({ abort() {} });
+
+    toggleMcpServer(
+      h.ctx,
+      cmd({ type: "toggle_mcp_server", serverName: "x", enabled: false }),
+      h.ws,
+    );
+
+    expect(h.wsSent[0]!["success"]).toBe(false);
+    expect(h.wsSent[0]!["error"]).toMatch(/"toggle_mcp_server"/);
+    expect(h.wsSent[0]!["error"]).toMatch(/"echo"/);
   });
 });

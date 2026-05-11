@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import type { SaveStatus } from "./use-autosave.ts";
+import type { ProjectSettings } from "./api.ts";
+import { SettingsMenu } from "./SettingsMenu.tsx";
 
 export type ActiveView = "canvas" | "kanban";
 
@@ -15,6 +17,8 @@ interface ProjectHeaderProps {
   onViewChange: (view: ActiveView) => void;
   /** Number of cards blocked/needing attention — shows a badge on the Kanban tab */
   kanbanBlockedCount?: number;
+  settings: ProjectSettings;
+  onSettingsChange: (settings: ProjectSettings) => void;
 }
 
 export function ProjectHeader({
@@ -28,6 +32,8 @@ export function ProjectHeader({
   activeView,
   onViewChange,
   kanbanBlockedCount = 0,
+  settings,
+  onSettingsChange,
 }: ProjectHeaderProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(name);
@@ -275,6 +281,9 @@ export function ProjectHeader({
           </>
         )}
       </div>
+
+      {/* Settings (top right) */}
+      <SettingsMenu settings={settings} onSettingsChange={onSettingsChange} />
     </div>
   );
 }

@@ -30,6 +30,12 @@ export interface SessionRow {
   worktree_isolation: number;
   total_cost: number;
   turns: number;
+  /**
+   * Registered AgentHarness name driving this session (e.g. "claude", "echo",
+   * "codex"). Persisted so a restored session resumes on the same harness it
+   * started on. Defaults to "claude" via the schema for pre-migration rows.
+   */
+  harness_name: string;
   created_at: string;
   updated_at: string;
 }
@@ -48,11 +54,11 @@ export function upsertSession(db: Database.Database, row: SessionRow): void {
     INSERT INTO sessions (
       session_key, project_id, node_id, status, cwd, model, role,
       task_name, session_id, worktree_isolation, total_cost, turns,
-      created_at, updated_at
+      harness_name, created_at, updated_at
     ) VALUES (
       @session_key, @project_id, @node_id, @status, @cwd, @model, @role,
       @task_name, @session_id, @worktree_isolation, @total_cost, @turns,
-      @created_at, @updated_at
+      @harness_name, @created_at, @updated_at
     )
     ON CONFLICT(session_key) DO UPDATE SET
       project_id = excluded.project_id,
@@ -66,6 +72,7 @@ export function upsertSession(db: Database.Database, row: SessionRow): void {
       worktree_isolation = excluded.worktree_isolation,
       total_cost = excluded.total_cost,
       turns = excluded.turns,
+      harness_name = excluded.harness_name,
       updated_at = excluded.updated_at
   `);
   stmt.run(row);

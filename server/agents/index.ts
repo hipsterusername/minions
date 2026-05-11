@@ -6,6 +6,7 @@
 import "./leader.ts";
 import "./minion.ts";
 import "./default.ts";
+import "./card-composer.ts";
 
 export { getAgentType, getAgentTypeOrDefault, registerAgentType } from "./registry.ts";
 export type { AgentType, AgentTypeContext, AgentToolResult } from "./types.ts";

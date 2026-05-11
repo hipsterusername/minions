@@ -17,7 +17,7 @@ import { chatRoleStyle } from "../chat-bubble-style.ts";
 import { type SessionStreamState } from "../session-stream.ts";
 import { useSessionStream } from "../use-session-stream.ts";
 import { SessionToolbar } from "../components/SessionToolbar.tsx";
-import type { ModelOption, PermissionMode } from "../components/SessionToolbar.tsx";
+import type { PermissionMode } from "../components/SessionToolbar.tsx";
 import { getSkill, getAllSkills } from "../skills/registry.ts";
 import type { SkillTemplate } from "../skills/types.ts";
 import { ResizeHandle } from "../components/ResizeHandle.tsx";
@@ -49,6 +49,10 @@ export interface TaskPlanItem {
   completedAt: number | null;
   /** Last few assistant messages from the minion session (tooltip detail) */
   sessionSummary: string;
+  /** Latest live progress report from a delegated minion. */
+  activeStep?: string | null | undefined;
+  /** Recent progress reports from a delegated minion. */
+  progress?: string[] | undefined;
 }
 
 export interface LeaderData {
@@ -67,8 +71,11 @@ export interface LeaderData {
   totalCost: number;
   turns: number;
   error: string | null;
-  model: ModelOption;
+  fullError?: string | null | undefined;
+  model: string;
   permissionMode: PermissionMode;
+  /** Active harness driving this session (e.g. "claude", "echo", "codex"). */
+  harness?: string;
   /** Adaptive-thinking config sent to the SDK on every query() call. */
   thinkingConfig: ThinkingConfig;
   taskPlan: TaskPlanItem[];
@@ -138,6 +145,7 @@ function extractLeaderCore(d: LeaderData): SessionStreamState {
     totalCost: d.totalCost,
     turns: d.turns,
     error: d.error,
+    fullError: d.fullError ?? null,
   };
 }
 
@@ -835,6 +843,44 @@ function UserMessageBubble({ msg }: { msg: LeaderMessage }) {
   );
 }
 
+function LeaderMessageActions({
+  text,
+  onAddContentNode,
+}: {
+  text: string;
+  onAddContentNode?: ((content: string) => void) | undefined;
+}) {
+  return (
+    <div
+      data-testid="leader-message-actions"
+      style={{
+        position: "sticky",
+        top: 8,
+        zIndex: 6,
+        height: 0,
+        display: "flex",
+        justifyContent: "flex-end",
+        pointerEvents: "none",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          gap: 4,
+          pointerEvents: "auto",
+        }}
+      >
+        <AddAsNodeButton
+          text={text}
+          onAdd={onAddContentNode}
+          layout="inline"
+        />
+        <CopyButton text={text} layout="inline" />
+      </div>
+    </div>
+  );
+}
+
 /* ── P4: Task Plan Panel ──────────────────────────────────────────────── */
 // Shows the full task lifecycle: planned → running → completed/failed.
 // Driven entirely by taskPlan[] which is populated from deterministic
@@ -853,6 +899,47 @@ const TASK_STATUS_COLOR: Record<TaskPlanItem["status"], string> = {
   completed: "var(--success-color)",
   failed: "var(--danger-color)",
 };
+
+function taskExecutorBadge(task: TaskPlanItem): {
+  label: string;
+  bg: string;
+  color: string;
+} {
+  if (task.executor === "leader") {
+    return {
+      label: task.status === "completed" ? "self done" : "self",
+      bg: "var(--state-active)",
+      color: "var(--accent)",
+    };
+  }
+
+  switch (task.status) {
+    case "running":
+      return {
+        label: "minion in progress",
+        bg: "var(--warning-bg)",
+        color: "var(--status-creating)",
+      };
+    case "completed":
+      return {
+        label: "minion done",
+        bg: "var(--success-bg)",
+        color: "var(--success-color)",
+      };
+    case "failed":
+      return {
+        label: "minion failed",
+        bg: "var(--danger-bg)",
+        color: "var(--danger-color)",
+      };
+    case "planned":
+      return {
+        label: "minion queued",
+        bg: "var(--state-hover)",
+        color: "var(--text-muted)",
+      };
+  }
+}
 
 function TaskPlanPanel({
   taskPlan,
@@ -944,6 +1031,7 @@ function TaskPlanPanel({
           {taskPlan.map((task, idx) => {
             const isMinion = task.executor === "minion";
             const canReveal = isMinion && onRevealMinion && (task.minionSessionKey || task.taskId);
+            const executorBadge = taskExecutorBadge(task);
             return (
             <div
               key={task.taskId}
@@ -977,41 +1065,62 @@ function TaskPlanPanel({
                 {TASK_STATUS_ICON[task.status]}
               </span>
 
-              {/* Title */}
+              {/* Title + live minion step */}
               <span
                 style={{
-                  fontSize: 11,
-                  color: task.status === "failed" ? "var(--danger-color)" : "var(--text-primary)",
                   flex: 1,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                  textDecoration: task.status === "failed" ? "line-through" : "none",
+                  minWidth: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 1,
                 }}
               >
-                {task.title}
-              </span>
-
-              {/* Executor badge — minion badges hint at click-to-reveal */}
-              {task.status !== "planned" && (
                 <span
                   style={{
-                    fontSize: 9,
-                    padding: "1px 4px",
-                    borderRadius: 3,
-                    background: task.executor === "leader"
-                      ? "var(--state-active)"
-                      : "var(--success-bg)",
-                    color: task.executor === "leader" ? "var(--accent)" : "var(--success-color)",
-                    fontFamily: "var(--font-mono)",
-                    flexShrink: 0,
-                    ...(canReveal ? { textDecoration: "underline", textUnderlineOffset: 2 } : {}),
+                    fontSize: 11,
+                    color: task.status === "failed" ? "var(--danger-color)" : "var(--text-primary)",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    textDecoration: task.status === "failed" ? "line-through" : "none",
                   }}
-                  title={canReveal ? "Click to view minion" : undefined}
                 >
-                  {task.executor === "leader" ? "self" : canReveal ? "▸ minion" : "minion"}
+                  {task.title}
                 </span>
-              )}
+                {task.activeStep && task.status === "running" && (
+                  <span
+                    style={{
+                      fontSize: 9,
+                      color: "var(--text-muted)",
+                      fontFamily: "var(--font-mono)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {task.activeStep}
+                  </span>
+                )}
+              </span>
+
+              {/* Executor/state badge — minion badges hint at click-to-reveal */}
+              <span
+                style={{
+                  fontSize: 9,
+                  padding: "1px 5px",
+                  borderRadius: 3,
+                  background: executorBadge.bg,
+                  color: executorBadge.color,
+                  fontFamily: "var(--font-mono)",
+                  flexShrink: 0,
+                  whiteSpace: "nowrap",
+                  ...(canReveal ? { textDecoration: "underline", textUnderlineOffset: 2 } : {}),
+                }}
+                title={canReveal ? "Click to view minion" : undefined}
+              >
+                {canReveal && task.executor === "minion" ? "▸ " : ""}
+                {executorBadge.label}
+              </span>
 
               {/* Priority */}
               <span
@@ -1059,7 +1168,7 @@ function TaskPlanPanel({
               )}
 
               {/* Hover tooltip — rendered via portal to escape overflow:hidden/auto containers */}
-              {hoveredTask === idx && tooltipAnchor && (task.description || task.result || task.sessionSummary) &&
+              {hoveredTask === idx && tooltipAnchor && (task.description || task.result || task.sessionSummary || task.activeStep || (task.progress?.length ?? 0) > 0) &&
                 createPortal(
                   <div
                     style={{
@@ -1097,7 +1206,7 @@ function TaskPlanPanel({
                         {task.minionSessionKey}
                       </div>
                     )}
-                    {(task.result || task.sessionSummary) && (
+                    {(task.result || task.sessionSummary || (task.progress?.length ?? 0) > 0) && (
                       <div
                         style={{
                           fontSize: 10,
@@ -1109,7 +1218,10 @@ function TaskPlanPanel({
                           overflowY: "auto",
                         }}
                       >
-                        {task.result ?? task.sessionSummary}
+                        {task.result ??
+                          (task.progress && task.progress.length > 0
+                            ? task.progress.slice(-5).join("\n")
+                            : task.sessionSummary)}
                       </div>
                     )}
                   </div>,
@@ -2630,6 +2742,7 @@ export function LeaderNodeRenderer({
         totalCost: next.totalCost,
         turns: next.turns,
         error: next.error,
+        fullError: next.fullError ?? next.error,
       };
 
       // Clear wait state when the session resumes (auto-continue fired).
@@ -2719,6 +2832,7 @@ export function LeaderNodeRenderer({
             streamingText: "",
             streamingBlockIndex: null,
             error: serverMsg.lastError ?? null,
+            fullError: serverMsg.lastErrorFull ?? serverMsg.lastError ?? null,
           };
 
           // Restore worktree info from sync if available
@@ -2807,6 +2921,12 @@ export function LeaderNodeRenderer({
         }
         if (serverMsg.taskName) {
           syncData.taskName = serverMsg.taskName;
+        }
+        if (serverMsg.lastErrorFull !== undefined) {
+          syncData.fullError = serverMsg.lastErrorFull ?? null;
+        }
+        if (serverMsg.harness) {
+          syncData.harness = serverMsg.harness;
         }
         const syncApproval = serverMsg.approval as
           | {
@@ -3055,6 +3175,7 @@ export function LeaderNodeRenderer({
       model: data.model,
       thinkingConfig: data.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
       worktreeIsolation: data.worktreeIsolation,
+      ...(data.harness ? { harness: data.harness } : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
       ...(projectPath ? { cwd: projectPath } : {}),
     });
@@ -3132,6 +3253,7 @@ export function LeaderNodeRenderer({
       model: dataRef.current.model,
       thinkingConfig: dataRef.current.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
       worktreeIsolation: dataRef.current.worktreeIsolation,
+      ...(dataRef.current.harness ? { harness: dataRef.current.harness } : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
       ...(projectPath ? { cwd: projectPath } : {}),
     });
@@ -3208,7 +3330,7 @@ export function LeaderNodeRenderer({
   }, [socketSend]);
 
   const handleModelChange = useCallback(
-    (model: ModelOption) => {
+    (model: string) => {
       const current = dataRef.current;
       onUpdateData({ ...current, model });
       if (socketSend && current.sessionKey) {
@@ -3216,6 +3338,24 @@ export function LeaderNodeRenderer({
       }
     },
     [socketSend, onUpdateData],
+  );
+
+  const handleHarnessChange = useCallback(
+    (harness: string, defaultModel?: string) => {
+      const current = dataRef.current;
+      // Mid-session swap is intentionally unsupported — see
+      // docs/codex-harness-spec.md Open Questions §1.
+      if (current.sessionKey) return;
+      // Apply harness + model atomically. Two separate onUpdateData calls
+      // would both read the stale `dataRef.current` and the second would
+      // clobber the harness update.
+      onUpdateData({
+        ...current,
+        harness,
+        ...(defaultModel ? { model: defaultModel } : {}),
+      });
+    },
+    [onUpdateData],
   );
 
   const handlePermissionModeChange = useCallback(
@@ -3491,6 +3631,8 @@ export function LeaderNodeRenderer({
         onPermissionModeChange={handlePermissionModeChange}
         thinkingConfig={data.thinkingConfig ?? DEFAULT_THINKING_CONFIG}
         onThinkingConfigChange={handleThinkingConfigChange}
+        harness={data.harness ?? "claude"}
+        onHarnessChange={handleHarnessChange}
         accent="var(--accent)"
         skillsContent={
           <div
@@ -3650,8 +3792,10 @@ export function LeaderNodeRenderer({
                   position: "relative",
                 }}
               >
-                <CopyButton text={msg.content} />
-                <AddAsNodeButton text={msg.content} onAdd={onAddContentNode} />
+                <LeaderMessageActions
+                  text={msg.content}
+                  onAddContentNode={onAddContentNode}
+                />
                 <SimpleMarkdown text={msg.content} />
                 {msg.suffix && (
                   <span style={{ display: "inline-block", marginLeft: 6, fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", opacity: 0.7 }}>
@@ -3673,8 +3817,10 @@ export function LeaderNodeRenderer({
                   position: "relative",
                 }}
               >
-                <CopyButton text={msg.content} />
-                <AddAsNodeButton text={msg.content} onAdd={onAddContentNode} />
+                <LeaderMessageActions
+                  text={msg.content}
+                  onAddContentNode={onAddContentNode}
+                />
                 <SimpleMarkdown text={msg.content} />
                 {msg.suffix && (
                   <span style={{ display: "inline-block", marginLeft: 6, fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", opacity: 0.7 }}>
@@ -3810,6 +3956,12 @@ export function LeaderNodeRenderer({
           }}
         >
           <span style={{ flex: 1 }}>{data.error}</span>
+          <CopyButton
+            text={data.fullError ?? data.error}
+            layout="inline"
+            alwaysVisible
+            title="Copy error to clipboard"
+          />
           <button
             onClick={() => onUpdateData({ ...data, error: null })}
             style={{
@@ -3851,6 +4003,7 @@ export const LEADER_DEFAULT_DATA: LeaderData = {
   totalCost: 0,
   turns: 0,
   error: null,
+  fullError: null,
   model: "opus",
   permissionMode: "auto",
   thinkingConfig: { ...DEFAULT_THINKING_CONFIG },

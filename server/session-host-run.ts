@@ -16,7 +16,12 @@ import type {
   AgentTypeContext,
   AgentToolResult,
 } from "./agents/index.ts";
-import type { AgentHarness, HarnessStartOptions } from "./harness/types.ts";
+import type {
+  AgentHarness,
+  HarnessStartOptions,
+  NormalizedAttachment,
+  NormalizedPermissionMode,
+} from "./harness/types.ts";
 import type { NormalizedEvent } from "../shared/normalized-event.ts";
 import type { Bus } from "./bus.ts";
 import { createWorktree, isGitRepo, type WorktreeInfo } from "./worktree.ts";
@@ -135,6 +140,7 @@ export function buildHarnessStartOpts(
   const resolvedModel = host.model ? (harness.resolveModel(host.model) ?? host.model) : "";
 
   const startOpts: HarnessStartOptions = {
+    sessionKey: host.id,
     cwd: host.cwd,
     prompt,
     systemPrompt,
@@ -144,6 +150,14 @@ export function buildHarnessStartOpts(
     resumeId: opts.resumeId,
     externalMcpServers: opts.externalMcpServers,
   };
+
+  if (opts.attachments && opts.attachments.length > 0) {
+    startOpts.attachments = opts.attachments as ReadonlyArray<NormalizedAttachment>;
+  }
+  const persistedPermissionMode = host.permissionMode;
+  if (isNormalizedPermissionMode(persistedPermissionMode)) {
+    startOpts.permissionMode = persistedPermissionMode;
+  }
 
   if (
     harness.capabilities.thinking &&
@@ -179,7 +193,12 @@ export function processNormalizedEvent(
   if (event.kind === "init") {
     host.sessionId = event.sessionId;
     if (event.model) host.model = event.model;
-    host.permissionMode = event.permissionMode ?? null;
+    // Only refresh `host.permissionMode` when the harness reports one on init.
+    // Harnesses that don't surface a permission mode in their init event
+    // (Codex, Echo) leave the existing seed from `StartSessionOptions` /
+    // `set_permission_mode` in place — Claude is the only one that overwrites
+    // here, and only when the SDK actually returns a value.
+    if (event.permissionMode) host.permissionMode = event.permissionMode;
     // `meta` carries Claude-specific init data (tools, mcp_servers, etc.).
     if (event.meta) host.initData = event.meta;
     host.persist();
@@ -223,12 +242,14 @@ export function processNormalizedEvent(
     if (event.reason === "error") {
       host.status = "error";
       host.lastError = event.error ?? "unknown";
+      host.lastErrorFull = event.fullError ?? host.lastError;
       host.persist();
 
       const errEvent: BufferedEvent = {
         type: "session_error",
         sessionKey: host.id,
         error: host.lastError,
+        fullError: host.lastErrorFull,
         timestamp: now,
       };
       host.bufferEvent(errEvent);
@@ -274,3 +295,16 @@ export function processNormalizedEvent(
  * keep the import arrow into `session-host.ts` narrow.
  */
 export type { WorktreeInfo };
+
+const VALID_PERMISSION_MODES: ReadonlySet<NormalizedPermissionMode> = new Set([
+  "default",
+  "auto",
+  "bypassPermissions",
+  "plan",
+]);
+
+function isNormalizedPermissionMode(
+  v: string | null | undefined,
+): v is NormalizedPermissionMode {
+  return typeof v === "string" && VALID_PERMISSION_MODES.has(v as NormalizedPermissionMode);
+}

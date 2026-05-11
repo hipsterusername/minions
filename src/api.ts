@@ -54,7 +54,9 @@ export interface ProjectContext {
 
 export interface ProjectSettings {
   defaultModel?: string;
+  defaultLeaderHarness?: string;
   defaultLeaderModel?: string;
+  defaultMinionHarness?: string;
   defaultMinionModel?: string;
   defaultPermissionMode?: string;
   defaultWorktreeIsolation?: boolean;

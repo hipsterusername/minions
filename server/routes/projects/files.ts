@@ -12,6 +12,20 @@ const SKIP = new Set([
   ".canvas", "coverage", ".nyc_output", ".parcel-cache",
 ]);
 
+/**
+ * Best-effort extension → MIME mapping for the binary /blob endpoint.
+ * Only the formats the client knows how to render — anything else falls
+ * back to application/octet-stream and the client can decide what to do.
+ */
+const BLOB_MIME_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+};
+
 export function mountFileRoutes(router: Router): void {
   // ── File read ────────────────────────────────────────
   router.get("/:encodedPath/file", (req: Request, res: Response) => {
@@ -63,6 +77,68 @@ export function mountFileRoutes(router: Router): void {
     } catch {
       res.status(500).json({ error: "Failed to read file" });
     }
+  });
+
+  // ── Binary file read (for images and other non-text assets) ──
+  // The /file endpoint above reads UTF-8 and is unsuitable for binary
+  // content like PNG/JPEG. /blob streams the raw bytes with a best-effort
+  // Content-Type so the client can wrap the response in a Blob/File and
+  // hand it to the image-loader pipeline (downscale, decode, annotate).
+  router.get("/:encodedPath/blob", (req: Request, res: Response) => {
+    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    if (!projectPath) {
+      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      return;
+    }
+    const relFile = req.query["path"];
+
+    if (typeof relFile !== "string" || !relFile) {
+      res.status(400).json({ error: "Missing ?path= query parameter" });
+      return;
+    }
+
+    const resolved = path.resolve(projectPath, relFile);
+    if (!resolved.startsWith(projectPath + path.sep) && resolved !== projectPath) {
+      res.status(403).json({ error: "Path traversal not allowed" });
+      return;
+    }
+
+    if (!fs.existsSync(resolved)) {
+      res.status(404).json({ error: "File not found" });
+      return;
+    }
+
+    const stat = fs.statSync(resolved);
+    if (!stat.isFile()) {
+      res.status(400).json({ error: "Not a file" });
+      return;
+    }
+
+    // Cap at 16MB. Images larger than this would be unusable on the
+    // vision channel anyway — the client downscales to 1568px on load,
+    // and 16MB of source is well above what any reasonable screenshot
+    // or photo produces.
+    const MAX_BLOB_SIZE = 16 * 1024 * 1024;
+    if (stat.size > MAX_BLOB_SIZE) {
+      res.status(413).json({ error: "File too large", size: stat.size, maxSize: MAX_BLOB_SIZE });
+      return;
+    }
+
+    const ext = path.extname(resolved).slice(1).toLowerCase();
+    const mime = BLOB_MIME_TYPES[ext] ?? "application/octet-stream";
+    res.setHeader("Content-Type", mime);
+    res.setHeader("Content-Length", String(stat.size));
+    // Stream the bytes directly. Using fs.createReadStream + pipe rather
+    // than res.sendFile keeps us off the express/send middleware (which
+    // adds its own caching and 404 handling we don't need here) and
+    // avoids surprising response codes when the file is short-lived
+    // (e.g. created in a test's beforeEach).
+    const stream = fs.createReadStream(resolved);
+    stream.on("error", () => {
+      if (!res.headersSent) res.status(500).end();
+      else res.end();
+    });
+    stream.pipe(res);
   });
 
   // ── Directory listing (for file browser) ────────────

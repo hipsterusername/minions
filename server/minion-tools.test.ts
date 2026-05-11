@@ -140,4 +140,34 @@ describe("minion-tools", () => {
       "third",
     ]);
   });
+
+  it("can mirror reports to the owning leader session with task metadata", async () => {
+    const { bus, sent } = makeBus();
+    const reports: Array<{ trigger: string; message: string }> = [];
+    const { toolDefs } = createMinionToolsForSession({
+      minionSessionKey: "minion-1",
+      leaderSessionKey: "leader-1",
+      taskId: "task-1",
+      bus,
+      onReport: (report) => reports.push(report),
+    });
+    const stepDef = findTool(toolDefs, "report_step");
+
+    await call(stepDef, { message: "Running tests" });
+
+    expect(sent).toHaveLength(2);
+    expect(sent.map((e) => e.topic)).toEqual([
+      "session:minion-1",
+      "session:leader-1",
+    ]);
+    for (const env of sent) {
+      expect(env.type).toBe("minion_status");
+      expect(env["minionSessionKey"]).toBe("minion-1");
+      expect(env["leaderSessionKey"]).toBe("leader-1");
+      expect(env["taskId"]).toBe("task-1");
+      expect(env["trigger"]).toBe("step");
+      expect(env["message"]).toBe("Running tests");
+    }
+    expect(reports).toMatchObject([{ trigger: "step", message: "Running tests" }]);
+  });
 });

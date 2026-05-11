@@ -18,6 +18,7 @@
  */
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { execSync } from "node:child_process";
 import { registerHarness } from "../index.ts";
 
@@ -35,13 +36,16 @@ const CLAUDE_EXECUTABLE = resolveClaudePath();
 import type {
   AgentHarness,
   HarnessCapabilities,
+  HarnessRunControl,
   HarnessStartOptions,
+  HarnessStaticInfo,
   NormalizedEvent,
   NormalizedToolDef,
 } from "../types.ts";
 import { sdkToNormalized } from "./translate.ts";
 import { wrapTools } from "./tools.ts";
 import { resolveModelAlias, supportsAdaptiveThinking } from "./models.ts";
+import { buildClaudePrompt } from "./prompt.ts";
 
 // ── Capability declaration ────────────────────────────────────────────────────
 
@@ -73,6 +77,39 @@ const CLAUDE_BUILT_IN_TOOLS = [
   "WebSearch",
 ] as const;
 
+/**
+ * Static model list for staticInfo(). Derived from MODEL_ALIAS_MAP in
+ * models.ts — update both when new model IDs are released.
+ */
+const CLAUDE_STATIC_MODELS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: "claude-opus-4-7", label: "Opus" },
+  { id: "claude-sonnet-4-6", label: "Sonnet" },
+  { id: "claude-haiku-4-5", label: "Haiku" },
+];
+
+// ── SDK handle type ───────────────────────────────────────────────────────────
+
+/**
+ * The Claude SDK `query()` return value is an AsyncIterable<SDKMessage> and
+ * also exposes per-run control methods. We cast to this local interface so
+ * TypeScript knows about them without leaking SDK types outside this file.
+ * The double-cast (via unknown) is intentional — the SDK's opaque Query type
+ * does not structurally overlap with this declared interface.
+ */
+interface SdkQueryHandle extends AsyncIterable<SDKMessage> {
+  close?(): Promise<void>;
+  interrupt?(): Promise<void>;
+  setModel?(model: string): Promise<void>;
+  setPermissionMode?(mode: never): Promise<void>;
+  getContextUsage?(): Promise<unknown>;
+  mcpServerStatus?(): Promise<unknown>;
+  rewindFiles?(userMessageId: string, opts?: { dryRun?: boolean }): Promise<unknown>;
+  seedReadState?(path: string, mtime: number): Promise<unknown>;
+  stopTask?(taskId: string): Promise<unknown>;
+  reconnectMcpServer?(serverName: string): Promise<unknown>;
+  toggleMcpServer?(serverName: string, enabled: boolean): Promise<unknown>;
+}
+
 // ── ClaudeHarness ─────────────────────────────────────────────────────────────
 
 class ClaudeHarness implements AgentHarness {
@@ -80,7 +117,6 @@ class ClaudeHarness implements AgentHarness {
   readonly capabilities = CLAUDE_CAPABILITIES;
   readonly builtInTools: string[] = [...CLAUDE_BUILT_IN_TOOLS];
 
-  private abortController: AbortController | null = null;
   private registeredGroups: Record<string, NormalizedToolDef[]> = {};
 
   /**
@@ -100,148 +136,187 @@ class ClaudeHarness implements AgentHarness {
     return resolveModelAlias(alias);
   }
 
-  /** Abort the running session. Idempotent. */
-  abort(): void {
-    this.abortController?.abort();
-    this.abortController = null;
+  /** Static introspection — safe to call before, during, and after start(). */
+  staticInfo(): HarnessStaticInfo {
+    return {
+      models: CLAUDE_STATIC_MODELS,
+      commands: [],
+      agents: [],
+      account: { provider: "claude" },
+    };
   }
 
   /**
-   * Start the Claude session and yield normalized events until done.
+   * Start the Claude session and return a normalized event stream plus a
+   * per-run control surface.
+   *
+   * start() is synchronous — it constructs the AbortController and control
+   * object immediately, then returns. The async generator opens the SDK
+   * query() handle lazily on first iteration. This ensures the control's
+   * abort() is safe to call before iteration begins.
    *
    * Emits `init` first and `done` last per the AgentHarness contract.
-   * The caller (session-host.ts in Phase 2) drives this iterator.
    */
-  async *start(opts: HarnessStartOptions): AsyncIterable<NormalizedEvent> {
+  start(opts: HarnessStartOptions): { events: AsyncIterable<NormalizedEvent>; control: HarnessRunControl } {
     const abortController = new AbortController();
-    this.abortController = abortController;
-
-    // Wire the caller's AbortSignal into our controller.
+    // Wire the incoming signal into our local controller. Also handle the case
+    // where the signal was already aborted before we registered the listener —
+    // in that scenario the "abort" event has already fired and won't fire again.
     opts.abortSignal.addEventListener("abort", () => abortController.abort(), { once: true });
+    if (opts.abortSignal.aborted) abortController.abort();
 
-    // Wrap each registered group as a separate named MCP server so tool call
-    // names follow the `mcp__<serverName>__<toolName>` pattern.
-    const mcpServers: Record<string, unknown> = {};
-    for (const [serverName, defs] of Object.entries(this.registeredGroups)) {
-      if (defs.length > 0) {
-        mcpServers[serverName] = wrapTools(serverName, defs);
+    // Snapshot registered groups so the generator captures its own copy and
+    // concurrent calls cannot step on each other.
+    const registeredGroups = { ...this.registeredGroups };
+
+    // Shared mutable reference populated when the generator starts iterating.
+    // Control methods guard on null so they are safe to call at any time.
+    let handle: SdkQueryHandle | null = null;
+
+    async function* makeEvents(): AsyncGenerator<NormalizedEvent> {
+      // Build MCP server map from registered groups.
+      const mcpServers: Record<string, unknown> = {};
+      for (const [serverName, defs] of Object.entries(registeredGroups)) {
+        if (defs.length > 0) {
+          mcpServers[serverName] = wrapTools(serverName, defs);
+        }
+      }
+
+      const options: Record<string, unknown> = {
+        cwd: opts.cwd,
+        resume: opts.resumeId,
+        allowedTools: opts.allowedTools,
+        // permissionMode: Claude consumes the normalized mode verbatim.
+        permissionMode: opts.permissionMode ?? "auto",
+        abortController,
+        includePartialMessages: true,
+        systemPrompt: opts.systemPrompt,
+        model: opts.model,
+        // Claude executable path — Claude-specific; other harnesses omit this.
+        pathToClaudeCodeExecutable: CLAUDE_EXECUTABLE,
+      };
+
+      // Merge externally-supplied pre-wrapped MCP servers (e.g. from the project
+      // sidecar's mcp-servers.json) alongside the tool-group servers.
+      const allServers = { ...mcpServers, ...(opts.externalMcpServers ?? {}) };
+      if (Object.keys(allServers).length > 0) {
+        options["mcpServers"] = allServers;
+      }
+
+      if (opts.thinking && CLAUDE_CAPABILITIES.thinking && supportsAdaptiveThinking(opts.model)) {
+        options["thinking"] = { type: "adaptive", display: opts.thinking.display };
+        options["effort"] = opts.thinking.effort;
+      }
+
+      const sdkPrompt = await buildClaudePrompt(opts);
+
+      try {
+        // Open the SDK handle lazily on first iteration. The double-cast
+        // bypasses the structural overlap check between the SDK's opaque
+        // Query type and our local SdkQueryHandle interface. Keep this
+        // inside the try so a synchronous SDK setup failure is reported
+        // as a normalized done(error) instead of bubbling out of the
+        // generator.
+        handle = query({
+          prompt: typeof sdkPrompt === "string" ? sdkPrompt : (sdkPrompt as never),
+          options: options as never,
+        }) as unknown as SdkQueryHandle;
+
+        for await (const msg of handle) {
+          if (abortController.signal.aborted) break;
+
+          // Intercept Claude Agent-tool sub-agent system events before the
+          // generic translator so they become NormalizedEvent variants.
+          const raw = msg as { type?: string; subtype?: string } & Record<string, unknown>;
+          if (raw.type === "system") {
+            if (raw.subtype === "task_started") {
+              yield {
+                kind: "agent_spawned",
+                taskId: (raw["task_id"] as string) ?? `agent-${Date.now().toString(36)}`,
+                description: (raw["description"] as string) ?? "Subagent task",
+              };
+              continue;
+            }
+            if (raw.subtype === "task_notification") {
+              yield {
+                kind: "agent_task_update",
+                taskId: (raw["task_id"] as string) ?? "",
+                status: (raw["status"] as string) ?? "completed",
+                summary: (raw["summary"] as string) ?? "",
+              };
+              continue;
+            }
+            // system/init: attach raw Claude meta so the host can populate initData.
+            if (raw.subtype === "init") {
+              const normalized = sdkToNormalized(msg);
+              for (const evt of normalized) {
+                if (evt.kind === "init") {
+                  yield {
+                    ...evt,
+                    meta: {
+                      tools: raw["tools"],
+                      model: raw["model"],
+                      mcp_servers: raw["mcp_servers"],
+                      permissionMode: raw["permissionMode"],
+                      slash_commands: raw["slash_commands"],
+                      skills: raw["skills"],
+                      claude_code_version: raw["claude_code_version"],
+                    },
+                  };
+                } else {
+                  yield evt;
+                }
+              }
+              continue;
+            }
+          }
+
+          const events = sdkToNormalized(msg);
+          for (const evt of events) {
+            yield evt;
+          }
+        }
+      } catch (err: unknown) {
+        const error = err instanceof Error ? err.message : String(err);
+        yield { kind: "done", reason: "error", error };
+        return;
+      }
+
+      // Ensure `done` is always emitted, even when the loop exits cleanly
+      // without a result message (e.g. abort before result arrives).
+      if (abortController.signal.aborted) {
+        yield { kind: "done", reason: "abort" };
       }
     }
 
-    const options: Record<string, unknown> = {
-      cwd: opts.cwd,
-      resume: opts.resumeId,
-      allowedTools: opts.allowedTools,
-      // permissionMode: Claude-specific permission model — gated by capabilities.
-      permissionMode: "auto",
-      abortController,
-      includePartialMessages: true,
-      systemPrompt: opts.systemPrompt,
-      model: opts.model,
-      // Claude executable path — Claude-specific; other harnesses omit this.
-      pathToClaudeCodeExecutable: CLAUDE_EXECUTABLE,
+    const control: HarnessRunControl = {
+      abort(): void {
+        abortController.abort();
+      },
+      close: () => handle?.close?.() ?? Promise.resolve(),
+      interrupt: () => handle?.interrupt?.() ?? Promise.resolve(),
+      setModel: (model: string) => handle?.setModel?.(model) ?? Promise.resolve(),
+      setPermissionMode: (mode: string) =>
+        handle?.setPermissionMode?.(mode as never) ?? Promise.resolve(),
+      getContextUsage: () => handle?.getContextUsage?.() ?? Promise.resolve(undefined),
+      mcpServerStatus: () => handle?.mcpServerStatus?.() ?? Promise.resolve(undefined),
+      rewindFiles: (args) =>
+        handle?.rewindFiles?.(
+          args.userMessageId,
+          args.dryRun !== undefined ? { dryRun: args.dryRun } : undefined,
+        ) ?? Promise.resolve(undefined),
+      seedReadState: (args) =>
+        handle?.seedReadState?.(args.path, args.mtime) ?? Promise.resolve(undefined),
+      stopTask: (taskId: string) =>
+        handle?.stopTask?.(taskId) ?? Promise.resolve(undefined),
+      reconnectMcpServer: (serverName: string) =>
+        handle?.reconnectMcpServer?.(serverName) ?? Promise.resolve(undefined),
+      toggleMcpServer: (serverName: string, enabled: boolean) =>
+        handle?.toggleMcpServer?.(serverName, enabled) ?? Promise.resolve(undefined),
     };
 
-    // Merge externally-supplied pre-wrapped MCP servers (e.g. from the project
-    // sidecar's mcp-servers.json) alongside the tool-group servers.
-    const allServers = { ...mcpServers, ...(opts.externalMcpServers ?? {}) };
-    if (Object.keys(allServers).length > 0) {
-      options["mcpServers"] = allServers;
-    }
-
-    if (opts.thinking && this.capabilities.thinking && supportsAdaptiveThinking(opts.model)) {
-      options["thinking"] = { type: "adaptive", display: opts.thinking.display };
-      options["effort"] = opts.thinking.effort;
-    }
-
-    const prompt =
-      typeof opts.prompt === "string" ? opts.prompt : collectPrompt(opts.prompt);
-
-    try {
-      const handle = query({
-        prompt: typeof prompt === "string" ? prompt : (prompt as never),
-        options: options as never,
-      });
-
-      for await (const msg of handle) {
-        if (abortController.signal.aborted) break;
-
-        // Intercept Claude Agent-tool sub-agent system events before the
-        // generic translator so they become NormalizedEvent variants.
-        const raw = msg as { type?: string; subtype?: string } & Record<string, unknown>;
-        if (raw.type === "system") {
-          if (raw.subtype === "task_started") {
-            yield {
-              kind: "agent_spawned",
-              taskId: (raw["task_id"] as string) ?? `agent-${Date.now().toString(36)}`,
-              description: (raw["description"] as string) ?? "Subagent task",
-            };
-            continue;
-          }
-          if (raw.subtype === "task_notification") {
-            yield {
-              kind: "agent_task_update",
-              taskId: (raw["task_id"] as string) ?? "",
-              status: (raw["status"] as string) ?? "completed",
-              summary: (raw["summary"] as string) ?? "",
-            };
-            continue;
-          }
-          // system/init: attach raw Claude meta so the host can populate initData.
-          if (raw.subtype === "init") {
-            const normalized = sdkToNormalized(msg);
-            for (const evt of normalized) {
-              if (evt.kind === "init") {
-                yield {
-                  ...evt,
-                  meta: {
-                    tools: raw["tools"],
-                    model: raw["model"],
-                    mcp_servers: raw["mcp_servers"],
-                    permissionMode: raw["permissionMode"],
-                    slash_commands: raw["slash_commands"],
-                    skills: raw["skills"],
-                    claude_code_version: raw["claude_code_version"],
-                  },
-                };
-              } else {
-                yield evt;
-              }
-            }
-            continue;
-          }
-        }
-
-        const events = sdkToNormalized(msg);
-        for (const evt of events) {
-          yield evt;
-        }
-      }
-    } catch (err: unknown) {
-      const error = err instanceof Error ? err.message : String(err);
-      yield { kind: "done", reason: "error", error };
-      return;
-    }
-
-    // Ensure `done` is always emitted, even when the loop exits cleanly
-    // without a result message (e.g. abort before result arrives).
-    if (abortController.signal.aborted) {
-      yield { kind: "done", reason: "abort" };
-    }
+    return { events: makeEvents(), control };
   }
-}
-
-// ── Prompt helpers ────────────────────────────────────────────────────────────
-
-/** Collect an async-iterable of user messages into a single string. */
-async function collectPrompt(
-  iter: AsyncIterable<{ role: "user"; content: string }>,
-): Promise<string> {
-  const parts: string[] = [];
-  for await (const msg of iter) {
-    parts.push(msg.content);
-  }
-  return parts.join("\n");
 }
 
 // ── Self-registration ─────────────────────────────────────────────────────────

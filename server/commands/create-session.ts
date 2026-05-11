@@ -16,6 +16,7 @@
 import { unicastGlobal, unicastToSession } from "../bus.ts";
 import { validateSessionCwd } from "../path-guard.ts";
 import { isValidThinkingConfig, type ThinkingConfig } from "../session-host.ts";
+import { registeredHarnessNames } from "../harness/index.ts";
 import { sanitizeAttachments } from "./attachment-sanitize.ts";
 import type { CommandContext, CommandHandler } from "./types.ts";
 import type { WebSocket } from "ws";
@@ -65,6 +66,22 @@ export const createSession: CommandHandler = (
     ? cmd.thinkingConfig
     : null;
   const attachments = sanitizeAttachments(cmd.attachments);
+  // Validate harness up front so an unknown name surfaces as a session-scoped
+  // session_error rather than crashing the SDK loop later. Empty / undefined
+  // means "use the SessionHost default" (claude).
+  if (cmd.harness !== undefined && cmd.harness !== "") {
+    const known = registeredHarnessNames();
+    if (!known.includes(cmd.harness)) {
+      rejectCreate(
+        ws,
+        key,
+        `Unknown harness "${cmd.harness}". Registered harnesses: ${
+          known.join(", ") || "(none registered)"
+        }.`,
+      );
+      return;
+    }
+  }
   ctx.registry.start({
     sessionKey: key,
     prompt,
@@ -75,6 +92,8 @@ export const createSession: CommandHandler = (
     initialModel: cmd.model ?? null,
     thinkingConfig: initialThinking,
     ...(attachments ? { attachments } : {}),
+    ...(cmd.harness ? { harness: cmd.harness } : {}),
+    ...(cmd.permissionMode ? { permissionMode: cmd.permissionMode } : {}),
   });
   unicastToSession(ws, key, { type: "session_created", sessionKey: key });
 };

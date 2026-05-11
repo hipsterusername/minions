@@ -298,6 +298,49 @@ export const tagsComponentSchema = z.object({
   span: spanSchema.optional(),
 });
 
+export const RENDER_COMPONENT_TYPES = [
+  "metric",
+  "progress",
+  "table",
+  "list",
+  "text",
+  "status",
+  "code",
+  "sparkline",
+  "kv",
+  "timeline",
+  "callout",
+  "separator",
+  "diff",
+  "checklist",
+  "tags",
+  "copyable",
+  "form",
+  "chart",
+  "section",
+  "tabs",
+  "image",
+  "file-preview",
+] as const;
+
+/**
+ * Agent-facing component input schema.
+ *
+ * The canonical component schema below is intentionally strict and uses a
+ * large discriminated union. Some non-Claude harness/tool-schema adapters
+ * simplify that union poorly before it reaches the model. This compact schema
+ * preserves the important contract in every harness: components are JSON
+ * objects with stable `id` and known `type`, plus type-specific fields from
+ * the Render DSL. Tool handlers still validate against `renderComponentSchema`
+ * before mutating dashboard state.
+ */
+export const renderComponentInputSchema = z.looseObject({
+  id: z.string().describe("Stable unique component id used by render_patch"),
+  type: z.enum(RENDER_COMPONENT_TYPES).describe("Render DSL component type"),
+}).describe(
+  "Dashboard component object. Include type-specific Render DSL fields for the selected type. Never pass JSON, HTML, markdown, or JSX as a string component.",
+);
+
 /**
  * Full union of render components. `z.discriminatedUnion` both narrows
  * `type` on the TS side and lets the server reject unknown component

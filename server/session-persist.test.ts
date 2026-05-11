@@ -60,6 +60,7 @@ function makeSession(overrides: Partial<PersistableSession> = {}): PersistableSe
     worktreeIsolation: true,
     totalCost: 0.15,
     turns: 5,
+    harnessName: "claude",
     ...overrides,
   };
 }
@@ -267,6 +268,30 @@ describe("session-persist integration", () => {
     expect(entry.tasks?.tasks.size).toBe(2);
     expect(entry.tasks?.tasks.get("run")?.minionSessionKey).toBe("M");
     expect(entry.render?.title).toBe("restart-me");
+  });
+
+  it("harnessName round-trips through persist/hydrate", () => {
+    persistSession(makeSession({ id: "echo-sess", harnessName: "echo" }));
+    const hydrated = hydrateSessionsFromDb();
+    expect(hydrated).toHaveLength(1);
+    expect(hydrated[0]?.row.harness_name).toBe("echo");
+  });
+
+  it("rows written before the harness column existed hydrate as 'claude'", () => {
+    // Simulate a pre-migration row by inserting one with the column dropped
+    // and then re-running the migration. We mimic this by writing a row via
+    // raw SQL that omits harness_name and relies on the schema default.
+    const db = openPersistDb();
+    db.prepare(
+      `INSERT INTO sessions (
+        session_key, status, cwd, role, total_cost, turns,
+        worktree_isolation, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("legacy", "stopped", "/tmp/legacy", "leader", 0, 0, 0, "now", "now");
+
+    const hydrated = hydrateSessionsFromDb();
+    const row = hydrated.find((h) => h.row.session_key === "legacy");
+    expect(row?.row.harness_name).toBe("claude");
   });
 });
 

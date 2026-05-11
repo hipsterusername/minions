@@ -8,13 +8,13 @@ import type { ServerMessage } from "../use-socket.ts";
 import { MINION_SYSTEM_PROMPT } from "../prompts/minion-system.ts";
 import { useStatusBanners, StatusBannerStack } from "../components/StatusBanner.tsx";
 import { StreamingBubble, StreamingIndicator } from "../components/StreamingBubble.tsx";
-import { chatRoleStyle, type ChatRole } from "../chat-bubble-style.ts";
 import { SessionToolbar } from "../components/SessionToolbar.tsx";
-import type { ModelOption, PermissionMode } from "../components/SessionToolbar.tsx";
+import type { PermissionMode } from "../components/SessionToolbar.tsx";
 import { msgId, type DisplayMessage } from "../sdk-messages.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { AddAsNodeButton } from "../components/AddAsNodeButton.tsx";
 import { UserContextHeader } from "../components/UserContextHeader.tsx";
+import { SimpleMarkdown } from "../components/SimpleMarkdown.tsx";
 import { STATUS_COLORS, PRIORITY_COLORS } from "../palette.ts";
 import {
   type SessionStreamState,
@@ -55,8 +55,10 @@ export interface MinionData {
    * `[text, tool_use, text]` don't merge across blocks.
    */
   streamingBlockIndex?: number | null | undefined;
-  model: ModelOption;
+  model: string;
   permissionMode: PermissionMode;
+  /** Active harness driving this session — inherited from the leader. */
+  harness?: string;
   /** Adaptive-thinking config sent to the SDK on every query() call. */
   thinkingConfig: ThinkingConfig;
   /** Set when this minion represents an SDK Agent-tool subagent (no independent session) */
@@ -90,6 +92,156 @@ function extractCore(d: MinionData): SessionStreamState {
     turns: d.turns,
     error: d.error,
   };
+}
+
+const MINION_LOG_ROLE: Record<
+  MinionMessage["role"],
+  { label: string; color: string; background: string }
+> = {
+  user: {
+    label: "Task",
+    color: "var(--accent)",
+    background: "color-mix(in srgb, var(--accent) 10%, transparent)",
+  },
+  assistant: {
+    label: "Assistant",
+    color: "var(--text-primary)",
+    background: "var(--bg-primary)",
+  },
+  result: {
+    label: "Result",
+    color: "var(--success-color)",
+    background: "var(--success-bg)",
+  },
+  system: {
+    label: "Status",
+    color: "var(--text-secondary)",
+    background: "var(--bg-primary)",
+  },
+  thinking: {
+    label: "Thinking",
+    color: "var(--text-secondary)",
+    background: "var(--bg-primary)",
+  },
+  tool: {
+    label: "Tool",
+    color: "var(--text-muted)",
+    background: "var(--bg-primary)",
+  },
+};
+
+function MinionLogEntry({
+  msg,
+  onAddContentNode,
+}: {
+  msg: MinionMessage;
+  onAddContentNode?: ((content: string) => void) | undefined;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = msg.content.length > 700 || msg.content.split("\n").length > 10;
+  const renderedText =
+    !expanded && isLong ? `${msg.content.slice(0, 700).trimEnd()}...` : msg.content;
+  const meta = MINION_LOG_ROLE[msg.role];
+  const isMarkdown = msg.role === "assistant" || msg.role === "result";
+
+  return (
+    <div
+      className={msg.role === "assistant" ? "copyable" : undefined}
+      style={{
+        position: "relative",
+        display: "grid",
+        gridTemplateColumns: "72px minmax(0, 1fr)",
+        gap: 8,
+        alignItems: "start",
+        padding: "7px 8px",
+        borderRadius: 5,
+        background: meta.background,
+        border: "1px solid var(--border-subtle, var(--border-default))",
+      }}
+    >
+      {msg.role === "assistant" && <CopyButton text={msg.content} />}
+      {msg.role === "assistant" && (
+        <AddAsNodeButton text={msg.content} onAdd={onAddContentNode} />
+      )}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+          minWidth: 0,
+        }}
+      >
+        <span
+          style={{
+            width: "fit-content",
+            maxWidth: "100%",
+            padding: "1px 5px",
+            borderRadius: 3,
+            fontSize: 9,
+            lineHeight: 1.3,
+            fontFamily: "var(--font-mono)",
+            color: meta.color,
+            background: "var(--bg-elevated)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {meta.label}
+        </span>
+        {msg.role === "user" && <UserContextHeader />}
+      </div>
+      <div
+        style={{
+          minWidth: 0,
+          color: meta.color,
+          fontSize: msg.role === "system" ? 11 : 12,
+          lineHeight: 1.45,
+          fontFamily:
+            msg.role === "system" || msg.role === "thinking"
+              ? "var(--font-mono)"
+              : "var(--font-sans)",
+          whiteSpace: isMarkdown ? "normal" : "pre-wrap",
+          wordBreak: "break-word",
+          overflowWrap: "break-word",
+        }}
+      >
+        {isMarkdown ? <SimpleMarkdown text={renderedText} /> : renderedText}
+        {msg.suffix && (
+          <span
+            style={{
+              display: "inline-block",
+              marginLeft: 6,
+              fontSize: 10,
+              fontFamily: "var(--font-mono)",
+              color: "var(--text-muted)",
+            }}
+          >
+            {msg.suffix}
+          </span>
+        )}
+        {isLong && (
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              display: "block",
+              marginTop: 6,
+              padding: 0,
+              background: "transparent",
+              border: "none",
+              color: "var(--success-color)",
+              cursor: "pointer",
+              fontSize: 10,
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            {expanded ? "show less" : "show more"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function MinionNodeRenderer({
@@ -332,7 +484,25 @@ export function MinionNodeRenderer({
                 activeStep: null,
               };
             }
-            emitUpdate({ ...current, taskQueue: tasks });
+            const label =
+              trigger === "step"
+                ? "Step"
+                : trigger === "done"
+                  ? "Done"
+                  : "Failed";
+            emitUpdate({
+              ...current,
+              taskQueue: tasks,
+              messages: [
+                ...current.messages,
+                {
+                  id: msgId(),
+                  role: "system" as const,
+                  content: `${label}: ${message}`,
+                  timestamp: Date.now(),
+                },
+              ],
+            });
           }
         }
         return;
@@ -478,6 +648,7 @@ export function MinionNodeRenderer({
         // Minions don't create their own worktrees — they inherit the leader's.
         // Pass cwd so the session runs in the project dir (not the server's cwd).
         worktreeIsolation: false,
+        ...(current.harness && !current.sessionKey ? { harness: current.harness } : {}),
         ...(projectPath ? { cwd: projectPath } : {}),
       });
 
@@ -514,7 +685,7 @@ export function MinionNodeRenderer({
   }, [socketSend]);
 
   const handleModelChange = useCallback(
-    (model: ModelOption) => {
+    (model: string) => {
       const current = dataRef.current;
       onUpdateData({ ...current, model });
       if (socketSend && current.sessionKey) {
@@ -553,6 +724,7 @@ export function MinionNodeRenderer({
   const completedCount = data.taskQueue.filter((t) => t.status === "completed").length;
   const totalTasks = data.taskQueue.length;
   const progressPct = totalTasks > 0 ? (completedCount / totalTasks) * 100 : 0;
+  const logMessages = data.messages.filter((m) => m.role !== "tool");
 
   const priorityColors: Record<string, string> = PRIORITY_COLORS;
 
@@ -737,6 +909,7 @@ export function MinionNodeRenderer({
           thinkingConfig={data.thinkingConfig ?? MINION_THINKING_CONFIG}
           onThinkingConfigChange={handleThinkingConfigChange}
           accent="var(--success-color)"
+          harness={data.harness ?? "claude"}
         />
       )}
 
@@ -974,7 +1147,7 @@ export function MinionNodeRenderer({
           >
             ▶
           </span>
-          Log ({data.messages.length})
+          Log ({logMessages.length})
         </button>
 
         {showLog && (
@@ -982,38 +1155,22 @@ export function MinionNodeRenderer({
             ref={outputRef}
             onMouseDown={(e) => e.stopPropagation()}
             style={{
-              maxHeight: 240,
+              maxHeight: 320,
               overflow: "auto",
-              padding: "6px 10px",
+              padding: "8px 10px",
               display: "flex",
               flexDirection: "column",
-              gap: 4,
+              gap: 6,
+              background: "var(--bg-secondary)",
             }}
           >
-            {data.messages
-              .filter((m) => m.role !== "tool")
-              .map((msg) => (
-                <div
-                  key={msg.id}
-                  className={msg.role === "assistant" ? "copyable" : undefined}
-                  style={{
-                    ...chatRoleStyle(msg.role as ChatRole, { density: "compact" }),
-                    position: "relative",
-                    maxHeight: 120,
-                    overflow: "hidden",
-                  }}
-                >
-                  {msg.role === "assistant" && <CopyButton text={msg.content} />}
-                  {msg.role === "assistant" && <AddAsNodeButton text={msg.content} onAdd={onAddContentNode} />}
-                  {msg.role === "user" && <UserContextHeader />}
-                  {msg.content}
-                  {msg.suffix && (
-                    <span style={{ display: "inline-block", marginLeft: 6, fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", opacity: 0.7 }}>
-                      {msg.suffix}
-                    </span>
-                  )}
-                </div>
-              ))}
+            {logMessages.map((msg) => (
+              <MinionLogEntry
+                key={msg.id}
+                msg={msg}
+                onAddContentNode={onAddContentNode}
+              />
+            ))}
             {/* Streaming partial text in log */}
             {data.streamingText ? (
               <StreamingBubble text={data.streamingText} role="assistant" density="compact" />

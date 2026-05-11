@@ -119,7 +119,8 @@ describe("settings routes", () => {
 
     const getRes = await fetch(`${baseUrl}/${encoded}/settings`);
     const body = (await getRes.json()) as Record<string, unknown>;
-    expect(body).toEqual(settings);
+    // readSettings merges in defaults for new harness fields; assert written values are preserved
+    expect(body).toMatchObject(settings);
   });
 
   it("GET returns the documented defaults when settings.json is absent", async () => {

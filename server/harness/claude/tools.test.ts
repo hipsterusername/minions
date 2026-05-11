@@ -13,13 +13,13 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { z } from "zod/v4";
+import { z, type ZodTypeAny } from "zod/v4";
 import { wrapTools } from "./tools.ts";
 import type { NormalizedToolDef } from "../types.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function makeDef(name: string, schema = z.object({ value: z.string() })): NormalizedToolDef {
+function makeDef(name: string, schema: ZodTypeAny = z.object({ value: z.string() })): NormalizedToolDef {
   return {
     name,
     description: `${name} tool`,

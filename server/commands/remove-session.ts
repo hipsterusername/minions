@@ -1,7 +1,11 @@
 /**
- * remove_session — tear down a session completely. Cancels the query,
+ * remove_session — tear down a session completely. Cancels the run,
  * removes the worktree if present, drops the row from SQLite, and
  * broadcasts an updated session list.
+ *
+ * Phase A: migrated from queryHandle to runControl.
+ * close() is fire-and-forget if present; absence is silently ignored — this
+ * is a teardown path, not a user-facing feature gate.
  */
 
 import { unicastGlobal } from "../bus.ts";
@@ -18,7 +22,8 @@ export const removeSession: CommandHandler = (ctx, cmd, ws) => {
   const host = ctx.registry.get(cmd.sessionKey);
   if (host) {
     host.clearWaitTimer();
-    if (host.queryHandle) host.queryHandle.close();
+    // Fire-and-forget; missing close() is a no-op on teardown.
+    void host.runControl?.close?.();
     host.abortController.abort();
 
     if (host.worktree) {

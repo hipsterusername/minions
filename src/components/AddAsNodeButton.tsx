@@ -16,11 +16,17 @@ import { useState, useCallback } from "react";
 export function AddAsNodeButton({
   text,
   onAdd,
+  layout = "absolute",
 }: {
   text: string;
   onAdd?: ((content: string) => void) | undefined;
+  layout?: "absolute" | "inline";
 }) {
   const [added, setAdded] = useState(false);
+  const placementStyle =
+    layout === "absolute"
+      ? { position: "absolute" as const, top: 4, right: 32 }
+      : { position: "static" as const, flex: "0 0 auto" };
 
   const handleAdd = useCallback(
     (e: React.MouseEvent) => {
@@ -42,9 +48,7 @@ export function AddAsNodeButton({
       title="Add as node"
       className="copy-btn"
       style={{
-        position: "absolute",
-        top: 4,
-        right: 32,
+        ...placementStyle,
         width: 24,
         height: 24,
         display: "flex",

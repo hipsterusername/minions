@@ -50,17 +50,6 @@ describe("clear_session", () => {
     expect(h.busSent).toHaveLength(0);
   });
 
-  it("is a no-op when the session is being created", () => {
-    const h = setup();
-    h.host.status = "creating";
-    h.host.eventBuffer = [fakeEvent("leader-1")];
-
-    clearSession(h.ctx, cmd({ type: "clear_session" }), h.ws);
-
-    expect(h.host.eventBuffer).toHaveLength(1);
-    expect(h.busSent).toHaveLength(0);
-  });
-
   it("is a no-op when sessionKey is missing", () => {
     const h = setup({ status: "idle" });
     h.host.eventBuffer = [fakeEvent("leader-1")];

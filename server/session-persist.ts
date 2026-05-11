@@ -119,6 +119,12 @@ export interface PersistableSession {
   worktreeIsolation: boolean;
   totalCost: number;
   turns: number;
+  /**
+   * Registered AgentHarness name driving this session. Persisted so the
+   * restored host resumes on the same harness it started on. Defaults
+   * to "claude" when the row was written before this column existed.
+   */
+  harnessName: string;
 }
 
 function sessionToRow(
@@ -138,6 +144,7 @@ function sessionToRow(
     worktree_isolation: s.worktreeIsolation ? 1 : 0,
     total_cost: s.totalCost,
     turns: s.turns,
+    harness_name: s.harnessName,
     // created_at is only used when the row is new; upsert preserves the
     // existing value on conflict so it's safe to send "now" here as a
     // placeholder — the schema default would cover new rows anyway, but

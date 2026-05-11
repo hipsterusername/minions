@@ -20,6 +20,7 @@ import { sendMessage } from "./send-message.ts";
 import { stopSession } from "./stop-session.ts";
 import { syncSession } from "./sync-session.ts";
 import { listSessions } from "./list-sessions.ts";
+import { listHarnesses } from "./list-harnesses.ts";
 import { interrupt, interruptSession } from "./interrupt.ts";
 import { closeSession } from "./close-session.ts";
 import { removeSession } from "./remove-session.ts";
@@ -64,6 +65,7 @@ export const COMMAND_TABLE = {
   stop_session: stopSession,
   sync_session: syncSession,
   list_sessions: listSessions,
+  list_harnesses: listHarnesses,
   // Execution control
   interrupt,
   interrupt_session: interruptSession,

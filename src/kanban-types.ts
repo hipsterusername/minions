@@ -4,7 +4,7 @@ export interface KanbanSubtask {
   done: boolean;
 }
 
-export type ModelOption = "sonnet" | "opus" | "opus-old" | "haiku";
+export type ModelOption = string;
 export type PermissionMode = "auto" | "bypassPermissions" | "default" | "plan" | "acceptEdits";
 
 export type BlockReason =
@@ -55,6 +55,12 @@ export interface KanbanCard {
   blockDetail?: string | undefined;
   /** True if this card was auto-created to represent a canvas agent (not manually created from backlog) */
   autoSynced?: boolean | undefined;
+  /** Temporary card-composer state while AI Finish is creating or failed to create the card */
+  composerState?: "creating" | "error" | undefined;
+  /** Session key for the card-composer job backing this temporary card */
+  composerSessionKey?: string | undefined;
+  /** Human-readable error from the card-composer job */
+  composerError?: string | undefined;
 }
 
 export interface KanbanColumn {

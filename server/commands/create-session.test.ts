@@ -18,6 +18,10 @@ import { SessionRegistry } from "../session-registry.ts";
 import { SessionHost } from "../session-host.ts";
 import type { CommandContext, WsCommand } from "./types.ts";
 import type { Bus } from "../bus.ts";
+import type { StartSessionOptions } from "../session-host.ts";
+// Side-effect: registers EchoHarness so the harness-validation branch can
+// look it up via `registeredHarnessNames()`.
+import "../harness/echo/index.ts";
 
 interface SentMessage {
   payload: unknown;
@@ -53,6 +57,12 @@ function makeCtx(registry: SessionRegistry, maxSessions: number): CommandContext
     bus: makeBus(),
     generateKey: () => "auto-key",
     maxSessions,
+    routines: {
+      list: () => [],
+      get: () => null,
+      register: () => {},
+      remove: () => {},
+    } as unknown as CommandContext["routines"],
   };
 }
 
@@ -175,6 +185,119 @@ describe("createSession — rejection routing", () => {
     const env = sent[0]?.payload as Record<string, unknown>;
     expect(env["topic"]).toBe("global");
     expect(env["type"]).toBe("error");
+  });
+
+  it("forwards `permissionMode` into registry.start so the harness sees it", () => {
+    const registry = new SessionRegistry();
+    const starts: StartSessionOptions[] = [];
+    (registry as unknown as { start: (opts: StartSessionOptions) => void }).start = (
+      opts,
+    ) => {
+      starts.push(opts);
+    };
+
+    const { ws } = makeFakeWs();
+    const ctx = makeCtx(registry, 50);
+    const cmd: WsCommand = {
+      type: "create_session",
+      sessionKey: "leader-perm",
+      prompt: "hi",
+      cwd: process.cwd(),
+      permissionMode: "bypassPermissions",
+    };
+
+    createSession(ctx, cmd, ws as unknown as Parameters<typeof createSession>[2]);
+
+    expect(starts).toHaveLength(1);
+    expect(starts[0]?.permissionMode).toBe("bypassPermissions");
+  });
+
+  it("omits permissionMode from the registry.start payload when the command lacks it", () => {
+    const registry = new SessionRegistry();
+    const starts: StartSessionOptions[] = [];
+    (registry as unknown as { start: (opts: StartSessionOptions) => void }).start = (
+      opts,
+    ) => {
+      starts.push(opts);
+    };
+
+    const { ws } = makeFakeWs();
+    const ctx = makeCtx(registry, 50);
+    const cmd: WsCommand = {
+      type: "create_session",
+      sessionKey: "leader-no-perm",
+      prompt: "hi",
+      cwd: process.cwd(),
+    };
+
+    createSession(ctx, cmd, ws as unknown as Parameters<typeof createSession>[2]);
+
+    expect(starts).toHaveLength(1);
+    expect(starts[0]).not.toHaveProperty("permissionMode");
+  });
+
+  it("forwards a valid `harness` into registry.start so the host runs on it", () => {
+    const registry = new SessionRegistry();
+    // Capture every registry.start() call.
+    const starts: StartSessionOptions[] = [];
+    (registry as unknown as { start: (opts: StartSessionOptions) => void }).start = (
+      opts,
+    ) => {
+      starts.push(opts);
+    };
+
+    const { ws, sent } = makeFakeWs();
+    const ctx = makeCtx(registry, 50);
+    const cmd: WsCommand = {
+      type: "create_session",
+      sessionKey: "leader-echo",
+      prompt: "hi",
+      cwd: process.cwd(),
+      harness: "echo",
+    };
+
+    createSession(ctx, cmd, ws as unknown as Parameters<typeof createSession>[2]);
+
+    expect(starts).toHaveLength(1);
+    expect(starts[0]?.harness).toBe("echo");
+    const types = sent.map((m) => (m.payload as { type: string }).type);
+    expect(types).toContain("session_created");
+    expect(types).not.toContain("session_error");
+  });
+
+  it("rejects an unknown harness with a session-scoped session_error and does not start a host", () => {
+    const registry = new SessionRegistry();
+    const starts: StartSessionOptions[] = [];
+    (registry as unknown as { start: (opts: StartSessionOptions) => void }).start = (
+      opts,
+    ) => {
+      starts.push(opts);
+    };
+
+    const { ws, sent } = makeFakeWs();
+    const ctx = makeCtx(registry, 50);
+    const cmd: WsCommand = {
+      type: "create_session",
+      sessionKey: "leader-bad-harness",
+      prompt: "hi",
+      cwd: process.cwd(),
+      harness: "definitely-not-registered",
+    };
+
+    createSession(ctx, cmd, ws as unknown as Parameters<typeof createSession>[2]);
+
+    // Host was never started.
+    expect(starts).toHaveLength(0);
+    expect(registry.has("leader-bad-harness")).toBe(false);
+
+    // Session-scoped session_error envelope so the LeaderNode reducer
+    // surfaces it; a global `error` would be silently dropped.
+    expect(sent).toHaveLength(1);
+    const env = sent[0]?.payload as Record<string, unknown>;
+    expect(env["topic"]).toBe("session:leader-bad-harness");
+    expect(env["type"]).toBe("session_error");
+    expect(env["error"]).toMatch(/Unknown harness/);
+    expect(env["error"]).toMatch(/definitely-not-registered/);
   });
 
   it("routes invalid-cwd rejection to the session topic too", () => {

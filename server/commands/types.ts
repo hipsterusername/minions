@@ -19,6 +19,7 @@ export type WsCommandType =
   | "stop_session"
   | "sync_session"
   | "list_sessions"
+  | "list_harnesses"
   // Execution control
   | "interrupt"
   | "interrupt_session"
@@ -109,6 +110,14 @@ export interface WsCommand {
   formAnswers?: Record<string, unknown>;
   // Request ID for correlating async responses
   requestId?: string;
+  /**
+   * Name of the registered AgentHarness to drive this session.
+   * Honoured only by `create_session`; mid-thread switches via `send_message`
+   * are intentionally ignored — the host's existing `harnessName` wins so a
+   * Claude conversation cannot silently flip into Codex (or vice versa) on a
+   * follow-up turn. See docs/codex-harness-spec.md §3 / Open Questions §1.
+   */
+  harness?: string;
 }
 
 /**

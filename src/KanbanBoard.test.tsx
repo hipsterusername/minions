@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, act } from "@testing-library/react";
 import { useReducer } from "react";
 import { KanbanBoard } from "./KanbanBoard.tsx";
 import {
@@ -22,6 +22,7 @@ import type { CanvasNode } from "./types.ts";
 import type { DisplayMessage } from "./sdk-messages.ts";
 import type { LeaderData } from "./nodes/LeaderNode.tsx";
 import type { RenderState } from "../shared/render-dsl.ts";
+import type { ServerMessage } from "./use-socket.ts";
 
 function makeCard(overrides: Partial<KanbanCard> = {}): KanbanCard {
   return {
@@ -112,12 +113,22 @@ function Harness({
   onCloseCard = vi.fn(),
   onResume = vi.fn(),
   nodes = [],
+  socketSend = vi.fn(),
+  socketSubscribe = (() => () => {}) as {
+    (fn: (msg: ServerMessage) => void): () => void;
+    (topic: string, fn: (msg: ServerMessage) => void): () => void;
+  },
 }: {
   initial: KanbanBoardType;
   onLaunchLeader?: (card: KanbanCard) => void;
   onCloseCard?: (card: KanbanCard) => void;
   onResume?: (card: KanbanCard) => void;
   nodes?: CanvasNode[];
+  socketSend?: (data: unknown) => void;
+  socketSubscribe?: {
+    (fn: (msg: ServerMessage) => void): () => void;
+    (topic: string, fn: (msg: ServerMessage) => void): () => void;
+  };
 }) {
   const [board, dispatch] = useReducer(kanbanReducer, initial);
   return (
@@ -128,8 +139,8 @@ function Harness({
       onCloseCard={onCloseCard}
       onResume={onResume}
       leaderStatuses={new Map()}
-      socketSend={() => {}}
-      socketSubscribe={() => () => {}}
+      socketSend={socketSend}
+      socketSubscribe={socketSubscribe}
       projectPath="/tmp/p"
       nodes={nodes}
     />
@@ -208,10 +219,10 @@ describe("KanbanBoard — Add card flow", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /add new card/i }));
 
-    const titleInput = screen.getByLabelText(/card title/i);
-    fireEvent.change(titleInput, { target: { value: "Brand new task" } });
+    const taskInput = screen.getByLabelText(/agent task/i);
+    fireEvent.change(taskInput, { target: { value: "Brand new task" } });
 
-    fireEvent.click(screen.getByRole("button", { name: /add card/i }));
+    fireEvent.click(screen.getByRole("button", { name: /create card/i }));
 
     expect(screen.getByText("Brand new task")).toBeInTheDocument();
   });
@@ -220,8 +231,81 @@ describe("KanbanBoard — Add card flow", () => {
     render(<Harness initial={makeBoard()} />);
 
     fireEvent.click(screen.getByRole("button", { name: /add new card/i }));
-    const submit = screen.getByRole("button", { name: /add card/i });
+    const submit = screen.getByRole("button", { name: /create card/i });
     expect(submit).toBeDisabled();
+  });
+
+  it("starts a structured card-composer job and adds the returned card", () => {
+    const socketSend = vi.fn();
+    let subscribedTopic = "";
+    let listener: ((msg: ServerMessage) => void) | null = null;
+    const socketSubscribe = vi.fn((topicOrFn: string | ((msg: ServerMessage) => void), maybeFn?: (msg: ServerMessage) => void) => {
+      if (typeof topicOrFn === "string") {
+        subscribedTopic = topicOrFn;
+        listener = maybeFn ?? null;
+      } else {
+        listener = topicOrFn;
+      }
+      return () => {};
+    }) as {
+      (fn: (msg: ServerMessage) => void): () => void;
+      (topic: string, fn: (msg: ServerMessage) => void): () => void;
+    };
+
+    render(
+      <Harness
+        initial={makeBoard()}
+        socketSend={socketSend}
+        socketSubscribe={socketSubscribe}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /add new card/i }));
+    fireEvent.change(screen.getByLabelText(/agent task/i), {
+      target: { value: "Make the settings page easier to scan" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /ai finish/i }));
+
+    expect(screen.getByText("Make the settings page easier to scan")).toBeInTheDocument();
+    expect(screen.getByText("Creating...")).toBeInTheDocument();
+    expect(screen.getByText("Creating card...")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /add new card/i }));
+    expect(screen.getByLabelText(/agent task/i)).not.toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /cancel adding card/i }));
+
+    expect(socketSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "create_session",
+        role: "card-composer",
+        permissionMode: "plan",
+        worktreeIsolation: false,
+      }),
+    );
+    const startCommand = socketSend.mock.calls[0]?.[0] as { sessionKey: string };
+    expect(subscribedTopic).toBe(`session:${startCommand.sessionKey}`);
+
+    act(() => {
+      listener?.({
+        type: "kanban_card_created",
+        sessionKey: startCommand.sessionKey,
+        timestamp: Date.now(),
+        card: {
+          title: "Improve settings scanability",
+          description: "Make the settings page easier to scan.",
+          context: "Group related controls and tighten labels.",
+          priority: "medium",
+          subtasks: ["Group controls", "Clarify labels"],
+        },
+      });
+    });
+
+    expect(screen.getByText("Improve settings scanability")).toBeInTheDocument();
+    expect(screen.queryByText("Creating...")).toBeNull();
+    expect(socketSend).toHaveBeenCalledWith({
+      type: "close_session",
+      sessionKey: startCommand.sessionKey,
+    });
   });
 });
 
@@ -396,5 +480,91 @@ describe("KanbanBoard inspector — Dashboard tab", () => {
     fireEvent.click(screen.getByRole("button", { name: /^dashboard$/i }));
 
     expect(screen.getByText(/no dashboard yet/i)).toBeInTheDocument();
+  });
+});
+
+/**
+ * The bug was: the inspector's read-only config view rendered subtasks
+ * as toggle-only labels, with no add/remove. After the polish pass the
+ * subtask editor is the same component regardless of column, so callers
+ * can manage the list from any state. These tests pin that behaviour
+ * down end-to-end through the reducer.
+ */
+describe("KanbanBoard — inspector subtask editor", () => {
+  it("adds a subtask from the inspector for an in-progress card", () => {
+    const sk = "sess-sub-1";
+    const card = makeCard({
+      id: "c-sub",
+      title: "Has subtasks",
+      columnId: "in-progress",
+      leaderNodeId: "leader-" + sk,
+      subtasks: [{ id: "s1", title: "Existing", done: false }],
+    });
+    render(<Harness initial={makeBoard([card])} nodes={[makeLeaderNode(sk)]} />);
+    fireEvent.click(screen.getByText("Has subtasks"));
+    fireEvent.click(screen.getByRole("button", { name: /^config$/i }));
+
+    const input = screen.getByLabelText(/new subtask/i);
+    fireEvent.change(input, { target: { value: "Fresh subtask" } });
+    fireEvent.click(screen.getByRole("button", { name: /add subtask/i }));
+
+    expect(screen.getAllByText("Fresh subtask").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Existing").length).toBeGreaterThan(0);
+  });
+
+  it("removes a subtask from the inspector", () => {
+    const sk = "sess-sub-2";
+    const card = makeCard({
+      id: "c-rm",
+      title: "Removable",
+      columnId: "in-progress",
+      leaderNodeId: "leader-" + sk,
+      subtasks: [
+        { id: "s-keep", title: "Keep me", done: false },
+        { id: "s-drop", title: "Drop me", done: false },
+      ],
+    });
+    render(<Harness initial={makeBoard([card])} nodes={[makeLeaderNode(sk)]} />);
+    fireEvent.click(screen.getByText("Removable"));
+    fireEvent.click(screen.getByRole("button", { name: /^config$/i }));
+
+    fireEvent.click(screen.getByRole("button", { name: /remove subtask: drop me/i }));
+
+    expect(screen.queryByText("Drop me")).toBeNull();
+    expect(screen.getAllByText("Keep me").length).toBeGreaterThan(0);
+  });
+
+  it("toggles a subtask's done state", () => {
+    const sk = "sess-sub-3";
+    const card = makeCard({
+      id: "c-toggle",
+      title: "Toggleable",
+      columnId: "in-progress",
+      leaderNodeId: "leader-" + sk,
+      subtasks: [{ id: "s-t", title: "Check me", done: false }],
+    });
+    render(<Harness initial={makeBoard([card])} nodes={[makeLeaderNode(sk)]} />);
+    fireEvent.click(screen.getByText("Toggleable"));
+    fireEvent.click(screen.getByRole("button", { name: /^config$/i }));
+
+    const checkbox = screen.getByRole("checkbox", { name: /check me/i });
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(checkbox);
+    expect(checkbox).toBeChecked();
+  });
+});
+
+describe("KanbanBoard — inspector save feedback", () => {
+  it("flashes a Saved state on the CardForm submit after saving a backlog card", () => {
+    const card = makeCard({ id: "c-save", title: "Edit me", columnId: "backlog" });
+    render(<Harness initial={makeBoard([card])} />);
+
+    fireEvent.click(screen.getByText("Edit me"));
+    // Config tab is the default for backlog cards.
+    const saveBtn = screen.getByRole("button", { name: /^save$/i });
+    fireEvent.click(saveBtn);
+
+    // Button label transitions to "Saved" in the same render pass.
+    expect(screen.getByRole("button", { name: /^saved$/i })).toBeInTheDocument();
   });
 });

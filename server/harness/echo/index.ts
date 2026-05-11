@@ -22,7 +22,9 @@ import { registerHarness } from "../index.ts";
 import type {
   AgentHarness,
   HarnessCapabilities,
+  HarnessRunControl,
   HarnessStartOptions,
+  HarnessStaticInfo,
   NormalizedToolDef,
 } from "../types.ts";
 import type { NormalizedEvent } from "../../../shared/normalized-event.ts";
@@ -46,7 +48,6 @@ class EchoHarness implements AgentHarness {
   readonly capabilities = ECHO_CAPABILITIES;
   readonly builtInTools: string[] = [];
 
-  private aborted = false;
   private registeredDefs: NormalizedToolDef[] = [];
 
   registerTools(toolGroups: Record<string, NormalizedToolDef[]>): void {
@@ -62,39 +63,65 @@ class EchoHarness implements AgentHarness {
     return alias || null;
   }
 
-  /** Abort a running session. Idempotent. */
-  abort(): void {
-    this.aborted = true;
+  /** Static introspection — safe to call before, during, and after start(). */
+  staticInfo(): HarnessStaticInfo {
+    return {
+      models: [{ id: "echo", label: "Echo" }],
+      commands: [],
+      agents: [],
+      account: { provider: "echo" },
+    };
   }
 
   /**
-   * Yield `init`, then an assistant `text` event containing the prompt text,
-   * then `done`. If `abort()` is called before the generator resumes, the
-   * session ends with `reason: "abort"`.
+   * Start the echo session. Returns the event stream plus a per-run control
+   * surface. start() is synchronous — the AbortController is created before
+   * returning so abort() is safe to call immediately.
+   *
+   * Yields `init`, then an assistant `text` event containing the prompt text,
+   * then `done`. If the AbortSignal fires before the text event, the session
+   * ends with `reason: "abort"`.
    */
-  async *start(opts: HarnessStartOptions): AsyncIterable<NormalizedEvent> {
-    this.aborted = false;
+  start(opts: HarnessStartOptions): { events: AsyncIterable<NormalizedEvent>; control: HarnessRunControl } {
+    const ac = new AbortController();
+    // Wire the incoming signal into our local controller. Also handle the case
+    // where the signal was already aborted before we registered the listener —
+    // in that scenario the "abort" event has already fired and won't fire again.
+    opts.abortSignal.addEventListener("abort", () => ac.abort(), { once: true });
+    if (opts.abortSignal.aborted) ac.abort();
+    let aborted = false;
 
-    const sessionId = `echo-${Date.now().toString(36)}`;
-    yield { kind: "init", sessionId, model: opts.model || "echo" };
+    async function* makeEvents(): AsyncGenerator<NormalizedEvent> {
+      const sessionId = `echo-${Date.now().toString(36)}`;
+      yield { kind: "init", sessionId, model: opts.model || "echo" };
 
-    if (opts.abortSignal.aborted || this.aborted) {
-      yield { kind: "done", reason: "abort" };
-      return;
+      if (ac.signal.aborted || aborted) {
+        yield { kind: "done", reason: "abort" };
+        return;
+      }
+
+      const promptText =
+        typeof opts.prompt === "string"
+          ? opts.prompt
+          : await collectPrompt(opts.prompt);
+
+      if (ac.signal.aborted || aborted) {
+        yield { kind: "done", reason: "abort" };
+        return;
+      }
+
+      yield { kind: "text", text: promptText, role: "assistant" };
+      yield { kind: "done", reason: "stop" };
     }
 
-    const promptText =
-      typeof opts.prompt === "string"
-        ? opts.prompt
-        : await collectPrompt(opts.prompt);
+    const control: HarnessRunControl = {
+      abort(): void {
+        aborted = true;
+        ac.abort();
+      },
+    };
 
-    if (opts.abortSignal.aborted || this.aborted) {
-      yield { kind: "done", reason: "abort" };
-      return;
-    }
-
-    yield { kind: "text", text: promptText, role: "assistant" };
-    yield { kind: "done", reason: "stop" };
+    return { events: makeEvents(), control };
   }
 }
 
