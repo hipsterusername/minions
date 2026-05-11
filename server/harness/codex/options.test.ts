@@ -25,24 +25,28 @@ describe("resolveCodexModel", () => {
   });
 
   it.each([
-    ["codex", "gpt-5-codex"],
-    ["default", "gpt-5-codex"],
-    ["fast", "gpt-5-codex-mini"],
+    ["codex", "gpt-5.5"],
+    ["default", "gpt-5.5"],
+    ["fast", "gpt-5.5"],
+    ["codex-default", "gpt-5.5"],
+    ["gpt-5", "gpt-5.5"],
+    ["gpt-5-codex", "gpt-5.5"],
+    ["gpt-5-codex-mini", "gpt-5.5"],
+    ["gpt-5.4", "gpt-5.4"],
   ] as const)("maps alias '%s' to '%s'", (alias, expected) => {
     expect(resolveCodexModel(alias)).toBe(expected);
   });
 
   it.each([
-    ["CODEX", "gpt-5-codex"],
-    ["Default", "gpt-5-codex"],
-    ["FAST", "gpt-5-codex-mini"],
-    ["Codex", "gpt-5-codex"],
+    ["CODEX", "gpt-5.5"],
+    ["Default", "gpt-5.5"],
+    ["FAST", "gpt-5.5"],
+    ["Codex", "gpt-5.5"],
   ] as const)("resolves alias '%s' case-insensitively", (alias, expected) => {
     expect(resolveCodexModel(alias)).toBe(expected);
   });
 
   it("passes through unknown aliases unchanged", () => {
-    expect(resolveCodexModel("gpt-5-codex")).toBe("gpt-5-codex");
     expect(resolveCodexModel("some-custom-model-id")).toBe("some-custom-model-id");
     expect(resolveCodexModel("gpt-4o")).toBe("gpt-4o");
   });
@@ -65,11 +69,12 @@ describe("CODEX_STATIC_MODELS", () => {
     }
   });
 
-  it("includes the three expected model IDs", () => {
+  it("exposes only current ChatGPT-backed Codex model options", () => {
     const ids = CODEX_STATIC_MODELS.map((m) => m.id);
-    expect(ids).toContain("gpt-5-codex");
-    expect(ids).toContain("gpt-5-codex-mini");
-    expect(ids).toContain("gpt-5");
+    expect(ids).toEqual(["gpt-5.5", "gpt-5.4"]);
+    expect(ids).not.toContain("gpt-5");
+    expect(ids).not.toContain("gpt-5-codex");
+    expect(ids).not.toContain("gpt-5-codex-mini");
   });
 });
 

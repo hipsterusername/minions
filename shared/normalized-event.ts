@@ -55,7 +55,10 @@ export type NormalizedEvent =
   | {
       kind: "done";
       reason: "stop" | "abort" | "error" | "completed";
+      /** Display-safe error summary. */
       error?: string;
+      /** Full diagnostic detail for copy/debug surfaces. */
+      fullError?: string;
       /** Result text from a successful completion (mirrors SDK result.result). */
       result?: string;
       /** Total number of turns for the session (mirrors SDK result.num_turns). */

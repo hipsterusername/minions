@@ -1,6 +1,6 @@
 # Codex Harness Extension Spec
 
-**Status:** Phases A/B complete; Phase C is next (updated 2026-05-10)
+**Status:** Phases A–E complete; remaining items are out-of-scope deferrals (updated 2026-05-10)
 **Scope:** add a Codex-backed `AgentHarness` alongside the existing Claude harness.
 
 ## Executive Summary
@@ -110,8 +110,13 @@ now made that seam load-bearing for the current app:
 - **Codex permission mapping is not wired.** `HarnessStartOptions` has
   `sessionKey` already; Phase D still needs `permissionMode` so Codex can map it
   to `approvalPolicy` and `sandboxMode`.
-- **UI selection is still Phase E.** The data needed by the UI is now in sync
-  payloads, but `SessionToolbar` and `model-meta.ts` remain Claude-oriented.
+- **UI selection is complete (Phase E).** `SessionToolbar` is now harness-aware
+  via the `list_harnesses` command and the `HarnessListProvider` context;
+  the model dropdown is scoped to the active harness's `staticInfo().models`,
+  and capability gates hide the permission selector / thinking controls when
+  the harness lacks support. The harness pill is render-only once
+  `sessionKey` is set, in line with Open Questions §1 (mid-session swap
+  remains deferred).
 
 ### Validation run
 
@@ -289,12 +294,26 @@ Update:
   `get_supported_agents`, and `get_account_info` read the corresponding field
   from `staticInfo()` instead of routing through `runControl`.
 - Phase E: `src/components/SessionToolbar.tsx` reads `harnessCapabilities` to
-  decide which controls render. Model dropdown becomes harness-scoped.
-- Phase E: `src/model-meta.ts` either
-  (a) becomes a per-harness map keyed by harness name, or
-  (b) is moved into harness modules and re-exported through a registry call.
-  Pick (b) — it puts the metadata next to the harness that owns it and keeps
-  `model-meta.ts` from gaining a `claude:`/`codex:` switch.
+  decide which controls render. Model dropdown becomes harness-scoped. **Done.**
+  The toolbar now hides the permission selector when the harness lacks
+  `permissionPrompts`, hides the thinking effort + display toggle when the
+  harness lacks `thinking`, drops the `plan` permission option for Codex
+  specifically (no capability flag covers it), and renders the harness pill
+  display-only once `sessionKey` is set so mid-session swap stays deferred
+  (Open Questions §1).
+- Phase E: harness inventory is exposed through a new global
+  `list_harnesses` WS command (`server/commands/list-harnesses.ts`); the
+  client subscribes via `HarnessListProvider` (`src/use-harness-list.tsx`)
+  and looks up by name with `findHarness(harnesses, name)`. Static info
+  comes from each harness's `staticInfo()` plus its declared
+  `capabilities` and `builtInTools` — no claude/codex switch in
+  `model-meta.ts`. **Done.**
+- Phase E: `src/model-meta.ts` accepts an optional `HarnessInfo` argument
+  and gates the entire surface on `harness.capabilities.thinking` first.
+  Per-Claude-model entries (Haiku has no thinking; Opus 4.7 supports
+  `xhigh`/`max`) still win for known Claude IDs; otherwise a thinking-
+  capable harness gets the standard low/medium/high effort levels, which
+  is the Codex shape. **Done.**
 
 ## Codex Harness
 
@@ -658,18 +677,53 @@ Implemented:
       `harness: "codex"` produces an `init` event whose `model` matches the
       requested model.
 
-### Phase E — UI + later hardening (not required for MVP)
+### Phase E — UI selector + capability gating (complete)
 
-- Move `src/model-meta.ts` data into per-harness modules; surface via
-  `harnessCapabilities` from sync.
-- Harness selector in `src/components/SessionToolbar.tsx`; gate
-  thinking/permission controls by capability.
-- Render Codex `todo_list` items in the plan UI (Open Question §2).
-- Add `usage.reasoningOutput` and surface it on the dashboard.
-- Mid-session harness swap.
-- Migrate Claude onto the bridge for parity (latency permitting).
-- README/preflight: install `codex` CLI, `OPENAI_API_KEY`/`CODEX_API_KEY`,
-  optional `CODEX_PATH`.
+Implemented:
+
+1. New global `list_harnesses` WS command + `harness_list` envelope
+   (`server/commands/list-harnesses.ts`). Returns one entry per registered
+   harness with `name`, `capabilities`, `builtInTools`, `models`,
+   `commands`, `agents`, and `account` — pulled directly from
+   `staticInfo()` plus declared flags. Tested in
+   `server/commands/list-harnesses.test.ts`.
+2. Client provider/hook (`src/use-harness-list.tsx`,
+   `src/harness-list.ts`). One `list_harnesses` request fires per
+   project view on connect; descendants read the inventory via
+   `useHarnessList()` and the `findHarness(harnesses, name)` helper.
+3. `src/components/SessionToolbar.tsx` is harness-aware:
+   - Renders a harness picker when more than one harness is registered;
+     selectable before `sessionKey` is set, display-only afterwards.
+   - Model dropdown uses the active harness's `staticInfo().models`.
+   - Permission selector hidden when `capabilities.permissionPrompts`
+     is false; `plan` mode dropped for the Codex harness specifically.
+   - Thinking effort + show/hide toggle hidden when the harness or
+     model lacks adaptive thinking.
+   - Interrupt button hidden when `capabilities.partialMessages` is
+     false (Codex run-control exposes only `abort`).
+4. `src/model-meta.ts` accepts an optional `HarnessInfo` argument so
+   the per-model capability check is gated on the harness's overall
+   thinking flag without re-introducing a `claude:`/`codex:` switch.
+5. Node integration: `LeaderNode`, `ClaudeSessionNode`, and `MinionNode`
+   carry an optional `harness` field on their data, pass it through
+   `create_session`, and hydrate it from `sync_response.harness`.
+   Minions inherit display-only — leaders own the picker.
+6. Toolbar tests: `src/components/SessionToolbar.test.tsx` covers
+   selector visibility, mid-session display-only, capability gating,
+   Codex `plan` filtering, and harness-scoped model lists.
+
+Still deferred (intentionally out of Phase E scope):
+
+- **Codex `todo_list` rendering in the plan UI** (Open Question §2).
+- **`usage.reasoningOutput`** on the dashboard (Open Question §3).
+- **Mid-session harness swap** (Open Question §1).
+- **External MCP for Codex** — Codex external MCP support depends on
+  the Phase D dropped-server warning being replaced with a normalized
+  source shape and per-harness renderers. The toolbar does not yet
+  surface a "Codex external MCP unavailable" affordance.
+- **Claude-on-bridge migration** (Open Question §4).
+- **README/preflight: install `codex` CLI, `OPENAI_API_KEY`/`CODEX_API_KEY`,
+  optional `CODEX_PATH`** — documentation only; not required to ship the UI.
 
 ## Acceptance Criteria
 

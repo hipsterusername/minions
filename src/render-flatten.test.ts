@@ -104,6 +104,24 @@ describe("flattenRenderStateToText", () => {
     expect(full).toContain("```bash\nexport TOKEN=xyz\n```");
   });
 
+  it("formats callouts even when variant has been elided from persisted state", () => {
+    // Regression: server/render-tools.ts runs elideDefaults on incoming
+    // components, which strips `variant: "info"` (the documented default).
+    // Connecting such a Dashboard to a Leader pipes that state through
+    // flattenRenderStateToText, so the formatter must tolerate a missing
+    // variant rather than crashing on `c.variant.toUpperCase()`.
+    const elidedCallout = {
+      id: "cl",
+      type: "callout",
+      content: "heads up",
+    } as unknown as RenderComponent;
+
+    const out = flattenRenderStateToText(state([elidedCallout]));
+
+    expect(out).toContain("[INFO]");
+    expect(out).toContain("heads up");
+  });
+
   it("joins multiple components with blank-line separators", () => {
     const out = flattenRenderStateToText(
       state([

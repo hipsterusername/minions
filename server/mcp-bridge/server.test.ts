@@ -23,6 +23,9 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { z } from "zod/v4";
+import type { WebSocketServer } from "ws";
+import { createBus } from "../bus.ts";
+import { createRenderToolsForLeader } from "../render-tools.ts";
 import { createMemoizedAttempt, startBridgeServer, type McpBridgeServer } from "./server.ts";
 import type { McpBridgeRegistration } from "./registry.ts";
 import type { NormalizedToolDef } from "../harness/types.ts";
@@ -129,13 +132,65 @@ describe("MCP bridge HTTP server", () => {
     );
     expect(res.status).toBe(200);
     const result = res.json?.result as {
-      tools: Array<{ name: string; description: string; inputSchema: { type: string } }>;
+      tools: Array<{
+        name: string;
+        description: string;
+        inputSchema: { type: string };
+        annotations: {
+          readOnlyHint: boolean;
+          destructiveHint: boolean;
+          openWorldHint: boolean;
+          idempotentHint?: boolean;
+        };
+      }>;
     };
     const names = result.tools.map((t) => t.name).sort();
     expect(names).toEqual(["plan_task", "throwing_tool"]);
     // JSON Schema shape sanity check — z.toJSONSchema produces type:object.
     const planTask = result.tools.find((t) => t.name === "plan_task");
     expect(planTask?.inputSchema.type).toBe("object");
+    expect(planTask?.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+    });
+  });
+
+  it("tools/list preserves explicit tool annotations", async () => {
+    const annotated = bridge.register({
+      sessionKey: "session-c",
+      groups: {
+        "task-manager": [
+          makeDef({
+            name: "get_task_status",
+            annotations: {
+              readOnlyHint: true,
+              destructiveHint: false,
+              openWorldHint: false,
+              idempotentHint: true,
+            },
+          }),
+        ],
+      },
+    });
+
+    const res = await postJsonRpc(
+      annotated.urlFor("task-manager"),
+      { jsonrpc: "2.0", id: 20, method: "tools/list" },
+      { token: annotated.bearerToken },
+    );
+    const result = res.json?.result as {
+      tools: Array<{ name: string; annotations: Record<string, boolean> }>;
+    };
+    expect(result.tools[0]).toMatchObject({
+      name: "get_task_status",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        openWorldHint: false,
+        idempotentHint: true,
+      },
+    });
   });
 
   it("tools/list for a different group returns that group's tools only", async () => {
@@ -146,6 +201,44 @@ describe("MCP bridge HTTP server", () => {
     );
     const result = res.json?.result as { tools: Array<{ name: string }> };
     expect(result.tools.map((t) => t.name)).toEqual(["report_step"]);
+  });
+
+  it("tools/list exposes render components as objects for schema-limited harnesses", async () => {
+    const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+    const { toolDefs } = createRenderToolsForLeader({
+      leaderSessionKey: "render-schema",
+      bus,
+    });
+    const renderRegistration = bridge.register({
+      sessionKey: "render-schema",
+      groups: { "render-dashboard": toolDefs },
+    });
+
+    const res = await postJsonRpc(
+      renderRegistration.urlFor("render-dashboard"),
+      { jsonrpc: "2.0", id: 30, method: "tools/list" },
+      { token: renderRegistration.bearerToken },
+    );
+
+    expect(res.status).toBe(200);
+    const result = res.json?.result as {
+      tools: Array<{
+        name: string;
+        inputSchema: {
+          properties?: Record<string, { items?: Record<string, unknown> }>;
+        };
+      }>;
+    };
+    const renderSet = result.tools.find((t) => t.name === "render_set");
+    const componentItems = renderSet?.inputSchema.properties?.["components"]?.items as
+      | { type?: string; required?: string[]; properties?: Record<string, unknown> }
+      | undefined;
+
+    expect(componentItems?.type).toBe("object");
+    expect(componentItems?.required).toEqual(["id", "type"]);
+    expect(componentItems?.properties?.["type"]).toMatchObject({
+      enum: expect.arrayContaining(["metric", "chart", "section", "file-preview"]),
+    });
   });
 
   it("tools/call invokes the handler and returns its result", async () => {
@@ -164,6 +257,41 @@ describe("MCP bridge HTTP server", () => {
     expect(result.content[0]?.text).toBe('{"value":"hello"}');
   });
 
+  it("tools/call rejects invalid render component arguments before state mutation", async () => {
+    const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+    const { toolDefs, renderState } = createRenderToolsForLeader({
+      leaderSessionKey: "render-call",
+      bus,
+    });
+    const renderRegistration = bridge.register({
+      sessionKey: "render-call",
+      groups: { "render-dashboard": toolDefs },
+    });
+
+    const res = await postJsonRpc(
+      renderRegistration.urlFor("render-dashboard"),
+      {
+        jsonrpc: "2.0",
+        id: 31,
+        method: "tools/call",
+        params: {
+          name: "render_set",
+          arguments: { components: ['{"id":"x","type":"text","content":"bad"}'] },
+        },
+      },
+      { token: renderRegistration.bearerToken },
+    );
+
+    expect(res.status).toBe(200);
+    const result = res.json?.result as {
+      isError?: boolean;
+      content: Array<{ type: string; text: string }>;
+    };
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain("invalid arguments");
+    expect(renderState.components).toEqual([]);
+  });
+
   it("tools/call surfaces a thrown handler as isError true", async () => {
     const res = await postJsonRpc(
       registration.urlFor("task-manager"),
@@ -171,7 +299,7 @@ describe("MCP bridge HTTP server", () => {
         jsonrpc: "2.0",
         id: 5,
         method: "tools/call",
-        params: { name: "throwing_tool", arguments: {} },
+        params: { name: "throwing_tool", arguments: { value: "trigger" } },
       },
       { token: registration.bearerToken },
     );

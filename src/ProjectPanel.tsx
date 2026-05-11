@@ -4,21 +4,17 @@ import {
   updateProjectContext,
   getProjectTree,
   type ProjectContext,
-  type ProjectSettings,
   type TreeNode,
 } from "./api.ts";
 import type { CanvasNode } from "./types.ts";
 import type { LeaderData } from "./nodes/LeaderNode.tsx";
 import type { MinionData } from "./nodes/MinionNode.tsx";
 import { ProjectTree, type LeaderActivity } from "./components/ProjectTree.tsx";
-import { useTheme } from "./use-theme.ts";
 
 interface ProjectPanelProps {
   projectId: string;
   projectPath: string;
   projectName: string;
-  settings: ProjectSettings;
-  onSettingsChange?: (settings: ProjectSettings) => void;
   onSpawnContextExplorer: () => void;
   nodes: CanvasNode[];
   /** Called when user clicks a file in the project tree */
@@ -58,7 +54,7 @@ function shortenPath(p: string, maxLen = 36): string {
   return parts[0] + "/…/" + parts.slice(-2).join("/");
 }
 
-type Tab = "dashboard" | "context" | "settings";
+type Tab = "dashboard" | "context";
 
 // ── Status colors ────────────────────────────────────────
 
@@ -82,15 +78,12 @@ export function ProjectPanel({
   projectId,
   projectPath,
   projectName,
-  settings,
-  onSettingsChange,
   onSpawnContextExplorer,
   nodes,
   onOpenFile,
   onUpdateNodeData,
   onFocusNode,
 }: ProjectPanelProps) {
-  const { themeId, setTheme, themes: allThemes } = useTheme();
   const [collapsed, setCollapsed] = useState(true);
   const userCollapsedRef = useRef(false);
   const [context, setContext] = useState<ProjectContext | null>(null);
@@ -218,9 +211,7 @@ export function ProjectPanel({
   }, [hasLeaderData]);
 
   // ── Tabs to show ──
-  const tabs: Tab[] = contextIsEmpty
-    ? ["context", "settings"]
-    : ["dashboard", "context", "settings"];
+  const tabs: Tab[] = contextIsEmpty ? ["context"] : ["dashboard", "context"];
 
   // ── Collapsed state ──
 
@@ -638,308 +629,6 @@ export function ProjectPanel({
             )}
           </>
         )}
-
-        {/* ─── Settings Tab ─── */}
-        {activeTab === "settings" && (
-          <div>
-            {/* ── Theme Selector ── */}
-            <div style={{ marginBottom: 20 }}>
-              <label
-                style={{
-                  display: "block",
-                  fontSize: 11,
-                  fontFamily: "var(--font-mono)",
-                  color: "var(--text-muted)",
-                  textTransform: "uppercase",
-                  letterSpacing: 0.5,
-                  marginBottom: 8,
-                }}
-              >
-                Theme
-              </label>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 6,
-                }}
-              >
-                {allThemes.map((t) => {
-                  const isActive = t.id === themeId;
-                  return (
-                    <button
-                      key={t.id}
-                      onClick={() => setTheme(t.id)}
-                      title={t.description}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: "7px 9px",
-                        background: isActive ? "var(--bg-elevated)" : "transparent",
-                        border: isActive
-                          ? "1px solid var(--accent)"
-                          : "1px solid var(--border-default)",
-                        borderRadius: 6,
-                        cursor: "pointer",
-                        transition: "border-color 120ms ease, background 120ms ease",
-                        outline: "none",
-                        textAlign: "left",
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!isActive)
-                          (e.currentTarget as HTMLElement).style.borderColor =
-                            "var(--border-hover)";
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!isActive)
-                          (e.currentTarget as HTMLElement).style.borderColor =
-                            "var(--border-default)";
-                      }}
-                    >
-                      {/* Swatch */}
-                      <div
-                        style={{
-                          width: 20,
-                          height: 20,
-                          borderRadius: 4,
-                          background: t.swatch.bg,
-                          border: `2px solid ${t.swatch.accent}`,
-                          flexShrink: 0,
-                          position: "relative",
-                          overflow: "hidden",
-                        }}
-                      >
-                        {/* Accent dot */}
-                        <div
-                          style={{
-                            position: "absolute",
-                            bottom: 1,
-                            right: 1,
-                            width: 6,
-                            height: 6,
-                            borderRadius: "50%",
-                            background: t.swatch.accent,
-                          }}
-                        />
-                      </div>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          fontFamily: "var(--font-sans)",
-                          color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
-                          fontWeight: isActive ? 600 : 400,
-                          lineHeight: 1.2,
-                        }}
-                      >
-                        {t.name}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* ── Separator ── */}
-            <div
-              style={{
-                height: 1,
-                background: "var(--border-default)",
-                marginBottom: 16,
-              }}
-            />
-
-            <div style={{ marginBottom: 16 }}>
-              <label
-                style={{
-                  display: "block",
-                  fontSize: 11,
-                  fontFamily: "var(--font-mono)",
-                  color: "var(--text-muted)",
-                  textTransform: "uppercase",
-                  letterSpacing: 0.5,
-                  marginBottom: 4,
-                }}
-              >
-                Default Permission Mode
-              </label>
-              <select
-                value={settings.defaultPermissionMode ?? "auto"}
-                onChange={(e) =>
-                  onSettingsChange?.({ ...settings, defaultPermissionMode: e.target.value })
-                }
-                style={{
-                  width: "100%",
-                  fontSize: 12,
-                  color: "var(--text-secondary)",
-                  padding: "6px 10px",
-                  background: "var(--bg-primary)",
-                  border: "1px solid var(--border-primary)",
-                  borderRadius: 4,
-                  fontFamily: "var(--font-mono)",
-                  cursor: "pointer",
-                  outline: "none",
-                }}
-              >
-                <option value="auto">Auto (Safe Approve)</option>
-                <option value="bypassPermissions">Bypass Permissions</option>
-                <option value="default">Default (Ask)</option>
-              </select>
-            </div>
-            <div style={{ marginBottom: 16 }}>
-              <label
-                style={{
-                  display: "block",
-                  fontSize: 11,
-                  fontFamily: "var(--font-mono)",
-                  color: "var(--text-muted)",
-                  textTransform: "uppercase",
-                  letterSpacing: 0.5,
-                  marginBottom: 4,
-                }}
-              >
-                Default Leader Model
-              </label>
-              <select
-                value={settings.defaultLeaderModel ?? "opus"}
-                onChange={(e) =>
-                  onSettingsChange?.({ ...settings, defaultLeaderModel: e.target.value })
-                }
-                style={{
-                  width: "100%",
-                  fontSize: 12,
-                  color: "var(--text-secondary)",
-                  padding: "6px 10px",
-                  background: "var(--bg-primary)",
-                  border: "1px solid var(--border-primary)",
-                  borderRadius: 4,
-                  fontFamily: "var(--font-mono)",
-                  cursor: "pointer",
-                  outline: "none",
-                }}
-              >
-                <option value="sonnet">Sonnet</option>
-                <option value="opus">Opus 4.7</option>
-                <option value="opus-old">Opus 4.6</option>
-                <option value="haiku">Haiku</option>
-              </select>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: "var(--text-muted)",
-                  marginTop: 3,
-                  fontFamily: "var(--font-sans)",
-                }}
-              >
-                Model used when spawning new Leader nodes
-              </div>
-            </div>
-            <div style={{ marginBottom: 16 }}>
-              <label
-                style={{
-                  display: "block",
-                  fontSize: 11,
-                  fontFamily: "var(--font-mono)",
-                  color: "var(--text-muted)",
-                  textTransform: "uppercase",
-                  letterSpacing: 0.5,
-                  marginBottom: 4,
-                }}
-              >
-                Default Minion Model
-              </label>
-              <select
-                value={settings.defaultMinionModel ?? "sonnet"}
-                onChange={(e) =>
-                  onSettingsChange?.({ ...settings, defaultMinionModel: e.target.value })
-                }
-                style={{
-                  width: "100%",
-                  fontSize: 12,
-                  color: "var(--text-secondary)",
-                  padding: "6px 10px",
-                  background: "var(--bg-primary)",
-                  border: "1px solid var(--border-primary)",
-                  borderRadius: 4,
-                  fontFamily: "var(--font-mono)",
-                  cursor: "pointer",
-                  outline: "none",
-                }}
-              >
-                <option value="sonnet">Sonnet</option>
-                <option value="opus">Opus 4.7</option>
-                <option value="opus-old">Opus 4.6</option>
-                <option value="haiku">Haiku</option>
-              </select>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: "var(--text-muted)",
-                  marginTop: 3,
-                  fontFamily: "var(--font-sans)",
-                }}
-              >
-                Model used when spawning new Minion nodes
-              </div>
-            </div>
-
-            {/* ── Separator ── */}
-            <div
-              style={{
-                height: 1,
-                background: "var(--border-default)",
-                margin: "16px 0",
-              }}
-            />
-
-            <div>
-              <label
-                style={{
-                  display: "block",
-                  fontSize: 11,
-                  fontFamily: "var(--font-mono)",
-                  color: "var(--text-muted)",
-                  textTransform: "uppercase",
-                  letterSpacing: 0.5,
-                  marginBottom: 4,
-                }}
-              >
-                Default Worktree Isolation
-              </label>
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontFamily: "var(--font-mono)",
-                  color: "var(--text-secondary)",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={settings.defaultWorktreeIsolation !== false}
-                  onChange={(e) =>
-                    onSettingsChange?.({ ...settings, defaultWorktreeIsolation: e.target.checked })
-                  }
-                  style={{ cursor: "pointer" }}
-                />
-                Enable for new Leader nodes
-              </label>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: "var(--text-muted)",
-                  marginTop: 3,
-                  fontFamily: "var(--font-sans)",
-                }}
-              >
-                Leaders work in an isolated git worktree branch with approval-based merging
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -1058,6 +747,7 @@ function DashboardView({
   const [treeError, setTreeError] = useState(false);
   const [viewMode, setViewMode] = useState<"tree" | "agents">("tree");
   const [filterActive, setFilterActive] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const fetchedRef = useRef(false);
 
   const refreshTree = useCallback(async () => {
@@ -1235,6 +925,57 @@ function DashboardView({
 
       {viewMode === "tree" && (
         <>
+          {/* In-tree fuzzy filter */}
+          <div
+            style={{
+              padding: "8px 12px",
+              borderBottom: "1px solid var(--border-default)",
+              position: "relative",
+            }}
+          >
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Filter files…"
+              aria-label="Filter files"
+              style={{
+                width: "100%",
+                padding: "6px 28px 6px 10px",
+                fontSize: 12,
+                fontFamily: "var(--font-mono)",
+                background: "var(--bg-primary)",
+                border: "1px solid var(--border-default)",
+                borderRadius: 6,
+                color: "var(--text-primary)",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                aria-label="Clear filter"
+                style={{
+                  position: "absolute",
+                  right: 18,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--text-muted)",
+                  cursor: "pointer",
+                  padding: 4,
+                  fontSize: 12,
+                  lineHeight: 1,
+                }}
+              >
+                ×
+              </button>
+            )}
+          </div>
+
           {/* Filter toggle for tree view */}
           {leaderActivities.some(l => l.files.length > 0) && (
             <div
@@ -1274,6 +1015,7 @@ function DashboardView({
               leaders={leaderActivities}
               projectPath={projectPath}
               filterActive={filterActive}
+              query={searchQuery}
               onFileClick={onOpenFile}
               onTreeChanged={refreshTree}
             />

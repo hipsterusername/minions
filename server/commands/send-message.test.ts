@@ -17,6 +17,7 @@ interface StartCall {
   role?: string;
   thinkingConfig?: unknown;
   attachments?: unknown;
+  harness?: string;
 }
 
 const createWorktreeCalls: { cwd: string; key: string }[] = [];
@@ -228,6 +229,27 @@ describe("send_message", () => {
     const failed = h.busSent.find((e) => e.type === "worktree_failed");
     expect(failed).toBeDefined();
     expect(failed!["error"]).toContain("git failed");
+  });
+
+  it("resumes with the host's existing harnessName, even when a different harness is on the cmd", () => {
+    const h = setup();
+    h.host.harnessName = "echo";
+    const { calls } = captureRegistryStart(h);
+
+    sendMessage(
+      h.ctx,
+      cmd({
+        type: "send_message",
+        sessionKey: "leader-1",
+        prompt: "next turn",
+        // cmd-supplied harness override is intentionally ignored mid-thread
+        harness: "claude",
+      }),
+      h.ws,
+    );
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.harness).toBe("echo");
   });
 
   it("forwards a refreshed thinkingConfig from the cmd onto the resume call", () => {

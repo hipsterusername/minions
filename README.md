@@ -1,6 +1,6 @@
 # Minions
 
-A canvas for managing agentic context and workflows. Give a Leader agent a complex task, and it automatically spawns parallel Minion agents that collaborate in real time.
+A canvas for managing agentic context and workflows. Give a Leader agent a complex task, and it spawns parallel Minion agents that collaborate in real time.
 
 > **Status**: Early development. Shared for private testing — expect rough edges.
 
@@ -11,9 +11,9 @@ A canvas for managing agentic context and workflows. Give a Leader agent a compl
 Minions gives you a spatial interface on top of Claude Code:
 
 - **Infinite canvas** — drag, zoom, arrange nodes visually
-- **Leader/Minion orchestration** — give a Leader a complex task, and it automatically spawns Minion agents, wires them up, and tracks progress through a live task board
+- **Leader/Minion orchestration** — give a Leader a complex task, and it spawns Minion agents, wires them up, and tracks progress through a live task board
 - **Kanban board** — plan work as cards with priorities, models, and skills, then launch Leaders directly from the board
-- **Git worktree isolation** — each Minion works in its own worktree so parallel agents don't conflict
+- **Git worktree isolation** — each Minion works in its own worktree so parallel agents don't conflict, and changes route through an explicit approval flow before merging
 - **Skills browser** — browse, create, and launch pre-configured skill templates
 - **Project management** — persistent projects with SQLite storage, session history, cost tracking
 
@@ -54,7 +54,7 @@ That's it. No environment variables, no database setup, no Docker — SQLite han
 ### Leader/Minion Orchestration
 
 1. Click the **+** button on the canvas toolbar and add a **Leader** node
-2. Give the Leader a complex task — it plans the work and automatically spawns **Minion** agents
+2. Give the Leader a complex task — it plans the work and spawns **Minion** agents
 3. Minion nodes appear on the canvas, automatically wired to the Leader
 4. Each Minion works independently in its own git worktree
 5. The Leader tracks progress, integrates results, and reports back
@@ -73,9 +73,13 @@ That's it. No environment variables, no database setup, no Docker — SQLite han
 Click **+** on the canvas toolbar to add:
 
 - **Leader** — orchestrator agent that decomposes work and delegates to Minions
-- **Note** — sticky notes for quick reminders on the canvas
 - **Markdown** — rich documentation and notes
-- **Context Group** — group context together to feed into Leader sessions
+- **Image** — drop in screenshots or diagrams as canvas context
+- **Dashboard** — render DSL component view (also driven by Leader render tools)
+- **Routine** — scheduled or recurring agent runs
+- **Context Group** — group nodes together to feed as context into Leader sessions
+
+Folder and File Viewer nodes are created automatically when you drag in directories or files.
 
 ## Configuration
 
@@ -92,6 +96,14 @@ Set them as environment variables:
 PORT=8080 pnpm start
 ```
 
+To pre-approve all in-process MCP tools so the Leader/Minion flow runs without interactive permission prompts:
+
+```bash
+pnpm configure
+```
+
+This writes a project-level allowlist to `.claude/settings.json`.
+
 ## Scripts
 
 | Command | What it does |
@@ -106,13 +118,12 @@ PORT=8080 pnpm start
 | `pnpm test:coverage` | Run all tests once and produce a coverage report |
 | `pnpm verify` | Run the full CI gate locally (typecheck + test:run + build) |
 | `pnpm preflight` | Validate prerequisites |
+| `pnpm configure` | Run preflight, then pre-approve all in-process MCP tools |
 
 ## Testing & development workflow
 
 Tests are required for all behavioural changes. The full strategy is in
-[`docs/testing-strategy.md`](./docs/testing-strategy.md); the upcoming
-refactor's per-phase test plan is in
-[`docs/refactor-test-plan.md`](./docs/refactor-test-plan.md).
+[`docs/testing-strategy.md`](./docs/testing-strategy.md).
 
 The short version:
 
@@ -132,10 +143,10 @@ The short version:
    `tests/contracts/`; architecture-fitness tests under
    `tests/architecture/`.
 
-The architecture-fitness suite encodes invariants from the architecture
-review (server file size ceilings, no cross-tree imports, broadcast call
-site count) — they fail CI when a PR drifts past the documented
-allowlists in `tests/architecture/baselines.ts`.
+The architecture-fitness suite encodes invariants enforced in CI:
+server file size ceilings (≤ 400 lines), no cross-tree imports between
+`src/` and `server/`, broadcasts only through `server/bus.ts`, and a
+handler registered for every WebSocket command.
 
 ## Architecture
 
@@ -156,15 +167,19 @@ Browser (localhost:5173)
 
 ```
 src/                  Frontend React application
-  nodes/              Node type components (ClaudeSession, Leader, Minion, etc.)
-  prompts/            System prompts for Leader/Minion behavior
+  nodes/              Node type components (Leader, Minion, ClaudeSession, …)
+  prompts/            System prompts shared with the frontend
   components/         Shared UI components
 server/               Backend Express + WebSocket server
+  agents/             Per-agent (leader, minion, default) wiring
+  commands/           Per-command WebSocket handlers
   routes/             REST API route handlers
-  task-tools.ts       MCP tools for Leader task management
+  task-tools/         MCP tools for Leader task management
   minion-tools.ts     MCP tools for Minion reporting
-  worktree.ts         Git worktree lifecycle management
-scripts/              Utility scripts (preflight checks)
+  render-tools.ts     MCP tools for Dashboard render DSL
+  bus.ts              Typed event bus — all broadcasts go through here
+  worktree*.ts        Git worktree lifecycle and approval flow
+scripts/              Utility scripts (preflight, permission setup)
 ```
 
 ## Troubleshooting

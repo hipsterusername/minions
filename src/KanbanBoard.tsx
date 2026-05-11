@@ -10,7 +10,6 @@ import type {
 import { getAllSkills, getSkill } from "./skills/registry.ts";
 import type { SkillTemplate } from "./skills/types.ts";
 import type { ServerMessage } from "./use-socket.ts";
-import { CardCreationChat } from "./CardCreationChat.tsx";
 import type { CanvasNode } from "./types.ts";
 import { DEFAULT_THINKING_CONFIG } from "./types.ts";
 import type { ProjectSettings } from "./api.ts";
@@ -18,6 +17,8 @@ import type { LeaderData, TaskPlanItem } from "./nodes/LeaderNode.tsx";
 import type { DisplayMessage } from "./sdk-messages.ts";
 import { msgId } from "./sdk-messages.ts";
 import { buildLeaderSystemPrompt } from "./prompts/build-leader-prompt.ts";
+import { useHarnessList } from "./use-harness-list.tsx";
+import type { HarnessInfo } from "./harness-list.ts";
 import {
   RenderComponentView,
   gridColumnFor,
@@ -82,6 +83,11 @@ function shortToolName(toolName: string): string {
 type ChatGroup =
   | { kind: "msg"; msg: DisplayMessage }
   | { kind: "tools"; id: string; toolNames: string[]; count: number };
+
+type AiComposeJob = {
+  sessionKey: string;
+  placeholderCardId: string;
+};
 
 /**
  * Walk the message list once, producing a render plan that:
@@ -204,12 +210,89 @@ interface CardFormData {
   linkedContextNodeIds: string[];
 }
 
-const MODEL_LABELS: Record<ModelOption, string> = {
+/**
+ * Fallback labels used before the harness inventory finishes loading or
+ * when a card references a model id no harness reports. Once
+ * `useHarnessList` returns results, those labels win — see `useModelInventory`.
+ */
+const MODEL_LABELS: Record<string, string> = {
   sonnet: "Sonnet",
   opus: "Opus 4.7",
   "opus-old": "Opus 4.6",
   haiku: "Haiku",
 };
+
+interface ModelOptionEntry {
+  id: string;
+  label: string;
+  harness: string;
+  providerLabel: string;
+}
+
+interface ModelInventory {
+  /** Flat list of all available `(harness, model)` pairs, in inventory order. */
+  options: ModelOptionEntry[];
+  /** Map of model id → display label. Includes legacy aliases as a fallback. */
+  labels: Record<string, string>;
+  /** Grouped per provider for UIs that need to render section headers. */
+  groups: { harness: string; providerLabel: string; models: ModelOptionEntry[] }[];
+  /** True once the harness inventory has answered at least once. */
+  loaded: boolean;
+}
+
+function providerLabelFor(h: HarnessInfo): string {
+  const provider = String(h.account.provider ?? h.name).toLowerCase();
+  if (provider === "openai") return "OpenAI";
+  if (provider === "anthropic" || provider === "claude") return "Anthropic";
+  if (provider === "echo") return "Echo";
+  return h.name.charAt(0).toUpperCase() + h.name.slice(1);
+}
+
+/**
+ * Build a unified model catalog from the harness inventory.
+ *
+ * Falls back to the Claude defaults (Sonnet/Opus/Opus-old/Haiku) when the
+ * inventory is still loading so the inspector never renders an empty
+ * picker. Once `harnesses` arrives, models from every harness — including
+ * OpenAI/GPT — are exposed.
+ */
+function useModelInventory(): ModelInventory {
+  const { harnesses, loaded } = useHarnessList();
+  return useMemo<ModelInventory>(() => {
+    if (harnesses.length === 0) {
+      const fallback: ModelOptionEntry[] = (Object.keys(MODEL_LABELS) as string[]).map((id) => ({
+        id,
+        label: MODEL_LABELS[id] ?? id,
+        harness: "claude",
+        providerLabel: "Anthropic",
+      }));
+      return {
+        options: fallback,
+        labels: { ...MODEL_LABELS },
+        groups: [{ harness: "claude", providerLabel: "Anthropic", models: fallback }],
+        loaded,
+      };
+    }
+    const options: ModelOptionEntry[] = [];
+    const labels: Record<string, string> = { ...MODEL_LABELS };
+    const groups: ModelInventory["groups"] = [];
+    for (const h of harnesses) {
+      const providerLabel = providerLabelFor(h);
+      const entries = h.models.map((m) => ({
+        id: m.id,
+        label: m.label,
+        harness: h.name,
+        providerLabel,
+      }));
+      for (const e of entries) {
+        options.push(e);
+        labels[e.id] = e.label;
+      }
+      if (entries.length > 0) groups.push({ harness: h.name, providerLabel, models: entries });
+    }
+    return { options, labels, groups, loaded };
+  }, [harnesses, loaded]);
+}
 
 const PERMISSION_LABELS: Record<PermissionMode, string> = {
   auto: "Auto",
@@ -448,8 +531,19 @@ function CardForm({
     initial?.linkedContextNodeIds ?? [],
   );
   const [configExpanded, setConfigExpanded] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const modelInventory = useModelInventory();
 
   useEscapeKey(onCancel, true);
+
+  // Clear the "Saved" pulse after a short delay so it acts as a flash, not a
+  // permanent state. 1.6s is long enough to register but not block the user
+  // from making a follow-up edit.
+  useEffect(() => {
+    if (savedAt === null) return;
+    const id = setTimeout(() => setSavedAt(null), 1600);
+    return () => clearTimeout(id);
+  }, [savedAt]);
 
   const handleAddSubtask = () => {
     const trimmed = newSubtask.trim();
@@ -476,6 +570,7 @@ function CardForm({
       skillValues,
       linkedContextNodeIds,
     });
+    setSavedAt(Date.now());
   };
 
   const hasNonDefaultConfig =
@@ -631,7 +726,7 @@ function CardForm({
           {hasNonDefaultConfig && (
             <span className="kb-form__config-badge" aria-label="Custom configuration">
               {[
-                model !== "sonnet" ? MODEL_LABELS[model] : null,
+                model !== "sonnet" ? (modelInventory.labels[model] ?? MODEL_LABELS[model] ?? model) : null,
                 permissionMode !== "auto" ? PERMISSION_LABELS[permissionMode] : null,
                 !worktreeIsolation ? "No Worktree" : null,
                 skillIds.length > 0 ? `${skillIds.length} skill${skillIds.length !== 1 ? "s" : ""}` : null,
@@ -652,13 +747,18 @@ function CardForm({
               <select
                 id="kb-model"
                 className="kb-form__select"
-                value={model}
-                onChange={(e) => setModel(e.target.value as ModelOption)}
+                value={modelInventory.labels[model] ? model : modelInventory.options[0]?.id ?? model}
+                onChange={(e) => setModel(e.target.value)}
               >
-                <option value="sonnet">Sonnet</option>
-                <option value="opus">Opus 4.7</option>
-                <option value="opus-old">Opus 4.6</option>
-                <option value="haiku">Haiku</option>
+                {modelInventory.groups.map((group) => (
+                  <optgroup key={group.harness} label={group.providerLabel}>
+                    {group.models.map((m) => (
+                      <option key={`${group.harness}:${m.id}`} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
               </select>
             </div>
 
@@ -716,11 +816,208 @@ function CardForm({
         <button type="button" className="kb-btn kb-btn--ghost" onClick={onCancel}>
           Cancel
         </button>
-        <button type="submit" className="kb-btn kb-btn--primary" disabled={!title.trim()}>
-          {submitLabel}
+        <button
+          type="submit"
+          className={cx("kb-btn kb-btn--primary", savedAt !== null && "kb-btn--saved")}
+          disabled={!title.trim()}
+          aria-live="polite"
+        >
+          {savedAt !== null ? (
+            <>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <path d="M2.5 6.2l2.4 2.4L9.5 3.6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Saved
+            </>
+          ) : (
+            submitLabel
+          )}
         </button>
       </div>
     </form>
+  );
+}
+
+interface QuickCardDraft {
+  goal: string;
+  notes: string;
+}
+
+type AiComposeStatus = "idle" | "starting" | "working" | "error";
+
+function titleFromGoal(goal: string): string {
+  const firstLine = goal
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean) ?? "Untitled task";
+  const withoutMarkdown = firstLine
+    .replace(/^[-*#\s]+/, "")
+    .replace(/^task:\s*/i, "")
+    .trim();
+  if (withoutMarkdown.length <= 64) return withoutMarkdown || "Untitled task";
+  return withoutMarkdown.slice(0, 61).trimEnd() + "...";
+}
+
+function cardFromQuickDraft(
+  draft: QuickCardDraft,
+  defaultWorktreeIsolation?: boolean,
+): KanbanCard {
+  const description = draft.goal.trim();
+  const context = draft.notes.trim();
+  return {
+    id: genId(),
+    title: titleFromGoal(description),
+    description,
+    context,
+    priority: "medium",
+    subtasks: [],
+    columnId: "backlog",
+    createdAt: Date.now(),
+    model: "sonnet",
+    permissionMode: "auto",
+    worktreeIsolation: defaultWorktreeIsolation === true,
+    skillIds: [],
+    skillValues: {},
+    linkedContextNodeIds: [],
+  };
+}
+
+function promptForCardComposer(draft: QuickCardDraft, contextNodes: ContextNodeOption[]): string {
+  const availableContext = contextNodes.length > 0
+    ? contextNodes.map((node) => `- ${node.type}: ${node.label}`).join("\n")
+    : "- none";
+  return [
+    "Create one Kanban card from this quick draft.",
+    "",
+    "User goal:",
+    draft.goal.trim(),
+    "",
+    "Additional notes, files, constraints, or acceptance criteria:",
+    draft.notes.trim() || "(none provided)",
+    "",
+    "Canvas context nodes available to mention only if relevant:",
+    availableContext,
+  ].join("\n");
+}
+
+function QuickCardComposer({
+  onCreate,
+  onAiFinish,
+  onCancel,
+  aiStatus,
+  aiError,
+}: {
+  onCreate: (draft: QuickCardDraft) => void;
+  onAiFinish: (draft: QuickCardDraft) => void;
+  onCancel: () => void;
+  aiStatus: AiComposeStatus;
+  aiError: string | null;
+}) {
+  const [goal, setGoal] = useState("");
+  const [notes, setNotes] = useState("");
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const goalRef = useRef<HTMLTextAreaElement>(null);
+  const isWorking = aiStatus === "starting" || aiStatus === "working";
+  const canSubmit = goal.trim().length > 0 && !isWorking;
+
+  useEffect(() => {
+    goalRef.current?.focus();
+  }, []);
+
+  useEscapeKey(onCancel, !isWorking);
+
+  const draft = { goal, notes };
+
+  return (
+    <div className="kb-quick-backdrop" role="presentation">
+      <section className="kb-quick" role="dialog" aria-modal="true" aria-labelledby="kb-quick-title">
+        <header className="kb-quick__header">
+          <div>
+            <p className="kb-quick__eyebrow">Quick add</p>
+            <h2 id="kb-quick-title" className="kb-quick__title">What should the agent do?</h2>
+          </div>
+          <button
+            type="button"
+            className="kb-btn kb-btn--icon"
+            onClick={onCancel}
+            disabled={isWorking}
+            aria-label="Close quick add"
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </button>
+        </header>
+
+        <div className="kb-quick__body">
+          <textarea
+            ref={goalRef}
+            className="kb-quick__goal"
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            placeholder="Example: Add keyboard navigation to the project tree"
+            aria-label="Agent task"
+            rows={5}
+            disabled={isWorking}
+          />
+
+          <button
+            type="button"
+            className="kb-quick__details-toggle"
+            onClick={() => setDetailsOpen((v) => !v)}
+            aria-expanded={detailsOpen}
+          >
+            <ChevronIcon open={detailsOpen} />
+            Add context, files, or acceptance criteria
+          </button>
+
+          {detailsOpen && (
+            <textarea
+              className="kb-quick__notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Optional: file paths, constraints, edge cases, acceptance criteria..."
+              aria-label="Additional context"
+              rows={4}
+              disabled={isWorking}
+            />
+          )}
+
+          {aiError && (
+            <div className="kb-quick__error" role="alert">
+              {aiError}
+            </div>
+          )}
+        </div>
+
+        <footer className="kb-quick__footer">
+          <button
+            type="button"
+            className="kb-btn kb-btn--ghost"
+            onClick={onCancel}
+            disabled={isWorking}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="kb-btn kb-btn--secondary"
+            onClick={() => onCreate(draft)}
+            disabled={!canSubmit}
+          >
+            Create Card
+          </button>
+          <button
+            type="button"
+            className="kb-btn kb-btn--primary"
+            onClick={() => onAiFinish(draft)}
+            disabled={!canSubmit}
+          >
+            {isWorking ? "Finishing..." : "AI Finish"}
+          </button>
+        </footer>
+      </section>
+    </div>
   );
 }
 
@@ -812,6 +1109,8 @@ function BacklogCard({
   const cardPermission = card.permissionMode ?? "auto";
   const cardWorktree = card.worktreeIsolation ?? false;
   const cardSkillIds = card.skillIds ?? [];
+  const isComposerCreating = card.composerState === "creating";
+  const hasComposerError = card.composerState === "error";
   const taggedSkills = cardSkillIds
     .map((id) => getSkill(id))
     .filter((s): s is SkillTemplate => s !== undefined);
@@ -819,8 +1118,20 @@ function BacklogCard({
   return (
     <>
       <article
-        className={cx("kb-card", `kb-card--${card.priority}`, isSelected && "kb-card--selected")}
-        aria-label={`${card.title} - ${PRIORITY_LABELS[card.priority]} priority`}
+        className={cx(
+          "kb-card",
+          `kb-card--${card.priority}`,
+          isSelected && "kb-card--selected",
+          isComposerCreating && "kb-card--creating",
+          hasComposerError && "kb-card--compose-error",
+        )}
+        aria-label={
+          isComposerCreating
+            ? `${card.title} - creating`
+            : hasComposerError
+              ? `${card.title} - creation failed`
+              : `${card.title} - ${PRIORITY_LABELS[card.priority]} priority`
+        }
         onClick={() => onSelect(card.id)}
       >
         <div
@@ -834,15 +1145,32 @@ function BacklogCard({
           aria-expanded={expanded}
         >
           <span className="kb-card__title">{card.title}</span>
+          {isComposerCreating && <span className="kb-compose-pill">Creating...</span>}
+          {hasComposerError && <span className="kb-compose-pill kb-compose-pill--error">Failed</span>}
           <SubtaskBadge done={doneCount} total={totalCount} />
           <ChevronIcon open={expanded} />
         </div>
 
+        {(isComposerCreating || hasComposerError) && (
+          <div className="kb-compose-status" aria-live="polite">
+            <span
+              className={cx(
+                "kb-status__dot",
+                isComposerCreating ? "kb-status__dot--running" : "kb-status__dot--waiting",
+              )}
+              aria-hidden="true"
+            />
+            <span className="kb-status__text">
+              {isComposerCreating ? "Creating card..." : card.composerError ?? "Card creation failed."}
+            </span>
+          </div>
+        )}
+
         {/* Config chips row — always visible when non-default */}
-        {(cardModel !== "sonnet" || cardPermission !== "auto" || !cardWorktree || taggedSkills.length > 0) && (
+        {!isComposerCreating && (cardModel !== "sonnet" || cardPermission !== "auto" || !cardWorktree || taggedSkills.length > 0) && (
           <div className="kb-card__config-chips">
             {cardModel !== "sonnet" && (
-              <span className="kb-config-chip kb-config-chip--model">{MODEL_LABELS[cardModel]}</span>
+              <span className="kb-config-chip kb-config-chip--model">{MODEL_LABELS[cardModel] ?? cardModel}</span>
             )}
             {cardPermission !== "auto" && (
               <span className="kb-config-chip kb-config-chip--perm">{PERMISSION_LABELS[cardPermission]}</span>
@@ -889,12 +1217,14 @@ function BacklogCard({
             )}
 
             <div className="kb-card__actions">
-              <button className="kb-btn kb-btn--primary" onClick={() => onLaunchLeader(card)} aria-label={`Launch ${card.title}`}>
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
-                  <path d="M2 1.5L8.5 5L2 8.5V1.5Z" fill="currentColor" />
-                </svg>
-                Launch
-              </button>
+              {!isComposerCreating && !hasComposerError && (
+                <button className="kb-btn kb-btn--primary" onClick={() => onLaunchLeader(card)} aria-label={`Launch ${card.title}`}>
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+                    <path d="M2 1.5L8.5 5L2 8.5V1.5Z" fill="currentColor" />
+                  </svg>
+                  Launch
+                </button>
+              )}
               <button className="kb-btn kb-btn--danger-ghost" onClick={() => setConfirmDelete(true)} aria-label={`Delete ${card.title}`}>
                 Del
               </button>
@@ -1634,6 +1964,98 @@ function DashboardView({ renderState }: { renderState: RenderState | null }) {
   );
 }
 
+/**
+ * Inline subtask editor used inside the inspector for any card column.
+ *
+ * Dispatches `TOGGLE_SUBTASK`, `ADD_SUBTASK`, and `REMOVE_SUBTASK`
+ * directly — these are atomic operations the reducer already supports, so
+ * there's no separate "save" step. The behaviour stays consistent
+ * regardless of whether the surrounding card is in backlog or already
+ * running (the reducer handles the column-specific concerns elsewhere).
+ */
+function InspectorSubtaskEditor({
+  card,
+  dispatch,
+}: {
+  card: KanbanCard;
+  dispatch: Dispatch<KanbanAction>;
+}) {
+  const [newSubtask, setNewSubtask] = useState("");
+
+  const handleAdd = useCallback(() => {
+    const trimmed = newSubtask.trim();
+    if (!trimmed) return;
+    dispatch({
+      type: "ADD_SUBTASK",
+      cardId: card.id,
+      subtask: { id: genId(), title: trimmed, done: false },
+    });
+    setNewSubtask("");
+  }, [newSubtask, dispatch, card.id]);
+
+  const done = card.subtasks.filter(s => s.done).length;
+  const total = card.subtasks.length;
+
+  return (
+    <div className="kb-panel__section">
+      <div className="kb-panel__label">
+        Subtasks
+        {total > 0 && <span className="kb-panel__label-badge">{done}/{total}</span>}
+      </div>
+      {card.subtasks.length > 0 && (
+        <div className="kb-panel__subtask-list">
+          {card.subtasks.map(st => (
+            <div key={st.id} className={cx("kb-panel__subtask-row", st.done && "kb-panel__subtask-row--done")}>
+              <label className={cx("kb-panel__subtask", st.done && "kb-panel__subtask--done")}>
+                <input
+                  type="checkbox"
+                  checked={st.done}
+                  onChange={() => dispatch({ type: "TOGGLE_SUBTASK", cardId: card.id, subtaskId: st.id })}
+                />
+                <span className="kb-panel__subtask-title">{st.title}</span>
+              </label>
+              <button
+                type="button"
+                className="kb-panel__subtask-remove"
+                onClick={() => dispatch({ type: "REMOVE_SUBTASK", cardId: card.id, subtaskId: st.id })}
+                aria-label={`Remove subtask: ${st.title}`}
+              >
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+                  <path d="M2.5 2.5l5 5M7.5 2.5l-5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="kb-panel__subtask-add">
+        <input
+          className="kb-panel__subtask-input"
+          placeholder="Add a subtask..."
+          value={newSubtask}
+          onChange={(e) => setNewSubtask(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleAdd();
+            }
+          }}
+          aria-label="New subtask"
+        />
+        <button
+          type="button"
+          className="kb-btn kb-btn--ghost kb-btn--sm"
+          onClick={handleAdd}
+          disabled={!newSubtask.trim()}
+          aria-label="Add subtask"
+        >
+          Add
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function InspectorConfigSection({
   card,
   dispatch,
@@ -1646,6 +2068,11 @@ function InspectorConfigSection({
   const taggedSkills = (card.skillIds ?? [])
     .map(id => getSkill(id))
     .filter((s): s is SkillTemplate => s !== undefined);
+  const modelInventory = useModelInventory();
+  const currentModelLabel =
+    modelInventory.labels[card.model ?? "sonnet"]
+      ?? MODEL_LABELS[card.model ?? "sonnet"]
+      ?? (card.model ?? "sonnet");
 
   return (
     <div className="kb-panel__config-section">
@@ -1653,19 +2080,29 @@ function InspectorConfigSection({
       <div className="kb-panel__config-group">
         <div className="kb-panel__config-label">Model</div>
         {editable ? (
-          <div className="kb-panel__config-options">
-            {(["sonnet", "opus", "opus-old", "haiku"] as ModelOption[]).map(m => (
-              <button
-                key={m}
-                className={cx("kb-panel__config-opt", card.model === m && "kb-panel__config-opt--active")}
-                onClick={() => dispatch({ type: "UPDATE_CARD", cardId: card.id, data: { model: m } })}
-              >
-                {MODEL_LABELS[m]}
-              </button>
+          <div className="kb-panel__config-model-groups">
+            {modelInventory.groups.map((group) => (
+              <div key={group.harness} className="kb-panel__config-model-group">
+                {modelInventory.groups.length > 1 && (
+                  <div className="kb-panel__config-model-provider">{group.providerLabel}</div>
+                )}
+                <div className="kb-panel__config-options">
+                  {group.models.map((m) => (
+                    <button
+                      key={`${group.harness}:${m.id}`}
+                      type="button"
+                      className={cx("kb-panel__config-opt", card.model === m.id && "kb-panel__config-opt--active")}
+                      onClick={() => dispatch({ type: "UPDATE_CARD", cardId: card.id, data: { model: m.id } })}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         ) : (
-          <span className="kb-panel__config-value">{MODEL_LABELS[card.model ?? "sonnet"]}</span>
+          <span className="kb-panel__config-value">{currentModelLabel}</span>
         )}
       </div>
 
@@ -2014,19 +2451,8 @@ function KanbanInspectorPanel({
                   </div>
                 )}
 
-                {/* Subtasks */}
-                {selectedCard.subtasks.length > 0 && (
-                  <div className="kb-panel__section">
-                    <div className="kb-panel__label">Subtasks ({selectedCard.subtasks.filter(s => s.done).length}/{selectedCard.subtasks.length})</div>
-                    {selectedCard.subtasks.map(st => (
-                      <label key={st.id} className={cx("kb-panel__subtask", st.done && "kb-panel__subtask--done")}>
-                        <input type="checkbox" checked={st.done}
-                          onChange={() => dispatch({ type: "TOGGLE_SUBTASK", cardId: selectedCard.id, subtaskId: st.id })} />
-                        {st.title}
-                      </label>
-                    ))}
-                  </div>
-                )}
+                {/* Subtasks (editable for any column) */}
+                <InspectorSubtaskEditor card={selectedCard} dispatch={dispatch} />
 
                 <div className="kb-panel__meta">Created {new Date(selectedCard.createdAt).toLocaleDateString()}</div>
               </>
@@ -2095,6 +2521,78 @@ function KanbanInspectorPanel({
   );
 }
 
+// ─── First-run Empty Experience ─────────────────────────────
+
+function EmptyBoardExperience({
+  onCreate,
+}: {
+  onCreate: () => void;
+}) {
+  return (
+    <section className="kb-onboarding" aria-labelledby="kb-onboarding-title">
+      <div className="kb-onboarding__visual" aria-hidden="true">
+        <div className="kb-onboarding__rail">
+          <span className="kb-onboarding__rail-dot kb-onboarding__rail-dot--active" />
+          <span className="kb-onboarding__rail-line" />
+          <span className="kb-onboarding__rail-dot" />
+          <span className="kb-onboarding__rail-line" />
+          <span className="kb-onboarding__rail-dot" />
+        </div>
+        <div className="kb-onboarding__preview">
+          <div className="kb-onboarding__preview-card kb-onboarding__preview-card--intent">
+            <span className="kb-onboarding__preview-kicker">Intent</span>
+            <span className="kb-onboarding__preview-line" />
+            <span className="kb-onboarding__preview-line kb-onboarding__preview-line--short" />
+          </div>
+          <div className="kb-onboarding__preview-card kb-onboarding__preview-card--agent">
+            <span className="kb-onboarding__preview-kicker">Agent run</span>
+            <span className="kb-onboarding__preview-meter">
+              <span />
+            </span>
+          </div>
+          <div className="kb-onboarding__preview-card kb-onboarding__preview-card--review">
+            <span className="kb-onboarding__preview-kicker">Review</span>
+            <span className="kb-onboarding__preview-check" />
+          </div>
+        </div>
+      </div>
+
+      <div className="kb-onboarding__body">
+        <p className="kb-onboarding__eyebrow">Start with a task, not a blank board</p>
+        <h2 id="kb-onboarding-title" className="kb-onboarding__title">
+          Create the first agent-ready card
+        </h2>
+        <p className="kb-onboarding__copy">
+          The board works best when each card already has enough context for a Leader
+          to run, pause for review, and return with a visible trail of work.
+        </p>
+
+        <div className="kb-onboarding__actions">
+          <button className="kb-btn kb-btn--primary kb-onboarding__primary" onClick={onCreate}>
+            <span aria-hidden="true">+</span>
+            Create Card
+          </button>
+        </div>
+
+        <div className="kb-onboarding__steps" aria-label="Suggested first task structure">
+          <div className="kb-onboarding__step">
+            <span className="kb-onboarding__step-index">1</span>
+            <span>Describe the outcome</span>
+          </div>
+          <div className="kb-onboarding__step">
+            <span className="kb-onboarding__step-index">2</span>
+            <span>Add files, constraints, and success criteria</span>
+          </div>
+          <div className="kb-onboarding__step">
+            <span className="kb-onboarding__step-index">3</span>
+            <span>Launch, then review from the Halted column</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ─── Main Board Component ─────────────────────────────────
 
 interface KanbanBoardProps {
@@ -2106,7 +2604,10 @@ interface KanbanBoardProps {
   onResume: (card: KanbanCard) => void;
   onFocusNode?: (nodeId: string) => void;
   socketSend: (data: unknown) => void;
-  socketSubscribe: (fn: (msg: ServerMessage) => void) => () => void;
+  socketSubscribe: {
+    (fn: (msg: ServerMessage) => void): () => void;
+    (topic: string, fn: (msg: ServerMessage) => void): () => void;
+  };
   projectPath: string;
   nodes: CanvasNode[];
   onUpdateNodeData?: (nodeId: string, data: unknown) => void;
@@ -2128,14 +2629,14 @@ export function KanbanBoard({
   onUpdateNodeData,
   projectSettings,
 }: KanbanBoardProps) {
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [showChat, setShowChat] = useState(false);
+  const [quickComposerOpen, setQuickComposerOpen] = useState(false);
+  const [aiComposeJobs, setAiComposeJobs] = useState<AiComposeJob[]>([]);
+  const [aiComposeError, setAiComposeError] = useState<string | null>(null);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [confirmClearDone, setConfirmClearDone] = useState(false);
   const [mobileColumnId, setMobileColumnId] = useState("backlog");
   const [inspectorOpen, setInspectorOpen] = useState(false);
-  const addPopupRef = useRef<HTMLDivElement>(null);
-  const addBtnRef = useRef<HTMLButtonElement>(null);
+  const isBoardEmpty = board.cards.length === 0;
 
   // Open inspector overlay when a card is selected (for tablet/mobile)
   useEffect(() => {
@@ -2162,34 +2663,157 @@ export function KanbanBoard({
       });
   }, [nodes]);
 
-  const closeAdd = useCallback(() => setShowAddForm(false), []);
-  useClickOutside(addPopupRef, closeAdd, showAddForm);
-  useEscapeKey(closeAdd, showAddForm);
+  const openQuickComposer = useCallback(() => {
+    setMobileColumnId("backlog");
+    setAiComposeError(null);
+    setQuickComposerOpen(true);
+  }, []);
 
-  const handleAddCard = useCallback(
-    (data: CardFormData) => {
-      const card: KanbanCard = {
-        id: genId(),
-        title: data.title,
-        description: data.description,
-        context: data.context,
-        priority: data.priority,
-        subtasks: data.subtasks,
-        model: data.model,
-        permissionMode: data.permissionMode,
-        worktreeIsolation: data.worktreeIsolation,
-        skillIds: data.skillIds,
-        skillValues: data.skillValues,
-        linkedContextNodeIds: data.linkedContextNodeIds,
+  const closeQuickComposer = useCallback(() => {
+    setQuickComposerOpen(false);
+    setAiComposeError(null);
+  }, []);
+
+  const handleQuickCreate = useCallback(
+    (draft: QuickCardDraft) => {
+      const card = cardFromQuickDraft(draft, projectSettings?.defaultWorktreeIsolation);
+      dispatch({ type: "ADD_CARD", card });
+      setQuickComposerOpen(false);
+      setAiComposeError(null);
+    },
+    [dispatch, projectSettings?.defaultWorktreeIsolation],
+  );
+
+  const handleAiFinish = useCallback(
+    (draft: QuickCardDraft) => {
+      if (!draft.goal.trim()) return;
+      const sessionKey = `card-composer-${Date.now()}`;
+      const placeholderCardId = genId();
+      const placeholderCard: KanbanCard = {
+        id: placeholderCardId,
+        title: titleFromGoal(draft.goal.trim()),
+        description: draft.goal.trim(),
+        context: draft.notes.trim(),
+        priority: "medium",
+        subtasks: [],
         columnId: "backlog",
         createdAt: Date.now(),
+        model: "sonnet",
+        permissionMode: "auto",
+        worktreeIsolation: projectSettings?.defaultWorktreeIsolation === true,
+        skillIds: [],
+        skillValues: {},
+        linkedContextNodeIds: [],
+        composerState: "creating",
+        composerSessionKey: sessionKey,
       };
-      dispatch({ type: "ADD_CARD", card });
-      setShowAddForm(false);
-      addBtnRef.current?.focus();
+
+      dispatch({ type: "ADD_CARD", card: placeholderCard });
+      setAiComposeJobs((jobs) => [...jobs, { sessionKey, placeholderCardId }]);
+      setAiComposeError(null);
+      setQuickComposerOpen(false);
+      setMobileColumnId("backlog");
+      socketSend({
+        type: "create_session",
+        sessionKey,
+        role: "card-composer",
+        cwd: projectPath,
+        prompt: promptForCardComposer(draft, availableContextNodes),
+        permissionMode: "plan",
+        model: "sonnet",
+        worktreeIsolation: false,
+      });
     },
-    [dispatch],
+    [availableContextNodes, dispatch, projectPath, projectSettings?.defaultWorktreeIsolation, socketSend],
   );
+
+  useEffect(() => {
+    if (aiComposeJobs.length === 0) return;
+
+    const closeJob = (job: AiComposeJob, error?: string) => {
+      setAiComposeJobs((jobs) => jobs.filter((j) => j.sessionKey !== job.sessionKey));
+      if (error) {
+        dispatch({
+          type: "UPDATE_CARD",
+          cardId: job.placeholderCardId,
+          data: {
+            composerState: "error",
+            composerError: error,
+            description: error,
+          },
+        });
+        setAiComposeError(error);
+      } else {
+        setAiComposeError(null);
+      }
+      socketSend({ type: "close_session", sessionKey: job.sessionKey });
+    };
+
+    const unsubscribers = aiComposeJobs.map((job) =>
+      socketSubscribe(`session:${job.sessionKey}`, (msg: ServerMessage) => {
+        if (!("sessionKey" in msg) || msg.sessionKey !== job.sessionKey) return;
+
+        if (msg.type === "session_created") {
+          dispatch({
+            type: "UPDATE_CARD",
+            cardId: job.placeholderCardId,
+            data: { composerState: "creating" },
+          });
+          return;
+        }
+
+        if (msg.type === "session_status") {
+          if (msg.status === "idle") {
+            closeJob(job, "AI finished without creating a card. Try Create Card or run AI Finish again.");
+          }
+          return;
+        }
+
+        if (msg.type === "kanban_card_created") {
+          dispatch({
+            type: "UPDATE_CARD",
+            cardId: job.placeholderCardId,
+            data: {
+              title: msg.card.title,
+              description: msg.card.description,
+              context: msg.card.context,
+              priority: msg.card.priority,
+              subtasks: msg.card.subtasks.map((title) => ({
+                id: genId(),
+                title,
+                done: false,
+              })),
+              model: "sonnet",
+              permissionMode: "auto",
+              worktreeIsolation: projectSettings?.defaultWorktreeIsolation === true,
+              skillIds: [],
+              skillValues: {},
+              linkedContextNodeIds: [],
+              composerState: undefined,
+              composerSessionKey: undefined,
+              composerError: undefined,
+            },
+          });
+          closeJob(job);
+          return;
+        }
+
+        if (msg.type === "session_error") {
+          closeJob(job, msg.error);
+        }
+      }),
+    );
+
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [
+    aiComposeJobs,
+    dispatch,
+    projectSettings?.defaultWorktreeIsolation,
+    socketSend,
+    socketSubscribe,
+  ]);
 
   // Column summary chips — exclude archive (shown in toolbar toggle)
   const columnSummary = board.columns
@@ -2302,6 +2926,11 @@ export function KanbanBoard({
               <line x1="10" y1="1" x2="10" y2="15" stroke="currentColor" strokeWidth="1.5" />
             </svg>
           </button>
+          {isBoardEmpty && (
+            <button className="kb-btn kb-btn--primary kb-toolbar__empty-action" onClick={openQuickComposer}>
+              Add
+            </button>
+          )}
         </div>
       </div>
 
@@ -2329,6 +2958,11 @@ export function KanbanBoard({
       <div className="kb-layout">
         {/* Left: columns + optional chat */}
         <div className="kb-columns-area">
+          {isBoardEmpty && !quickComposerOpen && (
+            <EmptyBoardExperience
+              onCreate={openQuickComposer}
+            />
+          )}
           <div className="kb-columns">
             {visibleColumns.map((col) => {
               const columnCards = board.cards.filter((c) => c.columnId === col.id);
@@ -2361,56 +2995,28 @@ export function KanbanBoard({
                   ) : isBacklog ? (
                     <div className="kb-column__actions">
                       <button
-                        className={cx("kb-btn kb-btn--sm", showChat ? "kb-btn--ghost" : "kb-btn--secondary", "kb-toolbar__chat-btn")}
-                        onClick={() => { setShowChat((v) => !v); if (showAddForm) setShowAddForm(false); }}
-                        aria-expanded={showChat}
+                        className={cx("kb-btn kb-btn--sm", quickComposerOpen ? "kb-btn--ghost" : "kb-btn--primary")}
+                        onClick={() => quickComposerOpen ? closeQuickComposer() : openQuickComposer()}
+                        aria-expanded={quickComposerOpen}
                         aria-haspopup="dialog"
-                        aria-label={showChat ? "Close AI chat" : "AI Create card"}
+                        aria-label={quickComposerOpen ? "Cancel adding card" : "Add new card"}
                       >
-                        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                          <path
-                            d="M2 2.5A2.5 2.5 0 014.5 0h7A2.5 2.5 0 0114 2.5v8a2.5 2.5 0 01-2.5 2.5H6l-3 3v-3H2.5A2.5 2.5 0 010 10.5v-8z"
-                            fill="currentColor"
-                          />
-                        </svg>
-                        <span className="kb-btn__label">{showChat ? "Close" : "AI Create"}</span>
+                        <span className="kb-btn__icon" aria-hidden="true">{quickComposerOpen ? "\u00D7" : "+"}</span>
+                        <span className="kb-btn__label">{quickComposerOpen ? "Cancel" : "Add"}</span>
                       </button>
-                      <button
-                        ref={addBtnRef}
-                        className={cx("kb-btn kb-btn--sm", showAddForm ? "kb-btn--ghost" : "kb-btn--primary")}
-                        onClick={() => setShowAddForm((v) => !v)}
-                        aria-expanded={showAddForm}
-                        aria-haspopup="dialog"
-                        aria-label={showAddForm ? "Cancel adding card" : "Add new card"}
-                      >
-                        <span className="kb-btn__icon" aria-hidden="true">{showAddForm ? "\u00D7" : "+"}</span>
-                        <span className="kb-btn__label">{showAddForm ? "Cancel" : "Add"}</span>
-                      </button>
-                    </div>
-                  ) : undefined}
-                  belowHeader={isBacklog && showAddForm ? (
-                    <div ref={addPopupRef} className="kb-backlog-add-form" role="dialog" aria-label="Add card" aria-modal="false">
-                      <CardForm
-                        submitLabel="Add Card"
-                        onSubmit={handleAddCard}
-                        onCancel={() => { setShowAddForm(false); addBtnRef.current?.focus(); }}
-                        contextNodes={availableContextNodes}
-                        defaultWorktreeIsolation={projectSettings?.defaultWorktreeIsolation}
-                      />
                     </div>
                   ) : undefined}
                 />
               );
             })}
           </div>
-          {showChat && (
-            <CardCreationChat
-              dispatch={dispatch}
-              socketSend={socketSend}
-              socketSubscribe={socketSubscribe}
-              onClose={() => setShowChat(false)}
-              projectPath={projectPath}
-              defaultWorktreeIsolation={projectSettings?.defaultWorktreeIsolation ?? false}
+          {quickComposerOpen && (
+            <QuickCardComposer
+              onCreate={handleQuickCreate}
+              onAiFinish={handleAiFinish}
+              onCancel={closeQuickComposer}
+              aiStatus="idle"
+              aiError={aiComposeError}
             />
           )}
         </div>

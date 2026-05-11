@@ -51,6 +51,7 @@ function makeSessionRow(overrides: Partial<SessionRow> = {}): SessionRow {
     worktree_isolation: 1,
     total_cost: 0.42,
     turns: 3,
+    harness_name: "claude",
     created_at: now,
     updated_at: now,
     ...overrides,

@@ -21,8 +21,37 @@ import type { Bus } from "./bus.ts";
 export function createMinionToolsForSession(opts: {
   minionSessionKey: string;
   bus: Bus;
+  leaderSessionKey?: string | null;
+  taskId?: string | null;
+  onReport?: (report: {
+    trigger: "step" | "done" | "fail";
+    message: string;
+    timestamp: number;
+  }) => void;
 }): { toolDefs: NormalizedToolDef[] } {
-  const { minionSessionKey, bus } = opts;
+  const { minionSessionKey, bus, leaderSessionKey, taskId, onReport } = opts;
+
+  const emitStatus = (
+    trigger: "step" | "done" | "fail",
+    message: string,
+  ): void => {
+    const timestamp = Date.now();
+    const payload = {
+      type: "minion_status",
+      minionSessionKey,
+      trigger,
+      message,
+      timestamp,
+      ...(leaderSessionKey ? { leaderSessionKey } : {}),
+      ...(taskId ? { taskId } : {}),
+    };
+
+    bus.emitToSession(minionSessionKey, payload);
+    if (leaderSessionKey) {
+      bus.emitToSession(leaderSessionKey, payload);
+    }
+    onReport?.({ trigger, message, timestamp });
+  };
 
   const reportStepDef: NormalizedToolDef = {
     name: "report_step",
@@ -33,13 +62,7 @@ export function createMinionToolsForSession(opts: {
     }),
     handler: async (input: unknown) => {
       const args = input as { message: string };
-      bus.emitToSession(minionSessionKey, {
-        type: "minion_status",
-        minionSessionKey,
-        trigger: "step",
-        message: args.message,
-        timestamp: Date.now(),
-      });
+      emitStatus("step", args.message);
       return {
         content: [{ type: "text" as const, text: `Step reported: ${args.message}` }],
       };
@@ -55,13 +78,7 @@ export function createMinionToolsForSession(opts: {
     }),
     handler: async (input: unknown) => {
       const args = input as { summary: string };
-      bus.emitToSession(minionSessionKey, {
-        type: "minion_status",
-        minionSessionKey,
-        trigger: "done",
-        message: args.summary,
-        timestamp: Date.now(),
-      });
+      emitStatus("done", args.summary);
       return {
         content: [{ type: "text" as const, text: `Task completed: ${args.summary}` }],
       };
@@ -77,13 +94,7 @@ export function createMinionToolsForSession(opts: {
     }),
     handler: async (input: unknown) => {
       const args = input as { reason: string };
-      bus.emitToSession(minionSessionKey, {
-        type: "minion_status",
-        minionSessionKey,
-        trigger: "fail",
-        message: args.reason,
-        timestamp: Date.now(),
-      });
+      emitStatus("fail", args.reason);
       return {
         content: [{ type: "text" as const, text: `Task failed: ${args.reason}` }],
       };

@@ -57,6 +57,34 @@ describe("sync_session", () => {
     expect(env["events"]).toEqual([event]);
   });
 
+  it("sync_response carries the host's harness and capabilities", () => {
+    const h = setup();
+    h.host.harnessName = "echo";
+
+    syncSession(h.ctx, cmd({ type: "sync_session" }), h.ws);
+
+    expect(h.wsSent).toHaveLength(1);
+    const env = h.wsSent[0]!;
+    expect(env["harness"]).toBe("echo");
+    const caps = env["harnessCapabilities"] as Record<string, unknown>;
+    expect(caps).not.toBeNull();
+    // EchoHarness declares every capability false.
+    expect(caps["thinking"]).toBe(false);
+    expect(caps["mcp"]).toBe(false);
+    expect(caps["builtInFilesystem"]).toBe(false);
+  });
+
+  it("sync_response sets harnessCapabilities=null when the harness is not registered", () => {
+    const h = setup();
+    h.host.harnessName = "ghost-harness-not-loaded";
+
+    syncSession(h.ctx, cmd({ type: "sync_session" }), h.ws);
+
+    const env = h.wsSent[0]!;
+    expect(env["harness"]).toBe("ghost-harness-not-loaded");
+    expect(env["harnessCapabilities"]).toBeNull();
+  });
+
   it("re-emits render_update when the host has non-empty renderState", () => {
     const h = setup();
     h.host.renderState = {

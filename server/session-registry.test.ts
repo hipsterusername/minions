@@ -54,6 +54,7 @@ function makePersisted(
     worktreeIsolation: false,
     totalCost: 0.1,
     turns: 1,
+    harnessName: "claude",
     ...overrides,
   };
 }

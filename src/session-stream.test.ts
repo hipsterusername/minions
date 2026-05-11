@@ -285,11 +285,17 @@ describe("sessionStreamReducer: status/error", () => {
     const s0 = freshState();
     const s1 = sessionStreamReducer(
       s0,
-      { type: "session_error", sessionKey: "k1", error: "boom" },
+      {
+        type: "session_error",
+        sessionKey: "k1",
+        error: "boom",
+        fullError: "boom\nfull stderr",
+      },
       "t",
     );
     expect(s1.status).toBe("error");
     expect(s1.error).toBe("boom");
+    expect(s1.fullError).toBe("boom\nfull stderr");
   });
 });
 
@@ -343,6 +349,32 @@ describe("sessionStreamReducer: sync_response", () => {
     // assistant("Hello") + result("Done") — assistant is NOT collapsed
     // because the contents differ.
     expect(s1.messages.map((m) => m.role)).toEqual(["assistant", "result"]);
+  });
+
+  it("restores fullError from buffered session_error events", () => {
+    const s0 = freshState({ messages: [], status: "disconnected" });
+    const s1 = sessionStreamReducer(
+      s0,
+      {
+        type: "sync_response",
+        sessionKey: "k1",
+        found: true,
+        status: "running",
+        events: [
+          {
+            type: "session_error",
+            sessionKey: "k1",
+            error: "short",
+            fullError: "short\nfull stderr",
+            timestamp: 0,
+          },
+        ],
+      },
+      "t",
+    );
+    expect(s1.status).toBe("error");
+    expect(s1.error).toBe("short");
+    expect(s1.fullError).toBe("short\nfull stderr");
   });
 
   it("collapses assistant during sync rebuild when result content matches", () => {
@@ -433,6 +465,7 @@ describe("emptySessionStreamState", () => {
       totalCost: 0,
       turns: 0,
       error: null,
+      fullError: null,
     });
   });
 

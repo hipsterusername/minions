@@ -18,6 +18,7 @@ import { z } from "zod/v4";
 import type { NormalizedToolDef } from "./harness/types.ts";
 import type { Bus } from "./bus.ts";
 import {
+  renderComponentInputSchema,
   renderComponentSchema,
   type RenderComponent,
 } from "../shared/render-dsl.ts";
@@ -30,6 +31,57 @@ export interface RenderState {
   columns: number;
   gap: number;
   components: RenderComponent[];
+}
+
+const DASHBOARD_COMPONENT_GUIDE = [
+  "The dashboard is a live side panel for showing progress, evidence, results, choices, and review data while the agent works.",
+  "Use structured Render DSL components, not arbitrary HTML/React. Every component is a JSON object with stable id and type; never pass stringified JSON, HTML, markdown, or JSX as a component.",
+  "Cell-width types: metric(label,value), progress(label,value 0-100), status(label,state success|error|warning|running|pending), sparkline(data), kv(entries), checklist(items), tags(items).",
+  "Full-width types: table(headers,rows), list(items), text(content), code(content), copyable(content), timeline(events), callout(variant,content), diff(before,after), separator.",
+  "Rich types: form(fields) for user input, chart(series) for SVG charts, section(components) and tabs(tabs[].components) for layout, image(src,alt), file-preview(source).",
+  "Use render_set for initial layout, then render_patch with stable ids for value/state updates.",
+].join(" ");
+
+const renderSetInputSchema = z.object({
+  title: z.string().optional().describe("Dashboard title"),
+  columns: z.number().optional().describe("Grid columns (default 2)"),
+  components: z
+    .array(renderComponentInputSchema)
+    .describe(
+      "Full component tree to display. Each entry must be a JSON object with id/type, never a string of JSON, HTML, or markdown.",
+    ),
+});
+
+const renderAppendInputSchema = z.object({
+  components: z
+    .array(renderComponentInputSchema)
+    .describe(
+      "Components to append. Each entry must be a JSON object with id/type, never a string of JSON, HTML, or markdown.",
+    ),
+});
+
+function parseRenderComponent(component: unknown): RenderComponent {
+  const parsed = renderComponentSchema.parse(component) as RenderComponent;
+  if (parsed.type === "section") {
+    return {
+      ...parsed,
+      components: parseRenderComponents(parsed.components),
+    };
+  }
+  if (parsed.type === "tabs") {
+    return {
+      ...parsed,
+      tabs: parsed.tabs.map((tab) => ({
+        ...tab,
+        components: parseRenderComponents(tab.components),
+      })),
+    };
+  }
+  return parsed;
+}
+
+function parseRenderComponents(components: unknown[]): RenderComponent[] {
+  return components.map(parseRenderComponent);
 }
 
 // ── Factory ───────────────────────────────────────────
@@ -74,19 +126,13 @@ export function createRenderToolsForLeader(opts: {
 
   const renderSetDef: NormalizedToolDef = {
     name: "render_set",
-    description: "Replace the entire dashboard. Use this for initial setup or full refreshes.",
-    inputSchema: z.object({
-      title: z.string().optional().describe("Dashboard title"),
-      columns: z.number().optional().describe("Grid columns (default 2)"),
-      components: z
-        .array(renderComponentSchema)
-        .describe("Full component tree to display"),
-    }),
+    description: `Replace the entire dashboard. Use this for initial setup or full refreshes. ${DASHBOARD_COMPONENT_GUIDE}`,
+    inputSchema: renderSetInputSchema,
     handler: async (input: unknown) => {
-      const args = input as {
-        title?: string;
-        columns?: number;
-        components: RenderComponent[];
+      const parsed = renderSetInputSchema.parse(input);
+      const args = {
+        ...parsed,
+        components: parseRenderComponents(parsed.components),
       };
       // `set` is a full replace: title and columns both fall back to their
       // documented defaults when the agent omits them, mirroring the way
@@ -126,7 +172,8 @@ export function createRenderToolsForLeader(opts: {
 
   const renderPatchDef: NormalizedToolDef = {
     name: "render_patch",
-    description: "Update specific components by id without replacing the whole dashboard.",
+    description:
+      "Update specific components by id without replacing the whole dashboard. Use for live progress updates: status state, metric values, progress percentages, chart data, checklist items, or concise text changes. Patch entries are partial component objects with id; the existing component id/type are preserved.",
     inputSchema: z.object({
       updates: z
         .array(
@@ -178,14 +225,11 @@ export function createRenderToolsForLeader(opts: {
 
   const renderAppendDef: NormalizedToolDef = {
     name: "render_append",
-    description: "Add new components to the existing dashboard.",
-    inputSchema: z.object({
-      components: z
-        .array(renderComponentSchema)
-        .describe("Components to append"),
-    }),
+    description: `Add new components to the existing dashboard without replacing the layout. ${DASHBOARD_COMPONENT_GUIDE}`,
+    inputSchema: renderAppendInputSchema,
     handler: async (input: unknown) => {
-      const args = input as { components: RenderComponent[] };
+      const parsed = renderAppendInputSchema.parse(input);
+      const args = { components: parseRenderComponents(parsed.components) };
       // Match the client-side `applyRenderMessage("append")` semantics: a
       // component whose id already exists is treated as a replace, not a
       // duplicate.
@@ -220,7 +264,8 @@ export function createRenderToolsForLeader(opts: {
 
   const renderRemoveDef: NormalizedToolDef = {
     name: "render_remove",
-    description: "Remove components from the dashboard by their ids.",
+    description:
+      "Remove components from the dashboard by their ids. Use when a temporary status, section, tab, or result is no longer relevant.",
     inputSchema: z.object({
       ids: z.array(z.string()).describe("Component ids to remove"),
     }),

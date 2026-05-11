@@ -131,6 +131,47 @@ describe("render-tools", () => {
       expect(renderState.title).toBe("Hello");
       expect(renderState.columns).toBe(3);
     });
+
+    it("rejects non-object components before mutating state", async () => {
+      const { bus, sent } = makeBus();
+      const { toolDefs, renderState } = createRenderToolsForLeader({
+        leaderSessionKey: "s-bad",
+        bus,
+      });
+      const setTool = findTool(toolDefs, "render_set");
+
+      await expect(
+        call(setTool, { components: ['{"id":"x","type":"text","content":"bad"}'] }),
+      ).rejects.toThrow();
+
+      expect(renderState.components).toEqual([]);
+      expect(sent).toEqual([]);
+    });
+
+    it("rejects non-object child components inside containers", async () => {
+      const { bus, sent } = makeBus();
+      const { toolDefs, renderState } = createRenderToolsForLeader({
+        leaderSessionKey: "s-bad-nested",
+        bus,
+      });
+      const setTool = findTool(toolDefs, "render_set");
+
+      await expect(
+        call(setTool, {
+          components: [
+            {
+              id: "section",
+              type: "section",
+              title: "Bad nested payload",
+              components: ['{"id":"x","type":"text","content":"bad"}'],
+            },
+          ],
+        }),
+      ).rejects.toThrow();
+
+      expect(renderState.components).toEqual([]);
+      expect(sent).toEqual([]);
+    });
   });
 
   describe("default elision", () => {

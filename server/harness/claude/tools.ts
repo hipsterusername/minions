@@ -13,6 +13,7 @@
  */
 
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
+import type { ZodTypeAny } from "zod/v4";
 import type { NormalizedToolDef } from "../types.ts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -34,12 +35,19 @@ export type McpServerInstance = ReturnType<typeof createSdkMcpServer>;
  * @param defs        Tool definitions to wrap.
  */
 export function wrapTools(serverName: string, defs: NormalizedToolDef[]): McpServerInstance {
+  // The SDK's `tool()` and `createSdkMcpServer()` are tightly typed via the
+  // Anthropic SDK's MCP schema. We bridge through `unknown`/`never` casts
+  // because NormalizedToolResult is a deliberately narrower shape than the
+  // SDK's full MCP content union — runtime values still satisfy the SDK.
   const sdkTools = defs.map((def) => {
     const rawShape = extractShape(def);
-    return tool(def.name, def.description, rawShape, async (args) => {
-      return await def.handler(args as unknown);
-    });
-  });
+    return tool(
+      def.name,
+      def.description,
+      rawShape as never,
+      (async (args: unknown) => def.handler(args)) as never,
+    );
+  }) as never;
   return createSdkMcpServer({ name: serverName, tools: sdkTools });
 }
 
@@ -53,8 +61,8 @@ export function wrapTools(serverName: string, defs: NormalizedToolDef[]): McpSer
  * ZodDiscriminatedUnion, etc.) would need a different approach — update this
  * function when that need arises.
  */
-function extractShape(def: NormalizedToolDef): Record<string, unknown> {
-  const schema = def.inputSchema as { shape?: Record<string, unknown> };
+function extractShape(def: NormalizedToolDef): Record<string, ZodTypeAny> {
+  const schema = def.inputSchema as { shape?: Record<string, ZodTypeAny> };
   if (schema.shape !== undefined && typeof schema.shape === "object") {
     return schema.shape;
   }

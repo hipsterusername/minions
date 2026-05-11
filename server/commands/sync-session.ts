@@ -7,7 +7,30 @@
  */
 
 import { unicastToSession } from "../bus.ts";
+import { getHarness } from "../harness/index.ts";
+import type { HarnessCapabilities } from "../harness/types.ts";
 import type { CommandHandler } from "./types.ts";
+
+/**
+ * Look up the host's current harness so the client can render
+ * harness-aware controls without a separate round-trip.
+ *
+ * Returns `null` for `capabilities` when the harness is unregistered
+ * (e.g. a hydrated session whose harness module was removed) — the
+ * client treats `null` capabilities as "fall back to safe defaults"
+ * rather than throwing.
+ */
+function harnessSnapshot(name: string): {
+  harness: string;
+  harnessCapabilities: HarnessCapabilities | null;
+} {
+  try {
+    const h = getHarness(name);
+    return { harness: name, harnessCapabilities: h.capabilities };
+  } catch {
+    return { harness: name, harnessCapabilities: null };
+  }
+}
 
 export const syncSession: CommandHandler = (ctx, cmd, ws) => {
   if (!cmd.sessionKey) return;
@@ -21,6 +44,8 @@ export const syncSession: CommandHandler = (ctx, cmd, ws) => {
     return;
   }
 
+  const { harness, harnessCapabilities } = harnessSnapshot(host.harnessName);
+
   unicastToSession(ws, cmd.sessionKey, {
     type: "sync_response",
     sessionKey: cmd.sessionKey,
@@ -31,6 +56,7 @@ export const syncSession: CommandHandler = (ctx, cmd, ws) => {
     totalCost: host.totalCost,
     turns: host.turns,
     lastError: host.lastError,
+    lastErrorFull: host.lastErrorFull,
     model: host.model,
     permissionMode: host.permissionMode,
     initData: host.initData,
@@ -39,6 +65,8 @@ export const syncSession: CommandHandler = (ctx, cmd, ws) => {
     renderState: host.renderState ?? null,
     taskName: host.taskName,
     role: host.role,
+    harness,
+    harnessCapabilities,
     activeMinions: host.taskState
       ? Array.from(host.taskState.tasks.entries())
           .filter(([, t]) => t.status === "planned" || t.status === "running")

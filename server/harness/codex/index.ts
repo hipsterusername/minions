@@ -51,6 +51,7 @@ import {
   writeCodexAttachments,
   type CodexAttachmentScratch,
 } from "./attachments.ts";
+import { buildCodexEnv } from "./env.ts";
 import { renderBridgeServers, type CodexConfigObject } from "./mcp-config.ts";
 
 // ── Capability declaration ────────────────────────────────────────────────────
@@ -174,12 +175,9 @@ class CodexHarness implements AgentHarness {
         // either be dropped by the SDK or render incorrectly, so we drop it on
         // the floor here until the normalization lands. Capabilities and
         // staticInfo do not advertise external MCP support.
-        const codexOpts: CodexOptions = {
-          ...resolveCodexCredentials(),
-        };
-        if (Object.keys(bridgeEnv).length > 0) {
-          codexOpts.env = { ...process.env, ...bridgeEnv } as Record<string, string>;
-        }
+        const codexOpts: CodexOptions = { ...resolveCodexCredentials() };
+        const env = buildCodexEnv(bridgeEnv, opts.cwd);
+        if (env) codexOpts.env = env;
         if (Object.keys(bridgeConfig).length > 0) {
           // Local CodexConfigObject is Record<string, unknown>; values produced
           // by renderBridgeServers are JSON-serializable so the SDK's stricter
@@ -200,6 +198,7 @@ class CodexHarness implements AgentHarness {
         const input: Input = buildCodexInput(text, scratch);
 
         const translator = createCodexTranslator({ model: opts.model });
+        const streamErrors: string[] = [];
 
         let runResult;
         try {
@@ -212,7 +211,7 @@ class CodexHarness implements AgentHarness {
             yield { kind: "done", reason: "abort" };
             return;
           }
-          yield { kind: "done", reason: "error", error: errorMessage(err) };
+          yield codexDoneError(errorMessage(err), streamErrors);
           return;
         }
 
@@ -222,7 +221,17 @@ class CodexHarness implements AgentHarness {
         try {
           for await (const evt of runResult.events as AsyncIterable<ThreadEvent>) {
             if (ac.signal.aborted) break;
-            const normalized = translator.translate(evt);
+            if (evt.type === "error") streamErrors.push(evt.message);
+            const normalized = translator
+              .translate(evt)
+              .map((e) =>
+                e.kind === "done" && e.reason === "error"
+                  ? {
+                      ...e,
+                      fullError: fullCodexError(e.error ?? "unknown", streamErrors),
+                    }
+                  : e,
+              );
             for (const e of normalized) {
               if (e.kind === "done") terminalEmitted = true;
               yield e;
@@ -236,7 +245,7 @@ class CodexHarness implements AgentHarness {
             yield { kind: "done", reason: "abort" };
             return;
           }
-          yield { kind: "done", reason: "error", error: errorMessage(err) };
+          yield codexDoneError(errorMessage(err), streamErrors);
           return;
         }
 
@@ -294,7 +303,10 @@ function resolveCodexCredentials(): {
  * Maps Minions normalized options onto Codex's native shape.
  */
 function buildThreadOptions(opts: HarnessStartOptions): ThreadOptions {
-  const out: ThreadOptions = { workingDirectory: opts.cwd };
+  const out: ThreadOptions = {
+    workingDirectory: opts.cwd,
+    skipGitRepoCheck: true,
+  };
   if (opts.model) out.model = opts.model;
 
   const perm = mapPermission(opts.permissionMode);
@@ -321,6 +333,28 @@ async function collectPrompt(
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function codexDoneError(
+  message: string,
+  streamErrors: readonly string[],
+): NormalizedEvent {
+  return {
+    kind: "done",
+    reason: "error",
+    error: message,
+    fullError: fullCodexError(message, streamErrors),
+  };
+}
+
+function fullCodexError(message: string, streamErrors: readonly string[]): string {
+  if (streamErrors.length === 0) return message;
+  return [
+    message,
+    "",
+    "Codex stream errors before termination:",
+    ...streamErrors.map((m, i) => `${i + 1}. ${m}`),
+  ].join("\n");
 }
 
 // Re-export internal helpers for tests; production callers use start().

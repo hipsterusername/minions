@@ -116,7 +116,32 @@ const CLS = {
   kvRow: "rd-kv-row",
   listItem: "rd-list-item",
   tagPill: "rd-tag-pill",
+  /** Outer "eye" socket that wraps the moving pupil (running state). */
+  eye: "rd-eye",
+  /** Inner pupil that performs the saccade animation. */
+  pupil: "rd-pupil",
+  /** One of four scripted look-around variants assigned per instance. */
+  pupilA: "rd-pupil--a",
+  pupilB: "rd-pupil--b",
+  pupilC: "rd-pupil--c",
+  pupilD: "rd-pupil--d",
 } as const;
+
+/**
+ * Pick one of four eye-saccade variants from a stable string seed.
+ *
+ * Used so multiple running indicators on the same dashboard pick visually
+ * different look-around scripts instead of marching in lockstep.
+ */
+const PUPIL_VARIANTS = [CLS.pupilA, CLS.pupilB, CLS.pupilC, CLS.pupilD] as const;
+function pupilVariantFor(seed: string): string {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return PUPIL_VARIANTS[h % PUPIL_VARIANTS.length] ?? CLS.pupilA;
+}
 
 // ── Individual component renderers ────────────────────────
 
@@ -288,23 +313,40 @@ function StatusBadge({ c }: { c: StatusComponent }) {
             }}
           />
         )}
-        <span style={{
-          width: 20,
-          height: 20,
-          borderRadius: "50%",
-          background: `color-mix(in srgb, ${cfg.color} 18%, transparent)`,
-          border: `1.5px solid ${cfg.color}`,
-          color: cfg.color,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 10,
-          fontWeight: 700,
-          ...(isRunning ? {
-            animation: "render-pulse 2s ease-in-out infinite",
-          } : {}),
-        }}>
-          {cfg.icon}
+        <span
+          className={isRunning ? CLS.eye : undefined}
+          style={{
+            width: 20,
+            height: 20,
+            borderRadius: "50%",
+            background: `color-mix(in srgb, ${cfg.color} 18%, transparent)`,
+            border: `1.5px solid ${cfg.color}`,
+            color: cfg.color,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 10,
+            fontWeight: 700,
+            position: "relative",
+            overflow: "hidden",
+          }}
+        >
+          {isRunning ? (
+            <span
+              data-testid="rd-status-pupil"
+              className={`${CLS.pupil} ${pupilVariantFor(c.id)}`}
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                background: cfg.color,
+                boxShadow: `0 0 6px color-mix(in srgb, ${cfg.color} 60%, transparent)`,
+                ["--rd-pupil-amp" as string]: 4,
+              }}
+            />
+          ) : (
+            cfg.icon
+          )}
         </span>
       </span>
       <span style={{
@@ -817,20 +859,39 @@ function TimelineView({ c }: { c: TimelineComponent }) {
                 width: 16,
                 flexShrink: 0,
               }}>
-                <div style={{
-                  width: 10,
-                  height: 10,
-                  borderRadius: "50%",
-                  background: `color-mix(in srgb, ${cfg.color} 20%, transparent)`,
-                  border: `2px solid ${cfg.color}`,
-                  flexShrink: 0,
-                  marginTop: 3,
-                  boxSizing: "border-box",
-                  ...(isRunning ? {
-                    animation: "render-pulse 2s ease-in-out infinite",
-                    background: cfg.color,
-                  } : {}),
-                }} />
+                <div
+                  className={isRunning ? CLS.eye : undefined}
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: "50%",
+                    background: `color-mix(in srgb, ${cfg.color} 20%, transparent)`,
+                    border: `2px solid ${cfg.color}`,
+                    flexShrink: 0,
+                    marginTop: 3,
+                    boxSizing: "border-box",
+                    position: "relative",
+                    overflow: "hidden",
+                    display: isRunning ? "flex" : undefined,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {isRunning && (
+                    <span
+                      data-testid="rd-timeline-pupil"
+                      className={`${CLS.pupil} ${pupilVariantFor(`tl-${i}`)}`}
+                      style={{
+                        width: 3,
+                        height: 3,
+                        borderRadius: "50%",
+                        background: cfg.color,
+                        boxShadow: `0 0 4px color-mix(in srgb, ${cfg.color} 70%, transparent)`,
+                        ["--rd-pupil-amp" as string]: 1.6,
+                      }}
+                    />
+                  )}
+                </div>
                 {!isLast && (
                   <div style={{
                     width: 1.5,
@@ -1712,6 +1773,132 @@ export function injectStyles() {
       }
     }
 
+    /* ── Eye/pupil saccade microinteractions ─────────────────
+       Hand-scripted timeline that mimics anime.js: per-keyframe
+       cubic-bezier easings make the "saccade" segments feel snappy
+       (easeOutExpo) while held fixation points stay still. Each
+       cycle visits three points in region A, jumps to region B,
+       and visits three more — short/long/medium dwell — so the
+       indicator looks like it's *looking at things* and pausing,
+       not just pulsing. Four variants ship so multiple running
+       indicators on one dashboard never march in lockstep.
+
+       Translation magnitude is parameterized via --rd-pupil-amp so
+       the same keyframes drive the 20px status badge (amp ≈ 4) and
+       the 10px timeline dot (amp ≈ 1.6).
+       ───────────────────────────────────────────────────────── */
+    .${CLS.eye} {
+      position: relative;
+    }
+    .${CLS.pupil} {
+      will-change: transform;
+      transform: translate(0, 0);
+    }
+
+    /* Variant A — upper-left → lower-right diagonal sweep */
+    .${CLS.pupilA} {
+      animation: render-eye-a 6.4s infinite both;
+    }
+    @keyframes render-eye-a {
+      0%   { transform: translate(calc(var(--rd-pupil-amp,3) * -0.7px), calc(var(--rd-pupil-amp,3) * -0.6px)); }
+      12%  { transform: translate(calc(var(--rd-pupil-amp,3) * -0.7px), calc(var(--rd-pupil-amp,3) * -0.6px));
+             animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+      15%  { transform: translate(calc(var(--rd-pupil-amp,3) * -0.4px), calc(var(--rd-pupil-amp,3) * -0.85px)); }
+      36%  { transform: translate(calc(var(--rd-pupil-amp,3) * -0.4px), calc(var(--rd-pupil-amp,3) * -0.85px));
+             animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+      39%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.2px), calc(var(--rd-pupil-amp,3) * -0.5px)); }
+      53%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.2px), calc(var(--rd-pupil-amp,3) * -0.5px));
+             animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+      57%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.6px), calc(var(--rd-pupil-amp,3) *  0.7px)); }
+      65%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.6px), calc(var(--rd-pupil-amp,3) *  0.7px));
+             animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+      68%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.85px), calc(var(--rd-pupil-amp,3) *  0.35px)); }
+      87%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.85px), calc(var(--rd-pupil-amp,3) *  0.35px));
+             animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+      90%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.3px), calc(var(--rd-pupil-amp,3) *  0.65px)); }
+      97%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.3px), calc(var(--rd-pupil-amp,3) *  0.65px));
+             animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1); }
+      100% { transform: translate(calc(var(--rd-pupil-amp,3) * -0.7px), calc(var(--rd-pupil-amp,3) * -0.6px)); }
+    }
+
+    /* Variant B — upper-right → lower-left, slightly slower */
+    .${CLS.pupilB} {
+      animation: render-eye-b 7.1s infinite both;
+    }
+    @keyframes render-eye-b {
+      0%   { transform: translate(calc(var(--rd-pupil-amp,3) *  0.8px), calc(var(--rd-pupil-amp,3) * -0.5px)); }
+      10%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.8px), calc(var(--rd-pupil-amp,3) * -0.5px));
+             animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+      13%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.55px), calc(var(--rd-pupil-amp,3) * -0.85px)); }
+      37%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.55px), calc(var(--rd-pupil-amp,3) * -0.85px));
+             animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+      40%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.1px), calc(var(--rd-pupil-amp,3) * -0.4px)); }
+      52%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.1px), calc(var(--rd-pupil-amp,3) * -0.4px));
+             animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+      56%  { transform: translate(calc(var(--rd-pupil-amp,3) * -0.7px), calc(var(--rd-pupil-amp,3) *  0.55px)); }
+      64%  { transform: translate(calc(var(--rd-pupil-amp,3) * -0.7px), calc(var(--rd-pupil-amp,3) *  0.55px));
+             animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+      67%  { transform: translate(calc(var(--rd-pupil-amp,3) * -0.85px), calc(var(--rd-pupil-amp,3) *  0.85px)); }
+      88%  { transform: translate(calc(var(--rd-pupil-amp,3) * -0.85px), calc(var(--rd-pupil-amp,3) *  0.85px));
+             animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+      91%  { transform: translate(calc(var(--rd-pupil-amp,3) * -0.4px), calc(var(--rd-pupil-amp,3) *  0.5px)); }
+      98%  { transform: translate(calc(var(--rd-pupil-amp,3) * -0.4px), calc(var(--rd-pupil-amp,3) *  0.5px));
+             animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1); }
+      100% { transform: translate(calc(var(--rd-pupil-amp,3) *  0.8px), calc(var(--rd-pupil-amp,3) * -0.5px)); }
+    }
+
+    /* Variant C — vertical top↔bottom scan with horizontal drift */
+    .${CLS.pupilC} {
+      animation: render-eye-c 6.8s infinite both;
+    }
+    @keyframes render-eye-c {
+      0%   { transform: translate(calc(var(--rd-pupil-amp,3) *  0.0px), calc(var(--rd-pupil-amp,3) * -0.85px)); }
+      11%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.0px), calc(var(--rd-pupil-amp,3) * -0.85px));
+             animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+      14%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.4px), calc(var(--rd-pupil-amp,3) * -0.65px)); }
+      35%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.4px), calc(var(--rd-pupil-amp,3) * -0.65px));
+             animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+      38%  { transform: translate(calc(var(--rd-pupil-amp,3) * -0.45px), calc(var(--rd-pupil-amp,3) * -0.55px)); }
+      51%  { transform: translate(calc(var(--rd-pupil-amp,3) * -0.45px), calc(var(--rd-pupil-amp,3) * -0.55px));
+             animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+      55%  { transform: translate(calc(var(--rd-pupil-amp,3) * -0.1px), calc(var(--rd-pupil-amp,3) *  0.85px)); }
+      63%  { transform: translate(calc(var(--rd-pupil-amp,3) * -0.1px), calc(var(--rd-pupil-amp,3) *  0.85px));
+             animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+      66%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.5px), calc(var(--rd-pupil-amp,3) *  0.6px)); }
+      86%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.5px), calc(var(--rd-pupil-amp,3) *  0.6px));
+             animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+      89%  { transform: translate(calc(var(--rd-pupil-amp,3) * -0.55px), calc(var(--rd-pupil-amp,3) *  0.45px)); }
+      97%  { transform: translate(calc(var(--rd-pupil-amp,3) * -0.55px), calc(var(--rd-pupil-amp,3) *  0.45px));
+             animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1); }
+      100% { transform: translate(calc(var(--rd-pupil-amp,3) *  0.0px), calc(var(--rd-pupil-amp,3) * -0.85px)); }
+    }
+
+    /* Variant D — scattered, longest cycle */
+    .${CLS.pupilD} {
+      animation: render-eye-d 7.6s infinite both;
+    }
+    @keyframes render-eye-d {
+      0%   { transform: translate(calc(var(--rd-pupil-amp,3) * -0.6px), calc(var(--rd-pupil-amp,3) *  0.7px)); }
+      9%   { transform: translate(calc(var(--rd-pupil-amp,3) * -0.6px), calc(var(--rd-pupil-amp,3) *  0.7px));
+             animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+      12%  { transform: translate(calc(var(--rd-pupil-amp,3) * -0.85px), calc(var(--rd-pupil-amp,3) *  0.2px)); }
+      34%  { transform: translate(calc(var(--rd-pupil-amp,3) * -0.85px), calc(var(--rd-pupil-amp,3) *  0.2px));
+             animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+      37%  { transform: translate(calc(var(--rd-pupil-amp,3) * -0.3px), calc(var(--rd-pupil-amp,3) *  0.45px)); }
+      50%  { transform: translate(calc(var(--rd-pupil-amp,3) * -0.3px), calc(var(--rd-pupil-amp,3) *  0.45px));
+             animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+      54%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.7px), calc(var(--rd-pupil-amp,3) * -0.7px)); }
+      62%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.7px), calc(var(--rd-pupil-amp,3) * -0.7px));
+             animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+      65%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.4px), calc(var(--rd-pupil-amp,3) * -0.85px)); }
+      85%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.4px), calc(var(--rd-pupil-amp,3) * -0.85px));
+             animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+      88%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.85px), calc(var(--rd-pupil-amp,3) * -0.3px)); }
+      97%  { transform: translate(calc(var(--rd-pupil-amp,3) *  0.85px), calc(var(--rd-pupil-amp,3) * -0.3px));
+             animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1); }
+      100% { transform: translate(calc(var(--rd-pupil-amp,3) * -0.6px), calc(var(--rd-pupil-amp,3) *  0.7px)); }
+    }
+
     /* ── Shimmer for active progress bars ── */
     .${CLS.shimmer}::after {
       content: '';
@@ -1826,6 +2013,10 @@ export function injectStyles() {
         animation: none;
       }
       .${CLS.tagPill}:hover {
+        transform: none;
+      }
+      .${CLS.pupil} {
+        animation: none;
         transform: none;
       }
     }

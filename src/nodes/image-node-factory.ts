@@ -10,7 +10,8 @@ import type { CanvasAction, CanvasNode, CanvasTransform } from "../types.ts";
 import { generateId } from "../canvas-state.ts";
 import { findNonOverlappingPosition, viewportCenter } from "../canvas-utils.ts";
 import { createImageNodeDefaultData, type ImageNodeData } from "./ImageNode.tsx";
-import { loadImageFromFile } from "./image-loader.ts";
+import { loadImageFromFile, type LoadedImage } from "./image-loader.ts";
+import { loadImageFromProjectPath } from "./image-loader-from-path.ts";
 
 const IMAGE_NODE_SIZE = { width: 480, height: 420 };
 
@@ -68,4 +69,64 @@ export async function createImageNodeFromFile(
   };
   dispatch({ type: "ADD_NODE", node });
   setSelectedIds(new Set([node.id]));
+}
+
+/**
+ * Spawn an ImageNode from a project-relative file path.
+ *
+ * Reuses the same downscale/decode pipeline as the File-based factory by
+ * routing through {@link loadImageFromProjectPath}. Used by the
+ * project-tree click handler and tree-drag drop so opening an image
+ * surfaces it as a real image (with annotation support) instead of a
+ * binary text dump in a FileViewerNode.
+ *
+ * Returns `true` on success, `false` if the load failed — callers can
+ * fall back to a FileViewerNode rather than leaving the user with no
+ * affordance at all.
+ */
+export async function createImageNodeFromProjectPath(
+  projectPath: string,
+  relativePath: string,
+  dispatch: (action: CanvasAction) => void,
+  setSelectedIds: (ids: Set<string>) => void,
+  transform: CanvasTransform,
+  existingNodes: ReadonlyArray<CanvasNode>,
+  worldPoint?: { x: number; y: number },
+): Promise<boolean> {
+  let loaded: LoadedImage;
+  try {
+    loaded = await loadImageFromProjectPath(projectPath, relativePath);
+  } catch {
+    return false;
+  }
+
+  const anchor = worldPoint ?? viewportCenter(transform);
+  const rawX = anchor.x - IMAGE_NODE_SIZE.width / 2;
+  const rawY = anchor.y - IMAGE_NODE_SIZE.height / 2;
+  const position = findNonOverlappingPosition(
+    rawX,
+    rawY,
+    IMAGE_NODE_SIZE.width,
+    IMAGE_NODE_SIZE.height,
+    existingNodes as CanvasNode[],
+  );
+
+  const data: ImageNodeData = {
+    ...createImageNodeDefaultData(),
+    src: loaded.src,
+    filename: loaded.filename,
+    naturalWidth: loaded.naturalWidth,
+    naturalHeight: loaded.naturalHeight,
+  };
+
+  const node: CanvasNode = {
+    id: generateId(),
+    type: "image",
+    position,
+    size: { ...IMAGE_NODE_SIZE },
+    data,
+  };
+  dispatch({ type: "ADD_NODE", node });
+  setSelectedIds(new Set([node.id]));
+  return true;
 }

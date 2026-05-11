@@ -157,7 +157,10 @@ export class RoutineRunRegistry {
 
     const donePromise = runRoutine({
       routine: args.routine,
-      inputs: args.inputs,
+      // The WS layer hands us untyped JSON; runRoutine validates via
+      // routineInputSchema before the values reach a step. Cast to widen
+      // unknown into the runtime's primitive-only union.
+      inputs: args.inputs as Readonly<Record<string, string | number | boolean>>,
       runner: handle.runner,
       runId,
       onSnapshot: (snap) => {

@@ -1,9 +1,18 @@
-import { useState, useCallback } from "react";
-import { MODEL_COLORS, COLORS } from "../palette.ts";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { MODEL_COLORS } from "../palette.ts";
 import type { EffortLevel, ThinkingConfig } from "../types.ts";
 import { getModelCapability } from "../model-meta.ts";
+import { findHarness, type HarnessInfo } from "../harness-list.ts";
+import { useHarnessList } from "../use-harness-list.tsx";
 
+/**
+ * Claude-flavoured short aliases the UI used before Phase E. Retained as a
+ * named export so existing call sites keep compiling — the actual model
+ * value flowing through the toolbar is now any string ID returned by a
+ * harness's `staticInfo().models`.
+ */
 export type ModelOption = "sonnet" | "opus" | "opus-old" | "haiku";
+
 export type PermissionMode =
   | "auto"
   | "bypassPermissions"
@@ -14,28 +23,49 @@ export type PermissionMode =
 export interface SessionToolbarProps {
   sessionKey: string | null;
   status: string;
-  model: ModelOption;
+  /** Either a Claude alias ("sonnet") or a concrete harness model id ("gpt-5.5"). */
+  model: string;
   permissionMode: PermissionMode;
   onInterrupt: () => void;
-  onModelChange: (model: ModelOption) => void;
+  onModelChange: (model: string) => void;
   onPermissionModeChange: (mode: PermissionMode) => void;
-  /** Adaptive-thinking config. Hidden when the selected model doesn't support it. */
+  /** Adaptive-thinking config. Hidden when the active harness/model don't support it. */
   thinkingConfig?: ThinkingConfig;
   onThinkingConfigChange?: (config: ThinkingConfig) => void;
   /** Optional accent color for theming (hex). Defaults to #60a5fa */
   accent?: string;
   /** Optional content rendered on the right side of the toolbar (e.g. skills button) */
   skillsContent?: React.ReactNode;
+  /**
+   * Active harness driving this session. When omitted the toolbar falls back
+   * to the legacy Claude defaults — this keeps existing call sites that
+   * haven't been threaded through working unchanged.
+   */
+  harness?: string;
+  /**
+   * Called when the user picks a harness for a not-yet-created session. When
+   * omitted (or `sessionKey` is set) the harness pill renders display-only.
+   * Mid-session swap is intentionally unsupported — see
+   * docs/codex-harness-spec.md Open Questions §1.
+   *
+   * The optional `defaultModel` is supplied when the current model isn't
+   * valid for the new harness; the parent should apply both updates
+   * atomically (a single `onUpdateData` call) to avoid clobbering the
+   * harness change with a stale-ref model update.
+   */
+  onHarnessChange?: (harness: string, defaultModel?: string) => void;
 }
 
-const MODEL_LABELS: Record<ModelOption, string> = {
+/** Default Claude model labels. Used when the active harness is Claude or unknown. */
+const CLAUDE_MODEL_LABELS: Record<string, string> = {
   sonnet: "Sonnet",
   opus: "Opus 4.7",
   "opus-old": "Opus 4.6",
   haiku: "Haiku",
+  "claude-opus-4-7": "Opus 4.7",
+  "claude-sonnet-4-6": "Sonnet 4.6",
+  "claude-haiku-4-5": "Haiku",
 };
-
-const MODEL_COLOR: Record<string, string> = MODEL_COLORS;
 
 const PERMISSION_LABELS: Record<PermissionMode, string> = {
   auto: "Auto",
@@ -87,6 +117,128 @@ const pillStyle: React.CSSProperties = {
   transition: "border-color 0.15s, background 0.15s",
 };
 
+function titleCase(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function modelColor(model: string): string | undefined {
+  return (MODEL_COLORS as Record<string, string>)[model];
+}
+
+function providerLabel(harness: HarnessInfo | undefined, fallbackName: string): string {
+  const provider = String(harness?.account.provider ?? fallbackName).toLowerCase();
+  if (provider === "openai") return "OpenAI";
+  if (provider === "anthropic" || provider === "claude") return "Anthropic";
+  if (provider === "echo") return "Echo";
+  return titleCase(harness?.name ?? fallbackName);
+}
+
+function providerMark(label: string): string {
+  if (label === "OpenAI") return "OA";
+  if (label === "Anthropic") return "A";
+  return label.slice(0, 2).toUpperCase();
+}
+
+type ModelTone = "flagship" | "balanced" | "fast" | "coding" | "general" | "test";
+
+interface ModelDisplayMeta {
+  family: string;
+  tier: string;
+  description: string;
+  tone: ModelTone;
+}
+
+function modelDisplayMeta(modelId: string, label: string, provider: string): ModelDisplayMeta {
+  const text = `${modelId} ${label}`.toLowerCase();
+  if (text.includes("opus")) {
+    return {
+      family: "Claude Opus",
+      tier: "Frontier",
+      description: "Highest capability for complex planning and review",
+      tone: "flagship",
+    };
+  }
+  if (text.includes("sonnet")) {
+    return {
+      family: "Claude Sonnet",
+      tier: "Balanced",
+      description: "Strong default for sustained coding work",
+      tone: "balanced",
+    };
+  }
+  if (text.includes("haiku")) {
+    return {
+      family: "Claude Haiku",
+      tier: "Fast",
+      description: "Lower-latency model for lighter turns",
+      tone: "fast",
+    };
+  }
+  if (text.includes("codex")) {
+    return {
+      family: "GPT-5 Codex",
+      tier: "Coding",
+      description: "OpenAI model tuned for codebase work",
+      tone: "coding",
+    };
+  }
+  if (text.includes("gpt-5")) {
+    return {
+      family: "GPT-5",
+      tier: "General",
+      description: "OpenAI general reasoning model",
+      tone: "general",
+    };
+  }
+  if (provider === "Echo") {
+    return {
+      family: "Echo",
+      tier: "Test",
+      description: "Local echo harness for UI and flow checks",
+      tone: "test",
+    };
+  }
+  return {
+    family: label,
+    tier: "Model",
+    description: "Available through this harness",
+    tone: "general",
+  };
+}
+
+const MODEL_TONE_STYLE: Record<ModelTone, React.CSSProperties> = {
+  flagship: {
+    background: "color-mix(in srgb, var(--model-opus) 18%, transparent)",
+    borderColor: "var(--model-opus)",
+    color: "var(--text-primary)",
+  },
+  balanced: {
+    background: "color-mix(in srgb, var(--model-sonnet) 18%, transparent)",
+    borderColor: "var(--model-sonnet)",
+    color: "var(--text-primary)",
+  },
+  fast: {
+    background: "color-mix(in srgb, var(--model-haiku) 18%, transparent)",
+    borderColor: "var(--model-haiku)",
+    color: "var(--text-primary)",
+  },
+  coding: {
+    background: "color-mix(in srgb, var(--accent) 18%, transparent)",
+    borderColor: "var(--accent)",
+    color: "var(--text-primary)",
+  },
+  general: {
+    background: "var(--bg-secondary)",
+    borderColor: "var(--border-default)",
+    color: "var(--text-secondary)",
+  },
+  test: {
+    background: "var(--code-bg)",
+    borderColor: "var(--border-default)",
+    color: "var(--text-muted)",
+  },
+};
+
 function Dropdown<T extends string>({
   value,
   options,
@@ -96,6 +248,7 @@ function Dropdown<T extends string>({
   onChange,
   open,
   onToggle,
+  disabled,
 }: {
   value: T;
   options: T[];
@@ -105,18 +258,21 @@ function Dropdown<T extends string>({
   onChange: (v: T) => void;
   open: boolean;
   onToggle: () => void;
+  disabled?: boolean;
 }) {
   return (
     <div style={{ position: "relative" }}>
       <button
-        onClick={onToggle}
+        onClick={disabled ? undefined : onToggle}
         onMouseDown={(e) => e.stopPropagation()}
+        disabled={disabled}
         style={{
           ...pillStyle,
           borderColor: open ? "var(--accent)" : "var(--border-default)",
+          ...(disabled ? { cursor: "default", opacity: 0.6 } : {}),
         }}
       >
-        {colors && (
+        {colors && colors[value] && (
           <span
             style={{
               width: 6,
@@ -127,21 +283,23 @@ function Dropdown<T extends string>({
             }}
           />
         )}
-        <span>{labels[value]}</span>
-        <span
-          style={{
-            fontSize: 7,
-            opacity: 0.5,
-            marginLeft: 2,
-            transform: open ? "rotate(180deg)" : "rotate(0deg)",
-            transition: "transform 0.15s",
-          }}
-        >
-          ▼
-        </span>
+        <span>{labels[value] ?? value}</span>
+        {!disabled && (
+          <span
+            style={{
+              fontSize: 7,
+              opacity: 0.5,
+              marginLeft: 2,
+              transform: open ? "rotate(180deg)" : "rotate(0deg)",
+              transition: "transform 0.15s",
+            }}
+          >
+            ▼
+          </span>
+        )}
       </button>
 
-      {open && (
+      {open && !disabled && (
         <div
           onMouseDown={(e) => e.stopPropagation()}
           style={{
@@ -199,7 +357,7 @@ function Dropdown<T extends string>({
                     : "transparent")
               }
             >
-              {colors && (
+              {colors && colors[opt] && (
                 <span
                   style={{
                     width: 8,
@@ -216,9 +374,9 @@ function Dropdown<T extends string>({
               )}
               <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
                 <span style={{ fontWeight: opt === value ? 600 : 400 }}>
-                  {labels[opt]}
+                  {labels[opt] ?? opt}
                 </span>
-                {descriptions && (
+                {descriptions && descriptions[opt] && (
                   <span
                     style={{
                       fontSize: 9,
@@ -249,6 +407,366 @@ function Dropdown<T extends string>({
   );
 }
 
+function ModelSelectionPicker({
+  model,
+  activeHarnessName,
+  activeHarness,
+  harnesses,
+  modelOptions,
+  modelLabels,
+  capability,
+  thinkingConfig,
+  onModelChange,
+  onHarnessChange,
+  onThinkingConfigChange,
+  onSelectComplete,
+  hasSession,
+  open,
+  onToggle,
+}: {
+  model: string;
+  activeHarnessName: string;
+  activeHarness: HarnessInfo | undefined;
+  harnesses: ReadonlyArray<HarnessInfo>;
+  modelOptions: string[];
+  modelLabels: Record<string, string>;
+  capability: ReturnType<typeof getModelCapability>;
+  thinkingConfig: ThinkingConfig | undefined;
+  onModelChange: (model: string) => void;
+  onHarnessChange: ((harness: string, defaultModel?: string) => void) | undefined;
+  onThinkingConfigChange: ((config: ThinkingConfig) => void) | undefined;
+  onSelectComplete: () => void;
+  hasSession: boolean;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const groups =
+    harnesses.length > 0
+      ? harnesses.map((h) => ({
+          harness: h.name,
+          label: providerLabel(h, h.name),
+          models: h.models.map((m) => ({ id: m.id, label: m.label })),
+          locked: hasSession && h.name === activeHarnessName,
+          source: h,
+        }))
+      : [
+          {
+            harness: activeHarnessName,
+            label: providerLabel(activeHarness, activeHarnessName),
+            models: modelOptions.map((id) => ({ id, label: modelLabels[id] ?? id })),
+            locked: hasSession,
+            source: activeHarness,
+          },
+        ];
+
+  const activeHarnessLabel = providerLabel(activeHarness, activeHarnessName);
+  const activeModelLabel = modelLabels[model] ?? model;
+  const activeMeta = modelDisplayMeta(model, activeModelLabel, activeHarnessLabel);
+  const effortLabel =
+    thinkingConfig && capability.supportsAdaptiveThinking
+      ? EFFORT_LABELS[thinkingConfig.effort]
+      : null;
+  const showThinkingControls =
+    capability.supportsAdaptiveThinking &&
+    !!thinkingConfig &&
+    !!onThinkingConfigChange;
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        onClick={onToggle}
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{
+          ...pillStyle,
+          minHeight: 24,
+          gap: 6,
+          borderColor: open ? "var(--accent)" : "var(--border-default)",
+        }}
+        title="Model selection"
+      >
+        <span
+          style={{
+            width: 18,
+            height: 18,
+            borderRadius: 4,
+            border: "1px solid var(--border-default)",
+            background: "var(--bg-secondary)",
+            color: "var(--text-secondary)",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 8,
+            fontWeight: 700,
+            flexShrink: 0,
+          }}
+        >
+          {providerMark(activeHarnessLabel)}
+        </span>
+        <span>{activeHarnessLabel}</span>
+        <span style={{ color: "var(--text-muted)" }}>·</span>
+        <span style={{ color: "var(--text-primary)" }}>{activeModelLabel}</span>
+        <span
+          style={{
+            ...MODEL_TONE_STYLE[activeMeta.tone],
+            border: `1px solid ${MODEL_TONE_STYLE[activeMeta.tone].borderColor}`,
+            borderRadius: 4,
+            padding: "1px 5px",
+            fontSize: 9,
+            lineHeight: 1.3,
+          }}
+        >
+          {activeMeta.tier}
+        </span>
+        {effortLabel && (
+          <>
+            <span style={{ color: "var(--text-muted)" }}>·</span>
+            <span>{effortLabel}</span>
+          </>
+        )}
+        <span
+          style={{
+            fontSize: 7,
+            opacity: 0.5,
+            marginLeft: 2,
+            transform: open ? "rotate(180deg)" : "rotate(0deg)",
+            transition: "transform 0.15s",
+          }}
+        >
+          ▼
+        </span>
+      </button>
+
+      {open && (
+        <div
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            zIndex: 100,
+            width: 310,
+            maxWidth: "calc(100vw - 24px)",
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--border-default)",
+            borderRadius: 6,
+            boxShadow: "var(--shadow-lg)",
+            padding: 8,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {groups.map((group) => (
+              <div key={group.harness} style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    padding: "0 2px",
+                    fontSize: 9,
+                    color: "var(--text-muted)",
+                    fontFamily: "var(--font-mono)",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span
+                      style={{
+                        width: 18,
+                        height: 18,
+                        borderRadius: 4,
+                        border: "1px solid var(--border-default)",
+                        background: "var(--bg-secondary)",
+                        color: "var(--text-secondary)",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 8,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {providerMark(group.label)}
+                    </span>
+                    {group.label}
+                  </span>
+                  {group.locked && <span>fixed for session</span>}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 4 }}>
+                  {group.models.map((option) => {
+                    const isActive =
+                      option.id === model && group.harness === activeHarnessName;
+                    const canSelect = !hasSession || group.harness === activeHarnessName;
+                    const meta = modelDisplayMeta(option.id, option.label, group.label);
+                    return (
+                      <button
+                        key={`${group.harness}:${option.id}`}
+                        onClick={() => {
+                          if (!canSelect) return;
+                          if (group.harness !== activeHarnessName) {
+                            onHarnessChange?.(group.harness, option.id);
+                            onSelectComplete();
+                            return;
+                          }
+                          onModelChange(option.id);
+                          onSelectComplete();
+                        }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        disabled={!canSelect}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          width: "100%",
+                          minHeight: 50,
+                          padding: "8px",
+                          borderRadius: 4,
+                          border: isActive
+                            ? "1px solid var(--accent)"
+                            : "1px solid var(--border-default)",
+                          background: isActive
+                            ? "var(--state-active)"
+                            : "var(--bg-primary)",
+                          color: isActive
+                            ? "var(--text-primary)"
+                            : "var(--text-secondary)",
+                          cursor: canSelect ? "pointer" : "default",
+                          opacity: canSelect ? 1 : 0.55,
+                          fontFamily: "var(--font-mono)",
+                          fontSize: 11,
+                          textAlign: "left",
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: 4,
+                            alignSelf: "stretch",
+                            borderRadius: 2,
+                            background: modelColor(option.id) ?? "var(--accent)",
+                            flexShrink: 0,
+                          }}
+                        />
+                        <span
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 2,
+                            flex: 1,
+                            minWidth: 0,
+                          }}
+                        >
+                          <span
+                            style={{
+                              display: "flex",
+                              alignItems: "baseline",
+                              gap: 6,
+                              minWidth: 0,
+                            }}
+                          >
+                            <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>
+                              {option.label}
+                            </span>
+                            <span style={{ color: "var(--text-muted)", fontSize: 10 }}>
+                              {meta.family}
+                            </span>
+                          </span>
+                          <span
+                            style={{
+                              color: "var(--text-muted)",
+                              fontFamily: "var(--font-sans)",
+                              fontSize: 10,
+                              lineHeight: 1.25,
+                            }}
+                          >
+                            {meta.description}
+                          </span>
+                        </span>
+                        {isActive && (
+                          <span style={{ color: "var(--accent)", fontSize: 10 }}>✓</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {showThinkingControls && thinkingConfig && onThinkingConfigChange && (
+            <div
+              style={{
+                borderTop: "1px solid var(--border-default)",
+                paddingTop: 8,
+                display: "flex",
+                flexDirection: "column",
+                gap: 7,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 9,
+                  color: "var(--text-muted)",
+                  fontFamily: "var(--font-mono)",
+                  textTransform: "uppercase",
+                }}
+              >
+                Reasoning
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {capability.supportedEffortLevels.map((effort) => {
+                  const active = thinkingConfig.effort === effort;
+                  return (
+                    <button
+                      key={effort}
+                      onClick={() =>
+                        onThinkingConfigChange({ ...thinkingConfig, effort })
+                      }
+                      onMouseDown={(e) => e.stopPropagation()}
+                      title={EFFORT_DESCRIPTIONS[effort]}
+                      style={{
+                        ...pillStyle,
+                        borderColor: active ? "var(--accent)" : "var(--border-default)",
+                        background: active ? "var(--state-active)" : "var(--bg-primary)",
+                        color: active ? "var(--text-primary)" : "var(--text-secondary)",
+                      }}
+                    >
+                      {EFFORT_LABELS[effort]}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", gap: 4 }}>
+                {(["summarized", "omitted"] as const).map((display) => {
+                  const active = thinkingConfig.display === display;
+                  return (
+                    <button
+                      key={display}
+                      onClick={() =>
+                        onThinkingConfigChange({ ...thinkingConfig, display })
+                      }
+                      onMouseDown={(e) => e.stopPropagation()}
+                      style={{
+                        ...pillStyle,
+                        borderColor: active ? "var(--accent)" : "var(--border-default)",
+                        background: active ? "var(--state-active)" : "var(--bg-primary)",
+                        color: active ? "var(--text-primary)" : "var(--text-secondary)",
+                      }}
+                    >
+                      {display === "summarized" ? "Summaries" : "Hidden"}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SessionToolbar({
   sessionKey,
   status,
@@ -260,27 +778,107 @@ export function SessionToolbar({
   thinkingConfig,
   onThinkingConfigChange,
   skillsContent,
+  harness,
+  onHarnessChange,
 }: SessionToolbarProps) {
-  const [modelOpen, setModelOpen] = useState(false);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [permOpen, setPermOpen] = useState(false);
-  const [effortOpen, setEffortOpen] = useState(false);
 
   const isRunning = status === "running" || status === "creating";
   const hasSession = !!sessionKey;
-  const capability = getModelCapability(model);
-  const showThinkingControls =
-    capability.supportsAdaptiveThinking &&
-    !!thinkingConfig &&
-    !!onThinkingConfigChange;
+
+  // ── Harness inventory (Phase E) ──────────────────────────
+  const { harnesses, loaded: harnessesLoaded } = useHarnessList();
+  const activeHarness = findHarness(harnesses, harness);
+  const harnessCapabilities = activeHarness?.capabilities;
+
+  // Models the active harness can resolve. Falls back to the existing
+  // Claude alias set when the inventory hasn't loaded — keeps the UI
+  // populated on the very first paint before the WS roundtrip lands.
+  const modelOptions = useMemo<string[]>(() => {
+    if (activeHarness && activeHarness.models.length > 0) {
+      return activeHarness.models.map((m) => m.id);
+    }
+    return ["sonnet", "opus", "opus-old", "haiku"];
+  }, [activeHarness]);
+
+  const modelLabels = useMemo<Record<string, string>>(() => {
+    const map: Record<string, string> = { ...CLAUDE_MODEL_LABELS };
+    if (activeHarness) {
+      for (const m of activeHarness.models) {
+        map[m.id] = m.label;
+      }
+    }
+    return map;
+  }, [activeHarness]);
+
+  // Per-model capability — gated by the harness's overall thinking flag
+  // first, then by the model entry.
+  const capability = getModelCapability(model, activeHarness);
+
+  // Permission options — Codex doesn't have a "plan" mode. Drop it when
+  // the active harness lacks permission prompts entirely; drop only "plan"
+  // for Codex specifically per the Codex permission-mapping table.
+  const permissionOptions = useMemo<PermissionMode[]>(() => {
+    const all: PermissionMode[] = [
+      "auto",
+      "bypassPermissions",
+      "default",
+      "plan",
+      "acceptEdits",
+    ];
+    if (!harnessCapabilities) return all;
+    if (!harnessCapabilities.permissionPrompts) return [];
+    if (harness === "codex") return all.filter((m) => m !== "plan");
+    return all;
+  }, [harnessCapabilities, harness]);
+
+  const activeHarnessName = harness ?? activeHarness?.name ?? "claude";
+  const modelPickerHarnesses = useMemo<ReadonlyArray<HarnessInfo>>(() => {
+    if (!harnessesLoaded || harnesses.length === 0) return [];
+    if (!hasSession && !!onHarnessChange) return harnesses;
+    if (hasSession) return harnesses;
+    return activeHarness ? [activeHarness] : [];
+  }, [activeHarness, harnesses, harnessesLoaded, hasSession, onHarnessChange]);
+
+  // Capability gates for live-run controls. Hide when the harness can't
+  // honour them rather than asking the server only to be told it's
+  // unsupported. We *don't* hide model/permission selectors — those are
+  // also legitimately changed before the run starts.
+  const showInterrupt =
+    !harnessCapabilities || harnessCapabilities.partialMessages;
 
   const closeAll = useCallback(() => {
-    setModelOpen(false);
+    setModelPickerOpen(false);
     setPermOpen(false);
-    setEffortOpen(false);
   }, []);
+
+  useEffect(() => {
+    if (!modelPickerOpen && !permOpen) return;
+
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      if (target && toolbarRef.current?.contains(target)) return;
+      closeAll();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeAll();
+    };
+
+    // Capture phase matters here because chat/canvas surfaces commonly stop
+    // propagation to prevent node dragging or canvas selection.
+    document.addEventListener("mousedown", onMouseDown, true);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown, true);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [closeAll, modelPickerOpen, permOpen]);
 
   return (
     <div
+      ref={toolbarRef}
       onMouseDown={(e) => e.stopPropagation()}
       style={{
         display: "flex",
@@ -294,103 +892,45 @@ export function SessionToolbar({
         minHeight: 30,
       }}
     >
-      {/* Model selector */}
-      <Dropdown
-        value={model}
-        options={["sonnet", "opus", "opus-old", "haiku"] as ModelOption[]}
-        labels={MODEL_LABELS}
-        colors={MODEL_COLOR}
-        onChange={(m) => {
-          onModelChange(m);
-          closeAll();
-        }}
-        open={modelOpen}
+      {/* Model selection: harness, concrete model, and reasoning controls in one surface. */}
+      <ModelSelectionPicker
+        model={model}
+        activeHarnessName={activeHarnessName}
+        activeHarness={activeHarness}
+        harnesses={modelPickerHarnesses}
+        modelOptions={modelOptions}
+        modelLabels={modelLabels}
+        capability={capability}
+        thinkingConfig={thinkingConfig}
+        onModelChange={onModelChange}
+        onHarnessChange={onHarnessChange}
+        onThinkingConfigChange={onThinkingConfigChange}
+        onSelectComplete={closeAll}
+        hasSession={hasSession}
+        open={modelPickerOpen}
         onToggle={() => {
-          setModelOpen(!modelOpen);
+          setModelPickerOpen(!modelPickerOpen);
           setPermOpen(false);
         }}
       />
 
-      {/* Permission mode selector */}
-      <Dropdown
-        value={permissionMode}
-        options={
-          [
-            "auto",
-            "bypassPermissions",
-            "default",
-            "plan",
-            "acceptEdits",
-          ] as PermissionMode[]
-        }
-        labels={PERMISSION_LABELS}
-        descriptions={PERMISSION_DESCRIPTIONS}
-        onChange={(m) => {
-          onPermissionModeChange(m);
-          closeAll();
-        }}
-        open={permOpen}
-        onToggle={() => {
-          setPermOpen(!permOpen);
-          setModelOpen(false);
-          setEffortOpen(false);
-        }}
-      />
-
-      {/* Effort selector + Show-thinking toggle (only when model supports adaptive) */}
-      {showThinkingControls && thinkingConfig && onThinkingConfigChange && (
-        <>
-          <Dropdown
-            value={thinkingConfig.effort}
-            options={capability.supportedEffortLevels}
-            labels={EFFORT_LABELS}
-            descriptions={EFFORT_DESCRIPTIONS}
-            onChange={(e) => {
-              onThinkingConfigChange({ ...thinkingConfig, effort: e });
-              closeAll();
-            }}
-            open={effortOpen}
-            onToggle={() => {
-              setEffortOpen(!effortOpen);
-              setModelOpen(false);
-              setPermOpen(false);
-            }}
-          />
-          <button
-            onClick={() =>
-              onThinkingConfigChange({
-                ...thinkingConfig,
-                display:
-                  thinkingConfig.display === "summarized"
-                    ? "omitted"
-                    : "summarized",
-              })
-            }
-            onMouseDown={(e) => e.stopPropagation()}
-            title={
-              thinkingConfig.display === "summarized"
-                ? "Hide thinking summaries (faster time-to-first-token)"
-                : "Show thinking summaries"
-            }
-            style={{
-              ...pillStyle,
-              color:
-                thinkingConfig.display === "summarized"
-                  ? COLORS.textSecondary
-                  : COLORS.textMuted,
-              opacity: thinkingConfig.display === "summarized" ? 1 : 0.7,
-            }}
-          >
-            <span style={{ fontSize: 11, lineHeight: 1 }}>
-              {thinkingConfig.display === "summarized" ? "\u{1F4AC}" : "\u{1F4AD}"}
-            </span>
-            <span>
-              {thinkingConfig.display === "summarized"
-                ? "Show thinking"
-                : "Hide thinking"}
-            </span>
-          </button>
-        </>
+      {/* Permission mode selector — hidden when the harness has no permission concept */}
+      {permissionOptions.length > 0 && (
+        <Dropdown
+          value={permissionMode}
+          options={permissionOptions}
+          labels={PERMISSION_LABELS}
+          descriptions={PERMISSION_DESCRIPTIONS}
+          onChange={(m) => {
+            onPermissionModeChange(m);
+            closeAll();
+          }}
+          open={permOpen}
+          onToggle={() => {
+            setPermOpen(!permOpen);
+            setModelPickerOpen(false);
+          }}
+        />
       )}
 
       {/* Spacer */}
@@ -399,8 +939,8 @@ export function SessionToolbar({
       {/* Skills content (right side) */}
       {skillsContent}
 
-      {/* Interrupt button */}
-      {hasSession && isRunning && (
+      {/* Interrupt button — hidden when the harness can't be interrupted mid-turn */}
+      {hasSession && isRunning && showInterrupt && (
         <button
           onClick={onInterrupt}
           onMouseDown={(e) => e.stopPropagation()}

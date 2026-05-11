@@ -142,12 +142,12 @@ describe("buildExternalMcpServers", () => {
     {
       transport: "sse" as const,
       url: "https://example.com/sse",
-      headers: { Authorization: "Bearer tok" },
+      headers: { Authorization: "Bearer tok" } as Record<string, string>,
     },
     {
       transport: "http" as const,
       url: "https://example.com/mcp",
-      headers: { "X-API-Key": "key123" },
+      headers: { "X-API-Key": "key123" } as Record<string, string>,
     },
   ])("$transport transport", ({ transport, url, headers }) => {
     it("builds config with type and url", () => {

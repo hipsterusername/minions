@@ -242,12 +242,14 @@ export function processNormalizedEvent(
     if (event.reason === "error") {
       host.status = "error";
       host.lastError = event.error ?? "unknown";
+      host.lastErrorFull = event.fullError ?? host.lastError;
       host.persist();
 
       const errEvent: BufferedEvent = {
         type: "session_error",
         sessionKey: host.id,
         error: host.lastError,
+        fullError: host.lastErrorFull,
         timestamp: now,
       };
       host.bufferEvent(errEvent);

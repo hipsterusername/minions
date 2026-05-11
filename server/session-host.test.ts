@@ -17,7 +17,7 @@
  *   - `Bus` capture (the real `createBus` over a fake `WebSocketServer`
  *     that records every fan-out).
  *   - `SessionHost` itself.
- *   - The `default` agent (no MCP, no worktree) — keeps the test focused
+ *   - The registered agents (no SDK calls in the agent implementations) — keeps the test focused
  *     on lifecycle, not agent wiring.
  */
 
@@ -85,7 +85,7 @@ import {
   disablePersistence,
   closePersistDb,
 } from "./session-persist.ts";
-import "./agents/index.ts"; // registers leader/minion/default
+import "./agents/index.ts"; // registers agent types
 
 interface CapturedEnvelope {
   topic: string;
@@ -400,5 +400,34 @@ describe("SessionHost.start — role + agent context", () => {
     await new Promise((r) => setTimeout(r, 5));
     expect(timerFired).toBe(false);
     expect(host.waitTimerId).toBeNull();
+  });
+
+  it("reports an unknown role as a session error instead of rejecting", async () => {
+    const { host, deps, envelopes } = makeHarness();
+
+    await expect(
+      host.start(
+        {
+          sessionKey: host.id,
+          prompt: "p",
+          cwd: host.cwd,
+          role: "missing-agent" as never,
+        },
+        deps,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(host.status).toBe("error");
+    expect(host.lastError).toMatch(/Unknown agent type "missing-agent"/);
+    expect(envelopes).toContainEqual(
+      expect.objectContaining({
+        topic: `session:${host.id}`,
+        type: "session_error",
+        payload: expect.objectContaining({
+          sessionKey: host.id,
+          error: expect.stringMatching(/Unknown agent type "missing-agent"/),
+        }),
+      }),
+    );
   });
 });

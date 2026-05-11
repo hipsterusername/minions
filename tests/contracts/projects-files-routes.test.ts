@@ -116,6 +116,60 @@ describe("GET /file — read file", () => {
   });
 });
 
+describe("GET /blob — binary file read", () => {
+  it("streams raw bytes with image/png content type for a .png file", async () => {
+    // Minimal PNG: 1x1 transparent. Used as a stand-in for binary content;
+    // the precise bytes don't matter, only that we get them back unchanged.
+    const pngBytes = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+      0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+      0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+      0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41,
+      0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+      0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
+      0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+      0x42, 0x60, 0x82,
+    ]);
+    fs.writeFileSync(path.join(project, "pixel.png"), pngBytes);
+    const res = await fetch(`${baseUrl}/${encoded}/blob?path=pixel.png`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    const buf = Buffer.from(await res.arrayBuffer());
+    expect(buf.equals(pngBytes)).toBe(true);
+  });
+
+  it("falls back to application/octet-stream for unknown extensions", async () => {
+    fs.writeFileSync(path.join(project, "thing.bin"), Buffer.from([1, 2, 3]));
+    const res = await fetch(`${baseUrl}/${encoded}/blob?path=thing.bin`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/octet-stream");
+  });
+
+  it("returns 404 for a missing file", async () => {
+    const res = await fetch(`${baseUrl}/${encoded}/blob?path=ghost.png`);
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 400 when the path query is missing", async () => {
+    const res = await fetch(`${baseUrl}/${encoded}/blob`);
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects path traversal with 403", async () => {
+    const res = await fetch(
+      `${baseUrl}/${encoded}/blob?path=${encodeURIComponent("../../etc/passwd")}`,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 400 when target is a directory, not a file", async () => {
+    fs.mkdirSync(path.join(project, "imgdir"));
+    const res = await fetch(`${baseUrl}/${encoded}/blob?path=imgdir`);
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("GET /ls — directory listing", () => {
   it("returns a sorted list of dirs first, then files, skipping ignored names", async () => {
     fs.mkdirSync(path.join(project, "src"));
@@ -208,3 +262,4 @@ describe("GET /tree — recursive listing", () => {
     expect(res.status).toBe(403);
   });
 });
+

@@ -9,11 +9,13 @@ import type { NormalizedEvent } from "../shared/normalized-event.ts";
 
 export type ServerMessage =
   | { type: "session_list"; sessions: SessionInfo[] }
+  | { type: "harness_list"; harnesses: HarnessListEntry[] }
   | { type: "session_created"; sessionKey: string }
   | { type: "session_status"; sessionKey: string; status: string; sessionId?: string }
-  | { type: "session_error"; sessionKey: string; error: string }
+  | { type: "session_error"; sessionKey: string; error: string; fullError?: string }
+  | { type: "kanban_card_created"; sessionKey: string; card: { title: string; description: string; context: string; priority: "low" | "medium" | "high" | "critical"; subtasks: string[] }; timestamp: number }
   | { type: "sdk_event"; sessionKey: string; event: NormalizedEvent }
-  | { type: "sync_response"; sessionKey: string; found: boolean; status?: string; sessionId?: string; totalCost?: number; turns?: number; lastError?: string | null; events?: SyncEvent[]; model?: string; permissionMode?: string; initData?: Record<string, unknown>; taskName?: string | null; role?: "leader" | "minion" | "default"; activeMinions?: ActiveMinion[]; worktree?: { path: string; branch: string } | null; approval?: { requested?: boolean; summary?: string; diff?: unknown } | null }
+  | { type: "sync_response"; sessionKey: string; found: boolean; status?: string; sessionId?: string; totalCost?: number; turns?: number; lastError?: string | null; lastErrorFull?: string | null; events?: SyncEvent[]; model?: string; permissionMode?: string; initData?: Record<string, unknown>; taskName?: string | null; role?: "leader" | "minion" | "default" | "card-composer"; activeMinions?: ActiveMinion[]; worktree?: { path: string; branch: string } | null; approval?: { requested?: boolean; summary?: string; diff?: unknown } | null; harness?: string; harnessCapabilities?: HarnessCapabilities | null }
   | { type: "control_response"; command: string; sessionKey: string; requestId: string | null; success: boolean; error?: string; [key: string]: unknown }
   | { type: "session_cleared"; sessionKey: string }
   | { type: "session_task_name"; sessionKey: string; taskName: string }
@@ -26,6 +28,8 @@ export type ServerMessage =
   | { type: "worktree_merged"; sessionKey: string }
   | { type: "worktree_merge_failed"; sessionKey: string; result?: { conflicts?: string[]; summary?: string; targetBranch?: string }; error?: string }
   | { type: "session_completed"; sessionKey: string; reason: string; timestamp: number }
+  | { type: "minion_status"; minionSessionKey: string; trigger: "step" | "done" | "fail"; message: string; timestamp: number; leaderSessionKey?: string; taskId?: string }
+  | { type: "minion_completed"; leaderSessionKey: string; minionSessionKey: string; taskId: string; status: "completed" | "failed"; result: string; timestamp: number }
   | { type: "agent_task_update"; leaderSessionKey: string; taskId: string; status: string; summary?: string; timestamp: number }
   | { type: "render_update"; leaderSessionKey: string; action: "set" | "patch" | "append" | "remove"; layout?: { title?: string | null; columns?: number; components?: unknown[] }; updates?: unknown[]; components?: unknown[]; ids?: string[] }
   | { type: "wait_state"; sessionKey: string; action: string; reason: string; waitUntil?: number; scheduledAt?: number; durationMs?: number; timestamp?: number }
@@ -39,7 +43,37 @@ export interface SyncEvent {
   message?: unknown;
   status?: string;
   error?: string;
+  fullError?: string;
   timestamp: number;
+}
+
+/**
+ * Capability flags declared by an `AgentHarness` and surfaced to the client
+ * via `sync_response` and `session_list`. Mirrors `server/harness/types.ts`
+ * `HarnessCapabilities` — keep the two in sync.
+ */
+export interface HarnessCapabilities {
+  thinking: boolean;
+  promptCaching: boolean;
+  mcp: boolean;
+  permissionPrompts: boolean;
+  resume: boolean;
+  partialMessages: boolean;
+  builtInFilesystem: boolean;
+}
+
+/**
+ * A single entry in the `harness_list` server payload. Mirrors what
+ * `server/commands/list-harnesses.ts` emits — keep the two in sync.
+ */
+export interface HarnessListEntry {
+  name: string;
+  capabilities: HarnessCapabilities;
+  builtInTools: string[];
+  models: ReadonlyArray<{ id: string; label: string }>;
+  commands: ReadonlyArray<{ name: string; description: string }>;
+  agents: ReadonlyArray<{ id: string; description: string }>;
+  account: { provider: string } & Record<string, unknown>;
 }
 
 export interface SessionInfo {
@@ -52,8 +86,16 @@ export interface SessionInfo {
   model?: string | null;
   permissionMode?: string | null;
   taskName?: string | null;
-  role?: "leader" | "minion" | "default";
+  role?: "leader" | "minion" | "default" | "card-composer";
   activeMinions?: ActiveMinion[];
+  /** Registered harness driving this session (e.g. "claude", "echo"). */
+  harness?: string;
+  /**
+   * Static capability flags for `harness`. `null` when the harness name is
+   * not currently registered (e.g. a hydrated session whose harness module
+   * was removed) — clients should fall back to safe defaults.
+   */
+  harnessCapabilities?: HarnessCapabilities | null;
 }
 
 export interface ActiveMinion {

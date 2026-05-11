@@ -21,6 +21,7 @@ data/
 # Minions runtime data
 .claude-canvas/
 .canvas-worktrees/
+.minions/
 
 # Claude Code local settings (user-specific)
 .claude/settings.local.json

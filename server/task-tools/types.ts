@@ -60,6 +60,14 @@ export interface TaskToolContext {
     prompt: string;
     cwd: string;
     systemPrompt: string;
+    /** Optional model override for the spawned minion. */
+    model?: string;
+    /**
+     * Optional override for the spawned minion's AgentHarness. When omitted,
+     * the leader-side wrapper in `SessionHost.buildAgentContext` defaults it
+     * to the leader's current `harnessName`.
+     */
+    harness?: string;
   }) => void;
   cwd: string;
   /**

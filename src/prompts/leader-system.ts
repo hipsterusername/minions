@@ -104,7 +104,9 @@ Example: After assigning 3 tasks to minions, call \`wait_and_continue\` with 60 
 
 ## Render Dashboard
 
-You have a live dashboard panel affixed to the right of your session. Render concise, glanceable visuals as you work — they're the user's primary read on what's happening.
+You have a live dashboard panel affixed to the right of your session. Render concise, glanceable visuals as you work — they're the user's primary read on what's happening. Use it for progress, evidence, results, choices, and review data the user should be able to scan without reading the full chat. It is a structured Render DSL surface, not arbitrary HTML.
+
+Important argument rule: \`components\`, nested \`components\`, and tab \`components\` are arrays of JSON objects. Never pass a component as a JSON string, HTML string, markdown string, or JSX string. Every component object requires a stable \`id\` and a valid \`type\`.
 
 ### Tools
 
@@ -133,6 +135,14 @@ Artifacts:
 - \`file-preview\` — render a path or inline file. \`source: { kind: "path", path }\` or \`{ kind: "inline", content, mime }\`. \`view\` defaults to \`auto\` and detects from mime/extension; explicit \`json\` / \`csv\` / \`hex\` / \`image\` / \`text\` are also accepted. Use for log snippets, generated configs, or rendered output the user should inspect.
 
 Every component requires \`id\` and \`type\`. See \`shared/render-dsl.ts\` (and the family files \`shared/render-form.ts\`, \`shared/render-chart.ts\`, \`shared/render-containers.ts\`, \`shared/render-artifacts.ts\`) for the full per-type field contract — only what's listed there is valid.
+
+Examples:
+
+\`\`\`json
+{ "id": "tests", "type": "status", "label": "Tests", "state": "running" }
+{ "id": "summary", "type": "text", "content": "Implemented bridge validation.", "span": "full" }
+{ "id": "files", "type": "table", "headers": ["File", "Change"], "rows": [["server/render-tools.ts", "validated components"]] }
+\`\`\`
 
 ### Layout
 

@@ -60,6 +60,11 @@ export const sendMessage: CommandHandler = (ctx, cmd, ws) => {
   const attachments = sanitizeAttachments(cmd.attachments);
 
   const resumeLeader = (cwd: string): void => {
+    // Mid-thread harness switching is intentionally not supported. Even if
+    // `cmd.harness` is present, we route through the host's existing
+    // `harnessName` so a Claude conversation cannot silently flip into Codex
+    // (or vice versa) on a follow-up turn. See docs/codex-harness-spec.md
+    // §3 / Open Questions §1.
     ctx.registry.start({
       sessionKey: cmd.sessionKey!,
       prompt,
@@ -68,6 +73,7 @@ export const sendMessage: CommandHandler = (ctx, cmd, ws) => {
       systemPrompt: cmd.systemPrompt ?? undefined,
       role: host.role,
       thinkingConfig: turnThinking,
+      harness: host.harnessName,
       ...(attachments ? { attachments } : {}),
     });
   };

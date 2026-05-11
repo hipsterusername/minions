@@ -144,6 +144,18 @@ export interface NormalizedToolResult {
 }
 
 /**
+ * MCP/App tool safety annotations. These hints let hosts distinguish
+ * read-only lookups from state-changing actions and frame approval prompts
+ * correctly. Defaults are supplied by harness adapters when omitted.
+ */
+export interface NormalizedToolAnnotations {
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  openWorldHint?: boolean;
+  idempotentHint?: boolean;
+}
+
+/**
  * Harness-agnostic tool definition. Each harness translates this to its native
  * format inside registerTools().
  *
@@ -159,6 +171,8 @@ export interface NormalizedToolDef {
   description: string;
   /** Zod schema — the single source of truth, converted per-harness. */
   inputSchema: ZodTypeAny;
+  /** Optional MCP/App safety hints advertised in tools/list descriptors. */
+  annotations?: NormalizedToolAnnotations;
   handler: (input: unknown) => Promise<NormalizedToolResult>;
 }
 

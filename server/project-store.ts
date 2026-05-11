@@ -8,54 +8,6 @@ const SIDECAR_DIR = ".minions";
 const GLOBAL_DIR = path.join(os.homedir(), ".minions");
 const RECENT_PROJECTS_FILE = path.join(GLOBAL_DIR, "recent-projects.json");
 
-// ── One-time directory migration ───────────────────────────────────────────
-
-/**
- * One-time migration: rename `~/.claude-canvas` → `~/.minions` on boot.
- *
- * - Old exists, new does not → rename.
- * - Old exists, new also exists → log a warning and leave both; the caller
- *   uses GLOBAL_DIR (.minions) going forward.
- * - Old does not exist → no-op.
- *
- * Exported for direct boot calls and tests.
- */
-export function migrateGlobalDir(): void {
-  const oldDir = path.join(os.homedir(), ".claude-canvas");
-  if (!fs.existsSync(oldDir)) return;
-  if (fs.existsSync(GLOBAL_DIR)) {
-    console.warn(
-      "[migrate] Both ~/.claude-canvas and ~/.minions exist — " +
-        "using ~/.minions. You may safely remove ~/.claude-canvas.",
-    );
-    return;
-  }
-  fs.renameSync(oldDir, GLOBAL_DIR);
-  console.log("[migrate] Renamed ~/.claude-canvas → ~/.minions");
-}
-
-/**
- * One-time migration: rename `<projectPath>/.claude-canvas` → `.minions`.
- *
- * Same three-case semantics as `migrateGlobalDir`.
- *
- * Exported for direct boot calls and tests.
- */
-export function migrateSidecar(projectPath: string): void {
-  const oldSidecar = path.join(projectPath, ".claude-canvas");
-  const newSidecar = path.join(projectPath, ".minions");
-  if (!fs.existsSync(oldSidecar)) return;
-  if (fs.existsSync(newSidecar)) {
-    console.warn(
-      `[migrate] Both .claude-canvas and .minions exist in ${projectPath} — ` +
-        "using .minions.",
-    );
-    return;
-  }
-  fs.renameSync(oldSidecar, newSidecar);
-  console.log(`[migrate] Renamed .claude-canvas → .minions in ${projectPath}`);
-}
-
 export interface RecentProject {
   path: string;          // absolute path to the project working directory
   name: string;          // display name
@@ -69,6 +21,10 @@ export interface ProjectContext {
 
 export interface ProjectSettings {
   defaultModel?: string;
+  defaultLeaderHarness?: string;
+  defaultLeaderModel?: string;
+  defaultMinionHarness?: string;
+  defaultMinionModel?: string;
   defaultPermissionMode?: string;
   defaultWorktreeIsolation?: boolean;
   [key: string]: unknown;
@@ -77,7 +33,6 @@ export interface ProjectSettings {
 // ── Recent projects index ──────────────────────────────
 
 function ensureGlobalDir(): void {
-  migrateGlobalDir();
   fs.mkdirSync(GLOBAL_DIR, { recursive: true });
 }
 
@@ -145,7 +100,11 @@ export function initSidecar(projectPath: string): Database.Database {
   const settingsPath = path.join(sidecar, "settings.json");
   if (!fs.existsSync(settingsPath)) {
     fs.writeFileSync(settingsPath, JSON.stringify({
-      defaultModel: "sonnet",
+      defaultModel: "claude-sonnet-4-6",
+      defaultLeaderHarness: "claude",
+      defaultLeaderModel: "claude-opus-4-7",
+      defaultMinionHarness: "claude",
+      defaultMinionModel: "claude-sonnet-4-6",
       defaultPermissionMode: "auto",
       defaultWorktreeIsolation: false,
     }, null, 2));
@@ -154,14 +113,7 @@ export function initSidecar(projectPath: string): Database.Database {
   return db;
 }
 
-/**
- * Open an existing sidecar's database. Runs the one-time `.claude-canvas` →
- * `.minions` migration before checking for the sidecar so existing projects
- * upgrade transparently on first open. Initializes a fresh sidecar if
- * neither the migrated nor a pre-existing one is found.
- */
 export function openProjectDb(projectPath: string): Database.Database {
-  migrateSidecar(projectPath);
   if (!hasSidecar(projectPath)) {
     return initSidecar(projectPath);
   }
@@ -193,14 +145,26 @@ export function writeContext(projectPath: string, content: string): void {
 export function readSettings(projectPath: string): ProjectSettings {
   const settingsPath = path.join(sidecarPath(projectPath), "settings.json");
   if (!fs.existsSync(settingsPath)) {
-    return { defaultModel: "sonnet", defaultPermissionMode: "auto", defaultWorktreeIsolation: false };
+    return defaultProjectSettings();
   }
   try {
     const raw = fs.readFileSync(settingsPath, "utf-8");
-    return JSON.parse(raw) as ProjectSettings;
+    return { ...defaultProjectSettings(), ...(JSON.parse(raw) as ProjectSettings) };
   } catch {
-    return { defaultModel: "sonnet", defaultPermissionMode: "auto", defaultWorktreeIsolation: false };
+    return defaultProjectSettings();
   }
+}
+
+function defaultProjectSettings(): ProjectSettings {
+  return {
+    defaultModel: "claude-sonnet-4-6",
+    defaultLeaderHarness: "claude",
+    defaultLeaderModel: "claude-opus-4-7",
+    defaultMinionHarness: "claude",
+    defaultMinionModel: "claude-sonnet-4-6",
+    defaultPermissionMode: "auto",
+    defaultWorktreeIsolation: false,
+  };
 }
 
 export function writeSettings(projectPath: string, settings: ProjectSettings): void {

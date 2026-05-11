@@ -56,13 +56,15 @@ describe("close_session", () => {
   it("does NOT emit 'unsupported by harness' when close() is absent — it is best-effort", () => {
     const h = setup({ status: "running" });
     // runControl with abort() only, no close()
-    h.setRunControl({ abort() {} });
+    const abort = vi.fn();
+    h.setRunControl({ abort });
 
     closeSession(h.ctx, cmd({ type: "close_session" }), h.ws);
 
     // Only one message: the control_response success — no error
     const errors = h.wsSent.filter((e) => e["success"] === false);
     expect(errors).toHaveLength(0);
+    expect(abort).toHaveBeenCalledTimes(1);
     expect(h.host.status).toBe("stopped");
   });
 

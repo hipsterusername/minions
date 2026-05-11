@@ -31,6 +31,8 @@ import {
 } from "vitest";
 import { z } from "zod/v4";
 import { promises as fs } from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 import type {
   HarnessStartOptions,
@@ -148,6 +150,7 @@ vi.mock("../../mcp-bridge/server.ts", () => ({
 
 // ── Imports that trigger module-load (after vi.mock) ──────────────────────────
 
+import { buildCodexEnv } from "./env.ts";
 import { codexHarness } from "./index.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -159,7 +162,7 @@ function baseOpts(over: Partial<HarnessStartOptions> = {}): HarnessStartOptions 
     cwd: "/tmp/work",
     prompt: "do the thing",
     systemPrompt: "you are codex",
-    model: "gpt-5-codex",
+    model: "gpt-5.5",
     allowedTools: [],
     abortSignal: ac.signal,
     ...over,
@@ -229,7 +232,7 @@ describe("CodexHarness.start()", () => {
     expect(typeof control.abort).toBe("function");
     const out = await collect(events);
     expect(out.map((e) => e.kind)).toEqual(["init", "text", "usage", "done"]);
-    expect(out[0]).toMatchObject({ kind: "init", sessionId: "th-001", model: "gpt-5-codex" });
+    expect(out[0]).toMatchObject({ kind: "init", sessionId: "th-001", model: "gpt-5.5" });
     expect(out[1]).toMatchObject({ kind: "text", role: "assistant", text: "hi" });
     expect(out[2]).toMatchObject({ kind: "usage", input: 7, output: 11, cacheRead: 3 });
     expect(out[3]).toMatchObject({ kind: "done", reason: "stop" });
@@ -242,11 +245,25 @@ describe("CodexHarness.start()", () => {
     expect(sdkMock.calls.resumeThread).toHaveLength(0);
   });
 
+  it("skips Codex's git repo trust check for Minions-selected projects", async () => {
+    await collect(codexHarness.start(baseOpts()).events);
+    const startThreadOpts = sdkMock.calls.startThread[0] as {
+      workingDirectory?: string;
+      skipGitRepoCheck?: boolean;
+    };
+    expect(startThreadOpts.workingDirectory).toBe("/tmp/work");
+    expect(startThreadOpts.skipGitRepoCheck).toBe(true);
+  });
+
   it("uses resumeThread when resumeId is provided", async () => {
     await collect(codexHarness.start(baseOpts({ resumeId: "th-prev" })).events);
     expect(sdkMock.calls.startThread).toHaveLength(0);
     expect(sdkMock.calls.resumeThread).toHaveLength(1);
     expect(sdkMock.calls.resumeThread[0]?.id).toBe("th-prev");
+    expect(
+      (sdkMock.calls.resumeThread[0]?.opts as { skipGitRepoCheck?: boolean })
+        .skipGitRepoCheck,
+    ).toBe(true);
   });
 
   it("emits done(reason: error) when runStreamed throws synchronously", async () => {
@@ -260,6 +277,19 @@ describe("CodexHarness.start()", () => {
     const out = await collect(codexHarness.start(baseOpts()).events);
     const last = out[out.length - 1];
     expect(last).toMatchObject({ kind: "done", reason: "error", error: "boom" });
+  });
+
+  it("attaches prior stream errors to fullError when the stream later throws", async () => {
+    sdkMock.setNextEvents(
+      (async function* () {
+        yield { type: "error", message: "Reconnecting... 1/5" };
+        throw new Error("Codex Exec exited with code 1: stderr detail");
+      })(),
+    );
+    const out = await collect(codexHarness.start(baseOpts()).events);
+    const last = out[out.length - 1] as { fullError?: string };
+    expect(last.fullError).toContain("Codex Exec exited with code 1");
+    expect(last.fullError).toContain("Reconnecting... 1/5");
   });
 
   it("emits done(reason: abort) when control.abort fires before iteration ends", async () => {
@@ -491,3 +521,78 @@ describe("CodexHarness abort determinism", () => {
     }
   });
 });
+
+// ── Codex CLI environment ────────────────────────────────────────────────────
+
+describe("buildCodexEnv", () => {
+  it("returns undefined when no bridge env is needed and the default Codex home is usable", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "codex-home-ok-"));
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "codex-cwd-"));
+    await fs.mkdir(path.join(home, ".codex"));
+
+    await withEnv({ HOME: home, CODEX_HOME: undefined }, async () => {
+      expect(buildCodexEnv({}, cwd)).toBeUndefined();
+    });
+  });
+
+  it("preserves bridge env while leaving CODEX_HOME unset when the default home is usable", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "codex-home-bridge-"));
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "codex-cwd-"));
+    await fs.mkdir(path.join(home, ".codex"));
+
+    await withEnv({ HOME: home, CODEX_HOME: undefined }, async () => {
+      const env = buildCodexEnv({ MINIONS_BRIDGE_TOKEN_TASKS: "tok" }, cwd);
+      expect(env?.["MINIONS_BRIDGE_TOKEN_TASKS"]).toBe("tok");
+      expect(env?.["CODEX_HOME"]).toBeUndefined();
+    });
+  });
+
+  it("uses a project-local CODEX_HOME fallback when the default path is not a directory", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "codex-home-file-"));
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "codex-cwd-"));
+    await fs.writeFile(path.join(home, ".codex"), "not a directory");
+
+    await withEnv({ HOME: home, CODEX_HOME: undefined }, async () => {
+      const env = buildCodexEnv({}, cwd);
+      expect(env?.["CODEX_HOME"]).toBe(path.join(cwd, ".minions", "codex-home"));
+      const stat = await fs.stat(env!["CODEX_HOME"]!);
+      expect(stat.isDirectory()).toBe(true);
+    });
+  });
+
+  it("respects an explicit CODEX_HOME", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "codex-cwd-"));
+    await withEnv({ CODEX_HOME: "/custom/codex-home" }, async () => {
+      const env = buildCodexEnv({ MINIONS_BRIDGE_TOKEN_TASKS: "tok" }, cwd);
+      expect(env?.["CODEX_HOME"]).toBe("/custom/codex-home");
+    });
+  });
+});
+
+async function withEnv(
+  updates: Record<string, string | undefined>,
+  fn: () => Promise<void>,
+): Promise<void> {
+  const previous: Record<string, string | undefined> = {};
+  for (const key of Object.keys(updates)) {
+    previous[key] = process.env[key];
+  }
+  try {
+    for (const [key, value] of Object.entries(updates)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+    await fn();
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+}

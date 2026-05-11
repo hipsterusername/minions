@@ -13,7 +13,7 @@
  * silently change state the UI sees.
  */
 
-import { act, render } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi, beforeAll } from "vitest";
 
@@ -41,9 +41,10 @@ interface ProbeProps {
   socket: ReturnType<typeof createReplaySocket>["socket"];
   initial: LeaderData;
   onState?: (d: LeaderData) => void;
+  onAddContentNode?: ((content: string) => void) | undefined;
 }
 
-function Probe({ socket, initial, onState }: ProbeProps) {
+function Probe({ socket, initial, onState, onAddContentNode }: ProbeProps) {
   const [data, setData] = useState<LeaderData>(initial);
   const node: CanvasNode = {
     id: "leader-test",
@@ -64,6 +65,7 @@ function Probe({ socket, initial, onState }: ProbeProps) {
     socketSend: () => {
       /* no-op */
     },
+    onAddContentNode,
   };
   return <LeaderNodeRenderer {...props} />;
 }
@@ -154,6 +156,33 @@ describe("LeaderNode: replays leader-plan-and-delegate fixture", () => {
   });
 });
 
+describe("LeaderNode: message actions", () => {
+  it("keeps assistant bubble actions sticky within the message bubble", () => {
+    const { socket } = createReplaySocket();
+    const longContent = Array.from({ length: 40 }, (_, i) => `Line ${i + 1}`).join("\n");
+
+    render(
+      <Probe
+        socket={socket}
+        initial={makeInitialData({
+          messages: [{
+            id: "assistant-long",
+            role: "assistant",
+            content: longContent,
+            timestamp: 0,
+          }],
+        })}
+        onAddContentNode={vi.fn()}
+      />,
+    );
+
+    const actions = screen.getByTestId("leader-message-actions");
+    expect(actions).toHaveStyle({ position: "sticky", top: "8px", height: "0px" }); // BANNED_ASSERTION_OK: sticky position proves action bar stays visible during scroll
+    expect(within(actions).getByTitle("Add as node")).toHaveStyle({ position: "static" }); // BANNED_ASSERTION_OK: static position proves buttons don't re-offset inside the sticky container
+    expect(within(actions).getByTitle("Copy to clipboard")).toHaveStyle({ position: "static" }); // BANNED_ASSERTION_OK: static position proves buttons don't re-offset inside the sticky container
+  });
+});
+
 // ── session_status / session_error transitions ──────
 
 describe("LeaderNode: status transitions", () => {
@@ -186,6 +215,8 @@ describe("LeaderNode: status transitions", () => {
   it("session_error flips status to 'error' and captures message", async () => {
     const { socket, replay } = createReplaySocket();
     const states: LeaderData[] = [];
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
 
     render(
       <Probe
@@ -201,6 +232,7 @@ describe("LeaderNode: status transitions", () => {
           type: "session_error",
           sessionKey: "leader-1",
           error: "upstream 503",
+          fullError: "upstream 503\nfull stderr detail",
         },
       },
     ]);
@@ -208,6 +240,10 @@ describe("LeaderNode: status transitions", () => {
     const last = states.at(-1);
     expect(last?.status).toBe("error");
     expect(last?.error).toBe("upstream 503");
+    await act(async () => {
+      screen.getByTitle("Copy error to clipboard").click();
+    });
+    expect(writeText).toHaveBeenCalledWith("upstream 503\nfull stderr detail");
   });
 
   it("session_status='running' clears waitUntil/waitReason", async () => {

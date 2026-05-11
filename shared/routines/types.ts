@@ -77,8 +77,11 @@ export const routineInputSchema = z.object({
 
 export type RoutineInput = z.infer<typeof routineInputSchema>;
 
-/** Concrete value bag the runtime hands to template rendering. */
-export type RoutineInputValues = Readonly<Record<string, string>>;
+/** Concrete value bag the runtime hands to template rendering.
+ *  Values are usually strings (validated via routineInputSchema) but the
+ *  template renderer and handoff serializer accept any primitive and
+ *  stringify it. */
+export type RoutineInputValues = Readonly<Record<string, string | number | boolean>>;
 
 // ── Steps ──────────────────────────────────────────────────────────────────
 

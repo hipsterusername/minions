@@ -49,6 +49,8 @@ export function createTaskToolsForLeader(opts: {
     prompt: string;
     cwd: string;
     systemPrompt: string;
+    model?: string;
+    harness?: string;
   }) => void;
   cwd: string;
   /**

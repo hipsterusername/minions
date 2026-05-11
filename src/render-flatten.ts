@@ -143,8 +143,13 @@ function formatTimeline(
 function formatCallout(
   c: Extract<RenderComponent, { type: "callout" }>,
 ): string {
+  // `variant` is documented-required but the server's elideDefaults strips
+  // `variant: "info"` from persisted state, so callouts arriving here may
+  // legitimately have it absent. Default matches COMPONENT_DEFAULTS.callout
+  // and the runtime fallback in src/nodes/RenderNode.tsx:CalloutBlock.
+  const variant = c.variant ?? "info";
   const titleLine = c.title ? `**${c.title}**\n` : "";
-  return `> [${c.variant.toUpperCase()}] ${titleLine}${c.content}`;
+  return `> [${variant.toUpperCase()}] ${titleLine}${c.content}`;
 }
 
 function formatDiff(c: Extract<RenderComponent, { type: "diff" }>): string {

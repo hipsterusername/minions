@@ -55,6 +55,7 @@ export function initDb(dbPath?: string): Database.Database {
       worktree_isolation INTEGER NOT NULL DEFAULT 0,
       total_cost    REAL NOT NULL DEFAULT 0,
       turns         INTEGER NOT NULL DEFAULT 0,
+      harness_name  TEXT NOT NULL DEFAULT 'claude',
       created_at    TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -110,6 +111,12 @@ export function initDb(dbPath?: string): Database.Database {
   // session_id is lost across restarts, and `send_message` cannot resume —
   // it starts a brand-new conversation with no transcript.
   ensureColumn(db, "sessions", "session_id", "TEXT");
+
+  // Phase B (codex-harness-spec) migration: persist the harness name so
+  // restored sessions resume on the same harness they started on. Pre-migration
+  // rows back-fill to "claude" via the column DEFAULT — exactly the behaviour
+  // before this column existed.
+  ensureColumn(db, "sessions", "harness_name", "TEXT NOT NULL DEFAULT 'claude'");
 
   // Phase 3 migration: add schema_version to event_log if the column was
   // added after the table was first created. Existing rows pre-date Phase 3

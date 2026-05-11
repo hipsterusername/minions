@@ -16,8 +16,15 @@ export const closeSession: CommandHandler = (ctx, cmd, ws) => {
   const host = getSessionOrError(ctx.registry, cmd.sessionKey, ws);
   if (!host) return;
   host.clearWaitTimer();
-  // Fire-and-forget; absence of close() is a no-op — do not emit an error.
-  void host.runControl?.close?.();
+  // Fire-and-forget; if the harness has no close() method, fall back to abort()
+  // so minimal controls (Echo/Codex MVP) still stop the underlying run.
+  const control = host.runControl;
+  if (control?.close) {
+    void control.close();
+  } else {
+    control?.abort();
+  }
+  host.abortController.abort();
   host.status = "stopped";
   host.eventStream = null;
   host.runControl = null;

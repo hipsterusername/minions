@@ -18,7 +18,7 @@ interface SessionPanelProps {
   socketSend?: ((data: unknown) => void) | undefined;
   socketSubscribe?: ((fn: (msg: unknown) => void) => () => void) | undefined;
   socketConnected?: boolean | undefined;
-  onAttachSession: (sessionKey: string, role?: "leader" | "minion" | "default") => void;
+  onAttachSession: (sessionKey: string, role?: "leader" | "minion" | "default" | "card-composer") => void;
   attachedSessionKeys: Set<string>;
 }
 
@@ -148,12 +148,14 @@ export function SessionPanel({
     error: "var(--danger-color)",
   };
 
-  const totalCost = sessions.reduce((sum, s) => sum + (s.totalCost ?? 0), 0);
+  const visibleSessions = sessions.filter(
+    (s) => s.role !== "minion" && s.role !== "card-composer",
+  );
+  const totalCost = visibleSessions.reduce((sum, s) => sum + (s.totalCost ?? 0), 0);
   // Memoize the usage map identity so UsageSection only re-renders when an
   // SDK result actually folds new tokens in.
   const usageView = useMemo(() => usageBySession, [usageBySession]);
 
-  const visibleSessions = sessions.filter((s) => s.role !== "minion");
   const runningCount = visibleSessions.filter((s) => s.status === "running").length;
 
   // Prevent wheel events from bubbling to the canvas zoom handler.
@@ -214,7 +216,7 @@ export function SessionPanel({
           padding: "6px",
         }}
       >
-        {sessions.length === 0 && (
+        {visibleSessions.length === 0 && (
           <div
             style={{
               padding: "20px 12px",
@@ -227,7 +229,7 @@ export function SessionPanel({
             No active sessions
           </div>
         )}
-        {sessions.filter((s) => s.role !== "minion").map((session) => {
+        {visibleSessions.map((session) => {
           const isAttached = attachedSessionKeys.has(session.sessionKey);
           const color = statusColor[session.status] ?? "var(--text-muted)";
 

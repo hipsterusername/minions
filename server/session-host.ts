@@ -156,6 +156,7 @@ export class SessionHost {
   runControl: HarnessRunControl | null = null;
   eventBuffer: BufferedEvent[] = [];
   lastError: string | null = null;
+  lastErrorFull: string | null = null;
   model: string | null = null;
   permissionMode: string | null = null;
   /** Adaptive-thinking config supplied by the client. Refreshed on each turn. */
@@ -245,6 +246,7 @@ export class SessionHost {
           role: "minion",
           worktreeIsolation: false,
           parentWorktree: this.worktree ?? undefined,
+          initialModel: params.model ?? null,
           harness: params.harness ?? this.harnessName,
         });
       },
@@ -308,6 +310,7 @@ export class SessionHost {
       this.eventStream = null;
       this.runControl = null;
       this.lastError = null;
+      this.lastErrorFull = null;
       this.role = resolvedRole;
       if (opts.resumeId) this.sessionId = opts.resumeId;
       if (opts.harness) this.harnessName = opts.harness;
@@ -381,11 +384,13 @@ export class SessionHost {
       const errorMessage = err instanceof Error ? err.message : String(err);
       this.status = "error";
       this.lastError = errorMessage;
+      this.lastErrorFull = errorMessage;
       this.persist();
       const errorEvent: BufferedEvent = {
         type: "session_error",
         sessionKey: this.id,
         error: errorMessage,
+        fullError: errorMessage,
         timestamp: Date.now(),
       };
       this.bufferEvent(errorEvent);

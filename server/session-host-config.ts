@@ -20,7 +20,7 @@ import type { NormalizedEvent } from "./harness/types.ts";
 
 // ── Shared types ───────────────────────────────────────────
 
-export type SessionRole = "leader" | "minion" | "default";
+export type SessionRole = "leader" | "minion" | "default" | "card-composer";
 
 export type SessionStatus =
   | "running"

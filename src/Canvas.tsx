@@ -36,6 +36,7 @@ import { wheelDetector } from "./wheel-detector.ts";
 import { canvasScale as canvasScaleRef } from "./canvas-scale.ts";
 import { useCanvasKeyboard } from "./use-canvas-keyboard.ts";
 import { useCanvasFileDrop } from "./use-canvas-file-drop.ts";
+import { useSuppressMiddleClickPaste } from "./use-suppress-middle-click-paste.ts";
 import { createImageNodeFromFile } from "./nodes/image-node-factory.ts";
 import { createMarkdownNodeFromText } from "./nodes/markdown-node-factory.ts";
 import { findNonOverlappingPosition, viewportCenter, pushNodesFromRect, snapToGrid } from "./canvas-utils.ts";
@@ -218,8 +219,9 @@ const Toolbar = memo(function Toolbar({
           viewBox="0 0 40 40"
           fill="none"
         >
-          {/* Crown hexagon leader icon */}
-          <path d="M20 4L34 12V28L20 36L6 28V12L20 4Z" fill="rgba(255,255,255,0.25)" stroke="currentColor" strokeWidth="2"/>
+          {/* Crown-in-circle leader icon — circle is the eye socket,
+              crown + dot are the leader glyph (matches LeaderLoadingScreen). */}
+          <circle cx="20" cy="20" r="16" fill="rgba(255,255,255,0.25)" stroke="currentColor" strokeWidth="2"/>
           <path d="M12 24L10 16L16 20L20 14L24 20L30 16L28 24H12Z" fill="currentColor"/>
           <circle cx="20" cy="28" r="2" fill="currentColor"/>
         </svg>
@@ -547,6 +549,8 @@ export function Canvas({
     description: string;
     priority: "low" | "medium" | "high" | "critical";
     worktreeBranch?: string | null | undefined;
+    model?: string | null | undefined;
+    harness?: string | null | undefined;
     isAgent?: boolean | undefined;
     parentSessionKey?: string | undefined;
   }
@@ -643,7 +647,7 @@ export function Canvas({
 
   // Attach a backend session to the canvas by creating the right node type for its role
   const handleAttachSession = useCallback(
-    (sessionKey: string, role?: "leader" | "minion" | "default") => {
+    (sessionKey: string, role?: "leader" | "minion" | "default" | "card-composer") => {
       const nodeType = role === "leader" ? "leader" : role === "minion" ? "minion" : "claude-session";
       const typeDef = getAllNodeTypes().find((t) => t.type === nodeType);
       if (!typeDef) return;
@@ -912,7 +916,8 @@ export function Canvas({
         totalCost: 0,
         turns: 0,
         error: null,
-        model: "sonnet" as const,
+        model: spawn.model ?? projectSettingsRef.current?.defaultMinionModel ?? "claude-sonnet-4-6",
+        harness: spawn.harness ?? projectSettingsRef.current?.defaultMinionHarness ?? "claude",
         permissionMode: "bypassPermissions" as const,
         thinkingConfig: { ...MINION_THINKING_CONFIG },
         ...(spawn.worktreeBranch ? { worktreeBranch: spawn.worktreeBranch } : {}),
@@ -1195,28 +1200,12 @@ export function Canvas({
     };
   }, [setTransform]);
 
-  // Suppress the browser's native middle-button behaviours (Linux PRIMARY
-  // selection paste, Windows/Linux middle-click autoscroll) that otherwise
-  // interrupt the pan gesture. Many child components stopPropagation on
-  // mousedown, so the Canvas onMouseDown handler never sees the event and
-  // therefore can't call preventDefault. We install a capture-phase listener
-  // on the container so our preventDefault runs before any child handler or
-  // the browser's default action.
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const suppressMiddleButton = (e: MouseEvent) => {
-      if (e.button === 1) e.preventDefault();
-    };
-
-    container.addEventListener("mousedown", suppressMiddleButton, true);
-    container.addEventListener("auxclick", suppressMiddleButton, true);
-    return () => {
-      container.removeEventListener("mousedown", suppressMiddleButton, true);
-      container.removeEventListener("auxclick", suppressMiddleButton, true);
-    };
-  }, []);
+  // Disable Linux PRIMARY-selection middle-click paste and middle-click
+  // autoscroll across the whole document. A container-scoped listener
+  // missed clicks that originated outside the canvas (chat inputs, side
+  // panels) but ended inside it — those still triggered a paste on the
+  // origin input. See `use-suppress-middle-click-paste.ts`.
+  useSuppressMiddleClickPaste();
 
   const handleCanvasMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -2480,6 +2469,9 @@ export function Canvas({
             createdAt: serverTask.createdAt,
             completedAt: serverTask.completedAt,
             sessionSummary: existing?.sessionSummary ?? "",
+            activeStep:
+              serverTask.status === "running" ? (existing?.activeStep ?? null) : null,
+            progress: existing?.progress ?? [],
           };
         });
 
@@ -2487,6 +2479,126 @@ export function Canvas({
           type: "UPDATE_NODE_DATA",
           id: leader.id,
           data: { ...leaderData, taskPlan: newPlan },
+        });
+        return;
+      }
+
+      // ── minion_status on the leader topic — live progress/result detail ──
+      // Minion report tools emit to both the minion session and the owning
+      // leader session. The minion node consumes the former; this branch keeps
+      // the leader task plan live even when the minion node is not revealed.
+      if (serverMsg.type === "minion_status") {
+        const {
+          leaderSessionKey,
+          minionSessionKey,
+          taskId,
+          trigger,
+          message,
+        } = serverMsg as unknown as {
+          leaderSessionKey?: string;
+          minionSessionKey: string;
+          taskId?: string;
+          trigger: "step" | "done" | "fail";
+          message: string;
+        };
+
+        if (!leaderSessionKey && !taskId) return;
+        const leader = nodesRef.current.find((n) => {
+          if (n.type !== "leader") return false;
+          const ld = n.data as LeaderData;
+          return (
+            ld.sessionKey === leaderSessionKey ||
+            (ld.taskPlan ?? []).some(
+              (t) =>
+                t.taskId === taskId ||
+                t.minionSessionKey === minionSessionKey,
+            )
+          );
+        });
+        if (!leader) return;
+
+        const leaderData = leader.data as LeaderData;
+        const taskPlan = (leaderData.taskPlan ?? []).map((task) => {
+          if (
+            task.taskId !== taskId &&
+            task.minionSessionKey !== minionSessionKey
+          ) {
+            return task;
+          }
+          const progress =
+            trigger === "step"
+              ? [...(task.progress ?? []), message].slice(-20)
+              : task.progress ?? [];
+          return {
+            ...task,
+            status:
+              trigger === "done"
+                ? "completed"
+                : trigger === "fail"
+                  ? "failed"
+                  : task.status === "planned"
+                    ? "running"
+                    : task.status,
+            result: trigger === "done" || trigger === "fail" ? message : task.result,
+            completedAt:
+              trigger === "done" || trigger === "fail"
+                ? Date.now()
+                : task.completedAt,
+            activeStep: trigger === "step" ? message : null,
+            progress,
+            sessionSummary: message,
+          } satisfies TaskPlanItem;
+        });
+
+        dispatch({
+          type: "UPDATE_NODE_DATA",
+          id: leader.id,
+          data: { ...leaderData, taskPlan },
+        });
+        return;
+      }
+
+      // ── Legacy/settled minion completion notification ──
+      if (serverMsg.type === "minion_completed") {
+        const {
+          leaderSessionKey,
+          minionSessionKey,
+          taskId,
+          status,
+          result,
+        } = serverMsg as unknown as {
+          leaderSessionKey: string;
+          minionSessionKey: string;
+          taskId: string;
+          status: "completed" | "failed";
+          result: string;
+        };
+
+        const leader = nodesRef.current.find(
+          (n) =>
+            n.type === "leader" &&
+            (n.data as LeaderData).sessionKey === leaderSessionKey,
+        );
+        if (!leader) return;
+
+        const leaderData = leader.data as LeaderData;
+        const taskPlan = (leaderData.taskPlan ?? []).map((task) =>
+          task.taskId === taskId || task.minionSessionKey === minionSessionKey
+            ? {
+                ...task,
+                status,
+                result,
+                completedAt: Date.now(),
+                activeStep: null,
+                sessionSummary: result,
+              }
+            : task,
+        );
+
+        dispatch({
+          type: "UPDATE_NODE_DATA",
+          id: leader.id,
+          data: { ...leaderData, taskPlan },
         });
         return;
       }
@@ -2502,6 +2614,8 @@ export function Canvas({
           description,
           priority,
           worktreeBranch,
+          model,
+          harness,
         } = serverMsg as unknown as {
           leaderSessionKey: string;
           minionSessionKey: string;
@@ -2510,6 +2624,8 @@ export function Canvas({
           description: string;
           priority: "low" | "medium" | "high" | "critical";
           worktreeBranch?: string | null;
+          model?: string | null;
+          harness?: string | null;
         };
 
         if (spawnedMinionsRef.current.has(minionSessionKey)) return;
@@ -2532,6 +2648,8 @@ export function Canvas({
           description,
           priority,
           worktreeBranch,
+          model,
+          harness,
         });
 
         console.log(`[Canvas] Minion registered (pending reveal): ${minionSessionKey} for task "${title}" (${taskId})`);

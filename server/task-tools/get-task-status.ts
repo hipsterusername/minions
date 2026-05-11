@@ -11,6 +11,12 @@ export function createGetTaskStatusToolDef(ctx: TaskToolContext): NormalizedTool
     name: "get_task_status",
     description:
       "Check the status of one or all tasks. Returns current status, executor, and any results.",
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+      idempotentHint: true,
+    },
     inputSchema: z.object({
       taskId: z
         .string()

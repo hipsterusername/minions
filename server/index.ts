@@ -113,7 +113,7 @@ function isAllowedOrigin(origin: string | undefined): boolean {
 const wss = new WebSocketServer({
   server,
   maxPayload: WS_MAX_PAYLOAD_BYTES,
-  verifyClient: (info) => {
+  verifyClient: (info: { origin: string; req: import("node:http").IncomingMessage }) => {
     const origin = info.origin ?? info.req.headers["origin"];
     if (!isAllowedOrigin(origin)) {
       console.warn(

@@ -9,6 +9,7 @@
 import { useState, useMemo, useCallback, type CSSProperties, type ReactNode } from "react";
 import type { TreeNode } from "../api.ts";
 import { getAuthToken } from "../api.ts";
+import { fuzzyMatch } from "../fuzzy-file-search.ts";
 
 // ── Inline tooltip (CSS-only, no portal) ──
 
@@ -153,6 +154,11 @@ interface ProjectTreeProps {
   projectPath?: string | undefined;
   /** When true, only show paths with active leader work */
   filterActive?: boolean | undefined;
+  /**
+   * Fuzzy search query. When set, only nodes whose path matches (and their
+   * ancestor directories) are rendered, and matched directories auto-expand.
+   */
+  query?: string | undefined;
   /** Called when the user clicks a file entry (relative path) */
   onFileClick?: ((relativePath: string) => void) | undefined;
   /** Called after a file/dir is moved or renamed (triggers tree refresh) */
@@ -202,10 +208,41 @@ function hasActivity(node: TreeNode, activityMap: Map<string, Set<number>>): boo
   return false;
 }
 
+/**
+ * Walk the tree and collect every path that should remain visible under a
+ * fuzzy search query. A node is visible if its own path matches, or if any
+ * descendant's path matches (so ancestor directories pull their matching
+ * children into view).
+ *
+ * Returns null when the query is empty — callers treat null as "no filter".
+ */
+function buildSearchMatch(tree: TreeNode[], query: string): Set<string> | null {
+  const trimmed = query.trim();
+  if (trimmed.length === 0) return null;
+  const visible = new Set<string>();
+  function walk(node: TreeNode): boolean {
+    let descendantMatched = false;
+    if (node.children) {
+      for (const child of node.children) {
+        if (walk(child)) descendantMatched = true;
+      }
+    }
+    const selfMatch = fuzzyMatch(trimmed, node.path) !== null;
+    if (selfMatch || descendantMatched) {
+      visible.add(node.path);
+      return true;
+    }
+    return false;
+  }
+  for (const root of tree) walk(root);
+  return visible;
+}
+
 // ── Components ──
 
-export function ProjectTree({ tree, rootName, leaders, projectPath, filterActive = false, onFileClick, onTreeChanged }: ProjectTreeProps) {
+export function ProjectTree({ tree, rootName, leaders, projectPath, filterActive = false, query = "", onFileClick, onTreeChanged }: ProjectTreeProps) {
   const activityMap = useMemo(() => buildActivityMap(leaders, projectPath), [leaders, projectPath]);
+  const searchMatch = useMemo(() => buildSearchMatch(tree, query), [tree, query]);
 
   const activeLeaders = leaders.filter(l => l.status === "running" || l.status === "creating");
 
@@ -331,6 +368,7 @@ export function ProjectTree({ tree, rootName, leaders, projectPath, filterActive
             activityMap={activityMap}
             leaders={leaders}
             filterActive={filterActive}
+            searchMatch={searchMatch}
             onFileClick={onFileClick}
             projectPath={projectPath}
             onTreeChanged={onTreeChanged}
@@ -359,6 +397,7 @@ function TreeRow({
   activityMap,
   leaders,
   filterActive,
+  searchMatch,
   onFileClick,
   projectPath,
   onTreeChanged,
@@ -368,6 +407,7 @@ function TreeRow({
   activityMap: Map<string, Set<number>>;
   leaders: LeaderActivity[];
   filterActive: boolean;
+  searchMatch: Set<string> | null;
   onFileClick?: ((relativePath: string) => void) | undefined;
   projectPath?: string | undefined;
   onTreeChanged?: (() => void) | undefined;
@@ -388,11 +428,19 @@ function TreeRow({
   const isDirectlyTouched = leaderIndices && leaderIndices.size > 0;
   const hasChildActivity = node.type === "dir" && hasActivity(node, activityMap);
 
-  // Filter mode: skip nodes without activity
-  if (filterActive && !isDirectlyTouched && !hasChildActivity) return null;
+  // Visibility: combine the leader-activity filter with the search filter.
+  // The decision is applied AFTER all hooks below so toggling filterActive
+  // or typing in the search box can't change the hook count between renders
+  // (React's rules-of-hooks invariant).
+  const filteredOut =
+    (filterActive && !isDirectlyTouched && !hasChildActivity) ||
+    (searchMatch !== null && !searchMatch.has(node.path));
 
   const isDir = node.type === "dir";
   const indent = depth * 16;
+  // While the user is searching, every directory we still render (i.e. one
+  // that's in searchMatch) should be expanded so its matches are visible.
+  const forceExpanded = isDir && searchMatch !== null;
 
   const handleRowClick = useCallback(() => {
     if (renaming) return;
@@ -534,6 +582,8 @@ function TreeRow({
     }
   }, [projectPath, isDir, node.path, onTreeChanged]);
 
+  if (filteredOut) return null;
+
   // Determine if any touching leader is actively running
   const hasRunningLeader = leaderIndices
     ? [...leaderIndices].some(i => leaders[i]?.status === "running" || leaders[i]?.status === "creating")
@@ -599,7 +649,7 @@ function TreeRow({
               justifyContent: "center",
               flexShrink: 0,
               transition: "transform 0.15s ease",
-              transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
+              transform: (expanded || forceExpanded) ? "rotate(90deg)" : "rotate(0deg)",
             }}
           >
             ▶
@@ -610,7 +660,7 @@ function TreeRow({
 
         {/* Icon with tooltip */}
         <Tooltip
-          label={isDir ? dirIconTooltip(expanded, hasChildActivity) : fileIconTooltip(node.name)}
+          label={isDir ? dirIconTooltip(expanded || forceExpanded, hasChildActivity) : fileIconTooltip(node.name)}
           style={{
             width: 16,
             fontSize: isDir ? 10 : 11,
@@ -625,7 +675,7 @@ function TreeRow({
             cursor: "help",
           }}
         >
-          {isDir ? (expanded ? "▾" : "▸") : fileIcon(node.name)}
+          {isDir ? ((expanded || forceExpanded) ? "▾" : "▸") : fileIcon(node.name)}
         </Tooltip>
 
         {/* Name */}
@@ -830,7 +880,7 @@ function TreeRow({
       )}
 
       {/* Children */}
-      {isDir && expanded && node.children && (
+      {isDir && (expanded || forceExpanded) && node.children && (
         <div
           style={{
             borderLeft: depth > 0 ? "1px solid var(--border-default)" : "none",
@@ -845,6 +895,7 @@ function TreeRow({
               activityMap={activityMap}
               leaders={leaders}
               filterActive={filterActive}
+              searchMatch={searchMatch}
               onFileClick={onFileClick}
               projectPath={projectPath}
               onTreeChanged={onTreeChanged}
