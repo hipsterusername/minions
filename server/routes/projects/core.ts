@@ -17,6 +17,7 @@ import {
   registerProjectPath,
   validateProjectPath,
   unregisterProjectPath,
+  rehydrateFromPaths,
 } from "../../path-guard.ts";
 import {
   encodePath,
@@ -28,14 +29,30 @@ import {
   ensureProjectRow,
   rowToProject,
   rowToNode,
+  rowToEdge,
 } from "./helpers.ts";
-import type { ProjectRow, NodeRow } from "./helpers.ts";
+import type { ProjectRow, NodeRow, EdgeRow } from "./helpers.ts";
+
+interface StateEdge {
+  id: string;
+  sourceNodeId: string;
+  sourcePortId: string;
+  targetNodeId: string;
+  targetPortId: string;
+  protocol: string;
+}
+
+function loadProjectEdges(db: ReturnType<typeof getDb>, projectId: string): StateEdge[] {
+  const edgeRows = db
+    .prepare("SELECT * FROM edges WHERE project_id = ? ORDER BY z_index ASC, created_at ASC")
+    .all(projectId) as EdgeRow[];
+  return edgeRows.map(rowToEdge);
+}
 
 export function mountCoreRoutes(router: Router): void {
-  // Pre-register recent projects so they're accessible without re-opening
-  for (const p of listRecentProjects()) {
-    registerProjectPath(p.path);
-  }
+  // Restore the path allowlist from durable storage so projects remain
+  // accessible across server restarts without requiring re-open.
+  rehydrateFromPaths(listRecentProjects().map((p) => p.path));
 
   // List recent projects
   router.get("/", (_req: Request, res: Response) => {
@@ -85,6 +102,8 @@ export function mountCoreRoutes(router: Router): void {
 
     res.status(201).json({
       ...rowToProject(row, absPath),
+      nodes: [],
+      graph: { edges: [] },
       context: readContext(absPath),
       settings: readSettings(absPath),
       skills: readSkills(absPath),
@@ -125,6 +144,7 @@ export function mountCoreRoutes(router: Router): void {
     res.json({
       ...rowToProject(row, absPath),
       nodes: nodeRows.map(rowToNode),
+      graph: { edges: loadProjectEdges(db, projectId) },
       context: readContext(absPath),
       settings: readSettings(absPath),
       skills: readSkills(absPath),
@@ -158,6 +178,7 @@ export function mountCoreRoutes(router: Router): void {
     res.json({
       ...rowToProject(row, projectPath),
       nodes: nodeRows.map(rowToNode),
+      graph: { edges: loadProjectEdges(db, projectId) },
       context: readContext(projectPath),
       settings: readSettings(projectPath),
       skills: readSkills(projectPath),
@@ -219,7 +240,7 @@ export function mountCoreRoutes(router: Router): void {
       res.status(403).json({ error: "Project path not registered or outside home directory" });
       return;
     }
-    const { transform, nodes } = req.body as {
+    const { transform, nodes, graph } = req.body as {
       transform?: { x: number; y: number; scale: number };
       nodes?: Array<{
         id: string;
@@ -228,6 +249,7 @@ export function mountCoreRoutes(router: Router): void {
         size: { width: number; height: number };
         data: unknown;
       }>;
+      graph?: { edges?: StateEdge[] };
     };
 
     const db = getDb(projectPath);
@@ -262,6 +284,32 @@ export function mountCoreRoutes(router: Router): void {
             n.size.width,
             n.size.height,
             JSON.stringify(n.data),
+            i,
+          );
+        }
+      }
+
+      if (graph?.edges) {
+        db.prepare("DELETE FROM edges WHERE project_id = ?").run(projectId);
+
+        const insert = db.prepare(
+          `INSERT INTO edges (
+             id, project_id, source_node_id, source_port_id,
+             target_node_id, target_port_id, protocol, z_index
+           )
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+
+        for (let i = 0; i < graph.edges.length; i++) {
+          const e = graph.edges[i]!;
+          insert.run(
+            e.id,
+            projectId,
+            e.sourceNodeId,
+            e.sourcePortId,
+            e.targetNodeId,
+            e.targetPortId,
+            e.protocol,
             i,
           );
         }

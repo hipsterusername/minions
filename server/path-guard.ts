@@ -4,9 +4,29 @@ import os from "os";
 /**
  * Path validation module to prevent arbitrary filesystem access.
  *
- * Maintains a server-side set of "opened" project paths.
+ * Maintains a server-side allowlist of "opened" project paths.
  * Only paths that have been explicitly opened/created via the projects API
  * are allowed for subsequent operations.
+ *
+ * ## Durability model
+ *
+ * The allowlist is process-scoped (an in-memory Set), but is durably derived:
+ * on startup, call `rehydrateFromPaths` with the persisted recent-projects list
+ * to restore the allowlist across server restarts. The route layer in
+ * `server/routes/projects/core.ts` does this as part of `mountCoreRoutes`.
+ *
+ * Invariant: every path in `openedProjects` was validated against `isUnderHomeDir`
+ * at registration time, so the Set is always a subset of paths under $HOME.
+ *
+ * ## Threat model
+ *
+ * This module guards against API callers supplying arbitrary filesystem paths
+ * (e.g. `/etc/passwd`, path-traversal tricks) to read or write outside the
+ * user's home directory. It is NOT a multi-user or remote-network security
+ * boundary — the server is local-only and single-user. A persistent ACL in a
+ * database would add write-ordering complexity with no meaningful security gain
+ * for this threat model; the JSON-backed recent-projects list is sufficient
+ * durable storage.
  */
 
 const openedProjects = new Set<string>();
@@ -69,6 +89,20 @@ export function validateProjectPath(projectPath: string): string | null {
  */
 export function unregisterProjectPath(projectPath: string): void {
   openedProjects.delete(path.resolve(projectPath));
+}
+
+/**
+ * Bulk-register project paths from durable storage (e.g. the recent-projects list).
+ * Call once at startup to restore the allowlist across server restarts.
+ *
+ * Invalid paths (outside home directory) are silently skipped — the durable
+ * store may contain stale entries for paths that have since been moved or
+ * deleted. Those paths will simply remain inaccessible until re-opened.
+ */
+export function rehydrateFromPaths(paths: readonly string[]): void {
+  for (const p of paths) {
+    registerProjectPath(p); // returns null for invalid paths — intentional no-op
+  }
 }
 
 /**

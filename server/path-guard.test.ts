@@ -16,6 +16,7 @@ import {
   validateProjectPath,
   unregisterProjectPath,
   validateSessionCwd,
+  rehydrateFromPaths,
 } from "./path-guard.ts";
 
 /** Build a unique path under home that does not need to exist on disk. */
@@ -85,6 +86,34 @@ describe("unregisterProjectPath", () => {
 
     unregisterProjectPath(p);
     expect(isRegisteredProject(p)).toBe(false);
+  });
+});
+
+describe("rehydrateFromPaths", () => {
+  it("registers all valid paths in the list", () => {
+    const p1 = uniqueHomePath("rehydrate-valid-1");
+    const p2 = uniqueHomePath("rehydrate-valid-2");
+    rehydrateFromPaths([p1, p2]);
+    expect(isRegisteredProject(p1)).toBe(true);
+    expect(isRegisteredProject(p2)).toBe(true);
+  });
+
+  it("silently skips paths outside the home directory", () => {
+    const valid = uniqueHomePath("rehydrate-mixed");
+    expect(() => rehydrateFromPaths(["/etc/passwd", "/var/run/bad", valid])).not.toThrow();
+    expect(isRegisteredProject(valid)).toBe(true);
+    expect(isRegisteredProject("/etc/passwd")).toBe(false);
+  });
+
+  it("is idempotent — re-registering an already-registered path is a no-op", () => {
+    const p = uniqueHomePath("rehydrate-idempotent");
+    rehydrateFromPaths([p]);
+    rehydrateFromPaths([p]); // second call must not throw or corrupt state
+    expect(isRegisteredProject(p)).toBe(true);
+  });
+
+  it("handles an empty list without throwing", () => {
+    expect(() => rehydrateFromPaths([])).not.toThrow();
   });
 });
 
