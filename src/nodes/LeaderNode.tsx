@@ -28,6 +28,14 @@ import { UserContextHeader } from "../components/UserContextHeader.tsx";
 import { AddAsNodeButton } from "../components/AddAsNodeButton.tsx";
 import { debugFlagStore } from "../debug.ts";
 import { DebugInspector } from "../components/DebugInspector.tsx";
+import {
+  groupMessages,
+  formatToolInput,
+  formatToolInputDetail,
+  timeAgo,
+  TOOL_ICONS,
+  type LeaderMessageGroup,
+} from "./leader-message-helpers.ts";
 
 registerContract(LEADER_CONTRACT);
 
@@ -384,106 +392,7 @@ function EditableTitle({ value, onChange }: { value: string; onChange: (v: strin
   );
 }
 
-/* ── Tool group helpers (Leader purple theme) ────────────────────────── */
-
-type LeaderMessageGroup =
-  | { kind: "single"; msg: LeaderMessage }
-  | { kind: "tool-group"; msgs: LeaderMessage[] }
-  | { kind: "thinking-group"; msgs: LeaderMessage[] };
-
-function groupMessages(messages: LeaderMessage[]): LeaderMessageGroup[] {
-  const groups: LeaderMessageGroup[] = [];
-  let toolBatch: LeaderMessage[] = [];
-  let thinkingBatch: LeaderMessage[] = [];
-
-  const flushTools = () => {
-    if (toolBatch.length > 0) {
-      groups.push({ kind: "tool-group", msgs: [...toolBatch] });
-      toolBatch = [];
-    }
-  };
-
-  const flushThinking = () => {
-    if (thinkingBatch.length > 0) {
-      groups.push({ kind: "thinking-group", msgs: [...thinkingBatch] });
-      thinkingBatch = [];
-    }
-  };
-
-  for (const msg of messages) {
-    if (msg.role === "tool") {
-      flushThinking();
-      toolBatch.push(msg);
-    } else if (msg.role === "thinking") {
-      flushTools();
-      thinkingBatch.push(msg);
-    } else {
-      flushTools();
-      flushThinking();
-      groups.push({ kind: "single", msg });
-    }
-  }
-  flushTools();
-  flushThinking();
-  return groups;
-}
-
-const TOOL_ICONS: Record<string, string> = {
-  Read: "\u25B7",
-  Write: "\u25B6",
-  Edit: "\u270E",
-  Bash: "$",
-  Glob: "\u2731",
-  Grep: "/",
-  Agent: "\u2726",
-  WebFetch: "\u2197",
-  WebSearch: "\u2315",
-};
-
-/** Format tool input into a readable summary string */
-function formatToolInput(toolName: string, input?: Record<string, unknown>): string | null {
-  if (!input || Object.keys(input).length === 0) return null;
-
-  // Show the most relevant field(s) based on tool type
-  switch (toolName) {
-    case "Read":
-      return (input["file_path"] as string) ?? null;
-    case "Write":
-      return (input["file_path"] as string) ?? null;
-    case "Edit":
-      return (input["file_path"] as string) ?? null;
-    case "Bash":
-      return (input["command"] as string) ?? null;
-    case "Glob":
-      return (input["pattern"] as string) ?? null;
-    case "Grep":
-      return (input["pattern"] as string) ?? null;
-    case "Agent":
-      return (input["description"] as string) ?? (input["prompt"] as string) ?? null;
-    case "WebFetch":
-      return (input["url"] as string) ?? null;
-    case "WebSearch":
-      return (input["query"] as string) ?? null;
-    default: {
-      // Generic: show first string value
-      for (const v of Object.values(input)) {
-        if (typeof v === "string" && v.length > 0) return v;
-      }
-      return null;
-    }
-  }
-}
-
-/** Format the full tool input as key-value pairs for the detail view */
-function formatToolInputDetail(input?: Record<string, unknown>): string {
-  if (!input || Object.keys(input).length === 0) return "(no input)";
-  const lines: string[] = [];
-  for (const [k, v] of Object.entries(input)) {
-    const val = typeof v === "string" ? v : JSON.stringify(v, null, 2);
-    lines.push(`${k}: ${val}`);
-  }
-  return lines.join("\n");
-}
+/* ── Tool group helpers imported from ./leader-message-helpers.ts ── */
 
 function ToolItem({ msg, accentColor }: { msg: LeaderMessage | DisplayMessage; accentColor: string }) {
   const [detailOpen, setDetailOpen] = useState(false);
@@ -790,16 +699,6 @@ const PRIORITY_COLORS: Record<string, string> = {
   medium: "var(--warning-color)",
   low: "var(--streaming-color)",
 };
-
-function timeAgo(ts: number): string {
-  const diff = Math.max(0, Date.now() - ts);
-  const secs = Math.floor(diff / 1000);
-  if (secs < 60) return `${secs}s ago`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  return `${hrs}h ago`;
-}
 
 /* ── P5: Collapsible user message ─────────────────────────────────────── */
 
@@ -2511,10 +2410,12 @@ function ConfigFooter({
 function HeaderMenu({
   onReset,
   onExportLog,
+  onDuplicateSetup,
   data,
 }: {
   onReset: () => void;
   onExportLog: () => void;
+  onDuplicateSetup?: (() => void) | undefined;
   data: LeaderData;
 }) {
   const [open, setOpen] = useState(false);
@@ -2571,6 +2472,29 @@ function HeaderMenu({
               minWidth: 160,
             }}
           >
+            {onDuplicateSetup && (
+              <button
+                onClick={() => { onDuplicateSetup(); setOpen(false); }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  width: "100%",
+                  padding: "8px 12px",
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--text-secondary)",
+                  fontSize: 11,
+                  fontFamily: "var(--font-mono)",
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-surface)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              >
+                <span style={{ opacity: 0.6 }}>⧉</span> Duplicate Setup
+              </button>
+            )}
             <button
               onClick={() => { onExportLog(); setOpen(false); }}
               style={{
@@ -2634,6 +2558,7 @@ export function LeaderNodeRenderer({
   onResize,
   onAddContentNode,
   onRevealMinion,
+  onDuplicateLeaderSetup,
 }: NodeRenderProps) {
   const data = node.data as LeaderData;
   const dataRef = useRef(data);
@@ -3615,6 +3540,7 @@ export function LeaderNodeRenderer({
           <HeaderMenu
             onReset={handleReset}
             onExportLog={handleExportLog}
+            onDuplicateSetup={onDuplicateLeaderSetup}
             data={data}
           />
         </div>
