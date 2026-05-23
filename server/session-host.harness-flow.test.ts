@@ -58,6 +58,7 @@ import {
   type SessionHostDeps,
   type StartSessionOptions,
 } from "./session-host.ts";
+import { buildAgentContext } from "./session-host-run.ts";
 import { createBus } from "./bus.ts";
 import {
   closePersistDb,
@@ -111,22 +112,8 @@ describe("Phase B — minion harness inheritance", () => {
     // Re-build the agent context the way the host does internally and
     // call its `startMinionSession` to mirror what the leader's task
     // tools would do.
-    const ctx = (
-      host as unknown as {
-        buildAgentContext: (
-          opts: StartSessionOptions,
-          deps: SessionHostDeps,
-        ) => {
-          startMinionSession: (params: {
-            sessionKey: string;
-            prompt: string;
-            cwd: string;
-            systemPrompt: string;
-            harness?: string;
-          }) => void;
-        };
-      }
-    ).buildAgentContext(
+    const ctx = buildAgentContext(
+      host,
       { sessionKey: "leader-1", prompt: "p", cwd: "/tmp/work" },
       deps,
     );
@@ -160,22 +147,8 @@ describe("Phase B — minion harness inheritance", () => {
       deps,
     );
 
-    const ctx = (
-      host as unknown as {
-        buildAgentContext: (
-          opts: StartSessionOptions,
-          deps: SessionHostDeps,
-        ) => {
-          startMinionSession: (params: {
-            sessionKey: string;
-            prompt: string;
-            cwd: string;
-            systemPrompt: string;
-            harness?: string;
-          }) => void;
-        };
-      }
-    ).buildAgentContext(
+    const ctx = buildAgentContext(
+      host,
       { sessionKey: "leader-2", prompt: "p", cwd: "/tmp/work" },
       deps,
     );

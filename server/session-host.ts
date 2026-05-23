@@ -27,9 +27,9 @@ import type {
   NormalizedEvent,
 } from "./harness/types.ts";
 import type { Bus } from "./bus.ts";
-import { getAgentType, type AgentTypeContext } from "./agents/index.ts";
+import { getAgentType } from "./agents/index.ts";
 import type { WorktreeInfo } from "./worktree.ts";
-import type { TaskManagerState } from "./task-tools.ts";
+import type { RuntimeSessionInfo, TaskManagerState } from "./task-tools.ts";
 import type { RenderState } from "./render-tools.ts";
 import {
   persistEvent as persistEventToDb,
@@ -46,8 +46,11 @@ import {
 } from "./session-host-config.ts";
 import {
   ensureWorktree,
+  buildAgentContext,
+  buildContextRecoveryStartOptions,
   buildHarnessStartOpts,
   processNormalizedEvent,
+  shouldRecoverFromContextWindow,
 } from "./session-host-run.ts";
 
 // Re-export shared types so callers can import everything from session-host.
@@ -82,6 +85,8 @@ export interface SessionHostDeps {
   forEachLeaderTaskState: (
     fn: (leaderKey: string, state: TaskManagerState) => void,
   ) => void;
+  /** Lookup live/persisted runtime metadata for a session key. */
+  getSessionRuntime?: (sessionKey: string) => RuntimeSessionInfo | null;
 }
 
 /**
@@ -126,6 +131,12 @@ export interface StartSessionOptions {
   harness?: string | undefined;
   /** Initial permission mode; only honoured on the first start. */
   permissionMode?: string | undefined;
+  /**
+   * Internal guard for automatic context-window recovery. When a resumable
+   * harness thread becomes too large, the host may start one fresh thread with
+   * compacted context instead of surfacing a hard error.
+   */
+  contextRecoveryAttempt?: number | undefined;
 }
 
 // ── SessionHost ────────────────────────────────────────────
@@ -218,72 +229,6 @@ export class SessionHost {
     }
   }
 
-  /**
-   * Build the MCP agent context for this run. Wires callbacks through
-   * `deps` so the agent can spawn minions or schedule a delayed resume
-   * without knowing about the registry directly.
-   */
-  private buildAgentContext(
-    opts: StartSessionOptions,
-    deps: SessionHostDeps,
-  ): AgentTypeContext {
-    const ctx: AgentTypeContext = {
-      sessionKey: this.id,
-      cwd: this.cwd,
-      bus: deps.bus,
-      worktreeInfo: this.worktree,
-      worktreeIsolation: this.worktreeIsolation,
-      forEachLeaderTaskState: deps.forEachLeaderTaskState,
-      startMinionSession: (params) => {
-        // Default the spawned minion to the leader's current harness so a
-        // non-Claude leader spawns same-harness minions unless the caller
-        // explicitly overrides it.
-        deps.startChildSession({
-          sessionKey: params.sessionKey,
-          prompt: params.prompt,
-          cwd: params.cwd,
-          systemPrompt: params.systemPrompt,
-          role: "minion",
-          worktreeIsolation: false,
-          parentWorktree: this.worktree ?? undefined,
-          initialModel: params.model ?? null,
-          harness: params.harness ?? this.harnessName,
-        });
-      },
-      scheduleWaitContinue: (durationMs, reason) => {
-        this.clearWaitTimer();
-        console.log(
-          `[wait] Leader ${this.id} waiting ${durationMs}ms: ${reason}`,
-        );
-        this.waitTimerId = setTimeout(() => {
-          this.waitTimerId = null;
-          deps.bus.emitToSession(this.id, {
-            type: "wait_state",
-            sessionKey: this.id,
-            action: "completed",
-            reason,
-            timestamp: Date.now(),
-          });
-          deps.startChildSession({
-            sessionKey: this.id,
-            prompt: `Continue. The ${Math.round(
-              durationMs / 1000,
-            )}s wait has elapsed (reason: ${reason}). Pick up where you left off.`,
-            cwd: this.cwd,
-            resumeId: this.sessionId ?? undefined,
-            systemPrompt: opts.systemPrompt,
-            role: this.role,
-            harness: this.harnessName,
-          });
-        }, durationMs);
-      },
-    };
-    if (this.taskState) ctx.existingTaskState = this.taskState;
-    if (this.renderState) ctx.existingRenderState = this.renderState;
-    if (opts.parentWorktree) ctx.parentWorktree = opts.parentWorktree;
-    return ctx;
-  }
-
   // ── Lifecycle ───────────────────────────────────────
 
   /**
@@ -346,7 +291,7 @@ export class SessionHost {
       deps.bus.emitToSession(this.id, statusEvent);
 
       // ── Run the harness query ─────────────────────────
-      const agentCtx = this.buildAgentContext(opts, deps);
+      const agentCtx = buildAgentContext(this, opts, deps);
       const toolResult = agentType.getToolGroups(agentCtx);
 
       if (toolResult.taskState) this.taskState = toolResult.taskState;
@@ -371,14 +316,38 @@ export class SessionHost {
       const { events, control } = harness.start(startOpts);
       this.eventStream = events;
       this.runControl = control;
+      let recoveryOpts: StartSessionOptions | null = null;
       try {
         for await (const event of events) {
           if (abortController.signal.aborted) break;
+          if (
+            event.kind === "done" &&
+            shouldRecoverFromContextWindow(opts, event)
+          ) {
+            recoveryOpts = buildContextRecoveryStartOptions(this, opts, event);
+            const recoveryEvent: BufferedEvent = {
+              type: "sdk_event",
+              sessionKey: this.id,
+              event: {
+                kind: "text",
+                role: "assistant",
+                text:
+                  "The Codex thread exceeded the model context window. Starting a fresh continuation with compacted session state.",
+              },
+              timestamp: Date.now(),
+            };
+            this.bufferEvent(recoveryEvent);
+            deps.bus.emitToSession(this.id, recoveryEvent);
+            break;
+          }
           processNormalizedEvent(this, deps.bus, agentType, agentCtx, event);
         }
       } finally {
         this.eventStream = null;
         this.runControl = null;
+      }
+      if (recoveryOpts) {
+        await this.start(recoveryOpts, deps);
       }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
