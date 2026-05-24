@@ -77,6 +77,34 @@ describe("ProjectTree filterActive toggle", () => {
     fireEvent.click(screen.getByText("toggle"));
     expect(screen.getByText("untouched.ts")).toBeInTheDocument();
   });
+
+  it("keeps active ancestor directories visible for normalized absolute file paths", () => {
+    const absoluteLeaders: LeaderActivity[] = [
+      {
+        id: "leader-1",
+        name: "Leader 1",
+        colorIndex: 0,
+        status: "running",
+        files: ["/repo/src/nested/deep.ts"],
+      },
+    ];
+
+    render(
+      <ProjectTree
+        tree={tree}
+        rootName="proj"
+        leaders={absoluteLeaders}
+        projectPath="/repo"
+        filterActive
+      />,
+    );
+
+    expect(screen.getByText("src")).toBeInTheDocument();
+    expect(screen.getByText("nested")).toBeInTheDocument();
+    expect(screen.getByText("deep.ts")).toBeInTheDocument();
+    expect(screen.queryByText("touched.ts")).toBeNull();
+    expect(screen.queryByText("README.md")).toBeNull();
+  });
 });
 
 describe("ProjectTree query filter", () => {

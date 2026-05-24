@@ -31,6 +31,8 @@ import type { RenderMessage } from "../shared/render-dsl.ts";
 import { CanvasContextMenu } from "./components/CanvasContextMenu.tsx";
 import type { ContextMenuOption } from "./components/CanvasContextMenu.tsx";
 import { ConfirmModal } from "./components/ConfirmModal.tsx";
+import { ViewportOverlay } from "./components/ViewportOverlay.tsx";
+import { CanvasMiniMap } from "./CanvasMiniMap.tsx";
 import { createDefaultNodeData } from "./node-defaults.ts";
 import { wheelDetector } from "./wheel-detector.ts";
 import { canvasScale as canvasScaleRef } from "./canvas-scale.ts";
@@ -41,6 +43,13 @@ import { createImageNodeFromFile } from "./nodes/image-node-factory.ts";
 import { createMarkdownNodeFromText } from "./nodes/markdown-node-factory.ts";
 import { findNonOverlappingPosition, viewportCenter, pushNodesFromRect, snapToGrid } from "./canvas-utils.ts";
 import { computeAutoLayout } from "./auto-layout.ts";
+import { cloneLeaderContextEdges, cloneLeaderSetupData } from "./leader-setup-clone.ts";
+import {
+  DASHBOARD_LEADER_ACTIONS,
+  resolveDashboardLeaderActionName,
+  resolveDashboardLeaderPrompt,
+  type DashboardLeaderAction,
+} from "./dashboard-leader-actions.ts";
 
 // Zoom-out floor: ~15% keeps the canvas readable at overview level.
 const MIN_ZOOM = 0.15;
@@ -103,6 +112,31 @@ function getPortWorldPos(
       ? node.position.x + node.size.width
       : node.position.x;
   return { x, y };
+}
+
+function computeLeaderDropPlacement(
+  worldX: number,
+  worldY: number,
+  existingNodes: CanvasNode[],
+) {
+  const leaderDef = getAllNodeTypes().find((td) => td.type === "leader");
+  if (!leaderDef) return null;
+
+  const rawX = worldX - leaderDef.defaultSize.width / 2;
+  const rawY = worldY - leaderDef.defaultSize.height / 2;
+  const position = findNonOverlappingPosition(
+    rawX,
+    rawY,
+    leaderDef.defaultSize.width,
+    leaderDef.defaultSize.height,
+    existingNodes,
+  );
+  const size = { ...leaderDef.defaultSize };
+  const targetPort =
+    getPortWorldPos({ position, size, type: "leader" }, "context-in", "input") ??
+    { x: position.x, y: position.y + size.height * 0.95 };
+
+  return { leaderDef, position, size, targetPort };
 }
 
 const DotGrid = memo(function DotGrid({ transform }: { transform: CanvasTransform }) {
@@ -201,6 +235,7 @@ const Toolbar = memo(function Toolbar({
         boxShadow: "var(--shadow-lg)",
         zIndex: 100,
         alignItems: "center",
+        pointerEvents: "auto",
       }}
     >
       <button
@@ -413,6 +448,12 @@ interface CanvasProps {
   /** When set, auto-selects this node (then clear it) */
   focusNodeId?: string | null;
   onFocusNodeHandled?: () => void;
+  onCreateKanbanCardFromMarkdown?: ((source: {
+    nodeId: string;
+    title: string;
+    content: string;
+  }) => void) | undefined;
+  viewportTopOffset?: number;
 }
 
 export function Canvas({
@@ -431,6 +472,8 @@ export function Canvas({
   redo,
   focusNodeId,
   onFocusNodeHandled,
+  onCreateKanbanCardFromMarkdown,
+  viewportTopOffset = 0,
 }: CanvasProps) {
   // Keep the module-level scale ref in sync so CanvasNode / ResizeHandle
   // can read the current zoom in event handlers without a prop (which would
@@ -465,6 +508,26 @@ export function Canvas({
     ],
     [],
   );
+
+  const dashboardDropMenuOptions: ContextMenuOption[] = useMemo(
+    () => [
+      ...DASHBOARD_LEADER_ACTIONS.map(({ action }) => ({
+        label: resolveDashboardLeaderActionName(projectSettings, action),
+        type: action,
+      })),
+      { label: "Custom", type: "custom" },
+    ],
+    [projectSettings],
+  );
+
+  const [dashboardDropMenu, setDashboardDropMenu] = useState<{
+    screenX: number;
+    screenY: number;
+    worldX: number;
+    worldY: number;
+    source: PortInfo;
+    compatiblePortId: string;
+  } | null>(null);
 
   // ── Connection drag state ─────────────────────────────
   const [connectionDrag, setConnectionDrag] = useState<{
@@ -638,12 +701,108 @@ export function Canvas({
   // state without needing them in dependency arrays (which would defeat memoization).
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
+  const graphRef = useRef(graph);
+  graphRef.current = graph;
   const transformRef = useRef(transform);
   transformRef.current = transform;
   const selectedIdsRef = useRef(selectedIds);
   selectedIdsRef.current = selectedIds;
   const projectSettingsRef = useRef(projectSettings);
   projectSettingsRef.current = projectSettings;
+
+  interface LeaderSetupClipboard {
+    sourceNodeId: string;
+    sourcePosition: Position;
+    sourceSize: Size;
+    data: LeaderData;
+    contextEdges: GraphDocument["edges"];
+  }
+
+  const leaderSetupClipboardRef = useRef<LeaderSetupClipboard | null>(null);
+
+  const createLeaderSetupClipboard = useCallback(
+    (nodeId: string): LeaderSetupClipboard | null => {
+      const source = nodesRef.current.find((n) => n.id === nodeId);
+      if (!source || source.type !== "leader") return null;
+      return {
+        sourceNodeId: source.id,
+        sourcePosition: { ...source.position },
+        sourceSize: { ...source.size },
+        data: cloneLeaderSetupData(source.data as LeaderData),
+        contextEdges: graphRef.current.edges.filter(
+          (edge) =>
+            edge.targetNodeId === source.id &&
+            edge.targetPortId === "context-in" &&
+            edge.protocol === "context",
+        ),
+      };
+    },
+    [],
+  );
+
+  const pasteLeaderSetupClipboard = useCallback(
+    (clipboard: LeaderSetupClipboard): boolean => {
+      const leaderTypeDef = getAllNodeTypes().find((t) => t.type === "leader");
+      if (!leaderTypeDef) return false;
+
+      const newId = generateId();
+      const rawX = clipboard.sourcePosition.x + 48;
+      const rawY = clipboard.sourcePosition.y + 48;
+      const position = findNonOverlappingPosition(
+        rawX,
+        rawY,
+        clipboard.sourceSize.width,
+        clipboard.sourceSize.height,
+        nodesRef.current,
+      );
+
+      const node: CanvasNode = {
+        id: newId,
+        type: "leader",
+        position,
+        size: { ...clipboard.sourceSize },
+        data: cloneLeaderSetupData(clipboard.data),
+      };
+      dispatch({ type: "ADD_NODE", node });
+
+      const liveNodeIds = new Set(nodesRef.current.map((n) => n.id));
+      for (const edge of cloneLeaderContextEdges(
+        clipboard.contextEdges,
+        clipboard.sourceNodeId,
+        newId,
+        () => `edge-${generateId()}`,
+      )) {
+        if (liveNodeIds.has(edge.sourceNodeId)) {
+          graphDispatch({ type: "ADD_EDGE", edge });
+        }
+      }
+
+      setSelectedIds(new Set([newId]));
+      return true;
+    },
+    [dispatch, graphDispatch],
+  );
+
+  const copyLeaderSetup = useCallback((nodeId: string): boolean => {
+    const clipboard = createLeaderSetupClipboard(nodeId);
+    if (!clipboard) return false;
+    leaderSetupClipboardRef.current = clipboard;
+    return true;
+  }, [createLeaderSetupClipboard]);
+
+  const pasteLeaderSetup = useCallback((): boolean => {
+    const clipboard = leaderSetupClipboardRef.current;
+    if (!clipboard) return false;
+    return pasteLeaderSetupClipboard(clipboard);
+  }, [pasteLeaderSetupClipboard]);
+
+  const duplicateLeaderSetup = useCallback((nodeId: string): void => {
+    const clipboard = createLeaderSetupClipboard(nodeId);
+    if (clipboard) {
+      leaderSetupClipboardRef.current = clipboard;
+      pasteLeaderSetupClipboard(clipboard);
+    }
+  }, [createLeaderSetupClipboard, pasteLeaderSetupClipboard]);
 
   // Attach a backend session to the canvas by creating the right node type for its role
   const handleAttachSession = useCallback(
@@ -762,6 +921,7 @@ export function Canvas({
       })
       .map((n) => n.id);
   }, [nodes]);
+  const activeNodeIdSet = useMemo(() => new Set(activeNodeIds), [activeNodeIds]);
 
   // Track which active node we last focused, to cycle through them
   const lastActiveIndexRef = useRef(-1);
@@ -919,7 +1079,9 @@ export function Canvas({
         model: spawn.model ?? projectSettingsRef.current?.defaultMinionModel ?? "claude-sonnet-4-6",
         harness: spawn.harness ?? projectSettingsRef.current?.defaultMinionHarness ?? "claude",
         permissionMode: "bypassPermissions" as const,
-        thinkingConfig: { ...MINION_THINKING_CONFIG },
+        thinkingConfig: {
+          ...(projectSettingsRef.current?.defaultMinionThinkingConfig ?? MINION_THINKING_CONFIG),
+        },
         ...(spawn.worktreeBranch ? { worktreeBranch: spawn.worktreeBranch } : {}),
         ...(spawn.isAgent
           ? { agentTaskId: spawn.taskId, parentSessionKey: spawn.parentSessionKey }
@@ -1042,6 +1204,8 @@ export function Canvas({
     setPendingGroupDelete,
     focusNodes,
     focusNextActive,
+    copyLeaderSetup,
+    pasteLeaderSetup,
     undo,
     redo,
   });
@@ -1877,6 +2041,59 @@ export function Canvas({
 
   // ── Connection drag handlers ────────────────────────────
 
+  const createConnectedLeaderFromDrop = useCallback(
+    (
+      sourcePort: PortInfo,
+      compatiblePortId: string,
+      worldX: number,
+      worldY: number,
+      prompt: string | null,
+    ) => {
+      const placement = computeLeaderDropPlacement(
+        worldX,
+        worldY,
+        nodesRef.current,
+      );
+      if (!placement) return;
+      const { leaderDef, position } = placement;
+
+      const baseData = createDefaultNodeData(
+        "leader",
+        projectSettingsRef.current,
+      ) as LeaderData;
+      const leaderData: LeaderData = prompt
+        ? { ...baseData, draftPrompt: prompt }
+        : baseData;
+
+      const newNode: CanvasNode = {
+        id: generateId(),
+        type: "leader",
+        position,
+        size: { ...leaderDef.defaultSize },
+        data: leaderData,
+      };
+      dispatch({ type: "ADD_NODE", node: newNode });
+      setSelectedIds(new Set([newNode.id]));
+
+      const newEdge = createEdge(
+        sourcePort.nodeId,
+        sourcePort.portId,
+        sourcePort.nodeType,
+        newNode.id,
+        compatiblePortId,
+        "leader",
+        leaderData,
+      );
+      if (newEdge) {
+        graphDispatch({ type: "ADD_EDGE", edge: newEdge });
+        console.log(
+          `[Canvas] Edge created (drop-to-create): ${sourcePort.nodeId}:${sourcePort.portId} → ${newNode.id}:${compatiblePortId}`,
+        );
+      }
+    },
+    [dispatch, graphDispatch],
+  );
+
   const handleConnectionStart = useCallback(
     (port: PortInfo, e: React.MouseEvent) => {
       const container = containerRef.current;
@@ -1885,6 +2102,8 @@ export function Canvas({
       // Read current values from refs so this callback stays stable
       const currentTransform = transformRef.current;
       const currentNodes = nodesRef.current;
+
+      setDashboardDropMenu(null);
 
       const rect = container.getBoundingClientRect();
       const worldX = (e.clientX - rect.left - currentTransform.x) / currentTransform.scale;
@@ -1987,8 +2206,8 @@ export function Canvas({
             console.log(`[Canvas] Edge created (snap): ${srcNodeId}:${srcPortId} → ${tgtNodeId}:${tgtPortId}`);
           }
         } else if (port.direction === "output") {
-          // Dropped on empty canvas from an output port — create a Leader node
-          // and auto-connect if there's a compatible input port on the Leader.
+          // Dropped on empty canvas from an output port — create or offer a
+          // Leader node and auto-connect if the Leader has a compatible input.
           const compatiblePort = LEADER_CONTRACT.ports.find(
             (p) => p.direction === "input" && p.protocol === port.protocol,
           );
@@ -2000,39 +2219,23 @@ export function Canvas({
               const dropX = (upEvent.clientX - rect.left - t.x) / t.scale;
               const dropY = (upEvent.clientY - rect.top - t.y) / t.scale;
 
-              const allTypes = getAllNodeTypes();
-              const leaderDef = allTypes.find((td) => td.type === "leader");
-              if (leaderDef) {
-                const leaderData = createDefaultNodeData("leader", projectSettingsRef.current);
-
-                const rawX = dropX - leaderDef.defaultSize.width / 2;
-                const rawY = dropY - leaderDef.defaultSize.height / 2;
-                const position = findNonOverlappingPosition(
-                  rawX, rawY,
-                  leaderDef.defaultSize.width, leaderDef.defaultSize.height,
-                  nodesRef.current,
+              if (port.nodeType === "render" && port.protocol === "context") {
+                setDashboardDropMenu({
+                  screenX: upEvent.clientX,
+                  screenY: upEvent.clientY,
+                  worldX: dropX,
+                  worldY: dropY,
+                  source: { ...port },
+                  compatiblePortId: compatiblePort.id,
+                });
+              } else {
+                createConnectedLeaderFromDrop(
+                  port,
+                  compatiblePort.id,
+                  dropX,
+                  dropY,
+                  null,
                 );
-
-                const newNode: CanvasNode = {
-                  id: generateId(),
-                  type: "leader",
-                  position,
-                  size: { ...leaderDef.defaultSize },
-                  data: leaderData,
-                };
-                dispatch({ type: "ADD_NODE", node: newNode });
-                setSelectedIds(new Set([newNode.id]));
-
-                // Create edge from source output to new Leader's compatible input
-                const newEdge = createEdge(
-                  port.nodeId, port.portId, port.nodeType,
-                  newNode.id, compatiblePort.id, "leader",
-                  leaderData,
-                );
-                if (newEdge) {
-                  graphDispatch({ type: "ADD_EDGE", edge: newEdge });
-                  console.log(`[Canvas] Edge created (drop-to-create): ${port.nodeId}:${port.portId} → ${newNode.id}:${compatiblePort.id}`);
-                }
               }
             }
           }
@@ -2049,7 +2252,7 @@ export function Canvas({
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseup", handleMouseUp);
     },
-    [graphDispatch],
+    [createConnectedLeaderFromDrop, graphDispatch],
   );
 
   const handleConnectionEnd = useCallback(
@@ -2228,6 +2431,32 @@ export function Canvas({
 
   const handleContextMenuClose = useCallback(() => {
     setContextMenu(null);
+  }, []);
+
+  const handleDashboardDropMenuSelect = useCallback(
+    (type: string) => {
+      if (!dashboardDropMenu) return;
+      const prompt =
+        type === "custom"
+          ? null
+          : resolveDashboardLeaderPrompt(
+              projectSettingsRef.current,
+              type as DashboardLeaderAction,
+            );
+      createConnectedLeaderFromDrop(
+        dashboardDropMenu.source,
+        dashboardDropMenu.compatiblePortId,
+        dashboardDropMenu.worldX,
+        dashboardDropMenu.worldY,
+        prompt,
+      );
+      setDashboardDropMenu(null);
+    },
+    [createConnectedLeaderFromDrop, dashboardDropMenu],
+  );
+
+  const handleDashboardDropMenuClose = useCallback(() => {
+    setDashboardDropMenu(null);
   }, []);
 
   /** Create a new markdown node from a chat response's text content */
@@ -2994,6 +3223,55 @@ export function Canvas({
         : undefined,
     [connectionDrag?.snapTarget?.nodeId, connectionDrag?.snapTarget?.portId],
   );
+  const pendingDashboardDrop = useMemo(() => {
+    if (!dashboardDropMenu) return null;
+    const sourceNode = nodes.find((n) => n.id === dashboardDropMenu.source.nodeId);
+    if (!sourceNode) return null;
+
+    const sourcePort = getPortWorldPos(
+      sourceNode,
+      dashboardDropMenu.source.portId,
+      "output",
+    );
+    if (!sourcePort) return null;
+
+    const placement = computeLeaderDropPlacement(
+      dashboardDropMenu.worldX,
+      dashboardDropMenu.worldY,
+      nodes,
+    );
+    if (!placement) return null;
+
+    return {
+      sourcePort,
+      targetPort: placement.targetPort,
+      position: placement.position,
+      size: placement.size,
+      color:
+        PROTOCOL_COLORS[dashboardDropMenu.source.protocol] ??
+        "var(--edge-context)",
+    };
+  }, [dashboardDropMenu, nodes]);
+  const dashboardDropMenuPosition = useMemo(() => {
+    if (!dashboardDropMenu) return null;
+    if (!pendingDashboardDrop) {
+      return { x: dashboardDropMenu.screenX, y: dashboardDropMenu.screenY };
+    }
+
+    const rect = containerRef.current?.getBoundingClientRect();
+    return {
+      x:
+        (rect?.left ?? 0) +
+        pendingDashboardDrop.position.x * transform.scale +
+        transform.x +
+        14,
+      y:
+        (rect?.top ?? 0) +
+        pendingDashboardDrop.position.y * transform.scale +
+        transform.y +
+        14,
+    };
+  }, [dashboardDropMenu, pendingDashboardDrop, transform]);
 
   return (
     <div
@@ -3106,6 +3384,17 @@ export function Canvas({
         />
       )}
 
+      {dashboardDropMenu && (
+        <CanvasContextMenu
+          x={dashboardDropMenuPosition?.x ?? dashboardDropMenu.screenX}
+          y={dashboardDropMenuPosition?.y ?? dashboardDropMenu.screenY}
+          options={dashboardDropMenuOptions}
+          onSelect={handleDashboardDropMenuSelect}
+          onClose={handleDashboardDropMenuClose}
+          title="Use dashboard context"
+        />
+      )}
+
       <div
         style={{
           position: "absolute",
@@ -3129,8 +3418,12 @@ export function Canvas({
             onUpdateData={handleUpdateNodeData}
             onResize={handleResizeNode}
             onAddContentNode={addContentNode}
+            onCreateKanbanCardFromMarkdown={onCreateKanbanCardFromMarkdown}
             onRevealMinion={revealMinion}
             onSpawnLeaderChild={spawnLeaderChild}
+            onDuplicateLeaderSetup={
+              node.type === "leader" ? () => duplicateLeaderSetup(node.id) : undefined
+            }
             socketSend={socketSend}
             socketSubscribe={socketSubscribe}
             getContextForNode={getStableContextGetter(node.id)}
@@ -3169,6 +3462,85 @@ export function Canvas({
       </div>
 
       <EdgeRenderer graph={graph} nodes={nodes} transform={transform} />
+
+      {/* Steady connector shown after dashboard context is dropped and before an action is chosen. */}
+      {pendingDashboardDrop && (
+        <svg
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: "100%",
+            height: "100%",
+            pointerEvents: "none",
+            overflow: "visible",
+            zIndex: 45,
+          }}
+        >
+          <g
+            transform={`translate(${transform.x}, ${transform.y}) scale(${transform.scale})`}
+          >
+            {(() => {
+              const x1 = pendingDashboardDrop.sourcePort.x;
+              const y1 = pendingDashboardDrop.sourcePort.y;
+              const x2 = pendingDashboardDrop.targetPort.x;
+              const y2 = pendingDashboardDrop.targetPort.y;
+              const dx = Math.max(80, Math.abs(x2 - x1) * 0.5);
+              const d = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
+
+              return (
+                <>
+                  <rect
+                    x={pendingDashboardDrop.position.x}
+                    y={pendingDashboardDrop.position.y}
+                    width={pendingDashboardDrop.size.width}
+                    height={pendingDashboardDrop.size.height}
+                    rx={12}
+                    fill="var(--bg-secondary)"
+                    fillOpacity={0.2}
+                    stroke={pendingDashboardDrop.color}
+                    strokeWidth={1.5}
+                    strokeDasharray="8 6"
+                    strokeOpacity={0.55}
+                  />
+                  <path
+                    d={d}
+                    fill="none"
+                    stroke={pendingDashboardDrop.color}
+                    strokeWidth={2.5}
+                    strokeOpacity={0.72}
+                    strokeDasharray="8 6"
+                    className="edge-flow"
+                  />
+                  <circle
+                    cx={x1}
+                    cy={y1}
+                    r={3.5}
+                    fill={pendingDashboardDrop.color}
+                    opacity={0.75}
+                  />
+                  <circle
+                    className="dashboard-drop-attention"
+                    cx={x2}
+                    cy={y2}
+                    r={9}
+                    fill="none"
+                    stroke={pendingDashboardDrop.color}
+                    strokeWidth={2}
+                  />
+                  <circle
+                    cx={x2}
+                    cy={y2}
+                    r={4}
+                    fill={pendingDashboardDrop.color}
+                    opacity={0.9}
+                  />
+                </>
+              );
+            })()}
+          </g>
+        </svg>
+      )}
 
       {/* Connection drag preview line */}
       {connectionDrag && (
@@ -3279,44 +3651,6 @@ export function Canvas({
           </g>
         </svg>
       )}
-
-      {/* Connection indicator */}
-      <div
-        style={{
-          position: "absolute",
-          top: 12,
-          right: 16,
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "6px 12px",
-          background: "var(--bg-secondary)",
-          border: "1px solid var(--border-default)",
-          borderRadius: 8,
-          zIndex: 100,
-        }}
-      >
-        <div
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: "50%",
-            background: socketConnected ? "var(--success-color)" : "var(--danger-color)",
-            boxShadow: socketConnected ? "0 0 6px var(--success-color)" : "none",
-          }}
-        />
-        <span
-          style={{
-            fontSize: 10,
-            color: "var(--text-muted)",
-            fontFamily: "var(--font-mono)",
-            textTransform: "uppercase",
-            letterSpacing: 1,
-          }}
-        >
-          {socketConnected ? "Connected" : "Disconnected"}
-        </span>
-      </div>
 
       {/* ── Multi-select floating action bar ── */}
       {multiSelectActionPos && multiSelectBounds && (multiSelectInfo ? !multiSelectInfo.allInSameGroup : true) && (
@@ -3442,35 +3776,88 @@ export function Canvas({
         />
       )}
 
-      <Toolbar
+      <ViewportOverlay zIndex={850}>
+        {/* Connection indicator */}
+        <div
+          style={{
+            position: "absolute",
+            top: viewportTopOffset + 12,
+            right: 16,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 12px",
+            background: "var(--bg-secondary)",
+            border: "1px solid var(--border-default)",
+            borderRadius: 8,
+            pointerEvents: "auto",
+          }}
+        >
+          <div
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: socketConnected ? "var(--success-color)" : "var(--danger-color)",
+              boxShadow: socketConnected ? "0 0 6px var(--success-color)" : "none",
+            }}
+          />
+          <span
+            style={{
+              fontSize: 10,
+              color: "var(--text-muted)",
+              fontFamily: "var(--font-mono)",
+              textTransform: "uppercase",
+              letterSpacing: 1,
+            }}
+          >
+            {socketConnected ? "Connected" : "Disconnected"}
+          </span>
+        </div>
+
+        <Toolbar
+          transform={transform}
+          onZoomIn={() => zoomTo(transform.scale * 1.1)}
+          onZoomOut={() => zoomTo(transform.scale / 1.1)}
+          onZoomReset={() =>
+            setTransform((p) => ({
+              ...p,
+              scale: 1,
+              x:
+                containerRef.current
+                  ? containerRef.current.clientWidth / 2 -
+                    (containerRef.current.clientWidth / 2 - p.x) /
+                      p.scale
+                  : 0,
+              y:
+                containerRef.current
+                  ? containerRef.current.clientHeight / 2 -
+                    (containerRef.current.clientHeight / 2 - p.y) /
+                      p.scale
+                  : 0,
+            }))
+          }
+          onFitView={fitView}
+          onFocusSelected={() => focusNodes(selectedIds)}
+          hasSelection={selectedIds.size > 0}
+          onAddNode={addNode}
+          onTidyLayout={handleTidyLayout}
+          onFocusNextActive={focusNextActive}
+          hasActiveNodes={activeNodeIds.length > 0}
+        />
+      </ViewportOverlay>
+      <CanvasMiniMap
+        nodes={nodes}
+        edges={graph.edges}
         transform={transform}
-        onZoomIn={() => zoomTo(transform.scale * 1.1)}
-        onZoomOut={() => zoomTo(transform.scale / 1.1)}
-        onZoomReset={() =>
-          setTransform((p) => ({
-            ...p,
-            scale: 1,
-            x:
-              containerRef.current
-                ? containerRef.current.clientWidth / 2 -
-                  (containerRef.current.clientWidth / 2 - p.x) /
-                    p.scale
-                : 0,
-            y:
-              containerRef.current
-                ? containerRef.current.clientHeight / 2 -
-                  (containerRef.current.clientHeight / 2 - p.y) /
-                    p.scale
-                : 0,
-          }))
-        }
+        setTransform={setTransform}
+        containerRef={containerRef}
+        selectedIds={selectedIds}
+        activeNodeIds={activeNodeIdSet}
         onFitView={fitView}
         onFocusSelected={() => focusNodes(selectedIds)}
         hasSelection={selectedIds.size > 0}
-        onAddNode={addNode}
-        onTidyLayout={handleTidyLayout}
-        onFocusNextActive={focusNextActive}
-        hasActiveNodes={activeNodeIds.length > 0}
+        onZoomTo={zoomTo}
       />
     </div>
   );

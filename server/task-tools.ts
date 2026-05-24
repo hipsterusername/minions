@@ -17,12 +17,17 @@ import type { WorktreeInfo } from "./worktree.js";
 // Re-export public types so callers keep importing from "server/task-tools"
 export type {
   TaskRecord,
+  RuntimeSessionInfo,
   PendingWait,
   ApprovalState,
   TaskManagerState,
 } from "./task-tools/types.ts";
 
-import type { TaskManagerState, TaskToolContext } from "./task-tools/types.ts";
+import type {
+  RuntimeSessionInfo,
+  TaskManagerState,
+  TaskToolContext,
+} from "./task-tools/types.ts";
 import { createPlanTaskToolDef } from "./task-tools/plan-task.ts";
 import { createAssignTaskToolDef } from "./task-tools/assign-task.ts";
 import { createCompleteTaskToolDef } from "./task-tools/complete-task.ts";
@@ -64,6 +69,7 @@ export function createTaskToolsForLeader(opts: {
   worktreeInfo?: WorktreeInfo | null;
   worktreeIsolation?: boolean;
   scheduleWaitContinue: (durationMs: number, reason: string) => void;
+  getSessionRuntime?: (sessionKey: string) => RuntimeSessionInfo | null;
   onStateChange?: (state: TaskManagerState) => void;
 }): { toolDefs: NormalizedToolDef[]; taskState: TaskManagerState } {
   const taskState: TaskManagerState = opts.existingTaskState ?? {
@@ -80,6 +86,7 @@ export function createTaskToolsForLeader(opts: {
     projectPath: opts.projectPath ?? opts.cwd,
     minionSystemPrompt: opts.minionSystemPrompt,
     taskState,
+    getSessionRuntime: opts.getSessionRuntime,
     onStateChange: opts.onStateChange,
     worktreeBranch: opts.worktreeBranch,
     worktreeInfo: opts.worktreeInfo,

@@ -16,6 +16,7 @@ import type {
   AgentTypeContext,
   AgentToolResult,
 } from "./agents/index.ts";
+import type { SessionHostDeps } from "./session-host.ts";
 import type {
   AgentHarness,
   HarnessStartOptions,
@@ -91,7 +92,7 @@ export async function ensureWorktree(
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error(`[worktree] Failed to create worktree for ${host.id}: ${errMsg}`);
     bus.emitToSession(host.id, {
-      type: "worktree_error",
+      type: "worktree_failed",
       sessionKey: host.id,
       error: `Worktree creation failed: ${errMsg}`,
     });
@@ -162,7 +163,7 @@ export function buildHarnessStartOpts(
   if (
     harness.capabilities.thinking &&
     host.thinkingConfig?.enabled &&
-    modelSupportsAdaptive(host.model)
+    modelSupportsThinkingForHarness(harness.name, host.model)
   ) {
     startOpts.thinking = {
       effort: host.thinkingConfig.effort as "low" | "medium" | "high",
@@ -171,6 +172,14 @@ export function buildHarnessStartOpts(
   }
 
   return { startOpts, allowedTools };
+}
+
+function modelSupportsThinkingForHarness(
+  harnessName: string,
+  model: string | null,
+): boolean {
+  if (harnessName === "claude") return modelSupportsAdaptive(model);
+  return true;
 }
 
 /**
@@ -289,11 +298,90 @@ export function processNormalizedEvent(
   bus.emitToSession(host.id, sdkEvent);
 }
 
+// ── Agent context builder ───────────────────────────────────────────────────
+
 /**
- * Type export for the agent's tool-group result shape.
- * Re-exported here rather than pulled from the full agent module to
- * keep the import arrow into `session-host.ts` narrow.
+ * Build the MCP agent context for a session run.
+ *
+ * Wires callbacks through `deps` so the agent can spawn minions or
+ * schedule a delayed resume without knowing about the registry directly.
+ *
+ * Extracted from `SessionHost.buildAgentContext` (was private) to keep
+ * the class file under the 400-line architecture ceiling.
  */
+export function buildAgentContext(
+  host: SessionHost,
+  opts: StartSessionOptions,
+  deps: SessionHostDeps,
+): AgentTypeContext {
+  const ctx: AgentTypeContext = {
+    sessionKey: host.id,
+    cwd: host.cwd,
+    bus: deps.bus,
+    worktreeInfo: host.worktree,
+    worktreeIsolation: host.worktreeIsolation,
+    forEachLeaderTaskState: deps.forEachLeaderTaskState,
+    getSessionRuntime: deps.getSessionRuntime,
+    startMinionSession: (params) => {
+      // Default the spawned minion to the leader's current harness so a
+      // non-Claude leader spawns same-harness minions unless the caller
+      // explicitly overrides it.
+      deps.startChildSession({
+        sessionKey: params.sessionKey,
+        prompt: params.prompt,
+        cwd: params.cwd,
+        systemPrompt: params.systemPrompt,
+        role: "minion",
+        worktreeIsolation: false,
+        parentWorktree: host.worktree ?? undefined,
+        initialModel: params.model ?? null,
+        thinkingConfig: params.thinkingConfig ?? undefined,
+        harness: params.harness ?? host.harnessName,
+      });
+    },
+    scheduleWaitContinue: (durationMs, reason) => {
+      host.clearWaitTimer();
+      console.log(
+        `[wait] Leader ${host.id} waiting ${durationMs}ms: ${reason}`,
+      );
+      host.waitTimerId = setTimeout(() => {
+        host.waitTimerId = null;
+        deps.bus.emitToSession(host.id, {
+          type: "wait_state",
+          sessionKey: host.id,
+          action: "completed",
+          reason,
+          timestamp: Date.now(),
+        });
+        deps.startChildSession({
+          sessionKey: host.id,
+          prompt: `Continue. The ${Math.round(
+            durationMs / 1000,
+          )}s wait has elapsed (reason: ${reason}). Pick up where you left off.`,
+          cwd: host.cwd,
+          resumeId: host.sessionId ?? undefined,
+          systemPrompt: opts.systemPrompt,
+          role: host.role,
+          harness: host.harnessName,
+        });
+      }, durationMs);
+    },
+  };
+  if (host.taskState) ctx.existingTaskState = host.taskState;
+  if (host.renderState) ctx.existingRenderState = host.renderState;
+  if (host.reasoningMapState) ctx.existingReasoningMapState = host.reasoningMapState;
+  if (opts.parentWorktree) ctx.parentWorktree = opts.parentWorktree;
+  return ctx;
+}
+
+// Context-window recovery — extracted to session-host-context-recovery.ts.
+export {
+  isContextWindowError,
+  shouldRecoverFromContextWindow,
+  buildContextRecoveryStartOptions,
+} from "./session-host-context-recovery.ts";
+
+// Worktree type re-export — keeps the import surface narrow for session-host.ts.
 export type { WorktreeInfo };
 
 const VALID_PERMISSION_MODES: ReadonlySet<NormalizedPermissionMode> = new Set([

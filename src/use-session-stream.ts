@@ -65,6 +65,45 @@ export interface UseSessionStreamOptions {
   prefix: string;
 }
 
+type ScheduledFrame =
+  | { kind: "raf"; id: number }
+  | { kind: "timeout"; id: ReturnType<typeof setTimeout> };
+
+function scheduleFrame(fn: () => void): ScheduledFrame {
+  if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+    return { kind: "raf", id: window.requestAnimationFrame(fn) };
+  }
+  return { kind: "timeout", id: setTimeout(fn, 16) };
+}
+
+function cancelFrame(frame: ScheduledFrame | null): void {
+  if (!frame) return;
+  if (frame.kind === "raf" && typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") {
+    window.cancelAnimationFrame(frame.id);
+    return;
+  }
+  clearTimeout(frame.id);
+}
+
+function isTransientStreamingOnlyChange(
+  previous: SessionStreamState,
+  next: SessionStreamState,
+): boolean {
+  return (
+    previous.sessionKey === next.sessionKey &&
+    previous.status === next.status &&
+    previous.messages === next.messages &&
+    previous.totalCost === next.totalCost &&
+    previous.turns === next.turns &&
+    previous.error === next.error &&
+    previous.fullError === next.fullError &&
+    (
+      previous.streamingText !== next.streamingText ||
+      previous.streamingBlockIndex !== next.streamingBlockIndex
+    )
+  );
+}
+
 /**
  * Subscribe to the socket and run every message through
  * `sessionStreamReducer` against the latest `state`. Calls `onChange`
@@ -80,11 +119,25 @@ export function useSessionStream(opts: UseSessionStreamOptions): void {
   // Latest props, accessed via ref so the subscription effect's
   // identity does not depend on them.
   const stateRef = useRef(opts.state);
-  stateRef.current = opts.state;
+  const pendingFrameRef = useRef<ScheduledFrame | null>(null);
+  const pendingTransientRef = useRef<SessionStreamState | null>(null);
+  if (!pendingTransientRef.current) {
+    stateRef.current = opts.state;
+  }
   const onChangeRef = useRef(opts.onChange);
   onChangeRef.current = opts.onChange;
   const prefixRef = useRef(prefix);
   prefixRef.current = prefix;
+
+  const flushTransientRef = useRef<() => void>(() => undefined);
+  flushTransientRef.current = () => {
+    const pending = pendingTransientRef.current;
+    pendingFrameRef.current = null;
+    pendingTransientRef.current = null;
+    if (pending) {
+      onChangeRef.current(pending);
+    }
+  };
 
   useEffect(() => {
     if (!socketSubscribe) return;
@@ -107,8 +160,29 @@ export function useSessionStream(opts: UseSessionStreamOptions): void {
         // Update ref synchronously so back-to-back messages within the
         // same tick each see the latest state, then notify the caller.
         stateRef.current = next;
+        if (isTransientStreamingOnlyChange(current, next)) {
+          pendingTransientRef.current = next;
+          if (!pendingFrameRef.current) {
+            pendingFrameRef.current = scheduleFrame(() => {
+              flushTransientRef.current();
+            });
+          }
+          return;
+        }
+
+        cancelFrame(pendingFrameRef.current);
+        pendingFrameRef.current = null;
+        pendingTransientRef.current = null;
         onChangeRef.current(next);
       }
     });
   }, [socketSubscribe]);
+
+  useEffect(() => {
+    return () => {
+      cancelFrame(pendingFrameRef.current);
+      pendingFrameRef.current = null;
+      pendingTransientRef.current = null;
+    };
+  }, []);
 }

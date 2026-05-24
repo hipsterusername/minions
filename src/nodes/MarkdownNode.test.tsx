@@ -33,7 +33,13 @@ interface MarkdownData {
   savedContentHash?: string | null;
 }
 
-function Probe({ initial }: { initial: MarkdownData }) {
+function Probe({
+  initial,
+  onCreateKanbanCardFromMarkdown,
+}: {
+  initial: MarkdownData;
+  onCreateKanbanCardFromMarkdown?: NodeRenderProps["onCreateKanbanCardFromMarkdown"];
+}) {
   const [data, setData] = useState<MarkdownData>(initial);
   const node: CanvasNode = {
     id: "md-test",
@@ -48,6 +54,7 @@ function Probe({ initial }: { initial: MarkdownData }) {
     onUpdateData: (next) => setData(next as MarkdownData),
     onResize: () => {},
     projectPath: "/tmp/fake-project",
+    onCreateKanbanCardFromMarkdown,
   };
   return <MarkdownNodeRenderer {...props} />;
 }
@@ -157,5 +164,40 @@ describe("MarkdownNode save", () => {
     );
     expect(saveCall).toBeDefined();
     expect(authHeaderOf(saveCall!)).toBe(`Bearer ${TEST_TOKEN}`);
+  });
+
+  it("prompts inline for a title and creates a Kanban card from markdown content", async () => {
+    const onCreateKanbanCardFromMarkdown = vi.fn();
+
+    render(
+      <Probe
+        initial={{
+          title: "Draft title",
+          content: "Implement this task\n\n- Keep the action quiet",
+          viewMode: "edit",
+        }}
+        onCreateKanbanCardFromMarkdown={onCreateKanbanCardFromMarkdown}
+      />,
+    );
+
+    const cardButton = await screen.findByTitle("Save as Kanban card");
+    await act(async () => {
+      fireEvent.click(cardButton);
+    });
+
+    const titleInput = await screen.findByLabelText("Card title");
+    expect(titleInput).toHaveValue("Draft title");
+
+    await act(async () => {
+      fireEvent.change(titleInput, { target: { value: "Ship markdown cards" } });
+      fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    });
+
+    expect(onCreateKanbanCardFromMarkdown).toHaveBeenCalledWith({
+      nodeId: "md-test",
+      title: "Ship markdown cards",
+      content: "Implement this task\n\n- Keep the action quiet",
+    });
+    expect(await screen.findByText("Card added")).toBeInTheDocument();
   });
 });

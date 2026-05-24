@@ -45,6 +45,7 @@ describe("listHarnesses", () => {
     expect(codex!.capabilities["thinking"]).toBe(true);
     expect(codex!.capabilities["mcp"]).toBe(true);
     expect(codex!.models.map((m) => m.id)).toContain("gpt-5.5");
+    expect(codex!.models.map((m) => m.id)).toContain("gpt-5.3-codex-spark");
     expect(codex!.account.provider).toBe("openai");
 
     // Echo is a test-only placeholder harness and must not be exposed to the

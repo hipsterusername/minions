@@ -26,8 +26,10 @@ import path from "node:path";
 import type Database from "better-sqlite3";
 import { initDb } from "./db.ts";
 import * as repo from "./session-repo.ts";
-import type { TaskManagerState } from "./task-tools.ts";
+import type { ApprovalState, TaskManagerState } from "./task-tools.ts";
 import type { RenderState } from "./render-tools.ts";
+import type { ReasoningMapState } from "./reasoning-map-tools.ts";
+import type { WorktreeInfo } from "./worktree-types.ts";
 import {
   MAX_BUFFERED_EVENTS,
   type BufferedEvent,
@@ -117,6 +119,8 @@ export interface PersistableSession {
    */
   sessionId: string | null;
   worktreeIsolation: boolean;
+  worktree: WorktreeInfo | null;
+  approval: ApprovalState | null;
   totalCost: number;
   turns: number;
   /**
@@ -142,6 +146,12 @@ function sessionToRow(
     task_name: s.taskName,
     session_id: s.sessionId,
     worktree_isolation: s.worktreeIsolation ? 1 : 0,
+    worktree_path: s.worktree?.path ?? null,
+    worktree_branch: s.worktree?.branch ?? null,
+    worktree_project_path: s.worktree?.projectPath ?? null,
+    worktree_created_at: s.worktree?.createdAt ?? null,
+    worktree_lifecycle: s.worktree?.lifecycle ?? null,
+    approval_json: s.approval ? JSON.stringify(s.approval) : null,
     total_cost: s.totalCost,
     turns: s.turns,
     harness_name: s.harnessName,
@@ -173,6 +183,7 @@ export function removePersistedSession(sessionKey: string): void {
   try {
     repo.deleteSession(db, sessionKey);
     repo.deleteRenderState(db, sessionKey);
+    repo.deleteReasoningMapState(db, sessionKey);
     repo.purgeEventsForSession(db, sessionKey);
     // task records are cascaded logically (we delete rows whose leader key
     // matches) — no FK so we do it explicitly.
@@ -249,6 +260,7 @@ export function persistTaskState(
     for (const rec of state.tasks.values()) {
       repo.upsertTaskRecord(db, rec);
     }
+    repo.updateSessionApproval(db, leaderSessionKey, state.approval);
   } catch (err) {
     console.warn("[session-persist] persistTaskState failed:", err);
   }
@@ -283,6 +295,19 @@ export function persistRenderState(
   }
 }
 
+export function persistReasoningMapState(
+  sessionKey: string,
+  state: ReasoningMapState,
+): void {
+  const db = ensureDb();
+  if (!db) return;
+  try {
+    repo.upsertReasoningMapState(db, sessionKey, state);
+  } catch (err) {
+    console.warn("[session-persist] persistReasoningMapState failed:", err);
+  }
+}
+
 // ── Boot-time hydration ─────────────────────────────────
 
 /**
@@ -295,6 +320,7 @@ export interface HydratedSession {
   row: repo.SessionRow;
   tasks: TaskManagerState | null;
   render: RenderState | null;
+  reasoningMap: ReasoningMapState | null;
   events: BufferedEvent[];
 }
 
@@ -314,17 +340,26 @@ export function hydrateSessionsFromDb(): HydratedSession[] {
   for (const row of rows) {
     let tasks: TaskManagerState | null = null;
     if (row.role === "leader") {
+      let approval: ApprovalState | null = null;
+      if (row.approval_json) {
+        try {
+          approval = JSON.parse(row.approval_json) as ApprovalState;
+        } catch {
+          approval = null;
+        }
+      }
       const records = repo.getTaskRecordsForLeader(db, row.session_key);
       if (records.length > 0) {
         const map = new Map(records.map((r) => [r.taskId, r]));
-        tasks = { tasks: map, pendingWait: null, approval: null };
+        tasks = { tasks: map, pendingWait: null, approval };
       } else {
-        tasks = { tasks: new Map(), pendingWait: null, approval: null };
+        tasks = { tasks: new Map(), pendingWait: null, approval };
       }
     }
     const render = repo.getRenderState(db, row.session_key);
+    const reasoningMap = repo.getReasoningMapState(db, row.session_key);
     const events = loadRecentEvents(row.session_key);
-    out.push({ row, tasks, render, events });
+    out.push({ row, tasks, render, reasoningMap, events });
   }
   return out;
 }

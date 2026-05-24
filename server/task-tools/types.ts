@@ -3,6 +3,7 @@
  */
 
 import type { Bus } from "../bus.ts";
+import type { ThinkingConfig } from "../session-host-config.ts";
 import type { WorktreeInfo, DetailedDiff } from "../worktree.js";
 
 // ── Public state types ────────────────────────────────
@@ -21,6 +22,26 @@ export interface TaskRecord {
   createdAt: number;
   completedAt: number | null;
   result: string | null;
+}
+
+export interface RuntimeSessionInfo {
+  sessionKey: string;
+  sessionId: string | null;
+  status: string;
+  role: string;
+  cwd: string;
+  model: string | null;
+  harness: string;
+  totalCost: number;
+  turns: number;
+  /** True when the host currently has an active harness run attached. */
+  isLive: boolean;
+  lastActivityAt: number | null;
+  lastActivityAgeMs: number | null;
+  lastEventType: string | null;
+  lastSdkEventKind: string | null;
+  lastError: string | null;
+  lastErrorFull: string | null;
 }
 
 export interface PendingWait {
@@ -62,6 +83,7 @@ export interface TaskToolContext {
     systemPrompt: string;
     /** Optional model override for the spawned minion. */
     model?: string;
+    thinkingConfig?: ThinkingConfig;
     /**
      * Optional override for the spawned minion's AgentHarness. When omitted,
      * the leader-side wrapper in `SessionHost.buildAgentContext` defaults it
@@ -79,6 +101,7 @@ export interface TaskToolContext {
   projectPath: string;
   minionSystemPrompt: string;
   taskState: TaskManagerState;
+  getSessionRuntime?: (sessionKey: string) => RuntimeSessionInfo | null;
   onStateChange?: (state: TaskManagerState) => void;
   worktreeBranch?: string | null;
   worktreeInfo?: WorktreeInfo | null;

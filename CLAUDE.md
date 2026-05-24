@@ -69,7 +69,7 @@ revert, or call it out in the PR with reasoning.
 | `pnpm test` | Watch mode. Run while you're working. |
 | `pnpm test:run` | One-shot. Run before you stage. |
 | `pnpm typecheck` | Run before you commit. CI runs the same. |
-| `pnpm verify` | One-shot mirror of CI: `pnpm typecheck && pnpm test:run && pnpm build`. Run before you push. |
+| `pnpm verify` | One-shot mirror of CI: `pnpm typecheck && pnpm typecheck:server && pnpm test:run && pnpm build`. Run before you push. |
 | `pnpm test:coverage` | Look at blind spots. Coverage is reported, not gated. |
 | `prek run` | Local pre-commit gate (see `.pre-commit-config.yaml`). |
 
@@ -145,16 +145,13 @@ New server files must be under 400 lines; split them if they grow.
 
 ---
 
-## Known scope gaps (broader typecheck coverage)
+## Typecheck coverage
 
-The strict TypeScript flags only walk what's in the tsconfig project
-references. Today that's `tsconfig.app.json` (covers `src/`) and
-`tsconfig.node.json` (covers only `vite.config.ts`). The
-`server/`, `tests/`, and `scripts/` trees are **not** typechecked by
-`pnpm typecheck` — they're only validated indirectly when vitest runs
-them via `tsx`. Adding a tsconfig project that covers those trees is
-a follow-up; surfaces additional type-strictness work but no longer
-blocks the CI gate (typecheck + tests + build all pass on `src/`).
+`pnpm typecheck` (`tsc -b --noEmit`) walks all three tsconfig project
+references: `tsconfig.app.json` (covers `src/`), `tsconfig.node.json`
+(covers `vite.config.ts`), and `server/tsconfig.json` (covers
+`server/`). The `tests/` and `scripts/` trees are still validated only
+indirectly when vitest runs them via `tsx`.
 
 ---
 

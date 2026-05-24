@@ -2,7 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectSettings } from "./api.ts";
 import { useTheme } from "./use-theme.ts";
 import { useHarnessList } from "./use-harness-list.tsx";
-import type { HarnessInfo } from "./harness-list.ts";
+import { findHarness, type HarnessInfo } from "./harness-list.ts";
+import type { EffortLevel, ThinkingConfig } from "./types.ts";
+import { DEFAULT_THINKING_CONFIG, MINION_THINKING_CONFIG } from "./types.ts";
+import { getModelCapability } from "./model-meta.ts";
+import {
+  DASHBOARD_LEADER_ACTIONS,
+  DEFAULT_DASHBOARD_LEADER_ACTION_NAMES,
+  DEFAULT_DASHBOARD_LEADER_ACTION_PROMPTS,
+  type DashboardLeaderAction,
+} from "./dashboard-leader-actions.ts";
 
 interface SettingsMenuProps {
   settings: ProjectSettings;
@@ -102,6 +111,18 @@ function SettingsPopover({
     settings.defaultMinionModel ?? settings.defaultModel ?? "claude-sonnet-4-6",
     modelGroups,
   );
+  const leaderHarness = findHarness(harnesses, leaderSelection.harness);
+  const minionHarness = findHarness(harnesses, minionSelection.harness);
+  const leaderThinking = normalizeThinkingConfig(
+    settings.defaultLeaderThinkingConfig,
+    DEFAULT_THINKING_CONFIG,
+  );
+  const minionThinking = normalizeThinkingConfig(
+    settings.defaultMinionThinkingConfig,
+    MINION_THINKING_CONFIG,
+  );
+  const leaderCapability = getModelCapability(leaderSelection.model, leaderHarness);
+  const minionCapability = getModelCapability(minionSelection.model, minionHarness);
 
   return (
     <div
@@ -248,10 +269,27 @@ function SettingsPopover({
             defaultModel: selection.model,
             defaultLeaderHarness: selection.harness,
             defaultLeaderModel: selection.model,
+            defaultLeaderThinkingConfig: normalizeThinkingForCapability(
+              leaderThinking,
+              getModelCapability(selection.model, findHarness(harnesses, selection.harness)),
+            ),
           })
         }
       />
-      <FieldHint>Harness and model used when spawning new Leader nodes</FieldHint>
+      <ThinkingControls
+        config={leaderThinking}
+        capability={leaderCapability}
+        onChange={(config) =>
+          onSettingsChange({
+            ...settings,
+            defaultLeaderThinkingConfig: normalizeThinkingForCapability(
+              config,
+              leaderCapability,
+            ),
+          })
+        }
+      />
+      <FieldHint>Harness, model, and reasoning used when spawning new Leader nodes</FieldHint>
 
       {/* ── Default Minion Model ── */}
       <FieldLabel>Default Minion Model</FieldLabel>
@@ -263,10 +301,27 @@ function SettingsPopover({
             ...settings,
             defaultMinionHarness: selection.harness,
             defaultMinionModel: selection.model,
+            defaultMinionThinkingConfig: normalizeThinkingForCapability(
+              minionThinking,
+              getModelCapability(selection.model, findHarness(harnesses, selection.harness)),
+            ),
           })
         }
       />
-      <FieldHint>Harness and model used when spawning new Minion nodes</FieldHint>
+      <ThinkingControls
+        config={minionThinking}
+        capability={minionCapability}
+        onChange={(config) =>
+          onSettingsChange({
+            ...settings,
+            defaultMinionThinkingConfig: normalizeThinkingForCapability(
+              config,
+              minionCapability,
+            ),
+          })
+        }
+      />
+      <FieldHint>Harness, model, and reasoning used when spawning new Minion nodes</FieldHint>
 
       <Divider />
 
@@ -300,8 +355,62 @@ function SettingsPopover({
         Leaders work in an isolated git worktree branch with approval-based
         merging
       </FieldHint>
+
+      <Divider />
+
+      {/* ── Dashboard Context Actions ── */}
+      <FieldLabel>Dashboard Context Prompts</FieldLabel>
+      {DASHBOARD_LEADER_ACTIONS.map(({ action }) => (
+        <DashboardActionField
+          key={action}
+          name={dashboardActionNameValue(settings, action)}
+          prompt={dashboardPromptValue(settings, action)}
+          onNameChange={(value) =>
+            onSettingsChange({
+              ...settings,
+              dashboardLeaderActionNames: {
+                ...settings.dashboardLeaderActionNames,
+                [action]: value,
+              },
+            })
+          }
+          onPromptChange={(value) =>
+            onSettingsChange({
+              ...settings,
+              dashboardLeaderActionPrompts: {
+                ...settings.dashboardLeaderActionPrompts,
+                [action]: value,
+              },
+            })
+          }
+        />
+      ))}
+      <FieldHint>
+        Used when dropping dashboard context onto the canvas and choosing an
+        action
+      </FieldHint>
     </div>
   );
+}
+
+function dashboardActionNameValue(
+  settings: ProjectSettings,
+  action: DashboardLeaderAction,
+): string {
+  const configured = settings.dashboardLeaderActionNames?.[action];
+  return typeof configured === "string"
+    ? configured
+    : DEFAULT_DASHBOARD_LEADER_ACTION_NAMES[action];
+}
+
+function dashboardPromptValue(
+  settings: ProjectSettings,
+  action: DashboardLeaderAction,
+): string {
+  const configured = settings.dashboardLeaderActionPrompts?.[action];
+  return typeof configured === "string"
+    ? configured
+    : DEFAULT_DASHBOARD_LEADER_ACTION_PROMPTS[action];
 }
 
 // ── Model settings helpers ─────────────────────────────────
@@ -311,6 +420,22 @@ interface ModelGroup {
   label: string;
   options: Array<{ value: string; label: string; model: string; harness: string }>;
 }
+
+const EFFORT_LABELS: Record<EffortLevel, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "XHigh",
+  max: "Max",
+};
+
+const EFFORT_DESCRIPTIONS: Record<EffortLevel, string> = {
+  low: "Fastest; minimal reasoning when possible",
+  medium: "Moderate reasoning for typical delegated work",
+  high: "Deep reasoning default for complex work",
+  xhigh: "Extra reasoning for supported models",
+  max: "Maximum reasoning for supported models",
+};
 
 const FALLBACK_MODEL_GROUPS: ModelGroup[] = [
   {
@@ -407,6 +532,45 @@ function findModelOption(
     ?.options.find((o) => o.model === model);
 }
 
+function normalizeThinkingConfig(
+  value: unknown,
+  fallback: ThinkingConfig,
+): ThinkingConfig {
+  if (typeof value !== "object" || value === null) return { ...fallback };
+  const cfg = value as Partial<Record<keyof ThinkingConfig, unknown>>;
+  const enabled = typeof cfg.enabled === "boolean" ? cfg.enabled : fallback.enabled;
+  const effort = isEffortLevel(cfg.effort) ? cfg.effort : fallback.effort;
+  const display =
+    cfg.display === "summarized" || cfg.display === "omitted"
+      ? cfg.display
+      : fallback.display;
+  return { enabled, effort, display };
+}
+
+function normalizeThinkingForCapability(
+  config: ThinkingConfig,
+  capability: ReturnType<typeof getModelCapability>,
+): ThinkingConfig {
+  if (!capability.supportsAdaptiveThinking) return { ...config, enabled: false };
+  if (capability.supportedEffortLevels.includes(config.effort)) return { ...config };
+  return {
+    ...config,
+    effort: capability.supportedEffortLevels.includes("high")
+      ? "high"
+      : (capability.supportedEffortLevels[0] ?? config.effort),
+  };
+}
+
+function isEffortLevel(value: unknown): value is EffortLevel {
+  return (
+    value === "low" ||
+    value === "medium" ||
+    value === "high" ||
+    value === "xhigh" ||
+    value === "max"
+  );
+}
+
 // ── Small layout helpers ────────────────────────────────────
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
@@ -494,6 +658,85 @@ function Select({
   );
 }
 
+function DashboardActionField({
+  name,
+  prompt,
+  onNameChange,
+  onPromptChange,
+}: {
+  name: string;
+  prompt: string;
+  onNameChange: (value: string) => void;
+  onPromptChange: (value: string) => void;
+}) {
+  return (
+    <div
+      style={{
+        marginBottom: 10,
+      }}
+    >
+      <label
+        style={{
+          display: "block",
+          fontSize: 10,
+          color: "var(--text-secondary)",
+          fontFamily: "var(--font-mono)",
+          marginBottom: 4,
+        }}
+      >
+        Name
+        <input
+          value={name}
+          onChange={(e) => onNameChange(e.target.value)}
+          style={{
+            width: "100%",
+            marginTop: 4,
+            fontSize: 12,
+            lineHeight: 1.35,
+            color: "var(--text-primary)",
+            padding: "6px 8px",
+            background: "var(--bg-primary)",
+            border: "1px solid var(--border-primary)",
+            borderRadius: 4,
+            fontFamily: "var(--font-sans)",
+            outline: "none",
+          }}
+        />
+      </label>
+      <label
+        style={{
+          display: "block",
+          fontSize: 10,
+          color: "var(--text-secondary)",
+          fontFamily: "var(--font-mono)",
+        }}
+      >
+        Prompt
+        <textarea
+          value={prompt}
+          onChange={(e) => onPromptChange(e.target.value)}
+          rows={3}
+          style={{
+            width: "100%",
+            marginTop: 4,
+            resize: "vertical",
+            minHeight: 64,
+            fontSize: 11,
+            lineHeight: 1.35,
+            color: "var(--text-secondary)",
+            padding: "7px 8px",
+            background: "var(--bg-primary)",
+            border: "1px solid var(--border-primary)",
+            borderRadius: 4,
+            fontFamily: "var(--font-sans)",
+            outline: "none",
+          }}
+        />
+      </label>
+    </div>
+  );
+}
+
 function ModelSelect({
   value,
   groups,
@@ -535,6 +778,130 @@ function ModelSelect({
         </optgroup>
       ))}
     </select>
+  );
+}
+
+function ThinkingControls({
+  config,
+  capability,
+  onChange,
+}: {
+  config: ThinkingConfig;
+  capability: ReturnType<typeof getModelCapability>;
+  onChange: (config: ThinkingConfig) => void;
+}) {
+  if (!capability.supportsAdaptiveThinking) {
+    return (
+      <div
+        style={{
+          marginTop: 7,
+          padding: "7px 8px",
+          border: "1px solid var(--border-default)",
+          borderRadius: 4,
+          color: "var(--text-muted)",
+          background: "var(--bg-primary)",
+          fontSize: 10,
+          fontFamily: "var(--font-sans)",
+        }}
+      >
+        Reasoning controls are unavailable for this model.
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        marginTop: 7,
+        padding: 8,
+        border: "1px solid var(--border-default)",
+        borderRadius: 4,
+        background: "var(--bg-primary)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      <label
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+          fontSize: 11,
+          fontFamily: "var(--font-mono)",
+          color: "var(--text-secondary)",
+          cursor: "pointer",
+        }}
+      >
+        <span>Reasoning</span>
+        <input
+          type="checkbox"
+          checked={config.enabled}
+          onChange={(e) => onChange({ ...config, enabled: e.target.checked })}
+          style={{ cursor: "pointer" }}
+        />
+      </label>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        {capability.supportedEffortLevels.map((effort) => {
+          const active = config.effort === effort;
+          return (
+            <button
+              key={effort}
+              type="button"
+              title={EFFORT_DESCRIPTIONS[effort]}
+              disabled={!config.enabled}
+              onClick={() => onChange({ ...config, effort })}
+              style={{
+                padding: "4px 7px",
+                borderRadius: 4,
+                border: active
+                  ? "1px solid var(--accent)"
+                  : "1px solid var(--border-default)",
+                background: active ? "var(--state-active)" : "var(--bg-secondary)",
+                color: active ? "var(--text-primary)" : "var(--text-secondary)",
+                opacity: config.enabled ? 1 : 0.55,
+                cursor: config.enabled ? "pointer" : "default",
+                fontSize: 10,
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              {EFFORT_LABELS[effort]}
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ display: "flex", gap: 4 }}>
+        {(["summarized", "omitted"] as const).map((display) => {
+          const active = config.display === display;
+          return (
+            <button
+              key={display}
+              type="button"
+              disabled={!config.enabled}
+              onClick={() => onChange({ ...config, display })}
+              style={{
+                padding: "4px 7px",
+                borderRadius: 4,
+                border: active
+                  ? "1px solid var(--accent)"
+                  : "1px solid var(--border-default)",
+                background: active ? "var(--state-active)" : "var(--bg-secondary)",
+                color: active ? "var(--text-primary)" : "var(--text-secondary)",
+                opacity: config.enabled ? 1 : 0.55,
+                cursor: config.enabled ? "pointer" : "default",
+                fontSize: 10,
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              {display === "summarized" ? "Summaries" : "Hidden"}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

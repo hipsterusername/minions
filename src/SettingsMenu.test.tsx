@@ -49,6 +49,7 @@ const CODEX_ENTRY: HarnessListEntry = {
   models: [
     { id: "gpt-5.5", label: "GPT-5.5" },
     { id: "gpt-5.4", label: "GPT-5.4" },
+    { id: "gpt-5.3-codex-spark", label: "GPT-5.3-Codex-Spark" },
   ],
   commands: [],
   agents: [],
@@ -133,7 +134,92 @@ describe("SettingsMenu", () => {
     expect(onChange).toHaveBeenCalledWith({
       defaultLeaderHarness: "codex",
       defaultLeaderModel: "gpt-5.5",
+      defaultLeaderThinkingConfig: {
+        enabled: true,
+        effort: "high",
+        display: "summarized",
+      },
       defaultModel: "gpt-5.5",
+    });
+  });
+
+  it("stores default reasoning settings for leader and minion models", () => {
+    const onChange = vi.fn();
+    renderWithHarnesses([CLAUDE_ENTRY, CODEX_ENTRY], {
+      settings: {
+        defaultLeaderHarness: "claude",
+        defaultLeaderModel: "claude-opus-4-7",
+        defaultLeaderThinkingConfig: {
+          enabled: true,
+          effort: "high",
+          display: "summarized",
+        },
+        defaultMinionHarness: "codex",
+        defaultMinionModel: "gpt-5.5",
+        defaultMinionThinkingConfig: {
+          enabled: true,
+          effort: "medium",
+          display: "summarized",
+        },
+      },
+      onSettingsChange: onChange,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+
+    fireEvent.click(screen.getAllByRole("button", { name: "XHigh" })[0]!);
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultLeaderThinkingConfig: {
+          enabled: true,
+          effort: "xhigh",
+          display: "summarized",
+        },
+      }),
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Hidden" })[1]!);
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultMinionThinkingConfig: {
+          enabled: true,
+          effort: "medium",
+          display: "omitted",
+        },
+      }),
+    );
+  });
+
+  it("stores dashboard context action names and prompt defaults", () => {
+    const onChange = vi.fn();
+    render(
+      <SettingsMenu
+        settings={{
+          dashboardLeaderActionNames: { improve: "Improve label" },
+          dashboardLeaderActionPrompts: { improve: "Improve old" },
+        }}
+        onSettingsChange={onChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+
+    fireEvent.change(screen.getByDisplayValue("Improve label"), {
+      target: { value: "Polish" },
+    });
+
+    expect(onChange).toHaveBeenCalledWith({
+      dashboardLeaderActionNames: { improve: "Polish" },
+      dashboardLeaderActionPrompts: { improve: "Improve old" },
+    });
+
+    fireEvent.change(screen.getByDisplayValue("Improve old"), {
+      target: { value: "Improve new" },
+    });
+
+    expect(onChange).toHaveBeenCalledWith({
+      dashboardLeaderActionNames: { improve: "Improve label" },
+      dashboardLeaderActionPrompts: { improve: "Improve new" },
     });
   });
 

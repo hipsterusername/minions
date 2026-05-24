@@ -73,6 +73,17 @@ const info: WorktreeInfo = {
   lifecycle: "active",
 };
 
+function enqueueTargetInspection(target = "main", sha = "base", checkedOut = "feature") {
+  queue.push({ ok: true, stdout: `${target}\n` });
+  queue.push({ ok: true, stdout: `${sha}\n` });
+  queue.push({ ok: true, stdout: `${checkedOut}\n` });
+}
+
+function enqueueExplicitTargetInspection(sha = "base", checkedOut = "feature") {
+  queue.push({ ok: true, stdout: `${sha}\n` });
+  queue.push({ ok: true, stdout: `${checkedOut}\n` });
+}
+
 describe("mergeWorktree — happy path", () => {
   it("merges target into canvas, fast-forwards target ref, and returns success", async () => {
     // Order:
@@ -82,11 +93,10 @@ describe("mergeWorktree — happy path", () => {
     //  4. update-ref refs/heads/main <sha>
     //  5. rev-parse --abbrev-ref HEAD  (project, see if main's checked out)
     //  6. (if mainBranch === target) reset --hard target
-    queue.push({ ok: true, stdout: "main\n" });
+    enqueueTargetInspection("main", "base", "feature");
     queue.push({ ok: true, stdout: "" });
     queue.push({ ok: true, stdout: "deadbeef\n" });
     queue.push({ ok: true, stdout: "" });
-    queue.push({ ok: true, stdout: "feature\n" }); // main NOT checked out
     // No reset call since mainBranch !== target.
 
     const result = await mergeWorktree(info);
@@ -97,53 +107,65 @@ describe("mergeWorktree — happy path", () => {
 
     expect(observed[0]!.args).toEqual(["rev-parse", "--abbrev-ref", "HEAD"]);
     expect(observed[0]!.cwd).toBe("/proj");
-    expect(observed[1]!.args).toEqual(["merge", "main", "--no-edit"]);
-    expect(observed[1]!.cwd).toBe(info.path);
-    expect(observed[3]!.args).toEqual([
+    expect(observed[3]!.args).toEqual(["merge", "main", "--no-edit"]);
+    expect(observed[3]!.cwd).toBe(info.path);
+    expect(observed[5]!.args).toEqual([
       "update-ref",
       "refs/heads/main",
       "deadbeef",
+      "base",
     ]);
   });
 
   it("uses the explicit targetBranch when provided (skips abbrev-ref)", async () => {
+    enqueueExplicitTargetInspection("base", "feature");
     queue.push({ ok: true, stdout: "" }); // merge develop
     queue.push({ ok: true, stdout: "abc\n" }); // rev-parse canvas
     queue.push({ ok: true, stdout: "" }); // update-ref
-    queue.push({ ok: true, stdout: "feature\n" }); // abbrev-ref HEAD
 
     const result = await mergeWorktree(info, "develop");
     expect(result.success).toBe(true);
-    expect(observed[0]!.args).toEqual(["merge", "develop", "--no-edit"]);
+    expect(observed[2]!.args).toEqual(["merge", "develop", "--no-edit"]);
+  });
+
+  it("refuses to merge when the target branch is checked out with uncommitted changes", async () => {
+    enqueueTargetInspection("main", "base", "main");
+    queue.push({ ok: true, stdout: " M unrelated.ts\n" }); // target checkout dirty
+
+    const result = await mergeWorktree(info);
+
+    expect(result.success).toBe(false);
+    expect(result.summary).toContain("uncommitted changes");
+    expect(observed.some((o) => o.args[0] === "update-ref")).toBe(false);
   });
 });
 
 describe("mergeWorktree — conflict path with default rebase", () => {
   it("aborts the failed merge, rebases, and fast-forwards on rebase success", async () => {
-    queue.push({ ok: true, stdout: "main\n" }); // abbrev-ref
+    enqueueTargetInspection();
     queue.push({ ok: false, stderr: "CONFLICT" }); // merge fails
     queue.push({ ok: true, stdout: "" }); // merge --abort
     queue.push({ ok: true, stdout: "" }); // rebase main → succeeds
     queue.push({ ok: true, stdout: "abc\n" }); // rev-parse canvas/k
     queue.push({ ok: true, stdout: "" }); // update-ref
-    queue.push({ ok: true, stdout: "feature\n" }); // abbrev-ref final
 
     const result = await mergeWorktree(info);
     expect(result.success).toBe(true);
     // Step trace verifies the abort + rebase path was taken.
     expect(observed.map((o) => o.args[0])).toEqual([
       "rev-parse",
+      "rev-parse",
+      "rev-parse",
       "merge",
       "merge", // --abort
       "rebase",
       "rev-parse",
       "update-ref",
-      "rev-parse",
     ]);
   });
 
   it("reports conflicts when rebase fails after a merge conflict", async () => {
-    queue.push({ ok: true, stdout: "main\n" });
+    enqueueTargetInspection();
     queue.push({ ok: false, stderr: "CONFLICT" });
     queue.push({ ok: true, stdout: "" }); // merge --abort
     queue.push({ ok: false, stderr: "rebase conflict" }); // rebase fails
@@ -161,7 +183,7 @@ describe("mergeWorktree — conflict path with default rebase", () => {
   });
 
   it("returns the bare merge failure when rebase is explicitly disabled", async () => {
-    queue.push({ ok: true, stdout: "main\n" });
+    enqueueTargetInspection();
     queue.push({ ok: false, stderr: "CONFLICT" });
     queue.push({ ok: true, stdout: "" }); // merge --abort
 
@@ -176,15 +198,14 @@ describe("mergeWorktree — conflict path with default rebase", () => {
 
 describe("mergeWorktree — strategy resolution", () => {
   it("with strategy='ours', invokes -X ours and falls through to fast-forward when merge succeeds first try", async () => {
-    queue.push({ ok: true, stdout: "main\n" });
+    enqueueTargetInspection();
     queue.push({ ok: true, stdout: "" }); // merge with -X ours succeeds
     queue.push({ ok: true, stdout: "abc\n" }); // rev-parse canvas
     queue.push({ ok: true, stdout: "" }); // update-ref
-    queue.push({ ok: true, stdout: "feature\n" }); // abbrev-ref final
 
     const result = await mergeWorktree(info, undefined, { strategy: "ours" });
     expect(result.success).toBe(true);
-    expect(observed[1]!.args).toEqual([
+    expect(observed[3]!.args).toEqual([
       "merge",
       "main",
       "--no-edit",
@@ -194,14 +215,13 @@ describe("mergeWorktree — strategy resolution", () => {
   });
 
   it("with force=true (no explicit strategy), uses -X ours by default", async () => {
-    queue.push({ ok: true, stdout: "main\n" });
+    enqueueTargetInspection();
     queue.push({ ok: true, stdout: "" });
     queue.push({ ok: true, stdout: "abc\n" });
     queue.push({ ok: true, stdout: "" });
-    queue.push({ ok: true, stdout: "feature\n" });
 
     await mergeWorktree(info, undefined, { force: true });
-    expect(observed[1]!.args).toEqual([
+    expect(observed[3]!.args).toEqual([
       "merge",
       "main",
       "--no-edit",
@@ -211,7 +231,7 @@ describe("mergeWorktree — strategy resolution", () => {
   });
 
   it("on conflict with strategy='theirs', force-resolves each unresolved file via checkout --theirs", async () => {
-    queue.push({ ok: true, stdout: "main\n" });
+    enqueueTargetInspection();
     queue.push({ ok: false, stderr: "CONFLICT" }); // merge -X theirs fails on tree conflict
     queue.push({
       ok: true,
@@ -223,7 +243,6 @@ describe("mergeWorktree — strategy resolution", () => {
     queue.push({ ok: true, stdout: "" }); // commit
     queue.push({ ok: true, stdout: "abc\n" }); // rev-parse canvas
     queue.push({ ok: true, stdout: "" }); // update-ref
-    queue.push({ ok: true, stdout: "feature\n" }); // abbrev-ref final
 
     const result = await mergeWorktree(info, undefined, {
       strategy: "theirs",
@@ -255,11 +274,10 @@ describe("mergeAndCleanup", () => {
     queue.push({ ok: true, stdout: "" }); // add -A
     queue.push({ ok: true, stdout: "" }); // status --porcelain → empty (no auto-commit)
     // Then mergeWorktree's normal happy-path sequence:
-    queue.push({ ok: true, stdout: "main\n" });
+    enqueueTargetInspection();
     queue.push({ ok: true, stdout: "" }); // merge
     queue.push({ ok: true, stdout: "abc\n" });
     queue.push({ ok: true, stdout: "" }); // update-ref
-    queue.push({ ok: true, stdout: "feature\n" }); // abbrev-ref final
     // Then removeWorktree:
     queue.push({ ok: true, stdout: "" }); // worktree remove --force
     queue.push({ ok: true, stdout: "" }); // branch -D
@@ -279,7 +297,7 @@ describe("mergeAndCleanup", () => {
   it("on merge failure, leaves the worktree intact (no removeWorktree)", async () => {
     queue.push({ ok: true, stdout: "" }); // add -A
     queue.push({ ok: true, stdout: "" }); // status --porcelain
-    queue.push({ ok: true, stdout: "main\n" }); // abbrev-ref
+    enqueueTargetInspection();
     queue.push({ ok: false, stderr: "CONFLICT" });
     queue.push({ ok: true, stdout: "" }); // merge --abort
     queue.push({ ok: false, stderr: "rebase conflict" });
@@ -299,11 +317,10 @@ describe("mergeAndCleanup", () => {
     queue.push({ ok: true, stdout: "" }); // add -A
     queue.push({ ok: true, stdout: " M src/x.ts\n" }); // status: dirty
     queue.push({ ok: true, stdout: "" }); // commit
-    queue.push({ ok: true, stdout: "main\n" }); // abbrev-ref
+    enqueueTargetInspection();
     queue.push({ ok: true, stdout: "" }); // merge
     queue.push({ ok: true, stdout: "abc\n" }); // rev-parse
     queue.push({ ok: true, stdout: "" }); // update-ref
-    queue.push({ ok: true, stdout: "feature\n" }); // abbrev-ref final
     queue.push({ ok: true, stdout: "" }); // worktree remove
     queue.push({ ok: true, stdout: "" }); // branch -D
 

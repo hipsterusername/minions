@@ -8,6 +8,7 @@ import type { TaskToolContext, TaskRecord } from "./types.ts";
 import { emitTaskPlanUpdate } from "./shared.ts";
 import { compileSkills, loadSkillsByIds } from "../skills.ts";
 import { readSettings } from "../project-store.ts";
+import { isValidThinkingConfig } from "../session-host-config.ts";
 
 export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef {
   return {
@@ -114,7 +115,7 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
       ];
       if (ctx.worktreeBranch) {
         headerLines.push(
-          `**Worktree branch:** \`${ctx.worktreeBranch}\` — your cwd is already inside it. Commit here; the orchestrator handles merging.`,
+          `**Worktree branch:** \`${ctx.worktreeBranch}\` — your cwd is inside the Leader's shared worktree. Keep edits within your assigned files, do not run git commit, and avoid reverting changes you did not make; the orchestrator handles committing and merging.`,
         );
       }
       if (armedSkillIds.length > 0) {
@@ -144,6 +145,9 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
           : typeof settings.defaultModel === "string"
             ? settings.defaultModel
             : undefined;
+      const minionThinkingConfig = isValidThinkingConfig(settings.defaultMinionThinkingConfig)
+        ? settings.defaultMinionThinkingConfig
+        : undefined;
 
       // Start the minion session on the server
       ctx.startMinionSession({
@@ -152,6 +156,7 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
         cwd: ctx.cwd,
         systemPrompt: minionSystemPrompt,
         ...(minionModel ? { model: minionModel } : {}),
+        ...(minionThinkingConfig ? { thinkingConfig: minionThinkingConfig } : {}),
         ...(minionHarness ? { harness: minionHarness } : {}),
       });
 

@@ -3,6 +3,7 @@ node_modules/
 
 # Build output
 dist/
+*.tsbuildinfo
 
 # Vite
 .vite/
@@ -40,3 +41,6 @@ Thumbs.db
 # Stryker mutation testing sandbox + reports
 .stryker-tmp/
 reports/
+
+# Test coverage output
+coverage/

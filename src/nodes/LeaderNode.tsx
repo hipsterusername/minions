@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useLayoutEffect, useSyncExternalStore } from "react";
+import { memo, useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect, useSyncExternalStore, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { NodeRenderProps, ThinkingConfig } from "../types.ts";
 import { DEFAULT_THINKING_CONFIG } from "../types.ts";
@@ -28,8 +28,19 @@ import { UserContextHeader } from "../components/UserContextHeader.tsx";
 import { AddAsNodeButton } from "../components/AddAsNodeButton.tsx";
 import { debugFlagStore } from "../debug.ts";
 import { DebugInspector } from "../components/DebugInspector.tsx";
+import { joinSelectedChunks, parseMessageChunks } from "../message-chunks.ts";
+import { canvasScale } from "../canvas-scale.ts";
+import {
+  groupMessages,
+  formatToolInput,
+  formatToolInputDetail,
+  timeAgo,
+  TOOL_ICONS,
+} from "./leader-message-helpers.ts";
 
 registerContract(LEADER_CONTRACT);
+
+export const LEADER_PROMPT_OVERLAY_ZOOM_THRESHOLD = 0.55;
 
 /** A single entry in the leader's task plan. Covers all states. */
 export interface TaskPlanItem {
@@ -91,6 +102,8 @@ export interface LeaderData {
   skillPanelOpen: boolean;
   /** If set, auto-start a session with this prompt (then clear it) */
   autoStartPrompt?: string | null | undefined;
+  /** If set, pre-fill the prompt input once (then clear it) */
+  draftPrompt?: string | null | undefined;
   /** Display name set by the agent via set_task_name */
   taskName?: string | null | undefined;
   /** Wait state: populated when the leader calls wait_and_continue */
@@ -125,6 +138,12 @@ export interface LeaderData {
 
 // LeaderMessage is now an alias for the shared DisplayMessage type
 type LeaderMessage = DisplayMessage;
+
+interface MessageContextSelection {
+  messageId: string;
+  selectedChunkIds: string[];
+  anchorChunkId: string | null;
+}
 
 function msgId(): string {
   return sharedMsgId("lm");
@@ -384,108 +403,9 @@ function EditableTitle({ value, onChange }: { value: string; onChange: (v: strin
   );
 }
 
-/* ── Tool group helpers (Leader purple theme) ────────────────────────── */
+/* ── Tool group helpers imported from ./leader-message-helpers.ts ── */
 
-type LeaderMessageGroup =
-  | { kind: "single"; msg: LeaderMessage }
-  | { kind: "tool-group"; msgs: LeaderMessage[] }
-  | { kind: "thinking-group"; msgs: LeaderMessage[] };
-
-function groupMessages(messages: LeaderMessage[]): LeaderMessageGroup[] {
-  const groups: LeaderMessageGroup[] = [];
-  let toolBatch: LeaderMessage[] = [];
-  let thinkingBatch: LeaderMessage[] = [];
-
-  const flushTools = () => {
-    if (toolBatch.length > 0) {
-      groups.push({ kind: "tool-group", msgs: [...toolBatch] });
-      toolBatch = [];
-    }
-  };
-
-  const flushThinking = () => {
-    if (thinkingBatch.length > 0) {
-      groups.push({ kind: "thinking-group", msgs: [...thinkingBatch] });
-      thinkingBatch = [];
-    }
-  };
-
-  for (const msg of messages) {
-    if (msg.role === "tool") {
-      flushThinking();
-      toolBatch.push(msg);
-    } else if (msg.role === "thinking") {
-      flushTools();
-      thinkingBatch.push(msg);
-    } else {
-      flushTools();
-      flushThinking();
-      groups.push({ kind: "single", msg });
-    }
-  }
-  flushTools();
-  flushThinking();
-  return groups;
-}
-
-const TOOL_ICONS: Record<string, string> = {
-  Read: "\u25B7",
-  Write: "\u25B6",
-  Edit: "\u270E",
-  Bash: "$",
-  Glob: "\u2731",
-  Grep: "/",
-  Agent: "\u2726",
-  WebFetch: "\u2197",
-  WebSearch: "\u2315",
-};
-
-/** Format tool input into a readable summary string */
-function formatToolInput(toolName: string, input?: Record<string, unknown>): string | null {
-  if (!input || Object.keys(input).length === 0) return null;
-
-  // Show the most relevant field(s) based on tool type
-  switch (toolName) {
-    case "Read":
-      return (input["file_path"] as string) ?? null;
-    case "Write":
-      return (input["file_path"] as string) ?? null;
-    case "Edit":
-      return (input["file_path"] as string) ?? null;
-    case "Bash":
-      return (input["command"] as string) ?? null;
-    case "Glob":
-      return (input["pattern"] as string) ?? null;
-    case "Grep":
-      return (input["pattern"] as string) ?? null;
-    case "Agent":
-      return (input["description"] as string) ?? (input["prompt"] as string) ?? null;
-    case "WebFetch":
-      return (input["url"] as string) ?? null;
-    case "WebSearch":
-      return (input["query"] as string) ?? null;
-    default: {
-      // Generic: show first string value
-      for (const v of Object.values(input)) {
-        if (typeof v === "string" && v.length > 0) return v;
-      }
-      return null;
-    }
-  }
-}
-
-/** Format the full tool input as key-value pairs for the detail view */
-function formatToolInputDetail(input?: Record<string, unknown>): string {
-  if (!input || Object.keys(input).length === 0) return "(no input)";
-  const lines: string[] = [];
-  for (const [k, v] of Object.entries(input)) {
-    const val = typeof v === "string" ? v : JSON.stringify(v, null, 2);
-    lines.push(`${k}: ${val}`);
-  }
-  return lines.join("\n");
-}
-
-function ToolItem({ msg, accentColor }: { msg: LeaderMessage | DisplayMessage; accentColor: string }) {
+const ToolItem = memo(function ToolItem({ msg, accentColor }: { msg: LeaderMessage | DisplayMessage; accentColor: string }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const icon = TOOL_ICONS[msg.toolName ?? ""] ?? "\u2022";
   const summary = formatToolInput(msg.toolName ?? "", msg.toolInput);
@@ -576,21 +496,23 @@ function ToolItem({ msg, accentColor }: { msg: LeaderMessage | DisplayMessage; a
       )}
     </div>
   );
-}
+});
 
-function LeaderToolGroup({ msgs }: { msgs: LeaderMessage[] }) {
+const LeaderToolGroup = memo(function LeaderToolGroup({ msgs }: { msgs: LeaderMessage[] }) {
   const [expanded, setExpanded] = useState(false);
-  const toolNames = msgs.map((m) => m.toolName ?? "tool");
-  const uniqueTools = [...new Set(toolNames)];
-  const summary =
-    uniqueTools.length <= 3
+  const summary = useMemo(() => {
+    const toolNames = msgs.map((m) => m.toolName ?? "tool");
+    const uniqueTools = [...new Set(toolNames)];
+    return uniqueTools.length <= 3
       ? uniqueTools.join(", ")
       : `${uniqueTools.slice(0, 2).join(", ")} +${uniqueTools.length - 2}`;
+  }, [msgs]);
+  const handleToggle = useCallback(() => setExpanded((value) => !value), []);
 
   return (
     <div style={{ marginBlock: 2 }}>
       <button
-        onClick={() => setExpanded(!expanded)}
+        onClick={handleToggle}
         onMouseDown={(e) => e.stopPropagation()}
         style={{
           display: "flex",
@@ -671,9 +593,9 @@ function LeaderToolGroup({ msgs }: { msgs: LeaderMessage[] }) {
       </div>
     </div>
   );
-}
+});
 
-function LeaderThinkingGroup({
+const LeaderThinkingGroup = memo(function LeaderThinkingGroup({
   msgs,
   effort,
 }: {
@@ -681,14 +603,17 @@ function LeaderThinkingGroup({
   effort?: ThinkingConfig["effort"];
 }) {
   const [expanded, setExpanded] = useState(false);
-  const totalLen = msgs.reduce((sum, m) => sum + m.content.length, 0);
-  const estTokens = Math.round(totalLen / 4);
-  const tokenLabel = estTokens >= 1000 ? `~${(estTokens / 1000).toFixed(1)}k tokens` : `~${estTokens} tokens`;
+  const tokenLabel = useMemo(() => {
+    const totalLen = msgs.reduce((sum, m) => sum + m.content.length, 0);
+    const estTokens = Math.round(totalLen / 4);
+    return estTokens >= 1000 ? `~${(estTokens / 1000).toFixed(1)}k tokens` : `~${estTokens} tokens`;
+  }, [msgs]);
+  const handleToggle = useCallback(() => setExpanded((value) => !value), []);
 
   return (
     <div style={{ marginBlock: 2 }}>
       <button
-        onClick={() => setExpanded(!expanded)}
+        onClick={handleToggle}
         onMouseDown={(e) => e.stopPropagation()}
         style={{
           display: "flex",
@@ -782,7 +707,7 @@ function LeaderThinkingGroup({
       </div>
     </div>
   );
-}
+});
 
 const PRIORITY_COLORS: Record<string, string> = {
   critical: "var(--priority-critical)",
@@ -791,21 +716,12 @@ const PRIORITY_COLORS: Record<string, string> = {
   low: "var(--streaming-color)",
 };
 
-function timeAgo(ts: number): string {
-  const diff = Math.max(0, Date.now() - ts);
-  const secs = Math.floor(diff / 1000);
-  if (secs < 60) return `${secs}s ago`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  return `${hrs}h ago`;
-}
-
 /* ── P5: Collapsible user message ─────────────────────────────────────── */
 
-function UserMessageBubble({ msg }: { msg: LeaderMessage }) {
+const UserMessageBubble = memo(function UserMessageBubble({ msg }: { msg: LeaderMessage }) {
   const [collapsed, setCollapsed] = useState(msg.content.length > 300);
   const isLong = msg.content.length > 300;
+  const toggleCollapsed = useCallback(() => setCollapsed((value) => !value), []);
 
   return (
     <div
@@ -820,7 +736,7 @@ function UserMessageBubble({ msg }: { msg: LeaderMessage }) {
       {collapsed ? msg.content.slice(0, 200) + "…" : msg.content}
       {isLong && (
         <button
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={toggleCollapsed}
           onMouseDown={(e) => e.stopPropagation()}
           style={{
             display: "inline-block",
@@ -841,9 +757,9 @@ function UserMessageBubble({ msg }: { msg: LeaderMessage }) {
       )}
     </div>
   );
-}
+});
 
-function LeaderMessageActions({
+const LeaderMessageActions = memo(function LeaderMessageActions({
   text,
   onAddContentNode,
 }: {
@@ -879,7 +795,530 @@ function LeaderMessageActions({
       </div>
     </div>
   );
+});
+
+type MessageSelectionIconKind =
+  | "copy"
+  | "copy-full"
+  | "node"
+  | "select-all"
+  | "clear"
+  | "exit";
+
+function MessageSelectionIcon({ kind }: { kind: MessageSelectionIconKind }) {
+  const common = {
+    width: 14,
+    height: 14,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+
+  switch (kind) {
+    case "copy":
+      return (
+        <svg {...common}>
+          <rect x="9" y="9" width="13" height="13" rx="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+      );
+    case "copy-full":
+      return (
+        <svg {...common}>
+          <rect x="4" y="3" width="14" height="18" rx="2" />
+          <path d="M8 7h6" />
+          <path d="M8 11h6" />
+          <path d="M8 15h4" />
+          <path d="M18 8h2v13a2 2 0 0 1-2 2h-9v-2" />
+        </svg>
+      );
+    case "node":
+      return (
+        <svg {...common}>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6" />
+          <path d="M12 18v-6" />
+          <path d="M9 15h6" />
+        </svg>
+      );
+    case "select-all":
+      return (
+        <svg {...common}>
+          <rect x="4" y="4" width="16" height="16" rx="2" />
+          <path d="m8 12 3 3 5-6" />
+        </svg>
+      );
+    case "clear":
+      return (
+        <svg {...common}>
+          <rect x="4" y="4" width="16" height="16" rx="2" />
+          <path d="M9 9l6 6" />
+          <path d="M15 9l-6 6" />
+        </svg>
+      );
+    case "exit":
+      return (
+        <svg {...common}>
+          <path d="M18 6 6 18" />
+          <path d="m6 6 12 12" />
+        </svg>
+      );
+  }
 }
+
+function MessageSelectionGroup({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      aria-label={label}
+      role="group"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 2,
+        paddingInlineStart: 5,
+        borderLeft: "1px solid var(--border-default)",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+const MessageSelectionButton = memo(function MessageSelectionButton({
+  icon,
+  label,
+  onClick,
+  disabled = false,
+  tone = "neutral",
+  title,
+}: {
+  icon: MessageSelectionIconKind;
+  label: string;
+  onClick: (e: MouseEvent<HTMLButtonElement>) => void;
+  disabled?: boolean;
+  tone?: "neutral" | "primary";
+  title?: string | undefined;
+}) {
+  const isPrimary = tone === "primary";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title ?? label}
+      aria-label={label}
+      style={{
+        width: 26,
+        height: 26,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 0,
+        borderRadius: 4,
+        border: `1px solid ${
+          disabled
+            ? "var(--border-default)"
+            : isPrimary
+              ? "color-mix(in srgb, var(--accent) 54%, var(--border-default))"
+              : "var(--border-default)"
+        }`,
+        background: disabled
+          ? "var(--bg-primary)"
+          : isPrimary
+            ? "color-mix(in srgb, var(--accent) 14%, var(--bg-elevated))"
+            : "var(--bg-elevated)",
+        color: disabled
+          ? "var(--text-dim)"
+          : isPrimary
+            ? "var(--accent)"
+            : "var(--text-secondary)",
+        cursor: disabled ? "default" : "pointer",
+      }}
+    >
+      <MessageSelectionIcon kind={icon} />
+    </button>
+  );
+});
+
+interface MessageChunkViewProps {
+  chunk: ReturnType<typeof parseMessageChunks>[number];
+  isActive: boolean;
+  selected: boolean;
+  onToggle: (chunkId: string, shiftKey: boolean) => void;
+}
+
+const MessageChunkView = memo(function MessageChunkView({
+  chunk,
+  isActive,
+  selected,
+  onToggle,
+}: MessageChunkViewProps) {
+  const handleClick = useCallback(
+    (e: MouseEvent<HTMLDivElement>) => {
+      if (!isActive) return;
+      e.stopPropagation();
+      onToggle(chunk.id, e.shiftKey);
+    },
+    [chunk.id, isActive, onToggle],
+  );
+
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLDivElement>) => {
+      if (!isActive) return;
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        e.stopPropagation();
+        onToggle(chunk.id, e.shiftKey);
+      }
+    },
+    [chunk.id, isActive, onToggle],
+  );
+
+  return (
+    <div
+      data-testid="message-chunk"
+      data-chunk-id={chunk.id}
+      data-selected={selected ? "true" : undefined}
+      className={`message-chunk${selected ? " message-chunk--selected" : ""}`}
+      role={isActive ? "checkbox" : undefined}
+      aria-checked={isActive ? selected : undefined}
+      tabIndex={isActive ? 0 : undefined}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+    >
+      {isActive && (
+        <span
+          aria-hidden="true"
+          className="message-chunk__marker"
+        >
+          {selected ? "✓" : "+"}
+        </span>
+      )}
+      <SimpleMarkdown text={chunk.rawText} />
+    </div>
+  );
+});
+
+function selectionForMessageChanged(
+  prev: MessageContextSelection | null,
+  next: MessageContextSelection | null,
+  messageId: string,
+): boolean {
+  const prevActive = prev?.messageId === messageId;
+  const nextActive = next?.messageId === messageId;
+  if (prevActive !== nextActive) return true;
+  if (!prevActive || !nextActive) return false;
+  if (prev.anchorChunkId !== next.anchorChunkId) return true;
+  if (prev.selectedChunkIds.length !== next.selectedChunkIds.length) return true;
+  return prev.selectedChunkIds.some((id, index) => id !== next.selectedChunkIds[index]);
+}
+
+const SelectableMessageBubble = memo(function SelectableMessageBubble({
+  msg,
+  selection,
+  onActivate,
+  onSelectionChange,
+  onExit,
+  onAddContentNode,
+}: {
+  msg: LeaderMessage;
+  selection: MessageContextSelection | null;
+  onActivate: (messageId: string) => void;
+  onSelectionChange: (selection: MessageContextSelection) => void;
+  onExit: () => void;
+  onAddContentNode?: ((content: string) => void) | undefined;
+}) {
+  const [copied, setCopied] = useState(false);
+  const chunks = useMemo(() => parseMessageChunks(msg.content), [msg.content]);
+  const isActive = selection?.messageId === msg.id;
+  const selectedIds = useMemo(
+    () => new Set(isActive ? selection.selectedChunkIds : []),
+    [isActive, selection?.selectedChunkIds],
+  );
+  const selectedText = useMemo(
+    () => joinSelectedChunks(chunks, selectedIds),
+    [chunks, selectedIds],
+  );
+  const selectedCount = selectedIds.size;
+
+  const updateSelectedIds = useCallback(
+    (nextIds: string[], anchorChunkId: string | null) => {
+      onSelectionChange({
+        messageId: msg.id,
+        selectedChunkIds: nextIds,
+        anchorChunkId,
+      });
+    },
+    [msg.id, onSelectionChange],
+  );
+
+  const toggleChunk = useCallback(
+    (chunkId: string, shiftKey: boolean) => {
+      if (shiftKey && isActive && selection?.anchorChunkId) {
+        const anchorIndex = chunks.findIndex((chunk) => chunk.id === selection.anchorChunkId);
+        const currentIndex = chunks.findIndex((chunk) => chunk.id === chunkId);
+        if (anchorIndex >= 0 && currentIndex >= 0) {
+          const [start, end] =
+            anchorIndex < currentIndex
+              ? [anchorIndex, currentIndex]
+              : [currentIndex, anchorIndex];
+          updateSelectedIds(
+            chunks.slice(start, end + 1).map((chunk) => chunk.id),
+            selection.anchorChunkId,
+          );
+          return;
+        }
+      }
+
+      const next = new Set(isActive ? selection?.selectedChunkIds ?? [] : []);
+      if (next.has(chunkId)) {
+        next.delete(chunkId);
+      } else {
+        next.add(chunkId);
+      }
+      updateSelectedIds([...next], chunkId);
+    },
+    [chunks, isActive, selection, updateSelectedIds],
+  );
+
+  const copyText = useCallback((text: string) => {
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, []);
+
+  const handleToolbarClick = useCallback((e: MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+  }, []);
+
+  const handleContainerClick = useCallback(() => {
+    if (!isActive) onActivate(msg.id);
+  }, [isActive, msg.id, onActivate]);
+
+  const handleContainerKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLDivElement>) => {
+      if (e.key === "Escape" && isActive) {
+        e.stopPropagation();
+        onExit();
+      }
+      if ((e.key === "Enter" || e.key === " ") && !isActive) {
+        e.preventDefault();
+        onActivate(msg.id);
+      }
+    },
+    [isActive, msg.id, onActivate, onExit],
+  );
+
+  const handleSelectAll = useCallback(
+    (e: MouseEvent<HTMLButtonElement>) => {
+      e.stopPropagation();
+      updateSelectedIds(chunks.map((chunk) => chunk.id), chunks[0]?.id ?? null);
+    },
+    [chunks, updateSelectedIds],
+  );
+
+  const handleClearSelection = useCallback(
+    (e: MouseEvent<HTMLButtonElement>) => {
+      e.stopPropagation();
+      updateSelectedIds([], null);
+    },
+    [updateSelectedIds],
+  );
+
+  const handleCopySelected = useCallback(
+    (e: MouseEvent<HTMLButtonElement>) => {
+      e.stopPropagation();
+      copyText(selectedText);
+    },
+    [copyText, selectedText],
+  );
+
+  const handleAddSelected = useCallback(
+    (e: MouseEvent<HTMLButtonElement>) => {
+      e.stopPropagation();
+      onAddContentNode?.(selectedText);
+    },
+    [onAddContentNode, selectedText],
+  );
+
+  const handleCopyFull = useCallback(
+    (e: MouseEvent<HTMLButtonElement>) => {
+      e.stopPropagation();
+      copyText(msg.content);
+    },
+    [copyText, msg.content],
+  );
+
+  const handleExitSelection = useCallback(
+    (e: MouseEvent<HTMLButtonElement>) => {
+      e.stopPropagation();
+      onExit();
+    },
+    [onExit],
+  );
+
+  return (
+    <div
+      className={`copyable message-selectable${isActive ? " message-selectable--active" : ""}`}
+      data-testid="selectable-message"
+      data-selected={isActive ? "true" : undefined}
+      role="button"
+      tabIndex={0}
+      aria-label="Select message chunks"
+      aria-pressed={isActive}
+      onClick={handleContainerClick}
+      onKeyDown={handleContainerKeyDown}
+      style={{
+        ...chatRoleStyle(msg.role === "result" ? "result" : "assistant"),
+        position: "relative",
+      }}
+    >
+      {isActive ? (
+        <div
+          data-testid="leader-message-selection-toolbar"
+          style={{
+            position: "sticky",
+            top: 8,
+            zIndex: 7,
+            minHeight: 28,
+            display: "flex",
+            justifyContent: "flex-end",
+            pointerEvents: "none",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              padding: 2,
+              borderRadius: 5,
+              background: "var(--bg-primary)",
+              border: "1px solid var(--border-default)",
+              boxShadow: "var(--shadow-sm)",
+              pointerEvents: "auto",
+            }}
+            onClick={handleToolbarClick}
+          >
+            <span
+              aria-live="polite"
+              style={{
+                padding: "0 5px",
+                color: "var(--text-muted)",
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {selectedCount} chunk{selectedCount === 1 ? "" : "s"}
+            </span>
+            <MessageSelectionGroup label="Selection controls">
+              <MessageSelectionButton
+                icon="select-all"
+                label="Select all chunks"
+                onClick={handleSelectAll}
+                disabled={chunks.length === 0}
+              />
+              <MessageSelectionButton
+                icon="clear"
+                label="Clear selected chunks"
+                onClick={handleClearSelection}
+                disabled={selectedCount === 0}
+              />
+            </MessageSelectionGroup>
+            <MessageSelectionGroup label="Copy and create actions">
+              <MessageSelectionButton
+                icon="copy"
+                label="Copy selected chunks"
+                onClick={handleCopySelected}
+                disabled={selectedText.length === 0}
+                tone="primary"
+              />
+              <MessageSelectionButton
+                icon="node"
+                label="Add selected chunks as node"
+                onClick={handleAddSelected}
+                disabled={!onAddContentNode || selectedText.length === 0}
+                tone="primary"
+              />
+              <MessageSelectionButton
+                icon="copy-full"
+                label="Copy full message"
+                onClick={handleCopyFull}
+                tone="primary"
+              />
+            </MessageSelectionGroup>
+            <MessageSelectionGroup label="Selection mode">
+              <MessageSelectionButton
+                icon="exit"
+                label="Exit chunk selection"
+                onClick={handleExitSelection}
+              />
+            </MessageSelectionGroup>
+          </div>
+        </div>
+      ) : (
+        <LeaderMessageActions
+          text={msg.content}
+          onAddContentNode={onAddContentNode}
+        />
+      )}
+
+      <div data-testid="leader-message-chunks">
+        {chunks.map((chunk) => (
+          <MessageChunkView
+            key={chunk.id}
+            chunk={chunk}
+            isActive={isActive}
+            selected={selectedIds.has(chunk.id)}
+            onToggle={toggleChunk}
+          />
+        ))}
+      </div>
+      {msg.suffix && (
+        <span style={{ display: "inline-block", marginLeft: 6, fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", opacity: 0.7 }}>
+          {msg.suffix}
+        </span>
+      )}
+      {copied && (
+        <span
+          role="status"
+          style={{
+            position: "absolute",
+            right: 10,
+            bottom: 2,
+            color: "var(--status-success)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+          }}
+        >
+          Copied
+        </span>
+      )}
+    </div>
+  );
+}, (prev, next) => (
+  prev.msg.id === next.msg.id &&
+  prev.msg.role === next.msg.role &&
+  prev.msg.content === next.msg.content &&
+  prev.msg.suffix === next.msg.suffix &&
+  prev.onActivate === next.onActivate &&
+  prev.onSelectionChange === next.onSelectionChange &&
+  prev.onExit === next.onExit &&
+  prev.onAddContentNode === next.onAddContentNode &&
+  !selectionForMessageChanged(prev.selection, next.selection, prev.msg.id)
+));
 
 /* ── P4: Task Plan Panel ──────────────────────────────────────────────── */
 // Shows the full task lifecycle: planned → running → completed/failed.
@@ -2511,10 +2950,12 @@ function ConfigFooter({
 function HeaderMenu({
   onReset,
   onExportLog,
+  onDuplicateSetup,
   data,
 }: {
   onReset: () => void;
   onExportLog: () => void;
+  onDuplicateSetup?: (() => void) | undefined;
   data: LeaderData;
 }) {
   const [open, setOpen] = useState(false);
@@ -2571,6 +3012,29 @@ function HeaderMenu({
               minWidth: 160,
             }}
           >
+            {onDuplicateSetup && (
+              <button
+                onClick={() => { onDuplicateSetup(); setOpen(false); }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  width: "100%",
+                  padding: "8px 12px",
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--text-secondary)",
+                  fontSize: 11,
+                  fontFamily: "var(--font-mono)",
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-surface)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              >
+                <span style={{ opacity: 0.6 }}>⧉</span> Duplicate Setup
+              </button>
+            )}
             <button
               onClick={() => { onExportLog(); setOpen(false); }}
               style={{
@@ -2622,6 +3086,334 @@ function HeaderMenu({
   );
 }
 
+/* ── Shared Leader prompt bar ──────────────────────────────────────────
+   Used by both the in-node prompt and the zoomed-out prompt overlay. Keep
+   prompt UI changes here so both affordances evolve together. */
+
+function LeaderPromptBar({
+  input,
+  onInputChange,
+  onKeyDown,
+  onSubmit,
+  placeholder,
+  submitLabel,
+  disabled,
+  active,
+  variant = "inline",
+  autoFocus = false,
+  textareaRef,
+  onTextareaFocus,
+}: {
+  input: string;
+  onInputChange: (value: string) => void;
+  onKeyDown: (e: React.KeyboardEvent) => void;
+  onSubmit: () => void;
+  placeholder: string;
+  submitLabel: string;
+  disabled: boolean;
+  active: boolean;
+  variant?: "inline" | "overlay";
+  autoFocus?: boolean;
+  textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
+  onTextareaFocus?: (() => void) | undefined;
+}) {
+  const isOverlay = variant === "overlay";
+
+  return (
+    <div
+      data-testid={`leader-prompt-bar-${variant}`}
+      data-no-drag
+      style={{
+        padding: isOverlay ? "10px" : "8px 10px",
+        borderTop: isOverlay ? "none" : "1px solid var(--border-default)",
+        display: "flex",
+        gap: isOverlay ? 8 : 6,
+        flexShrink: 0,
+        background: isOverlay ? "transparent" : "var(--bg-secondary)",
+        alignItems: "flex-end",
+      }}
+    >
+      <AutoTextarea
+        value={input}
+        onChange={onInputChange}
+        onKeyDown={onKeyDown}
+        autoFocus={autoFocus}
+        ariaLabel="Leader prompt"
+        testId={`leader-prompt-input-${variant}`}
+        placeholder={placeholder}
+        maxRows={isOverlay ? 10 : 8}
+        {...(onTextareaFocus ? { onFocus: onTextareaFocus } : {})}
+        {...(textareaRef ? { textareaRef } : {})}
+        style={{
+          fontSize: isOverlay ? 15 : 12,
+          lineHeight: isOverlay ? "24px" : "20px",
+          padding: isOverlay ? "12px 14px" : "8px 10px",
+          minHeight: isOverlay ? 52 : undefined,
+        }}
+      />
+      <button
+        type="button"
+        onClick={onSubmit}
+        onMouseDown={(e) => e.stopPropagation()}
+        disabled={disabled}
+        style={{
+          padding: isOverlay ? "12px 18px" : "8px 14px",
+          minHeight: isOverlay ? 52 : undefined,
+          borderRadius: 6,
+          border: "none",
+          background: active ? "var(--gradient-primary)" : "var(--bg-elevated)",
+          color: active ? "var(--text-primary)" : "var(--text-muted)",
+          fontSize: isOverlay ? 13 : 12,
+          fontWeight: 600,
+          cursor: disabled ? "default" : "pointer",
+          flexShrink: 0,
+          opacity: disabled ? 0.4 : 1,
+          marginBottom: isOverlay ? 0 : 1,
+        }}
+      >
+        {submitLabel}
+      </button>
+    </div>
+  );
+}
+
+function LeaderPromptOverlay({
+  open,
+  input,
+  title,
+  messages,
+  streamingText,
+  status,
+  onClose,
+  onInputChange,
+  onKeyDown,
+  onSubmit,
+  placeholder,
+  submitLabel,
+  disabled,
+  active,
+}: {
+  open: boolean;
+  input: string;
+  title: string;
+  messages: LeaderMessage[];
+  streamingText: string;
+  status: LeaderData["status"];
+  onClose: () => void;
+  onInputChange: (value: string) => void;
+  onKeyDown: (e: React.KeyboardEvent) => void;
+  onSubmit: () => void;
+  placeholder: string;
+  submitLabel: string;
+  disabled: boolean;
+  active: boolean;
+}) {
+  const overlayInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const contextRef = useRef<HTMLDivElement | null>(null);
+  const didInitialContextScrollRef = useRef(false);
+  const contextMessages = useMemo(() => {
+    const chatRoles = new Set<LeaderMessage["role"]>(["user", "assistant", "result", "system"]);
+    const visible = messages
+      .filter((msg) => chatRoles.has(msg.role) && msg.content.trim().length > 0)
+      .slice(-6);
+
+    if (streamingText.trim()) {
+      visible.push({
+        id: "leader-prompt-overlay-streaming",
+        role: "assistant",
+        content: streamingText.replace(/<!--task-name:.+?-->\s*/g, ""),
+        timestamp: Date.now(),
+      });
+    }
+
+    return visible;
+  }, [messages, streamingText]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      didInitialContextScrollRef.current = false;
+      return;
+    }
+    if (didInitialContextScrollRef.current) return;
+    const contextEl = contextRef.current;
+    if (!contextEl) return;
+    contextEl.scrollTop = contextEl.scrollHeight;
+    didInitialContextScrollRef.current = true;
+  }, [open, contextMessages.length]);
+
+  if (!open) return null;
+
+  return createPortal(
+    <>
+      <div
+        data-testid="leader-prompt-overlay-backdrop"
+        onMouseDown={onClose}
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 9990,
+          background: "rgba(0, 0, 0, 0.16)",
+        }}
+      />
+      <div
+        data-testid="leader-prompt-overlay"
+        data-no-drag
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{
+          position: "fixed",
+          left: "50%",
+          bottom: 24,
+          transform: "translateX(-50%)",
+          zIndex: 9991,
+          width: "min(760px, calc(100vw - 32px))",
+          background: "var(--bg-secondary)",
+          border: "1px solid var(--border-hover)",
+          borderRadius: 8,
+          boxShadow: "var(--shadow-lg)",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            minHeight: 34,
+            padding: "8px 12px 0",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            color: "var(--text-muted)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+          }}
+        >
+          <img
+            src={
+              status === "running" || status === "creating"
+                ? "/icons/leader-active.svg"
+                : "/icons/leader-idle.svg"
+            }
+            alt={status === "running" || status === "creating" ? "Active" : "Idle"}
+            width={18}
+            height={18}
+            className="leader-status-icon"
+            style={{ display: "block", flexShrink: 0 }}
+          />
+          <span
+            title={title}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              color: "var(--text-primary)",
+              fontWeight: 700,
+            }}
+          >
+            {title}
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            onMouseDown={(e) => e.stopPropagation()}
+            aria-label="Close enlarged prompt"
+            title="Close enlarged prompt"
+            style={{
+              width: 24,
+              height: 24,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              border: "1px solid var(--border-default)",
+              borderRadius: 4,
+              background: "var(--bg-elevated)",
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              padding: 0,
+              fontSize: 14,
+              lineHeight: 1,
+            }}
+          >
+            x
+          </button>
+        </div>
+        {contextMessages.length > 0 && (
+          <div
+            ref={contextRef}
+            data-testid="leader-prompt-context"
+            data-scroll-capture
+            style={{
+              margin: "8px 10px 0",
+              maxHeight: "min(360px, 42vh)",
+              overflowY: "auto",
+              padding: "8px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+              background: "var(--bg-surface)",
+              border: "1px solid var(--border-default)",
+              borderRadius: 6,
+            }}
+          >
+            {contextMessages.map((msg) => {
+              const role = msg.role === "result" ? "assistant" : msg.role;
+              const text =
+                msg.content.length > 1400
+                  ? `${msg.content.slice(0, 1397)}...`
+                  : msg.content;
+              return (
+                <div
+                  key={msg.id}
+                  style={{
+                    padding: "7px 9px",
+                    borderRadius: 6,
+                    background:
+                      role === "user"
+                        ? "var(--state-active)"
+                        : "var(--bg-primary)",
+                    border: "1px solid var(--border-default)",
+                    color: "var(--text-secondary)",
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  <div
+                    style={{
+                      marginBottom: 4,
+                      color: role === "user" ? "var(--accent)" : "var(--text-muted)",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 9,
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      letterSpacing: 0.5,
+                    }}
+                  >
+                    {role}
+                  </div>
+                  <SimpleMarkdown text={text} />
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <LeaderPromptBar
+          input={input}
+          onInputChange={onInputChange}
+          onKeyDown={onKeyDown}
+          onSubmit={onSubmit}
+          placeholder={placeholder}
+          submitLabel={submitLabel}
+          disabled={disabled}
+          active={active}
+          variant="overlay"
+          autoFocus
+          textareaRef={overlayInputRef}
+        />
+      </div>
+    </>,
+    document.body,
+  );
+}
+
 /* ── Main component ───────────────────────────────────────────────────── */
 
 export function LeaderNodeRenderer({
@@ -2634,6 +3426,7 @@ export function LeaderNodeRenderer({
   onResize,
   onAddContentNode,
   onRevealMinion,
+  onDuplicateLeaderSetup,
 }: NodeRenderProps) {
   const data = node.data as LeaderData;
   const dataRef = useRef(data);
@@ -2642,7 +3435,10 @@ export function LeaderNodeRenderer({
   const [input, setInput] = useState("");
   const [tasksExpanded, setTasksExpanded] = useState(false);
   const [skillFlyoutOpen, setSkillFlyoutOpen] = useState(false);
+  const [promptOverlayOpen, setPromptOverlayOpen] = useState(false);
   const [scrollLocked, setScrollLocked] = useState(false);
+  const [messageContextSelection, setMessageContextSelection] =
+    useState<MessageContextSelection | null>(null);
   const skillAnchorRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLDivElement>(null);
   const scrollZoneRef = useRef<HTMLDivElement>(null);
@@ -2653,6 +3449,17 @@ export function LeaderNodeRenderer({
     debugFlagStore.getSnapshot,
     debugFlagStore.getSnapshot,
   );
+  const groupedMessages = useMemo(() => groupMessages(data.messages), [data.messages]);
+  const activateMessageSelection = useCallback((messageId: string) => {
+    setMessageContextSelection({
+      messageId,
+      selectedChunkIds: [],
+      anchorChunkId: null,
+    });
+  }, []);
+  const exitMessageSelection = useCallback(() => {
+    setMessageContextSelection(null);
+  }, []);
 
   // Auto-expand the plan panel when the first task is registered
   const prevPlanCountRef = useRef(0);
@@ -2663,6 +3470,13 @@ export function LeaderNodeRenderer({
     }
     prevPlanCountRef.current = count;
   }, [data.taskPlan]);
+
+  useEffect(() => {
+    const prompt = dataRef.current.draftPrompt;
+    if (!prompt) return;
+    setInput(prompt);
+    onUpdateData({ ...dataRef.current, draftPrompt: null });
+  }, [data.draftPrompt, onUpdateData]);
 
   // Close flyout panels on any wheel event (covers zoom + scroll).
   // Replaces the old canvasScale-prop approach to avoid busting React.memo.
@@ -3427,20 +4241,56 @@ export function LeaderNodeRenderer({
     setInput("");
   }, [socketSend, emitUpdate, input]);
 
+  const promptPlaceholder =
+    data.status === "completed"
+      ? "Describe next goal (context preserved)..."
+      : data.sessionKey
+        ? "Guide the leader..."
+        : "Describe your project goal...";
+
+  const promptSubmitLabel =
+    data.status === "completed" ? "New Session" : data.sessionKey ? "Send" : "Start";
+
+  const promptSubmitDisabled =
+    !input.trim() && !!data.sessionKey && data.status !== "completed";
+
+  const promptSubmitActive =
+    data.status === "completed" || !!input.trim() || !data.sessionKey;
+
+  const handlePromptSubmit = useCallback(() => {
+    if (promptSubmitDisabled) return;
+
+    if (dataRef.current.status === "completed") {
+      handleNewSession();
+    } else if (dataRef.current.sessionKey) {
+      handleSend();
+    } else {
+      handleCreate();
+    }
+
+    setPromptOverlayOpen(false);
+  }, [handleCreate, handleNewSession, handleSend, promptSubmitDisabled]);
+
+  const handlePromptTextareaFocus = useCallback(() => {
+    if (canvasScale.current <= LEADER_PROMPT_OVERLAY_ZOOM_THRESHOLD) {
+      setPromptOverlayOpen(true);
+    }
+  }, []);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (e.key === "Escape" && promptOverlayOpen) {
+        e.preventDefault();
+        setPromptOverlayOpen(false);
+        return;
+      }
+
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        if (dataRef.current.status === "completed") {
-          handleNewSession();
-        } else if (dataRef.current.sessionKey) {
-          handleSend();
-        } else {
-          handleCreate();
-        }
+        handlePromptSubmit();
       }
     },
-    [handleSend, handleCreate, handleNewSession],
+    [handlePromptSubmit, promptOverlayOpen],
   );
 
   // P6: Export log handler
@@ -3615,6 +4465,7 @@ export function LeaderNodeRenderer({
           <HeaderMenu
             onReset={handleReset}
             onExportLog={handleExportLog}
+            onDuplicateSetup={onDuplicateLeaderSetup}
             data={data}
           />
         </div>
@@ -3750,7 +4601,7 @@ export function LeaderNodeRenderer({
               : "Describe your project goal to begin orchestration"}
           </div>
         )}
-        {groupMessages(data.messages).map((group, gi) => {
+        {groupedMessages.map((group, gi) => {
           if (group.kind === "tool-group") {
             return <LeaderToolGroup key={`tg-${gi}`} msgs={group.msgs} />;
           }
@@ -3784,50 +4635,30 @@ export function LeaderNodeRenderer({
           // P5: Assistant messages get markdown rendering
           if (msg.role === "assistant") {
             return (
-              <div
+              <SelectableMessageBubble
                 key={msg.id}
-                className="copyable"
-                style={{
-                  ...chatRoleStyle("assistant"),
-                  position: "relative",
-                }}
-              >
-                <LeaderMessageActions
-                  text={msg.content}
-                  onAddContentNode={onAddContentNode}
-                />
-                <SimpleMarkdown text={msg.content} />
-                {msg.suffix && (
-                  <span style={{ display: "inline-block", marginLeft: 6, fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", opacity: 0.7 }}>
-                    {msg.suffix}
-                  </span>
-                )}
-              </div>
+                msg={msg}
+                selection={messageContextSelection}
+                onActivate={activateMessageSelection}
+                onSelectionChange={setMessageContextSelection}
+                onExit={exitMessageSelection}
+                onAddContentNode={onAddContentNode}
+              />
             );
           }
 
           // P5: Result messages get markdown too
           if (msg.role === "result") {
             return (
-              <div
+              <SelectableMessageBubble
                 key={msg.id}
-                className="copyable"
-                style={{
-                  ...chatRoleStyle("result"),
-                  position: "relative",
-                }}
-              >
-                <LeaderMessageActions
-                  text={msg.content}
-                  onAddContentNode={onAddContentNode}
-                />
-                <SimpleMarkdown text={msg.content} />
-                {msg.suffix && (
-                  <span style={{ display: "inline-block", marginLeft: 6, fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", opacity: 0.7 }}>
-                    {msg.suffix}
-                  </span>
-                )}
-              </div>
+                msg={msg}
+                selection={messageContextSelection}
+                onActivate={activateMessageSelection}
+                onSelectionChange={setMessageContextSelection}
+                onExit={exitMessageSelection}
+                onAddContentNode={onAddContentNode}
+              />
             );
           }
 
@@ -3878,66 +4709,35 @@ export function LeaderNodeRenderer({
       />
 
       {/* P2: Auto-growing input */}
-      <div
-        style={{
-          padding: "8px 10px",
-          borderTop: "1px solid var(--border-default)",
-          display: "flex",
-          gap: 6,
-          flexShrink: 0,
-          background: "var(--bg-secondary)",
-          alignItems: "flex-end",
-        }}
-      >
-        <AutoTextarea
-          value={input}
-          onChange={setInput}
-          onKeyDown={handleKeyDown}
-          placeholder={
-            data.status === "completed"
-              ? "Describe next goal (context preserved)..."
-              : data.sessionKey
-                ? "Guide the leader..."
-                : "Describe your project goal..."
-          }
-          maxRows={8}
-        />
-        <button
-          onClick={
-            data.status === "completed"
-              ? () => { handleNewSession(); }
-              : data.sessionKey ? handleSend : handleCreate
-          }
-          onMouseDown={(e) => e.stopPropagation()}
-          disabled={!input.trim() && !!data.sessionKey && data.status !== "completed"}
-          style={{
-            padding: "8px 14px",
-            borderRadius: 6,
-            border: "none",
-            background:
-              data.status === "completed"
-                ? "var(--gradient-primary)"
-                : input.trim() || !data.sessionKey
-                  ? "var(--gradient-primary)"
-                  : "var(--bg-elevated)",
-            color:
-              data.status === "completed"
-                ? "var(--text-primary)"
-                : input.trim() || !data.sessionKey
-                  ? "var(--text-primary)"
-                  : "var(--text-muted)",
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: "pointer",
-            flexShrink: 0,
-            opacity: !input.trim() && !!data.sessionKey && data.status !== "completed" ? 0.4 : 1,
-            marginBottom: 1,
-          }}
-        >
-          {data.status === "completed" ? "New Session" : data.sessionKey ? "Send" : "Start"}
-        </button>
-      </div>
+      <LeaderPromptBar
+        input={input}
+        onInputChange={setInput}
+        onKeyDown={handleKeyDown}
+        onSubmit={handlePromptSubmit}
+        placeholder={promptPlaceholder}
+        submitLabel={promptSubmitLabel}
+        disabled={promptSubmitDisabled}
+        active={promptSubmitActive}
+        onTextareaFocus={handlePromptTextareaFocus}
+      />
       </div>{/* end scroll-capture zone */}
+
+      <LeaderPromptOverlay
+        open={promptOverlayOpen}
+        input={input}
+        title={data.taskName ?? "Leader"}
+        messages={data.messages}
+        streamingText={data.streamingText}
+        status={data.status}
+        onClose={() => setPromptOverlayOpen(false)}
+        onInputChange={setInput}
+        onKeyDown={handleKeyDown}
+        onSubmit={handlePromptSubmit}
+        placeholder={promptPlaceholder}
+        submitLabel={promptSubmitLabel}
+        disabled={promptSubmitDisabled}
+        active={promptSubmitActive}
+      />
 
       {data.error && (
         <div

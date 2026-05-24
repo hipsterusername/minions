@@ -6,7 +6,7 @@
  * within that subtree. Files show the specific leader(s) working on them.
  */
 
-import { useState, useMemo, useCallback, type CSSProperties, type ReactNode } from "react";
+import { memo, useState, useMemo, useCallback, type CSSProperties, type ReactNode } from "react";
 import type { TreeNode } from "../api.ts";
 import { getAuthToken } from "../api.ts";
 import { fuzzyMatch } from "../fuzzy-file-search.ts";
@@ -199,15 +199,6 @@ function buildActivityMap(leaders: LeaderActivity[], projectPath?: string): Map<
   return map;
 }
 
-/** Check if a tree node or any descendant has activity */
-function hasActivity(node: TreeNode, activityMap: Map<string, Set<number>>): boolean {
-  if (activityMap.has(node.path)) return true;
-  if (node.children) {
-    return node.children.some(c => hasActivity(c, activityMap));
-  }
-  return false;
-}
-
 /**
  * Walk the tree and collect every path that should remain visible under a
  * fuzzy search query. A node is visible if its own path matches, or if any
@@ -240,7 +231,7 @@ function buildSearchMatch(tree: TreeNode[], query: string): Set<string> | null {
 
 // ── Components ──
 
-export function ProjectTree({ tree, rootName, leaders, projectPath, filterActive = false, query = "", onFileClick, onTreeChanged }: ProjectTreeProps) {
+export const ProjectTree = memo(function ProjectTree({ tree, rootName, leaders, projectPath, filterActive = false, query = "", onFileClick, onTreeChanged }: ProjectTreeProps) {
   const activityMap = useMemo(() => buildActivityMap(leaders, projectPath), [leaders, projectPath]);
   const searchMatch = useMemo(() => buildSearchMatch(tree, query), [tree, query]);
 
@@ -389,9 +380,9 @@ export function ProjectTree({ tree, rootName, leaders, projectPath, filterActive
       `}</style>
     </div>
   );
-}
+});
 
-function TreeRow({
+const TreeRow = memo(function TreeRow({
   node,
   depth,
   activityMap,
@@ -414,7 +405,7 @@ function TreeRow({
 }) {
   const [expanded, setExpanded] = useState(() => {
     // Auto-expand directories that have activity
-    if (node.type === "dir" && hasActivity(node, activityMap)) return true;
+    if (node.type === "dir" && activityMap.has(node.path)) return true;
     // Auto-expand first level
     if (depth <= 1) return true;
     return false;
@@ -426,7 +417,7 @@ function TreeRow({
 
   const leaderIndices = activityMap.get(node.path);
   const isDirectlyTouched = leaderIndices && leaderIndices.size > 0;
-  const hasChildActivity = node.type === "dir" && hasActivity(node, activityMap);
+  const hasChildActivity = node.type === "dir" && activityMap.has(node.path);
 
   // Visibility: combine the leader-activity filter with the search filter.
   // The decision is applied AFTER all hooks below so toggling filterActive
@@ -905,4 +896,4 @@ function TreeRow({
       )}
     </>
   );
-}
+});

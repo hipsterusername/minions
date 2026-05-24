@@ -33,6 +33,7 @@ describe("resolveCodexModel", () => {
     ["gpt-5-codex", "gpt-5.5"],
     ["gpt-5-codex-mini", "gpt-5.5"],
     ["gpt-5.4", "gpt-5.4"],
+    ["gpt-5.3-codex-spark", "gpt-5.3-codex-spark"],
   ] as const)("maps alias '%s' to '%s'", (alias, expected) => {
     expect(resolveCodexModel(alias)).toBe(expected);
   });
@@ -71,7 +72,7 @@ describe("CODEX_STATIC_MODELS", () => {
 
   it("exposes only current ChatGPT-backed Codex model options", () => {
     const ids = CODEX_STATIC_MODELS.map((m) => m.id);
-    expect(ids).toEqual(["gpt-5.5", "gpt-5.4"]);
+    expect(ids).toEqual(["gpt-5.5", "gpt-5.4", "gpt-5.3-codex-spark"]);
     expect(ids).not.toContain("gpt-5");
     expect(ids).not.toContain("gpt-5-codex");
     expect(ids).not.toContain("gpt-5-codex-mini");

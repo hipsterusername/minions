@@ -182,6 +182,25 @@ describe("buildHarnessStartOpts — capability gating", () => {
       });
       expect(startOpts.thinking).toBeUndefined();
     });
+
+    it("sets thinking for non-Claude thinking-capable harnesses without Claude model gating", () => {
+      const harness = fakeHarness("codex", { thinking: true });
+      const host = fakeHost({
+        model: "gpt-5.5",
+        thinkingConfig: { enabled: true, effort: "medium", display: "omitted" },
+      });
+      const { startOpts } = buildHarnessStartOpts({
+        host,
+        opts: fakeOpts(),
+        agentType: fakeAgentType,
+        agentCtx: fakeCtx,
+        toolResult: fakeToolResult,
+        abortController: new AbortController(),
+        harness,
+        prompt: "hello",
+      });
+      expect(startOpts.thinking).toEqual({ effort: "medium", display: "omitted" });
+    });
   });
 
   describe("builtInFilesystem capability", () => {

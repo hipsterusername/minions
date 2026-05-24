@@ -5,10 +5,40 @@ import { describe, expect, it } from "vitest";
 import type { WebSocketServer } from "ws";
 import { createBus } from "../bus.ts";
 import { createGetTaskStatusToolDef } from "./get-task-status.ts";
-import type { TaskManagerState, TaskToolContext } from "./types.ts";
+import type {
+  RuntimeSessionInfo,
+  TaskManagerState,
+  TaskToolContext,
+} from "./types.ts";
 import type { NormalizedToolDef } from "../harness/types.ts";
 
-function makeCtx(): TaskToolContext {
+function makeRuntime(
+  overrides: Partial<RuntimeSessionInfo> = {},
+): RuntimeSessionInfo {
+  return {
+    sessionKey: "m-1",
+    sessionId: "sdk-1",
+    status: "running",
+    role: "minion",
+    cwd: "/p",
+    model: "sonnet",
+    harness: "claude",
+    totalCost: 0.25,
+    turns: 2,
+    isLive: true,
+    lastActivityAt: 1000,
+    lastActivityAgeMs: 50,
+    lastEventType: "sdk_event",
+    lastSdkEventKind: "tool_progress",
+    lastError: null,
+    lastErrorFull: null,
+    ...overrides,
+  };
+}
+
+function makeCtx(
+  runtimes: Record<string, RuntimeSessionInfo> = {},
+): TaskToolContext {
   const wss = { clients: new Set() } as unknown as WebSocketServer;
   return {
     leaderSessionKey: "L",
@@ -18,6 +48,7 @@ function makeCtx(): TaskToolContext {
     projectPath: "/p",
     minionSystemPrompt: "",
     taskState: { tasks: new Map(), pendingWait: null, approval: null },
+    getSessionRuntime: (sessionKey) => runtimes[sessionKey] ?? null,
     scheduleWaitContinue: () => {},
   };
 }
@@ -122,6 +153,78 @@ describe("get_task_status", () => {
       taskId: "t2",
       executor: "minion",
       minionSessionKey: "m-1",
+    });
+  });
+
+  it("attaches runtime metadata for a delegated minion task", async () => {
+    const ctx = makeCtx({
+      "m-1": makeRuntime({
+        sessionKey: "m-1",
+        isLive: true,
+        lastActivityAgeMs: 1234,
+      }),
+    });
+    ctx.taskState.tasks.set("t1", {
+      taskId: "t1",
+      title: "T",
+      description: "",
+      priority: "high",
+      executor: "minion",
+      minionSessionKey: "m-1",
+      leaderSessionKey: "L",
+      status: "running",
+      createdAt: 1,
+      completedAt: null,
+      result: null,
+    });
+
+    const tool = createGetTaskStatusToolDef(ctx);
+    const out = await call(tool, { taskId: "t1" });
+    const parsed = JSON.parse(out.content[0]!.text);
+    expect(parsed.runtimeSessionKey).toBe("m-1");
+    expect(parsed.runtime).toMatchObject({
+      sessionKey: "m-1",
+      status: "running",
+      role: "minion",
+      isLive: true,
+      lastActivityAgeMs: 1234,
+      lastSdkEventKind: "tool_progress",
+    });
+  });
+
+  it("uses leader runtime metadata for leader-executed running tasks", async () => {
+    const ctx = makeCtx({
+      L: makeRuntime({
+        sessionKey: "L",
+        role: "leader",
+        lastEventType: "session_status",
+        lastSdkEventKind: null,
+      }),
+    });
+    ctx.taskState.tasks.set("t1", {
+      taskId: "t1",
+      title: "T",
+      description: "",
+      priority: "high",
+      executor: "leader",
+      minionSessionKey: null,
+      leaderSessionKey: "L",
+      status: "running",
+      createdAt: 1,
+      completedAt: null,
+      result: null,
+    });
+
+    const tool = createGetTaskStatusToolDef(ctx);
+    const out = await call(tool, {});
+    const parsed = JSON.parse(out.content[0]!.text);
+    expect(parsed[0]).toMatchObject({
+      runtimeSessionKey: "L",
+      runtime: {
+        sessionKey: "L",
+        role: "leader",
+        isLive: true,
+      },
     });
   });
 });

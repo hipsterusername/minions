@@ -2,6 +2,8 @@
  * Custom hook for canvas keyboard shortcuts:
  * - Space: toggle pan mode
  * - Delete/Backspace: delete selected nodes (with leader cascade + group confirmation)
+ * - Ctrl/Cmd+C: copy selected Leader setup
+ * - Ctrl/Cmd+Shift+V: paste copied Leader setup as a new Leader
  * - Ctrl/Cmd+Z: undo
  * - Ctrl/Cmd+Shift+Z / Ctrl/Cmd+Y: redo
  * - N: focus next active (running) node
@@ -43,6 +45,8 @@ export interface UseCanvasKeyboardOpts {
   focusNodes?: ((ids: Set<string>) => void) | undefined;
   /** Cycle focus to the next active (running) node */
   focusNextActive?: (() => void) | undefined;
+  copyLeaderSetup?: ((nodeId: string) => boolean) | undefined;
+  pasteLeaderSetup?: (() => boolean) | undefined;
   undo?: (() => void) | undefined;
   redo?: (() => void) | undefined;
 }
@@ -59,6 +63,8 @@ export function useCanvasKeyboard({
   setPendingGroupDelete,
   focusNodes,
   focusNextActive,
+  copyLeaderSetup,
+  pasteLeaderSetup,
   undo,
   redo,
 }: UseCanvasKeyboardOpts): void {
@@ -143,8 +149,25 @@ export function useCanvasKeyboard({
         }
       }
 
-      // ── Undo/Redo ──
+      // ── Copy/Paste Leader setup ──
       const mod = e.metaKey || e.ctrlKey;
+      if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "c") {
+        if (isTextInput(e.target)) return;
+        if (selectedIds.size === 1 && copyLeaderSetup) {
+          const id = [...selectedIds][0];
+          if (id && copyLeaderSetup(id)) {
+            e.preventDefault();
+          }
+        }
+      }
+      if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === "v") {
+        if (isTextInput(e.target)) return;
+        if (pasteLeaderSetup?.()) {
+          e.preventDefault();
+        }
+      }
+
+      // ── Undo/Redo ──
       if (mod && e.key === "z" && !e.shiftKey) {
         const tag = (document.activeElement?.tagName || "").toLowerCase();
         if (tag === "input" || tag === "textarea") return;
@@ -174,5 +197,5 @@ export function useCanvasKeyboard({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [selectedIds, nodes, graph, dispatch, graphDispatch, spaceRef, isInsideGroup, setPendingGroupDelete, focusNodes, focusNextActive, undo, redo]);
+  }, [selectedIds, nodes, graph, dispatch, graphDispatch, spaceRef, isInsideGroup, setPendingGroupDelete, focusNodes, focusNextActive, copyLeaderSetup, pasteLeaderSetup, undo, redo]);
 }

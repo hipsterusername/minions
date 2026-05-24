@@ -16,6 +16,13 @@ import { isValidThinkingConfig, type ThinkingConfig } from "../session-host.ts";
 import { sanitizeAttachments } from "./attachment-sanitize.ts";
 import { errToMessage } from "./helpers.ts";
 import type { CommandHandler } from "./types.ts";
+import { persistTaskState } from "../session-persist.ts";
+import { dirname, basename } from "node:path";
+
+function projectPathForNewWorktree(cwd: string): string {
+  const parent = dirname(cwd);
+  return basename(parent) === ".canvas-worktrees" ? dirname(parent) : cwd;
+}
 
 export const sendMessage: CommandHandler = (ctx, cmd, ws) => {
   if (!cmd.sessionKey || !cmd.prompt) {
@@ -38,6 +45,7 @@ export const sendMessage: CommandHandler = (ctx, cmd, ws) => {
   let prompt = cmd.prompt;
   if (host.taskState?.approval?.requested) {
     host.taskState.approval = null;
+    persistTaskState(host.id, host.taskState);
     prompt = `[The user has reviewed your changes and is requesting modifications instead of approving. Their feedback follows.]\n\n${prompt}`;
     ctx.bus.emitToSession(cmd.sessionKey, {
       type: "approval_resolved",
@@ -85,10 +93,11 @@ export const sendMessage: CommandHandler = (ctx, cmd, ws) => {
     !host.worktree;
 
   if (needsNewWorktree) {
-    createWorktree(host.cwd, cmd.sessionKey)
+    createWorktree(projectPathForNewWorktree(host.cwd), cmd.sessionKey)
       .then((worktreeInfo) => {
         host.worktree = worktreeInfo;
         host.cwd = worktreeInfo.path;
+        host.persist();
         ctx.bus.emitToSession(cmd.sessionKey!, {
           type: "worktree_created",
           sessionKey: cmd.sessionKey,

@@ -70,6 +70,14 @@ const TRACKPAD_INTERVAL_THRESHOLD_MS = 30;
  */
 const SMALL_DELTA_THRESHOLD = 10;
 
+/**
+ * Some browsers/OS settings emit mouse wheel ticks as medium-sized pixel
+ * deltas rather than exact 100px notches. Treat vertical-only integer deltas
+ * at or above this size as a mouse signal; otherwise a physical wheel can
+ * fall through the near-tie path and pan the canvas instead of zooming.
+ */
+const MEDIUM_MOUSE_DELTA_THRESHOLD = 20;
+
 // ── Detector state ────────────────────────────────────────────────────
 
 class WheelDeviceDetector {
@@ -191,6 +199,14 @@ class WheelDeviceDetector {
       ) {
         // Exact multiple of 100 — strong mouse signal
         mouseScore += 3;
+      } else if (
+        current.absDeltaX <= 0.5 &&
+        Number.isInteger(current.absDeltaY) &&
+        current.absDeltaY >= MEDIUM_MOUSE_DELTA_THRESHOLD
+      ) {
+        // Browser-normalised mouse wheels are not always 100px notches;
+        // vertical-only medium integer deltas should still zoom the canvas.
+        mouseScore += 2;
       } else if (current.absDeltaY % 1 !== 0) {
         // Fractional delta — trackpad
         trackpadScore += 2;

@@ -53,9 +53,11 @@ function renderDock(props?: { onOpenRoutines?: (() => void) | undefined }) {
   return render(
     <DockProvider>
       <BadgeProbe id="sessions" count={3} dot="success" tail="$0.42" />
+      <BadgeProbe id="map" count={8} tail="75%" />
       <BadgeProbe id="mcp" count={2} />
       <BadgeProbe id="skills" count={5} />
       <PanelProbe id="sessions" />
+      <PanelProbe id="map" />
       <PanelProbe id="mcp" />
       <PanelProbe id="skills" />
       <DockBar onOpenRoutines={onOpenRoutines} />
@@ -88,6 +90,13 @@ describe("BottomRightDock", () => {
     fireEvent.click(pill("MCP"));
     expect(screen.queryByTestId("panel-sessions-body")).toBeNull();
     expect(screen.queryByTestId("panel-mcp-body")).not.toBeNull();
+  });
+
+  it("Map is a dock panel next to the other bottom tools", () => {
+    renderDock();
+    fireEvent.click(pill("Map"));
+    expect(screen.queryByTestId("panel-map-body")).not.toBeNull();
+    expect(pill("Map").getAttribute("data-active")).toBe("true");
   });
 
   it("Routines pill is action-only and never activates a panel", () => {
@@ -150,6 +159,23 @@ describe("BottomRightDock", () => {
       fireEvent.mouseDown(bar);
     });
     expect(screen.queryByTestId("panel-sessions-body")).not.toBeNull();
+  });
+
+  it("renders dock chrome inside fixed viewport overlays", () => {
+    renderDock();
+    const bar = document.querySelector("[data-dock-bar]") as HTMLElement;
+    const barOverlay = bar.closest("[data-viewport-overlay]") as HTMLElement | null;
+    expect(barOverlay).not.toBeNull();
+    expect(barOverlay).toHaveStyle("position: fixed");
+    expect(barOverlay).toHaveStyle("pointer-events: none");
+    expect(bar).toHaveStyle("pointer-events: auto");
+
+    fireEvent.click(pill("Sessions"));
+    const panel = document.querySelector("[data-dock-panel='sessions']") as HTMLElement;
+    const panelOverlay = panel.closest("[data-viewport-overlay]") as HTMLElement | null;
+    expect(panelOverlay).not.toBeNull();
+    expect(panelOverlay).toHaveStyle("position: fixed");
+    expect(panel).toHaveStyle("pointer-events: auto");
   });
 
   it("hides the Routines pill when onOpenRoutines is undefined", () => {

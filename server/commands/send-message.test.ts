@@ -203,6 +203,32 @@ describe("send_message", () => {
     expect(calls[0]!.cwd).toBe("/p/.canvas-worktrees/k");
   });
 
+  it("creates a fresh follow-up worktree from the project root when cwd is a stale worktree path", async () => {
+    const h = setup();
+    h.host.role = "leader";
+    h.host.worktreeIsolation = true;
+    h.host.worktree = null;
+    h.host.cwd = "/p/.canvas-worktrees/leader-1";
+    const { calls } = captureRegistryStart(h);
+
+    sendMessage(
+      h.ctx,
+      cmd({
+        type: "send_message",
+        sessionKey: "leader-1",
+        prompt: "next iteration",
+      }),
+      h.ws,
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(createWorktreeCalls).toEqual([{ cwd: "/p", key: "leader-1" }]);
+    expect(calls[0]!.cwd).toBe("/p/.canvas-worktrees/k");
+  });
+
   it("when createWorktree fails, emits worktree_failed and does NOT resume the session", async () => {
     createWorktreeShouldFail = true;
     const h = setup();

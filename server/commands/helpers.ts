@@ -18,6 +18,7 @@ import type { SessionRegistry } from "../session-registry.ts";
 import type { BufferedEvent } from "../session-host.ts";
 import { mergeAndCleanup, type MergeResult } from "../worktree.ts";
 import type { HarnessRunControl, NormalizedEvent } from "../harness/types.ts";
+import { persistTaskState } from "../session-persist.ts";
 
 /** Options bag accepted by mergeAndCleanup. Inlined here because worktree.ts
  *  does not export the shape directly. */
@@ -168,9 +169,11 @@ export function runMergeFlow(
     .then((result: MergeResult) => {
       if (result.success) {
         if (host.taskState?.approval) host.taskState.approval = null;
+        if (host.taskState) persistTaskState(host.id, host.taskState);
         host.worktree = null;
         host.cwd = projectPath;
         host.status = "completed";
+        host.persist();
 
         const completedEvent: BufferedEvent = {
           type: "session_status",

@@ -573,13 +573,23 @@ function SaveDialog({ projectPath, title, content, savedPath, onSaved, onClose }
 
 // ── Component ──────────────────────────────────────────
 
-export function MarkdownNodeRenderer({ node, onUpdateData, onResize, projectPath }: NodeRenderProps) {
+export function MarkdownNodeRenderer({
+  node,
+  onUpdateData,
+  onResize,
+  projectPath,
+  onCreateKanbanCardFromMarkdown,
+}: NodeRenderProps) {
   const data = node.data as MarkdownData;
   const collapsed = data.collapsed ?? false;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const cardTitleInputRef = useRef<HTMLInputElement>(null);
   const clickStartRef = useRef<{ x: number; y: number } | null>(null);
   const [wordCount, setWordCount] = useState(0);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [showCardPrompt, setShowCardPrompt] = useState(false);
+  const [cardTitleDraft, setCardTitleDraft] = useState("");
+  const [cardSaved, setCardSaved] = useState(false);
   const [lineCount, setLineCount] = useState(1);
 
   const update = (patch: Partial<MarkdownData>) =>
@@ -614,6 +624,27 @@ export function MarkdownNodeRenderer({ node, onUpdateData, onResize, projectPath
     }
   };
 
+  const openCardPrompt = () => {
+    if (!onCreateKanbanCardFromMarkdown) return;
+    setCardTitleDraft(data.title.trim());
+    setShowSaveDialog(false);
+    setShowCardPrompt(true);
+  };
+
+  const handleSaveAsKanbanCard = () => {
+    if (!onCreateKanbanCardFromMarkdown) return;
+    const trimmedTitle = cardTitleDraft.trim();
+    if (!trimmedTitle) return;
+    onCreateKanbanCardFromMarkdown({
+      nodeId: node.id,
+      title: trimmedTitle,
+      content: data.content,
+    });
+    setShowCardPrompt(false);
+    setCardSaved(true);
+    window.setTimeout(() => setCardSaved(false), 1800);
+  };
+
   const toggleCollapse = () => {
     if (!collapsed) {
       update({ collapsed: true, expandedHeight: node.size.height });
@@ -636,6 +667,13 @@ export function MarkdownNodeRenderer({ node, onUpdateData, onResize, projectPath
       textareaRef.current.focus();
     }
   }, [data.viewMode, collapsed]);
+
+  useEffect(() => {
+    if (showCardPrompt) {
+      cardTitleInputRef.current?.focus();
+      cardTitleInputRef.current?.select();
+    }
+  }, [showCardPrompt]);
 
   // ── Keyboard handler for textarea ──────────────────────
   const handleKeyDown = useCallback(
@@ -999,6 +1037,98 @@ export function MarkdownNodeRenderer({ node, onUpdateData, onResize, projectPath
         .md-save-as-btn:hover {
           background: var(--state-active);
           color: var(--text-primary);
+        }
+
+        .md-card-btn {
+          background: transparent;
+          border: 1px solid var(--border-default);
+          border-radius: 3px;
+          cursor: pointer;
+          color: var(--text-muted);
+          font-size: 10px;
+          font-family: var(--font-sans);
+          font-weight: 500;
+          padding: 1px 7px;
+          display: flex;
+          align-items: center;
+          gap: 3px;
+          transition: all 0.15s;
+        }
+        .md-card-btn:hover {
+          background: var(--state-hover);
+          color: var(--text-primary);
+          border-color: var(--border-hover);
+        }
+
+        .md-card-saved {
+          color: var(--success-color);
+          font-size: 10px;
+          font-family: var(--font-mono);
+          white-space: nowrap;
+        }
+
+        .md-card-prompt {
+          position: absolute;
+          bottom: 32px;
+          left: 8px;
+          right: 8px;
+          background: var(--bg-surface);
+          border: 1px solid var(--border-default);
+          border-radius: 8px;
+          box-shadow: var(--shadow-lg);
+          z-index: 90;
+          padding: 10px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .md-card-prompt__label {
+          font-size: 10px;
+          color: var(--text-muted);
+          font-family: var(--font-sans);
+        }
+        .md-card-prompt__row {
+          display: flex;
+          gap: 6px;
+        }
+        .md-card-prompt__input {
+          min-width: 0;
+          flex: 1;
+          padding: 5px 8px;
+          background: rgba(255,255,255,0.03);
+          border: 1px solid var(--border-default);
+          border-radius: 4px;
+          color: var(--text-secondary);
+          font-size: 12px;
+          font-family: var(--font-sans);
+          outline: none;
+          box-sizing: border-box;
+        }
+        .md-card-prompt__input:focus {
+          border-color: var(--accent);
+        }
+        .md-card-prompt__cancel,
+        .md-card-prompt__confirm {
+          padding: 5px 10px;
+          border-radius: 4px;
+          font-size: 11px;
+          font-family: var(--font-sans);
+          cursor: pointer;
+        }
+        .md-card-prompt__cancel {
+          background: var(--state-hover);
+          border: 1px solid var(--border-default);
+          color: var(--text-secondary);
+        }
+        .md-card-prompt__confirm {
+          background: var(--accent);
+          border: none;
+          color: #111;
+          font-weight: 600;
+        }
+        .md-card-prompt__confirm:disabled {
+          opacity: 0.45;
+          cursor: default;
         }
 
         .md-lang-label {
@@ -1411,7 +1541,10 @@ export function MarkdownNodeRenderer({ node, onUpdateData, onResize, projectPath
 
               {projectPath && (
                 <button
-                  onClick={() => setShowSaveDialog(true)}
+                  onClick={() => {
+                    setShowCardPrompt(false);
+                    setShowSaveDialog(true);
+                  }}
                   onMouseDown={(e) => e.stopPropagation()}
                   title={data.savedPath ? "Save As…" : "Save to project…"}
                   className="md-save-as-btn"
@@ -1423,8 +1556,63 @@ export function MarkdownNodeRenderer({ node, onUpdateData, onResize, projectPath
                 </button>
               )}
 
+              {onCreateKanbanCardFromMarkdown && (
+                cardSaved ? (
+                  <span className="md-card-saved">Card added</span>
+                ) : (
+                  <button
+                    onClick={openCardPrompt}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    title="Save as Kanban card"
+                    className="md-card-btn"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                      <rect x="2" y="3" width="12" height="10" rx="1.5" />
+                      <line x1="5" y1="6" x2="11" y2="6" />
+                      <line x1="5" y1="9" x2="9" y2="9" />
+                    </svg>
+                    Card
+                  </button>
+                )
+              )}
+
               <span className="md-lang-label">md</span>
             </div>
+
+            {showCardPrompt && (
+              <div className="md-card-prompt" onMouseDown={(e) => e.stopPropagation()}>
+                <label className="md-card-prompt__label" htmlFor={`md-card-title-${node.id}`}>
+                  Card title
+                </label>
+                <div className="md-card-prompt__row">
+                  <input
+                    id={`md-card-title-${node.id}`}
+                    ref={cardTitleInputRef}
+                    className="md-card-prompt__input"
+                    value={cardTitleDraft}
+                    onChange={(e) => setCardTitleDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleSaveAsKanbanCard();
+                      if (e.key === "Escape") setShowCardPrompt(false);
+                    }}
+                    placeholder="Task title"
+                  />
+                  <button
+                    className="md-card-prompt__cancel"
+                    onClick={() => setShowCardPrompt(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="md-card-prompt__confirm"
+                    onClick={handleSaveAsKanbanCard}
+                    disabled={!cardTitleDraft.trim()}
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+            )}
 
             {showSaveDialog && projectPath && (
               <SaveDialog

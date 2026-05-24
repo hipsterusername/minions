@@ -6,7 +6,7 @@
  *   - WebSocket server construction
  *   - SessionRegistry + Bus wiring
  *   - Command dispatch via `server/commands/`
- *   - Graceful shutdown (worktree cleanup)
+ *   - Graceful shutdown
  *
  * Per-command logic lives in `server/commands/<name>.ts`. Per-session
  * lifecycle lives in `server/session-host.ts`.
@@ -21,7 +21,7 @@ import { createProjectRoutes } from "./routes/projects.ts";
 import { createFileRoutes } from "./routes/files.ts";
 import { createBus } from "./bus.ts";
 import { attachConnectionListeners } from "./ws-connection.ts";
-import { removeWorktree, cleanupStaleWorktrees } from "./worktree.ts";
+import { cleanupStaleWorktrees } from "./worktree.ts";
 import { listRecentProjects } from "./project-store.ts";
 import type { SessionHostDeps, StartSessionOptions } from "./session-host.ts";
 import { SessionRegistry } from "./session-registry.ts";
@@ -152,6 +152,7 @@ const sessionDeps: SessionHostDeps = {
   bus,
   startChildSession: (opts: StartSessionOptions) => registry.start(opts),
   forEachLeaderTaskState: registry.forEachLeaderTaskState,
+  getSessionRuntime: registry.getSessionRuntime,
 };
 registry.setDeps(sessionDeps);
 
@@ -216,28 +217,9 @@ server.listen(PORT, HOST, () => {
   }
 });
 
-// ── Graceful shutdown: clean up all active worktrees ────────────────────────
+// ── Graceful shutdown ────────────────────────────────────────────────────────
 async function shutdownCleanup(): Promise<void> {
-  console.log("[shutdown] Cleaning up active worktrees...");
-  const cleanups: Promise<void>[] = [];
-  for (const [key, session] of registry) {
-    if (session.worktree) {
-      console.log(
-        `[shutdown] Removing worktree for ${key}: ${session.worktree.branch}`,
-      );
-      cleanups.push(
-        removeWorktree(session.worktree.path, session.worktree.projectPath).catch(
-          (err: unknown) => {
-            console.warn(
-              `[shutdown] Failed to remove worktree for ${key}: ${err instanceof Error ? err.message : err}`,
-            );
-          },
-        ),
-      );
-    }
-  }
-  await Promise.allSettled(cleanups);
-  console.log("[shutdown] Worktree cleanup complete.");
+  console.log("[shutdown] Preserving active worktrees for session recovery.");
   process.exit(0);
 }
 

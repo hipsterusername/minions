@@ -56,6 +56,7 @@ export function createRequestApprovalToolDef(ctx: TaskToolContext): NormalizedTo
         summary: args.summary,
         diff,
       };
+      ctx.onStateChange?.(ctx.taskState);
 
       // Broadcast so the frontend can show approval UI
       ctx.bus.emitToSession(ctx.leaderSessionKey, {
