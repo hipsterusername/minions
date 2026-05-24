@@ -18,7 +18,7 @@
  * can be embedded in a data: URI (e.g. dashboard previews).
  */
 
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 
 interface LeaderLoadingScreenProps {
   message?: string;
@@ -135,12 +135,32 @@ export const LEADER_LOADING_SVG = `
 export const LEADER_LOADING_DATA_URI =
   `data:image/svg+xml;utf8,${encodeURIComponent(LEADER_LOADING_SVG)}`;
 
-export function LeaderLoadingScreen({
+const LOOP_PUPIL_ANIMATION =
+  "animation: ll-saccade 4s cubic-bezier(.16,1,.3,1) infinite;";
+const LOOP_CROWN_ANIMATION = "animation: ll-crown 4s ease-out infinite;";
+const ONCE_PUPIL_ANIMATION =
+  `animation: ll-saccade-once ${ONE_SHOT_ANIM_S}s cubic-bezier(.16,1,.3,1) 1 forwards;`;
+const ONCE_CROWN_ANIMATION =
+  `animation: ll-crown-once ${ONE_SHOT_ANIM_S}s ease-out 1 forwards;`;
+
+const LEADER_LOADING_ONCE_SVG = LEADER_LOADING_SVG
+  .replace("<svg ", '<svg class="ll-once" ')
+  .replace(LOOP_PUPIL_ANIMATION, ONCE_PUPIL_ANIMATION)
+  .replace(LOOP_CROWN_ANIMATION, ONCE_CROWN_ANIMATION);
+
+function leaderLoadingSvgForMode(oneShot: boolean): string {
+  return oneShot ? LEADER_LOADING_ONCE_SVG : LEADER_LOADING_SVG;
+}
+
+export const LeaderLoadingScreen = memo(function LeaderLoadingScreen({
   message = "Loading project",
   size = 96,
   oneShot = false,
   onComplete,
 }: LeaderLoadingScreenProps) {
+  const svgMarkup = useMemo(() => leaderLoadingSvgForMode(oneShot), [oneShot]);
+  const svgInnerHtml = useMemo(() => ({ __html: svgMarkup }), [svgMarkup]);
+
   // In one-shot mode, fire onComplete exactly once at mount + total
   // duration. Stabilize via ref so a fresh inline `onComplete` arrow
   // on the parent doesn't re-arm the timeout on every parent render
@@ -171,12 +191,11 @@ export function LeaderLoadingScreen({
       }}
     >
       <div
-        className={oneShot ? "ll-once" : undefined}
         style={{ width: size, height: size, color: "var(--accent)" }}
         // Inline the same SVG used by the data: URI so animations
         // run inside the document (data: URIs sandbox CSS in some
         // browsers).
-        dangerouslySetInnerHTML={{ __html: LEADER_LOADING_SVG }}
+        dangerouslySetInnerHTML={svgInnerHtml}
       />
       <div
         style={{
@@ -193,7 +212,7 @@ export function LeaderLoadingScreen({
       </div>
     </div>
   );
-}
+});
 
 const LL_DOTS_CSS = `
 .ll-dots::after {

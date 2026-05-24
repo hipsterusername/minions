@@ -7,10 +7,12 @@
  */
 
 import type { Bus } from "../bus.ts";
-import type { TaskManagerState } from "../task-tools.ts";
+import type { RuntimeSessionInfo, TaskManagerState } from "../task-tools.ts";
 import type { RenderState } from "../render-tools.ts";
+import type { ReasoningMapState } from "../reasoning-map-tools.ts";
 import type { WorktreeInfo } from "../worktree.ts";
 import type { NormalizedToolDef } from "../harness/types.ts";
+import type { ThinkingConfig } from "../session-host-config.ts";
 
 // ── Context passed to every AgentType method ──────────────────────────────
 
@@ -24,6 +26,8 @@ export interface AgentTypeContext {
   existingTaskState?: TaskManagerState;
   /** Existing render state to preserve across resume calls (leader only) */
   existingRenderState?: RenderState;
+  /** Existing reasoning map state to preserve across resume calls (leader only) */
+  existingReasoningMapState?: ReasoningMapState;
   /** Worktree inherited from the leader (minion only) */
   parentWorktree?: WorktreeInfo;
   /**
@@ -41,6 +45,7 @@ export interface AgentTypeContext {
     systemPrompt: string;
     model?: string;
     harness?: string;
+    thinkingConfig?: ThinkingConfig;
   }) => void;
   /** Callback to schedule a delayed "Continue" resume (leader only) */
   scheduleWaitContinue?: (durationMs: number, reason: string) => void;
@@ -51,6 +56,8 @@ export interface AgentTypeContext {
   forEachLeaderTaskState?: (
     fn: (leaderKey: string, taskState: TaskManagerState) => void,
   ) => void;
+  /** Return live host/session metadata for a known session key, if loaded. */
+  getSessionRuntime?: (sessionKey: string) => RuntimeSessionInfo | null;
 }
 
 // ── Agent tool result ─────────────────────────────────────────────────────
@@ -72,6 +79,8 @@ export interface AgentToolResult {
   taskState?: TaskManagerState;
   /** Optional render state (leader only) */
   renderState?: RenderState;
+  /** Optional reasoning map state (leader only) */
+  reasoningMapState?: ReasoningMapState;
 }
 
 // ── AgentType interface ───────────────────────────────────────────────────

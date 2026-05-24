@@ -5,6 +5,7 @@
  * in Canvas.tsx's addNode() and addNodeAtPosition().
  */
 import type { ProjectSettings } from "./api.ts";
+import type { ThinkingConfig } from "./types.ts";
 import { DEFAULT_THINKING_CONFIG, MINION_THINKING_CONFIG } from "./types.ts";
 import { createImageNodeDefaultData } from "./nodes/ImageNode.tsx";
 import { createRoutineNodeDefaultData } from "./nodes/RoutineNode.tsx";
@@ -31,7 +32,7 @@ export function createDefaultNodeData(
         subagents: [],
         promptSuggestions: [],
         initData: null,
-        thinkingConfig: { ...DEFAULT_THINKING_CONFIG },
+        thinkingConfig: cloneThinkingConfig(DEFAULT_THINKING_CONFIG),
       };
 
     case "leader":
@@ -55,7 +56,9 @@ export function createDefaultNodeData(
         skillIds: [],
         skillValues: {},
         skillPanelOpen: false,
-        thinkingConfig: { ...DEFAULT_THINKING_CONFIG },
+        thinkingConfig: cloneThinkingConfig(
+          projectSettings?.defaultLeaderThinkingConfig ?? DEFAULT_THINKING_CONFIG,
+        ),
       };
 
     case "minion":
@@ -74,7 +77,9 @@ export function createDefaultNodeData(
         model: projectSettings?.defaultMinionModel ?? "claude-sonnet-4-6",
         harness: projectSettings?.defaultMinionHarness ?? "claude",
         permissionMode: projectSettings?.defaultPermissionMode ?? "auto",
-        thinkingConfig: { ...MINION_THINKING_CONFIG },
+        thinkingConfig: cloneThinkingConfig(
+          projectSettings?.defaultMinionThinkingConfig ?? MINION_THINKING_CONFIG,
+        ),
       };
 
     case "markdown":
@@ -98,4 +103,8 @@ export function createDefaultNodeData(
     default:
       return {};
   }
+}
+
+function cloneThinkingConfig(config: ThinkingConfig): ThinkingConfig {
+  return { ...config };
 }

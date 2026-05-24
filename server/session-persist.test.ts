@@ -18,6 +18,7 @@ import {
   loadRecentEvents,
   openPersistDb,
   persistEvent,
+  persistReasoningMapState,
   persistRenderState,
   persistSession,
   persistTaskState,
@@ -26,6 +27,7 @@ import {
 } from "./session-persist.ts";
 import type { TaskManagerState, TaskRecord } from "./task-tools.ts";
 import type { RenderState } from "./render-tools.ts";
+import type { ReasoningMapState } from "./reasoning-map-tools.ts";
 import {
   MAX_BUFFERED_EVENTS,
   type BufferedEvent,
@@ -58,6 +60,8 @@ function makeSession(overrides: Partial<PersistableSession> = {}): PersistableSe
     taskName: "Phase 4",
     sessionId: null,
     worktreeIsolation: true,
+    worktree: null,
+    approval: null,
     totalCost: 0.15,
     turns: 5,
     harnessName: "claude",
@@ -100,6 +104,26 @@ function makeRenderState(overrides: Partial<RenderState> = {}): RenderState {
   };
 }
 
+function makeReasoningMapState(): ReasoningMapState {
+  return {
+    activeMapId: "map-1",
+    maps: [
+      {
+        id: "map-1",
+        title: "Debug",
+        status: "active",
+        createdAt: "2026-05-23T12:00:00.000Z",
+        updatedAt: "2026-05-23T12:00:00.000Z",
+        nodes: [],
+        edges: [],
+        actionBindings: [],
+        challenges: [],
+        revisions: [],
+      },
+    ],
+  };
+}
+
 describe("session-persist integration", () => {
   let dbPath: string;
 
@@ -131,6 +155,30 @@ describe("session-persist integration", () => {
     expect(hydrated[0]?.row.total_cost).toBeCloseTo(0.15);
     // Leader role yields an empty but present TaskManagerState map.
     expect(hydrated[0]?.tasks?.tasks.size).toBe(0);
+  });
+
+  it("persists active worktree metadata and approval state across hydrate", () => {
+    persistSession(makeSession({
+      worktree: {
+        path: "/tmp/project/.canvas-worktrees/leader-1",
+        branch: "canvas/leader-1",
+        leaderSessionKey: "sess-1",
+        createdAt: 123,
+        projectPath: "/tmp/project",
+        lifecycle: "active",
+      },
+      approval: {
+        requested: true,
+        requestedAt: 456,
+        summary: "ready",
+        diff: null,
+      },
+    }));
+
+    const hydrated = hydrateSessionsFromDb();
+    expect(hydrated[0]?.row.worktree_path).toBe("/tmp/project/.canvas-worktrees/leader-1");
+    expect(hydrated[0]?.row.worktree_branch).toBe("canvas/leader-1");
+    expect(hydrated[0]?.tasks?.approval?.summary).toBe("ready");
   });
 
   it("persistTaskState removes stale rows and upserts current ones", () => {
@@ -167,10 +215,20 @@ describe("session-persist integration", () => {
     expect(hydrated[0]?.render?.components[0]?.id).toBe("s");
   });
 
+  it("persistReasoningMapState round-trips active reasoning state", () => {
+    persistSession(makeSession());
+    persistReasoningMapState("sess-1", makeReasoningMapState());
+
+    const hydrated = hydrateSessionsFromDb();
+    expect(hydrated[0]?.reasoningMap?.activeMapId).toBe("map-1");
+    expect(hydrated[0]?.reasoningMap?.maps[0]?.title).toBe("Debug");
+  });
+
   it("removePersistedSession deletes the row + task records + render state + events", () => {
     persistSession(makeSession());
     persistTaskState("sess-1", makeTaskState([makeTaskRecord()]));
     persistRenderState("sess-1", makeRenderState());
+    persistReasoningMapState("sess-1", makeReasoningMapState());
     persistEvent("sess-1", {
       type: "sdk_event",
       sessionKey: "sess-1",

@@ -47,6 +47,19 @@ export interface NodeRow {
   updated_at: string;
 }
 
+export interface EdgeRow {
+  id: string;
+  project_id: string;
+  source_node_id: string;
+  source_port_id: string;
+  target_node_id: string;
+  target_port_id: string;
+  protocol: string;
+  z_index: number;
+  created_at: string;
+  updated_at: string;
+}
+
 // ── Row mappers ─────────────────────────────────────────
 
 export function rowToProject(row: ProjectRow, projectPath: string) {
@@ -77,6 +90,17 @@ export function rowToNode(row: NodeRow) {
     position: { x: row.pos_x, y: row.pos_y },
     size: { width: row.width, height: row.height },
     data: parsedData,
+  };
+}
+
+export function rowToEdge(row: EdgeRow) {
+  return {
+    id: row.id,
+    sourceNodeId: row.source_node_id,
+    sourcePortId: row.source_port_id,
+    targetNodeId: row.target_node_id,
+    targetPortId: row.target_port_id,
+    protocol: row.protocol,
   };
 }
 

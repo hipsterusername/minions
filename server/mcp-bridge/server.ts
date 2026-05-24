@@ -141,6 +141,19 @@ export async function resetBridgeServerForTests(): Promise<void> {
 }
 
 /**
+ * Test-only entry point for exercising the HTTP bridge handler without binding
+ * a socket. Contract tests use this in sandboxed environments that disallow
+ * listen(2), while production callers go through `startBridgeServer()`.
+ */
+export async function handleBridgeRequestForTests(
+  req: IncomingMessage,
+  res: ServerResponse,
+  registry: BridgeRegistry,
+): Promise<void> {
+  await handleRequest(req, res, registry);
+}
+
+/**
  * Memoize an async factory so successful results are cached and rejections
  * are *not*. Public for tests; internal callers go through `bridgeSingleton`.
  *

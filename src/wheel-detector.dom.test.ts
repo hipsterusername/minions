@@ -71,6 +71,12 @@ describe("wheelDetector.classify()", () => {
     expect(wheelDetector.isPanGestureActive).toBe(false);
   });
 
+  it("classifies medium vertical-only pixel wheel deltas as mouse", () => {
+    const device = wheelDetector.classify(mouseEvent({ deltaY: 40 }));
+    expect(device).toBe("mouse");
+    expect(wheelDetector.isPanGestureActive).toBe(false);
+  });
+
   it("locks the device for the duration of a gesture", () => {
     expect(wheelDetector.classify(trackpadEvent())).toBe("trackpad");
     // A subsequent event that would otherwise look mouse-like should still

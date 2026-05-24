@@ -11,6 +11,7 @@ interface CanvasContextMenuProps {
   options: ContextMenuOption[];
   onSelect: (type: string) => void;
   onClose: () => void;
+  title?: string;
 }
 
 export function CanvasContextMenu({
@@ -19,6 +20,7 @@ export function CanvasContextMenu({
   options,
   onSelect,
   onClose,
+  title = "Add node",
 }: CanvasContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -47,8 +49,11 @@ export function CanvasContextMenu({
   // Adjust position if menu would overflow viewport
   useEffect(() => {
     if (!menuRef.current) return;
-    const rect = menuRef.current.getBoundingClientRect();
     const el = menuRef.current;
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+
+    const rect = el.getBoundingClientRect();
     if (rect.right > window.innerWidth) {
       el.style.left = `${x - rect.width}px`;
     }
@@ -86,7 +91,7 @@ export function CanvasContextMenu({
           userSelect: "none",
         }}
       >
-        Add node
+        {title}
       </div>
       {options.map((opt) => (
         <button

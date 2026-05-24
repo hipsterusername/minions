@@ -9,16 +9,18 @@
  * Codex model entries exposed in the UI.
  *
  * ChatGPT-backed Codex accounts reject older explicit model IDs such as
- * `gpt-5` and `gpt-5-codex*`. Current Codex docs use GPT-5.5 and GPT-5.4
- * model strings, so the UI exposes those directly and legacy persisted IDs
- * resolve forward to GPT-5.5.
+ * `gpt-5` and `gpt-5-codex*`. Current Codex docs use GPT-5.5, GPT-5.4,
+ * and GPT-5.3 Codex Spark model strings, so the UI exposes those directly
+ * and legacy persisted IDs resolve forward to GPT-5.5.
  */
 export const CODEX_DEFAULT_MODEL_ID = "gpt-5.5";
 export const CODEX_FALLBACK_MODEL_ID = "gpt-5.4";
+export const CODEX_SPARK_MODEL_ID = "gpt-5.3-codex-spark";
 
 export const CODEX_STATIC_MODELS: ReadonlyArray<{ id: string; label: string }> = [
   { id: CODEX_DEFAULT_MODEL_ID, label: "GPT-5.5" },
   { id: CODEX_FALLBACK_MODEL_ID, label: "GPT-5.4" },
+  { id: CODEX_SPARK_MODEL_ID, label: "GPT-5.3-Codex-Spark" },
 ];
 
 /**
@@ -28,6 +30,7 @@ export const CODEX_STATIC_MODELS: ReadonlyArray<{ id: string; label: string }> =
 const CODEX_MODEL_ALIAS_MAP: Record<string, string> = {
   [CODEX_DEFAULT_MODEL_ID]: CODEX_DEFAULT_MODEL_ID,
   [CODEX_FALLBACK_MODEL_ID]: CODEX_FALLBACK_MODEL_ID,
+  [CODEX_SPARK_MODEL_ID]: CODEX_SPARK_MODEL_ID,
   codex: CODEX_DEFAULT_MODEL_ID,
   default: CODEX_DEFAULT_MODEL_ID,
   fast: CODEX_DEFAULT_MODEL_ID,

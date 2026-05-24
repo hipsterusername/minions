@@ -1,4 +1,5 @@
-import type { CanvasNode, CanvasTransform } from "./types.ts";
+import type { CanvasNode, CanvasTransform, ThinkingConfig } from "./types.ts";
+import type { GraphDocument } from "./graph.ts";
 
 const BASE = "/api";
 
@@ -56,10 +57,22 @@ export interface ProjectSettings {
   defaultModel?: string;
   defaultLeaderHarness?: string;
   defaultLeaderModel?: string;
+  defaultLeaderThinkingConfig?: ThinkingConfig;
   defaultMinionHarness?: string;
   defaultMinionModel?: string;
+  defaultMinionThinkingConfig?: ThinkingConfig;
   defaultPermissionMode?: string;
   defaultWorktreeIsolation?: boolean;
+  dashboardLeaderActionPrompts?: {
+    improve?: string;
+    execute?: string;
+    analyze?: string;
+  };
+  dashboardLeaderActionNames?: {
+    improve?: string;
+    execute?: string;
+    analyze?: string;
+  };
   [key: string]: unknown;
 }
 
@@ -71,6 +84,7 @@ export interface ProjectWithNodes {
   createdAt: string;
   updatedAt: string;
   nodes: CanvasNode[];
+  graph?: GraphDocument;
   context?: ProjectContext;
   settings?: ProjectSettings;
   skills?: import("./skills/types.ts").SkillTemplate[];
@@ -139,7 +153,7 @@ export function deleteProject(id: string): Promise<unknown> {
 
 export function saveProjectState(
   id: string,
-  state: { transform: CanvasTransform; nodes: CanvasNode[] },
+  state: { transform: CanvasTransform; nodes: CanvasNode[]; graph?: GraphDocument },
 ): Promise<unknown> {
   return apiFetch(`/projects/${id}/state`, {
     method: "PUT",

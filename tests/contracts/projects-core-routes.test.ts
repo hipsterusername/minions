@@ -41,8 +41,6 @@ import {
   vi,
 } from "vitest";
 import express, { Router } from "express";
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -68,6 +66,7 @@ import {
   registerProjectPath,
   unregisterProjectPath,
 } from "../../server/path-guard.ts";
+import { createExpressFetch } from "../harness/in-process-http.ts";
 
 function encodePath(p: string): string {
   return Buffer.from(p).toString("base64url");
@@ -82,7 +81,7 @@ function buildApp(): express.Express {
   return app;
 }
 
-let server: Server;
+let fetch: typeof globalThis.fetch;
 let baseUrl: string;
 let parentDir: string; // ~/.tmp/projects-core-routes-XXXX
 
@@ -94,19 +93,11 @@ beforeAll(async () => {
   const tmpBase = path.join(os.homedir(), ".tmp");
   fs.mkdirSync(tmpBase, { recursive: true });
   parentDir = fs.mkdtempSync(path.join(tmpBase, "projects-core-routes-"));
-  server = createServer(buildApp());
-  baseUrl = await new Promise<string>((resolve) => {
-    server.listen(0, () => {
-      const { port } = server.address() as AddressInfo;
-      resolve(`http://localhost:${port}`);
-    });
-  });
+  baseUrl = "http://in-process.local";
+  fetch = createExpressFetch(buildApp(), baseUrl);
 });
 
 afterAll(async () => {
-  await new Promise<void>((resolve, reject) =>
-    server.close((err) => (err ? reject(err) : resolve())),
-  );
   // Wipe the entire fake home — including the recent-projects.json
   // entries this suite appended — so successive runs start clean.
   fs.rmSync(FAKE_HOME, { recursive: true, force: true });
@@ -280,14 +271,102 @@ describe("PUT /:encodedPath/state — bulk save", () => {
             data: { text: "world" },
           },
         ],
+        graph: {
+          edges: [
+            {
+              id: "e1",
+              sourceNodeId: "n1",
+              sourcePortId: "context-out",
+              targetNodeId: "n2",
+              targetPortId: "context-in",
+              protocol: "context",
+            },
+          ],
+        },
       }),
     });
     expect(stateRes.status).toBe(200);
 
     const getRes = await fetch(`${baseUrl}/${encoded}`);
-    const body = (await getRes.json()) as { nodes: Array<{ id: string; data: unknown }> };
+    const body = (await getRes.json()) as {
+      nodes: Array<{ id: string; data: unknown }>;
+      graph: { edges: Array<{ id: string; sourceNodeId: string; targetNodeId: string }> };
+    };
     expect(body.nodes.map((n) => n.id)).toEqual(["n1", "n2"]);
     expect(body.nodes[0]!.data).toEqual({ text: "hello" });
+    expect(body.graph.edges).toEqual([
+      expect.objectContaining({
+        id: "e1",
+        sourceNodeId: "n1",
+        targetNodeId: "n2",
+      }),
+    ]);
+  });
+
+  it("a second bulk save replaces edges — does not append", async () => {
+    await fetch(`${baseUrl}/open`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: project }),
+    });
+
+    const nodes = [
+      { id: "a", type: "x", position: { x: 0, y: 0 }, size: { width: 1, height: 1 }, data: {} },
+      { id: "b", type: "x", position: { x: 0, y: 0 }, size: { width: 1, height: 1 }, data: {} },
+      { id: "c", type: "x", position: { x: 0, y: 0 }, size: { width: 1, height: 1 }, data: {} },
+    ];
+
+    await fetch(`${baseUrl}/${encoded}/state`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        nodes,
+        graph: {
+          edges: [
+            {
+              id: "e1",
+              sourceNodeId: "a",
+              sourcePortId: "out",
+              targetNodeId: "b",
+              targetPortId: "in",
+              protocol: "context",
+            },
+            {
+              id: "e2",
+              sourceNodeId: "b",
+              sourcePortId: "out",
+              targetNodeId: "c",
+              targetPortId: "in",
+              protocol: "context",
+            },
+          ],
+        },
+      }),
+    });
+
+    await fetch(`${baseUrl}/${encoded}/state`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        nodes,
+        graph: {
+          edges: [
+            {
+              id: "e3",
+              sourceNodeId: "a",
+              sourcePortId: "out",
+              targetNodeId: "c",
+              targetPortId: "in",
+              protocol: "context",
+            },
+          ],
+        },
+      }),
+    });
+
+    const getRes = await fetch(`${baseUrl}/${encoded}`);
+    const body = (await getRes.json()) as { graph: { edges: Array<{ id: string }> } };
+    expect(body.graph.edges.map((e) => e.id)).toEqual(["e3"]);
   });
 
   it("a second bulk save replaces — does not append", async () => {

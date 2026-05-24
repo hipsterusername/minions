@@ -7,6 +7,7 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { buildCodexInput, writeCodexAttachments } from "./attachments.ts";
@@ -23,10 +24,8 @@ const PNG_1X1 =
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-let counter = 0;
-
 function uniqueKey(): string {
-  return `test-att-${Date.now()}-${++counter}`;
+  return `test-att-${randomUUID()}`;
 }
 
 // Collect all scratch handles so afterEach can dispose them even on failure.

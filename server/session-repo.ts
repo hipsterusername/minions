@@ -7,8 +7,9 @@
  */
 
 import type Database from "better-sqlite3";
-import type { TaskRecord } from "./task-tools.ts";
+import type { ApprovalState, TaskRecord } from "./task-tools.ts";
 import type { RenderState } from "./render-tools.ts";
+import type { ReasoningMapState } from "./reasoning-map-tools.ts";
 
 // ── Row types ────────────────────────────────────────────
 
@@ -28,6 +29,12 @@ export interface SessionRow {
    */
   session_id: string | null;
   worktree_isolation: number;
+  worktree_path: string | null;
+  worktree_branch: string | null;
+  worktree_project_path: string | null;
+  worktree_created_at: number | null;
+  worktree_lifecycle: string | null;
+  approval_json: string | null;
   total_cost: number;
   turns: number;
   /**
@@ -53,11 +60,15 @@ export function upsertSession(db: Database.Database, row: SessionRow): void {
   const stmt = db.prepare(`
     INSERT INTO sessions (
       session_key, project_id, node_id, status, cwd, model, role,
-      task_name, session_id, worktree_isolation, total_cost, turns,
-      harness_name, created_at, updated_at
+      task_name, session_id, worktree_isolation, worktree_path,
+      worktree_branch, worktree_project_path, worktree_created_at,
+      worktree_lifecycle, approval_json, total_cost, turns, harness_name,
+      created_at, updated_at
     ) VALUES (
       @session_key, @project_id, @node_id, @status, @cwd, @model, @role,
-      @task_name, @session_id, @worktree_isolation, @total_cost, @turns,
+      @task_name, @session_id, @worktree_isolation, @worktree_path,
+      @worktree_branch, @worktree_project_path, @worktree_created_at,
+      @worktree_lifecycle, @approval_json, @total_cost, @turns,
       @harness_name, @created_at, @updated_at
     )
     ON CONFLICT(session_key) DO UPDATE SET
@@ -70,6 +81,12 @@ export function upsertSession(db: Database.Database, row: SessionRow): void {
       task_name = excluded.task_name,
       session_id = excluded.session_id,
       worktree_isolation = excluded.worktree_isolation,
+      worktree_path = excluded.worktree_path,
+      worktree_branch = excluded.worktree_branch,
+      worktree_project_path = excluded.worktree_project_path,
+      worktree_created_at = excluded.worktree_created_at,
+      worktree_lifecycle = excluded.worktree_lifecycle,
+      approval_json = excluded.approval_json,
       total_cost = excluded.total_cost,
       turns = excluded.turns,
       harness_name = excluded.harness_name,
@@ -96,6 +113,16 @@ export function deleteSession(
   sessionKey: string,
 ): void {
   db.prepare("DELETE FROM sessions WHERE session_key = ?").run(sessionKey);
+}
+
+export function updateSessionApproval(
+  db: Database.Database,
+  sessionKey: string,
+  approval: ApprovalState | null,
+): void {
+  db.prepare(
+    "UPDATE sessions SET approval_json = ?, updated_at = ? WHERE session_key = ?",
+  ).run(approval ? JSON.stringify(approval) : null, new Date().toISOString(), sessionKey);
 }
 
 // ── Task records ─────────────────────────────────────────
@@ -223,6 +250,39 @@ export function deleteRenderState(
   sessionKey: string,
 ): void {
   db.prepare("DELETE FROM render_state WHERE session_key = ?").run(sessionKey);
+}
+
+// ── Reasoning map state ─────────────────────────────────
+
+export function upsertReasoningMapState(
+  db: Database.Database,
+  sessionKey: string,
+  state: ReasoningMapState,
+): void {
+  db.prepare(`
+    INSERT INTO reasoning_map_state (session_key, state_json, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(session_key) DO UPDATE SET
+      state_json = excluded.state_json,
+      updated_at = excluded.updated_at
+  `).run(sessionKey, JSON.stringify(state), new Date().toISOString());
+}
+
+export function getReasoningMapState(
+  db: Database.Database,
+  sessionKey: string,
+): ReasoningMapState | null {
+  const row = db.prepare(
+    "SELECT state_json FROM reasoning_map_state WHERE session_key = ?",
+  ).get(sessionKey) as { state_json: string } | undefined;
+  return row ? JSON.parse(row.state_json) as ReasoningMapState : null;
+}
+
+export function deleteReasoningMapState(
+  db: Database.Database,
+  sessionKey: string,
+): void {
+  db.prepare("DELETE FROM reasoning_map_state WHERE session_key = ?").run(sessionKey);
 }
 
 // ── Event log ────────────────────────────────────────────

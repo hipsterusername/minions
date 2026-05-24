@@ -118,6 +118,9 @@ describe("Phase B — minion harness inheritance", () => {
       deps,
     );
 
+    if (!ctx.startMinionSession) {
+      throw new Error("expected leader context to expose startMinionSession");
+    }
     ctx.startMinionSession({
       sessionKey: "minion-1",
       prompt: "do",
@@ -153,6 +156,9 @@ describe("Phase B — minion harness inheritance", () => {
       deps,
     );
 
+    if (!ctx.startMinionSession) {
+      throw new Error("expected leader context to expose startMinionSession");
+    }
     ctx.startMinionSession({
       sessionKey: "minion-claude",
       prompt: "do",

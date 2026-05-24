@@ -70,6 +70,11 @@ export default defineConfig({
         test: {
           name: "dom",
           environment: "jsdom",
+          environmentOptions: {
+            jsdom: {
+              url: "http://localhost/",
+            },
+          },
           setupFiles: ["./tests/setup-dom.ts"],
           include: [
             "src/**/*.test.tsx",

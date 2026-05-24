@@ -52,6 +52,8 @@ function makePersisted(
     taskName: "Old work",
     sessionId: "sdk-uuid-1",
     worktreeIsolation: false,
+    worktree: null,
+    approval: null,
     totalCost: 0.1,
     turns: 1,
     harnessName: "claude",
@@ -80,6 +82,60 @@ describe("SessionRegistry.activeCount", () => {
       map.set(key, h);
     }
     expect(r.activeCount()).toBe(4);
+  });
+});
+
+describe("SessionRegistry.getSessionRuntime", () => {
+  it("returns live host metadata and last activity details", () => {
+    const r = new SessionRegistry();
+    const map = (r as unknown as { map: Map<string, SessionHost> }).map;
+    const h = new SessionHost("minion-1", "/tmp/work");
+    h.status = "running";
+    h.role = "minion";
+    h.sessionId = "sdk-1";
+    h.model = "sonnet";
+    h.harnessName = "claude";
+    h.totalCost = 0.5;
+    h.turns = 3;
+    h.eventStream = (async function* () {})();
+    h.eventBuffer = [
+      {
+        type: "session_status",
+        sessionKey: "minion-1",
+        status: "running",
+        timestamp: 1000,
+      },
+      {
+        type: "sdk_event",
+        sessionKey: "minion-1",
+        event: { kind: "tool_progress", id: "t", name: "Bash", elapsedSeconds: 1 },
+        timestamp: Date.now(),
+      },
+    ];
+    map.set("minion-1", h);
+
+    const runtime = r.getSessionRuntime("minion-1");
+    expect(runtime).toMatchObject({
+      sessionKey: "minion-1",
+      sessionId: "sdk-1",
+      status: "running",
+      role: "minion",
+      cwd: "/tmp/work",
+      model: "sonnet",
+      harness: "claude",
+      totalCost: 0.5,
+      turns: 3,
+      isLive: true,
+      lastEventType: "sdk_event",
+      lastSdkEventKind: "tool_progress",
+      lastError: null,
+    });
+    expect(runtime?.lastActivityAgeMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("returns null for unknown sessions", () => {
+    const r = new SessionRegistry();
+    expect(r.getSessionRuntime("missing")).toBeNull();
   });
 });
 
@@ -120,6 +176,36 @@ describe("SessionRegistry.hydrateFromDb — sessionId round-trip", () => {
     r.hydrateFromDb();
     expect(r.size).toBe(10);
     expect(r.activeCount()).toBe(0);
+  });
+
+  it("hydrates active worktree metadata and approval state back onto the host", () => {
+    persistSession(makePersisted({
+      id: "leader-wt",
+      worktreeIsolation: true,
+      worktree: {
+        path: "/tmp/project/.canvas-worktrees/leader-wt",
+        branch: "canvas/leader-wt",
+        leaderSessionKey: "leader-wt",
+        createdAt: 123,
+        projectPath: "/tmp/project",
+        lifecycle: "active",
+      },
+      approval: {
+        requested: true,
+        requestedAt: 456,
+        summary: "ready",
+        diff: null,
+      },
+    }));
+
+    const r = new SessionRegistry();
+    r.hydrateFromDb();
+
+    const host = r.get("leader-wt");
+    expect(host?.worktree?.path).toBe("/tmp/project/.canvas-worktrees/leader-wt");
+    expect(host?.worktree?.projectPath).toBe("/tmp/project");
+    expect(host?.cwd).toBe("/tmp/project/.canvas-worktrees/leader-wt");
+    expect(host?.taskState?.approval?.summary).toBe("ready");
   });
 
   it("preserves null sessionId for pre-migration rows", () => {

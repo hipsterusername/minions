@@ -29,7 +29,7 @@ export function flattenRenderStateToText(state: RenderState): string {
 
   const parts: string[] = [];
   if (layout.title) parts.push(`# ${layout.title}`);
-  for (const c of components) parts.push(formatComponent(c));
+  for (const c of components) parts.push(formatRenderComponentToText(c));
   return parts.join("\n\n");
 }
 
@@ -37,7 +37,7 @@ function heading(title: string | undefined): string {
   return title ? `### ${title}\n` : "";
 }
 
-function formatComponent(c: RenderComponent): string {
+export function formatRenderComponentToText(c: RenderComponent): string {
   switch (c.type) {
     case "metric":
       return formatMetric(c);
@@ -76,9 +76,9 @@ function formatComponent(c: RenderComponent): string {
     case "chart":
       return formatChart(c);
     case "section":
-      return formatSection(c, formatComponent);
+      return formatSection(c, formatRenderComponentToText);
     case "tabs":
-      return formatTabs(c, formatComponent);
+      return formatTabs(c, formatRenderComponentToText);
     case "image":
       return formatImage(c);
     case "file-preview":

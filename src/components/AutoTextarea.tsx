@@ -4,9 +4,15 @@ interface AutoTextareaProps {
   value: string;
   onChange: (value: string) => void;
   onKeyDown?: (e: React.KeyboardEvent) => void;
+  onFocus?: (e: React.FocusEvent<HTMLTextAreaElement>) => void;
+  onBlur?: (e: React.FocusEvent<HTMLTextAreaElement>) => void;
   placeholder?: string;
   maxRows?: number;
   disabled?: boolean;
+  autoFocus?: boolean;
+  textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
+  ariaLabel?: string;
+  testId?: string;
   style?: React.CSSProperties;
 }
 
@@ -18,12 +24,28 @@ export function AutoTextarea({
   value,
   onChange,
   onKeyDown,
+  onFocus,
+  onBlur,
   placeholder,
   maxRows = 8,
   disabled,
+  autoFocus,
+  textareaRef,
+  ariaLabel,
+  testId,
   style,
 }: AutoTextareaProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
+
+  const setRef = useCallback(
+    (el: HTMLTextAreaElement | null) => {
+      ref.current = el;
+      if (textareaRef) {
+        textareaRef.current = el;
+      }
+    },
+    [textareaRef],
+  );
 
   const resize = useCallback(() => {
     const el = ref.current;
@@ -38,14 +60,22 @@ export function AutoTextarea({
     resize();
   }, [value, resize]);
 
+  useEffect(() => {
+    if (autoFocus) {
+      ref.current?.focus();
+    }
+  }, [autoFocus]);
+
   return (
     <div style={{ position: "relative", flex: 1 }}>
       <textarea
-        ref={ref}
+        ref={setRef}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
         onMouseDown={(e) => e.stopPropagation()}
+        aria-label={ariaLabel}
+        data-testid={testId}
         placeholder={placeholder}
         disabled={disabled}
         rows={1}
@@ -68,9 +98,11 @@ export function AutoTextarea({
         }}
         onFocus={(e) => {
           e.currentTarget.style.borderColor = "var(--border-hover)";
+          onFocus?.(e);
         }}
         onBlur={(e) => {
           e.currentTarget.style.borderColor = "var(--border-default)";
+          onBlur?.(e);
         }}
       />
       {/* Hint for multiline */}

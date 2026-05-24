@@ -76,6 +76,7 @@ function makeCtx(opts?: { worktreeInfo?: WorktreeInfo | null }) {
     minionSystemPrompt: "",
     taskState: { tasks: new Map(), pendingWait: null, approval: null },
     scheduleWaitContinue: () => {},
+    onStateChange: vi.fn(),
     sent,
     worktreeInfo,
   };
@@ -103,6 +104,7 @@ describe("request_approval", () => {
       diff: fakeDiff,
     });
     expect(typeof ctx.taskState.approval!.requestedAt).toBe("number");
+    expect(ctx.onStateChange).toHaveBeenCalledWith(ctx.taskState);
 
     expect(ctx.sent).toHaveLength(1);
     const env = ctx.sent[0]!;

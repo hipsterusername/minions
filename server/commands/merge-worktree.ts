@@ -21,6 +21,7 @@ export const mergeWorktree: CommandHandler = (ctx, cmd, ws) => {
       if (result.success) {
         host.worktree = null;
         host.cwd = projectPath;
+        host.persist();
         ctx.bus.emitToSession(cmd.sessionKey!, {
           type: "worktree_merged",
           sessionKey: cmd.sessionKey,

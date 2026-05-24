@@ -56,8 +56,8 @@ That's it. No environment variables, no database setup, no Docker — SQLite han
 1. Click the **+** button on the canvas toolbar and add a **Leader** node
 2. Give the Leader a complex task — it plans the work and spawns **Minion** agents
 3. Minion nodes appear on the canvas, automatically wired to the Leader
-4. Each Minion works independently in its own git worktree
-5. The Leader tracks progress, integrates results, and reports back
+4. Minions run inside the Leader's isolated worktree, so parallel tasks should own disjoint files
+5. The Leader tracks progress, integrates results, and routes the shared worktree through approval
 
 > Minion nodes are created and wired automatically — you never need to add or connect them manually.
 

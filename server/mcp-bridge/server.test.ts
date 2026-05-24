@@ -26,9 +26,15 @@ import { z } from "zod/v4";
 import type { WebSocketServer } from "ws";
 import { createBus } from "../bus.ts";
 import { createRenderToolsForLeader } from "../render-tools.ts";
-import { createMemoizedAttempt, startBridgeServer, type McpBridgeServer } from "./server.ts";
+import {
+  createMemoizedAttempt,
+  handleBridgeRequestForTests,
+  type McpBridgeServer,
+} from "./server.ts";
+import { BridgeRegistry } from "./registry.ts";
 import type { McpBridgeRegistration } from "./registry.ts";
 import type { NormalizedToolDef } from "../harness/types.ts";
+import { createNodeHandlerFetch } from "../../tests/harness/in-process-http.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -48,6 +54,28 @@ interface JsonRpcEnvelope {
   id: number | string | null;
   result?: unknown;
   error?: { code: number; message: string };
+}
+
+let fetch: typeof globalThis.fetch;
+
+interface InProcessBridgeServer extends McpBridgeServer {
+  readonly fetch: typeof globalThis.fetch;
+}
+
+function startInProcessBridgeServer(): InProcessBridgeServer {
+  const registry = new BridgeRegistry();
+  const url = "http://in-process-mcp.local";
+  registry.setUrlBuilder((sessionKey, group) => `${url}/mcp/${sessionKey}/${group}`);
+  return {
+    url,
+    fetch: createNodeHandlerFetch((req, res) => {
+      return handleBridgeRequestForTests(req as never, res as never, registry);
+    }, url),
+    register: (opts) => registry.register(opts),
+    dispose: async () => {
+      registry.clear();
+    },
+  };
 }
 
 async function postJsonRpc(
@@ -79,11 +107,12 @@ async function postJsonRpc(
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 describe("MCP bridge HTTP server", () => {
-  let bridge: McpBridgeServer;
+  let bridge: InProcessBridgeServer;
   let registration: McpBridgeRegistration;
 
   beforeEach(async () => {
-    bridge = await startBridgeServer();
+    bridge = startInProcessBridgeServer();
+    fetch = bridge.fetch;
     registration = bridge.register({
       sessionKey: "session-a",
       groups: {

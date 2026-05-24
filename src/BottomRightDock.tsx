@@ -1,6 +1,6 @@
 /**
  * BottomRightDock — single source of truth for the bottom-right cluster
- * of floating tools (Sessions, MCP, Skills, Routines).
+ * of floating tools (Sessions, Map, MCP, Skills, Routines).
  *
  * Replaces the previous setup where each panel managed its own
  * collapsed/expanded state and rendered its own pill. That produced
@@ -29,10 +29,11 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { ViewportOverlay } from "./components/ViewportOverlay.tsx";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export type DockPanelId = "sessions" | "mcp" | "skills";
+export type DockPanelId = "sessions" | "map" | "mcp" | "skills";
 
 export interface DockBadge {
   /** Numeric badge shown next to the icon. Zero or undefined hides it. */
@@ -187,28 +188,30 @@ export function DockPanel({
   if (activePanel !== id) return null;
 
   return (
-    <div
-      ref={ref}
-      data-dock-panel={id}
-      style={{
-        position: "absolute",
-        bottom: 64,
-        right: 16,
-        zIndex: 100,
-        width,
-        maxHeight: "calc(100% - 96px)",
-        background: "var(--bg-secondary)",
-        border: "1px solid var(--border-default)",
-        borderRadius: 10,
-        boxShadow: "var(--shadow-lg)",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-      }}
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      {children}
-    </div>
+    <ViewportOverlay>
+      <div
+        ref={ref}
+        data-dock-panel={id}
+        style={{
+          position: "absolute",
+          bottom: 64,
+          right: 16,
+          width,
+          maxHeight: "calc(100% - 96px)",
+          background: "var(--bg-secondary)",
+          border: "1px solid var(--border-default)",
+          borderRadius: 10,
+          boxShadow: "var(--shadow-lg)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          pointerEvents: "auto",
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        {children}
+      </div>
+    </ViewportOverlay>
   );
 }
 
@@ -434,6 +437,11 @@ export function DockBar({ onOpenRoutines }: DockBarProps) {
         icon: <SessionsIcon />,
       },
       {
+        id: "map",
+        label: "Map",
+        icon: <MapIcon />,
+      },
+      {
         id: "mcp",
         label: "MCP",
         icon: <McpIcon />,
@@ -456,51 +464,53 @@ export function DockBar({ onOpenRoutines }: DockBarProps) {
   }, [onOpenRoutines]);
 
   return (
-    <div
-      data-dock-bar=""
-      style={{
-        position: "absolute",
-        bottom: 16,
-        right: 16,
-        zIndex: 100,
-        display: "flex",
-        alignItems: "center",
-        gap: 2,
-        padding: 4,
-        background: "var(--bg-secondary)",
-        border: "1px solid var(--border-default)",
-        borderRadius: 10,
-        boxShadow: "var(--shadow-md)",
-      }}
-    >
-      {buttons.map((b, i) => (
-        <span key={b.id} style={{ display: "flex", alignItems: "center" }}>
-          {i > 0 && (
-            <span
-              aria-hidden="true"
-              style={{
-                width: 1,
-                height: 18,
-                background: "var(--border-default)",
-                margin: "0 2px",
+    <ViewportOverlay>
+      <div
+        data-dock-bar=""
+        style={{
+          position: "absolute",
+          bottom: 16,
+          right: 16,
+          display: "flex",
+          alignItems: "center",
+          gap: 2,
+          padding: 4,
+          background: "var(--bg-secondary)",
+          border: "1px solid var(--border-default)",
+          borderRadius: 10,
+          boxShadow: "var(--shadow-md)",
+          pointerEvents: "auto",
+        }}
+      >
+        {buttons.map((b, i) => (
+          <span key={b.id} style={{ display: "flex", alignItems: "center" }}>
+            {i > 0 && (
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 1,
+                  height: 18,
+                  background: "var(--border-default)",
+                  margin: "0 2px",
+                }}
+              />
+            )}
+            <DockPill
+              config={b}
+              active={b.id !== "routines" && activePanel === b.id}
+              badge={b.id === "routines" ? undefined : badges[b.id]}
+              onClick={() => {
+                if (b.onAction) {
+                  b.onAction();
+                  return;
+                }
+                togglePanel(b.id as DockPanelId);
               }}
             />
-          )}
-          <DockPill
-            config={b}
-            active={b.id !== "routines" && activePanel === b.id}
-            badge={b.id === "routines" ? undefined : badges[b.id]}
-            onClick={() => {
-              if (b.onAction) {
-                b.onAction();
-                return;
-              }
-              togglePanel(b.id as DockPanelId);
-            }}
-          />
-        </span>
-      ))}
-    </div>
+          </span>
+        ))}
+      </div>
+    </ViewportOverlay>
   );
 }
 
@@ -523,6 +533,25 @@ function SessionsIcon() {
       <line x1="2" y1="6" x2="14" y2="6" />
       <circle cx="4" cy="4.5" r="0.4" fill="currentColor" stroke="none" />
       <circle cx="5.5" cy="4.5" r="0.4" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function MapIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="2" y="3" width="12" height="10" rx="1.5" />
+      <rect x="5" y="6" width="4" height="3" rx="0.8" />
+      <path d="M10.5 5.5h1.5M10.5 8h1.5M4 11h8" />
     </svg>
   );
 }

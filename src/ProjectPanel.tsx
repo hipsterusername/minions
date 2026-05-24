@@ -27,8 +27,16 @@ interface ProjectPanelProps {
 
 // ── Helpers ──────────────────────────────────────────────
 
+type FilePathMessage = {
+  role: string;
+  content: string;
+  toolName?: string | undefined;
+};
+
+const EMPTY_MESSAGES: ReadonlyArray<FilePathMessage> = [];
+
 /** Extract file paths mentioned in tool messages */
-function extractFilePaths(messages: Array<{ role: string; content: string; toolName?: string | undefined }>): string[] {
+function extractFilePaths(messages: ReadonlyArray<FilePathMessage>): string[] {
   const paths = new Set<string>();
   for (const msg of messages) {
     if (msg.toolName === "Read" || msg.toolName === "Write" || msg.toolName === "Edit") {
@@ -45,6 +53,38 @@ function extractFilePaths(messages: Array<{ role: string; content: string; toolN
     }
   }
   return [...paths].slice(-8); // last 8 files
+}
+
+export function createFilePathExtractor(): (messages: ReadonlyArray<FilePathMessage>) => string[] {
+  const cache = new WeakMap<ReadonlyArray<FilePathMessage>, string[]>();
+  return (messages) => {
+    const cached = cache.get(messages);
+    if (cached) return cached;
+    const extracted = extractFilePaths(messages);
+    cache.set(messages, extracted);
+    return extracted;
+  };
+}
+
+function sameStringArray(a: readonly string[], b: readonly string[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  return a.every((value, index) => value === b[index]);
+}
+
+function sameLeaderActivities(a: readonly LeaderActivity[], b: readonly LeaderActivity[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((leader, index) => {
+    const next = b[index];
+    return (
+      next !== undefined &&
+      leader.id === next.id &&
+      leader.name === next.name &&
+      leader.colorIndex === next.colorIndex &&
+      leader.status === next.status &&
+      sameStringArray(leader.files, next.files)
+    );
+  });
 }
 
 function shortenPath(p: string, maxLen = 36): string {
@@ -141,6 +181,8 @@ export function ProjectPanel({
     setEditBuffer("");
   }, []);
 
+  const extractFilePathsCachedRef = useRef(createFilePathExtractor());
+
   // ── Derive agent data from canvas nodes ──
 
   const agents = useMemo(() => {
@@ -160,7 +202,7 @@ export function ProjectPanel({
       if (node.type === "leader") {
         const d = node.data as LeaderData;
         if (d.status === "disconnected") continue;
-        const files = extractFilePaths(d.messages ?? []);
+        const files = extractFilePathsCachedRef.current(d.messages ?? EMPTY_MESSAGES);
         result.push({
           id: node.id,
           type: "leader",
@@ -176,7 +218,7 @@ export function ProjectPanel({
         const d = node.data as MinionData;
         if (d.status === "disconnected" || d.status === "waiting") continue;
         const activeTask = d.taskQueue?.[d.activeTaskIndex];
-        const files = extractFilePaths(d.messages ?? []);
+        const files = extractFilePathsCachedRef.current(d.messages ?? EMPTY_MESSAGES);
         result.push({
           id: node.id,
           type: "minion",
@@ -749,6 +791,7 @@ function DashboardView({
   const [filterActive, setFilterActive] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const fetchedRef = useRef(false);
+  const leaderActivitiesRef = useRef<LeaderActivity[] | null>(null);
 
   const refreshTree = useCallback(async () => {
     try {
@@ -769,7 +812,7 @@ function DashboardView({
 
   // Build leader activity list for the tree
   const leaderActivities: LeaderActivity[] = useMemo(() => {
-    return agents
+    const next = agents
       .filter(a => a.type === "leader")
       .map((a, i) => ({
         id: a.id,
@@ -782,6 +825,12 @@ function DashboardView({
         status: a.status as LeaderActivity["status"],
         files: a.files,
       }));
+    const previous = leaderActivitiesRef.current;
+    if (previous && sameLeaderActivities(previous, next)) {
+      return previous;
+    }
+    leaderActivitiesRef.current = next;
+    return next;
   }, [agents]);
 
   if (agents.length === 0 && !tree) {

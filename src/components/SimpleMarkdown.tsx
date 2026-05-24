@@ -4,7 +4,7 @@
  * Does NOT use dangerouslySetInnerHTML — returns React elements.
  */
 
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import type { ReactElement } from "react";
 
 function escapeHtml(s: string): string {
@@ -121,12 +121,10 @@ function parseBlocks(text: string): Block[] {
   return blocks;
 }
 
-export function SimpleMarkdown({ text }: { text: string }) {
-  const blocks = useMemo(() => parseBlocks(text), [text]);
-
-  return (
-    <>
-      {blocks.map((block, i) => {
+export const SimpleMarkdown = memo(function SimpleMarkdown({ text }: { text: string }) {
+  const renderedBlocks = useMemo(
+    () =>
+      parseBlocks(text).map((block, i) => {
         switch (block.type) {
           case "heading":
             return (
@@ -200,7 +198,9 @@ export function SimpleMarkdown({ text }: { text: string }) {
               </div>
             );
         }
-      })}
-    </>
+      }),
+    [text],
   );
-}
+
+  return <>{renderedBlocks}</>;
+});

@@ -94,13 +94,44 @@ describe("LeaderLoadingScreen", () => {
       ).toBe(true);
     });
 
-    it("activates one-shot CSS via the .ll-once wrapper", () => {
+    it("activates one-shot CSS on the SVG root", () => {
       render(<LeaderLoadingScreen oneShot onComplete={() => {}} />);
-      const wrapper = screen
+      const svg = screen
         .getByTestId("leader-loading")
-        .querySelector(".ll-once");
-      // Wrapper present → descendant selectors override the loop.
-      expect(wrapper).not.toBeNull();
+        .querySelector("svg.ll-once");
+      // Root SVG class keeps the descendant selectors inside the
+      // injected SVG tree so the one-shot final frame wins reliably.
+      expect(svg).not.toBeNull();
+    });
+
+    it("removes infinite animation declarations from the rendered one-shot SVG", () => {
+      render(<LeaderLoadingScreen oneShot onComplete={() => {}} />);
+      const svg = screen
+        .getByTestId("leader-loading")
+        .querySelector("svg.ll-once");
+      const svgStyle = svg?.querySelector("style")?.textContent ?? "";
+
+      expect(svgStyle).toContain("animation: ll-saccade-once");
+      expect(svgStyle).toContain("animation: ll-crown-once");
+      expect(svgStyle).not.toContain("animation: ll-saccade 4s");
+      expect(svgStyle).not.toContain("animation: ll-crown 4s");
+      expect(svgStyle).not.toContain("infinite");
+    });
+
+    it("keeps the same SVG node across parent re-renders", () => {
+      const { rerender } = render(
+        <LeaderLoadingScreen oneShot onComplete={() => {}} />,
+      );
+      const firstSvg = screen
+        .getByTestId("leader-loading")
+        .querySelector("svg.ll-once");
+
+      rerender(<LeaderLoadingScreen oneShot onComplete={() => {}} />);
+
+      const nextSvg = screen
+        .getByTestId("leader-loading")
+        .querySelector("svg.ll-once");
+      expect(nextSvg).toBe(firstSvg);
     });
 
     it("fires onComplete after the animation + 1s hold", () => {

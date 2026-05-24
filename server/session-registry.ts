@@ -21,7 +21,8 @@ import {
 import { hydrateSessionsFromDb } from "./session-persist.ts";
 import { getHarness } from "./harness/index.ts";
 import type { HarnessCapabilities } from "./harness/types.ts";
-import type { TaskManagerState } from "./task-tools.ts";
+import type { RuntimeSessionInfo, TaskManagerState } from "./task-tools.ts";
+import type { WorktreeLifecycle } from "./worktree-types.ts";
 
 /** Compact shape broadcast to clients in `session_list` messages. */
 export interface SessionListItem {
@@ -160,6 +161,43 @@ export class SessionRegistry {
     }
   };
 
+  getSessionRuntime = (sessionKey: string): RuntimeSessionInfo | null => {
+    const host = this.map.get(sessionKey);
+    if (!host) return null;
+
+    const lastEvent = [...host.eventBuffer]
+      .reverse()
+      .find((event) => typeof event.timestamp === "number");
+    const lastActivityAt = lastEvent?.timestamp ?? null;
+    const now = Date.now();
+    const lastSdkEventKind =
+      lastEvent?.type === "sdk_event" && lastEvent.event
+        ? lastEvent.event.kind
+        : null;
+
+    return {
+      sessionKey,
+      sessionId: host.sessionId,
+      status: host.status,
+      role: host.role,
+      cwd: host.cwd,
+      model: host.model,
+      harness: host.harnessName,
+      totalCost: host.totalCost,
+      turns: host.turns,
+      isLive:
+        host.status === "running" &&
+        !host.abortController.signal.aborted &&
+        (host.eventStream !== null || host.runControl !== null),
+      lastActivityAt,
+      lastActivityAgeMs: lastActivityAt === null ? null : now - lastActivityAt,
+      lastEventType: lastEvent?.type ?? null,
+      lastSdkEventKind,
+      lastError: host.lastError,
+      lastErrorFull: host.lastErrorFull,
+    };
+  };
+
   // ── Snapshot helpers ───────────────────────────────
 
   /** Flatten the current registry into the `session_list` broadcast shape. */
@@ -206,7 +244,7 @@ export class SessionRegistry {
   hydrateFromDb(): number {
     try {
       const hydrated = hydrateSessionsFromDb();
-      for (const { row, tasks, render, events } of hydrated) {
+      for (const { row, tasks, render, reasoningMap, events } of hydrated) {
         const host = new SessionHost(
           row.session_key,
           row.cwd ?? process.cwd(),
@@ -224,12 +262,28 @@ export class SessionRegistry {
         // as before this fix.
         host.sessionId = row.session_id;
         host.worktreeIsolation = row.worktree_isolation === 1;
+        if (
+          row.worktree_path &&
+          row.worktree_branch &&
+          row.worktree_project_path
+        ) {
+          host.worktree = {
+            path: row.worktree_path,
+            branch: row.worktree_branch,
+            projectPath: row.worktree_project_path,
+            leaderSessionKey: row.session_key,
+            createdAt: row.worktree_created_at ?? 0,
+            lifecycle: (row.worktree_lifecycle as WorktreeLifecycle | null) ?? "active",
+          };
+          host.cwd = row.worktree_path;
+        }
         // Restore the harness so a resumed session keeps running on the
         // harness it started with. Pre-migration rows return "claude"
         // via the schema default — no behaviour change for old DBs.
         host.harnessName = row.harness_name || "claude";
         host.taskState = tasks;
         host.renderState = render;
+        host.reasoningMapState = reasoningMap;
         // Restore the event buffer in place — using bufferEvent() here
         // would re-persist every event we just loaded.
         host.eventBuffer = events;

@@ -7,6 +7,7 @@
 import { removeWorktree } from "../worktree.ts";
 import { getSessionOrError, sendControlError, sendControlResponse, errToMessage } from "./helpers.ts";
 import type { CommandHandler } from "./types.ts";
+import { persistTaskState } from "../session-persist.ts";
 
 export const discardWorktree: CommandHandler = (ctx, cmd, ws) => {
   const host = getSessionOrError(ctx.registry, cmd.sessionKey, ws);
@@ -22,6 +23,8 @@ export const discardWorktree: CommandHandler = (ctx, cmd, ws) => {
     .then(() => {
       host.worktree = null;
       host.cwd = worktreeProject;
+      host.persist();
+      if (host.taskState) persistTaskState(host.id, host.taskState);
       ctx.bus.emitToSession(cmd.sessionKey!, {
         type: "worktree_removed",
         sessionKey: cmd.sessionKey,

@@ -10,9 +10,13 @@ import { createRenderToolsForLeader } from "../render-tools.ts";
 import { MINION_SYSTEM_PROMPT } from "./minion.ts";
 import {
   persistTaskState,
+  persistReasoningMapState,
   persistRenderState,
 } from "../session-persist.ts";
 import { createStepToolsForSession } from "../routines/step-tools.ts";
+import { createReasoningMapToolsForLeader } from "../reasoning-map-tools.ts";
+import type { RenderComponent } from "../../shared/render-dsl.ts";
+import { elideDefaults } from "../../shared/render-defaults.ts";
 
 // ── System prompt ─────────────────────────────────────────────────────────
 
@@ -55,6 +59,14 @@ You also have orchestration tools:
 - **set_task_name**: Set a short display name for this session
 - **wait_and_continue**: Pause for a duration (5s–30min), then the system auto-resumes you with "Continue"
 - **request_approval**: **REQUIRED when worktree isolation is active.** Submit your changes for user review before they are merged. This triggers the Approve/Discard UI for the user.
+
+You also have Reasoning Graph tools for non-trivial work:
+- **create_reasoning_map**: Start session-scoped reasoning state with an outcome and success signal
+- **apply_reasoning_ops**: Batch add/revise/link reasoning artifacts
+- **validate_reasoning_map**: Check unsupported claims, contradictions, and unresolved risk
+- **challenge_reasoning_node**: Record and resolve a user challenge against a visible node
+- **summarize_reasoning_map**: Produce a compact recovery/completion summary
+- **close_reasoning_map**: Validate and close the graph with a final summary
 
 ## Workflow
 
@@ -163,6 +175,18 @@ Examples:
 - Update status components as tasks progress (pending → running → success/error).
 - Use \`callout\` for findings, \`timeline\` for step history, \`kv\` for metadata, \`checklist\` for tracked work, \`diff\` for before/after evidence, and \`copyable\` for values the user may paste.
 
+## Reasoning Graph
+
+Use a Reasoning Graph when work has meaningful uncertainty, validation cost, branching, user-visible tradeoffs, or decisions worth reviewing. Use the no-graph path for simple lookups, formatting, one-file edits, obvious bug fixes, or cases where graph upkeep would add noise.
+
+Rules:
+- Store only user-legible reasoning artifacts: outcomes, falsifiable hypotheses, evidence, decisions, risks, and challenges. Do not expose private chain-of-thought.
+- Every hypothesis must include \`falsifiedBy\` when created.
+- Validate before major decisions and before closing a graph. Treat validation errors as blockers; surface warnings when they affect the user-visible plan.
+- Material reasoning changes should revise or supersede nodes instead of silently rewriting old claims.
+- User challenges are not direct graph edits. Record them with \`challenge_reasoning_node\`, then resolve by adding evidence, revising, refuting, branching, or asking a clarification.
+- Keep the dashboard focused with Current Path, Unresolved Risk, Decisions, Audit, and Timeline views when a graph is active.
+
 ## ⚠️ MANDATORY: Worktree Isolation & Approval Workflow
 
 **This section applies whenever worktree isolation is active (which is the default for all sessions).** Your changes live in an isolated git branch — NOT in the user's main working tree. Nothing reaches main until the user explicitly approves via the UI.
@@ -238,6 +262,12 @@ const LEADER_MCP_TOOLS = [
   "mcp__render-dashboard__render_patch",
   "mcp__render-dashboard__render_append",
   "mcp__render-dashboard__render_remove",
+  "mcp__reasoning-map__create_reasoning_map",
+  "mcp__reasoning-map__apply_reasoning_ops",
+  "mcp__reasoning-map__validate_reasoning_map",
+  "mcp__reasoning-map__challenge_reasoning_node",
+  "mcp__reasoning-map__summarize_reasoning_map",
+  "mcp__reasoning-map__close_reasoning_map",
 ];
 
 // ── AgentType implementation ──────────────────────────────────────────────
@@ -268,6 +298,7 @@ const leaderAgent: AgentType = {
       projectPath: ctx.worktreeInfo?.projectPath ?? ctx.cwd,
       minionSystemPrompt: MINION_SYSTEM_PROMPT,
       existingTaskState: ctx.existingTaskState,
+      getSessionRuntime: ctx.getSessionRuntime,
       worktreeBranch: ctx.worktreeInfo?.branch ?? null,
       worktreeInfo: ctx.worktreeInfo ?? null,
       worktreeIsolation: ctx.worktreeIsolation,
@@ -285,6 +316,30 @@ const leaderAgent: AgentType = {
       onStateChange: (state) => persistRenderState(leaderSessionKey, state),
     });
 
+    function appendDashboardComponents(components: RenderComponent[]): void {
+      const elided = components.map(elideDefaults);
+      const incomingIds = new Set(elided.map((component) => component.id));
+      renderState.components = [
+        ...renderState.components.filter((component) => !incomingIds.has(component.id)),
+        ...elided,
+      ];
+      ctx.bus.emitToSession(leaderSessionKey, {
+        type: "render_update",
+        leaderSessionKey,
+        action: "append",
+        components: elided,
+      });
+      persistRenderState(leaderSessionKey, renderState);
+    }
+
+    const { toolDefs: reasoningDefs, reasoningMapState } =
+      createReasoningMapToolsForLeader({
+        existingReasoningMapState: ctx.existingReasoningMapState,
+        onStateChange: (state) =>
+          persistReasoningMapState(leaderSessionKey, state),
+        onDashboardUpdate: appendDashboardComponents,
+      });
+
     // When this leader was spawned as a routine step the runner has
     // pre-registered a completion context against its sessionKey; in that
     // case we expose `report_phase_result` so the agent can hand a
@@ -293,6 +348,7 @@ const leaderAgent: AgentType = {
     const toolGroups: Record<string, import("../harness/types.ts").NormalizedToolDef[]> = {
       "task-manager": taskDefs,
       "render-dashboard": renderDefs,
+      "reasoning-map": reasoningDefs,
     };
     let mcpToolNames = LEADER_MCP_TOOLS;
     if (stepTools) {
@@ -305,6 +361,7 @@ const leaderAgent: AgentType = {
       mcpToolNames,
       taskState,
       renderState,
+      reasoningMapState,
     };
   },
 

@@ -31,6 +31,7 @@ import { getAgentType } from "./agents/index.ts";
 import type { WorktreeInfo } from "./worktree.ts";
 import type { RuntimeSessionInfo, TaskManagerState } from "./task-tools.ts";
 import type { RenderState } from "./render-tools.ts";
+import type { ReasoningMapState } from "./reasoning-map-tools.ts";
 import {
   persistEvent as persistEventToDb,
   persistSession as persistSessionToDb,
@@ -181,6 +182,8 @@ export class SessionHost {
   waitTimerId: ReturnType<typeof setTimeout> | null = null;
   /** Current render dashboard state (leader only) — kept in sync by render MCP tools */
   renderState: RenderState | null = null;
+  /** Current Reasoning Graph state (leader only) */
+  reasoningMapState: ReasoningMapState | null = null;
 
   constructor(id: string, cwd: string) {
     this.id = id;
@@ -214,6 +217,8 @@ export class SessionHost {
       taskName: this.taskName,
       sessionId: this.sessionId,
       worktreeIsolation: this.worktreeIsolation,
+      worktree: this.worktree,
+      approval: this.taskState?.approval ?? null,
       totalCost: this.totalCost,
       turns: this.turns,
       harnessName: this.harnessName,
@@ -296,6 +301,7 @@ export class SessionHost {
 
       if (toolResult.taskState) this.taskState = toolResult.taskState;
       if (toolResult.renderState) this.renderState = toolResult.renderState;
+      if (toolResult.reasoningMapState) this.reasoningMapState = toolResult.reasoningMapState;
 
       const harness = getHarness(this.harnessName);
 

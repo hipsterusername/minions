@@ -42,6 +42,22 @@ export function initDb(dbPath?: string): Database.Database {
 
     CREATE INDEX IF NOT EXISTS idx_nodes_project ON nodes(project_id);
 
+    CREATE TABLE IF NOT EXISTS edges (
+      id              TEXT NOT NULL,
+      project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      source_node_id  TEXT NOT NULL,
+      source_port_id  TEXT NOT NULL,
+      target_node_id  TEXT NOT NULL,
+      target_port_id  TEXT NOT NULL,
+      protocol        TEXT NOT NULL,
+      z_index         INTEGER NOT NULL DEFAULT 0,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (id, project_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_edges_project ON edges(project_id);
+
     CREATE TABLE IF NOT EXISTS sessions (
       session_key   TEXT PRIMARY KEY,
       project_id    TEXT,
@@ -53,6 +69,12 @@ export function initDb(dbPath?: string): Database.Database {
       task_name     TEXT,
       session_id    TEXT,
       worktree_isolation INTEGER NOT NULL DEFAULT 0,
+      worktree_path TEXT,
+      worktree_branch TEXT,
+      worktree_project_path TEXT,
+      worktree_created_at INTEGER,
+      worktree_lifecycle TEXT,
+      approval_json TEXT,
       total_cost    REAL NOT NULL DEFAULT 0,
       turns         INTEGER NOT NULL DEFAULT 0,
       harness_name  TEXT NOT NULL DEFAULT 'claude',
@@ -83,6 +105,12 @@ export function initDb(dbPath?: string): Database.Database {
       components    TEXT NOT NULL DEFAULT '[]'
     );
 
+    CREATE TABLE IF NOT EXISTS reasoning_map_state (
+      session_key   TEXT PRIMARY KEY,
+      state_json    TEXT NOT NULL,
+      updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS event_log (
       id             INTEGER PRIMARY KEY AUTOINCREMENT,
       session_key    TEXT NOT NULL,
@@ -111,6 +139,12 @@ export function initDb(dbPath?: string): Database.Database {
   // session_id is lost across restarts, and `send_message` cannot resume —
   // it starts a brand-new conversation with no transcript.
   ensureColumn(db, "sessions", "session_id", "TEXT");
+  ensureColumn(db, "sessions", "worktree_path", "TEXT");
+  ensureColumn(db, "sessions", "worktree_branch", "TEXT");
+  ensureColumn(db, "sessions", "worktree_project_path", "TEXT");
+  ensureColumn(db, "sessions", "worktree_created_at", "INTEGER");
+  ensureColumn(db, "sessions", "worktree_lifecycle", "TEXT");
+  ensureColumn(db, "sessions", "approval_json", "TEXT");
 
   // Phase B (codex-harness-spec) migration: persist the harness name so
   // restored sessions resume on the same harness they started on. Pre-migration

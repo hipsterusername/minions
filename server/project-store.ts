@@ -23,12 +23,45 @@ export interface ProjectSettings {
   defaultModel?: string;
   defaultLeaderHarness?: string;
   defaultLeaderModel?: string;
+  defaultLeaderThinkingConfig?: ThinkingConfig;
   defaultMinionHarness?: string;
   defaultMinionModel?: string;
+  defaultMinionThinkingConfig?: ThinkingConfig;
   defaultPermissionMode?: string;
   defaultWorktreeIsolation?: boolean;
+  dashboardLeaderActionPrompts?: {
+    improve?: string;
+    execute?: string;
+    analyze?: string;
+  };
+  dashboardLeaderActionNames?: {
+    improve?: string;
+    execute?: string;
+    analyze?: string;
+  };
   [key: string]: unknown;
 }
+
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+export type ThinkingDisplay = "summarized" | "omitted";
+
+export interface ThinkingConfig {
+  enabled: boolean;
+  effort: EffortLevel;
+  display: ThinkingDisplay;
+}
+
+const DEFAULT_LEADER_THINKING_CONFIG: ThinkingConfig = {
+  enabled: true,
+  effort: "high",
+  display: "summarized",
+};
+
+const DEFAULT_MINION_THINKING_CONFIG: ThinkingConfig = {
+  enabled: true,
+  effort: "medium",
+  display: "summarized",
+};
 
 // ── Recent projects index ──────────────────────────────
 
@@ -103,10 +136,14 @@ export function initSidecar(projectPath: string): Database.Database {
       defaultModel: "claude-sonnet-4-6",
       defaultLeaderHarness: "claude",
       defaultLeaderModel: "claude-opus-4-7",
+      defaultLeaderThinkingConfig: DEFAULT_LEADER_THINKING_CONFIG,
       defaultMinionHarness: "claude",
       defaultMinionModel: "claude-sonnet-4-6",
+      defaultMinionThinkingConfig: DEFAULT_MINION_THINKING_CONFIG,
       defaultPermissionMode: "auto",
       defaultWorktreeIsolation: false,
+      dashboardLeaderActionNames: defaultDashboardLeaderActionNames(),
+      dashboardLeaderActionPrompts: defaultDashboardLeaderActionPrompts(),
     }, null, 2));
   }
 
@@ -160,10 +197,37 @@ function defaultProjectSettings(): ProjectSettings {
     defaultModel: "claude-sonnet-4-6",
     defaultLeaderHarness: "claude",
     defaultLeaderModel: "claude-opus-4-7",
+    defaultLeaderThinkingConfig: DEFAULT_LEADER_THINKING_CONFIG,
     defaultMinionHarness: "claude",
     defaultMinionModel: "claude-sonnet-4-6",
+    defaultMinionThinkingConfig: DEFAULT_MINION_THINKING_CONFIG,
     defaultPermissionMode: "auto",
     defaultWorktreeIsolation: false,
+    dashboardLeaderActionNames: defaultDashboardLeaderActionNames(),
+    dashboardLeaderActionPrompts: defaultDashboardLeaderActionPrompts(),
+  };
+}
+
+function defaultDashboardLeaderActionNames(): NonNullable<
+  ProjectSettings["dashboardLeaderActionNames"]
+> {
+  return {
+    improve: "Improve",
+    execute: "Execute",
+    analyze: "Analyze",
+  };
+}
+
+function defaultDashboardLeaderActionPrompts(): NonNullable<
+  ProjectSettings["dashboardLeaderActionPrompts"]
+> {
+  return {
+    improve:
+      "Improve the connected dashboard context. Identify the highest-impact changes, then implement or produce the improved result.",
+    execute:
+      "Execute the work implied by the connected dashboard context. Use the dashboard as source context and carry the task through to completion.",
+    analyze:
+      "Analyze the connected dashboard context. Summarize the key findings, risks, and recommended next steps.",
   };
 }
 

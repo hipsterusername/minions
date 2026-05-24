@@ -13,13 +13,18 @@
  * silently change state the UI sees.
  */
 
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
-import { describe, expect, it, vi, beforeAll } from "vitest";
+import { describe, expect, it, vi, beforeAll, afterEach } from "vitest";
 
-import { LeaderNodeRenderer, type LeaderData } from "./LeaderNode.tsx";
+import {
+  LEADER_PROMPT_OVERLAY_ZOOM_THRESHOLD,
+  LeaderNodeRenderer,
+  type LeaderData,
+} from "./LeaderNode.tsx";
 import type { CanvasNode, NodeRenderProps } from "../types.ts";
 import { DEFAULT_THINKING_CONFIG } from "../types.ts";
+import { canvasScale } from "../canvas-scale.ts";
 import type { ServerMessage } from "../use-socket.ts";
 import {
   createReplaySocket,
@@ -35,6 +40,10 @@ beforeAll(() => {
       disconnect(): void {}
     } as unknown as typeof ResizeObserver;
   }
+});
+
+afterEach(() => {
+  canvasScale.current = 1;
 });
 
 interface ProbeProps {
@@ -157,6 +166,95 @@ describe("LeaderNode: replays leader-plan-and-delegate fixture", () => {
 });
 
 describe("LeaderNode: message actions", () => {
+  it("opens a shared enlarged prompt when the inline prompt is focused at zoomed-out scale", async () => {
+    const { socket } = createReplaySocket();
+    canvasScale.current = LEADER_PROMPT_OVERLAY_ZOOM_THRESHOLD - 0.05;
+    const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollHeight",
+    );
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        return this.getAttribute("data-testid") === "leader-prompt-context" ? 720 : 0;
+      },
+    });
+
+    render(
+      <Probe
+        socket={socket}
+        initial={makeInitialData({
+          sessionKey: null,
+          status: "disconnected",
+          taskName: "Import workflow",
+          messages: [
+            {
+              id: "prior-user",
+              role: "user",
+              content: "Build the import workflow",
+              timestamp: 0,
+            },
+            {
+              id: "prior-assistant",
+              role: "assistant",
+              content: "I found the parser entry point.",
+              timestamp: 1,
+            },
+          ],
+        })}
+      />,
+    );
+
+    const inlinePrompt = screen.getByTestId("leader-prompt-input-inline");
+    fireEvent.focus(inlinePrompt);
+
+    const overlay = screen.getByTestId("leader-prompt-overlay");
+    expect(overlay).toBeInTheDocument();
+    expect(within(overlay).getByText("Import workflow")).toBeInTheDocument();
+    expect(within(overlay).getByAltText("Idle")).toBeInTheDocument();
+    expect(within(overlay).queryByText("Leader prompt")).not.toBeInTheDocument();
+    const context = within(overlay).getByTestId("leader-prompt-context");
+    expect(context).toHaveTextContent("Build the import workflow");
+    expect(context).toHaveTextContent("I found the parser entry point.");
+    expect(context.scrollTop).toBe(720);
+
+    const overlayPrompt = screen.getByTestId("leader-prompt-input-overlay");
+    await waitFor(() => expect(document.activeElement).toBe(overlayPrompt));
+
+    fireEvent.change(overlayPrompt, {
+      target: { value: "Plan from the large prompt" },
+    });
+
+    expect(inlinePrompt).toHaveValue("Plan from the large prompt");
+
+    fireEvent.keyDown(overlayPrompt, { key: "Escape" });
+    expect(screen.queryByTestId("leader-prompt-overlay")).not.toBeInTheDocument();
+    if (scrollHeightDescriptor) {
+      Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
+    } else {
+      delete (HTMLElement.prototype as Partial<HTMLElement>).scrollHeight;
+    }
+  });
+
+  it("keeps the inline prompt in place at readable zoom", () => {
+    const { socket } = createReplaySocket();
+    canvasScale.current = LEADER_PROMPT_OVERLAY_ZOOM_THRESHOLD + 0.1;
+
+    render(
+      <Probe
+        socket={socket}
+        initial={makeInitialData({
+          sessionKey: null,
+          status: "disconnected",
+        })}
+      />,
+    );
+
+    fireEvent.focus(screen.getByTestId("leader-prompt-input-inline"));
+
+    expect(screen.queryByTestId("leader-prompt-overlay")).not.toBeInTheDocument();
+  });
+
   it("keeps assistant bubble actions sticky within the message bubble", () => {
     const { socket } = createReplaySocket();
     const longContent = Array.from({ length: 40 }, (_, i) => `Line ${i + 1}`).join("\n");
@@ -180,6 +278,121 @@ describe("LeaderNode: message actions", () => {
     expect(actions).toHaveStyle({ position: "sticky", top: "8px", height: "0px" }); // BANNED_ASSERTION_OK: sticky position proves action bar stays visible during scroll
     expect(within(actions).getByTitle("Add as node")).toHaveStyle({ position: "static" }); // BANNED_ASSERTION_OK: static position proves buttons don't re-offset inside the sticky container
     expect(within(actions).getByTitle("Copy to clipboard")).toHaveStyle({ position: "static" }); // BANNED_ASSERTION_OK: static position proves buttons don't re-offset inside the sticky container
+  });
+
+  it("selects message chunks and copies only selected source text", () => {
+    const { socket } = createReplaySocket();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    render(
+      <Probe
+        socket={socket}
+        initial={makeInitialData({
+          messages: [{
+            id: "assistant-chunked",
+            role: "assistant",
+            content: [
+              "Intro paragraph",
+              "",
+              "- first item",
+              "- second item",
+              "",
+              "```ts",
+              "const answer = 42;",
+              "```",
+            ].join("\n"),
+            timestamp: 0,
+          }],
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("selectable-message"));
+
+    const chunks = screen.getAllByTestId("message-chunk");
+    expect(chunks).toHaveLength(3);
+
+    fireEvent.click(chunks[1]!);
+    fireEvent.click(screen.getByTitle("Copy selected chunks"));
+
+    expect(writeText).toHaveBeenCalledWith("- first item\n- second item");
+  });
+
+  it("adds selected chunks as a markdown node", () => {
+    const { socket } = createReplaySocket();
+    const onAddContentNode = vi.fn();
+
+    render(
+      <Probe
+        socket={socket}
+        onAddContentNode={onAddContentNode}
+        initial={makeInitialData({
+          messages: [{
+            id: "assistant-add-chunk",
+            role: "assistant",
+            content: "Keep this\n\nSkip this",
+            timestamp: 0,
+          }],
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("selectable-message"));
+    fireEvent.click(screen.getAllByTestId("message-chunk")[0]!);
+    fireEvent.click(screen.getByTitle("Add selected chunks as node"));
+
+    expect(onAddContentNode).toHaveBeenCalledWith("Keep this");
+  });
+
+  it("keeps chunk selection tied to assistant messages around grouped tools", () => {
+    const { socket } = createReplaySocket();
+
+    render(
+      <Probe
+        socket={socket}
+        initial={makeInitialData({
+          messages: [
+            {
+              id: "assistant-before-tools",
+              role: "assistant",
+              content: "Before tools",
+              timestamp: 0,
+            },
+            {
+              id: "tool-read",
+              role: "tool",
+              content: "Read result",
+              timestamp: 1,
+              toolName: "Read",
+            },
+            {
+              id: "tool-grep",
+              role: "tool",
+              content: "Grep result",
+              timestamp: 2,
+              toolName: "Grep",
+            },
+            {
+              id: "assistant-after-tools",
+              role: "assistant",
+              content: "After tools\n\n- keep this",
+              timestamp: 3,
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByText("Read, Grep")).toBeInTheDocument();
+    const bubbles = screen.getAllByTestId("selectable-message");
+    expect(bubbles).toHaveLength(2);
+
+    fireEvent.click(bubbles[1]!);
+
+    expect(bubbles[0]).not.toHaveAttribute("data-selected");
+    expect(bubbles[1]).toHaveAttribute("data-selected", "true");
+    expect(within(bubbles[1]!).getAllByTestId("message-chunk")).toHaveLength(2);
   });
 });
 

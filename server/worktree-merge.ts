@@ -27,6 +27,37 @@ export async function mergeWorktree(
     targetBranch = stdout.trim();
   }
 
+  let targetShaBefore = "";
+  let targetCheckedOutInMain = false;
+  try {
+    const [{ stdout: targetSha }, { stdout: mainBranch }] = await Promise.all([
+      exec(["rev-parse", `refs/heads/${targetBranch}`], projectCwd),
+      exec(["rev-parse", "--abbrev-ref", "HEAD"], projectCwd),
+    ]);
+    targetShaBefore = targetSha.trim();
+    targetCheckedOutInMain = mainBranch.trim() === targetBranch;
+
+    if (targetCheckedOutInMain) {
+      const { stdout: status } = await exec(["status", "--porcelain"], projectCwd);
+      if (status.trim()) {
+        return {
+          success: false,
+          conflicts: [],
+          targetBranch,
+          summary: `Cannot merge ${info.branch}: ${targetBranch} is checked out with uncommitted changes. Commit, stash, or discard them first.`,
+        };
+      }
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      success: false,
+      conflicts: [],
+      targetBranch,
+      summary: `Failed to inspect ${targetBranch} before merge: ${message}`,
+    };
+  }
+
   // Step 1: Inside the worktree, merge the target branch INTO the canvas branch.
   // This catches up the canvas branch with any changes on main since the worktree
   // was created, and surfaces any conflicts here (in the worktree, not in main).
@@ -170,14 +201,27 @@ export async function mergeWorktree(
   //
   // NOTE: We use `git update-ref` instead of `git branch -f` because git
   // refuses to force-update a branch that is currently checked out in any
-  // worktree. `update-ref` bypasses this restriction.
+  // worktree. Supplying the old SHA makes the ref update atomic: if another
+  // actor advances the target branch while the merge is running, this fails
+  // instead of overwriting their commit.
   try {
+    if (targetCheckedOutInMain) {
+      const { stdout: status } = await exec(["status", "--porcelain"], projectCwd);
+      if (status.trim()) {
+        return {
+          success: false,
+          conflicts: [],
+          targetBranch,
+          summary: `Cannot finalize merge: ${targetBranch} became dirty while merging. The worktree branch is intact; clean the target checkout and retry.`,
+        };
+      }
+    }
     const { stdout: canvasSha } = await exec(
       ["rev-parse", info.branch],
       projectCwd,
     );
     await exec(
-      ["update-ref", `refs/heads/${targetBranch}`, canvasSha.trim()],
+      ["update-ref", `refs/heads/${targetBranch}`, canvasSha.trim(), targetShaBefore],
       projectCwd,
     );
   } catch (err) {
@@ -186,7 +230,7 @@ export async function mergeWorktree(
       success: false,
       conflicts: [],
       targetBranch,
-      summary: `Failed to update ${targetBranch} ref: ${message}`,
+      summary: `Failed to update ${targetBranch} ref safely: ${message}`,
     };
   }
 
@@ -194,13 +238,9 @@ export async function mergeWorktree(
   // tree to reflect the new HEAD. This is equivalent to what `git merge` would
   // do, but without the risk of a checkout switching branches.
   try {
-    const { stdout: mainBranch } = await exec(
-      ["rev-parse", "--abbrev-ref", "HEAD"],
-      projectCwd,
-    );
-    if (mainBranch.trim() === targetBranch) {
+    if (targetCheckedOutInMain) {
       // Reset the working tree to match the updated branch ref.
-      // --hard is safe here because we only advanced the ref forward.
+      // --hard is only reached after dirty-checking the target checkout.
       await exec(["reset", "--hard", targetBranch], projectCwd);
     }
   } catch {
@@ -240,7 +280,14 @@ export async function mergeAndCleanup(
       );
     }
   } catch (e) {
-    console.log(`[worktree] mergeAndCleanup: auto-commit skipped (${e instanceof Error ? e.message : String(e)})`);
+    const message = e instanceof Error ? e.message : String(e);
+    console.log(`[worktree] mergeAndCleanup: auto-commit failed (${message})`);
+    return {
+      success: false,
+      conflicts: [],
+      targetBranch,
+      summary: `Failed to prepare ${info.branch} for merge: ${message}`,
+    };
   }
 
   const result = await mergeWorktree(info, targetBranch, options);

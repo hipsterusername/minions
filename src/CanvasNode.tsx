@@ -21,10 +21,18 @@ interface CanvasNodeProps {
   onResize?: ((id: string, size: Size) => void) | undefined;
   /** Callback to add text content as a new markdown node */
   onAddContentNode?: ((content: string) => void) | undefined;
+  /** Callback to save a markdown node as a Kanban backlog card */
+  onCreateKanbanCardFromMarkdown?: ((source: {
+    nodeId: string;
+    title: string;
+    content: string;
+  }) => void) | undefined;
   /** Callback to reveal (create or scroll-to) a minion node for a given session key */
   onRevealMinion?: ((minionSessionKey: string) => void) | undefined;
   /** Callback for RoutineNode: create a Leader child node when a step spawns one */
   onSpawnLeaderChild?: ((event: import("./types.ts").RoutineLeaderSpawnEvent) => void) | undefined;
+  /** Callback for LeaderNode: duplicate setup without runtime session state */
+  onDuplicateLeaderSetup?: (() => void) | undefined;
   /** Connection drag callbacks — threaded from Canvas */
   onConnectionStart?: ((port: PortInfo, e: React.MouseEvent) => void) | undefined;
   onConnectionEnd?: ((port: PortInfo) => void) | undefined;
@@ -132,8 +140,10 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
   projectPath,
   onResize,
   onAddContentNode,
+  onCreateKanbanCardFromMarkdown,
   onRevealMinion,
   onSpawnLeaderChild,
+  onDuplicateLeaderSetup,
   onConnectionStart,
   onConnectionEnd,
   isDragActive = false,
@@ -422,8 +432,10 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
         projectPath={projectPath}
         onResize={handleResize}
         onAddContentNode={onAddContentNode}
+        onCreateKanbanCardFromMarkdown={onCreateKanbanCardFromMarkdown}
         onRevealMinion={onRevealMinion}
         onSpawnLeaderChild={onSpawnLeaderChild}
+        onDuplicateLeaderSetup={onDuplicateLeaderSetup}
         isDropTarget={isDropTarget}
         isBeingDragged={isBeingDragged}
       />

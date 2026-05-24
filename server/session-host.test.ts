@@ -34,11 +34,12 @@ import type { NormalizedEvent } from "./harness/types.ts";
  */
 const harnessRef: {
   events: NormalizedEvent[];
+  starts: unknown[];
   startFnOverride: (() => {
     events: AsyncIterable<NormalizedEvent>;
     control: { abort: () => void };
   }) | null;
-} = { events: [], startFnOverride: null };
+} = { events: [], starts: [], startFnOverride: null };
 
 // Declared before imports — vitest hoists vi.mock() calls above the ESM
 // import graph, so the factory runs before any module under test is loaded.
@@ -63,7 +64,8 @@ vi.mock("./harness/index.ts", () => ({
     }),
     registerTools: () => {},
     resolveModel: () => null,
-    start: () => {
+    start: (opts: unknown) => {
+      harnessRef.starts.push(opts);
       if (harnessRef.startFnOverride) return harnessRef.startFnOverride();
       const eventsToYield = [...harnessRef.events];
       return {
@@ -127,6 +129,7 @@ function makeHarness(id = "host-1", cwd = "/tmp/fake-cwd"): Harness {
 beforeEach(() => {
   // Fresh event queue + reset override per test.
   harnessRef.events = [];
+  harnessRef.starts = [];
   harnessRef.startFnOverride = null;
   // Disable SQLite persistence for the duration of these tests.
   disablePersistence();
@@ -242,6 +245,111 @@ describe("SessionHost.start — error path", () => {
     const errorEvents = envelopes.filter((e) => e.type === "session_error");
     expect(errorEvents).toHaveLength(1);
     expect(errorEvents[0]!.payload["error"]).toBe("boom");
+  });
+
+  it("recovers a resumed Codex context-window failure in a fresh compacted thread", async () => {
+    const { host, deps, envelopes } = makeHarness();
+    host.harnessName = "codex";
+    host.sessionId = "thread-too-large";
+    host.taskName = "Long leader loop";
+    host.reasoningMapState = {
+      activeMapId: "map-1",
+      maps: [
+        {
+          id: "map-1",
+          title: "Recovery graph",
+          status: "active",
+          createdAt: "2026-05-23T12:00:00.000Z",
+          updatedAt: "2026-05-23T12:00:00.000Z",
+          nodes: [],
+          edges: [],
+          actionBindings: [],
+          challenges: [],
+          revisions: [],
+          finalSummary: "Keep the validated recovery decision.",
+        },
+      ],
+    };
+
+    let starts = 0;
+    harnessRef.startFnOverride = () => {
+      starts += 1;
+      const events =
+        starts === 1
+          ? ([
+              { kind: "init", sessionId: "thread-too-large", model: "gpt-5.5" },
+              { kind: "text", text: "I finished step one.", role: "assistant" },
+              {
+                kind: "done",
+                reason: "error",
+                error: "Codex Exec exited with code 1: Reading prompt from stdin...",
+                fullError:
+                  "Codex ran out of room in the model's context window. Start a new thread or clear earlier history before retrying.",
+              },
+            ] satisfies NormalizedEvent[])
+          : ([
+              { kind: "init", sessionId: "fresh-thread", model: "gpt-5.5" },
+              { kind: "done", reason: "stop" },
+            ] satisfies NormalizedEvent[]);
+      return {
+        events: (async function* () {
+          for (const event of events) yield event;
+        })(),
+        control: { abort: () => {} },
+      };
+    };
+
+    await host.start(
+      {
+        sessionKey: host.id,
+        prompt: "Continue the routine.",
+        cwd: host.cwd,
+        resumeId: "thread-too-large",
+      },
+      deps,
+    );
+
+    expect(starts).toBe(2);
+    expect(host.status).toBe("idle");
+    expect(host.sessionId).toBe("fresh-thread");
+    expect(envelopes.filter((e) => e.type === "session_error")).toHaveLength(0);
+
+    const secondStart = harnessRef.starts[1] as {
+      resumeId?: string;
+      prompt?: string;
+    };
+    expect(secondStart.resumeId).toBeUndefined();
+    expect(secondStart.prompt).toContain("<context-window-recovery>");
+    expect(secondStart.prompt).toContain("<reasoning-graph>");
+    expect(secondStart.prompt).toContain("Keep the validated recovery decision.");
+    expect(secondStart.prompt).toContain("I finished step one.");
+    expect(secondStart.prompt).toContain("Continue the routine.");
+  });
+
+  it("surfaces a context-window failure after one automatic recovery attempt", async () => {
+    const { host, deps, envelopes } = makeHarness();
+
+    harnessRef.events = [
+      {
+        kind: "done",
+        reason: "error",
+        error: "context window exhausted",
+      },
+    ];
+
+    await host.start(
+      {
+        sessionKey: host.id,
+        prompt: "Continue",
+        cwd: host.cwd,
+        resumeId: "thread-too-large",
+        contextRecoveryAttempt: 1,
+      },
+      deps,
+    );
+
+    expect(host.status).toBe("error");
+    expect(envelopes.filter((e) => e.type === "session_error")).toHaveLength(1);
   });
 
   it("preserves prior session metrics when an error occurs", async () => {

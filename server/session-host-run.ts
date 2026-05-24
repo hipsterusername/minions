@@ -92,7 +92,7 @@ export async function ensureWorktree(
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error(`[worktree] Failed to create worktree for ${host.id}: ${errMsg}`);
     bus.emitToSession(host.id, {
-      type: "worktree_error",
+      type: "worktree_failed",
       sessionKey: host.id,
       error: `Worktree creation failed: ${errMsg}`,
     });
@@ -369,6 +369,7 @@ export function buildAgentContext(
   };
   if (host.taskState) ctx.existingTaskState = host.taskState;
   if (host.renderState) ctx.existingRenderState = host.renderState;
+  if (host.reasoningMapState) ctx.existingReasoningMapState = host.reasoningMapState;
   if (opts.parentWorktree) ctx.parentWorktree = opts.parentWorktree;
   return ctx;
 }

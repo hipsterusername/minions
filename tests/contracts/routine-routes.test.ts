@@ -18,20 +18,31 @@
  *                                         (200) and returns 404 thereafter
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import express, { Router } from "express";
-import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
-import type { Server } from "node:http";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+const { FAKE_HOME } = vi.hoisted(() => ({
+  FAKE_HOME: `/tmp/minions-fakehome-routine-routes-${process.pid}`,
+}));
+
+vi.mock("node:os", async () => {
+  const actual = await vi.importActual<typeof import("node:os")>("node:os");
+  return {
+    ...actual,
+    default: { ...actual, homedir: () => FAKE_HOME },
+    homedir: () => FAKE_HOME,
+  };
+});
 
 import { mountRoutinesRoutes } from "../../server/routes/projects/routines.ts";
 import {
   registerProjectPath,
   unregisterProjectPath,
 } from "../../server/path-guard.ts";
+import { createExpressFetch } from "../harness/in-process-http.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -46,15 +57,6 @@ function buildApp(): express.Express {
   app.use(express.json());
   app.use("/", router);
   return app;
-}
-
-async function startListening(server: Server): Promise<string> {
-  return new Promise<string>((resolve) => {
-    server.listen(0, () => {
-      const { port } = server.address() as AddressInfo;
-      resolve(`http://localhost:${port}`);
-    });
-  });
 }
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -87,14 +89,15 @@ const VALID_ROUTINE = {
 
 // ── Shared server state ───────────────────────────────────────────────────────
 
-let server: Server;
+let fetch: typeof globalThis.fetch;
 let baseUrl: string;
 let projectPath: string;
 let encodedPath: string;
 
 beforeAll(async () => {
   // path-guard requires the project path to be under the home directory.
-  // Use ~/.tmp/ so we stay out of the repo tree.
+  // Use a mocked ~/.tmp/ so we stay out of the repo tree and real home.
+  fs.mkdirSync(FAKE_HOME, { recursive: true });
   const tmpBase = path.join(os.homedir(), ".tmp");
   fs.mkdirSync(tmpBase, { recursive: true });
   projectPath = fs.mkdtempSync(
@@ -103,16 +106,13 @@ beforeAll(async () => {
   registerProjectPath(projectPath);
   encodedPath = encodePath(projectPath);
 
-  server = createServer(buildApp());
-  baseUrl = await startListening(server);
+  baseUrl = "http://in-process.local";
+  fetch = createExpressFetch(buildApp(), baseUrl);
 });
 
 afterAll(async () => {
-  await new Promise<void>((resolve, reject) =>
-    server.close((err) => (err ? reject(err) : resolve())),
-  );
   unregisterProjectPath(projectPath);
-  fs.rmSync(projectPath, { recursive: true, force: true });
+  fs.rmSync(FAKE_HOME, { recursive: true, force: true });
 });
 
 /** Convenience: delete a routine file directly so each sub-suite starts clean. */

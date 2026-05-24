@@ -301,3 +301,120 @@ describe("useSessionStream: respects the reducer's reference-equality contract",
     expect(onState.mock.calls[0]?.[0].status).toBe("idle");
   });
 });
+
+describe("useSessionStream: batches transient streaming updates", () => {
+  it("coalesces token deltas into one frame update", async () => {
+    vi.useFakeTimers();
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((cb) =>
+        window.setTimeout(() => cb(performance.now()), 16),
+      );
+    const cancelAnimationFrameSpy = vi
+      .spyOn(window, "cancelAnimationFrame")
+      .mockImplementation((id) => window.clearTimeout(id));
+
+    const { socket, replay } = createReplaySocket();
+    const initial: SessionStreamState = {
+      ...emptySessionStreamState("leader-1"),
+      status: "running",
+    };
+    const states: SessionStreamState[] = [];
+
+    render(
+      <Probe
+        socket={socket}
+        initial={initial}
+        onState={(s) => states.push(s)}
+      />,
+    );
+
+    await pump(replay, [
+      {
+        message: {
+          type: "sdk_event",
+          sessionKey: "leader-1",
+          event: { kind: "text_delta", text: "Hel", blockIndex: 0 },
+        },
+      },
+      {
+        message: {
+          type: "sdk_event",
+          sessionKey: "leader-1",
+          event: { kind: "text_delta", text: "lo", blockIndex: 0 },
+        },
+      },
+    ]);
+
+    expect(states).toHaveLength(0);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
+    });
+
+    expect(states).toHaveLength(1);
+    expect(states[0]?.streamingText).toBe("Hello");
+    expect(states[0]?.streamingBlockIndex).toBe(0);
+
+    requestAnimationFrameSpy.mockRestore();
+    cancelAnimationFrameSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it("flushes durable session changes immediately and cancels pending streaming frames", async () => {
+    vi.useFakeTimers();
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((cb) =>
+        window.setTimeout(() => cb(performance.now()), 16),
+      );
+    const cancelAnimationFrameSpy = vi
+      .spyOn(window, "cancelAnimationFrame")
+      .mockImplementation((id) => window.clearTimeout(id));
+
+    const { socket, replay } = createReplaySocket();
+    const initial: SessionStreamState = {
+      ...emptySessionStreamState("leader-1"),
+      status: "running",
+    };
+    const states: SessionStreamState[] = [];
+
+    render(
+      <Probe
+        socket={socket}
+        initial={initial}
+        onState={(s) => states.push(s)}
+      />,
+    );
+
+    await pump(replay, [
+      {
+        message: {
+          type: "sdk_event",
+          sessionKey: "leader-1",
+          event: { kind: "text_delta", text: "partial", blockIndex: 0 },
+        },
+      },
+      {
+        message: {
+          type: "sdk_event",
+          sessionKey: "leader-1",
+          event: { kind: "text", text: "final", role: "assistant" },
+        },
+      },
+    ]);
+
+    expect(states).toHaveLength(1);
+    expect(states[0]?.streamingText).toBe("");
+    expect(states[0]?.messages).toHaveLength(1);
+    expect(states[0]?.messages[0]?.content).toBe("final");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
+    });
+    expect(states).toHaveLength(1);
+
+    requestAnimationFrameSpy.mockRestore();
+    cancelAnimationFrameSpy.mockRestore();
+    vi.useRealTimers();
+  });
+});

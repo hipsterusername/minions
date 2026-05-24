@@ -27,6 +27,7 @@ import { isImagePath } from "./nodes/image-loader-from-path.ts";
 import { graphReducer, createEdge } from "./graph-runtime.ts";
 import type { GraphDocument } from "./graph.ts";
 import type { CanvasTransform, CanvasNode } from "./types.ts";
+import { DEFAULT_THINKING_CONFIG } from "./types.ts";
 import { CONTEXT_EXPLORER_PROMPT } from "./prompts/context-explorer.ts";
 import { getAllNodeTypes } from "./node-registry.ts";
 import type { LeaderData } from "./nodes/LeaderNode.tsx";
@@ -47,6 +48,7 @@ import { themes, themeMap, applyTheme, DEFAULT_THEME_ID } from "./themes.ts";
 import { ThemeContext, loadPersistedThemeId, persistThemeId } from "./use-theme.ts";
 
 const WS_URL = `ws://localhost:${import.meta.env["VITE_SERVER_PORT"] ?? "3141"}`;
+const PROJECT_HEADER_HEIGHT = 44;
 
 /**
  * Sanitize nodes loaded from persistence — reset transient session state
@@ -63,6 +65,7 @@ function sanitizePersistedNodes(nodes: CanvasNode[]): CanvasNode[] {
           // Reset transient session state
           status: "disconnected",
           streamingText: "",
+          streamingBlockIndex: null,
           error: null,
           // Keep sessionKey so sync_session can attempt reconnection
           // Keep messages, totalCost, turns as historical data
@@ -77,6 +80,7 @@ function sanitizePersistedNodes(nodes: CanvasNode[]): CanvasNode[] {
           ...data,
           status: "disconnected",
           streamingText: "",
+          streamingBlockIndex: null,
           error: null,
         },
       };
@@ -89,6 +93,7 @@ function sanitizePersistedNodes(nodes: CanvasNode[]): CanvasNode[] {
           ...data,
           status: "disconnected",
           streamingText: "",
+          streamingBlockIndex: null,
           error: null,
         },
       };
@@ -166,6 +171,7 @@ function ProjectView({
         loadProjectSkillsFromData(projectId, project.skills ?? []);
         setSkillsRefreshKey((k) => k + 1);
         dispatch({ type: "SET_NODES", nodes: sanitizePersistedNodes(project.nodes) });
+        graphDispatch({ type: "SET_EDGES", edges: project.graph?.edges ?? [] });
         setLoaded(true);
       } catch (err) {
         console.error("Failed to load project:", err);
@@ -180,6 +186,7 @@ function ProjectView({
   const { status: saveStatus, lastSaved, retryCount, retry } = useAutosave(
     loaded ? projectId : null,
     nodes,
+    graph,
     transform,
   );
 
@@ -235,6 +242,9 @@ function ProjectView({
         model: projectSettings.defaultLeaderModel ?? projectSettings.defaultModel ?? "claude-opus-4-7",
         permissionMode: projectSettings.defaultPermissionMode ?? "auto",
         harness: projectSettings.defaultLeaderHarness ?? "claude",
+        thinkingConfig: {
+          ...(projectSettings.defaultLeaderThinkingConfig ?? DEFAULT_THINKING_CONFIG),
+        },
         // Special flag: auto-start with context explorer prompt
         autoStartPrompt: CONTEXT_EXPLORER_PROMPT(projectPath),
         skillIds: [],
@@ -323,6 +333,9 @@ function ProjectView({
         model: projectSettings.defaultLeaderModel ?? projectSettings.defaultModel ?? "claude-opus-4-7",
         permissionMode: projectSettings.defaultPermissionMode ?? "auto",
         harness: projectSettings.defaultLeaderHarness ?? "claude",
+        thinkingConfig: {
+          ...(projectSettings.defaultLeaderThinkingConfig ?? DEFAULT_THINKING_CONFIG),
+        },
         taskPlan: [],
         worktreeIsolation: projectSettings.defaultWorktreeIsolation === true,
         worktreePath: null,
@@ -454,6 +467,29 @@ function ProjectView({
       kanbanDispatch({ type: "BIND_LEADER", cardId: card.id, leaderNodeId: nodeId });
     },
     [kanbanDispatch, nodes, graphDispatch, positionInViewport],
+  );
+
+  const handleCreateKanbanCardFromMarkdown = useCallback(
+    (source: { nodeId: string; title: string; content: string }) => {
+      const card: KanbanCard = {
+        id: `kb-${generateId()}`,
+        title: source.title.trim(),
+        description: source.content.trim(),
+        context: "",
+        subtasks: [],
+        priority: "medium",
+        columnId: "backlog",
+        createdAt: Date.now(),
+        model: "sonnet",
+        permissionMode: "auto",
+        worktreeIsolation: projectSettings.defaultWorktreeIsolation === true,
+        skillIds: [],
+        skillValues: {},
+        linkedContextNodeIds: [],
+      };
+      kanbanDispatch({ type: "ADD_CARD", card });
+    },
+    [kanbanDispatch, projectSettings.defaultWorktreeIsolation],
   );
 
   // Close a card from "Ready for Review" → "Agent History"
@@ -791,9 +827,12 @@ function ProjectView({
 
   // The loader overlay sits on top of the project until both data is
   // ready AND the one-shot animation + hold are done. Then it fades
-  // out (350ms) and unmounts. Project content renders unconditionally
-  // beneath, so it can fade in through the overlay seamlessly.
+  // out (350ms) and unmounts. The overlay stays mounted across the
+  // loaded transition so its SVG animation does not restart.
   const loaderFadingOut = loaded && loaderAnimDone;
+  const handleLoaderComplete = useCallback(() => {
+    setLoaderAnimDone(true);
+  }, []);
 
   const kanbanBlockedCount = !loaded
     ? 0
@@ -820,125 +859,121 @@ function ProjectView({
       <LeaderLoadingScreen
         message="Loading project"
         oneShot
-        onComplete={() => setLoaderAnimDone(true)}
+        onComplete={handleLoaderComplete}
       />
     </div>
   ) : null;
 
-  // Until data is loaded, only the loader is shown — render nothing
-  // beneath to avoid layout flashes from an empty project.
-  if (!loaded) {
-    return (
-      <div style={{ width: "100%", height: "100%", position: "relative" }}>
-        {loaderOverlay}
-      </div>
-    );
-  }
-
   return (
-    <HarnessListProvider
-      send={socket.send}
-      subscribe={socket.subscribe}
-      connected={socket.connected}
-    >
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
       {loaderOverlay}
-      <ProjectHeader
-        name={projectName}
-        saveStatus={saveStatus}
-        lastSaved={lastSaved}
-        onRename={handleRename}
-        onBack={onClose}
-        retryCount={retryCount}
-        retry={retry}
-        activeView={activeView}
-        onViewChange={setActiveView}
-        kanbanBlockedCount={kanbanBlockedCount}
-        settings={projectSettings}
-        onSettingsChange={handleSettingsChange}
-      />
-      {activeView === "kanban" ? (
-        <div style={{ position: "absolute", top: 44, left: 0, right: 0, bottom: 0 }}>
-          <KanbanBoard
-            board={kanbanBoard}
-            dispatch={kanbanDispatch}
-            onLaunchLeader={handleLaunchLeader}
-            leaderStatuses={leaderStatuses}
-            onCloseCard={handleCloseCard}
-            onResume={handleResumeCard}
-            onFocusNode={handleFocusNode}
-            socketSend={socket.send}
-            socketSubscribe={socket.subscribe}
-            projectPath={projectPath}
-            nodes={nodes}
-            onUpdateNodeData={(nodeId, data) => dispatch({ type: "UPDATE_NODE_DATA", id: nodeId, data })}
-            projectSettings={projectSettings}
-          />
-        </div>
-      ) : (
-        <DockProvider>
-          <div style={{ position: "absolute", top: 44, left: 0, right: 0, bottom: 0 }}>
-            <Canvas
-              nodes={nodes}
-              dispatch={dispatch}
-              graph={graph}
-              graphDispatch={graphDispatch}
-              transform={transform}
-              setTransform={setTransform}
-              socketSend={socket.send}
-              socketSubscribe={socket.subscribe}
-              socketConnected={socket.connected}
-              projectPath={projectPath}
-              projectSettings={projectSettings}
-              focusNodeId={focusNodeId}
-              onFocusNodeHandled={handleFocusNodeHandled}
+      {loaded ? (
+        <HarnessListProvider
+          send={socket.send}
+          subscribe={socket.subscribe}
+          connected={socket.connected}
+        >
+          <>
+            <ProjectHeader
+              name={projectName}
+              saveStatus={saveStatus}
+              lastSaved={lastSaved}
+              onRename={handleRename}
+              onBack={onClose}
+              retryCount={retryCount}
+              retry={retry}
+              activeView={activeView}
+              onViewChange={setActiveView}
+              kanbanBlockedCount={kanbanBlockedCount}
+              settings={projectSettings}
+              onSettingsChange={handleSettingsChange}
             />
-            <ProjectPanel
-              projectId={projectId}
-              projectPath={projectPath}
-              projectName={projectName}
-              onSpawnContextExplorer={handleSpawnContextExplorer}
-              nodes={nodes}
-              onOpenFile={handleOpenFile}
-              onUpdateNodeData={(nodeId, data) => dispatch({ type: "UPDATE_NODE_DATA", id: nodeId, data })}
-              onFocusNode={handleFocusNode}
-            />
-            <SkillsBrowser
-              onLaunchSkill={handleLaunchSkill}
-              onCreateSkill={handleCreateSkill}
-              onEditSkill={handleEditSkill}
-              onDeleteSkill={handleDeleteSkill}
-              onImportSkills={handleImportSkills}
-              onExportSkills={handleExportSkills}
-              refreshKey={skillsRefreshKey}
-            />
-            <McpServersBrowser projectId={projectId} />
-            {skillEditorOpen && (
-              <SkillEditor
-                skill={editingSkill}
-                onSave={handleSaveSkill}
-                onClose={() => {
-                  setSkillEditorOpen(false);
-                  setEditingSkill(null);
-                }}
-              />
+            {activeView === "kanban" ? (
+              <div style={{ position: "absolute", top: PROJECT_HEADER_HEIGHT, left: 0, right: 0, bottom: 0 }}>
+                <KanbanBoard
+                  board={kanbanBoard}
+                  dispatch={kanbanDispatch}
+                  onLaunchLeader={handleLaunchLeader}
+                  leaderStatuses={leaderStatuses}
+                  onCloseCard={handleCloseCard}
+                  onResume={handleResumeCard}
+                  onFocusNode={handleFocusNode}
+                  socketSend={socket.send}
+                  socketSubscribe={socket.subscribe}
+                  projectPath={projectPath}
+                  nodes={nodes}
+                  onUpdateNodeData={(nodeId, data) => dispatch({ type: "UPDATE_NODE_DATA", id: nodeId, data })}
+                  projectSettings={projectSettings}
+                />
+              </div>
+            ) : (
+              <DockProvider>
+                <div style={{ position: "absolute", top: PROJECT_HEADER_HEIGHT, left: 0, right: 0, bottom: 0 }}>
+                  <Canvas
+                    nodes={nodes}
+                    dispatch={dispatch}
+                    graph={graph}
+                    graphDispatch={graphDispatch}
+                    transform={transform}
+                    setTransform={setTransform}
+                    socketSend={socket.send}
+                    socketSubscribe={socket.subscribe}
+                    socketConnected={socket.connected}
+                    projectPath={projectPath}
+                    projectSettings={projectSettings}
+                    onCreateKanbanCardFromMarkdown={handleCreateKanbanCardFromMarkdown}
+                    focusNodeId={focusNodeId}
+                    onFocusNodeHandled={handleFocusNodeHandled}
+                    viewportTopOffset={PROJECT_HEADER_HEIGHT}
+                  />
+                  <ProjectPanel
+                    projectId={projectId}
+                    projectPath={projectPath}
+                    projectName={projectName}
+                    onSpawnContextExplorer={handleSpawnContextExplorer}
+                    nodes={nodes}
+                    onOpenFile={handleOpenFile}
+                    onUpdateNodeData={(nodeId, data) => dispatch({ type: "UPDATE_NODE_DATA", id: nodeId, data })}
+                    onFocusNode={handleFocusNode}
+                  />
+                  <SkillsBrowser
+                    onLaunchSkill={handleLaunchSkill}
+                    onCreateSkill={handleCreateSkill}
+                    onEditSkill={handleEditSkill}
+                    onDeleteSkill={handleDeleteSkill}
+                    onImportSkills={handleImportSkills}
+                    onExportSkills={handleExportSkills}
+                    refreshKey={skillsRefreshKey}
+                  />
+                  <McpServersBrowser projectId={projectId} />
+                  {skillEditorOpen && (
+                    <SkillEditor
+                      skill={editingSkill}
+                      onSave={handleSaveSkill}
+                      onClose={() => {
+                        setSkillEditorOpen(false);
+                        setEditingSkill(null);
+                      }}
+                    />
+                  )}
+                  <DockBar
+                    onOpenRoutines={
+                      routinesEnabled ? () => setRoutineEditorOpen(true) : undefined
+                    }
+                  />
+                  {routinesEnabled && routineEditorOpen && (
+                    <RoutineEditor
+                      projectId={projectId}
+                      onClose={() => setRoutineEditorOpen(false)}
+                    />
+                  )}
+                </div>
+              </DockProvider>
             )}
-            <DockBar
-              onOpenRoutines={
-                routinesEnabled ? () => setRoutineEditorOpen(true) : undefined
-              }
-            />
-            {routinesEnabled && routineEditorOpen && (
-              <RoutineEditor
-                projectId={projectId}
-                onClose={() => setRoutineEditorOpen(false)}
-              />
-            )}
-          </div>
-        </DockProvider>
-      )}
+          </>
+        </HarnessListProvider>
+      ) : null}
     </div>
-    </HarnessListProvider>
   );
 }
 

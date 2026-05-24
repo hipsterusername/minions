@@ -9,19 +9,31 @@
  * tested — the handler must reject `..` escapes with 403.
  */
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import express, { Router } from "express";
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+const { FAKE_HOME } = vi.hoisted(() => ({
+  FAKE_HOME: `/tmp/minions-fakehome-projects-files-${process.pid}`,
+}));
+
+vi.mock("node:os", async () => {
+  const actual = await vi.importActual<typeof import("node:os")>("node:os");
+  return {
+    ...actual,
+    default: { ...actual, homedir: () => FAKE_HOME },
+    homedir: () => FAKE_HOME,
+  };
+});
 
 import { mountFileRoutes } from "../../server/routes/projects/files.ts";
 import {
   registerProjectPath,
   unregisterProjectPath,
 } from "../../server/path-guard.ts";
+import { createExpressFetch } from "../harness/in-process-http.ts";
 
 function encodePath(p: string): string {
   return Buffer.from(p).toString("base64url");
@@ -36,30 +48,23 @@ function buildApp(): express.Express {
   return app;
 }
 
-let server: Server;
+let fetch: typeof globalThis.fetch;
 let baseUrl: string;
 let parentDir: string;
 let project: string;
 let encoded: string;
 
 beforeAll(async () => {
+  fs.mkdirSync(FAKE_HOME, { recursive: true });
   const tmpBase = path.join(os.homedir(), ".tmp");
   fs.mkdirSync(tmpBase, { recursive: true });
   parentDir = fs.mkdtempSync(path.join(tmpBase, "projects-files-routes-"));
-  server = createServer(buildApp());
-  baseUrl = await new Promise<string>((resolve) => {
-    server.listen(0, () => {
-      const { port } = server.address() as AddressInfo;
-      resolve(`http://localhost:${port}`);
-    });
-  });
+  baseUrl = "http://in-process.local";
+  fetch = createExpressFetch(buildApp(), baseUrl);
 });
 
 afterAll(async () => {
-  await new Promise<void>((resolve, reject) =>
-    server.close((err) => (err ? reject(err) : resolve())),
-  );
-  fs.rmSync(parentDir, { recursive: true, force: true });
+  fs.rmSync(FAKE_HOME, { recursive: true, force: true });
 });
 
 beforeEach(() => {
@@ -262,4 +267,3 @@ describe("GET /tree — recursive listing", () => {
     expect(res.status).toBe(403);
   });
 });
-

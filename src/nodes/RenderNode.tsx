@@ -9,12 +9,12 @@
  * when a Leader session starts.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import type { NodeRenderProps } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
 import { CONTEXT_OUT_PORT, registerContract } from "../graph.ts";
 import type { NodeInterfaceContract } from "../graph.ts";
-import { flattenRenderStateToText } from "../render-flatten.ts";
+import { flattenRenderStateToText, formatRenderComponentToText } from "../render-flatten.ts";
 import type { ServerMessage } from "../use-socket.ts";
 import { SimpleMarkdown } from "../components/SimpleMarkdown.tsx";
 import { ResizeHandle } from "../components/ResizeHandle.tsx";
@@ -1639,6 +1639,226 @@ export function RenderComponentView({
   }
 }
 
+type DashboardSelectionIconKind =
+  | "copy"
+  | "copy-full"
+  | "node"
+  | "select-all"
+  | "clear"
+  | "exit";
+
+function DashboardSelectionIcon({ kind }: { kind: DashboardSelectionIconKind }) {
+  const common = {
+    width: 14,
+    height: 14,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+
+  switch (kind) {
+    case "copy":
+      return (
+        <svg {...common}>
+          <rect x="9" y="9" width="13" height="13" rx="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+      );
+    case "copy-full":
+      return (
+        <svg {...common}>
+          <rect x="4" y="3" width="14" height="18" rx="2" />
+          <path d="M8 7h6" />
+          <path d="M8 11h6" />
+          <path d="M8 15h4" />
+          <path d="M18 8h2v13a2 2 0 0 1-2 2h-9v-2" />
+        </svg>
+      );
+    case "node":
+      return (
+        <svg {...common}>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6" />
+          <path d="M12 18v-6" />
+          <path d="M9 15h6" />
+        </svg>
+      );
+    case "select-all":
+      return (
+        <svg {...common}>
+          <rect x="4" y="4" width="16" height="16" rx="2" />
+          <path d="m8 12 3 3 5-6" />
+        </svg>
+      );
+    case "clear":
+      return (
+        <svg {...common}>
+          <rect x="4" y="4" width="16" height="16" rx="2" />
+          <path d="M9 9l6 6" />
+          <path d="M15 9l-6 6" />
+        </svg>
+      );
+    case "exit":
+      return (
+        <svg {...common}>
+          <path d="M18 6 6 18" />
+          <path d="m6 6 12 12" />
+        </svg>
+      );
+  }
+}
+
+function DashboardSelectionGroup({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      aria-label={label}
+      role="group"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 2,
+        paddingInlineStart: 5,
+        borderLeft: "1px solid var(--border-default)",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function DashboardSelectionButton({
+  icon,
+  label,
+  onClick,
+  disabled = false,
+  tone = "neutral",
+}: {
+  icon: DashboardSelectionIconKind;
+  label: string;
+  onClick: (e: MouseEvent<HTMLButtonElement>) => void;
+  disabled?: boolean;
+  tone?: "neutral" | "primary";
+}) {
+  const isPrimary = tone === "primary";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      style={{
+        width: 26,
+        height: 26,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 0,
+        borderRadius: 4,
+        border: `1px solid ${
+          disabled
+            ? "var(--border-default)"
+            : isPrimary
+              ? "color-mix(in srgb, var(--accent) 54%, var(--border-default))"
+              : "var(--border-default)"
+        }`,
+        background: disabled
+          ? "var(--bg-primary)"
+          : isPrimary
+            ? "color-mix(in srgb, var(--accent) 14%, var(--bg-elevated))"
+            : "var(--bg-elevated)",
+        color: disabled
+          ? "var(--text-dim)"
+          : isPrimary
+            ? "var(--accent)"
+            : "var(--text-secondary)",
+        cursor: disabled ? "default" : "pointer",
+      }}
+    >
+      <DashboardSelectionIcon kind={icon} />
+    </button>
+  );
+}
+
+function isDashboardInteractiveTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(
+    target.closest(
+      "button,input,textarea,select,a,[role='tab'],[data-dashboard-context-action]",
+    ),
+  );
+}
+
+function SelectableDashboardComponent({
+  componentId,
+  selectionActive,
+  selected,
+  onToggle,
+  children,
+}: {
+  componentId: string;
+  selectionActive: boolean;
+  selected: boolean;
+  onToggle: (componentId: string) => void;
+  children: ReactNode;
+}) {
+  const toggle = useCallback(() => onToggle(componentId), [componentId, onToggle]);
+  const label = selected
+    ? "Remove component from context selection"
+    : "Add component to context selection";
+
+  return (
+    <div
+      className={`render-context-selectable${
+        selectionActive ? " render-context-selectable--active" : ""
+      }${selected ? " render-context-selectable--selected" : ""}`}
+      data-testid="render-context-component"
+      data-component-id={componentId}
+      data-selected={selected ? "true" : undefined}
+      role={selectionActive ? "checkbox" : undefined}
+      aria-checked={selectionActive ? selected : undefined}
+      tabIndex={selectionActive ? 0 : undefined}
+      onClick={(e) => {
+        if (!selectionActive || isDashboardInteractiveTarget(e.target)) return;
+        e.stopPropagation();
+        toggle();
+      }}
+      onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
+        if (!selectionActive) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          toggle();
+        }
+      }}
+    >
+      <button
+        type="button"
+        className="render-context-selectable__marker"
+        data-dashboard-context-action
+        title={label}
+        aria-label={label}
+        onClick={(e) => {
+          e.stopPropagation();
+          toggle();
+        }}
+      >
+        {selected ? "✓" : "+"}
+      </button>
+      {children}
+    </div>
+  );
+}
+
 // ── Determine if a component should span full width ───────
 //
 // Precedence:
@@ -2026,12 +2246,13 @@ export function injectStyles() {
 
 // ── Main RenderNode component ─────────────────────────────
 
-function RenderNodeRenderer({
+export function RenderNodeRenderer({
   node,
   onUpdateData,
   socketSubscribe,
   socketSend,
   onResize,
+  onAddContentNode,
 }: NodeRenderProps) {
   const data = node.data as RenderNodeData;
   const dataRef = useRef(data);
@@ -2059,6 +2280,9 @@ function RenderNodeRenderer({
 
   // Inject CSS animation
   useEffect(() => { injectStyles(); }, []);
+
+  const [contextSelectionActive, setContextSelectionActive] = useState(false);
+  const [selectedComponentIds, setSelectedComponentIds] = useState<string[]>([]);
 
   // Subscribe to render_update events from the paired Leader session
   useEffect(() => {
@@ -2094,6 +2318,37 @@ function RenderNodeRenderer({
   const columns = layout.columns ?? 2;
   const gap = layout.gap ?? 12;
   const hasContent = components.length > 0;
+  const selectedIdSet = useMemo(
+    () => new Set(selectedComponentIds),
+    [selectedComponentIds],
+  );
+  const selectedText = useMemo(
+    () =>
+      components
+        .filter((component) => selectedIdSet.has(component.id))
+        .map(formatRenderComponentToText)
+        .join("\n\n"),
+    [components, selectedIdSet],
+  );
+  const fullDashboardText = useMemo(
+    () => flattenRenderStateToText(renderState),
+    [renderState],
+  );
+  const toggleSelectedComponent = useCallback((componentId: string) => {
+    setContextSelectionActive(true);
+    setSelectedComponentIds((current) =>
+      current.includes(componentId)
+        ? current.filter((id) => id !== componentId)
+        : [...current, componentId],
+    );
+  }, []);
+  const copyText = useCallback((text: string) => {
+    void navigator.clipboard.writeText(text);
+  }, []);
+  const exitContextSelection = useCallback(() => {
+    setContextSelectionActive(false);
+    setSelectedComponentIds([]);
+  }, []);
 
   return (
     <div
@@ -2220,56 +2475,151 @@ function RenderNodeRenderer({
             </div>
           </div>
         ) : (
-          <div
-            className="rd-grid-container"
-            style={{
-              // Container query lets the grid step down to fewer columns
-              // when the node is resized narrow, independent of the
-              // agent-declared `columns` (which is treated as a maximum).
-              containerType: "inline-size",
-              // Expose the declared max column count to the CSS via a
-              // custom property so the @container rules can clamp it.
-              ["--rd-max-cols" as string]: String(columns),
-              ["--rd-gap" as string]: `${gap}px`,
-            }}
-          >
-            <div
-              className="rd-grid"
-              style={{
-                display: "grid",
-                // `minmax(0, 1fr)` prevents overflow when a child has
-                // intrinsic min-content wider than its track.
-                gridTemplateColumns: `repeat(var(--rd-cols, ${columns}), minmax(0, 1fr))`,
-                gap,
-                // `start` on both axes + `min-content` rows stops short
-                // components from being stretched to match a tall sibling.
-                alignContent: "start",
-                alignItems: "start",
-                gridAutoRows: "min-content",
-                // Dense packing backfills holes created by full-width
-                // items or size-mismatched rows.
-                gridAutoFlow: "dense",
-              }}
-            >
-              {components.map((c) => {
-                const col = gridColumnFor(c, columns);
-                return (
-                  <div
-                    key={c.id}
+          <>
+            {contextSelectionActive && (
+              <div
+                data-testid="render-context-selection-toolbar"
+                style={{
+                  position: "sticky",
+                  top: 0,
+                  zIndex: 20,
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  marginBottom: gap,
+                  pointerEvents: "none",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    padding: 2,
+                    borderRadius: 5,
+                    background: "var(--bg-primary)",
+                    border: "1px solid var(--border-default)",
+                    boxShadow: "var(--shadow-sm)",
+                    pointerEvents: "auto",
+                  }}
+                >
+                  <span
+                    aria-live="polite"
                     style={{
-                      gridColumn: col,
-                      minWidth: 0,
+                      padding: "0 5px",
+                      color: "var(--text-muted)",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 10,
+                      whiteSpace: "nowrap",
                     }}
                   >
-                    <RenderComponentView
-                      component={c}
-                      context={renderViewContext()}
+                    {selectedComponentIds.length} component
+                    {selectedComponentIds.length === 1 ? "" : "s"}
+                  </span>
+                  <DashboardSelectionGroup label="Selection controls">
+                    <DashboardSelectionButton
+                      icon="select-all"
+                      label="Select all dashboard components"
+                      onClick={() => setSelectedComponentIds(components.map((component) => component.id))}
+                      disabled={components.length === 0}
                     />
-                  </div>
-                );
-              })}
+                    <DashboardSelectionButton
+                      icon="clear"
+                      label="Clear selected dashboard components"
+                      onClick={() => setSelectedComponentIds([])}
+                      disabled={selectedComponentIds.length === 0}
+                    />
+                  </DashboardSelectionGroup>
+                  <DashboardSelectionGroup label="Copy and create actions">
+                    <DashboardSelectionButton
+                      icon="copy"
+                      label="Copy selected dashboard context"
+                      onClick={() => copyText(selectedText)}
+                      disabled={selectedText.length === 0}
+                      tone="primary"
+                    />
+                    <DashboardSelectionButton
+                      icon="node"
+                      label="Add selected dashboard context as node"
+                      onClick={() => onAddContentNode?.(selectedText)}
+                      disabled={!onAddContentNode || selectedText.length === 0}
+                      tone="primary"
+                    />
+                    <DashboardSelectionButton
+                      icon="copy-full"
+                      label="Copy full dashboard context"
+                      onClick={() => copyText(fullDashboardText)}
+                      disabled={fullDashboardText.length === 0}
+                      tone="primary"
+                    />
+                  </DashboardSelectionGroup>
+                  <DashboardSelectionGroup label="Selection mode">
+                    <DashboardSelectionButton
+                      icon="exit"
+                      label="Exit dashboard context selection"
+                      onClick={exitContextSelection}
+                    />
+                  </DashboardSelectionGroup>
+                </div>
+              </div>
+            )}
+            <div
+              className="rd-grid-container"
+              style={{
+                // Container query lets the grid step down to fewer columns
+                // when the node is resized narrow, independent of the
+                // agent-declared `columns` (which is treated as a maximum).
+                containerType: "inline-size",
+                // Expose the declared max column count to the CSS via a
+                // custom property so the @container rules can clamp it.
+                ["--rd-max-cols" as string]: String(columns),
+                ["--rd-gap" as string]: `${gap}px`,
+              }}
+            >
+              <div
+                className="rd-grid"
+                style={{
+                  display: "grid",
+                  // `minmax(0, 1fr)` prevents overflow when a child has
+                  // intrinsic min-content wider than its track.
+                  gridTemplateColumns: `repeat(var(--rd-cols, ${columns}), minmax(0, 1fr))`,
+                  gap,
+                  // `start` on both axes + `min-content` rows stops short
+                  // components from being stretched to match a tall sibling.
+                  alignContent: "start",
+                  alignItems: "start",
+                  gridAutoRows: "min-content",
+                  // Dense packing backfills holes created by full-width
+                  // items or size-mismatched rows.
+                  gridAutoFlow: "dense",
+                }}
+              >
+                {components.map((c) => {
+                  const col = gridColumnFor(c, columns);
+                  return (
+                    <div
+                      key={c.id}
+                      style={{
+                        gridColumn: col,
+                        minWidth: 0,
+                      }}
+                    >
+                      <SelectableDashboardComponent
+                        componentId={c.id}
+                        selectionActive={contextSelectionActive}
+                        selected={selectedIdSet.has(c.id)}
+                        onToggle={toggleSelectedComponent}
+                      >
+                        <RenderComponentView
+                          component={c}
+                          context={renderViewContext()}
+                        />
+                      </SelectableDashboardComponent>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          </>
         )}
       </div>
     </div>

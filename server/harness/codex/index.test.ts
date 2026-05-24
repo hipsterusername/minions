@@ -22,7 +22,6 @@
  */
 
 import {
-  afterEach,
   beforeEach,
   describe,
   expect,
@@ -214,14 +213,6 @@ beforeEach(() => {
       },
     ]),
   );
-});
-
-afterEach(async () => {
-  // Sweep any attachment scratch directories the tests may have created.
-  await fs.rm(`${process.env["TMPDIR"] ?? "/tmp"}/minions-codex-attachments`, {
-    recursive: true,
-    force: true,
-  });
 });
 
 // ── start() / event sequence ──────────────────────────────────────────────────
