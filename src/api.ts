@@ -1,5 +1,6 @@
 import type { CanvasNode, CanvasTransform, ThinkingConfig } from "./types.ts";
 import type { GraphDocument } from "./graph.ts";
+import type { LeaderPreset } from "./leader-preset.ts";
 
 const BASE = "/api";
 
@@ -73,8 +74,13 @@ export interface ProjectSettings {
     execute?: string;
     analyze?: string;
   };
+  /** Saved Leader configuration presets available across this project. */
+  leaderPresets?: LeaderPreset[];
   [key: string]: unknown;
 }
+
+// Re-export LeaderPreset so consumers can import it from api.ts
+export type { LeaderPreset };
 
 export interface ProjectWithNodes {
   id: string;
