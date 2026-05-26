@@ -19,6 +19,7 @@ interface SessionPanelProps {
   socketSubscribe?: ((fn: (msg: unknown) => void) => () => void) | undefined;
   socketConnected?: boolean | undefined;
   onAttachSession: (sessionKey: string, role?: "leader" | "minion" | "default" | "card-composer") => void;
+  onFocusSession?: (sessionKey: string) => void;
   attachedSessionKeys: Set<string>;
 }
 
@@ -27,10 +28,12 @@ export function SessionPanel({
   socketSubscribe,
   socketConnected,
   onAttachSession,
+  onFocusSession,
   attachedSessionKeys,
 }: SessionPanelProps) {
   const isOpen = useDockPanelOpen("sessions");
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [unattachedOpen, setUnattachedOpen] = useState(false);
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
   const [usageBySession, setUsageBySession] = useState<
@@ -151,6 +154,12 @@ export function SessionPanel({
   const visibleSessions = sessions.filter(
     (s) => s.role !== "minion" && s.role !== "card-composer",
   );
+  const attachedSessions = visibleSessions.filter((s) =>
+    attachedSessionKeys.has(s.sessionKey),
+  );
+  const unattachedSessions = visibleSessions.filter(
+    (s) => !attachedSessionKeys.has(s.sessionKey),
+  );
   const totalCost = visibleSessions.reduce((sum, s) => sum + (s.totalCost ?? 0), 0);
   // Memoize the usage map identity so UsageSection only re-renders when an
   // SDK result actually folds new tokens in.
@@ -229,13 +238,28 @@ export function SessionPanel({
             No active sessions
           </div>
         )}
-        {visibleSessions.map((session) => {
-          const isAttached = attachedSessionKeys.has(session.sessionKey);
+        {attachedSessions.length === 0 && unattachedSessions.length > 0 && (
+          <div
+            style={{
+              padding: "12px",
+              textAlign: "center",
+              color: "var(--text-muted)",
+              fontSize: 11,
+              fontStyle: "italic",
+            }}
+            data-testid="no-attached-sessions"
+          >
+            No sessions on canvas
+          </div>
+        )}
+        {attachedSessions.map((session) => {
+          const isAttached = true;
           const color = statusColor[session.status] ?? "var(--text-muted)";
 
           return (
             <div
               key={session.sessionKey}
+              data-testid="session-row-attached"
               style={{
                 padding: "8px 10px",
                 borderRadius: 6,
@@ -363,38 +387,24 @@ export function SessionPanel({
 
               {/* Actions */}
               <div style={{ display: "flex", gap: 4 }}>
-                {!isAttached && (
-                  <button
-                    onClick={() => onAttachSession(session.sessionKey, session.role)}
-                    style={{
-                      flex: 1,
-                      padding: "4px 0",
-                      fontSize: 10,
-                      background: "var(--bg-primary)",
-                      border: "1px solid var(--border-default)",
-                      borderRadius: 4,
-                      color: "var(--text-secondary)",
-                      cursor: "pointer",
-                      fontFamily: "var(--font-mono)",
-                    }}
-                  >
-                    Attach to canvas
-                  </button>
-                )}
-                {isAttached && (
-                  <span
-                    style={{
-                      flex: 1,
-                      padding: "4px 0",
-                      fontSize: 10,
-                      color: "var(--accent)",
-                      fontFamily: "var(--font-mono)",
-                      textAlign: "center",
-                    }}
-                  >
-                    On canvas
-                  </span>
-                )}
+                <button
+                  onClick={() => onFocusSession?.(session.sessionKey)}
+                  disabled={!onFocusSession}
+                  style={{
+                    flex: 1,
+                    padding: "4px 0",
+                    fontSize: 10,
+                    background: "var(--bg-primary)",
+                    border: "1px solid var(--accent)",
+                    borderRadius: 4,
+                    color: "var(--accent)",
+                    cursor: onFocusSession ? "pointer" : "default",
+                    fontFamily: "var(--font-mono)",
+                  }}
+                  title="Center canvas on this session"
+                >
+                  Focus
+                </button>
                 {session.status === "running" && (
                   <button
                     onClick={() => handleStop(session.sessionKey)}
@@ -438,6 +448,186 @@ export function SessionPanel({
             </div>
           );
         })}
+
+        {/* Unattached sessions: hidden under a collapsible section at the bottom */}
+        {unattachedSessions.length > 0 && (
+          <div style={{ marginTop: attachedSessions.length > 0 ? 8 : 0 }}>
+            <button
+              type="button"
+              onClick={() => setUnattachedOpen((v) => !v)}
+              aria-expanded={unattachedOpen}
+              data-testid="unattached-toggle"
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "6px 8px",
+                fontSize: 10,
+                background: "transparent",
+                border: "1px dashed var(--border-default)",
+                borderRadius: 4,
+                color: "var(--text-muted)",
+                cursor: "pointer",
+                fontFamily: "var(--font-mono)",
+                textTransform: "uppercase",
+                letterSpacing: 0.5,
+              }}
+            >
+              <span>
+                {unattachedOpen ? "▾" : "▸"} Not on canvas ({unattachedSessions.length})
+              </span>
+            </button>
+
+            {unattachedOpen &&
+              unattachedSessions.map((session) => {
+                const color = statusColor[session.status] ?? "var(--text-muted)";
+                return (
+                  <div
+                    key={session.sessionKey}
+                    data-testid="session-row-unattached"
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 6,
+                      marginTop: 4,
+                      background: "var(--bg-surface)",
+                      border: "1px solid var(--border-default)",
+                      opacity: 0.85,
+                      transition: "border-color 0.15s",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 4,
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <div
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: "50%",
+                            background: color,
+                            boxShadow:
+                              session.status === "running" ? `0 0 6px ${color}` : "none",
+                          }}
+                        />
+                        <span
+                          style={{
+                            fontSize: 11,
+                            color: "var(--text-primary)",
+                            fontFamily: "var(--font-mono)",
+                            fontWeight: session.taskName ? 600 : 400,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            maxWidth: 140,
+                          }}
+                        >
+                          {session.taskName ?? session.sessionKey.slice(0, 16)}
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: 9,
+                          color,
+                          fontFamily: "var(--font-mono)",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        {session.status}
+                      </span>
+                    </div>
+
+                    {/* Stats row */}
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        marginBottom: 6,
+                        fontSize: 10,
+                        color: "var(--text-muted)",
+                        fontFamily: "var(--font-mono)",
+                      }}
+                    >
+                      {(session.totalCost ?? 0) > 0 && (
+                        <span>${session.totalCost?.toFixed(4)}</span>
+                      )}
+                      {(session.turns ?? 0) > 0 && <span>{session.turns}T</span>}
+                    </div>
+
+                    {/* Actions */}
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <button
+                        onClick={() => onAttachSession(session.sessionKey, session.role)}
+                        style={{
+                          flex: 1,
+                          padding: "4px 0",
+                          fontSize: 10,
+                          background: "var(--bg-primary)",
+                          border: "1px solid var(--border-default)",
+                          borderRadius: 4,
+                          color: "var(--text-secondary)",
+                          cursor: "pointer",
+                          fontFamily: "var(--font-mono)",
+                        }}
+                      >
+                        Attach to canvas
+                      </button>
+                      {session.status === "running" && (
+                        <button
+                          onClick={() => handleStop(session.sessionKey)}
+                          style={{
+                            padding: "4px 8px",
+                            fontSize: 10,
+                            background: "var(--danger-bg)",
+                            border: "1px solid var(--danger-color)",
+                            borderRadius: 4,
+                            color: "var(--status-error)",
+                            cursor: "pointer",
+                            fontFamily: "var(--font-mono)",
+                          }}
+                        >
+                          Stop
+                        </button>
+                      )}
+                      {(session.status === "idle" ||
+                        session.status === "stopped" ||
+                        session.status === "error") && (
+                        <button
+                          onClick={() => {
+                            if (socketSend) {
+                              socketSend({
+                                type: "remove_session",
+                                sessionKey: session.sessionKey,
+                              });
+                            }
+                          }}
+                          style={{
+                            padding: "4px 8px",
+                            fontSize: 10,
+                            background:
+                              "color-mix(in srgb, var(--status-stopped) 15%, transparent)",
+                            border: "1px solid var(--border-default)",
+                            borderRadius: 4,
+                            color: "var(--text-muted)",
+                            cursor: "pointer",
+                            fontFamily: "var(--font-mono)",
+                          }}
+                          title="Remove session"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        )}
       </div>
 
       {/* Usage section — pinned at the bottom of the panel */}

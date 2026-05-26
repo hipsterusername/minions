@@ -211,6 +211,10 @@ class CodexHarness implements AgentHarness {
             yield { kind: "done", reason: "abort" };
             return;
           }
+          if (isBenignWindowsTaskkillParseError(errorMessage(err))) {
+            yield { kind: "done", reason: "stop" };
+            return;
+          }
           yield codexDoneError(errorMessage(err), streamErrors);
           return;
         }
@@ -243,6 +247,10 @@ class CodexHarness implements AgentHarness {
           // rejection. Treat it as an abort, not an error.
           if (ac.signal.aborted) {
             yield { kind: "done", reason: "abort" };
+            return;
+          }
+          if (isBenignWindowsTaskkillParseError(errorMessage(err))) {
+            if (!terminalEmitted) yield { kind: "done", reason: "stop" };
             return;
           }
           yield codexDoneError(errorMessage(err), streamErrors);
@@ -333,6 +341,12 @@ async function collectPrompt(
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function isBenignWindowsTaskkillParseError(message: string): boolean {
+  return /^Failed to parse item:\s*SUCCESS:\s+The process with PID \d+(?: \(child process of PID \d+\))? has been terminated\.\s*$/i.test(
+    message.trim(),
+  );
 }
 
 function codexDoneError(

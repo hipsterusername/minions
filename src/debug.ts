@@ -26,6 +26,26 @@
 
 const STORAGE_KEY = "minions:debug-mode";
 const MAX_RECORDS_PER_SESSION = 250;
+let debugEnabledCache: boolean | null = null;
+const flagListeners = new Set<(enabled: boolean) => void>();
+
+function notifyDebugFlag(enabled: boolean): void {
+  flagListeners.forEach((fn) => {
+    try {
+      fn(enabled);
+    } catch {
+      /* listener errors must not break siblings */
+    }
+  });
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    if (event.key !== STORAGE_KEY && event.key !== null) return;
+    debugEnabledCache = null;
+    notifyDebugFlag(isDebugEnabled());
+  });
+}
 
 // ── Public flag ─────────────────────────────────────────────
 
@@ -34,16 +54,19 @@ const MAX_RECORDS_PER_SESSION = 250;
  * browser (tests, SSR) so reducers don't accidentally instrument in CI.
  */
 export function isDebugEnabled(): boolean {
+  if (debugEnabledCache !== null) return debugEnabledCache;
   if (typeof window === "undefined") return false;
   try {
-    return window.localStorage.getItem(STORAGE_KEY) === "1";
+    debugEnabledCache = window.localStorage.getItem(STORAGE_KEY) === "1";
   } catch {
-    return false;
+    debugEnabledCache = false;
   }
+  return debugEnabledCache;
 }
 
 /** Write the persisted debug-mode flag and notify subscribers. */
 export function setDebugEnabled(value: boolean): void {
+  debugEnabledCache = value;
   if (typeof window === "undefined") return;
   try {
     if (value) {
@@ -54,16 +77,8 @@ export function setDebugEnabled(value: boolean): void {
   } catch {
     /* localStorage unavailable — keep going so the in-memory listeners still fire. */
   }
-  flagListeners.forEach((fn) => {
-    try {
-      fn(value);
-    } catch {
-      /* listener errors must not break siblings */
-    }
-  });
+  notifyDebugFlag(value);
 }
-
-const flagListeners = new Set<(enabled: boolean) => void>();
 
 /** Subscribe to debug-mode flag changes. Returns an unsubscribe fn. */
 export function subscribeDebugFlag(

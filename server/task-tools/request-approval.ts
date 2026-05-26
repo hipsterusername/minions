@@ -8,6 +8,8 @@ import type { DetailedDiff } from "../worktree.js";
 import { getDetailedDiff } from "../worktree.js";
 import type { TaskToolContext } from "./types.ts";
 
+export const APPROVAL_GRACE_MS = 15_000;
+
 export function createRequestApprovalToolDef(ctx: TaskToolContext): NormalizedToolDef {
   return {
     name: "request_approval",
@@ -49,10 +51,14 @@ export function createRequestApprovalToolDef(ctx: TaskToolContext): NormalizedTo
         };
       }
 
+      const requestedAt = Date.now();
+      const graceUntil = requestedAt + APPROVAL_GRACE_MS;
+
       // Record approval state
       ctx.taskState.approval = {
         requested: true,
-        requestedAt: Date.now(),
+        requestedAt,
+        graceUntil,
         summary: args.summary,
         diff,
       };
@@ -64,7 +70,8 @@ export function createRequestApprovalToolDef(ctx: TaskToolContext): NormalizedTo
         sessionKey: ctx.leaderSessionKey,
         summary: args.summary,
         diff,
-        timestamp: Date.now(),
+        timestamp: requestedAt,
+        graceUntil,
       });
 
       // Build a response with the diff details AND explicit render instructions

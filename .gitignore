@@ -26,6 +26,22 @@ data/
 
 # Claude Code local settings (user-specific)
 .claude/settings.local.json
+.claude/worktrees/
+
+# Local working notes / context (per-machine, not portable)
+context.md
+docs/
+.context/
+
+# Smoke-test / dev-server scratch logs
+vite-smoke.log
+vite-smoke.err.log
+vite-*.log
+*.smoke.log
+
+# Agent recovery scratch
+.recovery/
+*.rej
 
 # OS files
 .DS_Store

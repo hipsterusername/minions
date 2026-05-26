@@ -1,15 +1,22 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import type { NodeRenderProps } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
 import { registerContract } from "../graph.ts";
 import type { NodeInterfaceContract } from "../graph.ts";
 import { ResizeHandle } from "../components/ResizeHandle.tsx";
+import { MarkdownEditor } from "../components/MarkdownEditor.tsx";
 import { getAuthToken } from "../api.ts";
 
 interface MarkdownData {
   title: string;
   content: string;
-  viewMode: "edit" | "preview";
+  /**
+   * "edit"    — CodeMirror editor only.
+   * "preview" — rendered HTML only.
+   * "split"   — editor + live preview side-by-side.
+   */
+  viewMode: "edit" | "preview" | "split";
   collapsed?: boolean;
   /** Saved height before collapsing so we can restore on expand */
   expandedHeight?: number;
@@ -17,7 +24,21 @@ interface MarkdownData {
   savedPath?: string | null;
   /** Content hash at last save — used to detect unsaved changes */
   savedContentHash?: string | null;
+  /**
+   * Editor pane's fraction of the writing area in Split mode, 0–1.
+   * 0.5 = even 50/50 split. Clamped at read time to [SPLIT_MIN,
+   * SPLIT_MAX] so neither pane can collapse past 15%. Defaults to 0.5
+   * when undefined (existing nodes before this field existed).
+   */
+  splitRatio?: number;
 }
+
+/** Min/max bounds for the resizable Split divider. */
+const SPLIT_MIN = 0.15;
+const SPLIT_MAX = 0.85;
+const SPLIT_DEFAULT = 0.5;
+const clampSplit = (r: number): number =>
+  Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, r));
 
 // ── Graph contract ─────────────────────────────────────
 
@@ -181,128 +202,6 @@ function slugify(title: string): string {
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "") || "untitled"
   );
-}
-
-// ── Textarea keyboard helpers ────────────────────────────
-
-function wrapSelection(
-  textarea: HTMLTextAreaElement,
-  before: string,
-  after: string,
-): string {
-  const { selectionStart, selectionEnd, value } = textarea;
-  const selected = value.slice(selectionStart, selectionEnd);
-
-  // If already wrapped, unwrap
-  const prefixMatch =
-    selectionStart >= before.length &&
-    value.slice(selectionStart - before.length, selectionStart) === before;
-  const suffixMatch =
-    selectionEnd + after.length <= value.length &&
-    value.slice(selectionEnd, selectionEnd + after.length) === after;
-
-  if (prefixMatch && suffixMatch && selected.length > 0) {
-    const newValue =
-      value.slice(0, selectionStart - before.length) +
-      selected +
-      value.slice(selectionEnd + after.length);
-    // Schedule cursor restore after React re-render
-    requestAnimationFrame(() => {
-      textarea.selectionStart = selectionStart - before.length;
-      textarea.selectionEnd = selectionEnd - before.length;
-    });
-    return newValue;
-  }
-
-  const newValue =
-    value.slice(0, selectionStart) +
-    before +
-    selected +
-    after +
-    value.slice(selectionEnd);
-
-  requestAnimationFrame(() => {
-    if (selected.length > 0) {
-      textarea.selectionStart = selectionStart + before.length;
-      textarea.selectionEnd = selectionEnd + before.length;
-    } else {
-      // Place cursor between markers
-      textarea.selectionStart = selectionStart + before.length;
-      textarea.selectionEnd = selectionStart + before.length;
-    }
-  });
-  return newValue;
-}
-
-function handleTabIndent(
-  textarea: HTMLTextAreaElement,
-  shiftKey: boolean,
-): string {
-  const { selectionStart, selectionEnd, value } = textarea;
-  const indent = "  ";
-
-  if (shiftKey) {
-    // Outdent: remove leading indent from current line
-    const lineStart = value.lastIndexOf("\n", selectionStart - 1) + 1;
-    if (value.slice(lineStart, lineStart + indent.length) === indent) {
-      const newValue =
-        value.slice(0, lineStart) + value.slice(lineStart + indent.length);
-      requestAnimationFrame(() => {
-        textarea.selectionStart = Math.max(lineStart, selectionStart - indent.length);
-        textarea.selectionEnd = Math.max(lineStart, selectionEnd - indent.length);
-      });
-      return newValue;
-    }
-    return value;
-  }
-
-  // Indent
-  const newValue =
-    value.slice(0, selectionStart) + indent + value.slice(selectionEnd);
-  requestAnimationFrame(() => {
-    textarea.selectionStart = selectionStart + indent.length;
-    textarea.selectionEnd = selectionStart + indent.length;
-  });
-  return newValue;
-}
-
-function handleEnterKey(textarea: HTMLTextAreaElement): string | null {
-  const { selectionStart, value } = textarea;
-  const lineStart = value.lastIndexOf("\n", selectionStart - 1) + 1;
-  const currentLine = value.slice(lineStart, selectionStart);
-
-  // Match leading whitespace + list marker
-  const listMatch = currentLine.match(/^(\s*)([-*]\s+|\d+\.\s+)/);
-  if (!listMatch) return null;
-
-  const [, leadingSpace, marker] = listMatch;
-  const contentAfterMarker = currentLine.slice(listMatch[0].length);
-
-  // If list item is empty (just the marker), remove the marker line instead
-  if (contentAfterMarker.trim() === "") {
-    const newValue = value.slice(0, lineStart) + "\n" + value.slice(selectionStart);
-    requestAnimationFrame(() => {
-      textarea.selectionStart = lineStart + 1;
-      textarea.selectionEnd = lineStart + 1;
-    });
-    return newValue;
-  }
-
-  // Auto-increment numbered lists
-  let nextMarker = marker ?? "";
-  const numMatch = nextMarker.match(/^(\d+)\.\s+/);
-  if (numMatch && numMatch[1]) {
-    nextMarker = `${parseInt(numMatch[1]) + 1}. `;
-  }
-
-  const insertion = "\n" + leadingSpace + nextMarker;
-  const newValue =
-    value.slice(0, selectionStart) + insertion + value.slice(selectionStart);
-  requestAnimationFrame(() => {
-    textarea.selectionStart = selectionStart + insertion.length;
-    textarea.selectionEnd = selectionStart + insertion.length;
-  });
-  return newValue;
 }
 
 // ── Folder picker sub-component ───────────────────────────
@@ -582,7 +481,6 @@ export function MarkdownNodeRenderer({
 }: NodeRenderProps) {
   const data = node.data as MarkdownData;
   const collapsed = data.collapsed ?? false;
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const cardTitleInputRef = useRef<HTMLInputElement>(null);
   const clickStartRef = useRef<{ x: number; y: number } | null>(null);
   const [wordCount, setWordCount] = useState(0);
@@ -662,11 +560,9 @@ export function MarkdownNodeRenderer({
     setLineCount(data.content.split("\n").length);
   }, [data.content]);
 
-  useEffect(() => {
-    if (data.viewMode === "edit" && textareaRef.current && !collapsed) {
-      textareaRef.current.focus();
-    }
-  }, [data.viewMode, collapsed]);
+  // Focus into the editor is handled inside MarkdownEditor on mount.
+  // The editor mounts/unmounts based on `viewMode`, so switching from
+  // Read → Write naturally gives it focus.
 
   useEffect(() => {
     if (showCardPrompt) {
@@ -675,73 +571,162 @@ export function MarkdownNodeRenderer({
     }
   }, [showCardPrompt]);
 
-  // ── Keyboard handler for textarea ──────────────────────
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      const textarea = e.currentTarget;
-      const isMod = e.metaKey || e.ctrlKey;
-
-      // Cmd+B → bold
-      if (isMod && e.key === "b") {
-        e.preventDefault();
-        const newValue = wrapSelection(textarea, "**", "**");
-        update({ content: newValue });
-        return;
-      }
-
-      // Cmd+I → italic
-      if (isMod && e.key === "i") {
-        e.preventDefault();
-        const newValue = wrapSelection(textarea, "*", "*");
-        update({ content: newValue });
-        return;
-      }
-
-      // Cmd+E → inline code
-      if (isMod && e.key === "e") {
-        e.preventDefault();
-        const newValue = wrapSelection(textarea, "`", "`");
-        update({ content: newValue });
-        return;
-      }
-
-      // Cmd+S → save
-      if (isMod && e.key === "s") {
-        e.preventDefault();
-        if (data.savedPath && projectPath && hasUnsavedChanges) {
-          void handleQuickSave();
-        } else if (projectPath) {
-          setShowSaveDialog(true);
-        }
-        return;
-      }
-
-      // Tab → indent/outdent
-      if (e.key === "Tab") {
-        e.preventDefault();
-        const newValue = handleTabIndent(textarea, e.shiftKey);
-        update({ content: newValue });
-        return;
-      }
-
-      // Enter → auto-continue lists
-      if (e.key === "Enter" && !e.shiftKey) {
-        const result = handleEnterKey(textarea);
-        if (result !== null) {
-          e.preventDefault();
-          update({ content: result });
-        }
-        return;
-      }
-    },
+  // Cmd+S handler — delegated from CodeMirror's keymap into the existing
+  // save flow (quick-save if we already know a path, otherwise open the
+  // save-as dialog).
+  const handleEditorSave = useCallback(() => {
+    if (data.savedPath && projectPath && hasUnsavedChanges) {
+      void handleQuickSave();
+    } else if (projectPath) {
+      setShowSaveDialog(true);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data.content, data.savedPath, projectPath, hasUnsavedChanges],
-  );
+  }, [data.savedPath, projectPath, hasUnsavedChanges]);
+
+  // ── Focus mode (fullscreen overlay) ────────────────────
+  // Ephemeral, per-instance, per-session — modern markdown editors
+  // (Typora, iA Writer, HackMD, StackEdit) treat focus mode as a
+  // transient presentation state rather than something to persist.
+  // We intentionally do NOT store this on `data` for that reason.
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const toggleFullscreen = useCallback(() => {
+    setIsFullscreen((v) => !v);
+  }, []);
+
+  // Window-level keyboard: Cmd/Ctrl+Shift+F toggles, Esc exits.
+  // Window-level — not editor-level — so it works regardless of which
+  // surface within the node is focused (title input, save dialog, etc.).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      // Cmd/Ctrl+Shift+F → toggle.  Only fires for this node when its
+      // editor or any child is focused, or when *no* card is in
+      // fullscreen (so a global hotkey from anywhere enters this card's
+      // fullscreen if the node owns the focus path).
+      if (mod && e.shiftKey && (e.key === "f" || e.key === "F")) {
+        const root = nodeRootRef.current;
+        const focused = document.activeElement;
+        const owns = root && (root === focused || root.contains(focused));
+        if (owns) {
+          e.preventDefault();
+          toggleFullscreen();
+        }
+        return;
+      }
+      // Esc exits fullscreen (only if we are the one in fullscreen).
+      if (e.key === "Escape" && isFullscreen) {
+        e.preventDefault();
+        setIsFullscreen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isFullscreen, toggleFullscreen]);
+
+  // Lock body scroll while the overlay is up. Without this, a stray
+  // wheel/trackpad event near the edge of the overlay can scroll the
+  // page or pan the canvas underneath.
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [isFullscreen]);
+
+  // Ref used by the keyboard handler to scope Cmd+Shift+F to the focused
+  // node. Assigned to the in-canvas wrapper (NOT the portaled overlay)
+  // so both views identify as "this card".
+  const nodeRootRef = useRef<HTMLDivElement | null>(null);
+
+  // ── Resizable Split divider ────────────────────────────
+  //
+  // The Split mode divider is draggable. Strategy:
+  //   - During drag, we track a `draftRatio` in *component* state and
+  //     write it into a CSS variable on the writing-area host. The
+  //     editor and preview pick up the variable via `flex` so resize
+  //     is a pure CSS operation — no React re-render per pointer move.
+  //   - On pointer up we commit the final ratio into `data.splitRatio`
+  //     so it persists across reloads.
+  //   - `setPointerCapture` keeps the drag live even if the cursor
+  //     drifts outside the divider (a common ergonomic improvement
+  //     over plain `mousemove` listeners).
+  const writingAreaRef = useRef<HTMLDivElement | null>(null);
+  const dragRatioRef = useRef<number | null>(null);
+  const [isDraggingDivider, setIsDraggingDivider] = useState(false);
+
+  const persistedSplitRatio = clampSplit(data.splitRatio ?? SPLIT_DEFAULT);
+
+  // The drag is driven entirely off `dragRatioRef`. Storing "am I
+  // dragging?" in a ref (rather than only in state) means the move/up
+  // handlers are immune to the stale-closure problem you'd get if
+  // they only consulted `isDraggingDivider`. The state mirror exists
+  // solely so the divider can render a visual `data-dragging` flag.
+  const onDividerPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!writingAreaRef.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      (e.currentTarget as Element).setPointerCapture(e.pointerId);
+    } catch {
+      // setPointerCapture is unimplemented in some test environments.
+    }
+    dragRatioRef.current = persistedSplitRatio;
+    setIsDraggingDivider(true);
+  };
+
+  const onDividerPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragRatioRef.current === null || !writingAreaRef.current) return;
+    const rect = writingAreaRef.current.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const next = clampSplit((e.clientX - rect.left) / rect.width);
+    dragRatioRef.current = next;
+    // Write directly to the CSS variable — bypasses React for the
+    // duration of the drag so the layout updates at the browser's
+    // refresh rate, not React's commit rate.
+    writingAreaRef.current.style.setProperty("--md-split-ratio", String(next));
+  };
+
+  const endDividerDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragRatioRef.current === null) return;
+    try {
+      (e.currentTarget as Element).releasePointerCapture(e.pointerId);
+    } catch {
+      // pointerId may already be released — safe to ignore.
+    }
+    const final = dragRatioRef.current;
+    dragRatioRef.current = null;
+    setIsDraggingDivider(false);
+    if (final !== null && final !== persistedSplitRatio) {
+      update({ splitRatio: final });
+    }
+  };
+
+  const onDividerDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    update({ splitRatio: SPLIT_DEFAULT });
+    if (writingAreaRef.current) {
+      writingAreaRef.current.style.setProperty(
+        "--md-split-ratio",
+        String(SPLIT_DEFAULT),
+      );
+    }
+  };
 
   const isEdit = data.viewMode === "edit";
+  const isSplit = data.viewMode === "split";
+  const showEditor = isEdit || isSplit;
+  const showPreview = !isEdit; // both "preview" and "split"
 
-  return (
-    <div className="md-node" data-collapsed={collapsed}>
+  const nodeContent = (
+    <div
+      className="md-node"
+      data-collapsed={collapsed}
+      data-fullscreen={isFullscreen}
+      data-mode={data.viewMode}
+      ref={nodeRootRef}
+    >
       {/* ── Inline styles (scoped to this node via class names) ── */}
       <style>{`
         .md-node {
@@ -759,6 +744,12 @@ export function MarkdownNodeRenderer({
         }
 
         /* ── Title bar ─────────────────── */
+        /* The header doubles as the node's drag handle. Interactive
+           children inside it (the title input, the mode pills, the
+           fullscreen button) opt out of drag at the CanvasNode level
+           because they are input/button elements — so the visible
+           drag area is whatever header background and dedicated
+           grip/spacer regions remain. cursor:move advertises that. */
         .md-header {
           padding: 6px 10px;
           display: flex;
@@ -768,9 +759,45 @@ export function MarkdownNodeRenderer({
           border-bottom: 1px solid var(--border-default);
           flex-shrink: 0;
           min-height: 36px;
+          cursor: move;
         }
         .md-node[data-collapsed="true"] .md-header {
           border-bottom: none;
+        }
+
+        /* Dedicated drag grip at the leading edge of the header — the
+           obvious "grab here" affordance. Inherits move cursor from
+           the header but brightens on hover to signal interactivity. */
+        .md-drag-grip {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 14px;
+          height: 22px;
+          color: var(--text-muted);
+          opacity: 0.55;
+          flex-shrink: 0;
+          border-radius: 3px;
+          cursor: grab;
+          transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+        }
+        .md-drag-grip:hover {
+          opacity: 1;
+          color: var(--text-secondary);
+          background: var(--state-hover);
+        }
+        .md-drag-grip:active {
+          cursor: grabbing;
+        }
+
+        /* Always-present flex spacer between the title and the mode
+           toggle. Even with a long title (which would otherwise consume
+           the header), this gives the user a guaranteed drag region. */
+        .md-header-spacer {
+          flex: 1 1 12px;
+          min-width: 12px;
+          align-self: stretch;
+          cursor: move;
         }
 
         .md-collapse-btn {
@@ -791,7 +818,11 @@ export function MarkdownNodeRenderer({
         }
 
         .md-title-input {
-          flex: 1;
+          /* Bounded width so the .md-header-spacer beside it always
+             has room to absorb leftover header width and stay
+             draggable. Long titles scroll within the input rather than
+             eating the whole header. */
+          flex: 1 1 auto;
           background: transparent;
           border: none;
           color: var(--text-primary);
@@ -800,7 +831,8 @@ export function MarkdownNodeRenderer({
           font-family: var(--font-sans);
           outline: none;
           padding: 1px 4px;
-          min-width: 0;
+          min-width: 40px;
+          max-width: 240px;
           border-radius: 3px;
           transition: background 0.15s;
         }
@@ -843,32 +875,72 @@ export function MarkdownNodeRenderer({
         }
 
         /* ── Writing surface ──────────── */
-        .md-textarea {
-          flex: 1;
-          padding: 14px 20px;
+        /* CodeMirror host container. The editor's own theme (in
+           MarkdownEditor.tsx) supplies the font, caret, selection,
+           and placeholder styles; we only set layout here. */
+        .md-editor-host {
+          flex: 1 1 0;
+          min-width: 0;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
           background: var(--bg-primary);
-          border: none;
-          color: var(--text-primary);
-          font-size: 13.5px;
-          font-family: var(--font-sans);
-          resize: none;
+        }
+        .md-editor-host > .cm-editor {
+          flex: 1;
+          height: 100%;
+        }
+        /* In Split mode, the editor and preview share the row using
+           the --md-split-ratio CSS variable (0..1, editor's share).
+           flex-basis: 0 lets the grow values determine proportions. */
+        .md-writing-area[data-mode="split"] .md-editor-host {
+          flex: calc(var(--md-split-ratio, 0.5)) 1 0;
+        }
+        .md-writing-area[data-mode="split"] .md-preview {
+          flex: calc(1 - var(--md-split-ratio, 0.5)) 1 0;
+        }
+
+        /* Resizable vertical divider between editor and preview in
+           Split mode. 7px wide hit area, 1px visible line, brightens
+           on hover and during drag. */
+        .md-split-divider {
+          flex: 0 0 7px;
+          position: relative;
+          cursor: col-resize;
+          background: transparent;
+          align-self: stretch;
+          touch-action: none;
+          user-select: none;
+        }
+        .md-split-divider::before {
+          content: "";
+          position: absolute;
+          top: 0;
+          bottom: 0;
+          left: 3px;
+          right: 3px;
+          background: var(--border-default);
+          opacity: 0.6;
+          transition: opacity 0.15s ease, background 0.15s ease;
+        }
+        .md-split-divider:hover::before,
+        .md-split-divider:focus-visible::before,
+        .md-split-divider[data-dragging="true"]::before {
+          background: var(--accent);
+          opacity: 1;
+        }
+        .md-split-divider:focus-visible {
           outline: none;
-          line-height: 1.75;
-          letter-spacing: 0.005em;
-          caret-color: var(--accent);
-          tab-size: 2;
         }
-        .md-textarea::placeholder {
-          color: var(--text-muted);
-          font-style: italic;
-        }
-        .md-textarea::selection {
-          background: rgba(240, 136, 62, 0.25);
+        /* Hide a system caret if a focus ring would appear on tab. */
+        .md-split-divider:focus {
+          outline: none;
         }
 
         /* ── Preview surface ──────────── */
         .md-preview {
-          flex: 1;
+          flex: 1 1 0;
+          min-width: 0;
           padding: 14px 20px;
           background: var(--bg-primary);
           color: var(--text-secondary);
@@ -1152,7 +1224,7 @@ export function MarkdownNodeRenderer({
           display: flex;
           gap: 10px;
         }
-        .md-textarea:focus ~ .md-kbd-hint {
+        .md-writing-area:focus-within .md-kbd-hint {
           opacity: 0.5;
         }
         .md-kbd-hint kbd {
@@ -1415,10 +1487,132 @@ export function MarkdownNodeRenderer({
         .md-save-confirm-btn[data-status="saved"] {
           background: var(--success-color);
         }
+
+        /* ── Focus mode (fullscreen overlay) ─────────────── */
+        .md-fullscreen-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 22px;
+          height: 22px;
+          border: 1px solid transparent;
+          background: transparent;
+          color: var(--text-muted);
+          border-radius: 4px;
+          cursor: pointer;
+          margin-left: 4px;
+          transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        }
+        .md-fullscreen-btn:hover {
+          background: var(--bg-elevated);
+          color: var(--text-primary);
+          border-color: var(--border-default);
+        }
+        .md-fullscreen-btn[aria-pressed="true"] {
+          background: var(--bg-elevated);
+          color: var(--accent);
+          border-color: var(--border-default);
+        }
+        /* Placeholder kept in the canvas while the real UI is portaled. */
+        .md-fullscreen-stub {
+          align-items: center;
+          justify-content: center;
+          color: var(--text-muted);
+          font-style: italic;
+          font-size: 12px;
+          background: var(--bg-secondary);
+          opacity: 0.7;
+          display: flex;
+        }
+        .md-fullscreen-stub-label {
+          padding: 8px 12px;
+        }
+        /* The full-viewport overlay container. */
+        .md-fullscreen-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 1000;
+          display: flex;
+          align-items: stretch;
+          justify-content: center;
+          background: var(--bg-primary);
+          backdrop-filter: saturate(140%);
+          animation: md-fade-in 120ms ease-out;
+        }
+        @keyframes md-fade-in {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        /* Overrides applied to the node when it's the overlay's child. */
+        .md-fullscreen-overlay > .md-node[data-fullscreen="true"] {
+          width: 100%;
+          height: 100%;
+          max-width: none;
+          border-radius: 0;
+          border: none;
+          box-shadow: none;
+        }
+        /* Slim header chrome in focus mode. */
+        .md-fullscreen-overlay .md-node[data-fullscreen="true"] .md-header {
+          padding: 8px 18px;
+          min-height: 44px;
+        }
+        /* Centered reading column for single-pane modes. Generous
+           typography for the typewriter feel of modern focus modes.
+           Split mode stays edge-to-edge so both panes get the room. */
+        .md-node[data-fullscreen="true"][data-mode="edit"] .md-writing-area,
+        .md-node[data-fullscreen="true"][data-mode="preview"] .md-writing-area {
+          padding: 24px clamp(16px, 6vw, 80px);
+        }
+        .md-node[data-fullscreen="true"][data-mode="edit"] .md-editor-host,
+        .md-node[data-fullscreen="true"][data-mode="preview"] .md-preview {
+          max-width: 820px;
+          margin: 0 auto;
+          width: 100%;
+        }
+        .md-node[data-fullscreen="true"][data-mode="edit"] .md-editor-host .cm-scroller,
+        .md-node[data-fullscreen="true"][data-mode="preview"] .md-preview {
+          font-size: 15px;
+          line-height: 1.8;
+        }
+        .md-node[data-fullscreen="true"][data-mode="split"] .md-writing-area {
+          padding: 18px;
+        }
+        /* Footer chrome stays put but with calmer padding. */
+        .md-node[data-fullscreen="true"] .md-status-bar {
+          padding: 8px 18px;
+        }
       `}</style>
 
       {/* ── Title bar ─────────────────────────────────── */}
       <div className="md-header">
+        {/* Leading drag grip — the obvious "grab to move" affordance.
+            Plain span (not a button) so the CanvasNode drag handler
+            sees it as non-interactive and initiates a node drag on
+            mousedown. `aria-hidden` keeps it out of the a11y tree;
+            the `title` is a sighted-user hint and the surface used by
+            the regression test in MarkdownNode.test.tsx. */}
+        <span
+          className="md-drag-grip"
+          title="Drag to move"
+          aria-hidden="true"
+        >
+          <svg
+            width="8"
+            height="14"
+            viewBox="0 0 8 14"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <circle cx="2" cy="3" r="1" />
+            <circle cx="6" cy="3" r="1" />
+            <circle cx="2" cy="7" r="1" />
+            <circle cx="6" cy="7" r="1" />
+            <circle cx="2" cy="11" r="1" />
+            <circle cx="6" cy="11" r="1" />
+          </svg>
+        </span>
+
         <button
           onClick={toggleCollapse}
           onMouseDown={(e) => e.stopPropagation()}
@@ -1460,51 +1654,125 @@ export function MarkdownNodeRenderer({
           />
         )}
 
+        {/* Always-present drag region between the title and the
+            mode/fullscreen buttons. With the title input capped at
+            240px, this absorbs all leftover header width and keeps a
+            meaningful drag target on any node size. */}
+        <div className="md-header-spacer" aria-hidden="true" />
+
         {!collapsed && (
-          <div className="md-mode-toggle">
+          <>
+            <div className="md-mode-toggle">
+              <button
+                onClick={() => update({ viewMode: "edit" })}
+                onMouseDown={(e) => e.stopPropagation()}
+                className="md-mode-btn"
+                data-active={isEdit}
+              >
+                Write
+              </button>
+              <button
+                onClick={() => update({ viewMode: "split" })}
+                onMouseDown={(e) => e.stopPropagation()}
+                className="md-mode-btn"
+                data-active={isSplit}
+                title="Live preview alongside editor"
+              >
+                Split
+              </button>
+              <button
+                onClick={() => update({ viewMode: "preview" })}
+                onMouseDown={(e) => e.stopPropagation()}
+                className="md-mode-btn"
+                data-active={data.viewMode === "preview"}
+              >
+                Read
+              </button>
+            </div>
             <button
-              onClick={() => update({ viewMode: "edit" })}
+              onClick={toggleFullscreen}
               onMouseDown={(e) => e.stopPropagation()}
-              className="md-mode-btn"
-              data-active={isEdit}
+              className="md-fullscreen-btn"
+              title={
+                isFullscreen
+                  ? "Exit focus mode (Esc)"
+                  : "Focus mode (⌘⇧F)"
+              }
+              aria-label={isFullscreen ? "Exit focus mode" : "Enter focus mode"}
+              aria-pressed={isFullscreen}
             >
-              Write
+              {isFullscreen ? (
+                // Collapse glyph — two arrows pointing inward.
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+                  <path d="M7 2v4H3v1.5h5.5V2H7zM2 8.5V10h4v4h1.5V8.5H2zm12.5 0H9V14h1.5v-4h4V8.5zM14.5 7v-.5H10V2H8.5v5.5h6V7z" />
+                </svg>
+              ) : (
+                // Expand glyph — two arrows pointing outward (NW/SE).
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+                  <path d="M2 2h5v1.5H3.5V7H2V2zm12 0v5h-1.5V3.5H9V2h5zM2 14V9h1.5v3.5H7V14H2zm12 0H9v-1.5h3.5V9H14v5z" />
+                </svg>
+              )}
             </button>
-            <button
-              onClick={() => update({ viewMode: "preview" })}
-              onMouseDown={(e) => e.stopPropagation()}
-              className="md-mode-btn"
-              data-active={!isEdit}
-            >
-              Read
-            </button>
-          </div>
+          </>
         )}
       </div>
 
       {/* ── Writing area ──────────────────────────────── */}
       {!collapsed && (
         <>
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", position: "relative", overflow: "hidden" }}>
-            {isEdit ? (
-              <textarea
-                ref={textareaRef}
+          <div
+            ref={writingAreaRef}
+            className="md-writing-area"
+            data-mode={data.viewMode}
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "row",
+              position: "relative",
+              overflow: "hidden",
+              minHeight: 0,
+              // CSS variable consumed by `.md-editor-host` and
+              // `.md-preview` in Split mode to size the panes.
+              ["--md-split-ratio" as never]: String(persistedSplitRatio),
+            }}
+          >
+            {showEditor && (
+              <MarkdownEditor
                 value={data.content}
-                onChange={(e) => update({ content: e.target.value })}
-                onMouseDown={(e) => e.stopPropagation()}
-                onKeyDown={handleKeyDown}
+                onChange={(next) => update({ content: next })}
+                onSave={handleEditorSave}
                 placeholder="Start writing…"
-                spellCheck
-                className="md-textarea"
-                data-no-drag
+                className="md-editor-host"
+                ariaLabel="Markdown editor"
               />
-            ) : (
+            )}
+            {isSplit && (
+              <div
+                className="md-split-divider"
+                data-dragging={isDraggingDivider}
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize editor and preview panes"
+                aria-valuenow={Math.round(persistedSplitRatio * 100)}
+                aria-valuemin={Math.round(SPLIT_MIN * 100)}
+                aria-valuemax={Math.round(SPLIT_MAX * 100)}
+                tabIndex={0}
+                onPointerDown={onDividerPointerDown}
+                onPointerMove={onDividerPointerMove}
+                onPointerUp={endDividerDrag}
+                onPointerCancel={endDividerDrag}
+                onDoubleClick={onDividerDoubleClick}
+                title="Drag to resize · double-click to reset"
+              />
+            )}
+            {showPreview && (
               <div
                 onMouseDown={(e) => e.stopPropagation()}
                 onDoubleClick={() => update({ viewMode: "edit" })}
                 dangerouslySetInnerHTML={{ __html: sanitizeHtml(renderMarkdown(data.content)) }}
                 className="md-preview"
                 data-no-drag
+                data-scroll-capture
               />
             )}
           </div>
@@ -1628,7 +1896,7 @@ export function MarkdownNodeRenderer({
             )}
           </div>
 
-          {onResize && (
+          {onResize && !isFullscreen && (
             <ResizeHandle
               currentSize={node.size}
               minWidth={240}
@@ -1641,6 +1909,43 @@ export function MarkdownNodeRenderer({
       )}
     </div>
   );
+
+  // When the user is in focus mode, render the same node UI in a portal
+  // attached to <body>. `position: fixed` alone is not enough to escape
+  // the canvas's CSS transform stack — `transform` on an ancestor
+  // creates a containing block for fixed descendants, anchoring them
+  // inside the (panned/zoomed) canvas rather than the viewport. The
+  // portal sidesteps the entire transform ancestry.
+  if (isFullscreen) {
+    return (
+      <>
+        {/* Lightweight placeholder kept in the canvas so the node still
+            registers selection / hit-testing while its real UI is
+            overlaid. */}
+        <div
+          className="md-node md-fullscreen-stub"
+          data-fullscreen-stub
+          aria-hidden
+        >
+          <span className="md-fullscreen-stub-label">In focus mode…</span>
+        </div>
+        {createPortal(
+          <div
+            className="md-fullscreen-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Markdown focus mode"
+            data-scroll-capture
+          >
+            {nodeContent}
+          </div>,
+          document.body,
+        )}
+      </>
+    );
+  }
+
+  return nodeContent;
 }
 
 // ── Registration ───────────────────────────────────────

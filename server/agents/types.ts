@@ -13,6 +13,7 @@ import type { ReasoningMapState } from "../reasoning-map-tools.ts";
 import type { WorktreeInfo } from "../worktree.ts";
 import type { NormalizedToolDef } from "../harness/types.ts";
 import type { ThinkingConfig } from "../session-host-config.ts";
+import type { SessionTerminateReason } from "../session-host-terminate.ts";
 
 // ── Context passed to every AgentType method ──────────────────────────────
 
@@ -48,7 +49,11 @@ export interface AgentTypeContext {
     thinkingConfig?: ThinkingConfig;
   }) => void;
   /** Callback to schedule a delayed "Continue" resume (leader only) */
-  scheduleWaitContinue?: (durationMs: number, reason: string) => void;
+  scheduleWaitContinue?: (durationMs: number, reason: string) => ReturnType<typeof setTimeout> | null | void;
+  /** Callback to terminate another live session by key. */
+  terminateSession?: (sessionKey: string, reason: SessionTerminateReason) => void;
+  /** Wake a waiting leader as soon as every child task is terminal. */
+  wakeWaitingLeaderIfAllChildrenTerminal?: (leaderKey: string) => void;
   /**
    * Iterate over all sessions that have a taskState (i.e., leaders).
    * Used by minion onComplete to propagate results back.

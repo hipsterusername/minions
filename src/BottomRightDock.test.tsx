@@ -9,12 +9,14 @@
  *   - Click outside closes the active panel.
  *   - Live badges (count + dot + tail) round-trip through useDockBadge.
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import {
   DockBar,
   DockPanel,
   DockProvider,
+  DOCK_COMPACT_BREAKPOINT_PX,
+  DOCK_TAIL_BREAKPOINT_PX,
   useDockBadge,
   useDockPanelOpen,
   type DockPanelId,
@@ -185,11 +187,143 @@ describe("BottomRightDock", () => {
     expect(screen.getByLabelText("Sessions")).toBeInTheDocument();
   });
 
+  it("shows a hover tooltip with the pill name when the label is hidden", () => {
+    // Compact mode hides the inline label, so the custom tooltip must
+    // render the name on hover — the canvas swallows native title=
+    // tooltips, which is why the feature exists.
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      writable: true,
+      value: DOCK_COMPACT_BREAKPOINT_PX - 200,
+    });
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+    renderDock();
+    // No tooltip before hover.
+    expect(document.querySelector("[data-dock-tooltip='sessions']")).toBeNull();
+    fireEvent.mouseEnter(pill("Sessions"));
+    const tooltip = document.querySelector("[data-dock-tooltip='sessions']");
+    expect(tooltip).not.toBeNull();
+    expect(tooltip?.getAttribute("role")).toBe("tooltip");
+    expect(tooltip?.textContent).toBe("Sessions");
+    fireEvent.mouseLeave(pill("Sessions"));
+    expect(document.querySelector("[data-dock-tooltip='sessions']")).toBeNull();
+  });
+
+  it("does not duplicate the label as a tooltip when the inline label is already visible", () => {
+    // In the full-width density the pill already shows "Sessions" inline.
+    // Adding a tooltip with the same text would be redundant noise, so
+    // the tooltip is suppressed.
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      writable: true,
+      value: DOCK_TAIL_BREAKPOINT_PX + 200,
+    });
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+    renderDock();
+    fireEvent.mouseEnter(pill("Sessions"));
+    expect(document.querySelector("[data-dock-tooltip='sessions']")).toBeNull();
+  });
+
   it("active pill exposes aria-pressed=true and data-active=true", () => {
     renderDock();
     expect(pill("Sessions").getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(pill("Sessions"));
     expect(pill("Sessions").getAttribute("aria-pressed")).toBe("true");
     expect(pill("Sessions").getAttribute("data-active")).toBe("true");
+  });
+
+  describe("responsive compact mode", () => {
+    const originalWidth = window.innerWidth;
+
+    function setViewportWidth(width: number) {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        writable: true,
+        value: width,
+      });
+      act(() => {
+        window.dispatchEvent(new Event("resize"));
+      });
+    }
+
+    afterEach(() => {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        writable: true,
+        value: originalWidth,
+      });
+    });
+
+    it("shows full pills (label + tail) at wide viewport widths", () => {
+      setViewportWidth(DOCK_TAIL_BREAKPOINT_PX + 200);
+      renderDock();
+      // Label text is rendered inside the pill; getByText finds it
+      // regardless of the aria-label on the button wrapper.
+      expect(screen.getByText("Sessions")).toBeInTheDocument();
+      expect(screen.getByText("MCP")).toBeInTheDocument();
+      // BadgeProbe sets tail="$0.42" on sessions.
+      expect(screen.getByText("$0.42")).toBeInTheDocument();
+      const bar = document.querySelector("[data-dock-bar]");
+      expect(bar?.getAttribute("data-density")).toBe("full");
+      expect(bar?.getAttribute("data-compact")).toBe("false");
+    });
+
+    it("drops tails but keeps labels in the mid-tier band", () => {
+      // Mid-tier sits between compact and tail breakpoints. Pick the
+      // midpoint so the test is robust to small threshold tweaks.
+      const mid = Math.floor(
+        (DOCK_COMPACT_BREAKPOINT_PX + DOCK_TAIL_BREAKPOINT_PX) / 2,
+      );
+      setViewportWidth(mid);
+      renderDock();
+      expect(screen.getByText("Sessions")).toBeInTheDocument();
+      expect(screen.queryByText("$0.42")).toBeNull();
+      const bar = document.querySelector("[data-dock-bar]");
+      expect(bar?.getAttribute("data-density")).toBe("no-tail");
+      expect(bar?.getAttribute("data-compact")).toBe("false");
+    });
+
+    it("uses icon-only mode at 1280px (the laptop width the user reported)", () => {
+      // 1280px is a common laptop width where the labelled dock — even
+      // without tails — couldn't clear the center Canvas toolbar.
+      // Compact mode must engage here.
+      setViewportWidth(1280);
+      renderDock();
+      expect(screen.queryByText("Sessions")).toBeNull();
+      expect(screen.queryByText("MCP")).toBeNull();
+      const bar = document.querySelector("[data-dock-bar]");
+      expect(bar?.getAttribute("data-density")).toBe("compact");
+      expect(bar?.getAttribute("data-compact")).toBe("true");
+    });
+
+    it("hides pill labels when viewport drops below the compact breakpoint", () => {
+      setViewportWidth(DOCK_TAIL_BREAKPOINT_PX + 200);
+      renderDock();
+      expect(screen.getByText("Sessions")).toBeInTheDocument();
+
+      // Shrink to a phone-ish width. The dock should switch to icon-only.
+      setViewportWidth(DOCK_COMPACT_BREAKPOINT_PX - 200);
+
+      expect(screen.queryByText("Sessions")).toBeNull();
+      expect(screen.queryByText("MCP")).toBeNull();
+      // The button itself (and its aria-label) still exists so the pill
+      // stays operable and screen-readable.
+      expect(pill("Sessions")).toBeInTheDocument();
+      const bar = document.querySelector("[data-dock-bar]");
+      expect(bar?.getAttribute("data-density")).toBe("compact");
+      expect(bar?.getAttribute("data-compact")).toBe("true");
+    });
+
+    it("hides the tail copy in compact mode but keeps the count badge", () => {
+      setViewportWidth(DOCK_COMPACT_BREAKPOINT_PX - 200);
+      renderDock();
+      // BadgeProbe sets tail="$0.42" on sessions and count=3.
+      expect(screen.queryByText("$0.42")).toBeNull();
+      expect(screen.getByText("3")).toBeInTheDocument();
+    });
   });
 });

@@ -25,6 +25,8 @@ import { Fragment, useCallback, useEffect, useMemo, useRef } from "react";
 import type { NodeRenderProps, RoutineLeaderSpawnEvent } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
 import { ResizeHandle } from "../components/ResizeHandle.tsx";
+import { subscribeSocketTopic } from "../use-socket.ts";
+import { GLOBAL_TOPIC } from "../../shared/ws-envelope.ts";
 import type {
   DagStepState,
   Routine,
@@ -98,7 +100,7 @@ export function RoutineNodeRenderer({
   // ── Subscribe to bus events relevant to this node ──
   useEffect(() => {
     if (!socketSubscribe) return;
-    return socketSubscribe((raw: unknown) => {
+    return subscribeSocketTopic(socketSubscribe, GLOBAL_TOPIC, (raw: unknown) => {
       const msg = raw as { type?: string; [k: string]: unknown };
       if (!msg || typeof msg.type !== "string") return;
 

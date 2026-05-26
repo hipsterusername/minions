@@ -1,12 +1,13 @@
-import { memo, useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect, useSyncExternalStore, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore } from "react";
 import type { NodeRenderProps, ThinkingConfig } from "../types.ts";
 import { DEFAULT_THINKING_CONFIG } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
 import { registerContract, LEADER_CONTRACT } from "../graph.ts";
-import type { ServerMessage } from "../use-socket.ts";
 import {
-  msgId as sharedMsgId,
+  subscribeSocketTopic,
+  type ServerMessage,
+} from "../use-socket.ts";
+import {
   normalizedToDisplayMessages,
   type DisplayMessage,
 } from "../sdk-messages.ts";
@@ -18,3401 +19,71 @@ import { type SessionStreamState } from "../session-stream.ts";
 import { useSessionStream } from "../use-session-stream.ts";
 import { SessionToolbar } from "../components/SessionToolbar.tsx";
 import type { PermissionMode } from "../components/SessionToolbar.tsx";
-import { getSkill, getAllSkills } from "../skills/registry.ts";
+import { getSkill } from "../skills/registry.ts";
 import type { SkillTemplate } from "../skills/types.ts";
 import { ResizeHandle } from "../components/ResizeHandle.tsx";
-import { AutoTextarea } from "../components/AutoTextarea.tsx";
-import { SimpleMarkdown } from "../components/SimpleMarkdown.tsx";
 import { CopyButton } from "../components/CopyButton.tsx";
-import { UserContextHeader } from "../components/UserContextHeader.tsx";
-import { AddAsNodeButton } from "../components/AddAsNodeButton.tsx";
 import { debugFlagStore } from "../debug.ts";
 import { DebugInspector } from "../components/DebugInspector.tsx";
-import { joinSelectedChunks, parseMessageChunks } from "../message-chunks.ts";
+import { ConfirmModal } from "../components/ConfirmModal.tsx";
 import { canvasScale } from "../canvas-scale.ts";
+import { groupMessages } from "./leader-message-helpers.ts";
+import { sessionTopic } from "../../shared/ws-envelope.ts";
 import {
-  groupMessages,
-  formatToolInput,
-  formatToolInputDetail,
-  timeAgo,
-  TOOL_ICONS,
-} from "./leader-message-helpers.ts";
+  LEADER_DEFAULT_DATA,
+  LEADER_PROMPT_OVERLAY_ZOOM_THRESHOLD,
+  type LeaderData,
+  type LeaderMessage,
+  type MessageContextSelection,
+  type TaskPlanItem,
+} from "./leader/types.ts";
+import {
+  buildSessionContext,
+  extractLeaderCore,
+  msgId,
+} from "./leader/session-context.ts";
+import { EditableTitle } from "./leader/EditableTitle.tsx";
+import { WaitCountdown } from "./leader/WaitCountdown.tsx";
 
 registerContract(LEADER_CONTRACT);
 
-export const LEADER_PROMPT_OVERLAY_ZOOM_THRESHOLD = 0.55;
-
-/** A single entry in the leader's task plan. Covers all states. */
-export interface TaskPlanItem {
-  taskId: string;
-  title: string;
-  description: string;
-  priority: "low" | "medium" | "high" | "critical";
-  /** planned → running → completed | failed */
-  status: "planned" | "running" | "completed" | "failed";
-  /** Who is/was executing this task */
-  executor: "leader" | "minion";
-  minionSessionKey: string | null;
-  result: string | null;
-  /** Cost in USD — populated for minion tasks on completion */
-  cost: number;
-  createdAt: number;
-  completedAt: number | null;
-  /** Last few assistant messages from the minion session (tooltip detail) */
-  sessionSummary: string;
-  /** Latest live progress report from a delegated minion. */
-  activeStep?: string | null | undefined;
-  /** Recent progress reports from a delegated minion. */
-  progress?: string[] | undefined;
-}
-
-export interface LeaderData {
-  sessionKey: string | null;
-  status: "disconnected" | "creating" | "running" | "idle" | "stopped" | "error" | "completed";
-  messages: LeaderMessage[];
-  /** Accumulated partial text from streaming deltas */
-  streamingText: string;
-  /**
-   * Anthropic content block index that {@link streamingText} belongs to,
-   * or `null` when no block is currently streaming. Used to flush the
-   * preview buffer when a new content block starts so deltas from
-   * `[text, tool_use, text]` don't merge across blocks.
-   */
-  streamingBlockIndex?: number | null | undefined;
-  totalCost: number;
-  turns: number;
-  error: string | null;
-  fullError?: string | null | undefined;
-  model: string;
-  permissionMode: PermissionMode;
-  /** Active harness driving this session (e.g. "claude", "echo", "codex"). */
-  harness?: string;
-  /** Adaptive-thinking config sent to the SDK on every query() call. */
-  thinkingConfig: ThinkingConfig;
-  taskPlan: TaskPlanItem[];
-  worktreeIsolation: boolean;
-  worktreePath: string | null;
-  worktreeBranch: string | null;
-  worktreeStatus: "none" | "creating" | "active" | "merging" | "merged" | "discarded" | "failed";
-  /** IDs of skills tagged onto this leader */
-  skillIds: string[];
-  /** Variable values for each skill: { [skillId]: { [varName]: value } } */
-  skillValues: Record<string, Record<string, string>>;
-  /** Whether the skill config panel is expanded */
-  skillPanelOpen: boolean;
-  /** If set, auto-start a session with this prompt (then clear it) */
-  autoStartPrompt?: string | null | undefined;
-  /** If set, pre-fill the prompt input once (then clear it) */
-  draftPrompt?: string | null | undefined;
-  /** Display name set by the agent via set_task_name */
-  taskName?: string | null | undefined;
-  /** Wait state: populated when the leader calls wait_and_continue */
-  waitUntil?: number | null | undefined;
-  waitReason?: string | null | undefined;
-  /** Set briefly after a successful merge to show a confirmation banner */
-  mergeConfirmed?: boolean | undefined;
-  /** Set when this Leader was spawned by a routine step (survives reload). */
-  routineRunId?: string | null | undefined;
-  /** Phase id within the routine, when routineRunId is set. */
-  routinePhaseId?: string | null | undefined;
-  /** Step id within the phase, when routineRunId is set. */
-  routineStepId?: string | null | undefined;
-  /** Merge conflict state: set when approve & merge fails due to conflicts */
-  mergeConflict?: {
-    conflicts: string[];
-    summary: string;
-    targetBranch: string;
-  } | null | undefined;
-  /** Approval state: set when the leader calls request_approval */
-  approvalPending?: boolean | undefined;
-  approvalSummary?: string | null | undefined;
-  approvalDiff?: {
-    filesChanged: number;
-    insertions: number;
-    deletions: number;
-    files: { file: string; insertions: number; deletions: number; status: string }[];
-    commits: string[];
-    branch: string;
-  } | null | undefined;
-}
-
-// LeaderMessage is now an alias for the shared DisplayMessage type
-type LeaderMessage = DisplayMessage;
-
-interface MessageContextSelection {
-  messageId: string;
-  selectedChunkIds: string[];
-  anchorChunkId: string | null;
-}
-
-function msgId(): string {
-  return sharedMsgId("lm");
-}
-
-/**
- * Project a {@link LeaderData} onto the shared {@link SessionStreamState}
- * shape consumed by {@link useSessionStream}. LeaderData's `status` union
- * is identical to {@link SessionStreamStatus}, so no remapping is needed.
- */
-function extractLeaderCore(d: LeaderData): SessionStreamState {
-  return {
-    sessionKey: d.sessionKey,
-    status: d.status,
-    messages: d.messages,
-    streamingText: d.streamingText,
-    streamingBlockIndex: d.streamingBlockIndex ?? null,
-    totalCost: d.totalCost,
-    turns: d.turns,
-    error: d.error,
-    fullError: d.fullError ?? null,
-  };
-}
-
-/* ── Session context builder for restarts ─────────────────────────── */
-
-/**
- * Build a context block from previous session messages and task plan.
- * Used when restarting a leader session post-disconnect so the new
- * Claude instance understands what happened in the prior session.
- *
- * Returns an empty string if there's nothing meaningful to include.
- */
-export function buildSessionContext(
-  messages: LeaderMessage[],
-  taskPlan: TaskPlanItem[] = [],
-  taskName?: string | null,
-): string {
-  // Only include user/assistant/result messages with meaningful content
-  const conversationEntries = messages
-    .filter(
-      (m) =>
-        (m.role === "user" || m.role === "assistant" || m.role === "result") &&
-        m.content.trim().length > 0,
-    )
-    .map((m) => {
-      const role = m.role === "result" ? "assistant (result)" : m.role;
-      // Truncate very long individual messages to keep context manageable
-      const content =
-        m.content.length > 2000
-          ? m.content.slice(0, 1997) + "…"
-          : m.content;
-      return `[${role}]: ${content}`;
-    });
-
-  if (conversationEntries.length === 0 && taskPlan.length === 0) {
-    return "";
-  }
-
-  const parts: string[] = [];
-
-  parts.push("<previous-session-context>");
-  parts.push(
-    "This is a CONTINUATION session. A prior session existed in this leader node (it may have completed successfully, been restarted, or lost due to disconnect).",
-  );
-  parts.push(
-    "Below is the conversation history and task state from the prior session.",
-  );
-  parts.push(
-    "Use this to maintain continuity — do NOT repeat completed work. Build on what was already accomplished.\n",
-  );
-
-  if (taskName) {
-    parts.push(`Session name: ${taskName}\n`);
-  }
-
-  // Task plan state
-  if (taskPlan.length > 0) {
-    parts.push("<task-plan>");
-    for (const task of taskPlan) {
-      const statusEmoji =
-        task.status === "completed"
-          ? "✅"
-          : task.status === "running"
-            ? "🔄"
-            : task.status === "failed"
-              ? "❌"
-              : "📋";
-      let line = `${statusEmoji} [${task.status}] ${task.title}`;
-      if (task.result) {
-        const result =
-          task.result.length > 500
-            ? task.result.slice(0, 497) + "…"
-            : task.result;
-        line += ` → ${result}`;
-      }
-      parts.push(line);
-    }
-    parts.push("</task-plan>\n");
-  }
-
-  // Conversation history — cap at ~30k chars total to stay within context limits
-  if (conversationEntries.length > 0) {
-    parts.push("<conversation-history>");
-    let totalLen = 0;
-    const MAX_CONTEXT_CHARS = 30000;
-    // Include from newest to oldest, then reverse for chronological order
-    const included: string[] = [];
-    for (let i = conversationEntries.length - 1; i >= 0; i--) {
-      const entry = conversationEntries[i];
-      if (entry === undefined) continue;
-      if (totalLen + entry.length > MAX_CONTEXT_CHARS) {
-        included.push(
-          `[... ${i + 1} earlier messages omitted for brevity ...]`,
-        );
-        break;
-      }
-      included.push(entry);
-      totalLen += entry.length;
-    }
-    included.reverse();
-    parts.push(included.join("\n\n"));
-    parts.push("</conversation-history>");
-  }
-
-  parts.push("</previous-session-context>");
-
-  return parts.join("\n");
-}
-
-/* ── Wait countdown component ──────────────────────────────────────── */
-
-function WaitCountdown({ waitUntil, reason }: { waitUntil: number; reason: string }) {
-  // Capture the total duration once when the component mounts (or waitUntil changes)
-  const totalDurationRef = useRef(Math.max(1, waitUntil - Date.now()));
-  const [remaining, setRemaining] = useState(() => Math.max(0, waitUntil - Date.now()));
-
-  useEffect(() => {
-    totalDurationRef.current = Math.max(1, waitUntil - Date.now());
-    const tick = () => setRemaining(Math.max(0, waitUntil - Date.now()));
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [waitUntil]);
-
-  const totalSecs = Math.ceil(remaining / 1000);
-  const mins = Math.floor(totalSecs / 60);
-  const secs = totalSecs % 60;
-  const display = mins > 0 ? `${mins}:${secs.toString().padStart(2, "0")}` : `${secs}s`;
-
-  // Progress bar: fraction of total duration that has elapsed
-  const elapsed = 1 - (remaining / totalDurationRef.current);
-
-  return (
-    <div
-      style={{
-        margin: "8px 10px",
-        padding: "10px 12px",
-        borderRadius: 8,
-        background: "var(--bg-tertiary, #1a1a2e)",
-        border: "1px solid var(--accent, #6c63ff)",
-        display: "flex",
-        flexDirection: "column",
-        gap: 6,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ fontSize: 16 }}>⏳</span>
-        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
-          Waiting — resuming in {display}
-        </span>
-      </div>
-      <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.3 }}>
-        {reason}
-      </div>
-      {/* Progress bar */}
-      <div
-        style={{
-          height: 3,
-          borderRadius: 2,
-          background: "var(--border-default, #333)",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            height: "100%",
-            width: `${Math.min(100, elapsed * 100)}%`,
-            background: "var(--accent, #6c63ff)",
-            borderRadius: 2,
-            transition: "width 1s linear",
-          }}
-        />
-      </div>
-    </div>
-  );
-}
-
-/* ── Inline editable title ──────────────────────────────────────────── */
-
-function EditableTitle({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Sync draft when value changes externally
-  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
-
-  useEffect(() => {
-    if (editing) inputRef.current?.select();
-  }, [editing]);
-
-  if (!editing) {
-    return (
-      <span
-        onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
-        style={{ cursor: "default", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-        title={`${value} (double-click to rename)`}
-      >
-        {value}
-      </span>
-    );
-  }
-
-  const commit = () => {
-    const trimmed = draft.trim();
-    onChange(trimmed || value);
-    setEditing(false);
-  };
-
-  return (
-    <input
-      ref={inputRef}
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") commit();
-        if (e.key === "Escape") { setDraft(value); setEditing(false); }
-        e.stopPropagation();
-      }}
-      onMouseDown={(e) => e.stopPropagation()}
-      style={{
-        all: "unset",
-        fontSize: 11,
-        fontWeight: 600,
-        color: "var(--text-primary)",
-        background: "var(--bg-primary)",
-        border: "1px solid var(--border-active)",
-        borderRadius: 3,
-        padding: "1px 4px",
-        width: "100%",
-        minWidth: 40,
-        boxSizing: "border-box",
-      }}
-    />
-  );
-}
-
-/* ── Tool group helpers imported from ./leader-message-helpers.ts ── */
-
-const ToolItem = memo(function ToolItem({ msg, accentColor }: { msg: LeaderMessage | DisplayMessage; accentColor: string }) {
-  const [detailOpen, setDetailOpen] = useState(false);
-  const icon = TOOL_ICONS[msg.toolName ?? ""] ?? "\u2022";
-  const summary = formatToolInput(msg.toolName ?? "", msg.toolInput);
-  const hasInput = msg.toolInput && Object.keys(msg.toolInput).length > 0;
-
-  return (
-    <div>
-      <div
-        onClick={hasInput ? () => setDetailOpen(!detailOpen) : undefined}
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          gap: 6,
-          fontSize: 11,
-          fontFamily: "var(--font-mono)",
-          color: "var(--text-muted)",
-          lineHeight: 1.6,
-          cursor: hasInput ? "pointer" : "default",
-          borderRadius: 3,
-          padding: "1px 4px",
-          transition: "background 0.15s",
-        }}
-        onMouseEnter={(e) => { if (hasInput) e.currentTarget.style.background = `${accentColor}11`; }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-      >
-        <span
-          style={{
-            color: accentColor,
-            opacity: 0.5,
-            fontSize: 10,
-            flexShrink: 0,
-            width: 12,
-            textAlign: "center",
-          }}
-        >
-          {icon}
-        </span>
-        <span style={{ fontWeight: 500, flexShrink: 0 }}>{msg.toolName ?? "tool"}</span>
-        {summary && (
-          <span
-            style={{
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              opacity: 0.5,
-              flex: 1,
-              minWidth: 0,
-            }}
-          >
-            {summary}
-          </span>
-        )}
-        {hasInput && (
-          <span
-            style={{
-              fontSize: 8,
-              opacity: 0.35,
-              flexShrink: 0,
-              transition: "transform 0.15s",
-              transform: detailOpen ? "rotate(90deg)" : "rotate(0deg)",
-            }}
-          >
-            &#9654;
-          </span>
-        )}
-      </div>
-      {detailOpen && hasInput && (
-        <pre
-          style={{
-            margin: "2px 0 4px 22px",
-            padding: "6px 8px",
-            background: `${accentColor}08`,
-            border: `1px solid ${accentColor}18`,
-            borderRadius: 4,
-            fontSize: 10,
-            fontFamily: "var(--font-mono)",
-            color: "var(--text-muted)",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-all",
-            maxHeight: 200,
-            overflow: "auto",
-            lineHeight: 1.5,
-          }}
-        >
-          {formatToolInputDetail(msg.toolInput)}
-        </pre>
-      )}
-    </div>
-  );
-});
-
-const LeaderToolGroup = memo(function LeaderToolGroup({ msgs }: { msgs: LeaderMessage[] }) {
-  const [expanded, setExpanded] = useState(false);
-  const summary = useMemo(() => {
-    const toolNames = msgs.map((m) => m.toolName ?? "tool");
-    const uniqueTools = [...new Set(toolNames)];
-    return uniqueTools.length <= 3
-      ? uniqueTools.join(", ")
-      : `${uniqueTools.slice(0, 2).join(", ")} +${uniqueTools.length - 2}`;
-  }, [msgs]);
-  const handleToggle = useCallback(() => setExpanded((value) => !value), []);
-
-  return (
-    <div style={{ marginBlock: 2 }}>
-      <button
-        onClick={handleToggle}
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          width: "100%",
-          padding: "4px 8px",
-          background: expanded ? "var(--tool-bg)" : "transparent",
-          border: "none",
-          borderRadius: 4,
-          cursor: "pointer",
-          color: "var(--text-muted)",
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          textAlign: "left",
-          transition: "color 0.15s, background 0.15s",
-        }}
-        onMouseEnter={(e) =>
-          (e.currentTarget.style.color = "var(--text-dim)")
-        }
-        onMouseLeave={(e) =>
-          (e.currentTarget.style.color = "var(--text-muted)")
-        }
-      >
-        <span
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 16,
-            height: 16,
-            fontSize: 8,
-            borderRadius: 3,
-            background: "var(--tool-bg-hover)",
-            color: "var(--tool-accent)",
-            flexShrink: 0,
-            transition: "transform 0.2s",
-            transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
-          }}
-        >
-          &#9654;
-        </span>
-        <span style={{ opacity: 0.7 }}>{summary}</span>
-        <span
-          style={{
-            marginLeft: "auto",
-            fontSize: 10,
-            opacity: 0.4,
-            fontVariantNumeric: "tabular-nums",
-          }}
-        >
-          {msgs.length}
-        </span>
-      </button>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateRows: expanded ? "1fr" : "0fr",
-          transition: "grid-template-rows 0.2s ease-out",
-        }}
-      >
-        <div style={{ overflow: "hidden" }}>
-          <div
-            style={{
-              paddingBlock: 2,
-              paddingLeft: 24,
-              display: "flex",
-              flexDirection: "column",
-              gap: 1,
-            }}
-          >
-            {msgs.map((m) => (
-              <ToolItem key={m.id} msg={m} accentColor="var(--tool-accent)" />
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-});
-
-const LeaderThinkingGroup = memo(function LeaderThinkingGroup({
-  msgs,
-  effort,
-}: {
-  msgs: LeaderMessage[];
-  effort?: ThinkingConfig["effort"];
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const tokenLabel = useMemo(() => {
-    const totalLen = msgs.reduce((sum, m) => sum + m.content.length, 0);
-    const estTokens = Math.round(totalLen / 4);
-    return estTokens >= 1000 ? `~${(estTokens / 1000).toFixed(1)}k tokens` : `~${estTokens} tokens`;
-  }, [msgs]);
-  const handleToggle = useCallback(() => setExpanded((value) => !value), []);
-
-  return (
-    <div style={{ marginBlock: 2 }}>
-      <button
-        onClick={handleToggle}
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          width: "100%",
-          padding: "4px 8px",
-          background: expanded ? "var(--thinking-bg)" : "transparent",
-          border: "none",
-          borderRadius: 4,
-          cursor: "pointer",
-          color: "var(--text-muted)",
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          textAlign: "left",
-          transition: "color 0.15s, background 0.15s",
-        }}
-        onMouseEnter={(e) =>
-          (e.currentTarget.style.color = "var(--text-dim)")
-        }
-        onMouseLeave={(e) =>
-          (e.currentTarget.style.color = "var(--text-muted)")
-        }
-      >
-        <span
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 16,
-            height: 16,
-            fontSize: 10,
-            borderRadius: 3,
-            background: "var(--thinking-bg-hover)",
-            color: "var(--thinking-accent)",
-            flexShrink: 0,
-            transition: "transform 0.2s",
-            transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
-          }}
-        >
-          &#9654;
-        </span>
-        <span style={{ opacity: 0.7, color: "var(--thinking-accent)" }}>Thinking</span>
-        {effort && (
-          <span
-            style={{
-              fontSize: 9,
-              padding: "1px 5px",
-              borderRadius: 3,
-              background: "var(--thinking-bg-hover)",
-              color: "var(--thinking-accent)",
-              opacity: 0.85,
-              textTransform: "lowercase",
-              letterSpacing: 0.2,
-            }}
-            title={`Adaptive thinking · effort: ${effort}`}
-          >
-            {effort}
-          </span>
-        )}
-        <span
-          style={{
-            marginLeft: "auto",
-            fontSize: 10,
-            opacity: 0.4,
-            fontVariantNumeric: "tabular-nums",
-          }}
-        >
-          {tokenLabel}
-        </span>
-      </button>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateRows: expanded ? "1fr" : "0fr",
-          transition: "grid-template-rows 0.2s ease-out",
-        }}
-      >
-        <div style={{ overflow: "hidden" }}>
-          <div
-            style={{
-              ...chatRoleStyle("thinking"),
-              maxHeight: 200,
-              overflowY: "auto",
-            }}
-          >
-            {msgs.map((m) => m.content).join("\n\n")}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-});
-
-const PRIORITY_COLORS: Record<string, string> = {
-  critical: "var(--priority-critical)",
-  high: "var(--priority-high)",
-  medium: "var(--warning-color)",
-  low: "var(--streaming-color)",
+// Re-exports preserved so external consumers (Canvas, KanbanBoard, leader-preset,
+// tests, etc.) keep importing types from "./LeaderNode.tsx" without churn while
+// the file is drained into focused modules under ./leader/.
+export {
+  LEADER_DEFAULT_DATA,
+  LEADER_PROMPT_OVERLAY_ZOOM_THRESHOLD,
+  buildSessionContext,
 };
+export type { LeaderData, TaskPlanItem };
 
-/* ── P5: Collapsible user message ─────────────────────────────────────── */
 
-const UserMessageBubble = memo(function UserMessageBubble({ msg }: { msg: LeaderMessage }) {
-  const [collapsed, setCollapsed] = useState(msg.content.length > 300);
-  const isLong = msg.content.length > 300;
-  const toggleCollapsed = useCallback(() => setCollapsed((value) => !value), []);
+// Message-rendering components extracted to ./leader/messages/
+import { LeaderToolGroup } from "./leader/messages/ToolItem.tsx";
+import { LeaderThinkingGroup } from "./leader/messages/ThinkingGroup.tsx";
+import { UserMessageBubble } from "./leader/messages/UserMessageBubble.tsx";
+import { SelectableMessageBubble } from "./leader/messages/SelectableMessageBubble.tsx";
 
-  return (
-    <div
-      className="copyable"
-      style={{
-        ...chatRoleStyle("user"),
-        position: "relative",
-      }}
-    >
-      <CopyButton text={msg.content} />
-      <UserContextHeader />
-      {collapsed ? msg.content.slice(0, 200) + "…" : msg.content}
-      {isLong && (
-        <button
-          onClick={toggleCollapsed}
-          onMouseDown={(e) => e.stopPropagation()}
-          style={{
-            display: "inline-block",
-            marginLeft: 6,
-            fontSize: 10,
-            fontFamily: "var(--font-mono)",
-            color: "var(--accent)",
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            textDecoration: "underline",
-            opacity: 0.7,
-            padding: 0,
-          }}
-        >
-          {collapsed ? "show more" : "show less"}
-        </button>
-      )}
-    </div>
-  );
-});
 
-const LeaderMessageActions = memo(function LeaderMessageActions({
-  text,
-  onAddContentNode,
-}: {
-  text: string;
-  onAddContentNode?: ((content: string) => void) | undefined;
-}) {
-  return (
-    <div
-      data-testid="leader-message-actions"
-      style={{
-        position: "sticky",
-        top: 8,
-        zIndex: 6,
-        height: 0,
-        display: "flex",
-        justifyContent: "flex-end",
-        pointerEvents: "none",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          gap: 4,
-          pointerEvents: "auto",
-        }}
-      >
-        <AddAsNodeButton
-          text={text}
-          onAdd={onAddContentNode}
-          layout="inline"
-        />
-        <CopyButton text={text} layout="inline" />
-      </div>
-    </div>
-  );
-});
+// Task Plan Panel extracted to ./leader/TaskPlanPanel.tsx
+import { TaskPlanPanel } from "./leader/TaskPlanPanel.tsx";
 
-type MessageSelectionIconKind =
-  | "copy"
-  | "copy-full"
-  | "node"
-  | "select-all"
-  | "clear"
-  | "exit";
 
-function MessageSelectionIcon({ kind }: { kind: MessageSelectionIconKind }) {
-  const common = {
-    width: 14,
-    height: 14,
-    viewBox: "0 0 24 24",
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 2,
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-    "aria-hidden": true,
-  };
+// Skill components extracted to ./leader/skills/
+import { SkillTagChip } from "./leader/skills/SkillTagChip.tsx";
+import { SkillFlyout } from "./leader/skills/SkillFlyout.tsx";
 
-  switch (kind) {
-    case "copy":
-      return (
-        <svg {...common}>
-          <rect x="9" y="9" width="13" height="13" rx="2" />
-          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-        </svg>
-      );
-    case "copy-full":
-      return (
-        <svg {...common}>
-          <rect x="4" y="3" width="14" height="18" rx="2" />
-          <path d="M8 7h6" />
-          <path d="M8 11h6" />
-          <path d="M8 15h4" />
-          <path d="M18 8h2v13a2 2 0 0 1-2 2h-9v-2" />
-        </svg>
-      );
-    case "node":
-      return (
-        <svg {...common}>
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-          <path d="M14 2v6h6" />
-          <path d="M12 18v-6" />
-          <path d="M9 15h6" />
-        </svg>
-      );
-    case "select-all":
-      return (
-        <svg {...common}>
-          <rect x="4" y="4" width="16" height="16" rx="2" />
-          <path d="m8 12 3 3 5-6" />
-        </svg>
-      );
-    case "clear":
-      return (
-        <svg {...common}>
-          <rect x="4" y="4" width="16" height="16" rx="2" />
-          <path d="M9 9l6 6" />
-          <path d="M15 9l-6 6" />
-        </svg>
-      );
-    case "exit":
-      return (
-        <svg {...common}>
-          <path d="M18 6 6 18" />
-          <path d="m6 6 12 12" />
-        </svg>
-      );
-  }
-}
 
-function MessageSelectionGroup({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <div
-      aria-label={label}
-      role="group"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 2,
-        paddingInlineStart: 5,
-        borderLeft: "1px solid var(--border-default)",
-      }}
-    >
-      {children}
-    </div>
-  );
-}
+// ConfigFooter extracted to ./leader/ConfigFooter.tsx
+import { ConfigFooter } from "./leader/ConfigFooter.tsx";
 
-const MessageSelectionButton = memo(function MessageSelectionButton({
-  icon,
-  label,
-  onClick,
-  disabled = false,
-  tone = "neutral",
-  title,
-}: {
-  icon: MessageSelectionIconKind;
-  label: string;
-  onClick: (e: MouseEvent<HTMLButtonElement>) => void;
-  disabled?: boolean;
-  tone?: "neutral" | "primary";
-  title?: string | undefined;
-}) {
-  const isPrimary = tone === "primary";
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={title ?? label}
-      aria-label={label}
-      style={{
-        width: 26,
-        height: 26,
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 0,
-        borderRadius: 4,
-        border: `1px solid ${
-          disabled
-            ? "var(--border-default)"
-            : isPrimary
-              ? "color-mix(in srgb, var(--accent) 54%, var(--border-default))"
-              : "var(--border-default)"
-        }`,
-        background: disabled
-          ? "var(--bg-primary)"
-          : isPrimary
-            ? "color-mix(in srgb, var(--accent) 14%, var(--bg-elevated))"
-            : "var(--bg-elevated)",
-        color: disabled
-          ? "var(--text-dim)"
-          : isPrimary
-            ? "var(--accent)"
-            : "var(--text-secondary)",
-        cursor: disabled ? "default" : "pointer",
-      }}
-    >
-      <MessageSelectionIcon kind={icon} />
-    </button>
-  );
-});
 
-interface MessageChunkViewProps {
-  chunk: ReturnType<typeof parseMessageChunks>[number];
-  isActive: boolean;
-  selected: boolean;
-  onToggle: (chunkId: string, shiftKey: boolean) => void;
-}
+// Header menu + prompt components extracted to ./leader/
+import { HeaderMenu } from "./leader/HeaderMenu.tsx";
+import { LeaderPromptBar } from "./leader/prompt/LeaderPromptBar.tsx";
+import { LeaderPromptOverlay } from "./leader/prompt/LeaderPromptOverlay.tsx";
+import { LeaderFullscreen } from "./leader/fullscreen/LeaderFullscreen.tsx";
 
-const MessageChunkView = memo(function MessageChunkView({
-  chunk,
-  isActive,
-  selected,
-  onToggle,
-}: MessageChunkViewProps) {
-  const handleClick = useCallback(
-    (e: MouseEvent<HTMLDivElement>) => {
-      if (!isActive) return;
-      e.stopPropagation();
-      onToggle(chunk.id, e.shiftKey);
-    },
-    [chunk.id, isActive, onToggle],
-  );
-
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLDivElement>) => {
-      if (!isActive) return;
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        e.stopPropagation();
-        onToggle(chunk.id, e.shiftKey);
-      }
-    },
-    [chunk.id, isActive, onToggle],
-  );
-
-  return (
-    <div
-      data-testid="message-chunk"
-      data-chunk-id={chunk.id}
-      data-selected={selected ? "true" : undefined}
-      className={`message-chunk${selected ? " message-chunk--selected" : ""}`}
-      role={isActive ? "checkbox" : undefined}
-      aria-checked={isActive ? selected : undefined}
-      tabIndex={isActive ? 0 : undefined}
-      onClick={handleClick}
-      onKeyDown={handleKeyDown}
-    >
-      {isActive && (
-        <span
-          aria-hidden="true"
-          className="message-chunk__marker"
-        >
-          {selected ? "✓" : "+"}
-        </span>
-      )}
-      <SimpleMarkdown text={chunk.rawText} />
-    </div>
-  );
-});
-
-function selectionForMessageChanged(
-  prev: MessageContextSelection | null,
-  next: MessageContextSelection | null,
-  messageId: string,
-): boolean {
-  const prevActive = prev?.messageId === messageId;
-  const nextActive = next?.messageId === messageId;
-  if (prevActive !== nextActive) return true;
-  if (!prevActive || !nextActive) return false;
-  if (prev.anchorChunkId !== next.anchorChunkId) return true;
-  if (prev.selectedChunkIds.length !== next.selectedChunkIds.length) return true;
-  return prev.selectedChunkIds.some((id, index) => id !== next.selectedChunkIds[index]);
-}
-
-const SelectableMessageBubble = memo(function SelectableMessageBubble({
-  msg,
-  selection,
-  onActivate,
-  onSelectionChange,
-  onExit,
-  onAddContentNode,
-}: {
-  msg: LeaderMessage;
-  selection: MessageContextSelection | null;
-  onActivate: (messageId: string) => void;
-  onSelectionChange: (selection: MessageContextSelection) => void;
-  onExit: () => void;
-  onAddContentNode?: ((content: string) => void) | undefined;
-}) {
-  const [copied, setCopied] = useState(false);
-  const chunks = useMemo(() => parseMessageChunks(msg.content), [msg.content]);
-  const isActive = selection?.messageId === msg.id;
-  const selectedIds = useMemo(
-    () => new Set(isActive ? selection.selectedChunkIds : []),
-    [isActive, selection?.selectedChunkIds],
-  );
-  const selectedText = useMemo(
-    () => joinSelectedChunks(chunks, selectedIds),
-    [chunks, selectedIds],
-  );
-  const selectedCount = selectedIds.size;
-
-  const updateSelectedIds = useCallback(
-    (nextIds: string[], anchorChunkId: string | null) => {
-      onSelectionChange({
-        messageId: msg.id,
-        selectedChunkIds: nextIds,
-        anchorChunkId,
-      });
-    },
-    [msg.id, onSelectionChange],
-  );
-
-  const toggleChunk = useCallback(
-    (chunkId: string, shiftKey: boolean) => {
-      if (shiftKey && isActive && selection?.anchorChunkId) {
-        const anchorIndex = chunks.findIndex((chunk) => chunk.id === selection.anchorChunkId);
-        const currentIndex = chunks.findIndex((chunk) => chunk.id === chunkId);
-        if (anchorIndex >= 0 && currentIndex >= 0) {
-          const [start, end] =
-            anchorIndex < currentIndex
-              ? [anchorIndex, currentIndex]
-              : [currentIndex, anchorIndex];
-          updateSelectedIds(
-            chunks.slice(start, end + 1).map((chunk) => chunk.id),
-            selection.anchorChunkId,
-          );
-          return;
-        }
-      }
-
-      const next = new Set(isActive ? selection?.selectedChunkIds ?? [] : []);
-      if (next.has(chunkId)) {
-        next.delete(chunkId);
-      } else {
-        next.add(chunkId);
-      }
-      updateSelectedIds([...next], chunkId);
-    },
-    [chunks, isActive, selection, updateSelectedIds],
-  );
-
-  const copyText = useCallback((text: string) => {
-    void navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  }, []);
-
-  const handleToolbarClick = useCallback((e: MouseEvent<HTMLDivElement>) => {
-    e.stopPropagation();
-  }, []);
-
-  const handleContainerClick = useCallback(() => {
-    if (!isActive) onActivate(msg.id);
-  }, [isActive, msg.id, onActivate]);
-
-  const handleContainerKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLDivElement>) => {
-      if (e.key === "Escape" && isActive) {
-        e.stopPropagation();
-        onExit();
-      }
-      if ((e.key === "Enter" || e.key === " ") && !isActive) {
-        e.preventDefault();
-        onActivate(msg.id);
-      }
-    },
-    [isActive, msg.id, onActivate, onExit],
-  );
-
-  const handleSelectAll = useCallback(
-    (e: MouseEvent<HTMLButtonElement>) => {
-      e.stopPropagation();
-      updateSelectedIds(chunks.map((chunk) => chunk.id), chunks[0]?.id ?? null);
-    },
-    [chunks, updateSelectedIds],
-  );
-
-  const handleClearSelection = useCallback(
-    (e: MouseEvent<HTMLButtonElement>) => {
-      e.stopPropagation();
-      updateSelectedIds([], null);
-    },
-    [updateSelectedIds],
-  );
-
-  const handleCopySelected = useCallback(
-    (e: MouseEvent<HTMLButtonElement>) => {
-      e.stopPropagation();
-      copyText(selectedText);
-    },
-    [copyText, selectedText],
-  );
-
-  const handleAddSelected = useCallback(
-    (e: MouseEvent<HTMLButtonElement>) => {
-      e.stopPropagation();
-      onAddContentNode?.(selectedText);
-    },
-    [onAddContentNode, selectedText],
-  );
-
-  const handleCopyFull = useCallback(
-    (e: MouseEvent<HTMLButtonElement>) => {
-      e.stopPropagation();
-      copyText(msg.content);
-    },
-    [copyText, msg.content],
-  );
-
-  const handleExitSelection = useCallback(
-    (e: MouseEvent<HTMLButtonElement>) => {
-      e.stopPropagation();
-      onExit();
-    },
-    [onExit],
-  );
-
-  return (
-    <div
-      className={`copyable message-selectable${isActive ? " message-selectable--active" : ""}`}
-      data-testid="selectable-message"
-      data-selected={isActive ? "true" : undefined}
-      role="button"
-      tabIndex={0}
-      aria-label="Select message chunks"
-      aria-pressed={isActive}
-      onClick={handleContainerClick}
-      onKeyDown={handleContainerKeyDown}
-      style={{
-        ...chatRoleStyle(msg.role === "result" ? "result" : "assistant"),
-        position: "relative",
-      }}
-    >
-      {isActive ? (
-        <div
-          data-testid="leader-message-selection-toolbar"
-          style={{
-            position: "sticky",
-            top: 8,
-            zIndex: 7,
-            minHeight: 28,
-            display: "flex",
-            justifyContent: "flex-end",
-            pointerEvents: "none",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-              padding: 2,
-              borderRadius: 5,
-              background: "var(--bg-primary)",
-              border: "1px solid var(--border-default)",
-              boxShadow: "var(--shadow-sm)",
-              pointerEvents: "auto",
-            }}
-            onClick={handleToolbarClick}
-          >
-            <span
-              aria-live="polite"
-              style={{
-                padding: "0 5px",
-                color: "var(--text-muted)",
-                fontFamily: "var(--font-mono)",
-                fontSize: 10,
-                whiteSpace: "nowrap",
-              }}
-            >
-              {selectedCount} chunk{selectedCount === 1 ? "" : "s"}
-            </span>
-            <MessageSelectionGroup label="Selection controls">
-              <MessageSelectionButton
-                icon="select-all"
-                label="Select all chunks"
-                onClick={handleSelectAll}
-                disabled={chunks.length === 0}
-              />
-              <MessageSelectionButton
-                icon="clear"
-                label="Clear selected chunks"
-                onClick={handleClearSelection}
-                disabled={selectedCount === 0}
-              />
-            </MessageSelectionGroup>
-            <MessageSelectionGroup label="Copy and create actions">
-              <MessageSelectionButton
-                icon="copy"
-                label="Copy selected chunks"
-                onClick={handleCopySelected}
-                disabled={selectedText.length === 0}
-                tone="primary"
-              />
-              <MessageSelectionButton
-                icon="node"
-                label="Add selected chunks as node"
-                onClick={handleAddSelected}
-                disabled={!onAddContentNode || selectedText.length === 0}
-                tone="primary"
-              />
-              <MessageSelectionButton
-                icon="copy-full"
-                label="Copy full message"
-                onClick={handleCopyFull}
-                tone="primary"
-              />
-            </MessageSelectionGroup>
-            <MessageSelectionGroup label="Selection mode">
-              <MessageSelectionButton
-                icon="exit"
-                label="Exit chunk selection"
-                onClick={handleExitSelection}
-              />
-            </MessageSelectionGroup>
-          </div>
-        </div>
-      ) : (
-        <LeaderMessageActions
-          text={msg.content}
-          onAddContentNode={onAddContentNode}
-        />
-      )}
-
-      <div data-testid="leader-message-chunks">
-        {chunks.map((chunk) => (
-          <MessageChunkView
-            key={chunk.id}
-            chunk={chunk}
-            isActive={isActive}
-            selected={selectedIds.has(chunk.id)}
-            onToggle={toggleChunk}
-          />
-        ))}
-      </div>
-      {msg.suffix && (
-        <span style={{ display: "inline-block", marginLeft: 6, fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", opacity: 0.7 }}>
-          {msg.suffix}
-        </span>
-      )}
-      {copied && (
-        <span
-          role="status"
-          style={{
-            position: "absolute",
-            right: 10,
-            bottom: 2,
-            color: "var(--status-success)",
-            fontFamily: "var(--font-mono)",
-            fontSize: 10,
-          }}
-        >
-          Copied
-        </span>
-      )}
-    </div>
-  );
-}, (prev, next) => (
-  prev.msg.id === next.msg.id &&
-  prev.msg.role === next.msg.role &&
-  prev.msg.content === next.msg.content &&
-  prev.msg.suffix === next.msg.suffix &&
-  prev.onActivate === next.onActivate &&
-  prev.onSelectionChange === next.onSelectionChange &&
-  prev.onExit === next.onExit &&
-  prev.onAddContentNode === next.onAddContentNode &&
-  !selectionForMessageChanged(prev.selection, next.selection, prev.msg.id)
-));
-
-/* ── P4: Task Plan Panel ──────────────────────────────────────────────── */
-// Shows the full task lifecycle: planned → running → completed/failed.
-// Driven entirely by taskPlan[] which is populated from deterministic
-// server-side task_plan_update broadcasts and minion completion events.
-
-const TASK_STATUS_ICON: Record<TaskPlanItem["status"], string> = {
-  planned: "○",
-  running: "◎",
-  completed: "✓",
-  failed: "✗",
-};
-
-const TASK_STATUS_COLOR: Record<TaskPlanItem["status"], string> = {
-  planned: "var(--text-muted)",
-  running: "var(--status-creating)",
-  completed: "var(--success-color)",
-  failed: "var(--danger-color)",
-};
-
-function taskExecutorBadge(task: TaskPlanItem): {
-  label: string;
-  bg: string;
-  color: string;
-} {
-  if (task.executor === "leader") {
-    return {
-      label: task.status === "completed" ? "self done" : "self",
-      bg: "var(--state-active)",
-      color: "var(--accent)",
-    };
-  }
-
-  switch (task.status) {
-    case "running":
-      return {
-        label: "minion in progress",
-        bg: "var(--warning-bg)",
-        color: "var(--status-creating)",
-      };
-    case "completed":
-      return {
-        label: "minion done",
-        bg: "var(--success-bg)",
-        color: "var(--success-color)",
-      };
-    case "failed":
-      return {
-        label: "minion failed",
-        bg: "var(--danger-bg)",
-        color: "var(--danger-color)",
-      };
-    case "planned":
-      return {
-        label: "minion queued",
-        bg: "var(--state-hover)",
-        color: "var(--text-muted)",
-      };
-  }
-}
-
-function TaskPlanPanel({
-  taskPlan,
-  expanded,
-  onToggle,
-  onRevealMinion,
-}: {
-  taskPlan: TaskPlanItem[];
-  expanded: boolean;
-  onToggle: () => void;
-  onRevealMinion?: ((minionSessionKey: string) => void) | undefined;
-}) {
-  const [hoveredTask, setHoveredTask] = useState<number | null>(null);
-  const [tooltipAnchor, setTooltipAnchor] = useState<DOMRect | null>(null);
-
-  if (taskPlan.length === 0) return null;
-
-  const completedCount = taskPlan.filter(
-    (t) => t.status === "completed" || t.status === "failed",
-  ).length;
-
-  return (
-    <div
-      style={{
-        background: "var(--bg-surface)",
-        borderBottom: "1px solid var(--border-default)",
-        flexShrink: 0,
-      }}
-    >
-      {/* Header */}
-      <button
-        onClick={onToggle}
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          width: "100%",
-          padding: "5px 12px",
-          background: "transparent",
-          border: "none",
-          borderBottom: expanded ? "1px solid var(--border-default)" : "none",
-          color: "var(--text-dim)",
-          fontFamily: "var(--font-mono)",
-          fontSize: 10,
-          fontWeight: 600,
-          cursor: "pointer",
-          textAlign: "left",
-        }}
-      >
-        <span
-          style={{
-            fontSize: 8,
-            transition: "transform 0.15s",
-            transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
-            color: "var(--text-muted)",
-          }}
-        >
-          &#9654;
-        </span>
-        <span style={{ flex: 1 }}>
-          Plan{" "}
-          <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>
-            ({completedCount}/{taskPlan.length})
-          </span>
-        </span>
-        {/* Live running indicator */}
-        {taskPlan.some((t) => t.status === "running") && (
-          <span style={{ color: "var(--status-creating)", fontSize: 9, opacity: 0.8 }}>
-            {taskPlan.filter((t) => t.status === "running").length} running
-          </span>
-        )}
-      </button>
-
-      {/* Task list */}
-      {expanded && (
-        <div
-          data-scroll-capture
-          onMouseDown={(e) => e.stopPropagation()}
-          style={{
-            maxHeight: 220,
-            overflowY: "auto",
-            padding: "4px 12px 8px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 2,
-          }}
-        >
-          {taskPlan.map((task, idx) => {
-            const isMinion = task.executor === "minion";
-            const canReveal = isMinion && onRevealMinion && (task.minionSessionKey || task.taskId);
-            const executorBadge = taskExecutorBadge(task);
-            return (
-            <div
-              key={task.taskId}
-              onMouseEnter={(e) => { setHoveredTask(idx); setTooltipAnchor((e.currentTarget as HTMLElement).getBoundingClientRect()); }}
-              onMouseLeave={() => { setHoveredTask(null); setTooltipAnchor(null); }}
-              onClick={canReveal ? (e) => { e.stopPropagation(); onRevealMinion!(task.minionSessionKey ?? task.taskId); } : undefined}
-              onMouseDown={canReveal ? (e) => e.stopPropagation() : undefined}
-              style={{
-                position: "relative",
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "4px 6px",
-                borderRadius: 4,
-                background: hoveredTask === idx ? "var(--bg-elevated)" : "transparent",
-                cursor: canReveal ? "pointer" : "default",
-                opacity: task.status === "planned" ? 0.6 : 1,
-              }}
-            >
-              {/* Status icon */}
-              <span
-                style={{
-                  fontSize: 11,
-                  color: TASK_STATUS_COLOR[task.status],
-                  flexShrink: 0,
-                  width: 14,
-                  textAlign: "center",
-                  fontFamily: "var(--font-mono)",
-                }}
-              >
-                {TASK_STATUS_ICON[task.status]}
-              </span>
-
-              {/* Title + live minion step */}
-              <span
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 1,
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: task.status === "failed" ? "var(--danger-color)" : "var(--text-primary)",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    textDecoration: task.status === "failed" ? "line-through" : "none",
-                  }}
-                >
-                  {task.title}
-                </span>
-                {task.activeStep && task.status === "running" && (
-                  <span
-                    style={{
-                      fontSize: 9,
-                      color: "var(--text-muted)",
-                      fontFamily: "var(--font-mono)",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {task.activeStep}
-                  </span>
-                )}
-              </span>
-
-              {/* Executor/state badge — minion badges hint at click-to-reveal */}
-              <span
-                style={{
-                  fontSize: 9,
-                  padding: "1px 5px",
-                  borderRadius: 3,
-                  background: executorBadge.bg,
-                  color: executorBadge.color,
-                  fontFamily: "var(--font-mono)",
-                  flexShrink: 0,
-                  whiteSpace: "nowrap",
-                  ...(canReveal ? { textDecoration: "underline", textUnderlineOffset: 2 } : {}),
-                }}
-                title={canReveal ? "Click to view minion" : undefined}
-              >
-                {canReveal && task.executor === "minion" ? "▸ " : ""}
-                {executorBadge.label}
-              </span>
-
-              {/* Priority */}
-              <span
-                style={{
-                  fontSize: 9,
-                  padding: "1px 5px",
-                  borderRadius: 3,
-                  background: PRIORITY_COLORS[task.priority] ?? "var(--text-muted)",
-                  color: task.priority === "medium" ? "var(--bg-primary)" : "var(--text-primary)",
-                  fontWeight: 600,
-                  flexShrink: 0,
-                  textTransform: "uppercase",
-                  letterSpacing: 0.3,
-                }}
-              >
-                {task.priority}
-              </span>
-
-              {/* Cost (minion tasks only, on completion) */}
-              {task.cost > 0 && (
-                <span
-                  style={{
-                    fontSize: 10,
-                    color: "var(--text-muted)",
-                    fontFamily: "var(--font-mono)",
-                    flexShrink: 0,
-                  }}
-                >
-                  ${task.cost.toFixed(4)}
-                </span>
-              )}
-
-              {/* Time */}
-              {task.completedAt != null && (
-                <span
-                  style={{
-                    fontSize: 9,
-                    color: "var(--text-muted)",
-                    fontFamily: "var(--font-mono)",
-                    flexShrink: 0,
-                  }}
-                >
-                  {timeAgo(task.completedAt)}
-                </span>
-              )}
-
-              {/* Hover tooltip — rendered via portal to escape overflow:hidden/auto containers */}
-              {hoveredTask === idx && tooltipAnchor && (task.description || task.result || task.sessionSummary || task.activeStep || (task.progress?.length ?? 0) > 0) &&
-                createPortal(
-                  <div
-                    style={{
-                      position: "fixed",
-                      top: tooltipAnchor.top - 6,
-                      left: tooltipAnchor.left,
-                      transform: "translateY(-100%)",
-                      zIndex: 99999,
-                      background: "var(--bg-elevated)",
-                      border: "1px solid var(--border-default)",
-                      borderRadius: 8,
-                      padding: 12,
-                      maxWidth: 360,
-                      boxShadow: "var(--shadow-lg)",
-                      pointerEvents: "none",
-                    }}
-                  >
-                    {task.description && (
-                      <div style={{ fontSize: 11, color: "var(--text-primary)", marginBottom: 6, lineHeight: 1.4 }}>
-                        {task.description.length > 200
-                          ? task.description.slice(0, 200) + "…"
-                          : task.description}
-                      </div>
-                    )}
-                    {task.minionSessionKey && (
-                      <div
-                        style={{
-                          fontSize: 10,
-                          fontFamily: "var(--font-mono)",
-                          color: "var(--text-muted)",
-                          marginBottom: 4,
-                          opacity: 0.7,
-                        }}
-                      >
-                        {task.minionSessionKey}
-                      </div>
-                    )}
-                    {(task.result || task.sessionSummary || (task.progress?.length ?? 0) > 0) && (
-                      <div
-                        style={{
-                          fontSize: 10,
-                          color: "var(--text-secondary, var(--text-muted))",
-                          lineHeight: 1.4,
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-word",
-                          maxHeight: 120,
-                          overflowY: "auto",
-                        }}
-                      >
-                        {task.result ??
-                          (task.progress && task.progress.length > 0
-                            ? task.progress.slice(-5).join("\n")
-                            : task.sessionSummary)}
-                      </div>
-                    )}
-                  </div>,
-                  document.body,
-                )
-              }
-            </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ── P3: Skills Flyout (floating panel instead of inline) ─────────────── */
-
-const SKILL_CATEGORIES: { key: string; label: string }[] = [
-  { key: "code", label: "Code" },
-  { key: "docs", label: "Docs" },
-  { key: "testing", label: "Testing" },
-  { key: "devops", label: "DevOps" },
-  { key: "analysis", label: "Analysis" },
-  { key: "design", label: "Design" },
-  { key: "general", label: "General" },
-];
-
-function SkillTagChip({
-  skill,
-  onRemove,
-  readOnly,
-}: {
-  skill: SkillTemplate;
-  onRemove?: () => void;
-  readOnly: boolean;
-}) {
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        padding: "2px 8px",
-        borderRadius: 4,
-        fontSize: 10,
-        fontFamily: "var(--font-mono)",
-        background: `${skill.accentColor}20`,
-        border: `1px solid ${skill.accentColor}40`,
-        color: skill.accentColor,
-      }}
-    >
-      <span>{skill.icon}</span>
-      <span>{skill.name}</span>
-      {!readOnly && onRemove && (
-        <button
-          onClick={onRemove}
-          onMouseDown={(e) => e.stopPropagation()}
-          style={{
-            background: "none",
-            border: "none",
-            color: skill.accentColor,
-            cursor: "pointer",
-            padding: 0,
-            fontSize: 10,
-            lineHeight: 1,
-            opacity: 0.6,
-          }}
-        >
-          ✕
-        </button>
-      )}
-    </span>
-  );
-}
-
-function SkillVariableInputs({
-  skill,
-  values,
-  onChange,
-  readOnly,
-}: {
-  skill: SkillTemplate;
-  values: Record<string, string>;
-  onChange: (varName: string, value: string) => void;
-  readOnly: boolean;
-}) {
-  if (skill.variables.length === 0) return null;
-
-  return (
-    <div style={{ padding: "6px 0", display: "flex", flexDirection: "column", gap: 6 }}>
-      <div
-        style={{
-          fontSize: 10,
-          fontFamily: "var(--font-mono)",
-          color: skill.accentColor,
-          opacity: 0.8,
-          textTransform: "uppercase",
-          letterSpacing: 0.5,
-          fontWeight: 600,
-        }}
-      >
-        {skill.icon} {skill.name}
-      </div>
-      {skill.variables.map((v) => (
-        <div key={v.name} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-          <label
-            style={{
-              fontSize: 11,
-              color: "var(--text-secondary)",
-              fontFamily: "var(--font-mono)",
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-            }}
-          >
-            {v.label}
-            {v.required && (
-              <span style={{ color: "var(--danger-color)", fontSize: 10 }}>*</span>
-            )}
-          </label>
-          {v.type === "select" ? (
-            <select
-              value={values[v.name] ?? v.defaultValue ?? ""}
-              onChange={(e) => onChange(v.name, e.target.value)}
-              onMouseDown={(e) => e.stopPropagation()}
-              disabled={readOnly}
-              style={{
-                padding: "6px 8px",
-                fontSize: 12,
-                fontFamily: "var(--font-mono)",
-                background: "var(--bg-primary)",
-                border: "1px solid var(--border-default)",
-                borderRadius: 4,
-                color: "var(--text-primary)",
-                outline: "none",
-                opacity: readOnly ? 0.6 : 1,
-              }}
-            >
-              {v.options?.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          ) : v.type === "textarea" ? (
-            <textarea
-              value={values[v.name] ?? v.defaultValue ?? ""}
-              onChange={(e) => onChange(v.name, e.target.value)}
-              onMouseDown={(e) => e.stopPropagation()}
-              readOnly={readOnly}
-              placeholder={v.placeholder}
-              rows={2}
-              style={{
-                padding: "6px 8px",
-                fontSize: 12,
-                fontFamily: "var(--font-mono)",
-                background: "var(--bg-primary)",
-                border: "1px solid var(--border-default)",
-                borderRadius: 4,
-                color: "var(--text-primary)",
-                outline: "none",
-                resize: "vertical",
-                opacity: readOnly ? 0.6 : 1,
-              }}
-            />
-          ) : (
-            <input
-              type="text"
-              value={values[v.name] ?? v.defaultValue ?? ""}
-              onChange={(e) => onChange(v.name, e.target.value)}
-              onMouseDown={(e) => e.stopPropagation()}
-              readOnly={readOnly}
-              placeholder={v.placeholder}
-              style={{
-                padding: "6px 8px",
-                fontSize: 12,
-                fontFamily: "var(--font-mono)",
-                background: "var(--bg-primary)",
-                border: "1px solid var(--border-default)",
-                borderRadius: 4,
-                color: "var(--text-primary)",
-                outline: "none",
-                opacity: readOnly ? 0.6 : 1,
-              }}
-            />
-          )}
-          {v.description && (
-            <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-              {v.description}
-            </span>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-const FLYOUT_W = 680;
-const FLYOUT_H = 480;
-const FLYOUT_GAP = 6; // px below anchor
-
-function SkillFlyout({
-  skillIds,
-  skillValues,
-  open,
-  readOnly,
-  anchorRef,
-  onUpdate,
-  onClose,
-}: {
-  skillIds: string[];
-  skillValues: Record<string, Record<string, string>>;
-  open: boolean;
-  readOnly: boolean;
-  anchorRef?: React.RefObject<HTMLElement | null>;
-  onUpdate: (patch: {
-    skillIds?: string[];
-    skillValues?: Record<string, Record<string, string>>;
-    skillPanelOpen?: boolean;
-  }) => void;
-  onClose: () => void;
-}) {
-  const [searchQuery, setSearchQuery] = useState("");
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-
-  useLayoutEffect(() => {
-    if (!open) { setPos(null); return; }
-    const el = anchorRef?.current;
-    if (!el) { setPos(null); return; }
-
-    const rect = el.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-
-    // Prefer opening below the anchor; flip above if it would clip
-    let top = rect.bottom + FLYOUT_GAP;
-    if (top + FLYOUT_H > vh - 8) top = rect.top - FLYOUT_H - FLYOUT_GAP;
-
-    // Left-align with anchor, clamp to viewport
-    let left = rect.left;
-    if (left + FLYOUT_W > vw - 8) left = vw - FLYOUT_W - 8;
-    if (left < 8) left = 8;
-
-    setPos({ top, left });
-  }, [open, anchorRef]);
-
-  const allSkills = getAllSkills();
-  const taggedSkills = skillIds
-    .map((id) => getSkill(id))
-    .filter((s): s is SkillTemplate => s !== undefined);
-
-  const handleAddSkill = (id: string) => {
-    if (!skillIds.includes(id)) {
-      onUpdate({ skillIds: [...skillIds, id], skillPanelOpen: true });
-    }
-  };
-
-  const handleRemoveSkill = (id: string) => {
-    const next = skillIds.filter((s) => s !== id);
-    const nextValues = { ...skillValues };
-    delete nextValues[id];
-    onUpdate({ skillIds: next, skillValues: nextValues });
-  };
-
-  const handleVarChange = (skillId: string, varName: string, value: string) => {
-    const current = skillValues[skillId] ?? {};
-    onUpdate({ skillValues: { ...skillValues, [skillId]: { ...current, [varName]: value } } });
-  };
-
-  // Filter available skills by search + category (show all when readOnly)
-  const query = searchQuery.toLowerCase().trim();
-  const browseByCategory = SKILL_CATEGORIES
-    .map((cat) => ({
-      ...cat,
-      skills: allSkills.filter(
-        (s) =>
-          s.category === cat.key &&
-          (readOnly ? skillIds.includes(s.id) : !skillIds.includes(s.id)) &&
-          (query === "" ||
-            s.name.toLowerCase().includes(query) ||
-            s.description.toLowerCase().includes(query)),
-      ),
-    }))
-    .filter((cat) => cat.skills.length > 0);
-
-  if (!open) return null;
-
-  const flyoutContent = (
-    <>
-      {/* Backdrop */}
-      <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 9998 }} />
-
-      {/* Wide split-panel modal — anchored below the skills button */}
-      <div
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{
-          position: "fixed",
-          top: pos?.top ?? 120,
-          left: pos?.left ?? 120,
-          zIndex: 9999,
-          width: FLYOUT_W,
-          height: FLYOUT_H,
-          background: "var(--bg-secondary)",
-          border: "1px solid var(--border-default)",
-          borderRadius: 10,
-          boxShadow: "var(--shadow-lg)",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-        }}
-      >
-        {/* ── Modal header ── */}
-        <div
-          style={{
-            padding: "10px 14px",
-            borderBottom: "1px solid var(--border-default)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            background: "var(--bg-primary)",
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 14 }}>⚡</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>
-              Skills
-            </span>
-            {taggedSkills.length > 0 && (
-              <span
-                style={{
-                  fontSize: 10,
-                  fontFamily: "var(--font-mono)",
-                  padding: "1px 6px",
-                  borderRadius: 10,
-                  background: "var(--state-active)",
-                  color: "var(--accent)",
-                  border: "1px solid var(--accent)",
-                }}
-              >
-                {taggedSkills.length} active
-              </span>
-            )}
-          </div>
-          <button
-            onClick={onClose}
-            onMouseDown={(e) => e.stopPropagation()}
-            style={{
-              background: "none",
-              border: "none",
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              fontSize: 16,
-              padding: "0 2px",
-              lineHeight: 1,
-            }}
-          >
-            ✕
-          </button>
-        </div>
-
-        {/* ── Body: left browser + right config ── */}
-        <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-
-          {/* LEFT PANEL — skill browser */}
-          <div
-            style={{
-              width: 220,
-              flexShrink: 0,
-              borderRight: "1px solid var(--border-default)",
-              display: "flex",
-              flexDirection: "column",
-              background: "var(--bg-primary)",
-            }}
-          >
-            {/* Search */}
-            <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--border-default)", flexShrink: 0 }}>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onMouseDown={(e) => e.stopPropagation()}
-                placeholder="Search skills…"
-                style={{
-                  width: "100%",
-                  padding: "5px 8px",
-                  fontSize: 11,
-                  fontFamily: "var(--font-mono)",
-                  background: "var(--bg-elevated)",
-                  border: "1px solid var(--border-default)",
-                  borderRadius: 5,
-                  color: "var(--text-primary)",
-                  outline: "none",
-                  boxSizing: "border-box",
-                }}
-              />
-            </div>
-
-            {/* Skill list — scrollable */}
-            <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "4px 6px 8px" }}>
-              {browseByCategory.length === 0 && (
-                <div style={{ padding: "16px 8px", fontSize: 11, color: "var(--text-muted)", textAlign: "center", fontFamily: "var(--font-mono)" }}>
-                  {query ? "No matches" : readOnly ? "No skills" : "All added ✓"}
-                </div>
-              )}
-              {browseByCategory.map((cat) => (
-                <div key={cat.key}>
-                  <div
-                    style={{
-                      fontSize: 9,
-                      fontFamily: "var(--font-mono)",
-                      color: "var(--text-muted)",
-                      padding: "8px 6px 3px",
-                      textTransform: "uppercase",
-                      letterSpacing: 0.6,
-                    }}
-                  >
-                    {cat.label}
-                  </div>
-                  {cat.skills.map((skill) => (
-                    <button
-                      key={skill.id}
-                      onClick={() => !readOnly && handleAddSkill(skill.id)}
-                      onMouseDown={(e) => e.stopPropagation()}
-                      disabled={readOnly}
-                      style={{
-                        display: "flex",
-                        alignItems: "flex-start",
-                        gap: 7,
-                        width: "100%",
-                        padding: "6px 6px",
-                        background: "transparent",
-                        border: "none",
-                        borderRadius: 5,
-                        color: "var(--text-primary)",
-                        fontSize: 11,
-                        cursor: readOnly ? "default" : "pointer",
-                        textAlign: "left",
-                        transition: "background 0.1s",
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!readOnly) e.currentTarget.style.background = "var(--bg-elevated)";
-                      }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-                    >
-                      <span style={{ fontSize: 13, lineHeight: 1.3, flexShrink: 0 }}>{skill.icon}</span>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
-                        <span style={{ fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {skill.name}
-                        </span>
-                        <span style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: 1.3 }}>
-                          {skill.description.length > 55
-                            ? skill.description.slice(0, 55) + "…"
-                            : skill.description}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* RIGHT PANEL — active skills config */}
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-
-            {/* TOP GUTTER — active skill chips, single scrollable row */}
-            <div
-              style={{
-                position: "relative",
-                borderBottom: "1px solid var(--border-default)",
-                flexShrink: 0,
-                background: "var(--state-hover)",
-              }}
-            >
-              <div
-                style={{
-                  padding: "6px 12px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  flexWrap: "nowrap",
-                  overflowX: "auto",
-                  scrollbarWidth: "none",
-                  msOverflowStyle: "none",
-                  minHeight: 38,
-                  // hide webkit scrollbar via inline won't work — handled by className below
-                }}
-              >
-                {taggedSkills.length === 0 ? (
-                  <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontStyle: "italic", whiteSpace: "nowrap" }}>
-                    No skills selected — pick from the left panel
-                  </span>
-                ) : (
-                  taggedSkills.map((skill) => (
-                    <SkillTagChip
-                      key={skill.id}
-                      skill={skill}
-                      readOnly={readOnly}
-                      onRemove={() => handleRemoveSkill(skill.id)}
-                    />
-                  ))
-                )}
-              </div>
-              {/* Right-edge fade when chips overflow */}
-              {taggedSkills.length > 0 && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    right: 0,
-                    bottom: 0,
-                    width: 32,
-                    background: "linear-gradient(to right, transparent, var(--state-hover))",
-                    pointerEvents: "none",
-                  }}
-                />
-              )}
-            </div>
-
-            {/* MAIN CONFIG AREA — scrollable, position:relative gives concrete bounds */}
-            <div style={{ flex: 1, position: "relative", minHeight: 0 }}>
-            <div style={{ position: "absolute", inset: 0, overflowY: "auto", padding: "12px 16px", display: "flex", flexDirection: "column", gap: 16 }}>
-              {taggedSkills.length === 0 && (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    height: "100%",
-                    gap: 10,
-                    color: "var(--text-muted)",
-                  }}
-                >
-                  <span style={{ fontSize: 32, opacity: 0.3 }}>⚡</span>
-                  <span style={{ fontSize: 12, fontFamily: "var(--font-mono)" }}>
-                    Add skills to configure them here
-                  </span>
-                </div>
-              )}
-              {taggedSkills.map((skill) => (
-                <div
-                  key={skill.id}
-                  style={{
-                    background: "var(--bg-primary)",
-                    border: `1px solid ${skill.accentColor}30`,
-                    borderRadius: 7,
-                    overflow: "hidden",
-                    flexShrink: 0,
-                  }}
-                >
-                  {/* Skill config header */}
-                  <div
-                    style={{
-                      padding: "8px 12px",
-                      borderBottom: `1px solid ${skill.accentColor}20`,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      background: `${skill.accentColor}10`,
-                    }}
-                  >
-                    <span style={{ fontSize: 15 }}>{skill.icon}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: skill.accentColor, fontFamily: "var(--font-mono)" }}>
-                        {skill.name}
-                      </div>
-                      <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 1 }}>
-                        {skill.description}
-                      </div>
-                    </div>
-                    {!readOnly && (
-                      <button
-                        onClick={() => handleRemoveSkill(skill.id)}
-                        onMouseDown={(e) => e.stopPropagation()}
-                        style={{
-                          background: "none",
-                          border: "none",
-                          color: "var(--text-muted)",
-                          cursor: "pointer",
-                          fontSize: 12,
-                          padding: "2px 4px",
-                          borderRadius: 3,
-                          lineHeight: 1,
-                          flexShrink: 0,
-                        }}
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-                  {/* Variable inputs (or empty state) */}
-                  {skill.variables.length === 0 ? (
-                    <div style={{ padding: "10px 12px", fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>
-                      No configuration needed.
-                    </div>
-                  ) : (
-                    <div style={{ padding: "10px 12px" }}>
-                      <SkillVariableInputs
-                        skill={skill}
-                        values={skillValues[skill.id] ?? {}}
-                        onChange={(varName, value) => handleVarChange(skill.id, varName, value)}
-                        readOnly={readOnly}
-                      />
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-              {/* Bottom fade — suggests scrollability */}
-              <div
-                style={{
-                  position: "absolute",
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  height: 28,
-                  background: "linear-gradient(to bottom, transparent, var(--bg-secondary))",
-                  pointerEvents: "none",
-                }}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-    </>
-  );
-
-  return createPortal(flyoutContent, document.body);
-}
-
-/* ── P4: Compact config footer (worktree + context in one bar) ────────── */
-
-function ConfigFooter({
-  data,
-  onUpdateData,
-  socketSend,
-  socketSubscribe,
-  getContextForNode,
-  onNewSession,
-}: {
-  data: LeaderData;
-  onUpdateData: (d: LeaderData) => void;
-  socketSend?: ((data: unknown) => void) | undefined;
-  socketSubscribe?: ((cb: (msg: unknown) => void) => () => void) | undefined;
-  getContextForNode?: (() => import("../types.ts").ContextItem[]) | undefined;
-  onNewSession?: (() => void) | undefined;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const contextCount = getContextForNode?.().length ?? 0;
-  const hasSession = !!data.sessionKey;
-
-  // ── Manual worktree review state ─────────────────────────────────
-  const [manualReviewOpen, setManualReviewOpen] = useState(false);
-  const [manualDiff, setManualDiff] = useState<LeaderData["approvalDiff"] | null>(null);
-  const [diffLoading, setDiffLoading] = useState(false);
-
-  // Listen for control_response to get_worktree_diff (scoped to this session)
-  useEffect(() => {
-    if (!socketSubscribe) return;
-    return socketSubscribe((msg: unknown) => {
-      const m = msg as { type?: string; command?: string; sessionKey?: string; success?: boolean; diff?: LeaderData["approvalDiff"] };
-      if (m.type !== "control_response" || m.command !== "get_worktree_diff") return;
-      if (m.sessionKey !== data.sessionKey) return;
-      if (m.success) {
-        setManualDiff(m.diff ?? null);
-      }
-      setDiffLoading(false);
-    });
-  }, [socketSubscribe, data.sessionKey]);
-
-  // Close the manual review panel when worktree is no longer active
-  useEffect(() => {
-    if (data.worktreeStatus !== "active") {
-      setManualReviewOpen(false);
-      setManualDiff(null);
-    }
-  }, [data.worktreeStatus]);
-
-  // Worktree status indicators (merged, merging, discarded, failed) shown inline
-  const wtStatus = data.worktreeStatus;
-  const worktreeIsActive = wtStatus === "active" || wtStatus === "creating";
-  const showWorktreeStatusBadge =
-    wtStatus === "merging" || wtStatus === "merged" || wtStatus === "discarded" || wtStatus === "failed";
-
-  return (
-    <div
-      style={{
-        borderTop: "1px solid var(--border-default)",
-        background: "var(--bg-secondary)",
-        flexShrink: 0,
-      }}
-    >
-      {/* Compact summary row — always visible */}
-      <div
-        onClick={() => setExpanded(!expanded)}
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{
-          padding: "4px 10px",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          cursor: "pointer",
-          userSelect: "none",
-          fontSize: 10,
-          fontFamily: "var(--font-mono)",
-          color: "var(--text-muted)",
-        }}
-      >
-        {/* Worktree badge */}
-        <span
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 3,
-            padding: "1px 6px",
-            borderRadius: 3,
-            background: data.worktreeIsolation
-              ? "var(--state-active)"
-              : "var(--state-hover)",
-            color: data.worktreeIsolation ? "var(--accent)" : "var(--text-muted)",
-          }}
-        >
-          {"\u{1F33F}"} {data.worktreeIsolation ? "isolated" : "shared"}
-        </span>
-
-        {/* Context count — locked after session starts */}
-        {contextCount > 0 && (
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 3,
-              color: hasSession ? "var(--text-muted)" : "var(--accent)",
-              opacity: hasSession ? 0.7 : 1,
-            }}
-          >
-            {hasSession ? "\u{1F512}" : "\u{1F4CE}"} {contextCount}
-          </span>
-        )}
-
-        {/* Worktree branch */}
-        {data.worktreeBranch && (
-          <span style={{ color: "var(--accent)", fontSize: 9 }}>
-            {data.worktreeBranch}
-          </span>
-        )}
-
-        {/* Worktree status badge */}
-        {showWorktreeStatusBadge && (
-          <span
-            style={{
-              color: wtStatus === "merged" ? "var(--success-color)" : wtStatus === "failed" ? "var(--danger-color)" : wtStatus === "discarded" ? "var(--status-error)" : "var(--status-creating)",
-            }}
-          >
-            {wtStatus === "merging" ? "merging..." : wtStatus === "merged" ? "merged" : wtStatus === "failed" ? "isolation failed" : "discarded"}
-          </span>
-        )}
-
-        <span style={{ flex: 1 }} />
-        <span
-          style={{
-            fontSize: 8,
-            transform: expanded ? "rotate(0deg)" : "rotate(-90deg)",
-            transition: "transform 0.15s",
-          }}
-        >
-          ▼
-        </span>
-      </div>
-
-      {/* Expanded config */}
-      {expanded && (
-        <div
-          onMouseDown={(e) => e.stopPropagation()}
-          style={{ padding: "4px 10px 8px" }}
-        >
-          {/* Worktree isolation toggle */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-            <button
-              onClick={() => {
-                if (!hasSession) {
-                  onUpdateData({ ...data, worktreeIsolation: !data.worktreeIsolation });
-                }
-              }}
-              disabled={hasSession}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 4,
-                fontSize: 11,
-                fontFamily: "var(--font-mono)",
-                padding: "4px 10px",
-                borderRadius: 4,
-                border: "none",
-                cursor: hasSession ? "default" : "pointer",
-                opacity: hasSession ? 0.7 : 1,
-                background: data.worktreeIsolation
-                  ? "var(--state-active)"
-                  : "var(--state-hover)",
-                color: data.worktreeIsolation ? "var(--accent)" : "var(--text-muted)",
-              }}
-            >
-              {"\u{1F33F}"} Worktree Isolation
-              <span
-                style={{
-                  display: "inline-block",
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  background: data.worktreeIsolation ? "var(--accent)" : "var(--text-muted)",
-                  marginLeft: 2,
-                }}
-              />
-            </button>
-          </div>
-
-          {/* Context sources — locked after session starts */}
-          {contextCount > 0 && (
-            <div
-              style={{
-                fontSize: 10,
-                color: hasSession ? "var(--text-muted)" : "var(--accent)",
-                fontFamily: "var(--font-mono)",
-                display: "flex",
-                alignItems: "center",
-                gap: 4,
-                marginBottom: 4,
-                opacity: hasSession ? 0.7 : 1,
-              }}
-            >
-              {hasSession ? "\u{1F512}" : "\u{1F4CE}"}{" "}
-              {contextCount} context source{contextCount !== 1 ? "s" : ""}
-              {hasSession ? " (locked)" : " connected"}
-            </div>
-          )}
-
-          {/* Worktree failure warning */}
-          {wtStatus === "failed" && (
-            <div
-              style={{
-                marginTop: 4,
-                padding: "6px 8px",
-                background: "var(--danger-bg)",
-                border: "1px solid var(--danger-color)",
-                borderRadius: 4,
-                fontSize: 10,
-                color: "var(--status-error)",
-                lineHeight: 1.4,
-              }}
-            >
-              <strong>Isolation failed:</strong> This session is operating directly on your working tree.
-              Changes will not be isolated in a branch.
-            </div>
-          )}
-
-          {/* Worktree actions — always available when worktree is active */}
-          {worktreeIsActive && hasSession && !data.approvalPending && (
-            <div style={{ marginTop: 4 }}>
-              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <button
-                  onClick={() => {
-                    if (socketSend && data.sessionKey) {
-                      setManualReviewOpen(!manualReviewOpen);
-                      if (!manualReviewOpen) {
-                        setDiffLoading(true);
-                        setManualDiff(null);
-                        socketSend({ type: "get_worktree_diff", sessionKey: data.sessionKey });
-                      }
-                    }
-                  }}
-                  style={{
-                    padding: "3px 8px", fontSize: 10,
-                    background: manualReviewOpen ? "var(--state-active)" : "var(--bg-elevated)",
-                    border: `1px solid ${manualReviewOpen ? "var(--accent)" : "var(--border-default)"}`,
-                    borderRadius: 4,
-                    color: manualReviewOpen ? "var(--accent)" : "var(--text-secondary)",
-                    cursor: "pointer", fontFamily: "var(--font-mono)",
-                    fontWeight: manualReviewOpen ? 600 : 400,
-                  }}
-                >
-                  {manualReviewOpen ? "▾ Review & Merge" : "▸ Review & Merge"}
-                </button>
-                <button
-                  onClick={() => {
-                    if (socketSend && data.sessionKey && confirm("Discard all worktree changes?")) {
-                      socketSend({ type: "discard_worktree", sessionKey: data.sessionKey });
-                    }
-                  }}
-                  style={{
-                    padding: "3px 8px", fontSize: 10, background: "var(--danger-bg)",
-                    border: "1px solid var(--danger-color)", borderRadius: 4,
-                    color: "var(--status-error)", cursor: "pointer", fontFamily: "var(--font-mono)",
-                  }}
-                >
-                  Discard
-                </button>
-              </div>
-
-              {/* Manual review panel — inline diff + merge controls */}
-              {manualReviewOpen && (
-                <div
-                  style={{
-                    marginTop: 6,
-                    padding: "8px 10px",
-                    background: "var(--bg-surface)",
-                    border: "1px solid var(--border-default)",
-                    borderRadius: 6,
-                  }}
-                >
-                  {diffLoading && (
-                    <div style={{ fontSize: 10, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⟳</span>
-                      Loading diff...
-                    </div>
-                  )}
-                  {!diffLoading && manualDiff && (
-                    <>
-                      {/* Diff stats */}
-                      <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 6, fontFamily: "var(--font-mono)" }}>
-                        {manualDiff.filesChanged} file{manualDiff.filesChanged !== 1 ? "s" : ""} changed
-                        {" · "}
-                        <span style={{ color: "var(--success-color)", fontWeight: 600 }}>+{manualDiff.insertions}</span>
-                        {" "}
-                        <span style={{ color: "var(--status-error)", fontWeight: 600 }}>-{manualDiff.deletions}</span>
-                        {manualDiff.commits.length > 0 && (
-                          <span> · {manualDiff.commits.length} commit{manualDiff.commits.length !== 1 ? "s" : ""}</span>
-                        )}
-                      </div>
-
-                      {/* File list */}
-                      {manualDiff.files.length > 0 && (
-                        <div style={{
-                          fontSize: 10, fontFamily: "var(--font-mono)",
-                          background: "var(--bg-elevated)", borderRadius: 4,
-                          padding: "4px 6px", marginBottom: 6,
-                          maxHeight: 120, overflowY: "auto",
-                        }}>
-                          {manualDiff.files.map((f, i) => (
-                            <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 0", color: "var(--text-muted)" }}>
-                              <span style={{
-                                fontSize: 9, fontWeight: 600, minWidth: 12, textAlign: "center",
-                                color: f.status === "added" ? "var(--success-color)"
-                                  : f.status === "deleted" ? "var(--status-error)"
-                                  : "var(--accent)",
-                              }}>
-                                {f.status === "added" ? "A" : f.status === "deleted" ? "D" : "M"}
-                              </span>
-                              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {f.file}
-                              </span>
-                              <span style={{ color: "var(--success-color)", fontSize: 9 }}>+{f.insertions}</span>
-                              <span style={{ color: "var(--status-error)", fontSize: 9 }}>-{f.deletions}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* No changes state */}
-                      {manualDiff.filesChanged === 0 && (
-                        <div style={{ fontSize: 10, color: "var(--text-muted)", fontStyle: "italic", marginBottom: 6 }}>
-                          No changes to merge yet.
-                        </div>
-                      )}
-
-                      {/* Merge / Refresh actions */}
-                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                        {manualDiff.filesChanged > 0 && (
-                          <button
-                            onClick={() => {
-                              if (socketSend && data.sessionKey && confirm("Merge worktree changes into your working tree?")) {
-                                socketSend({ type: "approve_changes", sessionKey: data.sessionKey });
-                                onUpdateData({ ...data, worktreeStatus: "merging" });
-                                setManualReviewOpen(false);
-                                setManualDiff(null);
-                              }
-                            }}
-                            style={{
-                              padding: "4px 12px", fontSize: 11, fontWeight: 700,
-                              background: "var(--success-color)", border: "none", borderRadius: 4,
-                              color: "var(--text-primary)", cursor: "pointer", fontFamily: "var(--font-mono)",
-                            }}
-                          >
-                            Merge
-                          </button>
-                        )}
-                        <button
-                          onClick={() => {
-                            if (socketSend && data.sessionKey) {
-                              setDiffLoading(true);
-                              setManualDiff(null);
-                              socketSend({ type: "get_worktree_diff", sessionKey: data.sessionKey });
-                            }
-                          }}
-                          style={{
-                            padding: "4px 8px", fontSize: 10,
-                            background: "var(--bg-elevated)",
-                            border: "1px solid var(--border-default)", borderRadius: 4,
-                            color: "var(--text-secondary)", cursor: "pointer", fontFamily: "var(--font-mono)",
-                          }}
-                        >
-                          Refresh
-                        </button>
-                      </div>
-                    </>
-                  )}
-                  {!diffLoading && !manualDiff && (
-                    <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
-                      Unable to load diff. <button
-                        onClick={() => {
-                          if (socketSend && data.sessionKey) {
-                            setDiffLoading(true);
-                            socketSend({ type: "get_worktree_diff", sessionKey: data.sessionKey });
-                          }
-                        }}
-                        style={{
-                          background: "none", border: "none", color: "var(--accent)",
-                          cursor: "pointer", fontSize: 10, padding: 0, textDecoration: "underline",
-                        }}
-                      >Retry</button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Merge confirmed banner — shown briefly after successful merge */}
-      {data.mergeConfirmed && (
-        <div
-          onMouseDown={(e) => e.stopPropagation()}
-          style={{
-            margin: "0 6px 6px",
-            padding: "10px 12px",
-            background: "var(--success-bg, rgba(46,160,67,0.1))",
-            border: "2px solid var(--success-color)",
-            borderRadius: 8,
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--success-color)", display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: 14 }}>✓</span> Merged successfully
-            </div>
-            <button
-              onClick={() => onUpdateData({ ...data, mergeConfirmed: false })}
-              style={{
-                background: "none", border: "none", color: "var(--text-muted)",
-                cursor: "pointer", fontSize: 14, padding: "0 2px", lineHeight: 1,
-              }}
-              title="Dismiss"
-            >
-              x
-            </button>
-          </div>
-          {data.status === "completed" && (
-            <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                Session complete.
-              </span>
-              <button
-                onClick={onNewSession}
-                style={{
-                  padding: "4px 12px",
-                  borderRadius: 6,
-                  border: "1px solid var(--accent)",
-                  background: "var(--state-active, rgba(88,166,255,0.1))",
-                  color: "var(--accent)",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  fontFamily: "var(--font-mono)",
-                }}
-              >
-                New Session
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Merge conflict panel — shown when approve & merge fails */}
-      {data.approvalPending && data.mergeConflict && (
-        <div
-          onMouseDown={(e) => e.stopPropagation()}
-          style={{
-            margin: "0 6px 6px",
-            padding: "10px 12px",
-            background: "var(--danger-bg)",
-            border: "2px solid var(--danger-color)",
-            borderRadius: 8,
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--status-error)", display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: 14 }}>!</span> Merge Conflicts
-            </div>
-            <button
-              onClick={() => onUpdateData({ ...data, mergeConflict: null })}
-              style={{
-                background: "none", border: "none", color: "var(--text-muted)",
-                cursor: "pointer", fontSize: 14, padding: "0 2px", lineHeight: 1,
-              }}
-              title="Dismiss"
-            >
-              x
-            </button>
-          </div>
-          {data.mergeConflict.conflicts.length > 0 && (
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8, fontFamily: "var(--font-mono)", background: "var(--bg-elevated)", padding: "6px 8px", borderRadius: 4, maxHeight: 80, overflowY: "auto" }}>
-              {data.mergeConflict.conflicts.map((f, i) => (
-                <div key={i} style={{ padding: "1px 0" }}>{f}</div>
-              ))}
-            </div>
-          )}
-          <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 6, lineHeight: 1.4 }}>
-            Choose a resolution strategy:
-          </div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }} data-no-drag>
-            <button
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                console.log("[worktree] Keep Ours clicked", { socketSend: !!socketSend, sessionKey: data.sessionKey });
-                if (socketSend && data.sessionKey) {
-                  socketSend({ type: "force_merge", sessionKey: data.sessionKey });
-                  onUpdateData({ ...data, worktreeStatus: "merging", mergeConflict: null, approvalPending: false });
-                }
-              }}
-              style={{
-                padding: "5px 12px", fontSize: 11, fontWeight: 600,
-                background: "var(--accent)", border: "none", borderRadius: 6,
-                color: "var(--text-primary)", cursor: "pointer", fontFamily: "var(--font-mono)",
-              }}
-              title="Keep canvas branch changes where conflicts occur"
-            >
-              Keep Ours
-            </button>
-            <button
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                console.log("[worktree] Keep Main clicked", { socketSend: !!socketSend, sessionKey: data.sessionKey });
-                if (socketSend && data.sessionKey) {
-                  socketSend({ type: "theirs_merge", sessionKey: data.sessionKey });
-                  onUpdateData({ ...data, worktreeStatus: "merging", mergeConflict: null, approvalPending: false });
-                }
-              }}
-              style={{
-                padding: "5px 12px", fontSize: 11, fontWeight: 600,
-                background: "var(--bg-elevated)", border: "1px solid var(--border-default)", borderRadius: 6,
-                color: "var(--text-secondary)", cursor: "pointer", fontFamily: "var(--font-mono)",
-              }}
-              title="Keep main branch changes where conflicts occur"
-            >
-              Keep Main
-            </button>
-            <button
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                console.log("[worktree] Retry clicked", { socketSend: !!socketSend, sessionKey: data.sessionKey });
-                if (socketSend && data.sessionKey) {
-                  socketSend({ type: "retry_merge", sessionKey: data.sessionKey });
-                  onUpdateData({ ...data, worktreeStatus: "merging", mergeConflict: null, approvalPending: false });
-                }
-              }}
-              style={{
-                padding: "5px 12px", fontSize: 11,
-                background: "var(--bg-elevated)", border: "1px solid var(--border-default)", borderRadius: 6,
-                color: "var(--text-secondary)", cursor: "pointer", fontFamily: "var(--font-mono)",
-              }}
-              title="Re-attempt a clean merge (use after manually resolving conflicts in the worktree)"
-            >
-              Retry
-            </button>
-            <button
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (socketSend && data.sessionKey && confirm("Discard all worktree changes?")) {
-                  socketSend({ type: "discard_worktree", sessionKey: data.sessionKey });
-                }
-              }}
-              style={{
-                padding: "5px 12px", fontSize: 11,
-                background: "var(--danger-bg)", border: "1px solid var(--danger-color)", borderRadius: 6,
-                color: "var(--status-error)", cursor: "pointer", fontFamily: "var(--font-mono)",
-              }}
-            >
-              Discard
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Approval pending banner — shown when no conflicts (normal flow) */}
-      {data.approvalPending && !data.mergeConflict && (
-        <div
-          onMouseDown={(e) => e.stopPropagation()}
-          style={{
-            margin: "0 6px 6px",
-            padding: "10px 12px",
-            background: "var(--state-active)",
-            border: "2px solid var(--accent)",
-            borderRadius: 8,
-          }}
-        >
-          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 14 }}>✓</span> Changes Ready for Review
-          </div>
-          {data.approvalSummary && (
-            <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 8, lineHeight: 1.5 }}>
-              {data.approvalSummary}
-            </div>
-          )}
-          {data.approvalDiff && (
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8, fontFamily: "var(--font-mono)" }}>
-              {data.approvalDiff.filesChanged} file{data.approvalDiff.filesChanged !== 1 ? "s" : ""} changed
-              {" · "}
-              <span style={{ color: "var(--success-color)", fontWeight: 600 }}>+{data.approvalDiff.insertions}</span>
-              {" "}
-              <span style={{ color: "var(--status-error)", fontWeight: 600 }}>-{data.approvalDiff.deletions}</span>
-              {data.approvalDiff.commits.length > 0 && (
-                <span> {" · "} {data.approvalDiff.commits.length} commit{data.approvalDiff.commits.length !== 1 ? "s" : ""}</span>
-              )}
-            </div>
-          )}
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              onClick={() => {
-                if (socketSend && data.sessionKey) {
-                  socketSend({ type: "approve_changes", sessionKey: data.sessionKey });
-                  onUpdateData({ ...data, worktreeStatus: "merging", approvalPending: false });
-                }
-              }}
-              style={{
-                padding: "6px 16px", fontSize: 12, fontWeight: 700,
-                background: "var(--success-color)", border: "none", borderRadius: 6,
-                color: "var(--text-primary)", cursor: "pointer", fontFamily: "var(--font-mono)",
-              }}
-            >
-              ✓ Approve & Merge
-            </button>
-            <button
-              onClick={() => {
-                if (socketSend && data.sessionKey) {
-                  socketSend({ type: "get_worktree_diff", sessionKey: data.sessionKey });
-                }
-              }}
-              style={{
-                padding: "6px 12px", fontSize: 11, background: "var(--bg-elevated)",
-                border: "1px solid var(--border-default)", borderRadius: 6,
-                color: "var(--text-secondary)", cursor: "pointer", fontFamily: "var(--font-mono)",
-              }}
-            >
-              View Diff
-            </button>
-            <button
-              onClick={() => {
-                if (socketSend && data.sessionKey && confirm("Discard all worktree changes?")) {
-                  socketSend({ type: "discard_worktree", sessionKey: data.sessionKey });
-                }
-              }}
-              style={{
-                padding: "6px 12px", fontSize: 11, background: "var(--danger-bg)",
-                border: "1px solid var(--danger-color)", borderRadius: 6,
-                color: "var(--status-error)", cursor: "pointer", fontFamily: "var(--font-mono)",
-              }}
-            >
-              Discard
-            </button>
-          </div>
-          <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 6, fontStyle: "italic" }}>
-            Send a message to request changes instead
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ── P6: Header menu ──────────────────────────────────────────────────── */
-
-function HeaderMenu({
-  onReset,
-  onExportLog,
-  onDuplicateSetup,
-  data,
-}: {
-  onReset: () => void;
-  onExportLog: () => void;
-  onDuplicateSetup?: (() => void) | undefined;
-  data: LeaderData;
-}) {
-  const [open, setOpen] = useState(false);
-
-  // Close menu on any wheel event (covers both zoom and pan).
-  // This replaces the old canvasScale-prop approach which caused
-  // every node to re-render on every zoom frame.
-  useEffect(() => {
-    if (!open) return;
-    const close = () => setOpen(false);
-    window.addEventListener("wheel", close, { passive: true, once: true });
-    return () => window.removeEventListener("wheel", close);
-  }, [open]);
-
-  return (
-    <div style={{ position: "relative" }}>
-      <button
-        onClick={() => setOpen(!open)}
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{
-          background: "none",
-          border: "none",
-          color: "var(--text-muted)",
-          cursor: "pointer",
-          fontSize: 14,
-          padding: "2px 4px",
-          lineHeight: 1,
-          borderRadius: 3,
-          transition: "color 0.15s",
-        }}
-        onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-primary)")}
-        onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
-      >
-        ⋮
-      </button>
-      {open && (
-        <>
-          <div
-            onClick={() => setOpen(false)}
-            style={{ position: "fixed", inset: 0, zIndex: 998 }}
-          />
-          <div
-            onMouseDown={(e) => e.stopPropagation()}
-            style={{
-              position: "absolute",
-              top: "calc(100% + 4px)",
-              right: 0,
-              zIndex: 999,
-              background: "var(--bg-elevated)",
-              border: "1px solid var(--border-default)",
-              borderRadius: 6,
-              boxShadow: "var(--shadow-lg)",
-              overflow: "hidden",
-              minWidth: 160,
-            }}
-          >
-            {onDuplicateSetup && (
-              <button
-                onClick={() => { onDuplicateSetup(); setOpen(false); }}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  width: "100%",
-                  padding: "8px 12px",
-                  background: "transparent",
-                  border: "none",
-                  color: "var(--text-secondary)",
-                  fontSize: 11,
-                  fontFamily: "var(--font-mono)",
-                  cursor: "pointer",
-                  textAlign: "left",
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-surface)")}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-              >
-                <span style={{ opacity: 0.6 }}>⧉</span> Duplicate Setup
-              </button>
-            )}
-            <button
-              onClick={() => { onExportLog(); setOpen(false); }}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                width: "100%",
-                padding: "8px 12px",
-                background: "transparent",
-                border: "none",
-                color: "var(--text-secondary)",
-                fontSize: 11,
-                fontFamily: "var(--font-mono)",
-                cursor: "pointer",
-                textAlign: "left",
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-surface)")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            >
-              <span style={{ opacity: 0.6 }}>↗</span> Export Log
-            </button>
-            {data.sessionKey && (
-              <button
-                onClick={() => { onReset(); setOpen(false); }}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  width: "100%",
-                  padding: "8px 12px",
-                  background: "transparent",
-                  border: "none",
-                  color: "var(--status-error)",
-                  fontSize: 11,
-                  fontFamily: "var(--font-mono)",
-                  cursor: "pointer",
-                  textAlign: "left",
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--danger-bg)")}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-              >
-                <span style={{ opacity: 0.6 }}>↺</span> Reset Session
-              </button>
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-/* ── Shared Leader prompt bar ──────────────────────────────────────────
-   Used by both the in-node prompt and the zoomed-out prompt overlay. Keep
-   prompt UI changes here so both affordances evolve together. */
-
-function LeaderPromptBar({
-  input,
-  onInputChange,
-  onKeyDown,
-  onSubmit,
-  placeholder,
-  submitLabel,
-  disabled,
-  active,
-  variant = "inline",
-  autoFocus = false,
-  textareaRef,
-  onTextareaFocus,
-}: {
-  input: string;
-  onInputChange: (value: string) => void;
-  onKeyDown: (e: React.KeyboardEvent) => void;
-  onSubmit: () => void;
-  placeholder: string;
-  submitLabel: string;
-  disabled: boolean;
-  active: boolean;
-  variant?: "inline" | "overlay";
-  autoFocus?: boolean;
-  textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
-  onTextareaFocus?: (() => void) | undefined;
-}) {
-  const isOverlay = variant === "overlay";
-
-  return (
-    <div
-      data-testid={`leader-prompt-bar-${variant}`}
-      data-no-drag
-      style={{
-        padding: isOverlay ? "10px" : "8px 10px",
-        borderTop: isOverlay ? "none" : "1px solid var(--border-default)",
-        display: "flex",
-        gap: isOverlay ? 8 : 6,
-        flexShrink: 0,
-        background: isOverlay ? "transparent" : "var(--bg-secondary)",
-        alignItems: "flex-end",
-      }}
-    >
-      <AutoTextarea
-        value={input}
-        onChange={onInputChange}
-        onKeyDown={onKeyDown}
-        autoFocus={autoFocus}
-        ariaLabel="Leader prompt"
-        testId={`leader-prompt-input-${variant}`}
-        placeholder={placeholder}
-        maxRows={isOverlay ? 10 : 8}
-        {...(onTextareaFocus ? { onFocus: onTextareaFocus } : {})}
-        {...(textareaRef ? { textareaRef } : {})}
-        style={{
-          fontSize: isOverlay ? 15 : 12,
-          lineHeight: isOverlay ? "24px" : "20px",
-          padding: isOverlay ? "12px 14px" : "8px 10px",
-          minHeight: isOverlay ? 52 : undefined,
-        }}
-      />
-      <button
-        type="button"
-        onClick={onSubmit}
-        onMouseDown={(e) => e.stopPropagation()}
-        disabled={disabled}
-        style={{
-          padding: isOverlay ? "12px 18px" : "8px 14px",
-          minHeight: isOverlay ? 52 : undefined,
-          borderRadius: 6,
-          border: "none",
-          background: active ? "var(--gradient-primary)" : "var(--bg-elevated)",
-          color: active ? "var(--text-primary)" : "var(--text-muted)",
-          fontSize: isOverlay ? 13 : 12,
-          fontWeight: 600,
-          cursor: disabled ? "default" : "pointer",
-          flexShrink: 0,
-          opacity: disabled ? 0.4 : 1,
-          marginBottom: isOverlay ? 0 : 1,
-        }}
-      >
-        {submitLabel}
-      </button>
-    </div>
-  );
-}
-
-function LeaderPromptOverlay({
-  open,
-  input,
-  title,
-  messages,
-  streamingText,
-  status,
-  onClose,
-  onInputChange,
-  onKeyDown,
-  onSubmit,
-  placeholder,
-  submitLabel,
-  disabled,
-  active,
-}: {
-  open: boolean;
-  input: string;
-  title: string;
-  messages: LeaderMessage[];
-  streamingText: string;
-  status: LeaderData["status"];
-  onClose: () => void;
-  onInputChange: (value: string) => void;
-  onKeyDown: (e: React.KeyboardEvent) => void;
-  onSubmit: () => void;
-  placeholder: string;
-  submitLabel: string;
-  disabled: boolean;
-  active: boolean;
-}) {
-  const overlayInputRef = useRef<HTMLTextAreaElement | null>(null);
-  const contextRef = useRef<HTMLDivElement | null>(null);
-  const didInitialContextScrollRef = useRef(false);
-  const contextMessages = useMemo(() => {
-    const chatRoles = new Set<LeaderMessage["role"]>(["user", "assistant", "result", "system"]);
-    const visible = messages
-      .filter((msg) => chatRoles.has(msg.role) && msg.content.trim().length > 0)
-      .slice(-6);
-
-    if (streamingText.trim()) {
-      visible.push({
-        id: "leader-prompt-overlay-streaming",
-        role: "assistant",
-        content: streamingText.replace(/<!--task-name:.+?-->\s*/g, ""),
-        timestamp: Date.now(),
-      });
-    }
-
-    return visible;
-  }, [messages, streamingText]);
-
-  useLayoutEffect(() => {
-    if (!open) {
-      didInitialContextScrollRef.current = false;
-      return;
-    }
-    if (didInitialContextScrollRef.current) return;
-    const contextEl = contextRef.current;
-    if (!contextEl) return;
-    contextEl.scrollTop = contextEl.scrollHeight;
-    didInitialContextScrollRef.current = true;
-  }, [open, contextMessages.length]);
-
-  if (!open) return null;
-
-  return createPortal(
-    <>
-      <div
-        data-testid="leader-prompt-overlay-backdrop"
-        onMouseDown={onClose}
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 9990,
-          background: "rgba(0, 0, 0, 0.16)",
-        }}
-      />
-      <div
-        data-testid="leader-prompt-overlay"
-        data-no-drag
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{
-          position: "fixed",
-          left: "50%",
-          bottom: 24,
-          transform: "translateX(-50%)",
-          zIndex: 9991,
-          width: "min(760px, calc(100vw - 32px))",
-          background: "var(--bg-secondary)",
-          border: "1px solid var(--border-hover)",
-          borderRadius: 8,
-          boxShadow: "var(--shadow-lg)",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            minHeight: 34,
-            padding: "8px 12px 0",
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            color: "var(--text-muted)",
-            fontFamily: "var(--font-mono)",
-            fontSize: 10,
-          }}
-        >
-          <img
-            src={
-              status === "running" || status === "creating"
-                ? "/icons/leader-active.svg"
-                : "/icons/leader-idle.svg"
-            }
-            alt={status === "running" || status === "creating" ? "Active" : "Idle"}
-            width={18}
-            height={18}
-            className="leader-status-icon"
-            style={{ display: "block", flexShrink: 0 }}
-          />
-          <span
-            title={title}
-            style={{
-              flex: 1,
-              minWidth: 0,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              color: "var(--text-primary)",
-              fontWeight: 700,
-            }}
-          >
-            {title}
-          </span>
-          <button
-            type="button"
-            onClick={onClose}
-            onMouseDown={(e) => e.stopPropagation()}
-            aria-label="Close enlarged prompt"
-            title="Close enlarged prompt"
-            style={{
-              width: 24,
-              height: 24,
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              border: "1px solid var(--border-default)",
-              borderRadius: 4,
-              background: "var(--bg-elevated)",
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              padding: 0,
-              fontSize: 14,
-              lineHeight: 1,
-            }}
-          >
-            x
-          </button>
-        </div>
-        {contextMessages.length > 0 && (
-          <div
-            ref={contextRef}
-            data-testid="leader-prompt-context"
-            data-scroll-capture
-            style={{
-              margin: "8px 10px 0",
-              maxHeight: "min(360px, 42vh)",
-              overflowY: "auto",
-              padding: "8px",
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
-              background: "var(--bg-surface)",
-              border: "1px solid var(--border-default)",
-              borderRadius: 6,
-            }}
-          >
-            {contextMessages.map((msg) => {
-              const role = msg.role === "result" ? "assistant" : msg.role;
-              const text =
-                msg.content.length > 1400
-                  ? `${msg.content.slice(0, 1397)}...`
-                  : msg.content;
-              return (
-                <div
-                  key={msg.id}
-                  style={{
-                    padding: "7px 9px",
-                    borderRadius: 6,
-                    background:
-                      role === "user"
-                        ? "var(--state-active)"
-                        : "var(--bg-primary)",
-                    border: "1px solid var(--border-default)",
-                    color: "var(--text-secondary)",
-                    fontSize: 12,
-                    lineHeight: 1.5,
-                  }}
-                >
-                  <div
-                    style={{
-                      marginBottom: 4,
-                      color: role === "user" ? "var(--accent)" : "var(--text-muted)",
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 9,
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      letterSpacing: 0.5,
-                    }}
-                  >
-                    {role}
-                  </div>
-                  <SimpleMarkdown text={text} />
-                </div>
-              );
-            })}
-          </div>
-        )}
-        <LeaderPromptBar
-          input={input}
-          onInputChange={onInputChange}
-          onKeyDown={onKeyDown}
-          onSubmit={onSubmit}
-          placeholder={placeholder}
-          submitLabel={submitLabel}
-          disabled={disabled}
-          active={active}
-          variant="overlay"
-          autoFocus
-          textareaRef={overlayInputRef}
-        />
-      </div>
-    </>,
-    document.body,
-  );
-}
 
 /* ── Main component ───────────────────────────────────────────────────── */
 
@@ -3427,6 +98,7 @@ export function LeaderNodeRenderer({
   onAddContentNode,
   onRevealMinion,
   onDuplicateLeaderSetup,
+  onSaveLeaderPreset,
 }: NodeRenderProps) {
   const data = node.data as LeaderData;
   const dataRef = useRef(data);
@@ -3436,12 +108,21 @@ export function LeaderNodeRenderer({
   const [tasksExpanded, setTasksExpanded] = useState(false);
   const [skillFlyoutOpen, setSkillFlyoutOpen] = useState(false);
   const [promptOverlayOpen, setPromptOverlayOpen] = useState(false);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [scrollLocked, setScrollLocked] = useState(false);
+  // Fullscreen cockpit (ephemeral, per-instance, per-session — mirrors the
+  // MarkdownNode focus-mode rationale). Toggle via the header button or
+  // Cmd/Ctrl+Shift+F when the leader card owns focus; Esc to exit.
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [messageContextSelection, setMessageContextSelection] =
     useState<MessageContextSelection | null>(null);
   const skillAnchorRef = useRef<HTMLDivElement>(null);
+  // Anchor for the SkillFlyout when triggered from the fullscreen cockpit
+  // (different DOM tree from skillAnchorRef which lives in the in-canvas card).
+  const fullscreenSkillAnchorRef = useRef<HTMLElement | null>(null);
   const outputRef = useRef<HTMLDivElement>(null);
   const scrollZoneRef = useRef<HTMLDivElement>(null);
+  const nodeRootRef = useRef<HTMLDivElement | null>(null);
   const syncedRef = useRef(false);
   const { banners, processNormalizedEvent, dismissBanner } = useStatusBanners();
   const debugEnabled = useSyncExternalStore(
@@ -3486,6 +167,32 @@ export function LeaderNodeRenderer({
     window.addEventListener("wheel", close, { passive: true, once: true });
     return () => window.removeEventListener("wheel", close);
   }, [skillFlyoutOpen]);
+
+  // Fullscreen keyboard handler — Cmd/Ctrl+Shift+F toggles when this node
+  // owns focus (or when no card is in fullscreen), Esc exits. Window-level
+  // listener (not editor-level) so it fires from any child surface (title
+  // input, composer, etc.). Matches the MarkdownNode focus-mode pattern.
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.shiftKey && (e.key === "f" || e.key === "F")) {
+        const root = nodeRootRef.current;
+        const focused = document.activeElement;
+        const owns = root && (root === focused || root.contains(focused));
+        if (owns || isFullscreen) {
+          e.preventDefault();
+          setIsFullscreen((v) => !v);
+        }
+        return;
+      }
+      if (e.key === "Escape" && isFullscreen) {
+        e.preventDefault();
+        setIsFullscreen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isFullscreen]);
 
   // Click-outside: deactivate scroll lock when clicking outside the scroll zone
   useEffect(() => {
@@ -3586,9 +293,9 @@ export function LeaderNodeRenderer({
   // second on each message — by the time this runs, `dataRef.current`
   // already reflects the hook's update from the same dispatch.
   useEffect(() => {
-    if (!socketSubscribe) return;
-    return socketSubscribe((msg: unknown) => {
-      const serverMsg = msg as ServerMessage;
+    if (!socketSubscribe || !data.sessionKey) return;
+    return subscribeSocketTopic(socketSubscribe, sessionTopic(data.sessionKey), (msg: unknown) => {
+      const serverMsg = msg as ServerMessage & Record<string, any>;
       const current = dataRef.current;
 
       // Handle sync_response — rebuild or reset state after reconnect
@@ -3596,6 +303,7 @@ export function LeaderNodeRenderer({
         serverMsg.type === "sync_response" &&
         serverMsg.sessionKey === current.sessionKey
       ) {
+        if (false) {
         if (serverMsg.found && serverMsg.events) {
           // Replay buffered events to rebuild messages, cost, turns
           const rebuiltMessages: LeaderMessage[] = [];
@@ -3616,7 +324,7 @@ export function LeaderNodeRenderer({
                 if (resultText) {
                   const lastIdx = rebuiltMessages.findLastIndex((m) => m.role === "assistant");
                   const lastMsg = lastIdx >= 0 ? rebuiltMessages[lastIdx] : undefined;
-                  if (lastMsg && lastMsg.content.trim() === resultText.trim()) {
+                  if (lastMsg?.content.trim() === resultText!.trim()) {
                     rebuiltMessages.splice(lastIdx, 1);
                   }
                 }
@@ -3680,8 +388,8 @@ export function LeaderNodeRenderer({
             syncData.mergeConfirmed = true;
           } else if (syncApproval?.requested) {
             syncData.approvalPending = true;
-            syncData.approvalSummary = syncApproval.summary ?? null;
-            syncData.approvalDiff = syncApproval.diff ?? null;
+            syncData.approvalSummary = syncApproval?.summary ?? null;
+            syncData.approvalDiff = syncApproval?.diff ?? null;
           } else {
             syncData.approvalPending = false;
           }
@@ -3702,6 +410,7 @@ export function LeaderNodeRenderer({
           });
         }
         return;
+        }
       }
 
       if (!current.sessionKey) return;
@@ -3741,6 +450,33 @@ export function LeaderNodeRenderer({
         }
         if (serverMsg.harness) {
           syncData.harness = serverMsg.harness;
+        }
+        if (Array.isArray(serverMsg.taskPlan)) {
+          const existingMap = new Map(
+            (current.taskPlan ?? []).map((task) => [task.taskId, task]),
+          );
+          syncData.taskPlan = serverMsg.taskPlan.map((task) => {
+            const existing = existingMap.get(task.taskId);
+            return {
+              taskId: task.taskId,
+              title: task.title,
+              description: task.description,
+              priority: task.priority,
+              status: task.status as TaskPlanItem["status"],
+              executor: task.executor,
+              minionSessionKey: task.minionSessionKey,
+              result: task.result,
+              cost: existing?.cost ?? 0,
+              createdAt: task.createdAt,
+              completedAt: task.completedAt,
+              sessionSummary: existing?.sessionSummary ?? "",
+              activeStep:
+                task.status === "running" || task.status === "starting"
+                  ? (existing?.activeStep ?? null)
+                  : null,
+              progress: existing?.progress ?? [],
+            };
+          });
         }
         const syncApproval = serverMsg.approval as
           | {
@@ -3929,7 +665,7 @@ export function LeaderNodeRenderer({
         return;
       }
     });
-  }, [socketSubscribe, emitUpdate, processNormalizedEvent]);
+  }, [socketSubscribe, data.sessionKey, emitUpdate, processNormalizedEvent]);
 
   const handleCreate = useCallback(() => {
     if (!socketSend) return;
@@ -3978,6 +714,7 @@ export function LeaderNodeRenderer({
     const finalSystemPrompt = buildLeaderSystemPrompt({
       skillIds: data.skillIds ?? [],
       skillValues: data.skillValues ?? {},
+      systemPromptPrefix: data.systemPromptPrefix,
     });
 
     socketSend({
@@ -4056,6 +793,7 @@ export function LeaderNodeRenderer({
     const finalSystemPrompt = buildLeaderSystemPrompt({
       skillIds: dataRef.current.skillIds ?? [],
       skillValues: dataRef.current.skillValues ?? {},
+      systemPromptPrefix: dataRef.current.systemPromptPrefix,
     });
 
     socketSend({
@@ -4099,6 +837,7 @@ export function LeaderNodeRenderer({
     const finalSystemPrompt = buildLeaderSystemPrompt({
       skillIds: current.skillIds ?? [],
       skillValues: current.skillValues ?? {},
+      systemPromptPrefix: current.systemPromptPrefix,
     });
 
     // Re-gather context on each turn so image nodes attached *after* the
@@ -4194,9 +933,7 @@ export function LeaderNodeRenderer({
     [onUpdateData],
   );
 
-  // P6: Reset session handler
-  const handleReset = useCallback(() => {
-    if (!confirm("Reset this Leader session? All messages will be cleared.")) return;
+  const resetSession = useCallback(() => {
     if (socketSend && data.sessionKey) {
       socketSend({ type: "stop_session", sessionKey: data.sessionKey });
     }
@@ -4211,6 +948,10 @@ export function LeaderNodeRenderer({
       worktreeIsolation: data.worktreeIsolation,
     });
   }, [socketSend, data, emitUpdate]);
+
+  const handleReset = useCallback(() => {
+    setResetConfirmOpen(true);
+  }, []);
 
   // New Session handler — preserves conversation context for continuity.
   // If the user has typed a prompt in the input, it becomes the autoStartPrompt
@@ -4322,6 +1063,9 @@ export function LeaderNodeRenderer({
 
   return (
     <div
+      ref={nodeRootRef}
+      tabIndex={-1}
+      data-fullscreen={isFullscreen}
       style={{
         width: "100%",
         height: "100%",
@@ -4332,6 +1076,7 @@ export function LeaderNodeRenderer({
         border: "1px solid var(--border-default)",
         overflow: "hidden",
         position: "relative",
+        outline: "none",
       }}
     >
       {/* P1: Resize handle */}
@@ -4354,7 +1099,7 @@ export function LeaderNodeRenderer({
           alignItems: "center",
           borderBottom: "1px solid var(--border-default)",
           flexShrink: 0,
-          background: "linear-gradient(135deg, var(--bg-surface) 0%, var(--bg-secondary) 100%)",
+          background: "var(--bg-surface)",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -4461,11 +1206,48 @@ export function LeaderNodeRenderer({
               Stop
             </button>
           )}
+          {/* Fullscreen toggle — opens the cockpit overlay */}
+          <button
+            onClick={() => setIsFullscreen(true)}
+            onMouseDown={(e) => e.stopPropagation()}
+            aria-label="Enter fullscreen"
+            aria-pressed={isFullscreen}
+            title="Fullscreen cockpit (⌘⇧F)"
+            data-testid="leader-fullscreen-enter"
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              padding: "2px 4px",
+              borderRadius: 3,
+              display: "inline-flex",
+              alignItems: "center",
+              transition: "color 0.15s",
+            }}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.color = "var(--text-primary)")
+            }
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.color = "var(--text-muted)")
+            }
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+              aria-hidden
+            >
+              <path d="M2 2h5v1.5H3.5V7H2V2zm12 0v5h-1.5V3.5H9V2h5zM2 14V9h1.5v3.5H7V14H2zm12 0H9v-1.5h3.5V9H14v5z" />
+            </svg>
+          </button>
           {/* P6: Header menu */}
           <HeaderMenu
             onReset={handleReset}
             onExportLog={handleExportLog}
             onDuplicateSetup={onDuplicateLeaderSetup}
+            onSavePreset={onSaveLeaderPreset}
             data={data}
           />
         </div>
@@ -4739,6 +1521,68 @@ export function LeaderNodeRenderer({
         active={promptSubmitActive}
       />
 
+      {isFullscreen && (
+        <LeaderFullscreen
+          data={data}
+          onUpdateData={(next) => emitUpdate(next)}
+          onExit={() => setIsFullscreen(false)}
+          input={input}
+          onInputChange={setInput}
+          onPromptSubmit={handlePromptSubmit}
+          onPromptKeyDown={handleKeyDown}
+          promptPlaceholder={promptPlaceholder}
+          promptSubmitLabel={promptSubmitLabel}
+          promptSubmitDisabled={promptSubmitDisabled}
+          promptSubmitActive={promptSubmitActive}
+          onStop={handleStop}
+          messageContextSelection={messageContextSelection}
+          activateMessageSelection={activateMessageSelection}
+          setMessageContextSelection={setMessageContextSelection}
+          exitMessageSelection={exitMessageSelection}
+          onAddContentNode={onAddContentNode}
+          onRevealMinion={onRevealMinion}
+          onOpenSkillFlyout={() => setSkillFlyoutOpen(true)}
+          skillFlyoutAnchorRef={fullscreenSkillAnchorRef}
+          toolbarSlot={
+            <SessionToolbar
+              sessionKey={data.sessionKey}
+              status={data.status}
+              model={data.model ?? "opus"}
+              permissionMode={data.permissionMode ?? "auto"}
+              onInterrupt={handleInterrupt}
+              onModelChange={handleModelChange}
+              onPermissionModeChange={handlePermissionModeChange}
+              thinkingConfig={data.thinkingConfig ?? DEFAULT_THINKING_CONFIG}
+              onThinkingConfigChange={handleThinkingConfigChange}
+              harness={data.harness ?? "claude"}
+              onHarnessChange={handleHarnessChange}
+              accent="var(--accent)"
+            />
+          }
+          bannerSlot={
+            <StatusBannerStack banners={banners} onDismiss={dismissBanner} />
+          }
+        />
+      )}
+
+      {resetConfirmOpen && (
+        <ConfirmModal
+          title="Reset Leader session?"
+          description="All messages in this Leader session will be cleared."
+          onClose={() => setResetConfirmOpen(false)}
+          actions={[
+            {
+              label: "Reset",
+              variant: "danger",
+              onClick: () => {
+                setResetConfirmOpen(false);
+                resetSession();
+              },
+            },
+          ]}
+        />
+      )}
+
       {data.error && (
         <div
           style={{
@@ -4776,6 +1620,7 @@ export function LeaderNodeRenderer({
               opacity: 0.7,
             }}
             title="Dismiss error"
+            aria-label="Dismiss error"
           >
             x
           </button>
@@ -4794,27 +1639,4 @@ registerNodeType({
   ownsChildrenOfType: ["minion", "render"],
 });
 
-export const LEADER_DEFAULT_DATA: LeaderData = {
-  sessionKey: null,
-  status: "disconnected",
-  messages: [],
-  streamingText: "",
-  streamingBlockIndex: null,
-  totalCost: 0,
-  turns: 0,
-  error: null,
-  fullError: null,
-  model: "opus",
-  permissionMode: "auto",
-  thinkingConfig: { ...DEFAULT_THINKING_CONFIG },
-  taskPlan: [],
-  worktreeIsolation: false,
-  worktreePath: null,
-  worktreeBranch: null,
-  worktreeStatus: "none",
-  skillIds: [],
-  skillValues: {},
-  skillPanelOpen: false,
-  waitUntil: null,
-  waitReason: null,
-};
+// LEADER_DEFAULT_DATA has moved to ./leader/types.ts and is re-exported above.

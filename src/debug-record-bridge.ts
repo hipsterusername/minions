@@ -14,7 +14,7 @@
  * NormalizedEvent / ServerMessage, so debug buffers stay small.
  */
 
-import { recordDebug } from "./debug.ts";
+import { isDebugEnabled, recordDebug } from "./debug.ts";
 import type { ServerMessage } from "./use-socket.ts";
 
 /**
@@ -29,7 +29,9 @@ export function recordWsMessageForDebug(
   msg: ServerMessage,
   note?: string,
 ): void {
+  if (!isDebugEnabled()) return;
   if (!sessionKey) return;
+  if ("sessionKey" in msg && msg.sessionKey !== sessionKey) return;
 
   // Cheap top-level cases first — they don't carry an event payload.
   if (msg.type === "session_status") {
@@ -60,8 +62,6 @@ export function recordWsMessageForDebug(
 
   if (msg.type !== "sdk_event") return;
   // Filter for-this-session events — the same socket multiplexes many.
-  if (msg.sessionKey !== sessionKey) return;
-
   const event = msg.event;
   recordDebug(sessionKey, {
     source: "ws",

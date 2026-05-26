@@ -36,19 +36,23 @@ import {
   sessionStreamReducer,
   type SessionStreamState,
 } from "./session-stream.ts";
-import type { ServerMessage } from "./use-socket.ts";
+import {
+  subscribeSocketTopic,
+  type ServerMessage,
+  type SocketSubscribe,
+} from "./use-socket.ts";
+import { sessionTopic } from "../shared/ws-envelope.ts";
 
 /** Subscription function shape consumed by the hook. */
-export type SocketSubscribe = (
-  fn: (msg: unknown) => void,
-) => () => void;
-
 export interface UseSessionStreamOptions {
   /**
    * The subscription primitive. May be `undefined` while the socket is
    * still being established — the hook is a no-op in that case.
    */
-  socketSubscribe?: SocketSubscribe | undefined;
+  socketSubscribe?:
+    | SocketSubscribe
+    | ((fn: (msg: unknown) => void) => () => void)
+    | undefined;
   /** Current shared state. The caller owns this and persists it. */
   state: SessionStreamState;
   /**
@@ -115,6 +119,7 @@ function isTransientStreamingOnlyChange(
  */
 export function useSessionStream(opts: UseSessionStreamOptions): void {
   const { socketSubscribe, prefix } = opts;
+  const sessionKey = opts.state.sessionKey;
 
   // Latest props, accessed via ref so the subscription effect's
   // identity does not depend on them.
@@ -123,6 +128,20 @@ export function useSessionStream(opts: UseSessionStreamOptions): void {
   const pendingTransientRef = useRef<SessionStreamState | null>(null);
   if (!pendingTransientRef.current) {
     stateRef.current = opts.state;
+  } else if (opts.state !== stateRef.current) {
+    const pending = pendingTransientRef.current;
+    if (opts.state.sessionKey === pending.sessionKey) {
+      const rebased = {
+        ...opts.state,
+        streamingText: pending.streamingText,
+        streamingBlockIndex: pending.streamingBlockIndex,
+      };
+      pendingTransientRef.current = rebased;
+      stateRef.current = rebased;
+    } else {
+      pendingTransientRef.current = null;
+      stateRef.current = opts.state;
+    }
   }
   const onChangeRef = useRef(opts.onChange);
   onChangeRef.current = opts.onChange;
@@ -140,8 +159,8 @@ export function useSessionStream(opts: UseSessionStreamOptions): void {
   };
 
   useEffect(() => {
-    if (!socketSubscribe) return;
-    return socketSubscribe((msg: unknown) => {
+    if (!socketSubscribe || !sessionKey) return;
+    const listener = (msg: unknown) => {
       const current = stateRef.current;
       const serverMsg = msg as ServerMessage;
       // Debug capture — no-ops when debug mode is off, scoped to the
@@ -175,8 +194,16 @@ export function useSessionStream(opts: UseSessionStreamOptions): void {
         pendingTransientRef.current = null;
         onChangeRef.current(next);
       }
-    });
-  }, [socketSubscribe]);
+    };
+
+    const unsubscribe = subscribeSocketTopic(socketSubscribe, sessionTopic(sessionKey), listener);
+    return () => {
+      unsubscribe?.();
+      cancelFrame(pendingFrameRef.current);
+      pendingFrameRef.current = null;
+      pendingTransientRef.current = null;
+    };
+  }, [socketSubscribe, sessionKey]);
 
   useEffect(() => {
     return () => {

@@ -78,9 +78,13 @@ async function collect(events: AsyncIterable<NormalizedEvent>): Promise<Normaliz
   return out;
 }
 
-async function importHarness() {
+async function importHarness(claudePath?: string) {
   vi.resetModules();
-  process.env["CLAUDE_CODE_PATH"] = TEST_CLAUDE_PATH;
+  if (claudePath === undefined) {
+    delete process.env["CLAUDE_CODE_PATH"];
+  } else {
+    process.env["CLAUDE_CODE_PATH"] = claudePath;
+  }
   const mod = await import("./index.ts");
   return mod.claudeHarness;
 }
@@ -138,13 +142,23 @@ describe("ClaudeHarness.start()", () => {
       model: "claude-sonnet-4-6",
       includePartialMessages: true,
       permissionMode: "auto",
-      pathToClaudeCodeExecutable: TEST_CLAUDE_PATH,
     });
+    expect(options).not.toHaveProperty("pathToClaudeCodeExecutable");
     expect(options["abortController"]).toBeInstanceOf(AbortController);
     expect(sdkMock.query).toHaveBeenCalledWith({
       prompt: "hello",
       options: expect.any(Object),
     });
+  });
+
+  it("passes CLAUDE_CODE_PATH as the only explicit executable override", async () => {
+    const handle = makeHandle([doneMessage()]);
+    sdkMock.query.mockReturnValue(handle);
+    const harness = await importHarness(TEST_CLAUDE_PATH);
+
+    await collect(harness.start(baseOpts()).events);
+
+    expect(lastQueryOptions()["pathToClaudeCodeExecutable"]).toBe(TEST_CLAUDE_PATH);
   });
 
   it("wraps registered tool groups into mcpServers and merges external MCP servers", async () => {

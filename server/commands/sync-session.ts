@@ -62,6 +62,7 @@ export const syncSession: CommandHandler = (ctx, cmd, ws) => {
     initData: host.initData,
     worktree: host.worktree,
     approval: host.taskState?.approval ?? null,
+    taskPlan: host.taskState ? Array.from(host.taskState.tasks.values()) : [],
     renderState: host.renderState ?? null,
     taskName: host.taskName,
     role: host.role,
@@ -69,7 +70,12 @@ export const syncSession: CommandHandler = (ctx, cmd, ws) => {
     harnessCapabilities,
     activeMinions: host.taskState
       ? Array.from(host.taskState.tasks.entries())
-          .filter(([, t]) => t.status === "planned" || t.status === "running")
+          .filter(
+            ([, t]) =>
+              t.status === "planned" ||
+              t.status === "starting" ||
+              t.status === "running",
+          )
           .map(([id, t]) => ({
             taskId: id,
             title: t.title,

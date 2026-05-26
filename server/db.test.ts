@@ -109,6 +109,48 @@ describe("initDb — fresh DB", () => {
   });
 });
 
+describe("initDb - task_records identity migration", () => {
+  it("migrates old global task_id primary key to leader-scoped identity", () => {
+    const path = freshDbPath();
+    const old = new Database(path);
+    old.exec(`
+      CREATE TABLE task_records (
+        task_id            TEXT PRIMARY KEY,
+        leader_session_key TEXT NOT NULL,
+        title              TEXT NOT NULL,
+        description        TEXT NOT NULL DEFAULT '',
+        priority           TEXT NOT NULL DEFAULT 'medium',
+        executor           TEXT NOT NULL DEFAULT 'leader',
+        minion_session_key TEXT,
+        status             TEXT NOT NULL DEFAULT 'planned',
+        result             TEXT,
+        created_at         INTEGER NOT NULL,
+        completed_at       INTEGER
+      );
+      INSERT INTO task_records (task_id, leader_session_key, title, created_at)
+      VALUES ('same', 'leader-old', 'Old', 1);
+    `);
+    old.close();
+
+    const db = initDb(path);
+    db.prepare(
+      `INSERT INTO task_records (task_id, leader_session_key, title, created_at)
+       VALUES ('same', 'leader-new', 'New', 2)`,
+    ).run();
+    const rows = db
+      .prepare(
+        "SELECT task_id, leader_session_key FROM task_records WHERE task_id = 'same' ORDER BY leader_session_key",
+      )
+      .all();
+
+    expect(rows).toEqual([
+      { task_id: "same", leader_session_key: "leader-new" },
+      { task_id: "same", leader_session_key: "leader-old" },
+    ]);
+    db.close();
+  });
+});
+
 describe("initDb — re-open is idempotent", () => {
   it("re-opening an already-migrated DB does not destroy its data", () => {
     const path = freshDbPath();

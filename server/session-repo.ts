@@ -139,8 +139,7 @@ export function upsertTaskRecord(
       @taskId, @leaderSessionKey, @title, @description, @priority,
       @executor, @minionSessionKey, @status, @result, @createdAt, @completedAt
     )
-    ON CONFLICT(task_id) DO UPDATE SET
-      leader_session_key = excluded.leader_session_key,
+    ON CONFLICT(leader_session_key, task_id) DO UPDATE SET
       title = excluded.title,
       description = excluded.description,
       priority = excluded.priority,
@@ -190,9 +189,12 @@ export function getTaskRecordsForLeader(
 
 export function deleteTaskRecord(
   db: Database.Database,
+  leaderSessionKey: string,
   taskId: string,
 ): void {
-  db.prepare("DELETE FROM task_records WHERE task_id = ?").run(taskId);
+  db.prepare(
+    "DELETE FROM task_records WHERE leader_session_key = ? AND task_id = ?",
+  ).run(leaderSessionKey, taskId);
 }
 
 // ── Render state ─────────────────────────────────────────

@@ -56,6 +56,7 @@ export function createDefaultNodeData(
         skillIds: [],
         skillValues: {},
         skillPanelOpen: false,
+        systemPromptPrefix: null,
         thinkingConfig: cloneThinkingConfig(
           projectSettings?.defaultLeaderThinkingConfig ?? DEFAULT_THINKING_CONFIG,
         ),

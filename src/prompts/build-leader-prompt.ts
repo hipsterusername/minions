@@ -26,6 +26,8 @@ export interface BuildLeaderPromptInput {
   skillIds: readonly string[];
   /** Variable values for the leader's tagged skills. */
   skillValues: Record<string, Record<string, string>>;
+  /** Optional text prepended to the generated system prompt. */
+  systemPromptPrefix?: string | null | undefined;
   /**
    * Coding tool names to inject into the "Your Capabilities" section.
    * Defaults to the Claude built-in tool list.
@@ -40,5 +42,6 @@ export function buildLeaderSystemPrompt(input: BuildLeaderPromptInput): string {
     .filter((s): s is SkillTemplate => s !== undefined);
   const activeAddendum = compileSkills(taggedSkills, input.skillValues);
   const inventory = buildArmingInventory(getAllSkills());
-  return buildBaseLeaderPrompt(tools) + activeAddendum + inventory;
+  const prefix = input.systemPromptPrefix?.trim();
+  return (prefix ? `${prefix}\n\n` : "") + buildBaseLeaderPrompt(tools) + activeAddendum + inventory;
 }

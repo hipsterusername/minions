@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 
 export interface ConfirmModalAction {
   label: string;
@@ -15,6 +15,8 @@ interface ConfirmModalProps {
 
 export function ConfirmModal({ title, description, actions, onClose }: ConfirmModalProps) {
   const backdropRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const descriptionId = useId();
 
   // Close on Escape
   useEffect(() => {
@@ -41,6 +43,10 @@ export function ConfirmModal({ title, description, actions, onClose }: ConfirmMo
       }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
         style={{
           background: "var(--bg-surface)",
           border: "1px solid var(--border-default)",
@@ -55,13 +61,13 @@ export function ConfirmModal({ title, description, actions, onClose }: ConfirmMo
         }}
       >
         {/* Title */}
-        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", fontFamily: "var(--font-sans)" }}>
+        <div id={titleId} style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", fontFamily: "var(--font-sans)" }}>
           {title}
         </div>
 
         {/* Description */}
         {description && (
-          <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, fontFamily: "var(--font-sans)" }}>
+          <div id={descriptionId} style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, fontFamily: "var(--font-sans)" }}>
             {description}
           </div>
         )}
@@ -105,13 +111,12 @@ const buttonBase: React.CSSProperties = {
   fontFamily: "var(--font-sans)",
   cursor: "pointer",
   border: "none",
-  outline: "none",
   transition: "background 0.15s, opacity 0.15s",
 };
 
 const primaryStyle: React.CSSProperties = {
   background: "var(--accent)",
-  color: "var(--text-primary)",
+  color: "var(--text-on-accent)",
   border: "1px solid var(--accent)",
 };
 

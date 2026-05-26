@@ -24,6 +24,7 @@ import {
   loadFixture,
   type FixtureEntry,
 } from "./ws-replay.ts";
+import { sessionTopic } from "../../shared/ws-envelope.ts";
 
 const FIXTURES_DIR = join(import.meta.dirname, "..", "fixtures", "sdk-message-streams");
 
@@ -132,6 +133,31 @@ describe("createReplaySocket", () => {
 
     expect(a).toHaveLength(1);
     expect(b).toHaveLength(1);
+  });
+
+  it("routes session-keyed replay messages to topic-scoped subscribers", async () => {
+    const { socket, replay } = createReplaySocket();
+    const leader: ServerMessage[] = [];
+    const minion: ServerMessage[] = [];
+    const firehose: ServerMessage[] = [];
+    socket.subscribe(sessionTopic("leader-1"), (m) => leader.push(m));
+    socket.subscribe(sessionTopic("minion-1"), (m) => minion.push(m));
+    socket.subscribe((m) => firehose.push(m));
+
+    await replay([
+      entry({
+        type: "minion_status",
+        leaderSessionKey: "leader-1",
+        minionSessionKey: "minion-1",
+        trigger: "step",
+        message: "working",
+        timestamp: 1,
+      }),
+    ]);
+
+    expect(leader).toHaveLength(1);
+    expect(minion).toHaveLength(1);
+    expect(firehose).toHaveLength(1);
   });
 
   it("returns an unsubscribe function that removes the subscriber", async () => {

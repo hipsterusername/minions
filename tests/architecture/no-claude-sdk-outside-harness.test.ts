@@ -17,7 +17,7 @@
 
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
-import { join, relative } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const HARNESS_CLAUDE_DIR = join(REPO_ROOT, "server", "harness", "claude");
@@ -60,7 +60,8 @@ function listTsFiles(dirs: string[]): string[] {
 }
 
 function isInsideHarnessClaude(absPath: string): boolean {
-  return absPath.startsWith(HARNESS_CLAUDE_DIR + "/");
+  const rel = relative(HARNESS_CLAUDE_DIR, absPath);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
 function hasSdkImport(absPath: string): boolean {

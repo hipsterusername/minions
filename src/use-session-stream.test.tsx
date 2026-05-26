@@ -360,6 +360,71 @@ describe("useSessionStream: batches transient streaming updates", () => {
     vi.useRealTimers();
   });
 
+  it("rebases pending streaming frames over concurrent controlled state changes", async () => {
+    vi.useFakeTimers();
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((cb) =>
+        window.setTimeout(() => cb(performance.now()), 16),
+      );
+    const cancelAnimationFrameSpy = vi
+      .spyOn(window, "cancelAnimationFrame")
+      .mockImplementation((id) => window.clearTimeout(id));
+
+    const { socket, replay } = createReplaySocket();
+    const initial: SessionStreamState = {
+      ...emptySessionStreamState("leader-1"),
+      status: "running",
+    };
+    const states: SessionStreamState[] = [];
+
+    function RebaseProbe() {
+      const [state, setState] = useState<SessionStreamState>(initial);
+      useSessionStream({
+        socketSubscribe: socket.subscribe,
+        state,
+        onChange: (next) => {
+          setState(next);
+          states.push(next);
+        },
+        prefix: "test",
+      });
+      return (
+        <button
+          data-testid="stop"
+          onClick={() => setState((prev) => ({ ...prev, status: "stopped" }))}
+        />
+      );
+    }
+
+    const view = render(<RebaseProbe />);
+
+    await pump(replay, [
+      {
+        message: {
+          type: "sdk_event",
+          sessionKey: "leader-1",
+          event: { kind: "text_delta", text: "partial", blockIndex: 0 },
+        },
+      },
+    ]);
+    expect(states).toHaveLength(0);
+
+    act(() => view.getByTestId("stop").click());
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
+    });
+
+    expect(states).toHaveLength(1);
+    expect(states[0]?.status).toBe("stopped");
+    expect(states[0]?.streamingText).toBe("partial");
+
+    requestAnimationFrameSpy.mockRestore();
+    cancelAnimationFrameSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
   it("flushes durable session changes immediately and cancels pending streaming frames", async () => {
     vi.useFakeTimers();
     const requestAnimationFrameSpy = vi

@@ -8,6 +8,7 @@
  */
 
 import { execSync } from "child_process";
+import { existsSync } from "fs";
 
 let ok = true;
 
@@ -42,16 +43,16 @@ check("git installed", () => {
   return ver;
 });
 
-// ── Claude Code CLI ────────────────────────────────────
-check("Claude Code CLI (claude)", () => {
-  try {
-    const ver = execSync("claude --version", { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }).trim();
-    return ver;
-  } catch {
-    throw new Error(
-      "not found — install Claude Code: https://docs.anthropic.com/en/docs/claude-code"
-    );
+// ── Claude Code executable override ─────────────────────
+check("Claude Code executable resolution", () => {
+  const configuredPath = process.env["CLAUDE_CODE_PATH"]?.trim();
+  if (!configuredPath) {
+    return "SDK default discovery (CLAUDE_CODE_PATH not set)";
   }
+  if (!existsSync(configuredPath)) {
+    throw new Error("CLAUDE_CODE_PATH points to a missing file");
+  }
+  return "CLAUDE_CODE_PATH set";
 });
 
 // ── Summary ────────────────────────────────────────────

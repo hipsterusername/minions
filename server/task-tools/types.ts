@@ -17,12 +17,22 @@ export interface TaskRecord {
   executor: "leader" | "minion";
   minionSessionKey: string | null;
   leaderSessionKey: string;
-  /** planned → running → completed | failed */
-  status: "planned" | "running" | "completed" | "failed";
+  /** Server-owned lifecycle projection. */
+  status: TaskStatus;
   createdAt: number;
   completedAt: number | null;
   result: string | null;
 }
+
+export type TaskStatus =
+  | "planned"
+  | "starting"
+  | "running"
+  | "completed"
+  | "failed"
+  | "ended_without_report"
+  | "cancelled"
+  | "orphaned";
 
 export interface RuntimeSessionInfo {
   sessionKey: string;
@@ -57,6 +67,8 @@ export interface ApprovalState {
   requested: boolean;
   /** Timestamp of the request */
   requestedAt: number;
+  /** Short grace window for the leader to render its approval dashboard */
+  graceUntil?: number;
   /** Summary provided by the leader */
   summary: string;
   /** Detailed diff at the time of request */
@@ -106,5 +118,7 @@ export interface TaskToolContext {
   worktreeBranch?: string | null;
   worktreeInfo?: WorktreeInfo | null;
   worktreeIsolation?: boolean;
-  scheduleWaitContinue: (durationMs: number, reason: string) => void;
+  scheduleWaitContinue: (durationMs: number, reason: string) => ReturnType<typeof setTimeout> | null | void;
+  terminateSession?: (sessionKey: string, reason: "abort") => void;
+  taskTimeoutMs?: number;
 }

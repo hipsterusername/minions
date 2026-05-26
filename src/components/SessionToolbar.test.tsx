@@ -136,11 +136,11 @@ function renderWithHarnesses(
 // ── Tests ──────────────────────────────────────────────────────
 
 describe("SessionToolbar — model selection picker", () => {
-  it("combines harness, model, and reasoning into one trigger", () => {
+  it("combines harness, model, and reasoning into one trigger without tier chips", () => {
     renderWithHarnesses([CLAUDE_ENTRY]);
     expect(screen.getByTitle("Model selection")).toHaveTextContent("Anthropic");
     expect(screen.getByTitle("Model selection")).toHaveTextContent("Sonnet 4.6");
-    expect(screen.getByTitle("Model selection")).toHaveTextContent("Balanced");
+    expect(screen.getByTitle("Model selection")).not.toHaveTextContent("Balanced");
     expect(screen.getByTitle("Model selection")).toHaveTextContent("High");
   });
 

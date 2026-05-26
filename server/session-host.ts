@@ -5,12 +5,6 @@
  * the abort controller, SDK query handle, event buffer, task/render state,
  * wait timer, and worktree handle. Owns the SDK `query()` loop and the
  * SQLite write-through persistence calls.
- *
- * Extracted from the old monolithic `server/index.ts` in Phase 5.1. The
- * goal of this module is to give `server/index.ts` a single object to
- * dispatch per-session work against instead of managing a flat struct in
- * a Map.
- *
  * Non-goals:
  *   - Does not own the WebSocket dispatcher (that stays in `server/index.ts`
  *     until Phase 5.2 splits the command table).
@@ -53,6 +47,12 @@ import {
   processNormalizedEvent,
   shouldRecoverFromContextWindow,
 } from "./session-host-run.ts";
+import {
+  terminateSessionHost,
+  type SessionTerminateDeps,
+  type SessionTerminateReason,
+} from "./session-host-terminate.ts";
+import { applySessionEndedForMinion } from "./task-lifecycle.ts";
 
 // Re-export shared types so callers can import everything from session-host.
 export {
@@ -88,6 +88,10 @@ export interface SessionHostDeps {
   ) => void;
   /** Lookup live/persisted runtime metadata for a session key. */
   getSessionRuntime?: (sessionKey: string) => RuntimeSessionInfo | null;
+  /** Terminate another live session by key. */
+  terminateSession?: (sessionKey: string, reason: SessionTerminateReason) => void;
+  /** Wake a waiting leader once every delegated child is terminal. */
+  wakeWaitingLeaderIfAllChildrenTerminal?: (leaderKey: string) => void;
 }
 
 /**
@@ -184,6 +188,7 @@ export class SessionHost {
   renderState: RenderState | null = null;
   /** Current Reasoning Graph state (leader only) */
   reasoningMapState: ReasoningMapState | null = null;
+  private terminateDeps: SessionTerminateDeps | null = null;
 
   constructor(id: string, cwd: string) {
     this.id = id;
@@ -232,6 +237,7 @@ export class SessionHost {
       clearTimeout(this.waitTimerId);
       this.waitTimerId = null;
     }
+    if (this.taskState?.pendingWait) this.taskState.pendingWait.timerId = null;
   }
 
   // ── Lifecycle ───────────────────────────────────────
@@ -247,6 +253,7 @@ export class SessionHost {
    */
   async start(opts: StartSessionOptions, deps: SessionHostDeps): Promise<void> {
     const abortController = new AbortController();
+    this.terminateDeps = deps;
 
     try {
       // Derive a task name for agent types that want one (leader) — done
@@ -370,6 +377,20 @@ export class SessionHost {
       };
       this.bufferEvent(errorEvent);
       deps.bus.emitToSession(this.id, errorEvent);
+      if (this.role === "minion") {
+        applySessionEndedForMinion({
+          bus: deps.bus,
+          minionSessionKey: this.id,
+          reason: "error",
+          result: errorMessage,
+          forEachLeaderTaskState: deps.forEachLeaderTaskState,
+          onAfterLifecycle: deps.wakeWaitingLeaderIfAllChildrenTerminal,
+        });
+      }
     }
+  }
+
+  terminate(reason: SessionTerminateReason, deps?: SessionTerminateDeps): void {
+    terminateSessionHost(this, deps ?? this.terminateDeps, reason);
   }
 }

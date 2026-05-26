@@ -46,6 +46,7 @@ import type { SkillTemplate } from "./skills/types.ts";
 import { getSkill } from "./skills/registry.ts";
 import { themes, themeMap, applyTheme, DEFAULT_THEME_ID } from "./themes.ts";
 import { ThemeContext, loadPersistedThemeId, persistThemeId } from "./use-theme.ts";
+import { usePreventBrowserZoom } from "./use-prevent-browser-zoom.ts";
 
 const WS_URL = `ws://localhost:${import.meta.env["VITE_SERVER_PORT"] ?? "3141"}`;
 const PROJECT_HEADER_HEIGHT = 44;
@@ -904,6 +905,7 @@ function ProjectView({
                   nodes={nodes}
                   onUpdateNodeData={(nodeId, data) => dispatch({ type: "UPDATE_NODE_DATA", id: nodeId, data })}
                   projectSettings={projectSettings}
+                  onOpenCanvas={() => setActiveView("canvas")}
                 />
               </div>
             ) : (
@@ -921,6 +923,7 @@ function ProjectView({
                     socketConnected={socket.connected}
                     projectPath={projectPath}
                     projectSettings={projectSettings}
+                    onProjectSettingsChange={handleSettingsChange}
                     onCreateKanbanCardFromMarkdown={handleCreateKanbanCardFromMarkdown}
                     focusNodeId={focusNodeId}
                     onFocusNodeHandled={handleFocusNodeHandled}
@@ -980,6 +983,7 @@ function ProjectView({
 export default function App() {
   const [currentProject, setCurrentProject] = useState<{ id: string; path: string } | null>(null);
   const [themeId, setThemeIdState] = useState(() => loadPersistedThemeId());
+  usePreventBrowserZoom();
 
   // Apply theme on mount and when changed
   useEffect(() => {

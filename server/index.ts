@@ -153,6 +153,15 @@ const sessionDeps: SessionHostDeps = {
   startChildSession: (opts: StartSessionOptions) => registry.start(opts),
   forEachLeaderTaskState: registry.forEachLeaderTaskState,
   getSessionRuntime: registry.getSessionRuntime,
+  wakeWaitingLeaderIfAllChildrenTerminal:
+    registry.wakeWaitingLeaderIfAllChildrenTerminal,
+  terminateSession: (sessionKey, reason) =>
+    registry.get(sessionKey)?.terminate(reason, {
+      bus,
+      forEachLeaderTaskState: registry.forEachLeaderTaskState,
+      wakeWaitingLeaderIfAllChildrenTerminal:
+        registry.wakeWaitingLeaderIfAllChildrenTerminal,
+    }),
 };
 registry.setDeps(sessionDeps);
 

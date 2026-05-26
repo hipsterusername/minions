@@ -41,7 +41,24 @@ describe("discard_worktree", () => {
     const h = setup();
     h.host.worktree = fakeWorktree;
     h.host.taskState = {
-      tasks: new Map(),
+      tasks: new Map([
+        [
+          "t1",
+          {
+            taskId: "t1",
+            title: "T1",
+            description: "",
+            priority: "medium",
+            executor: "minion",
+            minionSessionKey: "minion-1",
+            leaderSessionKey: "leader-1",
+            status: "running",
+            createdAt: Date.now(),
+            completedAt: null,
+            result: null,
+          },
+        ],
+      ]),
       pendingWait: null,
       approval: { requested: true, requestedAt: 0, summary: "x", diff: null },
     };
@@ -57,6 +74,7 @@ describe("discard_worktree", () => {
     expect(h.host.worktree).toBeNull();
     expect(h.host.cwd).toBe("/p");
     expect(h.host.taskState!.approval).toBeNull();
+    expect(h.host.taskState!.tasks.get("t1")!.status).toBe("cancelled");
 
     expect(h.busSent.find((e) => e.type === "worktree_removed")).toBeDefined();
     const resolved = h.busSent.find((e) => e.type === "approval_resolved");

@@ -9,7 +9,7 @@
  * tests pin its semantics so the regression doesn't slip back in.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -18,10 +18,14 @@ import { SessionRegistry } from "./session-registry.ts";
 import { SessionHost } from "./session-host.ts";
 import {
   closePersistDb,
+  disablePersistence,
   openPersistDb,
+  persistTaskState,
   persistSession,
   type PersistableSession,
 } from "./session-persist.ts";
+import { createBus } from "./bus.ts";
+import type { WebSocketServer } from "ws";
 
 function tmpDb(): string {
   return path.join(
@@ -137,6 +141,56 @@ describe("SessionRegistry.getSessionRuntime", () => {
     const r = new SessionRegistry();
     expect(r.getSessionRuntime("missing")).toBeNull();
   });
+
+  it("wakes a pending leader wait when all minion tasks are terminal", () => {
+    disablePersistence();
+    const r = new SessionRegistry();
+    const map = (r as unknown as { map: Map<string, SessionHost> }).map;
+    const startChildSession = vi.fn();
+    const h = new SessionHost("leader-1", "/tmp/work");
+    h.role = "leader";
+    h.sessionId = "sdk-1";
+    h.waitTimerId = setTimeout(() => {}, 30_000);
+    h.taskState = {
+      tasks: new Map([
+        ["t1", {
+          taskId: "t1",
+          title: "T1",
+          description: "",
+          priority: "medium",
+          executor: "minion",
+          minionSessionKey: "minion-1",
+          leaderSessionKey: "leader-1",
+          status: "completed",
+          createdAt: 1,
+          completedAt: 2,
+          result: "done",
+        }],
+      ]),
+      pendingWait: {
+        durationMs: 30_000,
+        reason: "waiting on minions",
+        scheduledAt: 1,
+        timerId: h.waitTimerId,
+      },
+      approval: null,
+    };
+    map.set("leader-1", h);
+    r.setDeps({
+      bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
+      startChildSession,
+      forEachLeaderTaskState: r.forEachLeaderTaskState,
+    });
+
+    r.wakeWaitingLeaderIfAllChildrenTerminal("leader-1");
+
+    expect(h.waitTimerId).toBeNull();
+    expect(h.taskState.pendingWait).toBeNull();
+    expect(startChildSession).toHaveBeenCalledWith(expect.objectContaining({
+      sessionKey: "leader-1",
+      resumeId: "sdk-1",
+    }));
+  });
 });
 
 describe("SessionRegistry.hydrateFromDb — sessionId round-trip", () => {
@@ -213,5 +267,41 @@ describe("SessionRegistry.hydrateFromDb — sessionId round-trip", () => {
     const r = new SessionRegistry();
     r.hydrateFromDb();
     expect(r.get("old-leader")?.sessionId).toBeNull();
+  });
+
+  it("marks persisted running tasks as orphaned during hydration", () => {
+    persistSession(makePersisted({ id: "leader-orphan", role: "leader" }));
+    persistTaskState("leader-orphan", {
+      tasks: new Map([
+        [
+          "t1",
+          {
+            taskId: "t1",
+            title: "T1",
+            description: "",
+            priority: "medium",
+            executor: "minion",
+            minionSessionKey: "minion-missing",
+            leaderSessionKey: "leader-orphan",
+            status: "running",
+            createdAt: Date.now(),
+            completedAt: null,
+            result: null,
+          },
+        ],
+      ]),
+      pendingWait: null,
+      approval: null,
+    });
+
+    const r = new SessionRegistry();
+    r.setDeps({
+      bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
+      startChildSession: () => {},
+      forEachLeaderTaskState: r.forEachLeaderTaskState,
+    });
+    r.hydrateFromDb();
+
+    expect(r.get("leader-orphan")?.taskState?.tasks.get("t1")?.status).toBe("orphaned");
   });
 });

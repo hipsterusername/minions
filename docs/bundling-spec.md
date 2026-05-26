@@ -58,7 +58,7 @@ notarization, and auto-update are explicitly deferred to v1.
 | Process orchestration | `scripts/dev.mjs` spawns `tsx server` + `vite --open` |
 | Frontend ⇄ server bridge | Vite dev proxy (`/api → :3141`); WS to `ws://localhost:3141` |
 | Native modules | `better-sqlite3` (rebuilt at install time per `pnpm.onlyBuiltDependencies`) |
-| External binaries | `claude` (resolved by `which`, `server/harness/claude/index.ts:24`); `git` (`server/worktree-exec.ts`) |
+| External binaries | Claude Code (SDK default discovery, optional `CLAUDE_CODE_PATH` env override); `git` (`server/worktree-exec.ts`) |
 | Config dirs | `~/.minions/`, `<project>/.minions/`, `process.cwd()/data/canvas.db` fallback |
 | Auth | Random 32-byte bearer token per process, served at `/api/auth/token`, localhost-only |
 
@@ -78,7 +78,7 @@ Electron main process
 │         └── express.static(distDir)              # NEW
 │               └── falls back to index.html for SPA routes
 │   └── better-sqlite3 (.node from app.asar.unpacked)
-│   └── spawns `claude` and `git` via fix-path-augmented PATH
+│   └── spawns Claude Code through the SDK and `git` via inherited env/PATH
 └── BrowserWindow.loadURL(`http://127.0.0.1:${port}`)
       └── React renderer — relative `/api` and ws://localhost just work
             ↑
@@ -416,9 +416,11 @@ when convenient.
 ### 8.2 PATH semantics
 
 `fix-path` runs at main-process startup. The forked server inherits the
-augmented PATH via `process.env`. No code in `server/` needs to change; the
-existing `which claude` resolution in `server/harness/claude/index.ts:24` will
-succeed because PATH now matches the user's login shell.
+augmented PATH via `process.env`, which remains important for `git` and any
+user-provided executable overrides. The Claude harness does not probe PATH
+itself: it passes `CLAUDE_CODE_PATH` only when the environment sets it, and
+otherwise lets the Claude Agent SDK perform its platform-aware default
+discovery.
 
 For Linux distributions where `fix-path` is a no-op, the desktop launcher
 inherits the user session PATH — which is correct.
@@ -445,7 +447,7 @@ remains where it is — that's user content, not app state.
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
 | `better-sqlite3` fails to load in packaged build | Medium | Blocks Phase 3 | Smoke-test in CI on every Electron version bump; pin Electron + `@electron/rebuild` versions |
-| `claude` not on PATH despite `fix-path` (e.g. installed via volta, asdf) | Medium | App appears broken | Surface a settings UI to point at the binary; respect `CLAUDE_CODE_PATH` env (already supported by `server/harness/claude/index.ts:25`); preflight gate on first launch |
+| User needs a non-default Claude Code executable | Medium | App may use the wrong executable | Surface a settings UI that sets `CLAUDE_CODE_PATH`; the harness passes only that env override and otherwise delegates discovery to the SDK |
 | pnpm hoisting layout breaks `electron-builder` `files` resolution | Medium | Build fails | Use `pnpm install --shamefully-hoist` in the package CI job, OR set `node-linker=hoisted` for the package step only |
 | Server child outlives main process on hard kill | Low | Orphan worktrees | `cleanupStaleWorktrees()` already runs at next boot (`server/index.ts:208`) |
 | Bundle size > 200 MB (Electron baseline ≈ 90 MB; SDK + node_modules adds 50–80 MB) | Medium | Slow installer | Strip dev locales (`electron-builder` `electronLanguages: ['en-US']`); audit `files` allowlist |

@@ -530,10 +530,12 @@ export function ProjectPanel({
                       padding: "8px 16px",
                       fontSize: 12,
                       fontWeight: 500,
-                      background: "var(--gradient-primary)",
-                      border: "none",
+                      background: "var(--accent)",
+                      border: "1px solid color-mix(in srgb, var(--accent) 72%, var(--text-on-accent))",
                       borderRadius: 6,
-                      color: "var(--text-primary)",
+                      color: "var(--text-on-accent)",
+                      boxShadow:
+                        "inset 0 1px 0 color-mix(in srgb, var(--text-on-accent) 22%, transparent), 0 1px 2px rgba(var(--kb-shadow-color), 0.18), 0 8px 18px color-mix(in srgb, var(--accent) 14%, transparent)",
                       cursor: "pointer",
                       fontFamily: "var(--font-sans)",
                     }}
