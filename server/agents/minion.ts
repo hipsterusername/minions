@@ -5,10 +5,10 @@
 import { registerAgentType } from "./registry.ts";
 import type { AgentType, AgentTypeContext, AgentToolResult } from "./types.ts";
 import { createMinionToolsForSession } from "../minion-tools.ts";
-import { emitTaskPlanUpdate } from "../task-tools/shared.ts";
 import { persistTaskState } from "../session-persist.ts";
 import type { TaskManagerState, TaskRecord } from "../task-tools.ts";
 import { MINION_SYSTEM_PROMPT } from "../../shared/prompts/minion-system.ts";
+import { applyLifecycleEvent } from "../task-lifecycle.ts";
 
 // Re-exported so leader.ts can pass it to task-tools when spawning minions.
 export { MINION_SYSTEM_PROMPT };
@@ -37,14 +37,22 @@ function findParentTask(
   return found;
 }
 
-function persistAndBroadcastTaskState(
+function applyParentLifecycleEvent(
   ctx: AgentTypeContext,
   leaderKey: string,
   taskState: TaskManagerState,
+  taskId: string,
+  event: Parameters<typeof applyLifecycleEvent>[0]["event"],
 ): void {
-  emitTaskPlanUpdate(ctx.bus, leaderKey, taskState, (state) =>
-    persistTaskState(leaderKey, state),
-  );
+  applyLifecycleEvent({
+    bus: ctx.bus,
+    leaderSessionKey: leaderKey,
+    taskState,
+    taskId,
+    event,
+    onStateChange: (state) => persistTaskState(leaderKey, state),
+  });
+  ctx.wakeWaitingLeaderIfAllChildrenTerminal?.(leaderKey);
 }
 
 // ── AgentType implementation ──────────────────────────────────────────────
@@ -66,15 +74,17 @@ const minionAgent: AgentType = {
       onReport: (report) => {
         if (!parent) return;
         if (report.trigger === "step") {
-          if (parent.task.status === "planned") parent.task.status = "running";
-          persistAndBroadcastTaskState(ctx, parent.leaderKey, parent.taskState);
+          applyParentLifecycleEvent(ctx, parent.leaderKey, parent.taskState, parent.task.taskId, {
+            type: "reported_step",
+          });
           return;
         }
 
-        parent.task.status = report.trigger === "done" ? "completed" : "failed";
-        parent.task.completedAt = report.timestamp;
-        parent.task.result = report.message;
-        persistAndBroadcastTaskState(ctx, parent.leaderKey, parent.taskState);
+        applyParentLifecycleEvent(ctx, parent.leaderKey, parent.taskState, parent.task.taskId, {
+          type: report.trigger === "done" ? "reported_done" : "reported_fail",
+          result: report.message,
+          timestamp: report.timestamp,
+        });
       },
     });
 
@@ -91,21 +101,14 @@ const minionAgent: AgentType = {
     const parent = findParentTask(ctx);
     if (!parent) return;
 
-    const isError = !!(result["is_error"]);
-    const alreadyClosed =
-      parent.task.status === "completed" || parent.task.status === "failed";
-    if (!alreadyClosed) {
-      parent.task.status = isError ? "failed" : "completed";
-      parent.task.completedAt = Date.now();
-      parent.task.result =
-        (result["result"] as string) ??
-        (isError ? "Task failed" : "Task completed");
-    }
-
-    // Broadcast the authoritative plan even when report_done/report_fail
-    // already closed the task, so late-revealed leader nodes and persisted
-    // state converge after the SDK turn fully settles.
-    persistAndBroadcastTaskState(ctx, parent.leaderKey, parent.taskState);
+    const isError = !!result["is_error"];
+    applyParentLifecycleEvent(ctx, parent.leaderKey, parent.taskState, parent.task.taskId, {
+      type: "session_ended",
+      reason: isError ? "error" : "clean",
+      result:
+        (result["result"] as string | null | undefined) ??
+        (isError ? "Task failed" : null),
+    });
   },
 };
 

@@ -104,6 +104,9 @@ describe("request_approval", () => {
       diff: fakeDiff,
     });
     expect(typeof ctx.taskState.approval!.requestedAt).toBe("number");
+    expect(ctx.taskState.approval!.graceUntil).toBeGreaterThan(
+      ctx.taskState.approval!.requestedAt,
+    );
     expect(ctx.onStateChange).toHaveBeenCalledWith(ctx.taskState);
 
     expect(ctx.sent).toHaveLength(1);
@@ -112,6 +115,7 @@ describe("request_approval", () => {
     expect(env["sessionKey"]).toBe("leader-1");
     expect(env["summary"]).toBe("Refactored the parser");
     expect(env["diff"]).toEqual(fakeDiff);
+    expect(env["graceUntil"]).toBe(ctx.taskState.approval!.graceUntil);
   });
 
   it("returns the early no-worktree message and does NOT touch state when worktreeInfo is null", async () => {

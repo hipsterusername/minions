@@ -4,7 +4,10 @@ import { MINION_THINKING_CONFIG } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
 import { registerContract, MINION_CONTRACT } from "../graph.ts";
 import type { TaskAssignment } from "../graph.ts";
-import type { ServerMessage } from "../use-socket.ts";
+import {
+  subscribeSocketTopics,
+  type ServerMessage,
+} from "../use-socket.ts";
 import { MINION_SYSTEM_PROMPT } from "../prompts/minion-system.ts";
 import { useStatusBanners, StatusBannerStack } from "../components/StatusBanner.tsx";
 import { StreamingBubble, StreamingIndicator } from "../components/StreamingBubble.tsx";
@@ -23,6 +26,7 @@ import {
 import { useSessionStream } from "../use-session-stream.ts";
 import { debugFlagStore } from "../debug.ts";
 import { DebugInspector } from "../components/DebugInspector.tsx";
+import { sessionTopic } from "../../shared/ws-envelope.ts";
 
 registerContract(MINION_CONTRACT);
 
@@ -444,7 +448,14 @@ export function MinionNodeRenderer({
   // already reflects the hook's update from the same dispatch.
   useEffect(() => {
     if (!socketSubscribe) return;
-    return socketSubscribe((msg: unknown) => {
+    const topics = [
+      data.sessionKey ? sessionTopic(data.sessionKey) : null,
+      data.agentTaskId && data.parentSessionKey
+        ? sessionTopic(data.parentSessionKey)
+        : null,
+    ].filter((topic): topic is string => topic !== null);
+    if (topics.length === 0) return;
+    return subscribeSocketTopics(socketSubscribe, topics, (msg: unknown) => {
       const serverMsg = msg as ServerMessage;
       const current = dataRef.current;
 
@@ -622,7 +633,15 @@ export function MinionNodeRenderer({
         }
       }
     });
-  }, [socketSubscribe, emitUpdate, processNormalizedEvent, socketSend]);
+  }, [
+    socketSubscribe,
+    data.sessionKey,
+    data.agentTaskId,
+    data.parentSessionKey,
+    emitUpdate,
+    processNormalizedEvent,
+    socketSend,
+  ]);
 
   // Start working on a task
   const startTask = useCallback(
@@ -800,7 +819,7 @@ export function MinionNodeRenderer({
           alignItems: "center",
           borderBottom: "1px solid var(--border-default)",
           flexShrink: 0,
-          background: "linear-gradient(135deg, var(--bg-surface) 0%, var(--bg-secondary) 100%)",
+          background: "var(--bg-surface)",
           height: 32,
           boxSizing: "border-box",
         }}
@@ -812,7 +831,7 @@ export function MinionNodeRenderer({
               width: 20,
               height: 20,
               borderRadius: 5,
-              background: `linear-gradient(135deg, ${statusColor[data.status] ?? "var(--text-muted)"}, ${statusColor[data.status] ?? "var(--text-muted)"}cc)`,
+              background: `linear-gradient(135deg, ${statusColor[data.status] ?? "var(--text-muted)"}, color-mix(in srgb, ${statusColor[data.status] ?? "var(--text-muted)"} 80%, var(--bg-surface)))`,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -823,7 +842,8 @@ export function MinionNodeRenderer({
           >
             <img
               src="/icons/minion.svg"
-              alt="Minion"
+              alt=""
+              aria-hidden="true"
               width={14}
               height={14}
               style={{ display: "block" }}
@@ -890,6 +910,7 @@ export function MinionNodeRenderer({
               opacity: showSettings ? 1 : 0.6,
             }}
             title="Settings"
+            aria-label={showSettings ? "Hide minion settings" : "Show minion settings"}
           >
             ⚙
           </button>

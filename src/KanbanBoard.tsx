@@ -2525,8 +2525,10 @@ function KanbanInspectorPanel({
 
 function EmptyBoardExperience({
   onCreate,
+  onOpenCanvas,
 }: {
   onCreate: () => void;
+  onOpenCanvas: () => void;
 }) {
   return (
     <section className="kb-onboarding" aria-labelledby="kb-onboarding-title">
@@ -2540,12 +2542,12 @@ function EmptyBoardExperience({
         </div>
         <div className="kb-onboarding__preview">
           <div className="kb-onboarding__preview-card kb-onboarding__preview-card--intent">
-            <span className="kb-onboarding__preview-kicker">Intent</span>
+            <span className="kb-onboarding__preview-kicker">Card</span>
             <span className="kb-onboarding__preview-line" />
             <span className="kb-onboarding__preview-line kb-onboarding__preview-line--short" />
           </div>
           <div className="kb-onboarding__preview-card kb-onboarding__preview-card--agent">
-            <span className="kb-onboarding__preview-kicker">Agent run</span>
+            <span className="kb-onboarding__preview-kicker">Run</span>
             <span className="kb-onboarding__preview-meter">
               <span />
             </span>
@@ -2558,34 +2560,33 @@ function EmptyBoardExperience({
       </div>
 
       <div className="kb-onboarding__body">
-        <p className="kb-onboarding__eyebrow">Start with a task, not a blank board</p>
+        <p className="kb-onboarding__eyebrow">Choose how to start</p>
         <h2 id="kb-onboarding-title" className="kb-onboarding__title">
-          Create the first agent-ready card
+          Create a task card or map context on Canvas
         </h2>
         <p className="kb-onboarding__copy">
-          The board works best when each card already has enough context for a Leader
-          to run, pause for review, and return with a visible trail of work.
+          Use Kanban when the next task is clear. Use Canvas when you need to collect
+          files, notes, and relationships before assigning work.
         </p>
 
         <div className="kb-onboarding__actions">
           <button className="kb-btn kb-btn--primary kb-onboarding__primary" onClick={onCreate}>
             <span aria-hidden="true">+</span>
-            Create Card
+            Create task card
+          </button>
+          <button className="kb-btn kb-btn--secondary kb-onboarding__secondary" onClick={onOpenCanvas}>
+            Open Canvas
           </button>
         </div>
 
-        <div className="kb-onboarding__steps" aria-label="Suggested first task structure">
-          <div className="kb-onboarding__step">
-            <span className="kb-onboarding__step-index">1</span>
-            <span>Describe the outcome</span>
+        <div className="kb-onboarding__paths" aria-label="Available starting points">
+          <div className="kb-onboarding__path">
+            <span className="kb-onboarding__path-label">Kanban</span>
+            <span className="kb-onboarding__path-copy">Queue work, launch a Leader, and review halted runs.</span>
           </div>
-          <div className="kb-onboarding__step">
-            <span className="kb-onboarding__step-index">2</span>
-            <span>Add files, constraints, and success criteria</span>
-          </div>
-          <div className="kb-onboarding__step">
-            <span className="kb-onboarding__step-index">3</span>
-            <span>Launch, then review from the Halted column</span>
+          <div className="kb-onboarding__path">
+            <span className="kb-onboarding__path-label">Canvas</span>
+            <span className="kb-onboarding__path-copy">Place files and notes, connect context, then turn it into cards.</span>
           </div>
         </div>
       </div>
@@ -2612,6 +2613,7 @@ interface KanbanBoardProps {
   nodes: CanvasNode[];
   onUpdateNodeData?: (nodeId: string, data: unknown) => void;
   projectSettings?: ProjectSettings;
+  onOpenCanvas: () => void;
 }
 
 export function KanbanBoard({
@@ -2628,6 +2630,7 @@ export function KanbanBoard({
   nodes,
   onUpdateNodeData,
   projectSettings,
+  onOpenCanvas,
 }: KanbanBoardProps) {
   const [quickComposerOpen, setQuickComposerOpen] = useState(false);
   const [aiComposeJobs, setAiComposeJobs] = useState<AiComposeJob[]>([]);
@@ -2961,6 +2964,7 @@ export function KanbanBoard({
           {isBoardEmpty && !quickComposerOpen && (
             <EmptyBoardExperience
               onCreate={openQuickComposer}
+              onOpenCanvas={onOpenCanvas}
             />
           )}
           <div className="kb-columns">

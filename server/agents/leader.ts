@@ -17,6 +17,7 @@ import { createStepToolsForSession } from "../routines/step-tools.ts";
 import { createReasoningMapToolsForLeader } from "../reasoning-map-tools.ts";
 import type { RenderComponent } from "../../shared/render-dsl.ts";
 import { elideDefaults } from "../../shared/render-defaults.ts";
+import { applyLifecycleEvent, isTerminalTaskStatus } from "../task-lifecycle.ts";
 
 // ── System prompt ─────────────────────────────────────────────────────────
 
@@ -303,6 +304,7 @@ const leaderAgent: AgentType = {
       worktreeInfo: ctx.worktreeInfo ?? null,
       worktreeIsolation: ctx.worktreeIsolation,
       scheduleWaitContinue: ctx.scheduleWaitContinue,
+      terminateSession: ctx.terminateSession,
       // Phase 4.4: write-through cache — every task-state mutation is
       // persisted to SQLite so the plan survives a server restart.
       onStateChange: (state) => persistTaskState(leaderSessionKey, state),
@@ -367,6 +369,26 @@ const leaderAgent: AgentType = {
 
   wantsWorktree: true,
   detectsSubagents: true,
+
+  onComplete(ctx: AgentTypeContext): void {
+    ctx.forEachLeaderTaskState?.((leaderKey, taskState) => {
+      if (leaderKey !== ctx.sessionKey) return;
+      for (const task of Array.from(taskState.tasks.values())) {
+        if (isTerminalTaskStatus(task.status)) continue;
+        if (task.minionSessionKey) {
+          ctx.terminateSession?.(task.minionSessionKey, "abort");
+        }
+        applyLifecycleEvent({
+          bus: ctx.bus,
+          leaderSessionKey: leaderKey,
+          taskState,
+          taskId: task.taskId,
+          event: { type: "parent_terminated" },
+          onStateChange: (state) => persistTaskState(leaderKey, state),
+        });
+      }
+    });
+  },
 };
 
 registerAgentType(leaderAgent);

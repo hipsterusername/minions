@@ -139,13 +139,9 @@ function providerMark(label: string): string {
   return label.slice(0, 2).toUpperCase();
 }
 
-type ModelTone = "flagship" | "balanced" | "fast" | "coding" | "general" | "test";
-
 interface ModelDisplayMeta {
   family: string;
-  tier: string;
   description: string;
-  tone: ModelTone;
 }
 
 function modelDisplayMeta(modelId: string, label: string, provider: string): ModelDisplayMeta {
@@ -153,91 +149,44 @@ function modelDisplayMeta(modelId: string, label: string, provider: string): Mod
   if (text.includes("opus")) {
     return {
       family: "Claude Opus",
-      tier: "Frontier",
       description: "Highest capability for complex planning and review",
-      tone: "flagship",
     };
   }
   if (text.includes("sonnet")) {
     return {
       family: "Claude Sonnet",
-      tier: "Balanced",
       description: "Strong default for sustained coding work",
-      tone: "balanced",
     };
   }
   if (text.includes("haiku")) {
     return {
       family: "Claude Haiku",
-      tier: "Fast",
       description: "Lower-latency model for lighter turns",
-      tone: "fast",
     };
   }
   if (text.includes("codex")) {
     return {
       family: "GPT-5 Codex",
-      tier: "Coding",
       description: "OpenAI model tuned for codebase work",
-      tone: "coding",
     };
   }
   if (text.includes("gpt-5")) {
     return {
       family: "GPT-5",
-      tier: "General",
       description: "OpenAI general reasoning model",
-      tone: "general",
     };
   }
   if (provider === "Echo") {
     return {
       family: "Echo",
-      tier: "Test",
       description: "Local echo harness for UI and flow checks",
-      tone: "test",
     };
   }
   return {
     family: label,
-    tier: "Model",
     description: "Available through this harness",
-    tone: "general",
   };
 }
-
-const MODEL_TONE_STYLE: Record<ModelTone, React.CSSProperties> = {
-  flagship: {
-    background: "color-mix(in srgb, var(--model-opus) 18%, transparent)",
-    borderColor: "var(--model-opus)",
-    color: "var(--text-primary)",
-  },
-  balanced: {
-    background: "color-mix(in srgb, var(--model-sonnet) 18%, transparent)",
-    borderColor: "var(--model-sonnet)",
-    color: "var(--text-primary)",
-  },
-  fast: {
-    background: "color-mix(in srgb, var(--model-haiku) 18%, transparent)",
-    borderColor: "var(--model-haiku)",
-    color: "var(--text-primary)",
-  },
-  coding: {
-    background: "color-mix(in srgb, var(--accent) 18%, transparent)",
-    borderColor: "var(--accent)",
-    color: "var(--text-primary)",
-  },
-  general: {
-    background: "var(--bg-secondary)",
-    borderColor: "var(--border-default)",
-    color: "var(--text-secondary)",
-  },
-  test: {
-    background: "var(--code-bg)",
-    borderColor: "var(--border-default)",
-    color: "var(--text-muted)",
-  },
-};
 
 function Dropdown<T extends string>({
   value,
@@ -461,7 +410,6 @@ function ModelSelectionPicker({
 
   const activeHarnessLabel = providerLabel(activeHarness, activeHarnessName);
   const activeModelLabel = modelLabels[model] ?? model;
-  const activeMeta = modelDisplayMeta(model, activeModelLabel, activeHarnessLabel);
   const effortLabel =
     thinkingConfig && capability.supportsAdaptiveThinking
       ? EFFORT_LABELS[thinkingConfig.effort]
@@ -505,18 +453,6 @@ function ModelSelectionPicker({
         <span>{activeHarnessLabel}</span>
         <span style={{ color: "var(--text-muted)" }}>·</span>
         <span style={{ color: "var(--text-primary)" }}>{activeModelLabel}</span>
-        <span
-          style={{
-            ...MODEL_TONE_STYLE[activeMeta.tone],
-            border: `1px solid ${MODEL_TONE_STYLE[activeMeta.tone].borderColor}`,
-            borderRadius: 4,
-            padding: "1px 5px",
-            fontSize: 9,
-            lineHeight: 1.3,
-          }}
-        >
-          {activeMeta.tier}
-        </span>
         {effortLabel && (
           <>
             <span style={{ color: "var(--text-muted)" }}>·</span>

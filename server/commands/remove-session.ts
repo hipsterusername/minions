@@ -21,10 +21,10 @@ export const removeSession: CommandHandler = (ctx, cmd, ws) => {
   }
   const host = ctx.registry.get(cmd.sessionKey);
   if (host) {
-    host.clearWaitTimer();
-    // Fire-and-forget; missing close() is a no-op on teardown.
-    void host.runControl?.close?.();
-    host.abortController.abort();
+    host.terminate("remove", {
+      bus: ctx.bus,
+      forEachLeaderTaskState: ctx.registry.forEachLeaderTaskState,
+    });
 
     if (host.worktree) {
       const { path: wtPath, projectPath: wtProject } = host.worktree;

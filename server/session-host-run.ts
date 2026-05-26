@@ -1,14 +1,9 @@
 /**
  * Lifecycle helpers for `SessionHost`.
  *
- * Contains the pure-ish pieces of `SessionHost.start()` that are large
- * enough to warrant their own home:
  *   - `ensureWorktree`       — resolves the effective cwd/worktree for this run
  *   - `buildHarnessStartOpts` — assembles the HarnessStartOptions for harness.start()
  *   - `processNormalizedEvent` — the per-event body of the `for await` loop
- *
- * Kept as free functions that take an explicit `SessionHost` reference so
- * the class file stays under the architecture line-count ceiling.
  */
 
 import type {
@@ -25,6 +20,7 @@ import type {
 } from "./harness/types.ts";
 import type { NormalizedEvent } from "../shared/normalized-event.ts";
 import type { Bus } from "./bus.ts";
+import { persistTaskState } from "./session-persist.ts";
 import { createWorktree, isGitRepo, type WorktreeInfo } from "./worktree.ts";
 import {
   enrichSystemPromptForWorktree,
@@ -32,7 +28,7 @@ import {
   type BufferedEvent,
 } from "./session-host-config.ts";
 import type { SessionHost, StartSessionOptions } from "./session-host.ts";
-
+import { applySessionRunningForMinion } from "./task-lifecycle.ts";
 /**
  * Ensure the host has the correct cwd + worktree wiring before the SDK
  * query opens. Mutates `host` in place and emits bus events on failure.
@@ -197,6 +193,8 @@ export function processNormalizedEvent(
   event: NormalizedEvent,
 ): void {
   const now = Date.now();
+  if (host.role === "minion")
+    applySessionRunningForMinion({ bus, minionSessionKey: host.id, forEachLeaderTaskState: agentCtx.forEachLeaderTaskState });
 
   // ── Capture session metadata ────────────────────────────────────────────
   if (event.kind === "init") {
@@ -302,12 +300,6 @@ export function processNormalizedEvent(
 
 /**
  * Build the MCP agent context for a session run.
- *
- * Wires callbacks through `deps` so the agent can spawn minions or
- * schedule a delayed resume without knowing about the registry directly.
- *
- * Extracted from `SessionHost.buildAgentContext` (was private) to keep
- * the class file under the 400-line architecture ceiling.
  */
 export function buildAgentContext(
   host: SessionHost,
@@ -346,6 +338,10 @@ export function buildAgentContext(
       );
       host.waitTimerId = setTimeout(() => {
         host.waitTimerId = null;
+        if (host.taskState?.pendingWait) {
+          host.taskState.pendingWait = null;
+          persistTaskState(host.id, host.taskState);
+        }
         deps.bus.emitToSession(host.id, {
           type: "wait_state",
           sessionKey: host.id,
@@ -365,7 +361,10 @@ export function buildAgentContext(
           harness: host.harnessName,
         });
       }, durationMs);
+      return host.waitTimerId;
     },
+    terminateSession: deps.terminateSession,
+    wakeWaitingLeaderIfAllChildrenTerminal: deps.wakeWaitingLeaderIfAllChildrenTerminal,
   };
   if (host.taskState) ctx.existingTaskState = host.taskState;
   if (host.renderState) ctx.existingRenderState = host.renderState;

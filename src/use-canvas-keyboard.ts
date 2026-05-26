@@ -7,6 +7,8 @@
  * - Ctrl/Cmd+Z: undo
  * - Ctrl/Cmd+Shift+Z / Ctrl/Cmd+Y: redo
  * - N: focus next active (running) node
+ * - L: create Leader at the cursor when the cursor is over empty canvas
+ * - Ctrl/Cmd+K: open command palette
  */
 import { useEffect, type Dispatch, type MutableRefObject } from "react";
 import type { CanvasNode, CanvasAction } from "./types.ts";
@@ -27,6 +29,11 @@ function isTextInput(target: EventTarget | null): boolean {
 export interface UseCanvasKeyboardOpts {
   selectedIds: Set<string>;
   setSelectedIds: (ids: Set<string>) => void;
+  /** Currently selected edge ID, if any. When set, Delete removes that edge
+   *  instead of touching nodes. */
+  selectedEdgeId?: string | null;
+  /** Called when Delete/Backspace is pressed and only an edge is selected. */
+  onDeleteSelectedEdge?: (() => void) | undefined;
   nodes: CanvasNode[];
   graph: GraphDocument;
   dispatch: Dispatch<CanvasAction>;
@@ -47,6 +54,8 @@ export interface UseCanvasKeyboardOpts {
   focusNextActive?: (() => void) | undefined;
   copyLeaderSetup?: ((nodeId: string) => boolean) | undefined;
   pasteLeaderSetup?: (() => boolean) | undefined;
+  createLeaderAtCursor?: (() => boolean) | undefined;
+  openCommandPalette?: (() => void) | undefined;
   undo?: (() => void) | undefined;
   redo?: (() => void) | undefined;
 }
@@ -54,6 +63,8 @@ export interface UseCanvasKeyboardOpts {
 export function useCanvasKeyboard({
   selectedIds,
   setSelectedIds,
+  selectedEdgeId,
+  onDeleteSelectedEdge,
   nodes,
   graph,
   dispatch,
@@ -65,6 +76,8 @@ export function useCanvasKeyboard({
   focusNextActive,
   copyLeaderSetup,
   pasteLeaderSetup,
+  createLeaderAtCursor,
+  openCommandPalette,
   undo,
   redo,
 }: UseCanvasKeyboardOpts): void {
@@ -77,9 +90,19 @@ export function useCanvasKeyboard({
         spaceRef.current = true;
       }
 
-      // ── Delete / Backspace: delete selected nodes ──
+      // ── Delete / Backspace: delete selected edge OR nodes ──
       if (e.code === "Delete" || e.code === "Backspace") {
         if (isTextInput(e.target)) return;
+
+        // Edge selection takes priority: if an edge is selected and no
+        // node is, remove just the edge. Node + edge selections are
+        // mutually exclusive by construction (see Canvas.tsx), so the
+        // `selectedIds.size === 0` guard is defensive — it preserves the
+        // node-delete path if both ever coexist.
+        if (selectedEdgeId && selectedIds.size === 0) {
+          onDeleteSelectedEdge?.();
+          return;
+        }
 
         // Expand deletion: when a leader is deleted, also delete its
         // connected minions + render node
@@ -151,6 +174,27 @@ export function useCanvasKeyboard({
 
       // ── Copy/Paste Leader setup ──
       const mod = e.metaKey || e.ctrlKey;
+      if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") {
+        if (isTextInput(e.target)) return;
+        e.preventDefault();
+        openCommandPalette?.();
+        return;
+      }
+
+      if (
+        e.code === "KeyL" &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        !e.repeat
+      ) {
+        if (isTextInput(e.target)) return;
+        if (createLeaderAtCursor?.()) {
+          e.preventDefault();
+          return;
+        }
+      }
       if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "c") {
         if (isTextInput(e.target)) return;
         if (selectedIds.size === 1 && copyLeaderSetup) {
@@ -197,5 +241,5 @@ export function useCanvasKeyboard({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [selectedIds, nodes, graph, dispatch, graphDispatch, spaceRef, isInsideGroup, setPendingGroupDelete, focusNodes, focusNextActive, copyLeaderSetup, pasteLeaderSetup, undo, redo]);
+  }, [selectedIds, selectedEdgeId, onDeleteSelectedEdge, nodes, graph, dispatch, graphDispatch, spaceRef, isInsideGroup, setPendingGroupDelete, focusNodes, focusNextActive, copyLeaderSetup, pasteLeaderSetup, createLeaderAtCursor, openCommandPalette, undo, redo]);
 }

@@ -24,13 +24,15 @@ export function createWaitAndContinueToolDef(ctx: TaskToolContext): NormalizedTo
     handler: async (input: unknown) => {
       const args = input as { duration_seconds: number; reason: string };
       const durationMs = args.duration_seconds * 1000;
+      const scheduledAt = Date.now();
+      const timerId = ctx.scheduleWaitContinue(durationMs, args.reason);
 
       // Record the pending wait on the task state
       ctx.taskState.pendingWait = {
         durationMs,
         reason: args.reason,
-        scheduledAt: Date.now(),
-        timerId: null,
+        scheduledAt,
+        timerId: timerId ?? null,
       };
 
       // Broadcast so the frontend can show the countdown immediately
@@ -40,11 +42,10 @@ export function createWaitAndContinueToolDef(ctx: TaskToolContext): NormalizedTo
         action: "started",
         durationMs,
         reason: args.reason,
-        scheduledAt: Date.now(),
+        scheduledAt,
       });
 
-      // Schedule the actual continuation via the server callback.
-      ctx.scheduleWaitContinue(durationMs, args.reason);
+      ctx.onStateChange?.(ctx.taskState);
 
       const mins = Math.floor(args.duration_seconds / 60);
       const secs = args.duration_seconds % 60;

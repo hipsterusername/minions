@@ -28,7 +28,7 @@ export function buildCodexEnv(
 function codexHomeFallback(cwd: string): string | null {
   if (process.env["CODEX_HOME"]) return null;
 
-  const home = os.homedir();
+  const home = process.env["HOME"] || os.homedir();
   const defaultCodexHome = path.join(home, ".codex");
   if (
     isWritableDir(defaultCodexHome) ||

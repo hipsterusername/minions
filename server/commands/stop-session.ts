@@ -5,8 +5,6 @@
  * resume after the user explicitly stopped it.
  */
 
-import type { BusPayload } from "../bus.ts";
-import type { BufferedEvent } from "../session-host.ts";
 import type { CommandHandler } from "./types.ts";
 
 export const stopSession: CommandHandler = (ctx, cmd) => {
@@ -14,24 +12,8 @@ export const stopSession: CommandHandler = (ctx, cmd) => {
   const host = ctx.registry.get(cmd.sessionKey);
   if (!host) return;
 
-  if (host.waitTimerId) {
-    host.clearWaitTimer();
-    ctx.bus.emitToSession(cmd.sessionKey, {
-      type: "wait_state",
-      sessionKey: cmd.sessionKey,
-      action: "cancelled",
-      reason: "Session stopped",
-      timestamp: Date.now(),
-    });
-  }
-  host.abortController.abort();
-  host.status = "stopped";
-  const stopEvent: BufferedEvent = {
-    type: "session_status",
-    sessionKey: cmd.sessionKey,
-    status: "stopped",
-    timestamp: Date.now(),
-  };
-  host.bufferEvent(stopEvent);
-  ctx.bus.emitToSession(cmd.sessionKey, stopEvent as BusPayload);
+  host.terminate("stop", {
+    bus: ctx.bus,
+    forEachLeaderTaskState: ctx.registry.forEachLeaderTaskState,
+  });
 };

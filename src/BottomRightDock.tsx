@@ -31,6 +31,73 @@ import {
 } from "react";
 import { ViewportOverlay } from "./components/ViewportOverlay.tsx";
 
+/**
+ * The DockBar shrinks in two stages as the viewport narrows so the
+ * bottom-right cluster never reaches the center-bottom Canvas toolbar
+ * (`bottom: 16, left: 50%`).
+ *
+ * Geometry — both clusters live on `bottom: 16`:
+ *   • Canvas toolbar half-width ≈ 185px  (11 buttons + 2 dividers + pad)
+ *   • Dock width, labelled + tails ≈ 580-600px  (5 pills; Sessions
+ *     "$0.42" tail + count badge pushes the high end)
+ *   • Dock width, labelled, no tail ≈ 500-550px  (still labels +
+ *     count badges + dots)
+ *   • Dock width, icon only ≈ 220-300px
+ *
+ * Crossover (toolbarRight = dockLeft):
+ *     vw/2 + 185 = vw - 16 - dockWidth
+ *   → vw = 2 * (185 + 16 + dockWidth) = 402 + 2*dockWidth
+ *
+ *   Full-fat dock (600px) → overlap below ≈ 1600px
+ *   Labels-without-tail (550px) → overlap below ≈ 1500px
+ *   Icon only (300px) → overlap below ≈ 1000px
+ *
+ * Hence two thresholds:
+ *   • `DOCK_TAIL_BREAKPOINT_PX = 1700` — below this, drop tail strings
+ *     (e.g. "$0.42") but keep icon + label + count badge + dot. The
+ *     extra ~100px of headroom over the crossover absorbs label-width
+ *     variance and avoids pixel-perfect collisions at the boundary.
+ *   • `DOCK_COMPACT_BREAKPOINT_PX = 1500` — below this, also drop
+ *     labels (icon-only pills). Covers the common 1280, 1366, and
+ *     1440 laptop widths where the labelled dock can't fit without
+ *     touching the toolbar.
+ *
+ * Both exported so tests can drive each mode deterministically.
+ */
+export const DOCK_TAIL_BREAKPOINT_PX = 1700;
+export const DOCK_COMPACT_BREAKPOINT_PX = 1500;
+
+export type DockDensity = "full" | "no-tail" | "compact";
+
+function pickDensity(width: number): DockDensity {
+  if (width < DOCK_COMPACT_BREAKPOINT_PX) return "compact";
+  if (width < DOCK_TAIL_BREAKPOINT_PX) return "no-tail";
+  return "full";
+}
+
+/**
+ * Tracks the current dock density tier from `window.innerWidth`.
+ * SSR-safe: defaults to "full" when `window` is unavailable.
+ */
+function useDockDensity(): DockDensity {
+  const [density, setDensity] = useState<DockDensity>(() => {
+    if (typeof window === "undefined") return "full";
+    return pickDensity(window.innerWidth);
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onResize = () => {
+      setDensity(pickDensity(window.innerWidth));
+    };
+    // Sync once on mount in case the initial value was computed before
+    // the first browser layout.
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return density;
+}
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type DockPanelId = "sessions" | "map" | "mcp" | "skills";
@@ -313,20 +380,28 @@ function DockPill({
   config,
   active,
   badge,
+  density,
   onClick,
 }: {
   config: DockButtonConfig;
   active: boolean;
   badge: DockBadge | undefined;
+  /** Current density tier — drives which children get rendered. */
+  density: DockDensity;
   onClick: () => void;
 }) {
   const baseColor = active ? "var(--text-primary)" : "var(--text-secondary)";
+  const compact = density === "compact";
+  const showLabel = density !== "compact";
+  const showTail = density === "full";
+  const [hovered, setHovered] = useState(false);
 
   const baseStyle: CSSProperties = {
+    position: "relative",
     display: "flex",
     alignItems: "center",
-    gap: 6,
-    padding: "6px 10px",
+    gap: compact ? 4 : 6,
+    padding: compact ? "6px 8px" : "6px 10px",
     background: active ? "var(--bg-elevated)" : "transparent",
     border: active
       ? "1px solid var(--accent)"
@@ -340,6 +415,11 @@ function DockPill({
     transition: "background 0.12s, border-color 0.12s, color 0.12s",
   };
 
+  // Show the custom tooltip whenever the inline label is hidden (compact
+  // mode). Native `title=` tooltips don't reliably surface above the
+  // React Flow canvas, so we render an explicit floating chip.
+  const showTooltip = hovered && !showLabel;
+
   return (
     <button
       type="button"
@@ -347,16 +427,17 @@ function DockPill({
       data-active={active ? "true" : "false"}
       onClick={onClick}
       onMouseDown={(e) => e.stopPropagation()}
-      title={config.label}
       aria-label={config.label}
       aria-pressed={active}
       style={baseStyle}
       onMouseEnter={(e) => {
+        setHovered(true);
         if (active) return;
         e.currentTarget.style.background = "var(--bg-surface)";
         e.currentTarget.style.color = "var(--text-primary)";
       }}
       onMouseLeave={(e) => {
+        setHovered(false);
         if (active) return;
         e.currentTarget.style.background = "transparent";
         e.currentTarget.style.color = "var(--text-secondary)";
@@ -375,7 +456,7 @@ function DockPill({
       >
         {config.icon}
       </span>
-      <span>{config.label}</span>
+      {showLabel && <span>{config.label}</span>}
       {badge?.count != null && badge.count > 0 && (
         <span
           style={{
@@ -390,7 +471,7 @@ function DockPill({
           {badge.count}
         </span>
       )}
-      {badge?.tail && (
+      {showTail && badge?.tail && (
         <span
           style={{
             fontSize: 10,
@@ -413,6 +494,31 @@ function DockPill({
           }}
         />
       )}
+      {showTooltip && (
+        <span
+          role="tooltip"
+          data-dock-tooltip={config.id}
+          style={{
+            position: "absolute",
+            bottom: "calc(100% + 8px)",
+            left: "50%",
+            transform: "translateX(-50%)",
+            padding: "4px 8px",
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--border-default)",
+            borderRadius: 4,
+            color: "var(--text-primary)",
+            fontSize: 10,
+            fontFamily: "var(--font-mono)",
+            whiteSpace: "nowrap",
+            pointerEvents: "none",
+            boxShadow: "var(--shadow-md)",
+            zIndex: 10,
+          }}
+        >
+          {config.label}
+        </span>
+      )}
     </button>
   );
 }
@@ -428,6 +534,8 @@ interface DockBarProps {
 
 export function DockBar({ onOpenRoutines }: DockBarProps) {
   const { activePanel, togglePanel, badges } = useDock();
+  const density = useDockDensity();
+  const compact = density === "compact";
 
   const buttons: DockButtonConfig[] = useMemo(() => {
     const list: DockButtonConfig[] = [
@@ -467,6 +575,8 @@ export function DockBar({ onOpenRoutines }: DockBarProps) {
     <ViewportOverlay>
       <div
         data-dock-bar=""
+        data-compact={compact ? "true" : "false"}
+        data-density={density}
         style={{
           position: "absolute",
           bottom: 16,
@@ -484,7 +594,7 @@ export function DockBar({ onOpenRoutines }: DockBarProps) {
       >
         {buttons.map((b, i) => (
           <span key={b.id} style={{ display: "flex", alignItems: "center" }}>
-            {i > 0 && (
+            {i > 0 && !compact && (
               <span
                 aria-hidden="true"
                 style={{
@@ -499,6 +609,7 @@ export function DockBar({ onOpenRoutines }: DockBarProps) {
               config={b}
               active={b.id !== "routines" && activePanel === b.id}
               badge={b.id === "routines" ? undefined : badges[b.id]}
+              density={density}
               onClick={() => {
                 if (b.onAction) {
                   b.onAction();

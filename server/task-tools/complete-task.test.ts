@@ -1,6 +1,5 @@
 /**
- * complete_task — flips a task to completed, auto-creating the record if
- * the leader didn't pre-plan.
+ * complete_task — flips a known task to completed.
  */
 import { describe, expect, it } from "vitest";
 import type { WebSocketServer } from "ws";
@@ -41,8 +40,11 @@ function makeCtx(): TaskToolContext & { sent: Record<string, unknown>[] } {
 async function call(
   def: NormalizedToolDef,
   args: unknown,
-): Promise<{ content: { type: "text"; text: string }[] }> {
-  return (await def.handler(args)) as { content: { type: "text"; text: string }[] };
+): Promise<{ content: { type: "text"; text: string }[]; isError?: boolean }> {
+  return (await def.handler(args)) as {
+    content: { type: "text"; text: string }[];
+    isError?: boolean;
+  };
 }
 
 describe("complete_task", () => {
@@ -69,23 +71,28 @@ describe("complete_task", () => {
     expect(ctx.sent[0]!["type"]).toBe("task_plan_update");
   });
 
-  it("auto-creates a record when the leader completes an unplanned task", async () => {
+  it("rejects unknown taskIds without creating a phantom record", async () => {
     const ctx = makeCtx();
     const tool = createCompleteTaskToolDef(ctx);
 
     expect(ctx.taskState.tasks.has("rogue")).toBe(false);
-    await call(tool, { taskId: "rogue", result: "done" });
+    const result = await call(tool, { taskId: "rogue", result: "done" });
 
-    const record = ctx.taskState.tasks.get("rogue")!;
-    expect(record.title).toBe("rogue");
-    expect(record.status).toBe("completed");
-    expect(record.executor).toBe("leader");
-    expect(record.result).toBe("done");
+    expect(ctx.taskState.tasks.has("rogue")).toBe(false);
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("rogue");
   });
 
   it("is a no-op for an already-completed task — does not overwrite the prior result or fire another emission", async () => {
     const ctx = makeCtx();
+    const planTool = createPlanTaskToolDef(ctx);
     const tool = createCompleteTaskToolDef(ctx);
+    await call(planTool, {
+      taskId: "t1",
+      title: "T1",
+      description: "",
+      priority: "medium",
+    });
     await call(tool, { taskId: "t1", result: "first" });
     ctx.sent.length = 0;
 

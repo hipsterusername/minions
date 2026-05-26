@@ -11,9 +11,10 @@ import type { CanvasTransform, CanvasNode, CanvasAction, Position, Size, Context
 import { MINION_THINKING_CONFIG } from "./types.ts";
 import { generateId } from "./canvas-state.ts";
 import { CanvasNodeComponent } from "./CanvasNode.tsx";
-import { getAllNodeTypes, isContextProvider } from "./node-registry.ts";
+import { getAllNodeTypes, getUserCreatableNodeTypes, isContextProvider } from "./node-registry.ts";
 import { extractContextItem } from "./context-extraction.ts";
 import { SessionPanel } from "./SessionPanel.tsx";
+import { subscribeSocketTopics, type SocketSubscribe } from "./use-socket.ts";
 import { EdgeRenderer } from "./EdgeRenderer.tsx";
 import type { GraphDocument } from "./graph.ts";
 import { getContract, canConnect, isPortOpen, LEADER_CONTRACT } from "./graph.ts";
@@ -28,10 +29,12 @@ import type { RoutineNodeData } from "./nodes/RoutineNode.tsx";
 import { RoutineConnectors } from "./components/RoutineConnectors.tsx";
 import { emptyRenderState, applyRenderMessage } from "../shared/render-dsl.ts";
 import type { RenderMessage } from "../shared/render-dsl.ts";
+import { sessionTopic } from "../shared/ws-envelope.ts";
 import { CanvasContextMenu } from "./components/CanvasContextMenu.tsx";
 import type { ContextMenuOption } from "./components/CanvasContextMenu.tsx";
 import { ConfirmModal } from "./components/ConfirmModal.tsx";
 import { ViewportOverlay } from "./components/ViewportOverlay.tsx";
+import { EdgeInspector } from "./components/EdgeInspector.tsx";
 import { CanvasMiniMap } from "./CanvasMiniMap.tsx";
 import { createDefaultNodeData } from "./node-defaults.ts";
 import { wheelDetector } from "./wheel-detector.ts";
@@ -50,6 +53,12 @@ import {
   resolveDashboardLeaderPrompt,
   type DashboardLeaderAction,
 } from "./dashboard-leader-actions.ts";
+import {
+  applyPresetToLeaderData,
+  captureLeaderPreset,
+  type LeaderPreset,
+} from "./leader-preset.ts";
+import { decideConnectionDropAction } from "./connection-drop-decision.ts";
 
 // Zoom-out floor: ~15% keeps the canvas readable at overview level.
 const MIN_ZOOM = 0.15;
@@ -65,7 +74,7 @@ const GROUP_HEADER = 36;
  */
 function isInsideGroup(node: CanvasNode, group: CanvasNode): boolean {
   const cx = node.position.x + node.size.width / 2;
-  // Use a point near the top of the node — clamped so very short nodes
+  // Use a point near the top of the node â€” clamped so very short nodes
   // still use their center.
   const cy = node.position.y + Math.min(node.size.height / 2, GROUP_HEADER);
   return (
@@ -75,12 +84,12 @@ function isInsideGroup(node: CanvasNode, group: CanvasNode): boolean {
     cy <= group.position.y + group.size.height
   );
 }
-// Zoom-in ceiling: ~2× keeps a single leader node (560×520) roughly
+// Zoom-in ceiling: ~2Ã— keeps a single leader node (560Ã—520) roughly
 // viewport-sized without blowing past it into unusable territory.
 const MAX_ZOOM = 2;
 const GRID_SIZE = 24;
 
-/** Snap radius in world-space units — connections complete automatically when
+/** Snap radius in world-space units â€” connections complete automatically when
  *  the cursor comes this close to a valid target port. */
 const SNAP_RADIUS = 50;
 
@@ -177,6 +186,174 @@ const DotGrid = memo(function DotGrid({ transform }: { transform: CanvasTransfor
   );
 });
 
+type PaletteItem =
+  | { kind: "node"; type: string; label: string }
+  | { kind: "preset"; id: string; label: string; description?: string };
+
+type CreateNodeAnchor =
+  | { kind: "world"; x: number; y: number }
+  | { kind: "smart"; preferCursor: boolean };
+
+interface CommandPaletteProps {
+  items: PaletteItem[];
+  onCreate: (item: PaletteItem, prompt: string) => void;
+  onClose: () => void;
+}
+
+function fuzzyMatch(label: string, query: string): boolean {
+  const haystack = label.toLowerCase();
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  let index = 0;
+  for (const ch of needle) {
+    index = haystack.indexOf(ch, index);
+    if (index === -1) return false;
+    index += 1;
+  }
+  return true;
+}
+
+function CommandPalette({ items, onCreate, onClose }: CommandPaletteProps) {
+  const [query, setQuery] = useState("");
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const filtered = useMemo(() => {
+    const matches = items.filter((item) => {
+      const text =
+        item.kind === "preset"
+          ? `${item.label} ${item.description ?? ""}`
+          : item.label;
+      return fuzzyMatch(text, query);
+    });
+    return matches.length > 0 ? matches : items;
+  }, [items, query]);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [query]);
+
+  const selected = filtered[Math.min(selectedIndex, filtered.length - 1)] ?? items[0];
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 700,
+        background: "rgba(0, 0, 0, 0.28)",
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "center",
+        paddingTop: 96,
+      }}
+      onMouseDown={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{
+          width: "min(640px, calc(100vw - 32px))",
+          background: "var(--bg-elevated)",
+          border: "1px solid var(--border-hover)",
+          borderRadius: 8,
+          boxShadow: "var(--shadow-lg)",
+          overflow: "hidden",
+          fontFamily: "var(--font-sans)",
+        }}
+      >
+        <textarea
+          ref={inputRef}
+          value={query}
+          onChange={(e) => setQuery(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              onClose();
+              return;
+            }
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setSelectedIndex((idx) => Math.min(filtered.length - 1, idx + 1));
+              return;
+            }
+            if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setSelectedIndex((idx) => Math.max(0, idx - 1));
+              return;
+            }
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              if (selected) onCreate(selected, query.trim());
+            }
+          }}
+          placeholder="Create Leader with prompt or search nodes"
+          rows={3}
+          style={{
+            width: "100%",
+            resize: "none",
+            border: "none",
+            outline: "none",
+            background: "var(--bg-secondary)",
+            color: "var(--text-primary)",
+            padding: "16px 18px",
+            fontSize: 15,
+            lineHeight: "22px",
+            fontFamily: "var(--font-sans)",
+          }}
+        />
+        <div style={{ padding: 6, maxHeight: 280, overflowY: "auto" }}>
+          {filtered.map((item, index) => {
+            const active = index === selectedIndex;
+            return (
+              <button
+                key={`${item.kind}:${item.kind === "node" ? item.type : item.id}`}
+                type="button"
+                onClick={() => onCreate(item, query.trim())}
+                onMouseEnter={() => setSelectedIndex(index)}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                  gap: 2,
+                  padding: "9px 12px",
+                  border: "none",
+                  borderRadius: 6,
+                  background: active ? "var(--bg-hover)" : "transparent",
+                  color: "var(--text-primary)",
+                  cursor: "pointer",
+                  textAlign: "left",
+                  fontFamily: "var(--font-sans)",
+                }}
+              >
+                <span style={{ fontSize: 13, fontWeight: 650 }}>
+                  {item.label}
+                </span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "var(--text-muted)",
+                    fontFamily: "var(--font-mono)",
+                  }}
+                >
+                  {item.kind === "preset" ? "Leader preset" : "Node"}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface ToolbarProps {
   transform: CanvasTransform;
   onZoomIn: () => void;
@@ -254,7 +431,7 @@ const Toolbar = memo(function Toolbar({
           viewBox="0 0 40 40"
           fill="none"
         >
-          {/* Crown-in-circle leader icon — circle is the eye socket,
+          {/* Crown-in-circle leader icon â€” circle is the eye socket,
               crown + dot are the leader glyph (matches LeaderLoadingScreen). */}
           <circle cx="20" cy="20" r="16" fill="rgba(255,255,255,0.25)" stroke="currentColor" strokeWidth="2"/>
           <path d="M12 24L10 16L16 20L20 14L24 20L30 16L28 24H12Z" fill="currentColor"/>
@@ -439,10 +616,11 @@ interface CanvasProps {
   transform: CanvasTransform;
   setTransform: React.Dispatch<React.SetStateAction<CanvasTransform>>;
   socketSend?: (data: unknown) => void;
-  socketSubscribe?: (fn: (msg: unknown) => void) => () => void;
+  socketSubscribe?: SocketSubscribe;
   socketConnected?: boolean;
   projectPath?: string;
   projectSettings?: import("./api.ts").ProjectSettings;
+  onProjectSettingsChange?: (settings: import("./api.ts").ProjectSettings) => void;
   undo?: () => void;
   redo?: () => void;
   /** When set, auto-selects this node (then clear it) */
@@ -468,6 +646,7 @@ export function Canvas({
   socketConnected,
   projectPath,
   projectSettings,
+  onProjectSettingsChange,
   undo,
   redo,
   focusNodeId,
@@ -481,9 +660,15 @@ export function Canvas({
   canvasScaleRef.current = transform.scale;
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Edge selection is separate from node selection: clicking an edge selects
+  // exactly one edge and clears node selection (and vice versa). Hover is
+  // tracked independently so the inspector can preview which edge would be
+  // selected.
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [isPanning, setIsPanning] = useState(false);
 
-  // ── Marquee (rectangle) selection state ──
+  // â”€â”€ Marquee (rectangle) selection state â”€â”€
   const [marquee, setMarquee] = useState<{
     /** Starting point in screen coordinates */
     startX: number; startY: number;
@@ -491,7 +676,7 @@ export function Canvas({
     currentX: number; currentY: number;
   } | null>(null);
 
-  // ── Context menu state ────────────────────────────────
+  // â”€â”€ Context menu state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [contextMenu, setContextMenu] = useState<{
     /** Screen position */
     screenX: number;
@@ -502,11 +687,30 @@ export function Canvas({
   } | null>(null);
 
   const contextMenuOptions: ContextMenuOption[] = useMemo(
-    () => [
-      { label: "New Leader", type: "leader" },
-      { label: "New Markdown", type: "markdown" },
-    ],
+    () =>
+      getUserCreatableNodeTypes().map((def) => ({
+        label: `New ${def.label}`,
+        type: def.type,
+      })),
     [],
+  );
+
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const commandPaletteItems = useMemo<PaletteItem[]>(
+    () => [
+      ...getUserCreatableNodeTypes().map((def) => ({
+        kind: "node",
+        type: def.type,
+        label: `New ${def.label}`,
+      }) satisfies PaletteItem),
+      ...(projectSettings?.leaderPresets ?? []).map((preset) => ({
+        kind: "preset",
+        id: preset.id,
+        label: preset.name,
+        ...(preset.description ? { description: preset.description } : {}),
+      }) satisfies PaletteItem),
+    ],
+    [projectSettings?.leaderPresets],
   );
 
   const dashboardDropMenuOptions: ContextMenuOption[] = useMemo(
@@ -515,6 +719,9 @@ export function Canvas({
         label: resolveDashboardLeaderActionName(projectSettings, action),
         type: action,
       })),
+      { label: "+1 Leader", type: "fanout:1" },
+      { label: "+2 Leaders", type: "fanout:2" },
+      { label: "+3 Leaders", type: "fanout:3" },
       { label: "Custom", type: "custom" },
     ],
     [projectSettings],
@@ -529,7 +736,7 @@ export function Canvas({
     compatiblePortId: string;
   } | null>(null);
 
-  // ── Connection drag state ─────────────────────────────
+  // â”€â”€ Connection drag state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [connectionDrag, setConnectionDrag] = useState<{
     source: PortInfo;
     /** Current mouse position in canvas (world) coordinates */
@@ -539,11 +746,14 @@ export function Canvas({
     snapTarget: PortInfo | null;
   } | null>(null);
 
-  /** Ref mirror of connectionDrag.snapTarget — readable inside event closures
+  /** Ref mirror of connectionDrag.snapTarget â€” readable inside event closures
    *  without stale-closure issues. */
   const snapTargetRef = useRef<PortInfo | null>(null);
 
-  /** Ref mirror of connectionDrag — lets handleConnectionEnd stay stable. */
+  /** Set when a port-level mouseup consumes a connection drop. */
+  const connectionHandledByPortRef = useRef(false);
+
+  /** Ref mirror of connectionDrag â€” lets handleConnectionEnd stay stable. */
   const connectionDragRef = useRef(connectionDrag);
   connectionDragRef.current = connectionDrag;
 
@@ -577,8 +787,15 @@ export function Canvas({
   const containerRef = useRef<HTMLDivElement>(null);
   const panRef = useRef<{ startX: number; startY: number } | null>(null);
   const spaceRef = useRef(false);
+  const lastCanvasPointerRef = useRef<{
+    worldX: number;
+    worldY: number;
+    overEmptyCanvas: boolean;
+    at: number;
+  } | null>(null);
+  const recentActiveLeaderIdRef = useRef<string | null>(null);
 
-  // ── Node drag tracking (for context-group drop feedback) ──
+  // â”€â”€ Node drag tracking (for context-group drop feedback) â”€â”€
   /** Which node is currently being dragged by the user, null when idle */
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const draggingNodeIdRef = useRef<string | null>(null);
@@ -603,7 +820,7 @@ export function Canvas({
    *  onto unrelated nodes they pass over during the drag. */
   const dragGroupContainedIdsRef = useRef<Map<string, Set<string>>>(new Map());
 
-  // ── Pending minion spawn tracking ──
+  // â”€â”€ Pending minion spawn tracking â”€â”€
   interface PendingMinionSpawn {
     leaderNodeId: string;
     minionSessionKey: string | null;
@@ -804,6 +1021,44 @@ export function Canvas({
     }
   }, [createLeaderSetupClipboard, pasteLeaderSetupClipboard]);
 
+  const saveLeaderPreset = useCallback(
+    (
+      nodeId: string,
+      input: {
+        name: string;
+        description?: string;
+        systemPromptPrefix?: string;
+      },
+    ): boolean => {
+      if (!onProjectSettingsChange) return false;
+      const source = nodesRef.current.find((n) => n.id === nodeId);
+      if (!source || source.type !== "leader") return false;
+
+      const name = input.name.trim();
+      if (!name) return false;
+      const description = input.description?.trim();
+      const systemPromptPrefix = input.systemPromptPrefix?.trim();
+      const now = new Date().toISOString();
+      const preset = captureLeaderPreset(
+        source.data as LeaderData,
+        {
+          id: `leader-preset-${generateId()}`,
+          name,
+          ...(description ? { description } : {}),
+          ...(systemPromptPrefix ? { systemPromptPrefix } : {}),
+        },
+        now,
+      );
+      const current = projectSettingsRef.current ?? {};
+      onProjectSettingsChange({
+        ...current,
+        leaderPresets: [...(current.leaderPresets ?? []), preset],
+      });
+      return true;
+    },
+    [onProjectSettingsChange],
+  );
+
   // Attach a backend session to the canvas by creating the right node type for its role
   const handleAttachSession = useCallback(
     (sessionKey: string, role?: "leader" | "minion" | "default" | "card-composer") => {
@@ -843,16 +1098,23 @@ export function Canvas({
     [transform, dispatch],
   );
 
-  // Compute which session keys are already on the canvas (any node type with a sessionKey)
+  // Compute sessionKey -> nodeId map for sessions on the canvas (any node type with a sessionKey).
+  // First occurrence wins if the same session is attached to multiple nodes.
+  const sessionKeyToNodeId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const n of nodes) {
+      if (n.type !== "claude-session" && n.type !== "leader" && n.type !== "minion") continue;
+      const key = (n.data as { sessionKey?: string | null }).sessionKey;
+      if (key != null && !map.has(key)) {
+        map.set(key, n.id);
+      }
+    }
+    return map;
+  }, [nodes]);
+
   const attachedSessionKeys = useMemo(
-    () =>
-      new Set(
-        nodes
-          .filter((n) => n.type === "claude-session" || n.type === "leader" || n.type === "minion")
-          .map((n) => (n.data as { sessionKey?: string | null }).sessionKey)
-          .filter((k): k is string => k != null),
-      ),
-    [nodes],
+    () => new Set(sessionKeyToNodeId.keys()),
+    [sessionKeyToNodeId],
   );
 
   /**
@@ -903,8 +1165,19 @@ export function Canvas({
     [nodes, setTransform],
   );
 
-  // ── Active nodes: leaders/minions with a live session ──
-  // Includes running, idle, creating, and waiting — excludes disconnected/stopped/error
+  // Focus the canvas on the node hosting the given sessionKey (if any).
+  const handleFocusSession = useCallback(
+    (sessionKey: string) => {
+      const nodeId = sessionKeyToNodeId.get(sessionKey);
+      if (!nodeId) return;
+      setSelectedIds(new Set([nodeId]));
+      focusNodes(new Set([nodeId]));
+    },
+    [sessionKeyToNodeId, focusNodes, setSelectedIds],
+  );
+
+  // â”€â”€ Active nodes: leaders/minions with a live session â”€â”€
+  // Includes running, idle, creating, and waiting â€” excludes disconnected/stopped/error
   const INACTIVE_STATUSES = new Set(["disconnected", "stopped", "error"]);
   const activeNodeIds = useMemo(() => {
     return nodes
@@ -923,6 +1196,13 @@ export function Canvas({
   }, [nodes]);
   const activeNodeIdSet = useMemo(() => new Set(activeNodeIds), [activeNodeIds]);
 
+  useEffect(() => {
+    const activeLeader = nodes.find(
+      (n) => n.type === "leader" && activeNodeIdSet.has(n.id),
+    );
+    if (activeLeader) recentActiveLeaderIdRef.current = activeLeader.id;
+  }, [nodes, activeNodeIdSet]);
+
   // Track which active node we last focused, to cycle through them
   const lastActiveIndexRef = useRef(-1);
 
@@ -938,7 +1218,7 @@ export function Canvas({
     focusNodes(new Set([id]));
   }, [activeNodeIds, focusNodes, setSelectedIds]);
 
-  // Handle external focus-node requests — select AND zoom/center
+  // Handle external focus-node requests â€” select AND zoom/center
   useEffect(() => {
     if (!focusNodeId) return;
     const ids = new Set([focusNodeId]);
@@ -947,7 +1227,7 @@ export function Canvas({
     onFocusNodeHandled?.();
   }, [focusNodeId, onFocusNodeHandled, focusNodes]);
 
-  // ── Reveal minion on demand ──
+  // â”€â”€ Reveal minion on demand â”€â”€
   // Called from the leader's task plan UI when the user clicks a minion task.
   // Creates the minion node if not already on the canvas, or scrolls to it.
   const revealMinion = useCallback(
@@ -977,7 +1257,7 @@ export function Canvas({
         return;
       }
 
-      // Look up pending spawn data — try both direct key and agent- prefixed
+      // Look up pending spawn data â€” try both direct key and agent- prefixed
       let spawn = pendingMinionsRef.current.get(minionSessionKey);
       if (!spawn) {
         spawn = pendingMinionsRef.current.get(`agent-${minionSessionKey}`);
@@ -1034,7 +1314,7 @@ export function Canvas({
       const col = Math.floor(minionCount / MINIONS_PER_COLUMN);
       const row = minionCount % MINIONS_PER_COLUMN;
 
-      // Account for existing dashboard node — minions start to the right
+      // Account for existing dashboard node â€” minions start to the right
       // of the dashboard if one exists, otherwise to the right of the leader.
       const existingRender = nodesRef.current.find(
         (n) => n.type === "render" && (n.data as RenderNodeData).leaderId === leader.id,
@@ -1122,7 +1402,7 @@ export function Canvas({
     [dispatch, graphDispatch, setTransform],
   );
 
-  // ── Spawn a Leader child node when a routine step fires routine_step_leader_spawned ──
+  // â”€â”€ Spawn a Leader child node when a routine step fires routine_step_leader_spawned â”€â”€
   // Called from RoutineNodeRenderer via the onSpawnLeaderChild prop.
   const spawnLeaderChild = useCallback(
     ({ runId, phaseId, stepId, sessionKey }: RoutineLeaderSpawnEvent) => {
@@ -1191,10 +1471,90 @@ export function Canvas({
     [dispatch],
   );
 
+  const openCommandPalette = useCallback(() => {
+    setContextMenu(null);
+    setDashboardDropMenu(null);
+    setCommandPaletteOpen(true);
+  }, []);
+
+  function createLeaderAtCursor(): boolean {
+    const pointer = lastCanvasPointerRef.current;
+    if (!pointer || !pointer.overEmptyCanvas || Date.now() - pointer.at > 10_000) {
+      return false;
+    }
+    return createNode("leader", {
+      anchor: { kind: "world", x: pointer.worldX, y: pointer.worldY },
+    }) != null;
+  }
+
+  // ── Edge interaction handlers ──
+  const handleEdgeClick = useCallback(
+    (edgeId: string) => {
+      // Clicking an edge clears node selection so the user can immediately
+      // act on the edge (Delete, focus source/target) without ambiguity.
+      setSelectedIds(new Set());
+      setSelectedEdgeId(edgeId);
+    },
+    [],
+  );
+
+  const handleEdgeHover = useCallback((edgeId: string | null) => {
+    setHoveredEdgeId(edgeId);
+  }, []);
+
+  // If the selected edge disappears (e.g. one of its nodes was deleted),
+  // drop the selection so the inspector doesn't render against stale state.
+  useEffect(() => {
+    if (selectedEdgeId && !graph.edges.some((e) => e.id === selectedEdgeId)) {
+      setSelectedEdgeId(null);
+    }
+    if (hoveredEdgeId && !graph.edges.some((e) => e.id === hoveredEdgeId)) {
+      setHoveredEdgeId(null);
+    }
+  }, [graph.edges, selectedEdgeId, hoveredEdgeId]);
+
+  const selectedEdge = useMemo(
+    () => graph.edges.find((e) => e.id === selectedEdgeId) ?? null,
+    [graph.edges, selectedEdgeId],
+  );
+
+  /** World-space midpoint of the selected edge, used to anchor the
+   *  edge inspector overlay. Null when no edge is selected or one of
+   *  the endpoints is missing. */
+  const selectedEdgeMidpoint = useMemo(() => {
+    if (!selectedEdge) return null;
+    const src = nodes.find((n) => n.id === selectedEdge.sourceNodeId);
+    const tgt = nodes.find((n) => n.id === selectedEdge.targetNodeId);
+    if (!src || !tgt) return null;
+    const a = getPortWorldPos(src, selectedEdge.sourcePortId, "output");
+    const b = getPortWorldPos(tgt, selectedEdge.targetPortId, "input");
+    if (!a || !b) return null;
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  }, [selectedEdge, nodes]);
+
+  const handleDeleteSelectedEdge = useCallback(() => {
+    if (!selectedEdgeId) return;
+    graphDispatch({ type: "REMOVE_EDGE", id: selectedEdgeId });
+    setSelectedEdgeId(null);
+  }, [selectedEdgeId, graphDispatch]);
+
+  const handleFocusEdgeEndpoint = useCallback(
+    (which: "source" | "target") => {
+      if (!selectedEdge) return;
+      const id =
+        which === "source" ? selectedEdge.sourceNodeId : selectedEdge.targetNodeId;
+      setSelectedIds(new Set([id]));
+      focusNodes(new Set([id]));
+    },
+    [selectedEdge, focusNodes],
+  );
+
   // Keyboard shortcuts: space (pan), delete, undo/redo
   useCanvasKeyboard({
     selectedIds,
     setSelectedIds,
+    selectedEdgeId,
+    onDeleteSelectedEdge: handleDeleteSelectedEdge,
     nodes,
     graph,
     dispatch,
@@ -1206,6 +1566,8 @@ export function Canvas({
     focusNextActive,
     copyLeaderSetup,
     pasteLeaderSetup,
+    createLeaderAtCursor,
+    openCommandPalette,
     undo,
     redo,
   });
@@ -1278,13 +1640,13 @@ export function Canvas({
     };
 
     const handleWheel = (e: WheelEvent) => {
-      // ── Pinch-to-zoom detection (conclusive, browser-provided) ──
+      // â”€â”€ Pinch-to-zoom detection (conclusive, browser-provided) â”€â”€
       const isPinch = e.ctrlKey || e.metaKey;
 
-      // ── Device detection via heuristic engine ───────────────────
+      // â”€â”€ Device detection via heuristic engine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const device = wheelDetector.classify(e);
 
-      // ── Scroll-capture zones (chat areas, dashboards, etc.) ─────
+      // â”€â”€ Scroll-capture zones (chat areas, dashboards, etc.) â”€â”€â”€â”€â”€
       // Any element marked with `data-scroll-capture` (or an ancestor of
       // the wheel target so marked) opts out of canvas pan/zoom and lets
       // the browser scroll its content natively.
@@ -1367,9 +1729,22 @@ export function Canvas({
   // Disable Linux PRIMARY-selection middle-click paste and middle-click
   // autoscroll across the whole document. A container-scoped listener
   // missed clicks that originated outside the canvas (chat inputs, side
-  // panels) but ended inside it — those still triggered a paste on the
+  // panels) but ended inside it â€” those still triggered a paste on the
   // origin input. See `use-suppress-middle-click-paste.ts`.
   useSuppressMiddleClickPaste();
+
+  const handleCanvasMouseMove = useCallback((e: React.MouseEvent) => {
+    const container = containerRef.current;
+    if (!container) return;
+    const t = transformRef.current;
+    const rect = container.getBoundingClientRect();
+    lastCanvasPointerRef.current = {
+      worldX: (e.clientX - rect.left - t.x) / t.scale,
+      worldY: (e.clientY - rect.top - t.y) / t.scale,
+      overEmptyCanvas: e.target === e.currentTarget,
+      at: Date.now(),
+    };
+  }, []);
 
   const handleCanvasMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -1405,7 +1780,7 @@ export function Canvas({
         return;
       }
 
-      // Left-click on empty canvas → start marquee selection (or deselect on click)
+      // Left-click on empty canvas â†’ start marquee selection (or deselect on click)
       if (e.button === 0 && e.target === e.currentTarget) {
         const startScreenX = e.clientX;
         const startScreenY = e.clientY;
@@ -1465,8 +1840,9 @@ export function Canvas({
 
         const handleMouseUp = () => {
           if (!didDragMarquee) {
-            // Simple click on empty canvas → deselect all
+            // Simple click on empty canvas â†’ deselect all (nodes + edges)
             setSelectedIds(new Set());
+            setSelectedEdgeId(null);
           }
           setMarquee(null);
           document.body.style.userSelect = prevUserSelect;
@@ -1483,6 +1859,10 @@ export function Canvas({
 
   const handleSelectNode = useCallback(
     (id: string, additive: boolean) => {
+      // Selecting any node clears the edge selection — node and edge
+      // selections are mutually exclusive so the inspector and Delete-key
+      // semantics stay unambiguous.
+      setSelectedEdgeId(null);
       setSelectedIds((prev) => {
         if (additive) {
           const next = new Set(prev);
@@ -1500,6 +1880,7 @@ export function Canvas({
     [],
   );
 
+
   /** Padding inside a context-group frame around contained nodes. */
   const GROUP_PAD = 16;
   /** Minimum frame size when empty. */
@@ -1507,7 +1888,7 @@ export function Canvas({
   const GROUP_MIN_H = 200;
 
 
-  // ── Nodes inside a dragging context-group need elevated z-index ──
+  // â”€â”€ Nodes inside a dragging context-group need elevated z-index â”€â”€
   // When a context-group is being dragged, its z-index jumps to 50 but
   // contained children stay at z-index 1, causing the group to render ON
   // TOP of its children.  We use the **snapshot** taken at drag start
@@ -1517,7 +1898,7 @@ export function Canvas({
   // the group when the drag began should ride along at z-index 51.
   const draggingGroupContainedIds = useMemo<Set<string>>(() => {
     if (!draggingNodeId) return new Set();
-    // Union all snapshots from all dragging context-groups — this covers
+    // Union all snapshots from all dragging context-groups â€” this covers
     // both single context-group drags and multi-select drags that include
     // context-groups.
     const map = dragGroupContainedIdsRef.current;
@@ -1533,7 +1914,7 @@ export function Canvas({
     return merged;
   }, [draggingNodeId, nodes]);
 
-  // ── Context-group auto-fit on membership change ─────
+  // â”€â”€ Context-group auto-fit on membership change â”€â”€â”€â”€â”€
   // Debounced: waits for drag to settle before snapping layout.
   // When a node is *added*, auto-layouts all members in a clean
   // vertical stack then snaps the frame. When a node is *removed*,
@@ -1541,7 +1922,7 @@ export function Canvas({
 
   /** Gap between stacked nodes inside a group. */
   const GROUP_GAP = 12;
-  /** Debounce delay — lets the drag finish before we snap. */
+  /** Debounce delay â€” lets the drag finish before we snap. */
   const GROUP_LAYOUT_DELAY = 100;
 
   const groupMembershipRef = useRef<Map<string, Set<string>>>(new Map());
@@ -1552,13 +1933,13 @@ export function Canvas({
   const groupLayoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    // Clear any pending layout — a new nodes snapshot supersedes it
+    // Clear any pending layout â€” a new nodes snapshot supersedes it
     if (groupLayoutTimerRef.current != null) {
       clearTimeout(groupLayoutTimerRef.current);
       groupLayoutTimerRef.current = null;
     }
 
-    // ── Freeze membership tracking while any context-group is being dragged ──
+    // â”€â”€ Freeze membership tracking while any context-group is being dragged â”€â”€
     // When group A is dragged over group B their children spatially overlap
     // in transient ways:  group B would "claim" group A's children, group A
     // would "claim" group B's children, and fingerprints would churn causing
@@ -1642,7 +2023,7 @@ export function Canvas({
 
     if (!anyChanged) return;
 
-    // ── Helper: re-stack contained nodes vertically and fit the group frame ──
+    // â”€â”€ Helper: re-stack contained nodes vertically and fit the group frame â”€â”€
     const reflowGroup = (
       group: CanvasNode,
       currentIds: Set<string>,
@@ -1659,7 +2040,7 @@ export function Canvas({
         .join("|");
       groupSizeFingerprintRef.current.set(group.id, sizeFp);
 
-      // ── Empty: shrink to minimum ──
+      // â”€â”€ Empty: shrink to minimum â”€â”€
       if (currentIds.size === 0) {
         if (group.size.width !== GROUP_MIN_W || group.size.height !== GROUP_MIN_H) {
           dispatch({
@@ -1747,24 +2128,24 @@ export function Canvas({
       }
     };
 
-    // ── Split snapshots by urgency ──
-    // Size-only changes (collapse/expand) → immediate (no drag in progress)
-    // Membership or position changes → debounced (drag may still be in progress)
+    // â”€â”€ Split snapshots by urgency â”€â”€
+    // Size-only changes (collapse/expand) â†’ immediate (no drag in progress)
+    // Membership or position changes â†’ debounced (drag may still be in progress)
     const immediateSnapshots = snapshots.filter((s) => s.sizeChanged);
     const debouncedSnapshots = snapshots.filter((s) => !s.sizeChanged);
 
-    // Size-only changes (collapse / expand) — reflow now, no debounce
+    // Size-only changes (collapse / expand) â€” reflow now, no debounce
     for (const { group, currentIds } of immediateSnapshots) {
       reflowGroup(group, currentIds, "restack");
     }
 
-    // Membership or position changes — debounce to let drag settle
+    // Membership or position changes â€” debounce to let drag settle
     if (debouncedSnapshots.length > 0) {
       groupLayoutTimerRef.current = setTimeout(() => {
         groupLayoutTimerRef.current = null;
 
         // Double-check: if a context-group drag started between when we
-        // queued this timeout and when it fires, bail out — the effect
+        // queued this timeout and when it fires, bail out â€” the effect
         // will re-run with correct data once the drag ends.
         if (draggingNodeIdRef.current) {
           const dn = nodesRef.current.find((n) => n.id === draggingNodeIdRef.current);
@@ -1798,10 +2179,10 @@ export function Canvas({
       const dx = position.x - currentNode.position.x;
       const dy = position.y - currentNode.position.y;
 
-      // ── Multi-select drag ──
+      // â”€â”€ Multi-select drag â”€â”€
       // When the dragged node is part of a multi-selection, move ALL selected
       // nodes by the same delta. We also pull in any implicit companions
-      // (leader→minions, context-group→contained children) so the group
+      // (leaderâ†’minions, context-groupâ†’contained children) so the group
       // stays coherent.
       const sel = selectedIdsRef.current;
       if (sel.has(id) && sel.size > 1) {
@@ -1813,7 +2194,7 @@ export function Canvas({
           if (!selNode) continue;
 
           if (selNode.type === "leader") {
-            // Leader → drag attached minions and render nodes
+            // Leader â†’ drag attached minions and render nodes
             for (const n of nodesRef.current) {
               if (
                 (n.type === "minion" && (n.data as MinionData).leaderId === selId) ||
@@ -1823,7 +2204,7 @@ export function Canvas({
               }
             }
           } else if (selNode.type === "context-group") {
-            // Context group → drag contained children (use snapshot if available)
+            // Context group â†’ drag contained children (use snapshot if available)
             const groupSnapshot = dragGroupContainedIdsRef.current.get(selId);
             if (groupSnapshot && groupSnapshot.size > 0) {
               for (const cid of groupSnapshot) moveIds.add(cid);
@@ -1905,14 +2286,14 @@ export function Canvas({
         dispatch({ type: "MOVE_NODE", id, position });
       }
 
-      // ── Drop target detection during drag ──
+      // â”€â”€ Drop target detection during drag â”€â”€
       // Uses rectangle overlap: the dragged node activates a context-group
       // when at least 20% of its area overlaps the group's frame, OR when
       // the top-center of the dragged node enters the group.  This feels
-      // natural — you don't need to shove the entire node inside.
+      // natural â€” you don't need to shove the entire node inside.
       //
       // Skip detection when the node is being moved as part of a dragging
-      // context-group — its children shouldn't trigger drop zones on other
+      // context-group â€” its children shouldn't trigger drop zones on other
       // groups they happen to pass over.
       // Check if this node is contained in ANY dragging context-group's snapshot
       let isPartOfDraggingGroup = false;
@@ -1969,7 +2350,7 @@ export function Canvas({
       dispatch({ type: "UPDATE_NODE_DATA", id, data });
 
       // When a Leader's sessionKey changes, update any existing render node
-      // (but don't create one — that happens on first render_update message)
+      // (but don't create one â€” that happens on first render_update message)
       const leaderNode = nodesRef.current.find((n) => n.id === id);
       if (leaderNode?.type === "leader") {
         const prev = leaderNode.data as LeaderData;
@@ -2039,7 +2420,7 @@ export function Canvas({
     [dispatch],
   );
 
-  // ── Connection drag handlers ────────────────────────────
+  // â”€â”€ Connection drag handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const createConnectedLeaderFromDrop = useCallback(
     (
@@ -2048,7 +2429,30 @@ export function Canvas({
       worldX: number,
       worldY: number,
       prompt: string | null,
+      count = 1,
     ) => {
+      const safeCount = Math.max(1, Math.min(3, Math.floor(count)));
+      if (safeCount > 1) {
+        const leaderDef = getAllNodeTypes().find((td) => td.type === "leader");
+        const stepX = (leaderDef?.defaultSize.width ?? 560) + 48;
+        const createdIds: string[] = [];
+        for (let i = 0; i < safeCount; i += 1) {
+          const before = new Set(selectedIdsRef.current);
+          createConnectedLeaderFromDrop(
+            sourcePort,
+            compatiblePortId,
+            worldX + i * stepX,
+            worldY,
+            prompt,
+            1,
+          );
+          for (const id of selectedIdsRef.current) {
+            if (!before.has(id)) createdIds.push(id);
+          }
+        }
+        if (createdIds.length > 0) setSelectedIds(new Set(createdIds));
+        return;
+      }
       const placement = computeLeaderDropPlacement(
         worldX,
         worldY,
@@ -2062,7 +2466,7 @@ export function Canvas({
         projectSettingsRef.current,
       ) as LeaderData;
       const leaderData: LeaderData = prompt
-        ? { ...baseData, draftPrompt: prompt }
+        ? { ...baseData, autoStartPrompt: prompt.trim() }
         : baseData;
 
       const newNode: CanvasNode = {
@@ -2087,7 +2491,7 @@ export function Canvas({
       if (newEdge) {
         graphDispatch({ type: "ADD_EDGE", edge: newEdge });
         console.log(
-          `[Canvas] Edge created (drop-to-create): ${sourcePort.nodeId}:${sourcePort.portId} → ${newNode.id}:${compatiblePortId}`,
+          `[Canvas] Edge created (drop-to-create): ${sourcePort.nodeId}:${sourcePort.portId} â†’ ${newNode.id}:${compatiblePortId}`,
         );
       }
     },
@@ -2139,6 +2543,7 @@ export function Canvas({
 
       setValidTargets(targets);
       snapTargetRef.current = null;
+      connectionHandledByPortRef.current = false;
       setConnectionDrag({ source: port, mouseX: worldX, mouseY: worldY, snapTarget: null });
 
       // Disable text selection during drag
@@ -2146,13 +2551,13 @@ export function Canvas({
       document.body.style.userSelect = "none";
 
       const handleMouseMove = (ev: MouseEvent) => {
-        // Read latest transform from ref — it may change during drag
+        // Read latest transform from ref â€” it may change during drag
         const t = transformRef.current;
         const r = container.getBoundingClientRect();
         const wx = (ev.clientX - r.left - t.x) / t.scale;
         const wy = (ev.clientY - r.top - t.y) / t.scale;
 
-        // ── Snap detection: find nearest valid target port ──────────
+        // â”€â”€ Snap detection: find nearest valid target port â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // Use latest nodes from ref for accurate positions during drag
         const liveNodes = nodesRef.current;
         let nearestTarget: PortInfo | null = null;
@@ -2187,9 +2592,26 @@ export function Canvas({
       };
 
       const handleMouseUp = (upEvent: MouseEvent) => {
-        // Auto-complete connection if cursor is near a valid port
-        const snap = snapTargetRef.current;
-        if (snap) {
+        // The port-level mouseup (PortDot) fires before this window-level
+        // mouseup, so the source of truth for "did this drop already get
+        // consumed by landing on a port?" is connectionHandledByPortRef —
+        // not snapTargetRef, which can be null when the user releases
+        // directly on a port without ever entering snap range.
+        const compatiblePort =
+          port.direction === "output"
+            ? LEADER_CONTRACT.ports.find(
+                (p) => p.direction === "input" && p.protocol === port.protocol,
+              )
+            : undefined;
+        const action = decideConnectionDropAction({
+          source: port,
+          snapTarget: snapTargetRef.current,
+          consumedByPort: connectionHandledByPortRef.current,
+          compatibleLeaderInputPortId: compatiblePort?.id ?? null,
+        });
+
+        if (action.kind === "snap-connect") {
+          const snap = action.snap;
           let srcNodeId: string, srcPortId: string, srcNodeType: string;
           let tgtNodeId: string, tgtPortId: string, tgtNodeType: string;
           if (port.direction === "output") {
@@ -2203,44 +2625,42 @@ export function Canvas({
           const edge = createEdge(srcNodeId, srcPortId, srcNodeType, tgtNodeId, tgtPortId, tgtNodeType, tgtNode?.data);
           if (edge) {
             graphDispatch({ type: "ADD_EDGE", edge });
-            console.log(`[Canvas] Edge created (snap): ${srcNodeId}:${srcPortId} → ${tgtNodeId}:${tgtPortId}`);
+            console.log(`[Canvas] Edge created (snap): ${srcNodeId}:${srcPortId} â†’ ${tgtNodeId}:${tgtPortId}`);
           }
-        } else if (port.direction === "output") {
-          // Dropped on empty canvas from an output port — create or offer a
-          // Leader node and auto-connect if the Leader has a compatible input.
-          const compatiblePort = LEADER_CONTRACT.ports.find(
-            (p) => p.direction === "input" && p.protocol === port.protocol,
-          );
-          if (compatiblePort) {
-            const cont = containerRef.current;
-            if (cont) {
-              const t = transformRef.current;
-              const rect = cont.getBoundingClientRect();
-              const dropX = (upEvent.clientX - rect.left - t.x) / t.scale;
-              const dropY = (upEvent.clientY - rect.top - t.y) / t.scale;
+        } else if (
+          (action.kind === "show-dashboard-menu" ||
+            action.kind === "create-default-leader") &&
+          compatiblePort
+        ) {
+          const cont = containerRef.current;
+          if (cont) {
+            const t = transformRef.current;
+            const rect = cont.getBoundingClientRect();
+            const dropX = (upEvent.clientX - rect.left - t.x) / t.scale;
+            const dropY = (upEvent.clientY - rect.top - t.y) / t.scale;
 
-              if (port.nodeType === "render" && port.protocol === "context") {
-                setDashboardDropMenu({
-                  screenX: upEvent.clientX,
-                  screenY: upEvent.clientY,
-                  worldX: dropX,
-                  worldY: dropY,
-                  source: { ...port },
-                  compatiblePortId: compatiblePort.id,
-                });
-              } else {
-                createConnectedLeaderFromDrop(
-                  port,
-                  compatiblePort.id,
-                  dropX,
-                  dropY,
-                  null,
-                );
-              }
+            if (action.kind === "show-dashboard-menu") {
+              setDashboardDropMenu({
+                screenX: upEvent.clientX,
+                screenY: upEvent.clientY,
+                worldX: dropX,
+                worldY: dropY,
+                source: { ...port },
+                compatiblePortId: compatiblePort.id,
+              });
+            } else {
+              createConnectedLeaderFromDrop(
+                port,
+                compatiblePort.id,
+                dropX,
+                dropY,
+                null,
+              );
             }
           }
         }
 
+        connectionHandledByPortRef.current = false;
         snapTargetRef.current = null;
         setConnectionDrag(null);
         setValidTargets(EMPTY_VALID_TARGETS);
@@ -2259,6 +2679,11 @@ export function Canvas({
     (targetPort: PortInfo) => {
       const drag = connectionDragRef.current;
       if (!drag) return;
+      // Tell the window-level mouseup that the port consumed this drop, so
+      // it won't fall through to the "drop on empty canvas" branch (which
+      // would offer to create a new leader / show the dashboard-drop menu
+      // even though we just connected to an existing port).
+      connectionHandledByPortRef.current = true;
       const { source } = drag;
 
       // Determine which is source (output) and which is target (input)
@@ -2273,7 +2698,7 @@ export function Canvas({
         tgtPortId = targetPort.portId;
         tgtNodeType = targetPort.nodeType;
       } else {
-        // Dragged from input — target port should be the output
+        // Dragged from input â€” target port should be the output
         srcNodeId = targetPort.nodeId;
         srcPortId = targetPort.portId;
         srcNodeType = targetPort.nodeType;
@@ -2291,7 +2716,7 @@ export function Canvas({
 
       if (edge) {
         graphDispatch({ type: "ADD_EDGE", edge });
-        console.log(`[Canvas] Edge created: ${srcNodeId}:${srcPortId} → ${tgtNodeId}:${tgtPortId}`);
+        console.log(`[Canvas] Edge created: ${srcNodeId}:${srcPortId} â†’ ${tgtNodeId}:${tgtPortId}`);
       }
 
       // Clean up drag state (mouseup handler will also fire)
@@ -2301,45 +2726,109 @@ export function Canvas({
     [graphDispatch],
   );
 
-  const addNode = useCallback(
-    (type: string) => {
-      const allTypes = getAllNodeTypes();
-      const typeDef = allTypes.find((t) => t.type === type);
-      if (!typeDef) return;
+  const getViewportCenterPoint = useCallback((): Position => {
+    const t = transformRef.current;
+    const container = containerRef.current;
+    return {
+      x: container ? (container.clientWidth / 2 - t.x) / t.scale : 400,
+      y: container ? (container.clientHeight / 2 - t.y) / t.scale : 300,
+    };
+  }, []);
 
-      const t = transformRef.current;
-      const container = containerRef.current;
-      const centerX = container
-        ? (container.clientWidth / 2 - t.x) / t.scale
-        : 400;
-      const centerY = container
-        ? (container.clientHeight / 2 - t.y) / t.scale
-        : 300;
+  const resolveNodePosition = useCallback(
+    (
+      typeDef: { defaultSize: Size },
+      anchor: CreateNodeAnchor,
+    ): Position => {
+      let rawX: number;
+      let rawY: number;
 
-      const defaultData = createDefaultNodeData(type, projectSettingsRef.current);
+      if (anchor.kind === "world") {
+        rawX = anchor.x - typeDef.defaultSize.width / 2;
+        rawY = anchor.y - typeDef.defaultSize.height / 2;
+      } else {
+        const pointer = lastCanvasPointerRef.current;
+        const pointerIsRecent =
+          anchor.preferCursor &&
+          pointer != null &&
+          Date.now() - pointer.at < 10_000;
 
-      const rawX = centerX - typeDef.defaultSize.width / 2;
-      const rawY = centerY - typeDef.defaultSize.height / 2;
-      const position = findNonOverlappingPosition(
+        if (pointerIsRecent) {
+          rawX = pointer.worldX - typeDef.defaultSize.width / 2;
+          rawY = pointer.worldY - typeDef.defaultSize.height / 2;
+        } else {
+          const selectedNode = [...selectedIdsRef.current]
+            .map((id) => nodesRef.current.find((n) => n.id === id))
+            .find((n): n is CanvasNode => n != null);
+          const recentLeader = recentActiveLeaderIdRef.current
+            ? nodesRef.current.find((n) => n.id === recentActiveLeaderIdRef.current)
+            : null;
+          const anchorNode = selectedNode ?? recentLeader;
+
+          if (anchorNode) {
+            rawX = anchorNode.position.x + anchorNode.size.width + 48;
+            rawY = anchorNode.position.y;
+          } else {
+            const center = getViewportCenterPoint();
+            rawX = center.x - typeDef.defaultSize.width / 2;
+            rawY = center.y - typeDef.defaultSize.height / 2;
+          }
+        }
+      }
+
+      return findNonOverlappingPosition(
         rawX,
         rawY,
         typeDef.defaultSize.width,
         typeDef.defaultSize.height,
         nodesRef.current,
       );
+    },
+    [getViewportCenterPoint],
+  );
+
+  const createNode = useCallback(
+    (
+      type: string,
+      {
+        anchor,
+        prompt = null,
+        focus = false,
+        leaderPreset = null,
+      }: {
+        anchor: CreateNodeAnchor;
+        prompt?: string | null;
+        focus?: boolean;
+        leaderPreset?: LeaderPreset | null;
+      },
+    ): CanvasNode | null => {
+      const typeDef = getAllNodeTypes().find((t) => t.type === type);
+      if (!typeDef) return null;
+
+      const baseData = createDefaultNodeData(type, projectSettingsRef.current);
+      const presetData =
+        type === "leader" && leaderPreset
+          ? applyPresetToLeaderData(leaderPreset, baseData as LeaderData)
+          : baseData;
+      const trimmedPrompt = prompt?.trim() ?? "";
+      const data =
+        type === "leader" && trimmedPrompt
+          ? { ...(presetData as LeaderData), autoStartPrompt: trimmedPrompt }
+          : presetData;
+      const position = resolveNodePosition(typeDef, anchor);
 
       const node: CanvasNode = {
         id: generateId(),
         type,
         position,
         size: { ...typeDef.defaultSize },
-        data: defaultData,
+        data,
       };
       dispatch({ type: "ADD_NODE", node });
       setSelectedIds(new Set([node.id]));
 
-      // Focus viewport on the newly added node
-      if (container) {
+      const container = containerRef.current;
+      if (focus && container) {
         const padding = 80;
         const minX = position.x;
         const minY = position.y;
@@ -2358,40 +2847,49 @@ export function Canvas({
           scale,
         });
       }
+
+      return node;
     },
-    [dispatch, setTransform],
+    [dispatch, resolveNodePosition, setTransform],
+  );
+
+  const addNode = useCallback(
+    (type: string) => {
+      createNode(type, { anchor: { kind: "smart", preferCursor: false }, focus: true });
+    },
+    [createNode],
   );
 
   /** Add a node at a specific world position (used by context menu) */
   const addNodeAtPosition = useCallback(
     (type: string, worldX: number, worldY: number) => {
-      const allTypes = getAllNodeTypes();
-      const typeDef = allTypes.find((t) => t.type === type);
-      if (!typeDef) return;
-
-      const defaultData = createDefaultNodeData(type, projectSettingsRef.current);
-
-      const rawX = worldX - typeDef.defaultSize.width / 2;
-      const rawY = worldY - typeDef.defaultSize.height / 2;
-      const position = findNonOverlappingPosition(
-        rawX,
-        rawY,
-        typeDef.defaultSize.width,
-        typeDef.defaultSize.height,
-        nodesRef.current,
-      );
-
-      const node: CanvasNode = {
-        id: generateId(),
-        type,
-        position,
-        size: { ...typeDef.defaultSize },
-        data: defaultData,
-      };
-      dispatch({ type: "ADD_NODE", node });
-      setSelectedIds(new Set([node.id]));
+      createNode(type, { anchor: { kind: "world", x: worldX, y: worldY } });
     },
-    [dispatch],
+    [createNode],
+  );
+
+  const handleCommandPaletteCreate = useCallback(
+    (item: PaletteItem, prompt: string) => {
+      if (item.kind === "node") {
+        createNode(item.type, {
+          anchor: { kind: "smart", preferCursor: true },
+          prompt: item.type === "leader" ? prompt : null,
+        });
+      } else {
+        const preset = projectSettingsRef.current?.leaderPresets?.find(
+          (p) => p.id === item.id,
+        );
+        if (preset) {
+          createNode("leader", {
+            anchor: { kind: "smart", preferCursor: true },
+            prompt,
+            leaderPreset: preset,
+          });
+        }
+      }
+      setCommandPaletteOpen(false);
+    },
+    [createNode],
   );
 
   /** Handle right-click on empty canvas area */
@@ -2436,6 +2934,19 @@ export function Canvas({
   const handleDashboardDropMenuSelect = useCallback(
     (type: string) => {
       if (!dashboardDropMenu) return;
+      const fanoutMatch = /^fanout:(\d+)$/.exec(type);
+      if (fanoutMatch) {
+        createConnectedLeaderFromDrop(
+          dashboardDropMenu.source,
+          dashboardDropMenu.compatiblePortId,
+          dashboardDropMenu.worldX,
+          dashboardDropMenu.worldY,
+          null,
+          Number(fanoutMatch[1]),
+        );
+        setDashboardDropMenu(null);
+        return;
+      }
       const prompt =
         type === "custom"
           ? null
@@ -2502,7 +3013,7 @@ export function Canvas({
     [dispatch],
   );
 
-  // ── File drop handling (extracted to custom hook) ──
+  // â”€â”€ File drop handling (extracted to custom hook) â”€â”€
   const {
     isDragOverCanvas,
     handleDragOver,
@@ -2518,7 +3029,7 @@ export function Canvas({
     projectPath,
   });
 
-  // ── Global paste → ImageNode / MarkdownNode ───────────
+  // â”€â”€ Global paste â†’ ImageNode / MarkdownNode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   //
   // When the clipboard carries an image and no text-editable element
   // is focused, drop a new ImageNode into the viewport. When it carries
@@ -2539,7 +3050,7 @@ export function Canvas({
       const clipboard = e.clipboardData;
       if (!clipboard) return;
 
-      // 1. Image file on the clipboard → ImageNode.
+      // 1. Image file on the clipboard â†’ ImageNode.
       const imageItem = Array.from(clipboard.items).find(
         (it) => it.kind === "file" && it.type.startsWith("image/"),
       );
@@ -2557,7 +3068,7 @@ export function Canvas({
         return;
       }
 
-      // 2. Plain text on the clipboard → MarkdownNode.
+      // 2. Plain text on the clipboard â†’ MarkdownNode.
       const text = clipboard.getData("text/plain");
       const created = createMarkdownNodeFromText(
         text,
@@ -2642,15 +3153,29 @@ export function Canvas({
     }
   }, [nodes, graph.edges, transform, dispatch]);
 
-  // ── Handle server-side minion_spawned + agent_spawned events ──
+  const leaderSessionTopicKey = useMemo(() => {
+    const topics = nodes
+      .filter((n) => n.type === "leader")
+      .map((n) => (n.data as LeaderData).sessionKey)
+      .filter((key): key is string => typeof key === "string" && key.length > 0)
+      .map((key) => sessionTopic(key))
+      .sort();
+    return Array.from(new Set(topics)).join("\n");
+  }, [nodes]);
+
+  // â”€â”€ Handle server-side minion_spawned + agent_spawned events â”€â”€
   // Instead of auto-creating minion nodes, we store spawn data so the
   // user can reveal minions on demand from the leader's task plan UI.
   useEffect(() => {
     if (!socketSubscribe) return;
-    return socketSubscribe((msg: unknown) => {
+    const topics = leaderSessionTopicKey
+      ? leaderSessionTopicKey.split("\n")
+      : [];
+    if (topics.length === 0) return;
+    return subscribeSocketTopics(socketSubscribe, topics, (msg: unknown) => {
       const serverMsg = msg as { type: string; [key: string]: unknown };
 
-      // ── task_plan_update — authoritative plan state from server ──
+      // â”€â”€ task_plan_update â€” authoritative plan state from server â”€â”€
       // Fires on plan_task, assign_task, and complete_task. Merges server
       // task records into the leader's taskPlan, preserving any
       // frontend-only fields (cost, sessionSummary) accumulated at close.
@@ -2664,7 +3189,7 @@ export function Canvas({
             priority: "low" | "medium" | "high" | "critical";
             executor: "leader" | "minion";
             minionSessionKey: string | null;
-            status: "planned" | "running" | "completed" | "failed";
+            status: TaskPlanItem["status"];
             createdAt: number;
             completedAt: number | null;
             result: string | null;
@@ -2699,7 +3224,9 @@ export function Canvas({
             completedAt: serverTask.completedAt,
             sessionSummary: existing?.sessionSummary ?? "",
             activeStep:
-              serverTask.status === "running" ? (existing?.activeStep ?? null) : null,
+              serverTask.status === "running" || serverTask.status === "starting"
+                ? (existing?.activeStep ?? null)
+                : null,
             progress: existing?.progress ?? [],
           };
         });
@@ -2712,7 +3239,7 @@ export function Canvas({
         return;
       }
 
-      // ── minion_status on the leader topic — live progress/result detail ──
+      // â”€â”€ minion_status on the leader topic â€” live progress/result detail â”€â”€
       // Minion report tools emit to both the minion session and the owning
       // leader session. The minion node consumes the former; this branch keeps
       // the leader task plan live even when the minion node is not revealed.
@@ -2765,7 +3292,7 @@ export function Canvas({
                 ? "completed"
                 : trigger === "fail"
                   ? "failed"
-                  : task.status === "planned"
+                  : task.status === "planned" || task.status === "starting"
                     ? "running"
                     : task.status,
             result: trigger === "done" || trigger === "fail" ? message : task.result,
@@ -2787,7 +3314,7 @@ export function Canvas({
         return;
       }
 
-      // ── Legacy/settled minion completion notification ──
+      // â”€â”€ Legacy/settled minion completion notification â”€â”€
       if (serverMsg.type === "minion_completed") {
         const {
           leaderSessionKey,
@@ -2832,7 +3359,7 @@ export function Canvas({
         return;
       }
 
-      // ── MCP assign_task → minion_spawned ──
+      // â”€â”€ MCP assign_task â†’ minion_spawned â”€â”€
       // Store spawn data for on-demand reveal instead of auto-creating nodes
       if (serverMsg.type === "minion_spawned") {
         const {
@@ -2868,7 +3395,7 @@ export function Canvas({
           return;
         }
 
-        // Store spawn data — node created on demand via revealMinion
+        // Store spawn data â€” node created on demand via revealMinion
         pendingMinionsRef.current.set(minionSessionKey, {
           leaderNodeId: leader.id,
           minionSessionKey,
@@ -2885,7 +3412,7 @@ export function Canvas({
         return;
       }
 
-      // ── SDK Agent tool → agent_spawned ──
+      // â”€â”€ SDK Agent tool â†’ agent_spawned â”€â”€
       // Store spawn data for on-demand reveal
       if (serverMsg.type === "agent_spawned") {
         const {
@@ -2912,7 +3439,7 @@ export function Canvas({
           return;
         }
 
-        // Store spawn data — node created on demand via revealMinion
+        // Store spawn data â€” node created on demand via revealMinion
         pendingMinionsRef.current.set(dedupKey, {
           leaderNodeId: leader.id,
           minionSessionKey: null,
@@ -2958,7 +3485,7 @@ export function Canvas({
         return;
       }
 
-      // ── render_update — spawn RenderNode on first dashboard message ──
+      // â”€â”€ render_update â€” spawn RenderNode on first dashboard message â”€â”€
       // The render node is NOT created when the leader session starts; it only
       // appears once the leader actually calls a render tool (render_set, etc.).
       if (serverMsg.type === "render_update") {
@@ -2975,7 +3502,7 @@ export function Canvas({
         // in nodesRef (same pattern as spawnedMinionsRef for minion nodes).
         if (spawnedRenderNodesRef.current.has(leader.id)) return;
 
-        // If a render node already exists for this leader, nothing to do —
+        // If a render node already exists for this leader, nothing to do â€”
         // the RenderNode component's own socketSubscribe handles the update.
         const existing = nodesRef.current.find(
           (n) => n.type === "render" && (n.data as RenderNodeData).leaderId === leader.id,
@@ -2985,7 +3512,7 @@ export function Canvas({
         // Mark as spawned BEFORE dispatching to close the race window.
         spawnedRenderNodesRef.current.add(leader.id);
 
-        // First render_update for this leader — spawn the render node
+        // First render_update for this leader â€” spawn the render node
         // Apply the first message's data immediately so it isn't lost
         // (the RenderNode's own subscription hasn't mounted yet).
         const renderMsg: RenderMessage = serverMsg as unknown as RenderMessage;
@@ -3032,10 +3559,10 @@ export function Canvas({
         return;
       }
     });
-  }, [socketSubscribe, dispatch, graphDispatch]);
+  }, [socketSubscribe, leaderSessionTopicKey, dispatch, graphDispatch]);
 
   /** Gather context items for nodes spatially inside a context-group.
-   *  Any node whose type registers `providesContext: true` is eligible —
+   *  Any node whose type registers `providesContext: true` is eligible â€”
    *  including ImageNode, not just the hand-listed legacy types.
    *  See `./context-extraction.ts` for the per-node flattener. */
   const getContextFromGroup = useCallback((groupNode: CanvasNode): ContextItem[] => {
@@ -3097,7 +3624,7 @@ export function Canvas({
     return getter;
   }, []);
 
-  // ── Multi-select context group action ──────────────────
+  // â”€â”€ Multi-select context group action â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // When only context-compatible nodes are selected, compute whether we
   // can offer a "Group as Context" action.
   const CONTEXT_NODE_TYPES = useMemo(() => new Set(["markdown", "note", "file-viewer"]), []);
@@ -3187,7 +3714,7 @@ export function Canvas({
     setSelectedIds(new Set([groupId]));
   }, [multiSelectInfo, dispatch]);
 
-  // ── General multi-select bounding box (for all node types) ──
+  // â”€â”€ General multi-select bounding box (for all node types) â”€â”€
   const multiSelectBounds = useMemo(() => {
     if (selectedIds.size < 2) return null;
     const selected = nodes.filter((n) => selectedIds.has(n.id));
@@ -3212,7 +3739,7 @@ export function Canvas({
     return { x: screenX, y: screenY };
   }, [multiSelectInfo, multiSelectBounds, transform]);
 
-  // ── Stable derived values for CanvasNodeComponent props ──
+  // â”€â”€ Stable derived values for CanvasNodeComponent props â”€â”€
   // Memoize these so they don't create new identities on every render,
   // which would defeat React.memo on the node components.
   const isDragActive = connectionDrag !== null;
@@ -3277,6 +3804,7 @@ export function Canvas({
     <div
       ref={containerRef}
       onMouseDown={handleCanvasMouseDown}
+      onMouseMove={handleCanvasMouseMove}
       onContextMenu={handleCanvasContextMenu}
       onDragOver={handleDragOver}
       onDragEnter={handleDragEnter}
@@ -3304,7 +3832,7 @@ export function Canvas({
     >
       <DotGrid transform={transform} />
 
-      {/* ── File drop overlay ── */}
+      {/* â”€â”€ File drop overlay â”€â”€ */}
       {isDragOverCanvas && (
         <div
           style={{
@@ -3347,7 +3875,7 @@ export function Canvas({
         </div>
       )}
 
-      {/* ── Marquee selection rectangle ── */}
+      {/* â”€â”€ Marquee selection rectangle â”€â”€ */}
       {marquee && (
         <div
           style={{
@@ -3370,10 +3898,19 @@ export function Canvas({
         socketSubscribe={socketSubscribe}
         socketConnected={socketConnected}
         onAttachSession={handleAttachSession}
+        onFocusSession={handleFocusSession}
         attachedSessionKeys={attachedSessionKeys}
       />
 
-      {/* ── Right-click context menu ── */}
+      {commandPaletteOpen && (
+        <CommandPalette
+          items={commandPaletteItems}
+          onCreate={handleCommandPaletteCreate}
+          onClose={() => setCommandPaletteOpen(false)}
+        />
+      )}
+
+      {/* â”€â”€ Right-click context menu â”€â”€ */}
       {contextMenu && (
         <CanvasContextMenu
           x={contextMenu.screenX}
@@ -3405,8 +3942,16 @@ export function Canvas({
           willChange: "transform",
         }}
       >
-        {/* Routine → Leader connector lines rendered behind all nodes */}
+        {/* Routine â†’ Leader connector lines rendered behind all nodes */}
         <RoutineConnectors nodes={nodes} />
+        <EdgeRenderer
+          graph={graph}
+          nodes={nodes}
+          selectedEdgeId={selectedEdgeId}
+          hoveredEdgeId={hoveredEdgeId}
+          onEdgeClick={handleEdgeClick}
+          onEdgeHover={handleEdgeHover}
+        />
 
         {nodes.map((node) => (
           <CanvasNodeComponent
@@ -3423,6 +3968,9 @@ export function Canvas({
             onSpawnLeaderChild={spawnLeaderChild}
             onDuplicateLeaderSetup={
               node.type === "leader" ? () => duplicateLeaderSetup(node.id) : undefined
+            }
+            onSaveLeaderPreset={
+              node.type === "leader" ? (input) => saveLeaderPreset(node.id, input) : undefined
             }
             socketSend={socketSend}
             socketSubscribe={socketSubscribe}
@@ -3443,7 +3991,7 @@ export function Canvas({
           />
         ))}
 
-        {/* ── Multi-select bounding box highlight (in world space) ── */}
+        {/* â”€â”€ Multi-select bounding box highlight (in world space) â”€â”€ */}
         {multiSelectBounds && !draggingNodeId && (
           <div
             style={{
@@ -3461,7 +4009,26 @@ export function Canvas({
         )}
       </div>
 
-      <EdgeRenderer graph={graph} nodes={nodes} transform={transform} />
+      {/* ── Edge inspector ── */}
+      {selectedEdge && selectedEdgeMidpoint && (
+        <EdgeInspector
+          edge={selectedEdge}
+          screenX={selectedEdgeMidpoint.x * transform.scale + transform.x}
+          screenY={selectedEdgeMidpoint.y * transform.scale + transform.y}
+          sourceLabel={
+            nodes.find((n) => n.id === selectedEdge.sourceNodeId)?.type ??
+            "source"
+          }
+          targetLabel={
+            nodes.find((n) => n.id === selectedEdge.targetNodeId)?.type ??
+            "target"
+          }
+          onDelete={handleDeleteSelectedEdge}
+          onFocusSource={() => handleFocusEdgeEndpoint("source")}
+          onFocusTarget={() => handleFocusEdgeEndpoint("target")}
+          onClose={() => setSelectedEdgeId(null)}
+        />
+      )}
 
       {/* Steady connector shown after dashboard context is dropped and before an action is chosen. */}
       {pendingDashboardDrop && (
@@ -3633,7 +4200,7 @@ export function Canvas({
                     fill={color}
                     opacity={0.8}
                   />
-                  {/* Endpoint dot — pulses when snapping */}
+                  {/* Endpoint dot â€” pulses when snapping */}
                   <circle cx={x2} cy={y2} r={snap ? 6 : 3} fill={color} opacity={snap ? 0.9 : 0.5}>
                     {snap && (
                       <animate attributeName="r" values="5;9;5" dur="0.8s" repeatCount="indefinite" />
@@ -3652,7 +4219,7 @@ export function Canvas({
         </svg>
       )}
 
-      {/* ── Multi-select floating action bar ── */}
+      {/* â”€â”€ Multi-select floating action bar â”€â”€ */}
       {multiSelectActionPos && multiSelectBounds && (multiSelectInfo ? !multiSelectInfo.allInSameGroup : true) && (
         <div
           style={{
@@ -3727,7 +4294,7 @@ export function Canvas({
         </div>
       )}
 
-      {/* ── Context-group delete confirmation ── */}
+      {/* â”€â”€ Context-group delete confirmation â”€â”€ */}
       {pendingGroupDelete && (
         <ConfirmModal
           title="Delete Context Group"

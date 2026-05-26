@@ -6,6 +6,7 @@ import type {
   ServerMessage,
   SyncEvent,
 } from "../use-socket.ts";
+import { subscribeSocketTopic } from "../use-socket.ts";
 import type { NormalizedEvent } from "../../shared/normalized-event.ts";
 import { useStatusBanners, StatusBannerStack } from "../components/StatusBanner.tsx";
 import { SessionToolbar } from "../components/SessionToolbar.tsx";
@@ -24,6 +25,27 @@ import {
 import { recordWsMessageForDebug } from "../debug-record-bridge.ts";
 import { debugFlagStore } from "../debug.ts";
 import { DebugInspector } from "../components/DebugInspector.tsx";
+import { sessionTopic } from "../../shared/ws-envelope.ts";
+
+type ScheduledFrame =
+  | { kind: "raf"; id: number }
+  | { kind: "timeout"; id: ReturnType<typeof setTimeout> };
+
+function scheduleFrame(fn: () => void): ScheduledFrame {
+  if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+    return { kind: "raf", id: window.requestAnimationFrame(fn) };
+  }
+  return { kind: "timeout", id: setTimeout(fn, 16) };
+}
+
+function cancelFrame(frame: ScheduledFrame | null): void {
+  if (!frame) return;
+  if (frame.kind === "raf" && typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") {
+    window.cancelAnimationFrame(frame.id);
+    return;
+  }
+  clearTimeout(frame.id);
+}
 
 export interface SubagentInfo {
   taskId: string;
@@ -711,7 +733,27 @@ export function ClaudeSessionRenderer({
 }: NodeRenderProps) {
   const data = node.data as ClaudeSessionData;
   const dataRef = useRef(data);
-  dataRef.current = data;
+  const pendingStreamingFrameRef = useRef<ScheduledFrame | null>(null);
+  const pendingStreamingDataRef = useRef<ClaudeSessionData | null>(null);
+  const onUpdateDataRef = useRef(onUpdateData);
+  onUpdateDataRef.current = onUpdateData;
+  if (!pendingStreamingDataRef.current) {
+    dataRef.current = data;
+  } else if (data !== dataRef.current) {
+    const pending = pendingStreamingDataRef.current;
+    if (data.sessionKey === pending.sessionKey) {
+      const rebased = {
+        ...data,
+        streamingText: pending.streamingText,
+        streamingBlockIndex: pending.streamingBlockIndex,
+      };
+      pendingStreamingDataRef.current = rebased;
+      dataRef.current = rebased;
+    } else {
+      pendingStreamingDataRef.current = null;
+      dataRef.current = data;
+    }
+  }
 
   const [input, setInput] = useState("");
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
@@ -724,6 +766,39 @@ export function ClaudeSessionRenderer({
     debugFlagStore.getSnapshot,
     debugFlagStore.getSnapshot,
   );
+  const flushStreamingRef = useRef<() => void>(() => undefined);
+  flushStreamingRef.current = () => {
+    const pending = pendingStreamingDataRef.current;
+    pendingStreamingFrameRef.current = null;
+    pendingStreamingDataRef.current = null;
+    if (pending) {
+      onUpdateDataRef.current(pending);
+    }
+  };
+  const emitStreamingUpdate = useCallback((next: ClaudeSessionData) => {
+    dataRef.current = next;
+    pendingStreamingDataRef.current = next;
+    if (!pendingStreamingFrameRef.current) {
+      pendingStreamingFrameRef.current = scheduleFrame(() => {
+        flushStreamingRef.current();
+      });
+    }
+  }, []);
+  const emitDurableUpdate = useCallback((next: ClaudeSessionData) => {
+    cancelFrame(pendingStreamingFrameRef.current);
+    pendingStreamingFrameRef.current = null;
+    pendingStreamingDataRef.current = null;
+    dataRef.current = next;
+    onUpdateData(next);
+  }, [onUpdateData]);
+
+  useEffect(() => {
+    return () => {
+      cancelFrame(pendingStreamingFrameRef.current);
+      pendingStreamingFrameRef.current = null;
+      pendingStreamingDataRef.current = null;
+    };
+  }, []);
 
   // Scroll handler: detect if user scrolled up
   const handleMessagesScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
@@ -753,9 +828,9 @@ export function ClaudeSessionRenderer({
 
   // Subscribe to WebSocket events for this session
   useEffect(() => {
-    if (!socketSubscribe) return;
+    if (!socketSubscribe || !data.sessionKey) return;
 
-    return socketSubscribe((msg: unknown) => {
+    const unsubscribe = subscribeSocketTopic(socketSubscribe, sessionTopic(data.sessionKey), (msg: unknown) => {
       const serverMsg = msg as ServerMessage;
       const current = dataRef.current;
       // Debug capture for the ad-hoc subscription. ClaudeSessionNode
@@ -779,9 +854,9 @@ export function ClaudeSessionRenderer({
             serverMsg.permissionMode,
             serverMsg.harness,
           );
-          onUpdateData(rebuilt);
+          emitDurableUpdate(rebuilt);
         } else if (!serverMsg.found) {
-          onUpdateData({
+          emitDurableUpdate({
             ...current,
             status: "disconnected" as const,
           });
@@ -813,13 +888,13 @@ export function ClaudeSessionRenderer({
             // block. Reset the buffer so text from `[text, tool_use,
             // text]` doesn't merge across blocks in the live preview.
             if (activeIndex !== delta.index) {
-              onUpdateData({
+              emitStreamingUpdate({
                 ...current,
                 streamingText: delta.text,
                 streamingBlockIndex: delta.index,
               });
             } else {
-              onUpdateData({
+              emitStreamingUpdate({
                 ...current,
                 streamingText: (current.streamingText ?? "") + delta.text,
               });
@@ -830,7 +905,7 @@ export function ClaudeSessionRenderer({
           ) {
             // Stream ended — clear streaming text so stale content doesn't
             // linger while the complete assistant message is in flight.
-            onUpdateData({ ...current, streamingText: "", streamingBlockIndex: null });
+            emitDurableUpdate({ ...current, streamingText: "", streamingBlockIndex: null });
           }
           return;
         }
@@ -883,7 +958,7 @@ export function ClaudeSessionRenderer({
         }
 
         if (changed) {
-          onUpdateData(updated);
+          emitDurableUpdate(updated);
         }
         return;
       }
@@ -892,7 +967,7 @@ export function ClaudeSessionRenderer({
         serverMsg.type === "session_status" &&
         serverMsg.sessionKey === current.sessionKey
       ) {
-        onUpdateData({
+        emitDurableUpdate({
           ...current,
           status: serverMsg.status as ClaudeSessionData["status"],
         });
@@ -903,7 +978,7 @@ export function ClaudeSessionRenderer({
         serverMsg.type === "session_error" &&
         serverMsg.sessionKey === current.sessionKey
       ) {
-        onUpdateData({
+        emitDurableUpdate({
           ...current,
           status: "error" as const,
           error: serverMsg.error,
@@ -915,7 +990,7 @@ export function ClaudeSessionRenderer({
         serverMsg.type === "session_cleared" &&
         serverMsg.sessionKey === current.sessionKey
       ) {
-        onUpdateData({
+        emitDurableUpdate({
           ...current,
           messages: [],
           streamingText: "",
@@ -927,7 +1002,19 @@ export function ClaudeSessionRenderer({
         });
       }
     });
-  }, [socketSubscribe, onUpdateData, processNormalizedEvent]);
+    return () => {
+      unsubscribe?.();
+      cancelFrame(pendingStreamingFrameRef.current);
+      pendingStreamingFrameRef.current = null;
+      pendingStreamingDataRef.current = null;
+    };
+  }, [
+    socketSubscribe,
+    data.sessionKey,
+    emitDurableUpdate,
+    emitStreamingUpdate,
+    processNormalizedEvent,
+  ]);
 
   const handleCreate = useCallback(() => {
     if (!socketSend) return;

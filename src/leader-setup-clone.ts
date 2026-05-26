@@ -24,6 +24,7 @@ export function cloneLeaderSetupData(source: LeaderData): LeaderData {
     skillIds: [...(source.skillIds ?? [])],
     skillValues: structuredClone(source.skillValues ?? {}),
     skillPanelOpen: source.skillPanelOpen,
+    systemPromptPrefix: source.systemPromptPrefix ?? null,
     waitUntil: null,
     waitReason: null,
   };

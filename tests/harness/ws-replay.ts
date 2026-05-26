@@ -18,7 +18,8 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { ServerMessage } from "../../src/use-socket.ts";
+import type { ServerMessage, SocketSubscribe } from "../../src/use-socket.ts";
+import { GLOBAL_TOPIC, sessionTopic, topicMatches } from "../../shared/ws-envelope.ts";
 
 /**
  * One entry in a fixture JSONL file. Each line of the file parses to
@@ -49,7 +50,7 @@ export interface ReplaySocket {
   reconnectAttempt: 0;
   manualReconnect: () => void;
   send: (data: unknown) => void;
-  subscribe: (fn: ReplaySubscriber) => () => void;
+  subscribe: SocketSubscribe;
   /** All payloads passed to `send()`, in order. */
   readonly sent: ReadonlyArray<unknown>;
   /** All currently-registered subscribers. Exposed for assertions. */
@@ -126,7 +127,7 @@ export function createReplaySocket(): {
   socket: ReplaySocket;
   replay: (entries: ReadonlyArray<FixtureEntry>) => Promise<void>;
 } {
-  const subscribers = new Set<ReplaySubscriber>();
+  const subscribers = new Set<{ topic: string; fn: ReplaySubscriber }>();
   const sent: unknown[] = [];
 
   const socket: ReplaySocket = {
@@ -139,12 +140,17 @@ export function createReplaySocket(): {
     send: (data: unknown) => {
       sent.push(data);
     },
-    subscribe: (fn: ReplaySubscriber) => {
-      subscribers.add(fn);
-      return () => {
-        subscribers.delete(fn);
-      };
-    },
+    subscribe: Object.assign(
+      ((...args: [ReplaySubscriber] | [string, ReplaySubscriber]) => {
+        const [topic, fn] = args.length === 1 ? ["*", args[0]] : args;
+        const entry = { topic, fn };
+        subscribers.add(entry);
+        return () => {
+          subscribers.delete(entry);
+        };
+      }) as SocketSubscribe,
+      { supportsTopics: true as const },
+    ),
     get sent(): ReadonlyArray<unknown> {
       return sent;
     },
@@ -160,13 +166,32 @@ export function createReplaySocket(): {
       }
       // Snapshot subscribers in case a handler unsubscribes mid-flight.
       const snapshot = Array.from(subscribers);
+      const topics = topicsForReplayMessage(entry.message);
       for (const sub of snapshot) {
-        sub(entry.message);
+        if (topics.some((topic) => topicMatches(sub.topic, topic))) {
+          sub.fn(entry.message);
+        }
       }
     }
   };
 
   return { socket, replay };
+}
+
+function topicsForReplayMessage(message: ServerMessage): string[] {
+  const record = message as unknown as Record<string, unknown>;
+  if (typeof record["topic"] === "string") return [record["topic"]];
+  const topics: string[] = [];
+  if (typeof record["sessionKey"] === "string") {
+    topics.push(sessionTopic(record["sessionKey"]));
+  }
+  if (typeof record["leaderSessionKey"] === "string") {
+    topics.push(sessionTopic(record["leaderSessionKey"]));
+  }
+  if (typeof record["minionSessionKey"] === "string") {
+    topics.push(sessionTopic(record["minionSessionKey"]));
+  }
+  return topics.length > 0 ? Array.from(new Set(topics)) : [GLOBAL_TOPIC];
 }
 
 /**

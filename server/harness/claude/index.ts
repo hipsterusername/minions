@@ -19,19 +19,12 @@
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { execSync } from "node:child_process";
 import { registerHarness } from "../index.ts";
 
-function resolveClaudePath(): string {
-  if (process.env["CLAUDE_CODE_PATH"]) return process.env["CLAUDE_CODE_PATH"];
-  try {
-    return execSync("which claude", { encoding: "utf8" }).trim();
-  } catch {
-    return "claude";
-  }
+function resolveClaudePathFromEnv(): string | undefined {
+  const configuredPath = process.env["CLAUDE_CODE_PATH"]?.trim();
+  return configuredPath ? configuredPath : undefined;
 }
-
-const CLAUDE_EXECUTABLE = resolveClaudePath();
 
 import type {
   AgentHarness,
@@ -192,9 +185,14 @@ class ClaudeHarness implements AgentHarness {
         includePartialMessages: true,
         systemPrompt: opts.systemPrompt,
         model: opts.model,
-        // Claude executable path — Claude-specific; other harnesses omit this.
-        pathToClaudeCodeExecutable: CLAUDE_EXECUTABLE,
       };
+
+      // Claude executable path override. When unset, let the SDK use its own
+      // platform-aware bundled/default discovery instead of repo-side probing.
+      const claudeExecutable = resolveClaudePathFromEnv();
+      if (claudeExecutable) {
+        options["pathToClaudeCodeExecutable"] = claudeExecutable;
+      }
 
       // Merge externally-supplied pre-wrapped MCP servers (e.g. from the project
       // sidecar's mcp-servers.json) alongside the tool-group servers.

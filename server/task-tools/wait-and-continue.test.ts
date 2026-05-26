@@ -11,6 +11,7 @@ import type { NormalizedToolDef } from "../harness/types.ts";
 
 function makeCtx() {
   const sent: Record<string, unknown>[] = [];
+  const timerId = {} as ReturnType<typeof setTimeout>;
   const client = {
     readyState: 1,
     send(msg: string) {
@@ -18,7 +19,7 @@ function makeCtx() {
     },
   };
   const wss = { clients: new Set([client]) } as unknown as WebSocketServer;
-  const scheduleWaitContinue = vi.fn();
+  const scheduleWaitContinue = vi.fn(() => timerId);
   const ctx: TaskToolContext & {
     sent: Record<string, unknown>[];
     scheduleWaitContinue: typeof scheduleWaitContinue;
@@ -33,7 +34,7 @@ function makeCtx() {
     scheduleWaitContinue,
     sent,
   };
-  return ctx;
+  return { ...ctx, timerId };
 }
 
 async function call(
@@ -53,7 +54,7 @@ describe("wait_and_continue", () => {
     expect(ctx.taskState.pendingWait).toMatchObject({
       durationMs: 30_000,
       reason: "waiting on minion",
-      timerId: null,
+      timerId: ctx.timerId,
     });
     expect(typeof ctx.taskState.pendingWait!.scheduledAt).toBe("number");
 

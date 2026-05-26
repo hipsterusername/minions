@@ -283,6 +283,36 @@ describe("CodexHarness.start()", () => {
     expect(last.fullError).toContain("Reconnecting... 1/5");
   });
 
+  it("treats Windows taskkill success output after completion as normal stop", async () => {
+    sdkMock.setNextEvents(
+      (async function* () {
+        yield { type: "thread.started", thread_id: "th-win-cleanup" };
+        yield {
+          type: "item.completed",
+          item: { id: "m1", type: "agent_message", text: "done" },
+        };
+        yield {
+          type: "turn.completed",
+          usage: {
+            input_tokens: 1,
+            output_tokens: 1,
+            cached_input_tokens: 0,
+            reasoning_output_tokens: 0,
+          },
+        };
+        throw new Error(
+          "Failed to parse item: SUCCESS: The process with PID 2596 (child process of PID 14044) has been terminated.",
+        );
+      })(),
+    );
+    const out = await collect(codexHarness.start(baseOpts()).events);
+    expect(out.map((e) => e.kind)).toEqual(["init", "text", "usage", "done"]);
+    expect(out[out.length - 1]).toMatchObject({ kind: "done", reason: "stop" });
+    expect(
+      out.some((e) => e.kind === "done" && (e as { reason?: string }).reason === "error"),
+    ).toBe(false);
+  });
+
   it("emits done(reason: abort) when control.abort fires before iteration ends", async () => {
     const ac = new AbortController();
     // A stream that pauses indefinitely on the second event.

@@ -130,6 +130,7 @@ export function applyPresetToLeaderData(
     skillIds: [...preset.skillIds],
     skillValues: structuredClone(preset.skillValues),
     skillPanelOpen: preset.skillPanelOpen,
+    systemPromptPrefix: preset.systemPromptPrefix ?? null,
     ...(preset.harness !== undefined ? { harness: preset.harness } : {}),
   };
 }

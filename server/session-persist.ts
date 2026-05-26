@@ -239,8 +239,8 @@ export function loadRecentEvents(
 
 /**
  * Persist the full task-manager state for a leader. This rewrites the leader's
- * task_records rows: we upsert every current task and drop any stale task_id
- * that's no longer in the in-memory map. Callers invoke this on every
+ * task_records rows for that leader: we upsert every current task and drop any
+ * stale task_id that's no longer in the in-memory map. Callers invoke this on every
  * task-plan mutation — cost is O(n) in tasks, which is small.
  */
 export function persistTaskState(
@@ -254,7 +254,7 @@ export function persistTaskState(
     const existing = repo.getTaskRecordsForLeader(db, leaderSessionKey);
     for (const row of existing) {
       if (!currentIds.has(row.taskId)) {
-        repo.deleteTaskRecord(db, row.taskId);
+        repo.deleteTaskRecord(db, leaderSessionKey, row.taskId);
       }
     }
     for (const rec of state.tasks.values()) {

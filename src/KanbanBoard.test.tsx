@@ -112,6 +112,7 @@ function Harness({
   onLaunchLeader = vi.fn(),
   onCloseCard = vi.fn(),
   onResume = vi.fn(),
+  onOpenCanvas = vi.fn(),
   nodes = [],
   socketSend = vi.fn(),
   socketSubscribe = (() => () => {}) as {
@@ -123,6 +124,7 @@ function Harness({
   onLaunchLeader?: (card: KanbanCard) => void;
   onCloseCard?: (card: KanbanCard) => void;
   onResume?: (card: KanbanCard) => void;
+  onOpenCanvas?: () => void;
   nodes?: CanvasNode[];
   socketSend?: (data: unknown) => void;
   socketSubscribe?: {
@@ -143,6 +145,7 @@ function Harness({
       socketSubscribe={socketSubscribe}
       projectPath="/tmp/p"
       nodes={nodes}
+      onOpenCanvas={onOpenCanvas}
     />
   );
 }
@@ -566,5 +569,17 @@ describe("KanbanBoard — inspector save feedback", () => {
 
     // Button label transitions to "Saved" in the same render pass.
     expect(screen.getByRole("button", { name: /^saved$/i })).toBeInTheDocument();
+  });
+});
+
+describe("KanbanBoard empty state", () => {
+  it("offers Kanban and Canvas starting points", () => {
+    const onOpenCanvas = vi.fn();
+    render(<Harness initial={makeBoard()} onOpenCanvas={onOpenCanvas} />);
+
+    expect(screen.getByRole("button", { name: /create task card/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /open canvas/i }));
+
+    expect(onOpenCanvas).toHaveBeenCalledTimes(1);
   });
 });

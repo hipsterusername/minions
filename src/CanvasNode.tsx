@@ -7,6 +7,7 @@ import { PortDot } from "./components/PortDot.tsx";
 import type { PortInfo } from "./components/PortDot.tsx";
 import { wheelDetector } from "./wheel-detector.ts";
 import { canvasScale } from "./canvas-scale.ts";
+import type { SocketSubscribe } from "./use-socket.ts";
 
 interface CanvasNodeProps {
   node: CanvasNode;
@@ -15,7 +16,7 @@ interface CanvasNodeProps {
   onMove: (id: string, position: Position) => void;
   onUpdateData: (id: string, data: unknown) => void;
   socketSend?: ((data: unknown) => void) | undefined;
-  socketSubscribe?: ((fn: (msg: unknown) => void) => () => void) | undefined;
+  socketSubscribe?: SocketSubscribe | undefined;
   getContextForNode?: (() => import("./types.ts").ContextItem[]) | undefined;
   projectPath?: string | undefined;
   onResize?: ((id: string, size: Size) => void) | undefined;
@@ -33,6 +34,12 @@ interface CanvasNodeProps {
   onSpawnLeaderChild?: ((event: import("./types.ts").RoutineLeaderSpawnEvent) => void) | undefined;
   /** Callback for LeaderNode: duplicate setup without runtime session state */
   onDuplicateLeaderSetup?: (() => void) | undefined;
+  /** Callback for LeaderNode: save setup as a reusable preset */
+  onSaveLeaderPreset?: ((input: {
+    name: string;
+    description?: string;
+    systemPromptPrefix?: string;
+  }) => boolean) | undefined;
   /** Connection drag callbacks — threaded from Canvas */
   onConnectionStart?: ((port: PortInfo, e: React.MouseEvent) => void) | undefined;
   onConnectionEnd?: ((port: PortInfo) => void) | undefined;
@@ -144,6 +151,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
   onRevealMinion,
   onSpawnLeaderChild,
   onDuplicateLeaderSetup,
+  onSaveLeaderPreset,
   onConnectionStart,
   onConnectionEnd,
   isDragActive = false,
@@ -436,6 +444,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
         onRevealMinion={onRevealMinion}
         onSpawnLeaderChild={onSpawnLeaderChild}
         onDuplicateLeaderSetup={onDuplicateLeaderSetup}
+        onSaveLeaderPreset={onSaveLeaderPreset}
         isDropTarget={isDropTarget}
         isBeingDragged={isBeingDragged}
       />

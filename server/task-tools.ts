@@ -68,7 +68,9 @@ export function createTaskToolsForLeader(opts: {
   worktreeBranch?: string | null;
   worktreeInfo?: WorktreeInfo | null;
   worktreeIsolation?: boolean;
-  scheduleWaitContinue: (durationMs: number, reason: string) => void;
+  scheduleWaitContinue: (durationMs: number, reason: string) => ReturnType<typeof setTimeout> | null | void;
+  terminateSession?: (sessionKey: string, reason: "abort") => void;
+  taskTimeoutMs?: number;
   getSessionRuntime?: (sessionKey: string) => RuntimeSessionInfo | null;
   onStateChange?: (state: TaskManagerState) => void;
 }): { toolDefs: NormalizedToolDef[]; taskState: TaskManagerState } {
@@ -92,6 +94,8 @@ export function createTaskToolsForLeader(opts: {
     worktreeInfo: opts.worktreeInfo,
     worktreeIsolation: opts.worktreeIsolation,
     scheduleWaitContinue: opts.scheduleWaitContinue,
+    terminateSession: opts.terminateSession,
+    taskTimeoutMs: opts.taskTimeoutMs,
   };
 
   const baseDefs = [

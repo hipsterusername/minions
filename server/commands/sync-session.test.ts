@@ -116,7 +116,7 @@ describe("sync_session", () => {
     expect(h.wsSent[0]!["type"]).toBe("sync_response");
   });
 
-  it("derives activeMinions from taskState by filtering planned + running entries", () => {
+  it("derives activeMinions and ships the full task plan from taskState", () => {
     const h = setup();
     h.host.taskState = {
       tasks: new Map([
@@ -178,6 +178,8 @@ describe("sync_session", () => {
     const env = h.wsSent[0]!;
     const active = env["activeMinions"] as Array<{ taskId: string }>;
     expect(active.map((m) => m.taskId).sort()).toEqual(["t1", "t2"]);
+    const taskPlan = env["taskPlan"] as Array<{ taskId: string }>;
+    expect(taskPlan.map((m) => m.taskId).sort()).toEqual(["t1", "t2", "t3"]);
   });
 
   it("is a no-op (no unicast) when sessionKey is missing", () => {

@@ -149,6 +149,30 @@ describe("FormComponent — required validation", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/required/i);
   });
 
+  it("links validation errors and descriptions to the invalid input", () => {
+    const form: FormComponentType = {
+      id: "described-required",
+      type: "form",
+      fields: [
+        {
+          id: "name",
+          kind: "text",
+          label: "Name",
+          description: "Used on generated reports.",
+          required: true,
+        },
+      ],
+    };
+    render(<FormComponent component={form} onSubmit={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+
+    const input = screen.getByLabelText(/Name/);
+    expect(input).toBeInvalid();
+    expect(input).toHaveAccessibleDescription(/Used on generated reports\..*Name is required/);
+    expect(input).toHaveAttribute("aria-describedby", "name-description name-error");
+  });
+
   it("clears the error and calls onSubmit after valid input", () => {
     const onSubmit = vi.fn();
     render(<FormComponent component={requiredTextField} onSubmit={onSubmit} />);
@@ -182,6 +206,9 @@ describe("FormComponent — required validation", () => {
 
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.getByRole("alert")).toBeInTheDocument();
+    const group = screen.getByRole("group", { name: /Tags/ });
+    expect(group).toBeInvalid();
+    expect(group).toHaveAccessibleDescription(/Tags requires at least one selection/);
   });
 
   it("shows an error for required checkbox left unchecked", () => {
@@ -441,10 +468,6 @@ describe("FormComponent — edge cases", () => {
     };
     render(<FormComponent component={form} onSubmit={vi.fn()} />);
 
-    // The Fruits label wrapper can be found by its heading text
-    const fruitsLabel = screen.getByText("Fruits").closest("div");
-    expect(fruitsLabel).not.toBeNull();
-
     // "apple" and "banana" labels should be in the DOM
     const appleLabel = screen.getByText("apple");
     const bananaLabel = screen.getByText("banana");
@@ -452,7 +475,8 @@ describe("FormComponent — edge cases", () => {
     expect(bananaLabel).toBeInTheDocument();
 
     // The multiselect group should NOT include the solo-checkbox label
-    const multiGroup = within(fruitsLabel!).queryByText("solo-checkbox");
+    const fruitsGroup = screen.getByRole("group", { name: "Fruits" });
+    const multiGroup = within(fruitsGroup).queryByText("solo-checkbox");
     expect(multiGroup).toBeNull();
   });
 });

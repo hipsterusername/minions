@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { getAuthToken, clearAuthToken } from "./api.ts";
 import {
   wsEnvelopeSchema,
@@ -15,11 +15,11 @@ export type ServerMessage =
   | { type: "session_error"; sessionKey: string; error: string; fullError?: string }
   | { type: "kanban_card_created"; sessionKey: string; card: { title: string; description: string; context: string; priority: "low" | "medium" | "high" | "critical"; subtasks: string[] }; timestamp: number }
   | { type: "sdk_event"; sessionKey: string; event: NormalizedEvent }
-  | { type: "sync_response"; sessionKey: string; found: boolean; status?: string; sessionId?: string; totalCost?: number; turns?: number; lastError?: string | null; lastErrorFull?: string | null; events?: SyncEvent[]; model?: string; permissionMode?: string; initData?: Record<string, unknown>; taskName?: string | null; role?: "leader" | "minion" | "default" | "card-composer"; activeMinions?: ActiveMinion[]; worktree?: { path: string; branch: string } | null; approval?: { requested?: boolean; summary?: string; diff?: unknown } | null; harness?: string; harnessCapabilities?: HarnessCapabilities | null }
+  | { type: "sync_response"; sessionKey: string; found: boolean; status?: string; sessionId?: string; totalCost?: number; turns?: number; lastError?: string | null; lastErrorFull?: string | null; events?: SyncEvent[]; model?: string; permissionMode?: string; initData?: Record<string, unknown>; taskName?: string | null; role?: "leader" | "minion" | "default" | "card-composer"; activeMinions?: ActiveMinion[]; taskPlan?: SyncTaskRecord[]; worktree?: { path: string; branch: string } | null; approval?: { requested?: boolean; summary?: string; diff?: unknown; graceUntil?: number } | null; harness?: string; harnessCapabilities?: HarnessCapabilities | null }
   | { type: "control_response"; command: string; sessionKey: string; requestId: string | null; success: boolean; error?: string; [key: string]: unknown }
   | { type: "session_cleared"; sessionKey: string }
   | { type: "session_task_name"; sessionKey: string; taskName: string }
-  | { type: "approval_requested"; sessionKey: string; summary: string; diff: unknown; timestamp: number }
+  | { type: "approval_requested"; sessionKey: string; summary: string; diff: unknown; timestamp: number; graceUntil?: number }
   | { type: "approval_resolved"; sessionKey: string; action: string; timestamp: number }
   | { type: "worktree_status"; sessionKey: string; status: string; path?: string; branch?: string }
   | { type: "worktree_created"; sessionKey: string; worktreePath: string; branch: string }
@@ -112,6 +112,7 @@ export interface ActiveMinion {
  * compatible with `ServerMessage`.
  */
 type Listener = (msg: ServerMessage) => void;
+type UnknownListener = (msg: unknown) => void;
 
 export type ReconnectState = "connected" | "reconnecting" | "failed";
 
@@ -138,9 +139,61 @@ function getBackoffDelay(attempt: number): number {
  *     whose `topic` field matches the filter. Use `"*"` for firehose,
  *     `"session:<key>"` / `"project:<id>"` / `"global"` for scoped.
  */
-interface SubscribeFn {
+export interface SocketSubscribe {
   (fn: Listener): () => void;
   (topic: string, fn: Listener): () => void;
+  (fn: UnknownListener): () => void;
+  (topic: string, fn: UnknownListener): () => void;
+  readonly supportsTopics?: true;
+}
+
+export interface SyncTaskRecord {
+  taskId: string;
+  title: string;
+  description: string;
+  priority: "low" | "medium" | "high" | "critical";
+  executor: "leader" | "minion";
+  minionSessionKey: string | null;
+  status: string;
+  createdAt: number;
+  completedAt: number | null;
+  result: string | null;
+}
+
+export type SocketSubscribeLike =
+  | SocketSubscribe
+  | ((fn: (msg: unknown) => void) => () => void)
+  | undefined;
+
+export function subscribeSocketTopic(
+  socketSubscribe: SocketSubscribeLike,
+  topic: string,
+  fn: UnknownListener,
+): (() => void) | undefined {
+  if (!socketSubscribe) return undefined;
+  if ((socketSubscribe as SocketSubscribe).supportsTopics === true) {
+    return (socketSubscribe as SocketSubscribe)(topic, fn);
+  }
+  return (socketSubscribe as (fn: UnknownListener) => () => void)(fn);
+}
+
+export function subscribeSocketTopics(
+  socketSubscribe: SocketSubscribeLike,
+  topics: ReadonlyArray<string>,
+  fn: UnknownListener,
+): (() => void) | undefined {
+  if (!socketSubscribe) return undefined;
+  const uniqueTopics = Array.from(new Set(topics.filter(Boolean)));
+  if (uniqueTopics.length === 0) return undefined;
+  if ((socketSubscribe as SocketSubscribe).supportsTopics !== true) {
+    return (socketSubscribe as (listener: UnknownListener) => () => void)(fn);
+  }
+  const unsubscribers = uniqueTopics.map((topic) =>
+    (socketSubscribe as SocketSubscribe)(topic, fn),
+  );
+  return () => {
+    for (const unsubscribe of unsubscribers) unsubscribe();
+  };
 }
 
 interface SocketHandle {
@@ -149,12 +202,12 @@ interface SocketHandle {
   reconnectAttempt: number;
   manualReconnect: () => void;
   send: (data: unknown) => void;
-  subscribe: SubscribeFn;
+  subscribe: SocketSubscribe;
 }
 
 interface TopicListener {
   topic: string;
-  fn: Listener;
+  fn: UnknownListener;
 }
 
 export function useSocket(url: string): SocketHandle {
@@ -249,14 +302,21 @@ export function useSocket(url: string): SocketHandle {
     }
   }, []);
 
-  const subscribe = useCallback(((...args: [Listener] | [string, Listener]) => {
-    const [topic, fn] = args.length === 1 ? ["*", args[0]] : args;
-    const entry: TopicListener = { topic, fn };
-    listenersRef.current.add(entry);
-    return () => {
-      listenersRef.current.delete(entry);
-    };
-  }) as SubscribeFn, []);
+  const subscribe = useMemo(
+    () =>
+      Object.assign(
+        ((...args: [Listener] | [string, Listener]) => {
+          const [topic, fn] = args.length === 1 ? ["*", args[0]] : args;
+          const entry: TopicListener = { topic, fn: fn as UnknownListener };
+          listenersRef.current.add(entry);
+          return () => {
+            listenersRef.current.delete(entry);
+          };
+        }) as SocketSubscribe,
+        { supportsTopics: true as const },
+      ),
+    [],
+  );
 
   const manualReconnect = useCallback(() => {
     clearTimeout(reconnectTimer.current);

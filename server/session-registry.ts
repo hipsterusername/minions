@@ -23,6 +23,8 @@ import { getHarness } from "./harness/index.ts";
 import type { HarnessCapabilities } from "./harness/types.ts";
 import type { RuntimeSessionInfo, TaskManagerState } from "./task-tools.ts";
 import type { WorktreeLifecycle } from "./worktree-types.ts";
+import { applyLifecycleEvent, isTerminalTaskStatus } from "./task-lifecycle.ts";
+import { persistTaskState } from "./session-persist.ts";
 
 /** Compact shape broadcast to clients in `session_list` messages. */
 export interface SessionListItem {
@@ -200,6 +202,34 @@ export class SessionRegistry {
 
   // ── Snapshot helpers ───────────────────────────────
 
+  wakeWaitingLeaderIfAllChildrenTerminal = (leaderKey: string): void => {
+    const host = this.map.get(leaderKey);
+    if (!host?.taskState?.pendingWait || !this.deps) return;
+    const hasOpenChild = Array.from(host.taskState.tasks.values()).some(
+      (task) => task.executor === "minion" && !isTerminalTaskStatus(task.status),
+    );
+    if (hasOpenChild) return;
+    const wait = host.taskState.pendingWait;
+    host.clearWaitTimer();
+    host.taskState.pendingWait = null;
+    persistTaskState(host.id, host.taskState);
+    this.deps.bus.emitToSession(host.id, {
+      type: "wait_state",
+      sessionKey: host.id,
+      action: "completed",
+      reason: "All delegated child tasks reached a terminal state.",
+      timestamp: Date.now(),
+    });
+    this.deps.startChildSession({
+      sessionKey: host.id,
+      prompt: `Continue. All delegated child tasks reached terminal state while waiting (${wait.reason}). Pick up where you left off.`,
+      cwd: host.cwd,
+      resumeId: host.sessionId ?? undefined,
+      role: host.role,
+      harness: host.harnessName,
+    });
+  };
+
   /** Flatten the current registry into the `session_list` broadcast shape. */
   snapshot(): SessionListItem[] {
     return Array.from(this.map.entries()).map(([key, s]) => {
@@ -220,7 +250,10 @@ export class SessionRegistry {
         activeMinions: s.taskState
           ? Array.from(s.taskState.tasks.entries())
               .filter(
-                ([, t]) => t.status === "planned" || t.status === "running",
+                ([, t]) =>
+                  t.status === "planned" ||
+                  t.status === "starting" ||
+                  t.status === "running",
               )
               .map(([id, t]) => ({
                 taskId: id,
@@ -282,6 +315,19 @@ export class SessionRegistry {
         // via the schema default — no behaviour change for old DBs.
         host.harnessName = row.harness_name || "claude";
         host.taskState = tasks;
+        if (host.taskState && this.deps) {
+          for (const task of host.taskState.tasks.values()) {
+            if (task.status !== "running" && task.status !== "starting") continue;
+            applyLifecycleEvent({
+              bus: this.deps.bus,
+              leaderSessionKey: row.session_key,
+              taskState: host.taskState,
+              taskId: task.taskId,
+              event: { type: "rehydrated_orphan" },
+              onStateChange: (state) => persistTaskState(row.session_key, state),
+            });
+          }
+        }
         host.renderState = render;
         host.reasoningMapState = reasoningMap;
         // Restore the event buffer in place — using bufferEvent() here

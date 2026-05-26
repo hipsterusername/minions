@@ -83,7 +83,7 @@ export function initDb(dbPath?: string): Database.Database {
     );
 
     CREATE TABLE IF NOT EXISTS task_records (
-      task_id            TEXT PRIMARY KEY,
+      task_id            TEXT NOT NULL,
       leader_session_key TEXT NOT NULL,
       title              TEXT NOT NULL,
       description        TEXT NOT NULL DEFAULT '',
@@ -93,7 +93,8 @@ export function initDb(dbPath?: string): Database.Database {
       status             TEXT NOT NULL DEFAULT 'planned',
       result             TEXT,
       created_at         INTEGER NOT NULL,
-      completed_at       INTEGER
+      completed_at       INTEGER,
+      PRIMARY KEY (leader_session_key, task_id)
     );
     CREATE INDEX IF NOT EXISTS idx_task_records_leader ON task_records(leader_session_key);
 
@@ -151,6 +152,8 @@ export function initDb(dbPath?: string): Database.Database {
   // rows back-fill to "claude" via the column DEFAULT — exactly the behaviour
   // before this column existed.
   ensureColumn(db, "sessions", "harness_name", "TEXT NOT NULL DEFAULT 'claude'");
+  ensureTaskRecordsCompositePk(db);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_task_records_leader ON task_records(leader_session_key)");
 
   // Phase 3 migration: add schema_version to event_log if the column was
   // added after the table was first created. Existing rows pre-date Phase 3
@@ -166,6 +169,59 @@ export function initDb(dbPath?: string): Database.Database {
   }
 
   return db;
+}
+
+function ensureTaskRecordsCompositePk(db: Database.Database): void {
+  const rows = db.pragma("table_info(task_records)") as Array<{
+    name: string;
+    type: string;
+    pk: number;
+  }>;
+  const taskId = rows.find((r) => r.name === "task_id");
+  const leader = rows.find((r) => r.name === "leader_session_key");
+  if (taskId?.pk && leader?.pk) return;
+
+  const collision = db
+    .prepare(
+      `SELECT leader_session_key, task_id, COUNT(*) AS count
+       FROM task_records
+       GROUP BY leader_session_key, task_id
+       HAVING count > 1
+       LIMIT 1`,
+    )
+    .get() as { leader_session_key: string; task_id: string; count: number } | undefined;
+  if (collision) {
+    throw new Error(
+      `Cannot migrate task_records: duplicate task ${collision.task_id} for leader ${collision.leader_session_key}`,
+    );
+  }
+
+  db.exec(`
+    ALTER TABLE task_records RENAME TO task_records_legacy;
+    CREATE TABLE task_records (
+      task_id            TEXT NOT NULL,
+      leader_session_key TEXT NOT NULL,
+      title              TEXT NOT NULL,
+      description        TEXT NOT NULL DEFAULT '',
+      priority           TEXT NOT NULL DEFAULT 'medium',
+      executor           TEXT NOT NULL DEFAULT 'leader',
+      minion_session_key TEXT,
+      status             TEXT NOT NULL DEFAULT 'planned',
+      result             TEXT,
+      created_at         INTEGER NOT NULL,
+      completed_at       INTEGER,
+      PRIMARY KEY (leader_session_key, task_id)
+    );
+    INSERT INTO task_records (
+      task_id, leader_session_key, title, description, priority,
+      executor, minion_session_key, status, result, created_at, completed_at
+    )
+    SELECT
+      task_id, leader_session_key, title, description, priority,
+      executor, minion_session_key, status, result, created_at, completed_at
+    FROM task_records_legacy;
+    DROP TABLE task_records_legacy;
+  `);
 }
 
 /**

@@ -1,3 +1,5 @@
+import type { SocketSubscribe } from "./use-socket.ts";
+
 export interface Position {
   x: number;
   y: number;
@@ -141,7 +143,10 @@ export interface NodeRenderProps {
   isSelected: boolean;
   onUpdateData: (data: unknown) => void;
   socketSend?: ((data: unknown) => void) | undefined;
-  socketSubscribe?: ((fn: (msg: unknown) => void) => () => void) | undefined;
+  socketSubscribe?:
+    | SocketSubscribe
+    | ((fn: (msg: unknown) => void) => () => void)
+    | undefined;
   /** Returns text content from all context-protocol nodes connected to this node */
   getContextForNode?: (() => ContextItem[]) | undefined;
   projectPath?: string | undefined;
@@ -164,6 +169,12 @@ export interface NodeRenderProps {
   onSpawnLeaderChild?: ((event: RoutineLeaderSpawnEvent) => void) | undefined;
   /** Duplicate a Leader node's setup without prompt or chat history. */
   onDuplicateLeaderSetup?: (() => void) | undefined;
+  /** Save a Leader node's setup as a reusable preset. */
+  onSaveLeaderPreset?: ((input: {
+    name: string;
+    description?: string;
+    systemPromptPrefix?: string;
+  }) => boolean) | undefined;
   /** True when a compatible node is being dragged over this node (drop target) */
   isDropTarget?: boolean | undefined;
   /** True when this node is currently being dragged by the user */

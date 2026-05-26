@@ -189,6 +189,18 @@ describe("session-repo / task_records", () => {
     expect(got[0]?.completedAt).toBe(12345);
   });
 
+  it("allows the same taskId under different leader session keys", () => {
+    upsertTaskRecord(db, makeTaskRecord({ taskId: "shared", leaderSessionKey: "L1" }));
+    upsertTaskRecord(db, makeTaskRecord({ taskId: "shared", leaderSessionKey: "L2" }));
+
+    expect(getTaskRecordsForLeader(db, "L1").map((t) => t.taskId)).toEqual([
+      "shared",
+    ]);
+    expect(getTaskRecordsForLeader(db, "L2").map((t) => t.taskId)).toEqual([
+      "shared",
+    ]);
+  });
+
   it("groups tasks by leader session key", () => {
     upsertTaskRecord(db, makeTaskRecord({ taskId: "a", leaderSessionKey: "L1" }));
     upsertTaskRecord(db, makeTaskRecord({ taskId: "b", leaderSessionKey: "L1" }));
@@ -216,11 +228,13 @@ describe("session-repo / task_records", () => {
     expect(list.map((t) => t.taskId)).toEqual(["earlier", "later"]);
   });
 
-  it("deletes by taskId", () => {
+  it("deletes by leader key and taskId", () => {
     const rec = makeTaskRecord();
     upsertTaskRecord(db, rec);
-    deleteTaskRecord(db, rec.taskId);
+    upsertTaskRecord(db, makeTaskRecord({ ...rec, leaderSessionKey: "other" }));
+    deleteTaskRecord(db, rec.leaderSessionKey, rec.taskId);
     expect(getTaskRecordsForLeader(db, rec.leaderSessionKey)).toHaveLength(0);
+    expect(getTaskRecordsForLeader(db, "other")).toHaveLength(1);
   });
 });
 

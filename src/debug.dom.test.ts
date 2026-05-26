@@ -61,6 +61,27 @@ describe("debug flag", () => {
     setDebugEnabled(true);
     expect(fn).toHaveBeenCalledTimes(2); // unsub honored
   });
+
+  it("invalidates the cached flag on cross-tab storage changes", () => {
+    setDebugEnabled(true);
+    expect(isDebugEnabled()).toBe(true);
+    const fn = vi.fn();
+    const unsub = subscribeDebugFlag(fn);
+
+    window.localStorage.removeItem("minions:debug-mode");
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: "minions:debug-mode",
+        oldValue: "1",
+        newValue: null,
+        storageArea: window.localStorage,
+      }),
+    );
+
+    expect(isDebugEnabled()).toBe(false);
+    expect(fn).toHaveBeenCalledWith(false);
+    unsub();
+  });
 });
 
 describe("recorder", () => {

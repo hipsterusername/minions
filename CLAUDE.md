@@ -71,6 +71,7 @@ revert, or call it out in the PR with reasoning.
 | `pnpm typecheck` | Run before you commit. CI runs the same. |
 | `pnpm verify` | One-shot mirror of CI: `pnpm typecheck && pnpm typecheck:server && pnpm test:run && pnpm build`. Run before you push. |
 | `pnpm test:coverage` | Look at blind spots. Coverage is reported, not gated. |
+| `pnpm agent:preflight -- --checkpoint <label>` | Run before delegating code edits to another agent/minion. Confirms git metadata is writable, no patch rejects remain, and dirty work has an explicit recovery checkpoint. |
 | `prek run` | Local pre-commit gate (see `.pre-commit-config.yaml`). |
 
 The CI workflow (`.github/workflows/ci.yml`) runs the same commands as
@@ -89,6 +90,30 @@ prek install
 and `pnpm test:run` on commits that touch TS/TSX/JS/MJS files. It is
 intentionally cheap — the suite finishes in well under a second on a
 warm cache. Don't bypass it; if a hook fails, fix the cause.
+
+---
+
+## Delegating code edits to agents/minions
+
+This repo allows parallel agent work only when each worker has an isolated
+workspace or a clearly disjoint write set. Do not let a minion make code edits
+directly on the shared main worktree unless the leader has explicitly chosen to
+own the integration risk for that turn.
+
+Before assigning code-edit work:
+
+1. Create a recoverable checkpoint: commit, stash, or patch backup.
+2. Run `pnpm agent:preflight -- --checkpoint <label>`.
+3. Give the worker a narrow ownership boundary: files/modules it may edit.
+4. Tell the worker it is not alone in the codebase and must not revert others'
+   work.
+
+Workers must not run `git reset`, `git checkout --`, `git clean`, stash/drop,
+or commit on a shared branch. If a worker needs git operations, it needs its own
+worktree and should report changed paths back to the leader for integration.
+
+After a worker returns, the leader must inspect `git status --short` before
+continuing and reconcile any unexpected changes before starting another task.
 
 ---
 

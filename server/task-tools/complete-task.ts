@@ -4,8 +4,8 @@
 
 import { z } from "zod/v4";
 import type { NormalizedToolDef } from "../harness/types.ts";
-import type { TaskToolContext, TaskRecord } from "./types.ts";
-import { emitTaskPlanUpdate } from "./shared.ts";
+import type { TaskToolContext } from "./types.ts";
+import { applyLifecycleEvent, isTerminalTaskStatus } from "../task-lifecycle.ts";
 
 export function createCompleteTaskToolDef(ctx: TaskToolContext): NormalizedToolDef {
   return {
@@ -20,27 +20,21 @@ export function createCompleteTaskToolDef(ctx: TaskToolContext): NormalizedToolD
       const args = input as { taskId: string; result: string };
       const { taskId, result } = args;
 
-      let record = ctx.taskState.tasks.get(taskId);
+      const record = ctx.taskState.tasks.get(taskId);
 
       if (!record) {
-        // Auto-create if the leader completed something without pre-planning
-        record = {
-          taskId,
-          title: taskId,
-          description: "",
-          priority: "medium",
-          executor: "leader",
-          minionSessionKey: null,
-          leaderSessionKey: ctx.leaderSessionKey,
-          status: "planned",
-          createdAt: Date.now(),
-          completedAt: null,
-          result: null,
-        } satisfies TaskRecord;
-        ctx.taskState.tasks.set(taskId, record);
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Task ${taskId} does not exist. Register it with plan_task before completing it.`,
+            },
+          ],
+          isError: true,
+        };
       }
 
-      if (record.status === "completed" || record.status === "failed") {
+      if (isTerminalTaskStatus(record.status)) {
         return {
           content: [
             {
@@ -51,12 +45,14 @@ export function createCompleteTaskToolDef(ctx: TaskToolContext): NormalizedToolD
         };
       }
 
-      record.executor = "leader";
-      record.status = "completed";
-      record.completedAt = Date.now();
-      record.result = result;
-
-      emitTaskPlanUpdate(ctx.bus, ctx.leaderSessionKey, ctx.taskState, ctx.onStateChange);
+      applyLifecycleEvent({
+        bus: ctx.bus,
+        leaderSessionKey: ctx.leaderSessionKey,
+        taskState: ctx.taskState,
+        taskId,
+        event: { type: "leader_completed", result },
+        onStateChange: ctx.onStateChange,
+      });
 
       return {
         content: [

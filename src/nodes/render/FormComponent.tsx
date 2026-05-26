@@ -108,7 +108,6 @@ const inputStyle: React.CSSProperties = {
   borderRadius: 5,
   color: "var(--text-primary, #e0e0e0)",
   boxSizing: "border-box",
-  outline: "none",
 };
 
 const disabledStyle: React.CSSProperties = {
@@ -117,60 +116,125 @@ const disabledStyle: React.CSSProperties = {
   cursor: "not-allowed",
 };
 
+function fieldDescriptionId(field: FormField): string {
+  return `${field.id}-description`;
+}
+
+function fieldErrorId(field: FormField): string {
+  return `${field.id}-error`;
+}
+
+function fieldDescribedBy(field: FormField, error: string | null): string | undefined {
+  const ids: string[] = [];
+  if (field.description) ids.push(fieldDescriptionId(field));
+  if (error) ids.push(fieldErrorId(field));
+  return ids.length > 0 ? ids.join(" ") : undefined;
+}
+
+function fieldAriaProps(field: FormField, error: string | null) {
+  return {
+    "aria-describedby": fieldDescribedBy(field, error),
+    "aria-invalid": error ? true : undefined,
+    "aria-required": field.required ? true : undefined,
+  };
+}
+
+const fieldWrapperStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+};
+
+const fieldLabelStyle: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 600,
+  color: "var(--text-secondary, #aaa)",
+  letterSpacing: "0.02em",
+};
+
+function RequiredMarker() {
+  return (
+    <span
+      aria-hidden="true"
+      style={{ color: "var(--status-error, #e05252)", marginLeft: 3 }}
+    >
+      *
+    </span>
+  );
+}
+
 function FieldWrapper({
   field,
   error,
   children,
+  asFieldset = false,
 }: {
   field: FormField;
   error: string | null;
   children: React.ReactNode;
+  asFieldset?: boolean;
 }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <label
-        htmlFor={field.id}
+  const description = field.description && (
+    <div
+      id={fieldDescriptionId(field)}
+      style={{
+        fontSize: 10,
+        color: "var(--text-muted, #666)",
+        lineHeight: 1.5,
+      }}
+    >
+      {field.description}
+    </div>
+  );
+  const errorMessage = error && (
+    <div
+      id={fieldErrorId(field)}
+      role="alert"
+      style={{
+        fontSize: 10,
+        color: "var(--status-error, #e05252)",
+        marginTop: 2,
+      }}
+    >
+      {error}
+    </div>
+  );
+
+  if (asFieldset) {
+    return (
+      <fieldset
+        id={field.id}
+        aria-describedby={fieldDescribedBy(field, error)}
+        aria-invalid={error ? true : undefined}
+        aria-required={field.required ? true : undefined}
         style={{
-          fontSize: 11,
-          fontWeight: 600,
-          color: "var(--text-secondary, #aaa)",
-          letterSpacing: "0.02em",
+          ...fieldWrapperStyle,
+          margin: 0,
+          padding: 0,
+          border: "none",
+          minInlineSize: 0,
         }}
       >
+        <legend style={{ ...fieldLabelStyle, padding: 0 }}>
+          {field.label}
+          {field.required && <RequiredMarker />}
+        </legend>
+        {description}
+        {children}
+        {errorMessage}
+      </fieldset>
+    );
+  }
+
+  return (
+    <div style={fieldWrapperStyle}>
+      <label htmlFor={field.id} style={fieldLabelStyle}>
         {field.label}
-        {field.required && (
-          <span
-            aria-hidden="true"
-            style={{ color: "var(--status-error, #e05252)", marginLeft: 3 }}
-          >
-            *
-          </span>
-        )}
+        {field.required && <RequiredMarker />}
       </label>
-      {field.description && (
-        <div
-          style={{
-            fontSize: 10,
-            color: "var(--text-muted, #666)",
-            lineHeight: 1.5,
-          }}
-        >
-          {field.description}
-        </div>
-      )}
+      {description}
       {children}
-      {error && (
-        <div
-          role="alert"
-          style={{
-            fontSize: 10,
-            color: "var(--status-error, #e05252)",
-            marginTop: 2,
-          }}
-        >
-          {error}
-        </div>
-      )}
+      {errorMessage}
     </div>
   );
 }
@@ -198,6 +262,8 @@ function TextField({
         placeholder={field.placeholder}
         maxLength={field.maxLength}
         disabled={disabled}
+        required={field.required}
+        {...fieldAriaProps(field, error)}
         style={disabled ? disabledStyle : inputStyle}
       />
     </FieldWrapper>
@@ -226,6 +292,8 @@ function TextareaField({
         placeholder={field.placeholder}
         maxLength={field.maxLength}
         disabled={disabled}
+        required={field.required}
+        {...fieldAriaProps(field, error)}
         rows={4}
         style={{ ...( disabled ? disabledStyle : inputStyle), resize: "vertical" }}
       />
@@ -257,6 +325,8 @@ function NumberField({
         max={field.max}
         step={field.step}
         disabled={disabled}
+        required={field.required}
+        {...fieldAriaProps(field, error)}
         style={disabled ? disabledStyle : inputStyle}
       />
     </FieldWrapper>
@@ -284,6 +354,8 @@ function SelectField({
         value={String(value ?? "")}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
+        required={field.required}
+        {...fieldAriaProps(field, error)}
         style={disabled ? disabledStyle : inputStyle}
       >
         {!field.required && <option value="">— select —</option>}
@@ -322,7 +394,7 @@ function MultiselectField({
   }
 
   return (
-    <FieldWrapper field={field} error={error}>
+    <FieldWrapper field={field} error={error} asFieldset>
       <div
         style={{
           display: "flex",
@@ -356,6 +428,7 @@ function MultiselectField({
                 checked={checked}
                 onChange={() => toggle(val)}
                 disabled={disabled}
+                aria-describedby={fieldDescribedBy(field, error)}
                 style={{ accentColor: "var(--accent, #6c8ebf)" }}
               />
               {lbl}
@@ -393,6 +466,7 @@ function SliderField({
           max={field.max}
           step={field.step}
           disabled={disabled}
+          {...fieldAriaProps(field, error)}
           style={{
             flex: 1,
             accentColor: "var(--accent, #6c8ebf)",
@@ -447,6 +521,8 @@ function CheckboxField({
           checked={Boolean(value)}
           onChange={(e) => onChange(e.target.checked)}
           disabled={disabled}
+          required={field.required}
+          {...fieldAriaProps(field, error)}
           style={{ accentColor: "var(--accent, #6c8ebf)" }}
         />
         {field.description ?? field.label}
@@ -476,6 +552,8 @@ function DateField({
         value={String(value ?? "")}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
+        required={field.required}
+        {...fieldAriaProps(field, error)}
         style={disabled ? disabledStyle : inputStyle}
       />
     </FieldWrapper>
@@ -712,7 +790,7 @@ export function FormComponent({ component, onSubmit }: FormComponentProps) {
                 fontSize: 12,
                 fontWeight: 600,
                 background: "var(--accent, #6c8ebf)",
-                color: "#fff",
+                color: "var(--text-on-accent)",
                 border: "none",
                 borderRadius: 5,
                 cursor: "pointer",

@@ -15,7 +15,7 @@ import { registerNodeType } from "../node-registry.ts";
 import { CONTEXT_OUT_PORT, registerContract } from "../graph.ts";
 import type { NodeInterfaceContract } from "../graph.ts";
 import { flattenRenderStateToText, formatRenderComponentToText } from "../render-flatten.ts";
-import type { ServerMessage } from "../use-socket.ts";
+import { subscribeSocketTopic, type ServerMessage } from "../use-socket.ts";
 import { SimpleMarkdown } from "../components/SimpleMarkdown.tsx";
 import { ResizeHandle } from "../components/ResizeHandle.tsx";
 import type {
@@ -56,6 +56,7 @@ import {
   ImageRenderer,
   FilePreviewRenderer,
 } from "./render/ArtifactComponents.tsx";
+import { sessionTopic } from "../../shared/ws-envelope.ts";
 
 // ── Data shape ────────────────────────────────────────────
 
@@ -273,7 +274,7 @@ function ProgressBar({ c }: { c: ProgressComponent }) {
             width: `${pct}%`,
             background: isComplete
               ? color
-              : `linear-gradient(90deg, ${color}, color-mix(in srgb, ${color} 75%, white))`,
+              : `linear-gradient(90deg, ${color}, color-mix(in srgb, ${color} 75%, var(--bg-surface)))`,
             borderRadius: 3,
             transition: "width 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
             position: "relative",
@@ -2127,7 +2128,7 @@ export function injectStyles() {
       background: linear-gradient(
         90deg,
         transparent,
-        rgba(255,255,255,0.12),
+        color-mix(in srgb, var(--text-primary) 12%, transparent),
         transparent
       );
       animation: render-shimmer 2s ease-in-out infinite;
@@ -2288,7 +2289,7 @@ export function RenderNodeRenderer({
   useEffect(() => {
     if (!socketSubscribe || !data.leaderSessionKey) return;
 
-    return socketSubscribe((msg: unknown) => {
+    return subscribeSocketTopic(socketSubscribe, sessionTopic(data.leaderSessionKey), (msg: unknown) => {
       const serverMsg = msg as ServerMessage & {
         type: string;
         leaderSessionKey?: string;

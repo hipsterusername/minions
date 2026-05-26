@@ -5,10 +5,10 @@
 import { z } from "zod/v4";
 import type { NormalizedToolDef } from "../harness/types.ts";
 import type { TaskToolContext, TaskRecord } from "./types.ts";
-import { emitTaskPlanUpdate } from "./shared.ts";
 import { compileSkills, loadSkillsByIds } from "../skills.ts";
 import { readSettings } from "../project-store.ts";
 import { isValidThinkingConfig } from "../session-host-config.ts";
+import { applyLifecycleEvent, scheduleTaskTimeout } from "../task-lifecycle.ts";
 
 export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef {
   return {
@@ -71,12 +71,10 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
       const minionKey = `minion-${Date.now().toString(36)}-${taskId.slice(0, 8)}`;
 
       if (existing) {
-        // Transition pre-planned task to running
-        existing.executor = "minion";
-        existing.minionSessionKey = minionKey;
-        existing.status = "running";
+        existing.title = title;
+        existing.description = description;
+        existing.priority = priority;
       } else {
-        // Create and immediately delegate
         const record: TaskRecord = {
           taskId,
           title,
@@ -85,13 +83,31 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
           executor: "minion",
           minionSessionKey: minionKey,
           leaderSessionKey: ctx.leaderSessionKey,
-          status: "running",
+          status: "planned",
           createdAt: Date.now(),
           completedAt: null,
           result: null,
         };
         ctx.taskState.tasks.set(taskId, record);
       }
+
+      applyLifecycleEvent({
+        bus: ctx.bus,
+        leaderSessionKey: ctx.leaderSessionKey,
+        taskState: ctx.taskState,
+        taskId,
+        event: { type: "assigned", minionSessionKey: minionKey },
+        onStateChange: ctx.onStateChange,
+      });
+      scheduleTaskTimeout({
+        bus: ctx.bus,
+        leaderSessionKey: ctx.leaderSessionKey,
+        taskState: ctx.taskState,
+        taskId,
+        timeoutMs: ctx.taskTimeoutMs,
+        onStateChange: ctx.onStateChange,
+        onTimeout: () => ctx.terminateSession?.(minionKey, "abort"),
+      });
 
       // Arm the minion with any requested skills by appending their
       // compiled instructions to the minion's system prompt. Unknown
@@ -175,9 +191,6 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
         harness: minionHarness ?? null,
         timestamp: Date.now(),
       });
-
-      // Broadcast: full plan update so frontend reflects "running" status
-      emitTaskPlanUpdate(ctx.bus, ctx.leaderSessionKey, ctx.taskState, ctx.onStateChange);
 
       const armedNote =
         armedSkillIds.length > 0
