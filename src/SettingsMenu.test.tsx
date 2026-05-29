@@ -26,6 +26,7 @@ const CLAUDE_ENTRY: HarnessListEntry = {
   },
   builtInTools: [],
   models: [
+    { id: "claude-opus-4-8", label: "Opus 4.8" },
     { id: "claude-opus-4-7", label: "Opus 4.7" },
     { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
   ],
@@ -120,7 +121,7 @@ describe("SettingsMenu", () => {
   it("stores harness and concrete model when leader model changes", () => {
     const onChange = vi.fn();
     renderWithHarnesses([CLAUDE_ENTRY, CODEX_ENTRY], {
-      settings: { defaultLeaderHarness: "claude", defaultLeaderModel: "claude-opus-4-7" },
+      settings: { defaultLeaderHarness: "claude", defaultLeaderModel: "claude-opus-4-8" },
       onSettingsChange: onChange,
     });
 
@@ -148,7 +149,7 @@ describe("SettingsMenu", () => {
     renderWithHarnesses([CLAUDE_ENTRY, CODEX_ENTRY], {
       settings: {
         defaultLeaderHarness: "claude",
-        defaultLeaderModel: "claude-opus-4-7",
+        defaultLeaderModel: "claude-opus-4-8",
         defaultLeaderThinkingConfig: {
           enabled: true,
           effort: "high",

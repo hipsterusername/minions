@@ -135,7 +135,7 @@ export function initSidecar(projectPath: string): Database.Database {
     fs.writeFileSync(settingsPath, JSON.stringify({
       defaultModel: "claude-sonnet-4-6",
       defaultLeaderHarness: "claude",
-      defaultLeaderModel: "claude-opus-4-7",
+      defaultLeaderModel: "claude-opus-4-8",
       defaultLeaderThinkingConfig: DEFAULT_LEADER_THINKING_CONFIG,
       defaultMinionHarness: "claude",
       defaultMinionModel: "claude-sonnet-4-6",
@@ -196,7 +196,7 @@ function defaultProjectSettings(): ProjectSettings {
   return {
     defaultModel: "claude-sonnet-4-6",
     defaultLeaderHarness: "claude",
-    defaultLeaderModel: "claude-opus-4-7",
+    defaultLeaderModel: "claude-opus-4-8",
     defaultLeaderThinkingConfig: DEFAULT_LEADER_THINKING_CONFIG,
     defaultMinionHarness: "claude",
     defaultMinionModel: "claude-sonnet-4-6",

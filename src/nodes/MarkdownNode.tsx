@@ -6,6 +6,7 @@ import { registerContract } from "../graph.ts";
 import type { NodeInterfaceContract } from "../graph.ts";
 import { ResizeHandle } from "../components/ResizeHandle.tsx";
 import { MarkdownEditor } from "../components/MarkdownEditor.tsx";
+import { MarkdownPreview } from "../components/MarkdownPreview.tsx";
 import { getAuthToken } from "../api.ts";
 
 interface MarkdownData {
@@ -59,129 +60,6 @@ const MARKDOWN_CONTRACT: NodeInterfaceContract = {
 };
 
 registerContract(MARKDOWN_CONTRACT);
-
-// ── Simple markdown -> HTML ─────────────────────────────
-
-function renderMarkdown(src: string): string {
-  const escaped = src
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-
-  const lines = escaped.split("\n");
-  const html: string[] = [];
-  let inList = false;
-  let inOrderedList = false;
-  let inCodeBlock = false;
-
-  for (const line of lines) {
-    // Code fences
-    if (line.trimStart().startsWith("```")) {
-      if (inCodeBlock) {
-        html.push("</code></pre>");
-        inCodeBlock = false;
-      } else {
-        html.push('<pre class="md-code-block"><code>');
-        inCodeBlock = true;
-      }
-      continue;
-    }
-    if (inCodeBlock) {
-      html.push(line + "\n");
-      continue;
-    }
-
-    // Close lists if we leave list context
-    if (inList && !line.startsWith("- ")) {
-      html.push("</ul>");
-      inList = false;
-    }
-    if (inOrderedList && !/^\d+\.\s/.test(line)) {
-      html.push("</ol>");
-      inOrderedList = false;
-    }
-
-    if (line.startsWith("### ")) {
-      html.push(`<h5 class="md-h3">${inlineFormat(line.slice(4))}</h5>`);
-    } else if (line.startsWith("## ")) {
-      html.push(`<h4 class="md-h2">${inlineFormat(line.slice(3))}</h4>`);
-    } else if (line.startsWith("# ")) {
-      html.push(`<h3 class="md-h1">${inlineFormat(line.slice(2))}</h3>`);
-    } else if (line.startsWith("- ")) {
-      if (!inList) {
-        html.push('<ul class="md-list">');
-        inList = true;
-      }
-      html.push(`<li>${inlineFormat(line.slice(2))}</li>`);
-    } else if (/^\d+\.\s/.test(line)) {
-      if (!inOrderedList) {
-        html.push('<ol class="md-list">');
-        inOrderedList = true;
-      }
-      html.push(`<li>${inlineFormat(line.replace(/^\d+\.\s/, ""))}</li>`);
-    } else if (line.startsWith("&gt; ")) {
-      html.push(`<blockquote class="md-blockquote">${inlineFormat(line.slice(5))}</blockquote>`);
-    } else if (line.startsWith("---")) {
-      html.push('<hr class="md-hr">');
-    } else if (line.trim() === "") {
-      html.push('<div class="md-spacer"></div>');
-    } else {
-      html.push(`<p class="md-p">${inlineFormat(line)}</p>`);
-    }
-  }
-
-  if (inList) html.push("</ul>");
-  if (inOrderedList) html.push("</ol>");
-  if (inCodeBlock) html.push("</code></pre>");
-  return html.join("\n");
-}
-
-function inlineFormat(text: string): string {
-  return text
-    .replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong class="md-bold">$1</strong>')
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>");
-}
-
-/** Lightweight HTML sanitizer for our markdown output.
- * Only allows tags and attributes we explicitly generate. */
-function sanitizeHtml(html: string): string {
-  // Allowlist of tags we generate in renderMarkdown/inlineFormat
-  const ALLOWED_TAGS = new Set([
-    "h3", "h4", "h5", "p", "ul", "ol", "li", "blockquote", "hr",
-    "pre", "code", "strong", "em", "div", "a",
-  ]);
-  const ALLOWED_CLASSES = new Set([
-    "md-h1", "md-h2", "md-h3", "md-p", "md-list", "md-blockquote",
-    "md-hr", "md-code-block", "md-inline-code", "md-bold", "md-spacer",
-  ]);
-
-  // Strip any tag not in our allowlist
-  return html.replace(/<\/?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g, (match, tag) => {
-    const lowerTag = tag.toLowerCase();
-    if (!ALLOWED_TAGS.has(lowerTag)) return "";
-
-    // For closing tags, pass through as-is
-    if (match.startsWith("</")) return match;
-
-    // Extract class if present
-    const classMatch = match.match(/class="([^"]*)"/);
-    if (classMatch) {
-      const cls = classMatch[1];
-      if (cls && !ALLOWED_CLASSES.has(cls)) {
-        // Strip the class
-        return `<${lowerTag}>`;
-      }
-    }
-
-    // Strip all other attributes (href, onclick, style, etc.)
-    // except class on allowed tags
-    if (classMatch && ALLOWED_CLASSES.has(classMatch[1] ?? "")) {
-      return `<${lowerTag} class="${classMatch[1]}">`;
-    }
-    return `<${lowerTag}>`;
-  });
-}
 
 const COLLAPSED_HEIGHT = 38;
 
@@ -1766,13 +1644,10 @@ export function MarkdownNodeRenderer({
               />
             )}
             {showPreview && (
-              <div
+              <MarkdownPreview
+                content={data.content}
                 onMouseDown={(e) => e.stopPropagation()}
                 onDoubleClick={() => update({ viewMode: "edit" })}
-                dangerouslySetInnerHTML={{ __html: sanitizeHtml(renderMarkdown(data.content)) }}
-                className="md-preview"
-                data-no-drag
-                data-scroll-capture
               />
             )}
           </div>

@@ -2,22 +2,11 @@ import { Router } from "express";
 import type { Request, Response } from "express";
 import fs from "fs";
 import path from "path";
-import { validateProjectPath } from "../path-guard.ts";
-
-// ── Helpers ──────────────────────────────────────────────
-
-/**
- * Resolve and validate that a target path is safely within the project root.
- * Returns the resolved absolute path or null if it escapes the root.
- */
-function safePath(projectRoot: string, relative: string): string | null {
-  const resolved = path.resolve(projectRoot, relative);
-  const normalizedRoot = path.resolve(projectRoot);
-  if (!resolved.startsWith(normalizedRoot + path.sep) && resolved !== normalizedRoot) {
-    return null;
-  }
-  return resolved;
-}
+import {
+  resolveCreatableProjectPath,
+  resolveExistingProjectPath,
+  validateProjectPath,
+} from "../path-guard.ts";
 
 // ── Routes ──────────────────────────────────────────────
 
@@ -49,7 +38,7 @@ export function createFileRoutes(): Router {
       return;
     }
 
-    const resolved = safePath(validatedProject, filePath);
+    const resolved = await resolveCreatableProjectPath(validatedProject, filePath);
     if (!resolved) {
       res.status(403).json({ error: "Path escapes project root" });
       return;
@@ -95,7 +84,7 @@ export function createFileRoutes(): Router {
       return;
     }
 
-    const resolved = safePath(validatedProject, subPath);
+    const resolved = await resolveExistingProjectPath(validatedProject, subPath);
     if (!resolved) {
       res.status(403).json({ error: "Path escapes project root" });
       return;
@@ -154,7 +143,7 @@ export function createFileRoutes(): Router {
       return;
     }
 
-    const resolved = safePath(validatedProject, filePath);
+    const resolved = await resolveCreatableProjectPath(validatedProject, filePath);
     if (!resolved) {
       res.status(403).json({ error: "Path escapes project root" });
       return;
@@ -202,8 +191,8 @@ export function createFileRoutes(): Router {
       return;
     }
 
-    const resolvedFrom = safePath(validatedProject, fromPath);
-    const resolvedTo = safePath(validatedProject, toPath);
+    const resolvedFrom = await resolveCreatableProjectPath(validatedProject, fromPath);
+    const resolvedTo = await resolveCreatableProjectPath(validatedProject, toPath);
     if (!resolvedFrom || !resolvedTo) {
       res.status(403).json({ error: "Path escapes project root" });
       return;
@@ -252,7 +241,7 @@ export function createFileRoutes(): Router {
       return;
     }
 
-    const resolved = safePath(validatedProject, filePath);
+    const resolved = await resolveCreatableProjectPath(validatedProject, filePath);
     if (!resolved) {
       res.status(403).json({ error: "Path escapes project root" });
       return;
@@ -290,7 +279,7 @@ export function createFileRoutes(): Router {
       return;
     }
 
-    const resolved = safePath(validatedProject, dirPath);
+    const resolved = await resolveCreatableProjectPath(validatedProject, dirPath);
     if (!resolved) {
       res.status(403).json({ error: "Path escapes project root" });
       return;

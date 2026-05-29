@@ -4,6 +4,7 @@ import { registerNodeType } from "../node-registry.ts";
 import { registerContract, CONTEXT_OUT_PORT } from "../graph.ts";
 import type { NodeInterfaceContract } from "../graph.ts";
 import { ResizeHandle } from "../components/ResizeHandle.tsx";
+import { MarkdownPreview } from "../components/MarkdownPreview.tsx";
 import { getAuthToken } from "../api.ts";
 
 
@@ -64,84 +65,6 @@ function formatSize(bytes: number): string {
 }
 
 const MARKDOWN_EXTS = new Set(["md", "mdx"]);
-
-// ── Simple markdown → HTML ────────────────────────────
-
-function renderMarkdown(src: string): string {
-  const escaped = src
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-
-  const lines = escaped.split("\n");
-  const html: string[] = [];
-  let inList = false;
-  let inCodeBlock = false;
-
-  for (const line of lines) {
-    if (line.startsWith("```")) {
-      if (inCodeBlock) {
-        html.push("</code></pre>");
-        inCodeBlock = false;
-      } else {
-        inCodeBlock = true;
-        html.push(
-          '<pre style="background:var(--code-bg);padding:8px 10px;border-radius:4px;overflow-x:auto;margin:6px 0"><code>',
-        );
-      }
-      continue;
-    }
-    if (inCodeBlock) {
-      html.push(line + "\n");
-      continue;
-    }
-
-    if (inList && !line.startsWith("- ") && !line.startsWith("* ")) {
-      html.push("</ul>");
-      inList = false;
-    }
-
-    if (line.startsWith("### ")) {
-      html.push(`<h5 style="margin:10px 0 4px">${inlineFmt(line.slice(4))}</h5>`);
-    } else if (line.startsWith("## ")) {
-      html.push(`<h4 style="margin:12px 0 4px">${inlineFmt(line.slice(3))}</h4>`);
-    } else if (line.startsWith("# ")) {
-      html.push(`<h3 style="margin:14px 0 6px">${inlineFmt(line.slice(2))}</h3>`);
-    } else if (line.startsWith("- ") || line.startsWith("* ")) {
-      if (!inList) {
-        html.push('<ul style="margin:4px 0;padding-left:20px">');
-        inList = true;
-      }
-      html.push(`<li>${inlineFmt(line.slice(2))}</li>`);
-    } else if (line.startsWith("> ")) {
-      html.push(
-        `<blockquote style="border-left:3px solid var(--text-muted);margin:4px 0;padding:2px 10px;opacity:0.8">${inlineFmt(line.slice(2))}</blockquote>`,
-      );
-    } else if (line.trim() === "") {
-      html.push("<br>");
-    } else {
-      html.push(`<p style="margin:4px 0">${inlineFmt(line)}</p>`);
-    }
-  }
-
-  if (inList) html.push("</ul>");
-  if (inCodeBlock) html.push("</code></pre>");
-  return html.join("\n");
-}
-
-function inlineFmt(text: string): string {
-  return text
-    .replace(
-      /`([^`]+)`/g,
-      '<code style="background:var(--code-bg);padding:1px 4px;border-radius:3px;font-size:0.9em">$1</code>',
-    )
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-    .replace(
-      /\[([^\]]+)\]\(([^)]+)\)/g,
-      '<a href="$2" style="color:var(--accent)">$1</a>',
-    );
-}
 
 // ── Line-numbered code view ───────────────────────────
 
@@ -531,7 +454,6 @@ function FileViewerNodeRenderer({
           <StatusMsg>No file selected</StatusMsg>
         ) : isMarkdown ? (
           <div
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
             style={{
               padding: "12px 16px",
               color: "var(--text-primary)",
@@ -539,7 +461,12 @@ function FileViewerNodeRenderer({
               fontFamily: "var(--font-sans)",
               lineHeight: 1.6,
             }}
-          />
+          >
+            <MarkdownPreview
+              content={content}
+              className="md-preview file-viewer-markdown"
+            />
+          </div>
         ) : (
           <CodeView content={content} />
         )}

@@ -103,7 +103,7 @@ function SettingsPopover({
   );
   const leaderSelection = resolveModelSelection(
     settings.defaultLeaderHarness ?? "claude",
-    settings.defaultLeaderModel ?? settings.defaultModel ?? "claude-opus-4-7",
+    settings.defaultLeaderModel ?? settings.defaultModel ?? "claude-opus-4-8",
     modelGroups,
   );
   const minionSelection = resolveModelSelection(
@@ -443,6 +443,12 @@ const FALLBACK_MODEL_GROUPS: ModelGroup[] = [
     label: "Anthropic",
     options: [
       {
+        value: "claude::claude-opus-4-8",
+        label: "Opus 4.8",
+        model: "claude-opus-4-8",
+        harness: "claude",
+      },
+      {
         value: "claude::claude-opus-4-7",
         label: "Opus 4.7",
         model: "claude-opus-4-7",
@@ -465,8 +471,8 @@ const FALLBACK_MODEL_GROUPS: ModelGroup[] = [
 ];
 
 const LEGACY_MODEL_ALIASES: Record<string, string> = {
-  opus: "claude-opus-4-7",
-  "opus-old": "claude-opus-4-6",
+  opus: "claude-opus-4-8",
+  "opus-old": "claude-opus-4-7",
   sonnet: "claude-sonnet-4-6",
   haiku: "claude-haiku-4-5",
   "gpt-5": "gpt-5.5",

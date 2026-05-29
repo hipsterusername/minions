@@ -2,7 +2,10 @@ import type { Router } from "express";
 import type { Request, Response } from "express";
 import fs from "fs";
 import path from "path";
-import { validateProjectPath } from "../../path-guard.ts";
+import {
+  resolveExistingProjectPath,
+  validateProjectPath,
+} from "../../path-guard.ts";
 import { decodePath, param } from "./helpers.ts";
 
 /** Directories/files to always skip in listings */
@@ -28,7 +31,7 @@ const BLOB_MIME_TYPES: Record<string, string> = {
 
 export function mountFileRoutes(router: Router): void {
   // ── File read ────────────────────────────────────────
-  router.get("/:encodedPath/file", (req: Request, res: Response) => {
+  router.get("/:encodedPath/file", async (req: Request, res: Response) => {
     const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
     if (!projectPath) {
       res.status(403).json({ error: "Project path not registered or outside home directory" });
@@ -41,9 +44,8 @@ export function mountFileRoutes(router: Router): void {
       return;
     }
 
-    // Prevent path traversal
-    const resolved = path.resolve(projectPath, relFile);
-    if (!resolved.startsWith(projectPath + path.sep) && resolved !== projectPath) {
+    const resolved = await resolveExistingProjectPath(projectPath, relFile);
+    if (!resolved) {
       res.status(403).json({ error: "Path traversal not allowed" });
       return;
     }
@@ -84,7 +86,7 @@ export function mountFileRoutes(router: Router): void {
   // content like PNG/JPEG. /blob streams the raw bytes with a best-effort
   // Content-Type so the client can wrap the response in a Blob/File and
   // hand it to the image-loader pipeline (downscale, decode, annotate).
-  router.get("/:encodedPath/blob", (req: Request, res: Response) => {
+  router.get("/:encodedPath/blob", async (req: Request, res: Response) => {
     const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
     if (!projectPath) {
       res.status(403).json({ error: "Project path not registered or outside home directory" });
@@ -97,8 +99,8 @@ export function mountFileRoutes(router: Router): void {
       return;
     }
 
-    const resolved = path.resolve(projectPath, relFile);
-    if (!resolved.startsWith(projectPath + path.sep) && resolved !== projectPath) {
+    const resolved = await resolveExistingProjectPath(projectPath, relFile);
+    if (!resolved) {
       res.status(403).json({ error: "Path traversal not allowed" });
       return;
     }
@@ -142,7 +144,7 @@ export function mountFileRoutes(router: Router): void {
   });
 
   // ── Directory listing (for file browser) ────────────
-  router.get("/:encodedPath/ls", (req: Request, res: Response) => {
+  router.get("/:encodedPath/ls", async (req: Request, res: Response) => {
     const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
     if (!projectPath) {
       res.status(403).json({ error: "Project path not registered or outside home directory" });
@@ -150,8 +152,8 @@ export function mountFileRoutes(router: Router): void {
     }
     const relDir = (req.query["path"] as string) || "";
 
-    const resolved = path.resolve(projectPath, relDir);
-    if (!resolved.startsWith(projectPath + path.sep) && resolved !== projectPath) {
+    const resolved = await resolveExistingProjectPath(projectPath, relDir);
+    if (!resolved) {
       res.status(403).json({ error: "Path traversal not allowed" });
       return;
     }
@@ -181,7 +183,7 @@ export function mountFileRoutes(router: Router): void {
   });
 
   // ── Directory tree (high-level) ──────────────────────
-  router.get("/:encodedPath/tree", (req: Request, res: Response) => {
+  router.get("/:encodedPath/tree", async (req: Request, res: Response) => {
     const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
     if (!projectPath) {
       res.status(403).json({ error: "Project path not registered or outside home directory" });
@@ -189,6 +191,11 @@ export function mountFileRoutes(router: Router): void {
     }
     const depthParam = req.query["depth"];
     const maxDepth = typeof depthParam === "string" ? Math.min(parseInt(depthParam, 10) || 2, 4) : 2;
+    const rootPath = await resolveExistingProjectPath(projectPath, ".");
+    if (!rootPath) {
+      res.status(403).json({ error: "Path traversal not allowed" });
+      return;
+    }
 
     interface TreeNode {
       name: string;
@@ -227,7 +234,7 @@ export function mountFileRoutes(router: Router): void {
     }
 
     try {
-      const tree = scanDir(projectPath, "", 0);
+      const tree = scanDir(rootPath, "", 0);
       res.json({ root: path.basename(projectPath), tree });
     } catch (err) {
       res.status(500).json({ error: "Failed to scan directory" });

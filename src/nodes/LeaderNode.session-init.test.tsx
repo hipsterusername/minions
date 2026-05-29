@@ -25,9 +25,14 @@
 
 import { act, render } from "@testing-library/react";
 import { useState } from "react";
-import { describe, expect, it, beforeAll } from "vitest";
+import { describe, expect, it, beforeAll, beforeEach } from "vitest";
 
-import { LeaderNodeRenderer, type LeaderData } from "./LeaderNode.tsx";
+import {
+  LeaderNodeRenderer,
+  claimLeaderAutoStart,
+  resetLeaderAutoStartClaimsForTests,
+  type LeaderData,
+} from "./LeaderNode.tsx";
 import type { CanvasNode, NodeRenderProps } from "../types.ts";
 import { DEFAULT_THINKING_CONFIG } from "../types.ts";
 import type { ServerMessage } from "../use-socket.ts";
@@ -41,6 +46,10 @@ beforeAll(() => {
       disconnect(): void {}
     } as unknown as typeof ResizeObserver;
   }
+});
+
+beforeEach(() => {
+  resetLeaderAutoStartClaimsForTests();
 });
 
 function disconnectedLeaderData(overrides: Partial<LeaderData> = {}): LeaderData {
@@ -145,6 +154,12 @@ function buildInitMessages(sessionKey: string): ServerMessage[] {
 }
 
 describe("LeaderNode: new-session initiation", () => {
+  it("dedupes rapid auto-start claims for the same node and prompt", () => {
+    expect(claimLeaderAutoStart("leader-node", "run it", 1000)).toBe(true);
+    expect(claimLeaderAutoStart("leader-node", "run it", 1001)).toBe(false);
+    expect(claimLeaderAutoStart("leader-node", "run it", 12_001)).toBe(true);
+  });
+
   it("walks disconnected → creating → running → idle and renders the user prompt + reply", async () => {
     const { socket, replay } = createReplaySocket();
     const states: LeaderData[] = [];

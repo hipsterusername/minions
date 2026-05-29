@@ -44,6 +44,16 @@ export const createSession: CommandHandler = (
   cmd,
   ws,
 ) => {
+  const key = cmd.sessionKey ?? ctx.generateKey();
+
+  // create_session is frequently sent from UI effects. Treat a repeated key
+  // as an idempotent acknowledgement instead of re-entering SessionHost.start(),
+  // which would open another SDK query for the same logical session.
+  if (cmd.sessionKey && ctx.registry.get(key)) {
+    unicastToSession(ws, key, { type: "session_created", sessionKey: key });
+    return;
+  }
+
   if (ctx.registry.activeCount() >= ctx.maxSessions) {
     rejectCreate(
       ws,
@@ -52,7 +62,6 @@ export const createSession: CommandHandler = (
     );
     return;
   }
-  const key = cmd.sessionKey ?? ctx.generateKey();
   const rawCwd = cmd.cwd ?? process.cwd();
   const cwd = validateSessionCwd(rawCwd);
   if (!cwd) {

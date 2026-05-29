@@ -50,6 +50,12 @@ import { usePreventBrowserZoom } from "./use-prevent-browser-zoom.ts";
 
 const WS_URL = `ws://localhost:${import.meta.env["VITE_SERVER_PORT"] ?? "3141"}`;
 const PROJECT_HEADER_HEIGHT = 44;
+const DEFAULT_DOCUMENT_TITLE = "Minions";
+
+export function formatProjectDocumentTitle(projectName: string): string {
+  const name = projectName.trim();
+  return name ? `${name} (Minions)` : DEFAULT_DOCUMENT_TITLE;
+}
 
 /**
  * Sanitize nodes loaded from persistence — reset transient session state
@@ -133,7 +139,7 @@ function ProjectView({
     y: 0,
     scale: 1,
   });
-  const [projectName, setProjectName] = useState("Loading...");
+  const [projectName, setProjectName] = useState("");
   const [projectSettings, setProjectSettings] = useState<ProjectSettings>({});
   const [loaded, setLoaded] = useState(false);
   // Loader-overlay state machine: the LeaderLoadingScreen plays its
@@ -158,6 +164,13 @@ function ProjectView({
     routinesFlagStore.getSnapshot,
     routinesFlagStore.getSnapshot,
   );
+
+  useEffect(() => {
+    document.title = formatProjectDocumentTitle(projectName);
+    return () => {
+      document.title = DEFAULT_DOCUMENT_TITLE;
+    };
+  }, [projectName]);
 
   // Load project from API
   useEffect(() => {
@@ -240,7 +253,7 @@ function ProjectView({
         totalCost: 0,
         turns: 0,
         error: null,
-        model: projectSettings.defaultLeaderModel ?? projectSettings.defaultModel ?? "claude-opus-4-7",
+        model: projectSettings.defaultLeaderModel ?? projectSettings.defaultModel ?? "claude-opus-4-8",
         permissionMode: projectSettings.defaultPermissionMode ?? "auto",
         harness: projectSettings.defaultLeaderHarness ?? "claude",
         thinkingConfig: {
@@ -331,7 +344,7 @@ function ProjectView({
         totalCost: 0,
         turns: 0,
         error: null,
-        model: projectSettings.defaultLeaderModel ?? projectSettings.defaultModel ?? "claude-opus-4-7",
+        model: projectSettings.defaultLeaderModel ?? projectSettings.defaultModel ?? "claude-opus-4-8",
         permissionMode: projectSettings.defaultPermissionMode ?? "auto",
         harness: projectSettings.defaultLeaderHarness ?? "claude",
         thinkingConfig: {

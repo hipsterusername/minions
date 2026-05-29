@@ -21,6 +21,22 @@ function nextBannerId(): string {
   return `sb-${bannerIdCounter}`;
 }
 
+function formatRateLimitMessage(event: Extract<NormalizedEvent, { kind: "rate_limit" }>): string {
+  const waitSec = event.retryAfterMs > 0 ? Math.ceil(event.retryAfterMs / 1000) : 0;
+  const waitText = waitSec > 0 ? `resuming in ${waitSec}s` : "";
+  if (event.resetAtMs && Number.isFinite(event.resetAtMs)) {
+    const resetAt = new Date(event.resetAtMs).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZoneName: "short",
+    });
+    return `Rate limited until ${resetAt}${waitText ? ` (${waitText})` : ""}`;
+  }
+  return `Rate limited${waitText ? `. ${waitText}` : ""}`;
+}
+
 // ── Banner config per kind ──────────────────────────────
 
 const BANNER_CONFIG: Record<
@@ -59,11 +75,10 @@ export function classifyNormalizedEvent(event: NormalizedEvent): StatusBannerIte
   const now = Date.now();
 
   if (event.kind === "rate_limit") {
-    const waitSec = event.retryAfterMs > 0 ? Math.ceil(event.retryAfterMs / 1000) : 0;
     return {
       id: nextBannerId(),
       kind: "rate_limit",
-      message: `Rate limited${waitSec > 0 ? `. Resuming in ${waitSec}s` : ""}`,
+      message: formatRateLimitMessage(event),
       timestamp: now,
       ttl: event.retryAfterMs > 0 ? event.retryAfterMs + 2000 : 30000,
     };

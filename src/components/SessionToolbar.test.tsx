@@ -36,6 +36,7 @@ const CLAUDE_ENTRY: HarnessListEntry = {
   },
   builtInTools: ["Read", "Bash"],
   models: [
+    { id: "claude-opus-4-8", label: "Opus 4.8" },
     { id: "claude-opus-4-7", label: "Opus 4.7" },
     { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
   ],
@@ -160,8 +161,8 @@ describe("SessionToolbar — model selection picker", () => {
       { sessionKey: null, harness: "claude", model: "claude-sonnet-4-6" },
     );
     fireEvent.click(screen.getByTitle("Model selection"));
-    fireEvent.click(screen.getByRole("button", { name: /Opus 4.7/ }));
-    expect(props.onModelChange).toHaveBeenCalledWith("claude-opus-4-7");
+    fireEvent.click(screen.getByRole("button", { name: /Opus 4.8/ }));
+    expect(props.onModelChange).toHaveBeenCalledWith("claude-opus-4-8");
     expect(props.onHarnessChange).not.toHaveBeenCalled();
   });
 
@@ -172,7 +173,7 @@ describe("SessionToolbar — model selection picker", () => {
     );
     fireEvent.click(screen.getByTitle("Model selection"));
 
-    expect(screen.getByRole("button", { name: /Opus 4.7/ })).not.toHaveTextContent("Frontier");
+    expect(screen.getByRole("button", { name: /Opus 4.8/ })).not.toHaveTextContent("Frontier");
     expect(screen.getByRole("button", { name: /GPT-5.5/ })).not.toHaveTextContent("General");
   });
 
@@ -275,7 +276,7 @@ describe("SessionToolbar — harness-aware models", () => {
   it("keeps Claude models selectable only when the active harness is Claude", () => {
     renderWithHarnesses(
       [CLAUDE_ENTRY, CODEX_ENTRY],
-      { sessionKey: "leader-1", harness: "claude", model: "claude-opus-4-7" },
+      { sessionKey: "leader-1", harness: "claude", model: "claude-opus-4-8" },
     );
     fireEvent.click(screen.getByTitle("Model selection"));
     expect(screen.getByRole("button", { name: /Sonnet 4.6/ })).toBeEnabled();

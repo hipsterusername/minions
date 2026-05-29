@@ -6,9 +6,24 @@
  * cross-test pollution.
  */
 
-import { describe, it, expect } from "vitest";
+import { afterAll, beforeAll, describe, it, expect, vi } from "vitest";
+import fs from "fs";
 import os from "os";
 import path from "path";
+
+const { FAKE_HOME } = vi.hoisted(() => ({
+  FAKE_HOME: `/tmp/minions-fakehome-path-guard-${process.pid}`,
+}));
+
+vi.mock("os", async () => {
+  const actual = await vi.importActual<typeof import("os")>("os");
+  return {
+    ...actual,
+    default: { ...actual, homedir: () => FAKE_HOME },
+    homedir: () => FAKE_HOME,
+  };
+});
+
 import {
   isUnderHomeDir,
   registerProjectPath,
@@ -17,12 +32,28 @@ import {
   unregisterProjectPath,
   validateSessionCwd,
   rehydrateFromPaths,
+  resolveCreatableProjectPath,
+  resolveExistingProjectPath,
 } from "./path-guard.ts";
+
+beforeAll(() => {
+  fs.mkdirSync(FAKE_HOME, { recursive: true });
+});
+
+afterAll(() => {
+  fs.rmSync(FAKE_HOME, { recursive: true, force: true });
+});
 
 /** Build a unique path under home that does not need to exist on disk. */
 function uniqueHomePath(label: string): string {
   const tag = `${label}-${Math.random().toString(36).slice(2)}`;
   return path.join(os.homedir(), ".canvas-test-guard", tag);
+}
+
+function uniqueProject(label: string): string {
+  const project = uniqueHomePath(label);
+  fs.mkdirSync(project, { recursive: true });
+  return project;
 }
 
 describe("isUnderHomeDir", () => {
@@ -58,6 +89,17 @@ describe("registerProjectPath", () => {
     const registered = registerProjectPath(p);
     expect(registered).not.toBeNull();
     expect(isRegisteredProject(p)).toBe(true);
+  });
+
+  it("rejects a project path whose realpath escapes the home directory", () => {
+    const outside = fs.mkdtempSync(path.join("/tmp", "path-guard-outside-root-"));
+    const linkedProject = uniqueHomePath("linked-project");
+    fs.mkdirSync(path.dirname(linkedProject), { recursive: true });
+    fs.symlinkSync(outside, linkedProject, "dir");
+
+    expect(registerProjectPath(linkedProject)).toBeNull();
+
+    fs.rmSync(outside, { recursive: true, force: true });
   });
 });
 
@@ -123,5 +165,70 @@ describe("validateSessionCwd", () => {
 
   it("rejects a path outside the home directory", () => {
     expect(validateSessionCwd("/var/run/something")).toBeNull();
+  });
+});
+
+describe("resolveExistingProjectPath", () => {
+  it("resolves an existing file inside the real project root", async () => {
+    const project = uniqueProject("existing-file");
+    fs.writeFileSync(path.join(project, "README.md"), "ok");
+
+    await expect(resolveExistingProjectPath(project, "README.md")).resolves.toBe(
+      path.join(project, "README.md"),
+    );
+  });
+
+  it("allows symlinks that resolve inside the project root", async () => {
+    const project = uniqueProject("inside-symlink");
+    fs.writeFileSync(path.join(project, "target.txt"), "ok");
+    fs.symlinkSync("target.txt", path.join(project, "linked.txt"));
+
+    await expect(resolveExistingProjectPath(project, "linked.txt")).resolves.toBe(
+      path.join(project, "linked.txt"),
+    );
+  });
+
+  it("rejects symlinks whose final target escapes the project root", async () => {
+    const project = uniqueProject("outside-symlink");
+    const outsideDir = fs.mkdtempSync(path.join("/tmp", "path-guard-outside-read-"));
+    const outsideFile = path.join(outsideDir, "secret.txt");
+    fs.writeFileSync(outsideFile, "secret");
+    fs.symlinkSync(outsideFile, path.join(project, "linked-secret.txt"));
+
+    await expect(resolveExistingProjectPath(project, "linked-secret.txt")).resolves.toBeNull();
+
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+  });
+});
+
+describe("resolveCreatableProjectPath", () => {
+  it("resolves a missing file below an existing in-project parent", async () => {
+    const project = uniqueProject("creatable-file");
+
+    await expect(resolveCreatableProjectPath(project, "nested/new.txt")).resolves.toBe(
+      path.join(project, "nested", "new.txt"),
+    );
+  });
+
+  it("rejects a symlink parent that resolves outside the project root", async () => {
+    const project = uniqueProject("creatable-parent-symlink");
+    const outsideDir = fs.mkdtempSync(path.join("/tmp", "path-guard-outside-parent-"));
+    fs.symlinkSync(outsideDir, path.join(project, "outside"));
+
+    await expect(resolveCreatableProjectPath(project, "outside/new.txt")).resolves.toBeNull();
+
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+  });
+
+  it("rejects a symlink final target for write-like operations", async () => {
+    const project = uniqueProject("creatable-final-symlink");
+    const outsideDir = fs.mkdtempSync(path.join("/tmp", "path-guard-outside-write-"));
+    const outsideFile = path.join(outsideDir, "secret.txt");
+    fs.writeFileSync(outsideFile, "secret");
+    fs.symlinkSync(outsideFile, path.join(project, "linked-secret.txt"));
+
+    await expect(resolveCreatableProjectPath(project, "linked-secret.txt")).resolves.toBeNull();
+
+    fs.rmSync(outsideDir, { recursive: true, force: true });
   });
 });

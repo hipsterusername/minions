@@ -218,8 +218,15 @@ function translateResult(msg: ResultLike): NormalizedEvent[] {
 
 function translateRateLimit(msg: RateLimitLike): NormalizedEvent[] {
   const resetsAt = msg.rate_limit_info?.resetsAt;
-  const retryAfterMs = resetsAt ? Math.max(0, resetsAt * 1000 - Date.now()) : 0;
-  return [{ kind: "rate_limit", retryAfterMs }];
+  const resetAtMs = resetsAt ? resetsAt * 1000 : undefined;
+  const retryAfterMs = resetAtMs ? Math.max(0, resetAtMs - Date.now()) : 0;
+  return [
+    {
+      kind: "rate_limit",
+      retryAfterMs,
+      ...(resetAtMs !== undefined ? { resetAtMs } : {}),
+    },
+  ];
 }
 
 function usageFromRaw(u: RawUsage, costUSD: number | undefined): NormalizedEvent {

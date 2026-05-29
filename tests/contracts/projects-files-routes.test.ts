@@ -114,6 +114,18 @@ describe("GET /file — read file", () => {
     expect(res.status).toBe(403);
   });
 
+  it("rejects a symlink whose file target escapes the project root", async () => {
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "projects-files-outside-read-"));
+    const outsideFile = path.join(outsideDir, "secret.txt");
+    fs.writeFileSync(outsideFile, "secret");
+    fs.symlinkSync(outsideFile, path.join(project, "linked-secret.txt"));
+
+    const res = await fetch(`${baseUrl}/${encoded}/file?path=linked-secret.txt`);
+    expect(res.status).toBe(403);
+
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+  });
+
   it("returns 400 when target is a directory, not a file", async () => {
     fs.mkdirSync(path.join(project, "subdir"));
     const res = await fetch(`${baseUrl}/${encoded}/file?path=subdir`);
@@ -168,6 +180,18 @@ describe("GET /blob — binary file read", () => {
     expect(res.status).toBe(403);
   });
 
+  it("rejects a symlink whose binary target escapes the project root", async () => {
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "projects-files-outside-blob-"));
+    const outsideFile = path.join(outsideDir, "secret.png");
+    fs.writeFileSync(outsideFile, Buffer.from([1, 2, 3]));
+    fs.symlinkSync(outsideFile, path.join(project, "linked-secret.png"));
+
+    const res = await fetch(`${baseUrl}/${encoded}/blob?path=linked-secret.png`);
+    expect(res.status).toBe(403);
+
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+  });
+
   it("returns 400 when target is a directory, not a file", async () => {
     fs.mkdirSync(path.join(project, "imgdir"));
     const res = await fetch(`${baseUrl}/${encoded}/blob?path=imgdir`);
@@ -202,6 +226,16 @@ describe("GET /ls — directory listing", () => {
       `${baseUrl}/${encoded}/ls?path=${encodeURIComponent("../..")}`,
     );
     expect(res.status).toBe(403);
+  });
+
+  it("rejects listing a symlinked directory outside the project root", async () => {
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "projects-files-outside-ls-"));
+    fs.symlinkSync(outsideDir, path.join(project, "outside"));
+
+    const res = await fetch(`${baseUrl}/${encoded}/ls?path=outside`);
+    expect(res.status).toBe(403);
+
+    fs.rmSync(outsideDir, { recursive: true, force: true });
   });
 
   it("returns 404 when the listed path is not a directory", async () => {
@@ -265,5 +299,20 @@ describe("GET /tree — recursive listing", () => {
     unregisterProjectPath(project);
     const res = await fetch(`${baseUrl}/${encoded}/tree`);
     expect(res.status).toBe(403);
+  });
+
+  it("does not include symlinked directories that point outside the project root", async () => {
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "projects-files-outside-tree-"));
+    fs.writeFileSync(path.join(outsideDir, "secret.txt"), "secret");
+    fs.symlinkSync(outsideDir, path.join(project, "outside"));
+
+    const res = await fetch(`${baseUrl}/${encoded}/tree`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      tree: Array<{ name: string }>;
+    };
+    expect(body.tree.some((entry) => entry.name === "outside")).toBe(false);
+
+    fs.rmSync(outsideDir, { recursive: true, force: true });
   });
 });
