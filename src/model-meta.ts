@@ -6,7 +6,7 @@
  * harness-aware: a `HarnessInfo` argument lets non-Claude harnesses
  * declare whether thinking is supported at all and which effort levels
  * apply, while preserving the existing per-model gating Claude needs
- * (Haiku has no thinking; Opus 4.7 supports xhigh/max).
+ * (Haiku has no thinking; Opus 4.8 supports xhigh/max).
  *
  * Source for Claude entries: the Anthropic adaptive-thinking docs and
  * `ModelInfo` in the Claude Agent SDK. Codex entries follow the
@@ -44,13 +44,17 @@ const CLAUDE_MODEL_CAPABILITIES: Record<string, ModelCapability> = {
   },
   "opus-old": {
     supportsAdaptiveThinking: true,
-    supportedEffortLevels: STANDARD_EFFORTS,
+    supportedEffortLevels: OPUS_EFFORTS,
   },
   haiku: {
     supportsAdaptiveThinking: false,
     supportedEffortLevels: [],
   },
   // Concrete model ids (matching `staticInfo().models`).
+  "claude-opus-4-8": {
+    supportsAdaptiveThinking: true,
+    supportedEffortLevels: OPUS_EFFORTS,
+  },
   "claude-opus-4-7": {
     supportsAdaptiveThinking: true,
     supportedEffortLevels: OPUS_EFFORTS,

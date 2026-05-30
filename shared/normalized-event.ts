@@ -48,7 +48,7 @@ export type NormalizedEvent =
   /** The harness was denied permission to run a tool. */
   | { kind: "permission_denial"; tool: string; reason: string }
   /** Rate limit hit; caller should back off by `retryAfterMs`. */
-  | { kind: "rate_limit"; retryAfterMs: number; message?: string }
+  | { kind: "rate_limit"; retryAfterMs: number; resetAtMs?: number; message?: string }
   /** Transient API error retried by the harness. */
   | { kind: "api_retry"; attempt: number; reason: string }
   /** Session complete. Final event. */

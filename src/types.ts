@@ -96,7 +96,7 @@ export interface ContextItem {
 
 // ── Adaptive thinking ────────────────────────────────────
 //
-// On Opus 4.7 adaptive is the *only* supported thinking mode and
+// On Opus 4.8 adaptive is the *only* supported thinking mode and
 // thinking.display defaults to "omitted" (so thinking blocks come
 // back empty unless we explicitly opt into "summarized"). On 4.6
 // and Sonnet 4.6 adaptive is recommended; on older models it is
@@ -104,7 +104,7 @@ export interface ContextItem {
 // Messages API.
 //
 // We deliberately do not expose budget_tokens / maxThinkingTokens —
-// it is deprecated on 4.6+ and rejected on 4.7.
+// it is deprecated on 4.6+ and rejected on 4.8.
 
 export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
 export type ThinkingDisplay = "summarized" | "omitted";

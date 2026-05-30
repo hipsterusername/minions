@@ -1,5 +1,6 @@
 import path from "path";
 import os from "os";
+import fs from "fs";
 
 /**
  * Path validation module to prevent arbitrary filesystem access.
@@ -33,6 +34,43 @@ const openedProjects = new Set<string>();
 
 const HOME_DIR = os.homedir();
 
+function isInsideOrEqual(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return (
+    relative === "" ||
+    (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative))
+  );
+}
+
+async function realpathOrNull(absPath: string): Promise<string | null> {
+  try {
+    return await fs.promises.realpath(absPath);
+  } catch {
+    return null;
+  }
+}
+
+async function lstatOrNull(absPath: string): Promise<fs.Stats | null> {
+  try {
+    return await fs.promises.lstat(absPath);
+  } catch {
+    return null;
+  }
+}
+
+async function closestExistingAncestor(absPath: string, boundary: string): Promise<string | null> {
+  let current = absPath;
+  while (isInsideOrEqual(boundary, current)) {
+    const stat = await lstatOrNull(current);
+    if (stat) return current;
+
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+  return null;
+}
+
 /**
  * Check if a path is under the user's home directory.
  * Rejects paths like /etc, /usr, /var, etc.
@@ -53,6 +91,16 @@ export function registerProjectPath(projectPath: string): string | null {
   // Must be under home directory
   if (!isUnderHomeDir(resolved)) {
     return null;
+  }
+
+  try {
+    const real = fs.realpathSync(resolved);
+    if (!isUnderHomeDir(real)) {
+      return null;
+    }
+  } catch {
+    // Projects can be registered before their directories exist; callers that
+    // perform filesystem operations validate the real project root later.
   }
 
   // Reject paths with .. components after resolution (already resolved, but extra safety)
@@ -115,4 +163,74 @@ export function validateSessionCwd(cwd: string): string | null {
     return null;
   }
   return resolved;
+}
+
+/**
+ * Resolve an existing project-relative path and verify its final realpath stays
+ * inside the real project root. This is appropriate for read/list operations,
+ * where following a symlink is acceptable only when it lands inside the project.
+ */
+export async function resolveExistingProjectPath(
+  projectRoot: string,
+  relativePath: string,
+): Promise<string | null> {
+  const root = path.resolve(projectRoot);
+  const candidate = path.resolve(root, relativePath);
+  if (!isInsideOrEqual(root, candidate)) {
+    return null;
+  }
+
+  const [rootReal, targetReal] = await Promise.all([
+    realpathOrNull(root),
+    realpathOrNull(candidate),
+  ]);
+  if (!rootReal || !isUnderHomeDir(rootReal)) {
+    return null;
+  }
+  if (!targetReal) {
+    return candidate;
+  }
+  if (!isInsideOrEqual(rootReal, targetReal)) {
+    return null;
+  }
+
+  return candidate;
+}
+
+/**
+ * Resolve a project-relative path for write-like operations. The final path may
+ * not exist yet, so validation is anchored on the closest existing parent. A
+ * symlink final target is rejected to avoid mutating through links.
+ */
+export async function resolveCreatableProjectPath(
+  projectRoot: string,
+  relativePath: string,
+): Promise<string | null> {
+  const root = path.resolve(projectRoot);
+  const candidate = path.resolve(root, relativePath);
+  if (!isInsideOrEqual(root, candidate)) {
+    return null;
+  }
+
+  const rootReal = await realpathOrNull(root);
+  if (!rootReal || !isUnderHomeDir(rootReal)) {
+    return null;
+  }
+
+  const finalStat = await lstatOrNull(candidate);
+  if (finalStat?.isSymbolicLink()) {
+    return null;
+  }
+
+  const ancestor = await closestExistingAncestor(path.dirname(candidate), root);
+  if (!ancestor) {
+    return null;
+  }
+
+  const ancestorReal = await realpathOrNull(ancestor);
+  if (!ancestorReal || !isInsideOrEqual(rootReal, ancestorReal)) {
+    return null;
+  }
+
+  return candidate;
 }

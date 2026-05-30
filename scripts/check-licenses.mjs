@@ -56,12 +56,28 @@ const EXCEPTIONS = new Map([
     "Platform-specific binary of @anthropic-ai/claude-agent-sdk. Same license posture.",
   ],
   [
+    "@anthropic-ai/claude-agent-sdk-linux-x64",
+    "Platform-specific binary of @anthropic-ai/claude-agent-sdk for Linux glibc. Same license posture.",
+  ],
+  [
+    "@anthropic-ai/claude-agent-sdk-linux-x64-musl",
+    "Platform-specific binary of @anthropic-ai/claude-agent-sdk for Linux musl. Same license posture.",
+  ],
+  [
     "lightningcss",
     "MPL-2.0 (weak file-level copyleft). Consumed unmodified as a build-time CSS transform via Vite — no source obligation unless we modify lightningcss source files.",
   ],
   [
     "lightningcss-win32-x64-msvc",
     "Platform-specific native binary of lightningcss. Same MPL-2.0 posture; consumed unmodified.",
+  ],
+  [
+    "lightningcss-linux-x64-gnu",
+    "Platform-specific native binary of lightningcss for Linux glibc. Same MPL-2.0 posture; consumed unmodified.",
+  ],
+  [
+    "lightningcss-linux-x64-musl",
+    "Platform-specific native binary of lightningcss for Linux musl. Same MPL-2.0 posture; consumed unmodified.",
   ],
 ]);
 

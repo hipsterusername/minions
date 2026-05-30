@@ -365,6 +365,22 @@ describe("sdkToNormalized: rate_limit_event", () => {
     );
     expect((events[0] as { retryAfterMs: number }).retryAfterMs).toBe(0);
   });
+
+  it("carries resetAtMs when resetsAt is present", () => {
+    const resetAtSeconds = Math.floor(Date.now() / 1000) + 60;
+    const events = sdkToNormalized(
+      msg({
+        type: "rate_limit_event",
+        rate_limit_info: { resetsAt: resetAtSeconds },
+        session_id: "s",
+      }),
+    );
+    expect(events[0]).toMatchObject({
+      kind: "rate_limit",
+      resetAtMs: resetAtSeconds * 1000,
+    });
+    expect((events[0] as { retryAfterMs: number }).retryAfterMs).toBeGreaterThan(0);
+  });
 });
 
 // ── stream_event and other pass-through types ─────────────────────────────────

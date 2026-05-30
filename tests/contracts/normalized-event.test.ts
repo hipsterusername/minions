@@ -137,10 +137,12 @@ describe("NormalizedEvent: every kind round-trips through JSON", () => {
     const e: NormalizedEvent = {
       kind: "rate_limit",
       retryAfterMs: 5000,
+      resetAtMs: 1779860999000,
       message: "too many requests",
     };
     assertRoundTrip(e);
     expect(e.retryAfterMs).toBe(5000);
+    expect(e.resetAtMs).toBe(1779860999000);
   });
 
   it("api_retry", () => {

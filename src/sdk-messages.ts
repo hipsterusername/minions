@@ -37,6 +37,22 @@ export function msgId(prefix = "m"): string {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
+function formatRateLimitMessage(event: Extract<NormalizedEvent, { kind: "rate_limit" }>): string {
+  const waitSec = event.retryAfterMs > 0 ? Math.ceil(event.retryAfterMs / 1000) : 0;
+  const waitText = waitSec > 0 ? `resuming in ${waitSec}s` : "";
+  if (event.resetAtMs && Number.isFinite(event.resetAtMs)) {
+    const resetAt = new Date(event.resetAtMs).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZoneName: "short",
+    });
+    return `Rate limited until ${resetAt}${waitText ? ` (${waitText})` : ""}`;
+  }
+  return `Rate limited${waitText ? `; ${waitText}` : ""}`;
+}
+
 /**
  * Derive a semi-stable, URL-safe key from content so that the same event
  * produces the same message ID when processed twice (enabling dedup).
@@ -158,11 +174,10 @@ export function normalizedToDisplayMessages(
       }];
 
     case "rate_limit": {
-      const waitSec = event.retryAfterMs > 0 ? Math.ceil(event.retryAfterMs / 1000) : 0;
       return [{
         id: msgId(prefix),
         role: "system",
-        content: `Rate limited${waitSec > 0 ? `; resuming in ${waitSec}s` : ""}`,
+        content: formatRateLimitMessage(event),
         timestamp: now,
       }];
     }

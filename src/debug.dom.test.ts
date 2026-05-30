@@ -74,7 +74,6 @@ describe("debug flag", () => {
         key: "minions:debug-mode",
         oldValue: "1",
         newValue: null,
-        storageArea: window.localStorage,
       }),
     );
 

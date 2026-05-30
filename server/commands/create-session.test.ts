@@ -91,6 +91,42 @@ function fillRegistryWithRunning(
 }
 
 describe("createSession — MAX_SESSIONS cap", () => {
+  it("is idempotent for an existing sessionKey and does not start another host", () => {
+    const registry = new SessionRegistry();
+    const existing = new SessionHost("leader-existing", process.cwd());
+    existing.status = "running";
+    (registry as unknown as { map: Map<string, SessionHost> }).map.set(
+      existing.id,
+      existing,
+    );
+
+    const starts: StartSessionOptions[] = [];
+    (registry as unknown as { start: (opts: StartSessionOptions) => void }).start = (
+      opts,
+    ) => {
+      starts.push(opts);
+    };
+
+    const { ws, sent } = makeFakeWs();
+    const ctx = makeCtx(registry, 1);
+    const cmd: WsCommand = {
+      type: "create_session",
+      sessionKey: "leader-existing",
+      prompt: "hi",
+      cwd: process.cwd(),
+      role: "leader",
+    };
+
+    createSession(ctx, cmd, ws as unknown as Parameters<typeof createSession>[2]);
+
+    expect(starts).toHaveLength(0);
+    expect(sent).toHaveLength(1);
+    const env = sent[0]?.payload as Record<string, unknown>;
+    expect(env["topic"]).toBe("session:leader-existing");
+    expect(env["type"]).toBe("session_created");
+    expect(env["sessionKey"]).toBe("leader-existing");
+  });
+
   it("accepts a new session when the registry holds N stopped (hydrated) sessions where N === maxSessions (regression)", () => {
     const registry = new SessionRegistry();
     fillRegistryWithStopped(registry, 50);

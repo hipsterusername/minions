@@ -211,6 +211,17 @@ describe("normalizedToDisplayMessages", () => {
       expect(msgs).toHaveLength(1);
       expect(msgs[0]?.role).toBe("system");
     });
+
+    it("includes reset time when available", () => {
+      const event: NormalizedEvent = {
+        kind: "rate_limit",
+        retryAfterMs: 5000,
+        resetAtMs: Date.UTC(2026, 4, 27, 5, 49),
+      };
+      const msgs = normalizedToDisplayMessages(event);
+      expect(msgs[0]?.content).toContain("Rate limited until");
+      expect(msgs[0]?.content).toContain("resuming in 5s");
+    });
   });
 
   // ── permission_denial ─────────────────────────────────────────────────────

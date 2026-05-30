@@ -45,7 +45,7 @@ export function createDefaultNodeData(
         totalCost: 0,
         turns: 0,
         error: null,
-        model: projectSettings?.defaultLeaderModel ?? "claude-opus-4-7",
+        model: projectSettings?.defaultLeaderModel ?? "claude-opus-4-8",
         harness: projectSettings?.defaultLeaderHarness ?? "claude",
         permissionMode: projectSettings?.defaultPermissionMode ?? "auto",
         taskPlan: [],

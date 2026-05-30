@@ -59,10 +59,12 @@ export interface SessionToolbarProps {
 /** Default Claude model labels. Used when the active harness is Claude or unknown. */
 const CLAUDE_MODEL_LABELS: Record<string, string> = {
   sonnet: "Sonnet",
-  opus: "Opus 4.7",
-  "opus-old": "Opus 4.6",
+  opus: "Opus 4.8",
+  "opus-old": "Opus 4.7",
   haiku: "Haiku",
+  "claude-opus-4-8": "Opus 4.8",
   "claude-opus-4-7": "Opus 4.7",
+  "claude-opus-4-6": "Opus 4.6",
   "claude-sonnet-4-6": "Sonnet 4.6",
   "claude-haiku-4-5": "Haiku",
 };
@@ -95,7 +97,7 @@ const EFFORT_DESCRIPTIONS: Record<EffortLevel, string> = {
   low: "Skip thinking when possible — fastest, cheapest",
   medium: "Light reasoning on harder requests",
   high: "Always think (default) — deep reasoning",
-  xhigh: "Deeper exploration — Opus 4.7 only",
+  xhigh: "Deeper exploration — Opus 4.8 only",
   max: "Maximum effort — no constraints on thinking depth",
 };
 
