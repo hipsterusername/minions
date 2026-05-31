@@ -269,6 +269,23 @@ describe("applyPresetToLeaderData", () => {
     expect(result.skillPanelOpen).toBe(false);
   });
 
+  it("overlays systemPromptPrefix from preset", () => {
+    const base = makeLeaderData({ systemPromptPrefix: "old prefix" });
+    const preset = makePreset({ systemPromptPrefix: "new prefix" });
+
+    const result = applyPresetToLeaderData(preset, base);
+
+    expect(result.systemPromptPrefix).toBe("new prefix");
+  });
+
+  it("clears systemPromptPrefix when preset has no prefix", () => {
+    const base = makeLeaderData({ systemPromptPrefix: "old prefix" });
+
+    const result = applyPresetToLeaderData(makePreset(), base);
+
+    expect(result.systemPromptPrefix).toBeNull();
+  });
+
   it("preserves session/runtime state from base (sessionKey, status, messages)", () => {
     const base = makeLeaderData();
     const result = applyPresetToLeaderData(makePreset(), base);
