@@ -27,7 +27,7 @@
     "configure": "node scripts/preflight.mjs && node scripts/setup-permissions.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.144",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.150",
     "@codemirror/commands": "6.10.3",
     "@codemirror/lang-markdown": "6.5.0",
     "@codemirror/language": "6.12.3",
@@ -35,12 +35,12 @@
     "@codemirror/state": "6.6.0",
     "@codemirror/view": "6.43.0",
     "@lezer/highlight": "1.2.3",
-    "@openai/codex-sdk": "^0.131.0",
+    "@openai/codex-sdk": "^0.133.0",
     "better-sqlite3": "^12.10.0",
     "express": "^5.2.1",
     "react": "19.2.6",
     "react-dom": "19.2.6",
-    "ws": "^8.20.1",
+    "ws": "^8.21.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
