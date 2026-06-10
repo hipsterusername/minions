@@ -21,6 +21,7 @@
 import type { WebSocket } from "ws";
 import { unicastGlobal } from "./bus.ts";
 import type { WsCommand } from "./commands/index.ts";
+import { validateWsCommand } from "./commands/schemas.ts";
 import type { SessionListItem } from "./session-registry.ts";
 
 export interface ConnectionDeps {
@@ -47,13 +48,21 @@ export function attachConnectionListeners(
   });
 
   ws.on("message", (raw) => {
+    let parsed: unknown;
     try {
-      const cmd = JSON.parse(String(raw)) as WsCommand;
-      deps.dispatch(cmd, ws);
+      parsed = JSON.parse(String(raw));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       unicastGlobal(ws, { type: "error", message: msg });
+      return;
     }
+    const validation = validateWsCommand(parsed);
+    if (!validation.ok) {
+      console.warn(`[ws] Invalid command rejected: ${validation.error}`);
+      unicastGlobal(ws, { type: "error", message: validation.error });
+      return;
+    }
+    deps.dispatch(validation.cmd, ws);
   });
 
   ws.on("close", () => {
