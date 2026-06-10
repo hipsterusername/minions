@@ -539,3 +539,132 @@ describe("SessionHost.start — role + agent context", () => {
     );
   });
 });
+
+// ── Bug-regression: concurrent-run guard (Bug 1) ─────────────────────────────
+
+describe("SessionHost.start — concurrent-run guard", () => {
+  it("silently ignores a second start() call while a run is already active", async () => {
+    const { host, deps, envelopes } = makeHarness();
+
+    // Promise whose resolution unblocks the first run's stream.
+    let releaseFirst!: () => void;
+    const firstBlocker = new Promise<void>((r) => {
+      releaseFirst = r;
+    });
+
+    harnessRef.startFnOverride = () => ({
+      events: (async function* () {
+        yield { kind: "init", sessionId: "s1", model: "" } as NormalizedEvent;
+        await firstBlocker;
+        yield { kind: "done", reason: "stop" } as NormalizedEvent;
+      })(),
+      control: { abort: () => {} },
+    });
+
+    // Kick off the first run without awaiting — status becomes "running"
+    // synchronously (before the first internal await).
+    const firstRun = host.start(
+      { sessionKey: host.id, prompt: "first", cwd: host.cwd },
+      deps,
+    );
+
+    // status is "running" synchronously at this point.
+    expect(host.status).toBe("running");
+
+    // Second call while first run is still blocked — guard fires, returns immediately.
+    await host.start(
+      { sessionKey: host.id, prompt: "second", cwd: host.cwd },
+      deps,
+    );
+
+    // Unblock and finish the first run.
+    releaseFirst();
+    await firstRun;
+
+    // Only one harness.start() invocation — the second call was rejected.
+    expect(harnessRef.starts).toHaveLength(1);
+    expect(host.status).toBe("idle");
+
+    // Only one "running" status broadcast.
+    const runningEvents = envelopes.filter(
+      (e) => e.type === "session_status" && e.payload["status"] === "running",
+    );
+    expect(runningEvents).toHaveLength(1);
+  });
+});
+
+// ── Bug-regression: worktree isolation preserved on resume (Bug 2) ────────────
+
+describe("SessionHost.start — worktree isolation preservation", () => {
+  it("keeps worktreeIsolation=true when opts.worktreeIsolation is not provided (resume path)", async () => {
+    const { host, deps } = makeHarness();
+    host.worktreeIsolation = true; // set at session-creation time
+
+    harnessRef.events = [
+      { kind: "init", sessionId: "s", model: "" },
+      { kind: "done", reason: "stop" },
+    ];
+
+    // Resume: start() called without the worktreeIsolation option.
+    await host.start(
+      { sessionKey: host.id, prompt: "resume turn", cwd: host.cwd },
+      deps,
+    );
+
+    // Isolation must NOT have been silently cleared.
+    expect(host.worktreeIsolation).toBe(true);
+  });
+
+  it("updates worktreeIsolation when the option is explicitly provided", async () => {
+    const { host, deps } = makeHarness();
+    host.worktreeIsolation = false;
+
+    harnessRef.events = [
+      { kind: "init", sessionId: "s", model: "" },
+      { kind: "done", reason: "stop" },
+    ];
+
+    await host.start(
+      {
+        sessionKey: host.id,
+        prompt: "first turn",
+        cwd: host.cwd,
+        worktreeIsolation: true,
+      },
+      deps,
+    );
+
+    expect(host.worktreeIsolation).toBe(true);
+  });
+});
+
+// ── Bug-regression: abort/error conflation (Bug 3) ───────────────────────────
+
+describe("SessionHost.start — abort/error distinction", () => {
+  it("does not emit session_error when the harness throws after the abort signal fires", async () => {
+    const { host, deps, envelopes } = makeHarness();
+
+    // Simulate: harness throws (e.g. an AbortError) AFTER the controller was
+    // already set. This used to land in the catch block and surface as a
+    // session_error event even though the run was intentionally stopped.
+    harnessRef.startFnOverride = () => ({
+      events: (async function* () {
+        yield { kind: "init", sessionId: "s", model: "" } as NormalizedEvent;
+        host.abortController.abort(); // signal fires
+        throw new Error("The operation was aborted"); // harness propagates it
+        // eslint-disable-next-line no-unreachable
+        yield {} as never;
+      })(),
+      control: { abort: () => {} },
+    });
+
+    await host.start(
+      { sessionKey: host.id, prompt: "p", cwd: host.cwd },
+      deps,
+    );
+
+    // Must NOT surface as an error event — it was an intentional abort.
+    expect(envelopes.filter((e) => e.type === "session_error")).toHaveLength(0);
+    expect(host.status).not.toBe("error");
+  });
+});

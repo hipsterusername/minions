@@ -252,6 +252,7 @@ export class SessionHost {
    * Safe to call repeatedly — each call supersedes the previous run.
    */
   async start(opts: StartSessionOptions, deps: SessionHostDeps): Promise<void> {
+    if (this.status === "running") { return; }
     const abortController = new AbortController();
     this.terminateDeps = deps;
 
@@ -280,7 +281,9 @@ export class SessionHost {
       if (opts.thinkingConfig !== undefined) {
         this.thinkingConfig = opts.thinkingConfig ?? this.thinkingConfig;
       }
-      this.worktreeIsolation = opts.worktreeIsolation === true;
+      if (opts.worktreeIsolation !== undefined) {
+        this.worktreeIsolation = opts.worktreeIsolation === true;
+      }
 
       // Clear any existing wait timer when the session resumes.
       this.clearWaitTimer();
@@ -359,10 +362,10 @@ export class SessionHost {
         this.eventStream = null;
         this.runControl = null;
       }
-      if (recoveryOpts) {
-        await this.start(recoveryOpts, deps);
-      }
+      // Reset status so the guard allows the recursive recovery start.
+      if (recoveryOpts) { this.status = "idle"; await this.start(recoveryOpts, deps); }
     } catch (err: unknown) {
+      if (abortController.signal.aborted) return;
       const errorMessage = err instanceof Error ? err.message : String(err);
       this.status = "error";
       this.lastError = errorMessage;
@@ -391,6 +394,6 @@ export class SessionHost {
   }
 
   terminate(reason: SessionTerminateReason, deps?: SessionTerminateDeps): void {
-    terminateSessionHost(this, deps ?? this.terminateDeps, reason);
+    void terminateSessionHost(this, deps ?? this.terminateDeps, reason);
   }
 }
