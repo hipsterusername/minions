@@ -17,7 +17,7 @@
  * back through `onUpdateData`.
  */
 
-import { act, render } from "@testing-library/react";
+import { act, fireEvent, render } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi, beforeAll } from "vitest";
 
@@ -118,6 +118,39 @@ function makeInitialData(overrides: Partial<MinionData> = {}): MinionData {
 }
 
 // ── End-to-end fixture replay ──────────────────────────
+
+describe("MinionNode: execution log scroll capture", () => {
+  it("captures wheel events in the expanded log", () => {
+    const { socket } = createReplaySocket();
+    const { container, getByRole } = render(
+      <Probe
+        socket={socket}
+        initial={makeInitialData({
+          messages: [
+            {
+              id: "msg-1",
+              role: "assistant",
+              content: "A long-running task log entry",
+              timestamp: Date.now(),
+            },
+          ],
+        })}
+      />,
+    );
+
+    fireEvent.click(getByRole("button", { name: /log \(1\)/i }));
+
+    const log = container.querySelector("[data-scroll-capture]");
+    expect(log).toBeTruthy();
+    if (!log) return;
+
+    const bubbled = vi.fn();
+    container.addEventListener("wheel", bubbled);
+    log.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true }));
+
+    expect(bubbled).not.toHaveBeenCalled();
+  });
+});
 
 describe("MinionNode: replays minion-completes-task fixture", () => {
   it("captures cost/turns, builds the message feed, and marks the active task completed", async () => {

@@ -36,6 +36,7 @@ const CLAUDE_ENTRY: HarnessListEntry = {
   },
   builtInTools: ["Read", "Bash"],
   models: [
+    { id: "claude-fable-5", label: "Fable 5" },
     { id: "claude-opus-4-8", label: "Opus 4.8" },
     { id: "claude-opus-4-7", label: "Opus 4.7" },
     { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
@@ -164,6 +165,18 @@ describe("SessionToolbar — model selection picker", () => {
     fireEvent.click(screen.getByRole("button", { name: /Opus 4.8/ }));
     expect(props.onModelChange).toHaveBeenCalledWith("claude-opus-4-8");
     expect(props.onHarnessChange).not.toHaveBeenCalled();
+  });
+
+  it("offers Fable 5 as a Claude model", () => {
+    const props = renderWithHarnesses(
+      [CLAUDE_ENTRY, CODEX_ENTRY],
+      { sessionKey: null, harness: "claude", model: "claude-sonnet-4-6" },
+    );
+    fireEvent.click(screen.getByTitle("Model selection"));
+    const fableOption = screen.getByRole("button", { name: /Fable 5/ });
+    expect(fableOption).toHaveTextContent("Claude Fable");
+    fireEvent.click(fableOption);
+    expect(props.onModelChange).toHaveBeenCalledWith("claude-fable-5");
   });
 
   it("does not add vague tier chips to model rows", () => {

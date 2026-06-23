@@ -27,7 +27,7 @@ import type Database from "better-sqlite3";
 import { initDb } from "./db.ts";
 import * as repo from "./session-repo.ts";
 import type { ApprovalState, TaskManagerState } from "./task-tools.ts";
-import type { RenderState } from "./render-tools.ts";
+import type { RenderState } from "../shared/render-dsl.ts";
 import type { ReasoningMapState } from "./reasoning-map-tools.ts";
 import type { WorktreeInfo } from "./worktree-types.ts";
 import {

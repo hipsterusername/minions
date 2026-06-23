@@ -24,6 +24,7 @@ const TASK_STATUS_ICON: Record<TaskPlanItem["status"], string> = {
   planned: "○",
   starting: "◎",
   running: "◎",
+  blocked: "⏸",
   completed: "✓",
   failed: "✗",
   ended_without_report: "!",
@@ -35,6 +36,7 @@ const TASK_STATUS_COLOR: Record<TaskPlanItem["status"], string> = {
   planned: "var(--text-muted)",
   starting: "var(--status-creating)",
   running: "var(--status-creating)",
+  blocked: "var(--warning-color)",
   completed: "var(--success-color)",
   failed: "var(--danger-color)",
   ended_without_report: "var(--warning-color)",
@@ -67,6 +69,12 @@ function taskExecutorBadge(task: TaskPlanItem): {
         label: "minion in progress",
         bg: "var(--warning-bg)",
         color: "var(--status-creating)",
+      };
+    case "blocked":
+      return {
+        label: "needs input",
+        bg: "var(--warning-bg)",
+        color: "var(--warning-color)",
       };
     case "completed":
       return {
@@ -279,7 +287,9 @@ export function TaskPlanPanel({
                     {task.title}
                   </span>
                   {task.activeStep &&
-                    (task.status === "running" || task.status === "starting") && (
+                    (task.status === "running" ||
+                      task.status === "starting" ||
+                      task.status === "blocked") && (
                     <span
                       style={{
                         fontSize: 9,

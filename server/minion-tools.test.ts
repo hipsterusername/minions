@@ -3,9 +3,10 @@
  *
  * Each handler is invoked directly via the `toolDefs` array the factory
  * returns; the test asserts on the captured `minion_status` envelope the bus
- * emits and on the NormalizedToolResult. We cover the three triggers (`step`,
- * `done`, `fail`) by parameterised cases — per docs/testing-strategy.md §5.9,
- * three near-identical describe blocks would be a duplicate.
+ * emits and on the NormalizedToolResult. We cover the four triggers (`step`,
+ * `done`, `fail`, `blocked`) by parameterised cases — per
+ * docs/testing-strategy.md §5.9, near-identical describe blocks would be a
+ * duplicate.
  */
 import { describe, it, expect } from "vitest";
 import type { WebSocketServer } from "ws";
@@ -56,27 +57,30 @@ describe("minion-tools", () => {
       arg: { message: "Reading the source file" },
       trigger: "step",
       // For report_step the agent passes `message`; the bus event echoes it
-      // back under the same key. The text content acks the call.
+      // back under the same key for the UI.
       expectedMessage: "Reading the source file",
-      ackPrefix: "Step reported:",
     },
     {
       tool: "report_done",
       arg: { summary: "Task complete with two new tests" },
       trigger: "done",
       expectedMessage: "Task complete with two new tests",
-      ackPrefix: "Task completed:",
     },
     {
       tool: "report_fail",
       arg: { reason: "Could not parse the input" },
       trigger: "fail",
       expectedMessage: "Could not parse the input",
-      ackPrefix: "Task failed:",
+    },
+    {
+      tool: "report_blocked",
+      arg: { question: "Which migration strategy should I use?" },
+      trigger: "blocked",
+      expectedMessage: "Which migration strategy should I use?",
     },
   ])(
     "$tool",
-    ({ tool: toolName, arg, trigger, expectedMessage, ackPrefix }) => {
+    ({ tool: toolName, arg, trigger, expectedMessage }) => {
       it("emits a minion_status envelope on the minion's session topic", async () => {
         const { bus, sent } = makeBus();
         const { toolDefs } = createMinionToolsForSession({
@@ -103,7 +107,7 @@ describe("minion-tools", () => {
         expect(ts).toBeLessThanOrEqual(Date.now());
       });
 
-      it("returns an acknowledgement that contains the agent's payload", async () => {
+      it("returns a terse ack that does NOT echo the agent's payload", async () => {
         const { bus } = makeBus();
         const { toolDefs } = createMinionToolsForSession({
           minionSessionKey: "minion-2",
@@ -115,12 +119,36 @@ describe("minion-tools", () => {
 
         expect(result.content).toHaveLength(1);
         expect(result.content[0]!.type).toBe("text");
-        // Test the structure (prefix + payload), not the literal copy. §5.7.
-        expect(result.content[0]!.text.startsWith(ackPrefix)).toBe(true);
-        expect(result.content[0]!.text).toContain(expectedMessage);
+        // Token-efficiency contract: the model already has its own input in
+        // context, so the ack must be constant and must not repeat it.
+        expect(result.content[0]!.text).toBe("ok");
+        expect(result.content[0]!.text).not.toContain(expectedMessage);
       });
     },
   );
+
+  describe.each([
+    { tool: "report_step", badArg: { /* missing message */ } },
+    { tool: "report_done", badArg: { /* missing summary */ } },
+    { tool: "report_fail", badArg: { /* missing reason */ } },
+    { tool: "report_blocked", badArg: { /* missing question */ } },
+  ])("$tool parse guard", ({ tool: toolName, badArg }) => {
+    it("rejects garbage input — missing required field throws before emitting", async () => {
+      const { bus, sent } = makeBus();
+      const { toolDefs } = createMinionToolsForSession({
+        minionSessionKey: "parse-guard",
+        bus,
+      });
+      const def = findTool(toolDefs, toolName);
+
+      // Null is clearly invalid.
+      await expect(def.handler(null)).rejects.toThrow();
+      // Missing required field is also invalid.
+      await expect(def.handler(badArg)).rejects.toThrow();
+      // Nothing should have been emitted.
+      expect(sent).toHaveLength(0);
+    });
+  });
 
   it("multiple report_step calls produce one envelope per call, preserving order", async () => {
     const { bus, sent } = makeBus();

@@ -57,6 +57,26 @@ async function callHandler(
 }
 
 describe("plan_task", () => {
+  it("rejects garbage input before touching task state — parse guard", async () => {
+    const ctx = makeCtx();
+    const tool = createPlanTaskToolDef(ctx);
+
+    // Null and empty objects are invalid — all required fields are missing.
+    await expect(callHandler(tool, null)).rejects.toThrow();
+    await expect(callHandler(tool, {})).rejects.toThrow();
+    // Wrong type for priority enum.
+    await expect(
+      callHandler(tool, {
+        taskId: "t",
+        title: "T",
+        description: "",
+        priority: "URGENT",
+      }),
+    ).rejects.toThrow();
+
+    expect(ctx.taskState.tasks.size).toBe(0);
+  });
+
   it("registers a new task and emits task_plan_update with the task in the list", async () => {
     const ctx = makeCtx();
     const tool = createPlanTaskToolDef(ctx);

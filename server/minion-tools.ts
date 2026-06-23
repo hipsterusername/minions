@@ -14,6 +14,7 @@
 
 import { z } from "zod/v4";
 import type { NormalizedToolDef } from "./harness/types.ts";
+import { okResult } from "./harness/tool-result.ts";
 import type { Bus } from "./bus.ts";
 
 // ── Factory ────────────────────────────────────────────
@@ -24,7 +25,7 @@ export function createMinionToolsForSession(opts: {
   leaderSessionKey?: string | null;
   taskId?: string | null;
   onReport?: (report: {
-    trigger: "step" | "done" | "fail";
+    trigger: "step" | "done" | "fail" | "blocked";
     message: string;
     timestamp: number;
   }) => void;
@@ -32,7 +33,7 @@ export function createMinionToolsForSession(opts: {
   const { minionSessionKey, bus, leaderSessionKey, taskId, onReport } = opts;
 
   const emitStatus = (
-    trigger: "step" | "done" | "fail",
+    trigger: "step" | "done" | "fail" | "blocked",
     message: string,
   ): void => {
     const timestamp = Date.now();
@@ -53,53 +54,77 @@ export function createMinionToolsForSession(opts: {
     onReport?.({ trigger, message, timestamp });
   };
 
+  const reportStepInputSchema = z.object({
+    message: z.string().describe("Short description of what you're doing now"),
+  });
+
   const reportStepDef: NormalizedToolDef = {
     name: "report_step",
     description:
       "Report a progress step to the UI. Call this when starting a meaningful phase of work (e.g. reading files, implementing, testing).",
-    inputSchema: z.object({
-      message: z.string().describe("Short description of what you're doing now"),
-    }),
+    inputSchema: reportStepInputSchema,
     handler: async (input: unknown) => {
-      const args = input as { message: string };
+      const args = reportStepInputSchema.parse(input);
       emitStatus("step", args.message);
-      return {
-        content: [{ type: "text" as const, text: `Step reported: ${args.message}` }],
-      };
+      // Terse ack: the model already has its own message in context, so
+      // echoing it back would only burn tokens. See harness/tool-result.ts.
+      return okResult();
     },
   };
+
+  const reportDoneInputSchema = z.object({
+    summary: z.string().describe("One-line summary of what was accomplished"),
+  });
 
   const reportDoneDef: NormalizedToolDef = {
     name: "report_done",
     description:
       "Report task completion. Call exactly once when the current task is finished successfully.",
-    inputSchema: z.object({
-      summary: z.string().describe("One-line summary of what was accomplished"),
-    }),
+    inputSchema: reportDoneInputSchema,
     handler: async (input: unknown) => {
-      const args = input as { summary: string };
+      const args = reportDoneInputSchema.parse(input);
       emitStatus("done", args.summary);
-      return {
-        content: [{ type: "text" as const, text: `Task completed: ${args.summary}` }],
-      };
+      return okResult();
     },
   };
+
+  const reportFailInputSchema = z.object({
+    reason: z.string().describe("One-line reason for failure"),
+  });
 
   const reportFailDef: NormalizedToolDef = {
     name: "report_fail",
     description:
       "Report task failure. Call exactly once if you cannot complete the current task.",
-    inputSchema: z.object({
-      reason: z.string().describe("One-line reason for failure"),
-    }),
+    inputSchema: reportFailInputSchema,
     handler: async (input: unknown) => {
-      const args = input as { reason: string };
+      const args = reportFailInputSchema.parse(input);
       emitStatus("fail", args.reason);
-      return {
-        content: [{ type: "text" as const, text: `Task failed: ${args.reason}` }],
-      };
+      return okResult();
     },
   };
 
-  return { toolDefs: [reportStepDef, reportDoneDef, reportFailDef] };
+  const reportBlockedInputSchema = z.object({
+    question: z
+      .string()
+      .describe(
+        "What you are blocked on — the question or decision the leader must resolve before you can proceed",
+      ),
+  });
+
+  const reportBlockedDef: NormalizedToolDef = {
+    name: "report_blocked",
+    description:
+      "Report that you are blocked and need leader input. Use this instead of report_fail when you cannot proceed without a decision or answer. Your turn ends and the leader is woken to respond; they can reply via message_task to unblock you. This does NOT fail the task.",
+    inputSchema: reportBlockedInputSchema,
+    handler: async (input: unknown) => {
+      const args = reportBlockedInputSchema.parse(input);
+      emitStatus("blocked", args.question);
+      return okResult();
+    },
+  };
+
+  return {
+    toolDefs: [reportStepDef, reportDoneDef, reportFailDef, reportBlockedDef],
+  };
 }

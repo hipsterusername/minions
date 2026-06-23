@@ -55,3 +55,24 @@ export const ALLOWED_CROSS_TREE_IMPORTS: ReadonlyArray<{
  * is kept empty as a historical record of where the debt used to live.
  */
 export const BROADCAST_CALL_SITE_BASELINE: Readonly<Record<string, number>> = {};
+
+/**
+ * Client (src/) files tracked as "shrink-only" ceilings.
+ *
+ * CLAUDE.md calls out Canvas.tsx, LeaderNode.tsx, and ClaudeSessionNode.tsx
+ * as known-oversized files. Every PR must hold steady or shrink them —
+ * growth fails CI. Baselines are set to the line counts at the time this
+ * gate was introduced; ratchet them down as the files shrink.
+ *
+ * Line counting uses the same newline-count (`wc -l`) semantics as the
+ * server file-size test: count `\n` characters, not visual rows.
+ *
+ * Note: another minion may be actively shrinking ClaudeSessionNode.tsx —
+ * the baseline here is the current count at gate-introduction time; any
+ * shrink still passes (only growth fails).
+ */
+export const CLIENT_FILE_SIZE_ALLOWLIST: Readonly<Record<string, number>> = {
+  "src/Canvas.tsx": 4626,
+  "src/nodes/LeaderNode.tsx": 1671,
+  "src/nodes/ClaudeSessionNode.tsx": 1521,
+};

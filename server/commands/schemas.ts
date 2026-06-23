@@ -53,6 +53,14 @@ const attachmentSchema = z.object({
   data: z.string(),
 });
 
+const canvasContextItemSchema = z.object({
+  nodeId: z.string(),
+  nodeType: z.string(),
+  label: z.string(),
+  content: z.string(),
+  attachments: z.array(attachmentSchema).optional(),
+});
+
 const sessionConfigFields = {
   prompt,
   attachments: z.array(attachmentSchema).optional(),
@@ -86,6 +94,10 @@ export const COMMAND_SCHEMAS = {
   send_message: command("send_message", {
     sessionKey,
     ...sessionConfigFields,
+  }),
+  canvas_context: command("canvas_context", {
+    sessionKey,
+    items: z.array(canvasContextItemSchema),
   }),
   stop_session: sessionScoped("stop_session"),
   sync_session: sessionScoped("sync_session"),

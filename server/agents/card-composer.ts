@@ -7,6 +7,7 @@ import { z } from "zod/v4";
 import { registerAgentType } from "./registry.ts";
 import type { AgentType, AgentTypeContext, AgentToolResult } from "./types.ts";
 import type { NormalizedToolDef } from "../harness/types.ts";
+import { okResult, errorResult } from "../harness/tool-result.ts";
 
 const CARD_COMPOSER_TOOL = "mcp__card-composer__create_card";
 
@@ -44,15 +45,7 @@ function createCardTool(ctx: AgentTypeContext): NormalizedToolDef {
     handler: async (input: unknown) => {
       const parsed = createCardSchema.safeParse(input);
       if (!parsed.success) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: `Invalid card payload: ${parsed.error.message}`,
-            },
-          ],
-        };
+        return errorResult(`Invalid card payload: ${parsed.error.message}`);
       }
 
       const card = {
@@ -70,14 +63,7 @@ function createCardTool(ctx: AgentTypeContext): NormalizedToolDef {
         timestamp: Date.now(),
       });
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Created card: ${card.title}`,
-          },
-        ],
-      };
+      return okResult();
     },
   };
 }

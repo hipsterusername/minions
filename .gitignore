@@ -30,7 +30,6 @@ data/
 
 # Local working notes / context (per-machine, not portable)
 context.md
-docs/
 .context/
 
 # Smoke-test / dev-server scratch logs

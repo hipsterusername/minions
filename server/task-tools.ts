@@ -31,6 +31,8 @@ import type {
 import { createPlanTaskToolDef } from "./task-tools/plan-task.ts";
 import { createAssignTaskToolDef } from "./task-tools/assign-task.ts";
 import { createCompleteTaskToolDef } from "./task-tools/complete-task.ts";
+import { createCancelTaskToolDef } from "./task-tools/cancel-task.ts";
+import { createMessageTaskToolDef } from "./task-tools/message-task.ts";
 import { createGetTaskStatusToolDef } from "./task-tools/get-task-status.ts";
 import { createWaitAndContinueToolDef } from "./task-tools/wait-and-continue.ts";
 import { createSetTaskNameToolDef } from "./task-tools/set-task-name.ts";
@@ -70,6 +72,10 @@ export function createTaskToolsForLeader(opts: {
   worktreeIsolation?: boolean;
   scheduleWaitContinue: (durationMs: number, reason: string) => ReturnType<typeof setTimeout> | null | void;
   terminateSession?: (sessionKey: string, reason: "abort") => void;
+  messageSession?: (
+    sessionKey: string,
+    message: string,
+  ) => { delivered: boolean; status: string | null };
   taskTimeoutMs?: number;
   getSessionRuntime?: (sessionKey: string) => RuntimeSessionInfo | null;
   onStateChange?: (state: TaskManagerState) => void;
@@ -95,6 +101,7 @@ export function createTaskToolsForLeader(opts: {
     worktreeIsolation: opts.worktreeIsolation,
     scheduleWaitContinue: opts.scheduleWaitContinue,
     terminateSession: opts.terminateSession,
+    messageSession: opts.messageSession,
     taskTimeoutMs: opts.taskTimeoutMs,
   };
 
@@ -102,6 +109,8 @@ export function createTaskToolsForLeader(opts: {
     createPlanTaskToolDef(ctx),
     createAssignTaskToolDef(ctx),
     createCompleteTaskToolDef(ctx),
+    createCancelTaskToolDef(ctx),
+    createMessageTaskToolDef(ctx),
     createGetTaskStatusToolDef(ctx),
     createSetTaskNameToolDef(ctx),
     createWaitAndContinueToolDef(ctx),

@@ -21,6 +21,7 @@
 
 import { z } from "zod/v4";
 import type { NormalizedToolDef } from "../harness/types.ts";
+import { textResult } from "../harness/tool-result.ts";
 import type {
   Artifact,
   StepOutcome,
@@ -138,16 +139,10 @@ export function createStepToolsForSession(sessionKey: string): {
         artifacts?: Array<{ label: string; ref?: string; excerpt?: string }>;
       };
       if (ctx.isSettled()) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text:
-                "report_phase_result was already accepted for this step; " +
-                "subsequent calls are ignored. Wrap up the conversation.",
-            },
-          ],
-        };
+        return textResult(
+          "report_phase_result was already accepted for this step; " +
+            "subsequent calls are ignored. Wrap up the conversation.",
+        );
       }
       ctx.resolve({
         outcome: args.outcome,
@@ -155,17 +150,11 @@ export function createStepToolsForSession(sessionKey: string): {
         ...(args.outputs ? { outputs: args.outputs } : {}),
         ...(args.artifacts ? { artifacts: args.artifacts as Artifact[] } : {}),
       });
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text:
-              "Result recorded. The routine scheduler will compose the " +
-              "handoff brief from this and (if applicable) start the next " +
-              "phase. You can stop now.",
-          },
-        ],
-      };
+      return textResult(
+        "Result recorded. The routine scheduler will compose the handoff " +
+          "brief from this and (if applicable) start the next phase. You " +
+          "can stop now.",
+      );
     },
   };
 

@@ -21,10 +21,11 @@ import {
 import { hydrateSessionsFromDb } from "./session-persist.ts";
 import { getHarness } from "./harness/index.ts";
 import type { HarnessCapabilities } from "./harness/types.ts";
-import type { RuntimeSessionInfo, TaskManagerState } from "./task-tools.ts";
+import type { RuntimeSessionInfo, TaskManagerState, TaskRecord } from "./task-tools.ts";
 import type { WorktreeLifecycle } from "./worktree-types.ts";
-import { applyLifecycleEvent, isTerminalTaskStatus } from "./task-lifecycle.ts";
+import { applyLifecycleEvent } from "./task-lifecycle.ts";
 import { persistTaskState } from "./session-persist.ts";
+import { buildTaskDigest, isWakeWorthyStatus } from "./session-wake.ts";
 
 /** Compact shape broadcast to clients in `session_list` messages. */
 export interface SessionListItem {
@@ -204,25 +205,73 @@ export class SessionRegistry {
 
   wakeWaitingLeaderIfAllChildrenTerminal = (leaderKey: string): void => {
     const host = this.map.get(leaderKey);
-    if (!host?.taskState?.pendingWait || !this.deps) return;
-    const hasOpenChild = Array.from(host.taskState.tasks.values()).some(
-      (task) => task.executor === "minion" && !isTerminalTaskStatus(task.status),
+    if (!host || !this.deps) return;
+
+    const minionTasks = host.taskState
+      ? Array.from(host.taskState.tasks.values()).filter((t) => t.executor === "minion")
+      : [];
+    const pendingWait = host.taskState?.pendingWait ?? null;
+
+    // ── Path A: pending wait ──────────────────────────────────────────────
+    if (pendingWait) {
+      const wakeOn = pendingWait.wakeOn ?? "all_terminal";
+      // Wake-worthy = terminal OR blocked. A blocked child has ended its turn
+      // awaiting a leader decision, so the leader must be roused to answer it
+      // even though the task is not terminal.
+      // any_terminal: wake on first wake-worthy child; all_terminal: wait for all.
+      if (wakeOn === "any_terminal") {
+        if (!minionTasks.some((t) => isWakeWorthyStatus(t.status))) return;
+      } else if (minionTasks.some((t) => !isWakeWorthyStatus(t.status))) return;
+
+      const digest = buildTaskDigest(minionTasks, pendingWait.scheduledAt);
+      host.clearWaitTimer();
+      host.taskState!.pendingWait = null;
+      persistTaskState(host.id, host.taskState!);
+      this.deps.bus.emitToSession(host.id, {
+        type: "wait_state",
+        sessionKey: host.id,
+        action: "completed",
+        reason: "All delegated child tasks reached a wake-worthy state (terminal or blocked).",
+        timestamp: Date.now(),
+      });
+      this.deps.startChildSession({
+        sessionKey: host.id,
+        prompt:
+          `Continue. All delegated child tasks reached a wake-worthy state (terminal or blocked) while waiting (${pendingWait.reason}). Pick up where you left off.` +
+          (digest ? `\n\nTask results:\n${digest}` : ""),
+        cwd: host.cwd,
+        resumeId: host.sessionId ?? undefined,
+        role: host.role,
+        harness: host.harnessName,
+      });
+      return;
+    }
+
+    // ── Path B: no pending wait — idle-leader resurrection ───────────────
+    // Only fire when the host is genuinely idle (mirrors the isLive guard).
+    if (
+      !host.taskState ||
+      host.status !== "idle" ||
+      host.runControl !== null ||
+      host.eventStream !== null ||
+      host.abortController.signal.aborted
+    ) return;
+
+    // cancelled/orphaned come from teardown paths; must not resurrect a leader.
+    // blocked is included: an idle leader must be roused to answer a stuck minion.
+    const meaningfulTasks = minionTasks.filter(
+      (t) =>
+        t.status === "completed" ||
+        t.status === "failed" ||
+        t.status === "ended_without_report" ||
+        t.status === "blocked",
     );
-    if (hasOpenChild) return;
-    const wait = host.taskState.pendingWait;
-    host.clearWaitTimer();
-    host.taskState.pendingWait = null;
-    persistTaskState(host.id, host.taskState);
-    this.deps.bus.emitToSession(host.id, {
-      type: "wait_state",
-      sessionKey: host.id,
-      action: "completed",
-      reason: "All delegated child tasks reached a terminal state.",
-      timestamp: Date.now(),
-    });
+    if (meaningfulTasks.length === 0) return;
+
+    const digest = buildTaskDigest(meaningfulTasks);
     this.deps.startChildSession({
       sessionKey: host.id,
-      prompt: `Continue. All delegated child tasks reached terminal state while waiting (${wait.reason}). Pick up where you left off.`,
+      prompt: `A delegated task reached a state needing your attention while you were idle:\n${digest}\nReview it (answer a blocked task with message_task) and continue orchestrating.`,
       cwd: host.cwd,
       resumeId: host.sessionId ?? undefined,
       role: host.role,
@@ -253,7 +302,8 @@ export class SessionRegistry {
                 ([, t]) =>
                   t.status === "planned" ||
                   t.status === "starting" ||
-                  t.status === "running",
+                  t.status === "running" ||
+                  t.status === "blocked",
               )
               .map(([id, t]) => ({
                 taskId: id,
@@ -317,7 +367,7 @@ export class SessionRegistry {
         host.taskState = tasks;
         if (host.taskState && this.deps) {
           for (const task of host.taskState.tasks.values()) {
-            if (task.status !== "running" && task.status !== "starting") continue;
+            if (task.status !== "running" && task.status !== "starting" && task.status !== "blocked") continue;
             applyLifecycleEvent({
               bus: this.deps.bus,
               leaderSessionKey: row.session_key,

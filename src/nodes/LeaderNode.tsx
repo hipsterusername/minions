@@ -44,6 +44,14 @@ import {
 } from "./leader/session-context.ts";
 import { EditableTitle } from "./leader/EditableTitle.tsx";
 import { WaitCountdown } from "./leader/WaitCountdown.tsx";
+import {
+  buildContextBlock,
+  seedContextHashes,
+  diffContextItems,
+  sendCanvasContextSnapshotIfChanged,
+  type ContextHashes,
+  type CanvasContextSignature,
+} from "../connected-context.ts";
 
 registerContract(LEADER_CONTRACT);
 
@@ -152,6 +160,8 @@ export function LeaderNodeRenderer({
   const scrollZoneRef = useRef<HTMLDivElement>(null);
   const nodeRootRef = useRef<HTMLDivElement | null>(null);
   const syncedRef = useRef(false);
+  const contextHashesRef = useRef<ContextHashes>({});
+  const canvasContextSignatureRef = useRef<CanvasContextSignature>(null);
   const { banners, processNormalizedEvent, dismissBanner } = useStatusBanners();
   const debugEnabled = useSyncExternalStore(
     debugFlagStore.subscribe,
@@ -257,6 +267,23 @@ export function LeaderNodeRenderer({
     syncedRef.current = true;
     socketSend({ type: "sync_session", sessionKey: data.sessionKey });
   }, [socketSend, data.sessionKey]);
+
+  const publishCanvasContext = useCallback((
+    sessionKey: string,
+    items = getContextForNode?.() ?? [],
+    previousSignature = canvasContextSignatureRef.current,
+  ) => {
+    canvasContextSignatureRef.current = sendCanvasContextSnapshotIfChanged({
+      socketSend,
+      sessionKey,
+      items,
+      previousSignature,
+    });
+  }, [socketSend, getContextForNode]);
+
+  useEffect(() => {
+    if (data.sessionKey) publishCanvasContext(data.sessionKey);
+  });
 
   // Helper: update dataRef *synchronously* so rapid-fire WS events within the
   // same frame each see the latest state, then dispatch to React.
@@ -709,36 +736,17 @@ export function LeaderNodeRenderer({
     const prevTaskName = dataRef.current.taskName;
     const sessionContext = buildSessionContext(prevMessages, prevTaskPlan, prevTaskName);
 
-    // Gather context from connected nodes
     const contextItems = getContextForNode?.() ?? [];
-    let fullPrompt = userPrompt;
-    // Binary attachments (images for now) hoisted out of ContextItems so
-    // the server can pack them as real multimodal content blocks rather
-    // than stringifying into the prompt.
     const attachments = contextItems.flatMap((item) => item.attachments ?? []);
 
-    if (contextItems.length > 0) {
-      const contextBlock = contextItems
-        .map((item) => {
-          const isDefault = item.label.toLowerCase() === item.nodeType.toLowerCase();
-          const openTag = isDefault
-            ? `<context-group>`
-            : `<context-group title="${item.label}">`;
-          return `${openTag}\n${item.content}\n</context-group>`;
-        })
-        .join("\n");
-      const attachmentHint = attachments.length > 0
-        ? `\n\nThe user has also attached ${attachments.length} image${attachments.length === 1 ? "" : "s"} — see the image block${attachments.length === 1 ? "" : "s"} in this turn.`
-        : "";
-      fullPrompt = `<connected-context>\nThe following context has been provided by the user via connected canvas nodes:\n\n${contextBlock}${attachmentHint}\n</connected-context>\n\n${userPrompt}`;
-    }
+    const block = buildContextBlock(contextItems);
+    let fullPrompt = block ? `${block}\n\n${userPrompt}` : userPrompt;
+    contextHashesRef.current = seedContextHashes(contextItems);
 
-    // Prepend previous session context if this is a restart
     if (sessionContext) {
       fullPrompt = `${sessionContext}\n\n${fullPrompt}`;
     }
 
-    // Build the full Leader system prompt (active skills + arming inventory)
     const finalSystemPrompt = buildLeaderSystemPrompt({
       skillIds: data.skillIds ?? [],
       skillValues: data.skillValues ?? {},
@@ -758,6 +766,7 @@ export function LeaderNodeRenderer({
       ...(attachments.length > 0 ? { attachments } : {}),
       ...(projectPath ? { cwd: projectPath } : {}),
     });
+    publishCanvasContext(key, contextItems, null);
     syncedRef.current = true;
     onUpdateData({
       ...dataRef.current,
@@ -774,9 +783,7 @@ export function LeaderNodeRenderer({
       ],
     });
     setInput("");
-  }, [socketSend, input, onUpdateData, getContextForNode, data.skillIds, data.skillValues, data.model, data.thinkingConfig]);
-
-  // Auto-start session when autoStartPrompt is set (e.g. from Kanban launch)
+  }, [socketSend, input, onUpdateData, getContextForNode, publishCanvasContext, data.skillIds, data.skillValues, data.model, data.thinkingConfig]);
   const autoStartFired = useRef(false);
   useEffect(() => {
     if (autoStartFired.current) return;
@@ -793,32 +800,17 @@ export function LeaderNodeRenderer({
     const prevTaskName = dataRef.current.taskName;
     const sessionContext = buildSessionContext(prevMessages, prevTaskPlan, prevTaskName);
 
-    // Gather context from connected nodes
     const contextItems = getContextForNode?.() ?? [];
-    let fullPrompt = prompt;
     const attachments = contextItems.flatMap((item) => item.attachments ?? []);
-    if (contextItems.length > 0) {
-      const contextBlock = contextItems
-        .map((item) => {
-          const isDefault = item.label.toLowerCase() === item.nodeType.toLowerCase();
-          const openTag = isDefault
-            ? `<context-group>`
-            : `<context-group title="${item.label}">`;
-          return `${openTag}\n${item.content}\n</context-group>`;
-        })
-        .join("\n");
-      const attachmentHint = attachments.length > 0
-        ? `\n\nThe user has also attached ${attachments.length} image${attachments.length === 1 ? "" : "s"} — see the image block${attachments.length === 1 ? "" : "s"} in this turn.`
-        : "";
-      fullPrompt = `<connected-context>\nThe following context has been provided by the user via connected canvas nodes:\n\n${contextBlock}${attachmentHint}\n</connected-context>\n\n${prompt}`;
-    }
 
-    // Prepend previous session context if this is a restart
+    const block = buildContextBlock(contextItems);
+    let fullPrompt = block ? `${block}\n\n${prompt}` : prompt;
+    contextHashesRef.current = seedContextHashes(contextItems);
+
     if (sessionContext) {
       fullPrompt = `${sessionContext}\n\n${fullPrompt}`;
     }
 
-    // Build the full Leader system prompt (active skills + arming inventory)
     const finalSystemPrompt = buildLeaderSystemPrompt({
       skillIds: dataRef.current.skillIds ?? [],
       skillValues: dataRef.current.skillValues ?? {},
@@ -838,12 +830,13 @@ export function LeaderNodeRenderer({
       ...(attachments.length > 0 ? { attachments } : {}),
       ...(projectPath ? { cwd: projectPath } : {}),
     });
+    publishCanvasContext(key, contextItems, null);
     syncedRef.current = true;
     onUpdateData({
       ...dataRef.current,
       sessionKey: key,
       status: "creating",
-      autoStartPrompt: null, // Clear so it doesn't re-trigger
+      autoStartPrompt: null,
       messages: [
         ...prevMessages,
         {
@@ -854,7 +847,7 @@ export function LeaderNodeRenderer({
         },
       ],
     });
-  }, [socketSend, onUpdateData, getContextForNode, projectPath]);
+  }, [socketSend, onUpdateData, getContextForNode, publishCanvasContext, projectPath]);
 
   const handleSend = useCallback(() => {
     const current = dataRef.current;
@@ -869,16 +862,21 @@ export function LeaderNodeRenderer({
       systemPromptPrefix: current.systemPromptPrefix,
     });
 
-    // Re-gather context on each turn so image nodes attached *after* the
-    // initial send still reach the model. Text context already flows via
-    // the session transcript, so we only forward binary attachments here.
+    // Re-gather context on each turn:
+    //   (a) binary attachments always forwarded for image nodes added after the first turn,
+    //   (b) changed/new text context prepended as a delta <connected-context> block.
     const contextItems = getContextForNode?.() ?? [];
     const attachments = contextItems.flatMap((item) => item.attachments ?? []);
+    const { changedItems, nextHashes } = diffContextItems(contextItems, contextHashesRef.current);
+    contextHashesRef.current = nextHashes;
+    const rawPrompt = input.trim();
+    const deltaBlock = changedItems.length > 0 ? buildContextBlock(changedItems) : null;
+    const prompt = deltaBlock ? `${deltaBlock}\n\n${rawPrompt}` : rawPrompt;
 
     socketSend({
       type: "send_message",
       sessionKey: current.sessionKey,
-      prompt: input.trim(),
+      prompt,
       systemPrompt: finalSystemPrompt,
       thinkingConfig: current.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
       ...(attachments.length > 0 ? { attachments } : {}),
@@ -891,7 +889,7 @@ export function LeaderNodeRenderer({
         {
           id: msgId(),
           role: "user" as const,
-          content: input.trim(),
+          content: rawPrompt,
           timestamp: Date.now(),
         },
       ],
@@ -967,6 +965,7 @@ export function LeaderNodeRenderer({
       socketSend({ type: "stop_session", sessionKey: data.sessionKey });
     }
     syncedRef.current = false;
+    canvasContextSignatureRef.current = null;
     emitUpdate({
       ...LEADER_DEFAULT_DATA,
       skillIds: data.skillIds,
@@ -996,6 +995,7 @@ export function LeaderNodeRenderer({
     // can inject them as <previous-session-context> on the next handleCreate().
     // Also preserve user preferences (model, skills, permissions, isolation).
     syncedRef.current = false;
+    canvasContextSignatureRef.current = null;
     emitUpdate({
       ...LEADER_DEFAULT_DATA,
       messages: current.messages,

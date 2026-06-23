@@ -11,6 +11,7 @@
  * Update this table when a new model ID is released.
  */
 const MODEL_ALIAS_MAP: Record<string, string> = {
+  fable: "claude-fable-5",
   opus: "claude-opus-4-8",
   "opus-old": "claude-opus-4-7",
   sonnet: "claude-sonnet-4-6",
@@ -35,8 +36,10 @@ export function resolveModelAlias(alias: string | null | undefined): string | nu
  */
 const ADAPTIVE_THINKING_MODELS: ReadonlySet<string> = new Set([
   "sonnet",
+  "fable",
   "opus",
   "opus-old",
+  "claude-fable-5",
   "claude-opus-4-8",
   "claude-opus-4-7",
   "claude-opus-4-6",

@@ -38,4 +38,27 @@ describe("buildBaseLeaderPrompt", () => {
       expect(LEADER_SYSTEM_PROMPT).toContain(tool);
     }
   });
+
+  // Worktree/approval copy must NOT appear in the base prompt — it is
+  // injected conditionally by enrichSystemPromptForWorktree only when
+  // a worktree is actually active.
+  it("base leader prompt does NOT contain request_approval", () => {
+    expect(buildBaseLeaderPrompt(CLAUDE_BUILT_IN_TOOLS)).not.toContain("request_approval");
+  });
+
+  it("base leader prompt does NOT contain 'Worktree Isolation'", () => {
+    expect(buildBaseLeaderPrompt(CLAUDE_BUILT_IN_TOOLS)).not.toContain("Worktree Isolation");
+  });
+
+  it("base leader prompt does NOT contain 'Approval Workflow'", () => {
+    expect(buildBaseLeaderPrompt(CLAUDE_BUILT_IN_TOOLS)).not.toContain("Approval Workflow");
+  });
+
+  it("Wait & Continue section explains early auto-wake and recommends generous durations", () => {
+    // Must explain that the system wakes the leader early when all minion tasks finish.
+    expect(LEADER_SYSTEM_PROMPT).toMatch(/auto-wake|wakes you early/i);
+    expect(LEADER_SYSTEM_PROMPT).toMatch(/10.{1,5}30 min/i);
+    // The old 60-second polling example must be gone.
+    expect(LEADER_SYSTEM_PROMPT).not.toMatch(/wait_and_continue.*60 seconds/i);
+  });
 });

@@ -7,7 +7,6 @@ import type {
   SyncEvent,
 } from "../use-socket.ts";
 import { subscribeSocketTopic } from "../use-socket.ts";
-import type { NormalizedEvent } from "../../shared/normalized-event.ts";
 import { useStatusBanners, StatusBannerStack } from "../components/StatusBanner.tsx";
 import { SessionToolbar } from "../components/SessionToolbar.tsx";
 import type { ModelOption, PermissionMode } from "../components/SessionToolbar.tsx";
@@ -22,6 +21,11 @@ import {
   isStreamEnd,
   isStreamingEvent,
 } from "../streaming.ts";
+import {
+  type DisplayMessage,
+  msgId,
+  normalizedToDisplayMessages,
+} from "../sdk-messages.ts";
 import { recordWsMessageForDebug } from "../debug-record-bridge.ts";
 import { debugFlagStore } from "../debug.ts";
 import { DebugInspector } from "../components/DebugInspector.tsx";
@@ -67,7 +71,7 @@ export interface ClaudeSessionData {
     | "idle"
     | "stopped"
     | "error";
-  messages: SessionMessage[];
+  messages: DisplayMessage[];
   totalCost: number;
   turns: number;
   error: string | null;
@@ -96,94 +100,25 @@ export interface ClaudeSessionData {
   initData: Record<string, unknown> | null;
 }
 
-type SessionMessageRole = "user" | "assistant" | "tool" | "system" | "result";
-
-interface SessionMessage {
-  id: string;
-  role: SessionMessageRole;
-  content: string;
-  timestamp: number;
-  toolName?: string | undefined;
-  toolInput?: Record<string, unknown> | undefined;
-  /** For result messages: structured metadata */
-  meta?: ResultMeta | undefined;
-}
-
-interface ResultMeta {
-  isError?: boolean | undefined;
-  error?: string | undefined;
-}
-
-function msgId(): string {
-  return `m-${crypto.randomUUID()}`;
-}
-
 /**
- * Convert a NormalizedEvent into zero or more SessionMessages for the
- * ClaudeSessionNode chat feed. Uses simple random IDs since ClaudeSessionNode
- * has its own subscription and doesn't need cross-session dedup.
+ * Event kinds that produce feed messages in ClaudeSessionNode.
+ *
+ * This whitelist is intentionally narrow: `thinking`, `api_retry`, and
+ * `rate_limit` are handled by the status-banner layer (not the feed),
+ * while `usage`, `text_delta`, `stream_end`, and `tool_result` carry no
+ * displayable content. Checking the kind before calling
+ * `normalizedToDisplayMessages` keeps the feed identical to the legacy
+ * `normalizedToDisplayMessages` behaviour and avoids banner-vs-feed
+ * double-display for rate-limit / retry events.
  */
-function normalizedToSessionMessages(event: NormalizedEvent): SessionMessage[] {
-  const out: SessionMessage[] = [];
-  const now = Date.now();
-  switch (event.kind) {
-    case "init":
-      out.push({ id: msgId(), role: "system", content: `Session on ${event.model}`, timestamp: now });
-      break;
-    case "text":
-      if (event.role === "assistant") {
-        const text = event.text.replace(/<!--task-name:.+?-->\s*/g, "");
-        if (text.trim()) {
-          out.push({ id: msgId(), role: "assistant", content: text, timestamp: now });
-        }
-      }
-      break;
-    case "thinking":
-      // thinking blocks not shown in the generic session node
-      break;
-    case "tool_call":
-      if (event.parentId == null) {
-        out.push({
-          id: msgId(), role: "tool",
-          content: event.name,
-          timestamp: now,
-          toolName: event.name,
-          toolInput: event.input as Record<string, unknown>,
-        });
-      }
-      break;
-    case "tool_progress":
-      if (event.parentId == null) {
-        out.push({
-          id: msgId(), role: "tool",
-          content: `${event.name} (${event.elapsedSeconds.toFixed(1)}s)`,
-          timestamp: now, toolName: event.name,
-        });
-      }
-      break;
-    case "done": {
-      if (event.reason === "error") {
-        const errText = event.error ?? "Error";
-        out.push({ id: msgId(), role: "result", content: errText, timestamp: now,
-          meta: { isError: true, error: errText } });
-      } else if ((event.reason === "completed" || event.reason === "stop") && event.result) {
-        const txt = event.result.replace(/<!--task-name:.+?-->\s*/g, "");
-        if (txt.trim()) {
-          out.push({ id: msgId(), role: "result", content: txt, timestamp: now });
-        }
-      }
-      break;
-    }
-    case "permission_denial":
-      out.push({ id: msgId(), role: "system",
-        content: `Permission denied: ${event.tool}`, timestamp: now });
-      break;
-    // usage, text_delta, stream_end, tool_result, api_retry, rate_limit \u2192 no feed message
-    default:
-      break;
-  }
-  return out;
-}
+const SESSION_FEED_KINDS = new Set([
+  "init",
+  "text",
+  "tool_call",
+  "tool_progress",
+  "done",
+  "permission_denial",
+]);
 
 function rebuildFromSyncEvents(
   events: SyncEvent[],
@@ -196,11 +131,13 @@ function rebuildFromSyncEvents(
   serverPermissionMode?: string | null,
   serverHarness?: string | undefined,
 ): ClaudeSessionData {
-  const messages: SessionMessage[] = [];
+  const messages: DisplayMessage[] = [];
   for (const evt of events) {
     if (evt.type === "sdk_event" && evt.event) {
-      const msgs = normalizedToSessionMessages(evt.event);
-      messages.push(...msgs);
+      const ev = evt.event;
+      if (SESSION_FEED_KINDS.has(ev.kind)) {
+        messages.push(...normalizedToDisplayMessages(ev));
+      }
     }
   }
   return {
@@ -226,12 +163,12 @@ function rebuildFromSyncEvents(
 // ── Message display components ──────────────────────────
 
 type MessageGroup =
-  | { kind: "single"; msg: SessionMessage }
-  | { kind: "tool-group"; msgs: SessionMessage[] };
+  | { kind: "single"; msg: DisplayMessage }
+  | { kind: "tool-group"; msgs: DisplayMessage[] };
 
-function groupMessages(messages: SessionMessage[]): MessageGroup[] {
+function groupMessages(messages: DisplayMessage[]): MessageGroup[] {
   const groups: MessageGroup[] = [];
-  let toolBatch: SessionMessage[] = [];
+  let toolBatch: DisplayMessage[] = [];
 
   const flushTools = () => {
     if (toolBatch.length > 0) {
@@ -297,7 +234,7 @@ function formatToolInputDetail(input?: Record<string, unknown>): string {
   return lines.join("\n");
 }
 
-function ToolItem({ msg, accentColor }: { msg: SessionMessage; accentColor: string }) {
+function ToolItem({ msg, accentColor }: { msg: DisplayMessage; accentColor: string }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const icon = TOOL_ICONS[msg.toolName ?? ""] ?? "\u2022";
   const summary = formatToolInput(msg.toolName ?? "", msg.toolInput);
@@ -390,7 +327,7 @@ function ToolItem({ msg, accentColor }: { msg: SessionMessage; accentColor: stri
   );
 }
 
-function ToolGroup({ msgs }: { msgs: SessionMessage[] }) {
+function ToolGroup({ msgs }: { msgs: DisplayMessage[] }) {
   const [expanded, setExpanded] = useState(false);
   const toolNames = msgs.map((m) => m.toolName ?? "tool");
   const uniqueTools = [...new Set(toolNames)];
@@ -485,7 +422,7 @@ function ToolGroup({ msgs }: { msgs: SessionMessage[] }) {
   );
 }
 
-function AssistantBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAddContentNode?: ((content: string) => void) | undefined }) {
+function AssistantBubble({ msg, onAddContentNode }: { msg: DisplayMessage; onAddContentNode?: ((content: string) => void) | undefined }) {
   const [expanded, setExpanded] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const [isOverflowing, setIsOverflowing] = useState(false);
@@ -634,7 +571,7 @@ function AssistantBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAdd
   );
 }
 
-function UserBubble({ msg }: { msg: SessionMessage }) {
+function UserBubble({ msg }: { msg: DisplayMessage }) {
   return (
     <div style={{ ...chatRoleStyle("user"), marginBlock: 2 }}>
       <UserContextHeader />
@@ -643,7 +580,7 @@ function UserBubble({ msg }: { msg: SessionMessage }) {
   );
 }
 
-function SystemBubble({ msg }: { msg: SessionMessage }) {
+function SystemBubble({ msg }: { msg: DisplayMessage }) {
   return (
     <div style={{ ...chatRoleStyle("system"), marginBlock: 2 }}>
       {msg.content}
@@ -651,7 +588,7 @@ function SystemBubble({ msg }: { msg: SessionMessage }) {
   );
 }
 
-function ResultBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAddContentNode?: ((content: string) => void) | undefined }) {
+function ResultBubble({ msg, onAddContentNode }: { msg: DisplayMessage; onAddContentNode?: ((content: string) => void) | undefined }) {
   const [expanded, setExpanded] = useState(false);
   const isLong = msg.content.length > 300;
   const meta = msg.meta;
@@ -695,7 +632,7 @@ function ResultBubble({ msg, onAddContentNode }: { msg: SessionMessage; onAddCon
   );
 }
 
-function MessageFeed({ messages, onAddContentNode }: { messages: SessionMessage[]; onAddContentNode?: ((content: string) => void) | undefined }) {
+function MessageFeed({ messages, onAddContentNode }: { messages: DisplayMessage[]; onAddContentNode?: ((content: string) => void) | undefined }) {
   const groups = groupMessages(messages);
   return (
     <>
@@ -931,7 +868,7 @@ export function ClaudeSessionRenderer({
           changed = true;
         }
 
-        const newMsgs = normalizedToSessionMessages(ev);
+        const newMsgs = SESSION_FEED_KINDS.has(ev.kind) ? normalizedToDisplayMessages(ev) : [];
         if (newMsgs.length > 0) {
           let base = updated.messages;
           // When a done event arrives with a result, drop the last assistant

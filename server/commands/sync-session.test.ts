@@ -88,9 +88,7 @@ describe("sync_session", () => {
   it("re-emits render_update when the host has non-empty renderState", () => {
     const h = setup();
     h.host.renderState = {
-      title: "Dashboard",
-      columns: 3,
-      gap: 12,
+      layout: { title: "Dashboard", columns: 3, gap: 12 },
       components: [{ id: "a", type: "metric", label: "X", value: "1" }],
     };
 
@@ -106,9 +104,7 @@ describe("sync_session", () => {
   it("does NOT re-emit render_update when renderState is empty", () => {
     const h = setup();
     h.host.renderState = {
-      title: "",
-      columns: 2,
-      gap: 12,
+      layout: { title: "", columns: 2, gap: 12 },
       components: [],
     };
     syncSession(h.ctx, cmd({ type: "sync_session" }), h.ws);

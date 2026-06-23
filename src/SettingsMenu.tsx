@@ -443,6 +443,12 @@ const FALLBACK_MODEL_GROUPS: ModelGroup[] = [
     label: "Anthropic",
     options: [
       {
+        value: "claude::claude-fable-5",
+        label: "Fable 5",
+        model: "claude-fable-5",
+        harness: "claude",
+      },
+      {
         value: "claude::claude-opus-4-8",
         label: "Opus 4.8",
         model: "claude-opus-4-8",
@@ -471,6 +477,7 @@ const FALLBACK_MODEL_GROUPS: ModelGroup[] = [
 ];
 
 const LEGACY_MODEL_ALIASES: Record<string, string> = {
+  fable: "claude-fable-5",
   opus: "claude-opus-4-8",
   "opus-old": "claude-opus-4-7",
   sonnet: "claude-sonnet-4-6",

@@ -40,6 +40,8 @@ interface CanvasNodeProps {
     description?: string;
     systemPromptPrefix?: string;
   }) => boolean) | undefined;
+  /** Callback to center/focus this node in the canvas viewport */
+  onFocusNode?: ((nodeId: string) => void) | undefined;
   /** Connection drag callbacks — threaded from Canvas */
   onConnectionStart?: ((port: PortInfo, e: React.MouseEvent) => void) | undefined;
   onConnectionEnd?: ((port: PortInfo) => void) | undefined;
@@ -152,6 +154,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
   onSpawnLeaderChild,
   onDuplicateLeaderSetup,
   onSaveLeaderPreset,
+  onFocusNode,
   onConnectionStart,
   onConnectionEnd,
   isDragActive = false,
@@ -286,6 +289,27 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
     // Trackpad pan events bubble up to the canvas for seamless panning
   }, []);
 
+  const handleDoubleClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (node.type !== "leader" || !onFocusNode) return;
+
+      const target = e.target as Element;
+      const interactiveTags = new Set(["input", "textarea", "select", "button", "a", "label"]);
+      if (
+        interactiveTags.has(target.tagName.toLowerCase()) ||
+        target.closest("[contenteditable]") ||
+        target.closest("[data-no-drag]") ||
+        target.closest("[data-scroll-capture]")
+      ) {
+        return;
+      }
+
+      e.stopPropagation();
+      onFocusNode(node.id);
+    },
+    [node.id, node.type, onFocusNode],
+  );
+
   // Stable callback — only changes when node.id or parent handler changes,
   // preventing child useEffect subscriptions from tearing down every render.
   const handleNodeUpdate = useCallback(
@@ -380,6 +404,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
     <div
       ref={nodeRef}
       onMouseDown={handleMouseDown}
+      onDoubleClick={handleDoubleClick}
       onWheel={handleWheel}
       style={{
         position: "absolute",

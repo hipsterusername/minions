@@ -16,22 +16,18 @@
 
 import { z } from "zod/v4";
 import type { NormalizedToolDef } from "./harness/types.ts";
+import { textResult } from "./harness/tool-result.ts";
 import type { Bus } from "./bus.ts";
 import {
   renderComponentInputSchema,
   renderComponentSchema,
   type RenderComponent,
+  type RenderState,
 } from "../shared/render-dsl.ts";
 import { elideDefaults } from "../shared/render-defaults.ts";
 
-// ── Types ─────────────────────────────────────────────
-
-export interface RenderState {
-  title: string;
-  columns: number;
-  gap: number;
-  components: RenderComponent[];
-}
+// RenderState is imported from shared/render-dsl.ts — single source of truth.
+export type { RenderState };
 
 const DASHBOARD_COMPONENT_GUIDE = [
   "The dashboard is a live side panel for showing progress, evidence, results, choices, and review data while the agent works.",
@@ -107,9 +103,7 @@ export function createRenderToolsForLeader(opts: {
   const { leaderSessionKey, bus, onStateChange } = opts;
 
   const renderState: RenderState = opts.existingRenderState ?? {
-    title: "",
-    columns: 2,
-    gap: 12,
+    layout: { title: "", columns: 2, gap: 12 },
     components: [],
   };
 
@@ -137,8 +131,8 @@ export function createRenderToolsForLeader(opts: {
       // `set` is a full replace: title and columns both fall back to their
       // documented defaults when the agent omits them, mirroring the way
       // components is replaced wholesale.
-      renderState.title = args.title ?? "";
-      renderState.columns = args.columns ?? 2;
+      renderState.layout.title = args.title ?? "";
+      renderState.layout.columns = args.columns ?? 2;
       // Strip fields equal to their documented defaults so persisted state
       // and the broadcast envelope stay lean.
       renderState.components = args.components.map(elideDefaults);
@@ -148,43 +142,40 @@ export function createRenderToolsForLeader(opts: {
         leaderSessionKey,
         action: "set",
         layout: {
-          title: renderState.title,
-          columns: renderState.columns,
-          gap: renderState.gap,
+          title: renderState.layout.title,
+          columns: renderState.layout.columns,
+          gap: renderState.layout.gap,
         },
         components: renderState.components,
       });
 
       notifyStateChange();
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Dashboard set with ${args.components.length} component(s).`,
-          },
-        ],
-      };
+      return textResult(
+        `Dashboard set with ${args.components.length} component(s).`,
+      );
     },
   };
 
   // ── render_patch ──────────────────────────────────
 
+  const renderPatchInputSchema = z.object({
+    updates: z
+      .array(
+        z
+          .object({ id: z.string().describe("Component id to update") })
+          .passthrough(),
+      )
+      .describe("Array of partial component updates, each must include id"),
+  });
+
   const renderPatchDef: NormalizedToolDef = {
     name: "render_patch",
     description:
       "Update specific components by id without replacing the whole dashboard. Use for live progress updates: status state, metric values, progress percentages, chart data, checklist items, or concise text changes. Patch entries are partial component objects with id; the existing component id/type are preserved.",
-    inputSchema: z.object({
-      updates: z
-        .array(
-          z
-            .object({ id: z.string().describe("Component id to update") })
-            .passthrough(),
-        )
-        .describe("Array of partial component updates, each must include id"),
-    }),
+    inputSchema: renderPatchInputSchema,
     handler: async (input: unknown) => {
-      const args = input as { updates: Array<Record<string, unknown>> };
+      const args = renderPatchInputSchema.parse(input);
       // Apply patches to local state
       for (const update of args.updates) {
         const idx = renderState.components.findIndex(
@@ -210,14 +201,7 @@ export function createRenderToolsForLeader(opts: {
 
       notifyStateChange();
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Patched ${args.updates.length} component(s).`,
-          },
-        ],
-      };
+      return textResult(`Patched ${args.updates.length} component(s).`);
     },
   };
 
@@ -225,7 +209,8 @@ export function createRenderToolsForLeader(opts: {
 
   const renderAppendDef: NormalizedToolDef = {
     name: "render_append",
-    description: `Add new components to the existing dashboard without replacing the layout. ${DASHBOARD_COMPONENT_GUIDE}`,
+    description:
+      "Add new components to the existing dashboard without replacing the layout. Components follow the same Render DSL contract documented on render_set; a component whose id already exists is replaced in place.",
     inputSchema: renderAppendInputSchema,
     handler: async (input: unknown) => {
       const parsed = renderAppendInputSchema.parse(input);
@@ -249,28 +234,25 @@ export function createRenderToolsForLeader(opts: {
 
       notifyStateChange();
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Appended ${args.components.length} component(s). Total: ${renderState.components.length}.`,
-          },
-        ],
-      };
+      return textResult(
+        `Appended ${args.components.length} component(s). Total: ${renderState.components.length}.`,
+      );
     },
   };
 
   // ── render_remove ─────────────────────────────────
 
+  const renderRemoveInputSchema = z.object({
+    ids: z.array(z.string()).describe("Component ids to remove"),
+  });
+
   const renderRemoveDef: NormalizedToolDef = {
     name: "render_remove",
     description:
       "Remove components from the dashboard by their ids. Use when a temporary status, section, tab, or result is no longer relevant.",
-    inputSchema: z.object({
-      ids: z.array(z.string()).describe("Component ids to remove"),
-    }),
+    inputSchema: renderRemoveInputSchema,
     handler: async (input: unknown) => {
-      const args = input as { ids: string[] };
+      const args = renderRemoveInputSchema.parse(input);
       const idSet = new Set(args.ids);
       renderState.components = renderState.components.filter(
         (c) => !idSet.has(c.id),
@@ -285,14 +267,9 @@ export function createRenderToolsForLeader(opts: {
 
       notifyStateChange();
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Removed ${args.ids.length} component(s). Remaining: ${renderState.components.length}.`,
-          },
-        ],
-      };
+      return textResult(
+        `Removed ${args.ids.length} component(s). Remaining: ${renderState.components.length}.`,
+      );
     },
   };
 

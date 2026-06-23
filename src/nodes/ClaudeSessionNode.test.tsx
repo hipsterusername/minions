@@ -21,7 +21,7 @@
 
 import { act, render } from "@testing-library/react";
 import { useState } from "react";
-import { describe, expect, it, vi, beforeAll } from "vitest";
+import { describe, expect, it, vi, beforeAll, beforeEach, afterEach } from "vitest";
 
 import { ClaudeSessionRenderer, type ClaudeSessionData } from "./ClaudeSessionNode.tsx";
 import type { CanvasNode, NodeRenderProps } from "../types.ts";
@@ -325,5 +325,317 @@ describe("ClaudeSessionNode: sync_response !found disconnects", () => {
 
     const last = states.at(-1);
     expect(last?.status).toBe("disconnected");
+  });
+});
+
+// ── Reducer behavior: message kinds produced ───────────
+
+describe("ClaudeSessionNode: message kind coverage", () => {
+  it("done/error produces a result message with meta.isError=true", async () => {
+    const { socket, replay } = createReplaySocket();
+    const states: ClaudeSessionData[] = [];
+
+    render(
+      <Probe
+        socket={socket}
+        initial={makeInitialData()}
+        onState={(d) => states.push(d)}
+      />,
+    );
+
+    await pump(replay, [
+      {
+        message: {
+          type: "sdk_event",
+          sessionKey: "session-1",
+          event: { kind: "done", reason: "error", error: "upstream failure" },
+        },
+      } as FixtureEntry,
+    ]);
+
+    const last = states.at(-1);
+    const errMsg = last?.messages.find((m) => m.role === "result");
+    expect(errMsg?.content).toBe("upstream failure");
+    // meta.isError must be true so ResultBubble renders with error styling
+    expect((errMsg as { meta?: { isError?: boolean } } | undefined)?.meta?.isError).toBe(true);
+  });
+
+  it("permission_denial produces a system message containing the tool name", async () => {
+    const { socket, replay } = createReplaySocket();
+    const states: ClaudeSessionData[] = [];
+
+    render(
+      <Probe
+        socket={socket}
+        initial={makeInitialData()}
+        onState={(d) => states.push(d)}
+      />,
+    );
+
+    await pump(replay, [
+      {
+        message: {
+          type: "sdk_event",
+          sessionKey: "session-1",
+          event: { kind: "permission_denial", tool: "Bash", reason: "not allowed" },
+        },
+      } as FixtureEntry,
+    ]);
+
+    const last = states.at(-1);
+    const sysMsg = last?.messages.find((m) => m.role === "system");
+    expect(sysMsg?.content).toContain("Bash");
+  });
+
+  it("thinking events do NOT appear in the message feed", async () => {
+    const { socket, replay } = createReplaySocket();
+    const states: ClaudeSessionData[] = [];
+
+    render(
+      <Probe
+        socket={socket}
+        initial={makeInitialData()}
+        onState={(d) => states.push(d)}
+      />,
+    );
+
+    await pump(replay, [
+      {
+        message: {
+          type: "sdk_event",
+          sessionKey: "session-1",
+          event: { kind: "thinking", text: "internal reasoning" },
+        },
+      } as FixtureEntry,
+    ]);
+
+    // thinking events should be silently dropped from the feed
+    // (ClaudeSessionNode deliberately skips them)
+    const last = states.at(-1);
+    expect(last).toBeUndefined(); // no state update at all for thinking events
+  });
+
+  it("api_retry events do NOT appear in the message feed", async () => {
+    const { socket, replay } = createReplaySocket();
+    const states: ClaudeSessionData[] = [];
+
+    render(
+      <Probe
+        socket={socket}
+        initial={makeInitialData()}
+        onState={(d) => states.push(d)}
+      />,
+    );
+
+    await pump(replay, [
+      {
+        message: {
+          type: "sdk_event",
+          sessionKey: "session-1",
+          event: { kind: "api_retry", attempt: 1, reason: "timeout" },
+        },
+      } as FixtureEntry,
+    ]);
+
+    // api_retry handled by status banners, not feed — no feed message produced, no state update
+    expect(states).toHaveLength(0);
+  });
+
+  it("rate_limit events do NOT appear in the message feed", async () => {
+    const { socket, replay } = createReplaySocket();
+    const states: ClaudeSessionData[] = [];
+
+    render(
+      <Probe
+        socket={socket}
+        initial={makeInitialData()}
+        onState={(d) => states.push(d)}
+      />,
+    );
+
+    await pump(replay, [
+      {
+        message: {
+          type: "sdk_event",
+          sessionKey: "session-1",
+          event: { kind: "rate_limit", retryAfterMs: 5000 },
+        },
+      } as FixtureEntry,
+    ]);
+
+    // rate_limit handled by status banners, not feed — no state update
+    expect(states).toHaveLength(0);
+  });
+});
+
+// ── Streaming delta behavior ────────────────────────────
+
+/**
+ * Helper: pump events through replay then flush any pending RAF/timer frames
+ * that `emitStreamingUpdate` schedules. We use fake timers so the 16ms
+ * fallback setTimeout fires synchronously inside `act`.
+ */
+async function pumpAndFlushFrames(
+  replay: (entries: ReadonlyArray<FixtureEntry>) => Promise<void>,
+  entries: ReadonlyArray<FixtureEntry>,
+): Promise<void> {
+  await pump(replay, entries);
+  // Flush the RAF/setTimeout scheduled by emitStreamingUpdate.
+  await act(async () => {
+    vi.runAllTimers();
+  });
+}
+
+describe("ClaudeSessionNode: streaming delta handling", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("text_delta events accumulate into streamingText", async () => {
+    const { socket, replay } = createReplaySocket();
+    const states: ClaudeSessionData[] = [];
+
+    render(
+      <Probe
+        socket={socket}
+        initial={makeInitialData()}
+        onState={(d) => states.push(d)}
+      />,
+    );
+
+    await pumpAndFlushFrames(replay, [
+      {
+        message: {
+          type: "sdk_event",
+          sessionKey: "session-1",
+          event: { kind: "text_delta", text: "Hello", blockIndex: 0 },
+        },
+      } as FixtureEntry,
+    ]);
+    await pumpAndFlushFrames(replay, [
+      {
+        message: {
+          type: "sdk_event",
+          sessionKey: "session-1",
+          event: { kind: "text_delta", text: " world", blockIndex: 0 },
+        },
+      } as FixtureEntry,
+    ]);
+
+    const last = states.at(-1);
+    expect(last?.streamingText).toBe("Hello world");
+  });
+
+  it("text_delta with a new blockIndex resets the streaming buffer", async () => {
+    const { socket, replay } = createReplaySocket();
+    const states: ClaudeSessionData[] = [];
+
+    render(
+      <Probe
+        socket={socket}
+        initial={makeInitialData({ streamingText: "block0", streamingBlockIndex: 0 })}
+        onState={(d) => states.push(d)}
+      />,
+    );
+
+    await pumpAndFlushFrames(replay, [
+      {
+        message: {
+          type: "sdk_event",
+          sessionKey: "session-1",
+          // blockIndex 2 is a new block — must reset buffer
+          event: { kind: "text_delta", text: "fresh", blockIndex: 2 },
+        },
+      } as FixtureEntry,
+    ]);
+
+    const last = states.at(-1);
+    expect(last?.streamingText).toBe("fresh");
+    expect(last?.streamingBlockIndex).toBe(2);
+  });
+
+  it("text_delta with parentId (sub-agent) is ignored", async () => {
+    const { socket, replay } = createReplaySocket();
+    const onState = vi.fn();
+
+    render(
+      <Probe
+        socket={socket}
+        initial={makeInitialData()}
+        onState={onState}
+      />,
+    );
+
+    await pump(replay, [
+      {
+        message: {
+          type: "sdk_event",
+          sessionKey: "session-1",
+          event: { kind: "text_delta", text: "sub-agent noise", blockIndex: 0, parentId: "task-xyz" },
+        },
+      } as FixtureEntry,
+    ]);
+
+    // Sub-agent deltas must not update state at all
+    expect(onState).not.toHaveBeenCalled();
+  });
+
+  it("stream_end clears the streaming buffer", async () => {
+    const { socket, replay } = createReplaySocket();
+    const states: ClaudeSessionData[] = [];
+
+    render(
+      <Probe
+        socket={socket}
+        initial={makeInitialData({ streamingText: "partial...", streamingBlockIndex: 0 })}
+        onState={(d) => states.push(d)}
+      />,
+    );
+
+    await pump(replay, [
+      {
+        message: {
+          type: "sdk_event",
+          sessionKey: "session-1",
+          event: { kind: "stream_end" },
+        },
+      } as FixtureEntry,
+    ]);
+
+    const last = states.at(-1);
+    expect(last?.streamingText).toBe("");
+    expect(last?.streamingBlockIndex).toBeNull();
+  });
+
+  it("a complete assistant text event clears the streaming buffer", async () => {
+    const { socket, replay } = createReplaySocket();
+    const states: ClaudeSessionData[] = [];
+
+    render(
+      <Probe
+        socket={socket}
+        initial={makeInitialData({ streamingText: "streaming...", streamingBlockIndex: 0 })}
+        onState={(d) => states.push(d)}
+      />,
+    );
+
+    await pump(replay, [
+      {
+        message: {
+          type: "sdk_event",
+          sessionKey: "session-1",
+          event: { kind: "text", text: "Complete message.", role: "assistant" },
+        },
+      } as FixtureEntry,
+    ]);
+
+    const last = states.at(-1);
+    expect(last?.streamingText).toBe("");
+    expect(last?.streamingBlockIndex).toBeNull();
+    // The complete message appears in the feed
+    expect(last?.messages.some((m) => m.role === "assistant" && m.content === "Complete message.")).toBe(true);
   });
 });

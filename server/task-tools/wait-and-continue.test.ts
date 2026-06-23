@@ -45,6 +45,29 @@ async function call(
 }
 
 describe("wait_and_continue", () => {
+  it("rejects garbage input before scheduling the wait — parse guard", async () => {
+    const ctx = makeCtx();
+    const tool = createWaitAndContinueToolDef(ctx);
+
+    // Null and missing fields are invalid.
+    await expect(call(tool, null)).rejects.toThrow();
+    await expect(call(tool, {})).rejects.toThrow();
+    // duration_seconds must be a number in [5, 1800].
+    await expect(
+      call(tool, { duration_seconds: 2, reason: "too short" }),
+    ).rejects.toThrow();
+    await expect(
+      call(tool, { duration_seconds: 9999, reason: "too long" }),
+    ).rejects.toThrow();
+    // reason must be a string.
+    await expect(
+      call(tool, { duration_seconds: 30, reason: 42 }),
+    ).rejects.toThrow();
+
+    expect(ctx.taskState.pendingWait).toBeNull();
+    expect(ctx.scheduleWaitContinue).not.toHaveBeenCalled();
+  });
+
   it("records the pendingWait on task state, broadcasts wait_state, and calls scheduleWaitContinue", async () => {
     const ctx = makeCtx();
     const tool = createWaitAndContinueToolDef(ctx);
@@ -71,6 +94,24 @@ describe("wait_and_continue", () => {
       30_000,
       "waiting on minion",
     );
+  });
+
+  it("stores wake_on on pendingWait when explicitly provided", async () => {
+    const ctx = makeCtx();
+    const tool = createWaitAndContinueToolDef(ctx);
+
+    await call(tool, { duration_seconds: 30, reason: "pipelining", wake_on: "any_terminal" });
+
+    expect(ctx.taskState.pendingWait?.wakeOn).toBe("any_terminal");
+  });
+
+  it("leaves wakeOn undefined (defaults to all_terminal behavior) when wake_on is omitted", async () => {
+    const ctx = makeCtx();
+    const tool = createWaitAndContinueToolDef(ctx);
+
+    await call(tool, { duration_seconds: 30, reason: "waiting on all minions" });
+
+    expect(ctx.taskState.pendingWait?.wakeOn).toBeUndefined();
   });
 
   it("formats the user-facing duration text for sub-minute and multi-minute waits", async () => {

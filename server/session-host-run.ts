@@ -29,6 +29,7 @@ import {
 } from "./session-host-config.ts";
 import type { SessionHost, StartSessionOptions } from "./session-host.ts";
 import { applySessionRunningForMinion } from "./task-lifecycle.ts";
+import { injectSessionMessage } from "./session-message.ts";
 /**
  * Ensure the host has the correct cwd + worktree wiring before the SDK
  * query opens. Mutates `host` in place and emits bus events on failure.
@@ -364,6 +365,8 @@ export function buildAgentContext(
       return host.waitTimerId;
     },
     terminateSession: deps.terminateSession,
+    messageSession: (sessionKey, message) =>
+      injectSessionMessage(deps, sessionKey, message),
     wakeWaitingLeaderIfAllChildrenTerminal: deps.wakeWaitingLeaderIfAllChildrenTerminal,
   };
   if (host.taskState) ctx.existingTaskState = host.taskState;

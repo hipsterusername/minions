@@ -126,6 +126,15 @@ afterEach(() => {
 });
 
 describe("ClaudeHarness.start()", () => {
+  it("exposes Fable 5 in static model metadata", async () => {
+    const harness = await importHarness();
+
+    expect(harness.staticInfo().models).toContainEqual({
+      id: "claude-fable-5",
+      label: "Fable 5",
+    });
+  });
+
   it("passes the expected session options to query()", async () => {
     const handle = makeHandle([doneMessage()]);
     sdkMock.query.mockReturnValue(handle);

@@ -15,7 +15,7 @@
  *   8. The armed skill IDs are injected into the spawn prompt when armed.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -25,7 +25,7 @@ import type {
   TaskToolContext,
 } from "./types.ts";
 import type { Bus, BusPayload } from "../bus.ts";
-import { writeSkills } from "../project-store.ts";
+import { writeSettings, writeSkills } from "../project-store.ts";
 
 const BASE_MINION_PROMPT = "You are a Minion. Do the work.";
 
@@ -34,6 +34,7 @@ interface CapturedSpawn {
   prompt: string;
   cwd: string;
   systemPrompt: string;
+  model?: string;
 }
 
 interface Harness {
@@ -86,6 +87,10 @@ async function callAssign(
     title: string;
     description: string;
     priority: "low" | "medium" | "high" | "critical";
+    model?: string;
+    timeout_minutes?: number;
+    ownedPaths?: string[];
+    include_canvas_context?: boolean;
     skillIds?: string[];
     skillValues?: Record<string, Record<string, string>>;
   },
@@ -116,6 +121,33 @@ describe("assign_task", () => {
 
   afterEach(() => {
     fs.rmSync(projectDir, { recursive: true, force: true });
+    // ownedPaths now lives on each task record in the per-test taskState Map,
+    // which is recreated in beforeEach — no module-level registry to clear.
+  });
+
+  it("rejects garbage input before spawning a minion — parse guard", async () => {
+    // Null and empty objects lack all required fields.
+    await expect(callAssign(harness.ctx, null as never)).rejects.toThrow();
+    // Wrong priority enum value.
+    await expect(
+      callAssign(harness.ctx, {
+        taskId: "t",
+        title: "T",
+        description: "D",
+        priority: "urgent" as never,
+      }),
+    ).rejects.toThrow();
+    // Missing 'description'.
+    await expect(
+      callAssign(harness.ctx, {
+        taskId: "t",
+        title: "T",
+        description: undefined as never,
+        priority: "low",
+      }),
+    ).rejects.toThrow();
+
+    expect(harness.spawns).toHaveLength(0);
   });
 
   it("uses the base minion prompt when no skillIds are provided", async () => {
@@ -246,8 +278,11 @@ describe("assign_task", () => {
     const sent = harness.spawns[0]!.systemPrompt;
     expect(sent).toContain("Real instructions.");
     expect(sent).not.toContain("ghost");
-    expect(text).toContain("Armed with skills: real");
+    // Token-efficiency contract: only NEW information is returned. Dropped
+    // IDs are reported (the drop is otherwise silent); armed skills are
+    // derivable as requested-minus-dropped, so they are not echoed back.
     expect(text).toContain("Skipped unknown skill IDs: ghost");
+    expect(text).not.toContain("Armed with skills");
   });
 
   it("emits minion_spawned with armedSkillIds", async () => {
@@ -297,7 +332,7 @@ describe("assign_task", () => {
   // skillIds happy-path case above.
 
   describe("spawn user-prompt structure", () => {
-    it("uses the Description / Acceptance Criteria header and drops the legacy trailer", async () => {
+    it("uses the Description header and drops the legacy trailer", async () => {
       await callAssign(harness.ctx, {
         taskId: "t-struct",
         title: "Add a thing",
@@ -310,7 +345,7 @@ describe("assign_task", () => {
       expect(prompt).toContain("**Task ID:** t-struct");
       expect(prompt).toContain("**Title:** Add a thing");
       expect(prompt).toContain("**Priority:** medium");
-      expect(prompt).toContain("## Description / Acceptance Criteria");
+      expect(prompt).toContain("## Description");
       expect(prompt).toContain("Add a button to LeaderNode that does X.");
       expect(prompt).not.toContain("Please execute this task now.");
     });
@@ -387,5 +422,268 @@ describe("assign_task", () => {
 
     // Note: an "omits the armed skills line" negative-existence test was
     // removed per §5.9 — already covered by the positive case above.
+
+    it("injects connected canvas context by default when a snapshot is present", async () => {
+      harness.ctx.getCanvasContext = () =>
+        "<connected-context>\nThe following context has been provided by the user via connected canvas nodes:\n\n<context-group title=\"Spec\">\nBuild the compact view.\n</context-group>\n</connected-context>";
+
+      await callAssign(harness.ctx, {
+        taskId: "t-canvas",
+        title: "Use canvas",
+        description: "details",
+        priority: "medium",
+      });
+
+      const prompt = lastSpawnPrompt(harness);
+      expect(prompt).toContain("## Canvas context (from connected nodes)");
+      expect(prompt).toContain("Build the compact view.");
+    });
+
+    it("omits canvas context when absent or explicitly disabled", async () => {
+      harness.ctx.getCanvasContext = () => null;
+      await callAssign(harness.ctx, {
+        taskId: "t-canvas-absent",
+        title: "No canvas",
+        description: "details",
+        priority: "low",
+      });
+
+      harness.ctx.getCanvasContext = () =>
+        "<connected-context>\nThe following context has been provided by the user via connected canvas nodes:\n\n<context-group>\nHidden\n</context-group>\n</connected-context>";
+      await callAssign(harness.ctx, {
+        taskId: "t-canvas-off",
+        title: "No canvas",
+        description: "details",
+        priority: "low",
+        include_canvas_context: false,
+      });
+
+      expect(harness.spawns[0]!.prompt).not.toContain("## Canvas context");
+      expect(harness.spawns[1]!.prompt).not.toContain("## Canvas context");
+    });
+  });
+
+  // ── model override ────────────────────────────────────────────────────────
+
+  it("passes explicit model arg to startMinionSession (takes precedence over defaults)", async () => {
+    await callAssign(harness.ctx, {
+      taskId: "t-model-explicit",
+      title: "Explicit model",
+      description: "details",
+      priority: "low",
+      model: "claude-haiku-4-5",
+    });
+
+    expect(harness.spawns[0]?.model).toBe("claude-haiku-4-5");
+  });
+
+  it("falls back to settings.defaultMinionModel when no model arg is provided", async () => {
+    writeSettings(projectDir, { defaultMinionModel: "claude-test-minion" });
+
+    await callAssign(harness.ctx, {
+      taskId: "t-model-settings",
+      title: "Settings model",
+      description: "details",
+      priority: "low",
+    });
+
+    expect(harness.spawns[0]?.model).toBe("claude-test-minion");
+  });
+
+  it("model arg overrides settings.defaultMinionModel", async () => {
+    writeSettings(projectDir, { defaultMinionModel: "claude-test-minion" });
+
+    await callAssign(harness.ctx, {
+      taskId: "t-model-override",
+      title: "Override model",
+      description: "details",
+      priority: "low",
+      model: "claude-haiku-4-5",
+    });
+
+    expect(harness.spawns[0]?.model).toBe("claude-haiku-4-5");
+  });
+
+  // ── timeout_minutes ───────────────────────────────────────────────────────
+
+  it("timeout_minutes × 60_000 is passed to scheduleTaskTimeout (fires after custom ms)", async () => {
+    vi.useFakeTimers();
+    try {
+      await callAssign(harness.ctx, {
+        taskId: "t-timeout-custom",
+        title: "Custom timeout",
+        description: "details",
+        priority: "low",
+        timeout_minutes: 1,
+      });
+
+      // Immediately after assignment the task is in "starting" state.
+      expect(harness.ctx.taskState.tasks.get("t-timeout-custom")?.status).toBe("starting");
+
+      // Advance past the 1-minute (60_000 ms) custom timeout.
+      vi.advanceTimersByTime(60_001);
+
+      // The timeout event should have fired and moved the task to "failed".
+      expect(harness.ctx.taskState.tasks.get("t-timeout-custom")?.status).toBe("failed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("default timeout does NOT fire after 60 seconds when timeout_minutes is omitted", async () => {
+    vi.useFakeTimers();
+    try {
+      await callAssign(harness.ctx, {
+        taskId: "t-timeout-default",
+        title: "Default timeout",
+        description: "details",
+        priority: "low",
+        // no timeout_minutes — defaults to 30 min (1_800_000 ms)
+      });
+
+      vi.advanceTimersByTime(60_001);
+
+      // Should still be "starting" — the 30-minute default hasn't elapsed.
+      expect(harness.ctx.taskState.tasks.get("t-timeout-default")?.status).toBe("starting");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // ── ownedPaths ────────────────────────────────────────────────────────────
+
+  it("appends a labeled Owned paths section to the spawn prompt when ownedPaths is provided", async () => {
+    await callAssign(harness.ctx, {
+      taskId: "t-paths-header",
+      title: "Paths header",
+      description: "details",
+      priority: "low",
+      ownedPaths: ["src/foo.ts", "src/bar.ts"],
+    });
+
+    const prompt = lastSpawnPrompt(harness);
+    expect(prompt).toContain("## Owned paths (your write boundary)");
+    expect(prompt).toContain("- src/foo.ts");
+    expect(prompt).toContain("- src/bar.ts");
+  });
+
+  it("warns in the tool result when two concurrent tasks share an ownedPath", async () => {
+    // Assign first task with ownedPaths — it transitions to "starting".
+    await callAssign(harness.ctx, {
+      taskId: "t-overlap-a",
+      title: "Task A",
+      description: "details",
+      priority: "low",
+      ownedPaths: ["src/foo.ts", "src/shared.ts"],
+    });
+
+    // Assign second task that overlaps on "src/shared.ts".
+    const { text } = await callAssign(harness.ctx, {
+      taskId: "t-overlap-b",
+      title: "Task B",
+      description: "details",
+      priority: "low",
+      ownedPaths: ["src/bar.ts", "src/shared.ts"],
+    });
+
+    expect(text).toContain("Warning: ownedPaths overlap with running task t-overlap-a: src/shared.ts");
+  });
+
+  it("does not warn when the other task is completed (not running/starting)", async () => {
+    await callAssign(harness.ctx, {
+      taskId: "t-done-path",
+      title: "Done",
+      description: "details",
+      priority: "low",
+      ownedPaths: ["src/shared.ts"],
+    });
+
+    // Simulate task completion so it is no longer active.
+    const doneTask = harness.ctx.taskState.tasks.get("t-done-path")!;
+    doneTask.status = "completed";
+    doneTask.completedAt = Date.now();
+
+    const { text } = await callAssign(harness.ctx, {
+      taskId: "t-after-done",
+      title: "After done",
+      description: "details",
+      priority: "low",
+      ownedPaths: ["src/shared.ts"],
+    });
+
+    expect(text).not.toContain("Warning");
+  });
+
+  // ── retry ─────────────────────────────────────────────────────────────────
+
+  it("allows re-assignment of a failed task, spawns a new minion, and mentions attempt 2", async () => {
+    // Initial assignment
+    await callAssign(harness.ctx, {
+      taskId: "t-retry",
+      title: "Retry me",
+      description: "details",
+      priority: "low",
+    });
+    expect(harness.spawns).toHaveLength(1);
+
+    // Simulate failure
+    const task = harness.ctx.taskState.tasks.get("t-retry")!;
+    task.status = "failed";
+    task.result = "Network timeout.";
+
+    // Retry
+    const { text } = await callAssign(harness.ctx, {
+      taskId: "t-retry",
+      title: "Retry me",
+      description: "details",
+      priority: "low",
+    });
+
+    expect(harness.spawns).toHaveLength(2);
+    expect(text).toContain("attempt 2");
+  });
+
+  it("allows re-assignment of an orphaned task", async () => {
+    await callAssign(harness.ctx, {
+      taskId: "t-orphan",
+      title: "Orphan",
+      description: "details",
+      priority: "low",
+    });
+
+    harness.ctx.taskState.tasks.get("t-orphan")!.status = "orphaned";
+
+    const { text } = await callAssign(harness.ctx, {
+      taskId: "t-orphan",
+      title: "Orphan",
+      description: "details",
+      priority: "low",
+    });
+
+    expect(text).toContain("attempt 2");
+    expect(harness.spawns).toHaveLength(2);
+  });
+
+  it("refuses a completed task with a create-new-task hint", async () => {
+    await callAssign(harness.ctx, {
+      taskId: "t-completed",
+      title: "Completed",
+      description: "details",
+      priority: "low",
+    });
+
+    harness.ctx.taskState.tasks.get("t-completed")!.status = "completed";
+
+    const { text } = await callAssign(harness.ctx, {
+      taskId: "t-completed",
+      title: "Completed",
+      description: "details",
+      priority: "low",
+    });
+
+    expect(text).toContain("already completed");
+    expect(text).toContain("create a new task instead");
+    // No second spawn
+    expect(harness.spawns).toHaveLength(1);
   });
 });

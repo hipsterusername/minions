@@ -98,9 +98,7 @@ describe("render-tools", () => {
         leaderSessionKey: "s2",
         bus,
         existingRenderState: {
-          title: "Stale title",
-          columns: 4,
-          gap: 12,
+          layout: { title: "Stale title", columns: 4, gap: 12 },
           components: [],
         },
       });
@@ -110,8 +108,8 @@ describe("render-tools", () => {
 
       // Both title and columns are reset to their documented defaults when
       // the agent doesn't pass them — `set` is a full replace.
-      expect(renderState.title).toBe("");
-      expect(renderState.columns).toBe(2);
+      expect(renderState.layout.title).toBe("");
+      expect(renderState.layout.columns).toBe(2);
     });
 
     it("respects explicit title and columns", async () => {
@@ -128,8 +126,23 @@ describe("render-tools", () => {
         components: [],
       });
 
-      expect(renderState.title).toBe("Hello");
-      expect(renderState.columns).toBe(3);
+      expect(renderState.layout.title).toBe("Hello");
+      expect(renderState.layout.columns).toBe(3);
+    });
+
+    it("rejects garbage input before mutating state — parse guard", async () => {
+      const { bus } = makeBus();
+      const { toolDefs, renderState } = createRenderToolsForLeader({
+        leaderSessionKey: "s-parse-set",
+        bus,
+      });
+      const setTool = findTool(toolDefs, "render_set");
+
+      // Null is not a valid object — zod should reject it.
+      await expect(call(setTool, null)).rejects.toThrow();
+      // Missing required 'components' field.
+      await expect(call(setTool, { title: "ok" })).rejects.toThrow();
+      expect(renderState.components).toEqual([]);
     });
 
     it("rejects non-object components before mutating state", async () => {
@@ -241,6 +254,59 @@ describe("render-tools", () => {
         label: "L",
         value: "2",
       });
+    });
+  });
+
+  describe("render_patch parse guard", () => {
+    it("rejects garbage input without mutating state", async () => {
+      const { bus } = makeBus();
+      const { toolDefs, renderState } = createRenderToolsForLeader({
+        leaderSessionKey: "s-parse-patch",
+        bus,
+      });
+      const setTool = findTool(toolDefs, "render_set");
+      const patchTool = findTool(toolDefs, "render_patch");
+
+      await call(setTool, {
+        components: [{ id: "m1", type: "metric", label: "A", value: "1" }],
+      });
+
+      // Null and missing 'updates' field are both invalid.
+      await expect(call(patchTool, null)).rejects.toThrow();
+      await expect(call(patchTool, {})).rejects.toThrow();
+      // 'updates' must be an array — a plain object is invalid.
+      await expect(call(patchTool, { updates: "bad" })).rejects.toThrow();
+
+      // State is unchanged after all the bad calls.
+      expect(renderState.components).toHaveLength(1);
+    });
+  });
+
+  describe("render_remove parse guard", () => {
+    it("rejects garbage input without mutating state", async () => {
+      const { bus } = makeBus();
+      const { toolDefs, renderState } = createRenderToolsForLeader({
+        leaderSessionKey: "s-parse-remove",
+        bus,
+      });
+      const setTool = findTool(toolDefs, "render_set");
+      const removeTool = findTool(toolDefs, "render_remove");
+
+      await call(setTool, {
+        components: [
+          { id: "a", type: "text", content: "A" },
+          { id: "b", type: "text", content: "B" },
+        ],
+      });
+
+      // Null and missing 'ids' field are both invalid.
+      await expect(call(removeTool, null)).rejects.toThrow();
+      await expect(call(removeTool, {})).rejects.toThrow();
+      // 'ids' must be an array of strings — a number array is invalid.
+      await expect(call(removeTool, { ids: [1, 2] })).rejects.toThrow();
+
+      // Both components remain after all invalid calls.
+      expect(renderState.components).toHaveLength(2);
     });
   });
 

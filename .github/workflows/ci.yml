@@ -55,8 +55,14 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Typecheck (server)
+        run: pnpm typecheck:server
+
       - name: Test
         run: pnpm test:run
+
+      - name: Check licenses
+        run: pnpm check:licenses
 
       - name: Build
         run: pnpm build

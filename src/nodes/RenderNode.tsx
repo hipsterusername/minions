@@ -21,7 +21,6 @@ import { ResizeHandle } from "../components/ResizeHandle.tsx";
 import type {
   RenderState,
   RenderComponent,
-  RenderMessage,
   MetricComponent,
   ProgressComponent,
   TableComponent,
@@ -45,7 +44,7 @@ import type {
   ImageComponent,
   FilePreviewComponent,
 } from "../../shared/render-dsl.ts";
-import { applyRenderMessage } from "../../shared/render-dsl.ts";
+import { applyRenderMessage, renderMessageSchema } from "../../shared/render-dsl.ts";
 import { FormComponent } from "./render/FormComponent.tsx";
 import { ChartComponent } from "./render/ChartComponent.tsx";
 import {
@@ -2284,6 +2283,7 @@ export function RenderNodeRenderer({
 
   const [contextSelectionActive, setContextSelectionActive] = useState(false);
   const [selectedComponentIds, setSelectedComponentIds] = useState<string[]>([]);
+  const [payloadError, setPayloadError] = useState<string | null>(null);
 
   // Subscribe to render_update events from the paired Leader session
   useEffect(() => {
@@ -2307,9 +2307,16 @@ export function RenderNodeRenderer({
         return;
       }
 
-      // Build a RenderMessage from the server event
-      const renderMsg: RenderMessage = serverMsg as unknown as RenderMessage;
-      const newState = applyRenderMessage(dataRef.current.renderState, renderMsg);
+      // Validate the wire payload before applying it so a malformed message
+      // from the server never causes an uncaught runtime error here.
+      const parsed = renderMessageSchema.safeParse(serverMsg);
+      if (!parsed.success) {
+        const detail = parsed.error.issues.map((i) => i.message).join("; ");
+        setPayloadError(`Invalid render payload: ${detail}`);
+        return;
+      }
+      setPayloadError(null);
+      const newState = applyRenderMessage(dataRef.current.renderState, parsed.data);
       onUpdateData({ ...dataRef.current, renderState: newState });
     });
   }, [socketSubscribe, data.leaderSessionKey, onUpdateData]);
@@ -2433,6 +2440,24 @@ export function RenderNodeRenderer({
           overscrollBehavior: "contain",
         }}
       >
+        {payloadError !== null && (
+          <div
+            role="alert"
+            style={{
+              margin: gap,
+              padding: "8px 12px",
+              background: "var(--error-bg, #fef2f2)",
+              border: "1px solid var(--status-error, #dc2626)",
+              borderRadius: 6,
+              fontSize: 11,
+              color: "var(--status-error, #dc2626)",
+              fontFamily: "var(--font-mono, monospace)",
+              wordBreak: "break-all",
+            }}
+          >
+            {payloadError}
+          </div>
+        )}
         {!hasContent ? (
           <div style={{
             height: "100%",

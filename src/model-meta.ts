@@ -34,6 +34,10 @@ const OPUS_EFFORTS: EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
  */
 const CLAUDE_MODEL_CAPABILITIES: Record<string, ModelCapability> = {
   // UI aliases
+  fable: {
+    supportsAdaptiveThinking: true,
+    supportedEffortLevels: OPUS_EFFORTS,
+  },
   sonnet: {
     supportsAdaptiveThinking: true,
     supportedEffortLevels: STANDARD_EFFORTS,
@@ -51,6 +55,10 @@ const CLAUDE_MODEL_CAPABILITIES: Record<string, ModelCapability> = {
     supportedEffortLevels: [],
   },
   // Concrete model ids (matching `staticInfo().models`).
+  "claude-fable-5": {
+    supportsAdaptiveThinking: true,
+    supportedEffortLevels: OPUS_EFFORTS,
+  },
   "claude-opus-4-8": {
     supportsAdaptiveThinking: true,
     supportedEffortLevels: OPUS_EFFORTS,

@@ -24,11 +24,12 @@ export interface TaskPlanItem {
   title: string;
   description: string;
   priority: "low" | "medium" | "high" | "critical";
-  /** planned → running → completed | failed */
+  /** planned → running → completed | failed; blocked = awaiting leader input */
   status:
     | "planned"
     | "starting"
     | "running"
+    | "blocked"
     | "completed"
     | "failed"
     | "ended_without_report"

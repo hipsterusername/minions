@@ -1,5 +1,6 @@
 import { z } from "zod/v4";
 import type { NormalizedToolDef } from "./harness/types.ts";
+import { jsonResult } from "./harness/tool-result.ts";
 import type { RenderComponent } from "../shared/render-dsl.ts";
 import {
   applyReasoningOps,
@@ -224,9 +225,8 @@ export function createReasoningMapToolsForLeader(opts: {
   };
 }
 
+// Compact, null-stripped JSON — see server/harness/tool-result.ts for the
+// token-efficiency rationale.
 function textResult(value: unknown, isError = false) {
-  return {
-    isError,
-    content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }],
-  };
+  return jsonResult(value, { isError });
 }

@@ -44,6 +44,7 @@ import { getBridgeServer } from "../../mcp-bridge/server.ts";
 import type { McpBridgeRegistration } from "../../mcp-bridge/registry.ts";
 
 import { createCodexTranslator } from "./translate.ts";
+import { missingCodexAuth, resolveCodexCredentials } from "./auth.ts";
 import { mapPermission, mapReasoningEffort } from "./options.ts";
 import { CODEX_STATIC_MODELS, resolveCodexModel } from "./models.ts";
 import {
@@ -139,6 +140,17 @@ class CodexHarness implements AgentHarness {
           return;
         }
 
+        // Fail fast when Codex has no credentials. Without this preflight
+        // the CLI spawn fails or hangs while emitting zero events, and the
+        // session sits silent at 0 turns until a task timeout aborts it
+        // (observed: every minion spawn dying with "Session abort.").
+        const creds = resolveCodexCredentials();
+        const authProblem = creds.apiKey ? null : missingCodexAuth();
+        if (authProblem) {
+          yield { kind: "done", reason: "error", error: authProblem };
+          return;
+        }
+
         // Materialize image attachments to disk if any.
         if (opts.attachments && opts.attachments.length > 0) {
           scratch = await writeCodexAttachments({
@@ -175,7 +187,7 @@ class CodexHarness implements AgentHarness {
         // either be dropped by the SDK or render incorrectly, so we drop it on
         // the floor here until the normalization lands. Capabilities and
         // staticInfo do not advertise external MCP support.
-        const codexOpts: CodexOptions = { ...resolveCodexCredentials() };
+        const codexOpts: CodexOptions = { ...creds };
         const env = buildCodexEnv(bridgeEnv, opts.cwd);
         if (env) codexOpts.env = env;
         if (Object.keys(bridgeConfig).length > 0) {
@@ -287,24 +299,6 @@ class CodexHarness implements AgentHarness {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-/**
- * Pick up Codex API credentials from the environment without forcing them
- * into argv. Either `CODEX_API_KEY` or `OPENAI_API_KEY` is accepted; if
- * neither is set the SDK falls back to whatever the local `codex` CLI has
- * configured. `CODEX_PATH` overrides the discovered binary.
- */
-function resolveCodexCredentials(): {
-  apiKey?: string;
-  codexPathOverride?: string;
-} {
-  const out: { apiKey?: string; codexPathOverride?: string } = {};
-  const apiKey = process.env["CODEX_API_KEY"] ?? process.env["OPENAI_API_KEY"];
-  if (apiKey) out.apiKey = apiKey;
-  const codexPath = process.env["CODEX_PATH"];
-  if (codexPath) out.codexPathOverride = codexPath;
-  return out;
-}
 
 /**
  * Build the ThreadOptions consumed by Codex.startThread / resumeThread.

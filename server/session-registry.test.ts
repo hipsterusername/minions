@@ -193,6 +193,203 @@ describe("SessionRegistry.getSessionRuntime", () => {
   });
 });
 
+describe("SessionRegistry.wakeWaitingLeaderIfAllChildrenTerminal — wake policies, digest, and idle wake", () => {
+  function makeRegistry() {
+    const r = new SessionRegistry();
+    const map = (r as unknown as { map: Map<string, SessionHost> }).map;
+    const startChildSession = vi.fn();
+    r.setDeps({
+      bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
+      startChildSession,
+      forEachLeaderTaskState: r.forEachLeaderTaskState,
+    });
+    return { r, map, startChildSession };
+  }
+
+  function makeLeader(id = "leader-1") {
+    const h = new SessionHost(id, "/tmp/work");
+    h.role = "leader";
+    h.sessionId = "sdk-1";
+    h.status = "idle";
+    return h;
+  }
+
+  function makeTask(
+    overrides: Partial<{
+      taskId: string;
+      status: string;
+      executor: string;
+      completedAt: number | null;
+      result: string | null;
+    }> = {},
+  ) {
+    return {
+      taskId: overrides.taskId ?? "t1",
+      title: "Task",
+      description: "",
+      priority: "medium" as const,
+      executor: (overrides.executor ?? "minion") as "minion" | "leader",
+      minionSessionKey: "minion-1",
+      leaderSessionKey: "leader-1",
+      status: (overrides.status ?? "completed") as import("./task-tools/types.ts").TaskStatus,
+      createdAt: 100,
+      completedAt: overrides.completedAt ?? 200,
+      result: overrides.result ?? "done",
+    };
+  }
+
+  beforeEach(() => {
+    disablePersistence();
+  });
+
+  it("any_terminal policy wakes when at least one of two children is terminal", () => {
+    const { r, map, startChildSession } = makeRegistry();
+    const h = makeLeader();
+    h.waitTimerId = setTimeout(() => {}, 30_000);
+    h.taskState = {
+      tasks: new Map([
+        ["t1", makeTask({ taskId: "t1", status: "completed", completedAt: 150 })],
+        ["t2", makeTask({ taskId: "t2", status: "running", completedAt: null })],
+      ]),
+      pendingWait: {
+        durationMs: 30_000,
+        reason: "pipeline",
+        scheduledAt: 100,
+        timerId: h.waitTimerId,
+        wakeOn: "any_terminal",
+      },
+      approval: null,
+    };
+    map.set("leader-1", h);
+
+    r.wakeWaitingLeaderIfAllChildrenTerminal("leader-1");
+
+    expect(startChildSession).toHaveBeenCalledOnce();
+    expect(h.taskState.pendingWait).toBeNull();
+  });
+
+  it("all_terminal policy does NOT wake when only one of two children is terminal", () => {
+    const { r, map, startChildSession } = makeRegistry();
+    const h = makeLeader();
+    h.waitTimerId = setTimeout(() => {}, 30_000);
+    h.taskState = {
+      tasks: new Map([
+        ["t1", makeTask({ taskId: "t1", status: "completed", completedAt: 150 })],
+        ["t2", makeTask({ taskId: "t2", status: "running", completedAt: null })],
+      ]),
+      pendingWait: {
+        durationMs: 30_000,
+        reason: "waiting for all",
+        scheduledAt: 100,
+        timerId: h.waitTimerId,
+        wakeOn: "all_terminal",
+      },
+      approval: null,
+    };
+    map.set("leader-1", h);
+
+    r.wakeWaitingLeaderIfAllChildrenTerminal("leader-1");
+
+    expect(startChildSession).not.toHaveBeenCalled();
+    expect(h.taskState.pendingWait).not.toBeNull();
+  });
+
+  it("digest includes only tasks that became terminal after scheduledAt, with truncated result", () => {
+    const { r, map, startChildSession } = makeRegistry();
+    const h = makeLeader();
+    const scheduledAt = 500;
+    const longResult = "x".repeat(300);
+    h.waitTimerId = setTimeout(() => {}, 30_000);
+    h.taskState = {
+      tasks: new Map([
+        // completedAt BEFORE scheduledAt — should NOT appear in digest
+        ["old", makeTask({ taskId: "old", status: "completed", completedAt: 100, result: "old result" })],
+        // completedAt AFTER scheduledAt — SHOULD appear, result truncated to 200
+        ["new", makeTask({ taskId: "new", status: "failed", completedAt: 600, result: longResult })],
+      ]),
+      pendingWait: {
+        durationMs: 30_000,
+        reason: "waiting",
+        scheduledAt,
+        timerId: h.waitTimerId,
+      },
+      approval: null,
+    };
+    map.set("leader-1", h);
+
+    r.wakeWaitingLeaderIfAllChildrenTerminal("leader-1");
+
+    expect(startChildSession).toHaveBeenCalledOnce();
+    const prompt: string = (startChildSession.mock.calls[0]![0] as { prompt: string }).prompt;
+    expect(prompt).toContain("new");
+    expect(prompt).toContain("failed");
+    expect(prompt).toContain("x".repeat(200));
+    // old task should not be in prompt
+    expect(prompt).not.toContain("old result");
+  });
+
+  it("idle leader is resumed when a child has completed while no wait was pending", () => {
+    const { r, map, startChildSession } = makeRegistry();
+    const h = makeLeader();
+    h.status = "idle";
+    h.taskState = {
+      tasks: new Map([
+        ["t1", makeTask({ taskId: "t1", status: "completed", result: "great result" })],
+      ]),
+      pendingWait: null,
+      approval: null,
+    };
+    map.set("leader-1", h);
+
+    r.wakeWaitingLeaderIfAllChildrenTerminal("leader-1");
+
+    expect(startChildSession).toHaveBeenCalledOnce();
+    const opts = startChildSession.mock.calls[0]![0] as { sessionKey: string; prompt: string };
+    expect(opts.sessionKey).toBe("leader-1");
+    expect(opts.prompt).toContain("t1");
+    expect(opts.prompt).toContain("completed");
+    expect(opts.prompt).toContain("great result");
+  });
+
+  it("idle leader is NOT resumed when the only terminal children are cancelled", () => {
+    const { r, map, startChildSession } = makeRegistry();
+    const h = makeLeader();
+    h.status = "idle";
+    h.taskState = {
+      tasks: new Map([
+        ["t1", makeTask({ taskId: "t1", status: "cancelled", result: "cancelled" })],
+      ]),
+      pendingWait: null,
+      approval: null,
+    };
+    map.set("leader-1", h);
+
+    r.wakeWaitingLeaderIfAllChildrenTerminal("leader-1");
+
+    expect(startChildSession).not.toHaveBeenCalled();
+  });
+
+  it("leader with an active run is not resumed via the idle-wake path", () => {
+    const { r, map, startChildSession } = makeRegistry();
+    const h = makeLeader();
+    h.status = "running";
+    // Simulate an active run — only the non-null check matters here
+    h.runControl = { abort: () => {} } as unknown as NonNullable<typeof h.runControl>;
+    h.taskState = {
+      tasks: new Map([
+        ["t1", makeTask({ taskId: "t1", status: "completed", result: "done" })],
+      ]),
+      pendingWait: null,
+      approval: null,
+    };
+    map.set("leader-1", h);
+
+    r.wakeWaitingLeaderIfAllChildrenTerminal("leader-1");
+
+    expect(startChildSession).not.toHaveBeenCalled();
+  });
+});
+
 describe("SessionRegistry.hydrateFromDb — sessionId round-trip", () => {
   let dbPath: string;
 
@@ -303,5 +500,41 @@ describe("SessionRegistry.hydrateFromDb — sessionId round-trip", () => {
     r.hydrateFromDb();
 
     expect(r.get("leader-orphan")?.taskState?.tasks.get("t1")?.status).toBe("orphaned");
+  });
+
+  it("marks persisted blocked tasks as orphaned during hydration", () => {
+    persistSession(makePersisted({ id: "leader-blocked-orphan", role: "leader" }));
+    persistTaskState("leader-blocked-orphan", {
+      tasks: new Map([
+        [
+          "t1",
+          {
+            taskId: "t1",
+            title: "T1",
+            description: "",
+            priority: "medium",
+            executor: "minion",
+            minionSessionKey: "minion-missing",
+            leaderSessionKey: "leader-blocked-orphan",
+            status: "blocked",
+            createdAt: Date.now(),
+            completedAt: null,
+            result: null,
+          },
+        ],
+      ]),
+      pendingWait: null,
+      approval: null,
+    });
+
+    const r = new SessionRegistry();
+    r.setDeps({
+      bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
+      startChildSession: () => {},
+      forEachLeaderTaskState: r.forEachLeaderTaskState,
+    });
+    r.hydrateFromDb();
+
+    expect(r.get("leader-blocked-orphan")?.taskState?.tasks.get("t1")?.status).toBe("orphaned");
   });
 });

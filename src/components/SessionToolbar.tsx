@@ -11,7 +11,7 @@ import { useHarnessList } from "../use-harness-list.tsx";
  * value flowing through the toolbar is now any string ID returned by a
  * harness's `staticInfo().models`.
  */
-export type ModelOption = "sonnet" | "opus" | "opus-old" | "haiku";
+export type ModelOption = "sonnet" | "fable" | "opus" | "opus-old" | "haiku";
 
 export type PermissionMode =
   | "auto"
@@ -59,9 +59,11 @@ export interface SessionToolbarProps {
 /** Default Claude model labels. Used when the active harness is Claude or unknown. */
 const CLAUDE_MODEL_LABELS: Record<string, string> = {
   sonnet: "Sonnet",
+  fable: "Fable 5",
   opus: "Opus 4.8",
   "opus-old": "Opus 4.7",
   haiku: "Haiku",
+  "claude-fable-5": "Fable 5",
   "claude-opus-4-8": "Opus 4.8",
   "claude-opus-4-7": "Opus 4.7",
   "claude-opus-4-6": "Opus 4.6",
@@ -152,6 +154,12 @@ function modelDisplayMeta(modelId: string, label: string, provider: string): Mod
     return {
       family: "Claude Opus",
       description: "Highest capability for complex planning and review",
+    };
+  }
+  if (text.includes("fable")) {
+    return {
+      family: "Claude Fable",
+      description: "Frontier model for long, complex coding tasks",
     };
   }
   if (text.includes("sonnet")) {
@@ -738,7 +746,7 @@ export function SessionToolbar({
     if (activeHarness && activeHarness.models.length > 0) {
       return activeHarness.models.map((m) => m.id);
     }
-    return ["sonnet", "opus", "opus-old", "haiku"];
+    return ["fable", "sonnet", "opus", "opus-old", "haiku"];
   }, [activeHarness]);
 
   const modelLabels = useMemo<Record<string, string>>(() => {
@@ -927,3 +935,5 @@ export function SessionToolbar({
     </div>
   );
 }
+
+export default SessionToolbar;

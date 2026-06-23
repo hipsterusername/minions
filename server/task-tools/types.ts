@@ -12,6 +12,14 @@ export interface TaskRecord {
   taskId: string;
   title: string;
   description: string;
+  /** Files, paths, or symbols the task should read or change. */
+  files?: string[];
+  /** Invariants, boundaries, and do-not-touch rules for the task. */
+  constraints?: string[];
+  /** Observable conditions that define task completion. */
+  acceptanceCriteria?: string[];
+  /** Files/globs this minion may edit. */
+  ownedPaths?: string[];
   priority: "low" | "medium" | "high" | "critical";
   /** Who is executing this task */
   executor: "leader" | "minion";
@@ -22,12 +30,28 @@ export interface TaskRecord {
   createdAt: number;
   completedAt: number | null;
   result: string | null;
+  /** Timestamp of the one-time report reminder after a silent clean run. */
+  nudgedAt?: number;
+  /** Most recent progress message from the executing minion. */
+  lastStep?: string | null;
+  /** Running count of reported_step events for this attempt. */
+  stepCount?: number;
+  /** 1-based attempt number; undefined/1 means first attempt. */
+  attempt?: number;
+  /** Archived records of previous attempts (filled on retry). */
+  previousAttempts?: Array<{
+    attempt: number;
+    status: TaskStatus;
+    result: string | null;
+    completedAt: number | null;
+  }>;
 }
 
 export type TaskStatus =
   | "planned"
   | "starting"
   | "running"
+  | "blocked"
   | "completed"
   | "failed"
   | "ended_without_report"
@@ -60,6 +84,12 @@ export interface PendingWait {
   scheduledAt: number;
   /** Node.js timer handle — allows cancellation if the session is stopped */
   timerId: ReturnType<typeof setTimeout> | null;
+  /**
+   * Semantics for waking a waiting leader (consumed by a later wave).
+   * "any_terminal" — wake as soon as any awaited child reaches a terminal status.
+   * "all_terminal" — wake only when every awaited child is terminal.
+   */
+  wakeOn?: "any_terminal" | "all_terminal";
 }
 
 export interface ApprovalState {
@@ -113,6 +143,8 @@ export interface TaskToolContext {
   projectPath: string;
   minionSystemPrompt: string;
   taskState: TaskManagerState;
+  /** Latest full connected-canvas context snapshot for this leader, if any. */
+  getCanvasContext?: () => string | null;
   getSessionRuntime?: (sessionKey: string) => RuntimeSessionInfo | null;
   onStateChange?: (state: TaskManagerState) => void;
   worktreeBranch?: string | null;
@@ -120,5 +152,14 @@ export interface TaskToolContext {
   worktreeIsolation?: boolean;
   scheduleWaitContinue: (durationMs: number, reason: string) => ReturnType<typeof setTimeout> | null | void;
   terminateSession?: (sessionKey: string, reason: "abort") => void;
+  /**
+   * Inject a steering message into a live minion session as a new user turn.
+   * Returns whether the message was delivered and the session's status so the
+   * caller can report a useful error for non-live (ended) sessions.
+   */
+  messageSession?: (
+    sessionKey: string,
+    message: string,
+  ) => { delivered: boolean; status: string | null };
   taskTimeoutMs?: number;
 }

@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 
 const { FAKE_HOME } = vi.hoisted(() => ({
-  FAKE_HOME: `/tmp/minions-fakehome-files-routes-${process.pid}`,
+  FAKE_HOME: require("path").resolve(require("os").tmpdir(), `minions-fakehome-files-routes-${process.pid}`),
 }));
 
 vi.mock("node:os", async () => {
@@ -27,6 +27,27 @@ vi.mock("node:os", async () => {
 import { registerProjectPath } from "../../server/path-guard.ts";
 import { createFileRoutes } from "../../server/routes/files.ts";
 import { createExpressFetch } from "../harness/in-process-http.ts";
+
+/**
+ * Probe whether the current environment can create file-type symlinks.
+ * On Windows without Developer Mode the SeCreateSymbolicLink privilege is
+ * absent and fs.symlinkSync throws EPERM.  Tests that need file symlinks are
+ * skipped; directory symlinks use the 'junction' type which works without
+ * the privilege.
+ */
+const canSymlink: boolean = (() => {
+  try {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "probe-symlink-"));
+    const src = path.join(dir, "src.txt");
+    const lnk = path.join(dir, "lnk.txt");
+    fs.writeFileSync(src, "x");
+    fs.symlinkSync(src, lnk);
+    fs.rmSync(dir, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
+})();
 
 function buildApp(): express.Express {
   const app = express();
@@ -71,7 +92,9 @@ afterEach(() => {
 beforeEach(() => {
   project = fs.mkdtempSync(path.join(parentDir, "p-"));
   outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "files-routes-outside-"));
-  fs.symlinkSync(outsideDir, path.join(project, "outside"));
+  // Use 'junction' for the directory symlink: works on Windows without
+  // the SeCreateSymbolicLink privilege; treated as 'dir' on Linux/macOS.
+  fs.symlinkSync(outsideDir, path.join(project, "outside"), "junction");
   registerProjectPath(project);
 });
 
@@ -128,7 +151,8 @@ describe("POST /move", () => {
     expect(fs.existsSync(path.join(outsideDir, "moved.txt"))).toBe(false);
   });
 
-  it("rejects moving a symlink final target", async () => {
+  // File-type symlinks require SeCreateSymbolicLink on Windows.
+  it.skipIf(!canSymlink)("rejects moving a symlink final target", async () => {
     const outsideFile = path.join(outsideDir, "secret.txt");
     fs.writeFileSync(outsideFile, "secret");
     fs.symlinkSync(outsideFile, path.join(project, "linked-secret.txt"));
@@ -145,7 +169,8 @@ describe("POST /move", () => {
 });
 
 describe("POST /delete", () => {
-  it("rejects deleting a symlink final target", async () => {
+  // File-type symlinks require SeCreateSymbolicLink on Windows.
+  it.skipIf(!canSymlink)("rejects deleting a symlink final target", async () => {
     const outsideFile = path.join(outsideDir, "secret.txt");
     fs.writeFileSync(outsideFile, "secret");
     fs.symlinkSync(outsideFile, path.join(project, "linked-secret.txt"));

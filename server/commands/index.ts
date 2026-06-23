@@ -17,6 +17,7 @@
 import { unicastGlobal } from "../bus.ts";
 import { createSession } from "./create-session.ts";
 import { sendMessage } from "./send-message.ts";
+import { canvasContext } from "./canvas-context.ts";
 import { stopSession } from "./stop-session.ts";
 import { syncSession } from "./sync-session.ts";
 import { listSessions } from "./list-sessions.ts";
@@ -62,6 +63,7 @@ export const COMMAND_TABLE = {
   // Session lifecycle
   create_session: createSession,
   send_message: sendMessage,
+  canvas_context: canvasContext,
   stop_session: stopSession,
   sync_session: syncSession,
   list_sessions: listSessions,

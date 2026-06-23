@@ -16,7 +16,7 @@ import os from "node:os";
 import path from "node:path";
 
 const { FAKE_HOME } = vi.hoisted(() => ({
-  FAKE_HOME: `/tmp/minions-fakehome-projects-files-${process.pid}`,
+  FAKE_HOME: require("path").resolve(require("os").tmpdir(), `minions-fakehome-projects-files-${process.pid}`),
 }));
 
 vi.mock("node:os", async () => {
@@ -34,6 +34,26 @@ import {
   unregisterProjectPath,
 } from "../../server/path-guard.ts";
 import { createExpressFetch } from "../harness/in-process-http.ts";
+
+/**
+ * Probe whether the current environment can create file-type symlinks.
+ * On Windows without Developer Mode the SeCreateSymbolicLink privilege is
+ * absent and fs.symlinkSync throws EPERM.  File-symlink tests are skipped
+ * when false; directory symlinks use 'junction' which needs no privilege.
+ */
+const canSymlink: boolean = (() => {
+  try {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "probe-symlink-"));
+    const src = path.join(dir, "src.txt");
+    const lnk = path.join(dir, "lnk.txt");
+    fs.writeFileSync(src, "x");
+    fs.symlinkSync(src, lnk);
+    fs.rmSync(dir, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
+})();
 
 function encodePath(p: string): string {
   return Buffer.from(p).toString("base64url");
@@ -114,7 +134,8 @@ describe("GET /file — read file", () => {
     expect(res.status).toBe(403);
   });
 
-  it("rejects a symlink whose file target escapes the project root", async () => {
+  // File-type symlinks require SeCreateSymbolicLink on Windows.
+  it.skipIf(!canSymlink)("rejects a symlink whose file target escapes the project root", async () => {
     const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "projects-files-outside-read-"));
     const outsideFile = path.join(outsideDir, "secret.txt");
     fs.writeFileSync(outsideFile, "secret");
@@ -180,7 +201,8 @@ describe("GET /blob — binary file read", () => {
     expect(res.status).toBe(403);
   });
 
-  it("rejects a symlink whose binary target escapes the project root", async () => {
+  // File-type symlinks require SeCreateSymbolicLink on Windows.
+  it.skipIf(!canSymlink)("rejects a symlink whose binary target escapes the project root", async () => {
     const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "projects-files-outside-blob-"));
     const outsideFile = path.join(outsideDir, "secret.png");
     fs.writeFileSync(outsideFile, Buffer.from([1, 2, 3]));
@@ -230,7 +252,8 @@ describe("GET /ls — directory listing", () => {
 
   it("rejects listing a symlinked directory outside the project root", async () => {
     const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "projects-files-outside-ls-"));
-    fs.symlinkSync(outsideDir, path.join(project, "outside"));
+    // Use 'junction': works on Windows without the symlink privilege.
+    fs.symlinkSync(outsideDir, path.join(project, "outside"), "junction");
 
     const res = await fetch(`${baseUrl}/${encoded}/ls?path=outside`);
     expect(res.status).toBe(403);
@@ -304,7 +327,8 @@ describe("GET /tree — recursive listing", () => {
   it("does not include symlinked directories that point outside the project root", async () => {
     const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "projects-files-outside-tree-"));
     fs.writeFileSync(path.join(outsideDir, "secret.txt"), "secret");
-    fs.symlinkSync(outsideDir, path.join(project, "outside"));
+    // Use 'junction': works on Windows without the symlink privilege.
+    fs.symlinkSync(outsideDir, path.join(project, "outside"), "junction");
 
     const res = await fetch(`${baseUrl}/${encoded}/tree`);
     expect(res.status).toBe(200);

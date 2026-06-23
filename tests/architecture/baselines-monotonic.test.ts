@@ -33,6 +33,7 @@ const BASELINES_PATH = "tests/architecture/baselines.ts";
  */
 const TRACKED_MAPS: ReadonlyArray<string> = [
   "SERVER_FILE_SIZE_ALLOWLIST",
+  "CLIENT_FILE_SIZE_ALLOWLIST",
   "BROADCAST_CALL_SITE_BASELINE",
 ];
 

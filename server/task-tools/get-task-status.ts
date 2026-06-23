@@ -4,6 +4,8 @@
 
 import { z } from "zod/v4";
 import type { NormalizedToolDef } from "../harness/types.ts";
+import { jsonResult, textResult } from "../harness/tool-result.ts";
+import { isTerminalTaskStatus } from "../task-lifecycle.ts";
 import type {
   RuntimeSessionInfo,
   TaskRecord,
@@ -28,6 +30,14 @@ type TaskStatusSummary = Pick<
   runtimeSessionKey: string | null;
   runtime: RuntimeSessionInfo | null;
 };
+
+const SUMMARY_RESULT_MAX = 200;
+const TRUNCATION_SUFFIX = "… [truncated — fetch taskId for full text]";
+
+function truncateResult(result: string | null): string | null {
+  if (result === null || result.length <= SUMMARY_RESULT_MAX) return result;
+  return result.slice(0, SUMMARY_RESULT_MAX) + TRUNCATION_SUFFIX;
+}
 
 function runtimeSessionKeyForTask(
   ctx: TaskToolContext,
@@ -58,6 +68,7 @@ function detailView(ctx: TaskToolContext, task: TaskRecord): TaskStatusView {
 }
 
 function summaryView(ctx: TaskToolContext, task: TaskRecord): TaskStatusSummary {
+  const terminal = isTerminalTaskStatus(task.status);
   return {
     taskId: task.taskId,
     title: task.title,
@@ -65,10 +76,21 @@ function summaryView(ctx: TaskToolContext, task: TaskRecord): TaskStatusSummary 
     status: task.status,
     executor: task.executor,
     minionSessionKey: task.minionSessionKey,
-    result: task.result,
-    ...runtimeForTask(ctx, task),
+    result: truncateResult(task.result),
+    ...(terminal
+      ? { runtimeSessionKey: null, runtime: null }
+      : runtimeForTask(ctx, task)),
   };
 }
+
+const getTaskStatusInputSchema = z.object({
+  taskId: z
+    .string()
+    .optional()
+    .describe(
+      "Specific task ID to check. If omitted, returns status of all tasks.",
+    ),
+});
 
 export function createGetTaskStatusToolDef(ctx: TaskToolContext): NormalizedToolDef {
   return {
@@ -81,36 +103,17 @@ export function createGetTaskStatusToolDef(ctx: TaskToolContext): NormalizedTool
       openWorldHint: false,
       idempotentHint: true,
     },
-    inputSchema: z.object({
-      taskId: z
-        .string()
-        .optional()
-        .describe(
-          "Specific task ID to check. If omitted, returns status of all tasks.",
-        ),
-    }),
+    inputSchema: getTaskStatusInputSchema,
     handler: async (input: unknown) => {
-      const args = input as { taskId?: string };
+      const args = getTaskStatusInputSchema.parse(input);
       if (args.taskId) {
         const record = ctx.taskState.tasks.get(args.taskId);
         if (!record) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: `Task ${args.taskId} not found.`,
-              },
-            ],
-          };
+          return textResult(`Task ${args.taskId} not found.`);
         }
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(detailView(ctx, record), null, 2),
-            },
-          ],
-        };
+        // Compact, null-stripped JSON — pretty-printing roughly doubles the
+        // token cost of structured payloads. See harness/tool-result.ts.
+        return jsonResult(detailView(ctx, record));
       }
 
       // Return all tasks
@@ -118,17 +121,9 @@ export function createGetTaskStatusToolDef(ctx: TaskToolContext): NormalizedTool
         summaryView(ctx, t),
       );
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text:
-              all.length === 0
-                ? "No tasks in plan yet."
-                : JSON.stringify(all, null, 2),
-          },
-        ],
-      };
+      return all.length === 0
+        ? textResult("No tasks in plan yet.")
+        : jsonResult(all);
     },
   };
 }

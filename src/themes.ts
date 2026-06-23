@@ -54,6 +54,7 @@ const darkSemanticVars = {
 
   // Model colors
   "--model-sonnet": "#f59e0b",
+  "--model-fable": "#f472b6",
   "--model-opus": "#a78bfa",
   "--model-opus-old": "#8b7ab8",
   "--model-haiku": "#34d399",
@@ -152,6 +153,7 @@ const lightSemanticVars: Record<string, string> = {
 
   // Model colors
   "--model-sonnet": "#a84e08",
+  "--model-fable": "#be185d",
   "--model-opus": "#6d28d9",
   "--model-opus-old": "#7c5db5",
   "--model-haiku": "#15803d",

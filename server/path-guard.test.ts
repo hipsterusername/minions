@@ -12,7 +12,7 @@ import os from "os";
 import path from "path";
 
 const { FAKE_HOME } = vi.hoisted(() => ({
-  FAKE_HOME: `/tmp/minions-fakehome-path-guard-${process.pid}`,
+  FAKE_HOME: require("path").resolve(require("os").tmpdir(), `minions-fakehome-path-guard-${process.pid}`),
 }));
 
 vi.mock("os", async () => {
@@ -35,6 +35,27 @@ import {
   resolveCreatableProjectPath,
   resolveExistingProjectPath,
 } from "./path-guard.ts";
+
+/**
+ * Probe whether this platform/config can create symbolic links.
+ * On Windows without Developer Mode the SeCreateSymbolicLink privilege is
+ * absent and fs.symlinkSync throws EPERM.  Tests that require file-type
+ * symlinks are skipped when this returns false; directory-type symlinks are
+ * replaced with Windows junctions which work without the privilege.
+ */
+const canSymlink: boolean = (() => {
+  try {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "probe-symlink-"));
+    const src = path.join(dir, "src.txt");
+    const lnk = path.join(dir, "lnk.txt");
+    fs.writeFileSync(src, "x");
+    fs.symlinkSync(src, lnk);
+    fs.rmSync(dir, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
+})();
 
 beforeAll(() => {
   fs.mkdirSync(FAKE_HOME, { recursive: true });
@@ -92,10 +113,12 @@ describe("registerProjectPath", () => {
   });
 
   it("rejects a project path whose realpath escapes the home directory", () => {
-    const outside = fs.mkdtempSync(path.join("/tmp", "path-guard-outside-root-"));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "path-guard-outside-root-"));
     const linkedProject = uniqueHomePath("linked-project");
     fs.mkdirSync(path.dirname(linkedProject), { recursive: true });
-    fs.symlinkSync(outside, linkedProject, "dir");
+    // Use 'junction' on Windows (no SeCreateSymbolicLink needed); treated as
+    // 'dir' on Linux/macOS. realpath() follows both correctly.
+    fs.symlinkSync(outside, linkedProject, "junction");
 
     expect(registerProjectPath(linkedProject)).toBeNull();
 
@@ -178,7 +201,9 @@ describe("resolveExistingProjectPath", () => {
     );
   });
 
-  it("allows symlinks that resolve inside the project root", async () => {
+  // File-type symlinks require SeCreateSymbolicLink on Windows (Developer Mode
+  // or admin). Skip when the current environment does not support them.
+  it.skipIf(!canSymlink)("allows symlinks that resolve inside the project root", async () => {
     const project = uniqueProject("inside-symlink");
     fs.writeFileSync(path.join(project, "target.txt"), "ok");
     fs.symlinkSync("target.txt", path.join(project, "linked.txt"));
@@ -188,9 +213,9 @@ describe("resolveExistingProjectPath", () => {
     );
   });
 
-  it("rejects symlinks whose final target escapes the project root", async () => {
+  it.skipIf(!canSymlink)("rejects symlinks whose final target escapes the project root", async () => {
     const project = uniqueProject("outside-symlink");
-    const outsideDir = fs.mkdtempSync(path.join("/tmp", "path-guard-outside-read-"));
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "path-guard-outside-read-"));
     const outsideFile = path.join(outsideDir, "secret.txt");
     fs.writeFileSync(outsideFile, "secret");
     fs.symlinkSync(outsideFile, path.join(project, "linked-secret.txt"));
@@ -212,17 +237,18 @@ describe("resolveCreatableProjectPath", () => {
 
   it("rejects a symlink parent that resolves outside the project root", async () => {
     const project = uniqueProject("creatable-parent-symlink");
-    const outsideDir = fs.mkdtempSync(path.join("/tmp", "path-guard-outside-parent-"));
-    fs.symlinkSync(outsideDir, path.join(project, "outside"));
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "path-guard-outside-parent-"));
+    // Use 'junction' — no privilege needed on Windows; treated as 'dir' on Linux.
+    fs.symlinkSync(outsideDir, path.join(project, "outside"), "junction");
 
     await expect(resolveCreatableProjectPath(project, "outside/new.txt")).resolves.toBeNull();
 
     fs.rmSync(outsideDir, { recursive: true, force: true });
   });
 
-  it("rejects a symlink final target for write-like operations", async () => {
+  it.skipIf(!canSymlink)("rejects a symlink final target for write-like operations", async () => {
     const project = uniqueProject("creatable-final-symlink");
-    const outsideDir = fs.mkdtempSync(path.join("/tmp", "path-guard-outside-write-"));
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "path-guard-outside-write-"));
     const outsideFile = path.join(outsideDir, "secret.txt");
     fs.writeFileSync(outsideFile, "secret");
     fs.symlinkSync(outsideFile, path.join(project, "linked-secret.txt"));

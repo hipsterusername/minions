@@ -2,10 +2,8 @@
 
 **Status:** Proposed. No code has landed yet.
 **Companion to:** [`architecture-review-2026-04-16.md`](./architecture-review-2026-04-16.md)
-(what's broken today), [`refactor-test-plan.md`](./refactor-test-plan.md)
-(the five refactor phases this plan interleaves with), and
-[`testing-strategy.md`](./testing-strategy.md) (the testing working
-agreement).
+(what's broken today) and [`testing-strategy.md`](./testing-strategy.md)
+(the testing working agreement).
 
 ---
 
@@ -443,7 +441,7 @@ pipeline and does not fork the task-assignment protocol.
 ### 4h · Render DSL image component
 
 For symmetry. Agents can render images back to the dashboard as
-evidence. One new `image` component in `src/render-dsl.ts` and
+evidence. One new `image` component in `shared/render-dsl.ts` and
 `server/render-tools.ts`. Small, reuses the asset store. Worth doing
 whenever render-DSL changes are already open.
 

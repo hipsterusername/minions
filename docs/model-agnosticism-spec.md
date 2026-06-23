@@ -223,7 +223,7 @@ Today, every Minions tool already follows this shape — they just import
 | Node components | `src/nodes/ClaudeSessionNode.tsx`, `LeaderNode.tsx`, `src/CardCreationChat.tsx`, `src/components/StatusBanner.tsx`, `src/session-stream.ts` | Replace every `type === 'tool_use' \| 'thinking' \| 'text'` discriminant with `kind === 'tool_call' \| 'thinking' \| 'text'`. |
 | Usage accounting | `src/usage-aggregator.ts` | Make `cacheRead` / `cacheCreation` optional; default to zero. |
 | Prompts | `src/prompts/*.ts` | Stop hardcoding tool names by string. Read them from the harness's `allowedTools` list and interpolate. |
-| Dashboard, skills, worktree, approval | `src/render-dsl.ts`, `src/skills/`, `server/worktree-*.ts`, `server/commands/approve-changes.ts` | **No change.** Already harness-agnostic. |
+| Dashboard, skills, worktree, approval | `shared/render-dsl.ts`, `src/skills/`, `server/worktree-*.ts`, `server/commands/approve-changes.ts` | **No change.** Already harness-agnostic. |
 | `.claude-canvas/` sidecar | `server/{skills,routine-store,session-persist,project-store}.ts` | Rename to `.minions/` with a one-version migration (see §6). |
 
 ---
@@ -591,6 +591,6 @@ Source: model-agnosticism audit performed against the repo.
 | System prompts (tool names by string) | `src/prompts/{leader,minion,card-creation}-system.ts` | SOFT | 6 |
 | Worktree + approval | `server/worktree-*.ts`, `server/commands/approve-changes.ts`, `server/task-tools/request-approval.ts` | already abstract | — |
 | Skills system | `src/skills/`, `server/skills.ts` | already abstract | — |
-| Dashboard DSL | `src/render-dsl.ts`, `server/render-tools.ts` | already abstract | — |
+| Dashboard DSL | `shared/render-dsl.ts`, `server/render-tools.ts` | already abstract | — |
 | `.claude-canvas/` sidecar | `server/{skills,routine-store,session-persist,project-store}.ts` | cosmetic | 7 |
 | Auth | (none in code; SDK owns it) | needs new env per harness | 8 |

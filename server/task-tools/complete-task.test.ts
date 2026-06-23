@@ -48,6 +48,19 @@ async function call(
 }
 
 describe("complete_task", () => {
+  it("rejects garbage input before touching task state — parse guard", async () => {
+    const ctx = makeCtx();
+    const tool = createCompleteTaskToolDef(ctx);
+
+    // Null and empty object both lack required fields.
+    await expect(call(tool, null)).rejects.toThrow();
+    await expect(call(tool, {})).rejects.toThrow();
+    // 'result' must be a string — a number is invalid.
+    await expect(call(tool, { taskId: "t1", result: 42 })).rejects.toThrow();
+
+    expect(ctx.taskState.tasks.size).toBe(0);
+  });
+
   it("marks a planned task as completed with the supplied result", async () => {
     const ctx = makeCtx();
     const planTool = createPlanTaskToolDef(ctx);

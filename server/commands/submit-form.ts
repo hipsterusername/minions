@@ -18,7 +18,9 @@ function buildFormPrompt(
   formComponentId: string,
   answers: Record<string, unknown>,
 ): string {
-  const body = JSON.stringify(answers, null, 2);
+  // Compact JSON — this string lands in the model's context as a user turn,
+  // where pretty-print indentation roughly doubles its token cost.
+  const body = JSON.stringify(answers);
   return (
     `[The user submitted form '${formComponentId}' with the following answers:]\n\n${body}`
   );

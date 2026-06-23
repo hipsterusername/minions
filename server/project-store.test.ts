@@ -31,7 +31,7 @@ import { join } from "node:path";
 // executes alongside the mock factory) and create the directory itself in
 // `beforeAll`. The pid-based name is unique per vitest worker.
 const { FAKE_HOME } = vi.hoisted(() => ({
-  FAKE_HOME: `/tmp/minions-fakehome-${process.pid}`,
+  FAKE_HOME: require("path").resolve(require("os").tmpdir(), `minions-fakehome-${process.pid}`),
 }));
 
 vi.mock("node:os", async () => {
@@ -88,7 +88,10 @@ afterEach(() => {
 describe("initSidecar / openProjectDb", () => {
   it("creates the sidecar directory, default context.md, and settings.json", () => {
     expect(hasSidecar(project)).toBe(false);
-    initSidecar(project);
+    const db = initSidecar(project);
+    // On Windows, SQLite holds a file lock until the connection is closed.
+    // Push the close before the project rmSync so afterEach cleanup succeeds.
+    cleanup.push(() => db.close());
     expect(hasSidecar(project)).toBe(true);
 
     const ctx = readContext(project);
@@ -129,7 +132,10 @@ describe("initSidecar / openProjectDb", () => {
 
 describe("context / settings / skills / mcp-servers round-trip", () => {
   beforeEach(() => {
-    initSidecar(project);
+    // Capture the db handle so afterEach can close it before the project dir
+    // is deleted.  On Windows, SQLite holds a file lock until close().
+    const db = initSidecar(project);
+    cleanup.push(() => db.close());
   });
 
   it("readContext returns the default for a missing file (does not throw)", () => {

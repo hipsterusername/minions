@@ -16,6 +16,7 @@ export type WsCommandType =
   // Session lifecycle
   | "create_session"
   | "send_message"
+  | "canvas_context"
   | "stop_session"
   | "sync_session"
   | "list_sessions"
@@ -73,6 +74,14 @@ export interface WsImageAttachment {
   data: string;
 }
 
+export interface WsCanvasContextItem {
+  nodeId: string;
+  nodeType: string;
+  label: string;
+  content: string;
+  attachments?: WsImageAttachment[];
+}
+
 /** The full WebSocket command envelope clients send. */
 export interface WsCommand {
   type: WsCommandType;
@@ -80,6 +89,8 @@ export interface WsCommand {
   prompt?: string;
   /** Multimodal attachments that accompany `prompt` on the first user turn. */
   attachments?: WsImageAttachment[];
+  /** Full connected-canvas context snapshot for `canvas_context`. */
+  items?: WsCanvasContextItem[];
   cwd?: string;
   permissionMode?: string;
   systemPrompt?: string;

@@ -70,10 +70,11 @@ export function getTaskStatusColor(status: string): string {
 
 // ── Model colors ─────────────────────────────────────────────
 
-export type ModelKey = "sonnet" | "opus" | "opus-old" | "haiku";
+export type ModelKey = "sonnet" | "fable" | "opus" | "opus-old" | "haiku";
 
 export const MODEL_COLORS: Record<ModelKey, string> = {
   sonnet: "var(--model-sonnet)",
+  fable: "var(--model-fable)",
   opus: "var(--model-opus)",
   "opus-old": "var(--model-opus-old)",
   haiku: "var(--model-haiku)",

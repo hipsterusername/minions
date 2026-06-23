@@ -94,9 +94,9 @@ export const syncSession: CommandHandler = (ctx, cmd, ws) => {
       leaderSessionKey: cmd.sessionKey,
       action: "set",
       layout: {
-        title: host.renderState.title,
-        columns: host.renderState.columns,
-        gap: host.renderState.gap,
+        title: host.renderState.layout.title,
+        columns: host.renderState.layout.columns,
+        gap: host.renderState.layout.gap,
       },
       components: host.renderState.components,
     });

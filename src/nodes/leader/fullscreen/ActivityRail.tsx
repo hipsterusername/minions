@@ -45,6 +45,7 @@ const STATUS_DOT_COLOR: Record<TaskPlanItem["status"], string> = {
   planned: "var(--text-muted)",
   starting: "var(--status-creating)",
   running: "var(--status-creating)",
+  blocked: "var(--warning-color)",
   completed: "var(--success-color)",
   failed: "var(--danger-color)",
   ended_without_report: "var(--warning-color)",

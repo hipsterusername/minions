@@ -8,7 +8,7 @@
 
 import type { Bus } from "../bus.ts";
 import type { RuntimeSessionInfo, TaskManagerState } from "../task-tools.ts";
-import type { RenderState } from "../render-tools.ts";
+import type { RenderState } from "../../shared/render-dsl.ts";
 import type { ReasoningMapState } from "../reasoning-map-tools.ts";
 import type { WorktreeInfo } from "../worktree.ts";
 import type { NormalizedToolDef } from "../harness/types.ts";
@@ -52,6 +52,15 @@ export interface AgentTypeContext {
   scheduleWaitContinue?: (durationMs: number, reason: string) => ReturnType<typeof setTimeout> | null | void;
   /** Callback to terminate another live session by key. */
   terminateSession?: (sessionKey: string, reason: SessionTerminateReason) => void;
+  /**
+   * Inject a steering message into a live session as a new user turn.
+   * Returns whether it was delivered plus the session's status, so callers
+   * can surface a useful error for ended sessions.
+   */
+  messageSession?: (
+    sessionKey: string,
+    message: string,
+  ) => { delivered: boolean; status: string | null };
   /** Wake a waiting leader as soon as every child task is terminal. */
   wakeWaitingLeaderIfAllChildrenTerminal?: (leaderKey: string) => void;
   /**
@@ -115,10 +124,22 @@ export interface AgentType {
   wantsWorktree: boolean;
 
   /**
-   * Handle post-completion behavior.
+   * Handle post-completion behavior of a single RUN (one `done` event —
+   * i.e. the agent finished a turn, not necessarily the session's life).
    * E.g., minion propagates results to the leader's taskState.
+   *
+   * Do NOT use this hook for teardown that should only happen when the
+   * session itself goes away — that's `onTerminate`. A leader finishes a
+   * run every time it ends a turn while its minions keep working.
    */
   onComplete?(ctx: AgentTypeContext, result: Record<string, unknown>): void | Promise<void>;
+
+  /**
+   * Handle teardown when the SESSION is terminated (stop/close/remove/abort
+   * of the session itself, via `terminateSessionHost`). E.g., the leader
+   * aborts still-running minion sessions when it is closed or removed.
+   */
+  onTerminate?(ctx: AgentTypeContext, reason: SessionTerminateReason): void;
 
   /**
    * Whether this agent type should detect subagent events.

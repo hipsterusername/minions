@@ -53,8 +53,8 @@ import {
   type SessionTerminateReason,
 } from "./session-host-terminate.ts";
 import { applySessionEndedForMinion } from "./task-lifecycle.ts";
+import { setSessionCanvasContext } from "./canvas-context-store.ts";
 
-// Re-export shared types so callers can import everything from session-host.
 export {
   MAX_BUFFERED_EVENTS,
   isValidThinkingConfig,
@@ -70,19 +70,9 @@ export type {
 
 // ── Host dependencies + options ────────────────────────────
 
-/**
- * External services the host needs to operate. Passed in at start time so the
- * host stays decoupled from `server/index.ts` and testable in isolation.
- */
 export interface SessionHostDeps {
   bus: Bus;
-  /**
-   * Start (or resume) another session. Used by the host for minion spawning
-   * and self-resume after a `wait_and_continue` timer fires. The registry
-   * wires this so it routes back through itself.
-   */
   startChildSession: (opts: StartSessionOptions) => void;
-  /** Enumerate every leader's task state for MCP tools that need it. */
   forEachLeaderTaskState: (
     fn: (leaderKey: string, state: TaskManagerState) => void,
   ) => void;
@@ -94,11 +84,6 @@ export interface SessionHostDeps {
   wakeWaitingLeaderIfAllChildrenTerminal?: (leaderKey: string) => void;
 }
 
-/**
- * Binary image attachment pinned to the first user turn. The host
- * converts each one into a Base64-source {@link ImageBlockParam} so
- * the SDK sends real pixels to the model.
- */
 export interface ImageAttachment {
   kind: "image";
   filename?: string;
@@ -188,6 +173,8 @@ export class SessionHost {
   renderState: RenderState | null = null;
   /** Current Reasoning Graph state (leader only) */
   reasoningMapState: ReasoningMapState | null = null;
+  /** Latest full connected-canvas context snapshot (leader only). */
+  canvasContext: string | null = null;
   private terminateDeps: SessionTerminateDeps | null = null;
 
   constructor(id: string, cwd: string) {
@@ -238,6 +225,11 @@ export class SessionHost {
       this.waitTimerId = null;
     }
     if (this.taskState?.pendingWait) this.taskState.pendingWait.timerId = null;
+  }
+
+  setCanvasContext(canvasContext: string | null): void {
+    this.canvasContext = canvasContext;
+    setSessionCanvasContext(this.id, canvasContext);
   }
 
   // ── Lifecycle ───────────────────────────────────────

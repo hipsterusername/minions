@@ -29,6 +29,11 @@ export interface DisplayMessage {
   suffix?: string | undefined;
   /** SDK message UUID — used for deduplication */
   sdkUuid?: string | undefined;
+  /**
+   * Optional metadata for result messages. Set on error results so
+   * consumers can apply error styling independently of the role field.
+   */
+  meta?: { isError?: boolean; error?: string } | undefined;
 }
 
 // ── Helpers ────────────────────────────────────────────
@@ -149,6 +154,7 @@ export function normalizedToDisplayMessages(
           role: "result",
           content: errText,
           timestamp: now,
+          meta: { isError: true, error: errText },
         }];
       }
       if (event.reason === "completed" || event.reason === "stop") {

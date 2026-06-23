@@ -140,5 +140,4 @@ With the drain complete:
 
 - `docs/architecture-review-2026-04-16.md` — the original architecture
   audit that drove phases 0–5.
-- `docs/refactor-test-plan.md` — per-phase test targets.
 - `docs/testing-strategy.md` — layer definitions, mocking boundaries.

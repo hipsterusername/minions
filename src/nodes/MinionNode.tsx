@@ -280,6 +280,19 @@ export function MinionNodeRenderer({
     }
   }, [data.messages.length]);
 
+  // Native wheel listener on the log output: keep scroll gestures inside the
+  // log from reaching the canvas container's native pan/zoom handler.
+  useEffect(() => {
+    if (!showLog) return;
+    const output = outputRef.current;
+    if (!output) return;
+    const stop = (e: WheelEvent) => {
+      e.stopPropagation();
+    };
+    output.addEventListener("wheel", stop, { passive: false });
+    return () => output.removeEventListener("wheel", stop);
+  }, [showLog]);
+
   // Request sync on mount if we have a sessionKey
   useEffect(() => {
     if (!socketSend || !data.sessionKey || syncedRef.current) return;
@@ -1174,6 +1187,7 @@ export function MinionNodeRenderer({
         {showLog && (
           <div
             ref={outputRef}
+            data-scroll-capture
             onMouseDown={(e) => e.stopPropagation()}
             style={{
               maxHeight: 320,

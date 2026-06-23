@@ -91,6 +91,20 @@ async function call(
 }
 
 describe("request_approval", () => {
+  it("rejects garbage input before touching approval state — parse guard", async () => {
+    const ctx = makeCtx();
+    const tool = createRequestApprovalToolDef(ctx);
+
+    // Null and empty object both lack the required 'summary' field.
+    await expect(call(tool, null)).rejects.toThrow();
+    await expect(call(tool, {})).rejects.toThrow();
+    // 'summary' must be a string — a number is invalid.
+    await expect(call(tool, { summary: 42 })).rejects.toThrow();
+
+    expect(ctx.taskState.approval).toBeNull();
+    expect(ctx.sent).toHaveLength(0);
+  });
+
   it("records approval state, fetches the diff, and broadcasts approval_requested", async () => {
     const ctx = makeCtx();
     const tool = createRequestApprovalToolDef(ctx);

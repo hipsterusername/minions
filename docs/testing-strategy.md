@@ -503,7 +503,7 @@ matrix.
 | `src/streaming.ts` | L1 | exists | Collapse type-guard duplicates per §5.9. |
 | `src/usage-aggregator.ts` | L1 | exists | Drop `shortModelLabel` regex pinning per §5.7. |
 | `src/render-flatten.ts` | L1 | exists | Replace literal-format pinning with property assertions per §5.7. |
-| `src/render-dsl.ts` | L1 | exists (as `shared/render-dsl.test.ts`) | Rewrite — see §7.4. |
+| `shared/render-dsl.ts` | L1 | exists (`shared/render-dsl.test.ts`) | Rewrite — see §7.4. |
 | `src/sdk-messages.ts` | L1 | exists | Pinned. |
 | `src/session-stream.ts` | L1 | exists | Drop reference-equality early-return tests per §5.7. |
 | `src/mcp-paste-parser.ts` | L1 | exists | Drop `String#toLowerCase` test per §5.7. |

@@ -4,28 +4,28 @@
 
 import { z } from "zod/v4";
 import type { NormalizedToolDef } from "../harness/types.ts";
+import { okResult } from "../harness/tool-result.ts";
 import type { TaskToolContext } from "./types.ts";
+
+const setTaskNameInputSchema = z.object({
+  name: z.string().describe("Concise task name, 3-6 words"),
+});
 
 export function createSetTaskNameToolDef(ctx: TaskToolContext): NormalizedToolDef {
   return {
     name: "set_task_name",
     description:
       "Set a short display name for this leader session (3-6 words). Call once at the start.",
-    inputSchema: z.object({
-      name: z.string().describe("Concise task name, 3-6 words"),
-    }),
+    inputSchema: setTaskNameInputSchema,
     handler: async (input: unknown) => {
-      const args = input as { name: string };
+      const args = setTaskNameInputSchema.parse(input);
       ctx.bus.emitToSession(ctx.leaderSessionKey, {
         type: "session_task_name",
         sessionKey: ctx.leaderSessionKey,
         taskName: args.name,
       });
-      return {
-        content: [
-          { type: "text" as const, text: `Task name set: ${args.name}` },
-        ],
-      };
+      // Terse ack — never echo the name the model just sent.
+      return okResult();
     },
   };
 }

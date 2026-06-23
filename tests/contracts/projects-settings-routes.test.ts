@@ -15,14 +15,14 @@
  * uses ~/.tmp/.
  */
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import express, { Router } from "express";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 const { FAKE_HOME } = vi.hoisted(() => ({
-  FAKE_HOME: `/tmp/minions-fakehome-projects-settings-${process.pid}`,
+  FAKE_HOME: require("path").resolve(require("os").tmpdir(), `minions-fakehome-projects-settings-${process.pid}`),
 }));
 
 vi.mock("node:os", async () => {
@@ -41,6 +41,11 @@ import {
   unregisterProjectPath,
 } from "../../server/path-guard.ts";
 import { createExpressFetch } from "../harness/in-process-http.ts";
+
+// On Windows, SQLite holds a file lock until the connection is closed.
+// Track the db returned by initSidecar and close it in afterEach so
+// afterAll's rmSync(FAKE_HOME) can delete canvas.db without EBUSY.
+let sidecarDb: { close(): void } | undefined;
 
 function encodePath(p: string): string {
   return Buffer.from(p).toString("base64url");
@@ -80,7 +85,13 @@ beforeEach(() => {
   project = fs.mkdtempSync(path.join(parentDir, "p-"));
   registerProjectPath(project);
   encoded = encodePath(project);
-  initSidecar(project);
+  sidecarDb = initSidecar(project);
+});
+
+afterEach(() => {
+  // Close the SQLite connection so afterAll's rmSync can delete the db file.
+  try { sidecarDb?.close(); } catch { /* ignore */ }
+  sidecarDb = undefined;
 });
 
 describe("context routes", () => {

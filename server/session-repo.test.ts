@@ -81,15 +81,21 @@ function makeTaskRecord(overrides: Partial<TaskRecord> = {}): TaskRecord {
   };
 }
 
-function makeRenderState(overrides: Partial<RenderState> = {}): RenderState {
+function makeRenderState(opts: {
+  title?: string;
+  columns?: number;
+  gap?: number;
+  components?: RenderState["components"];
+} = {}): RenderState {
   return {
-    title: "Dash",
-    columns: 2,
-    gap: 12,
-    components: [
+    layout: {
+      title: opts.title ?? "Dash",
+      columns: opts.columns ?? 2,
+      gap: opts.gap ?? 12,
+    },
+    components: opts.components ?? [
       { id: "m1", type: "metric", label: "Count", value: "42" },
     ],
-    ...overrides,
   };
 }
 
@@ -250,9 +256,9 @@ describe("session-repo / render_state", () => {
 
     const got = getRenderState(db, "sess-abc");
     expect(got).not.toBeNull();
-    expect(got?.title).toBe("Dash");
-    expect(got?.columns).toBe(2);
-    expect(got?.gap).toBe(12);
+    expect(got?.layout.title).toBe("Dash");
+    expect(got?.layout.columns).toBe(2);
+    expect(got?.layout.gap).toBe(12);
     expect(got?.components).toEqual(state.components);
   });
 
@@ -270,8 +276,8 @@ describe("session-repo / render_state", () => {
       }),
     );
     const got = getRenderState(db, "sess-abc");
-    expect(got?.title).toBe("Next");
-    expect(got?.columns).toBe(3);
+    expect(got?.layout.title).toBe("Next");
+    expect(got?.layout.columns).toBe(3);
     expect(got?.components).toHaveLength(1);
     expect(got?.components[0]?.id).toBe("t1");
   });

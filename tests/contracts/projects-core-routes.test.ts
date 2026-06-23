@@ -33,6 +33,7 @@
 
 import {
   afterAll,
+  afterEach,
   beforeAll,
   beforeEach,
   describe,
@@ -47,7 +48,7 @@ import path from "node:path";
 // Hoisted alongside the `vi.mock` factory below — see comment in the
 // module docstring for why this isolation matters.
 const { FAKE_HOME } = vi.hoisted(() => ({
-  FAKE_HOME: `/tmp/minions-fakehome-projects-core-${process.pid}`,
+  FAKE_HOME: require("path").resolve(require("os").tmpdir(), `minions-fakehome-projects-core-${process.pid}`),
 }));
 
 vi.mock("node:os", async () => {
@@ -66,6 +67,10 @@ import {
   registerProjectPath,
   unregisterProjectPath,
 } from "../../server/path-guard.ts";
+import {
+  getDb,
+  deleteDbCache,
+} from "../../server/routes/projects/helpers.ts";
 import { createExpressFetch } from "../harness/in-process-http.ts";
 
 function encodePath(p: string): string {
@@ -114,6 +119,18 @@ beforeEach(() => {
   encoded = encodePath(project);
 });
 
+// Close any cached SQLite connection for `project` so afterAll's
+// rmSync(FAKE_HOME) can delete canvas.db without EBUSY on Windows.
+// Only close when the sidecar was actually initialised (db file present).
+afterEach(() => {
+  try {
+    if (fs.existsSync(path.join(project, ".minions", "canvas.db"))) {
+      getDb(project).close();
+      deleteDbCache(project);
+    }
+  } catch { /* ignore */ }
+});
+
 function teardownProject() {
   unregisterProjectPath(project);
   // Don't rm the tmpdir between tests — afterAll handles bulk cleanup.
@@ -144,6 +161,10 @@ describe("POST /  — create project", () => {
       fs.existsSync(path.join(newPath, ".minions", "context.md")),
     ).toBe(true);
 
+    // On Windows, SQLite holds a file lock until the connection is explicitly
+    // closed. The POST handler cached the db via setDbCache; close it before
+    // rmSync so the canvas.db file is not busy.
+    try { getDb(newPath).close(); deleteDbCache(newPath); } catch { /* ignore */ }
     fs.rmSync(newPath, { recursive: true, force: true });
   });
 
@@ -412,6 +433,10 @@ describe("DELETE /:encodedPath — drop from recent", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ path: project }),
     });
+
+    // The DELETE route drops the cache entry; close the Windows file
+    // handle first so fixture cleanup can remove the fake home.
+    try { getDb(project).close(); deleteDbCache(project); } catch { /* ignore */ }
 
     const delRes = await fetch(`${baseUrl}/${encoded}`, { method: "DELETE" });
     expect(delRes.status).toBe(200);

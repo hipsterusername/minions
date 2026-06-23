@@ -140,7 +140,7 @@ New server files must be under 400 lines; split them if they grow.
 | The chat / message feed | `src/sdk-messages.ts`, `src/streaming.ts`, the relevant node component |
 | A new MCP tool for the leader | `server/task-tools/` (per-tool factories) + `server/render-tools.ts` |
 | A new MCP tool for a minion | `server/minion-tools.ts` |
-| The render DSL | `src/render-dsl.ts` (client union) and `server/render-tools.ts` (server schema) |
+| The render DSL | `shared/render-dsl.ts` (single source of truth for types + schemas) and `server/render-tools.ts` (MCP tool surface) |
 | A new WebSocket command | `server/commands/<name>.ts` + an entry in `server/commands/index.ts` `COMMAND_TABLE` |
 | Session lifecycle (abort, query loop, persistence) | `server/session-host.ts` |
 | Worktree / approval flow | `server/worktree-*.ts`, `server/commands/approve-changes.ts`, `server/commands/*-merge.ts` |

@@ -76,13 +76,17 @@ const QUERY_AS_ASSERTION_RE =
 
 /**
  * CSS / DOM-impl coupling: `.toHaveStyle({...})` with a literal style
- * object, raw `getComputedStyle(...)` reads, and bare attribute-only
- * `getAttribute("style")` reads. These pin presentation, not behaviour.
+ * object, raw `getComputedStyle(...)` reads, bare `getAttribute("style")`
+ * reads, and inline-style flex assertions. These pin presentation, not
+ * behaviour.
  */
 const CSS_COUPLING_RES: ReadonlyArray<RegExp> = [
   /\.toHaveStyle\s*\(\s*\{/,
   /getComputedStyle\s*\(/,
   /\.getAttribute\s*\(\s*["']style["']\s*\)/,
+  // Inline-style flex-string assertion: `.style*.toMatch(/flex/)` couples
+  // the test to CSS implementation details.
+  /\.style[A-Za-z.]*\.toMatch\([^)]*flex[^)]*\)/,
 ];
 
 /** A line carrying this marker is allowed to violate either rule. */
@@ -144,6 +148,10 @@ function formatViolations(violations: Violation[]): string {
 
 describe("architecture: banned assertion shapes", () => {
   const files = listTestFiles();
+
+  it("scans at least one test file (sanity for the walker)", () => {
+    expect(files.length).toBeGreaterThan(20);
+  });
 
   it("the test tree contains no `getBy*().toBeDefined()` / `toBeTruthy()` shapes (§6.3)", () => {
     const all = files.flatMap(scanFile);

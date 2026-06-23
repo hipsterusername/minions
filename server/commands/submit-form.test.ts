@@ -101,8 +101,10 @@ describe("submitForm — success path", () => {
     const opts = startMock.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(opts["sessionKey"]).toBe("sess-1");
     expect(opts["prompt"]).toContain("[The user submitted form 'form-abc'");
-    expect(opts["prompt"]).toContain('"env": "prod"');
-    expect(opts["prompt"]).toContain('"canary": 25');
+    // Compact JSON (no pretty-print spacing) — the prompt is paid for in
+    // model tokens on every subsequent turn.
+    expect(opts["prompt"]).toContain('"env":"prod"');
+    expect(opts["prompt"]).toContain('"canary":25');
     expect(opts["cwd"]).toBe("/projects/foo");
   });
 

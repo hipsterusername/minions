@@ -19,7 +19,11 @@ const MINION_MCP_TOOLS = [
   "mcp__minion-status__report_step",
   "mcp__minion-status__report_done",
   "mcp__minion-status__report_fail",
+  "mcp__minion-status__report_blocked",
 ];
+
+const REPORT_NUDGE_PROMPT =
+  "Your task is still open. Call mcp__minion-status__report_done with a one-line summary of what you completed, or report_fail with what blocked you. Do not start new work.";
 
 function findParentTask(
   ctx: AgentTypeContext,
@@ -76,6 +80,16 @@ const minionAgent: AgentType = {
         if (report.trigger === "step") {
           applyParentLifecycleEvent(ctx, parent.leaderKey, parent.taskState, parent.task.taskId, {
             type: "reported_step",
+            message: report.message,
+          });
+          return;
+        }
+
+        if (report.trigger === "blocked") {
+          applyParentLifecycleEvent(ctx, parent.leaderKey, parent.taskState, parent.task.taskId, {
+            type: "reported_blocked",
+            question: report.message,
+            timestamp: report.timestamp,
           });
           return;
         }
@@ -101,7 +115,37 @@ const minionAgent: AgentType = {
     const parent = findParentTask(ctx);
     if (!parent) return;
 
+    // A blocked minion ended its turn deliberately to await a leader decision.
+    // The session stays idle and resumable via message_task; do NOT terminalize
+    // it with session_ended here.
+    if (parent.task.status === "blocked") return;
+
     const isError = !!result["is_error"];
+    if (
+      !isError &&
+      (parent.task.status === "starting" || parent.task.status === "running") &&
+      parent.task.nudgedAt == null &&
+      ctx.startMinionSession
+    ) {
+      const nudged = applyLifecycleEvent({
+        bus: ctx.bus,
+        leaderSessionKey: parent.leaderKey,
+        taskState: parent.taskState,
+        taskId: parent.task.taskId,
+        event: { type: "report_nudged" },
+        onStateChange: (state) => persistTaskState(parent.leaderKey, state),
+      });
+      if (nudged !== parent.task) {
+        ctx.startMinionSession({
+          sessionKey: ctx.sessionKey,
+          prompt: REPORT_NUDGE_PROMPT,
+          cwd: ctx.cwd,
+          systemPrompt: MINION_SYSTEM_PROMPT,
+        });
+      }
+      return;
+    }
+
     applyParentLifecycleEvent(ctx, parent.leaderKey, parent.taskState, parent.task.taskId, {
       type: "session_ended",
       reason: isError ? "error" : "clean",

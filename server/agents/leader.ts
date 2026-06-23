@@ -17,7 +17,8 @@ import { createStepToolsForSession } from "../routines/step-tools.ts";
 import { createReasoningMapToolsForLeader } from "../reasoning-map-tools.ts";
 import type { RenderComponent } from "../../shared/render-dsl.ts";
 import { elideDefaults } from "../../shared/render-defaults.ts";
-import { applyLifecycleEvent, isTerminalTaskStatus } from "../task-lifecycle.ts";
+import type { SessionTerminateReason } from "../session-host-terminate.ts";
+import { cancelChildrenOnLeaderTeardown } from "./leader-teardown.ts";
 
 // ── System prompt ─────────────────────────────────────────────────────────
 
@@ -102,9 +103,9 @@ Use \`wait_and_continue\` when you need to pause and come back later:
 - **External processes**: Kicked off a build, deploy, or test suite that takes time
 - **Periodic monitoring**: Need to poll status at intervals
 
-The tool takes \`duration_seconds\` (5–1800) and a \`reason\` string. After the wait expires, the system automatically sends you a "Continue" message so you can pick up where you left off. The UI shows a countdown timer to the user.
+The tool takes \`duration_seconds\` (5–1800) and a \`reason\` string. **Auto-wake:** when all delegated child tasks reach a terminal state, the system wakes you early — you do not wait the full duration. Rely on this: use generous waits of 10–30 minutes for minion work so you skip pointless polling cycles. Short loops (e.g. 60 s) replay your entire context each cycle and waste tokens. The UI shows a countdown timer to the user.
 
-Example: After assigning 3 tasks to minions, call \`wait_and_continue\` with 60 seconds to check back on their progress.
+Example: After assigning 3 tasks to minions, call \`wait_and_continue\` with 1200 seconds — auto-wake fires as soon as all minions finish.
 
 ## Delegation Guidelines
 
@@ -113,6 +114,10 @@ Example: After assigning 3 tasks to minions, call \`wait_and_continue\` with 60 
 - **Assign independent tasks in bulk**: Don't wait for one to finish before assigning the next.
 - **Monitor periodically**: Use \`get_task_status\` to check progress, but don't poll obsessively.
 - **Review and integrate**: After minions finish, review their output and handle integration yourself.
+- **Per-task model override**: Pass \`model\` to use a smaller or faster model for mechanical tasks (renaming, formatting, pure refactors). Omit for reasoning-heavy work.
+- **Custom timeout**: Pass \`timeout_minutes\` (1–120) to override the default 30-minute inactivity budget.
+- **Declare write sets**: Pass \`ownedPaths\` when running tasks in parallel to declare disjoint file boundaries; the tool warns if two concurrent tasks claim the same path.
+- **Retry failed tasks**: If a task reaches failed/ended_without_report/orphaned, re-assign it with the same \`taskId\` to retry. The prior attempt is archived; the result mentions "attempt N".
 
 ## Arming Minions With Skills
 
@@ -305,6 +310,7 @@ const leaderAgent: AgentType = {
       worktreeIsolation: ctx.worktreeIsolation,
       scheduleWaitContinue: ctx.scheduleWaitContinue,
       terminateSession: ctx.terminateSession,
+      messageSession: ctx.messageSession,
       // Phase 4.4: write-through cache — every task-state mutation is
       // persisted to SQLite so the plan survives a server restart.
       onStateChange: (state) => persistTaskState(leaderSessionKey, state),
@@ -370,24 +376,11 @@ const leaderAgent: AgentType = {
   wantsWorktree: true,
   detectsSubagents: true,
 
-  onComplete(ctx: AgentTypeContext): void {
-    ctx.forEachLeaderTaskState?.((leaderKey, taskState) => {
-      if (leaderKey !== ctx.sessionKey) return;
-      for (const task of Array.from(taskState.tasks.values())) {
-        if (isTerminalTaskStatus(task.status)) continue;
-        if (task.minionSessionKey) {
-          ctx.terminateSession?.(task.minionSessionKey, "abort");
-        }
-        applyLifecycleEvent({
-          bus: ctx.bus,
-          leaderSessionKey: leaderKey,
-          taskState,
-          taskId: task.taskId,
-          event: { type: "parent_terminated" },
-          onStateChange: (state) => persistTaskState(leaderKey, state),
-        });
-      }
-    });
+  // Child cleanup on close/remove ONLY — never on run completion. See
+  // leader-teardown.ts for the rationale and leader.test.ts for the
+  // regression tests.
+  onTerminate(ctx: AgentTypeContext, reason: SessionTerminateReason): void {
+    cancelChildrenOnLeaderTeardown(ctx, reason);
   },
 };
 

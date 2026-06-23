@@ -22,7 +22,7 @@ import {
   LeaderNodeRenderer,
   type LeaderData,
 } from "./LeaderNode.tsx";
-import type { CanvasNode, NodeRenderProps } from "../types.ts";
+import type { CanvasNode, ContextItem, NodeRenderProps } from "../types.ts";
 import { DEFAULT_THINKING_CONFIG } from "../types.ts";
 import { canvasScale } from "../canvas-scale.ts";
 import type { ServerMessage } from "../use-socket.ts";
@@ -745,5 +745,191 @@ describe("LeaderNode: ignores mismatched sessionKey", () => {
     ]);
 
     expect(onState).not.toHaveBeenCalled();
+  });
+});
+
+// ── Connected-context dedup ────────────────────────────────────────────────
+// Verifies that delta-based context injection works end-to-end:
+//   1. Full block injected at session creation (hashes seeded).
+//   2. Unchanged context → no <connected-context> in send_message.
+//   3. Changed context → only changed group included in the delta block.
+
+describe("LeaderNode: connected-context dedup", () => {
+  it("seeds hashes at creation and omits unchanged context on subsequent sends", async () => {
+    const { socket } = createReplaySocket();
+    const captured: unknown[] = [];
+    const mockSend = (msg: unknown) => { captured.push(msg); };
+
+    // Use a mutable reference so we can change what getContextForNode returns
+    // without changing the function reference (keeping handleSend stable).
+    let contextSnapshot: ContextItem[] = [
+      { nodeId: "ctx-1", nodeType: "markdown", label: "markdown", content: "Initial context" },
+    ];
+    const getContextForNode = () => contextSnapshot;
+
+    function ContextProbe() {
+      const [data, setData] = useState<LeaderData>(
+        makeInitialData({ sessionKey: null, status: "disconnected" }),
+      );
+      const node: CanvasNode = {
+        id: "leader-ctx-1",
+        type: "leader",
+        position: { x: 0, y: 0 },
+        size: { width: 480, height: 400 },
+        data,
+      };
+      const props: NodeRenderProps = {
+        node,
+        isSelected: false,
+        onUpdateData: (next) => setData(next as LeaderData),
+        socketSubscribe: socket.subscribe,
+        socketSend: mockSend,
+        getContextForNode,
+      };
+      return <LeaderNodeRenderer {...props} />;
+    }
+
+    render(<ContextProbe />);
+
+    // ── Step 1: create session with context ──────────────────────────────
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("leader-prompt-input-inline"), {
+        target: { value: "Initial task" },
+      });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    });
+
+    const nonCanvasCommands = () =>
+      captured.filter((msg) => (msg as { type?: string }).type !== "canvas_context");
+    const canvasCommands = () =>
+      captured.filter((msg) => (msg as { type?: string }).type === "canvas_context");
+
+    expect(nonCanvasCommands()).toHaveLength(1);
+    expect(canvasCommands()).toHaveLength(1);
+    const createMsg = nonCanvasCommands()[0] as { type: string; prompt: string };
+    expect(createMsg.type).toBe("create_session");
+    // Full context block injected at session creation
+    expect(createMsg.prompt).toContain("<connected-context>");
+    expect(createMsg.prompt).toContain("Initial context");
+    expect(createMsg.prompt).toContain("Initial task");
+
+    // ── Step 2: send with UNCHANGED context ─────────────────────────────
+    // Input was cleared by handleCreate; type a new message.
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("leader-prompt-input-inline"), {
+        target: { value: "Follow-up question" },
+      });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    });
+
+    expect(nonCanvasCommands()).toHaveLength(2);
+    expect(canvasCommands()).toHaveLength(1);
+    const sendMsg1 = nonCanvasCommands()[1] as { type: string; prompt: string };
+    expect(sendMsg1.type).toBe("send_message");
+    // Unchanged context → no context block at all
+    expect(sendMsg1.prompt).toBe("Follow-up question");
+    expect(sendMsg1.prompt).not.toContain("<connected-context>");
+
+    // ── Step 3: mutate context, send → delta block present ──────────────
+    contextSnapshot = [
+      { nodeId: "ctx-1", nodeType: "markdown", label: "markdown", content: "UPDATED context" },
+    ];
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("leader-prompt-input-inline"), {
+        target: { value: "After update" },
+      });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    });
+
+    expect(nonCanvasCommands()).toHaveLength(3);
+    expect(canvasCommands()).toHaveLength(2);
+    const sendMsg2 = nonCanvasCommands()[2] as { type: string; prompt: string };
+    expect(sendMsg2.type).toBe("send_message");
+    // Delta block present with ONLY the changed item
+    expect(sendMsg2.prompt).toContain("<connected-context>");
+    expect(sendMsg2.prompt).toContain("UPDATED context");
+    expect(sendMsg2.prompt).not.toContain("Initial context");
+    expect(sendMsg2.prompt).toContain("After update");
+  });
+
+  it("includes only the changed group when one of several context nodes changes", async () => {
+    const { socket } = createReplaySocket();
+    const captured: unknown[] = [];
+    const mockSend = (msg: unknown) => { captured.push(msg); };
+
+    let contextSnapshot: ContextItem[] = [
+      { nodeId: "node-a", nodeType: "markdown", label: "markdown", content: "stable content" },
+      { nodeId: "node-b", nodeType: "markdown", label: "Notes", content: "original notes" },
+    ];
+    const getContextForNode = () => contextSnapshot;
+
+    function MultiContextProbe() {
+      const [data, setData] = useState<LeaderData>(
+        makeInitialData({ sessionKey: null, status: "disconnected" }),
+      );
+      const node: CanvasNode = {
+        id: "leader-multi-ctx",
+        type: "leader",
+        position: { x: 0, y: 0 },
+        size: { width: 480, height: 400 },
+        data,
+      };
+      const props: NodeRenderProps = {
+        node,
+        isSelected: false,
+        onUpdateData: (next) => setData(next as LeaderData),
+        socketSubscribe: socket.subscribe,
+        socketSend: mockSend,
+        getContextForNode,
+      };
+      return <LeaderNodeRenderer {...props} />;
+    }
+
+    render(<MultiContextProbe />);
+
+    // Create session to seed hashes for both nodes
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("leader-prompt-input-inline"), {
+        target: { value: "setup" },
+      });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    });
+
+    const nonCanvasCommands = () =>
+      captured.filter((msg) => (msg as { type?: string }).type !== "canvas_context");
+    expect((nonCanvasCommands()[0] as { type: string }).type).toBe("create_session");
+
+    // Only change node-b; node-a remains the same
+    contextSnapshot = [
+      { nodeId: "node-a", nodeType: "markdown", label: "markdown", content: "stable content" },
+      { nodeId: "node-b", nodeType: "markdown", label: "Notes", content: "updated notes" },
+    ];
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("leader-prompt-input-inline"), {
+        target: { value: "ask about notes" },
+      });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    });
+
+    expect(nonCanvasCommands()).toHaveLength(2);
+    const sendMsg = nonCanvasCommands()[1] as { type: string; prompt: string };
+    expect(sendMsg.type).toBe("send_message");
+    // Delta block includes the changed node-b
+    expect(sendMsg.prompt).toContain("updated notes");
+    // Stable node-a must NOT appear in the delta block
+    expect(sendMsg.prompt).not.toContain("stable content");
+    expect(sendMsg.prompt).toContain("ask about notes");
   });
 });

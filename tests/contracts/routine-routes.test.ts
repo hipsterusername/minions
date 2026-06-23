@@ -25,7 +25,7 @@ import os from "node:os";
 import path from "node:path";
 
 const { FAKE_HOME } = vi.hoisted(() => ({
-  FAKE_HOME: `/tmp/minions-fakehome-routine-routes-${process.pid}`,
+  FAKE_HOME: require("path").resolve(require("os").tmpdir(), `minions-fakehome-routine-routes-${process.pid}`),
 }));
 
 vi.mock("node:os", async () => {

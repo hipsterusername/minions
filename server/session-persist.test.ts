@@ -94,13 +94,19 @@ function makeTaskState(records: TaskRecord[]): TaskManagerState {
   };
 }
 
-function makeRenderState(overrides: Partial<RenderState> = {}): RenderState {
+function makeRenderState(opts: {
+  title?: string;
+  columns?: number;
+  gap?: number;
+  components?: RenderState["components"];
+} = {}): RenderState {
   return {
-    title: "Dash",
-    columns: 2,
-    gap: 12,
-    components: [{ id: "m", type: "metric", label: "N", value: "1" }],
-    ...overrides,
+    layout: {
+      title: opts.title ?? "Dash",
+      columns: opts.columns ?? 2,
+      gap: opts.gap ?? 12,
+    },
+    components: opts.components ?? [{ id: "m", type: "metric", label: "N", value: "1" }],
   };
 }
 
@@ -209,8 +215,8 @@ describe("session-persist integration", () => {
       }),
     );
     const hydrated = hydrateSessionsFromDb();
-    expect(hydrated[0]?.render?.title).toBe("Hello");
-    expect(hydrated[0]?.render?.columns).toBe(3);
+    expect(hydrated[0]?.render?.layout.title).toBe("Hello");
+    expect(hydrated[0]?.render?.layout.columns).toBe(3);
     expect(hydrated[0]?.render?.components).toHaveLength(1);
     expect(hydrated[0]?.render?.components[0]?.id).toBe("s");
   });
@@ -325,7 +331,7 @@ describe("session-persist integration", () => {
     expect(entry.row.task_name).toBe("Phase 4");
     expect(entry.tasks?.tasks.size).toBe(2);
     expect(entry.tasks?.tasks.get("run")?.minionSessionKey).toBe("M");
-    expect(entry.render?.title).toBe("restart-me");
+    expect(entry.render?.layout.title).toBe("restart-me");
   });
 
   it("harnessName round-trips through persist/hydrate", () => {

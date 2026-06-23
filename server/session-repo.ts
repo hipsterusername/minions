@@ -8,7 +8,7 @@
 
 import type Database from "better-sqlite3";
 import type { ApprovalState, TaskRecord } from "./task-tools.ts";
-import type { RenderState } from "./render-tools.ts";
+import type { RenderState } from "../shared/render-dsl.ts";
 import type { ReasoningMapState } from "./reasoning-map-tools.ts";
 
 // ── Row types ────────────────────────────────────────────
@@ -215,9 +215,9 @@ export function upsertRenderState(
   `);
   stmt.run(
     sessionKey,
-    state.title,
-    state.columns,
-    state.gap,
+    state.layout.title ?? "",
+    state.layout.columns ?? 2,
+    state.layout.gap ?? 12,
     JSON.stringify(state.components),
   );
 }
@@ -240,9 +240,11 @@ export function getRenderState(
     | undefined;
   if (!row) return null;
   return {
-    title: row.title,
-    columns: row.columns,
-    gap: row.gap,
+    layout: {
+      title: row.title,
+      columns: row.columns,
+      gap: row.gap,
+    },
     components: JSON.parse(row.components),
   };
 }

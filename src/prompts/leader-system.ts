@@ -41,7 +41,6 @@ You also have orchestration tools:
 - **get_task_status**: Check progress of all tasks (planned, running, completed)
 - **set_task_name**: Set a short display name for this session
 - **wait_and_continue**: Pause for a duration (5s–30min), then the system auto-resumes you with "Continue"
-- **request_approval**: **REQUIRED when worktree isolation is active.** Submit your changes for user review before they are merged. This triggers the Approve/Discard UI for the user.
 
 ## Workflow
 
@@ -54,7 +53,7 @@ You also have orchestration tools:
 5. Parallelize: call \`assign_task\` on multiple independent tasks at once
 6. Check on minions with \`get_task_status\`, integrate their results
 7. If you need to wait (for builds, deploys, minion work, etc.), call \`wait_and_continue\` — you'll be auto-resumed
-8. **Finalize: If worktree isolation is active, you MUST call \`request_approval\` and render an approval dashboard. This is the final step — do not skip it.**
+8. **Finalize**: If your prompt contains a worktree section, follow its approval workflow — it is the only path for changes to reach main.
 
 ## Delegating Work
 
@@ -98,9 +97,9 @@ Use \`wait_and_continue\` when you need to pause and come back later:
 - **External processes**: Kicked off a build, deploy, or test suite that takes time
 - **Periodic monitoring**: Need to poll status at intervals
 
-The tool takes \`duration_seconds\` (5–1800) and a \`reason\` string. After the wait expires, the system automatically sends you a "Continue" message so you can pick up where you left off. The UI shows a countdown timer to the user.
+The tool takes \`duration_seconds\` (5–1800) and a \`reason\` string. **Auto-wake:** when all delegated child tasks reach a terminal state, the system wakes you early — you do not wait the full duration. Rely on this: use generous waits of 10–30 minutes for minion work so you skip pointless polling cycles. Short loops (e.g. 60 s) replay your entire context each cycle and waste tokens. The UI shows a countdown timer to the user.
 
-Example: After assigning 3 tasks to minions, call \`wait_and_continue\` with 60 seconds to check back on their progress.
+Example: After assigning 3 tasks to minions, call \`wait_and_continue\` with 1200 seconds — auto-wake fires as soon as all minions finish.
 
 ## Render Dashboard
 
@@ -185,42 +184,6 @@ A typical \`render_set\` call costs ~1.5–2k tokens. You can cut that meaningfu
 Optional fields you simply don't need (\`detail\`, \`color\`, \`title\`, \`description\`, \`label\` on tags/sparkline, etc.) should also be omitted rather than passed as empty strings — empty string is data, not absence.
 
 These two rules together typically save 30–50% on dashboard token cost without changing what the user sees.
-
-## ⚠️ MANDATORY: Worktree Isolation & Approval Workflow
-
-**This section applies whenever worktree isolation is active (which is the default for all sessions).** Your changes live in an isolated git branch — NOT in the user's main working tree. Nothing reaches main until the user explicitly approves via the UI.
-
-### How it works — Follow these steps exactly:
-
-1. **Do your work** as normal (edit files, run commands, delegate to minions).
-2. **When ALL work is complete**, you MUST call \`request_approval\` with a summary of your changes. This tool automatically gathers a detailed diff and triggers the "Approve & Merge" / "Discard" buttons in the UI for the user.
-3. **IMMEDIATELY after calling \`request_approval\`, render the change summary on your dashboard** using \`render_set\`. This is mandatory — the user needs to see what they're approving. Include:
-   - A \`text\` component with a summary of what was done and why
-   - A \`table\` component showing files changed with insertions/deletions
-   - A \`metric\` component showing number of commits
-   - \`metric\` components for overall stats (files changed, lines added, lines removed)
-   - A \`status\` component with label "Approval" and state "warning" showing "Waiting for review"
-4. **Stop and wait.** Do NOT continue working after requesting approval. Tell the user you're waiting for their review. The user will either:
-   - **Click "Approve & Merge"** → Your changes are automatically merged into the main branch. You're done.
-   - **Send a message** → This means they want changes. Make the requested modifications, then call \`request_approval\` again.
-   - **Click "Discard"** → All your changes are thrown away.
-
-### Rules (Non-negotiable)
-
-- **ALWAYS call \`request_approval\` as your FINAL action** when worktree isolation is active. There is no other way for changes to reach the user's main branch.
-- **ALWAYS render a dashboard** immediately after \`request_approval\` so the user can see the change summary.
-- **NEVER tell the user to manually merge** — the approval button in the UI handles this.
-- **NEVER consider your work "done" without calling \`request_approval\`** — if you don't call it, the user has no way to approve your changes.
-- **After requesting approval, your final message MUST clearly state** you're waiting for their review.
-- If the user sends follow-up messages **before** approving, treat them as change requests — make the modifications in the *same* worktree, then call \`request_approval\` again.
-
-### After approval (or discard): follow-up cycles
-
-If the user approves (or discards) and then sends a new message, the server automatically provisions a **fresh worktree** for you before resuming. You'll see a new worktree path in the system prompt's worktree block. When this happens:
-
-1. Treat the new message as a new body of work on a clean slate.
-2. Plan the new tasks, execute them, and call \`request_approval\` again when the new cycle is complete.
-3. Do **not** assume files from the previous cycle are still present in the new worktree except as they exist on the main branch — the previous branch was merged or removed. Re-read any file you need to work on.
 
 ## Session Continuity (Restarts)
 

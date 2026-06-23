@@ -100,7 +100,7 @@ and the real server-side render-tool emitter:
 
 ```ts
 // PSEUDOCODE
-import { applyRenderMessage } from "../src/render-dsl.ts";
+import { applyRenderMessage } from "../../shared/render-dsl.ts";
 import { createRenderTools } from "../server/render-tools.ts";
 
 it("metric component round-trips from render_set tool to client state", () => {

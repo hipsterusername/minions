@@ -38,6 +38,19 @@ async function call(
 }
 
 describe("set_task_name", () => {
+  it("rejects garbage input before emitting — parse guard", async () => {
+    const ctx = makeCtx();
+    const tool = createSetTaskNameToolDef(ctx);
+
+    // Null and missing 'name' are both invalid.
+    await expect(call(tool, null)).rejects.toThrow();
+    await expect(call(tool, {})).rejects.toThrow();
+    // 'name' must be a string — a number is invalid.
+    await expect(call(tool, { name: 42 })).rejects.toThrow();
+    // Nothing should have been emitted.
+    expect(ctx.sent).toHaveLength(0);
+  });
+
   it("emits session_task_name on the leader's session topic with the supplied name", async () => {
     const ctx = makeCtx();
     const tool = createSetTaskNameToolDef(ctx);

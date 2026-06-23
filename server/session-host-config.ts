@@ -80,8 +80,10 @@ const VALID_DISPLAYS: ReadonlySet<ThinkingDisplay> = new Set([
 /** Models that accept `thinking: {type: "adaptive"}` */
 const ADAPTIVE_THINKING_MODELS: ReadonlySet<string> = new Set([
   "sonnet",
+  "fable",
   "opus",
   "opus-old",
+  "claude-fable-5",
   "claude-opus-4-8",
   "claude-opus-4-7",
   "claude-opus-4-6",
@@ -151,10 +153,26 @@ export function enrichSystemPromptForWorktree(
       ? [
           "- **Commit your work** (`git add -A && git commit -m \"...\"`) before calling `report_done`. The orchestrator has an auto-commit fallback, but explicit commits produce cleaner history.",
           "- **Do NOT** create branches, merge, rebase, or push — the orchestrator manages all integration.",
+          "- **Do NOT modify .git files or config** — the worktree shares a .git link with the main repo.",
         ]
       : [
           "- If you spawn subagents via the Agent tool, they inherit your worktree cwd.",
           "- When delegating to minions via assign_task, they will automatically work in your worktree.",
+          "",
+          "### Approval Workflow (MANDATORY)",
+          "",
+          "1. **When ALL work is complete**, call `request_approval` — it is the **ONLY** path for your changes to reach main. There is no other way.",
+          "2. **Immediately after** calling `request_approval`, render a change-summary dashboard with `render_set`:",
+          "   - A `text` component summarising what was done and why",
+          "   - A `table` component showing files changed (insertions/deletions per file)",
+          "   - `metric` components for overall stats: commit count, files changed, lines added, lines removed",
+          "   - A `status` component with label \"Approval\" and state \"warning\", content \"Waiting for review\"",
+          "3. **Stop and wait.** Do NOT continue working. The user will either:",
+          "   - **Click \"Approve & Merge\"** → your changes are merged into main; you're done.",
+          "   - **Send a follow-up message** → treat it as a change request: make the modifications in the *same* worktree, then call `request_approval` again.",
+          "   - **Click \"Discard\"** → all your changes are thrown away.",
+          "4. **After approval (or discard) + a new message**, the server provisions a **fresh worktree**.",
+          "   Re-read every file you need — do not assume files from the previous cycle still exist on the new branch.",
         ]),
     "",
   ].join("\n");

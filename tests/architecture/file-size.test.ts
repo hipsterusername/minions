@@ -17,6 +17,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
+  CLIENT_FILE_SIZE_ALLOWLIST,
   SERVER_FILE_SIZE_ALLOWLIST,
   SERVER_FILE_SIZE_LIMIT,
 } from "./baselines.ts";
@@ -94,6 +95,48 @@ describe("architecture: server file size", () => {
         `Allowlist references ${rel} but no such file exists. ` +
           `Remove the entry from SERVER_FILE_SIZE_ALLOWLIST.`,
       ).toBe(true);
+    }
+  });
+});
+
+/**
+ * Client (src/) file size — shrink-only ceilings.
+ *
+ * CLAUDE.md calls out Canvas.tsx, LeaderNode.tsx, and ClaudeSessionNode.tsx
+ * as known-oversized files that every PR must hold steady or shrink.
+ * Growth past the recorded baseline is a CI failure. The baselines in
+ * CLIENT_FILE_SIZE_ALLOWLIST are set to the line counts at gate-introduction
+ * time; ratchet them downward as the files shrink.
+ *
+ * Line counting uses `wc -l` semantics (count `\n` characters).
+ */
+describe("architecture: client file size", () => {
+  for (const [rel, ceiling] of Object.entries(CLIENT_FILE_SIZE_ALLOWLIST)) {
+    it(`${rel} has not grown past its recorded baseline of ${ceiling} lines`, () => {
+      const abs = join(REPO_ROOT, rel);
+      const actual = lineCount(abs);
+      expect(
+        actual,
+        `${rel} grew from the recorded baseline of ${ceiling} to ${actual} lines. ` +
+          `CLAUDE.md designates this file as shrink-only. ` +
+          `Either revert the growth or, if the change is intentional, ratchet ` +
+          `the value in CLIENT_FILE_SIZE_ALLOWLIST in tests/architecture/baselines.ts ` +
+          `downward to the new (smaller) count — never upward.`,
+      ).toBeLessThanOrEqual(ceiling);
+    });
+  }
+
+  it("CLIENT_FILE_SIZE_ALLOWLIST entries refer to files that still exist", () => {
+    for (const rel of Object.keys(CLIENT_FILE_SIZE_ALLOWLIST)) {
+      const abs = join(REPO_ROOT, rel);
+      try {
+        statSync(abs);
+      } catch {
+        throw new Error(
+          `CLIENT_FILE_SIZE_ALLOWLIST references ${rel} but no such file exists. ` +
+            `Remove the entry from tests/architecture/baselines.ts.`,
+        );
+      }
     }
   });
 });
