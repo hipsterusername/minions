@@ -156,6 +156,7 @@ export function initDb(dbPath?: string): Database.Database {
       risk_level          TEXT NOT NULL,
       user_request        TEXT NOT NULL,
       packet_json         TEXT NOT NULL,
+      context_pack        TEXT NOT NULL DEFAULT '',
       created_at          INTEGER NOT NULL,
       updated_at          INTEGER NOT NULL
     );
@@ -209,6 +210,7 @@ export function initDb(dbPath?: string): Database.Database {
   ensureColumn(db, "session_usage", "turn_id", "TEXT");
   ensureColumn(db, "session_usage", "harness_session_id", "TEXT");
   ensureColumn(db, "session_usage", "usage_identity", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "work_packets", "context_pack", "TEXT NOT NULL DEFAULT ''");
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_session_usage_identity
       ON session_usage(

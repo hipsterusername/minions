@@ -11,6 +11,8 @@ import { readSettings, resolveMinionModelForHarness } from "../project-store.ts"
 import { isValidThinkingConfig } from "../session-host-config.ts";
 import { getSessionCanvasContext } from "../canvas-context-store.ts";
 import { buildTaskSpawnPrompt } from "./task-prompt.ts";
+import { hasSystemModelManifest } from "../system-model/load.ts";
+import { getWorkPacketContextPack } from "../system-model/store.ts";
 import {
   applyLifecycleEvent,
   isRetryableTaskStatus,
@@ -86,6 +88,10 @@ const assignTaskInputSchema = z.object({
     .describe(
       "Whether to include the latest connected canvas-node context in the spawned minion prompt. Defaults to true.",
     ),
+  workPacketId: z
+    .string()
+    .optional()
+    .describe("Optional system-model Work Packet id whose stored Context Pack should be injected when the layer is active."),
 });
 
 export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef {
@@ -207,6 +213,10 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
       const armedSkillIds = skills.map((s) => s.id);
       const skillsAddendum = compileSkills(skills, skillValues ?? {});
       const minionSystemPrompt = ctx.minionSystemPrompt + skillsAddendum;
+      const settings = readSettings(ctx.projectPath);
+      const contextPack = args.workPacketId && settings.systemModel !== "off" && hasSystemModelManifest(ctx.cwd)
+        ? getWorkPacketContextPack(ctx.projectPath, args.workPacketId)
+        : null;
 
       const prompt = buildTaskSpawnPrompt({
         taskId,
@@ -219,6 +229,7 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
         constraints: task.constraints,
         acceptanceCriteria: task.acceptanceCriteria,
         ownedPaths: task.ownedPaths,
+        contextPack,
         canvasContext:
           args.include_canvas_context === false
             ? null
@@ -226,7 +237,6 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
               getSessionCanvasContext(ctx.leaderSessionKey)),
       });
 
-      const settings = readSettings(ctx.projectPath);
       const minionHarness =
         typeof settings.defaultMinionHarness === "string"
           ? settings.defaultMinionHarness

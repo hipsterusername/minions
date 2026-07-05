@@ -10,6 +10,7 @@ interface TaskSpawnPromptArgs {
   acceptanceCriteria?: string[];
   ownedPaths?: string[];
   canvasContext?: string | null;
+  contextPack?: string | null;
 }
 
 export const CANVAS_CONTEXT_CHAR_LIMIT = 6000;
@@ -79,12 +80,12 @@ export function buildTaskSpawnPrompt(args: TaskSpawnPromptArgs): string {
   }
   lines.push(
     "**Project context:** Skim `CLAUDE.md` at the repo root before significant work - it captures conventions and testing rules the Leader expects.",
-    "",
-    "## Description",
-    "",
-    args.description,
   );
 
+  if (args.contextPack) {
+    lines.push("", "## System Model Context", "", args.contextPack);
+  }
+  lines.push("", "## Description", "", args.description);
   appendListSection(lines, "## Files / surface area", args.files);
   appendListSection(lines, "## Constraints", args.constraints);
   appendListSection(lines, "## Acceptance criteria", args.acceptanceCriteria);

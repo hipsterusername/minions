@@ -10,6 +10,8 @@ describe("query_system_model", () => {
     const def = createQuerySystemModelToolDef({
       leaderSessionKey: "leader-1",
       projectPath: project,
+      cwd: project,
+      bus: { emit: () => {}, emitToSession: () => {}, emitToProject: () => {}, emitGlobal: () => {}, subscribe: () => () => {} },
       runtime: { mode: "advisory", manifestFound: true, model, loadErrors: [] },
     });
 

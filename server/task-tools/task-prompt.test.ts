@@ -10,6 +10,21 @@ function contextBlock(groups: string[]): string {
 }
 
 describe("buildTaskSpawnPrompt canvas context", () => {
+  it("injects system-model context before the task description", () => {
+    const prompt = buildTaskSpawnPrompt({
+      taskId: "t1",
+      title: "Use packet",
+      priority: "high",
+      description: "details",
+      armedSkillIds: [],
+      contextPack: "Suggested files are hints, not truth.",
+    });
+
+    expect(prompt).toContain("## System Model Context");
+    expect(prompt.indexOf("## System Model Context")).toBeLessThan(prompt.indexOf("## Description"));
+    expect(prompt).toContain("Suggested files are hints, not truth.");
+  });
+
   it("appends the labeled canvas context section", () => {
     const prompt = buildTaskSpawnPrompt({
       taskId: "t1",

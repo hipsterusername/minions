@@ -106,8 +106,30 @@ describe("leader agent wiring", () => {
 
     expect(result.toolGroups["system-model"]?.map((def) => def.name)).toEqual([
       "query_system_model",
+      "create_work_packet",
+      "amend_work_packet",
+      "check_freshness",
+      "record_verification",
     ]);
     expect(result.mcpToolNames).toContain("mcp__system-model__query_system_model");
+    expect(result.mcpToolNames).toContain("mcp__system-model__create_work_packet");
+  });
+
+  it("appends the system-model leader prompt addendum only when active", () => {
+    const project = copyValidFixture();
+    writeSettings(project, { systemModel: "advisory" });
+    const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+    const prompt = getAgentType("leader").buildSystemPrompt({
+      sessionKey: "leader-1",
+      cwd: project,
+      bus,
+      worktreeInfo: null,
+      worktreeIsolation: false,
+    });
+
+    expect(prompt).toContain("## System Model");
+    expect(prompt).toContain("create_work_packet");
+    expect(prompt).toContain("workPacketId");
   });
 
   // Regression (2026-06): the child-task sweep used to live in `onComplete`,

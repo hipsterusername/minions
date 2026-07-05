@@ -8,7 +8,7 @@ import type { AgentType, AgentTypeContext, AgentToolResult } from "./types.ts";
 import { createTaskToolsForLeader } from "../task-tools.ts";
 import { createRenderToolsForLeader } from "../render-tools.ts";
 import { createSystemModelToolsForLeader } from "../system-model-tools/index.ts";
-import { resolveSystemModelRuntime } from "../system-model/runtime.ts";
+import { resolveSystemModelRuntime, type SystemModelRuntime } from "../system-model/runtime.ts";
 import { MINION_SYSTEM_PROMPT } from "./minion.ts";
 import {
   persistTaskState,
@@ -242,6 +242,21 @@ If your prompt includes a \`<previous-session-context>\` block, this is a **rest
  */
 export const LEADER_SYSTEM_PROMPT = buildLeaderPromptBody(LEADER_PROMPT_TOOLS);
 
+function appendSystemModelAddendum(prompt: string, runtime: SystemModelRuntime): string {
+  if (runtime.mode === "off" || !runtime.model) return prompt;
+  const addendum = `
+
+## System Model
+
+The \`system-model\` tool group is active. Use \`query_system_model\` for planning context, \`create_work_packet\` before delegating gated-surface work, \`amend_work_packet\` whenever replanning changes scope, \`check_freshness\` for ad hoc staleness checks, and \`record_verification\` after required checks are complete.
+
+A Work Packet is required when task files, owned paths, or matched suggested files intersect review-gate file globs or critical constraint file globs. Enforcement is structural at the worktree boundary; this prompt is orientation only.
+
+When assigning a minion for packet-scoped work, pass \`workPacketId\` to \`assign_task\` so the stored Context Pack is injected into the spawn prompt.`;
+  const maxChars = runtime.model.policies.contextBudgets.leaderPromptAddendum * 4;
+  return `${prompt}${addendum.length <= maxChars ? addendum : `${addendum.slice(0, Math.max(0, maxChars - 40))}\n[system-model addendum truncated]`}`;
+}
+
 // ── MCP tool names ────────────────────────────────────────────────────────
 
 const LEADER_MCP_TOOLS = [
@@ -264,10 +279,11 @@ const leaderAgent: AgentType = {
   id: "leader",
 
   buildSystemPrompt(_ctx: AgentTypeContext, customPrompt?: string, tools?: string[]): string {
-    if (customPrompt) return customPrompt;
+    const systemModelRuntime = resolveSystemModelRuntime(_ctx);
+    if (customPrompt) return appendSystemModelAddendum(customPrompt, systemModelRuntime);
     // Filter "Agent" — it is an allowed tool but not a user-facing coding tool.
     const promptTools = (tools ?? LEADER_PROMPT_TOOLS).filter((t) => t !== "Agent");
-    return buildLeaderPromptBody(promptTools);
+    return appendSystemModelAddendum(buildLeaderPromptBody(promptTools), systemModelRuntime);
   },
 
   getToolGroups(ctx: AgentTypeContext): AgentToolResult {
@@ -311,7 +327,9 @@ const leaderAgent: AgentType = {
       ? createSystemModelToolsForLeader({
         leaderSessionKey,
         projectPath: ctx.worktreeInfo?.projectPath ?? ctx.cwd,
+        cwd: ctx.cwd,
         runtime: systemModelRuntime,
+        bus: ctx.bus,
       })
       : [];
 

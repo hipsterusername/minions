@@ -2,14 +2,8 @@ import { z } from "zod/v4";
 import type { NormalizedToolDef } from "../harness/types.ts";
 import { jsonResult } from "../harness/tool-result.ts";
 import type { SystemModelObject, SystemModelObjectType } from "../../shared/system-model/index.ts";
-import type { SystemModelRuntime } from "../system-model/runtime.ts";
 import { recordSystemModelUsage } from "../system-model/store.ts";
-
-export interface SystemModelToolContext {
-  leaderSessionKey: string;
-  projectPath: string;
-  runtime: SystemModelRuntime;
-}
+import type { SystemModelToolContext } from "./shared.ts";
 
 const querySystemModelInputSchema = z.object({
   query: z.string(),

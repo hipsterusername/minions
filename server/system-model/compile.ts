@@ -13,7 +13,7 @@ import { globMatches, LOW_CONFIDENCE_FALLBACK, type MatchCandidate } from "./mat
 import type { LoadedSystemModel } from "./types.ts";
 
 export const CONTEXT_PACK_PREAMBLE =
-  "System model context is guidance, not truth. Verify against the repository before making or merging changes.";
+  "Suggested files are hints, not truth. Inspect current code before editing. Hard constraints override implementation convenience. If current code contradicts this context, report the conflict.";
 
 export interface CompileInput {
   model: LoadedSystemModel;

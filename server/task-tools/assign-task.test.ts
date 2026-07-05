@@ -26,6 +26,8 @@ import type {
 } from "./types.ts";
 import type { Bus, BusPayload } from "../bus.ts";
 import { writeSettings, writeSkills } from "../project-store.ts";
+import { saveWorkPacket } from "../system-model/store.ts";
+import type { WorkPacket } from "../../shared/system-model/index.ts";
 
 const BASE_MINION_PROMPT = "You are a Minion. Do the work.";
 
@@ -95,6 +97,7 @@ async function callAssign(
     include_canvas_context?: boolean;
     skillIds?: string[];
     skillValues?: Record<string, Record<string, string>>;
+    workPacketId?: string;
   },
 ): Promise<{ text: string }> {
   const tool = createAssignTaskToolDef(ctx);
@@ -463,6 +466,25 @@ describe("assign_task", () => {
       expect(harness.spawns[0]!.prompt).not.toContain("## Canvas context");
       expect(harness.spawns[1]!.prompt).not.toContain("## Canvas context");
     });
+
+    it("injects a stored Context Pack when workPacketId is supplied and system-model mode is active", async () => {
+      fs.mkdirSync(path.join(projectDir, ".systemmodel"), { recursive: true });
+      fs.writeFileSync(path.join(projectDir, ".systemmodel/manifest.yaml"), "name: test\n");
+      writeSettings(projectDir, { systemModel: "advisory" });
+      saveWorkPacket(projectDir, packet, "Suggested files are hints, not truth.\nConstraint constraint.bus_only: use the bus", 100);
+
+      await callAssign(harness.ctx, {
+        taskId: "t-packet",
+        title: "Use packet",
+        description: "details",
+        priority: "high",
+        workPacketId: packet.id,
+      });
+
+      const prompt = lastSpawnPrompt(harness);
+      expect(prompt).toContain("## System Model Context");
+      expect(prompt).toContain("Constraint constraint.bus_only");
+    });
   });
 
   // ── model override ────────────────────────────────────────────────────────
@@ -767,3 +789,20 @@ describe("assign_task", () => {
     expect(harness.spawns).toHaveLength(1);
   });
 });
+
+const packet: WorkPacket = {
+  id: "wp_assign",
+  leaderSessionKey: "leader-key",
+  createdAt: 1,
+  userRequest: "request",
+  normalizedGoal: "request",
+  status: "draft",
+  scope: { capabilities: [], flows: [], constraints: [], decisions: [], risks: [], suggestedFiles: [], suggestedTests: [] },
+  nonGoals: [],
+  agentInstructions: [],
+  freshness: { status: "fresh", warnings: [], requiredVerifications: [] },
+  reviewGates: [],
+  riskLevel: "low",
+  matchConfidence: "high",
+  amendments: [],
+};
