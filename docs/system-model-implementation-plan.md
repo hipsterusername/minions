@@ -1,6 +1,6 @@
 # System Model Layer — Implementation Plan & Spec
 
-Status: **proposed** · Owner: TBD · Feature flag: `ProjectSettings.systemModel`
+Status: **implemented** (Phases 1–6, 2026-07-04) · Feature flag: `ProjectSettings.systemModel`
 
 This document specifies the integration of an Agent Task Context Layer
 ("System Model") into Minions as an additive, feature-flagged capability.
