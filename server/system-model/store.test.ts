@@ -2,9 +2,20 @@ import Database from "better-sqlite3";
 import path from "path";
 import { describe, expect, it } from "vitest";
 import { initDb } from "../db.ts";
-import { getWorkPacket, getWorkPacketContextPack, listWorkPacketVerifications, recordSystemModelUsage, recordWorkPacketVerification, saveWorkPacket } from "./store.ts";
+import {
+  getLatestReconciliationReportForPacket,
+  getReconciliationReport,
+  getWorkPacket,
+  getWorkPacketContextPack,
+  listWorkPacketVerifications,
+  recordSystemModelUsage,
+  recordWorkPacketVerification,
+  saveReconciliationReport,
+  saveWorkPacket,
+  updateWorkPacketStatus,
+} from "./store.ts";
 import { copyValidFixture } from "./load.test.ts";
-import type { WorkPacket } from "../../shared/system-model/index.ts";
+import type { ReconciliationReport, WorkPacket } from "../../shared/system-model/index.ts";
 
 describe("system-model persistence", () => {
   it("initDb creates Phase 1 tables", () => {
@@ -48,6 +59,17 @@ describe("system-model persistence", () => {
       expect.objectContaining({ target: "capability.workspace_management", result: "passed" }),
     ]);
   });
+
+  it("round-trips reconciliation reports and packet status updates", () => {
+    const project = copyValidFixture();
+    saveWorkPacket(project, packet, "context pack", 2);
+    saveReconciliationReport(project, report);
+
+    expect(getReconciliationReport(project, report.id)?.deterministic.provenance).toBe("deterministic");
+    expect(getLatestReconciliationReportForPacket(project, packet.id)?.id).toBe(report.id);
+    expect(updateWorkPacketStatus(project, packet.id, "reconciled", 4)?.status).toBe("reconciled");
+    expect(getWorkPacket(project, packet.id)?.packet.status).toBe("reconciled");
+  });
 });
 
 const packet: WorkPacket = {
@@ -65,4 +87,29 @@ const packet: WorkPacket = {
   riskLevel: "low",
   matchConfidence: "high",
   amendments: [],
+};
+
+const report: ReconciliationReport = {
+  id: "recon_store",
+  workPacketId: packet.id,
+  createdAt: 3,
+  deterministic: {
+    provenance: "deterministic",
+    changedFiles: ["server/session-host.ts"],
+    affectedCapabilities: ["capability.workspace_management"],
+    affectedFlows: [],
+    constraintsInScope: ["constraint.bus_only"],
+    testsMissing: [],
+    outOfScopeFiles: [],
+    gateRequirements: [],
+    diffSummary: "1 file changed",
+  },
+  constraintVerdicts: [],
+  provenance: { deterministic: "deterministic" },
+  affectedObjects: ["capability.workspace_management"],
+  changedFiles: ["server/session-host.ts"],
+  testsMissing: [],
+  outOfScopeFiles: [],
+  gates: [],
+  constraintChecks: [],
 };

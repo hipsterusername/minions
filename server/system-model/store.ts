@@ -1,5 +1,11 @@
 import { openProjectDb } from "../project-store.ts";
-import { workPacketSchema, type RequiredVerification, type WorkPacket } from "../../shared/system-model/index.ts";
+import {
+  reconciliationReportSchema,
+  workPacketSchema,
+  type ReconciliationReport,
+  type RequiredVerification,
+  type WorkPacket,
+} from "../../shared/system-model/index.ts";
 
 export interface SystemModelUsageHit {
   objectId: string;
@@ -86,6 +92,19 @@ export function getWorkPacketContextPack(projectPath: string, id: string): strin
   return getWorkPacket(projectPath, id)?.contextPack ?? null;
 }
 
+export function updateWorkPacketStatus(
+  projectPath: string,
+  id: string,
+  status: WorkPacket["status"],
+  now = Date.now(),
+): WorkPacket | null {
+  const stored = getWorkPacket(projectPath, id);
+  if (!stored) return null;
+  const packet = { ...stored.packet, status };
+  saveWorkPacket(projectPath, packet, stored.contextPack, now);
+  return packet;
+}
+
 export function recordWorkPacketVerification(
   projectPath: string,
   row: WorkPacketVerificationRow,
@@ -124,4 +143,50 @@ export function listWorkPacketVerifications(
     notes: row.notes,
     recordedAt: row.recorded_at,
   }));
+}
+
+export function saveReconciliationReport(
+  projectPath: string,
+  report: ReconciliationReport,
+): void {
+  const db = openProjectDb(projectPath);
+  db.prepare(
+    `INSERT INTO reconciliation_reports
+      (id, work_packet_id, report_json, created_at)
+     VALUES (@id, @workPacketId, @reportJson, @createdAt)
+     ON CONFLICT(id) DO UPDATE SET
+      work_packet_id = excluded.work_packet_id,
+      report_json = excluded.report_json,
+      created_at = excluded.created_at`,
+  ).run({
+    id: report.id,
+    workPacketId: report.workPacketId,
+    reportJson: JSON.stringify(report),
+    createdAt: report.createdAt,
+  });
+}
+
+export function getReconciliationReport(
+  projectPath: string,
+  id: string,
+): ReconciliationReport | null {
+  const db = openProjectDb(projectPath);
+  const row = db.prepare(
+    "SELECT report_json FROM reconciliation_reports WHERE id = ?",
+  ).get(id) as { report_json: string } | undefined;
+  return row ? reconciliationReportSchema.parse(JSON.parse(row.report_json)) : null;
+}
+
+export function getLatestReconciliationReportForPacket(
+  projectPath: string,
+  workPacketId: string,
+): ReconciliationReport | null {
+  const db = openProjectDb(projectPath);
+  const row = db.prepare(
+    `SELECT report_json FROM reconciliation_reports
+     WHERE work_packet_id = ?
+     ORDER BY created_at DESC, id DESC
+     LIMIT 1`,
+  ).get(workPacketId) as { report_json: string } | undefined;
+  return row ? reconciliationReportSchema.parse(JSON.parse(row.report_json)) : null;
 }

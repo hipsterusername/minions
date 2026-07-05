@@ -1,0 +1,95 @@
+import type { WorkPacket, ReviewGateRequirement } from "../../shared/system-model/index.ts";
+import type { DetailedDiff } from "../worktree-types.ts";
+import { globMatches } from "./match.ts";
+import type { LoadedSystemModel } from "./types.ts";
+import type { DeterministicReconciliation } from "../../shared/system-model/reconcile.ts";
+
+export interface ReconcileInput {
+  diff: DetailedDiff;
+  model: LoadedSystemModel;
+  packet: WorkPacket;
+}
+
+export function reconcileDeterministic(input: ReconcileInput): DeterministicReconciliation {
+  const changedFiles = unique(input.diff.files.map((file) => file.file));
+  const affectedCapabilities = input.model.capabilities
+    .filter((capability) => changedFiles.some((file) => matchesAny(file, capability.suggestedFiles)))
+    .map((capability) => capability.id);
+  const affectedFlows = input.model.flows
+    .filter((flow) => changedFiles.some((file) => matchesAny(file, flow.suggestedFiles)))
+    .map((flow) => flow.id);
+  const scopeCapabilities = unique([...input.packet.scope.capabilities, ...affectedCapabilities]);
+  const scopeFlows = unique([...input.packet.scope.flows, ...affectedFlows]);
+  const constraintsInScope = input.model.constraints
+    .filter((constraint) =>
+      input.packet.scope.constraints.includes(constraint.id)
+      || intersects(constraint.appliesTo.capabilities, scopeCapabilities)
+      || intersects(constraint.appliesTo.flows, scopeFlows)
+      || changedFiles.some((file) => matchesAny(file, constraint.appliesTo.files)))
+    .map((constraint) => constraint.id);
+  const changedTests = new Set(changedFiles.filter(isLikelyTestFile));
+  const testsMissing = input.packet.scope.suggestedTests
+    .filter((test) => !changedTests.has(test))
+    .sort();
+  const outOfScopeFiles = changedFiles
+    .filter((file) => !matchesAny(file, input.packet.scope.suggestedFiles)
+      && !input.packet.scope.suggestedTests.includes(file))
+    .sort();
+  const gateRequirements = deriveGateRequirements(input.model, {
+    capabilities: scopeCapabilities,
+    flows: scopeFlows,
+    files: changedFiles,
+  });
+  return {
+    provenance: "deterministic",
+    changedFiles,
+    affectedCapabilities: affectedCapabilities.sort(),
+    affectedFlows: affectedFlows.sort(),
+    constraintsInScope: constraintsInScope.sort(),
+    testsMissing,
+    outOfScopeFiles,
+    gateRequirements,
+    diffSummary: summarizeDiff(input.diff),
+  };
+}
+
+function deriveGateRequirements(
+  model: LoadedSystemModel,
+  scope: { capabilities: string[]; flows: string[]; files: string[] },
+): ReviewGateRequirement[] {
+  return model.policies.reviewGates.map((gate) => {
+    const required = intersects(gate.requiredWhen.capabilities, scope.capabilities)
+      || intersects(gate.requiredWhen.flows, scope.flows)
+      || scope.files.some((file) => matchesAny(file, gate.requiredWhen.files));
+    return {
+      gateId: gate.id,
+      name: gate.name,
+      status: required ? "required_pending" : "not_required",
+      reason: required ? "Matched actual diff or packet scope" : "No diff or scope match",
+    };
+  });
+}
+
+function summarizeDiff(diff: DetailedDiff): string {
+  if (diff.files.length === 0) return "No changed files";
+  const files = diff.files.map((file) =>
+    `${file.file} (${file.status}, +${file.insertions}/-${file.deletions})`);
+  return `${diff.filesChanged} files changed, +${diff.insertions}/-${diff.deletions}: ${files.join("; ")}`;
+}
+
+function isLikelyTestFile(file: string): boolean {
+  return /(^|\/)(tests?|__tests__)\//.test(file) || /\.(test|spec)\.[cm]?[jt]sx?$/.test(file);
+}
+
+function matchesAny(file: string, globs: string[]): boolean {
+  return globs.some((glob) => globMatches(glob, file));
+}
+
+function intersects(a: string[], b: string[]): boolean {
+  const bSet = new Set(b);
+  return a.some((item) => bSet.has(item));
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)].sort();
+}
