@@ -7,3 +7,4 @@ export * from "./store.ts";
 export * from "./freshness.ts";
 export * from "./match.ts";
 export * from "./compile.ts";
+export * from "./gates.ts";

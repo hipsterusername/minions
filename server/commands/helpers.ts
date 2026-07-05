@@ -19,6 +19,11 @@ import type { BufferedEvent } from "../session-host.ts";
 import { mergeAndCleanup, type MergeResult } from "../worktree.ts";
 import type { HarnessRunControl, NormalizedEvent } from "../harness/types.ts";
 import { persistTaskState } from "../session-persist.ts";
+import {
+  evaluateMergeGates,
+  shouldEvaluateMergeGates,
+  shouldWarnForMergeGates,
+} from "../system-model/gates.ts";
 
 /** Options bag accepted by mergeAndCleanup. Inlined here because worktree.ts
  *  does not export the shape directly. */
@@ -151,6 +156,37 @@ export function unsupportedByHarness(
  *   5. Either way: reply with a control_response carrying the result
  */
 export function runMergeFlow(
+  bus: Bus,
+  host: SessionHost,
+  ws: WebSocket,
+  command: string,
+  cmd: WsCommand,
+  options?: MergeOptions,
+): void {
+  const gateVerdict = shouldEvaluateMergeGates(host) ? evaluateMergeGates(host) : null;
+  if (!gateVerdict) {
+    continueMergeFlow(bus, host, ws, command, cmd, options);
+    return;
+  }
+
+  void gateVerdict
+    .then((verdict) => {
+      if (shouldWarnForMergeGates(verdict)) {
+        bus.emitToSession(host.id, {
+          type: "merge_gate_warning",
+          sessionKey: host.id,
+          verdict,
+          timestamp: Date.now(),
+        });
+      }
+      continueMergeFlow(bus, host, ws, command, cmd, options);
+    })
+    .catch((err: unknown) => {
+      sendControlError(ws, command, cmd.sessionKey!, cmd.requestId, errToMessage(err));
+    });
+}
+
+function continueMergeFlow(
   bus: Bus,
   host: SessionHost,
   ws: WebSocket,

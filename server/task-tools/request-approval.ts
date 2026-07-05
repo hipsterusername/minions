@@ -8,6 +8,8 @@ import { textResult } from "../harness/tool-result.ts";
 import type { DetailedDiff } from "../worktree.js";
 import { getDetailedDiff } from "../worktree.js";
 import type { TaskToolContext } from "./types.ts";
+import type { SessionHost } from "../session-host.ts";
+import { evaluateMergeGates } from "../system-model/gates.ts";
 
 export const APPROVAL_GRACE_MS = 15_000;
 
@@ -44,6 +46,13 @@ export function createRequestApprovalToolDef(ctx: TaskToolContext): NormalizedTo
 
       const requestedAt = Date.now();
       const graceUntil = requestedAt + APPROVAL_GRACE_MS;
+      const gateHost = {
+        id: ctx.leaderSessionKey,
+        cwd: ctx.cwd,
+        worktree: ctx.worktreeInfo,
+      } as SessionHost;
+      const gateVerdict = await evaluateMergeGates(gateHost);
+      const gates = gateVerdict.mode === "off" ? null : gateVerdict;
 
       // Record approval state
       ctx.taskState.approval = {
@@ -52,6 +61,7 @@ export function createRequestApprovalToolDef(ctx: TaskToolContext): NormalizedTo
         graceUntil,
         summary: args.summary,
         diff,
+        gates,
       };
       ctx.onStateChange?.(ctx.taskState);
 
@@ -61,6 +71,7 @@ export function createRequestApprovalToolDef(ctx: TaskToolContext): NormalizedTo
         sessionKey: ctx.leaderSessionKey,
         summary: args.summary,
         diff,
+        gates,
         timestamp: requestedAt,
         graceUntil,
       });

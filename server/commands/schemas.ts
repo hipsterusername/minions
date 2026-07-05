@@ -154,6 +154,11 @@ export const COMMAND_SCHEMAS = {
   get_mcp_server_status: sessionScoped("get_mcp_server_status"),
   get_system_model_status: sessionScoped("get_system_model_status"),
   get_system_graph: sessionScoped("get_system_graph"),
+  get_work_packets: command("get_work_packets", {
+    sessionKey,
+    projectPath: z.string().optional(),
+    workPacketId: z.string().optional(),
+  }),
   // MCP server control
   reconnect_mcp_server: command("reconnect_mcp_server", {
     sessionKey,

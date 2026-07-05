@@ -52,6 +52,7 @@ import { submitForm } from "./submit-form.ts";
 import { clearSession } from "./clear-session.ts";
 import { getSystemModelStatus } from "./get-system-model-status.ts";
 import { getSystemGraph } from "./get-system-graph.ts";
+import { getWorkPackets } from "./get-work-packets.ts";
 import type { CommandContext, CommandTable, WsCommand } from "./types.ts";
 import type { WebSocket } from "ws";
 
@@ -101,6 +102,7 @@ export const COMMAND_TABLE = {
   get_mcp_server_status: getMcpServerStatus,
   get_system_model_status: getSystemModelStatus,
   get_system_graph: getSystemGraph,
+  get_work_packets: getWorkPackets,
   // MCP server control
   reconnect_mcp_server: reconnectMcpServer,
   toggle_mcp_server: toggleMcpServer,

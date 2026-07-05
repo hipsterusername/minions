@@ -5,6 +5,7 @@
 import type { Bus } from "../bus.ts";
 import type { ThinkingConfig } from "../session-host-config.ts";
 import type { WorktreeInfo, DetailedDiff } from "../worktree.js";
+import type { MergeGateVerdict } from "../system-model/gates.ts";
 
 // ── Public state types ────────────────────────────────
 
@@ -103,6 +104,8 @@ export interface ApprovalState {
   summary: string;
   /** Detailed diff at the time of request */
   diff: DetailedDiff | null;
+  /** System-model gate verdict at approval-request time (null when layer off). */
+  gates?: MergeGateVerdict | null;
 }
 
 export interface TaskManagerState {

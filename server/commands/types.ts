@@ -52,6 +52,7 @@ export type WsCommandType =
   | "get_mcp_server_status"
   | "get_system_model_status"
   | "get_system_graph"
+  | "get_work_packets"
   // MCP server control
   | "reconnect_mcp_server"
   | "toggle_mcp_server"
@@ -100,6 +101,7 @@ export interface WsCommand {
   /** Adaptive-thinking config — may be updated on every send_message */
   thinkingConfig?: unknown;
   projectPath?: string;
+  workPacketId?: string;
   // Task control params
   taskId?: string;
   // Rewind params

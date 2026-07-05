@@ -5,6 +5,11 @@
  */
 
 import { mergeAndCleanup } from "../worktree.ts";
+import {
+  evaluateMergeGates,
+  shouldEvaluateMergeGates,
+  shouldWarnForMergeGates,
+} from "../system-model/gates.ts";
 import { getSessionOrError, sendControlError, sendControlResponse, errToMessage } from "./helpers.ts";
 import type { CommandHandler } from "./types.ts";
 
@@ -16,7 +21,22 @@ export const mergeWorktree: CommandHandler = (ctx, cmd, ws) => {
     return;
   }
   const projectPath = host.worktree.projectPath;
-  mergeAndCleanup(host.worktree)
+  const gateVerdict = shouldEvaluateMergeGates(host) ? evaluateMergeGates(host) : null;
+  const merge = gateVerdict
+    ? gateVerdict.then((verdict) => {
+        if (shouldWarnForMergeGates(verdict)) {
+          ctx.bus.emitToSession(host.id, {
+            type: "merge_gate_warning",
+            sessionKey: host.id,
+            verdict,
+            timestamp: Date.now(),
+          });
+        }
+        return mergeAndCleanup(host.worktree!);
+      })
+    : mergeAndCleanup(host.worktree);
+
+  merge
     .then((result) => {
       if (result.success) {
         host.worktree = null;

@@ -116,6 +116,7 @@ describe("request_approval", () => {
       requested: true,
       summary: "Refactored the parser",
       diff: fakeDiff,
+      gates: null,
     });
     expect(typeof ctx.taskState.approval!.requestedAt).toBe("number");
     expect(ctx.taskState.approval!.graceUntil).toBeGreaterThan(
@@ -129,6 +130,7 @@ describe("request_approval", () => {
     expect(env["sessionKey"]).toBe("leader-1");
     expect(env["summary"]).toBe("Refactored the parser");
     expect(env["diff"]).toEqual(fakeDiff);
+    expect(env["gates"]).toBeNull();
     expect(env["graceUntil"]).toBe(ctx.taskState.approval!.graceUntil);
   });
 
