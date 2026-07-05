@@ -7,6 +7,8 @@ import { registerAgentType } from "./registry.ts";
 import type { AgentType, AgentTypeContext, AgentToolResult } from "./types.ts";
 import { createTaskToolsForLeader } from "../task-tools.ts";
 import { createRenderToolsForLeader } from "../render-tools.ts";
+import { createSystemModelToolsForLeader } from "../system-model-tools/index.ts";
+import { resolveSystemModelRuntime } from "../system-model/runtime.ts";
 import { MINION_SYSTEM_PROMPT } from "./minion.ts";
 import {
   persistTaskState,
@@ -304,14 +306,27 @@ const leaderAgent: AgentType = {
       onStateChange: (state) => persistRenderState(leaderSessionKey, state),
     });
 
+    const systemModelRuntime = resolveSystemModelRuntime(ctx);
+    const systemModelDefs = systemModelRuntime.mode !== "off" && systemModelRuntime.model
+      ? createSystemModelToolsForLeader({
+        leaderSessionKey,
+        projectPath: ctx.worktreeInfo?.projectPath ?? ctx.cwd,
+        runtime: systemModelRuntime,
+      })
+      : [];
+
     const toolGroups: Record<string, import("../harness/types.ts").NormalizedToolDef[]> = {
       "task-manager": taskDefs,
       "render-dashboard": renderDefs,
+      ...(systemModelDefs.length > 0 ? { "system-model": systemModelDefs } : {}),
     };
 
     return {
       toolGroups,
-      mcpToolNames: LEADER_MCP_TOOLS,
+      mcpToolNames: [
+        ...LEADER_MCP_TOOLS,
+        ...systemModelDefs.map((def) => `mcp__system-model__${def.name}`),
+      ],
       taskState,
       renderState,
     };

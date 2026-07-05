@@ -1,0 +1,12 @@
+id: flow.approve_changes
+type: flow
+name: Approve Changes
+summary: Review and merge isolated worktree changes.
+capabilities: [capability.workspace_management]
+constraints: [constraint.bus_only]
+decisions: [decision.bus_architecture]
+risks: [risk.merge_bypass]
+suggested_files: [server/commands/approve-changes.ts]
+suggested_tests: [server/commands/merge-flow.test.ts]
+steps: [inspect diff, approve merge]
+risk: high

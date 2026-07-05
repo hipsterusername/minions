@@ -26,6 +26,7 @@
     "test:coverage": "vitest run --coverage",
     "test:mutation": "stryker run",
     "check:licenses": "node scripts/check-licenses.mjs",
+    "system-model:validate": "tsx scripts/system-model-validate.mjs",
     "verify": "pnpm typecheck && pnpm typecheck:server && pnpm test:run && pnpm check:licenses && pnpm build",
     "agent:preflight": "node scripts/agent-workflow-preflight.mjs",
     "preflight": "node scripts/preflight.mjs",
@@ -46,6 +47,7 @@
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "ws": "^8.21.0",
+    "yaml": "^2.8.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {

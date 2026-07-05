@@ -33,6 +33,8 @@ export interface ProjectSettings {
   defaultWorktreeIsolation?: boolean;
   /** Leader proactive compaction mode; see server/compaction-advisor.ts. */
   proactiveCompaction?: "off" | "recommend" | "auto";
+  /** System-model layer mode; see docs/system-model-implementation-plan.md. */
+  systemModel?: "off" | "advisory" | "enforced";
   dashboardLeaderActionPrompts?: {
     improve?: string;
     execute?: string;
@@ -163,6 +165,7 @@ export function initSidecar(projectPath: string): Database.Database {
       defaultMinionThinkingConfig: DEFAULT_MINION_THINKING_CONFIG,
       defaultPermissionMode: "auto",
       defaultWorktreeIsolation: false,
+      systemModel: "off",
       dashboardLeaderActionNames: defaultDashboardLeaderActionNames(),
       dashboardLeaderActionPrompts: defaultDashboardLeaderActionPrompts(),
     }, null, 2));
@@ -227,6 +230,7 @@ function defaultProjectSettings(): ProjectSettings {
     defaultMinionThinkingConfig: DEFAULT_MINION_THINKING_CONFIG,
     defaultPermissionMode: "auto",
     defaultWorktreeIsolation: false,
+    systemModel: "off",
     dashboardLeaderActionNames: defaultDashboardLeaderActionNames(),
     dashboardLeaderActionPrompts: defaultDashboardLeaderActionPrompts(),
   };

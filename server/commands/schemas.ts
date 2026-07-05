@@ -152,6 +152,8 @@ export const COMMAND_SCHEMAS = {
   get_supported_agents: sessionScoped("get_supported_agents"),
   get_account_info: sessionScoped("get_account_info"),
   get_mcp_server_status: sessionScoped("get_mcp_server_status"),
+  get_system_model_status: sessionScoped("get_system_model_status"),
+  get_system_graph: sessionScoped("get_system_graph"),
   // MCP server control
   reconnect_mcp_server: command("reconnect_mcp_server", {
     sessionKey,

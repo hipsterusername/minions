@@ -148,6 +148,43 @@ export function initDb(dbPath?: string): Database.Database {
       public_key  TEXT NOT NULL,
       private_key TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS work_packets (
+      id                  TEXT PRIMARY KEY,
+      leader_session_key  TEXT NOT NULL,
+      status              TEXT NOT NULL,
+      risk_level          TEXT NOT NULL,
+      user_request        TEXT NOT NULL,
+      packet_json         TEXT NOT NULL,
+      created_at          INTEGER NOT NULL,
+      updated_at          INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_work_packets_session
+      ON work_packets(leader_session_key);
+
+    CREATE TABLE IF NOT EXISTS work_packet_verifications (
+      work_packet_id  TEXT NOT NULL,
+      kind            TEXT NOT NULL,
+      target          TEXT NOT NULL,
+      result          TEXT NOT NULL,
+      notes           TEXT,
+      recorded_at     INTEGER NOT NULL,
+      PRIMARY KEY (work_packet_id, kind, target)
+    );
+
+    CREATE TABLE IF NOT EXISTS reconciliation_reports (
+      id              TEXT PRIMARY KEY,
+      work_packet_id  TEXT NOT NULL,
+      report_json     TEXT NOT NULL,
+      created_at      INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS system_model_usage (
+      object_id       TEXT NOT NULL,
+      work_packet_id  TEXT NOT NULL,
+      used_at         INTEGER NOT NULL,
+      PRIMARY KEY (object_id, work_packet_id)
+    );
   `);
 
   // Idempotent migration: older databases were created before `session_id`

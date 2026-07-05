@@ -50,6 +50,8 @@ export type WsCommandType =
   | "get_supported_agents"
   | "get_account_info"
   | "get_mcp_server_status"
+  | "get_system_model_status"
+  | "get_system_graph"
   // MCP server control
   | "reconnect_mcp_server"
   | "toggle_mcp_server"

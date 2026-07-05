@@ -1,0 +1,4 @@
+freshness:
+  - policy_class: ordinary
+    consequence: verify_before_task
+    required_actions: [inspect current code]

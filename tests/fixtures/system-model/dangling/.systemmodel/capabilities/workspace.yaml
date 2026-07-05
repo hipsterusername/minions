@@ -1,0 +1,6 @@
+id: capability.workspace_management
+type: capability
+name: Workspace Management
+summary: Manage sessions.
+linked_flows: [flow.missing]
+risk: medium

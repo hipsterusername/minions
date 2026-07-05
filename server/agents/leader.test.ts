@@ -4,6 +4,8 @@ import { createBus } from "../bus.ts";
 import { getAgentType } from "./registry.ts";
 import { LEADER_SYSTEM_PROMPT } from "./leader.ts";
 import { disablePersistence } from "../session-persist.ts";
+import { writeSettings } from "../project-store.ts";
+import { copyValidFixture } from "../system-model/load.test.ts";
 import type { TaskManagerState } from "../task-tools.ts";
 import "./leader.ts";
 
@@ -49,6 +51,63 @@ describe("leader agent wiring", () => {
     ]);
     expect(result.mcpToolNames).toContain("mcp__task-manager__plan_task");
     expect(result.mcpToolNames).toContain("mcp__render-dashboard__render_set");
+  });
+
+  it("keeps flag-off tool groups and prompt byte-identical", () => {
+    const project = copyValidFixture();
+    writeSettings(project, { systemModel: "off" });
+    const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+    const leader = getAgentType("leader");
+    const beforePrompt = leader.buildSystemPrompt({
+      sessionKey: "leader-1",
+      cwd: project,
+      bus,
+      worktreeInfo: null,
+      worktreeIsolation: false,
+    });
+    const result = leader.getToolGroups({
+      sessionKey: "leader-1",
+      cwd: project,
+      bus,
+      worktreeInfo: null,
+      worktreeIsolation: false,
+      startMinionSession: vi.fn(),
+      scheduleWaitContinue: vi.fn(),
+    });
+    const afterPrompt = leader.buildSystemPrompt({
+      sessionKey: "leader-1",
+      cwd: project,
+      bus,
+      worktreeInfo: null,
+      worktreeIsolation: false,
+    });
+
+    expect(Object.keys(result.toolGroups).sort()).toEqual([
+      "render-dashboard",
+      "task-manager",
+    ]);
+    expect(result.mcpToolNames).not.toContain("mcp__system-model__query_system_model");
+    expect(afterPrompt).toBe(beforePrompt);
+  });
+
+  it("registers system-model tools when flag and manifest are present", () => {
+    const project = copyValidFixture();
+    writeSettings(project, { systemModel: "advisory" });
+    const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+    const result = getAgentType("leader").getToolGroups({
+      sessionKey: "leader-1",
+      cwd: project,
+      bus,
+      worktreeInfo: null,
+      worktreeIsolation: false,
+      startMinionSession: vi.fn(),
+      scheduleWaitContinue: vi.fn(),
+    });
+
+    expect(result.toolGroups["system-model"]?.map((def) => def.name)).toEqual([
+      "query_system_model",
+    ]);
+    expect(result.mcpToolNames).toContain("mcp__system-model__query_system_model");
   });
 
   // Regression (2026-06): the child-task sweep used to live in `onComplete`,
