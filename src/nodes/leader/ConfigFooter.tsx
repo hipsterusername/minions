@@ -4,6 +4,7 @@ import type { ContextItem } from "../../types.ts";
 import { subscribeSocketTopic, type SocketSubscribe } from "../../use-socket.ts";
 import { sessionTopic } from "../../../shared/ws-envelope.ts";
 import type { LeaderData } from "./types.ts";
+import { GateStrip, type MergeGateVerdict } from "./GateStrip.tsx";
 
 /**
  * P4: Compact config footer.
@@ -47,6 +48,7 @@ export function ConfigFooter({
   const [manualDiff, setManualDiff] = useState<LeaderData["approvalDiff"] | null>(
     null,
   );
+  const [approvalGates, setApprovalGates] = useState<MergeGateVerdict | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<"discard" | "merge" | null>(
     null,
@@ -65,10 +67,24 @@ export function ConfigFooter({
           sessionKey?: string;
           success?: boolean;
           diff?: LeaderData["approvalDiff"];
+          gates?: MergeGateVerdict | null;
+          approval?: { requested?: boolean; gates?: MergeGateVerdict | null } | null;
         };
+        if (m.sessionKey !== data.sessionKey) return;
+        if (m.type === "approval_requested") {
+          setApprovalGates(m.gates ?? null);
+          return;
+        }
+        if (m.type === "approval_resolved") {
+          setApprovalGates(null);
+          return;
+        }
+        if (m.type === "sync_response") {
+          setApprovalGates(m.approval?.requested ? (m.approval.gates ?? null) : null);
+          return;
+        }
         if (m.type !== "control_response" || m.command !== "get_worktree_diff")
           return;
-        if (m.sessionKey !== data.sessionKey) return;
         if (m.success) {
           setManualDiff(m.diff ?? null);
         }
@@ -929,6 +945,11 @@ export function ConfigFooter({
                 {data.approvalSummary}
               </div>
             )}
+            <GateStrip
+              gates={approvalGates}
+              sessionKey={data.sessionKey}
+              socketSend={socketSend}
+            />
             {data.approvalDiff && (
               <div
                 style={{
