@@ -159,6 +159,11 @@ export const COMMAND_SCHEMAS = {
     projectPath: z.string().optional(),
     workPacketId: z.string().optional(),
   }),
+  waive_review_gate: command("waive_review_gate", {
+    sessionKey: z.string(),
+    gateId: z.string().min(1),
+    reason: z.string().min(1),
+  }),
   // MCP server control
   reconnect_mcp_server: command("reconnect_mcp_server", {
     sessionKey,

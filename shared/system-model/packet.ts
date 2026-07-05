@@ -13,6 +13,7 @@ export const reviewGateRequirementSchema = z.object({
   name: z.string(),
   status: z.enum(["not_required", "required_pending", "passed", "failed", "waived"]),
   reason: z.string(),
+  waivedAt: z.number().optional(),
 });
 
 export const workPacketStatusSchema = z.enum([

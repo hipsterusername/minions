@@ -53,6 +53,7 @@ export type WsCommandType =
   | "get_system_model_status"
   | "get_system_graph"
   | "get_work_packets"
+  | "waive_review_gate"
   // MCP server control
   | "reconnect_mcp_server"
   | "toggle_mcp_server"
@@ -102,6 +103,8 @@ export interface WsCommand {
   thinkingConfig?: unknown;
   projectPath?: string;
   workPacketId?: string;
+  gateId?: string;
+  reason?: string;
   // Task control params
   taskId?: string;
   // Rewind params

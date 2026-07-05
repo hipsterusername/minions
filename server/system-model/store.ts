@@ -92,6 +92,36 @@ export function getWorkPacketContextPack(projectPath: string, id: string): strin
   return getWorkPacket(projectPath, id)?.contextPack ?? null;
 }
 
+export function waiveLatestWorkPacketGate(
+  projectPath: string,
+  leaderSessionKey: string,
+  gateId: string,
+  reason: string,
+  now = Date.now(),
+): WorkPacket | null {
+  const db = openProjectDb(projectPath);
+  const row = db.prepare(
+    `SELECT id, packet_json, context_pack
+     FROM work_packets
+     WHERE leader_session_key = ?
+     ORDER BY updated_at DESC, created_at DESC
+     LIMIT 1`,
+  ).get(leaderSessionKey) as { id: string; packet_json: string; context_pack: string } | undefined;
+  if (!row) return null;
+
+  const packet = workPacketSchema.parse(JSON.parse(row.packet_json));
+  const reviewGates = packet.reviewGates.map((gate) =>
+    gate.gateId === gateId ? { ...gate, status: "waived" as const, reason, waivedAt: now } : gate,
+  );
+  if (!reviewGates.some((gate) => gate.gateId === gateId)) {
+    reviewGates.push({ gateId, name: gateId, status: "waived", reason, waivedAt: now });
+  }
+  const waivedPacket = { ...packet, reviewGates };
+  saveWorkPacket(projectPath, waivedPacket, row.context_pack, now);
+  waiveLatestReconciliationGate(db, row.id, gateId, reason, now);
+  return waivedPacket;
+}
+
 export function updateWorkPacketStatus(
   projectPath: string,
   id: string,
@@ -189,4 +219,38 @@ export function getLatestReconciliationReportForPacket(
      LIMIT 1`,
   ).get(workPacketId) as { report_json: string } | undefined;
   return row ? reconciliationReportSchema.parse(JSON.parse(row.report_json)) : null;
+}
+
+function waiveLatestReconciliationGate(
+  db: ReturnType<typeof openProjectDb>,
+  workPacketId: string,
+  gateId: string,
+  reason: string,
+  now: number,
+): void {
+  const row = db.prepare(
+    `SELECT id, report_json FROM reconciliation_reports
+     WHERE work_packet_id = ?
+     ORDER BY created_at DESC, id DESC
+     LIMIT 1`,
+  ).get(workPacketId) as { id: string; report_json: string } | undefined;
+  if (!row) return;
+  const report = reconciliationReportSchema.parse(JSON.parse(row.report_json));
+  const waive = <T extends { gateId: string; name: string }>(gates: T[]) =>
+    gates.map((gate) =>
+      gate.gateId === gateId ? { ...gate, status: "waived" as const, reason, waivedAt: now } : gate,
+    );
+  const updated = {
+    ...report,
+    gates: waive(report.gates),
+    deterministic: {
+      ...report.deterministic,
+      gateRequirements: waive(report.deterministic.gateRequirements),
+    },
+  };
+  db.prepare(
+    `UPDATE reconciliation_reports
+     SET report_json = ?
+     WHERE id = ?`,
+  ).run(JSON.stringify(updated), row.id);
 }

@@ -53,6 +53,7 @@ import { clearSession } from "./clear-session.ts";
 import { getSystemModelStatus } from "./get-system-model-status.ts";
 import { getSystemGraph } from "./get-system-graph.ts";
 import { getWorkPackets } from "./get-work-packets.ts";
+import { waiveReviewGate } from "./waive-review-gate.ts";
 import type { CommandContext, CommandTable, WsCommand } from "./types.ts";
 import type { WebSocket } from "ws";
 
@@ -103,6 +104,7 @@ export const COMMAND_TABLE = {
   get_system_model_status: getSystemModelStatus,
   get_system_graph: getSystemGraph,
   get_work_packets: getWorkPackets,
+  waive_review_gate: waiveReviewGate,
   // MCP server control
   reconnect_mcp_server: reconnectMcpServer,
   toggle_mcp_server: toggleMcpServer,

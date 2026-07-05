@@ -10,7 +10,7 @@ import {
   shouldEvaluateMergeGates,
   shouldWarnForMergeGates,
 } from "../system-model/gates.ts";
-import { getSessionOrError, sendControlError, sendControlResponse, errToMessage } from "./helpers.ts";
+import { blockForMergeGates, getSessionOrError, sendControlError, sendControlResponse, errToMessage } from "./helpers.ts";
 import type { CommandHandler } from "./types.ts";
 
 export const mergeWorktree: CommandHandler = (ctx, cmd, ws) => {
@@ -32,12 +32,16 @@ export const mergeWorktree: CommandHandler = (ctx, cmd, ws) => {
             timestamp: Date.now(),
           });
         }
+        if (blockForMergeGates(ctx.bus, host.id, ws, "merge_worktree", cmd.requestId, verdict)) {
+          return null;
+        }
         return mergeAndCleanup(host.worktree!);
       })
     : mergeAndCleanup(host.worktree);
 
   merge
     .then((result) => {
+      if (!result) return;
       if (result.success) {
         host.worktree = null;
         host.cwd = projectPath;

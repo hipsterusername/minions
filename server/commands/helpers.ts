@@ -21,6 +21,7 @@ import type { HarnessRunControl, NormalizedEvent } from "../harness/types.ts";
 import { persistTaskState } from "../session-persist.ts";
 import {
   evaluateMergeGates,
+  type MergeGateVerdict,
   shouldEvaluateMergeGates,
   shouldWarnForMergeGates,
 } from "../system-model/gates.ts";
@@ -102,6 +103,7 @@ export function sendControlError(
   sessionKey: string,
   requestId: string | undefined,
   error: string,
+  data?: Record<string, unknown>,
 ): void {
   unicastToSession(ws, sessionKey, {
     type: "control_response",
@@ -110,6 +112,7 @@ export function sendControlError(
     requestId: requestId ?? null,
     success: false,
     error,
+    ...data,
   });
 }
 
@@ -179,11 +182,33 @@ export function runMergeFlow(
           timestamp: Date.now(),
         });
       }
+      if (blockForMergeGates(bus, host.id, ws, command, cmd.requestId, verdict)) return;
       continueMergeFlow(bus, host, ws, command, cmd, options);
     })
     .catch((err: unknown) => {
       sendControlError(ws, command, cmd.sessionKey!, cmd.requestId, errToMessage(err));
     });
+}
+
+export function blockForMergeGates(
+  bus: Bus,
+  sessionKey: string,
+  ws: WebSocket,
+  command: string,
+  requestId: string | undefined,
+  verdict: MergeGateVerdict,
+): boolean {
+  if (verdict.mode !== "enforced" || verdict.allowed) return false;
+  bus.emitToSession(sessionKey, {
+    type: "merge_blocked_by_gate",
+    sessionKey,
+    verdict,
+    timestamp: Date.now(),
+  });
+  sendControlError(ws, command, sessionKey, requestId, "Merge blocked by system-model gate", {
+    verdict,
+  });
+  return true;
 }
 
 function continueMergeFlow(

@@ -13,6 +13,7 @@ import {
   saveReconciliationReport,
   saveWorkPacket,
   updateWorkPacketStatus,
+  waiveLatestWorkPacketGate,
 } from "./store.ts";
 import { copyValidFixture } from "./load.test.ts";
 import type { ReconciliationReport, WorkPacket } from "../../shared/system-model/index.ts";
@@ -70,7 +71,35 @@ describe("system-model persistence", () => {
     expect(updateWorkPacketStatus(project, packet.id, "reconciled", 4)?.status).toBe("reconciled");
     expect(getWorkPacket(project, packet.id)?.packet.status).toBe("reconciled");
   });
+
+  it("persists gate waivers on the packet and latest reconciliation report", () => {
+    const project = copyValidFixture();
+    saveWorkPacket(project, { ...packet, reviewGates: [gate("required_pending", "pending")] }, "context pack", 2);
+    saveReconciliationReport(project, {
+      ...report,
+      gates: [gate("failed", "failed")],
+      deterministic: { ...report.deterministic, gateRequirements: [gate("failed", "failed")] },
+    });
+
+    const waived = waiveLatestWorkPacketGate(project, "leader-1", "gate.review", "human accepted risk", 5);
+
+    expect(waived?.reviewGates[0]).toMatchObject({
+      gateId: "gate.review",
+      status: "waived",
+      reason: "human accepted risk",
+      waivedAt: 5,
+    });
+    expect(getLatestReconciliationReportForPacket(project, packet.id)?.gates[0]).toMatchObject({
+      status: "waived",
+      reason: "human accepted risk",
+      waivedAt: 5,
+    });
+  });
 });
+
+function gate(status: WorkPacket["reviewGates"][number]["status"], reason: string): WorkPacket["reviewGates"][number] {
+  return { gateId: "gate.review", name: "Human Review", status, reason };
+}
 
 const packet: WorkPacket = {
   id: "wp_store",
