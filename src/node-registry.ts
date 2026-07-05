@@ -1,47 +1,53 @@
 import type { ContextAttachment, NodeTypeDefinition } from "./types.ts";
+import "./nodes/SystemGraphNode.tsx";
 
-const registry = new Map<string, NodeTypeDefinition>();
+var registry: Map<string, NodeTypeDefinition> | undefined;
+
+function nodeRegistry(): Map<string, NodeTypeDefinition> {
+  registry ??= new Map<string, NodeTypeDefinition>();
+  return registry;
+}
 
 export function registerNodeType(def: NodeTypeDefinition): void {
-  registry.set(def.type, def);
+  nodeRegistry().set(def.type, def);
 }
 
 export function getNodeType(type: string): NodeTypeDefinition | undefined {
-  return registry.get(type);
+  return nodeRegistry().get(type);
 }
 
 export function getAllNodeTypes(): NodeTypeDefinition[] {
-  return Array.from(registry.values());
+  return Array.from(nodeRegistry().values());
 }
 
 export function getUserCreatableNodeTypes(): NodeTypeDefinition[] {
-  return Array.from(registry.values()).filter((def) => def.userCreatable !== false);
+  return Array.from(nodeRegistry().values()).filter((def) => def.userCreatable !== false);
 }
 
 /** Returns true if parentType owns/manages childType as a child node. */
 export function nodeOwnsType(parentType: string, childType: string): boolean {
-  const def = registry.get(parentType);
+  const def = nodeRegistry().get(parentType);
   return def?.ownsChildrenOfType?.includes(childType) ?? false;
 }
 
 /** Returns true if the given node type acts as a spatial container. */
 export function isContainerType(type: string): boolean {
-  return registry.get(type)?.isContainer ?? false;
+  return nodeRegistry().get(type)?.isContainer ?? false;
 }
 
 /** Returns true if the given node type can provide context content. */
 export function isContextProvider(type: string): boolean {
-  return registry.get(type)?.providesContext ?? false;
+  return nodeRegistry().get(type)?.providesContext ?? false;
 }
 
 /** Returns the content extractor function for the given node type, if registered. */
 export function getContentExtractor(type: string): ((data: unknown) => string | null) | undefined {
-  return registry.get(type)?.extractContent;
+  return nodeRegistry().get(type)?.extractContent;
 }
 
 /** Returns the attachment extractor (images, etc.) for the given node type, if registered. */
 export function getAttachmentExtractor(
   type: string,
 ): ((data: unknown) => ContextAttachment[] | null) | undefined {
-  return registry.get(type)?.extractAttachments;
+  return nodeRegistry().get(type)?.extractAttachments;
 }
