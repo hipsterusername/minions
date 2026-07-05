@@ -59,6 +59,11 @@ describe("system-model persistence", () => {
     expect(listWorkPacketVerifications(project, packet.id)).toEqual([
       expect.objectContaining({ target: "capability.workspace_management", result: "passed" }),
     ]);
+    const db = new Database(path.join(project, ".minions/canvas.db"));
+    const usage = db.prepare("SELECT object_id, work_packet_id FROM system_model_usage").all() as Array<{ object_id: string; work_packet_id: string }>;
+    expect(usage).toEqual([
+      { object_id: "capability.workspace_management", work_packet_id: packet.id },
+    ]);
   });
 
   it("round-trips reconciliation reports and packet status updates", () => {
@@ -108,7 +113,7 @@ const packet: WorkPacket = {
   userRequest: "request",
   normalizedGoal: "request",
   status: "draft",
-  scope: { capabilities: [], flows: [], constraints: [], decisions: [], risks: [], suggestedFiles: [], suggestedTests: [] },
+  scope: { capabilities: ["capability.workspace_management"], flows: [], constraints: [], decisions: [], risks: [], suggestedFiles: [], suggestedTests: [] },
   nonGoals: [],
   agentInstructions: [],
   freshness: { status: "fresh", warnings: [], requiredVerifications: [] },

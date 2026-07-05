@@ -112,6 +112,7 @@ describe("leader agent wiring", () => {
       "record_verification",
       "reconcile_run",
       "record_constraint_verdicts",
+      "model_health",
     ]);
     expect(result.mcpToolNames).toContain("mcp__system-model__query_system_model");
     expect(result.mcpToolNames).toContain("mcp__system-model__create_work_packet");

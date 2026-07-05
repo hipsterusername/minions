@@ -51,29 +51,41 @@ export function saveWorkPacket(
   now = Date.now(),
 ): void {
   const db = openProjectDb(projectPath);
-  db.prepare(
-    `INSERT INTO work_packets
-      (id, leader_session_key, status, risk_level, user_request, packet_json, context_pack, created_at, updated_at)
-     VALUES (@id, @leaderSessionKey, @status, @riskLevel, @userRequest, @packetJson, @contextPack, @createdAt, @updatedAt)
-     ON CONFLICT(id) DO UPDATE SET
-      leader_session_key = excluded.leader_session_key,
-      status = excluded.status,
-      risk_level = excluded.risk_level,
-      user_request = excluded.user_request,
-      packet_json = excluded.packet_json,
-      context_pack = excluded.context_pack,
-      updated_at = excluded.updated_at`,
-  ).run({
-    id: packet.id,
-    leaderSessionKey: packet.leaderSessionKey,
-    status: packet.status,
-    riskLevel: packet.riskLevel,
-    userRequest: packet.userRequest,
-    packetJson: JSON.stringify(packet),
-    contextPack,
-    createdAt: packet.createdAt,
-    updatedAt: now,
+  const tx = db.transaction(() => {
+    db.prepare(
+      `INSERT INTO work_packets
+        (id, leader_session_key, status, risk_level, user_request, packet_json, context_pack, created_at, updated_at)
+       VALUES (@id, @leaderSessionKey, @status, @riskLevel, @userRequest, @packetJson, @contextPack, @createdAt, @updatedAt)
+       ON CONFLICT(id) DO UPDATE SET
+        leader_session_key = excluded.leader_session_key,
+        status = excluded.status,
+        risk_level = excluded.risk_level,
+        user_request = excluded.user_request,
+        packet_json = excluded.packet_json,
+        context_pack = excluded.context_pack,
+        updated_at = excluded.updated_at`,
+    ).run({
+      id: packet.id,
+      leaderSessionKey: packet.leaderSessionKey,
+      status: packet.status,
+      riskLevel: packet.riskLevel,
+      userRequest: packet.userRequest,
+      packetJson: JSON.stringify(packet),
+      contextPack,
+      createdAt: packet.createdAt,
+      updatedAt: now,
+    });
+    const usage = usageHitsForPacket(packet, now);
+    if (usage.length > 0) {
+      const stmt = db.prepare(
+        `INSERT OR REPLACE INTO system_model_usage
+          (object_id, work_packet_id, used_at)
+         VALUES (@objectId, @workPacketId, @usedAt)`,
+      );
+      for (const row of usage) stmt.run(row);
+    }
   });
+  tx();
 }
 
 export function getWorkPacket(projectPath: string, id: string): StoredWorkPacket | null {
@@ -253,4 +265,14 @@ function waiveLatestReconciliationGate(
      SET report_json = ?
      WHERE id = ?`,
   ).run(JSON.stringify(updated), row.id);
+}
+
+function usageHitsForPacket(packet: WorkPacket, usedAt: number): SystemModelUsageHit[] {
+  return [
+    ...packet.scope.capabilities,
+    ...packet.scope.flows,
+    ...packet.scope.constraints,
+    ...packet.scope.decisions,
+    ...packet.scope.risks,
+  ].map((objectId) => ({ objectId, workPacketId: packet.id, usedAt }));
 }

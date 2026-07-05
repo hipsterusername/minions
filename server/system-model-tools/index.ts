@@ -2,6 +2,7 @@ import type { NormalizedToolDef } from "../harness/types.ts";
 import { createAmendWorkPacketToolDef } from "./amend-work-packet.ts";
 import { createCheckFreshnessToolDef } from "./check-freshness.ts";
 import { createCreateWorkPacketToolDef } from "./create-work-packet.ts";
+import { createModelHealthToolDef } from "./model-health.ts";
 import { createQuerySystemModelToolDef } from "./query-system-model.ts";
 import { createReconcileRunToolDef } from "./reconcile-run.ts";
 import { createRecordConstraintVerdictsToolDef } from "./record-constraint-verdicts.ts";
@@ -17,6 +18,7 @@ export function createSystemModelToolsForLeader(ctx: SystemModelToolContext): No
     createRecordVerificationToolDef(ctx),
     createReconcileRunToolDef(ctx),
     createRecordConstraintVerdictsToolDef(ctx),
+    createModelHealthToolDef(ctx),
   ];
 }
 

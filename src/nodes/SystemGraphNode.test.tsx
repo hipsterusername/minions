@@ -81,6 +81,7 @@ describe("SystemGraphNodeRenderer", () => {
             risk: "high",
             freshness: "stale",
             activePackets: ["packet.ui-graph-node"],
+            usage: { recentPacketCount: 0, unusedInLastPackets: 30, lastUsedAt: 1000 },
           },
           {
             id: "flow.review_merge",
@@ -121,6 +122,7 @@ describe("SystemGraphNodeRenderer", () => {
     });
     expect(screen.getByRole("button", { name: "Inspect Review Merge" })).toBeInTheDocument();
     expect(screen.getByText("Keeps task execution scoped to the right worktree.")).toBeInTheDocument();
+    expect(screen.getAllByText("unused 30").length).toBeGreaterThan(0);
     expect(screen.getByText("packet.ui-graph-node")).toBeInTheDocument();
   });
 
@@ -168,5 +170,52 @@ describe("SystemGraphNodeRenderer", () => {
       expect(screen.queryByRole("button", { name: "Inspect Low Risk Flow" })).not.toBeInTheDocument();
     });
     expect(screen.getByRole("button", { name: "Inspect High Risk Capability" })).toBeInTheDocument();
+  });
+
+  it("filters by usage attention metadata when the graph payload includes it", async () => {
+    const socket = renderSystemGraph();
+
+    await waitFor(() => expect(socket.send).toHaveBeenCalled());
+    const request = socket.send.mock.calls[0]![0] as { requestId: string };
+    socket.emit(sessionTopic("leader-1"), {
+      topic: sessionTopic("leader-1"),
+      type: "control_response",
+      command: "get_system_graph",
+      sessionKey: "leader-1",
+      requestId: request.requestId,
+      success: true,
+      graph: {
+        nodes: [
+          {
+            id: "capability.used",
+            type: "capability",
+            label: "Used Capability",
+            freshness: "fresh",
+            usage: { recentPacketCount: 3 },
+          },
+          {
+            id: "risk.orphan",
+            type: "risk",
+            label: "Orphan Risk",
+            freshness: "unknown",
+            orphaned: true,
+          },
+        ],
+        edges: [],
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Inspect Used Capability" })).toBeInTheDocument();
+    });
+
+    const filters = screen.getByLabelText("System graph filters");
+    fireEvent.click(within(filters).getByRole("button", { name: "Usage" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Inspect Used Capability" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Inspect Orphan Risk" })).toBeInTheDocument();
+    expect(screen.getAllByText("orphaned").length).toBeGreaterThan(0);
   });
 });

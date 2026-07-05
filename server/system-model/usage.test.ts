@@ -1,0 +1,88 @@
+import { describe, expect, it } from "vitest";
+import { loadSystemModel } from "./load.ts";
+import { copyValidFixture } from "./load.test.ts";
+import { saveWorkPacket } from "./store.ts";
+import { orphanedObjects, staleObjects, unusedInLastNPackets } from "./usage.ts";
+import type { WorkPacket } from "../../shared/system-model/index.ts";
+
+describe("system-model usage queries", () => {
+  it("finds objects unused in the last N packets", async () => {
+    const project = copyValidFixture();
+    const { model } = loadSystemModel(project);
+    saveWorkPacket(project, packet("wp-old", {
+      capabilities: ["capability.workspace_management"],
+      flows: [],
+      constraints: [],
+      decisions: [],
+      risks: [],
+    }), "old", 1);
+    saveWorkPacket(project, packet("wp-new", {
+      capabilities: [],
+      flows: ["flow.approve_changes"],
+      constraints: ["constraint.bus_only"],
+      decisions: ["decision.bus_architecture"],
+      risks: ["risk.merge_bypass"],
+    }), "new", 2);
+
+    const unused = await unusedInLastNPackets({ projectPath: project, model: model!, n: 1 });
+
+    expect(unused.map((item) => item.id)).toEqual(["capability.workspace_management"]);
+  });
+
+  it("reports stale code-coupled objects via freshness.ts", async () => {
+    const project = copyValidFixture();
+    const { model } = loadSystemModel(project);
+
+    const stale = await staleObjects({
+      model: model!,
+      cwd: project,
+      headSha: "head",
+      mode: "advisory",
+      timestampFn: async ({ objectFile }) => ({
+        modelTouchedAt: objectFile.includes("workspace_management") ? 10 : 20,
+        codeTouchedAt: objectFile.includes("workspace_management") ? 30 : 5,
+      }),
+    });
+
+    expect(stale).toEqual([
+      expect.objectContaining({
+        id: "capability.workspace_management",
+        status: "stale",
+        modelTouchedAt: 10,
+        codeTouchedAt: 30,
+      }),
+    ]);
+  });
+
+  it("finds graph objects with no inbound links", () => {
+    const project = copyValidFixture();
+    const { model } = loadSystemModel(project);
+
+    const orphaned = orphanedObjects(model!);
+
+    expect(orphaned.map((item) => item.id)).toEqual([]);
+  });
+});
+
+function packet(id: string, scope: Pick<WorkPacket["scope"], "capabilities" | "flows" | "constraints" | "decisions" | "risks">): WorkPacket {
+  return {
+    id,
+    leaderSessionKey: "leader-1",
+    createdAt: id === "wp-old" ? 1 : 2,
+    userRequest: "request",
+    normalizedGoal: "request",
+    status: "draft",
+    scope: {
+      ...scope,
+      suggestedFiles: [],
+      suggestedTests: [],
+    },
+    nonGoals: [],
+    agentInstructions: [],
+    freshness: { status: "fresh", warnings: [], requiredVerifications: [] },
+    reviewGates: [],
+    riskLevel: "low",
+    matchConfidence: "high",
+    amendments: [],
+  };
+}

@@ -14,6 +14,7 @@ import "../system-graph.css";
 type RiskFilter = "all" | "elevated";
 type FreshnessFilter = "all" | "attention";
 type PacketFilter = "all" | "active";
+type UsageFilter = "all" | "attention";
 type LoadState = "idle" | "loading" | "loaded" | "error";
 
 type GraphNode = BaseSystemGraphNode & {
@@ -23,6 +24,15 @@ type GraphNode = BaseSystemGraphNode & {
   activePackets?: string[];
   activeWorkPackets?: string[];
   packets?: string[];
+  usage?: {
+    lastUsedAt?: number | null;
+    recentPacketCount?: number;
+    unusedInLastPackets?: number;
+  };
+  lastUsedAt?: number | null;
+  recentPacketCount?: number;
+  unusedInLastPackets?: number;
+  orphaned?: boolean;
 };
 
 interface GraphResponse {
@@ -59,11 +69,11 @@ function requestId(nodeId: string): string {
 }
 
 function activePacketsFor(node: GraphNode): string[] {
-  return [
+  return [...new Set([
     ...(node.activePackets ?? []),
     ...(node.activeWorkPackets ?? []),
     ...(node.packets ?? []),
-  ].filter(Boolean);
+  ].filter(Boolean))];
 }
 
 function isElevatedRisk(node: GraphNode): boolean {
@@ -72,6 +82,25 @@ function isElevatedRisk(node: GraphNode): boolean {
 
 function needsFreshnessAttention(node: GraphNode): boolean {
   return node.freshness !== "fresh";
+}
+
+function needsUsageAttention(node: GraphNode): boolean {
+  return !!node.orphaned || (node.usage?.recentPacketCount ?? node.recentPacketCount ?? 1) === 0
+    || (node.usage?.unusedInLastPackets ?? node.unusedInLastPackets ?? 0) > 0;
+}
+
+function usageLabel(node: GraphNode): string | null {
+  if (node.orphaned) return "orphaned";
+  const unusedWindow = node.usage?.unusedInLastPackets ?? node.unusedInLastPackets;
+  if (unusedWindow && unusedWindow > 0) return `unused ${unusedWindow}`;
+  const recent = node.usage?.recentPacketCount ?? node.recentPacketCount;
+  if (recent !== undefined) return recent === 0 ? "unused" : `used ${recent}`;
+  return null;
+}
+
+function lastUsedLabel(node: GraphNode): string | null {
+  const lastUsedAt = node.usage?.lastUsedAt ?? node.lastUsedAt;
+  return typeof lastUsedAt === "number" ? new Date(lastUsedAt).toLocaleString() : null;
 }
 
 function nodeColumn(type: GraphNode["type"]): string {
@@ -92,11 +121,13 @@ function filterGraph(
   riskFilter: RiskFilter,
   freshnessFilter: FreshnessFilter,
   packetFilter: PacketFilter,
+  usageFilter: UsageFilter,
 ): SystemGraph {
   const nodes = (graph.nodes as GraphNode[]).filter((node) => {
     if (riskFilter === "elevated" && !isElevatedRisk(node)) return false;
     if (freshnessFilter === "attention" && !needsFreshnessAttention(node)) return false;
     if (packetFilter === "active" && activePacketsFor(node).length === 0) return false;
+    if (usageFilter === "attention" && !needsUsageAttention(node)) return false;
     return true;
   });
   const visibleIds = new Set(nodes.map((node) => node.id));
@@ -118,7 +149,7 @@ function layoutNodes(nodes: GraphNode[]): PositionedNode[] {
       x: COLUMN_X[column] ?? COLUMN_X["support"]!,
       y: 42 + index * 74,
       width: 148,
-      height: 48,
+      height: 54,
     })),
   );
 }
@@ -192,6 +223,9 @@ function SvgGraph({
             <text x={x + 10} y={y + 36} className="sg-node-label">
               {node.label.slice(0, 22)}
             </text>
+            <text x={x + 10} y={y + 48} className="sg-node-meta">
+              {[node.freshness, usageLabel(node)].filter(Boolean).join(" | ")}
+            </text>
             {node.risk && <circle cx={x + width - 14} cy={y + 14} r="5" className={`sg-risk-dot sg-risk-${node.risk}`} />}
           </g>
         );
@@ -224,6 +258,8 @@ function Inspector({ graph, selectedId }: { graph: SystemGraph; selectedId: stri
   ];
   const packets = activePacketsFor(node);
   const related = connectedNodes(node, graph).filter((n) => n.type !== "constraint");
+  const usage = usageLabel(node);
+  const lastUsed = lastUsedLabel(node);
 
   return (
     <aside className="sg-inspector">
@@ -234,6 +270,8 @@ function Inspector({ graph, selectedId }: { graph: SystemGraph; selectedId: stri
         <div><dt>Type</dt><dd>{node.type}</dd></div>
         {node.risk && <div><dt>Risk</dt><dd>{node.risk}</dd></div>}
         <div><dt>Freshness</dt><dd>{node.freshness}</dd></div>
+        {usage && <div><dt>Usage</dt><dd>{usage}</dd></div>}
+        {lastUsed && <div><dt>Last used</dt><dd>{lastUsed}</dd></div>}
       </dl>
       {constraints.length > 0 && (
         <section>
@@ -279,6 +317,7 @@ export function SystemGraphNodeRenderer({
   const [riskFilter, setRiskFilter] = useState<RiskFilter>("all");
   const [freshnessFilter, setFreshnessFilter] = useState<FreshnessFilter>("all");
   const [packetFilter, setPacketFilter] = useState<PacketFilter>("all");
+  const [usageFilter, setUsageFilter] = useState<UsageFilter>("all");
 
   useEffect(() => {
     setSessionKeyDraft(data.sessionKey ?? "");
@@ -322,8 +361,8 @@ export function SystemGraphNodeRenderer({
   }, [socketSend, socketSubscribe, data.sessionKey, node.id]);
 
   const visibleGraph = useMemo(
-    () => filterGraph(graph, riskFilter, freshnessFilter, packetFilter),
-    [graph, riskFilter, freshnessFilter, packetFilter],
+    () => filterGraph(graph, riskFilter, freshnessFilter, packetFilter, usageFilter),
+    [graph, riskFilter, freshnessFilter, packetFilter, usageFilter],
   );
 
   useEffect(() => {
@@ -376,6 +415,13 @@ export function SystemGraphNodeRenderer({
           onClick={() => setPacketFilter((current) => (current === "all" ? "active" : "all"))}
         >
           Active Packet
+        </button>
+        <button
+          type="button"
+          aria-pressed={usageFilter === "attention"}
+          onClick={() => setUsageFilter((current) => (current === "all" ? "attention" : "all"))}
+        >
+          Usage
         </button>
       </div>
       {!data.sessionKey && (
