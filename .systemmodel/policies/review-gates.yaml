@@ -1,0 +1,37 @@
+review_gates:
+  - id: gate.merge_review
+    name: Merge Path Review
+    description: Human review required for worktree merge, approval, force, retry, discard, or cleanup behavior.
+    blocks_merge: true
+    required_when:
+      files: [server/commands/**, server/worktree-*.ts, server/worktree.ts]
+      capabilities: [capability.worktree_approval]
+      flows: [flow.worktree_approval_merge]
+      risk: [high, critical]
+  - id: gate.ws_contract_review
+    name: WebSocket Contract Review
+    description: Review changes that alter command dispatch, bus envelopes, or server/client shared WS contracts.
+    blocks_merge: true
+    required_when:
+      files: [server/commands/**, server/bus.ts, server/ws-connection.ts, shared/ws-envelope.ts, src/api.ts]
+      capabilities: [capability.ws_command_bus]
+      flows: [flow.ws_command_dispatch]
+      risk: [high, critical]
+  - id: gate.architecture_review
+    name: Architecture Invariant Review
+    description: Review changes near enforced invariants such as file-size ceilings and cross-tree imports.
+    blocks_merge: true
+    required_when:
+      files: [server/**/*.ts, src/**/*.ts, src/**/*.tsx, shared/**/*.ts, tests/architecture/*.test.ts]
+      capabilities: [capability.task_delegation, capability.render_dashboard, capability.system_model_layer]
+      flows: [flow.task_delegation_lifecycle, flow.ws_command_dispatch]
+      risk: [high, critical]
+  - id: gate.system_model_review
+    name: System Model Review
+    description: Review model edits for bloat, stale suggested files, and agent-useful summaries.
+    blocks_merge: false
+    required_when:
+      files: [.systemmodel/**, shared/system-model/**, server/system-model/**]
+      capabilities: [capability.system_model_layer]
+      flows: [flow.ws_command_dispatch]
+      risk: [medium, high, critical]

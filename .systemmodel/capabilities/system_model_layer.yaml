@@ -1,0 +1,14 @@
+id: capability.system_model_layer
+type: capability
+name: System Model Layer
+summary: A repo-versioned model gives leaders structured capability, flow, constraint, decision, risk, and policy context.
+linked_flows: [flow.ws_command_dispatch]
+constraints: [constraint.model_bloat_guard, constraint.no_cross_tree_imports]
+decisions: [decision.graph_as_bus]
+risks: [risk.model_rot]
+suggested_files: [.systemmodel/**/*.yaml, .systemmodel/decisions/*.md, shared/system-model/*.ts, server/system-model/*.ts, server/system-model-tools/*.ts, scripts/system-model-validate.mjs]
+suggested_tests: [shared/system-model/*.test.ts, server/system-model/*.test.ts, server/system-model-tools/query-system-model.test.ts]
+keywords: [system model, capability, flow, constraint, validation, context pack]
+freshness:
+  class: code_coupled
+risk: high

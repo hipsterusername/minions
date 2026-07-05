@@ -1,0 +1,12 @@
+id: constraint.bus_only_broadcasts
+type: constraint
+statement: Outbound WebSocket messages must go through server/bus.ts helpers so every payload is wrapped in a typed topic envelope.
+applies_to:
+  capabilities: [capability.canvas_sessions, capability.ws_command_bus, capability.render_dashboard]
+  flows: [flow.canvas_session_lifecycle, flow.ws_command_dispatch, flow.worktree_approval_merge]
+  files: [server/**/*.ts]
+severity: critical
+agent_instruction: Do not add direct broadcast(wss, ...) call sites outside server/bus.ts; emit through Bus helpers or unicast helpers.
+review_gate: gate.ws_contract_review
+suggested_tests: [tests/architecture/no-direct-broadcast.test.ts, server/bus.test.ts, tests/contracts/ws-envelope.test.ts]
+evidence: [decision.graph_as_bus]

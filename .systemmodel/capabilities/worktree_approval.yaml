@@ -1,0 +1,14 @@
+id: capability.worktree_approval
+type: capability
+name: Worktree Approval
+summary: Isolated agent work lands in git worktrees and merges only through explicit approval, retry, discard, or force-merge commands.
+linked_flows: [flow.worktree_approval_merge]
+constraints: [constraint.review_gated_merges]
+decisions: [decision.worktree_isolation]
+risks: [risk.merge_bypass]
+suggested_files: [server/worktree*.ts, server/commands/approve-changes.ts, server/commands/merge-worktree.ts, server/commands/force-merge.ts, server/commands/retry-merge.ts, server/commands/discard-worktree.ts]
+suggested_tests: [server/worktree-merge.test.ts, server/worktree-diff.test.ts, server/commands/merge-flow.test.ts, server/commands/merge-worktree.test.ts, server/commands/discard-worktree.test.ts]
+keywords: [worktree, approval, merge, diff, discard, conflicts]
+freshness:
+  class: code_coupled
+risk: critical

@@ -1,0 +1,14 @@
+id: capability.persistence_project_state
+type: capability
+name: Project Persistence
+summary: Projects persist settings, skills, sessions, canvas state, dashboards, and usage in sidecar files and SQLite.
+linked_flows: [flow.canvas_session_lifecycle]
+constraints: [constraint.no_cross_tree_imports]
+decisions: [decision.worktree_isolation]
+risks: [risk.session_state_drift]
+suggested_files: [server/project-store.ts, server/db.ts, server/session-persist.ts, server/session-message.ts, server/session-usage-capture.ts, server/routes/projects*.ts]
+suggested_tests: [server/project-store.test.ts, server/db.test.ts, server/session-persist.test.ts, server/session-message.test.ts, server/session-usage-capture.test.ts]
+keywords: [project, sidecar, sqlite, settings, skills, persistence]
+freshness:
+  class: code_coupled
+risk: high

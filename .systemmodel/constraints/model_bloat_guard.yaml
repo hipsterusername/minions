@@ -1,0 +1,12 @@
+id: constraint.model_bloat_guard
+type: constraint
+statement: System-model objects should be added only when they change future agent behavior, and every object must point to concrete suggested files or policy globs.
+applies_to:
+  capabilities: [capability.system_model_layer]
+  flows: [flow.ws_command_dispatch]
+  files: [.systemmodel/**/*.yaml, .systemmodel/decisions/*.md, shared/system-model/*.ts, server/system-model/*.ts]
+severity: medium
+agent_instruction: Prefer editing an existing model object; add a new capability, flow, constraint, decision, or risk only when it changes scoping, review, or implementation behavior.
+review_gate: gate.system_model_review
+suggested_tests: [pnpm system-model:validate]
+evidence: [decision.graph_as_bus]

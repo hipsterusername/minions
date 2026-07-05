@@ -1,0 +1,12 @@
+id: constraint.review_gated_merges
+type: constraint
+statement: Worktree merge paths must preserve explicit user approval semantics and evaluate gates from the actual diff before cleanup.
+applies_to:
+  capabilities: [capability.worktree_approval]
+  flows: [flow.worktree_approval_merge]
+  files: [server/commands/**, server/worktree-*.ts, server/worktree.ts]
+severity: critical
+agent_instruction: When changing merge, approval, force, retry, or cleanup code, verify all command paths preserve approval/gating behavior and emit merge results through the bus.
+review_gate: gate.merge_review
+suggested_tests: [server/commands/merge-flow.test.ts, server/commands/merge-worktree.test.ts, server/worktree-merge.test.ts]
+evidence: [decision.worktree_isolation]

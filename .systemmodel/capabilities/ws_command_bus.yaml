@@ -1,0 +1,14 @@
+id: capability.ws_command_bus
+type: capability
+name: WebSocket Command Bus
+summary: Browser commands dispatch through typed handlers and server events fan out through the shared bus envelope.
+linked_flows: [flow.ws_command_dispatch]
+constraints: [constraint.bus_only_broadcasts, constraint.no_cross_tree_imports]
+decisions: [decision.graph_as_bus]
+risks: [risk.command_contract_drift]
+suggested_files: [server/bus.ts, server/commands/index.ts, server/commands/*.ts, server/ws-connection.ts, shared/ws-envelope.ts, src/api.ts]
+suggested_tests: [server/bus.test.ts, server/commands/schemas.test.ts, tests/architecture/no-direct-broadcast.test.ts, tests/contracts/ws-envelope.test.ts]
+keywords: [websocket, command, bus, envelope, handler]
+freshness:
+  class: code_coupled
+risk: critical

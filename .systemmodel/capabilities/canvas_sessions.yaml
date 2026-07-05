@@ -1,0 +1,14 @@
+id: capability.canvas_sessions
+type: capability
+name: Canvas Sessions
+summary: Users create, resume, arrange, and control agent sessions on an infinite canvas.
+linked_flows: [flow.canvas_session_lifecycle]
+constraints: [constraint.bus_only_broadcasts]
+decisions: [decision.graph_as_bus]
+risks: [risk.session_state_drift]
+suggested_files: [src/Canvas.tsx, src/CanvasNode.tsx, src/nodes/LeaderNode.tsx, src/nodes/MinionNode.tsx, src/nodes/ClaudeSessionNode.tsx, server/session-host*.ts, server/session-registry.ts]
+suggested_tests: [src/CanvasNode.test.tsx, src/nodes/LeaderNode.test.tsx, server/session-host.test.ts, server/session-registry.test.ts]
+keywords: [canvas, session, leader, minion, node, resume]
+freshness:
+  class: code_coupled
+risk: high

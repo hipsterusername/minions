@@ -96,8 +96,10 @@ describe("loadAllSkills + loadSkillsByIds", () => {
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 
-  it("returns [] when the sidecar has no skills.json", () => {
-    expect(loadAllSkills(projectDir)).toEqual([]);
+  it("returns built-in skills when the sidecar has no skills.json", () => {
+    expect(loadAllSkills(projectDir).map((skill) => skill.id)).toEqual([
+      "system-model-authoring",
+    ]);
     expect(loadSkillsByIds(projectDir, ["anything"])).toEqual([]);
   });
 
@@ -107,7 +109,11 @@ describe("loadAllSkills + loadSkillsByIds", () => {
       makeSkill({ id: "test", name: "Test" }),
     ]);
     const all = loadAllSkills(projectDir);
-    expect(all.map((s) => s.id)).toEqual(["lint", "test"]);
+    expect(all.map((s) => s.id)).toEqual([
+      "system-model-authoring",
+      "lint",
+      "test",
+    ]);
   });
 
   it("filters out malformed entries instead of throwing", () => {
@@ -117,7 +123,7 @@ describe("loadAllSkills + loadSkillsByIds", () => {
       "not even an object",
     ]);
     const all = loadAllSkills(projectDir);
-    expect(all.map((s) => s.id)).toEqual(["ok"]);
+    expect(all.map((s) => s.id)).toEqual(["system-model-authoring", "ok"]);
   });
 
   it("loads skills by id in the order requested", () => {
@@ -134,6 +140,30 @@ describe("loadAllSkills + loadSkillsByIds", () => {
     writeSkills(projectDir, [makeSkill({ id: "real" })]);
     const got = loadSkillsByIds(projectDir, ["real", "ghost"]);
     expect(got.map((s) => s.id)).toEqual(["real"]);
+  });
+
+  it("loads the built-in system model authoring skill by id", () => {
+    const got = loadSkillsByIds(projectDir, ["system-model-authoring"]);
+    expect(got).toHaveLength(1);
+    expect(got[0]!.template).toContain(
+      "Capabilities are user-facing powers, not modules.",
+    );
+    expect(got[0]!.template).toContain(
+      "Create an object only if it will change agent behavior",
+    );
+  });
+
+  it("lets project skills override a built-in skill id", () => {
+    writeSkills(projectDir, [
+      makeSkill({
+        id: "system-model-authoring",
+        name: "Custom System Model Authoring",
+        template: "Custom instructions",
+      }),
+    ]);
+    const got = loadSkillsByIds(projectDir, ["system-model-authoring"]);
+    expect(got.map((s) => s.name)).toEqual(["Custom System Model Authoring"]);
+    expect(got[0]!.template).toBe("Custom instructions");
   });
 
   // Note: an "empty ids" trivial was removed per §5.7.

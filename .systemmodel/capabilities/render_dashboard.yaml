@@ -1,0 +1,14 @@
+id: capability.render_dashboard
+type: capability
+name: Render Dashboard
+summary: Leaders present live structured progress, artifacts, forms, and review data through the render DSL dashboard.
+linked_flows: [flow.ws_command_dispatch]
+constraints: [constraint.no_cross_tree_imports, constraint.bus_only_broadcasts]
+decisions: [decision.graph_as_bus]
+risks: [risk.render_schema_drift]
+suggested_files: [server/render-tools.ts, shared/render-dsl.ts, shared/render-defaults.ts, src/nodes/RenderNode.tsx, src/nodes/render/*.tsx]
+suggested_tests: [server/render-tools.test.ts, shared/render-dsl.test.ts, src/nodes/RenderNode.validation.test.tsx, src/nodes/render/ArtifactComponents.test.tsx]
+keywords: [render, dashboard, dsl, form, artifact]
+freshness:
+  class: code_coupled
+risk: medium

@@ -13,6 +13,7 @@
  */
 
 import { readSkills } from "./project-store.ts";
+import { builtInSkillPresets } from "../shared/skill-presets.ts";
 
 /** Variable definition extracted from {{name}} patterns in a template. */
 export interface SkillVariable {
@@ -105,7 +106,12 @@ function isSkillTemplate(value: unknown): value is SkillTemplate {
  */
 export function loadAllSkills(projectPath: string): SkillTemplate[] {
   const raw = readSkills(projectPath);
-  return raw.filter(isSkillTemplate);
+  const projectSkills = raw.filter(isSkillTemplate);
+  const projectSkillIds = new Set(projectSkills.map((skill) => skill.id));
+  const builtIns = builtInSkillPresets.filter(
+    (skill) => !projectSkillIds.has(skill.id),
+  );
+  return [...builtIns, ...projectSkills];
 }
 
 /**

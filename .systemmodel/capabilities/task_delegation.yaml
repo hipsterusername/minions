@@ -1,0 +1,14 @@
+id: capability.task_delegation
+type: capability
+name: Task Delegation
+summary: Leaders plan work, spawn minions, arm them with skills, track lifecycle state, and collect completion reports.
+linked_flows: [flow.task_delegation_lifecycle]
+constraints: [constraint.no_cross_tree_imports]
+decisions: [decision.graph_as_bus]
+risks: [risk.parallel_work_conflicts]
+suggested_files: [server/task-tools/*.ts, server/task-lifecycle.ts, server/minion-tools.ts, server/session-host.ts, src/nodes/leader/TaskPlanPanel.tsx, src/KanbanBoard.tsx]
+suggested_tests: [server/task-tools/assign-task.test.ts, server/task-lifecycle.test.ts, server/minion-tools.test.ts, src/KanbanBoard.test.tsx]
+keywords: [assign_task, minion, leader, lifecycle, skills, kanban]
+freshness:
+  class: code_coupled
+risk: high

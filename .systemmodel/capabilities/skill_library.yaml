@@ -1,0 +1,14 @@
+id: capability.skill_library
+type: capability
+name: Skill Library
+summary: Users and built-ins provide reusable skill templates that leaders can attach to sessions or arm minions with during delegation.
+linked_flows: [flow.task_delegation_lifecycle]
+constraints: [constraint.no_cross_tree_imports]
+decisions: [decision.graph_as_bus]
+risks: [risk.prompt_bloat]
+suggested_files: [server/skills.ts, shared/skill-presets.ts, src/skills/**/*.ts, src/nodes/leader/skills/*.tsx, server/task-tools/assign-task.ts]
+suggested_tests: [server/skills.test.ts, src/skills/built-in/index.test.ts, src/prompts/build-leader-prompt.test.ts, server/task-tools/assign-task.test.ts]
+keywords: [skill, template, arming, prompt, built-in]
+freshness:
+  class: code_coupled
+risk: medium

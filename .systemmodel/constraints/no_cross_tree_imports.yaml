@@ -1,0 +1,12 @@
+id: constraint.no_cross_tree_imports
+type: constraint
+statement: Server and frontend trees must not import each other directly; shared contracts belong under shared/.
+applies_to:
+  capabilities: [capability.task_delegation, capability.ws_command_bus, capability.render_dashboard, capability.persistence_project_state, capability.skill_library, capability.system_model_layer]
+  flows: [flow.task_delegation_lifecycle, flow.ws_command_dispatch]
+  files: [server/**/*.ts, src/**/*.ts, src/**/*.tsx, shared/**/*.ts]
+severity: high
+agent_instruction: Move cross-boundary types or schemas into shared/ instead of importing from server/ into src/ or from src/ into server/.
+review_gate: gate.architecture_review
+suggested_tests: [tests/architecture/no-cross-tree-imports.test.ts]
+evidence: [decision.graph_as_bus]

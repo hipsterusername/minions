@@ -1,0 +1,10 @@
+freshness:
+  - policy_class: code_coupled
+    consequence: verify_before_task
+    required_actions: [inspect suggested_files, inspect suggested_tests, compare current code to model summary]
+  - policy_class: policy
+    consequence: required_agent_actions
+    required_actions: [read the policy object before changing gated files]
+  - policy_class: informational
+    consequence: verify_before_task
+    required_actions: [use as planning context, verify against current README or docs when relevant]

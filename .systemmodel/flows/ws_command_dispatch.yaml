@@ -1,0 +1,14 @@
+id: flow.ws_command_dispatch
+type: flow
+name: WebSocket Command Dispatch
+summary: The browser sends typed command envelopes, the server dispatches to a registered handler, and responses or broadcasts return through typed bus topics.
+capabilities: [capability.ws_command_bus, capability.canvas_sessions, capability.worktree_approval]
+constraints: [constraint.bus_only_broadcasts, constraint.no_cross_tree_imports]
+decisions: [decision.graph_as_bus]
+risks: [risk.command_contract_drift]
+suggested_files: [src/api.ts, server/ws-connection.ts, server/commands/index.ts, server/commands/types.ts, server/commands/schemas.ts, server/bus.ts, shared/ws-envelope.ts]
+suggested_tests: [server/ws-connection.test.ts, server/commands/schemas.test.ts, server/bus.test.ts, shared/ws-envelope.test.ts, tests/contracts/ws-envelope.test.ts]
+steps: [client sends command, command schema parses payload, command table selects handler, handler mutates server state, bus emits envelope]
+freshness:
+  class: code_coupled
+risk: critical

@@ -1,0 +1,14 @@
+id: flow.task_delegation_lifecycle
+type: flow
+name: Task Delegation Lifecycle
+summary: A leader plans tasks, delegates to minions with scoped files and optional skills, then records progress and completion through task tools.
+capabilities: [capability.task_delegation, capability.skill_library, capability.canvas_sessions]
+constraints: [constraint.no_cross_tree_imports]
+decisions: [decision.graph_as_bus]
+risks: [risk.parallel_work_conflicts, risk.prompt_bloat]
+suggested_files: [server/task-tools/plan-task.ts, server/task-tools/assign-task.ts, server/task-tools/get-task-status.ts, server/task-tools/complete-task.ts, server/minion-tools.ts, server/task-lifecycle.ts, server/task-tools/task-prompt.ts]
+suggested_tests: [server/task-tools/plan-task.test.ts, server/task-tools/assign-task.test.ts, server/task-tools/get-task-status.test.ts, server/task-tools/complete-task.test.ts, server/minion-tools.test.ts, server/task-lifecycle.test.ts]
+steps: [plan work, assign owned paths, arm requested skills, spawn minion session, report progress, complete or retry task]
+freshness:
+  class: code_coupled
+risk: high

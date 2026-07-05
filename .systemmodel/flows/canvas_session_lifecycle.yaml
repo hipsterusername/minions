@@ -1,0 +1,14 @@
+id: flow.canvas_session_lifecycle
+type: flow
+name: Canvas Session Lifecycle
+summary: A user creates or resumes a canvas session, sends messages, receives streamed updates, and persists state for later recovery.
+capabilities: [capability.canvas_sessions, capability.persistence_project_state, capability.ws_command_bus]
+constraints: [constraint.bus_only_broadcasts, constraint.no_cross_tree_imports]
+decisions: [decision.graph_as_bus]
+risks: [risk.session_state_drift, risk.command_contract_drift]
+suggested_files: [src/Canvas.tsx, src/nodes/LeaderNode.tsx, server/commands/create-session.ts, server/commands/send-message.ts, server/session-host*.ts, server/session-persist.ts, server/bus.ts]
+suggested_tests: [server/commands/create-session.test.ts, server/commands/send-message.test.ts, server/session-host.harness-flow.test.ts, server/session-persist.test.ts]
+steps: [create or resume session, attach canvas context, stream harness messages, emit bus updates, persist session state]
+freshness:
+  class: code_coupled
+risk: high
