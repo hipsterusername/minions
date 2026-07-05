@@ -4,7 +4,7 @@
  * Turns a user-supplied File (dragged, dropped, pasted, or picked) into a
  * node-ready `{ src, naturalWidth, naturalHeight, filename, mediaType }`
  * tuple. The key responsibility beyond a plain `FileReader` is
- * **downscaling**: raw camera photos and 4K/5K screenshots routinely
+ * **downscaling**: raw camera photos and 4K/5K screenshots often
  * exceed the WebSocket payload ceiling when sent to the Leader as a
  * base64 `data:` URL, and vision models already cap useful resolution
  * around 1568px on the long edge — anything larger costs tokens without

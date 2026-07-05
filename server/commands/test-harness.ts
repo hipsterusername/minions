@@ -93,13 +93,6 @@ export function setup(opts?: {
     bus,
     generateKey: () => "auto-gen",
     maxSessions: 50,
-    routines: {
-      // Minimal stub — most commands ignore this.
-      list: () => [],
-      get: () => null,
-      register: () => {},
-      remove: () => {},
-    } as unknown as CommandContext["routines"],
   };
 
   return {

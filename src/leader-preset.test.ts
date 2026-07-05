@@ -233,7 +233,7 @@ describe("captureLeaderPreset", () => {
 describe("applyPresetToLeaderData", () => {
   it("overlays model, harness, permissionMode, thinkingConfig, worktreeIsolation from preset", () => {
     const base = makeLeaderData({
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-5",
       harness: "echo",
       permissionMode: "auto",
       worktreeIsolation: false,

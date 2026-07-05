@@ -5,6 +5,7 @@ import { registerContract, CONTEXT_OUT_PORT } from "../graph.ts";
 import type { NodeInterfaceContract } from "../graph.ts";
 import { ResizeHandle } from "../components/ResizeHandle.tsx";
 import { MarkdownPreview } from "../components/MarkdownPreview.tsx";
+import { copyText } from "../components/CopyButton.tsx";
 import { getAuthToken } from "../api.ts";
 
 
@@ -151,11 +152,15 @@ function FileViewerNodeRenderer({
 
   const handleCopy = useCallback(() => {
     if (!content) return;
-    navigator.clipboard.writeText(content).then(() => {
-      setCopied(true);
-      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
-      copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
-    });
+    copyText(content)
+      .then(() => {
+        setCopied(true);
+        if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+        copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
+      })
+      .catch((err: unknown) => {
+        console.warn("[FileViewerNode] copy failed:", err);
+      });
   }, [content]);
 
   const toggleCollapsed = () => {

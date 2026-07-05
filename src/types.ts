@@ -99,7 +99,7 @@ export interface ContextItem {
 // On Opus 4.8 adaptive is the *only* supported thinking mode and
 // thinking.display defaults to "omitted" (so thinking blocks come
 // back empty unless we explicitly opt into "summarized"). On 4.6
-// and Sonnet 4.6 adaptive is recommended; on older models it is
+// and Sonnet 5 adaptive is recommended; on older models it is
 // unsupported. The SDK passes these straight through to the
 // Messages API.
 //
@@ -130,14 +130,6 @@ export const MINION_THINKING_CONFIG: ThinkingConfig = {
   display: "summarized",
 };
 
-/** Payload emitted when a routine step spawns a Leader session on the server. */
-export interface RoutineLeaderSpawnEvent {
-  runId: string;
-  phaseId: string;
-  stepId: string;
-  sessionKey: string;
-}
-
 export interface NodeRenderProps {
   node: CanvasNode;
   isSelected: boolean;
@@ -162,11 +154,6 @@ export interface NodeRenderProps {
   }) => void) | undefined;
   /** Callback to reveal (create or scroll-to) a minion node for a given session key */
   onRevealMinion?: ((minionSessionKey: string) => void) | undefined;
-  /**
-   * Callback invoked when this RoutineNode receives a `routine_step_leader_spawned`
-   * event for its current runId. Canvas.tsx handles it by creating the leader node.
-   */
-  onSpawnLeaderChild?: ((event: RoutineLeaderSpawnEvent) => void) | undefined;
   /** Duplicate a Leader node's setup without prompt or chat history. */
   onDuplicateLeaderSetup?: (() => void) | undefined;
   /** Save a Leader node's setup as a reusable preset. */

@@ -13,10 +13,6 @@ import type { NormalizedEvent } from "../shared/normalized-event.ts";
 import type { SessionHost, StartSessionOptions } from "./session-host.ts";
 import type { TaskManagerState, TaskRecord } from "./task-tools.ts";
 import type { BufferedEvent } from "./session-host-config.ts";
-import {
-  summarizeReasoningMap,
-  type ReasoningMapState,
-} from "../shared/reasoning-map.ts";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -87,7 +83,6 @@ function buildContextRecoveryPrompt(
     `Recovery cause: ${truncateMiddle(event.fullError ?? event.error ?? "context window exceeded", 1200)}`,
     "",
     renderTaskState(host.taskState),
-    renderReasoningMapState(host.reasoningMapState),
     renderRecentEvents(host.eventBuffer),
     "</context-window-recovery>",
     "",
@@ -130,18 +125,6 @@ function renderTask(task: TaskRecord): string {
     ? ` minion=${task.minionSessionKey}`
     : ` executor=${task.executor}`;
   return `- ${task.taskId} [${task.status}] (${task.priority})${assignee}: ${task.title}. ${task.description}${result}`;
-}
-
-function renderReasoningMapState(state: ReasoningMapState | null): string {
-  if (!state || state.maps.length === 0) return "";
-  const lines = ["<reasoning-graph>"];
-  for (const map of state.maps) {
-    const summary = map.finalSummary ?? summarizeReasoningMap(map, 1200).summary;
-    const active = state.activeMapId === map.id ? " active" : "";
-    lines.push(`- ${map.id} [${map.status}${active}]: ${truncateMiddle(summary, 1400)}`);
-  }
-  lines.push("</reasoning-graph>");
-  return lines.join("\n");
 }
 
 function renderRecentEvents(events: readonly BufferedEvent[]): string {

@@ -125,6 +125,26 @@ describe("buildHarnessStartOpts — capability gating", () => {
     expect(allowedTools).toContain("mcp__ext__bar");
   });
 
+  it("derives MCP allowed tool names from registered tool groups", () => {
+    const harness = fakeHarness("fake", {}, []);
+    const toolResult: AgentToolResult = {
+      toolGroups: { "task-manager": [{ name: "checkpoint_session", description: "", inputSchema: {} as never, handler: async () => ({ content: [] }) }] },
+      mcpToolNames: [],
+    };
+    const { allowedTools } = buildHarnessStartOpts({
+      host: fakeHost(),
+      opts: fakeOpts(),
+      agentType: fakeAgentType,
+      agentCtx: fakeCtx,
+      toolResult,
+      abortController: new AbortController(),
+      harness,
+      prompt: "hello",
+    });
+
+    expect(allowedTools).toContain("mcp__task-manager__checkpoint_session");
+  });
+
   describe("thinking gating", () => {
     it("omits thinking when capabilities.thinking is false, even if thinkingConfig is set", () => {
       const harness = fakeHarness("fake", { thinking: false });

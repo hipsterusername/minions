@@ -140,4 +140,123 @@ describe("SessionPanel attached / unattached grouping", () => {
     expect(screen.getAllByTestId("session-row-attached")).toHaveLength(1);
     expect(screen.queryByTestId("unattached-toggle")).toBeNull();
   });
+
+  it("renders token totals and cache hit rate from the session snapshot", () => {
+    renderOpen({
+      socketSubscribe: subscribe,
+      onAttachSession: () => {},
+      onFocusSession: () => {},
+      attachedSessionKeys: new Set(["usage-1"]),
+    });
+
+    emitSessions([
+      session({
+        sessionKey: "usage-1",
+        taskName: "Measured",
+        usageTotals: {
+          input: 412_000,
+          output: 38_000,
+          cacheRead: 4_120_000,
+          cacheCreation: 10_000,
+          cacheHitRate: 0.909090909,
+        },
+      }),
+    ]);
+
+    expect(screen.getByTestId("session-row-attached")).toHaveTextContent(
+      "in 412k / out 38k / cache 91%",
+    );
+  });
+
+  it("updates visible cost totals from live usage events", () => {
+    renderOpen({
+      socketSubscribe: subscribe,
+      onAttachSession: () => {},
+      onFocusSession: () => {},
+      attachedSessionKeys: new Set(["usage-1"]),
+    });
+
+    emitSessions([
+      session({
+        sessionKey: "usage-1",
+        taskName: "Measured",
+        totalCost: 0,
+      }),
+    ]);
+
+    expect(screen.getByTestId("session-row-attached")).not.toHaveTextContent("$0.1234");
+
+    act(() => {
+      for (const fn of listeners) {
+        fn({
+          type: "sdk_event",
+          sessionKey: "usage-1",
+          event: {
+            kind: "usage",
+            source: "result",
+            input: 100,
+            output: 10,
+            costUSD: 0.1234,
+          },
+        });
+      }
+    });
+
+    expect(screen.getByTestId("session-row-attached")).toHaveTextContent("$0.1234");
+  });
+
+  it("clears all visible idle and stopped sessions without touching active or hidden sessions", () => {
+    const socketSend = vi.fn();
+    renderOpen({
+      socketSend,
+      socketSubscribe: subscribe,
+      onAttachSession: () => {},
+      onFocusSession: () => {},
+      attachedSessionKeys: new Set([
+        "idle-1",
+        "stopped-1",
+        "running-1",
+        "error-1",
+        "minion-1",
+        "composer-1",
+      ]),
+    });
+
+    emitSessions([
+      session({ sessionKey: "idle-1", status: "idle", taskName: "Idle" }),
+      session({ sessionKey: "stopped-1", status: "stopped", taskName: "Stopped" }),
+      session({ sessionKey: "running-1", status: "running", taskName: "Running" }),
+      session({ sessionKey: "error-1", status: "error", taskName: "Error" }),
+      session({ sessionKey: "minion-1", status: "idle", role: "minion" }),
+      session({ sessionKey: "composer-1", status: "stopped", role: "card-composer" }),
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Session Clear All" }));
+
+    expect(socketSend).toHaveBeenCalledTimes(2);
+    expect(socketSend).toHaveBeenNthCalledWith(1, {
+      type: "remove_session",
+      sessionKey: "idle-1",
+    });
+    expect(socketSend).toHaveBeenNthCalledWith(2, {
+      type: "remove_session",
+      sessionKey: "stopped-1",
+    });
+  });
+
+  it("disables Session Clear All when there are no idle or stopped sessions", () => {
+    renderOpen({
+      socketSend: vi.fn(),
+      socketSubscribe: subscribe,
+      onAttachSession: () => {},
+      onFocusSession: () => {},
+      attachedSessionKeys: new Set(["running-1"]),
+    });
+
+    emitSessions([
+      session({ sessionKey: "running-1", status: "running", taskName: "Running" }),
+    ]);
+
+    expect(screen.getByRole("button", { name: "Session Clear All" })).toBeDisabled();
+  });
 });

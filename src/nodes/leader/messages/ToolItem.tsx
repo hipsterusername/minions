@@ -3,7 +3,7 @@ import type { DisplayMessage } from "../../../sdk-messages.ts";
 import {
   formatToolInput,
   formatToolInputDetail,
-  TOOL_ICONS,
+  toolDisplayInfo,
 } from "../../leader-message-helpers.ts";
 import type { LeaderMessage } from "../types.ts";
 
@@ -21,8 +21,8 @@ export const ToolItem = memo(function ToolItem({
   accentColor: string;
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
-  const icon = TOOL_ICONS[msg.toolName ?? ""] ?? "•";
-  const summary = formatToolInput(msg.toolName ?? "", msg.toolInput);
+  const display = toolDisplayInfo(msg.toolName, msg.toolInput);
+  const summary = display.summary ?? formatToolInput(msg.toolName ?? "", msg.toolInput);
   const hasInput = msg.toolInput && Object.keys(msg.toolInput).length > 0;
 
   return (
@@ -58,12 +58,15 @@ export const ToolItem = memo(function ToolItem({
             flexShrink: 0,
             width: 12,
             textAlign: "center",
+            borderRadius: 3,
+            background: `${accentColor}12`,
+            fontWeight: 800,
           }}
         >
-          {icon}
+          {display.icon}
         </span>
         <span style={{ fontWeight: 500, flexShrink: 0 }}>
-          {msg.toolName ?? "tool"}
+          {display.label}
         </span>
         {summary && (
           <span
@@ -131,7 +134,7 @@ export const LeaderToolGroup = memo(function LeaderToolGroup({
   const [expanded, setExpanded] = useState(false);
   const summary = useMemo(() => {
     const toolNames = msgs.map((m) => m.toolName ?? "tool");
-    const uniqueTools = [...new Set(toolNames)];
+    const uniqueTools = [...new Set(toolNames.map((name) => toolDisplayInfo(name).shortLabel))];
     return uniqueTools.length <= 3
       ? uniqueTools.join(", ")
       : `${uniqueTools.slice(0, 2).join(", ")} +${uniqueTools.length - 2}`;

@@ -30,8 +30,6 @@ interface CanvasNodeProps {
   }) => void) | undefined;
   /** Callback to reveal (create or scroll-to) a minion node for a given session key */
   onRevealMinion?: ((minionSessionKey: string) => void) | undefined;
-  /** Callback for RoutineNode: create a Leader child node when a step spawns one */
-  onSpawnLeaderChild?: ((event: import("./types.ts").RoutineLeaderSpawnEvent) => void) | undefined;
   /** Callback for LeaderNode: duplicate setup without runtime session state */
   onDuplicateLeaderSetup?: (() => void) | undefined;
   /** Callback for LeaderNode: save setup as a reusable preset */
@@ -151,7 +149,6 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
   onAddContentNode,
   onCreateKanbanCardFromMarkdown,
   onRevealMinion,
-  onSpawnLeaderChild,
   onDuplicateLeaderSetup,
   onSaveLeaderPreset,
   onFocusNode,
@@ -467,7 +464,6 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
         onAddContentNode={onAddContentNode}
         onCreateKanbanCardFromMarkdown={onCreateKanbanCardFromMarkdown}
         onRevealMinion={onRevealMinion}
-        onSpawnLeaderChild={onSpawnLeaderChild}
         onDuplicateLeaderSetup={onDuplicateLeaderSetup}
         onSaveLeaderPreset={onSaveLeaderPreset}
         isDropTarget={isDropTarget}

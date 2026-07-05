@@ -441,7 +441,10 @@ describe("useSocket — send", () => {
     ]);
   });
 
-  it("drops the message when the socket is not OPEN", async () => {
+  it("queues messages sent before the socket is OPEN and flushes them in order on open", async () => {
+    // Regression: tapping "Launch leader" fires `create_session` while the
+    // socket may still be CONNECTING. Previously the message was dropped and
+    // the session never started; now it is queued and flushed on open.
     let captured = null as ProbeState | null;
     render(
       <Probe
@@ -452,15 +455,90 @@ describe("useSocket — send", () => {
       />,
     );
     await flushAsync();
-    // Don't trigger open → readyState stays at CONNECTING.
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // Socket constructed but not opened → readyState stays CONNECTING.
 
     act(() => {
-      captured!.send({ type: "ping" });
+      captured!.send({ type: "create_session", id: 1 });
+      captured!.send({ type: "sync_session", id: 2 });
     });
 
+    // Nothing leaves the wire while the socket is closed.
     expect(lastFake().sent).toEqual([]);
+
+    act(() => {
+      lastFake().triggerOpen();
+    });
+
+    // The queue flushes in the order the messages were enqueued.
+    expect(lastFake().sent).toEqual([
+      JSON.stringify({ type: "create_session", id: 1 }),
+      JSON.stringify({ type: "sync_session", id: 2 }),
+    ]);
+  });
+
+  it("flushes a message queued during a reconnect window once the socket reopens", async () => {
+    // The mobile failure mode: the connection drops, the user taps launch
+    // during the backoff window, and the command must survive to the next open.
+    let captured = null as ProbeState | null;
+    render(
+      <Probe
+        url="ws://x"
+        onState={(s) => {
+          captured = s;
+        }}
+      />,
+    );
+    await flushAsync();
+    act(() => lastFake().triggerOpen());
+
+    // Connection drops → we're now in reconnect backoff.
+    act(() => lastFake().triggerClose());
+    act(() => {
+      captured!.send({ type: "create_session", id: 7 });
+    });
+
+    // Advance past the first backoff (2000ms) so a fresh socket constructs.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    act(() => lastFake().triggerOpen());
+
+    expect(lastFake().sent).toEqual([
+      JSON.stringify({ type: "create_session", id: 7 }),
+    ]);
+  });
+
+  it("caps the offline queue, dropping the oldest messages when it overflows", async () => {
+    let captured = null as ProbeState | null;
+    render(
+      <Probe
+        url="ws://x"
+        onState={(s) => {
+          captured = s;
+        }}
+      />,
+    );
+    await flushAsync();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Enqueue 101 messages while CONNECTING; the cap is 100, so the very
+    // first message is evicted and the rest are retained newest-first-out.
+    act(() => {
+      for (let i = 0; i < 101; i++) {
+        captured!.send({ type: "msg", id: i });
+      }
+    });
     expect(warn).toHaveBeenCalled();
+
+    act(() => lastFake().triggerOpen());
+
+    const sent = lastFake().sent;
+    expect(sent).toHaveLength(100);
+    expect(sent[0]).toBe(JSON.stringify({ type: "msg", id: 1 }));
+    expect(sent.at(-1)).toBe(JSON.stringify({ type: "msg", id: 100 }));
     warn.mockRestore();
   });
 });

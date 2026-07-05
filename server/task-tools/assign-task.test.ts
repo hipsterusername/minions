@@ -35,6 +35,7 @@ interface CapturedSpawn {
   cwd: string;
   systemPrompt: string;
   model?: string;
+  harness?: string;
 }
 
 interface Harness {
@@ -87,6 +88,7 @@ async function callAssign(
     title: string;
     description: string;
     priority: "low" | "medium" | "high" | "critical";
+    executorClass?: "mechanical" | "standard" | "reasoning";
     model?: string;
     timeout_minutes?: number;
     ownedPaths?: string[];
@@ -502,6 +504,84 @@ describe("assign_task", () => {
     });
 
     expect(harness.spawns[0]?.model).toBe("claude-haiku-4-5");
+  });
+
+  it("explicit model arg wins over executorClass mapping", async () => {
+    writeSettings(projectDir, {
+      mechanicalMinionModel: "claude-mechanical",
+      defaultMinionModel: "claude-standard",
+    });
+
+    await callAssign(harness.ctx, {
+      taskId: "t-model-wins",
+      title: "Exact model",
+      description: "details",
+      priority: "low",
+      executorClass: "mechanical",
+      model: "claude-explicit",
+    });
+
+    expect(harness.spawns[0]?.model).toBe("claude-explicit");
+  });
+
+  it("maps mechanical executorClass to a Codex-valid model under the Codex harness", async () => {
+    writeSettings(projectDir, {
+      defaultMinionHarness: "codex",
+      defaultMinionModel: "gpt-5.5",
+      mechanicalMinionModel: "claude-haiku-4-5",
+    });
+
+    await callAssign(harness.ctx, {
+      taskId: "t-codex-mechanical",
+      title: "Codex mechanical",
+      description: "details",
+      priority: "low",
+      executorClass: "mechanical",
+    });
+
+    expect(harness.spawns[0]?.harness).toBe("codex");
+    expect(harness.spawns[0]?.model).toBe("gpt-5.5");
+    expect(harness.spawns[0]?.model).not.toBe("claude-haiku-4-5");
+  });
+
+  it.each([
+    ["mechanical", "claude-mechanical"],
+    ["standard", "claude-standard"],
+    ["reasoning", "claude-reasoning"],
+  ] as const)("maps executorClass %s to the configured tier model", async (executorClass, expected) => {
+    writeSettings(projectDir, {
+      defaultMinionModel: "claude-standard",
+      mechanicalMinionModel: "claude-mechanical",
+      reasoningMinionModel: "claude-reasoning",
+    });
+
+    await callAssign(harness.ctx, {
+      taskId: `t-${executorClass}`,
+      title: `${executorClass} tier`,
+      description: "details",
+      priority: "medium",
+      executorClass,
+    });
+
+    expect(harness.spawns.at(-1)?.model).toBe(expected);
+  });
+
+  it("falls back to the existing default chain when executorClass is absent", async () => {
+    writeSettings(projectDir, {
+      defaultModel: "claude-base",
+      defaultMinionModel: 123 as unknown as string,
+      mechanicalMinionModel: "claude-mechanical",
+      reasoningMinionModel: "claude-reasoning",
+    });
+
+    await callAssign(harness.ctx, {
+      taskId: "t-no-class",
+      title: "No class",
+      description: "details",
+      priority: "medium",
+    });
+
+    expect(harness.spawns[0]?.model).toBe("claude-base");
   });
 
   // ── timeout_minutes ───────────────────────────────────────────────────────

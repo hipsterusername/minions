@@ -1,0 +1,136 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { WebSocketServer } from "ws";
+
+import { createBus } from "./bus.ts";
+import { SessionHost, type SessionHostDeps } from "./session-host.ts";
+import type { TaskRecord } from "./task-tools.ts";
+import { cancelQueuedWaitResume } from "./wait-resume.ts";
+import {
+  buildWakeTaskDigest,
+  MIN_WAKE_RESUME_INTERVAL_MS,
+  requestCoalescedWake,
+  WAKE_COALESCE_WINDOW_MS,
+  WAKE_DIGEST_EXCERPT_CHARS,
+} from "./wake-coalescer.ts";
+
+function makeDeps(startChildSession = vi.fn()): SessionHostDeps {
+  return {
+    bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
+    startChildSession,
+    forEachLeaderTaskState: () => {},
+  };
+}
+
+function makeLeader(): SessionHost {
+  const host = new SessionHost("leader-1", "/tmp/work");
+  host.status = "idle";
+  host.role = "leader";
+  host.sessionId = "sdk-1";
+  return host;
+}
+
+function wake(host: SessionHost, deps: SessionHostDeps, prompt: string, immediate = false): void {
+  requestCoalescedWake(host, deps, {
+    immediate,
+    opts: {
+      sessionKey: host.id,
+      prompt,
+      cwd: host.cwd,
+      resumeId: host.sessionId ?? undefined,
+      role: host.role,
+      harness: host.harnessName,
+    },
+  });
+}
+
+describe("wake coalescer", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("coalesces multiple wake triggers inside the window into one resume", async () => {
+    const startChildSession = vi.fn();
+    const deps = makeDeps(startChildSession);
+    const host = makeLeader();
+
+    wake(host, deps, "Task results:\nt1 - completed - first");
+    await vi.advanceTimersByTimeAsync(1_000);
+    wake(host, deps, "Task results:\nt2 - failed - second");
+
+    await vi.advanceTimersByTimeAsync(WAKE_COALESCE_WINDOW_MS - 1_001);
+    expect(startChildSession).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(startChildSession).toHaveBeenCalledOnce();
+    const prompt = startChildSession.mock.calls[0]![0].prompt;
+    expect(prompt).toContain("Wake event 1");
+    expect(prompt).toContain("t1 - completed - first");
+    expect(prompt).toContain("Wake event 2");
+    expect(prompt).toContain("t2 - failed - second");
+  });
+
+  it("defers triggers inside the per-session minimum resume interval", async () => {
+    const startChildSession = vi.fn();
+    const deps = makeDeps(startChildSession);
+    const host = makeLeader();
+
+    wake(host, deps, "first", true);
+    expect(startChildSession).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    wake(host, deps, "second", true);
+    expect(startChildSession).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(MIN_WAKE_RESUME_INTERVAL_MS - 1_001);
+    expect(startChildSession).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(startChildSession).toHaveBeenCalledTimes(2);
+    expect(startChildSession.mock.calls[1]![0].prompt).toBe("second");
+  });
+
+  it("cleans up a deferred wake through the termination cleanup path", async () => {
+    const startChildSession = vi.fn();
+    const deps = makeDeps(startChildSession);
+    const host = makeLeader();
+
+    wake(host, deps, "first", true);
+    await vi.advanceTimersByTimeAsync(1_000);
+    wake(host, deps, "second", true);
+    cancelQueuedWaitResume(host);
+
+    await vi.advanceTimersByTimeAsync(MIN_WAKE_RESUME_INTERVAL_MS);
+
+    expect(startChildSession).toHaveBeenCalledOnce();
+    expect(startChildSession.mock.calls[0]![0].prompt).toBe("first");
+  });
+
+  it("caps each task digest excerpt with a truncation marker", () => {
+    const longResult = "x".repeat(WAKE_DIGEST_EXCERPT_CHARS + 50);
+    const task: TaskRecord = {
+      taskId: "t1",
+      title: "Task",
+      description: "",
+      priority: "medium",
+      executor: "minion",
+      minionSessionKey: "minion-1",
+      leaderSessionKey: "leader-1",
+      status: "completed",
+      createdAt: 1,
+      completedAt: 2,
+      result: longResult,
+    };
+
+    const digest = buildWakeTaskDigest([task]);
+
+    expect(digest).toContain("x".repeat(WAKE_DIGEST_EXCERPT_CHARS));
+    expect(digest).toContain("[truncated]");
+    expect(digest).not.toContain("x".repeat(WAKE_DIGEST_EXCERPT_CHARS + 1));
+  });
+});

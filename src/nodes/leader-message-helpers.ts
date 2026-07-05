@@ -59,6 +59,61 @@ export function groupMessages(messages: LeaderMessage[]): LeaderMessageGroup[] {
   return groups;
 }
 
+// ── Tool-call noise filtering ─────────────────────────────────────────────────
+//
+// Tool messages from the SDK fall into two buckets:
+//
+//   1. **Pure plumbing** — set_task_name, get_task_status, wait_and_continue,
+//      render_set/patch/append/remove, TodoWrite. These either mutate other
+//      surfaces (the Dashboard tab, the task plan section, the wait countdown
+//      in the toolbar) or are zero-payload queries. Showing them in a chat
+//      transcript is just noise; the same info is already on screen.
+//
+//   2. **Substantive work** — Read, Edit, Bash, Grep, Glob, Write, plan_task,
+//      assign_task, complete_task, etc. These have user-relevant payloads
+//      (filenames, commands, task titles). We *keep* them but consolidate
+//      consecutive runs into a single grouped chip so a long Read/Edit
+//      sequence doesn't drown the transcript.
+//
+// Naming: the SDK delivers MCP-registered tools as `mcp__<server>__<tool>`
+// so we match both the bare name and the prefix.
+
+const HIDDEN_TOOL_BARE_NAMES = new Set<string>([
+  "set_task_name",
+  "get_task_status",
+  "wait_and_continue",
+  "render_set",
+  "render_patch",
+  "render_append",
+  "render_remove",
+  "TodoWrite",
+]);
+
+const HIDDEN_MCP_PREFIXES = ["mcp__render-dashboard__"];
+
+/** Whether a tool call is pure plumbing that should be hidden from transcripts. */
+export function isHiddenTool(toolName: string | undefined | null): boolean {
+  if (!toolName) return false;
+  // Strip mcp__server__ prefix if present so "mcp__task-manager__set_task_name"
+  // matches "set_task_name" in the bare set.
+  const bare = toolName.includes("__")
+    ? toolName.slice(toolName.lastIndexOf("__") + 2)
+    : toolName;
+  if (HIDDEN_TOOL_BARE_NAMES.has(bare)) return true;
+  return HIDDEN_MCP_PREFIXES.some((p) => toolName.startsWith(p));
+}
+
+/** Strip `mcp__server__` for display so chips read cleanly. */
+export function shortToolName(toolName: string): string {
+  return toolName.includes("__")
+    ? toolName.slice(toolName.lastIndexOf("__") + 2)
+    : toolName;
+}
+
+function bareToolName(toolName: string): string {
+  return shortToolName(toolName);
+}
+
 // ── Tool icon map ─────────────────────────────────────────────────────────────
 
 export const TOOL_ICONS: Record<string, string> = {
@@ -108,6 +163,61 @@ export function formatToolInput(
       return null;
     }
   }
+}
+
+export interface ToolDisplayInfo {
+  icon: string;
+  label: string;
+  shortLabel: string;
+  kind: "file" | "search" | "shell" | "web" | "delegate" | "review" | "context" | "tool";
+  summary: string | null;
+}
+
+const FRIENDLY_TOOL_LABELS: Record<string, Omit<ToolDisplayInfo, "summary">> = {
+  Read: { icon: "R", label: "Read file", shortLabel: "Read", kind: "file" },
+  Write: { icon: "W", label: "Write file", shortLabel: "Write", kind: "file" },
+  Edit: { icon: "E", label: "Edit file", shortLabel: "Edit", kind: "file" },
+  Bash: { icon: "$", label: "Run command", shortLabel: "Command", kind: "shell" },
+  Glob: { icon: "*", label: "Find files", shortLabel: "Files", kind: "search" },
+  Grep: { icon: "/", label: "Search code", shortLabel: "Search", kind: "search" },
+  Agent: { icon: "A", label: "Delegate agent", shortLabel: "Agent", kind: "delegate" },
+  WebFetch: { icon: "W", label: "Fetch web page", shortLabel: "Fetch", kind: "web" },
+  WebSearch: { icon: "S", label: "Search web", shortLabel: "Web", kind: "web" },
+  plan_task: { icon: "P", label: "Plan task", shortLabel: "Plan", kind: "delegate" },
+  assign_task: { icon: "M", label: "Launch minion", shortLabel: "Minion", kind: "delegate" },
+  message_task: { icon: "M", label: "Message minion", shortLabel: "Message", kind: "delegate" },
+  complete_task: { icon: "C", label: "Complete task", shortLabel: "Complete", kind: "review" },
+  cancel_task: { icon: "X", label: "Cancel task", shortLabel: "Cancel", kind: "review" },
+  get_task_status: { icon: "?", label: "Check task", shortLabel: "Status", kind: "context" },
+  wait_and_continue: { icon: "T", label: "Wait", shortLabel: "Wait", kind: "context" },
+};
+
+function taskSummary(input?: Record<string, unknown>): string | null {
+  if (!input) return null;
+  for (const key of ["title", "taskId", "message", "reason", "description"]) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return null;
+}
+
+export function toolDisplayInfo(
+  toolName: string | undefined | null,
+  input?: Record<string, unknown>,
+): ToolDisplayInfo {
+  const raw = toolName ?? "tool";
+  const bare = bareToolName(raw);
+  const friendly = FRIENDLY_TOOL_LABELS[bare];
+  const summary = taskSummary(input) ?? formatToolInput(bare, input) ?? formatToolInput(raw, input);
+  if (friendly) return { ...friendly, summary };
+  const label = bare.replace(/_/g, " ");
+  return {
+    icon: TOOL_ICONS[bare] ?? "•",
+    label,
+    shortLabel: label,
+    kind: "tool",
+    summary,
+  };
 }
 
 /**

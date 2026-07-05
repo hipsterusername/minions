@@ -93,7 +93,7 @@ export function listMcpServers(projectPath: string): ListMcpServersResult {
 /**
  * Load MCP servers by ID from the project's sidecar. Unknown IDs are
  * silently dropped — the caller (step runner) may reference a server that
- * was deleted since the routine was authored. Returns entries in the order
+ * was deleted since a saved reference was authored. Returns entries in the order
  * of the requested ids.
  */
 export function loadMcpServersByIds(

@@ -11,6 +11,11 @@ import type {
   TaskRecord,
   TaskToolContext,
 } from "./types.ts";
+import {
+  capTaskTextForSummary,
+  DETAIL_DESCRIPTION_MAX_CHARS,
+  DETAIL_RESULT_MAX_CHARS,
+} from "./result-summary.ts";
 
 type TaskStatusView = TaskRecord & {
   runtimeSessionKey: string | null;
@@ -30,6 +35,8 @@ type TaskStatusSummary = Pick<
   runtimeSessionKey: string | null;
   runtime: RuntimeSessionInfo | null;
 };
+
+type TaskStatusDetailMode = "summary" | "full";
 
 const SUMMARY_RESULT_MAX = 200;
 const TRUNCATION_SUFFIX = "… [truncated — fetch taskId for full text]";
@@ -63,8 +70,25 @@ function runtimeForTask(
   };
 }
 
-function detailView(ctx: TaskToolContext, task: TaskRecord): TaskStatusView {
-  return { ...task, ...runtimeForTask(ctx, task) };
+function detailView(
+  ctx: TaskToolContext,
+  task: TaskRecord,
+  detail: TaskStatusDetailMode,
+): TaskStatusView {
+  const view = { ...task, ...runtimeForTask(ctx, task) };
+  if (detail === "full") return view;
+  return {
+    ...view,
+    description: capTaskTextForSummary(
+      view.description,
+      DETAIL_DESCRIPTION_MAX_CHARS,
+      "description",
+    ),
+    result:
+      view.result === null
+        ? null
+        : capTaskTextForSummary(view.result, DETAIL_RESULT_MAX_CHARS, "result"),
+  };
 }
 
 function summaryView(ctx: TaskToolContext, task: TaskRecord): TaskStatusSummary {
@@ -90,13 +114,19 @@ const getTaskStatusInputSchema = z.object({
     .describe(
       "Specific task ID to check. If omitted, returns status of all tasks.",
     ),
+  detail: z
+    .enum(["summary", "full"])
+    .optional()
+    .describe(
+      'Detail mode for taskId lookups. "summary" is the default and caps long description/result fields with a marker; "full" returns the complete stored record.',
+    ),
 });
 
 export function createGetTaskStatusToolDef(ctx: TaskToolContext): NormalizedToolDef {
   return {
     name: "get_task_status",
     description:
-      "Check the status of one or all tasks. Returns current status, executor, runtime session metadata, and any results.",
+      'Check the status of one or all tasks. All-tasks view stays compact. For taskId detail lookups, detail:"summary" is the default and caps long description/result fields; use detail:"full" to fetch the complete stored text.',
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
@@ -113,7 +143,7 @@ export function createGetTaskStatusToolDef(ctx: TaskToolContext): NormalizedTool
         }
         // Compact, null-stripped JSON — pretty-printing roughly doubles the
         // token cost of structured payloads. See harness/tool-result.ts.
-        return jsonResult(detailView(ctx, record));
+        return jsonResult(detailView(ctx, record, args.detail ?? "summary"));
       }
 
       // Return all tasks

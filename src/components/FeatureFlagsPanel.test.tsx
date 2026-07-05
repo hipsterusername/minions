@@ -13,8 +13,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   FEATURE_FLAGS,
-  getFeatureFlag,
-  setFeatureFlag,
 } from "../feature-flags.ts";
 import { FeatureFlagsPanel } from "./FeatureFlagsPanel.tsx";
 
@@ -34,22 +32,15 @@ describe("FeatureFlagsPanel", () => {
     }
   });
 
-  it("toggling a checkbox flips the flag in the store", () => {
+  it("renders no flag rows when the registry is empty", () => {
     render(<FeatureFlagsPanel onClose={() => {}} onDisableDebug={() => {}} />);
-    const cb = screen.getByLabelText(/routines/i) as HTMLInputElement;
-    expect(cb.checked).toBe(false);
-    fireEvent.click(cb);
-    expect(getFeatureFlag("routines")).toBe(true);
-    expect(cb.checked).toBe(true);
-    fireEvent.click(cb);
-    expect(getFeatureFlag("routines")).toBe(false);
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
   });
 
-  it("Reset to defaults clears every override", () => {
-    setFeatureFlag("routines", true);
+  it("Reset to defaults is available with an empty registry", () => {
     render(<FeatureFlagsPanel onClose={() => {}} onDisableDebug={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: /reset to defaults/i }));
-    expect(getFeatureFlag("routines")).toBe(false);
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
   });
 
   it("Disable debug button calls the prop", () => {

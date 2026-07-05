@@ -42,6 +42,8 @@ interface RawUsage {
   cache_creation_input_tokens?: number | null;
 }
 
+type UsageSource = NonNullable<Extract<NormalizedEvent, { kind: "usage" }>["source"]>;
+
 // ── Main translator ───────────────────────────────────────────────────────────
 
 /**
@@ -91,8 +93,11 @@ interface SystemLike {
 
 interface AssistantLike {
   type: "assistant";
+  uuid?: string;
+  session_id?: string;
   parent_tool_use_id: string | null;
   message: {
+    id?: string;
     content: RawBlock[];
     usage?: RawUsage;
   };
@@ -100,6 +105,8 @@ interface AssistantLike {
 
 interface ResultLike {
   type: "result";
+  uuid?: string;
+  session_id?: string;
   is_error: boolean;
   subtype?: string;
   result?: string;
@@ -181,7 +188,12 @@ function translateAssistant(msg: AssistantLike): NormalizedEvent[] {
   }
 
   if (msg.message.usage) {
-    events.push(usageFromRaw(msg.message.usage, undefined));
+    const messageId = msg.message.id ?? msg.uuid;
+    events.push(usageFromRaw(msg.message.usage, {
+      source: "assistant",
+      messageId,
+      sdkSessionId: msg.session_id,
+    }));
   }
 
   return events;
@@ -192,12 +204,27 @@ function translateResult(msg: ResultLike): NormalizedEvent[] {
 
   if (msg.is_error) {
     const error = msg.errors?.[0] ?? "Unknown error";
+    if (isClaudeToolUseDiagnostic(error)) {
+      return translateSuccessfulResult(msg, events);
+    }
     events.push({ kind: "done", reason: "error", error });
     return events;
   }
 
+  return translateSuccessfulResult(msg, events);
+}
+
+function translateSuccessfulResult(
+  msg: ResultLike,
+  events: NormalizedEvent[] = [],
+): NormalizedEvent[] {
   if (msg.usage) {
-    events.push(usageFromRaw(msg.usage, msg.total_cost_usd));
+    events.push(usageFromRaw(msg.usage, {
+      source: "result",
+      messageId: msg.uuid,
+      sdkSessionId: msg.session_id,
+      costUSD: msg.total_cost_usd,
+    }));
   }
 
   for (const denial of msg.permission_denials ?? []) {
@@ -216,6 +243,15 @@ function translateResult(msg: ResultLike): NormalizedEvent[] {
   return events;
 }
 
+export function isClaudeToolUseDiagnostic(error: string): boolean {
+  return (
+    error.includes("[ede_diagnostic]") &&
+    error.includes("result_type=user") &&
+    error.includes("last_content_type=n/a") &&
+    error.includes("stop_reason=tool_use")
+  );
+}
+
 function translateRateLimit(msg: RateLimitLike): NormalizedEvent[] {
   const resetsAt = msg.rate_limit_info?.resetsAt;
   const resetAtMs = resetsAt ? resetsAt * 1000 : undefined;
@@ -229,14 +265,27 @@ function translateRateLimit(msg: RateLimitLike): NormalizedEvent[] {
   ];
 }
 
-function usageFromRaw(u: RawUsage, costUSD: number | undefined): NormalizedEvent {
+function usageFromRaw(
+  u: RawUsage,
+  meta: {
+    source: UsageSource;
+    costUSD?: number | undefined;
+    messageId?: string | undefined;
+    turnId?: string | undefined;
+    sdkSessionId?: string | undefined;
+  },
+): NormalizedEvent {
   return {
     kind: "usage",
+    source: meta.source,
     input: u.input_tokens,
     output: u.output_tokens,
     ...(u.cache_read_input_tokens != null && { cacheRead: u.cache_read_input_tokens }),
     ...(u.cache_creation_input_tokens != null && { cacheCreation: u.cache_creation_input_tokens }),
-    ...(costUSD != null && { costUSD }),
+    ...(meta.costUSD != null && { costUSD: meta.costUSD }),
+    ...(meta.messageId != null && { messageId: meta.messageId }),
+    ...(meta.turnId != null && { turnId: meta.turnId }),
+    ...(meta.sdkSessionId != null && { sdkSessionId: meta.sdkSessionId }),
   };
 }
 

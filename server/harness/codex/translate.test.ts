@@ -446,17 +446,27 @@ describe("item.completed: error (non-fatal)", () => {
 describe("turn.completed", () => {
   it("emits usage event with input, output, and cacheRead from cached_input_tokens", () => {
     const tr = makeTranslator();
+    tr.translate({ type: "thread.started", thread_id: "thread-usage" });
     const events = tr.translate({
       type: "turn.completed",
+      turn_id: "turn-usage",
       usage: {
         input_tokens: 200,
         output_tokens: 80,
         cached_input_tokens: 50,
         reasoning_output_tokens: 0,
       },
-    });
+    } as never);
     expect(events).toEqual([
-      { kind: "usage", input: 200, output: 80, cacheRead: 50 },
+      {
+        kind: "usage",
+        source: "turn_completed",
+        input: 200,
+        output: 80,
+        cacheRead: 50,
+        turnId: "turn-usage",
+        sdkSessionId: "thread-usage",
+      },
     ]);
   });
 

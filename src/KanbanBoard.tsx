@@ -16,6 +16,7 @@ import type { ProjectSettings } from "./api.ts";
 import type { LeaderData, TaskPlanItem } from "./nodes/LeaderNode.tsx";
 import type { DisplayMessage } from "./sdk-messages.ts";
 import { msgId } from "./sdk-messages.ts";
+import { isHiddenTool, shortToolName } from "./nodes/leader-message-helpers.ts";
 import { buildLeaderSystemPrompt } from "./prompts/build-leader-prompt.ts";
 import { useHarnessList } from "./use-harness-list.tsx";
 import type { HarnessInfo } from "./harness-list.ts";
@@ -27,58 +28,6 @@ import {
 import type { RenderNodeData } from "./nodes/RenderNode.tsx";
 import type { RenderState } from "../shared/render-dsl.ts";
 import "./kanban.css";
-
-// ─── Inspector chat: tool-call filtering ──────────────────
-//
-// Tool messages from the SDK fall into two buckets:
-//
-//   1. **Pure plumbing** — set_task_name, get_task_status, wait_and_continue,
-//      render_set/patch/append/remove, TodoWrite. These either mutate other
-//      surfaces (the Dashboard tab, the task plan section, the wait countdown
-//      in the toolbar) or are zero-payload queries. Showing them in the chat
-//      is just noise; the same info is already on screen.
-//
-//   2. **Substantive work** — Read, Edit, Bash, Grep, Glob, Write, plan_task,
-//      assign_task, complete_task, etc. These have user-relevant payloads
-//      (filenames, commands, task titles). We *keep* them but consolidate
-//      consecutive runs into a single grouped chip so a long Read/Edit
-//      sequence doesn't drown the chat.
-//
-// Naming: the SDK delivers MCP-registered tools as `mcp__<server>__<tool>`
-// so we match both the bare name and the prefix.
-
-const HIDDEN_TOOL_BARE_NAMES = new Set<string>([
-  "set_task_name",
-  "get_task_status",
-  "wait_and_continue",
-  "render_set",
-  "render_patch",
-  "render_append",
-  "render_remove",
-  "TodoWrite",
-]);
-
-const HIDDEN_MCP_PREFIXES = [
-  "mcp__render-dashboard__",
-];
-
-function isHiddenTool(toolName: string | undefined | null): boolean {
-  if (!toolName) return false;
-  // Strip mcp__server__ prefix if present so "mcp__task-manager__set_task_name"
-  // matches "set_task_name" in the bare set.
-  const bare = toolName.includes("__")
-    ? toolName.slice(toolName.lastIndexOf("__") + 2)
-    : toolName;
-  if (HIDDEN_TOOL_BARE_NAMES.has(bare)) return true;
-  return HIDDEN_MCP_PREFIXES.some((p) => toolName.startsWith(p));
-}
-
-/** Strip `mcp__server__` for display so chips read cleanly. */
-function shortToolName(toolName: string): string {
-  return toolName.includes("__")
-    ? toolName.slice(toolName.lastIndexOf("__") + 2)
-    : toolName;
-}
 
 type ChatGroup =
   | { kind: "msg"; msg: DisplayMessage }

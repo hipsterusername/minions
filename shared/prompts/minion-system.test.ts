@@ -45,4 +45,10 @@ describe("MINION_SYSTEM_PROMPT (base)", () => {
     expect(MINION_SYSTEM_PROMPT).toContain("report_done");
     expect(MINION_SYSTEM_PROMPT).toContain("report_fail");
   });
+
+  it("instructs minions to keep final reports summary-first and reference artifact files", () => {
+    expect(MINION_SYSTEM_PROMPT).toMatch(/under 2000 characters/i);
+    expect(MINION_SYSTEM_PROMPT).toMatch(/file in the repo\/worktree/i);
+    expect(MINION_SYSTEM_PROMPT).toMatch(/reference the path/i);
+  });
 });

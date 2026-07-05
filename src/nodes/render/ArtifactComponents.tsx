@@ -9,6 +9,7 @@
 
 import { useState, useEffect } from "react";
 import type { ImageComponent, FilePreviewComponent } from "../../../shared/render-artifacts.ts";
+import { copyText } from "../../components/CopyButton.tsx";
 
 // ── Shared card baseline style ────────────────────────────
 
@@ -310,7 +311,9 @@ function PathSourcePreview({ c }: { c: FilePreviewComponent }) {
   }
 
   function handleCopyPath() {
-    void navigator.clipboard.writeText(srcPath);
+    void copyText(srcPath).catch((err: unknown) => {
+      console.warn("[ArtifactComponents] copy path failed:", err);
+    });
   }
 
   return (

@@ -9,19 +9,17 @@ import "./leader.ts";
 
 beforeEach(() => disablePersistence());
 
-describe("leader agent reasoning map wiring", () => {
-  it("documents reasoning graph constraints in the prompt", () => {
-    expect(LEADER_SYSTEM_PROMPT).toContain("create_reasoning_map");
-    expect(LEADER_SYSTEM_PROMPT).toContain("Every hypothesis must include `falsifiedBy`");
-    expect(LEADER_SYSTEM_PROMPT).toContain("Do not expose private chain-of-thought");
-  });
-
-  it("documents assign_task per-task model, timeout_minutes, ownedPaths, and retry in delegation guidelines", () => {
+describe("leader agent wiring", () => {
+  it("documents assign_task executorClass, model override, timeout_minutes, ownedPaths, and retry in delegation guidelines", () => {
+    expect(LEADER_SYSTEM_PROMPT).toContain("## Token Economy");
+    expect(LEADER_SYSTEM_PROMPT).toContain("Buy conclusions, not raw data");
+    expect(LEADER_SYSTEM_PROMPT).toContain("over ~2000 chars through their summaries");
+    expect(LEADER_SYSTEM_PROMPT).toContain("never Read multi-thousand-line files");
+    expect(LEADER_SYSTEM_PROMPT).toContain("executorClass");
     expect(LEADER_SYSTEM_PROMPT).toContain("timeout_minutes");
     expect(LEADER_SYSTEM_PROMPT).toContain("ownedPaths");
     expect(LEADER_SYSTEM_PROMPT).toMatch(/retry|re-assign/i);
-    // model override bullet should be present
-    expect(LEADER_SYSTEM_PROMPT).toMatch(/model.*mechanical|mechanical.*model/i);
+    expect(LEADER_SYSTEM_PROMPT).toMatch(/model.*overrides.*executorClass/i);
   });
 
   it("Wait & Continue section explains early auto-wake and recommends generous durations", () => {
@@ -33,7 +31,7 @@ describe("leader agent reasoning map wiring", () => {
     expect(LEADER_SYSTEM_PROMPT).not.toMatch(/wait_and_continue.*60 seconds/i);
   });
 
-  it("exposes reasoning map tools to leader sessions", () => {
+  it("exposes task and render tools to leader sessions", () => {
     const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
     const result = getAgentType("leader").getToolGroups({
       sessionKey: "leader-1",
@@ -45,59 +43,12 @@ describe("leader agent reasoning map wiring", () => {
       scheduleWaitContinue: vi.fn(),
     });
 
-    expect(Object.keys(result.toolGroups)).toContain("reasoning-map");
-    expect(result.mcpToolNames).toContain(
-      "mcp__reasoning-map__create_reasoning_map",
-    );
-    expect(result.reasoningMapState).toEqual({ maps: [] });
-  });
-
-  it("publishes reasoning graph state into the dashboard side panel", async () => {
-    const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
-    const envelopes: Array<Record<string, unknown>> = [];
-    bus.subscribe((envelope) => envelopes.push(envelope));
-    const result = getAgentType("leader").getToolGroups({
-      sessionKey: "leader-1",
-      cwd: "/tmp/project",
-      bus,
-      worktreeInfo: null,
-      worktreeIsolation: false,
-      startMinionSession: vi.fn(),
-      scheduleWaitContinue: vi.fn(),
-    });
-
-    const createMap = result.toolGroups["reasoning-map"]!.find(
-      (tool) => tool.name === "create_reasoning_map",
-    )!;
-    await createMap.handler({
-      title: "Risky refactor",
-      outcome: {
-        title: "Refactor safely",
-        summary: "Keep behavior while changing structure.",
-        successSignal: "Focused tests pass.",
-      },
-    });
-
-    expect(result.renderState?.components).toContainEqual(
-      expect.objectContaining({
-        id: "reasoning-map-dashboard",
-        type: "section",
-        title: "Reasoning Graph",
-      }),
-    );
-    expect(envelopes).toContainEqual(
-      expect.objectContaining({
-        type: "render_update",
-        leaderSessionKey: "leader-1",
-        action: "append",
-        components: [
-          expect.objectContaining({
-            id: "reasoning-map-dashboard",
-            type: "section",
-          }),
-        ],
-      }),
-    );
+    expect(Object.keys(result.toolGroups).sort()).toEqual([
+      "render-dashboard",
+      "task-manager",
+    ]);
+    expect(result.mcpToolNames).toContain("mcp__task-manager__plan_task");
+    expect(result.mcpToolNames).toContain("mcp__render-dashboard__render_set");
   });
 
   // Regression (2026-06): the child-task sweep used to live in `onComplete`,

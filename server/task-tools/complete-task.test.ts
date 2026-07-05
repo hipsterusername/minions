@@ -84,6 +84,31 @@ describe("complete_task", () => {
     expect(ctx.sent[0]!["type"]).toBe("task_plan_update");
   });
 
+  it("accepts long results without truncating storage", async () => {
+    const ctx = makeCtx();
+    const planTool = createPlanTaskToolDef(ctx);
+    const completeTool = createCompleteTaskToolDef(ctx);
+    const longResult = "long-result\n".repeat(500);
+
+    await call(planTool, {
+      taskId: "t1",
+      title: "T1",
+      description: "",
+      priority: "medium",
+    });
+    await call(completeTool, { taskId: "t1", result: longResult });
+
+    expect(ctx.taskState.tasks.get("t1")!.result).toBe(longResult);
+  });
+
+  it("describes the summary-first artifact-file convention", () => {
+    const ctx = makeCtx();
+    const tool = createCompleteTaskToolDef(ctx);
+
+    expect(tool.description).toContain("summary-first");
+    expect(tool.description).toContain("artifact file");
+  });
+
   it("rejects unknown taskIds without creating a phantom record", async () => {
     const ctx = makeCtx();
     const tool = createCompleteTaskToolDef(ctx);

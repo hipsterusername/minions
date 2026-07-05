@@ -1,0 +1,129 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  activitySection,
+  groupSessionsByActivity,
+  needsAttention,
+  sessionBelongsToProject,
+  sessionDisplayTitle,
+  type MobileSessionInfo,
+} from "./mobile-selectors.ts";
+
+function session(overrides: Partial<MobileSessionInfo>): MobileSessionInfo {
+  return {
+    sessionKey: overrides.sessionKey ?? "s-1",
+    sessionId: null,
+    status: overrides.status ?? "idle",
+    cwd: "/tmp/project",
+    ...overrides,
+  };
+}
+
+describe("mobile selectors", () => {
+  it("marks error and pending sessions as needing attention", () => {
+    expect(needsAttention(session({ status: "error" }))).toBe(true);
+    expect(needsAttention(session({ pendingAttention: true }))).toBe(true);
+    expect(needsAttention(session({ status: "running" }))).toBe(false);
+  });
+
+  it("uses taskName for display title and falls back to sessionKey", () => {
+    expect(sessionDisplayTitle(session({ taskName: "Refactor auth" }))).toBe("Refactor auth");
+    expect(sessionDisplayTitle(session({ taskName: "   ", sessionKey: "abc" }))).toBe("abc");
+    expect(sessionDisplayTitle(session({ sessionKey: "fallback" }))).toBe("fallback");
+  });
+
+  it("classifies statuses into activity sections", () => {
+    expect(activitySection("running")).toBe("active");
+    expect(activitySection("creating")).toBe("active");
+    expect(activitySection("waiting")).toBe("active");
+    expect(activitySection("idle")).toBe("idle");
+    expect(activitySection("error")).toBe("idle");
+    expect(activitySection("totally-unknown")).toBe("idle");
+    expect(activitySection("stopped")).toBe("stopped");
+    expect(activitySection("completed")).toBe("stopped");
+    expect(activitySection("disconnected")).toBe("stopped");
+  });
+
+  it("groups sessions into Active → Idle → Stopped sections, recent-active first within each", () => {
+    const olderRunning = session({ sessionKey: "older-running", status: "running", lastActivityAt: 10 });
+    const newerRunning = session({ sessionKey: "newer-running", status: "running", lastActivityAt: 50 });
+    const idle = session({ sessionKey: "idle", status: "idle", lastActivityAt: 30 });
+    const error = session({ sessionKey: "error", status: "error", lastActivityAt: 99 });
+    const stopped = session({ sessionKey: "stopped", status: "stopped", lastActivityAt: 5 });
+    const completed = session({ sessionKey: "completed", status: "completed", lastActivityAt: 8 });
+
+    const sections = groupSessionsByActivity([
+      olderRunning,
+      stopped,
+      idle,
+      error,
+      newerRunning,
+      completed,
+    ]);
+
+    expect(sections.map((s) => s.id)).toEqual(["active", "idle", "stopped"]);
+    expect(sections.map((s) => s.title)).toEqual(["Active", "Idle", "Stopped / Cleared"]);
+    // Active: most recently active first.
+    expect(sections[0]!.sessions.map((s) => s.sessionKey)).toEqual(["newer-running", "older-running"]);
+    // Idle holds idle + error; error is the most recently active here.
+    expect(sections[1]!.sessions.map((s) => s.sessionKey)).toEqual(["error", "idle"]);
+    // Stopped holds stopped + completed, recent first.
+    expect(sections[2]!.sessions.map((s) => s.sessionKey)).toEqual(["completed", "stopped"]);
+  });
+
+  it("omits empty sections", () => {
+    const sections = groupSessionsByActivity([
+      session({ sessionKey: "a", status: "running" }),
+      session({ sessionKey: "b", status: "running" }),
+    ]);
+    expect(sections.map((s) => s.id)).toEqual(["active"]);
+  });
+
+  it("scopes sessions to a project by cwd, including worktree subpaths", () => {
+    const root = session({ sessionKey: "root", cwd: "/work/alpha" });
+    const worktree = session({
+      sessionKey: "wt",
+      cwd: "/work/alpha/.minions/worktrees/leader-1",
+    });
+    const sibling = session({ sessionKey: "sibling", cwd: "/work/alpha-beta" });
+    const other = session({ sessionKey: "other", cwd: "/work/beta" });
+
+    expect(sessionBelongsToProject(root, "/work/alpha")).toBe(true);
+    expect(sessionBelongsToProject(worktree, "/work/alpha")).toBe(true);
+    // A sibling whose path merely shares the prefix string must not match.
+    expect(sessionBelongsToProject(sibling, "/work/alpha")).toBe(false);
+    expect(sessionBelongsToProject(other, "/work/alpha")).toBe(false);
+    // Trailing slash on the project path is tolerated.
+    expect(sessionBelongsToProject(worktree, "/work/alpha/")).toBe(true);
+    // Empty project path never matches.
+    expect(sessionBelongsToProject(root, "")).toBe(false);
+  });
+
+  it("breaks ties within a section by attention then title", () => {
+    const plain = session({ sessionKey: "plain", status: "idle", taskName: "Zeta", lastActivityAt: 0 });
+    const flagged = session({ sessionKey: "flagged", status: "idle", taskName: "Alpha", pendingAttention: true, lastActivityAt: 0 });
+    const [section] = groupSessionsByActivity([plain, flagged]);
+    // Equal lastActivityAt → attention wins over alphabetical order.
+    expect(section!.sessions.map((s) => s.sessionKey)).toEqual(["flagged", "plain"]);
+  });
+
+  it("orders stopped sessions by most recent response timestamp before title", () => {
+    const newer = session({
+      sessionKey: "z-new",
+      status: "stopped",
+      taskName: "Zeta newer",
+      lastActivityAt: 300,
+    });
+    const older = session({
+      sessionKey: "a-old",
+      status: "completed",
+      taskName: "Alpha older",
+      lastActivityAt: 100,
+    });
+
+    const [section] = groupSessionsByActivity([older, newer]);
+
+    expect(section!.id).toBe("stopped");
+    expect(section!.sessions.map((s) => s.sessionKey)).toEqual(["z-new", "a-old"]);
+  });
+});

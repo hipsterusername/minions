@@ -98,12 +98,6 @@ export interface LeaderData {
   waitReason?: string | null | undefined;
   /** Set briefly after a successful merge to show a confirmation banner */
   mergeConfirmed?: boolean | undefined;
-  /** Set when this Leader was spawned by a routine step (survives reload). */
-  routineRunId?: string | null | undefined;
-  /** Phase id within the routine, when routineRunId is set. */
-  routinePhaseId?: string | null | undefined;
-  /** Step id within the phase, when routineRunId is set. */
-  routineStepId?: string | null | undefined;
   /** Merge conflict state: set when approve & merge fails due to conflicts */
   mergeConflict?: {
     conflicts: string[];

@@ -9,7 +9,6 @@
 import type Database from "better-sqlite3";
 import type { ApprovalState, TaskRecord } from "./task-tools.ts";
 import type { RenderState } from "../shared/render-dsl.ts";
-import type { ReasoningMapState } from "./reasoning-map-tools.ts";
 
 // ── Row types ────────────────────────────────────────────
 
@@ -254,39 +253,6 @@ export function deleteRenderState(
   sessionKey: string,
 ): void {
   db.prepare("DELETE FROM render_state WHERE session_key = ?").run(sessionKey);
-}
-
-// ── Reasoning map state ─────────────────────────────────
-
-export function upsertReasoningMapState(
-  db: Database.Database,
-  sessionKey: string,
-  state: ReasoningMapState,
-): void {
-  db.prepare(`
-    INSERT INTO reasoning_map_state (session_key, state_json, updated_at)
-    VALUES (?, ?, ?)
-    ON CONFLICT(session_key) DO UPDATE SET
-      state_json = excluded.state_json,
-      updated_at = excluded.updated_at
-  `).run(sessionKey, JSON.stringify(state), new Date().toISOString());
-}
-
-export function getReasoningMapState(
-  db: Database.Database,
-  sessionKey: string,
-): ReasoningMapState | null {
-  const row = db.prepare(
-    "SELECT state_json FROM reasoning_map_state WHERE session_key = ?",
-  ).get(sessionKey) as { state_json: string } | undefined;
-  return row ? JSON.parse(row.state_json) as ReasoningMapState : null;
-}
-
-export function deleteReasoningMapState(
-  db: Database.Database,
-  sessionKey: string,
-): void {
-  db.prepare("DELETE FROM reasoning_map_state WHERE session_key = ?").run(sessionKey);
 }
 
 // ── Event log ────────────────────────────────────────────

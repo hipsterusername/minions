@@ -44,15 +44,7 @@ export interface FeatureFlagDefinition {
  * fully shipped or fully removed, delete the entry rather than letting
  * the registry rot. (Per project convention: replace, don't deprecate.)
  */
-export const FEATURE_FLAGS: ReadonlyArray<FeatureFlagDefinition> = [
-  {
-    id: "routines",
-    label: "Routines",
-    description:
-      "Show the Routines dock pill and editor. Off by default while the routines flow is being reworked.",
-    defaultValue: false,
-  },
-];
+export const FEATURE_FLAGS: ReadonlyArray<FeatureFlagDefinition> = [];
 
 /** Map view of {@link FEATURE_FLAGS} for O(1) lookup by id. */
 const DEFINITIONS_BY_ID: ReadonlyMap<string, FeatureFlagDefinition> = new Map(

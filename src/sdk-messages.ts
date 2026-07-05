@@ -15,6 +15,7 @@
  */
 
 import type { NormalizedEvent } from "../shared/normalized-event.ts";
+import { randomUuid } from "./random-id.ts";
 
 // ── Display message (rendered in both Leader & Minion nodes) ──
 
@@ -39,7 +40,7 @@ export interface DisplayMessage {
 // ── Helpers ────────────────────────────────────────────
 
 export function msgId(prefix = "m"): string {
-  return `${prefix}-${crypto.randomUUID()}`;
+  return `${prefix}-${randomUuid()}`;
 }
 
 function formatRateLimitMessage(event: Extract<NormalizedEvent, { kind: "rate_limit" }>): string {

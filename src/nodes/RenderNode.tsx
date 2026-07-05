@@ -15,6 +15,7 @@ import { registerNodeType } from "../node-registry.ts";
 import { CONTEXT_OUT_PORT, registerContract } from "../graph.ts";
 import type { NodeInterfaceContract } from "../graph.ts";
 import { flattenRenderStateToText, formatRenderComponentToText } from "../render-flatten.ts";
+import { copyText as copyToClipboard } from "../components/CopyButton.tsx";
 import { subscribeSocketTopic, type ServerMessage } from "../use-socket.ts";
 import { SimpleMarkdown } from "../components/SimpleMarkdown.tsx";
 import { ResizeHandle } from "../components/ResizeHandle.tsx";
@@ -2351,7 +2352,9 @@ export function RenderNodeRenderer({
     );
   }, []);
   const copyText = useCallback((text: string) => {
-    void navigator.clipboard.writeText(text);
+    void copyToClipboard(text).catch((err: unknown) => {
+      console.warn("[RenderNode] copy failed:", err);
+    });
   }, []);
   const exitContextSelection = useCallback(() => {
     setContextSelectionActive(false);

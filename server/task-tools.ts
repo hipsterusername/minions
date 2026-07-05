@@ -37,6 +37,7 @@ import { createGetTaskStatusToolDef } from "./task-tools/get-task-status.ts";
 import { createWaitAndContinueToolDef } from "./task-tools/wait-and-continue.ts";
 import { createSetTaskNameToolDef } from "./task-tools/set-task-name.ts";
 import { createRequestApprovalToolDef } from "./task-tools/request-approval.ts";
+import { createCheckpointSessionToolDef } from "./task-tools/checkpoint-session.ts";
 
 // ── Factory ────────────────────────────────────────────
 
@@ -114,6 +115,7 @@ export function createTaskToolsForLeader(opts: {
     createGetTaskStatusToolDef(ctx),
     createSetTaskNameToolDef(ctx),
     createWaitAndContinueToolDef(ctx),
+    createCheckpointSessionToolDef(ctx),
   ];
 
   // Only add request_approval when worktree isolation is active

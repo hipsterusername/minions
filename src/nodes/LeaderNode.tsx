@@ -11,7 +11,6 @@ import {
   normalizedToDisplayMessages,
   type DisplayMessage,
 } from "../sdk-messages.ts";
-import { buildLeaderSystemPrompt } from "../prompts/build-leader-prompt.ts";
 import { useStatusBanners, StatusBannerStack } from "../components/StatusBanner.tsx";
 import { StreamingBubble, StreamingIndicator } from "../components/StreamingBubble.tsx";
 import { chatRoleStyle } from "../chat-bubble-style.ts";
@@ -24,6 +23,7 @@ import type { SkillTemplate } from "../skills/types.ts";
 import { ResizeHandle } from "../components/ResizeHandle.tsx";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { debugFlagStore } from "../debug.ts";
+import { useLeaderFullscreenRequest } from "../use-leader-fullscreen-request.ts";
 import { DebugInspector } from "../components/DebugInspector.tsx";
 import { ConfirmModal } from "../components/ConfirmModal.tsx";
 import { canvasScale } from "../canvas-scale.ts";
@@ -52,6 +52,7 @@ import {
   type ContextHashes,
   type CanvasContextSignature,
 } from "../connected-context.ts";
+import { buildFrozenLeaderFollowUpPrompt, freezeLeaderSystemPrompt, type FrozenLeaderPrompt } from "./leader/frozen-prompt.ts";
 
 registerContract(LEADER_CONTRACT);
 
@@ -100,26 +101,21 @@ import { LeaderThinkingGroup } from "./leader/messages/ThinkingGroup.tsx";
 import { UserMessageBubble } from "./leader/messages/UserMessageBubble.tsx";
 import { SelectableMessageBubble } from "./leader/messages/SelectableMessageBubble.tsx";
 
-
 // Task Plan Panel extracted to ./leader/TaskPlanPanel.tsx
 import { TaskPlanPanel } from "./leader/TaskPlanPanel.tsx";
-
 
 // Skill components extracted to ./leader/skills/
 import { SkillTagChip } from "./leader/skills/SkillTagChip.tsx";
 import { SkillFlyout } from "./leader/skills/SkillFlyout.tsx";
 
-
 // ConfigFooter extracted to ./leader/ConfigFooter.tsx
 import { ConfigFooter } from "./leader/ConfigFooter.tsx";
-
 
 // Header menu + prompt components extracted to ./leader/
 import { HeaderMenu } from "./leader/HeaderMenu.tsx";
 import { LeaderPromptBar } from "./leader/prompt/LeaderPromptBar.tsx";
 import { LeaderPromptOverlay } from "./leader/prompt/LeaderPromptOverlay.tsx";
 import { LeaderFullscreen } from "./leader/fullscreen/LeaderFullscreen.tsx";
-
 
 /* ── Main component ───────────────────────────────────────────────────── */
 
@@ -160,6 +156,7 @@ export function LeaderNodeRenderer({
   const scrollZoneRef = useRef<HTMLDivElement>(null);
   const nodeRootRef = useRef<HTMLDivElement | null>(null);
   const syncedRef = useRef(false);
+  const frozenPromptRef = useRef<FrozenLeaderPrompt | null>(null);
   const contextHashesRef = useRef<ContextHashes>({});
   const canvasContextSignatureRef = useRef<CanvasContextSignature>(null);
   const { banners, processNormalizedEvent, dismissBanner } = useStatusBanners();
@@ -231,6 +228,10 @@ export function LeaderNodeRenderer({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [isFullscreen]);
+
+  // The Activity view (or any sibling surface) can ask this node to open its
+  // cockpit by id; the hook bridges that request channel to local state.
+  useLeaderFullscreenRequest(node.id, () => setIsFullscreen(true));
 
   // Click-outside: deactivate scroll lock when clicking outside the scroll zone
   useEffect(() => {
@@ -747,17 +748,18 @@ export function LeaderNodeRenderer({
       fullPrompt = `${sessionContext}\n\n${fullPrompt}`;
     }
 
-    const finalSystemPrompt = buildLeaderSystemPrompt({
+    const frozenPrompt = freezeLeaderSystemPrompt({
       skillIds: data.skillIds ?? [],
       skillValues: data.skillValues ?? {},
       systemPromptPrefix: data.systemPromptPrefix,
     });
+    frozenPromptRef.current = frozenPrompt;
 
     socketSend({
       type: "create_session",
       sessionKey: key,
       prompt: fullPrompt,
-      systemPrompt: finalSystemPrompt,
+      systemPrompt: frozenPrompt.systemPrompt,
       role: "leader",
       model: data.model,
       thinkingConfig: data.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
@@ -811,17 +813,18 @@ export function LeaderNodeRenderer({
       fullPrompt = `${sessionContext}\n\n${fullPrompt}`;
     }
 
-    const finalSystemPrompt = buildLeaderSystemPrompt({
+    const frozenPrompt = freezeLeaderSystemPrompt({
       skillIds: dataRef.current.skillIds ?? [],
       skillValues: dataRef.current.skillValues ?? {},
       systemPromptPrefix: dataRef.current.systemPromptPrefix,
     });
+    frozenPromptRef.current = frozenPrompt;
 
     socketSend({
       type: "create_session",
       sessionKey: key,
       prompt: fullPrompt,
-      systemPrompt: finalSystemPrompt,
+      systemPrompt: frozenPrompt.systemPrompt,
       role: "leader",
       model: dataRef.current.model,
       thinkingConfig: dataRef.current.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
@@ -853,15 +856,6 @@ export function LeaderNodeRenderer({
     const current = dataRef.current;
     if (!socketSend || !input.trim() || !current.sessionKey) return;
 
-    // Rebuild the system prompt so mid-session skill additions/removals
-    // (and freshly-added library skills available for arming) take effect
-    // on the next turn.
-    const finalSystemPrompt = buildLeaderSystemPrompt({
-      skillIds: current.skillIds ?? [],
-      skillValues: current.skillValues ?? {},
-      systemPromptPrefix: current.systemPromptPrefix,
-    });
-
     // Re-gather context on each turn:
     //   (a) binary attachments always forwarded for image nodes added after the first turn,
     //   (b) changed/new text context prepended as a delta <connected-context> block.
@@ -872,12 +866,15 @@ export function LeaderNodeRenderer({
     const rawPrompt = input.trim();
     const deltaBlock = changedItems.length > 0 ? buildContextBlock(changedItems) : null;
     const prompt = deltaBlock ? `${deltaBlock}\n\n${rawPrompt}` : rawPrompt;
+    const frozen = frozenPromptRef.current ?? freezeLeaderSystemPrompt({ skillIds: current.skillIds ?? [], skillValues: current.skillValues ?? {}, systemPromptPrefix: current.systemPromptPrefix });
+    frozenPromptRef.current = frozen;
+    const followUp = buildFrozenLeaderFollowUpPrompt({ frozen, current, prompt });
 
     socketSend({
       type: "send_message",
       sessionKey: current.sessionKey,
-      prompt,
-      systemPrompt: finalSystemPrompt,
+      prompt: followUp.prompt,
+      systemPrompt: followUp.systemPrompt,
       thinkingConfig: current.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
       ...(attachments.length > 0 ? { attachments } : {}),
     });

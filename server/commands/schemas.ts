@@ -143,6 +143,10 @@ export const COMMAND_SCHEMAS = {
   }),
   // Info queries
   get_context_usage: sessionScoped("get_context_usage"),
+  get_usage_report: sessionScoped("get_usage_report"),
+  get_provider_usage_report: command("get_provider_usage_report", {
+    harness: z.string().optional(),
+  }),
   get_supported_models: sessionScoped("get_supported_models"),
   get_supported_commands: sessionScoped("get_supported_commands"),
   get_supported_agents: sessionScoped("get_supported_agents"),
@@ -157,17 +161,6 @@ export const COMMAND_SCHEMAS = {
     sessionKey,
     serverName: z.string().optional(),
     enabled: z.boolean().optional(),
-  }),
-  // Routines
-  list_routines: command("list_routines", { cwd }),
-  start_routine: command("start_routine", {
-    cwd,
-    routineId: z.string().optional(),
-    runId: z.string().optional(),
-    routineInputs: z.record(z.string(), z.unknown()).optional(),
-  }),
-  abort_routine: command("abort_routine", {
-    runId: z.string().optional(),
   }),
   // Render-DSL interactive components
   submit_form: command("submit_form", {

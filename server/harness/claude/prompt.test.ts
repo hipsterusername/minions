@@ -21,7 +21,7 @@ function baseOpts(over: Partial<HarnessStartOptions> = {}): HarnessStartOptions 
     cwd: "/tmp",
     prompt: "hello",
     systemPrompt: "",
-    model: "claude-sonnet-4-6",
+    model: "claude-sonnet-5",
     allowedTools: [],
     abortSignal: new AbortController().signal,
     ...over,

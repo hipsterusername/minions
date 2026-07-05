@@ -13,7 +13,6 @@ vi.mock("./nodes/FolderNode.tsx", () => ({}));
 vi.mock("./nodes/ContextGroupNode.tsx", () => ({}));
 vi.mock("./nodes/RenderNode.tsx", () => ({}));
 vi.mock("./nodes/ImageNode.tsx", () => ({}));
-vi.mock("./nodes/RoutineNode.tsx", () => ({}));
 
 vi.mock("./api.ts", () => ({
   listProjects: vi.fn(),
@@ -85,10 +84,6 @@ vi.mock("./McpServersBrowser.tsx", () => ({
 
 vi.mock("./SkillEditor.tsx", () => ({
   SkillEditor: () => null,
-}));
-
-vi.mock("./RoutineEditor.tsx", () => ({
-  RoutineEditor: () => null,
 }));
 
 vi.mock("./BottomRightDock.tsx", () => ({

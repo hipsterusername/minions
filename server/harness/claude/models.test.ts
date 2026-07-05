@@ -10,4 +10,13 @@ describe("Claude model metadata", () => {
     expect(supportsAdaptiveThinking("fable")).toBe(true);
     expect(supportsAdaptiveThinking("claude-fable-5")).toBe(true);
   });
+
+  it("resolves the sonnet alias to the Sonnet 5 concrete model id", () => {
+    expect(resolveModelAlias("sonnet")).toBe("claude-sonnet-5");
+  });
+
+  it("marks Sonnet 5 as adaptive-thinking capable", () => {
+    expect(supportsAdaptiveThinking("sonnet")).toBe(true);
+    expect(supportsAdaptiveThinking("claude-sonnet-5")).toBe(true);
+  });
 });

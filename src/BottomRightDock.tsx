@@ -1,12 +1,11 @@
 /**
  * BottomRightDock — single source of truth for the bottom-right cluster
- * of floating tools (Sessions, Map, MCP, Skills, Routines).
+ * of floating tools (Sessions, Map, MCP, Skills).
  *
  * Replaces the previous setup where each panel managed its own
  * collapsed/expanded state and rendered its own pill. That produced
- * overlapping pills (the old Routine `⚡` circle sat on top of the MCP
- * pill at bottom:56) and let users open multiple panels at once,
- * stacking them on top of each other.
+ * overlapping pills and let users open multiple panels at once, stacking
+ * them on top of each other.
  *
  * Design contract:
  *   - Exactly one panel can be open at a time (mutex).
@@ -363,11 +362,9 @@ export function DockPanelHeader({
 // ── Dock bar ─────────────────────────────────────────────────────────────────
 
 interface DockButtonConfig {
-  id: DockPanelId | "routines";
+  id: DockPanelId;
   label: string;
   icon: ReactNode;
-  /** When provided, the button is action-only — it does not toggle a panel. */
-  onAction?: () => void;
 }
 
 const DOT_COLOR: Record<NonNullable<DockBadge["dot"]>, string> = {
@@ -523,22 +520,13 @@ function DockPill({
   );
 }
 
-interface DockBarProps {
-  /**
-   * When provided, the Routines pill is shown and clicking it invokes
-   * this callback. When undefined (e.g. the `routines` feature flag is
-   * off), the pill is omitted entirely.
-   */
-  onOpenRoutines?: (() => void) | undefined;
-}
-
-export function DockBar({ onOpenRoutines }: DockBarProps) {
+export function DockBar() {
   const { activePanel, togglePanel, badges } = useDock();
   const density = useDockDensity();
   const compact = density === "compact";
 
   const buttons: DockButtonConfig[] = useMemo(() => {
-    const list: DockButtonConfig[] = [
+    return [
       {
         id: "sessions",
         label: "Sessions",
@@ -560,16 +548,7 @@ export function DockBar({ onOpenRoutines }: DockBarProps) {
         icon: <SkillsIcon />,
       },
     ];
-    if (onOpenRoutines) {
-      list.push({
-        id: "routines",
-        label: "Routines",
-        icon: <RoutinesIcon />,
-        onAction: onOpenRoutines,
-      });
-    }
-    return list;
-  }, [onOpenRoutines]);
+  }, []);
 
   return (
     <ViewportOverlay>
@@ -607,15 +586,11 @@ export function DockBar({ onOpenRoutines }: DockBarProps) {
             )}
             <DockPill
               config={b}
-              active={b.id !== "routines" && activePanel === b.id}
-              badge={b.id === "routines" ? undefined : badges[b.id]}
+              active={activePanel === b.id}
+              badge={badges[b.id]}
               density={density}
               onClick={() => {
-                if (b.onAction) {
-                  b.onAction();
-                  return;
-                }
-                togglePanel(b.id as DockPanelId);
+                togglePanel(b.id);
               }}
             />
           </span>
@@ -701,23 +676,6 @@ function SkillsIcon() {
       strokeLinejoin="round"
     >
       <path d="M8 1.5L9.6 6h4.4l-3.6 2.7L11.8 13 8 10.3 4.2 13l1.4-4.3L2 6h4.4z" />
-    </svg>
-  );
-}
-
-function RoutinesIcon() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M9 2L4 9h3l-1 5 5-7H8z" fill="currentColor" stroke="none" />
     </svg>
   );
 }

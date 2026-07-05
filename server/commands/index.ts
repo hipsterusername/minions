@@ -39,6 +39,8 @@ import { rewindFiles } from "./rewind-files.ts";
 import { seedReadState } from "./seed-read-state.ts";
 import {
   getContextUsage,
+  getUsageReport,
+  getProviderUsageReport,
   getSupportedModels,
   getSupportedCommands,
   getSupportedAgents,
@@ -46,9 +48,6 @@ import {
   getMcpServerStatus,
 } from "./info-queries.ts";
 import { reconnectMcpServer, toggleMcpServer } from "./mcp-control.ts";
-import { listRoutinesCommand } from "./list-routines.ts";
-import { startRoutine } from "./start-routine.ts";
-import { abortRoutine } from "./abort-routine.ts";
 import { submitForm } from "./submit-form.ts";
 import { clearSession } from "./clear-session.ts";
 import type { CommandContext, CommandTable, WsCommand } from "./types.ts";
@@ -91,6 +90,8 @@ export const COMMAND_TABLE = {
   seed_read_state: seedReadState,
   // Info queries
   get_context_usage: getContextUsage,
+  get_usage_report: getUsageReport,
+  get_provider_usage_report: getProviderUsageReport,
   get_supported_models: getSupportedModels,
   get_supported_commands: getSupportedCommands,
   get_supported_agents: getSupportedAgents,
@@ -99,10 +100,6 @@ export const COMMAND_TABLE = {
   // MCP server control
   reconnect_mcp_server: reconnectMcpServer,
   toggle_mcp_server: toggleMcpServer,
-  // Routines
-  list_routines: listRoutinesCommand,
-  start_routine: startRoutine,
-  abort_routine: abortRoutine,
   // Render-DSL interactive components
   submit_form: submitForm,
   // Session history

@@ -18,7 +18,6 @@ import {
   loadRecentEvents,
   openPersistDb,
   persistEvent,
-  persistReasoningMapState,
   persistRenderState,
   persistSession,
   persistTaskState,
@@ -27,7 +26,6 @@ import {
 } from "./session-persist.ts";
 import type { TaskManagerState, TaskRecord } from "./task-tools.ts";
 import type { RenderState } from "./render-tools.ts";
-import type { ReasoningMapState } from "./reasoning-map-tools.ts";
 import {
   MAX_BUFFERED_EVENTS,
   type BufferedEvent,
@@ -107,26 +105,6 @@ function makeRenderState(opts: {
       gap: opts.gap ?? 12,
     },
     components: opts.components ?? [{ id: "m", type: "metric", label: "N", value: "1" }],
-  };
-}
-
-function makeReasoningMapState(): ReasoningMapState {
-  return {
-    activeMapId: "map-1",
-    maps: [
-      {
-        id: "map-1",
-        title: "Debug",
-        status: "active",
-        createdAt: "2026-05-23T12:00:00.000Z",
-        updatedAt: "2026-05-23T12:00:00.000Z",
-        nodes: [],
-        edges: [],
-        actionBindings: [],
-        challenges: [],
-        revisions: [],
-      },
-    ],
   };
 }
 
@@ -221,20 +199,10 @@ describe("session-persist integration", () => {
     expect(hydrated[0]?.render?.components[0]?.id).toBe("s");
   });
 
-  it("persistReasoningMapState round-trips active reasoning state", () => {
-    persistSession(makeSession());
-    persistReasoningMapState("sess-1", makeReasoningMapState());
-
-    const hydrated = hydrateSessionsFromDb();
-    expect(hydrated[0]?.reasoningMap?.activeMapId).toBe("map-1");
-    expect(hydrated[0]?.reasoningMap?.maps[0]?.title).toBe("Debug");
-  });
-
   it("removePersistedSession deletes the row + task records + render state + events", () => {
     persistSession(makeSession());
     persistTaskState("sess-1", makeTaskState([makeTaskRecord()]));
     persistRenderState("sess-1", makeRenderState());
-    persistReasoningMapState("sess-1", makeReasoningMapState());
     persistEvent("sess-1", {
       type: "sdk_event",
       sessionKey: "sess-1",

@@ -6,6 +6,7 @@ import {
   type WsEnvelope,
 } from "../shared/ws-envelope.ts";
 import type { NormalizedEvent } from "../shared/normalized-event.ts";
+import type { RenderState } from "../shared/render-dsl.ts";
 
 export type ServerMessage =
   | { type: "session_list"; sessions: SessionInfo[] }
@@ -14,9 +15,9 @@ export type ServerMessage =
   | { type: "session_status"; sessionKey: string; status: string; sessionId?: string }
   | { type: "session_error"; sessionKey: string; error: string; fullError?: string }
   | { type: "kanban_card_created"; sessionKey: string; card: { title: string; description: string; context: string; priority: "low" | "medium" | "high" | "critical"; subtasks: string[] }; timestamp: number }
-  | { type: "sdk_event"; sessionKey: string; event: NormalizedEvent }
-  | { type: "sync_response"; sessionKey: string; found: boolean; status?: string; sessionId?: string; totalCost?: number; turns?: number; lastError?: string | null; lastErrorFull?: string | null; events?: SyncEvent[]; model?: string; permissionMode?: string; initData?: Record<string, unknown>; taskName?: string | null; role?: "leader" | "minion" | "default" | "card-composer"; activeMinions?: ActiveMinion[]; taskPlan?: SyncTaskRecord[]; worktree?: { path: string; branch: string } | null; approval?: { requested?: boolean; summary?: string; diff?: unknown; graceUntil?: number } | null; harness?: string; harnessCapabilities?: HarnessCapabilities | null }
-  | { type: "control_response"; command: string; sessionKey: string; requestId: string | null; success: boolean; error?: string; [key: string]: unknown }
+  | { type: "sdk_event"; sessionKey: string; event: NormalizedEvent; timestamp?: number }
+  | { type: "sync_response"; sessionKey: string; found: boolean; status?: string; sessionId?: string | null; cwd?: string; totalCost?: number; turns?: number; usageTotals?: SessionUsageTotals; lastError?: string | null; lastErrorFull?: string | null; events?: SyncEvent[]; model?: string | null; permissionMode?: string | null; initData?: Record<string, unknown>; taskName?: string | null; role?: "leader" | "minion" | "default" | "card-composer"; activeMinions?: ActiveMinion[]; taskPlan?: SyncTaskRecord[]; renderState?: RenderState | null; worktree?: { path: string; branch: string } | null; approval?: { requested?: boolean; summary?: string; diff?: unknown; graceUntil?: number } | null; harness?: string; harnessCapabilities?: HarnessCapabilities | null }
+  | { type: "control_response"; command: string; sessionKey: string | null; requestId: string | null; success: boolean; error?: string; [key: string]: unknown }
   | { type: "session_cleared"; sessionKey: string }
   | { type: "session_task_name"; sessionKey: string; taskName: string }
   | { type: "approval_requested"; sessionKey: string; summary: string; diff: unknown; timestamp: number; graceUntil?: number }
@@ -31,7 +32,8 @@ export type ServerMessage =
   | { type: "minion_status"; minionSessionKey: string; trigger: "step" | "done" | "fail"; message: string; timestamp: number; leaderSessionKey?: string; taskId?: string }
   | { type: "minion_completed"; leaderSessionKey: string; minionSessionKey: string; taskId: string; status: "completed" | "failed"; result: string; timestamp: number }
   | { type: "agent_task_update"; leaderSessionKey: string; taskId: string; status: string; summary?: string; timestamp: number }
-  | { type: "render_update"; leaderSessionKey: string; action: "set" | "patch" | "append" | "remove"; layout?: { title?: string | null; columns?: number; components?: unknown[] }; updates?: unknown[]; components?: unknown[]; ids?: string[] }
+  | { type: "task_plan_update"; leaderSessionKey: string; tasks: SyncTaskRecord[] }
+  | { type: "render_update"; leaderSessionKey: string; action: "set" | "patch" | "append" | "remove"; layout?: { title?: string | null; columns?: number; gap?: number; components?: unknown[] }; updates?: unknown[]; components?: unknown[]; ids?: string[] }
   | { type: "wait_state"; sessionKey: string; action: string; reason: string; waitUntil?: number; scheduledAt?: number; durationMs?: number; timestamp?: number }
   | { type: "error"; message: string };
 
@@ -83,11 +85,14 @@ export interface SessionInfo {
   cwd: string;
   totalCost?: number;
   turns?: number;
+  usageTotals?: SessionUsageTotals;
   model?: string | null;
   permissionMode?: string | null;
   taskName?: string | null;
   role?: "leader" | "minion" | "default" | "card-composer";
   activeMinions?: ActiveMinion[];
+  taskPlan?: SyncTaskRecord[];
+  renderState?: RenderState | null;
   /** Registered harness driving this session (e.g. "claude", "echo"). */
   harness?: string;
   /**
@@ -96,6 +101,16 @@ export interface SessionInfo {
    * was removed) — clients should fall back to safe defaults.
    */
   harnessCapabilities?: HarnessCapabilities | null;
+  /** Most recent assistant response/activity timestamp from the server snapshot. */
+  lastActivityAt?: number | null;
+}
+
+export interface SessionUsageTotals {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreation: number;
+  cacheHitRate: number;
 }
 
 export interface ActiveMinion {
@@ -120,6 +135,13 @@ const MAX_RECONNECT_ATTEMPTS = 10;
 const BASE_DELAY_MS = 2000;
 const MAX_DELAY_MS = 30000;
 const JITTER_MS = 500;
+/**
+ * Cap on the offline outbound queue. Messages sent while the socket is down
+ * are buffered and flushed on the next open; this bounds memory if we stay
+ * disconnected for a long time. When the cap is exceeded the oldest queued
+ * messages are dropped (with a warning) so the newest commands survive.
+ */
+const MAX_PENDING_SENDS = 100;
 
 /** Compute exponential backoff delay with jitter: 2s → 4s → 8s → 16s … capped at 30s, ±500ms jitter */
 function getBackoffDelay(attempt: number): number {
@@ -213,6 +235,10 @@ interface TopicListener {
 export function useSocket(url: string): SocketHandle {
   const wsRef = useRef<WebSocket | null>(null);
   const listenersRef = useRef<Set<TopicListener>>(new Set());
+  // Outbound messages enqueued while the socket was not OPEN (initial connect,
+  // reconnect backoff, auth-token refresh). Flushed in order on the next open
+  // so commands like `create_session` are never silently lost.
+  const pendingSendsRef = useRef<string[]>([]);
   const [connected, setConnected] = useState(false);
   const [reconnectState, setReconnectState] = useState<ReconnectState>("reconnecting");
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
@@ -237,6 +263,17 @@ export function useSocket(url: string): SocketHandle {
         setReconnectState("connected");
         attemptRef.current = 0;
         setReconnectAttempt(0);
+
+        // Flush anything queued while we were disconnected, in order. New
+        // sends that arrive during the loop go straight out on the now-OPEN
+        // socket, so there is no interleaving or double-send.
+        if (pendingSendsRef.current.length > 0) {
+          const queued = pendingSendsRef.current;
+          pendingSendsRef.current = [];
+          for (const serialized of queued) {
+            ws.send(serialized);
+          }
+        }
       };
 
       ws.onclose = () => {
@@ -295,10 +332,24 @@ export function useSocket(url: string): SocketHandle {
   }, [connect]);
 
   const send = useCallback((data: unknown) => {
+    const serialized = JSON.stringify(data);
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(data));
-    } else {
-      console.warn("[ws] send dropped — WebSocket not open", { readyState: wsRef.current?.readyState, data });
+      wsRef.current.send(serialized);
+      return;
+    }
+
+    // Socket not open yet (first connect, reconnect backoff, or token
+    // refresh). Queue the message and flush it on the next open instead of
+    // dropping it — otherwise a tap like "Launch leader" that fires
+    // `create_session` during a disconnected window is silently lost.
+    const queue = pendingSendsRef.current;
+    queue.push(serialized);
+    if (queue.length > MAX_PENDING_SENDS) {
+      const overflow = queue.length - MAX_PENDING_SENDS;
+      queue.splice(0, overflow);
+      console.warn(
+        `[ws] outbound queue exceeded ${MAX_PENDING_SENDS}; dropped ${overflow} oldest message(s)`,
+      );
     }
   }, []);
 

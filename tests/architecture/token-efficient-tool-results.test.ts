@@ -29,8 +29,6 @@ const TOOL_MODULE_DIRS = [join(REPO_ROOT, "server", "task-tools")];
 const TOOL_MODULE_FILES = [
   join(REPO_ROOT, "server", "minion-tools.ts"),
   join(REPO_ROOT, "server", "render-tools.ts"),
-  join(REPO_ROOT, "server", "reasoning-map-tools.ts"),
-  join(REPO_ROOT, "server", "routines", "step-tools.ts"),
   join(REPO_ROOT, "server", "agents", "card-composer.ts"),
 ];
 

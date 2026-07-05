@@ -77,6 +77,9 @@ describe("initDb — fresh DB", () => {
         "INSERT INTO sessions (session_key, project_id) VALUES ('s', 'proj')",
       ).run();
       db.prepare(
+        "INSERT INTO session_usage (session_key, role, model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, created_at) VALUES ('s', 'leader', 'claude-sonnet', 10, 3, 90, 5, 0.01, 1)",
+      ).run();
+      db.prepare(
         `INSERT INTO task_records (task_id, leader_session_key, title, created_at) VALUES ('t', 's', 'T', ${Date.now()})`,
       ).run();
       db.prepare(
@@ -86,7 +89,10 @@ describe("initDb — fresh DB", () => {
         "INSERT INTO event_log (session_key, event_type, payload) VALUES ('s', 'e', '{}')",
       ).run();
       db.prepare(
-        `INSERT INTO routine_runs (run_id, routine_id, project_path, snapshot_json, started_at, state) VALUES ('r', 'rt', '/p', '{}', '${new Date().toISOString()}', 'running')`,
+        "INSERT INTO push_subscriptions (endpoint, p256dh, auth, created_at) VALUES ('https://push.example/1', 'p', 'a', 1)",
+      ).run();
+      db.prepare(
+        "INSERT INTO push_vapid (id, public_key, private_key) VALUES (1, 'public', 'private')",
       ).run();
     }).not.toThrow();
 
@@ -203,6 +209,53 @@ describe("initDb — session_id migration", () => {
       session_key: "s-legacy",
       session_id: "sdk-id-123",
     });
+    db.close();
+  });
+});
+
+describe("initDb - session_usage identity migration", () => {
+  it("adds usage identity columns and enforces unique forward rows", () => {
+    const path = freshDbPath();
+    const old = new Database(path);
+    old.exec(`
+      CREATE TABLE session_usage (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_key           TEXT NOT NULL,
+        role                  TEXT NOT NULL,
+        model                 TEXT,
+        input_tokens          INTEGER NOT NULL DEFAULT 0,
+        output_tokens         INTEGER NOT NULL DEFAULT 0,
+        cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+        cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+        cost_usd              REAL,
+        created_at            INTEGER NOT NULL
+      );
+      INSERT INTO session_usage (
+        session_key, role, model, input_tokens, output_tokens, created_at
+      ) VALUES ('s', 'leader', 'claude-sonnet', 1, 1, 1);
+    `);
+    old.close();
+
+    const db = initDb(path);
+    const legacy = db
+      .prepare("SELECT source, usage_identity FROM session_usage WHERE id = 1")
+      .get();
+    expect(legacy).toEqual({ source: "assistant", usage_identity: "" });
+
+    db.prepare(
+      `INSERT INTO session_usage (
+        session_key, role, model, source, message_id, harness_session_id,
+        usage_identity, input_tokens, output_tokens, created_at
+      ) VALUES ('s', 'leader', 'claude-sonnet', 'assistant', 'msg-1', 'sdk-1', 'msg-1', 1, 2, 2)`,
+    ).run();
+    expect(() =>
+      db.prepare(
+        `INSERT INTO session_usage (
+          session_key, role, model, source, message_id, harness_session_id,
+          usage_identity, input_tokens, output_tokens, created_at
+        ) VALUES ('s', 'leader', 'claude-sonnet', 'assistant', 'msg-1', 'sdk-1', 'msg-1', 1, 3, 3)`,
+      ).run(),
+    ).toThrow(/UNIQUE/i);
     db.close();
   });
 });

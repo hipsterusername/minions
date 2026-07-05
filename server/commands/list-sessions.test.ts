@@ -69,6 +69,53 @@ describe("listSessions", () => {
     expect(ghost?.harnessCapabilities).toBeNull();
   });
 
+  it("includes lastActivityAt from the most recent assistant response", () => {
+    const h = setup({ sessionKey: "older" });
+    h.host.eventBuffer = [
+      {
+        type: "sdk_event",
+        sessionKey: "older",
+        event: { kind: "text", role: "assistant", text: "older reply" },
+        timestamp: 100,
+      },
+      {
+        type: "session_status",
+        sessionKey: "older",
+        status: "stopped",
+        timestamp: 300,
+      },
+    ];
+    const newer = new SessionHost("newer", "/p");
+    newer.status = "stopped";
+    newer.eventBuffer = [
+      {
+        type: "sdk_event",
+        sessionKey: "newer",
+        event: { kind: "text", role: "assistant", text: "newer reply" },
+        timestamp: 200,
+      },
+      {
+        type: "session_status",
+        sessionKey: "newer",
+        status: "stopped",
+        timestamp: 250,
+      },
+    ];
+    (h.ctx.registry as unknown as {
+      map: Map<string, SessionHost>;
+    }).map.set("newer", newer);
+
+    listSessions(h.ctx, cmd({ type: "list_sessions" }), h.ws);
+
+    const sessions = h.wsSent[0]!["sessions"] as Array<{
+      sessionKey: string;
+      lastActivityAt: number | null;
+    }>;
+    const byKey = new Map(sessions.map((s) => [s.sessionKey, s]));
+    expect(byKey.get("older")?.lastActivityAt).toBe(100);
+    expect(byKey.get("newer")?.lastActivityAt).toBe(200);
+  });
+
   it("emits an empty session list when the registry is empty", () => {
     const h = setup();
     // Drain the seeded session.

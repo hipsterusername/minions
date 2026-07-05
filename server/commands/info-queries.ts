@@ -5,6 +5,7 @@
  *
  * Run-dependent (route through host.runControl):
  *   - get_context_usage      → runControl.getContextUsage()
+ *   - get_usage_report       → runControl.getUsageReport()
  *   - get_mcp_server_status  → runControl.mcpServerStatus()
  *
  * Run-independent (route through harness.staticInfo()):
@@ -18,6 +19,7 @@
  */
 
 import { getHarness } from "../harness/index.ts";
+import { unicastGlobal } from "../bus.ts";
 import {
   getSessionOrError,
   sendControlError,
@@ -26,6 +28,7 @@ import {
   errToMessage,
 } from "./helpers.ts";
 import type { CommandHandler } from "./types.ts";
+import type { SessionHost } from "../session-host.ts";
 
 // ── Run-dependent queries ─────────────────────────────────────
 
@@ -49,6 +52,138 @@ export const getContextUsage: CommandHandler = (ctx, cmd, ws) => {
       sendControlError(ws, "get_context_usage", host.id, cmd.requestId, errToMessage(err)),
     );
 };
+
+export const getUsageReport: CommandHandler = (ctx, cmd, ws) => {
+  const host = getSessionOrError(ctx.registry, cmd.sessionKey, ws);
+  if (!host) return;
+  if (!host.runControl) {
+    sendControlError(ws, "get_usage_report", host.id, cmd.requestId, "No active query");
+    return;
+  }
+  const fn = host.runControl.getUsageReport;
+  if (!fn) {
+    unsupportedByHarness(ws, "get_usage_report", host, cmd.requestId);
+    return;
+  }
+  fn.call(host.runControl)
+    .then((usage) =>
+      sendControlResponse(ws, "get_usage_report", host.id, cmd.requestId, { usage }),
+    )
+    .catch((err: unknown) =>
+      sendControlError(ws, "get_usage_report", host.id, cmd.requestId, errToMessage(err)),
+    );
+};
+
+export const getProviderUsageReport: CommandHandler = (ctx, cmd, ws) => {
+  const harnessName = cmd.harness;
+  if (!harnessName) {
+    unicastGlobal(ws, {
+      type: "control_response",
+      command: "get_provider_usage_report",
+      sessionKey: null,
+      requestId: cmd.requestId ?? null,
+      success: false,
+      error: "harness required",
+    });
+    return;
+  }
+
+  const liveHost = newestLiveUsageHost([...ctx.registry.values()], harnessName);
+  if (liveHost?.runControl?.getUsageReport) {
+    liveHost.runControl.getUsageReport()
+      .then((usage) =>
+        unicastGlobal(ws, {
+          type: "control_response",
+          command: "get_provider_usage_report",
+          sessionKey: liveHost.id,
+          requestId: cmd.requestId ?? null,
+          success: true,
+          provider: harnessName,
+          usage,
+        }),
+      )
+      .catch((err: unknown) =>
+        unicastGlobal(ws, {
+          type: "control_response",
+          command: "get_provider_usage_report",
+          sessionKey: liveHost.id,
+          requestId: cmd.requestId ?? null,
+          success: false,
+          provider: harnessName,
+          error: errToMessage(err),
+        }),
+      );
+    return;
+  }
+
+  let harness;
+  try {
+    harness = getHarness(harnessName);
+  } catch (err: unknown) {
+    unicastGlobal(ws, {
+      type: "control_response",
+      command: "get_provider_usage_report",
+      sessionKey: null,
+      requestId: cmd.requestId ?? null,
+      success: false,
+      provider: harnessName,
+      error: errToMessage(err),
+    });
+    return;
+  }
+
+  if (!harness.getUsageReport) {
+    unicastGlobal(ws, {
+      type: "control_response",
+      command: "get_provider_usage_report",
+      sessionKey: null,
+      requestId: cmd.requestId ?? null,
+      success: false,
+      provider: harnessName,
+      error: `No live ${harnessName} query exposes a usage report.`,
+    });
+    return;
+  }
+
+  harness.getUsageReport()
+    .then((usage) =>
+      unicastGlobal(ws, {
+        type: "control_response",
+        command: "get_provider_usage_report",
+        sessionKey: null,
+        requestId: cmd.requestId ?? null,
+        success: true,
+        provider: harnessName,
+        usage,
+      }),
+    )
+    .catch((err: unknown) =>
+      unicastGlobal(ws, {
+        type: "control_response",
+        command: "get_provider_usage_report",
+        sessionKey: null,
+        requestId: cmd.requestId ?? null,
+        success: false,
+        provider: harnessName,
+        error: errToMessage(err),
+      }),
+    );
+};
+
+function newestLiveUsageHost(hosts: SessionHost[], harnessName: string): SessionHost | null {
+  return hosts
+    .filter((host) => host.harnessName === harnessName)
+    .filter((host) => host.runControl?.getUsageReport)
+    .sort((a, b) => lastActivityAt(b) - lastActivityAt(a))[0] ?? null;
+}
+
+function lastActivityAt(host: SessionHost): number {
+  for (let i = host.eventBuffer.length - 1; i >= 0; i -= 1) {
+    const timestamp = host.eventBuffer[i]?.timestamp;
+    if (typeof timestamp === "number") return timestamp;
+  }
+  return 0;
+}
 
 export const getMcpServerStatus: CommandHandler = (ctx, cmd, ws) => {
   const host = getSessionOrError(ctx.registry, cmd.sessionKey, ws);

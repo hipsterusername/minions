@@ -25,12 +25,16 @@ import { getAgentType } from "./agents/index.ts";
 import type { WorktreeInfo } from "./worktree.ts";
 import type { RuntimeSessionInfo, TaskManagerState } from "./task-tools.ts";
 import type { RenderState } from "./render-tools.ts";
-import type { ReasoningMapState } from "./reasoning-map-tools.ts";
 import {
   persistEvent as persistEventToDb,
   persistSession as persistSessionToDb,
   type PersistableSession,
 } from "./session-persist.ts";
+import {
+  emptyUsageTotals,
+  type SessionUsageTotals,
+} from "./usage-telemetry.ts";
+import { buildPendingCompactionStartOptions, createProactiveCompactionState, emitSessionCompacted, type ProactiveCompactionState } from "./proactive-compaction.ts";
 import {
   MAX_BUFFERED_EVENTS,
   deriveTaskName,
@@ -54,6 +58,7 @@ import {
 } from "./session-host-terminate.ts";
 import { applySessionEndedForMinion } from "./task-lifecycle.ts";
 import { setSessionCanvasContext } from "./canvas-context-store.ts";
+import { drainQueuedWaitResume } from "./wait-resume.ts";
 
 export {
   MAX_BUFFERED_EVENTS,
@@ -105,11 +110,7 @@ export interface StartSessionOptions {
   thinkingConfig?: ThinkingConfig | null | undefined;
   /** Multimodal attachments riding on the first user message. */
   attachments?: ImageAttachment[] | undefined;
-  /**
-   * External MCP servers resolved from a routine step's `mcpServerIds`.
-   * Merged into the session's `mcpServers` dict alongside the agent's
-   * built-in servers. Shape: server name → SDK-compatible config object.
-   */
+  /** External MCP servers merged alongside the agent's built-in servers. */
   externalMcpServers?: Record<string, unknown> | undefined;
   /**
    * Formatted tool names for servers in `externalMcpServers`.
@@ -148,6 +149,7 @@ export class SessionHost {
   // ── Persisted metrics ──────────────────────────────
   totalCost = 0;
   turns = 0;
+  usageTotals: SessionUsageTotals = emptyUsageTotals();
 
   // ── Volatile runtime state ─────────────────────────
   /** Registered harness name for this session (e.g. "claude"). */
@@ -160,21 +162,15 @@ export class SessionHost {
   lastErrorFull: string | null = null;
   model: string | null = null;
   permissionMode: string | null = null;
-  /** Adaptive-thinking config supplied by the client. Refreshed on each turn. */
   thinkingConfig: ThinkingConfig | null = null;
   initData: Record<string, unknown> | null = null;
-  /** For leader sessions: the task manager state tracking minion tasks */
   taskState: TaskManagerState | null = null;
   worktree: WorktreeInfo | null = null;
   worktreeIsolation = false;
-  /** Active wait timer for wait_and_continue (leader only) */
   waitTimerId: ReturnType<typeof setTimeout> | null = null;
-  /** Current render dashboard state (leader only) — kept in sync by render MCP tools */
   renderState: RenderState | null = null;
-  /** Current Reasoning Graph state (leader only) */
-  reasoningMapState: ReasoningMapState | null = null;
-  /** Latest full connected-canvas context snapshot (leader only). */
   canvasContext: string | null = null;
+  proactiveCompaction: ProactiveCompactionState = createProactiveCompactionState();
   private terminateDeps: SessionTerminateDeps | null = null;
 
   constructor(id: string, cwd: string) {
@@ -249,6 +245,7 @@ export class SessionHost {
     this.terminateDeps = deps;
 
     try {
+      this.abortController = abortController;
       // Derive a task name for agent types that want one (leader) — done
       // before we might mutate cwd based on worktree.
       const resolvedRole: SessionRole = opts.role ?? this.role ?? "default";
@@ -256,7 +253,6 @@ export class SessionHost {
 
       // ── Reset per-run volatile state ──────────────────
       this.status = "running";
-      this.abortController = abortController;
       this.eventStream = null;
       this.runControl = null;
       this.lastError = null;
@@ -303,7 +299,6 @@ export class SessionHost {
 
       if (toolResult.taskState) this.taskState = toolResult.taskState;
       if (toolResult.renderState) this.renderState = toolResult.renderState;
-      if (toolResult.reasoningMapState) this.reasoningMapState = toolResult.reasoningMapState;
 
       const harness = getHarness(this.harnessName);
 
@@ -325,6 +320,7 @@ export class SessionHost {
       this.eventStream = events;
       this.runControl = control;
       let recoveryOpts: StartSessionOptions | null = null;
+      let compactedFrom: string | null = null;
       try {
         for await (const event of events) {
           if (abortController.signal.aborted) break;
@@ -354,10 +350,15 @@ export class SessionHost {
         this.eventStream = null;
         this.runControl = null;
       }
+      if (!recoveryOpts) {
+        compactedFrom = this.sessionId;
+        recoveryOpts = buildPendingCompactionStartOptions(this, opts);
+      }
       // Reset status so the guard allows the recursive recovery start.
-      if (recoveryOpts) { this.status = "idle"; await this.start(recoveryOpts, deps); }
+      if (recoveryOpts) { this.status = "idle"; await this.start(recoveryOpts, deps); if (compactedFrom) emitSessionCompacted(this, deps, compactedFrom, null); }
+      else drainQueuedWaitResume(this, deps);
     } catch (err: unknown) {
-      if (abortController.signal.aborted) return;
+      if (abortController.signal.aborted || this.abortController !== abortController) return;
       const errorMessage = err instanceof Error ? err.message : String(err);
       this.status = "error";
       this.lastError = errorMessage;

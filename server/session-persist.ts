@@ -28,12 +28,18 @@ import { initDb } from "./db.ts";
 import * as repo from "./session-repo.ts";
 import type { ApprovalState, TaskManagerState } from "./task-tools.ts";
 import type { RenderState } from "../shared/render-dsl.ts";
-import type { ReasoningMapState } from "./reasoning-map-tools.ts";
 import type { WorktreeInfo } from "./worktree-types.ts";
 import {
   MAX_BUFFERED_EVENTS,
   type BufferedEvent,
 } from "./session-host-config.ts";
+import {
+  emptyUsageTotals,
+  getSessionUsageTotals,
+  insertSessionUsage,
+  type SessionUsageRowInput,
+  type SessionUsageTotals,
+} from "./usage-telemetry.ts";
 
 // ── Connection management ───────────────────────────────
 
@@ -183,7 +189,6 @@ export function removePersistedSession(sessionKey: string): void {
   try {
     repo.deleteSession(db, sessionKey);
     repo.deleteRenderState(db, sessionKey);
-    repo.deleteReasoningMapState(db, sessionKey);
     repo.purgeEventsForSession(db, sessionKey);
     // task records are cascaded logically (we delete rows whose leader key
     // matches) — no FK so we do it explicitly.
@@ -213,6 +218,27 @@ export function persistEvent(
     repo.appendEvent(db, sessionKey, event.type, event);
   } catch (err) {
     console.warn("[session-persist] persistEvent failed:", err);
+  }
+}
+
+export function persistSessionUsage(row: SessionUsageRowInput): void {
+  const db = ensureDb();
+  if (!db) return;
+  try {
+    insertSessionUsage(db, row);
+  } catch (err) {
+    console.warn("[session-persist] persistSessionUsage failed:", err);
+  }
+}
+
+export function loadSessionUsageTotals(sessionKey: string): SessionUsageTotals {
+  const db = ensureDb();
+  if (!db) return emptyUsageTotals();
+  try {
+    return getSessionUsageTotals(db, sessionKey);
+  } catch (err) {
+    console.warn("[session-persist] loadSessionUsageTotals failed:", err);
+    return emptyUsageTotals();
   }
 }
 
@@ -295,19 +321,6 @@ export function persistRenderState(
   }
 }
 
-export function persistReasoningMapState(
-  sessionKey: string,
-  state: ReasoningMapState,
-): void {
-  const db = ensureDb();
-  if (!db) return;
-  try {
-    repo.upsertReasoningMapState(db, sessionKey, state);
-  } catch (err) {
-    console.warn("[session-persist] persistReasoningMapState failed:", err);
-  }
-}
-
 // ── Boot-time hydration ─────────────────────────────────
 
 /**
@@ -320,8 +333,8 @@ export interface HydratedSession {
   row: repo.SessionRow;
   tasks: TaskManagerState | null;
   render: RenderState | null;
-  reasoningMap: ReasoningMapState | null;
   events: BufferedEvent[];
+  usageTotals: SessionUsageTotals;
 }
 
 export function hydrateSessionsFromDb(): HydratedSession[] {
@@ -357,9 +370,9 @@ export function hydrateSessionsFromDb(): HydratedSession[] {
       }
     }
     const render = repo.getRenderState(db, row.session_key);
-    const reasoningMap = repo.getReasoningMapState(db, row.session_key);
     const events = loadRecentEvents(row.session_key);
-    out.push({ row, tasks, render, reasoningMap, events });
+    const usageTotals = loadSessionUsageTotals(row.session_key);
+    out.push({ row, tasks, render, events, usageTotals });
   }
   return out;
 }

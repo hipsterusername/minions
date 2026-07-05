@@ -22,7 +22,7 @@ import type { WebSocket } from "ws";
 import { unicastGlobal } from "./bus.ts";
 import type { WsCommand } from "./commands/index.ts";
 import { validateWsCommand } from "./commands/schemas.ts";
-import type { SessionListItem } from "./session-registry.ts";
+import type { SessionListItem } from "./session-list-item.ts";
 
 export interface ConnectionDeps {
   /** Current session list; sent once on connect. */

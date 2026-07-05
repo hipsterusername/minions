@@ -4,12 +4,11 @@
  *
  * Verifies the contract that replaced the old per-panel pill UX:
  *   - Pills toggle their panels (mutex: opening one closes the others).
- *   - Routines pill is action-only — it triggers a callback, not a panel.
  *   - Escape closes the active panel.
  *   - Click outside closes the active panel.
  *   - Live badges (count + dot + tail) round-trip through useDockBadge.
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import {
   DockBar,
@@ -47,11 +46,7 @@ function BadgeProbe({
   return null;
 }
 
-function renderDock(props?: { onOpenRoutines?: (() => void) | undefined }) {
-  const onOpenRoutines =
-    props && "onOpenRoutines" in props
-      ? props.onOpenRoutines
-      : () => {};
+function renderDock() {
   return render(
     <DockProvider>
       <BadgeProbe id="sessions" count={3} dot="success" tail="$0.42" />
@@ -62,7 +57,7 @@ function renderDock(props?: { onOpenRoutines?: (() => void) | undefined }) {
       <PanelProbe id="map" />
       <PanelProbe id="mcp" />
       <PanelProbe id="skills" />
-      <DockBar onOpenRoutines={onOpenRoutines} />
+      <DockBar />
     </DockProvider>,
   );
 }
@@ -101,26 +96,6 @@ describe("BottomRightDock", () => {
     expect(pill("Map").getAttribute("data-active")).toBe("true");
   });
 
-  it("Routines pill is action-only and never activates a panel", () => {
-    const onOpenRoutines = vi.fn();
-    renderDock({ onOpenRoutines });
-    fireEvent.click(pill("Routines"));
-    expect(onOpenRoutines).toHaveBeenCalledTimes(1);
-    // No data-active=true on the routines pill.
-    expect(pill("Routines").getAttribute("data-active")).toBe("false");
-  });
-
-  it("opening a panel does not close itself when Routines is clicked again", () => {
-    const onOpenRoutines = vi.fn();
-    renderDock({ onOpenRoutines });
-    fireEvent.click(pill("Skills"));
-    expect(screen.queryByTestId("panel-skills-body")).not.toBeNull();
-    fireEvent.click(pill("Routines"));
-    // Skills panel is still open — Routines does not steal panel focus.
-    expect(screen.queryByTestId("panel-skills-body")).not.toBeNull();
-    expect(onOpenRoutines).toHaveBeenCalledTimes(1);
-  });
-
   it("Escape closes the active panel", () => {
     renderDock();
     fireEvent.click(pill("MCP"));
@@ -138,7 +113,7 @@ describe("BottomRightDock", () => {
           outside
         </div>
         <PanelProbe id="skills" />
-        <DockBar onOpenRoutines={() => {}} />
+        <DockBar />
       </DockProvider>,
     );
     fireEvent.click(pill("Skills"));
@@ -178,13 +153,6 @@ describe("BottomRightDock", () => {
     expect(panelOverlay).not.toBeNull();
     expect(panelOverlay).toHaveStyle("position: fixed");
     expect(panel).toHaveStyle("pointer-events: auto");
-  });
-
-  it("hides the Routines pill when onOpenRoutines is undefined", () => {
-    renderDock({ onOpenRoutines: undefined });
-    expect(screen.queryByLabelText("Routines")).toBeNull();
-    // Sibling pills are unaffected.
-    expect(screen.getByLabelText("Sessions")).toBeInTheDocument();
   });
 
   it("shows a hover tooltip with the pill name when the label is hidden", () => {

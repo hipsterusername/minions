@@ -9,7 +9,6 @@
 import type { Bus } from "../bus.ts";
 import type { RuntimeSessionInfo, TaskManagerState } from "../task-tools.ts";
 import type { RenderState } from "../../shared/render-dsl.ts";
-import type { ReasoningMapState } from "../reasoning-map-tools.ts";
 import type { WorktreeInfo } from "../worktree.ts";
 import type { NormalizedToolDef } from "../harness/types.ts";
 import type { ThinkingConfig } from "../session-host-config.ts";
@@ -27,8 +26,6 @@ export interface AgentTypeContext {
   existingTaskState?: TaskManagerState;
   /** Existing render state to preserve across resume calls (leader only) */
   existingRenderState?: RenderState;
-  /** Existing reasoning map state to preserve across resume calls (leader only) */
-  existingReasoningMapState?: ReasoningMapState;
   /** Worktree inherited from the leader (minion only) */
   parentWorktree?: WorktreeInfo;
   /**
@@ -93,8 +90,6 @@ export interface AgentToolResult {
   taskState?: TaskManagerState;
   /** Optional render state (leader only) */
   renderState?: RenderState;
-  /** Optional reasoning map state (leader only) */
-  reasoningMapState?: ReasoningMapState;
 }
 
 // ── AgentType interface ───────────────────────────────────────────────────

@@ -71,7 +71,7 @@ const CLAUDE_MODEL_CAPABILITIES: Record<string, ModelCapability> = {
     supportsAdaptiveThinking: true,
     supportedEffortLevels: STANDARD_EFFORTS,
   },
-  "claude-sonnet-4-6": {
+  "claude-sonnet-5": {
     supportsAdaptiveThinking: true,
     supportedEffortLevels: STANDARD_EFFORTS,
   },

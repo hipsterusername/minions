@@ -2,8 +2,9 @@ import { useState, useRef, useEffect } from "react";
 import type { SaveStatus } from "./use-autosave.ts";
 import type { ProjectSettings } from "./api.ts";
 import { SettingsMenu } from "./SettingsMenu.tsx";
+import type { SocketSubscribe } from "./use-socket.ts";
 
-export type ActiveView = "canvas" | "kanban";
+export type ActiveView = "activity" | "canvas" | "kanban";
 
 interface ProjectHeaderProps {
   name: string;
@@ -17,8 +18,12 @@ interface ProjectHeaderProps {
   onViewChange: (view: ActiveView) => void;
   /** Number of cards blocked/needing attention — shows a badge on the Kanban tab */
   kanbanBlockedCount?: number;
+  /** Number of sessions needing attention — shows a badge on the Activity tab */
+  activityAttentionCount?: number;
   settings: ProjectSettings;
   onSettingsChange: (settings: ProjectSettings) => void;
+  socketSend?: (data: unknown) => void;
+  socketSubscribe?: SocketSubscribe;
 }
 
 export function ProjectHeader({
@@ -32,8 +37,11 @@ export function ProjectHeader({
   activeView,
   onViewChange,
   kanbanBlockedCount = 0,
+  activityAttentionCount = 0,
   settings,
   onSettingsChange,
+  socketSend,
+  socketSubscribe,
 }: ProjectHeaderProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(name);
@@ -205,6 +213,23 @@ export function ProjectHeader({
         aria-label="View mode"
       >
         <ViewTab
+          label="Activity"
+          active={activeView === "activity"}
+          onClick={() => onViewChange("activity")}
+          badge={activityAttentionCount > 0 ? activityAttentionCount : undefined}
+          icon={
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path
+                d="M1 6.5h2L4.5 2l3 8L9 6.5h2"
+                stroke="currentColor"
+                strokeWidth="1.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          }
+        />
+        <ViewTab
           label="Canvas"
           active={activeView === "canvas"}
           onClick={() => onViewChange("canvas")}
@@ -283,7 +308,12 @@ export function ProjectHeader({
       </div>
 
       {/* Settings (top right) */}
-      <SettingsMenu settings={settings} onSettingsChange={onSettingsChange} />
+      <SettingsMenu
+        settings={settings}
+        onSettingsChange={onSettingsChange}
+        socketSend={socketSend}
+        socketSubscribe={socketSubscribe}
+      />
     </div>
   );
 }

@@ -3,6 +3,7 @@ import type { ServerMessage, SessionInfo } from "./use-socket.ts";
 import { UsageSection } from "./UsagePopover.tsx";
 import {
   emptySessionUsage,
+  formatSessionUsageLine,
   mergeUsageEvent,
   mergeDoneEvent,
   type SessionUsage,
@@ -47,6 +48,14 @@ export function SessionPanel({
 
       if (serverMsg.type === "session_list") {
         setSessions(serverMsg.sessions);
+        setUsageBySession(
+          new Map(
+            serverMsg.sessions.map((s) => [
+              s.sessionKey,
+              usageFromSessionInfo(s),
+            ]),
+          ),
+        );
         return;
       }
 
@@ -108,13 +117,20 @@ export function SessionPanel({
       if (serverMsg.type === "sdk_event") {
         const key = serverMsg.sessionKey;
         const ev = serverMsg.event;
-        if (ev.kind === "usage" && ev.costUSD != null) {
-          const costUSD = ev.costUSD;
+        if (ev.kind === "usage") {
           setUsageBySession((prev) => {
             const next = new Map(prev);
-            next.set(key, mergeUsageEvent(prev.get(key) ?? emptySessionUsage(), costUSD));
+            next.set(key, mergeUsageEvent(prev.get(key) ?? emptySessionUsage(), ev));
             return next;
           });
+          const costUSD = ev.costUSD;
+          if (costUSD != null) {
+            setSessions((prev) =>
+              prev.map((s) =>
+                s.sessionKey === key ? { ...s, totalCost: costUSD } : s,
+              ),
+            );
+          }
         }
         if (ev.kind === "done" && ev.turns != null) {
           const turns = ev.turns;
@@ -123,6 +139,9 @@ export function SessionPanel({
             next.set(key, mergeDoneEvent(prev.get(key) ?? emptySessionUsage(), turns));
             return next;
           });
+          setSessions((prev) =>
+            prev.map((s) => (s.sessionKey === key ? { ...s, turns } : s)),
+          );
         }
       }
     });
@@ -143,6 +162,18 @@ export function SessionPanel({
     [socketSend],
   );
 
+  const handleClearAll = useCallback(() => {
+    if (!socketSend) return;
+    for (const session of sessionsRef.current.filter(
+      (s) =>
+        s.role !== "minion" &&
+        s.role !== "card-composer" &&
+        isSessionClearable(s),
+    )) {
+      socketSend({ type: "remove_session", sessionKey: session.sessionKey });
+    }
+  }, [socketSend]);
+
   const statusColor: Record<string, string> = {
     creating: "var(--status-creating)",
     running: "var(--status-success)",
@@ -154,6 +185,7 @@ export function SessionPanel({
   const visibleSessions = sessions.filter(
     (s) => s.role !== "minion" && s.role !== "card-composer",
   );
+  const removableSessions = visibleSessions.filter(isSessionClearable);
   const attachedSessions = visibleSessions.filter((s) =>
     attachedSessionKeys.has(s.sessionKey),
   );
@@ -214,6 +246,45 @@ export function SessionPanel({
             )}
           </>
         }
+        actions={
+          <button
+            type="button"
+            onClick={handleClearAll}
+            disabled={!socketSend || removableSessions.length === 0}
+            aria-label="Session Clear All"
+            title={
+              removableSessions.length > 0
+                ? `Remove ${removableSessions.length} idle or stopped session${
+                    removableSessions.length === 1 ? "" : "s"
+                  }`
+                : "No idle or stopped sessions to remove"
+            }
+            style={{
+              padding: "3px 7px",
+              fontSize: 10,
+              background:
+                removableSessions.length > 0
+                  ? "color-mix(in srgb, var(--status-stopped) 15%, transparent)"
+                  : "transparent",
+              border: "1px solid var(--border-default)",
+              borderRadius: 4,
+              color:
+                removableSessions.length > 0
+                  ? "var(--text-secondary)"
+                  : "var(--text-muted)",
+              cursor:
+                socketSend && removableSessions.length > 0
+                  ? "pointer"
+                  : "default",
+              fontFamily: "var(--font-mono)",
+              textTransform: "uppercase",
+              letterSpacing: 0,
+              whiteSpace: "nowrap",
+            }}
+          >
+            Clear All
+          </button>
+        }
       />
 
       {/* Session list */}
@@ -255,6 +326,9 @@ export function SessionPanel({
         {attachedSessions.map((session) => {
           const isAttached = true;
           const color = statusColor[session.status] ?? "var(--text-muted)";
+          const usageLine = formatSessionUsageLine(
+            usageBySession.get(session.sessionKey) ?? usageFromSessionInfo(session),
+          );
 
           return (
             <div
@@ -327,6 +401,7 @@ export function SessionPanel({
               <div
                 style={{
                   display: "flex",
+                  flexWrap: "wrap",
                   gap: 8,
                   marginBottom: 6,
                   fontSize: 10,
@@ -340,6 +415,7 @@ export function SessionPanel({
                 {(session.turns ?? 0) > 0 && (
                   <span>{session.turns}T</span>
                 )}
+                {usageLine && <span>{usageLine}</span>}
               </div>
 
               {/* Active minion tags */}
@@ -482,6 +558,9 @@ export function SessionPanel({
             {unattachedOpen &&
               unattachedSessions.map((session) => {
                 const color = statusColor[session.status] ?? "var(--text-muted)";
+                const usageLine = formatSessionUsageLine(
+                  usageBySession.get(session.sessionKey) ?? usageFromSessionInfo(session),
+                );
                 return (
                   <div
                     key={session.sessionKey}
@@ -546,6 +625,7 @@ export function SessionPanel({
                     <div
                       style={{
                         display: "flex",
+                        flexWrap: "wrap",
                         gap: 8,
                         marginBottom: 6,
                         fontSize: 10,
@@ -557,6 +637,7 @@ export function SessionPanel({
                         <span>${session.totalCost?.toFixed(4)}</span>
                       )}
                       {(session.turns ?? 0) > 0 && <span>{session.turns}T</span>}
+                      {usageLine && <span>{usageLine}</span>}
                     </div>
 
                     {/* Actions */}
@@ -641,4 +722,22 @@ export function SessionPanel({
       </div>
     </DockPanel>
   );
+}
+
+function usageFromSessionInfo(session: SessionInfo): SessionUsage {
+  const usage = emptySessionUsage();
+  usage.totalCost = session.totalCost ?? 0;
+  usage.turns = session.turns ?? 0;
+  if (session.usageTotals) {
+    usage.input = session.usageTotals.input;
+    usage.output = session.usageTotals.output;
+    usage.cacheRead = session.usageTotals.cacheRead;
+    usage.cacheCreation = session.usageTotals.cacheCreation;
+    usage.cacheHitRate = session.usageTotals.cacheHitRate;
+  }
+  return usage;
+}
+
+function isSessionClearable(session: SessionInfo): boolean {
+  return session.status === "idle" || session.status === "stopped";
 }

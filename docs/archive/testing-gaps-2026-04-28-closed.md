@@ -27,7 +27,6 @@ Every entry references the rule in `testing-strategy.md` it was caught by.
 | `tests/architecture/no-direct-broadcast.test.ts:63-69` | §5.7 (TRIVIAL) | Drop the "bus.ts has at least one `broadcast(`" sanity. Build would break before the test could. |
 | `tests/architecture/file-size.test.ts:62-64` | §5.7 (TRIVIAL) | Drop the "is reading at least a few server files" check. |
 | `shared/render-dsl.test.ts:24-192` | §5.4 (SCHEMA_REDUNDANT) | Delete the 8 "accepts valid X component" + 5 "rejects invalid X" tests. Replace per §2 below. |
-| `shared/routines/types.test.ts:103-394` | §5.4 (SCHEMA_REDUNDANT) | Delete tests that assert `.min(1)`, `.default(0)`, `.regex(...)`, `.enum(...)` directly. Keep `safeParseRoutine`'s **error-formatting** tests. |
 | `shared/ws-envelope.test.ts:19-74` | §5.4 (SCHEMA_REDUNDANT) | Delete topic-regex-pass/fail and envelope-required-field-pass/fail. |
 | `shared/ws-envelope.test.ts:115-117` | §5.7 (TAUTOLOGY) | `expect(GLOBAL_TOPIC).toBe("global")` — drop. |
 | `tests/harness/sdk-messages-snapshot.test.ts:67-307` | §5.6 (SNAPSHOT_BLOB) | Delete the 5 inline snapshots. Rewrite per §2 below. |
@@ -42,13 +41,6 @@ Every entry references the rule in `testing-strategy.md` it was caught by.
 | `server/mcp-server-store.test.ts:67, 71` | §5.7 (TRIVIAL) | Two empty-fs cases — collapse to one. |
 | `server/mcp-server-store.test.ts:158, 165, 171` | §5.9 (DUPLICATE) | Three near-identical "creates a new {stdio,SSE,HTTP} entry" tests — collapse to one parameterised case. |
 | `server/mcp-server-store.test.ts:215` | §5.9 (DUPLICATE) | Sort-by-id reassertion. |
-| `server/routines/external-mcp.test.ts:50, 60, 150, 200` | §5.7 / §5.9 | Drop the empty-input duplicate, the no-optional-fields trivial, and parameterise the SSE/HTTP describe blocks. |
-| `server/routines/scheduler-dag.test.ts:170 vs 208` | §5.9 (DUPLICATE) | Two assertions on the same diamond happy path — collapse. |
-| `server/routines/scheduler-dag.test.ts:185` | §5.7 (IMPL_COUPLING) | "lists dep edges" round-trips the parser, not the scheduler. |
-| `server/routines/scheduler-dag.test.ts:519` | §5.7 (TRIVIAL) | "emits mode=dag" tests a constant string field. |
-| `server/routines/templates.test.ts:25, 43-65` | §5.4 + §5.7 | Drop the schema-roundtrip and the `RESEARCH_ANALYZE_REPORT` literal-content tests. |
-| `server/routine-persist.test.ts:520-572` | §5.4 + §5.9 | Drop the `pragma table_info` / `pragma index_list` / `openPersistDb migrates fresh file` block. |
-| `server/routine-persist.test.ts:396` | §5.7 (TRIVIAL) | Drop "re-enables persistence after disable" — inverse-operation tautology. |
 | `server/session-persist.test.ts:296` | §5.7 (TRIVIAL) | Drop the `disablePersistence` no-op chain. |
 | `server/session-persist.test.ts:260` | §5.9 (DUPLICATE) | Drop "simulated server restart" — covered by the line-231 case. |
 | `server/session-registry.test.ts:62, 67-77` | §5.7 + §5.2 | Drop the empty-registry size and the impl-coupled `map` reach-in. |
@@ -70,7 +62,6 @@ Every entry references the rule in `testing-strategy.md` it was caught by.
 | `src/nodes/rasterize-annotations.node.test.ts:222-272` | §5.7 (TRIVIAL) | Drop the `fingerprintAnnotations([]) === "0"` and empty-cache tests. |
 | `src/prompts/build-leader-prompt.test.ts:88-93` | §5.7 (IMPL_COUPLING) | Drop the `(no description)` substring test. |
 | `src/render-flatten.test.ts:25-180` | §5.6 / §5.7 | Drop the literal-format pinning. Replace per §2 below. |
-| `src/routine-context-paths.test.ts:62-77` | §5.9 (DUPLICATE) | Trim the 10-case `it.each` to 3-4 representatives. |
 | `src/sdk-messages.test.ts:170-285` | §5.1 / §5.7 | Drop `msgId` regex tests, the "1 system message" length+role triad, the emoji-glyph tests, and the status-subtype default-fallthrough. |
 | `src/session-stream.test.ts:178-247` | §5.7 (IMPL_COUPLING) | Drop reference-equality early-return and message_delta-doesn't-end-stream-by-reference. |
 | `src/skills/built-in/index.test.ts:41-58` | §5.9 / §5.2 | Collapse the documented-by-id test into the exact-set test; drop the idempotency-of-`registerSkill` test. |
@@ -78,12 +69,9 @@ Every entry references the rule in `testing-strategy.md` it was caught by.
 | `src/usage-aggregator.test.ts:83-91, 206-215` | §5.3 / §5.7 | Drop no-mutate and `shortModelLabel` regex pinning. |
 | `src/UsagePopover.test.tsx` (entire file) | §5.5 (TRIVIAL) | Every assertion is `getBy* + .toBeDefined()`. Either rewrite to test something falsifiable or delete the file. |
 | `src/SessionPanel.test.tsx:100-128` | §5.5 (TRIVIAL) | 6 `.toBeDefined()` matchers — drop. The queries already carry signal. |
-| `src/RoutinePromptEditor.test.tsx:114-121` | §5.5 (TRIVIAL) | 4 `getByTitle.toBeTruthy()` — drop. |
 | `src/BottomRightDock.test.tsx:69-73` | §5.5 (TRIVIAL) | 4 `.toBeDefined()` — drop. |
-| `src/nodes/RoutineNode.test.tsx:237-439` | §5.5 (TRIVIAL) | 9 `.toBeTruthy()` across 3 tests — drop the matchers. |
 | `src/nodes/ImageNode.test.tsx:276-291, 335-342, 489-546` | §5.5 (IMPL_COUPLING) | Drop the inline-style assertions and the DOM-API-counter test. |
 | `src/components/AnnotationSidebar.test.tsx:216-229` | §5.5 (IMPL_COUPLING) | Drop the inline-flex and `data-no-drag` attribute-only tests; replace with drag-propagation behaviour test if drag matters. |
-| `src/RoutineEditor.test.tsx:508-557` | §5.5 + §5.9 | Drop the rail-button existence smoke and the duplicate drill-into-step test. |
 
 **Total:** ~100 distinct removals across ~50 files. Estimated 2,500–3,500 LoC
 of test code deleted with **zero** coverage loss.
@@ -119,10 +107,8 @@ it("metric component round-trips from render_set tool to client state", () => {
 A regression in either side of the contract surfaces. A regression in zod
 does not.
 
-### 2.2 `shared/routines/types.test.ts`
 
 Keep:
-- `safeParseRoutine`'s **error-formatting** tests — the editor consumes
   `formattedError`. The contract is the formatted message's shape, the
   joined path, and the per-field grouping.
 - One round-trip per failure-policy / step-type combination, exercising
@@ -252,10 +238,6 @@ ones a regression would hurt users most.
 |---|---|---|
 | `server/commands/<28 untested>.ts` | L2 | Each WS command: handler invocation, state mutation, emitted broadcast, error surface. Currently only `attachment-sanitize` and `create-session` are covered. |
 | `server/task-tools/<6 untested>.ts` | L2 | `complete-task`, `get-task-status`, `plan-task`, `request-approval`, `set-task-name`, `wait-and-continue`. Cover happy path + error path + state-already-completed guard. |
-| `server/routes/<all subdirs>.ts` | L2 | Real Express + supertest round-trips per route. Pattern: `tests/contracts/routine-routes.test.ts`. |
-| `server/routine-registry.ts` | L1 | Built-in registration + custom override + lookup. |
-| `server/routines/session-end.ts` | L1 | Termination paths + cleanup on partial failure. |
-| `server/routines/step-tools.ts` | L2 | Per-step tool factories — same shape as render-tools. |
 | `src/use-autosave.ts` | L1 | Debounce + flush + cancel-on-unmount. |
 | `src/use-canvas-keyboard.ts` | L1 | Keyboard mapping; modifier combinations. |
 | `src/use-canvas-file-drop.ts` | L1 | File-drop dispatch; reject paths outside the project. |
@@ -309,7 +291,6 @@ Sequence the work in three waves.
 
 5. Rewrites in §2 — schema round-trips that exercise real producers
    (render-DSL via `applyRenderMessage` + `createRenderTools`,
-   ws-envelope via `bus.emit*`, routine schema via `parseRoutine` +
    the scheduler). Stub comments are already in place at the top of
    the trimmed test files calling out the rewrites by §2.x label.
 6. Critical green-field tests in §3.1.
@@ -361,8 +342,6 @@ Sequence the work in three waves.
    Includes `info-queries` (6 handlers parameterised), the 4 merge-flow
    commands collapsed into `merge-flow.test.ts`, `interrupt` covering
    both `interrupt`/`interrupt_session`, plus per-command tests for
-   send-message, sync-session, remove-session, list-routines,
-   start-routine, abort-routine, mcp-control, seed-read-state,
    rewind-files, list-sessions, close-session, stop-session, set-model,
    set-permission-mode, stop-task, get-worktree-diff, merge-worktree,
    discard-worktree.

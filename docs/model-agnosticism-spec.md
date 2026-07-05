@@ -215,7 +215,6 @@ Today, every Minions tool already follows this shape — they just import
 | Layer | File(s) today | Change |
 |---|---|---|
 | Session host | `server/session-host.ts`, `session-host-run.ts`, `session-host-config.ts` | Replace `query()` import with `harness.start()`. Move model alias table into `server/harness/claude/models.ts`. |
-| MCP tool definitions | `server/task-tools.ts`, `server/task-tools/*.ts`, `server/minion-tools.ts`, `server/render-tools.ts`, `server/routines/step-tools.ts` | Stop importing `createSdkMcpServer`/`tool` directly. Each tool becomes a `NormalizedToolDef` literal; the harness wraps them. |
 | WS bus | `server/bus.ts`, `shared/ws-envelope.ts` | `sdk_event` payload changes from `SdkMessage` to `NormalizedEvent`. Add a schema test that pins the new shape. |
 | Persistence | `server/db.ts`, `server/session-persist.ts` | `event_log.payload` becomes `NormalizedEvent` JSON. New schema version; old rows are migrated by re-encoding (Phase 3) or dropped (acceptable — event_log is a transient replay buffer, not durable history). |
 | Client receive | `src/use-socket.ts` | Drop `ContentBlock` / `TextBlock` / `ToolUseBlock` / `ToolResultBlock`. Replace with `NormalizedEvent`. |
@@ -224,7 +223,6 @@ Today, every Minions tool already follows this shape — they just import
 | Usage accounting | `src/usage-aggregator.ts` | Make `cacheRead` / `cacheCreation` optional; default to zero. |
 | Prompts | `src/prompts/*.ts` | Stop hardcoding tool names by string. Read them from the harness's `allowedTools` list and interpolate. |
 | Dashboard, skills, worktree, approval | `shared/render-dsl.ts`, `src/skills/`, `server/worktree-*.ts`, `server/commands/approve-changes.ts` | **No change.** Already harness-agnostic. |
-| `.claude-canvas/` sidecar | `server/{skills,routine-store,session-persist,project-store}.ts` | Rename to `.minions/` with a one-version migration (see §6). |
 
 ---
 
@@ -351,7 +349,6 @@ Cost: ~3–5 days. This is the largest PR.
 
 **Changes:**
 - Each `server/task-tools/*.ts`, `server/minion-tools.ts`,
-  `server/render-tools.ts`, `server/routines/step-tools.ts`:
   - Stop importing `createSdkMcpServer`/`tool`.
   - Export a `NormalizedToolDef` (or array of them) — pure data, no SDK
     coupling.
@@ -400,7 +397,6 @@ Cost: ~1 day.
 ### Phase 7 — `.claude-canvas/` → `.minions/`
 
 **Changes:**
-- `server/{skills,routine-store,session-persist,project-store}.ts`: the
   sidecar dir constant is renamed.
 - One-time migration on server boot: if `.claude-canvas/` exists and
   `.minions/` does not, rename it. If both exist, log a warning and use
@@ -592,5 +588,4 @@ Source: model-agnosticism audit performed against the repo.
 | Worktree + approval | `server/worktree-*.ts`, `server/commands/approve-changes.ts`, `server/task-tools/request-approval.ts` | already abstract | — |
 | Skills system | `src/skills/`, `server/skills.ts` | already abstract | — |
 | Dashboard DSL | `shared/render-dsl.ts`, `server/render-tools.ts` | already abstract | — |
-| `.claude-canvas/` sidecar | `server/{skills,routine-store,session-persist,project-store}.ts` | cosmetic | 7 |
 | Auth | (none in code; SDK owns it) | needs new env per harness | 8 |

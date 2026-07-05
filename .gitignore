@@ -23,6 +23,7 @@ data/
 .claude-canvas/
 .canvas-worktrees/
 .minions/
+.run/
 
 # Claude Code local settings (user-specific)
 .claude/settings.local.json

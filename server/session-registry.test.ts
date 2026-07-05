@@ -26,6 +26,7 @@ import {
 } from "./session-persist.ts";
 import { createBus } from "./bus.ts";
 import type { WebSocketServer } from "ws";
+import { drainQueuedWaitResume, getQueuedWaitResume } from "./wait-resume.ts";
 
 function tmpDb(): string {
   return path.join(
@@ -198,12 +199,13 @@ describe("SessionRegistry.wakeWaitingLeaderIfAllChildrenTerminal — wake polici
     const r = new SessionRegistry();
     const map = (r as unknown as { map: Map<string, SessionHost> }).map;
     const startChildSession = vi.fn();
-    r.setDeps({
+    const deps = {
       bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
       startChildSession,
       forEachLeaderTaskState: r.forEachLeaderTaskState,
-    });
-    return { r, map, startChildSession };
+    };
+    r.setDeps(deps);
+    return { r, map, startChildSession, deps };
   }
 
   function makeLeader(id = "leader-1") {
@@ -242,7 +244,13 @@ describe("SessionRegistry.wakeWaitingLeaderIfAllChildrenTerminal — wake polici
     disablePersistence();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("any_terminal policy wakes when at least one of two children is terminal", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
     const { r, map, startChildSession } = makeRegistry();
     const h = makeLeader();
     h.waitTimerId = setTimeout(() => {}, 30_000);
@@ -264,8 +272,43 @@ describe("SessionRegistry.wakeWaitingLeaderIfAllChildrenTerminal — wake polici
 
     r.wakeWaitingLeaderIfAllChildrenTerminal("leader-1");
 
-    expect(startChildSession).toHaveBeenCalledOnce();
+    expect(startChildSession).not.toHaveBeenCalled();
     expect(h.taskState.pendingWait).toBeNull();
+    vi.advanceTimersByTime(15_000);
+    expect(startChildSession).toHaveBeenCalledOnce();
+  });
+
+  it("queues the wake when children finish before the leader run is idle", () => {
+    const { r, map, startChildSession, deps } = makeRegistry();
+    const h = makeLeader();
+    h.status = "running";
+    h.waitTimerId = setTimeout(() => {}, 30_000);
+    h.taskState = {
+      tasks: new Map([
+        ["t1", makeTask({ taskId: "t1", status: "completed", completedAt: 150 })],
+      ]),
+      pendingWait: {
+        durationMs: 30_000,
+        reason: "waiting for fast child",
+        scheduledAt: 100,
+        timerId: h.waitTimerId,
+      },
+      approval: null,
+    };
+    map.set("leader-1", h);
+
+    r.wakeWaitingLeaderIfAllChildrenTerminal("leader-1");
+
+    expect(startChildSession).not.toHaveBeenCalled();
+    expect(h.waitTimerId).toBeNull();
+    expect(h.taskState.pendingWait).not.toBeNull();
+    expect(getQueuedWaitResume(h)?.opts.prompt).toContain("waiting for fast child");
+
+    h.status = "idle";
+    drainQueuedWaitResume(h, deps);
+
+    expect(h.taskState.pendingWait).toBeNull();
+    expect(startChildSession).toHaveBeenCalledOnce();
   });
 
   it("all_terminal policy does NOT wake when only one of two children is terminal", () => {
@@ -329,6 +372,8 @@ describe("SessionRegistry.wakeWaitingLeaderIfAllChildrenTerminal — wake polici
   });
 
   it("idle leader is resumed when a child has completed while no wait was pending", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
     const { r, map, startChildSession } = makeRegistry();
     const h = makeLeader();
     h.status = "idle";
@@ -343,12 +388,43 @@ describe("SessionRegistry.wakeWaitingLeaderIfAllChildrenTerminal — wake polici
 
     r.wakeWaitingLeaderIfAllChildrenTerminal("leader-1");
 
+    expect(startChildSession).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(15_000);
     expect(startChildSession).toHaveBeenCalledOnce();
     const opts = startChildSession.mock.calls[0]![0] as { sessionKey: string; prompt: string };
     expect(opts.sessionKey).toBe("leader-1");
     expect(opts.prompt).toContain("t1");
     expect(opts.prompt).toContain("completed");
     expect(opts.prompt).toContain("great result");
+  });
+
+  it("coalesces multiple idle child completion wakes into one combined resume", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const { r, map, startChildSession } = makeRegistry();
+    const h = makeLeader();
+    h.status = "idle";
+    h.taskState = {
+      tasks: new Map([
+        ["t1", makeTask({ taskId: "t1", status: "completed", result: "first result" })],
+      ]),
+      pendingWait: null,
+      approval: null,
+    };
+    map.set("leader-1", h);
+
+    r.wakeWaitingLeaderIfAllChildrenTerminal("leader-1");
+    h.taskState.tasks.set("t2", makeTask({ taskId: "t2", status: "failed", result: "second result" }));
+    vi.advanceTimersByTime(1_000);
+    r.wakeWaitingLeaderIfAllChildrenTerminal("leader-1");
+    vi.advanceTimersByTime(14_999);
+
+    expect(startChildSession).toHaveBeenCalledOnce();
+    const prompt = (startChildSession.mock.calls[0]![0] as { prompt: string }).prompt;
+    expect(prompt).toContain("t1");
+    expect(prompt).toContain("first result");
+    expect(prompt).toContain("t2");
+    expect(prompt).toContain("second result");
   });
 
   it("idle leader is NOT resumed when the only terminal children are cancelled", () => {

@@ -26,9 +26,13 @@ export interface ProjectSettings {
   defaultLeaderThinkingConfig?: ThinkingConfig;
   defaultMinionHarness?: string;
   defaultMinionModel?: string;
+  mechanicalMinionModel?: string;
+  reasoningMinionModel?: string;
   defaultMinionThinkingConfig?: ThinkingConfig;
   defaultPermissionMode?: string;
   defaultWorktreeIsolation?: boolean;
+  /** Leader proactive compaction mode; see server/compaction-advisor.ts. */
+  proactiveCompaction?: "off" | "recommend" | "auto";
   dashboardLeaderActionPrompts?: {
     improve?: string;
     execute?: string;
@@ -41,6 +45,21 @@ export interface ProjectSettings {
   };
   [key: string]: unknown;
 }
+
+export type ExecutorClass = "mechanical" | "standard" | "reasoning";
+
+const HARNESS_DEFAULT_MINION_MODELS: Record<string, Record<ExecutorClass, string>> = {
+  claude: {
+    mechanical: "claude-haiku-4-5",
+    standard: "claude-sonnet-5",
+    reasoning: "claude-opus-4-8",
+  },
+  codex: {
+    mechanical: "gpt-5.5",
+    standard: "gpt-5.5",
+    reasoning: "gpt-5.5",
+  },
+};
 
 export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
 export type ThinkingDisplay = "summarized" | "omitted";
@@ -133,12 +152,14 @@ export function initSidecar(projectPath: string): Database.Database {
   const settingsPath = path.join(sidecar, "settings.json");
   if (!fs.existsSync(settingsPath)) {
     fs.writeFileSync(settingsPath, JSON.stringify({
-      defaultModel: "claude-sonnet-4-6",
+      defaultModel: "claude-sonnet-5",
       defaultLeaderHarness: "claude",
       defaultLeaderModel: "claude-opus-4-8",
       defaultLeaderThinkingConfig: DEFAULT_LEADER_THINKING_CONFIG,
       defaultMinionHarness: "claude",
-      defaultMinionModel: "claude-sonnet-4-6",
+      defaultMinionModel: "claude-sonnet-5",
+      mechanicalMinionModel: "claude-haiku-4-5",
+      reasoningMinionModel: "claude-opus-4-8",
       defaultMinionThinkingConfig: DEFAULT_MINION_THINKING_CONFIG,
       defaultPermissionMode: "auto",
       defaultWorktreeIsolation: false,
@@ -186,7 +207,8 @@ export function readSettings(projectPath: string): ProjectSettings {
   }
   try {
     const raw = fs.readFileSync(settingsPath, "utf-8");
-    return { ...defaultProjectSettings(), ...(JSON.parse(raw) as ProjectSettings) };
+    const parsed = JSON.parse(raw) as ProjectSettings;
+    return withLeaderThinkingDefaults({ ...defaultProjectSettings(), ...parsed }, parsed);
   } catch {
     return defaultProjectSettings();
   }
@@ -194,18 +216,89 @@ export function readSettings(projectPath: string): ProjectSettings {
 
 function defaultProjectSettings(): ProjectSettings {
   return {
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "claude-sonnet-5",
     defaultLeaderHarness: "claude",
     defaultLeaderModel: "claude-opus-4-8",
     defaultLeaderThinkingConfig: DEFAULT_LEADER_THINKING_CONFIG,
     defaultMinionHarness: "claude",
-    defaultMinionModel: "claude-sonnet-4-6",
+    defaultMinionModel: "claude-sonnet-5",
+    mechanicalMinionModel: "claude-haiku-4-5",
+    reasoningMinionModel: "claude-opus-4-8",
     defaultMinionThinkingConfig: DEFAULT_MINION_THINKING_CONFIG,
     defaultPermissionMode: "auto",
     defaultWorktreeIsolation: false,
     dashboardLeaderActionNames: defaultDashboardLeaderActionNames(),
     dashboardLeaderActionPrompts: defaultDashboardLeaderActionPrompts(),
   };
+}
+
+export function resolveMinionModelForHarness(
+  settings: ProjectSettings,
+  harnessName: string | undefined,
+  executorClass: ExecutorClass | undefined,
+): string | undefined {
+  const configured =
+    executorClass === "mechanical"
+      ? settings.mechanicalMinionModel
+      : executorClass === "reasoning"
+        ? settings.reasoningMinionModel
+        : settings.defaultMinionModel;
+  const fallback =
+    executorClass
+      ? defaultMinionModelForHarness(harnessName, executorClass)
+      : firstString(settings.defaultMinionModel, settings.defaultModel);
+  return compatibleOrFallback(configured, harnessName, fallback);
+}
+
+function defaultMinionModelForHarness(
+  harnessName: string | undefined,
+  executorClass: ExecutorClass,
+): string | undefined {
+  return HARNESS_DEFAULT_MINION_MODELS[harnessName ?? "claude"]?.[executorClass];
+}
+
+function compatibleOrFallback(
+  model: unknown,
+  harnessName: string | undefined,
+  fallback: string | undefined,
+): string | undefined {
+  if (typeof model !== "string") return fallback;
+  if (isModelCompatibleWithHarness(model, harnessName)) return model;
+  return fallback;
+}
+
+function isModelCompatibleWithHarness(
+  model: string,
+  harnessName: string | undefined,
+): boolean {
+  if (harnessName === "codex") return !model.startsWith("claude-");
+  if (harnessName === "claude" || harnessName == null) return !model.startsWith("gpt-");
+  return true;
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  return values.find((value): value is string => typeof value === "string");
+}
+
+function withLeaderThinkingDefaults(
+  settings: ProjectSettings,
+  stored: ProjectSettings,
+): ProjectSettings {
+  if (Object.prototype.hasOwnProperty.call(stored, "defaultLeaderThinkingConfig")) {
+    return settings;
+  }
+  if (!isFableModel(settings.defaultLeaderModel)) return settings;
+  return {
+    ...settings,
+    defaultLeaderThinkingConfig: {
+      ...DEFAULT_LEADER_THINKING_CONFIG,
+      effort: "medium",
+    },
+  };
+}
+
+function isFableModel(model: unknown): boolean {
+  return model === "claude-fable-5" || model === "fable";
 }
 
 function defaultDashboardLeaderActionNames(): NonNullable<

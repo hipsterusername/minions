@@ -10,13 +10,8 @@ import { createRenderToolsForLeader } from "../render-tools.ts";
 import { MINION_SYSTEM_PROMPT } from "./minion.ts";
 import {
   persistTaskState,
-  persistReasoningMapState,
   persistRenderState,
 } from "../session-persist.ts";
-import { createStepToolsForSession } from "../routines/step-tools.ts";
-import { createReasoningMapToolsForLeader } from "../reasoning-map-tools.ts";
-import type { RenderComponent } from "../../shared/render-dsl.ts";
-import { elideDefaults } from "../../shared/render-defaults.ts";
 import type { SessionTerminateReason } from "../session-host-terminate.ts";
 import { cancelChildrenOnLeaderTeardown } from "./leader-teardown.ts";
 
@@ -62,14 +57,6 @@ You also have orchestration tools:
 - **wait_and_continue**: Pause for a duration (5s–30min), then the system auto-resumes you with "Continue"
 - **request_approval**: **REQUIRED when worktree isolation is active.** Submit your changes for user review before they are merged. This triggers the Approve/Discard UI for the user.
 
-You also have Reasoning Graph tools for non-trivial work:
-- **create_reasoning_map**: Start session-scoped reasoning state with an outcome and success signal
-- **apply_reasoning_ops**: Batch add/revise/link reasoning artifacts
-- **validate_reasoning_map**: Check unsupported claims, contradictions, and unresolved risk
-- **challenge_reasoning_node**: Record and resolve a user challenge against a visible node
-- **summarize_reasoning_map**: Produce a compact recovery/completion summary
-- **close_reasoning_map**: Validate and close the graph with a final summary
-
 ## Workflow
 
 1. Analyze the goal
@@ -88,13 +75,23 @@ You also have Reasoning Graph tools for non-trivial work:
 Work directly (then call \`complete_task\`) when:
 - The task is sequential (step B depends on step A's output)
 - The task is small or simple (one file, quick fix, config change)
-- You need to explore/understand something before deciding what to do
+- You need a small targeted read before deciding what to do
 - You're integrating or reviewing work
 
 Delegate with \`assign_task\` when:
 - Multiple independent tasks can run in parallel
 - Each task is self-contained and clearly scoped
 - The minion has everything it needs in the task description
+
+## Token Economy
+
+- Buy conclusions, not raw data: delegate broad file reading/exploration and ask for structured summaries with file:line citations.
+- Small files are fine to read directly; many files or files over a few hundred lines are minion work.
+- Do not paste large raw content (long diffs, whole files) into chat or dashboard components; reference paths instead.
+- When fetching task details, prefer the default summary mode; request full detail only when synthesis genuinely needs it.
+- Consume minion reports and analysis files over ~2000 chars through their summaries; task results are already summary-capped.
+- For large files or /tmp reports, delegate targeted extraction to a minion and request specific facts; never Read multi-thousand-line files when grep or a minion summary answers the question.
+- Classify each \`assign_task\` with \`executorClass\`: \`mechanical\` for low-ambiguity lint/rename/docs/format work, \`standard\` for normal implementation/investigation, \`reasoning\` for tricky or ambiguous work. Use \`mechanical\` aggressively for low-ambiguity work; pass \`model\` only for exact overrides.
 
 ## Wait & Continue
 
@@ -114,7 +111,8 @@ Example: After assigning 3 tasks to minions, call \`wait_and_continue\` with 120
 - **Assign independent tasks in bulk**: Don't wait for one to finish before assigning the next.
 - **Monitor periodically**: Use \`get_task_status\` to check progress, but don't poll obsessively.
 - **Review and integrate**: After minions finish, review their output and handle integration yourself.
-- **Per-task model override**: Pass \`model\` to use a smaller or faster model for mechanical tasks (renaming, formatting, pure refactors). Omit for reasoning-heavy work.
+- **Executor class**: Pass \`executorClass\` on each \`assign_task\`; use \`mechanical\` aggressively for low-ambiguity work and \`reasoning\` for tasks needing the strongest minion tier.
+- **Per-task model override**: Pass \`model\` only when you need an exact model; it overrides \`executorClass\`.
 - **Custom timeout**: Pass \`timeout_minutes\` (1–120) to override the default 30-minute inactivity budget.
 - **Declare write sets**: Pass \`ownedPaths\` when running tasks in parallel to declare disjoint file boundaries; the tool warns if two concurrent tasks claim the same path.
 - **Retry failed tasks**: If a task reaches failed/ended_without_report/orphaned, re-assign it with the same \`taskId\` to retry. The prior attempt is archived; the result mentions "attempt N".
@@ -181,18 +179,6 @@ Examples:
 - Update status components as tasks progress (pending → running → success/error).
 - Use \`callout\` for findings, \`timeline\` for step history, \`kv\` for metadata, \`checklist\` for tracked work, \`diff\` for before/after evidence, and \`copyable\` for values the user may paste.
 
-## Reasoning Graph
-
-Use a Reasoning Graph when work has meaningful uncertainty, validation cost, branching, user-visible tradeoffs, or decisions worth reviewing. Use the no-graph path for simple lookups, formatting, one-file edits, obvious bug fixes, or cases where graph upkeep would add noise.
-
-Rules:
-- Store only user-legible reasoning artifacts: outcomes, falsifiable hypotheses, evidence, decisions, risks, and challenges. Do not expose private chain-of-thought.
-- Every hypothesis must include \`falsifiedBy\` when created.
-- Validate before major decisions and before closing a graph. Treat validation errors as blockers; surface warnings when they affect the user-visible plan.
-- Material reasoning changes should revise or supersede nodes instead of silently rewriting old claims.
-- User challenges are not direct graph edits. Record them with \`challenge_reasoning_node\`, then resolve by adding evidence, revising, refuting, branching, or asking a clarification.
-- Keep the dashboard focused with Current Path, Unresolved Risk, Decisions, Audit, and Timeline views when a graph is active.
-
 ## ⚠️ MANDATORY: Worktree Isolation & Approval Workflow
 
 **This section applies whenever worktree isolation is active (which is the default for all sessions).** Your changes live in an isolated git branch — NOT in the user's main working tree. Nothing reaches main until the user explicitly approves via the UI.
@@ -249,8 +235,8 @@ If your prompt includes a \`<previous-session-context>\` block, this is a **rest
 
 /**
  * Default leader system prompt for the Claude harness.
- * Exported for the routine runner and any other server-side caller that
- * always uses Claude and needs the pre-built string.
+ * Exported for server-side callers that always use Claude and need the
+ * pre-built string.
  */
 export const LEADER_SYSTEM_PROMPT = buildLeaderPromptBody(LEADER_PROMPT_TOOLS);
 
@@ -268,12 +254,6 @@ const LEADER_MCP_TOOLS = [
   "mcp__render-dashboard__render_patch",
   "mcp__render-dashboard__render_append",
   "mcp__render-dashboard__render_remove",
-  "mcp__reasoning-map__create_reasoning_map",
-  "mcp__reasoning-map__apply_reasoning_ops",
-  "mcp__reasoning-map__validate_reasoning_map",
-  "mcp__reasoning-map__challenge_reasoning_node",
-  "mcp__reasoning-map__summarize_reasoning_map",
-  "mcp__reasoning-map__close_reasoning_map",
 ];
 
 // ── AgentType implementation ──────────────────────────────────────────────
@@ -324,52 +304,16 @@ const leaderAgent: AgentType = {
       onStateChange: (state) => persistRenderState(leaderSessionKey, state),
     });
 
-    function appendDashboardComponents(components: RenderComponent[]): void {
-      const elided = components.map(elideDefaults);
-      const incomingIds = new Set(elided.map((component) => component.id));
-      renderState.components = [
-        ...renderState.components.filter((component) => !incomingIds.has(component.id)),
-        ...elided,
-      ];
-      ctx.bus.emitToSession(leaderSessionKey, {
-        type: "render_update",
-        leaderSessionKey,
-        action: "append",
-        components: elided,
-      });
-      persistRenderState(leaderSessionKey, renderState);
-    }
-
-    const { toolDefs: reasoningDefs, reasoningMapState } =
-      createReasoningMapToolsForLeader({
-        existingReasoningMapState: ctx.existingReasoningMapState,
-        onStateChange: (state) =>
-          persistReasoningMapState(leaderSessionKey, state),
-        onDashboardUpdate: appendDashboardComponents,
-      });
-
-    // When this leader was spawned as a routine step the runner has
-    // pre-registered a completion context against its sessionKey; in that
-    // case we expose `report_phase_result` so the agent can hand a
-    // structured result back to the scheduler.
-    const stepTools = createStepToolsForSession(leaderSessionKey);
     const toolGroups: Record<string, import("../harness/types.ts").NormalizedToolDef[]> = {
       "task-manager": taskDefs,
       "render-dashboard": renderDefs,
-      "reasoning-map": reasoningDefs,
     };
-    let mcpToolNames = LEADER_MCP_TOOLS;
-    if (stepTools) {
-      toolGroups["routine-step"] = stepTools.toolDefs;
-      mcpToolNames = [...LEADER_MCP_TOOLS, ...stepTools.toolNames];
-    }
 
     return {
       toolGroups,
-      mcpToolNames,
+      mcpToolNames: LEADER_MCP_TOOLS,
       taskState,
       renderState,
-      reasoningMapState,
     };
   },
 

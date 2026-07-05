@@ -6,7 +6,7 @@
  *
  * Test strategy:
  *   - Accept cases: minimal valid envelopes for a representative cross-section
- *     of command types (session lifecycle, info queries, routines, worktree).
+ *     of command types (session lifecycle, info queries, forms, worktree).
  *   - Reject cases: non-object, missing `type`, unknown `type`, and wrong
  *     field types that should be caught before handlers run.
  *   - The `COMMAND_SCHEMAS` record is exported so the test can assert that
@@ -108,16 +108,6 @@ describe("validateWsCommand – accept", () => {
       sessionKey: "s1",
       serverName: "my-server",
       enabled: false,
-    });
-  });
-
-  it("accepts start_routine with all fields", () => {
-    accept({
-      type: "start_routine",
-      cwd: "/project",
-      routineId: "r1",
-      runId: "run-1",
-      routineInputs: { key: "value", count: 3 },
     });
   });
 

@@ -63,7 +63,6 @@ function makeCtx(host: FakeHost | null): {
     bus: makeBus(),
     generateKey: () => "key",
     maxSessions: 10,
-    routines: {} as unknown as CommandContext["routines"],
   };
   return { ctx, startMock };
 }

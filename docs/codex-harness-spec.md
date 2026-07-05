@@ -40,7 +40,6 @@ now made that seam load-bearing for the current app:
 - `server/session-persist.ts`, `server/session-repo.ts`, `server/db.ts` — SQLite write-through; `sessions.harness_name` is present and hydrated.
 - `server/commands/*` — command handlers now route live-run operations through `host.runControl` and static info through `harness.staticInfo()`.
 - `server/agents/{leader,minion,types}.ts` — `AgentToolResult.toolGroups: Record<string, NormalizedToolDef[]>`; `startMinionSession` accepts optional `harness`.
-- `server/routines/external-mcp.ts` — Claude SDK-shaped `mcpServers` config.
 - `server/multimodal-prompt.ts` — `buildQueryPrompt` returns Claude SDK `SDKUserMessage` for image attachments.
 - `shared/normalized-event.ts` — already shared by server and client.
 - `src/use-socket.ts` — client-side `sync_response` and `session_list` types include `harness` + `harnessCapabilities`.
@@ -104,7 +103,6 @@ now made that seam load-bearing for the current app:
   returns a Claude SDK `SDKUserMessage`; Phase D must move prompt/input
   formatting into harness-specific code and add normalized `attachments` to
   `HarnessStartOptions`.
-- **External MCP config is still Claude-shaped.** `server/routines/external-mcp.ts`
   emits Claude SDK config objects; Phase C/D must introduce a normalized source
   shape plus per-harness renderers.
 - **Codex permission mapping is not wired.** `HarnessStartOptions` has
@@ -561,18 +559,15 @@ leaking them into Codex CLI logs that quote `--config` values).
 > only Minions-internal tool groups (task-manager, render-dashboard,
 > minion-status) through the bridge. User-configured external MCP servers
 > resolved from the project sidecar's `mcp-servers.json` are still produced in
-> Claude SDK shape by `server/routines/external-mcp.ts` and **silently dropped**
 > by the Codex harness — passing them through unchanged would either be
 > rejected by the Codex CLI or render incorrectly. Codex external MCP does
 > not appear in `HarnessCapabilities` and is not advertised in `staticInfo()`.
 > The Phase D Codex harness leaves an explicit comment near its `Codex`
 > constructor call documenting the drop.
 
-The eventual fix replaces `server/routines/external-mcp.ts` with a normalized
 shape and per-harness renderers:
 
 ```ts
-// server/routines/external-mcp.ts
 export interface NormalizedExternalMcp {
   id: string;
   toolNames: string[];                          // already prefixed mcp__id__name

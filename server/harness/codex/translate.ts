@@ -38,6 +38,7 @@ export interface CodexTranslator {
 export function createCodexTranslator(ctx: TranslatorContext): CodexTranslator {
   /** Maps item id → Date.now() when item.started was received. */
   const startedAt = new Map<string, number>();
+  let threadId = "";
 
   function computeElapsed(id: string): number {
     const started = startedAt.get(id);
@@ -206,6 +207,7 @@ export function createCodexTranslator(ctx: TranslatorContext): CodexTranslator {
     translate(evt: ThreadEvent): NormalizedEvent[] {
       switch (evt.type) {
         case "thread.started":
+          threadId = evt.thread_id;
           return [{ kind: "init", sessionId: evt.thread_id, model: ctx.model }];
 
         case "turn.started":
@@ -221,12 +223,20 @@ export function createCodexTranslator(ctx: TranslatorContext): CodexTranslator {
           return handleItemCompleted(evt.item);
 
         case "turn.completed":
+          const rawTurn = evt as ThreadEvent & { turn_id?: string; id?: string };
+          const turnId =
+            rawTurn.turn_id ??
+            rawTurn.id ??
+            `${threadId || "unknown"}:${evt.usage.input_tokens}:${evt.usage.output_tokens}:${evt.usage.cached_input_tokens}`;
           return [
             {
               kind: "usage",
+              source: "turn_completed",
               input: evt.usage.input_tokens,
               output: evt.usage.output_tokens,
               cacheRead: evt.usage.cached_input_tokens,
+              turnId,
+              ...(threadId ? { sdkSessionId: threadId } : {}),
             },
           ];
 

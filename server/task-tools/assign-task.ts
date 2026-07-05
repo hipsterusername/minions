@@ -7,7 +7,7 @@ import type { NormalizedToolDef } from "../harness/types.ts";
 import { textResult } from "../harness/tool-result.ts";
 import type { TaskToolContext, TaskRecord } from "./types.ts";
 import { compileSkills, loadSkillsByIds } from "../skills.ts";
-import { readSettings } from "../project-store.ts";
+import { readSettings, resolveMinionModelForHarness } from "../project-store.ts";
 import { isValidThinkingConfig } from "../session-host-config.ts";
 import { getSessionCanvasContext } from "../canvas-context-store.ts";
 import { buildTaskSpawnPrompt } from "./task-prompt.ts";
@@ -44,11 +44,17 @@ const assignTaskInputSchema = z.object({
   priority: z
     .enum(["low", "medium", "high", "critical"])
     .describe("Task priority level"),
+  executorClass: z
+    .enum(["mechanical", "standard", "reasoning"])
+    .optional()
+    .describe(
+      "Model tier for this minion: mechanical for low-ambiguity lint/rename/docs/format work, standard for normal implementation or investigation, reasoning for architecturally tricky or ambiguous work. Explicit model overrides this.",
+    ),
   model: z
     .string()
     .optional()
     .describe(
-      "Model override for this minion (e.g. a small/fast model for mechanical tasks). Falls back to project defaults.",
+      "Exact model override for this minion. Takes precedence over executorClass and project defaults.",
     ),
   timeout_minutes: z
     .number()
@@ -86,7 +92,7 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
   return {
     name: "assign_task",
     description:
-      "Delegate a task to a new Minion agent. Creates a minion session that will execute the task autonomously. If the task was registered with plan_task, it will transition from planned to running. Optionally arm the minion with one or more skills from the project's skill library via `skillIds`. Tasks that ended in failed/ended_without_report/orphaned may be re-assigned with the same taskId to retry.",
+      "Delegate a task to a new Minion agent. Creates a minion session that will execute the task autonomously. Use executorClass to choose mechanical, standard, or reasoning model tiers; pass model only for exact override. If the task was registered with plan_task, it will transition from planned to running. Optionally arm the minion with one or more skills from the project's skill library via `skillIds`. Tasks that ended in failed/ended_without_report/orphaned may be re-assigned with the same taskId to retry.",
     inputSchema: assignTaskInputSchema,
     handler: async (input: unknown) => {
       const args = assignTaskInputSchema.parse(input);
@@ -226,14 +232,10 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
           ? settings.defaultMinionHarness
           : undefined;
 
-      // Model precedence: per-task arg > defaultMinionModel > defaultModel
+      // Model precedence: per-task model > harness-compatible executorClass tier > defaults
       const minionModel =
         args.model ??
-        (typeof settings.defaultMinionModel === "string"
-          ? settings.defaultMinionModel
-          : typeof settings.defaultModel === "string"
-            ? settings.defaultModel
-            : undefined);
+        resolveMinionModelForHarness(settings, minionHarness, args.executorClass);
 
       const minionThinkingConfig = isValidThinkingConfig(settings.defaultMinionThinkingConfig)
         ? settings.defaultMinionThinkingConfig

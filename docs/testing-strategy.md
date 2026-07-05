@@ -134,7 +134,6 @@ A thin pyramid. Most value is in L1 and L2.
 ### L2 — Contract
 
 **Target.** The interface between subsystems: the WS envelope, the MCP
-tool factories, the command table, the persistence schema, the routine DSL.
 
 **Tool.** vitest, node env. Real schemas (no redefinition).
 
@@ -158,7 +157,6 @@ and consumer** of the contract:
 | MCP task tools | `assign_task`, `complete_task`, etc. | leader prompt schema | `server/task-tools/<tool>.test.ts` — emit assertions |
 | MCP minion tools | `report_step`, `report_done`, `report_fail` | minion prompt schema | colocated next to each tool |
 | Render DSL | `render_set/append/patch/remove` | `applyRenderMessage` | one round-trip per component variant; not one zod-parse per variant |
-| Routine schema | `parseRoutine` | scheduler + persistence | one round-trip per failure-policy / step-type combination |
 | Persistence | `persist*` writers | `hydrate*` readers | one round-trip across `closePersistDb()/openPersistDb()` per session kind |
 
 **Banned patterns.**
@@ -176,7 +174,6 @@ and consumer** of the contract:
 **Target.** React components whose behaviour is non-trivial: the
 `ClaudeSessionNode` collapsible tool feed, `LeaderNode`'s task plan view,
 `MinionNode`'s queue/active/log split, `KanbanBoard` interactions,
-`RoutineEditor` rail navigation, `RenderNode` DSL interpretation,
 `AnnotationLayer` pointer events, `ApprovalBar` confirmation flow.
 
 **Tool.** vitest + jsdom + `@testing-library/react`.
@@ -282,7 +279,6 @@ schema, parse it, and assert `.success === true`. That tests zod.
 and assert `.success === false`. That tests `.optional()`.
 
 When `safeParse` carries domain logic the codebase relies on (e.g.
-`safeParseRoutine` returns a `formattedError` shape consumed by the editor),
 test **that domain logic** — the formatted message structure, the error
 path joining — not zod's pass/fail.
 
@@ -324,7 +320,6 @@ Audit tag: `SNAPSHOT_BLOB`.
 **MUST.** Test the behaviour a config value produces.
 
 **MUST NOT.** Assert that a constant equals a literal (`expect(X).toBe(42)`),
-that a config field has a specific name, or that a routine template has a
 specific phase ID. The TypeScript compiler enforces shape; the value's
 meaning is in the behaviour it drives.
 
@@ -420,7 +415,6 @@ vitest — at the time of writing the closest is `mutation-testing-elements`
 | Q1 | `src/canvas-state.ts` + `src/graph-runtime.ts` |
 | Q2 | `server/task-tools/*` |
 | Q3 | `src/sdk-messages.ts` + `src/streaming.ts` |
-| Q4 | `server/routine-persist.ts` + `server/routines/scheduler.ts` |
 
 The acceptance bar is mutation score ≥ 80% for the module. Surviving
 mutants are tracked as gaps to fill in the next sprint, not as test
@@ -465,18 +459,6 @@ matrix.
 | `server/commands/<cmd>.ts` | L2 | colocated `.test.ts` (NEW) | One per WS command. Currently only `attachment-sanitize` and `create-session` covered — 28 commands need tests. |
 | `server/commands/index.ts` | L4 | drop the runtime test; `satisfies` is the gate | Per §6.5. |
 | `server/routes/<area>.ts` | L2 | colocated `.test.ts` (NEW) | Real Express + supertest round-trips per route. |
-| `server/routine-registry.ts` | L1 | colocated `.test.ts` (NEW) | Built-in registration, custom override. |
-| `server/routine-store.ts` | L1 | exists | Trim trivials per §5.7. |
-| `server/routine-persist.ts` | L2 | exists | Drop the migration / pragma tests per §5.4 / §5.7; keep the round-trip cases. |
-| `server/routines/scheduler.ts` | L1 | exists | Tighten the "snapshot every transition" test per §5.7. |
-| `server/routines/scheduler-dag.ts` | L1 | exists | Collapse the diamond happy-path duplicates per §5.9. |
-| `server/routines/leader-runner.ts` | L1 | exists | Keep — this is real concurrency. |
-| `server/routines/handoff.ts` | L1 | exists | Keep. |
-| `server/routines/external-mcp.ts` | L1 | exists | Parameterise the transport-variant duplicates per §5.9. |
-| `server/routines/template.ts` | L1 | exists | Keep. |
-| `server/routines/templates.ts` | L1 | exists | Drop the "RESEARCH_ANALYZE_REPORT has these phase IDs" test per §5.7. |
-| `server/routines/session-end.ts` | L1 | colocated `.test.ts` (NEW) | Termination paths. |
-| `server/routines/step-tools.ts` | L2 | colocated `.test.ts` (NEW) | Per-step tool factories. |
 | `server/worktree.ts` (barrel) | L1 | colocated `.test.ts` (NEW) | API stability — the public re-exports. |
 | `server/worktree-create.ts` | L1 | colocated `.test.ts` (NEW) | Mock `child_process`; assert git invocation + error surface. |
 | `server/worktree-diff.ts` | L1 | colocated `.test.ts` (NEW) | Same. |
@@ -510,7 +492,6 @@ matrix.
 | `src/model-meta.ts` | L1 | exists | Rewrite — see §5.2. |
 | `src/context-extraction.ts` | L1 | exists | Audit found this acceptable. |
 | `src/kanban-types.ts` | L1 | exists | Trim trivials. |
-| `src/routine-context-paths.ts` | L1 | exists | Collapse `it.each` duplicates per §5.9. |
 | `src/use-kanban.ts` | L1 | exists (`use-kanban.dom.test.ts`) | Keep. |
 | `src/use-socket.ts` | L1 | NEW | Reconnect logic, `sync_response` handling, message routing — currently untested. |
 | `src/use-autosave.ts` | L1 | NEW | Debounce + flush — currently untested. |
@@ -534,8 +515,6 @@ matrix.
 | `src/SessionPanel.tsx` | L3 | exists | Drop `getByText.toBeDefined()` patterns per §5.5. |
 | `src/UsagePopover.tsx` | L3 | exists — DELETE current and replace | Every test in current file violates §5.5. Rewrite minimally or drop. |
 | `src/BottomRightDock.tsx` | L3 | exists | Trim per §5.5. |
-| `src/RoutineEditor.tsx` | L3 | exists | Drop the duplicate drill-into-step test per §5.9. |
-| `src/RoutinePromptEditor.tsx` | L3 | exists | Trim per §5.5. |
 | `src/KanbanBoard.tsx` | L3 | exists | Audit found this acceptable. |
 | `src/components/AnnotationLayer.tsx` | L3 | exists | Keep. |
 | `src/components/AnnotationList.tsx` | L3 | exists | Keep. |
@@ -545,7 +524,6 @@ matrix.
 | `src/nodes/LeaderNode.tsx` | L3 | exists | Audit found this acceptable. |
 | `src/nodes/MinionNode.tsx` | L3 | exists | Keep. |
 | `src/nodes/MarkdownNode.tsx` | L3 | exists | Keep. |
-| `src/nodes/RoutineNode.tsx` | L3 | exists | Drop trivial assertions per §5.5. |
 | `src/nodes/ImageNode.tsx` | L3 | exists | Drop the DOM-API-counter and CSS-token tests per §5.5. |
 
 ### 7.4 shared/ — cross-tree contracts
@@ -554,7 +532,6 @@ matrix.
 |---|---|---|---|
 | `shared/ws-envelope.ts` | L2 | exists — REWRITE | Replace zod-pass/fail tests with bus-emit-then-parse round-trips per §5.4. |
 | `shared/render-dsl.ts` | L2 | exists — REWRITE | Drop schema-identity cases (~150 LoC); keep one round-trip per component variant via a real `applyRenderMessage` consumer. |
-| `shared/routines/types.ts` | L2 | exists — REWRITE | Drop schema-feature tests (`.min(1)`, `.default(0)`, `.regex`); keep `safeParseRoutine`'s **error-formatting** tests. |
 
 ### 7.5 tests/architecture/
 
@@ -572,8 +549,6 @@ matrix.
 |---|---|
 | `command-table.test.ts` | DELETE — replace with `satisfies` in `commands/index.ts` per §6.5. |
 | `image-node.test.ts` | DELETE — re-reads literal fields from the same module that registered them. |
-| `routine-end-to-end.test.ts` | Keep; drop the prompt-substring assertions per §5.7. |
-| `routine-routes.test.ts` | Keep — exemplar for new route tests. |
 | `ws-envelope.test.ts` | Rewrite per §5.4. |
 
 ### 7.7 tests/harness/
@@ -633,8 +608,6 @@ tests/
     file-size.test.ts                 ← L4
     no-banned-assertions.test.ts      ← L4 (new)
   contracts/
-    routine-end-to-end.test.ts        ← L2 (cross-tree)
-    routine-routes.test.ts
     ws-envelope.test.ts
   harness/
     ws-replay.test.ts                 ← replay harness for L3 by fixture

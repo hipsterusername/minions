@@ -182,15 +182,25 @@ describe("sdkToNormalized: assistant", () => {
     const events = sdkToNormalized(
       msg({
         type: "assistant",
+        uuid: "sdk-uuid-1",
+        session_id: "claude-session",
         parent_tool_use_id: null,
         message: {
+          id: "msg-usage-1",
           content: [],
           usage: { input_tokens: 100, output_tokens: 50 },
         },
       }),
     );
     const usage = events.find((e) => e.kind === "usage");
-    expect(usage).toMatchObject({ kind: "usage", input: 100, output: 50 });
+    expect(usage).toMatchObject({
+      kind: "usage",
+      source: "assistant",
+      messageId: "msg-usage-1",
+      sdkSessionId: "claude-session",
+      input: 100,
+      output: 50,
+    });
   });
 
   it("includes cacheRead when cache_read_input_tokens is present", () => {
@@ -292,8 +302,11 @@ describe("sdkToNormalized: result success", () => {
         session_id: "s",
       }),
     );
-    const usage = events.find((e) => e.kind === "usage") as { costUSD?: number } | undefined;
+    const usage = events.find((e) => e.kind === "usage") as
+      | { costUSD?: number; source?: string }
+      | undefined;
     expect(usage?.costUSD).toBe(0.0088);
+    expect(usage?.source).toBe("result");
   });
 
   it("emits permission_denial events before done", () => {
@@ -344,6 +357,21 @@ describe("sdkToNormalized: result error", () => {
     );
     const done = events[0] as { error?: string } | undefined;
     expect(done?.error).toBe("Unknown error");
+  });
+
+  it("treats Claude tool-use diagnostics as non-error completion", () => {
+    const events = sdkToNormalized(
+      msg({
+        type: "result",
+        is_error: true,
+        errors: [
+          "Claude Code returned an error result: [ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use",
+        ],
+        session_id: "s",
+      }),
+    );
+
+    expect(events).toEqual([{ kind: "done", reason: "completed" }]);
   });
 });
 

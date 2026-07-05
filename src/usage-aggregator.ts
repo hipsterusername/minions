@@ -15,11 +15,24 @@
 export interface SessionUsage {
   totalCost: number;
   turns: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreation: number;
+  cacheHitRate: number;
 }
 
 /** Empty per-session usage — used when a session is first observed. */
 export function emptySessionUsage(): SessionUsage {
-  return { totalCost: 0, turns: 0 };
+  return {
+    totalCost: 0,
+    turns: 0,
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheCreation: 0,
+    cacheHitRate: 0,
+  };
 }
 
 /**
@@ -28,9 +41,29 @@ export function emptySessionUsage(): SessionUsage {
  */
 export function mergeUsageEvent(
   current: SessionUsage,
-  costUSD: number,
+  usage:
+    | number
+    | {
+        source?: "assistant" | "result" | "turn_completed";
+        input: number;
+        output: number;
+        cacheRead?: number;
+        cacheCreation?: number;
+        costUSD?: number;
+      },
 ): SessionUsage {
-  return { ...current, totalCost: costUSD };
+  if (typeof usage === "number") return { ...current, totalCost: usage };
+  if (usage.source === "result") {
+    return { ...current, totalCost: usage.costUSD ?? current.totalCost };
+  }
+  return withCacheHitRate({
+    ...current,
+    totalCost: usage.costUSD ?? current.totalCost,
+    input: current.input + usage.input,
+    output: current.output + usage.output,
+    cacheRead: current.cacheRead + (usage.cacheRead ?? 0),
+    cacheCreation: current.cacheCreation + (usage.cacheCreation ?? 0),
+  });
 }
 
 /**
@@ -47,6 +80,11 @@ export function mergeDoneEvent(
 export interface GlobalUsage {
   totalCost: number;
   totalTurns: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreation: number;
+  cacheHitRate: number;
   /** Number of sessions that have contributed at least one usage/done event. */
   sessionCount: number;
 }
@@ -60,13 +98,30 @@ export function aggregateGlobalUsage(
 ): GlobalUsage {
   let totalCost = 0;
   let totalTurns = 0;
+  let input = 0;
+  let output = 0;
+  let cacheRead = 0;
+  let cacheCreation = 0;
   let sessionCount = 0;
   for (const s of sessions.values()) {
-    if (s.totalCost > 0 || s.turns > 0) sessionCount++;
+    if (hasUsage(s)) sessionCount++;
     totalCost += s.totalCost;
     totalTurns += s.turns;
+    input += s.input;
+    output += s.output;
+    cacheRead += s.cacheRead;
+    cacheCreation += s.cacheCreation;
   }
-  return { totalCost, totalTurns, sessionCount };
+  return withCacheHitRate({
+    totalCost,
+    totalTurns,
+    input,
+    output,
+    cacheRead,
+    cacheCreation,
+    cacheHitRate: 0,
+    sessionCount,
+  });
 }
 
 /**
@@ -84,4 +139,31 @@ export function formatTokens(n: number): string {
   if (n < 1000) return String(n);
   if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
   return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+export function formatCacheHitRate(rate: number): string {
+  return `${Math.round(rate * 100)}%`;
+}
+
+export function formatSessionUsageLine(usage: SessionUsage): string | null {
+  if (!hasTokenUsage(usage)) return null;
+  return `in ${formatTokens(usage.input)} / out ${formatTokens(usage.output)} / cache ${formatCacheHitRate(usage.cacheHitRate)}`;
+}
+
+function withCacheHitRate<T extends { input: number; cacheRead: number }>(
+  totals: T,
+): T {
+  const denominator = totals.input + totals.cacheRead;
+  return {
+    ...totals,
+    cacheHitRate: denominator > 0 ? totals.cacheRead / denominator : 0,
+  };
+}
+
+function hasUsage(s: SessionUsage): boolean {
+  return s.totalCost > 0 || s.turns > 0 || hasTokenUsage(s);
+}
+
+function hasTokenUsage(s: SessionUsage): boolean {
+  return s.input > 0 || s.output > 0 || s.cacheRead > 0 || s.cacheCreation > 0;
 }

@@ -7,9 +7,8 @@ import "./nodes/FolderNode.tsx";
 import "./nodes/ContextGroupNode.tsx";
 import "./nodes/RenderNode.tsx";
 import "./nodes/ImageNode.tsx";
-import "./nodes/RoutineNode.tsx";
 import { loadProjectSkillsFromData, saveUserSkill, deleteUserSkill as removeUserSkill, exportUserSkills, importUserSkills } from "./skills/user-skills.ts";
-import { useState, useEffect, useReducer, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import { useState, useEffect, useReducer, useCallback, useMemo, useRef } from "react";
 import { Canvas } from "./Canvas.tsx";
 import { useSocket } from "./use-socket.ts";
 import type { ServerMessage } from "./use-socket.ts";
@@ -30,25 +29,29 @@ import type { CanvasTransform, CanvasNode } from "./types.ts";
 import { DEFAULT_THINKING_CONFIG } from "./types.ts";
 import { CONTEXT_EXPLORER_PROMPT } from "./prompts/context-explorer.ts";
 import { getAllNodeTypes } from "./node-registry.ts";
+import { createDefaultNodeData } from "./node-defaults.ts";
 import type { LeaderData } from "./nodes/LeaderNode.tsx";
 import { useKanban } from "./use-kanban.ts";
 import { KanbanBoard } from "./KanbanBoard.tsx";
+import { ActivityView } from "./ActivityView.tsx";
+import { useSessionActivity } from "./use-session-activity.ts";
+import { sessionBelongsToProject, needsAttention } from "./mobile/mobile-selectors.ts";
+import { requestLeaderFullscreen } from "./leader-fullscreen-request.ts";
 import type { KanbanCard } from "./kanban-types.ts";
 import { McpServersBrowser } from "./McpServersBrowser.tsx";
 import { SkillsBrowser } from "./SkillsBrowser.tsx";
 import { SkillEditor } from "./SkillEditor.tsx";
-import { RoutineEditor } from "./RoutineEditor.tsx";
 import { DockProvider, DockBar } from "./BottomRightDock.tsx";
 import { DebugModeAffordance } from "./components/DebugModeAffordance.tsx";
 import { LeaderLoadingScreen } from "./LeaderLoadingScreen.tsx";
-import { featureFlagStore } from "./feature-flags.ts";
 import type { SkillTemplate } from "./skills/types.ts";
 import { getSkill } from "./skills/registry.ts";
 import { themes, themeMap, applyTheme, DEFAULT_THEME_ID } from "./themes.ts";
 import { ThemeContext, loadPersistedThemeId, persistThemeId } from "./use-theme.ts";
 import { usePreventBrowserZoom } from "./use-prevent-browser-zoom.ts";
+import { buildWsUrl } from "./ws-url.ts";
 
-const WS_URL = `ws://localhost:${import.meta.env["VITE_SERVER_PORT"] ?? "3141"}`;
+const WS_URL = buildWsUrl();
 const PROJECT_HEADER_HEIGHT = 44;
 const DEFAULT_DOCUMENT_TITLE = "Minions";
 
@@ -148,22 +151,12 @@ function ProjectView({
   // overlay out, and on transitionend we unmount it.
   const [loaderAnimDone, setLoaderAnimDone] = useState(false);
   const [loaderUnmounted, setLoaderUnmounted] = useState(false);
-  const [activeView, setActiveView] = useState<ActiveView>("kanban");
+  const [activeView, setActiveView] = useState<ActiveView>("activity");
 
   // Skills customization state
   const [skillEditorOpen, setSkillEditorOpen] = useState(false);
   const [editingSkill, setEditingSkill] = useState<SkillTemplate | null>(null);
   const [skillsRefreshKey, setSkillsRefreshKey] = useState(0);
-
-  // Routine editor state. Gated by the `routines` feature flag — when
-  // the flag is off the editor and its dock pill are not rendered at all.
-  const [routineEditorOpen, setRoutineEditorOpen] = useState(false);
-  const routinesFlagStore = useMemo(() => featureFlagStore("routines"), []);
-  const routinesEnabled = useSyncExternalStore(
-    routinesFlagStore.subscribe,
-    routinesFlagStore.getSnapshot,
-    routinesFlagStore.getSnapshot,
-  );
 
   useEffect(() => {
     document.title = formatProjectDocumentTitle(projectName);
@@ -322,6 +315,113 @@ function ProjectView({
   const handleFocusNodeHandled = useCallback(() => {
     setFocusNodeId(null);
   }, []);
+
+  // Attach an existing backend session (e.g. one launched from the mobile
+  // view) to the canvas by creating a leader node bound to its sessionKey,
+  // then revealing it. Sessions live in the server registry independent of
+  // canvas nodes; this is what lets a phone-started leader show up on the
+  // desktop canvas. If the session already has a node we just focus it.
+  const handleAttachSessionToCanvas = useCallback(
+    (sessionKey: string) => {
+      const existing = nodes.find(
+        (n) =>
+          (n.type === "leader" ||
+            n.type === "minion" ||
+            n.type === "claude-session") &&
+          (n.data as { sessionKey?: string | null }).sessionKey === sessionKey,
+      );
+      if (existing) {
+        handleFocusNode(existing.id);
+        return;
+      }
+
+      const typeDef = getAllNodeTypes().find((t) => t.type === "leader");
+      if (!typeDef) return;
+
+      const { width, height } = typeDef.defaultSize;
+      const position = positionInViewport(width, height);
+      const nodeId = generateId();
+      const node: CanvasNode = {
+        id: nodeId,
+        type: "leader",
+        position,
+        size: { ...typeDef.defaultSize },
+        data: {
+          ...(createDefaultNodeData("leader", projectSettings) as Record<string, unknown>),
+          sessionKey,
+          status: "idle",
+        },
+      };
+      dispatch({ type: "ADD_NODE", node });
+
+      // The node isn't in `nodes` yet (state update is async), so center the
+      // viewport on its known position directly rather than via handleFocusNode.
+      const x = window.innerWidth / 2 - position.x - width / 2;
+      const y = window.innerHeight / 2 - position.y - height / 2;
+      setTransform({ x, y, scale: 1 });
+      setFocusNodeId(nodeId);
+      setActiveView("canvas");
+    },
+    [nodes, handleFocusNode, positionInViewport, projectSettings, setTransform],
+  );
+
+  const handleLaunchActivityLeader = useCallback(() => {
+    const typeDef = getAllNodeTypes().find((t) => t.type === "leader");
+    if (!typeDef) return;
+
+    const { width, height } = typeDef.defaultSize;
+    const position = positionInViewport(width, height);
+    const nodeId = generateId();
+    const node: CanvasNode = {
+      id: nodeId,
+      type: "leader",
+      position,
+      size: { ...typeDef.defaultSize },
+      data: createDefaultNodeData("leader", projectSettings),
+    };
+    dispatch({ type: "ADD_NODE", node });
+
+    const x = window.innerWidth / 2 - position.x - width / 2;
+    const y = window.innerHeight / 2 - position.y - height / 2;
+    setTransform({ x, y, scale: 1 });
+    setFocusNodeId(nodeId);
+    setActiveView("canvas");
+  }, [positionInViewport, projectSettings, setTransform]);
+
+  // Session activity (Activity view) — the same live stream the mobile Activity
+  // screen consumes, scoped to this project by working directory.
+  const { mobileSessions } = useSessionActivity(socket.subscribe);
+  const activitySessions = useMemo(
+    () => mobileSessions.filter((s) => sessionBelongsToProject(s, projectPath)),
+    [mobileSessions, projectPath],
+  );
+  useEffect(() => {
+    if (activeView !== "activity" || !socket.connected) return;
+    socket.send({ type: "list_sessions" });
+  }, [activeView, socket.connected, socket.send]);
+  const activityAttentionCount = useMemo(
+    () =>
+      activitySessions.filter((s) => s.role !== "minion" && needsAttention(s)).length,
+    [activitySessions],
+  );
+
+  // Reveal a leader on the canvas and open its existing fullscreen cockpit.
+  // `handleFocusNode` switches to the canvas and centers the node; the
+  // fullscreen request is picked up by that LeaderNode as it mounts.
+  const handleExpandFullscreen = useCallback(
+    (nodeId: string) => {
+      handleFocusNode(nodeId);
+      requestLeaderFullscreen(nodeId);
+    },
+    [handleFocusNode],
+  );
+
+  const handleStopSession = useCallback(
+    (sessionKey: string) => {
+      socket.send({ type: "stop_session", sessionKey });
+    },
+    [socket],
+  );
 
   // Kanban board state
   const { board: kanbanBoard, dispatch: kanbanDispatch } = useKanban(projectId);
@@ -899,10 +999,25 @@ function ProjectView({
               activeView={activeView}
               onViewChange={setActiveView}
               kanbanBlockedCount={kanbanBlockedCount}
+              activityAttentionCount={activityAttentionCount}
               settings={projectSettings}
               onSettingsChange={handleSettingsChange}
+              socketSend={socket.send}
+              socketSubscribe={socket.subscribe}
             />
-            {activeView === "kanban" ? (
+            {activeView === "activity" ? (
+              <div style={{ position: "absolute", top: PROJECT_HEADER_HEIGHT, left: 0, right: 0, bottom: 0 }}>
+                <ActivityView
+                  sessions={activitySessions}
+                  nodes={nodes}
+                  onLaunchLeader={handleLaunchActivityLeader}
+                  onOpenInCanvas={handleFocusNode}
+                  onExpandFullscreen={handleExpandFullscreen}
+                  onStopSession={handleStopSession}
+                  onAttachToCanvas={handleAttachSessionToCanvas}
+                />
+              </div>
+            ) : activeView === "kanban" ? (
               <div style={{ position: "absolute", top: PROJECT_HEADER_HEIGHT, left: 0, right: 0, bottom: 0 }}>
                 <KanbanBoard
                   board={kanbanBoard}
@@ -972,17 +1087,7 @@ function ProjectView({
                       }}
                     />
                   )}
-                  <DockBar
-                    onOpenRoutines={
-                      routinesEnabled ? () => setRoutineEditorOpen(true) : undefined
-                    }
-                  />
-                  {routinesEnabled && routineEditorOpen && (
-                    <RoutineEditor
-                      projectId={projectId}
-                      onClose={() => setRoutineEditorOpen(false)}
-                    />
-                  )}
+                  <DockBar />
                 </div>
               </DockProvider>
             )}

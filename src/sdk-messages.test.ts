@@ -5,9 +5,18 @@
  * sdkToDisplayMessages) and msgId from sdk-messages.ts.
  */
 
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
 import type { NormalizedEvent } from "../shared/normalized-event.ts";
-import { normalizedToDisplayMessages } from "./sdk-messages.ts";
+import { msgId, normalizedToDisplayMessages } from "./sdk-messages.ts";
+
+const originalCrypto = globalThis.crypto;
+
+afterEach(() => {
+  Object.defineProperty(globalThis, "crypto", {
+    configurable: true,
+    value: originalCrypto,
+  });
+});
 
 // ── normalizedToDisplayMessages ───────────────────────────────────────────────
 
@@ -286,5 +295,28 @@ describe("normalizedToDisplayMessages", () => {
       const m2 = normalizedToDisplayMessages(event, "t");
       expect(m1[0]?.id).toBe(m2[0]?.id);
     });
+  });
+});
+
+describe("msgId", () => {
+  it("falls back when crypto.randomUUID is unavailable", () => {
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: {
+        getRandomValues<T extends Exclude<BufferSource, ArrayBuffer>>(array: T): T {
+          const bytes = new Uint8Array(
+            ArrayBuffer.isView(array) ? array.buffer : array,
+            ArrayBuffer.isView(array) ? array.byteOffset : 0,
+            ArrayBuffer.isView(array) ? array.byteLength : undefined,
+          );
+          for (let i = 0; i < bytes.length; i += 1) {
+            bytes[i] = i;
+          }
+          return array;
+        },
+      } satisfies Pick<Crypto, "getRandomValues">,
+    });
+
+    expect(msgId("x")).toBe("x-00010203-0405-4607-8809-0a0b0c0d0e0f");
   });
 });

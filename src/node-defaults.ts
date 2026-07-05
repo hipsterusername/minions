@@ -8,7 +8,6 @@ import type { ProjectSettings } from "./api.ts";
 import type { ThinkingConfig } from "./types.ts";
 import { DEFAULT_THINKING_CONFIG, MINION_THINKING_CONFIG } from "./types.ts";
 import { createImageNodeDefaultData } from "./nodes/ImageNode.tsx";
-import { createRoutineNodeDefaultData } from "./nodes/RoutineNode.tsx";
 
 export function createDefaultNodeData(
   type: string,
@@ -57,9 +56,7 @@ export function createDefaultNodeData(
         skillValues: {},
         skillPanelOpen: false,
         systemPromptPrefix: null,
-        thinkingConfig: cloneThinkingConfig(
-          projectSettings?.defaultLeaderThinkingConfig ?? DEFAULT_THINKING_CONFIG,
-        ),
+        thinkingConfig: resolveLeaderThinkingConfig(projectSettings),
       };
 
     case "minion":
@@ -75,7 +72,7 @@ export function createDefaultNodeData(
         totalCost: 0,
         turns: 0,
         error: null,
-        model: projectSettings?.defaultMinionModel ?? "claude-sonnet-4-6",
+        model: projectSettings?.defaultMinionModel ?? "claude-sonnet-5",
         harness: projectSettings?.defaultMinionHarness ?? "claude",
         permissionMode: projectSettings?.defaultPermissionMode ?? "auto",
         thinkingConfig: cloneThinkingConfig(
@@ -98,9 +95,6 @@ export function createDefaultNodeData(
     case "image":
       return createImageNodeDefaultData();
 
-    case "routine":
-      return createRoutineNodeDefaultData();
-
     default:
       return {};
   }
@@ -108,4 +102,22 @@ export function createDefaultNodeData(
 
 function cloneThinkingConfig(config: ThinkingConfig): ThinkingConfig {
   return { ...config };
+}
+
+function resolveLeaderThinkingConfig(
+  projectSettings?: ProjectSettings,
+): ThinkingConfig {
+  if (projectSettings?.defaultLeaderThinkingConfig) {
+    return cloneThinkingConfig(projectSettings.defaultLeaderThinkingConfig);
+  }
+  return {
+    ...DEFAULT_THINKING_CONFIG,
+    effort: isFableModel(projectSettings?.defaultLeaderModel)
+      ? "medium"
+      : DEFAULT_THINKING_CONFIG.effort,
+  };
+}
+
+function isFableModel(model: unknown): boolean {
+  return model === "claude-fable-5" || model === "fable";
 }

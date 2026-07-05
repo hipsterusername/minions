@@ -20,7 +20,6 @@ import type {
 } from "./harness/types.ts";
 import type { NormalizedEvent } from "../shared/normalized-event.ts";
 import type { Bus } from "./bus.ts";
-import { persistTaskState } from "./session-persist.ts";
 import { createWorktree, isGitRepo, type WorktreeInfo } from "./worktree.ts";
 import {
   enrichSystemPromptForWorktree,
@@ -30,6 +29,9 @@ import {
 import type { SessionHost, StartSessionOptions } from "./session-host.ts";
 import { applySessionRunningForMinion } from "./task-lifecycle.ts";
 import { injectSessionMessage } from "./session-message.ts";
+import { pauseActiveRunForWait, requestWaitResume } from "./wait-resume.ts";
+import { captureUsageEvent } from "./session-usage-capture.ts";
+import { captureCheckpointHandoffEvent, recordCompactionUsage, withCompactionReminder } from "./proactive-compaction.ts";
 /**
  * Ensure the host has the correct cwd + worktree wiring before the SDK
  * query opens. Mutates `host` in place and emits bus events on failure.
@@ -122,9 +124,13 @@ export function buildHarnessStartOpts(
 ): { startOpts: HarnessStartOptions; allowedTools: string[] } {
   const { host, opts, agentType, agentCtx, toolResult, abortController, harness, prompt } = input;
   const externalToolNames = opts.externalMcpToolNames ?? [];
+  const derivedMcpToolNames = Object.entries(toolResult.toolGroups).flatMap(
+    ([serverName, defs]) => defs.map((def) => `mcp__${serverName}__${def.name}`),
+  );
   const allowedTools = [
     ...harness.builtInTools,
     ...toolResult.mcpToolNames,
+    ...derivedMcpToolNames,
     ...externalToolNames,
   ];
 
@@ -140,7 +146,7 @@ export function buildHarnessStartOpts(
   const startOpts: HarnessStartOptions = {
     sessionKey: host.id,
     cwd: host.cwd,
-    prompt,
+    prompt: withCompactionReminder(host, prompt),
     systemPrompt,
     model: resolvedModel,
     allowedTools,
@@ -238,9 +244,11 @@ export function processNormalizedEvent(
   }
 
   // ── Accumulate cost from usage events ──────────────────────────────────
-  if (event.kind === "usage" && event.costUSD != null) {
-    host.totalCost = event.costUSD;
+  if (event.kind === "usage") {
+    captureUsageEvent(host, event, now);
+    recordCompactionUsage(host, event);
   }
+  captureCheckpointHandoffEvent(host, event);
 
   // ── Session completion ──────────────────────────────────────────────────
   if (event.kind === "done") {
@@ -329,6 +337,7 @@ export function buildAgentContext(
         parentWorktree: host.worktree ?? undefined,
         initialModel: params.model ?? null,
         thinkingConfig: params.thinkingConfig ?? undefined,
+        resumeId: params.sessionKey === host.id ? host.sessionId ?? undefined : undefined,
         harness: params.harness ?? host.harnessName,
       });
     },
@@ -339,29 +348,20 @@ export function buildAgentContext(
       );
       host.waitTimerId = setTimeout(() => {
         host.waitTimerId = null;
-        if (host.taskState?.pendingWait) {
-          host.taskState.pendingWait = null;
-          persistTaskState(host.id, host.taskState);
-        }
-        deps.bus.emitToSession(host.id, {
-          type: "wait_state",
-          sessionKey: host.id,
-          action: "completed",
-          reason,
-          timestamp: Date.now(),
-        });
-        deps.startChildSession({
-          sessionKey: host.id,
-          prompt: `Continue. The ${Math.round(
-            durationMs / 1000,
-          )}s wait has elapsed (reason: ${reason}). Pick up where you left off.`,
-          cwd: host.cwd,
-          resumeId: host.sessionId ?? undefined,
-          systemPrompt: opts.systemPrompt,
-          role: host.role,
-          harness: host.harnessName,
+        requestWaitResume(host, deps, {
+          completedReason: reason,
+          opts: {
+            sessionKey: host.id,
+            prompt: `Continue. The ${Math.round(durationMs / 1000)}s wait has elapsed (reason: ${reason}). Pick up where you left off.`,
+            cwd: host.cwd,
+            resumeId: host.sessionId ?? undefined,
+            systemPrompt: opts.systemPrompt,
+            role: host.role,
+            harness: host.harnessName,
+          },
         });
       }, durationMs);
+      pauseActiveRunForWait(host);
       return host.waitTimerId;
     },
     terminateSession: deps.terminateSession,
@@ -371,7 +371,6 @@ export function buildAgentContext(
   };
   if (host.taskState) ctx.existingTaskState = host.taskState;
   if (host.renderState) ctx.existingRenderState = host.renderState;
-  if (host.reasoningMapState) ctx.existingReasoningMapState = host.reasoningMapState;
   if (opts.parentWorktree) ctx.parentWorktree = opts.parentWorktree;
   return ctx;
 }

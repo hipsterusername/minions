@@ -11,7 +11,12 @@ import { describe, it, expect, vi } from "vitest";
 import { act, render, screen, fireEvent } from "@testing-library/react";
 import { SettingsMenu } from "./SettingsMenu.tsx";
 import { HarnessListProvider } from "./use-harness-list.tsx";
-import type { HarnessListEntry } from "./use-socket.ts";
+import type { HarnessListEntry, ServerMessage, SocketSubscribe } from "./use-socket.ts";
+import { restartServer } from "./api.ts";
+
+vi.mock("./api.ts", () => ({
+  restartServer: vi.fn(),
+}));
 
 const CLAUDE_ENTRY: HarnessListEntry = {
   name: "claude",
@@ -29,7 +34,7 @@ const CLAUDE_ENTRY: HarnessListEntry = {
     { id: "claude-fable-5", label: "Fable 5" },
     { id: "claude-opus-4-8", label: "Opus 4.8" },
     { id: "claude-opus-4-7", label: "Opus 4.7" },
-    { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
+    { id: "claude-sonnet-5", label: "Sonnet 5" },
   ],
   commands: [],
   agents: [],
@@ -223,6 +228,144 @@ describe("SettingsMenu", () => {
       dashboardLeaderActionNames: { improve: "Improve label" },
       dashboardLeaderActionPrompts: { improve: "Improve new" },
     });
+  });
+
+  it("queries and renders provider usage reports", async () => {
+    const socketSend = vi.fn();
+    const subscribers: Array<(msg: ServerMessage) => void> = [];
+    const socketSubscribe = vi.fn(
+      (
+        topicOrFn: string | ((msg: ServerMessage) => void),
+        maybeFn?: (msg: ServerMessage) => void,
+      ) => {
+        const fn = typeof topicOrFn === "function" ? topicOrFn : maybeFn;
+        if (fn) subscribers.push(fn);
+        return () => {};
+      },
+    ) as unknown as SocketSubscribe;
+
+    render(
+      <SettingsMenu
+        settings={{}}
+        onSettingsChange={() => {}}
+        socketSend={socketSend}
+        socketSubscribe={socketSubscribe}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    expect(socketSend).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "get_provider_usage_report", harness: "claude" }),
+    );
+    expect(socketSend).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "get_provider_usage_report", harness: "codex" }),
+    );
+
+    const claudeRequest = socketSend.mock.calls.find(
+      ([payload]) => (payload as { harness?: string }).harness === "claude",
+    )?.[0] as { requestId: string };
+    const openaiRequest = socketSend.mock.calls.find(
+      ([payload]) => (payload as { harness?: string }).harness === "codex",
+    )?.[0] as { requestId: string };
+
+    act(() => {
+      subscribers.forEach((fn) =>
+        fn({
+          type: "control_response",
+          command: "get_provider_usage_report",
+          sessionKey: "leader-1",
+          requestId: claudeRequest.requestId,
+          success: true,
+          usage: {
+            rate_limits_available: true,
+            rate_limits: {
+              five_hour: {
+                utilization: 41.8,
+                resets_at: "2026-07-03T16:05:00.000Z",
+              },
+            },
+          },
+        }),
+      );
+      subscribers.forEach((fn) =>
+        fn({
+          type: "control_response",
+          command: "get_provider_usage_report",
+          sessionKey: null,
+          requestId: openaiRequest.requestId,
+          success: true,
+          provider: "codex",
+          usage: {
+            rate_limits_available: false,
+            rate_limits: null,
+            unavailable_reason: "OpenAI/Codex rate-limit reset windows are not exposed.",
+          },
+        }),
+      );
+    });
+
+    expect(await screen.findByText("42%")).toBeInTheDocument();
+    expect(screen.getByText("OpenAI/Codex rate-limit reset windows are not exposed.")).toBeInTheDocument();
+  });
+
+  it("shows command errors instead of leaving usage refresh pending", async () => {
+    const socketSend = vi.fn();
+    const subscribers: Array<(msg: ServerMessage) => void> = [];
+    const socketSubscribe = vi.fn(
+      (
+        topicOrFn: string | ((msg: ServerMessage) => void),
+        maybeFn?: (msg: ServerMessage) => void,
+      ) => {
+        const fn = typeof topicOrFn === "function" ? topicOrFn : maybeFn;
+        if (fn) subscribers.push(fn);
+        return () => {};
+      },
+    ) as unknown as SocketSubscribe;
+
+    render(
+      <SettingsMenu
+        settings={{}}
+        onSettingsChange={() => {}}
+        socketSend={socketSend}
+        socketSubscribe={socketSubscribe}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    act(() => {
+      subscribers.forEach((fn) =>
+        fn({
+          type: "error",
+          message: "Unknown command type: get_provider_usage_report",
+        }),
+      );
+    });
+
+    expect(
+      await screen.findAllByText("Unknown command type: get_provider_usage_report"),
+    ).toHaveLength(2);
+    expect(screen.queryByText("Querying provider...")).toBeNull();
+  });
+
+  it("confirms before restarting the server", async () => {
+    vi.mocked(restartServer).mockResolvedValue({ ok: true, restarting: true });
+    render(<SettingsMenu settings={{}} onSettingsChange={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Restart Server" }));
+
+    expect(screen.getByRole("dialog", { name: /restart minions server/i })).toBeInTheDocument();
+    expect(screen.getByText(/active sessions will disconnect/i)).toBeInTheDocument();
+    expect(restartServer).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Restart Server" })[1]!);
+
+    await screen.findByText(/restart requested/i);
+    expect(restartServer).toHaveBeenCalledTimes(1);
   });
 
   it("closes on Escape", () => {

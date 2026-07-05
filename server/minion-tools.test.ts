@@ -198,4 +198,18 @@ describe("minion-tools", () => {
     }
     expect(reports).toMatchObject([{ trigger: "step", message: "Running tests" }]);
   });
+
+  it("describes summary-first artifact-file reporting for terminal/blocking reports", () => {
+    const { bus } = makeBus();
+    const { toolDefs } = createMinionToolsForSession({
+      minionSessionKey: "m",
+      bus,
+    });
+
+    for (const name of ["report_done", "report_fail", "report_blocked"]) {
+      const def = findTool(toolDefs, name);
+      expect(def.description).toContain("summary-first");
+      expect(def.description).toContain("artifact file");
+    }
+  });
 });

@@ -82,6 +82,26 @@ export function initDb(dbPath?: string): Database.Database {
       updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS session_usage (
+      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_key           TEXT NOT NULL,
+      role                  TEXT NOT NULL,
+      model                 TEXT,
+      input_tokens          INTEGER NOT NULL DEFAULT 0,
+      output_tokens         INTEGER NOT NULL DEFAULT 0,
+      cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+      cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd              REAL,
+      source                TEXT NOT NULL DEFAULT 'assistant',
+      message_id            TEXT,
+      turn_id               TEXT,
+      harness_session_id    TEXT,
+      usage_identity        TEXT NOT NULL DEFAULT '',
+      created_at            INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_usage_session
+      ON session_usage(session_key, created_at);
+
     CREATE TABLE IF NOT EXISTS task_records (
       task_id            TEXT NOT NULL,
       leader_session_key TEXT NOT NULL,
@@ -106,12 +126,6 @@ export function initDb(dbPath?: string): Database.Database {
       components    TEXT NOT NULL DEFAULT '[]'
     );
 
-    CREATE TABLE IF NOT EXISTS reasoning_map_state (
-      session_key   TEXT PRIMARY KEY,
-      state_json    TEXT NOT NULL,
-      updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
     CREATE TABLE IF NOT EXISTS event_log (
       id             INTEGER PRIMARY KEY AUTOINCREMENT,
       session_key    TEXT NOT NULL,
@@ -122,17 +136,18 @@ export function initDb(dbPath?: string): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_event_log_session ON event_log(session_key);
 
-    CREATE TABLE IF NOT EXISTS routine_runs (
-      run_id        TEXT PRIMARY KEY,
-      routine_id    TEXT NOT NULL,
-      project_path  TEXT NOT NULL,
-      snapshot_json TEXT NOT NULL,
-      started_at    TEXT NOT NULL,
-      ended_at      TEXT,
-      state         TEXT NOT NULL
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      endpoint   TEXT PRIMARY KEY,
+      p256dh     TEXT NOT NULL,
+      auth       TEXT NOT NULL,
+      created_at INTEGER NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_routine_runs_project
-      ON routine_runs(project_path, started_at DESC);
+
+    CREATE TABLE IF NOT EXISTS push_vapid (
+      id          INTEGER PRIMARY KEY CHECK (id = 1),
+      public_key  TEXT NOT NULL,
+      private_key TEXT NOT NULL
+    );
   `);
 
   // Idempotent migration: older databases were created before `session_id`
@@ -152,6 +167,21 @@ export function initDb(dbPath?: string): Database.Database {
   // rows back-fill to "claude" via the column DEFAULT — exactly the behaviour
   // before this column existed.
   ensureColumn(db, "sessions", "harness_name", "TEXT NOT NULL DEFAULT 'claude'");
+  ensureColumn(db, "session_usage", "source", "TEXT NOT NULL DEFAULT 'assistant'");
+  ensureColumn(db, "session_usage", "message_id", "TEXT");
+  ensureColumn(db, "session_usage", "turn_id", "TEXT");
+  ensureColumn(db, "session_usage", "harness_session_id", "TEXT");
+  ensureColumn(db, "session_usage", "usage_identity", "TEXT NOT NULL DEFAULT ''");
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_session_usage_identity
+      ON session_usage(
+        session_key,
+        COALESCE(harness_session_id, ''),
+        source,
+        usage_identity
+      )
+      WHERE usage_identity <> ''
+  `);
   ensureTaskRecordsCompositePk(db);
   db.exec("CREATE INDEX IF NOT EXISTS idx_task_records_leader ON task_records(leader_session_key)");
 

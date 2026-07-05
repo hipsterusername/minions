@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ProjectSettings } from "./api.ts";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { restartServer, type ProjectSettings } from "./api.ts";
 import { useTheme } from "./use-theme.ts";
 import { useHarnessList } from "./use-harness-list.tsx";
 import { findHarness, type HarnessInfo } from "./harness-list.ts";
 import type { EffortLevel, ThinkingConfig } from "./types.ts";
 import { DEFAULT_THINKING_CONFIG, MINION_THINKING_CONFIG } from "./types.ts";
+import { ConfirmModal } from "./components/ConfirmModal.tsx";
 import { getModelCapability } from "./model-meta.ts";
 import {
   DASHBOARD_LEADER_ACTIONS,
@@ -12,17 +13,45 @@ import {
   DEFAULT_DASHBOARD_LEADER_ACTION_PROMPTS,
   type DashboardLeaderAction,
 } from "./dashboard-leader-actions.ts";
+import type { ServerMessage, SocketSubscribe } from "./use-socket.ts";
 
 interface SettingsMenuProps {
   settings: ProjectSettings;
   onSettingsChange: (settings: ProjectSettings) => void;
+  socketSend?: ((data: unknown) => void) | undefined;
+  socketSubscribe?: SocketSubscribe | undefined;
 }
+
+type UsageProvider = "claude" | "openai";
+type UsageLoadState = "idle" | "loading" | "loaded" | "error";
+
+interface UsageProviderState {
+  state: UsageLoadState;
+  sessionKey: string | null;
+  usage?: unknown;
+  error?: string | undefined;
+}
+
+const USAGE_PROVIDERS: ReadonlyArray<{
+  id: UsageProvider;
+  label: string;
+  harness: string;
+}> = [
+  { id: "claude", label: "Claude", harness: "claude" },
+  { id: "openai", label: "OpenAI", harness: "codex" },
+];
+const USAGE_QUERY_TIMEOUT_MS = 10_000;
 
 /**
  * Header-anchored settings menu. Renders a gear button in the project
  * header; clicking opens a popover with theme + per-project preferences.
  */
-export function SettingsMenu({ settings, onSettingsChange }: SettingsMenuProps) {
+export function SettingsMenu({
+  settings,
+  onSettingsChange,
+  socketSend,
+  socketSubscribe,
+}: SettingsMenuProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -80,6 +109,8 @@ export function SettingsMenu({ settings, onSettingsChange }: SettingsMenuProps) 
         <SettingsPopover
           settings={settings}
           onSettingsChange={onSettingsChange}
+          socketSend={socketSend}
+          socketSubscribe={socketSubscribe}
         />
       )}
     </div>
@@ -91,12 +122,23 @@ export function SettingsMenu({ settings, onSettingsChange }: SettingsMenuProps) 
 function SettingsPopover({
   settings,
   onSettingsChange,
+  socketSend,
+  socketSubscribe,
 }: {
   settings: ProjectSettings;
   onSettingsChange: (settings: ProjectSettings) => void;
+  socketSend?: ((data: unknown) => void) | undefined;
+  socketSubscribe?: SocketSubscribe | undefined;
 }) {
   const { themeId, setTheme, themes: allThemes } = useTheme();
   const { harnesses, loaded: harnessesLoaded } = useHarnessList();
+  const [restartModalOpen, setRestartModalOpen] = useState(false);
+  const [restartState, setRestartState] = useState<"idle" | "pending" | "sent">("idle");
+  const [restartError, setRestartError] = useState<string | null>(null);
+  const [usageReports, setUsageReports] = useState<Record<UsageProvider, UsageProviderState>>({
+    claude: { state: "idle", sessionKey: null },
+    openai: { state: "idle", sessionKey: null },
+  });
   const modelGroups = useMemo(
     () => buildModelGroups(harnesses, harnessesLoaded),
     [harnesses, harnessesLoaded],
@@ -108,7 +150,7 @@ function SettingsPopover({
   );
   const minionSelection = resolveModelSelection(
     settings.defaultMinionHarness ?? "claude",
-    settings.defaultMinionModel ?? settings.defaultModel ?? "claude-sonnet-4-6",
+    settings.defaultMinionModel ?? settings.defaultModel ?? "claude-sonnet-5",
     modelGroups,
   );
   const leaderHarness = findHarness(harnesses, leaderSelection.harness);
@@ -124,25 +166,132 @@ function SettingsPopover({
   const leaderCapability = getModelCapability(leaderSelection.model, leaderHarness);
   const minionCapability = getModelCapability(minionSelection.model, minionHarness);
 
+  const requestRestart = async () => {
+    setRestartState("pending");
+    setRestartError(null);
+    try {
+      await restartServer();
+      setRestartState("sent");
+    } catch (err) {
+      setRestartState("idle");
+      setRestartError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const refreshUsage = useCallback(() => {
+    if (!socketSend || !socketSubscribe) {
+      setUsageReports({
+        claude: {
+          state: "error",
+          sessionKey: null,
+          error: "Usage queries need a socket connection.",
+        },
+        openai: {
+          state: "error",
+          sessionKey: null,
+          error: "Usage queries need a socket connection.",
+        },
+      });
+      return;
+    }
+
+    const pending = new Map<string, UsageProvider>();
+    const nextReports = {} as Record<UsageProvider, UsageProviderState>;
+    for (const provider of USAGE_PROVIDERS) {
+      const requestId = makeUsageRequestId(provider.id);
+      pending.set(requestId, provider.id);
+      nextReports[provider.id] = { state: "loading", sessionKey: null };
+    }
+
+    setUsageReports(nextReports);
+    let settled = false;
+    let unsubscribe: (() => void) | null = null;
+    const timeoutId = window.setTimeout(() => {
+      finishPending("Usage query timed out. Restart the server if it was running before this update.");
+    }, USAGE_QUERY_TIMEOUT_MS);
+
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      unsubscribe?.();
+    };
+
+    const finishPending = (error: string) => {
+      if (pending.size === 0) {
+        cleanup();
+        return;
+      }
+      const providers = [...pending.values()];
+      pending.clear();
+      setUsageReports((current) => {
+        const next = { ...current };
+        for (const provider of providers) {
+          next[provider] = {
+            state: "error",
+            sessionKey: current[provider]?.sessionKey ?? null,
+            error,
+          };
+        }
+        return next;
+      });
+      cleanup();
+    };
+
+    unsubscribe = socketSubscribe("*", (msg: ServerMessage) => {
+      if (msg.type === "error" && /get_provider_usage_report|Unknown command type/.test(msg.message)) {
+        finishPending(msg.message);
+        return;
+      }
+      if (msg.type !== "control_response" || msg.command !== "get_provider_usage_report") return;
+      const requestId = msg.requestId;
+      if (!requestId) return;
+      const provider = pending.get(requestId);
+      if (!provider) return;
+      pending.delete(requestId);
+      setUsageReports((current) => ({
+        ...current,
+        [provider]: {
+          state: msg.success ? "loaded" : "error",
+          sessionKey: typeof msg.sessionKey === "string" ? msg.sessionKey : null,
+          usage: msg.success ? msg["usage"] : undefined,
+          error: msg.success ? undefined : msg.error ?? "Usage report unavailable.",
+        },
+      }));
+      if (pending.size === 0) cleanup();
+    });
+
+    for (const provider of USAGE_PROVIDERS) {
+      const requestId = [...pending.entries()].find(([, id]) => id === provider.id)?.[0];
+      if (!requestId) continue;
+      socketSend({
+        type: "get_provider_usage_report",
+        harness: provider.harness,
+        requestId,
+      });
+    }
+  }, [socketSend, socketSubscribe]);
+
   return (
-    <div
-      role="dialog"
-      aria-label="Settings"
-      style={{
-        position: "absolute",
-        top: "calc(100% + 6px)",
-        right: 0,
-        width: 320,
-        maxHeight: "calc(100vh - 80px)",
-        overflowY: "auto",
-        background: "var(--bg-secondary)",
-        border: "1px solid var(--border-default)",
-        borderRadius: 10,
-        boxShadow: "var(--shadow-lg)",
-        padding: "14px 14px 16px",
-        zIndex: 250,
-      }}
-    >
+    <>
+      <div
+        role="dialog"
+        aria-label="Settings"
+        style={{
+          position: "absolute",
+          top: "calc(100% + 6px)",
+          right: 0,
+          width: 320,
+          maxHeight: "calc(100vh - 80px)",
+          overflowY: "auto",
+          background: "var(--bg-secondary)",
+          border: "1px solid var(--border-default)",
+          borderRadius: 10,
+          boxShadow: "var(--shadow-lg)",
+          padding: "14px 14px 16px",
+          zIndex: 250,
+        }}
+      >
       <div
         style={{
           fontSize: 11,
@@ -358,6 +507,10 @@ function SettingsPopover({
 
       <Divider />
 
+      <UsageReportSection reports={usageReports} onRefresh={refreshUsage} />
+
+      <Divider />
+
       {/* ── Dashboard Context Actions ── */}
       <FieldLabel>Dashboard Context Prompts</FieldLabel>
       {DASHBOARD_LEADER_ACTIONS.map(({ action }) => (
@@ -389,8 +542,347 @@ function SettingsPopover({
         Used when dropping dashboard context onto the canvas and choosing an
         action
       </FieldHint>
+
+        <Divider />
+
+        <FieldLabel>Server</FieldLabel>
+        <button
+          type="button"
+          onClick={() => {
+            setRestartError(null);
+            setRestartModalOpen(true);
+          }}
+          style={{
+            width: "100%",
+            padding: "7px 10px",
+            borderRadius: 6,
+            border: "1px solid var(--danger-color)",
+            background: "transparent",
+            color: "var(--danger-color)",
+            fontSize: 12,
+            fontFamily: "var(--font-mono)",
+            cursor: "pointer",
+            textAlign: "left",
+          }}
+        >
+          Restart Server
+        </button>
+        <FieldHint>Restarts the active Minions backend to pick up new code</FieldHint>
+        {restartError && (
+          <div
+            role="alert"
+            style={{
+              marginTop: -8,
+              marginBottom: 12,
+              color: "var(--danger-color)",
+              fontSize: 11,
+              fontFamily: "var(--font-sans)",
+              lineHeight: 1.4,
+            }}
+          >
+            {restartError}
+          </div>
+        )}
+      </div>
+
+      {restartModalOpen && (
+        <ConfirmModal
+          title="Restart Minions server?"
+          description={
+            restartState === "sent"
+              ? "Restart requested. The app will reconnect when the server is back."
+              : "Active sessions will disconnect while the backend restarts. Use this only when you need the running server to pick up newly changed code."
+          }
+          onClose={() => {
+            if (restartState !== "pending") {
+              setRestartModalOpen(false);
+              if (restartState === "sent") setRestartState("idle");
+            }
+          }}
+          actions={
+            restartState === "sent"
+              ? [
+                  {
+                    label: "Close",
+                    variant: "primary",
+                    onClick: () => {
+                      setRestartModalOpen(false);
+                      setRestartState("idle");
+                    },
+                  },
+                ]
+              : [
+                  {
+                    label: restartState === "pending" ? "Restarting..." : "Restart Server",
+                    variant: "danger",
+                    onClick: () => {
+                      if (restartState === "idle") void requestRestart();
+                    },
+                  },
+                ]
+          }
+        />
+      )}
+    </>
+  );
+}
+
+function UsageReportSection({
+  reports,
+  onRefresh,
+}: {
+  reports: Record<UsageProvider, UsageProviderState>;
+  onRefresh: () => void;
+}) {
+  return (
+    <section aria-labelledby="desktop-usage-heading">
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 10,
+          marginBottom: 8,
+        }}
+      >
+        <FieldLabel id="desktop-usage-heading">Usage</FieldLabel>
+        <button
+          type="button"
+          onClick={onRefresh}
+          style={{
+            padding: "4px 8px",
+            borderRadius: 5,
+            border: "1px solid var(--border-default)",
+            background: "var(--bg-primary)",
+            color: "var(--text-secondary)",
+            fontSize: 11,
+            fontFamily: "var(--font-mono)",
+            cursor: "pointer",
+          }}
+        >
+          Refresh
+        </button>
+      </div>
+      <div style={{ display: "grid", gap: 8 }}>
+        {USAGE_PROVIDERS.map((provider) => (
+          <UsageProviderReport
+            key={provider.id}
+            label={provider.label}
+            report={reports[provider.id]}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function UsageProviderReport({
+  label,
+  report,
+}: {
+  label: string;
+  report: UsageProviderState;
+}) {
+  const rows = usageWindowRows(report.usage);
+  const extra = extraUsageRow(report.usage);
+  const unavailableReason = usageUnavailableReason(report.usage);
+  const rateLimitsAvailable =
+    isRecord(report.usage) && report.usage["rate_limits_available"] === true;
+
+  return (
+    <div
+      style={{
+        padding: "8px 9px",
+        border: "1px solid var(--border-default)",
+        borderRadius: 6,
+        background: "var(--bg-primary)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+          marginBottom: 6,
+        }}
+      >
+        <strong
+          style={{
+            fontSize: 12,
+            color: "var(--text-primary)",
+            fontFamily: "var(--font-sans)",
+          }}
+        >
+          {label}
+        </strong>
+        <span
+          style={{
+            fontSize: 10,
+            color: "var(--text-muted)",
+            fontFamily: "var(--font-mono)",
+          }}
+        >
+          {report.state === "loading" ? "Loading" : report.sessionKey ?? "Provider"}
+        </span>
+      </div>
+
+      {report.state === "idle" ? (
+        <UsageText>Refresh to query provider usage.</UsageText>
+      ) : report.state === "loading" ? (
+        <UsageText>Querying provider...</UsageText>
+      ) : report.state === "error" ? (
+        <UsageText tone="error">{report.error}</UsageText>
+      ) : rows.length > 0 || extra ? (
+        <dl style={{ display: "grid", gap: 5, margin: 0 }}>
+          {rows.map((row) => (
+            <UsageWindowRow key={row.label} row={row} />
+          ))}
+          {extra ? (
+            <UsageWindowRow
+              row={{ label: "Extra usage", value: extra.value, reset: extra.reset }}
+            />
+          ) : null}
+        </dl>
+      ) : (
+        <UsageText>
+          {unavailableReason ??
+            (rateLimitsAvailable
+              ? "No reset windows returned for this provider."
+              : "Provider limits are not available for this provider.")}
+        </UsageText>
+      )}
     </div>
   );
+}
+
+function UsageWindowRow({
+  row,
+}: {
+  row: { label: string; value: string; reset: string };
+}) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr) auto",
+        gap: 8,
+        alignItems: "baseline",
+      }}
+    >
+      <dt
+        style={{
+          fontSize: 11,
+          color: "var(--text-secondary)",
+          fontFamily: "var(--font-sans)",
+        }}
+      >
+        {row.label}
+      </dt>
+      <dd
+        style={{
+          margin: 0,
+          textAlign: "right",
+          fontSize: 11,
+          color: "var(--text-primary)",
+          fontFamily: "var(--font-mono)",
+        }}
+      >
+        <span>{row.value}</span>
+        <small
+          style={{
+            display: "block",
+            color: "var(--text-muted)",
+            fontSize: 10,
+            marginTop: 1,
+          }}
+        >
+          Resets {row.reset}
+        </small>
+      </dd>
+    </div>
+  );
+}
+
+function UsageText({
+  children,
+  tone = "muted",
+}: {
+  children: React.ReactNode;
+  tone?: "muted" | "error";
+}) {
+  return (
+    <p
+      style={{
+        margin: 0,
+        color: tone === "error" ? "var(--danger-color)" : "var(--text-muted)",
+        fontSize: 11,
+        lineHeight: 1.4,
+        fontFamily: "var(--font-sans)",
+      }}
+    >
+      {children}
+    </p>
+  );
+}
+
+function makeUsageRequestId(provider: UsageProvider): string {
+  const suffix =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `desktop-usage-${provider}-${suffix}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function usageWindowRows(usage: unknown): Array<{ label: string; value: string; reset: string }> {
+  if (!isRecord(usage) || !isRecord(usage["rate_limits"])) return [];
+  const windows = usage["rate_limits"];
+  const labels: Record<string, string> = {
+    five_hour: "5 hour",
+    seven_day: "7 day",
+    seven_day_oauth_apps: "7 day OAuth apps",
+    seven_day_opus: "7 day Opus",
+    seven_day_sonnet: "7 day Sonnet",
+  };
+  return Object.entries(labels).flatMap(([key, label]) => {
+    if (!isRecord(windows)) return [];
+    const entry = windows[key];
+    if (!isRecord(entry)) return [];
+    const utilization =
+      typeof entry["utilization"] === "number"
+        ? `${Math.round(entry["utilization"])}%`
+        : "Unknown";
+    const reset =
+      typeof entry["resets_at"] === "string" && entry["resets_at"]
+        ? new Date(entry["resets_at"]).toLocaleString([], {
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+          })
+        : "Unknown";
+    return [{ label, value: utilization, reset }];
+  });
+}
+
+function extraUsageRow(usage: unknown): { value: string; reset: string } | null {
+  if (!isRecord(usage) || !isRecord(usage["rate_limits"])) return null;
+  const extra = usage["rate_limits"]["extra_usage"];
+  if (!isRecord(extra) || extra["is_enabled"] !== true) return null;
+  const used = typeof extra["used_credits"] === "number" ? extra["used_credits"] : null;
+  const limit = typeof extra["monthly_limit"] === "number" ? extra["monthly_limit"] : null;
+  const currency = typeof extra["currency"] === "string" ? extra["currency"] : "credits";
+  const value = used !== null && limit !== null ? `${used}/${limit} ${currency}` : "Enabled";
+  return { value, reset: "Monthly" };
+}
+
+function usageUnavailableReason(usage: unknown): string | null {
+  if (!isRecord(usage)) return null;
+  return typeof usage["unavailable_reason"] === "string" ? usage["unavailable_reason"] : null;
 }
 
 function dashboardActionNameValue(
@@ -415,7 +907,7 @@ function dashboardPromptValue(
 
 // ── Model settings helpers ─────────────────────────────────
 
-interface ModelGroup {
+export interface ModelGroup {
   harness: string;
   label: string;
   options: Array<{ value: string; label: string; model: string; harness: string }>;
@@ -461,9 +953,9 @@ const FALLBACK_MODEL_GROUPS: ModelGroup[] = [
         harness: "claude",
       },
       {
-        value: "claude::claude-sonnet-4-6",
-        label: "Sonnet 4.6",
-        model: "claude-sonnet-4-6",
+        value: "claude::claude-sonnet-5",
+        label: "Sonnet 5",
+        model: "claude-sonnet-5",
         harness: "claude",
       },
       {
@@ -480,13 +972,13 @@ const LEGACY_MODEL_ALIASES: Record<string, string> = {
   fable: "claude-fable-5",
   opus: "claude-opus-4-8",
   "opus-old": "claude-opus-4-7",
-  sonnet: "claude-sonnet-4-6",
+  sonnet: "claude-sonnet-5",
   haiku: "claude-haiku-4-5",
   "gpt-5": "gpt-5.5",
   "gpt-5-codex": "gpt-5.5",
 };
 
-function buildModelGroups(
+export function buildModelGroups(
   harnesses: ReadonlyArray<HarnessInfo>,
   loaded: boolean,
 ): ModelGroup[] {
@@ -516,7 +1008,7 @@ function providerLabel(harness: HarnessInfo): string {
   return harness.name.charAt(0).toUpperCase() + harness.name.slice(1);
 }
 
-function resolveModelSelection(
+export function resolveModelSelection(
   preferredHarness: string,
   model: string,
   groups: ModelGroup[],
@@ -545,7 +1037,7 @@ function findModelOption(
     ?.options.find((o) => o.model === model);
 }
 
-function normalizeThinkingConfig(
+export function normalizeThinkingConfig(
   value: unknown,
   fallback: ThinkingConfig,
 ): ThinkingConfig {
@@ -560,7 +1052,7 @@ function normalizeThinkingConfig(
   return { enabled, effort, display };
 }
 
-function normalizeThinkingForCapability(
+export function normalizeThinkingForCapability(
   config: ThinkingConfig,
   capability: ReturnType<typeof getModelCapability>,
 ): ThinkingConfig {
@@ -586,9 +1078,10 @@ function isEffortLevel(value: unknown): value is EffortLevel {
 
 // ── Small layout helpers ────────────────────────────────────
 
-function FieldLabel({ children }: { children: React.ReactNode }) {
+function FieldLabel({ children, id }: { children: React.ReactNode; id?: string }) {
   return (
     <label
+      id={id}
       style={{
         display: "block",
         fontSize: 11,
@@ -750,7 +1243,7 @@ function DashboardActionField({
   );
 }
 
-function ModelSelect({
+export function ModelSelect({
   value,
   groups,
   onChange,
@@ -794,7 +1287,7 @@ function ModelSelect({
   );
 }
 
-function ThinkingControls({
+export function ThinkingControls({
   config,
   capability,
   onChange,

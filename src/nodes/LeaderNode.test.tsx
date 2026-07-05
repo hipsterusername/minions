@@ -384,7 +384,7 @@ describe("LeaderNode: message actions", () => {
       />,
     );
 
-    expect(screen.getByText("Read, Grep")).toBeInTheDocument();
+    expect(screen.getByText("Read, Search")).toBeInTheDocument();
     const bubbles = screen.getAllByTestId("selectable-message");
     expect(bubbles).toHaveLength(2);
 

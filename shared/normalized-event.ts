@@ -39,11 +39,15 @@ export type NormalizedEvent =
   /** Token + cost accounting for the turn. */
   | {
       kind: "usage";
+      source?: "assistant" | "result" | "turn_completed";
       input: number;
       output: number;
       cacheRead?: number;
       cacheCreation?: number;
       costUSD?: number;
+      messageId?: string;
+      turnId?: string;
+      sdkSessionId?: string;
     }
   /** The harness was denied permission to run a tool. */
   | { kind: "permission_denial"; tool: string; reason: string }

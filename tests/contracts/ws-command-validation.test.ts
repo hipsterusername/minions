@@ -107,23 +107,6 @@ describe("contract: inbound WS command validation", () => {
     expect(ws.sent).toHaveLength(0);
   });
 
-  it("dispatches a valid start_routine command", () => {
-    const ws = new FakeWs();
-    const dispatch = vi.fn();
-    attachConnectionListeners(ws as unknown as WebSocket, makeDeps({ dispatch }));
-    clearInitialMessages(ws);
-
-    send(ws, {
-      type: "start_routine",
-      cwd: "/project",
-      routineId: "daily-digest",
-      routineInputs: { topic: "AI" },
-    });
-
-    expect(dispatch).toHaveBeenCalledTimes(1);
-    expect(ws.sent).toHaveLength(0);
-  });
-
   // ── Invalid commands are rejected with an error reply ──────
 
   it("sends an error reply and does NOT dispatch for an unknown command type", () => {

@@ -1,0 +1,178 @@
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { ServerMessage, SocketSubscribe } from "../use-socket.ts";
+import { ReviewChangesScreen } from "./ReviewChangesScreen.tsx";
+import type { DetailedDiff } from "./mobile-approvals.ts";
+
+type ServerListener = (msg: ServerMessage) => void;
+
+const requestId = "00000000-0000-4000-8000-000000000001";
+
+const diff: DetailedDiff = {
+  filesChanged: 2,
+  insertions: 18,
+  deletions: 4,
+  files: [
+    { file: "src/auth/token.ts", insertions: 10, deletions: 4, status: "modified" },
+    { file: "src/auth/token.test.ts", insertions: 8, deletions: 0, status: "added" },
+  ],
+  commits: ["Extract token validation", "Add token tests"],
+  branch: "worktree/s-1",
+};
+
+function fakeSocket() {
+  const listeners = new Set<ServerListener>();
+  const subscribe = Object.assign(
+    ((topicOrFn: string | ServerListener, fn?: ServerListener) => {
+      const listener = typeof topicOrFn === "function" ? topicOrFn : fn;
+      if (!listener) return () => {};
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    }) as SocketSubscribe,
+    { supportsTopics: true as const },
+  );
+
+  return {
+    subscribe,
+    deliver(msg: ServerMessage) {
+      for (const listener of listeners) listener(msg);
+    },
+  };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("ReviewChangesScreen", () => {
+  it("requests the worktree diff on mount", async () => {
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(requestId);
+    const socket = fakeSocket();
+    const send = vi.fn();
+
+    render(
+      <ReviewChangesScreen
+        sessionKey="s-1"
+        send={send}
+        subscribe={socket.subscribe}
+        onClose={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(send).toHaveBeenCalledWith({
+        type: "get_worktree_diff",
+        sessionKey: "s-1",
+        requestId,
+      });
+    });
+  });
+
+  it("renders matching diff responses", async () => {
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(requestId);
+    const socket = fakeSocket();
+
+    render(
+      <ReviewChangesScreen
+        sessionKey="s-1"
+        send={() => {}}
+        subscribe={socket.subscribe}
+        onClose={() => {}}
+        summary="Extracted validation."
+      />,
+    );
+
+    socket.deliver({
+      type: "control_response",
+      command: "get_worktree_diff",
+      sessionKey: "s-1",
+      requestId,
+      success: true,
+      diff,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("src/auth/token.ts")).toBeInTheDocument();
+    });
+    expect(screen.getByText("+10 -4")).toBeInTheDocument();
+    expect(screen.getByText("Extract token validation")).toBeInTheDocument();
+    expect(screen.getByText(/2 files \+18 -4/)).toBeInTheDocument();
+  });
+
+  it("sends approve, request-changes, and discard commands", async () => {
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(requestId);
+    const socket = fakeSocket();
+    const send = vi.fn();
+
+    render(
+      <ReviewChangesScreen
+        sessionKey="s-1"
+        send={send}
+        subscribe={socket.subscribe}
+        onClose={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve & Merge" }));
+    expect(send).toHaveBeenCalledWith({ type: "approve_changes", sessionKey: "s-1" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Request changes" }));
+    fireEvent.change(screen.getByLabelText("Request changes"), {
+      target: { value: "Please add coverage for errors." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(send).toHaveBeenCalledWith({
+      type: "send_message",
+      sessionKey: "s-1",
+      prompt: "Please add coverage for errors.",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => {
+      expect(screen.getByRole("group", { name: "Confirm discard" })).toBeInTheDocument();
+    });
+    const confirm = screen.getByRole("group", { name: "Confirm discard" });
+    fireEvent.click(within(confirm).getByRole("button", { name: "Discard" }));
+    expect(send).toHaveBeenCalledWith({ type: "discard_worktree", sessionKey: "s-1" });
+  });
+
+  it("reveals conflict resolution actions after merge failure", async () => {
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(requestId);
+    const socket = fakeSocket();
+    const send = vi.fn();
+
+    render(
+      <ReviewChangesScreen
+        sessionKey="s-1"
+        send={send}
+        subscribe={socket.subscribe}
+        onClose={() => {}}
+      />,
+    );
+
+    socket.deliver({
+      type: "worktree_merge_failed",
+      sessionKey: "s-1",
+      result: {
+        conflicts: ["src/auth/token.ts"],
+        summary: "Conflicts while merging",
+        targetBranch: "main",
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Conflicts while merging")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Force" }));
+    fireEvent.click(screen.getByRole("button", { name: "Theirs" }));
+
+    expect(send).toHaveBeenCalledWith({ type: "retry_merge", sessionKey: "s-1" });
+    expect(send).toHaveBeenCalledWith({ type: "force_merge", sessionKey: "s-1" });
+    expect(send).toHaveBeenCalledWith({ type: "theirs_merge", sessionKey: "s-1" });
+  });
+});

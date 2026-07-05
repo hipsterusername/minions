@@ -10,14 +10,18 @@ import { applyLifecycleEvent, isTerminalTaskStatus } from "../task-lifecycle.ts"
 
 const completeTaskInputSchema = z.object({
   taskId: z.string().describe("The task ID to mark as completed"),
-  result: z.string().describe("Summary of what was done and the outcome"),
+  result: z
+    .string()
+    .describe(
+      "Summary of what was done and the outcome. Lead with a tight summary; put long supporting detail in a repo/worktree file and reference its path instead of inlining it.",
+    ),
 });
 
 export function createCompleteTaskToolDef(ctx: TaskToolContext): NormalizedToolDef {
   return {
     name: "complete_task",
     description:
-      "Mark a task as completed by you (the leader) directly. Use this when you have executed a task yourself without delegating to a minion.",
+      "Mark a task as completed by you (the leader) directly. Use this when you have executed a task yourself without delegating to a minion. Store a summary-first result; put long supporting detail in a repo/worktree artifact file and reference the path.",
     inputSchema: completeTaskInputSchema,
     handler: async (input: unknown) => {
       const args = completeTaskInputSchema.parse(input);

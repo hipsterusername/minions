@@ -193,6 +193,22 @@ export function updateProjectSettings(id: string, settings: ProjectSettings): Pr
   });
 }
 
+// ── Server control ───────────────────────────────────────
+
+export function restartServer(): Promise<{ ok: true; restarting: true }> {
+  return apiFetch<{ ok: true; restarting: true }>("/server/restart", {
+    method: "POST",
+  }).catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("API error 404")) {
+      throw new Error(
+        "Server restart is not available on the running backend yet. Restart Minions once manually, then this settings action will work.",
+      );
+    }
+    throw err;
+  });
+}
+
 // ── Skills (per-project) ─────────────────────────────────
 
 export function getProjectSkills(id: string): Promise<import("./skills/types.ts").SkillTemplate[]> {
@@ -257,39 +273,6 @@ export interface ProjectTree {
 
 export function getProjectTree(id: string, depth = 2): Promise<ProjectTree> {
   return apiFetch(`/projects/${id}/tree?depth=${depth}`);
-}
-
-// ── Routines (per-project) ───────────────────────────────
-
-import type { Routine } from "../shared/routines/types.ts";
-
-export interface RoutineListResult {
-  routines: Routine[];
-  invalid: { file: string; errors: { path: string; message: string }[] }[];
-}
-
-export function listProjectRoutines(id: string): Promise<RoutineListResult> {
-  return apiFetch(`/projects/${id}/routines`);
-}
-
-export function getProjectRoutine(id: string, routineId: string): Promise<Routine> {
-  return apiFetch(`/projects/${id}/routines/${routineId}`);
-}
-
-export function saveProjectRoutine(id: string, routine: Routine): Promise<Routine> {
-  return apiFetch(`/projects/${id}/routines/${routine.id}`, {
-    method: "PUT",
-    body: JSON.stringify(routine),
-  });
-}
-
-export function deleteProjectRoutine(
-  id: string,
-  routineId: string,
-): Promise<{ ok: true }> {
-  return apiFetch(`/projects/${id}/routines/${routineId}`, {
-    method: "DELETE",
-  });
 }
 
 // Re-export encodePath for consumers that need to convert raw paths to IDs

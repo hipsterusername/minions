@@ -9,6 +9,7 @@ import {
 import { chatRoleStyle } from "../../../chat-bubble-style.ts";
 import { joinSelectedChunks, parseMessageChunks } from "../../../message-chunks.ts";
 import type { LeaderMessage, MessageContextSelection } from "../types.ts";
+import { copyText as copyToClipboard } from "../../../components/CopyButton.tsx";
 import { LeaderMessageActions } from "./MessageActions.tsx";
 import { MessageChunkView } from "./MessageChunkView.tsx";
 import {
@@ -118,10 +119,14 @@ export const SelectableMessageBubble = memo(
     );
 
     const copyText = useCallback((text: string) => {
-      void navigator.clipboard.writeText(text).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      });
+      void copyToClipboard(text)
+        .then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        })
+        .catch((err: unknown) => {
+          console.warn("[SelectableMessageBubble] copy failed:", err);
+        });
     }, []);
 
     const handleToolbarClick = useCallback((e: MouseEvent<HTMLDivElement>) => {

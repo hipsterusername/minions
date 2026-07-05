@@ -70,6 +70,17 @@ export const wsEnvelopeSchema = z.looseObject({
 
 export type WsEnvelope = z.infer<typeof wsEnvelopeSchema>;
 
+export const sessionCompactedEnvelopeSchema = wsEnvelopeSchema.extend({
+  type: z.literal("session_compacted"),
+  sessionKey: z.string(),
+  oldSessionId: z.string().nullable(),
+  newSessionId: z.string().nullable(),
+  contextTokensBefore: z.number().optional(),
+  contextWindowTokens: z.number().optional(),
+  ratioBefore: z.number().optional(),
+  timestamp: z.number(),
+});
+
 // ── Helpers ────────────────────────────────────────────
 
 /** Build a session-scoped topic. */

@@ -39,7 +39,7 @@ const CLAUDE_ENTRY: HarnessListEntry = {
     { id: "claude-fable-5", label: "Fable 5" },
     { id: "claude-opus-4-8", label: "Opus 4.8" },
     { id: "claude-opus-4-7", label: "Opus 4.7" },
-    { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
+    { id: "claude-sonnet-5", label: "Sonnet 5" },
   ],
   commands: [],
   agents: [],
@@ -112,7 +112,7 @@ function renderWithHarnesses(
   const baseProps: React.ComponentProps<typeof SessionToolbar> = {
     sessionKey: null,
     status: "disconnected",
-    model: "claude-sonnet-4-6",
+    model: "claude-sonnet-5",
     permissionMode: "auto",
     onInterrupt: vi.fn(),
     onModelChange: vi.fn(),
@@ -141,7 +141,7 @@ describe("SessionToolbar — model selection picker", () => {
   it("combines harness, model, and reasoning into one trigger without tier chips", () => {
     renderWithHarnesses([CLAUDE_ENTRY]);
     expect(screen.getByTitle("Model selection")).toHaveTextContent("Anthropic");
-    expect(screen.getByTitle("Model selection")).toHaveTextContent("Sonnet 4.6");
+    expect(screen.getByTitle("Model selection")).toHaveTextContent("Sonnet 5");
     expect(screen.getByTitle("Model selection")).not.toHaveTextContent("Balanced");
     expect(screen.getByTitle("Model selection")).toHaveTextContent("High");
   });
@@ -159,7 +159,7 @@ describe("SessionToolbar — model selection picker", () => {
   it("changes only the model when the selected model belongs to the active harness", () => {
     const props = renderWithHarnesses(
       [CLAUDE_ENTRY, CODEX_ENTRY],
-      { sessionKey: null, harness: "claude", model: "claude-sonnet-4-6" },
+      { sessionKey: null, harness: "claude", model: "claude-sonnet-5" },
     );
     fireEvent.click(screen.getByTitle("Model selection"));
     fireEvent.click(screen.getByRole("button", { name: /Opus 4.8/ }));
@@ -170,7 +170,7 @@ describe("SessionToolbar — model selection picker", () => {
   it("offers Fable 5 as a Claude model", () => {
     const props = renderWithHarnesses(
       [CLAUDE_ENTRY, CODEX_ENTRY],
-      { sessionKey: null, harness: "claude", model: "claude-sonnet-4-6" },
+      { sessionKey: null, harness: "claude", model: "claude-sonnet-5" },
     );
     fireEvent.click(screen.getByTitle("Model selection"));
     const fableOption = screen.getByRole("button", { name: /Fable 5/ });
@@ -182,7 +182,7 @@ describe("SessionToolbar — model selection picker", () => {
   it("does not add vague tier chips to model rows", () => {
     renderWithHarnesses(
       [CLAUDE_ENTRY, CODEX_ENTRY],
-      { sessionKey: null, harness: "claude", model: "claude-sonnet-4-6" },
+      { sessionKey: null, harness: "claude", model: "claude-sonnet-5" },
     );
     fireEvent.click(screen.getByTitle("Model selection"));
 
@@ -208,7 +208,7 @@ describe("SessionToolbar — model selection picker", () => {
           <SessionToolbar
             sessionKey={null}
             status="disconnected"
-            model="claude-sonnet-4-6"
+            model="claude-sonnet-5"
             permissionMode="auto"
             onInterrupt={vi.fn()}
             onModelChange={vi.fn()}
@@ -283,7 +283,7 @@ describe("SessionToolbar — harness-aware models", () => {
     fireEvent.click(screen.getByTitle("Model selection"));
     expect(screen.getAllByText("GPT-5.5").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /GPT-5.4/ })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /Sonnet 4.6/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Sonnet 5/ })).toBeDisabled();
   });
 
   it("keeps Claude models selectable only when the active harness is Claude", () => {
@@ -292,7 +292,7 @@ describe("SessionToolbar — harness-aware models", () => {
       { sessionKey: "leader-1", harness: "claude", model: "claude-opus-4-8" },
     );
     fireEvent.click(screen.getByTitle("Model selection"));
-    expect(screen.getByRole("button", { name: /Sonnet 4.6/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Sonnet 5/ })).toBeEnabled();
     expect(screen.getByRole("button", { name: /GPT-5.5/ })).toBeDisabled();
   });
 

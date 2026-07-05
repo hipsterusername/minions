@@ -16,60 +16,15 @@ import {
   type SessionHostDeps,
   type StartSessionOptions,
   type SessionRole,
-  type SessionStatus,
 } from "./session-host.ts";
 import { hydrateSessionsFromDb } from "./session-persist.ts";
-import { getHarness } from "./harness/index.ts";
-import type { HarnessCapabilities } from "./harness/types.ts";
 import type { RuntimeSessionInfo, TaskManagerState, TaskRecord } from "./task-tools.ts";
 import type { WorktreeLifecycle } from "./worktree-types.ts";
 import { applyLifecycleEvent } from "./task-lifecycle.ts";
 import { persistTaskState } from "./session-persist.ts";
-import { buildTaskDigest, isWakeWorthyStatus } from "./session-wake.ts";
-
-/** Compact shape broadcast to clients in `session_list` messages. */
-export interface SessionListItem {
-  sessionKey: string;
-  sessionId: string | null;
-  status: SessionStatus;
-  cwd: string;
-  totalCost: number;
-  turns: number;
-  model: string | null;
-  permissionMode: string | null;
-  taskName: string | null;
-  role: SessionRole;
-  /**
-   * Registered harness driving this session. Mirrors the field on
-   * `sync_response` so the sessions panel can render harness-aware
-   * affordances without an extra round-trip per session.
-   */
-  harness: string;
-  /**
-   * Capabilities of the resolved harness, or `null` when the harness
-   * name is no longer registered (e.g. a hydrated session whose harness
-   * module has been removed). Clients treat `null` as "fall back to safe
-   * defaults" rather than throwing.
-   */
-  harnessCapabilities: HarnessCapabilities | null;
-  activeMinions: Array<{
-    taskId: string;
-    title: string;
-    status: string;
-    sessionKey: string | null;
-  }>;
-}
-
-function harnessMeta(name: string): {
-  harness: string;
-  harnessCapabilities: HarnessCapabilities | null;
-} {
-  try {
-    return { harness: name, harnessCapabilities: getHarness(name).capabilities };
-  } catch {
-    return { harness: name, harnessCapabilities: null };
-  }
-}
+import { requestWaitResume } from "./wait-resume.ts";
+import { buildWakeTaskDigest, isWakeWorthyStatus, requestCoalescedWake } from "./wake-coalescer.ts";
+import { buildSessionListItem, type SessionListItem } from "./session-list-item.ts";
 
 export class SessionRegistry {
   private readonly map = new Map<string, SessionHost>();
@@ -223,26 +178,20 @@ export class SessionRegistry {
         if (!minionTasks.some((t) => isWakeWorthyStatus(t.status))) return;
       } else if (minionTasks.some((t) => !isWakeWorthyStatus(t.status))) return;
 
-      const digest = buildTaskDigest(minionTasks, pendingWait.scheduledAt);
-      host.clearWaitTimer();
-      host.taskState!.pendingWait = null;
-      persistTaskState(host.id, host.taskState!);
-      this.deps.bus.emitToSession(host.id, {
-        type: "wait_state",
-        sessionKey: host.id,
-        action: "completed",
-        reason: "All delegated child tasks reached a wake-worthy state (terminal or blocked).",
-        timestamp: Date.now(),
-      });
-      this.deps.startChildSession({
-        sessionKey: host.id,
-        prompt:
-          `Continue. All delegated child tasks reached a wake-worthy state (terminal or blocked) while waiting (${pendingWait.reason}). Pick up where you left off.` +
-          (digest ? `\n\nTask results:\n${digest}` : ""),
-        cwd: host.cwd,
-        resumeId: host.sessionId ?? undefined,
-        role: host.role,
-        harness: host.harnessName,
+      const digest = buildWakeTaskDigest(minionTasks, pendingWait.scheduledAt);
+      requestWaitResume(host, this.deps, {
+        completedReason: "All delegated child tasks reached a wake-worthy state (terminal or blocked).",
+        immediate: wakeOn === "all_terminal",
+        opts: {
+          sessionKey: host.id,
+          prompt:
+            `Continue. All delegated child tasks reached a wake-worthy state (terminal or blocked) while waiting (${pendingWait.reason}). Pick up where you left off.` +
+            (digest ? `\n\nTask results:\n${digest}` : ""),
+          cwd: host.cwd,
+          resumeId: host.sessionId ?? undefined,
+          role: host.role,
+          harness: host.harnessName,
+        },
       });
       return;
     }
@@ -268,52 +217,24 @@ export class SessionRegistry {
     );
     if (meaningfulTasks.length === 0) return;
 
-    const digest = buildTaskDigest(meaningfulTasks);
-    this.deps.startChildSession({
-      sessionKey: host.id,
-      prompt: `A delegated task reached a state needing your attention while you were idle:\n${digest}\nReview it (answer a blocked task with message_task) and continue orchestrating.`,
-      cwd: host.cwd,
-      resumeId: host.sessionId ?? undefined,
-      role: host.role,
-      harness: host.harnessName,
+    const digest = buildWakeTaskDigest(meaningfulTasks);
+    requestCoalescedWake(host, this.deps, {
+      opts: {
+        sessionKey: host.id,
+        prompt: `A delegated task reached a state needing your attention while you were idle:\n${digest}\nReview it (answer a blocked task with message_task) and continue orchestrating.`,
+        cwd: host.cwd,
+        resumeId: host.sessionId ?? undefined,
+        role: host.role,
+        harness: host.harnessName,
+      },
     });
   };
 
   /** Flatten the current registry into the `session_list` broadcast shape. */
   snapshot(): SessionListItem[] {
-    return Array.from(this.map.entries()).map(([key, s]) => {
-      const { harness, harnessCapabilities } = harnessMeta(s.harnessName);
-      return {
-        sessionKey: key,
-        sessionId: s.sessionId,
-        status: s.status,
-        cwd: s.cwd,
-        totalCost: s.totalCost,
-        turns: s.turns,
-        model: s.model,
-        permissionMode: s.permissionMode,
-        taskName: s.taskName,
-        role: s.role,
-        harness,
-        harnessCapabilities,
-        activeMinions: s.taskState
-          ? Array.from(s.taskState.tasks.entries())
-              .filter(
-                ([, t]) =>
-                  t.status === "planned" ||
-                  t.status === "starting" ||
-                  t.status === "running" ||
-                  t.status === "blocked",
-              )
-              .map(([id, t]) => ({
-                taskId: id,
-                title: t.title,
-                status: t.status,
-                sessionKey: t.minionSessionKey,
-              }))
-          : [],
-      };
-    });
+    return Array.from(this.map.entries()).map(([key, s]) =>
+      buildSessionListItem(key, s),
+    );
   }
 
   // ── Boot hydration ─────────────────────────────────
@@ -327,7 +248,7 @@ export class SessionRegistry {
   hydrateFromDb(): number {
     try {
       const hydrated = hydrateSessionsFromDb();
-      for (const { row, tasks, render, reasoningMap, events } of hydrated) {
+      for (const { row, tasks, render, events, usageTotals } of hydrated) {
         const host = new SessionHost(
           row.session_key,
           row.cwd ?? process.cwd(),
@@ -335,6 +256,7 @@ export class SessionRegistry {
         host.status = "stopped";
         host.totalCost = row.total_cost;
         host.turns = row.turns;
+        host.usageTotals = usageTotals;
         host.model = row.model;
         host.role = (row.role as SessionRole) ?? "default";
         host.taskName = row.task_name;
@@ -379,7 +301,6 @@ export class SessionRegistry {
           }
         }
         host.renderState = render;
-        host.reasoningMapState = reasoningMap;
         // Restore the event buffer in place — using bufferEvent() here
         // would re-persist every event we just loaded.
         host.eventBuffer = events;

@@ -46,6 +46,8 @@ pnpm start
 ```
 
 The app opens automatically at **http://localhost:5173**. The backend server runs on port 3141.
+It also listens on your Tailscale interface by default, so you can open
+`http://<tailscale-hostname-or-ip>:5173` from another device on your tailnet.
 
 That's it. No environment variables, no database setup, no Docker — SQLite handles storage automatically.
 
@@ -76,7 +78,6 @@ Click **+** on the canvas toolbar to add:
 - **Markdown** — rich documentation and notes
 - **Image** — drop in screenshots or diagrams as canvas context
 - **Dashboard** — render DSL component view (also driven by Leader render tools)
-- **Routine** — scheduled or recurring agent runs
 - **Context Group** — group nodes together to feed as context into Leader sessions
 
 Folder and File Viewer nodes are created automatically when you drag in directories or files.
@@ -88,13 +89,49 @@ All optional — sane defaults are provided:
 | Variable | Default | Description |
 |---|---|---|
 | `PORT` | `3141` | Backend server port |
-| `HOST` | `127.0.0.1` | Server bind address |
+| `HOST` | `0.0.0.0` | Server bind address |
 
 Set them as environment variables:
 
 ```bash
 PORT=8080 pnpm start
 ```
+
+Remote browser access is limited to loopback and Tailscale-style hosts
+(`100.64.0.0/10`, Tailscale IPv6, and MagicDNS `*.ts.net`). The browser talks to
+the backend same-origin — Vite proxies both `/api` and the `/ws` WebSocket to the
+server — so changing `PORT` alone is enough; the front end follows automatically:
+
+```bash
+PORT=8080 pnpm start
+```
+
+### Mobile access over HTTPS (Tailscale)
+
+The mobile companion at `/m` uses **Web Push** for notifications, and browsers
+only expose the Service Worker / Push APIs in a **secure context** (HTTPS, or
+`localhost`). Opening the app from a phone over `http://<host>:5173` is *not* a
+secure context, so the notifications button shows **"Notifications Unsupported"**.
+
+Serve the app over real HTTPS on your tailnet — no self-signed certs:
+
+```bash
+# Terminal 1 — run the app (built preview is best for a phone):
+pnpm build && pnpm preview        # serves the built app on :4173
+
+# Terminal 2 — front it over tailnet HTTPS on :443:
+pnpm serve:tailscale              # tailscale serve → https://<machine>.<tailnet>.ts.net
+```
+
+Then open `https://<machine>.<tailnet>.ts.net/m` on your phone (small screens
+auto-redirect to `/m`). Notifications now work: tap **Enable notifications**.
+
+- Fronting the **dev** server instead: `pnpm serve:tailscale:dev` (port 5173).
+- Stop fronting: `node scripts/tailscale-serve.mjs --off`.
+- On **iOS**, Web Push additionally requires iOS 16.4+ and adding the app to the
+  Home Screen (Share → *Add to Home Screen*), then launching it from that icon.
+
+This stays tailnet-only; it does not enable `tailscale funnel` (public internet).
 
 To pre-approve all in-process MCP tools so the Leader/Minion flow runs without interactive permission prompts:
 
@@ -151,11 +188,11 @@ handler registered for every WebSocket command.
 ## Architecture
 
 ```
-Browser (localhost:5173)
+Browser (localhost:5173 or Tailscale host:5173)
   │
   ├── React 19 + Vite 8 (infinite canvas UI)
   │
-  └── WebSocket ──► Express server (localhost:3141)
+  └── WebSocket ──► Express server (same host:3141)
                       │
                       ├── Claude Agent SDK ──► claude CLI sessions
                       ├── SQLite (per-project state)

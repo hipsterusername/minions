@@ -86,7 +86,7 @@ const darkSemanticVars = {
   "--success-bg": "rgba(74, 222, 128, 0.08)",
   "--danger-bg": "rgba(239, 68, 68, 0.08)",
   // Alias kept for components that ask for an `error` rather than `danger`
-  // background (e.g. RenderNode status, RoutineNode aborted state).
+  // background (e.g. RenderNode status).
   "--error-bg": "rgba(239, 68, 68, 0.08)",
   "--warning-bg": "rgba(250, 204, 21, 0.06)",
   "--info-bg": "rgba(96, 165, 250, 0.08)",

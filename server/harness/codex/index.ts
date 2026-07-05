@@ -98,6 +98,24 @@ class CodexHarness implements AgentHarness {
     };
   }
 
+  async getUsageReport(): Promise<unknown> {
+    const creds = resolveCodexCredentials();
+    const authProblem = creds.apiKey ? null : missingCodexAuth();
+    return {
+      provider: "openai",
+      subscription_type: null,
+      rate_limits_available: false,
+      rate_limits: null,
+      unavailable_reason:
+        "OpenAI/Codex rate-limit reset windows are not exposed by the installed Codex SDK or CLI.",
+      auth: {
+        authenticated: authProblem === null,
+        source: creds.apiKey ? "api_key" : authProblem === null ? "codex_cli" : "missing",
+        error: authProblem ?? undefined,
+      },
+    };
+  }
+
   /**
    * Start a Codex session. Returns the event stream the host pulls until the
    * `done` event is emitted, plus a per-run control surface command handlers
@@ -181,7 +199,7 @@ class CodexHarness implements AgentHarness {
         // intentionally NOT rendered here. Phase D wires Minions-internal tool
         // groups through the bridge only; external MCP renderers per-harness
         // (Codex stdio + streamable HTTP shape) are deferred to a follow-up
-        // because the source representation in `server/routines/external-mcp.ts`
+        // because external MCP server definitions are already resolved before
         // is still Claude SDK-shaped. See docs/codex-harness-spec.md §"External
         // MCP" — silently passing the Claude config object into Codex would
         // either be dropped by the SDK or render incorrectly, so we drop it on

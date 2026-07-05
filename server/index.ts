@@ -25,10 +25,16 @@ import { cleanupStaleWorktrees } from "./worktree.ts";
 import { listRecentProjects } from "./project-store.ts";
 import type { SessionHostDeps, StartSessionOptions } from "./session-host.ts";
 import { SessionRegistry } from "./session-registry.ts";
-import { RoutineRunRegistry } from "./routine-registry.ts";
 import { dispatchCommand } from "./commands/index.ts";
 import type { CommandContext } from "./commands/index.ts";
 import { WS_MAX_PAYLOAD_BYTES } from "./ws-config.ts";
+import { isAllowedAuthRequestHost, isAllowedOrigin } from "./network-access.ts";
+import { openPersistDb } from "./session-persist.ts";
+import { loadOrCreateVapidKeys } from "./push-vapid.ts";
+import { createPushStore } from "./push-store.ts";
+import { createPushRoutes } from "./routes/push.ts";
+import { createPushNotifier } from "./push-notifier.ts";
+import { sendWebPush } from "./push-sender.ts";
 
 // ── Auth Token ──────────────────────────────────────────
 const AUTH_TOKEN = crypto.randomBytes(32).toString("hex");
@@ -42,13 +48,8 @@ app.use(express.json({ limit: "10mb" }));
 
 // ── CORS ────────────────────────────────────────────────
 app.use((req, res, next) => {
-  const allowedOrigins = [
-    "http://localhost:5173",
-    "http://localhost:4173",
-    "http://127.0.0.1:5173",
-  ];
   const origin = req.headers.origin;
-  if (origin && allowedOrigins.includes(origin)) {
+  if (origin && isAllowedOrigin(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader(
       "Access-Control-Allow-Methods",
@@ -67,10 +68,13 @@ app.use((req, res, next) => {
   next();
 });
 
-// ── Auth bootstrap endpoint (unauthenticated, localhost only) ──
+// ── Auth bootstrap endpoint (unauthenticated, local/Tailscale only) ──
 app.get("/api/auth/token", (req: Request, res: Response) => {
-  const host = req.hostname;
-  if (host !== "localhost" && host !== "127.0.0.1" && host !== "::1") {
+  const origin = req.headers.origin;
+  if (
+    !isAllowedOrigin(Array.isArray(origin) ? origin[0] : origin) ||
+    !isAllowedAuthRequestHost(req.hostname, req.socket.remoteAddress)
+  ) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
@@ -91,24 +95,26 @@ function authMiddleware(req: Request, res: Response, next: Function) {
 // Mount REST API routes (with auth)
 app.use("/api/projects", authMiddleware, createProjectRoutes());
 app.use("/api/files", authMiddleware, createFileRoutes());
+app.post("/api/server/restart", authMiddleware, (_req: Request, res: Response) => {
+  res.json({ ok: true, restarting: true });
+  setTimeout(() => {
+    console.log("[restart] Restart requested from settings.");
+    process.exit(42);
+  }, 100).unref();
+});
+
+// ── Web Push (mobile notifications) ─────────────────────
+// Server-authoritative subscriptions + VAPID keys live in the shared
+// server.db. Registration is over HTTP (behind auth); the notifier reads
+// the bus and fans approval/minion/error events out as Web Push.
+const pushDb = openPersistDb();
+const vapidKeys = loadOrCreateVapidKeys(pushDb);
+const pushStore = createPushStore(pushDb);
+app.use("/api/push", authMiddleware, createPushRoutes({ store: pushStore, vapid: vapidKeys }));
 
 // ── HTTP + WebSocket Server ──────────────────────────────
 const PORT = parseInt(process.env["PORT"] ?? "3141", 10);
 const server = createServer(app);
-
-// ── Origin validation ───────────────────────────────────
-// Only allow WebSocket connections from localhost origins.
-// This prevents drive-by attacks from malicious web pages.
-const ALLOWED_ORIGIN_PATTERNS = [
-  /^https?:\/\/localhost(:\d+)?$/,
-  /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
-  /^https?:\/\/\[::1\](:\d+)?$/,
-];
-
-function isAllowedOrigin(origin: string | undefined): boolean {
-  if (!origin) return true;
-  return ALLOWED_ORIGIN_PATTERNS.some((pattern) => pattern.test(origin));
-}
 
 const wss = new WebSocketServer({
   server,
@@ -148,6 +154,9 @@ const MAX_SESSIONS = 50;
 const registry = new SessionRegistry();
 const bus = createBus(wss);
 
+// Fan approval/minion/error bus events out as Web Push notifications.
+createPushNotifier({ bus, store: pushStore, vapid: vapidKeys, send: sendWebPush });
+
 const sessionDeps: SessionHostDeps = {
   bus,
   startChildSession: (opts: StartSessionOptions) => registry.start(opts),
@@ -171,14 +180,6 @@ function generateKey(): string {
   return `session-${Date.now().toString(36)}-${keyCounter}`;
 }
 
-// ── Routine runtime ─────────────────────────────────────
-//
-// Owns live routine runs. Spawns its child Leaders through the same
-// SessionRegistry as everything else, so a Routine-spawned Leader is
-// indistinguishable from a hand-spawned one on the canvas — except that
-// it also has a `report_phase_result` MCP tool wired in via step-tools.
-const routines = new RoutineRunRegistry({ bus, sessionRegistry: registry });
-
 // ── Command dispatcher context ──────────────────────────
 
 const commandContext: CommandContext = {
@@ -186,7 +187,6 @@ const commandContext: CommandContext = {
   bus,
   generateKey,
   maxSessions: MAX_SESSIONS,
-  routines,
 };
 
 // ── WebSocket handlers ───────────────────────────────────
@@ -205,7 +205,7 @@ wss.on("connection", (ws) => {
   });
 });
 
-const HOST = process.env["HOST"] ?? "127.0.0.1";
+const HOST = process.env["HOST"] ?? "0.0.0.0";
 server.listen(PORT, HOST, () => {
   console.log(`Minions server on http://${HOST}:${PORT}`);
   console.log(`WebSocket available on ws://${HOST}:${PORT}`);

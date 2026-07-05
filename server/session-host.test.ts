@@ -84,10 +84,17 @@ vi.mock("./harness/index.ts", () => ({
 import { SessionHost, type SessionHostDeps } from "./session-host.ts";
 import { createBus, type Bus } from "./bus.ts";
 import {
+  openPersistDb,
   disablePersistence,
   closePersistDb,
 } from "./session-persist.ts";
+import { requestWaitResume } from "./wait-resume.ts";
 import "./agents/index.ts"; // registers agent types
+import {
+  createCheckpointSessionToolDef,
+  resetCheckpointSessionStateForTest,
+} from "./task-tools/checkpoint-session.ts";
+import type { TaskToolContext } from "./task-tools/types.ts";
 
 interface CapturedEnvelope {
   topic: string;
@@ -136,6 +143,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetCheckpointSessionStateForTest();
   closePersistDb();
 });
 
@@ -172,6 +180,92 @@ describe("SessionHost.start — happy-path lifecycle", () => {
       .filter((e) => e.type === "session_status")
       .map((e) => e.payload["status"]);
     expect(statuses).toEqual(["running", "idle"]);
+  });
+
+  it("drains a queued wait resume after the current run becomes idle", async () => {
+    const { host, deps, envelopes } = makeHarness("leader-1");
+    host.role = "leader";
+    const startChildSession = deps.startChildSession as ReturnType<typeof vi.fn>;
+
+    harnessRef.startFnOverride = () => ({
+      events: (async function* () {
+        yield { kind: "init", sessionId: "sdk-queued", model: "sonnet" };
+        const timerId = setTimeout(() => {}, 30_000);
+        host.taskState = {
+          tasks: new Map(),
+          pendingWait: {
+            durationMs: 30_000,
+            reason: "waiting",
+            scheduledAt: Date.now(),
+            timerId,
+          },
+          approval: null,
+        };
+        host.waitTimerId = timerId;
+        requestWaitResume(host, deps, {
+          completedReason: "timer elapsed",
+          opts: {
+            sessionKey: host.id,
+            prompt: "Continue.",
+            cwd: host.cwd,
+            resumeId: host.sessionId ?? undefined,
+            role: "leader",
+            harness: "claude",
+          },
+        });
+        expect(startChildSession).not.toHaveBeenCalled();
+        yield { kind: "done", reason: "stop" };
+      })(),
+      control: { abort: () => {} },
+    });
+
+    await host.start({ sessionKey: host.id, prompt: "p", cwd: host.cwd, role: "leader" }, deps);
+
+    expect(host.taskState?.pendingWait).toBeNull();
+    expect(startChildSession).toHaveBeenCalledWith(expect.objectContaining({
+      sessionKey: "leader-1",
+      resumeId: "sdk-queued",
+      prompt: "Continue.",
+    }));
+    expect(envelopes.some((e) =>
+      e.type === "wait_state" && e.payload["action"] === "completed",
+    )).toBe(true);
+  });
+
+  it("nudges an idle minion by resuming its existing harness session", async () => {
+    const { host, deps } = makeHarness("minion-1");
+    const taskState = {
+      tasks: new Map([
+        ["t1", {
+          taskId: "t1",
+          title: "T1",
+          description: "",
+          priority: "medium" as const,
+          executor: "minion" as const,
+          minionSessionKey: "minion-1",
+          leaderSessionKey: "leader-1",
+          status: "running" as const,
+          createdAt: 1,
+          completedAt: null,
+          result: null,
+        }],
+      ]),
+      pendingWait: null,
+      approval: null,
+    };
+    deps.forEachLeaderTaskState = (fn) => fn("leader-1", taskState);
+    harnessRef.events = [
+      { kind: "init", sessionId: "sdk-existing", model: "sonnet" },
+      { kind: "done", reason: "stop" },
+    ];
+
+    await host.start({ sessionKey: host.id, prompt: "p", cwd: host.cwd, role: "minion" }, deps);
+
+    expect(deps.startChildSession).toHaveBeenCalledWith(expect.objectContaining({
+      sessionKey: "minion-1",
+      role: "minion",
+      resumeId: "sdk-existing",
+    }));
   });
 
   it("captures init metadata into host.initData and persists session_id immediately", async () => {
@@ -252,24 +346,6 @@ describe("SessionHost.start — error path", () => {
     host.harnessName = "codex";
     host.sessionId = "thread-too-large";
     host.taskName = "Long leader loop";
-    host.reasoningMapState = {
-      activeMapId: "map-1",
-      maps: [
-        {
-          id: "map-1",
-          title: "Recovery graph",
-          status: "active",
-          createdAt: "2026-05-23T12:00:00.000Z",
-          updatedAt: "2026-05-23T12:00:00.000Z",
-          nodes: [],
-          edges: [],
-          actionBindings: [],
-          challenges: [],
-          revisions: [],
-          finalSummary: "Keep the validated recovery decision.",
-        },
-      ],
-    };
 
     let starts = 0;
     harnessRef.startFnOverride = () => {
@@ -302,7 +378,7 @@ describe("SessionHost.start — error path", () => {
     await host.start(
       {
         sessionKey: host.id,
-        prompt: "Continue the routine.",
+        prompt: "Continue the work.",
         cwd: host.cwd,
         resumeId: "thread-too-large",
       },
@@ -320,10 +396,8 @@ describe("SessionHost.start — error path", () => {
     };
     expect(secondStart.resumeId).toBeUndefined();
     expect(secondStart.prompt).toContain("<context-window-recovery>");
-    expect(secondStart.prompt).toContain("<reasoning-graph>");
-    expect(secondStart.prompt).toContain("Keep the validated recovery decision.");
     expect(secondStart.prompt).toContain("I finished step one.");
-    expect(secondStart.prompt).toContain("Continue the routine.");
+    expect(secondStart.prompt).toContain("Continue the work.");
   });
 
   it("surfaces a context-window failure after one automatic recovery attempt", async () => {
@@ -352,6 +426,132 @@ describe("SessionHost.start — error path", () => {
     expect(envelopes.filter((e) => e.type === "session_error")).toHaveLength(1);
   });
 
+  it("appends one proactive checkpoint reminder after recommendation crossing", async () => {
+    const { host, deps } = makeHarness();
+    host.role = "leader";
+
+    harnessRef.events = [
+      { kind: "init", sessionId: "thread-1", model: "sonnet" },
+      { kind: "usage", input: 110_000, output: 1 },
+      { kind: "done", reason: "stop" },
+    ];
+    await host.start({ sessionKey: host.id, prompt: "first", cwd: host.cwd, role: "leader" }, deps);
+
+    harnessRef.events = [
+      { kind: "init", sessionId: "thread-1", model: "sonnet" },
+      { kind: "done", reason: "stop" },
+    ];
+    await host.start({ sessionKey: host.id, prompt: "next wake", cwd: host.cwd, role: "leader" }, deps);
+
+    const secondStart = harnessRef.starts[1] as { prompt: string };
+    expect(secondStart.prompt).toContain("checkpoint_session");
+    expect(secondStart.prompt).toContain("55%");
+
+    await host.start({ sessionKey: host.id, prompt: "third", cwd: host.cwd, role: "leader" }, deps);
+    const thirdStart = harnessRef.starts[2] as { prompt: string };
+    expect(thirdStart.prompt).not.toContain("checkpoint_session");
+  });
+
+  it("swaps to a fresh thread after checkpoint_session handoff", async () => {
+    const { host, deps, envelopes } = makeHarness("leader-1");
+    await createCheckpointSessionToolDef(taskToolCtx("leader-1")).handler({});
+
+    let starts = 0;
+    harnessRef.startFnOverride = () => {
+      starts += 1;
+      const events =
+        starts === 1
+          ? ([
+              { kind: "init", sessionId: "old-thread", model: "sonnet" },
+              { kind: "text", role: "assistant", text: "Goal: finish compaction. Next: run tests." },
+              { kind: "done", reason: "stop" },
+            ] satisfies NormalizedEvent[])
+          : ([
+              { kind: "init", sessionId: "new-thread", model: "sonnet" },
+              { kind: "done", reason: "stop" },
+            ] satisfies NormalizedEvent[]);
+      return { events: (async function* () { for (const event of events) yield event; })(), control: { abort: () => {} } };
+    };
+
+    await host.start({ sessionKey: host.id, prompt: "p", cwd: host.cwd, role: "leader", resumeId: "old-thread" }, deps);
+
+    expect(starts).toBe(2);
+    expect(host.sessionId).toBe("new-thread");
+    const secondStart = harnessRef.starts[1] as { resumeId?: string; prompt: string };
+    expect(secondStart.resumeId).toBeUndefined();
+    expect(secondStart.prompt).toContain("<previous-session-context>");
+    expect(secondStart.prompt).toContain("Goal: finish compaction");
+    expect(envelopes.some((e) => e.type === "session_compacted")).toBe(true);
+  });
+
+  it("does not let a stale recovery frame persist error after a healthy compacted run", async () => {
+    const db = openPersistDb(":memory:");
+    const { host, deps } = makeHarness("leader-db-status");
+    await createCheckpointSessionToolDef(taskToolCtx("leader-db-status")).handler({});
+
+    const emitToSession = deps.bus.emitToSession.bind(deps.bus);
+    vi.spyOn(deps.bus, "emitToSession").mockImplementation((sessionKey, payload) => {
+      if ((payload as { type?: string }).type === "session_compacted") {
+        throw new Error("subscriber failed after recovery");
+      }
+      emitToSession(sessionKey, payload);
+    });
+
+    let starts = 0;
+    harnessRef.startFnOverride = () => {
+      starts += 1;
+      const events =
+        starts === 1
+          ? ([
+              { kind: "init", sessionId: "old-thread", model: "sonnet" },
+              { kind: "text", role: "assistant", text: "Ready to continue." },
+              { kind: "done", reason: "stop" },
+            ] satisfies NormalizedEvent[])
+          : ([
+              { kind: "init", sessionId: "new-thread", model: "sonnet" },
+              { kind: "done", reason: "stop" },
+            ] satisfies NormalizedEvent[]);
+      return { events: (async function* () { for (const event of events) yield event; })(), control: { abort: () => {} } };
+    };
+
+    await host.start({ sessionKey: host.id, prompt: "p", cwd: host.cwd, role: "leader", resumeId: "old-thread" }, deps);
+
+    expect(starts).toBe(2);
+    expect(host.status).toBe("idle");
+    expect(
+      db.prepare("SELECT status FROM sessions WHERE session_key = ?").get(host.id),
+    ).toEqual({ status: "idle" });
+  });
+
+  it("auto-compacts at the force threshold on the next idle boundary", async () => {
+    const { host, deps } = makeHarness("leader-force");
+    host.proactiveCompaction.setting = "auto";
+    host.proactiveCompaction.settingResolved = true;
+    let starts = 0;
+    harnessRef.startFnOverride = () => {
+      starts += 1;
+      const events =
+        starts === 1
+          ? ([
+              { kind: "init", sessionId: "old-force", model: "sonnet" },
+              { kind: "usage", input: 160_000, output: 1 },
+              { kind: "done", reason: "stop" },
+            ] satisfies NormalizedEvent[])
+          : ([
+              { kind: "init", sessionId: "new-force", model: "sonnet" },
+              { kind: "done", reason: "stop" },
+            ] satisfies NormalizedEvent[]);
+      return { events: (async function* () { for (const event of events) yield event; })(), control: { abort: () => {} } };
+    };
+
+    await host.start({ sessionKey: host.id, prompt: "p", cwd: host.cwd, role: "leader", resumeId: "old-force" }, deps);
+
+    expect(starts).toBe(2);
+    const secondStart = harnessRef.starts[1] as { resumeId?: string; prompt: string };
+    expect(secondStart.resumeId).toBeUndefined();
+    expect(secondStart.prompt).toContain("Automatic checkpoint");
+  });
+
   it("preserves prior session metrics when an error occurs", async () => {
     const { host, deps } = makeHarness();
     host.totalCost = 1.23;
@@ -375,6 +575,19 @@ describe("SessionHost.start — error path", () => {
     expect(host.turns).toBe(7);
   });
 });
+
+function taskToolCtx(leaderSessionKey: string): TaskToolContext {
+  return {
+    leaderSessionKey,
+    bus: {} as never,
+    startMinionSession() {},
+    cwd: "/tmp/fake-cwd",
+    projectPath: "/tmp/fake-cwd",
+    minionSystemPrompt: "minion",
+    taskState: { tasks: new Map(), pendingWait: null, approval: null },
+    scheduleWaitContinue() {},
+  };
+}
 
 describe("SessionHost.start — abort", () => {
   it("breaks out of the for-await loop when the abort controller fires mid-stream", async () => {

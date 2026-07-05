@@ -104,5 +104,6 @@ export const createSession: CommandHandler = (
     ...(cmd.harness ? { harness: cmd.harness } : {}),
     ...(cmd.permissionMode ? { permissionMode: cmd.permissionMode } : {}),
   });
+  ctx.bus.emitGlobal({ type: "session_list", sessions: ctx.registry.snapshot() });
   unicastToSession(ws, key, { type: "session_created", sessionKey: key });
 };

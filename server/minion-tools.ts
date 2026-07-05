@@ -73,13 +73,17 @@ export function createMinionToolsForSession(opts: {
   };
 
   const reportDoneInputSchema = z.object({
-    summary: z.string().describe("One-line summary of what was accomplished"),
+    summary: z
+      .string()
+      .describe(
+        "One-line summary of what was accomplished. Lead with a tight summary; put long supporting detail in a repo/worktree file and reference its path instead of inlining it.",
+      ),
   });
 
   const reportDoneDef: NormalizedToolDef = {
     name: "report_done",
     description:
-      "Report task completion. Call exactly once when the current task is finished successfully.",
+      "Report task completion. Call exactly once when the current task is finished successfully. Keep the report summary-first; put long supporting detail in a repo/worktree artifact file and reference the path.",
     inputSchema: reportDoneInputSchema,
     handler: async (input: unknown) => {
       const args = reportDoneInputSchema.parse(input);
@@ -89,13 +93,17 @@ export function createMinionToolsForSession(opts: {
   };
 
   const reportFailInputSchema = z.object({
-    reason: z.string().describe("One-line reason for failure"),
+    reason: z
+      .string()
+      .describe(
+        "One-line reason for failure. Lead with a tight summary; put long supporting detail in a repo/worktree file and reference its path instead of inlining it.",
+      ),
   });
 
   const reportFailDef: NormalizedToolDef = {
     name: "report_fail",
     description:
-      "Report task failure. Call exactly once if you cannot complete the current task.",
+      "Report task failure. Call exactly once if you cannot complete the current task. Keep the report summary-first; put long supporting detail in a repo/worktree artifact file and reference the path.",
     inputSchema: reportFailInputSchema,
     handler: async (input: unknown) => {
       const args = reportFailInputSchema.parse(input);
@@ -108,14 +116,14 @@ export function createMinionToolsForSession(opts: {
     question: z
       .string()
       .describe(
-        "What you are blocked on — the question or decision the leader must resolve before you can proceed",
+        "What you are blocked on — the question or decision the leader must resolve before you can proceed. Lead with a tight summary; put long supporting detail in a repo/worktree file and reference its path instead of inlining it.",
       ),
   });
 
   const reportBlockedDef: NormalizedToolDef = {
     name: "report_blocked",
     description:
-      "Report that you are blocked and need leader input. Use this instead of report_fail when you cannot proceed without a decision or answer. Your turn ends and the leader is woken to respond; they can reply via message_task to unblock you. This does NOT fail the task.",
+      "Report that you are blocked and need leader input. Use this instead of report_fail when you cannot proceed without a decision or answer. Your turn ends and the leader is woken to respond; they can reply via message_task to unblock you. This does NOT fail the task. Keep the report summary-first; put long supporting detail in a repo/worktree artifact file and reference the path.",
     inputSchema: reportBlockedInputSchema,
     handler: async (input: unknown) => {
       const args = reportBlockedInputSchema.parse(input);

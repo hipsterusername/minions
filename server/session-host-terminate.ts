@@ -4,6 +4,7 @@ import type { TaskManagerState } from "./task-tools/types.ts";
 import { applySessionEndedForMinion } from "./task-lifecycle.ts";
 import { persistTaskState } from "./session-persist.ts";
 import { getAgentTypeOrDefault } from "./agents/index.ts";
+import { cancelQueuedWaitResume } from "./wait-resume.ts";
 
 export type SessionTerminateReason = "stop" | "close" | "remove" | "abort";
 
@@ -24,6 +25,7 @@ export async function terminateSessionHost(
 ): Promise<void> {
   const hadWaitTimer = host.waitTimerId !== null;
   host.clearWaitTimer();
+  cancelQueuedWaitResume(host);
   if (host.taskState?.pendingWait) {
     host.taskState.pendingWait = null;
     persistTaskState(host.id, host.taskState);

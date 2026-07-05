@@ -5,6 +5,10 @@ import { describe, expect, it } from "vitest";
 import type { WebSocketServer } from "ws";
 import { createBus } from "../bus.ts";
 import { createGetTaskStatusToolDef } from "./get-task-status.ts";
+import {
+  DETAIL_DESCRIPTION_MAX_CHARS,
+  DETAIL_RESULT_MAX_CHARS,
+} from "./result-summary.ts";
 import type {
   RuntimeSessionInfo,
   TaskManagerState,
@@ -346,13 +350,14 @@ describe("get_task_status", () => {
 
   // ── detailView full fidelity ────────────────────────────
 
-  it("detail view returns full result (untruncated) for a completed task", async () => {
+  it("detail view defaults to summary mode and caps long result and description", async () => {
     const ctx = makeCtx({ "m-1": makeRuntime({ sessionKey: "m-1" }) });
-    const longResult = "z".repeat(300);
+    const longResult = "r".repeat(DETAIL_RESULT_MAX_CHARS + 1);
+    const longDescription = "d".repeat(DETAIL_DESCRIPTION_MAX_CHARS + 1);
     ctx.taskState.tasks.set("t1", {
       taskId: "t1",
       title: "T",
-      description: "",
+      description: longDescription,
       priority: "medium",
       executor: "minion",
       minionSessionKey: "m-1",
@@ -366,8 +371,94 @@ describe("get_task_status", () => {
     const tool = createGetTaskStatusToolDef(ctx);
     const out = await call(tool, { taskId: "t1" });
     const parsed = JSON.parse(out.content[0]!.text);
-    expect(parsed.result).toBe(longResult);
+    expect(parsed.result).toMatch(/^r+…\[truncated/);
+    expect(parsed.result).toContain(
+      `${(DETAIL_RESULT_MAX_CHARS + 1).toLocaleString("en-US")} chars total`,
+    );
+    expect(parsed.result).toContain(
+      'call get_task_status with detail:"full"',
+    );
+    expect(parsed.description).toMatch(/^d+…\[truncated/);
+    expect(parsed.description).toContain(
+      `${(DETAIL_DESCRIPTION_MAX_CHARS + 1).toLocaleString("en-US")} chars total`,
+    );
+  });
+
+  it("detail summary mode does not add truncation markers for under-cap fields", async () => {
+    const ctx = makeCtx();
+    ctx.taskState.tasks.set("t1", {
+      taskId: "t1",
+      title: "T",
+      description: "short description",
+      priority: "medium",
+      executor: "minion",
+      minionSessionKey: null,
+      leaderSessionKey: "L",
+      status: "completed",
+      createdAt: 1,
+      completedAt: 2,
+      result: "short result",
+    });
+
+    const tool = createGetTaskStatusToolDef(ctx);
+    const out = await call(tool, { taskId: "t1" });
+    const parsed = JSON.parse(out.content[0]!.text);
+    expect(parsed.result).toBe("short result");
+    expect(parsed.description).toBe("short description");
     expect(parsed.result).not.toContain("[truncated");
+    expect(parsed.description).not.toContain("[truncated");
+  });
+
+  it("detail full mode returns full result and description for a completed task", async () => {
+    const ctx = makeCtx({ "m-1": makeRuntime({ sessionKey: "m-1" }) });
+    const longResult = "z".repeat(DETAIL_RESULT_MAX_CHARS + 25);
+    const longDescription = "q".repeat(DETAIL_DESCRIPTION_MAX_CHARS + 25);
+    ctx.taskState.tasks.set("t1", {
+      taskId: "t1",
+      title: "T",
+      description: longDescription,
+      priority: "medium",
+      executor: "minion",
+      minionSessionKey: "m-1",
+      leaderSessionKey: "L",
+      status: "completed",
+      createdAt: 1,
+      completedAt: 2,
+      result: longResult,
+    });
+
+    const tool = createGetTaskStatusToolDef(ctx);
+    const out = await call(tool, { taskId: "t1", detail: "full" });
+    const parsed = JSON.parse(out.content[0]!.text);
+    expect(parsed.result).toBe(longResult);
+    expect(parsed.description).toBe(longDescription);
+    expect(parsed.result).not.toContain("[truncated");
+    expect(parsed.description).not.toContain("[truncated");
+  });
+
+  it("detail summary mode never mutates the stored task record", async () => {
+    const ctx = makeCtx();
+    const longResult = "stored".repeat(400);
+    ctx.taskState.tasks.set("t1", {
+      taskId: "t1",
+      title: "T",
+      description: "stored description".repeat(100),
+      priority: "medium",
+      executor: "minion",
+      minionSessionKey: null,
+      leaderSessionKey: "L",
+      status: "completed",
+      createdAt: 1,
+      completedAt: 2,
+      result: longResult,
+    });
+
+    const tool = createGetTaskStatusToolDef(ctx);
+    const out = await call(tool, { taskId: "t1" });
+    const parsed = JSON.parse(out.content[0]!.text);
+
+    expect(parsed.result).toContain("[truncated");
+    expect(ctx.taskState.tasks.get("t1")!.result).toBe(longResult);
   });
 
   it("detail view returns runtime for a completed task", async () => {

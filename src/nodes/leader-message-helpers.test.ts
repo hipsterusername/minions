@@ -5,6 +5,9 @@ import {
   formatToolInputDetail,
   timeAgo,
   TOOL_ICONS,
+  isHiddenTool,
+  shortToolName,
+  toolDisplayInfo,
 } from "./leader-message-helpers.ts";
 import type { LeaderMessageGroup } from "./leader-message-helpers.ts";
 import type { DisplayMessage } from "../sdk-messages.ts";
@@ -196,5 +199,69 @@ describe("TOOL_ICONS", () => {
     for (const tool of ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Agent"]) {
       expect(TOOL_ICONS[tool]).toBeDefined();
     }
+  });
+});
+
+// ── isHiddenTool / shortToolName ────────────────────────────────────────────────
+
+describe("isHiddenTool", () => {
+  it("hides pure-plumbing bare tools", () => {
+    expect(isHiddenTool("set_task_name")).toBe(true);
+    expect(isHiddenTool("wait_and_continue")).toBe(true);
+    expect(isHiddenTool("TodoWrite")).toBe(true);
+  });
+
+  it("hides plumbing tools delivered with an mcp__server__ prefix", () => {
+    expect(isHiddenTool("mcp__task-manager__set_task_name")).toBe(true);
+    expect(isHiddenTool("mcp__render-dashboard__render_set")).toBe(true);
+  });
+
+  it("keeps substantive work tools and handles nullish input", () => {
+    expect(isHiddenTool("Read")).toBe(false);
+    expect(isHiddenTool("Bash")).toBe(false);
+    expect(isHiddenTool(undefined)).toBe(false);
+    expect(isHiddenTool(null)).toBe(false);
+  });
+});
+
+describe("shortToolName", () => {
+  it("strips the mcp__server__ prefix", () => {
+    expect(shortToolName("mcp__task-manager__assign_task")).toBe("assign_task");
+  });
+
+  it("leaves bare tool names untouched", () => {
+    expect(shortToolName("Read")).toBe("Read");
+  });
+});
+
+describe("toolDisplayInfo", () => {
+  it("turns common Minions MCP actions into friendly labels and summaries", () => {
+    expect(toolDisplayInfo("mcp__task-manager__assign_task", { title: "Fix auth" })).toMatchObject({
+      label: "Launch minion",
+      shortLabel: "Minion",
+      kind: "delegate",
+      summary: "Fix auth",
+    });
+    expect(toolDisplayInfo("mcp__task-manager__complete_task", { taskId: "t-1" })).toMatchObject({
+      label: "Complete task",
+      shortLabel: "Complete",
+      kind: "review",
+      summary: "t-1",
+    });
+  });
+
+  it("keeps familiar labels for core file and shell tools", () => {
+    expect(toolDisplayInfo("Read", { file_path: "/tmp/a.ts" })).toMatchObject({
+      label: "Read file",
+      shortLabel: "Read",
+      kind: "file",
+      summary: "/tmp/a.ts",
+    });
+    expect(toolDisplayInfo("Bash", { command: "pnpm test" })).toMatchObject({
+      label: "Run command",
+      shortLabel: "Command",
+      kind: "shell",
+      summary: "pnpm test",
+    });
   });
 });

@@ -53,7 +53,7 @@ function baseOpts(overrides: Partial<HarnessStartOptions> = {}): HarnessStartOpt
     cwd: "/tmp/workspace",
     prompt: "hello",
     systemPrompt: "system prompt",
-    model: "claude-sonnet-4-6",
+    model: "claude-sonnet-5",
     allowedTools: ["Read", "mcp__internal__alpha"],
     abortSignal: controller.signal,
     resumeId: "resume-123",
@@ -146,11 +146,12 @@ describe("ClaudeHarness.start()", () => {
     expect(options).toMatchObject({
       cwd: "/tmp/workspace",
       resume: "resume-123",
-      allowedTools: ["Read", "mcp__internal__alpha"],
+      allowedTools: ["mcp__internal__alpha", "Read"],
       systemPrompt: "system prompt",
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-5",
       includePartialMessages: true,
       permissionMode: "auto",
+      strictMcpConfig: true,
     });
     expect(options).not.toHaveProperty("pathToClaudeCodeExecutable");
     expect(options["abortController"]).toBeInstanceOf(AbortController);
@@ -213,6 +214,53 @@ describe("ClaudeHarness.start()", () => {
     });
   });
 
+  it("normalizes tool and MCP server ordering before querying Claude", async () => {
+    const handle = makeHandle([doneMessage()]);
+    sdkMock.query.mockReturnValue(handle);
+    const harness = await importHarness();
+    harness.registerTools({
+      zeta: [toolDef("gamma"), toolDef("alpha")],
+      alpha: [toolDef("beta")],
+    });
+
+    await collect(
+      harness.start(
+        baseOpts({
+          allowedTools: ["mcp__zeta__gamma", "Read", "mcp__alpha__beta"],
+          externalMcpServers: {
+            remote: { type: "http", url: "https://remote.example.test" },
+            local: { type: "stdio", command: "local-mcp" },
+          },
+        }),
+      ).events,
+    );
+
+    expect(lastQueryOptions()["allowedTools"]).toEqual([
+      "mcp__alpha__beta",
+      "mcp__zeta__gamma",
+      "Read",
+    ]);
+    expect(sdkMock.createSdkMcpServer.mock.calls.map((call) => call[0])).toEqual([
+      {
+        name: "alpha",
+        tools: [expect.objectContaining({ name: "beta" })],
+      },
+      {
+        name: "zeta",
+        tools: [
+          expect.objectContaining({ name: "alpha" }),
+          expect.objectContaining({ name: "gamma" }),
+        ],
+      },
+    ]);
+    expect(Object.keys(lastQueryOptions()["mcpServers"] as Record<string, unknown>)).toEqual([
+      "alpha",
+      "local",
+      "remote",
+      "zeta",
+    ]);
+  });
+
   it("passes thinking options when opts.thinking is set and the model supports adaptive thinking", async () => {
     sdkMock.query.mockReturnValue(makeHandle([doneMessage()]));
     const harness = await importHarness();
@@ -220,7 +268,7 @@ describe("ClaudeHarness.start()", () => {
     await collect(
       harness.start(
         baseOpts({
-          model: "claude-sonnet-4-6",
+          model: "claude-sonnet-5",
           thinking: { effort: "high", display: "summarized" },
         }),
       ).events,
@@ -236,7 +284,7 @@ describe("ClaudeHarness.start()", () => {
     sdkMock.query.mockReturnValue(makeHandle([doneMessage()]));
     const harness = await importHarness();
 
-    await collect(harness.start(baseOpts({ model: "claude-sonnet-4-6" })).events);
+    await collect(harness.start(baseOpts({ model: "claude-sonnet-5" })).events);
 
     expect(lastQueryOptions()).not.toHaveProperty("thinking");
     expect(lastQueryOptions()).not.toHaveProperty("effort");
@@ -266,7 +314,7 @@ describe("ClaudeHarness.start()", () => {
           type: "system",
           subtype: "init",
           session_id: "sdk-session",
-          model: "claude-sonnet-4-6",
+          model: "claude-sonnet-5",
           permissionMode: "auto",
           tools: ["Read"],
           mcp_servers: [{ name: "internal" }],
@@ -284,11 +332,11 @@ describe("ClaudeHarness.start()", () => {
     expect(events[0]).toEqual({
       kind: "init",
       sessionId: "sdk-session",
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-5",
       permissionMode: "auto",
       meta: {
         tools: ["Read"],
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-5",
         mcp_servers: [{ name: "internal" }],
         permissionMode: "auto",
         slash_commands: ["/help"],
@@ -347,6 +395,19 @@ describe("ClaudeHarness.start()", () => {
     expect(events).toEqual([
       { kind: "done", reason: "error", error: "SDK setup failed" },
     ]);
+  });
+
+  it("treats thrown Claude tool-use diagnostics as non-error completion", async () => {
+    sdkMock.query.mockImplementation(() => {
+      throw new Error(
+        "Claude Code returned an error result: [ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use",
+      );
+    });
+    const harness = await importHarness();
+
+    const events = await collect(harness.start(baseOpts()).events);
+
+    expect(events).toEqual([{ kind: "done", reason: "completed" }]);
   });
 
   it("delegates run control methods to the SDK handle once query is ready", async () => {

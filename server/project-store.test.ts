@@ -105,6 +105,8 @@ describe("initSidecar / openProjectDb", () => {
 
     const settings = readSettings(project);
     expect(settings.defaultModel).toBeTruthy();
+    expect(settings.mechanicalMinionModel).toBe("claude-haiku-4-5");
+    expect(settings.reasoningMinionModel).toBe(settings.defaultLeaderModel);
     expect(settings.defaultPermissionMode).toBeTruthy();
     expect(typeof settings.defaultWorktreeIsolation).toBe("boolean");
   });
@@ -160,6 +162,27 @@ describe("context / settings / skills / mcp-servers round-trip", () => {
     writeSettings(project, next);
     // readSettings merges in defaults for new harness fields; assert written values are preserved
     expect(readSettings(project)).toMatchObject(next);
+  });
+
+  it("uses medium leader thinking for fable when no explicit setting is stored", () => {
+    writeSettings(project, {
+      defaultLeaderModel: "claude-fable-5",
+    });
+
+    expect(readSettings(project).defaultLeaderThinkingConfig?.effort).toBe("medium");
+  });
+
+  it("preserves an explicit stored leader thinking effort for fable", () => {
+    writeSettings(project, {
+      defaultLeaderModel: "claude-fable-5",
+      defaultLeaderThinkingConfig: {
+        enabled: true,
+        effort: "high",
+        display: "summarized",
+      },
+    });
+
+    expect(readSettings(project).defaultLeaderThinkingConfig?.effort).toBe("high");
   });
 
   it("readSkills returns [] for an unwritten skills file and round-trips after write", () => {
@@ -226,4 +249,3 @@ describe("recent-projects index", () => {
     expect(recent.at(-1)!.path).toBe("/projects/p5");
   });
 });
-

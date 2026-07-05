@@ -1,6 +1,37 @@
 import { useState, useCallback } from "react";
 
 /**
+ * Copy text to the clipboard, robust across browsers and contexts.
+ *
+ * `navigator.clipboard` is only defined in secure contexts. Firefox served
+ * over a plain-http LAN address (e.g. http://192.168.x.x:5173) leaves it
+ * `undefined`, so calling `.writeText` there throws synchronously. We fall
+ * back to a hidden-textarea + `execCommand("copy")`, which still works in
+ * that situation. Rejects if neither path succeeds so callers can react.
+ */
+export async function copyText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.top = "0";
+  ta.style.left = "0";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    const ok = document.execCommand("copy");
+    if (!ok) throw new Error("execCommand('copy') returned false");
+  } finally {
+    document.body.removeChild(ta);
+  }
+}
+
+/**
  * A small copy-to-clipboard icon that appears on hover of its parent.
  * The parent must have `position: relative` and a `group` class (or use
  * the `CopyableWrapper` helper).
@@ -29,13 +60,18 @@ export function CopyButton({
       : { position: "static" as const, flex: "0 0 auto" };
 
   const handleCopy = useCallback(
-    (e: React.MouseEvent) => {
+    async (e: React.MouseEvent) => {
       e.stopPropagation();
       e.preventDefault();
-      navigator.clipboard.writeText(text).then(() => {
+      try {
+        await copyText(text);
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
-      });
+      } catch (err) {
+        // Surface the failure instead of silently no-op'ing (Firefox in a
+        // non-secure context leaves navigator.clipboard undefined).
+        console.warn("[CopyButton] copy failed:", err);
+      }
     },
     [text],
   );

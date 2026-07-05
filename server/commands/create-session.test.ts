@@ -39,30 +39,28 @@ function makeFakeWs(): { ws: { send: (s: string) => void; readyState: 1 }; sent:
   };
 }
 
-function makeBus(): Bus {
+function makeBus(sent: Array<Record<string, unknown>> = []): Bus {
   // None of the rejection paths use the bus — every reply goes via
   // `unicast*`. We supply a no-op bus for the success path.
   return {
     emit: () => {},
     emitToSession: () => {},
     emitToProject: () => {},
-    emitGlobal: () => {},
+    emitGlobal: (payload) => sent.push(payload),
     subscribe: () => () => {},
   };
 }
 
-function makeCtx(registry: SessionRegistry, maxSessions: number): CommandContext {
+function makeCtx(
+  registry: SessionRegistry,
+  maxSessions: number,
+  bus: Bus = makeBus(),
+): CommandContext {
   return {
     registry,
-    bus: makeBus(),
+    bus,
     generateKey: () => "auto-key",
     maxSessions,
-    routines: {
-      list: () => [],
-      get: () => null,
-      register: () => {},
-      remove: () => {},
-    } as unknown as CommandContext["routines"],
   };
 }
 
@@ -156,6 +154,34 @@ describe("createSession — MAX_SESSIONS cap", () => {
     expect(types).toContain("session_created");
     expect(types).not.toContain("error");
     expect(types).not.toContain("session_error");
+  });
+
+  it("broadcasts an updated session_list after registering a new session", () => {
+    const registry = new SessionRegistry();
+    registry.setDeps({
+      bus: makeBus(),
+      startChildSession: () => {},
+      forEachLeaderTaskState: () => {},
+    });
+
+    const busSent: Array<Record<string, unknown>> = [];
+    const { ws } = makeFakeWs();
+    const ctx = makeCtx(registry, 5, makeBus(busSent));
+    const cmd: WsCommand = {
+      type: "create_session",
+      sessionKey: "leader-new",
+      prompt: "hi",
+      cwd: process.cwd(),
+      role: "leader",
+    };
+
+    createSession(ctx, cmd, ws as unknown as Parameters<typeof createSession>[2]);
+
+    const list = busSent.find((payload) => payload["type"] === "session_list");
+    expect(list).toBeDefined();
+    const sessions = list?.["sessions"] as Array<{ sessionKey: string; role?: string }>;
+    expect(sessions.map((s) => s.sessionKey)).toContain("leader-new");
+    expect(sessions.find((s) => s.sessionKey === "leader-new")?.role).toBe("leader");
   });
 
   it("rejects when the registry is full of LIVE sessions, not stopped ones", () => {

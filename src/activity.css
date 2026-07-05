@@ -1,0 +1,454 @@
+/* Desktop Activity view — default landing surface. */
+
+.act-root {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  overflow: hidden;
+}
+
+/* ── Main list ─────────────────────────────────────────── */
+
+.act-main {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 20px 24px 48px;
+}
+
+.act-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 18px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.act-header-main {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.act-header-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.act-header-count {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  padding: 1px 9px;
+}
+
+.act-launch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  padding: 7px 12px;
+  border: none;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--bg-primary);
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.act-launch-btn:hover {
+  background: var(--accent-dark);
+  transform: translateY(-1px);
+}
+
+.act-section {
+  margin-bottom: 26px;
+}
+
+.act-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  margin: 0 0 10px;
+}
+
+.act-section-count {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.act-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+/* ── Card ──────────────────────────────────────────────── */
+
+.act-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+  padding: 14px;
+  min-height: 128px;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.act-card:hover {
+  border-color: var(--border-hover);
+  transform: translateY(-1px);
+}
+
+.act-card--selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-surface));
+}
+
+.act-card--attention {
+  border-color: color-mix(in srgb, var(--status-warning) 55%, var(--border-default));
+  background: color-mix(in srgb, var(--status-warning) 8%, var(--bg-surface));
+}
+
+.act-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.act-card-role {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.act-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.act-card-meta {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.act-card-activity {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  flex: 1;
+}
+
+.act-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.act-card-oncanvas {
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 999px;
+  padding: 0 7px;
+}
+
+/* ── Status pill ───────────────────────────────────────── */
+
+.act-pill {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--bg-primary);
+  background: var(--status-idle);
+  white-space: nowrap;
+}
+
+.act-pill--running {
+  background: var(--status-running);
+}
+.act-pill--idle {
+  background: var(--status-idle);
+}
+.act-pill--creating {
+  background: var(--status-creating);
+}
+.act-pill--waiting {
+  background: var(--status-waiting);
+}
+.act-pill--completed {
+  background: var(--status-success);
+}
+.act-pill--error {
+  background: var(--status-error);
+}
+.act-pill--stopped {
+  background: var(--status-stopped);
+}
+.act-pill--disconnected {
+  background: var(--status-disconnected);
+}
+
+/* ── Empty state ───────────────────────────────────────── */
+
+.act-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 80px 20px;
+  text-align: center;
+}
+
+.act-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.act-empty-sub {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.act-empty-launch {
+  flex: 0 0 auto;
+  margin-top: 8px;
+}
+
+/* ── Inspector ─────────────────────────────────────────── */
+
+.act-inspector {
+  width: 400px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border-left: 1px solid var(--border-default);
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.act-inspector-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.act-inspector-title {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.act-icon-btn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.act-icon-btn:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+.act-inspector-statusrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.act-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0;
+}
+
+.act-metric {
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--bg-surface);
+  min-width: 0;
+}
+
+.act-metric dt {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-bottom: 3px;
+}
+
+.act-metric dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.act-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.act-btn {
+  flex: 1;
+  min-width: 110px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.act-btn:hover:not(:disabled) {
+  border-color: var(--border-hover);
+}
+
+.act-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.act-btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-primary);
+}
+
+.act-btn--primary:hover:not(:disabled) {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+}
+
+.act-btn--danger {
+  color: var(--danger-color-text);
+  border-color: color-mix(in srgb, var(--danger-color) 40%, var(--border-default));
+}
+
+.act-inspector-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+}
+
+.act-inspector-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.act-inspector-fallback {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.act-inspector-fallback p {
+  margin: 0 0 8px;
+}
+
+.act-inspector-lastactivity {
+  color: var(--text-secondary);
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  white-space: pre-wrap;
+}
+
+/* Narrow viewports: inspector overlays the list. */
+@media (max-width: 900px) {
+  .act-inspector {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(400px, 92vw);
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.3);
+    z-index: 5;
+  }
+}

@@ -26,6 +26,22 @@ function resolveClaudePathFromEnv(): string | undefined {
   return configuredPath ? configuredPath : undefined;
 }
 
+function compareNames(a: string, b: string): number {
+  return a.localeCompare(b);
+}
+
+function sortedToolDefs(defs: NormalizedToolDef[]): NormalizedToolDef[] {
+  return [...defs].sort((a, b) => compareNames(a.name, b.name));
+}
+
+function sortedRecordEntries<T>(record: Record<string, T>): Array<[string, T]> {
+  return Object.entries(record).sort(([a], [b]) => compareNames(a, b));
+}
+
+function sortedRecord<T>(record: Record<string, T>): Record<string, T> {
+  return Object.fromEntries(sortedRecordEntries(record));
+}
+
 import type {
   AgentHarness,
   HarnessCapabilities,
@@ -35,7 +51,7 @@ import type {
   NormalizedEvent,
   NormalizedToolDef,
 } from "../types.ts";
-import { sdkToNormalized } from "./translate.ts";
+import { isClaudeToolUseDiagnostic, sdkToNormalized } from "./translate.ts";
 import { wrapTools } from "./tools.ts";
 import { resolveModelAlias, supportsAdaptiveThinking } from "./models.ts";
 import { buildClaudePrompt } from "./prompt.ts";
@@ -78,7 +94,7 @@ const CLAUDE_STATIC_MODELS: ReadonlyArray<{ id: string; label: string }> = [
   { id: "claude-fable-5", label: "Fable 5" },
   { id: "claude-opus-4-8", label: "Opus 4.8" },
   { id: "claude-opus-4-7", label: "Opus 4.7" },
-  { id: "claude-sonnet-4-6", label: "Sonnet" },
+  { id: "claude-sonnet-5", label: "Sonnet 5" },
   { id: "claude-haiku-4-5", label: "Haiku" },
 ];
 
@@ -97,6 +113,7 @@ interface SdkQueryHandle extends AsyncIterable<SDKMessage> {
   setModel?(model: string): Promise<void>;
   setPermissionMode?(mode: never): Promise<void>;
   getContextUsage?(): Promise<unknown>;
+  usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?(): Promise<unknown>;
   mcpServerStatus?(): Promise<unknown>;
   rewindFiles?(userMessageId: string, opts?: { dryRun?: boolean }): Promise<unknown>;
   seedReadState?(path: string, mtime: number): Promise<unknown>;
@@ -120,7 +137,12 @@ class ClaudeHarness implements AgentHarness {
    * `mcp__<serverName>__<toolName>` as before.
    */
   registerTools(toolGroups: Record<string, NormalizedToolDef[]>): void {
-    this.registeredGroups = toolGroups;
+    this.registeredGroups = Object.fromEntries(
+      sortedRecordEntries(toolGroups).map(([serverName, defs]) => [
+        serverName,
+        sortedToolDefs(defs),
+      ]),
+    );
   }
 
   /**
@@ -162,7 +184,12 @@ class ClaudeHarness implements AgentHarness {
 
     // Snapshot registered groups so the generator captures its own copy and
     // concurrent calls cannot step on each other.
-    const registeredGroups = { ...this.registeredGroups };
+    const registeredGroups = Object.fromEntries(
+      sortedRecordEntries(this.registeredGroups).map(([serverName, defs]) => [
+        serverName,
+        [...defs],
+      ]),
+    );
 
     // Shared mutable reference populated when the generator starts iterating.
     // Control methods guard on null so they are safe to call at any time.
@@ -171,7 +198,7 @@ class ClaudeHarness implements AgentHarness {
     async function* makeEvents(): AsyncGenerator<NormalizedEvent> {
       // Build MCP server map from registered groups.
       const mcpServers: Record<string, unknown> = {};
-      for (const [serverName, defs] of Object.entries(registeredGroups)) {
+      for (const [serverName, defs] of sortedRecordEntries(registeredGroups)) {
         if (defs.length > 0) {
           mcpServers[serverName] = wrapTools(serverName, defs);
         }
@@ -180,13 +207,14 @@ class ClaudeHarness implements AgentHarness {
       const options: Record<string, unknown> = {
         cwd: opts.cwd,
         resume: opts.resumeId,
-        allowedTools: opts.allowedTools,
+        allowedTools: [...opts.allowedTools].sort(compareNames),
         // permissionMode: Claude consumes the normalized mode verbatim.
         permissionMode: opts.permissionMode ?? "auto",
         abortController,
         includePartialMessages: true,
         systemPrompt: opts.systemPrompt,
         model: opts.model,
+        strictMcpConfig: true,
       };
 
       // Claude executable path override. When unset, let the SDK use its own
@@ -198,7 +226,7 @@ class ClaudeHarness implements AgentHarness {
 
       // Merge externally-supplied pre-wrapped MCP servers (e.g. from the project
       // sidecar's mcp-servers.json) alongside the tool-group servers.
-      const allServers = { ...mcpServers, ...(opts.externalMcpServers ?? {}) };
+      const allServers = sortedRecord({ ...mcpServers, ...(opts.externalMcpServers ?? {}) });
       if (Object.keys(allServers).length > 0) {
         options["mcpServers"] = allServers;
       }
@@ -278,6 +306,10 @@ class ClaudeHarness implements AgentHarness {
         }
       } catch (err: unknown) {
         const error = err instanceof Error ? err.message : String(err);
+        if (isClaudeToolUseDiagnostic(error)) {
+          yield { kind: "done", reason: "completed" };
+          return;
+        }
         yield { kind: "done", reason: "error", error };
         return;
       }
@@ -299,6 +331,9 @@ class ClaudeHarness implements AgentHarness {
       setPermissionMode: (mode: string) =>
         handle?.setPermissionMode?.(mode as never) ?? Promise.resolve(),
       getContextUsage: () => handle?.getContextUsage?.() ?? Promise.resolve(undefined),
+      getUsageReport: () =>
+        handle?.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?.() ??
+        Promise.resolve(undefined),
       mcpServerStatus: () => handle?.mcpServerStatus?.() ?? Promise.resolve(undefined),
       rewindFiles: (args) =>
         handle?.rewindFiles?.(

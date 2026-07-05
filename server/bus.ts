@@ -71,7 +71,7 @@ export interface Bus {
 
   /**
    * Subscribe to every envelope emitted on the bus. Used by in-process
-   * consumers (e.g. the routine runtime watching for session-end events)
+   * consumers (e.g. lifecycle observers watching for session-end events)
    * — frontend clients receive the same events through the WebSocket
    * fan-out and should never call this.
    *

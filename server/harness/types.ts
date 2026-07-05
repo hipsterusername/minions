@@ -199,6 +199,7 @@ export interface HarnessRunControl {
   setModel?(model: string): Promise<void>;
   setPermissionMode?(mode: string): Promise<void>;
   getContextUsage?(): Promise<unknown>;
+  getUsageReport?(): Promise<unknown>;
   mcpServerStatus?(): Promise<unknown>;
   rewindFiles?(args: {
     userMessageId: string;
@@ -277,6 +278,14 @@ export interface AgentHarness {
    * they work even when no run is live.
    */
   staticInfo(): HarnessStaticInfo;
+
+  /**
+   * Optional run-independent usage report for provider/account state.
+   * Harnesses should implement this only when they can answer without a live
+   * session control object. Live per-run usage still belongs on
+   * HarnessRunControl.getUsageReport().
+   */
+  getUsageReport?(): Promise<unknown>;
 
   /**
    * Register tool definitions, grouped by MCP server name.

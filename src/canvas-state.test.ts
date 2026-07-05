@@ -166,43 +166,6 @@ describe("canvasReducer", () => {
       expect(next[0]?.position).toEqual({ x: 1, y: 1 });
     });
 
-    it("moves routine node and its spawned leader children together", () => {
-      // Simulates the group-move emitted when a RoutineNode is dragged: the
-      // canvas moves the routine node + all leaders whose routineRunId matches.
-      const routine = makeNode("rn", {
-        type: "routine",
-        position: { x: 100, y: 100 },
-        data: { runId: "run-1" },
-      });
-      const leader1 = makeNode("l1", {
-        type: "leader",
-        position: { x: 600, y: 100 },
-        data: { routineRunId: "run-1", sessionKey: "s1" },
-      });
-      const leader2 = makeNode("l2", {
-        type: "leader",
-        position: { x: 600, y: 260 },
-        data: { routineRunId: "run-1", sessionKey: "s2" },
-      });
-      const unrelated = makeNode("u1", { position: { x: 0, y: 0 } });
-
-      const initial = [routine, leader1, leader2, unrelated];
-      // Simulate Canvas's MOVE_GROUP dispatch: move each node by dx=50, dy=30
-      const next = canvasReducer(initial, {
-        type: "MOVE_GROUP",
-        moves: [
-          { id: "rn", position: { x: 150, y: 130 } },
-          { id: "l1", position: { x: 650, y: 130 } },
-          { id: "l2", position: { x: 650, y: 290 } },
-        ],
-      });
-
-      expect(next.find((n) => n.id === "rn")?.position).toEqual({ x: 150, y: 130 });
-      expect(next.find((n) => n.id === "l1")?.position).toEqual({ x: 650, y: 130 });
-      expect(next.find((n) => n.id === "l2")?.position).toEqual({ x: 650, y: 290 });
-      // Unrelated node must not move
-      expect(next.find((n) => n.id === "u1")?.position).toEqual({ x: 0, y: 0 });
-    });
   });
 
   // Removed: SET_NODES-preserves-fields hydration test — this asserts the

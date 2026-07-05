@@ -55,6 +55,7 @@ export const syncSession: CommandHandler = (ctx, cmd, ws) => {
     cwd: host.cwd,
     totalCost: host.totalCost,
     turns: host.turns,
+    usageTotals: host.usageTotals,
     lastError: host.lastError,
     lastErrorFull: host.lastErrorFull,
     model: host.model,
