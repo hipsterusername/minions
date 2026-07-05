@@ -4,3 +4,6 @@ export * from "./validate.ts";
 export * from "./runtime.ts";
 export * from "./graph.ts";
 export * from "./store.ts";
+export * from "./freshness.ts";
+export * from "./match.ts";
+export * from "./compile.ts";
