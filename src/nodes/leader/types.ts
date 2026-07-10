@@ -8,6 +8,7 @@
 
 import type { ThinkingConfig } from "../../types.ts";
 import { DEFAULT_THINKING_CONFIG } from "../../types.ts";
+import type { ContextDeliveryLedger } from "../../context-delivery.ts";
 import type { PermissionMode } from "../../components/SessionToolbar.tsx";
 import type { DisplayMessage } from "../../sdk-messages.ts";
 import type { RenderState } from "../../../shared/render-dsl.ts";
@@ -134,6 +135,13 @@ export interface LeaderData {
   activeBodyView?: "chat" | "dashboard" | undefined;
   /** Persisted split ratio (0–1) for the chat｜dashboard divider when wide. */
   dashboardSplitRatio?: number | undefined;
+  /**
+   * Per-source connected-context delivery ledger: what this session has
+   * already received from each upstream context node (`src/context-delivery.ts`).
+   * Persisted with the node so reloads don't re-send unchanged context, and
+   * read by the edge-staleness UI (`src/context-staleness.ts`).
+   */
+  contextDelivery?: ContextDeliveryLedger | undefined;
 }
 
 /**

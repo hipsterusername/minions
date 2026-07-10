@@ -45,12 +45,14 @@ import {
 import { EditableTitle } from "./leader/EditableTitle.tsx";
 import {
   buildContextBlock,
-  seedContextHashes,
-  diffContextItems,
   sendCanvasContextSnapshotIfChanged,
-  type ContextHashes,
   type CanvasContextSignature,
 } from "../connected-context.ts";
+import {
+  seedContextDelivery,
+  diffContextDelivery,
+  buildContextUpdateBlock,
+} from "../context-delivery.ts";
 import { buildFrozenLeaderFollowUpPrompt, freezeLeaderSystemPrompt, type FrozenLeaderPrompt } from "./leader/frozen-prompt.ts";
 import { mergeContextPreamble, resolveContextMode } from "../leader-context-mode.ts";
 import { consumeLeaderInputFocus } from "../leader-focus-request.ts";
@@ -173,7 +175,6 @@ export function LeaderNodeRenderer({
   const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const syncedRef = useRef(false);
   const frozenPromptRef = useRef<FrozenLeaderPrompt | null>(null);
-  const contextHashesRef = useRef<ContextHashes>({});
   const canvasContextSignatureRef = useRef<CanvasContextSignature>(null);
   const { banners, processNormalizedEvent, dismissBanner } = useStatusBanners();
   const debugEnabled = useSyncExternalStore(
@@ -794,7 +795,7 @@ export function LeaderNodeRenderer({
 
     const block = buildContextBlock(contextItems);
     let fullPrompt = block ? `${block}\n\n${userPrompt}` : userPrompt;
-    contextHashesRef.current = seedContextHashes(contextItems);
+    const contextDelivery = seedContextDelivery(contextItems, Date.now());
 
     if (sessionContext) {
       fullPrompt = `${sessionContext}\n\n${fullPrompt}`;
@@ -824,6 +825,7 @@ export function LeaderNodeRenderer({
       ...dataRef.current,
       sessionKey: key,
       status: "creating",
+      contextDelivery,
       messages: [
         ...prevMessages,
         {
@@ -857,7 +859,7 @@ export function LeaderNodeRenderer({
 
     const block = buildContextBlock(contextItems);
     let fullPrompt = block ? `${block}\n\n${prompt}` : prompt;
-    contextHashesRef.current = seedContextHashes(contextItems);
+    const contextDelivery = seedContextDelivery(contextItems, Date.now());
 
     if (sessionContext) {
       fullPrompt = `${sessionContext}\n\n${fullPrompt}`;
@@ -892,6 +894,7 @@ export function LeaderNodeRenderer({
       sessionKey: key,
       status: "creating",
       autoStartPrompt: null,
+      contextDelivery,
       messages: [
         ...prevMessages,
         {
@@ -921,14 +924,26 @@ export function LeaderNodeRenderer({
 
     // Re-gather context on each turn:
     //   (a) binary attachments always forwarded for image nodes added after the first turn,
-    //   (b) changed/new text context prepended as a delta <connected-context> block.
+    //   (b) never-delivered sources prepended as a <connected-context> block,
+    //   (c) changed sources prepended as a <connected-context-update> block —
+    //       transcript sources send only the suffix of new blocks (append),
+    //       everything else is a full replace. The ledger is persisted in
+    //       node data so reloads don't re-send unchanged context.
     const contextItems = getContextForNode?.() ?? [];
     const attachments = contextItems.flatMap((item) => item.attachments ?? []);
-    const { changedItems, nextHashes } = diffContextItems(contextItems, contextHashesRef.current);
-    contextHashesRef.current = nextHashes;
+    const { newItems, updates, nextLedger } = diffContextDelivery(
+      contextItems,
+      current.contextDelivery ?? {},
+      Date.now(),
+    );
     const rawPrompt = input.trim();
-    const deltaBlock = changedItems.length > 0 ? buildContextBlock(changedItems) : null;
-    const prompt = deltaBlock ? `${deltaBlock}\n\n${rawPrompt}` : rawPrompt;
+    const prompt = [
+      buildContextUpdateBlock(updates),
+      buildContextBlock(newItems),
+      rawPrompt,
+    ]
+      .filter((part): part is string => Boolean(part))
+      .join("\n\n");
     const frozen = frozenPromptRef.current ?? freezeLeaderSystemPrompt({ skillIds: current.skillIds ?? [], skillValues: current.skillValues ?? {}, systemPromptPrefix: current.systemPromptPrefix });
     frozenPromptRef.current = frozen;
     const followUp = buildFrozenLeaderFollowUpPrompt({ frozen, current, prompt });
@@ -944,6 +959,7 @@ export function LeaderNodeRenderer({
     onUpdateData({
       ...current,
       status: "running",
+      contextDelivery: nextLedger,
       messages: [
         ...current.messages,
         {

@@ -1,11 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   hashString,
+  itemContentHash,
   buildContextBlock,
-  seedContextHashes,
-  diffContextItems,
   sendCanvasContextSnapshotIfChanged,
-  type ContextHashes,
 } from "./connected-context.ts";
 import type { ContextItem } from "./types.ts";
 
@@ -129,113 +127,24 @@ describe("buildContextBlock", () => {
   });
 });
 
-// ── seedContextHashes ─────────────────────────────────────────────────────
+// ── itemContentHash ───────────────────────────────────────────────────────
 
-describe("seedContextHashes", () => {
-  it("returns an empty object for empty items", () => {
-    expect(seedContextHashes([])).toEqual({});
+describe("itemContentHash", () => {
+  it("is deterministic for identical items", () => {
+    const item: ContextItem = { nodeId: "n1", nodeType: "markdown", label: "L", content: "c" };
+    expect(itemContentHash(item)).toBe(itemContentHash({ ...item }));
   });
 
-  it("keys the hash map by nodeId", () => {
-    const items: ContextItem[] = [
-      { nodeId: "abc", nodeType: "markdown", label: "markdown", content: "hello" },
-    ];
-    const hashes = seedContextHashes(items);
-    expect(Object.keys(hashes)).toEqual(["abc"]);
+  it("changes when content changes", () => {
+    const a: ContextItem = { nodeId: "n1", nodeType: "markdown", label: "L", content: "one" };
+    const b: ContextItem = { ...a, content: "two" };
+    expect(itemContentHash(a)).not.toBe(itemContentHash(b));
   });
 
-  it("is deterministic: same items → same hashes", () => {
-    const items: ContextItem[] = [
-      { nodeId: "x", nodeType: "markdown", label: "markdown", content: "content" },
-    ];
-    expect(seedContextHashes(items)).toEqual(seedContextHashes(items));
-  });
-});
-
-// ── diffContextItems ──────────────────────────────────────────────────────
-
-describe("diffContextItems", () => {
-  const makeItem = (
-    nodeId: string,
-    content: string,
-    label = "markdown",
-    nodeType = "markdown",
-  ): ContextItem => ({ nodeId, nodeType, label, content });
-
-  it("returns all items as changed when prevHashes is empty (new session baseline)", () => {
-    const items = [makeItem("n1", "content A"), makeItem("n2", "content B")];
-    const { changedItems, nextHashes } = diffContextItems(items, {});
-    expect(changedItems).toHaveLength(2);
-    expect(nextHashes).toHaveProperty("n1");
-    expect(nextHashes).toHaveProperty("n2");
-  });
-
-  it("returns empty changedItems when no content changed", () => {
-    const items = [makeItem("n1", "hello"), makeItem("n2", "world")];
-    const prev = seedContextHashes(items);
-    const { changedItems, nextHashes } = diffContextItems(items, prev);
-    expect(changedItems).toHaveLength(0);
-    expect(nextHashes).toEqual(prev);
-  });
-
-  it("includes an item when its content changes", () => {
-    const original = [makeItem("n1", "original")];
-    const prev = seedContextHashes(original);
-    const updated = [makeItem("n1", "updated")];
-    const { changedItems } = diffContextItems(updated, prev);
-    expect(changedItems).toHaveLength(1);
-    expect(changedItems[0]!.content).toBe("updated");
-  });
-
-  it("includes a new item not present in prevHashes", () => {
-    const original = [makeItem("n1", "existing")];
-    const prev = seedContextHashes(original);
-    const withNew = [makeItem("n1", "existing"), makeItem("n2", "brand new")];
-    const { changedItems, nextHashes } = diffContextItems(withNew, prev);
-    expect(changedItems).toHaveLength(1);
-    expect(changedItems[0]!.nodeId).toBe("n2");
-    expect(nextHashes).toHaveProperty("n2");
-  });
-
-  it("does not re-send a removed item (it simply disappears from nextHashes)", () => {
-    const original = [makeItem("n1", "first"), makeItem("n2", "second")];
-    const prev = seedContextHashes(original);
-    const withRemoved = [makeItem("n1", "first")]; // n2 removed
-    const { changedItems, nextHashes } = diffContextItems(withRemoved, prev);
-    expect(changedItems).toHaveLength(0); // n1 unchanged
-    expect(nextHashes).not.toHaveProperty("n2");
-  });
-
-  it("only includes changed item when one of several items changes", () => {
-    const items = [makeItem("n1", "unchanged"), makeItem("n2", "to be changed")];
-    const prev = seedContextHashes(items);
-    const updated = [makeItem("n1", "unchanged"), makeItem("n2", "changed!")];
-    const { changedItems } = diffContextItems(updated, prev);
-    expect(changedItems).toHaveLength(1);
-    expect(changedItems[0]!.nodeId).toBe("n2");
-  });
-
-  it("detects label changes as content changes (label is part of the hash key)", () => {
-    const items: ContextItem[] = [
-      { nodeId: "n1", nodeType: "markdown", label: "Old Label", content: "same content" },
-    ];
-    const prev = seedContextHashes(items);
-    const relabeled: ContextItem[] = [
-      { nodeId: "n1", nodeType: "markdown", label: "New Label", content: "same content" },
-    ];
-    const { changedItems } = diffContextItems(relabeled, prev);
-    expect(changedItems).toHaveLength(1);
-  });
-
-  it("returns correct nextHashes after mixed update (changed + unchanged)", () => {
-    const items = [makeItem("n1", "alpha"), makeItem("n2", "beta")];
-    const prev: ContextHashes = seedContextHashes(items);
-    const next = [makeItem("n1", "alpha"), makeItem("n2", "gamma")];
-    const { nextHashes } = diffContextItems(next, prev);
-    // n1 unchanged — its hash in nextHashes matches prev
-    expect(nextHashes["n1"]).toBe(prev["n1"]);
-    // n2 changed — its hash in nextHashes differs from prev
-    expect(nextHashes["n2"]).not.toBe(prev["n2"]);
+  it("changes when label changes (label is part of the hash key)", () => {
+    const a: ContextItem = { nodeId: "n1", nodeType: "markdown", label: "Old", content: "same" };
+    const b: ContextItem = { ...a, label: "New" };
+    expect(itemContentHash(a)).not.toBe(itemContentHash(b));
   });
 });
 
@@ -284,5 +193,29 @@ describe("sendCanvasContextSnapshotIfChanged", () => {
     expect(sent).toHaveLength(2);
     expect(sent[1]).toEqual({ type: "canvas_context", sessionKey: "leader-1", items: [] });
     expect(third).toBeNull();
+  });
+
+  it("strips client-side `blocks` metadata from the wire payload", () => {
+    const sent: Array<{ items: ContextItem[] }> = [];
+    const items: ContextItem[] = [
+      {
+        nodeId: "n1",
+        nodeType: "leader",
+        label: "Upstream",
+        content: "User:\nhi\n\nAssistant:\nhello",
+        blocks: ["User:\nhi", "Assistant:\nhello"],
+      },
+    ];
+
+    sendCanvasContextSnapshotIfChanged({
+      socketSend: (payload) => sent.push(payload as { items: ContextItem[] }),
+      sessionKey: "leader-1",
+      items,
+      previousSignature: null,
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.items[0]).not.toHaveProperty("blocks");
+    expect(sent[0]!.items[0]!.content).toBe(items[0]!.content);
   });
 });

@@ -923,8 +923,11 @@ describe("LeaderNode: connected-context dedup", () => {
     expect(canvasCommands()).toHaveLength(2);
     const sendMsg2 = nonCanvasCommands()[2] as { type: string; prompt: string };
     expect(sendMsg2.type).toBe("send_message");
-    // Delta block present with ONLY the changed item
-    expect(sendMsg2.prompt).toContain("<connected-context>");
+    // Already-delivered source changed → an update block (replace), NOT a
+    // fresh <connected-context> block, carrying only the changed item.
+    expect(sendMsg2.prompt).toContain("<connected-context-update>");
+    expect(sendMsg2.prompt).toContain('update="replace"');
+    expect(sendMsg2.prompt).not.toContain("<connected-context>\n");
     expect(sendMsg2.prompt).toContain("UPDATED context");
     expect(sendMsg2.prompt).not.toContain("Initial context");
     expect(sendMsg2.prompt).toContain("After update");

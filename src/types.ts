@@ -92,6 +92,16 @@ export interface ContextItem {
    * field so the SDK can attach real image blocks to the user turn.
    */
   attachments?: ContextAttachment[];
+  /**
+   * Present for append-only sources (leader transcripts in lean/full mode).
+   * `blocks.join(TRANSCRIPT_BLOCK_SEPARATOR)` MUST equal `content` — the
+   * context-delivery ledger relies on this to validate append watermarks and
+   * send only the suffix of new blocks on follow-up turns.
+   *
+   * Client-side only: stripped before the `canvas_context` WS snapshot so the
+   * server payload isn't doubled (see `sendCanvasContextSnapshotIfChanged`).
+   */
+  blocks?: string[];
 }
 
 // ── Adaptive thinking ────────────────────────────────────

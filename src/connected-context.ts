@@ -14,11 +14,6 @@ import type { ContextItem } from "./types.ts";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
-/**
- * Map of nodeId → content hash, used to detect which context items changed
- * between turns so only the delta is re-sent.
- */
-export type ContextHashes = Record<string, number>;
 export type CanvasContextSignature = string | null;
 
 export interface CanvasContextSnapshotSendArgs {
@@ -79,8 +74,13 @@ export function buildContextBlock(items: ContextItem[]): string | null {
 
 // ── Hash helpers ──────────────────────────────────────────────────────────
 
-/** Compute a stable content hash for a single ContextItem. */
-function itemContentHash(item: ContextItem): number {
+/**
+ * Compute a stable content hash for a single ContextItem. Shared with the
+ * delivery ledger in `src/context-delivery.ts` and the edge-staleness check
+ * in `src/context-staleness.ts` — all three must agree on what "changed"
+ * means.
+ */
+export function itemContentHash(item: ContextItem): number {
   return hashString(`${item.label}\0${item.nodeType}\0${item.content}`);
 }
 
@@ -119,47 +119,9 @@ export function sendCanvasContextSnapshotIfChanged({
   if (!socketSend || !sessionKey || nextSignature === previousSignature) {
     return previousSignature;
   }
-  socketSend({ type: "canvas_context", sessionKey, items });
+  // `blocks` is client-side delivery metadata (duplicate of `content`);
+  // strip it so the server snapshot payload isn't doubled.
+  const wireItems = items.map(({ blocks: _blocks, ...rest }) => rest);
+  socketSend({ type: "canvas_context", sessionKey, items: wireItems });
   return nextSignature;
-}
-
-/**
- * Seed a fresh `ContextHashes` map from a full set of context items.
- * Call this at session-creation time to give subsequent diffs a baseline.
- */
-export function seedContextHashes(items: ContextItem[]): ContextHashes {
-  const hashes: ContextHashes = {};
-  for (const item of items) {
-    hashes[item.nodeId] = itemContentHash(item);
-  }
-  return hashes;
-}
-
-/**
- * Diff `items` against a previous hash snapshot.
- *
- * - New items (not in `prevHashes`) are included in `changedItems`.
- * - Existing items whose content changed are included in `changedItems`.
- * - Unchanged items are excluded.
- * - Removed items simply disappear from `nextHashes` — they are not re-sent.
- *
- * Returns `changedItems` (the subset to include in a delta block) and
- * `nextHashes` (the updated snapshot to store for the next turn).
- */
-export function diffContextItems(
-  items: ContextItem[],
-  prevHashes: ContextHashes,
-): { changedItems: ContextItem[]; nextHashes: ContextHashes } {
-  const nextHashes: ContextHashes = {};
-  const changedItems: ContextItem[] = [];
-
-  for (const item of items) {
-    const h = itemContentHash(item);
-    nextHashes[item.nodeId] = h;
-    if (prevHashes[item.nodeId] !== h) {
-      changedItems.push(item);
-    }
-  }
-
-  return { changedItems, nextHashes };
 }

@@ -1,6 +1,9 @@
 import type { CanvasNode, ContextItem } from "./types.ts";
 import type { DisplayMessage } from "./sdk-messages.ts";
-import { buildLeaderTranscript } from "./nodes/leader/transcript-builder.ts";
+import {
+  buildLeaderTranscriptBlocks,
+  TRANSCRIPT_BLOCK_SEPARATOR,
+} from "./nodes/leader/transcript-builder.ts";
 
 export type ContextEdgeMode = "dashboard" | "lean" | "full";
 
@@ -57,7 +60,8 @@ export function resolveLeaderContextItem(
     | { messages?: DisplayMessage[]; taskName?: string | null }
     | undefined;
   const messages = data?.messages ?? [];
-  const content = buildLeaderTranscript(messages, mode);
+  const blocks = buildLeaderTranscriptBlocks(messages, mode);
+  const content = blocks.join(TRANSCRIPT_BLOCK_SEPARATOR);
   if (!content.trim()) return null;
   const label =
     data?.taskName && data.taskName.trim() ? data.taskName : "Leader Session";
@@ -66,6 +70,9 @@ export function resolveLeaderContextItem(
     nodeType: sourceNode.type,
     label,
     content,
+    // Append-only block list: lets follow-up turns deliver only the suffix of
+    // new transcript blocks instead of re-sending the whole transcript.
+    blocks,
   };
 }
 
