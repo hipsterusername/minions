@@ -127,12 +127,12 @@ describe("elideDefaults", () => {
     });
   });
 
-  it("strips section.defaultOpen=true and recurses into children", () => {
+  it("strips section.defaultOpen=false and recurses into children", () => {
     const c: RenderComponent = {
       id: "sec",
       type: "section",
       title: "T",
-      defaultOpen: true,
+      defaultOpen: false,
       components: [
         {
           id: "child",

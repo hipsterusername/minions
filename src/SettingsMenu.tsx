@@ -507,6 +507,63 @@ function SettingsPopover({
 
       <Divider />
 
+      {/* ── Tidy Layout ── */}
+      <FieldLabel>Canvas Layout</FieldLabel>
+      <label
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          cursor: "pointer",
+          fontSize: 12,
+          fontFamily: "var(--font-mono)",
+          color: "var(--text-secondary)",
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={settings.tidyLayout !== false}
+          onChange={(e) =>
+            onSettingsChange({
+              ...settings,
+              tidyLayout: e.target.checked,
+            })
+          }
+          style={{ cursor: "pointer" }}
+        />
+        Tidy layout (snap to grid, prevent overlaps)
+      </label>
+      <FieldHint>
+        Overlapping nodes snap flush against their neighbour on the side
+        nearest where you drop them. Dashboards stay affixed to their leader.
+      </FieldHint>
+
+      <Divider />
+
+      {/* ── System Model ── */}
+      <FieldLabel>System Model</FieldLabel>
+      <Select
+        value={settings.systemModel ?? "off"}
+        onChange={(v) =>
+          onSettingsChange({
+            ...settings,
+            systemModel: v as NonNullable<ProjectSettings["systemModel"]>,
+          })
+        }
+        options={[
+          { value: "off", label: "Off" },
+          { value: "advisory", label: "Advisory (Context Only)" },
+          { value: "enforced", label: "Enforced (Blocks Merges)" },
+        ]}
+      />
+      <FieldHint>
+        Compiles the repo's <code>.systemmodel/</code> into Context Packs for
+        minions. Enforced blocks merges that fail review gates. Requires a{" "}
+        <code>.systemmodel/manifest.yaml</code> in the worktree.
+      </FieldHint>
+
+      <Divider />
+
       <UsageReportSection reports={usageReports} onRefresh={refreshUsage} />
 
       <Divider />
@@ -974,8 +1031,12 @@ const LEGACY_MODEL_ALIASES: Record<string, string> = {
   "opus-old": "claude-opus-4-7",
   sonnet: "claude-sonnet-5",
   haiku: "claude-haiku-4-5",
-  "gpt-5": "gpt-5.5",
-  "gpt-5-codex": "gpt-5.5",
+  "gpt-5": "gpt-5.6-sol",
+  "gpt-5-codex": "gpt-5.6-sol",
+  "gpt-5.6": "gpt-5.6-sol",
+  "gpt-5.5": "gpt-5.6-sol",
+  "gpt-5.4": "gpt-5.6-terra",
+  "gpt-5.3-codex-spark": "gpt-5.6-luna",
 };
 
 export function buildModelGroups(

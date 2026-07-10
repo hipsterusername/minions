@@ -1,0 +1,35 @@
+id: flow.force_merge
+type: flow
+name: Force Merge With Ours Strategy
+summary: After conflicts force_merge follows the approval-style completion path but passes force options so mergeWorktree prefers the canvas side with ours strategy and manual unresolved-file resolution.
+capabilities:
+  - capability.worktree_approval
+constraints:
+  - constraint.review_gated_merges
+  - constraint.bus_only_broadcasts
+decisions:
+  - decision.worktree_isolation
+  - decision.graph_as_bus
+risks:
+  - risk.merge_bypass
+  - risk.parallel_work_conflicts
+  - risk.session_state_drift
+suggested_files:
+  - server/commands/force-merge.ts
+  - server/commands/helpers.ts
+  - server/worktree-merge.ts
+  - server/worktree-create.ts
+  - server/worktree.ts
+suggested_tests:
+  - server/commands/merge-flow.test.ts
+  - server/worktree-merge.test.ts
+  - tests/contracts/merge-blocking.test.ts
+steps:
+  - force_merge validates sessionKey and host.worktree then calls runMergeFlow with force true.
+  - Merge gates are still evaluated before the force strategy can run.
+  - mergeWorktree maps force true to strategy ours and runs git merge target no-edit with ours strategy inside the worktree.
+  - If strategy merge still leaves unresolved files mergeWorktree checks out ours per unresolved path stages all changes commits the resolution and continues to safe update-ref.
+  - Success follows the same approval completion and cleanup envelopes as approve_changes while failure preserves the worktree and reports worktree_merge_failed.
+freshness:
+  class: code_coupled
+risk: critical

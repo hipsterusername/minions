@@ -5,6 +5,8 @@
 import { registerAgentType } from "./registry.ts";
 import type { AgentType, AgentTypeContext, AgentToolResult } from "./types.ts";
 import { createMinionToolsForSession } from "../minion-tools.ts";
+import { createSubskillToolsForSession } from "../subskill-tools.ts";
+import { createSkillAuthoringTools } from "../skill-authoring-tools.ts";
 import { persistTaskState } from "../session-persist.ts";
 import type { TaskManagerState, TaskRecord } from "../task-tools.ts";
 import { MINION_SYSTEM_PROMPT } from "../../shared/prompts/minion-system.ts";
@@ -15,12 +17,33 @@ export { MINION_SYSTEM_PROMPT };
 
 // ── MCP tool names ────────────────────────────────────────────────────────
 
-const MINION_MCP_TOOLS = [
+/**
+ * Always-available minion tool names: status reporting + sub-skill retrieval.
+ * The skill-authoring tools are gated separately (see SKILL_AUTHORING_TOOLS).
+ */
+const MINION_MCP_TOOLS_BASE = [
   "mcp__minion-status__report_step",
   "mcp__minion-status__report_done",
   "mcp__minion-status__report_fail",
   "mcp__minion-status__report_blocked",
+  "mcp__skills__load_subskill",
 ];
+
+/**
+ * Skill-authoring tool names — opt-in. Only loaded for a minion whose task
+ * armed the `skill-builder` skill. Keeps ~1.5k tokens of tool schemas off
+ * every other minion.
+ */
+const SKILL_AUTHORING_TOOLS = [
+  "mcp__skills__list_skills",
+  "mcp__skills__get_skill",
+  "mcp__skills__create_skill",
+  "mcp__skills__update_skill",
+  "mcp__skills__delete_skill",
+];
+
+/** The skill ID that gates the skill-authoring tools. */
+const SKILL_BUILDER_ID = "skill-builder";
 
 const REPORT_NUDGE_PROMPT =
   "Your task is still open. Call mcp__minion-status__report_done with a one-line summary of what you completed, or report_fail with what blocked you. Do not start new work.";
@@ -102,9 +125,30 @@ const minionAgent: AgentType = {
       },
     });
 
+    // Sub-skill retrieval reads the project's skill library. When the minion
+    // runs inside a leader-inherited worktree, the sidecar lives at the
+    // original checkout (parentWorktree.projectPath), not the worktree cwd.
+    const projectPath = ctx.parentWorktree?.projectPath ?? ctx.cwd;
+    const { toolDefs: subskillDefs } = createSubskillToolsForSession({
+      projectPath,
+    });
+
+    // Skill-authoring tools are opt-in: load them only when the parent task
+    // armed the `skill-builder` skill. Sub-skill retrieval stays always-on.
+    const hasSkillBuilder =
+      parent?.task.skillIds?.includes(SKILL_BUILDER_ID) ?? false;
+    const skillAuthoringDefs = hasSkillBuilder
+      ? createSkillAuthoringTools({ projectPath })
+      : [];
+
     return {
-      toolGroups: { "minion-status": toolDefs },
-      mcpToolNames: MINION_MCP_TOOLS,
+      toolGroups: {
+        "minion-status": toolDefs,
+        skills: [...subskillDefs, ...skillAuthoringDefs],
+      },
+      mcpToolNames: hasSkillBuilder
+        ? [...MINION_MCP_TOOLS_BASE, ...SKILL_AUTHORING_TOOLS]
+        : MINION_MCP_TOOLS_BASE,
     };
   },
 

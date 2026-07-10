@@ -1,0 +1,31 @@
+id: flow.unicast_envelope_reply
+type: flow
+name: Unicast Envelope Reply
+summary: Direct replies to the requesting socket pass through bus helpers so errors, acks, and sync responses carry valid envelope topics.
+capabilities:
+  - capability.ws_command_bus
+constraints:
+  - constraint.bus_only_broadcasts
+decisions: []
+risks:
+  - risk.command_contract_drift
+suggested_files:
+  - server/bus.ts
+  - server/ws-connection.ts
+  - server/commands/index.ts
+  - shared/ws-envelope.ts
+suggested_tests:
+  - server/bus.test.ts
+  - server/ws-connection.test.ts
+  - tests/contracts/ws-command-validation.test.ts
+  - tests/contracts/ws-envelope-roundtrip.test.ts
+  - tests/architecture/no-direct-ws-send.test.ts
+steps:
+  - unicast wraps a payload with the supplied topic and sends JSON only when the target WebSocket is OPEN.
+  - unicastToSession derives a session topic and throws through sessionTopic when the session key is empty.
+  - unicastGlobal wraps direct replies such as validation errors and session lists with the global topic.
+  - ws-connection uses unicastGlobal for malformed JSON and command validation failures.
+  - dispatchCommand uses unicastGlobal if a command type reaches dispatch without a registered handler.
+freshness:
+  class: code_coupled
+risk: medium

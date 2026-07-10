@@ -6,6 +6,7 @@ import { useSocket } from "../use-socket.ts";
 import { HarnessListProvider } from "../use-harness-list.tsx";
 import { useSessionActivity } from "../use-session-activity.ts";
 import { ActivityScreen } from "./ActivityScreen.tsx";
+import type { ActivityNotice } from "./ActivityScreen.tsx";
 import { ApprovalsScreen } from "./ApprovalsScreen.tsx";
 import { LaunchScreen } from "./LaunchScreen.tsx";
 import { ProjectsScreen } from "./ProjectsScreen.tsx";
@@ -224,6 +225,8 @@ export default function MobileApp() {
   const [selectedReviewSessionKey, setSelectedReviewSessionKey] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<MobileTab>("activity");
   const [pendingApprovals, setPendingApprovals] = useState<PendingApprovalsMap>({});
+  const [pendingLaunchSessionKey, setPendingLaunchSessionKey] = useState<string | null>(null);
+  const [activityNotice, setActivityNotice] = useState<ActivityNotice | null>(null);
 
   useEffect(() => {
     return subscribe("*", (msg) => {
@@ -260,6 +263,21 @@ export default function MobileApp() {
     const scopedKeys = new Set(scopedSessions.map((session) => session.sessionKey));
     return approvalRows.filter((approval) => scopedKeys.has(approval.sessionKey));
   }, [approvalRows, scopedSessions, selectedProject]);
+  const sessionToStopForLimit = useMemo(
+    () =>
+      scopedSessions.find((session) =>
+        session.role !== "minion" &&
+        session.status !== "stopped" &&
+        (session.status === "idle" ||
+          session.status === "error" ||
+          session.status === "completed")
+      ) ??
+      scopedSessions.find((session) =>
+        session.role !== "minion" && session.status !== "stopped"
+      ) ??
+      null,
+    [scopedSessions],
+  );
 
   const selectedApproval = selectedReviewSessionKey
     ? approvalRows.find((approval) => approval.sessionKey === selectedReviewSessionKey)
@@ -286,6 +304,12 @@ export default function MobileApp() {
     setActiveTab("chat");
   }, []);
 
+  const handleLaunchSubmitted = useCallback((sessionKey: string) => {
+    setPendingLaunchSessionKey(sessionKey);
+    setActivityNotice(null);
+    openSession(sessionKey);
+  }, [openSession]);
+
   const openApprovals = useCallback(() => {
     setSelectedReviewSessionKey(null);
     setActiveTab("approvals");
@@ -306,6 +330,55 @@ export default function MobileApp() {
     setSelectedReviewSessionKey(null);
     setActiveTab("activity");
   }, []);
+
+  const dismissActivityNotice = useCallback(() => {
+    setActivityNotice(null);
+  }, []);
+
+  const openSessionToStopForLimit = useCallback(() => {
+    if (!sessionToStopForLimit) return;
+    setActivityNotice(null);
+    openSession(sessionToStopForLimit.sessionKey);
+  }, [openSession, sessionToStopForLimit]);
+
+  useEffect(() => {
+    return subscribe("*", (msg) => {
+      if (msg.type === "session_created" && msg.sessionKey === pendingLaunchSessionKey) {
+        setPendingLaunchSessionKey(null);
+        return;
+      }
+
+      if (
+        msg.type !== "session_error" ||
+        !/Maximum session limit/i.test(msg.error) ||
+        (pendingLaunchSessionKey !== null && msg.sessionKey !== pendingLaunchSessionKey)
+      ) {
+        return;
+      }
+
+      setPendingLaunchSessionKey(null);
+      setSelectedSessionKey(null);
+      setSelectedReviewSessionKey(null);
+      setActiveTab("activity");
+      const notice: ActivityNotice = {
+        title: "Session limit reached",
+        message:
+          "Minions already has 50 non-stopped sessions. Open an idle or errored session and tap Stop, or remove old sessions on desktop, then launch again.",
+        onDismiss: dismissActivityNotice,
+      };
+      if (sessionToStopForLimit) {
+        notice.actionLabel = "Open session to stop";
+        notice.onAction = openSessionToStopForLimit;
+      }
+      setActivityNotice(notice);
+    });
+  }, [
+    dismissActivityNotice,
+    openSessionToStopForLimit,
+    pendingLaunchSessionKey,
+    sessionToStopForLimit,
+    subscribe,
+  ]);
 
   const openReview = useCallback((sessionKey: string) => {
     setSelectedReviewSessionKey(sessionKey);
@@ -399,7 +472,7 @@ export default function MobileApp() {
       ) : activeTab === "approvals" ? (
         <ApprovalsScreen approvals={scopedApprovalRows} onOpenReview={openReview} />
       ) : activeTab === "launch" ? (
-        <LaunchScreen send={send} onLaunched={openSession} lockedProject={selectedProject} />
+        <LaunchScreen send={send} onLaunched={handleLaunchSubmitted} lockedProject={selectedProject} />
       ) : activeTab === "settings" ? (
         <SettingsScreen
           project={selectedProject}
@@ -408,7 +481,11 @@ export default function MobileApp() {
           subscribe={subscribe}
         />
       ) : (
-        <ActivityScreen sessions={scopedSessions} onOpenSession={openSession} />
+        <ActivityScreen
+          sessions={scopedSessions}
+          onOpenSession={openSession}
+          notice={activityNotice}
+        />
       )}
 
       {selectedReviewSessionKey || !selectedProject ? null : (

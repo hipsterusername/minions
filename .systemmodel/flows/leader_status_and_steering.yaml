@@ -1,0 +1,35 @@
+id: flow.leader_status_and_steering
+type: flow
+name: Leader Status Inspection And Steering
+summary: get_task_status returns compact or full task state with runtime metadata, TaskPlanPanel renders authoritative taskPlan status, and message_task injects steering into a live minion.
+capabilities:
+  - capability.task_delegation
+constraints:
+  - constraint.model_bloat_guard
+decisions:
+  - decision.graph_as_bus
+risks:
+  - risk.command_contract_drift
+  - risk.render_schema_drift
+  - risk.session_state_drift
+suggested_files:
+  - server/task-tools/get-task-status.ts
+  - server/task-tools/message-task.ts
+  - server/task-lifecycle.ts
+  - src/nodes/leader/TaskPlanPanel.tsx
+  - src/KanbanBoard.tsx
+suggested_tests:
+  - server/task-tools/get-task-status.test.ts
+  - server/task-tools/message-task.test.ts
+  - src/use-session-activity.test.ts
+  - src/nodes/MinionNode.test.tsx
+steps:
+  - get_task_status parses optional taskId and detail mode, then returns all task summary JSON, one task detail JSON, or a not found text result.
+  - Summary views omit long descriptions, compact result text, strip nulls, and attach runtime metadata only for nonterminal active sessions.
+  - TaskPlanPanel consumes taskPlan records from server task_plan_update projection to render status icons, executor badges, active step, result tooltip, cost, and reveal action.
+  - message_task validates the task exists and has a minion session key, then calls the session messaging boundary with a new user turn.
+  - Delivered messages leave running tasks unchanged while delivered answers to blocked tasks apply session_running to resume them.
+  - Undelivered messages return an error naming the session status and keep task lifecycle state unchanged.
+freshness:
+  class: code_coupled
+risk: medium

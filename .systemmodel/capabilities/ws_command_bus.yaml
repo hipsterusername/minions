@@ -1,14 +1,56 @@
 id: capability.ws_command_bus
 type: capability
 name: WebSocket Command Bus
-summary: Browser commands dispatch through typed handlers and server events fan out through the shared bus envelope.
-linked_flows: [flow.ws_command_dispatch]
-constraints: [constraint.bus_only_broadcasts, constraint.no_cross_tree_imports]
-decisions: [decision.graph_as_bus]
-risks: [risk.command_contract_drift]
-suggested_files: [server/bus.ts, server/commands/index.ts, server/commands/*.ts, server/ws-connection.ts, shared/ws-envelope.ts, src/api.ts]
-suggested_tests: [server/bus.test.ts, server/commands/schemas.test.ts, tests/architecture/no-direct-broadcast.test.ts, tests/contracts/ws-envelope.test.ts]
-keywords: [websocket, command, bus, envelope, handler]
+summary: Typed WebSocket infrastructure validates inbound commands, dispatches handlers, wraps server messages in topics, and routes client subscriptions over a reconnecting socket.
+linked_flows:
+  - flow.ws_url_auth_connect
+  - flow.connection_snapshot_attach
+  - flow.inbound_command_validation
+  - flow.command_table_dispatch
+  - flow.bus_envelope_fanout
+  - flow.unicast_envelope_reply
+  - flow.client_envelope_topic_dispatch
+  - flow.client_send_queue_reconnect
+constraints:
+  - constraint.bus_only_broadcasts
+  - constraint.no_cross_tree_imports
+decisions: []
+risks:
+  - risk.command_contract_drift
+suggested_files:
+  - server/bus.ts
+  - server/ws-connection.ts
+  - server/commands/index.ts
+  - server/commands/schemas.ts
+  - server/commands/types.ts
+  - shared/ws-envelope.ts
+  - src/use-socket.ts
+  - src/ws-url.ts
+suggested_tests:
+  - server/bus.test.ts
+  - server/ws-connection.test.ts
+  - server/commands/schemas.test.ts
+  - shared/ws-envelope.test.ts
+  - src/use-socket.test.tsx
+  - src/ws-url.test.ts
+  - tests/contracts/ws-command-validation.test.ts
+  - tests/contracts/ws-envelope-roundtrip.test.ts
+  - tests/contracts/ws-envelope.test.ts
+  - tests/architecture/no-direct-broadcast.test.ts
+  - tests/architecture/no-direct-ws-send.test.ts
+keywords:
+  - websocket
+  - ws
+  - command
+  - command_table
+  - dispatch
+  - zod
+  - envelope
+  - topic
+  - broadcast
+  - unicast
+  - reconnect
+  - auth_token
 freshness:
   class: code_coupled
-risk: critical
+risk: medium

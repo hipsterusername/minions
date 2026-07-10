@@ -4,8 +4,8 @@ import { buildWsUrl } from "./ws-url.ts";
 
 describe("buildWsUrl", () => {
   it("uses ws:// for an http origin and connects same-origin to /ws", () => {
-    expect(buildWsUrl({ protocol: "http:", host: "localhost:5173" })).toBe(
-      "ws://localhost:5173/ws",
+    expect(buildWsUrl({ protocol: "http:", host: "localhost:6173" })).toBe(
+      "ws://localhost:6173/ws",
     );
   });
 

@@ -1,0 +1,32 @@
+id: flow.check_freshness_status
+type: flow
+name: Check Freshness Status
+summary: Compares model and code timestamps then applies freshness policy to produce fresh stale blocked unknown or skipped status.
+capabilities:
+  - capability.system_model_layer
+constraints:
+  - constraint.model_bloat_guard
+decisions:
+  - decision.relevance_scoped_context
+risks:
+  - risk.model_rot
+suggested_files:
+  - server/system-model/freshness.ts
+  - server/system-model-tools/check-freshness.ts
+  - server/system-model-tools/shared.ts
+  - server/system-model/store.ts
+  - shared/system-model/policies.ts
+  - shared/system-model/packet.ts
+suggested_tests:
+  - server/system-model/freshness.test.ts
+  - server/system-model-tools/check-freshness.test.ts
+  - server/system-model/store.test.ts
+steps:
+  - Select subjects from explicit object ids a Work Packet scope or all capabilities when no narrower scope is provided.
+  - Read passed freshness verification targets for packet scoped checks.
+  - Use git derived last touch timestamps for model files and suggested code globs with caching by cwd and HEAD.
+  - Skip non code coupled subjects warn on unknown timestamps and mark stale when code is newer than the model object.
+  - Aggregate policy consequences into warnings required actions required verifications and enforced stale blocking.
+freshness:
+  class: code_coupled
+risk: high

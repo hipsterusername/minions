@@ -1,0 +1,33 @@
+id: flow.skill_builtin_preset_resolution
+type: flow
+name: Built-In Preset Resolution
+summary: Shared built-in presets are defined once, adapted for the client, merged into server reads, and hidden by same-id project overrides.
+capabilities:
+  - capability.skill_library
+constraints:
+  - constraint.no_cross_tree_imports
+  - constraint.model_bloat_guard
+decisions:
+  - decision.relevance_scoped_context
+risks:
+  - risk.model_rot
+  - risk.prompt_bloat
+suggested_files:
+  - shared/skill-presets.ts
+  - src/skills/built-in-presets.ts
+  - src/skills/registry.ts
+  - server/skills.ts
+  - server/skill-authoring.ts
+suggested_tests:
+  - server/skills.test.ts
+  - server/skill-authoring.test.ts
+  - src/skills/registry.test.ts
+steps:
+  - shared skill-presets defines server-and-client presets such as system-model-authoring and skill-builder.
+  - The client adapter marks shared presets builtIn so browsers and pickers treat them as read-only.
+  - getPickableSkills returns project registry entries plus unshadowed shared built-ins while getAllSkills remains project-only.
+  - server loadAllSkills reads project skills and prepends unshadowed shared built-in presets for tool and prompt resolution.
+  - summarizeSkillLibrary tags shared presets as built-in and same-id project overrides as project.
+freshness:
+  class: code_coupled
+risk: high

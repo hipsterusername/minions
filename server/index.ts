@@ -23,6 +23,7 @@ import { createBus } from "./bus.ts";
 import { attachConnectionListeners } from "./ws-connection.ts";
 import { cleanupStaleWorktrees } from "./worktree.ts";
 import { listRecentProjects } from "./project-store.ts";
+import { sweepOrphanHtmlArtifacts } from "./html-artifact-store.ts";
 import type { SessionHostDeps, StartSessionOptions } from "./session-host.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import { dispatchCommand } from "./commands/index.ts";
@@ -35,12 +36,15 @@ import { createPushStore } from "./push-store.ts";
 import { createPushRoutes } from "./routes/push.ts";
 import { createPushNotifier } from "./push-notifier.ts";
 import { sendWebPush } from "./push-sender.ts";
+import { serverLogger } from "./logging.ts";
+
+const log = serverLogger.child("main");
 
 // ── Auth Token ──────────────────────────────────────────
 const AUTH_TOKEN = crypto.randomBytes(32).toString("hex");
 
 // ── Database ─────────────────────────────────────────────
-console.log("Server starting (per-project SQLite mode)");
+log.info("starting", { persistence: "per-project-sqlite" });
 
 // ── Express ──────────────────────────────────────────────
 const app = express();
@@ -98,7 +102,7 @@ app.use("/api/files", authMiddleware, createFileRoutes());
 app.post("/api/server/restart", authMiddleware, (_req: Request, res: Response) => {
   res.json({ ok: true, restarting: true });
   setTimeout(() => {
-    console.log("[restart] Restart requested from settings.");
+    log.info("restart_requested", { source: "settings" });
     process.exit(42);
   }, 100).unref();
 });
@@ -122,15 +126,13 @@ const wss = new WebSocketServer({
   verifyClient: (info: { origin: string; req: import("node:http").IncomingMessage }) => {
     const origin = info.origin ?? info.req.headers["origin"];
     if (!isAllowedOrigin(origin)) {
-      console.warn(
-        `[ws] Rejected connection from disallowed origin: ${origin}`,
-      );
+      log.warn("ws_connection_rejected", { cause: "origin", origin });
       return false;
     }
     const url = new URL(info.req.url ?? "", `http://${info.req.headers.host}`);
     const token = url.searchParams.get("token");
     if (token !== AUTH_TOKEN) {
-      console.warn(`[ws] Rejected connection: invalid auth token`);
+      log.warn("ws_connection_rejected", { cause: "auth" });
       return false;
     }
     return true;
@@ -194,8 +196,7 @@ const commandContext: CommandContext = {
 // Server-level errors (handshake failures, listener errors). Without this
 // listener an emitted `'error'` would crash the Node process.
 wss.on("error", (err: unknown) => {
-  const msg = err instanceof Error ? err.message : String(err);
-  console.warn(`[ws] Server error: ${msg}`);
+  log.error("ws_server_error", { error: err });
 });
 
 wss.on("connection", (ws) => {
@@ -207,28 +208,40 @@ wss.on("connection", (ws) => {
 
 const HOST = process.env["HOST"] ?? "0.0.0.0";
 server.listen(PORT, HOST, () => {
-  console.log(`Minions server on http://${HOST}:${PORT}`);
-  console.log(`WebSocket available on ws://${HOST}:${PORT}`);
-  console.log(`[auth] Auth token: ${AUTH_TOKEN.slice(0, 8)}...`);
+  log.info("listening", { host: HOST, port: PORT, websocket: true });
 
   // Phase 4.4: rehydrate persisted sessions (tasks, render state) from SQLite
   registry.hydrateFromDb();
+
+  // Sweep temporary HTML artifacts whose session no longer exists (a session
+  // that died without its remove/clear cleanup running). Session-scoped dirs
+  // for still-known sessions are preserved.
+  const knownSessionKeys = registry.snapshot().map((s) => s.sessionKey);
+  void sweepOrphanHtmlArtifacts(knownSessionKeys)
+    .then((removed) => {
+      if (removed > 0) {
+        log.info("artifact_sweep_completed", { removed });
+      }
+    })
+    .catch((err) => {
+      log.warn("artifact_sweep_skipped", { error: err });
+    });
 
   // Clean up stale worktrees from previous sessions across all known projects
   const recentProjects = listRecentProjects();
   for (const project of recentProjects) {
     void cleanupStaleWorktrees(project.path).catch((err) => {
-      console.warn(
-        `Worktree cleanup skipped for ${project.path}:`,
-        err instanceof Error ? err.message : err,
-      );
+      log.warn("worktree_cleanup_skipped", {
+        projectPath: project.path,
+        error: err,
+      });
     });
   }
 });
 
 // ── Graceful shutdown ────────────────────────────────────────────────────────
 async function shutdownCleanup(): Promise<void> {
-  console.log("[shutdown] Preserving active worktrees for session recovery.");
+  log.info("shutdown_requested", { worktrees: "preserved" });
   process.exit(0);
 }
 

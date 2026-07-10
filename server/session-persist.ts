@@ -40,6 +40,9 @@ import {
   type SessionUsageRowInput,
   type SessionUsageTotals,
 } from "./usage-telemetry.ts";
+import { serverLogger } from "./logging.ts";
+
+const log = serverLogger.child("session-persist");
 
 // ── Connection management ───────────────────────────────
 
@@ -95,7 +98,7 @@ function ensureDb(): Database.Database | null {
     try {
       return openPersistDb();
     } catch (err) {
-      console.warn("[session-persist] failed to open DB, disabling:", err);
+      log.warn("database_open_failed", { error: err });
       disabled = true;
       return null;
     }
@@ -179,7 +182,7 @@ export function persistSession(s: PersistableSession): void {
     const nowIso = new Date().toISOString();
     repo.upsertSession(db, sessionToRow(s, nowIso));
   } catch (err) {
-    console.warn("[session-persist] upsertSession failed:", err);
+    log.warn("session_upsert_failed", { error: err });
   }
 }
 
@@ -196,7 +199,7 @@ export function removePersistedSession(sessionKey: string): void {
       "DELETE FROM task_records WHERE leader_session_key = ?",
     ).run(sessionKey);
   } catch (err) {
-    console.warn("[session-persist] removePersistedSession failed:", err);
+    log.warn("session_remove_failed", { error: err });
   }
 }
 
@@ -217,7 +220,7 @@ export function persistEvent(
   try {
     repo.appendEvent(db, sessionKey, event.type, event);
   } catch (err) {
-    console.warn("[session-persist] persistEvent failed:", err);
+    log.warn("event_persist_failed", { error: err });
   }
 }
 
@@ -227,7 +230,7 @@ export function persistSessionUsage(row: SessionUsageRowInput): void {
   try {
     insertSessionUsage(db, row);
   } catch (err) {
-    console.warn("[session-persist] persistSessionUsage failed:", err);
+    log.warn("usage_persist_failed", { error: err });
   }
 }
 
@@ -237,7 +240,7 @@ export function loadSessionUsageTotals(sessionKey: string): SessionUsageTotals {
   try {
     return getSessionUsageTotals(db, sessionKey);
   } catch (err) {
-    console.warn("[session-persist] loadSessionUsageTotals failed:", err);
+    log.warn("usage_load_failed", { error: err });
     return emptyUsageTotals();
   }
 }
@@ -258,7 +261,7 @@ export function loadRecentEvents(
     const rows = repo.getRecentEvents(db, sessionKey, limit);
     return rows.map((r) => JSON.parse(r.payload) as BufferedEvent);
   } catch (err) {
-    console.warn("[session-persist] loadRecentEvents failed:", err);
+    log.warn("recent_events_load_failed", { error: err });
     return [];
   }
 }
@@ -288,7 +291,7 @@ export function persistTaskState(
     }
     repo.updateSessionApproval(db, leaderSessionKey, state.approval);
   } catch (err) {
-    console.warn("[session-persist] persistTaskState failed:", err);
+    log.warn("task_state_persist_failed", { error: err });
   }
 }
 
@@ -304,7 +307,7 @@ export function clearSessionEvents(sessionKey: string): void {
   try {
     repo.purgeEventsForSession(db, sessionKey);
   } catch (err) {
-    console.warn("[session-persist] clearSessionEvents failed:", err);
+    log.warn("session_events_clear_failed", { error: err });
   }
 }
 
@@ -317,7 +320,7 @@ export function persistRenderState(
   try {
     repo.upsertRenderState(db, sessionKey, state);
   } catch (err) {
-    console.warn("[session-persist] persistRenderState failed:", err);
+    log.warn("render_state_persist_failed", { error: err });
   }
 }
 
@@ -345,7 +348,7 @@ export function hydrateSessionsFromDb(): HydratedSession[] {
   try {
     rows = repo.getAllSessions(db);
   } catch (err) {
-    console.warn("[session-persist] getAllSessions failed:", err);
+    log.warn("sessions_load_failed", { error: err });
     return [];
   }
 

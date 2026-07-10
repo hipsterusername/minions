@@ -1,0 +1,38 @@
+id: flow.run_harness_query_loop
+type: flow
+name: run_harness_query_loop
+summary: Owns one live harness run from running status through async event iteration, normalized event handling, recovery handoff, completion hooks, and abort aware error handling.
+capabilities:
+  - capability.canvas_sessions
+constraints:
+  - constraint.bus_only_broadcasts
+  - constraint.no_cross_tree_imports
+  - constraint.server_file_size_ceiling
+decisions:
+  - decision.graph_as_bus
+  - decision.worktree_isolation
+risks:
+  - risk.session_state_drift
+  - risk.command_contract_drift
+  - risk.prompt_bloat
+suggested_files:
+  - server/session-host.ts
+  - server/session-host-run.ts
+  - server/session-host-context-recovery.ts
+  - server/proactive-compaction.ts
+  - server/task-lifecycle.ts
+  - server/harness/types.ts
+suggested_tests:
+  - server/session-host.test.ts
+  - server/session-host-run.test.ts
+  - tests/contracts/session-compacted-event.test.ts
+steps:
+  - SessionHost.start ignores duplicate starts while running, creates a fresh AbortController, clears old wait state, and emits and buffers session_status running.
+  - The host registers role provided tool groups with the selected harness and stores taskState and renderState returned by the agent type.
+  - The harness returns an AsyncIterable of NormalizedEvent plus runControl, then the host stores both for lifecycle controls and iterates until completion abort or recovery.
+  - processNormalizedEvent captures init metadata usage and checkpoint handoff, rebroadcasts agent_spawned and agent_task_update as canvas level events, and emits remaining events as sdk_event envelopes.
+  - Done events become either session_error or session_status idle, update cost and turns, persist host state, and invoke role onComplete for minion report nudges or parent lifecycle propagation.
+  - Context window recovery or pending proactive compaction can recursively restart the same host after resetting status to idle, while aborted harness errors are suppressed.
+freshness:
+  class: code_coupled
+risk: high

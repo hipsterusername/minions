@@ -69,7 +69,7 @@ revert, or call it out in the PR with reasoning.
 | `pnpm test` | Watch mode. Run while you're working. |
 | `pnpm test:run` | One-shot. Run before you stage. |
 | `pnpm typecheck` | Run before you commit. CI runs the same. |
-| `pnpm verify` | One-shot mirror of CI: `pnpm typecheck && pnpm typecheck:server && pnpm test:run && pnpm build`. Run before you push. |
+| `pnpm verify` | One-shot mirror of CI: typechecks, tests, license and system-model validation, then build. Run before you push. |
 | `pnpm test:coverage` | Look at blind spots. Coverage is reported, not gated. |
 | `pnpm agent:preflight -- --checkpoint <label>` | Run before delegating code edits to another agent/minion. Confirms git metadata is writable, no patch rejects remain, and dirty work has an explicit recovery checkpoint. |
 | `prek run` | Local pre-commit gate (see `.pre-commit-config.yaml`). |

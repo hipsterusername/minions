@@ -1,0 +1,35 @@
+id: flow.evaluate_merge_gates
+type: flow
+name: Evaluate Merge Gates From Diff
+summary: Checks actual changed files against model review gates and uses packet reconciliation waiver and verification evidence to allow or block merge.
+capabilities:
+  - capability.system_model_layer
+constraints:
+  - constraint.review_gated_merges
+decisions:
+  - decision.worktree_isolation
+  - decision.relevance_scoped_context
+risks:
+  - risk.merge_bypass
+  - risk.parallel_work_conflicts
+  - risk.model_rot
+suggested_files:
+  - server/system-model/gates.ts
+  - server/system-model/load.ts
+  - server/system-model/match.ts
+  - server/system-model/store.ts
+  - shared/system-model/packet.ts
+  - shared/system-model/reconcile.ts
+suggested_tests:
+  - server/system-model/gates.test.ts
+  - server/system-model/store.test.ts
+  - tests/contracts/merge-blocking.test.ts
+steps:
+  - Return allowed immediately when model mode is off no worktree exists or no manifest is present.
+  - Load the model and detailed worktree diff then match changed files against review gate file globs.
+  - Read the latest session packet latest reconciliation report and verification rows from project storage.
+  - Honor packet and reconciliation waivers and propagate reconciled failed or passed gate status.
+  - Block required gates until reconciliation exists and required verifications pass and fail when any verification failed.
+freshness:
+  class: code_coupled
+risk: critical

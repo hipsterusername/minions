@@ -5,7 +5,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { clearSession } from "./clear-session.ts";
 import { disablePersistence } from "../session-persist.ts";
-import { setup, cmd } from "./test-harness.ts";
+import { setup, cmd } from "../../tests/support/server-command-harness.ts";
 import type { BufferedEvent } from "../session-host-config.ts";
 
 beforeEach(() => disablePersistence());

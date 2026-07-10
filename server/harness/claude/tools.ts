@@ -5,11 +5,7 @@
  * SDK. This module is the only place in `server/harness/claude/` that calls
  * those helpers.
  *
- * Phase 1: standalone module, not yet wired into session-host.ts.
- * Phase 4 will make all tool files export NormalizedToolDef and route through
- * here, at which point the architecture test added in Phase 2 fully passes.
- *
- * See docs/model-agnosticism-spec.md §3.4 and Phase 1.
+ * ClaudeHarness calls this adapter for each registered internal tool group.
  */
 
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";

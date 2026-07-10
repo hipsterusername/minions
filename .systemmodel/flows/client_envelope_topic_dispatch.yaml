@@ -1,0 +1,29 @@
+id: flow.client_envelope_topic_dispatch
+type: flow
+name: Client Envelope Topic Dispatch
+summary: The client parses each incoming server frame as a shared envelope and delivers it only to firehose or exact-topic subscribers.
+capabilities:
+  - capability.ws_command_bus
+constraints:
+  - constraint.no_cross_tree_imports
+decisions: []
+risks:
+  - risk.command_contract_drift
+suggested_files:
+  - src/use-socket.ts
+  - shared/ws-envelope.ts
+  - tests/harness/ws-replay.ts
+suggested_tests:
+  - src/use-socket.test.tsx
+  - shared/ws-envelope.test.ts
+  - tests/harness/ws-replay.test.ts
+steps:
+  - useSocket.onmessage JSON parses ev.data and validates the parsed object with wsEnvelopeSchema.safeParse.
+  - Messages that fail the shared envelope schema are warned about and dropped before any listener sees them.
+  - Valid envelopes are treated as ServerMessage because topic and type remain top-level fields.
+  - subscribe with one function registers a firehose listener using the star topic, while subscribe with topic and function stores an exact topic filter.
+  - For every listener, topicMatches permits either star or exact topic equality before invoking the callback.
+  - The returned unsubscribe function removes the listener from the Set for future messages.
+freshness:
+  class: code_coupled
+risk: medium

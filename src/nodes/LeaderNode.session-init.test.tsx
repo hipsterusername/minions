@@ -23,7 +23,7 @@
  * Phase 3: all sdk_event messages use `event: NormalizedEvent`.
  */
 
-import { act, render } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, beforeAll, beforeEach } from "vitest";
 
@@ -321,5 +321,63 @@ describe("LeaderNode: new-session initiation", () => {
     // The user prompt must survive the status transition.
     expect(last.messages.map((m) => m.role)).toEqual(["user"]);
     expect(last.messages[0]?.content).toBe("Investigate the regression.");
+  });
+
+  it("suppresses a manual Start after autoStart claimed the session (no double create_session)", async () => {
+    // Reproduces the double-init / doubled-content race: autoStart fires on
+    // mount and claims the session (syncedRef set), but the generated
+    // sessionKey has NOT yet propagated back into node.data — here modelled by
+    // an onUpdateData that swallows the update, so dataRef.current.sessionKey
+    // stays null. A manual Start in that window must NOT open a second leader
+    // host. Pre-fix (no syncedRef guard in handleCreate) this sent a second
+    // create_session; each host then streamed its own copy of the reply.
+    const { socket } = createReplaySocket();
+    const captured: unknown[] = [];
+    const mockSend = (msg: unknown) => {
+      captured.push(msg);
+    };
+
+    // Stable node whose data never receives the sessionKey update.
+    const node: CanvasNode = {
+      id: "leader-race-1",
+      type: "leader",
+      position: { x: 0, y: 0 },
+      size: { width: 480, height: 400 },
+      data: disconnectedLeaderData({ autoStartPrompt: "Auto go" }),
+    };
+
+    function RaceProbe() {
+      const props: NodeRenderProps = {
+        node,
+        isSelected: false,
+        onUpdateData: () => {
+          /* swallow: sessionKey never propagates to props (stale-dataRef window) */
+        },
+        socketSubscribe: socket.subscribe,
+        socketSend: mockSend,
+      };
+      return <LeaderNodeRenderer {...props} />;
+    }
+
+    render(<RaceProbe />);
+
+    const creates = () =>
+      captured.filter((m) => (m as { type?: string }).type === "create_session");
+
+    // autoStart fired exactly once on mount.
+    expect(creates()).toHaveLength(1);
+
+    // Manual Start while the sessionKey is still un-propagated.
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("leader-prompt-input-inline"), {
+        target: { value: "Manual go" },
+      });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    });
+
+    // Still one create_session — the second was suppressed by the syncedRef guard.
+    expect(creates()).toHaveLength(1);
   });
 });

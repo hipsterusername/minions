@@ -1,6 +1,7 @@
 import { StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
+import "./theme-skins/index.css";
 import {
   buildMobileRedirectUrl,
   readViewParam,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { themes } from "./themes.ts";
+import { themes, skinThemes, themeMap } from "./themes.ts";
 
 function hexToRgb(hex: string): [number, number, number] {
   const normalized = hex.replace("#", "");
@@ -44,6 +44,42 @@ describe("theme accent text tokens", () => {
   it("uses the accent text token for kanban gradient labels", () => {
     for (const theme of themes) {
       expect(theme.vars["--kb-text-on-gradient"], theme.id).toBe("var(--text-on-accent)");
+    }
+  });
+});
+
+describe("permanent skins", () => {
+  it("appends the six skins after the base themes, in order", () => {
+    expect(skinThemes.map((s) => s.id)).toEqual([
+      "glass",
+      "ink",
+      "blueprint",
+      "porcelain",
+      "obsidian",
+      "nocturne",
+    ]);
+    // Skins are the tail of the full list, preserving base-theme order.
+    expect(themes.slice(-skinThemes.length)).toEqual(skinThemes);
+  });
+
+  it("exposes every skin permanently in the picker list", () => {
+    for (const skin of skinThemes) {
+      expect(themes, `${skin.id} is in the picker`).toContain(skin);
+      expect(themeMap[skin.id], `${skin.id} is resolvable`).toBe(skin);
+    }
+  });
+
+  it("gives every theme a unique id", () => {
+    const ids = themes.map((t) => t.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("gives every skin a swatch and non-empty palette", () => {
+    for (const skin of skinThemes) {
+      expect(skin.swatch.bg, `${skin.id} swatch bg`).toMatch(/^#[0-9a-f]{6}$/i);
+      expect(skin.swatch.accent, `${skin.id} swatch accent`).toMatch(/^#[0-9a-f]{6}$/i);
+      expect(skin.vars["--bg-primary"], `${skin.id} bg`).toBeTruthy();
+      expect(skin.vars["--accent"], `${skin.id} accent`).toBeTruthy();
     }
   });
 });

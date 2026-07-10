@@ -33,6 +33,14 @@ export function SkillTagChip({
     >
       <span>{skill.icon}</span>
       <span>{skill.name}</span>
+      {skill.subskills && skill.subskills.length > 0 && (
+        <span
+          title={`${skill.subskills.length} sub-skill${skill.subskills.length === 1 ? "" : "s"}`}
+          style={{ opacity: 0.7 }}
+        >
+          {skill.subskills.length}▸
+        </span>
+      )}
       {!readOnly && onRemove && (
         <button
           onClick={onRemove}

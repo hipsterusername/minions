@@ -2,14 +2,14 @@
 
 ## Summary
 
-The dominant Fable 5 cache-write churn in session `38465c76-de56-47b8-a865-0292fbee10fc` was prompt-prefix invalidation from tool-list changes, not 5-minute TTL expiry. The tight burst at transcript lines 17, 18, 19, 21, and 23 created the same 206,639-token prefix five times in 6.275 seconds, which is too short for TTL expiry. The same transcript shows user-level `claude.ai` Gmail/Calendar/Drive MCP tools being added, removed, and re-added as deferred tools. Because Claude prompt caching is a strict prefix match over tools -> system -> messages, changing the SDK/CLI tool list invalidates the whole cached prefix.
+The dominant cache-write churn in the inspected session was prompt-prefix invalidation from tool-list changes, not 5-minute TTL expiry. A tight burst created the same large prompt prefix five times in a few seconds, which is too short for TTL expiry. The same transcript shows user-level remote connector tools being added, removed, and re-added as deferred tools. Because Claude prompt caching is a strict prefix match over tools -> system -> messages, changing the SDK/CLI tool list invalidates the whole cached prefix.
 
 ## Evidence
 
 Source files:
 
 - Analysis: `/tmp/fable-session-eval.md`
-- Transcript: `/home/hipsterusername/.claude/projects/-home-hipsterusername-PersonalRepos-minions/38465c76-de56-47b8-a865-0292fbee10fc.jsonl`
+- Source: a local Claude session transcript (not committed; identifying path and session ID omitted)
 
 Session-level totals from the eval:
 

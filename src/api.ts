@@ -64,6 +64,15 @@ export interface ProjectSettings {
   defaultMinionThinkingConfig?: ThinkingConfig;
   defaultPermissionMode?: string;
   defaultWorktreeIsolation?: boolean;
+  /**
+   * Keep the canvas tidy: overlapping nodes snap flush against their nearest
+   * neighbour (on the side closest to where they're dropped), free drops snap
+   * to the grid, and dashboards stay affixed to their leader. Absent = on;
+   * only `false` disables it.
+   */
+  tidyLayout?: boolean;
+  /** System-model layer mode; see docs/system-model-implementation-plan.md. */
+  systemModel?: "off" | "advisory" | "enforced";
   dashboardLeaderActionPrompts?: {
     improve?: string;
     execute?: string;

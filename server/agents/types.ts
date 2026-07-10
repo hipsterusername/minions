@@ -26,6 +26,12 @@ export interface AgentTypeContext {
   existingTaskState?: TaskManagerState;
   /** Existing render state to preserve across resume calls (leader only) */
   existingRenderState?: RenderState;
+  /**
+   * Skill IDs tagged on this session (leader only), used to gate opt-in tool
+   * surfaces such as the skill-authoring tools. Sourced from the frontend at
+   * launch time and persisted on the host across resume/wait cycles.
+   */
+  skillIds?: string[];
   /** Worktree inherited from the leader (minion only) */
   parentWorktree?: WorktreeInfo;
   /**

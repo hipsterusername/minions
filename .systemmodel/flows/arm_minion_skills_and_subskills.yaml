@@ -1,0 +1,32 @@
+id: flow.arm_minion_skills_and_subskills
+type: flow
+name: Arm Minion Skills And Load Subskills
+summary: assign_task resolves requested skills, appends compiled skill instructions and subskill maps to the minion system prompt, records resolved skill IDs, and exposes tolerant subskill loading.
+capabilities:
+  - capability.task_delegation
+constraints:
+  - constraint.model_bloat_guard
+decisions:
+  - decision.relevance_scoped_context
+risks:
+  - risk.prompt_bloat
+  - risk.command_contract_drift
+  - risk.model_rot
+suggested_files:
+  - server/task-tools/assign-task.ts
+  - server/task-tools/load-subskill.ts
+  - server/subskill-tools.ts
+  - shared/prompts/minion-system.ts
+  - server/task-tools/types.ts
+suggested_tests:
+  - server/task-tools/assign-task.test.ts
+  - server/task-tools/load-subskill.test.ts
+steps:
+  - Load requested skills from the project skill library and silently drop unknown IDs while noting dropped IDs in the assign_task result.
+  - Compile resolved skill templates with skill values and append them to the base minion system prompt without mutating the context prompt.
+  - Store resolved skill IDs on the task record so minion runtime tool surfaces can be gated from the armed task state.
+  - Include armed skill IDs in the spawn prompt so the minion can cross reference the Active Skills section.
+  - Resolve subskill bodies on demand from projectPath through leader load_subskill or minion skills load_subskill and return formatted text even for unknown IDs.
+freshness:
+  class: code_coupled
+risk: medium

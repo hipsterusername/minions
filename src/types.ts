@@ -141,9 +141,19 @@ export interface NodeRenderProps {
     | undefined;
   /** Returns text content from all context-protocol nodes connected to this node */
   getContextForNode?: (() => ContextItem[]) | undefined;
+  /**
+   * Returns the per-edge context modes of every incoming context edge
+   * ("dashboard" | "lean" | "full"). Used by leaders to frame an upstream
+   * leader's forwarded transcript with a system-prompt preamble.
+   */
+  getIncomingContextModes?: (() => string[]) | undefined;
   projectPath?: string | undefined;
   /** Callback to resize this node on the canvas */
   onResize?: ((size: Size) => void) | undefined;
+  /** Called when the user starts dragging this node's resize handle. */
+  onResizeStart?: (() => void) | undefined;
+  /** Called when the user stops dragging this node's resize handle. */
+  onResizeEnd?: (() => void) | undefined;
   /** Callback to add a text response as a new markdown node on the canvas */
   onAddContentNode?: ((content: string) => void) | undefined;
   /** Callback to save a markdown node as a Kanban backlog card */
@@ -156,6 +166,8 @@ export interface NodeRenderProps {
   onRevealMinion?: ((minionSessionKey: string) => void) | undefined;
   /** Duplicate a Leader node's setup without prompt or chat history. */
   onDuplicateLeaderSetup?: (() => void) | undefined;
+  /** Open a System Model node preloaded with this Leader's session key. */
+  onOpenSystemModel?: (() => void) | undefined;
   /** Save a Leader node's setup as a reusable preset. */
   onSaveLeaderPreset?: ((input: {
     name: string;

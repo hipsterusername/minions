@@ -115,6 +115,8 @@ function FolderNodeRenderer({
   node,
   projectPath,
   onResize,
+  onResizeStart,
+  onResizeEnd,
   onUpdateData,
 }: NodeRenderProps) {
   const data = node.data as FolderData;
@@ -352,6 +354,8 @@ function FolderNodeRenderer({
           minWidth={240}
           minHeight={160}
           onResize={onResize}
+          {...(onResizeStart ? { onResizeStart } : {})}
+          {...(onResizeEnd ? { onResizeEnd } : {})}
         />
       )}
     </div>

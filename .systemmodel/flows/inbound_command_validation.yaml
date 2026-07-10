@@ -1,0 +1,29 @@
+id: flow.inbound_command_validation
+type: flow
+name: Inbound Command Validation
+summary: Incoming socket frames are JSON decoded, checked against per-command zod schemas, and rejected with enveloped errors before dispatch when invalid.
+capabilities:
+  - capability.ws_command_bus
+constraints: []
+decisions: []
+risks:
+  - risk.command_contract_drift
+suggested_files:
+  - server/ws-connection.ts
+  - server/commands/schemas.ts
+  - server/commands/types.ts
+  - server/bus.ts
+  - shared/ws-envelope.ts
+suggested_tests:
+  - server/commands/schemas.test.ts
+  - tests/contracts/ws-command-validation.test.ts
+  - tests/contracts/canvas-context.test.ts
+steps:
+  - The message listener parses the raw ws frame with JSON.parse over String(raw) and malformed JSON produces an unicastGlobal error reply before returning.
+  - validateWsCommand rejects non-object payloads, missing or non-string type fields, unknown command names, and fields that fail the matching COMMAND_SCHEMAS zod schema.
+  - COMMAND_SCHEMAS is keyed by WsCommandType and uses satisfies Record of WsCommandType to zod type so command schema coverage is compile-time checked.
+  - On validation failure, ws-connection logs a warning, sends an enveloped global error reply, and never calls dispatch.
+  - On validation success, ws-connection passes the original command object and originating WebSocket to deps.dispatch.
+freshness:
+  class: code_coupled
+risk: high

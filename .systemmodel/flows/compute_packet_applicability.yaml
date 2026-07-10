@@ -1,0 +1,34 @@
+id: flow.compute_packet_applicability
+type: flow
+name: Compute Packet Applicability
+summary: Determines when file scope intersects gated surfaces and renders compact packet required notes for planning assignment and compilation.
+capabilities:
+  - capability.system_model_layer
+constraints:
+  - constraint.review_gated_merges
+  - constraint.model_bloat_guard
+decisions:
+  - decision.relevance_scoped_context
+risks:
+  - risk.merge_bypass
+  - risk.prompt_bloat
+suggested_files:
+  - server/system-model/applicability.ts
+  - server/system-model/compile.ts
+  - server/task-tools/plan-task.ts
+  - server/task-tools/assign-task.ts
+  - server/agents/leader.ts
+suggested_tests:
+  - server/system-model/applicability.test.ts
+  - server/task-tools/plan-task.test.ts
+  - server/task-tools/assign-task.test.ts
+  - server/agents/leader.test.ts
+steps:
+  - Compare candidate files to review gate file globs and critical constraint file globs.
+  - Return packet required only when a gate or critical constraint hits.
+  - Treat empty file lists as misses so silence never forces a packet.
+  - Expose the unique sorted gated surface glob list for the leader prompt addendum.
+  - Render a compact systemModel packet note for plan and assign results with an optional workPacketId reminder.
+freshness:
+  class: code_coupled
+risk: high

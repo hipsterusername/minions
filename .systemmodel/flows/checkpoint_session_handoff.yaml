@@ -1,0 +1,30 @@
+id: flow.checkpoint_session_handoff
+type: flow
+name: Checkpoint Session Handoff
+summary: checkpoint_session requests a proactive leader handoff only at safe boundaries and defers while approval, child wait, or pending render form input would make continuation unsafe.
+capabilities:
+  - capability.task_delegation
+constraints:
+  - constraint.review_gated_merges
+  - constraint.model_bloat_guard
+decisions:
+  - decision.graph_as_bus
+risks:
+  - risk.session_state_drift
+  - risk.render_schema_drift
+  - risk.prompt_bloat
+suggested_files:
+  - server/task-tools/checkpoint-session.ts
+  - server/task-tools/types.ts
+  - server/task-tools.ts
+suggested_tests:
+  - server/task-tools/checkpoint-session.test.ts
+  - server/task-tools/wait-and-continue.test.ts
+steps:
+  - Validate the empty checkpoint_session input and check whether this leader already has a pending handoff request.
+  - Defer when taskState approval is requested, when pendingWait wakeOn is any_terminal, or when supplied render components contain an unsubmitted form.
+  - On a safe boundary, mark the leaderSessionKey in the pending handoff map and return instructions for a compact structured handoff under 4000 characters.
+  - Later continuation code can test isCheckpointRequested and consumeCheckpointHandoff exactly once, clearing the request for that session.
+freshness:
+  class: code_coupled
+risk: medium

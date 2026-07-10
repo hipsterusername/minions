@@ -1,0 +1,30 @@
+id: flow.command_table_dispatch
+type: flow
+name: Command Table Dispatch
+summary: A validated command selects its handler from COMMAND_TABLE and invokes it with shared command context plus the originating socket.
+capabilities:
+  - capability.ws_command_bus
+constraints: []
+decisions: []
+risks:
+  - risk.command_contract_drift
+suggested_files:
+  - server/index.ts
+  - server/commands/index.ts
+  - server/commands/types.ts
+  - server/bus.ts
+suggested_tests:
+  - server/commands/schemas.test.ts
+  - tests/contracts/ws-command-validation.test.ts
+  - tests/contracts/system-model-commands.test.ts
+  - tests/contracts/get-work-packets.test.ts
+  - tests/contracts/merge-blocking.test.ts
+steps:
+  - server/index.ts creates CommandContext with registry, bus, generateKey, and maxSessions.
+  - The connection dispatch closure calls dispatchCommand with commandContext, cmd, and target.
+  - dispatchCommand reads COMMAND_TABLE indexed by cmd.type to select the registered handler.
+  - If no handler exists at runtime, dispatchCommand sends an enveloped global error with the unknown command type.
+  - When a handler exists, dispatchCommand calls handler with ctx, cmd, and ws and leaves domain-specific behavior to that command module.
+freshness:
+  class: code_coupled
+risk: high

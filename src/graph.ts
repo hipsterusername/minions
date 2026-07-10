@@ -96,6 +96,18 @@ export const LEADER_CONTRACT: NodeInterfaceContract = {
         return data?.sessionKey ? "locked" : "open";
       },
     },
+    {
+      // The leader now hosts its dashboard inline (the standalone render node
+      // was retired). This port exports the flattened dashboard as context so
+      // it can still feed another Leader — preserving the old render node's
+      // context-out capability.
+      id: "context-out",
+      label: "Dashboard",
+      direction: "output",
+      protocol: "context",
+      maxConnections: 10,
+      anchorY: 0.5,
+    },
   ],
 };
 
@@ -156,6 +168,15 @@ export interface GraphEdge {
   targetNodeId: string;
   targetPortId: string;
   protocol: EdgeMessage["protocol"];
+  /**
+   * For leader→leader `context` edges: how much of the upstream leader's
+   * session is forwarded to the downstream leader.
+   * - "dashboard" (default): the flattened embedded dashboard only.
+   * - "lean": upstream user inputs + assistant responses (no thinking/tools).
+   * - "full": inputs + assistant thinking + responses (no tools).
+   * Undefined is treated as "dashboard".
+   */
+  contextMode?: "dashboard" | "lean" | "full";
 }
 
 // ── Graph document ──────────────────────────────────────

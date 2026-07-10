@@ -2,6 +2,9 @@ import type { Bus } from "./bus.ts";
 import type { VapidKeys } from "./push-crypto.ts";
 import type { PushStore, PushSubscription } from "./push-store.ts";
 import type { WsEnvelope } from "../shared/ws-envelope.ts";
+import { serverLogger } from "./logging.ts";
+
+const log = serverLogger.child("push");
 
 export type PushKind = "approval" | "minion_done" | "error";
 
@@ -112,10 +115,7 @@ async function notifySubscriptions({
           store.removeSubscription(subscription.endpoint);
         }
       } catch (err) {
-        console.warn(
-          "[push] failed to send notification:",
-          err instanceof Error ? err.message : err,
-        );
+        log.warn("notification_send_failed", { error: err });
       }
     }),
   );

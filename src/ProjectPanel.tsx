@@ -10,6 +10,9 @@ import type { CanvasNode } from "./types.ts";
 import type { LeaderData } from "./nodes/LeaderNode.tsx";
 import type { MinionData } from "./nodes/MinionNode.tsx";
 import { ProjectTree, type LeaderActivity } from "./components/ProjectTree.tsx";
+import { browserLogger } from "./logging.ts";
+
+const log = browserLogger.child("project-panel");
 
 interface ProjectPanelProps {
   projectId: string;
@@ -153,7 +156,7 @@ export function ProjectPanel({
         const ctx = await getProjectContext(projectId);
         setContext(ctx);
       } catch (err) {
-        console.error("Failed to load context:", err);
+        log.error("context_load_failed", { error: err });
       }
     })();
   }, [projectId]);
@@ -170,7 +173,7 @@ export function ProjectPanel({
       setContext({ content: editBuffer, exists: true });
       setEditing(false);
     } catch (err) {
-      console.error("Failed to save context:", err);
+      log.error("context_save_failed", { error: err });
     } finally {
       setSaving(false);
     }

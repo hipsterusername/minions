@@ -18,6 +18,9 @@ import { errToMessage } from "./helpers.ts";
 import type { CommandHandler } from "./types.ts";
 import { persistTaskState } from "../session-persist.ts";
 import { dirname, basename } from "node:path";
+import { serverLogger } from "../logging.ts";
+
+const log = serverLogger.child("send-message");
 
 function projectPathForNewWorktree(cwd: string): string {
   const parent = dirname(cwd);
@@ -108,9 +111,10 @@ export const sendMessage: CommandHandler = (ctx, cmd, ws) => {
       })
       .catch((err: unknown) => {
         const errMsg = errToMessage(err);
-        console.error(
-          `[worktree] Failed to create follow-up worktree for ${cmd.sessionKey}: ${errMsg}`,
-        );
+        log.error("follow_up_worktree_create_failed", {
+          sessionKey: cmd.sessionKey,
+          error: err,
+        });
         ctx.bus.emitToSession(cmd.sessionKey!, {
           type: "worktree_failed",
           sessionKey: cmd.sessionKey,

@@ -1,0 +1,34 @@
+id: flow.skill_authoring_create_tool
+type: flow
+name: Create Skill Via Authoring Tool
+summary: create_skill validates an author draft, derives ids and implicit variables, rejects duplicate project ids, and persists a new sidecar entry.
+capabilities:
+  - capability.skill_library
+constraints:
+  - constraint.no_cross_tree_imports
+  - constraint.server_file_size_ceiling
+decisions:
+  - decision.relevance_scoped_context
+risks:
+  - risk.command_contract_drift
+  - risk.model_rot
+  - risk.prompt_bloat
+suggested_files:
+  - server/skill-authoring-tools.ts
+  - server/skill-authoring.ts
+  - server/project-store.ts
+  - server/skill-authoring-tools.test.ts
+  - server/skill-authoring.test.ts
+suggested_tests:
+  - server/skill-authoring-tools.test.ts
+  - server/skill-authoring.test.ts
+steps:
+  - create_skill parses name, template, metadata, variables, and optional subskills with the zod input schema.
+  - buildSkillDraft requires a non-empty name and template, derives a slug id when omitted, and normalizes category defaults.
+  - Template placeholders not declared in variables are auto-added as text variables.
+  - Subskill drafts receive stable ids with duplicate ids suffixed to remain addressable.
+  - The tool rejects an existing project skill id, then writes the appended array with writeSkills.
+  - The success message reports the created id and task spawn usage remains outside this flow.
+freshness:
+  class: code_coupled
+risk: high

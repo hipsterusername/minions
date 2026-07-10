@@ -16,8 +16,7 @@
  * the bridge `McpBridgeRegistration` is the only thing it depends on, and
  * `BridgeServerConfigGroup` mirrors only the fields Codex actually accepts.
  *
- * Phase C scope: renderer + tests only. Wiring this into the Codex harness
- * happens in Phase D.
+ * CodexHarness calls this renderer for every bridge-backed run.
  */
 
 import type { McpBridgeRegistration } from "../../mcp-bridge/registry.ts";
@@ -40,8 +39,7 @@ export interface BridgeServerConfigGroup {
 /**
  * Free-form Codex config object. The Codex SDK's CodexConfigObject is
  * `Record<string, unknown>` — we mirror that shape locally so this module
- * doesn't take a dependency on `@openai/codex-sdk`. Phase D will re-type
- * this against the SDK's actual export.
+ * does not need to depend directly on `@openai/codex-sdk`.
  */
 export type CodexConfigObject = Record<string, unknown>;
 

@@ -8,7 +8,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { rewindFiles } from "./rewind-files.ts";
-import { setup, cmd, fakeRunControl } from "./test-harness.ts";
+import { setup, cmd, fakeRunControl } from "../../tests/support/server-command-harness.ts";
 
 describe("rewind_files", () => {
   it("forwards { userMessageId, dryRun } to runControl.rewindFiles and returns the result", async () => {

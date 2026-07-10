@@ -1,14 +1,53 @@
 id: capability.persistence_project_state
 type: capability
-name: Project Persistence
-summary: Projects persist settings, skills, sessions, canvas state, dashboards, and usage in sidecar files and SQLite.
-linked_flows: [flow.canvas_session_lifecycle]
-constraints: [constraint.no_cross_tree_imports]
-decisions: [decision.worktree_isolation]
-risks: [risk.session_state_drift]
-suggested_files: [server/project-store.ts, server/db.ts, server/session-persist.ts, server/session-message.ts, server/session-usage-capture.ts, server/routes/projects*.ts]
-suggested_tests: [server/project-store.test.ts, server/db.test.ts, server/session-persist.test.ts, server/session-message.test.ts, server/session-usage-capture.test.ts]
-keywords: [project, sidecar, sqlite, settings, skills, persistence]
+name: persistence_project_state
+summary: Durable project and session state across sidecars, SQLite schema setup, session hydration, usage accounting, event replay, and render persistence.
+linked_flows:
+  - flow.sqlite_schema_init_and_migration
+  - flow.project_canvas_state_roundtrip
+  - flow.project_sidecar_configuration_state
+  - flow.session_snapshot_hydration
+  - flow.resume_idle_session_message_and_event_log
+  - flow.capture_session_usage_cost
+  - flow.persist_render_dashboard_state
+constraints:
+  - constraint.no_cross_tree_imports
+  - constraint.server_file_size_ceiling
+  - constraint.bus_only_broadcasts
+  - constraint.model_bloat_guard
+decisions:
+  - decision.graph_as_bus
+  - decision.worktree_isolation
+risks:
+  - risk.session_state_drift
+  - risk.render_schema_drift
+  - risk.command_contract_drift
+  - risk.model_rot
+suggested_files:
+  - server/db.ts
+  - server/project-store.ts
+  - server/session-persist.ts
+  - server/session-repo.ts
+  - server/session-usage-capture.ts
+  - server/usage-telemetry.ts
+  - server/session-message.ts
+  - server/routes/projects/core.ts
+suggested_tests:
+  - server/db.test.ts
+  - server/project-store.test.ts
+  - server/session-persist.test.ts
+  - server/session-repo.test.ts
+  - server/session-usage-capture.test.ts
+  - tests/contracts/projects-core-routes.test.ts
+  - tests/contracts/projects-settings-routes.test.ts
+keywords:
+  - sqlite
+  - sidecar
+  - project_state
+  - session_hydration
+  - event_log
+  - usage_telemetry
+  - render_state
 freshness:
   class: code_coupled
 risk: high

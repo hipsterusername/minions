@@ -161,7 +161,7 @@ function baseOpts(over: Partial<HarnessStartOptions> = {}): HarnessStartOptions 
     cwd: "/tmp/work",
     prompt: "do the thing",
     systemPrompt: "you are codex",
-    model: "gpt-5.5",
+    model: "gpt-5.6-sol",
     allowedTools: [],
     abortSignal: ac.signal,
     ...over,
@@ -223,7 +223,7 @@ describe("CodexHarness.start()", () => {
     expect(typeof control.abort).toBe("function");
     const out = await collect(events);
     expect(out.map((e) => e.kind)).toEqual(["init", "text", "usage", "done"]);
-    expect(out[0]).toMatchObject({ kind: "init", sessionId: "th-001", model: "gpt-5.5" });
+    expect(out[0]).toMatchObject({ kind: "init", sessionId: "th-001", model: "gpt-5.6-sol" });
     expect(out[1]).toMatchObject({ kind: "text", role: "assistant", text: "hi" });
     expect(out[2]).toMatchObject({ kind: "usage", input: 7, output: 11, cacheRead: 3 });
     expect(out[3]).toMatchObject({ kind: "done", reason: "stop" });

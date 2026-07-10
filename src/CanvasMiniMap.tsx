@@ -168,8 +168,6 @@ function nodeTint(node: CanvasNode, active: boolean): string {
       return "var(--accent)";
     case "minion":
       return "var(--edge-task)";
-    case "render":
-      return "var(--info-color)";
     case "markdown":
     case "note":
       return "var(--status-success)";

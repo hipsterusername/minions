@@ -6,10 +6,13 @@ import { describe, it, expect } from "vitest";
 import {
   imageComponentSchema,
   filePreviewComponentSchema,
+  htmlArtifactComponentSchema,
   formatImage,
   formatFilePreview,
+  formatHtmlArtifact,
   type ImageComponent,
   type FilePreviewComponent,
+  type HtmlArtifactComponent,
 } from "./render-artifacts.ts";
 
 // ── imageComponentSchema ───────────────────────────────────
@@ -167,6 +170,93 @@ describe("filePreviewComponentSchema", () => {
       actions: ["share"],
     });
     expect(result.success).toBe(false);
+  });
+});
+
+// ── htmlArtifactComponentSchema ────────────────────────────
+
+describe("htmlArtifactComponentSchema", () => {
+  it("parses a minimal valid html-artifact component", () => {
+    const result = htmlArtifactComponentSchema.safeParse({
+      id: "html-1",
+      type: "html-artifact",
+      html: "<div>hello</div>",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("parses all optional fields", () => {
+    const result = htmlArtifactComponentSchema.safeParse({
+      id: "html-2",
+      type: "html-artifact",
+      html: "<section><h1>Report</h1></section>",
+      title: "Weekly report",
+      height: 480,
+      artifactId: "a1b2c3",
+      span: "full",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a missing html field", () => {
+    const result = htmlArtifactComponentSchema.safeParse({
+      id: "html-3",
+      type: "html-artifact",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a non-string html field", () => {
+    const result = htmlArtifactComponentSchema.safeParse({
+      id: "html-4",
+      type: "html-artifact",
+      html: { not: "a string" },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a wrong type literal", () => {
+    const result = htmlArtifactComponentSchema.safeParse({
+      id: "html-5",
+      type: "html",
+      html: "<div></div>",
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+// ── formatHtmlArtifact ─────────────────────────────────────
+
+describe("formatHtmlArtifact", () => {
+  it("summarizes with the title, byte count, and a visualization-only note", () => {
+    const c: HtmlArtifactComponent = {
+      id: "html-1",
+      type: "html-artifact",
+      html: "<div>hi</div>",
+      title: "My chart",
+    };
+    const result = formatHtmlArtifact(c);
+    expect(result).toContain("My chart");
+    expect(result).toContain(`${c.html.length} bytes`);
+    expect(result).toContain("visualization only");
+  });
+
+  it("falls back to a generic label when no title", () => {
+    const c: HtmlArtifactComponent = {
+      id: "html-2",
+      type: "html-artifact",
+      html: "<p>x</p>",
+    };
+    expect(formatHtmlArtifact(c)).toContain("HTML artifact");
+  });
+
+  it("does not inline the raw HTML markup", () => {
+    const c: HtmlArtifactComponent = {
+      id: "html-3",
+      type: "html-artifact",
+      html: "<strong>secret markup</strong>",
+    };
+    expect(formatHtmlArtifact(c)).not.toContain("<strong>");
   });
 });
 

@@ -1579,6 +1579,9 @@
 
 .kb-panel-backdrop {
   display: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
 /* ─── Mobile toolbar actions ──────────────────────────────── */

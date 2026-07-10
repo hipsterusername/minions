@@ -1,12 +1,12 @@
 risks:
   - id: risk.merge_bypass
     type: risk
-    summary: A merge command can bypass approval or future system-model gates if it calls cleanup directly.
+    summary: A merge command can bypass approval or system-model gates if it calls cleanup directly.
     severity: critical
     applies_to:
       capabilities: [capability.worktree_approval]
-      flows: [flow.worktree_approval_merge]
-      files: [server/commands/merge-worktree.ts, server/commands/approve-changes.ts, server/commands/helpers.ts, server/worktree.ts]
+      flows: []
+      files: [server/commands/merge-worktree.ts, server/commands/approve-changes.ts, server/worktree.ts]
     mitigation: Keep merge gating centralized and test every merge command path.
   - id: risk.parallel_work_conflicts
     type: risk
@@ -14,8 +14,8 @@ risks:
     severity: high
     applies_to:
       capabilities: [capability.task_delegation, capability.worktree_approval]
-      flows: [flow.task_delegation_lifecycle, flow.worktree_approval_merge]
-      files: [server/task-tools/assign-task.ts, server/worktree-create.ts, server/worktree-merge.ts]
+      flows: []
+      files: [server/task-tools/assign-task.ts, server/worktree-create.ts]
     mitigation: Use ownedPaths, task constraints, and worktree isolation for parallel code edits.
   - id: risk.command_contract_drift
     type: risk
@@ -23,17 +23,17 @@ risks:
     severity: high
     applies_to:
       capabilities: [capability.ws_command_bus, capability.canvas_sessions]
-      flows: [flow.ws_command_dispatch, flow.canvas_session_lifecycle]
-      files: [server/commands/**, server/bus.ts, shared/ws-envelope.ts, src/api.ts]
-    mitigation: Keep command table exhaustive and run contract tests for producer/consumer behavior.
+      flows: []
+      files: [server/commands/schemas.ts, server/bus.ts, shared/ws-envelope.ts, src/api.ts]
+    mitigation: Keep the command table exhaustive and run contract tests for producer/consumer behavior.
   - id: risk.render_schema_drift
     type: risk
     summary: Render DSL server tools and client components can diverge if schema changes are not shared and tested end to end.
     severity: medium
     applies_to:
       capabilities: [capability.render_dashboard]
-      flows: [flow.ws_command_dispatch]
-      files: [server/render-tools.ts, shared/render-dsl.ts, src/nodes/RenderNode.tsx, src/nodes/render/*.tsx]
+      flows: []
+      files: [server/render-tools.ts, shared/render-dsl.ts, src/nodes/RenderNode.tsx]
     mitigation: Keep DSL schemas in shared/ and cover server tool output plus client render application.
   - id: risk.session_state_drift
     type: risk
@@ -41,8 +41,8 @@ risks:
     severity: high
     applies_to:
       capabilities: [capability.canvas_sessions, capability.persistence_project_state]
-      flows: [flow.canvas_session_lifecycle]
-      files: [server/session-persist.ts, server/session-host.ts, server/project-store.ts, server/db.ts, src/Canvas.tsx]
+      flows: []
+      files: [server/session-persist.ts, server/session-host.ts, server/project-store.ts, server/db.ts]
     mitigation: Round-trip persistence through real writers/readers and emit state changes through the bus.
   - id: risk.prompt_bloat
     type: risk
@@ -50,8 +50,8 @@ risks:
     severity: medium
     applies_to:
       capabilities: [capability.skill_library, capability.system_model_layer]
-      flows: [flow.task_delegation_lifecycle]
-      files: [server/skills.ts, shared/skill-presets.ts, server/task-tools/task-prompt.ts, .systemmodel/**]
+      flows: []
+      files: [server/skills.ts, shared/skill-presets.ts, .systemmodel]
     mitigation: Enforce bloat-guard authoring rules and context budgets.
   - id: risk.model_rot
     type: risk
@@ -59,6 +59,6 @@ risks:
     severity: high
     applies_to:
       capabilities: [capability.system_model_layer]
-      flows: [flow.ws_command_dispatch]
-      files: [.systemmodel/**, server/system-model/*.ts, scripts/system-model-validate.mjs]
+      flows: []
+      files: [.systemmodel, server/system-model]
     mitigation: Run system-model validation and freshness checks before relying on model context.

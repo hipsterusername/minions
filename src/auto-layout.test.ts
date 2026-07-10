@@ -71,22 +71,6 @@ describe("computeAutoLayout", () => {
     expect(cm.position.y).toBeLessThan(lm.position.y);
   });
 
-  it("render dashboard with data.leaderId matching the leader is placed in the children column", () => {
-    const leader = makeLeader("l");
-    const dashboard = makeNode("d", {
-      type: "render",
-      data: { leaderId: "l" },
-      size: { width: 320, height: 200 },
-    });
-
-    const moves = computeAutoLayout([leader, dashboard], []);
-    const lm = moves.find((m) => m.id === "l")!;
-    const dm = moves.find((m) => m.id === "d")!;
-
-    // Dashboard goes into the children column (right of the leader)
-    expect(dm.position.x).toBeGreaterThan(lm.position.x + leader.size.width);
-  });
-
   it("two leaders are packed left-to-right with a gap between their bounding boxes", () => {
     const l1 = makeLeader("l1");
     const l2 = makeLeader("l2");
@@ -97,6 +81,76 @@ describe("computeAutoLayout", () => {
 
     // l2 starts after l1's right edge (bounding boxes don't overlap, with a gap)
     expect(m2.position.x).toBeGreaterThan(m1.position.x + l1.size.width);
+  });
+
+  it("orders leader clusters by running status first, then last updated date", () => {
+    const runningOlder = makeLeader("running-older", {
+      data: {
+        status: "running",
+        messages: [{ id: "r", role: "assistant", content: "", timestamp: 100 }],
+      },
+    });
+    const idleNewer = makeLeader("idle-newer", {
+      data: {
+        status: "idle",
+        messages: [{ id: "n", role: "assistant", content: "", timestamp: 900 }],
+      },
+    });
+    const idleOlder = makeLeader("idle-older", {
+      data: {
+        status: "idle",
+        messages: [{ id: "o", role: "assistant", content: "", timestamp: 500 }],
+      },
+    });
+
+    const moves = computeAutoLayout([idleOlder, idleNewer, runningOlder], []);
+    const byX = moves
+      .filter((m) =>
+        ["running-older", "idle-newer", "idle-older"].includes(m.id),
+      )
+      .sort((a, b) => a.position.x - b.position.x)
+      .map((m) => m.id);
+
+    expect(byX).toEqual(["running-older", "idle-newer", "idle-older"]);
+  });
+
+  it("orders child agents by running status first, then last updated date", () => {
+    const leader = makeLeader("l");
+    const runningOlder = makeMinion("running-older", {
+      data: {
+        status: "running",
+        messages: [{ id: "r", role: "assistant", content: "", timestamp: 100 }],
+      },
+    });
+    const idleNewer = makeMinion("idle-newer", {
+      data: {
+        status: "idle",
+        messages: [{ id: "n", role: "assistant", content: "", timestamp: 900 }],
+      },
+    });
+    const idleOlder = makeMinion("idle-older", {
+      data: {
+        status: "idle",
+        messages: [{ id: "o", role: "assistant", content: "", timestamp: 500 }],
+      },
+    });
+
+    const moves = computeAutoLayout(
+      [leader, idleOlder, idleNewer, runningOlder],
+      [
+        makeEdge("e1", "l", "idle-older"),
+        makeEdge("e2", "l", "idle-newer"),
+        makeEdge("e3", "l", "running-older"),
+      ],
+    );
+    const byY = moves
+      .filter((m) =>
+        ["running-older", "idle-newer", "idle-older"].includes(m.id),
+      )
+      .sort((a, b) => a.position.y - b.position.y)
+      .map((m) => m.id);
+
+    expect(byY).toEqual(["running-older", "idle-newer", "idle-older"]);
   });
 
   it("context-group members move by the same delta as their group", () => {
@@ -147,23 +201,17 @@ describe("computeAutoLayout", () => {
     expect(moves).toHaveLength(3);
   });
 
-  it("chained leaders (dashboard→context-in) sequence horizontally on the same row", () => {
-    // Setup:
-    //   leader A owns dashboard dA (data.leaderId = "A")
-    //   dA has a context edge into leader B's context-in port
-    //   leader X is unrelated and should NOT split the chain
+  it("chained leaders (leader dashboard→context-in) stay contiguous within the shared horizontal row", () => {
+    // Setup (dashboards are embedded in leaders now):
+    //   leader A's context-out feeds leader B's context-in port
+    //   leader X is unrelated and must not be inserted between A and B
     const leaderA = makeLeader("A");
-    const dashA = makeNode("dA", {
-      type: "render",
-      data: { leaderId: "A" },
-      size: { width: 320, height: 200 },
-    });
     const leaderB = makeLeader("B");
     const leaderX = makeLeader("X");
 
     const chainEdge = {
       id: "chain",
-      sourceNodeId: dashA.id,
+      sourceNodeId: leaderA.id,
       sourcePortId: "context-out",
       targetNodeId: leaderB.id,
       targetPortId: "context-in",
@@ -173,26 +221,69 @@ describe("computeAutoLayout", () => {
     // Pass leaderX between A and B in input order to verify chain
     // ordering wins over input order.
     const moves = computeAutoLayout(
-      [leaderA, leaderX, dashA, leaderB],
+      [leaderA, leaderX, leaderB],
       [chainEdge],
     );
     const mA = moves.find((m) => m.id === "A")!;
     const mB = moves.find((m) => m.id === "B")!;
-    const mDashA = moves.find((m) => m.id === "dA")!;
     const mX = moves.find((m) => m.id === "X")!;
 
-    // B sits to the right of A's cluster (which includes dashA on the right).
+    // B sits to the right of A's cluster.
     expect(mB.position.x).toBeGreaterThan(
-      mDashA.position.x + dashA.size.width,
+      mA.position.x + leaderA.size.width,
     );
-    // A and B share the same row (top y matches within the cluster's
-    // own internal vertical layout — they are clusters of equal height).
+    // A, B and the unrelated X all share the single horizontal row now
+    // that connected and independent units flow together by recency.
     expect(mA.position.y).toBe(mB.position.y);
-    // The unrelated leader X must not appear between A and B horizontally
-    // on the chain row.  It either sits before A or after B (chain row
-    // takes priority and X falls into a separate singleton row, so its
-    // y differs from the chain row).
-    expect(mX.position.y).not.toBe(mA.position.y);
+    expect(mX.position.y).toBe(mA.position.y);
+    // The chain stays contiguous: X is not inserted between A and B.
+    // It flows after the chain (equal freshness → later input order).
+    expect(mX.position.x).toBeGreaterThan(mB.position.x);
+  });
+
+  it("packs chains and singletons into one recency-ordered horizontal row, keeping chains contiguous", () => {
+    // Chain A→B (older). Standalone leader S (newer). S should sort
+    // before the chain by recency, but A and B stay adjacent.
+    const leaderA = makeLeader("A", {
+      data: {
+        messages: [{ id: "a", role: "assistant", content: "", timestamp: 100 }],
+      },
+    });
+    const leaderB = makeLeader("B", {
+      data: {
+        messages: [{ id: "b", role: "assistant", content: "", timestamp: 200 }],
+      },
+    });
+    const singleton = makeLeader("S", {
+      data: {
+        messages: [{ id: "s", role: "assistant", content: "", timestamp: 900 }],
+      },
+    });
+
+    const chainEdge = {
+      id: "chain",
+      sourceNodeId: leaderA.id,
+      sourcePortId: "context-out",
+      targetNodeId: leaderB.id,
+      targetPortId: "context-in",
+      protocol: "context" as const,
+    };
+
+    const moves = computeAutoLayout(
+      [leaderA, leaderB, singleton],
+      [chainEdge],
+    );
+    const mA = moves.find((m) => m.id === "A")!;
+    const mB = moves.find((m) => m.id === "B")!;
+    const mS = moves.find((m) => m.id === "S")!;
+
+    // All three units share one horizontal row.
+    expect(mA.position.y).toBe(mS.position.y);
+    expect(mA.position.y).toBe(mB.position.y);
+    // Newer standalone leader sorts before the older chain by recency.
+    expect(mS.position.x).toBeLessThan(mA.position.x);
+    // Chain stays contiguous: B directly follows A, S is not between them.
+    expect(mB.position.x).toBeGreaterThan(mA.position.x);
   });
 
   // Removed: Number.isInteger pinning of move positions — implementation

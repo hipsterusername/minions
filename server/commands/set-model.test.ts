@@ -7,7 +7,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { setModel } from "./set-model.ts";
-import { setup, cmd, fakeRunControl } from "./test-harness.ts";
+import { setup, cmd, fakeRunControl } from "../../tests/support/server-command-harness.ts";
 
 describe("set_model", () => {
   it("invokes runControl.setModel and mirrors the value onto host.model on resolve", async () => {

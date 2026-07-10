@@ -1,0 +1,37 @@
+id: flow.reconcile_work_packet_drift
+type: flow
+name: Reconcile Work Packet Drift
+summary: Builds deterministic reconciliation reports from actual diffs and records minion judged constraint verdicts with provenance.
+capabilities:
+  - capability.system_model_layer
+constraints:
+  - constraint.review_gated_merges
+  - constraint.model_bloat_guard
+decisions:
+  - decision.worktree_isolation
+  - decision.relevance_scoped_context
+risks:
+  - risk.parallel_work_conflicts
+  - risk.model_rot
+  - risk.merge_bypass
+suggested_files:
+  - shared/system-model/reconcile.ts
+  - server/system-model/reconcile.ts
+  - server/system-model/store.ts
+  - server/system-model-tools/reconcile-run.ts
+  - server/system-model-tools/record-constraint-verdicts.ts
+suggested_tests:
+  - shared/system-model/reconcile.test.ts
+  - server/system-model/reconcile.test.ts
+  - server/system-model-tools/reconcile-run.test.ts
+  - server/system-model-tools/record-constraint-verdicts.test.ts
+  - server/system-model/store.test.ts
+steps:
+  - Load the packet and diff provider then derive changed files affected objects scoped constraints missing tests and out of scope files.
+  - Persist a reconciliation report with deterministic provenance summary fields affected objects changed files gates and empty constraint checks.
+  - Render a read only reviewer task when constraints are in scope.
+  - Validate returned ConstraintCheck verdicts stamp them with minion judged provenance and merge them into the latest report.
+  - Mark the packet reconciled and emit reconciliation ready with the report for downstream gate evaluation.
+freshness:
+  class: code_coupled
+risk: high

@@ -86,6 +86,7 @@ export const COMMAND_SCHEMAS = {
     sessionKey,
     cwd,
     role: z.enum(SESSION_ROLES).optional(),
+    skillIds: z.array(z.string()).optional(),
     worktreeIsolation: z.boolean().optional(),
     model: z.string().optional(),
     permissionMode: z.string().optional(),

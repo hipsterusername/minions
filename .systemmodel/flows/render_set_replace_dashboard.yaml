@@ -1,0 +1,36 @@
+id: flow.render_set_replace_dashboard
+type: flow
+name: render_set replaces the dashboard
+summary: The leader calls render_set with a full component tree and the server validates normalizes stores broadcasts and the client replaces dashboard state.
+capabilities:
+  - capability.render_dashboard
+constraints:
+  - constraint.bus_only_broadcasts
+  - constraint.no_cross_tree_imports
+  - constraint.server_file_size_ceiling
+decisions:
+  - decision.graph_as_bus
+risks:
+  - risk.render_schema_drift
+  - risk.session_state_drift
+suggested_files:
+  - server/render-tools.ts
+  - shared/render-dsl.ts
+  - shared/render-defaults.ts
+  - src/nodes/RenderNode.tsx
+  - tests/contracts/render-dsl-roundtrip.test.ts
+  - server/render-tools.test.ts
+suggested_tests:
+  - tests/contracts/render-dsl-roundtrip.test.ts
+  - server/render-tools.test.ts
+  - shared/render-dsl.test.ts
+steps:
+  - render_set input is parsed by renderSetInputSchema requiring a components array of object shaped renderComponentInputSchema entries.
+  - server render tools recursively validates each component through renderComponentSchema including section and tabs children via parseRenderComponents.
+  - renderState layout resets title and columns defaults when omitted and stores components after elideDefaults.
+  - the server emits a render_update action set envelope through bus.emitToSession for the leader session key.
+  - RenderNode subscribes to the leader session topic safeParses the payload with renderMessageSchema and calls applyRenderMessage.
+  - applyRenderMessage replaces layout and components and RenderComponentView renders the new tree.
+freshness:
+  class: code_coupled
+risk: high

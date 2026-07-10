@@ -1,13 +1,7 @@
 /**
  * Shared helpers for WebSocket command handlers.
  *
- * Extracted from `server/index.ts` in Phase 5.2. Anything that appeared in
- * more than one case of the original switch statement lives here so each
- * per-command file stays tiny.
- *
- * Phase A: adds `unsupportedByHarness` for the two-step runControl check and
- * augments SessionHost with the new `runControl` / `eventStream` fields so
- * command handlers can reference them without touching session-host.ts.
+ * Cross-command behavior lives here so each per-command file stays focused.
  */
 
 import type { WebSocket } from "ws";
@@ -17,7 +11,6 @@ import type { Bus } from "../bus.ts";
 import type { SessionRegistry } from "../session-registry.ts";
 import type { BufferedEvent } from "../session-host.ts";
 import { mergeAndCleanup, type MergeResult } from "../worktree.ts";
-import type { HarnessRunControl, NormalizedEvent } from "../harness/types.ts";
 import { persistTaskState } from "../session-persist.ts";
 import {
   evaluateMergeGates,
@@ -34,21 +27,6 @@ export interface MergeOptions {
   rebase?: boolean;
 }
 import type { CommandContext, WsCommand } from "./types.ts";
-
-// ── SessionHost augmentation ──────────────────────────────────
-// Phase A: `queryHandle: AsyncIterable<unknown>` is replaced by a typed pair.
-// The actual field declarations live in session-host.ts once the run loop is
-// wired; this augmentation lets command handlers reference the fields now so
-// `pnpm exec tsc -p server/tsconfig.json` reports zero errors in this tree.
-
-declare module "../session-host.ts" {
-  interface SessionHost {
-    /** Per-run harness control surface. Null when no run is live. */
-    runControl: HarnessRunControl | null;
-    /** Raw event stream from harness.start(). Null when no run is live. */
-    eventStream: AsyncIterable<NormalizedEvent> | null;
-  }
-}
 
 // ── Session lookup helpers ────────────────────────────────
 

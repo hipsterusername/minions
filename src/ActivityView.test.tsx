@@ -17,7 +17,11 @@ function session(overrides: Partial<MobileSessionInfo>): MobileSessionInfo {
   };
 }
 
-function leaderNode(sessionKey: string, messages: DisplayMessage[] = []): CanvasNode {
+function leaderNode(
+  sessionKey: string,
+  messages: DisplayMessage[] = [],
+  overrides: Partial<LeaderData> = {},
+): CanvasNode {
   const data: Partial<LeaderData> = {
     sessionKey,
     status: "running",
@@ -25,6 +29,7 @@ function leaderNode(sessionKey: string, messages: DisplayMessage[] = []): Canvas
     streamingText: "",
     totalCost: 0,
     turns: 0,
+    ...overrides,
   };
   return {
     id: `node-${sessionKey}`,
@@ -41,6 +46,7 @@ const noop = {
   onExpandFullscreen: () => {},
   onStopSession: () => {},
   onAttachToCanvas: () => {},
+  onUpdateNodeData: () => {},
 };
 
 describe("ActivityView", () => {
@@ -98,6 +104,54 @@ describe("ActivityView", () => {
     expect(container.querySelector(".act-header-count")?.textContent).toBe("3");
   });
 
+  it("pins errors, waiting sessions, and reviewable changes in Needs you", () => {
+    render(
+      <ActivityView
+        sessions={[
+          session({ sessionKey: "run", status: "running", taskName: "Running normal" }),
+          session({ sessionKey: "err", status: "error", taskName: "Errored task", lastActivityAt: 30 }),
+          session({
+            sessionKey: "wait",
+            status: "waiting",
+            taskName: "Needs reply",
+            lastActivityAt: 20,
+          }),
+          session({
+            sessionKey: "changes",
+            status: "running",
+            taskName: "Changes ready",
+            lastActivityAt: 10,
+          }),
+          session({ sessionKey: "idle", status: "idle", taskName: "Idle normal" }),
+        ]}
+        nodes={[leaderNode("changes", [], { worktreeStatus: "active" })]}
+        {...noop}
+      />,
+    );
+
+    expect(screen.getAllByRole("region").map((s) => s.getAttribute("aria-label"))).toEqual([
+      "Needs you",
+      "Active",
+      "Idle",
+    ]);
+
+    const needsYou = screen.getByRole("region", { name: /needs you/i });
+    expect(within(needsYou).getByRole("button", { name: /errored task/i })).toBeInTheDocument();
+    expect(within(needsYou).getByText("errored")).toBeInTheDocument();
+    expect(within(needsYou).getByRole("button", { name: /needs reply/i })).toBeInTheDocument();
+    expect(within(needsYou).getByText("waiting for you")).toBeInTheDocument();
+    expect(within(needsYou).getByRole("button", { name: /changes ready/i })).toBeInTheDocument();
+
+    const active = screen.getByRole("region", { name: /^active$/i });
+    expect(within(active).getByRole("button", { name: /running normal/i })).toBeInTheDocument();
+    expect(within(active).queryByRole("button", { name: /changes ready/i })).not.toBeInTheDocument();
+
+    fireEvent.click(within(needsYou).getByRole("button", { name: /^review$/i }));
+    expect(screen.getByRole("complementary", { name: /session details/i })).toHaveTextContent(
+      "Changes ready",
+    );
+  });
+
   it("opens the inspector with metadata when a card is selected", () => {
     render(
       <ActivityView
@@ -128,6 +182,7 @@ describe("ActivityView", () => {
         onExpandFullscreen={onExpandFullscreen}
         onStopSession={() => {}}
         onAttachToCanvas={() => {}}
+        onUpdateNodeData={() => {}}
       />,
     );
 
@@ -189,6 +244,7 @@ describe("ActivityView", () => {
         onExpandFullscreen={() => {}}
         onStopSession={onStopSession}
         onAttachToCanvas={() => {}}
+        onUpdateNodeData={() => {}}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: /idle one/i }));
@@ -203,6 +259,7 @@ describe("ActivityView", () => {
         onExpandFullscreen={() => {}}
         onStopSession={onStopSession}
         onAttachToCanvas={() => {}}
+        onUpdateNodeData={() => {}}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: /running one/i }));

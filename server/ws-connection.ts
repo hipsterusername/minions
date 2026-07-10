@@ -23,6 +23,9 @@ import { unicastGlobal } from "./bus.ts";
 import type { WsCommand } from "./commands/index.ts";
 import { validateWsCommand } from "./commands/schemas.ts";
 import type { SessionListItem } from "./session-list-item.ts";
+import { serverLogger } from "./logging.ts";
+
+const log = serverLogger.child("ws-connection");
 
 export interface ConnectionDeps {
   /** Current session list; sent once on connect. */
@@ -35,7 +38,7 @@ export function attachConnectionListeners(
   ws: WebSocket,
   deps: ConnectionDeps,
 ): void {
-  console.log("Client connected");
+  log.debug("client_connected");
 
   unicastGlobal(ws, {
     type: "session_list",
@@ -43,8 +46,7 @@ export function attachConnectionListeners(
   });
 
   ws.on("error", (err: unknown) => {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[ws] Connection error: ${msg}`);
+    log.warn("connection_error", { error: err });
   });
 
   ws.on("message", (raw) => {
@@ -58,7 +60,7 @@ export function attachConnectionListeners(
     }
     const validation = validateWsCommand(parsed);
     if (!validation.ok) {
-      console.warn(`[ws] Invalid command rejected: ${validation.error}`);
+      log.warn("command_rejected", { error: validation.error });
       unicastGlobal(ws, { type: "error", message: validation.error });
       return;
     }
@@ -66,6 +68,6 @@ export function attachConnectionListeners(
   });
 
   ws.on("close", () => {
-    console.log("Client disconnected");
+    log.debug("client_disconnected");
   });
 }

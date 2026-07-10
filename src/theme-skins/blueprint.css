@@ -1,0 +1,72 @@
+/* ── Blueprint skin ───────────────────────────────────────
+   Flag-gated (theme-blueprint). Technical brutalist: blueprint navy,
+   cyan signal, zero-radius crisp borders, monospaced controls, hard
+   offset shadows and a faint drafting grid across the canvas. Palette
+   lives in src/themes.ts (id "blueprint"); this file owns the
+   structural look-and-feel. */
+
+:root[data-theme="blueprint"] {
+  --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --radius-node: 0px;
+  --radius-panel: 0px;
+  --radius-control: 0px;
+  --radius-pill: 0px;
+  --border-width: 1.5px;
+  --surface-blur: none;
+  --letter-spacing-label: 0.12em;
+  --label-transform: uppercase;
+}
+
+/* Drafting grid: major + minor rules across the canvas. */
+:root[data-theme="blueprint"] body,
+:root[data-theme="blueprint"] .canvas-root {
+  background-image:
+    linear-gradient(rgba(56, 189, 248, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.06) 1px, transparent 1px),
+    linear-gradient(rgba(56, 189, 248, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.03) 1px, transparent 1px);
+  background-size: 96px 96px, 96px 96px, 24px 24px, 24px 24px;
+  background-attachment: fixed;
+}
+
+/* Hard-edged cards with a crisp offset shadow. */
+:root[data-theme="blueprint"] .canvas-node-card {
+  box-shadow: 4px 4px 0 rgba(4, 12, 22, 0.55) !important;
+}
+
+/* Boxy, monospaced controls. */
+:root[data-theme="blueprint"] button,
+:root[data-theme="blueprint"] input,
+:root[data-theme="blueprint"] textarea,
+:root[data-theme="blueprint"] select {
+  border-radius: 0 !important;
+  font-family: var(--font-mono) !important;
+  letter-spacing: 0.02em;
+}
+:root[data-theme="blueprint"] button {
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-label);
+}
+
+/* Uppercase technical headings. */
+:root[data-theme="blueprint"] h1,
+:root[data-theme="blueprint"] h2,
+:root[data-theme="blueprint"] h3 {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Technical scrollbars. */
+:root[data-theme="blueprint"] ::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+:root[data-theme="blueprint"] ::-webkit-scrollbar-thumb {
+  background: var(--accent-dark);
+  border-radius: 0;
+  border: 2px solid var(--bg-primary);
+}
+:root[data-theme="blueprint"] ::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}

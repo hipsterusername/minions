@@ -4,14 +4,33 @@ import type { WebSocketServer } from "ws";
 import { createBus } from "./bus.ts";
 import { SessionHost, type SessionHostDeps } from "./session-host.ts";
 import type { TaskRecord } from "./task-tools.ts";
+import type { TaskStatus } from "./task-tools/types.ts";
 import { cancelQueuedWaitResume } from "./wait-resume.ts";
 import {
   buildWakeTaskDigest,
+  isWakeWorthyStatus,
   MIN_WAKE_RESUME_INTERVAL_MS,
   requestCoalescedWake,
   WAKE_COALESCE_WINDOW_MS,
   WAKE_DIGEST_EXCERPT_CHARS,
 } from "./wake-coalescer.ts";
+
+function task(status: TaskStatus, over: Partial<TaskRecord> = {}): TaskRecord {
+  return {
+    taskId: "t1",
+    title: "Task",
+    description: "",
+    priority: "medium",
+    executor: "minion",
+    minionSessionKey: "m-1",
+    leaderSessionKey: "leader-1",
+    status,
+    createdAt: 1,
+    completedAt: null,
+    result: null,
+    ...over,
+  };
+}
 
 function makeDeps(startChildSession = vi.fn()): SessionHostDeps {
   return {
@@ -132,5 +151,50 @@ describe("wake coalescer", () => {
     expect(digest).toContain("x".repeat(WAKE_DIGEST_EXCERPT_CHARS));
     expect(digest).toContain("[truncated]");
     expect(digest).not.toContain("x".repeat(WAKE_DIGEST_EXCERPT_CHARS + 1));
+  });
+
+  it("treats terminal and blocked statuses as wake-worthy", () => {
+    for (const status of [
+      "completed",
+      "failed",
+      "ended_without_report",
+      "cancelled",
+      "orphaned",
+      "blocked",
+    ] as TaskStatus[]) {
+      expect(isWakeWorthyStatus(status)).toBe(true);
+    }
+  });
+
+  it("does not treat in-flight statuses as wake-worthy", () => {
+    for (const status of ["planned", "starting", "running"] as TaskStatus[]) {
+      expect(isWakeWorthyStatus(status)).toBe(false);
+    }
+  });
+
+  it("includes blocked questions regardless of the completion window", () => {
+    expect(
+      buildWakeTaskDigest([
+        task("blocked", { taskId: "b1", lastStep: "Which DB driver?" }),
+      ], 10_000),
+    ).toBe("b1 — blocked — Which DB driver?");
+  });
+
+  it("filters terminal results by completion time", () => {
+    expect(
+      buildWakeTaskDigest([
+        task("completed", { taskId: "c1", result: "done", completedAt: 5_000 }),
+        task("completed", { taskId: "c2", result: "later", completedAt: 20_000 }),
+      ], 10_000),
+    ).toBe("c2 — completed — later");
+  });
+
+  it("combines blocked questions and terminal results", () => {
+    expect(
+      buildWakeTaskDigest([
+        task("blocked", { taskId: "b1", lastStep: "stuck" }),
+        task("failed", { taskId: "f1", result: "boom", completedAt: 50 }),
+      ]),
+    ).toBe("b1 — blocked — stuck\nf1 — failed — boom");
   });
 });

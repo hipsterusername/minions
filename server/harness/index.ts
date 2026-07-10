@@ -6,8 +6,7 @@
  *
  *   import "server/harness/claude/index.ts"; // registers "claude"
  *
- * Phase 0: registry wiring only. ClaudeHarness is registered in Phase 1.
- * See docs/model-agnosticism-spec.md §3.1 for the module layout.
+ * SessionHost resolves registered harnesses through this module.
  */
 
 import type { AgentHarness } from "./types.ts";

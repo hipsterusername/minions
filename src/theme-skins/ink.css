@@ -1,0 +1,59 @@
+/* ── Broadsheet Ink skin ──────────────────────────────────
+   Flag-gated (theme-ink). Editorial print: warm paper, near-black ink,
+   oxblood accent, Fraunces serif display, hairline rules and a flat,
+   shadowless surface treatment. Palette lives in src/themes.ts (id
+   "ink"); this file owns the structural look-and-feel. */
+
+:root[data-theme="ink"] {
+  --font-display: "Fraunces", "Iowan Old Style", "Georgia", serif;
+  --radius-node: 3px;
+  --radius-panel: 3px;
+  --radius-control: 2px;
+  --radius-pill: 2px;
+  --border-width: 1px;
+  --surface-blur: none;
+  --letter-spacing-label: 0.08em;
+  --label-transform: uppercase;
+}
+
+/* Subtle paper vignette. */
+:root[data-theme="ink"] body,
+:root[data-theme="ink"] .canvas-root {
+  background-image:
+    radial-gradient(120% 90% at 50% 0%, rgba(120, 90, 40, 0.05), transparent 60%);
+}
+
+/* Flat, hairline cards — print has no drop shadows. */
+:root[data-theme="ink"] .canvas-node-card {
+  box-shadow: none !important;
+}
+
+/* Serif display headings with a printed weight. */
+:root[data-theme="ink"] h1,
+:root[data-theme="ink"] h2,
+:root[data-theme="ink"] h3 {
+  font-family: var(--font-display) !important;
+  font-weight: 600;
+  letter-spacing: 0.008em;
+}
+
+/* Squared controls, hairline borders. */
+:root[data-theme="ink"] button,
+:root[data-theme="ink"] input,
+:root[data-theme="ink"] textarea,
+:root[data-theme="ink"] select {
+  border-radius: var(--radius-control) !important;
+}
+
+/* Editorial block scrollbars. */
+:root[data-theme="ink"] ::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+:root[data-theme="ink"] ::-webkit-scrollbar-thumb {
+  background: var(--border-hover);
+  border-radius: 0;
+}
+:root[data-theme="ink"] ::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}

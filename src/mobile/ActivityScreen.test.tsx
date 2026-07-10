@@ -99,5 +99,32 @@ describe("ActivityScreen", () => {
     fireEvent.click(screen.getByRole("button", { name: /ship mobile/i }));
     expect(onOpenSession).toHaveBeenCalledWith("leader-1");
   });
-});
 
+  it("shows a prominent activity notice with actions", () => {
+    const onAction = vi.fn();
+    const onDismiss = vi.fn();
+
+    render(
+      <ActivityScreen
+        sessions={[]}
+        onOpenSession={() => {}}
+        notice={{
+          title: "Session limit reached",
+          message: "Stop idle sessions before launching again.",
+          actionLabel: "Open session to stop",
+          onAction,
+          onDismiss,
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("alert", { name: "Session limit reached" })).toBeInTheDocument();
+    expect(screen.getByText("Stop idle sessions before launching again.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open session to stop" }));
+    expect(onAction).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss notice" }));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+});

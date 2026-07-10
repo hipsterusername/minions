@@ -286,3 +286,127 @@ describe("minion task lifecycle", () => {
     expect(t?.status).toBe("running");
   });
 });
+
+describe("minion sub-skill tool group", () => {
+  function ctxWith(over: Record<string, unknown> = {}) {
+    const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+    return {
+      sessionKey: "minion-1",
+      cwd: "/tmp/worktree",
+      bus,
+      worktreeInfo: null,
+      worktreeIsolation: false,
+      forEachLeaderTaskState: () => {},
+      ...over,
+    };
+  }
+
+  /** ctx whose parent task armed the given skill IDs. */
+  function ctxWithArmedSkills(skillIds: string[]) {
+    const taskState: TaskManagerState = {
+      tasks: new Map([
+        [
+          "t1",
+          {
+            taskId: "t1",
+            title: "T1",
+            description: "",
+            priority: "medium" as const,
+            executor: "minion" as const,
+            minionSessionKey: "minion-1",
+            leaderSessionKey: "leader-1",
+            status: "running" as const,
+            createdAt: 0,
+            completedAt: null,
+            result: null,
+            skillIds,
+          },
+        ],
+      ]),
+      pendingWait: null,
+      approval: null,
+    };
+    return ctxWith({
+      forEachLeaderTaskState: (
+        fn: (leaderKey: string, state: TaskManagerState) => void,
+      ) => fn("leader-1", taskState),
+    });
+  }
+
+  it("omits the authoring tools when the task did not arm skill-builder", () => {
+    const minion = getAgentType("minion");
+    // ctxWith's forEachLeaderTaskState is a no-op → no parent task at all.
+    const { toolGroups, mcpToolNames } = minion.getToolGroups(ctxWith());
+    expect(toolGroups["skills"]?.map((t) => t.name)).toEqual(["load_subskill"]);
+    expect(mcpToolNames).toContain("mcp__skills__load_subskill");
+    expect(mcpToolNames).not.toContain("mcp__skills__create_skill");
+    expect(mcpToolNames).not.toContain("mcp__skills__list_skills");
+  });
+
+  it("omits the authoring tools when the task armed other skills only", () => {
+    const minion = getAgentType("minion");
+    const { toolGroups, mcpToolNames } = minion.getToolGroups(
+      ctxWithArmedSkills(["code-review"]),
+    );
+    expect(toolGroups["skills"]?.map((t) => t.name)).toEqual(["load_subskill"]);
+    expect(mcpToolNames).not.toContain("mcp__skills__create_skill");
+  });
+
+  it("exposes the authoring tools when the task armed skill-builder", () => {
+    const minion = getAgentType("minion");
+    const { toolGroups, mcpToolNames } = minion.getToolGroups(
+      ctxWithArmedSkills(["skill-builder"]),
+    );
+    expect(toolGroups["skills"]?.map((t) => t.name)).toEqual([
+      "load_subskill",
+      "list_skills",
+      "get_skill",
+      "create_skill",
+      "update_skill",
+      "delete_skill",
+    ]);
+    expect(mcpToolNames).toContain("mcp__skills__load_subskill");
+    expect(mcpToolNames).toContain("mcp__skills__create_skill");
+  });
+
+  it("derives projectPath from parentWorktree.projectPath when present", async () => {
+    // Pointing projectPath at a temp dir with a skills.json proves the tool
+    // reads from parentWorktree.projectPath rather than the worktree cwd.
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const { writeSkills } = await import("../project-store.ts");
+    const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "minion-subskill-"));
+    try {
+      writeSkills(projectDir, [
+        {
+          id: "p",
+          name: "Parent",
+          description: "d",
+          category: "general",
+          icon: "x",
+          accentColor: "#fff",
+          template: "base",
+          variables: [],
+          subskills: [
+            { id: "s", name: "Sub", description: "d", body: "MINION BODY" },
+          ],
+        },
+      ]);
+      const minion = getAgentType("minion");
+      const { toolGroups } = minion.getToolGroups(
+        ctxWith({
+          cwd: "/tmp/worktree-cwd",
+          parentWorktree: { projectPath: projectDir },
+        }),
+      );
+      const def = toolGroups["skills"]!.find((t) => t.name === "load_subskill")!;
+      const res = (await def.handler({ skillId: "p", subskillId: "s" })) as {
+        content: { type: "text"; text: string }[];
+      };
+      expect(res.content[0]!.text).toBe("# Sub-skill: Parent › Sub\n\nMINION BODY");
+    } finally {
+      fs.rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+});

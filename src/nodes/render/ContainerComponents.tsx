@@ -11,7 +11,7 @@
  * `--accent`, …) come from the shared theme.
  */
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { ReactElement, KeyboardEvent } from "react";
 import type { SectionComponent, TabsComponent, TabItem } from "../../../shared/render-containers.ts";
 import type { RenderComponent } from "../../../shared/render-dsl.ts";
@@ -22,10 +22,18 @@ interface SectionRendererProps {
   c: SectionComponent;
   /** Called once per visible child to produce a React element. */
   renderChild: (child: RenderComponent) => ReactElement;
+  /** Dashboard-level expand/collapse state applied to all sections. */
+  globalOpenState?: boolean | undefined;
 }
 
-export function SectionRenderer({ c, renderChild }: SectionRendererProps): ReactElement {
-  const [isOpen, setIsOpen] = useState(c.defaultOpen ?? true);
+export function SectionRenderer({ c, renderChild, globalOpenState }: SectionRendererProps): ReactElement {
+  const [isOpen, setIsOpen] = useState(globalOpenState ?? c.defaultOpen ?? false);
+
+  useEffect(() => {
+    if (globalOpenState !== undefined) {
+      setIsOpen(globalOpenState);
+    }
+  }, [globalOpenState]);
 
   const toggleOpen = useCallback(() => {
     setIsOpen((prev) => !prev);

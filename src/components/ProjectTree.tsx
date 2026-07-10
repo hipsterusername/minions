@@ -229,13 +229,45 @@ function buildSearchMatch(tree: TreeNode[], query: string): Set<string> | null {
   return visible;
 }
 
+function collectDirectoryPaths(tree: TreeNode[]): string[] {
+  const paths: string[] = [];
+  function walk(node: TreeNode): void {
+    if (node.type !== "dir") return;
+    paths.push(node.path);
+    for (const child of node.children ?? []) {
+      walk(child);
+    }
+  }
+  for (const root of tree) walk(root);
+  return paths;
+}
+
 // ── Components ──
 
 export const ProjectTree = memo(function ProjectTree({ tree, rootName, leaders, projectPath, filterActive = false, query = "", onFileClick, onTreeChanged }: ProjectTreeProps) {
   const activityMap = useMemo(() => buildActivityMap(leaders, projectPath), [leaders, projectPath]);
   const searchMatch = useMemo(() => buildSearchMatch(tree, query), [tree, query]);
+  const directoryPaths = useMemo(() => collectDirectoryPaths(tree), [tree]);
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set());
 
   const activeLeaders = leaders.filter(l => l.status === "running" || l.status === "creating");
+  const allDirectoriesExpanded = directoryPaths.length > 0 && directoryPaths.every(path => expandedPaths.has(path));
+
+  const handleToggleAllDirectories = useCallback(() => {
+    setExpandedPaths(allDirectoriesExpanded ? new Set() : new Set(directoryPaths));
+  }, [allDirectoriesExpanded, directoryPaths]);
+
+  const handleToggleDirectory = useCallback((path: string) => {
+    setExpandedPaths((previous) => {
+      const next = new Set(previous);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }, []);
 
   return (
     <div style={{ fontSize: 11, fontFamily: "var(--font-mono)" }}>
@@ -308,6 +340,36 @@ export const ProjectTree = memo(function ProjectTree({ tree, rootName, leaders, 
 
       {/* Tree */}
       <div style={{ padding: "6px 0" }}>
+        {directoryPaths.length > 0 && (
+          <div
+            style={{
+              padding: "0 12px 6px",
+              display: "flex",
+              justifyContent: "flex-end",
+            }}
+          >
+            <button
+              type="button"
+              onClick={handleToggleAllDirectories}
+              aria-label={allDirectoriesExpanded ? "Collapse all project folders" : "Expand all project folders"}
+              style={{
+                padding: "3px 8px",
+                fontSize: 9,
+                fontFamily: "var(--font-mono)",
+                background: "transparent",
+                border: "1px solid var(--border-default)",
+                borderRadius: 4,
+                color: "var(--text-muted)",
+                cursor: "pointer",
+                letterSpacing: 0.3,
+                textTransform: "uppercase",
+              }}
+            >
+              {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
+            </button>
+          </div>
+        )}
+
         {/* Root */}
         <div
           style={{
@@ -358,6 +420,8 @@ export const ProjectTree = memo(function ProjectTree({ tree, rootName, leaders, 
             depth={1}
             activityMap={activityMap}
             leaders={leaders}
+            expandedPaths={expandedPaths}
+            onToggleDirectory={handleToggleDirectory}
             filterActive={filterActive}
             searchMatch={searchMatch}
             onFileClick={onFileClick}
@@ -387,6 +451,8 @@ const TreeRow = memo(function TreeRow({
   depth,
   activityMap,
   leaders,
+  expandedPaths,
+  onToggleDirectory,
   filterActive,
   searchMatch,
   onFileClick,
@@ -397,19 +463,14 @@ const TreeRow = memo(function TreeRow({
   depth: number;
   activityMap: Map<string, Set<number>>;
   leaders: LeaderActivity[];
+  expandedPaths: Set<string>;
+  onToggleDirectory: (path: string) => void;
   filterActive: boolean;
   searchMatch: Set<string> | null;
   onFileClick?: ((relativePath: string) => void) | undefined;
   projectPath?: string | undefined;
   onTreeChanged?: (() => void) | undefined;
 }) {
-  const [expanded, setExpanded] = useState(() => {
-    // Auto-expand directories that have activity
-    if (node.type === "dir" && activityMap.has(node.path)) return true;
-    // Auto-expand first level
-    if (depth <= 1) return true;
-    return false;
-  });
   const [isDragOver, setIsDragOver] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
@@ -428,6 +489,7 @@ const TreeRow = memo(function TreeRow({
     (searchMatch !== null && !searchMatch.has(node.path));
 
   const isDir = node.type === "dir";
+  const expanded = isDir && expandedPaths.has(node.path);
   const indent = depth * 16;
   // While the user is searching, every directory we still render (i.e. one
   // that's in searchMatch) should be expanded so its matches are visible.
@@ -436,11 +498,11 @@ const TreeRow = memo(function TreeRow({
   const handleRowClick = useCallback(() => {
     if (renaming) return;
     if (isDir) {
-      setExpanded(e => !e);
+      onToggleDirectory(node.path);
     } else if (onFileClick) {
       onFileClick(node.path);
     }
-  }, [isDir, onFileClick, node.path, renaming]);
+  }, [isDir, onFileClick, node.path, onToggleDirectory, renaming]);
 
   // ── Drag source ──
   const handleDragStart = useCallback((e: React.DragEvent) => {
@@ -885,6 +947,8 @@ const TreeRow = memo(function TreeRow({
               depth={depth + 1}
               activityMap={activityMap}
               leaders={leaders}
+              expandedPaths={expandedPaths}
+              onToggleDirectory={onToggleDirectory}
               filterActive={filterActive}
               searchMatch={searchMatch}
               onFileClick={onFileClick}

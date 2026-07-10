@@ -10,6 +10,21 @@
  * an edge in EdgeRenderer; the Delete key short-circuits to onDelete.
  */
 import type { GraphEdge } from "../graph.ts";
+import type { ContextEdgeMode } from "../leader-context-mode.ts";
+
+const MODE_LABELS: Record<ContextEdgeMode, string> = {
+  dashboard: "Dashboard",
+  lean: "Lean",
+  full: "Full",
+};
+
+export const MODE_HINTS: Record<ContextEdgeMode, string> = {
+  dashboard: "Forward only this leader's dashboard (default).",
+  lean: "Forward user inputs + responses. No thinking, no tool calls.",
+  full: "Forward inputs + thinking + responses. No tool calls.",
+};
+
+const MODE_ORDER: ContextEdgeMode[] = ["dashboard", "lean", "full"];
 
 interface EdgeInspectorProps {
   edge: GraphEdge;
@@ -25,6 +40,13 @@ interface EdgeInspectorProps {
   onFocusSource: () => void;
   onFocusTarget: () => void;
   onClose: () => void;
+  /**
+   * When present, renders the leader→leader context-forwarding mode control.
+   * Canvas passes this only for leader→leader `context` edges.
+   */
+  contextMode?:
+    | { current: ContextEdgeMode; onChange: (mode: ContextEdgeMode) => void }
+    | undefined;
 }
 
 export function EdgeInspector({
@@ -37,6 +59,7 @@ export function EdgeInspector({
   onFocusSource,
   onFocusTarget,
   onClose,
+  contextMode,
 }: EdgeInspectorProps) {
   // Approximate panel size for centering; the actual width grows with the
   // labels but the offset is good enough that the panel always sits above
@@ -117,6 +140,68 @@ export function EdgeInspector({
           ×
         </button>
       </div>
+      {contextMode && (
+        <div
+          data-testid="edge-inspector-mode"
+          style={{ display: "flex", flexDirection: "column", gap: 4 }}
+        >
+          <div
+            style={{
+              color: "var(--text-muted)",
+              fontSize: 10,
+              textTransform: "uppercase",
+              letterSpacing: 0.6,
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            Context passed downstream
+          </div>
+          <div
+            role="group"
+            aria-label="Context mode"
+            style={{
+              display: "inline-flex",
+              alignSelf: "flex-start",
+              border: "1px solid var(--border-default)",
+              borderRadius: 6,
+              overflow: "hidden",
+            }}
+          >
+            {MODE_ORDER.map((m) => {
+              const active = contextMode.current === m;
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  data-testid={`edge-inspector-mode-${m}`}
+                  aria-pressed={active}
+                  title={MODE_HINTS[m]}
+                  onClick={() => contextMode.onChange(m)}
+                  style={{
+                    background: active ? "var(--accent)" : "transparent",
+                    color: active
+                      ? "var(--accent-fg, #ffffff)"
+                      : "var(--text-primary)",
+                    border: "none",
+                    borderRight:
+                      m === "full" ? "none" : "1px solid var(--border-default)",
+                    padding: "4px 10px",
+                    fontSize: 11,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontWeight: active ? 600 : 400,
+                  }}
+                >
+                  {MODE_LABELS[m]}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ color: "var(--text-muted)", fontSize: 10 }}>
+            {MODE_HINTS[contextMode.current]}
+          </div>
+        </div>
+      )}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <button
           type="button"

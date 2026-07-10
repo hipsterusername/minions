@@ -56,6 +56,7 @@ export interface EdgeRow {
   target_port_id: string;
   protocol: string;
   z_index: number;
+  context_mode: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -101,6 +102,9 @@ export function rowToEdge(row: EdgeRow) {
     targetNodeId: row.target_node_id,
     targetPortId: row.target_port_id,
     protocol: row.protocol,
+    ...(row.context_mode
+      ? { contextMode: row.context_mode as "dashboard" | "lean" | "full" }
+      : {}),
   };
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createDefaultNodeData } from "./node-defaults.ts";
+import { applyPromptSeed, createDefaultNodeData } from "./node-defaults.ts";
 import type { ThinkingConfig } from "./types.ts";
 
 describe("createDefaultNodeData leader thinking defaults", () => {
@@ -30,5 +30,40 @@ describe("createDefaultNodeData leader thinking defaults", () => {
     }) as { thinkingConfig: ThinkingConfig };
 
     expect(data.thinkingConfig.effort).toBe("xhigh");
+  });
+});
+
+describe("applyPromptSeed", () => {
+  it("auto-starts a leader with the typed prompt", () => {
+    const data = applyPromptSeed("leader", { model: "opus" }, "build a thing");
+    expect(data).toEqual({ model: "opus", autoStartPrompt: "build a thing" });
+  });
+
+  it("seeds markdown content and derives a title from the first line", () => {
+    const data = applyPromptSeed(
+      "markdown",
+      createDefaultNodeData("markdown"),
+      "My heading\nbody text",
+    ) as { content: string; title: string };
+    expect(data.content).toBe("My heading\nbody text");
+    expect(data.title).toBe("My heading");
+  });
+
+  it("seeds note text and file/folder paths", () => {
+    expect(applyPromptSeed("note", {}, "todo")).toEqual({ text: "todo" });
+    expect(applyPromptSeed("file-viewer", {}, "src/a.ts")).toEqual({
+      filePath: "src/a.ts",
+    });
+    expect(applyPromptSeed("folder", {}, "src")).toEqual({ folderPath: "src" });
+  });
+
+  it("returns data untouched for a blank value", () => {
+    const original = { title: "Untitled", content: "" };
+    expect(applyPromptSeed("markdown", original, "   ")).toBe(original);
+  });
+
+  it("returns data untouched for types with nowhere to put text", () => {
+    const original = { sessionKey: null };
+    expect(applyPromptSeed("claude-session", original, "hi")).toBe(original);
   });
 });

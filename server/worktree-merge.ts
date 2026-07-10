@@ -1,6 +1,9 @@
 import type { WorktreeInfo, MergeResult } from "./worktree-types.js";
 import { exec } from "./worktree-exec.js";
 import { removeWorktree } from "./worktree-create.js";
+import { serverLogger } from "./logging.ts";
+
+const log = serverLogger.child("worktree-merge");
 
 // ── Merge operations ───────────────────────────────────────────────────────
 
@@ -70,12 +73,16 @@ export async function mergeWorktree(
   const mergeArgs = strategy
     ? ["merge", targetBranch, "--no-edit", "-X", strategy]
     : ["merge", targetBranch, "--no-edit"];
-  console.log(`[worktree] mergeWorktree: running git ${mergeArgs.join(" ")} in ${worktreeCwd}`);
+  log.debug("merge_started", {
+    targetBranch,
+    strategy: strategy ?? "default",
+    worktreePath: worktreeCwd,
+  });
   try {
     await exec(mergeArgs, worktreeCwd);
-    console.log(`[worktree] mergeWorktree: merge succeeded cleanly`);
+    log.debug("merge_succeeded", { targetBranch });
   } catch (err) {
-    console.log(`[worktree] mergeWorktree: merge failed — ${err instanceof Error ? err.message : String(err)}`);
+    log.debug("merge_attempt_failed", { targetBranch, error: err });
     // Merge produced conflicts. If a strategy was requested, try to force-resolve
     // remaining conflicts (modify/delete, add/add, tree conflicts) that -X alone
     // can't handle, then complete the merge without aborting.
@@ -145,14 +152,17 @@ export async function mergeWorktree(
       // Attempt rebase (default behavior, or explicitly requested)
       const shouldRebase = options?.rebase !== false; // default: true
       if (shouldRebase) {
-        console.log(`[worktree] mergeWorktree: attempting rebase onto ${targetBranch} in ${worktreeCwd}`);
+        log.debug("rebase_started", {
+          targetBranch,
+          worktreePath: worktreeCwd,
+        });
         try {
           await exec(["rebase", targetBranch!], worktreeCwd);
-          console.log(`[worktree] mergeWorktree: rebase succeeded cleanly`);
+          log.debug("rebase_succeeded", { targetBranch });
           // Rebase succeeded — the canvas branch is now cleanly ahead of target.
           // Fall through to Step 2 (update-ref fast-forward).
         } catch (rebaseErr) {
-          console.log(`[worktree] mergeWorktree: rebase failed — ${rebaseErr instanceof Error ? rebaseErr.message : String(rebaseErr)}`);
+          log.debug("rebase_failed", { targetBranch, error: rebaseErr });
 
           // Collect conflicted files from the failed rebase
           let conflicts: string[] = [];
@@ -267,13 +277,18 @@ export async function mergeAndCleanup(
   targetBranch?: string,
   options?: { force?: boolean; strategy?: "ours" | "theirs"; rebase?: boolean },
 ): Promise<MergeResult> {
-  console.log(`[worktree] mergeAndCleanup: path=${info.path} branch=${info.branch} options=${JSON.stringify(options)}`);
+  log.debug("merge_and_cleanup_started", {
+    branch: info.branch,
+    targetBranch,
+    worktreePath: info.path,
+    options,
+  });
   // Auto-commit any uncommitted changes so they aren't lost on merge.
   try {
     await exec(["add", "-A"], info.path);
     const { stdout: status } = await exec(["status", "--porcelain"], info.path);
     if (status.trim()) {
-      console.log(`[worktree] mergeAndCleanup: auto-committing uncommitted changes`);
+      log.debug("auto_commit_started", { branch: info.branch });
       await exec(
         ["commit", "-m", "chore: auto-commit uncommitted changes before merge"],
         info.path,
@@ -281,7 +296,7 @@ export async function mergeAndCleanup(
     }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    console.log(`[worktree] mergeAndCleanup: auto-commit failed (${message})`);
+    log.warn("auto_commit_failed", { branch: info.branch, error: e });
     return {
       success: false,
       conflicts: [],
@@ -291,7 +306,11 @@ export async function mergeAndCleanup(
   }
 
   const result = await mergeWorktree(info, targetBranch, options);
-  console.log(`[worktree] mergeAndCleanup: merge result success=${result.success} summary=${result.summary}`);
+  log.debug("merge_and_cleanup_completed", {
+    success: result.success,
+    targetBranch: result.targetBranch,
+    conflictCount: result.conflicts.length,
+  });
 
   if (result.success) {
     // Merge succeeded — remove worktree directory + branch

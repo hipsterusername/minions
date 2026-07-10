@@ -146,14 +146,40 @@ describe("SessionToolbar — model selection picker", () => {
     expect(screen.getByTitle("Model selection")).toHaveTextContent("High");
   });
 
-  it("switches harness and model together before a session exists", () => {
+  it("lists providers with OpenAI first", () => {
+    renderWithHarnesses(
+      [CLAUDE_ENTRY, CODEX_ENTRY, ECHO_ENTRY],
+      { sessionKey: null, harness: "claude" },
+    );
+    fireEvent.click(screen.getByTitle("Model selection"));
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.map((t) => t.textContent)).toEqual([
+      expect.stringContaining("OpenAI"),
+      expect.stringContaining("Anthropic"),
+      expect.stringContaining("Echo"),
+    ]);
+  });
+
+  it("selecting a provider commits its harness and default model", () => {
     const props = renderWithHarnesses(
       [CLAUDE_ENTRY, CODEX_ENTRY],
       { sessionKey: null, harness: "claude" },
     );
     fireEvent.click(screen.getByTitle("Model selection"));
-    fireEvent.click(screen.getByRole("button", { name: /GPT-5.5/ }));
+    // The OpenAI provider's default is its first model (gpt-5.5 in the fixture).
+    fireEvent.click(screen.getByRole("tab", { name: /OpenAI/ }));
     expect(props.onHarnessChange).toHaveBeenCalledWith("codex", "gpt-5.5");
+  });
+
+  it("scopes the model list to the active provider", () => {
+    renderWithHarnesses(
+      [CLAUDE_ENTRY, CODEX_ENTRY],
+      { sessionKey: null, harness: "claude", model: "claude-sonnet-5" },
+    );
+    fireEvent.click(screen.getByTitle("Model selection"));
+    // Active provider is Anthropic, so only Claude models are listed.
+    expect(screen.getByRole("button", { name: /Opus 4.8/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /GPT-5.5/ })).not.toBeInTheDocument();
   });
 
   it("changes only the model when the selected model belongs to the active harness", () => {
@@ -174,7 +200,6 @@ describe("SessionToolbar — model selection picker", () => {
     );
     fireEvent.click(screen.getByTitle("Model selection"));
     const fableOption = screen.getByRole("button", { name: /Fable 5/ });
-    expect(fableOption).toHaveTextContent("Claude Fable");
     fireEvent.click(fableOption);
     expect(props.onModelChange).toHaveBeenCalledWith("claude-fable-5");
   });
@@ -187,17 +212,19 @@ describe("SessionToolbar — model selection picker", () => {
     fireEvent.click(screen.getByTitle("Model selection"));
 
     expect(screen.getByRole("button", { name: /Opus 4.8/ })).not.toHaveTextContent("Frontier");
-    expect(screen.getByRole("button", { name: /GPT-5.5/ })).not.toHaveTextContent("General");
+    expect(screen.getByRole("button", { name: /Opus 4.7/ })).not.toHaveTextContent("General");
   });
 
-  it("shows but disables inactive harnesses after a session exists", () => {
+  it("locks the provider to the active harness after a session exists", () => {
     const props = renderWithHarnesses(
       [CLAUDE_ENTRY, CODEX_ENTRY],
       { sessionKey: "leader-1", harness: "claude" },
     );
     fireEvent.click(screen.getByTitle("Model selection"));
     expect(props.onHarnessChange).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: /GPT-5.5/ })).toBeDisabled();
+    // The active provider tab stays enabled; other providers are locked.
+    expect(screen.getByRole("tab", { name: /Anthropic/ })).toBeEnabled();
+    expect(screen.getByRole("tab", { name: /OpenAI/ })).toBeDisabled();
     expect(screen.getByText("fixed for session")).toBeInTheDocument();
   });
 
@@ -275,25 +302,27 @@ describe("SessionToolbar — capability gating", () => {
 });
 
 describe("SessionToolbar — harness-aware models", () => {
-  it("keeps Codex models selectable only when the active harness is Codex", () => {
+  it("lists only Codex models when the active harness is Codex", () => {
     renderWithHarnesses(
       [CLAUDE_ENTRY, CODEX_ENTRY],
       { sessionKey: "leader-1", harness: "codex", model: "gpt-5.5", permissionMode: "auto" },
     );
     fireEvent.click(screen.getByTitle("Model selection"));
-    expect(screen.getAllByText("GPT-5.5").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /GPT-5.4/ })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /Sonnet 5/ })).toBeDisabled();
+    // Claude models aren't in the list; the Anthropic provider tab is locked.
+    expect(screen.queryByRole("button", { name: /Sonnet 5/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Anthropic/ })).toBeDisabled();
   });
 
-  it("keeps Claude models selectable only when the active harness is Claude", () => {
+  it("lists only Claude models when the active harness is Claude", () => {
     renderWithHarnesses(
       [CLAUDE_ENTRY, CODEX_ENTRY],
       { sessionKey: "leader-1", harness: "claude", model: "claude-opus-4-8" },
     );
     fireEvent.click(screen.getByTitle("Model selection"));
     expect(screen.getByRole("button", { name: /Sonnet 5/ })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /GPT-5.5/ })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /GPT-5.5/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /OpenAI/ })).toBeDisabled();
   });
 
   it("keeps reasoning controls inside the model picker", () => {

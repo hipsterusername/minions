@@ -13,6 +13,7 @@
 import type { NormalizedToolDef } from "./harness/types.ts";
 import type { Bus } from "./bus.ts";
 import type { WorktreeInfo } from "./worktree.js";
+import type { LoadedSystemModel } from "./system-model/types.ts";
 
 // Re-export public types so callers keep importing from "server/task-tools"
 export type {
@@ -38,6 +39,7 @@ import { createWaitAndContinueToolDef } from "./task-tools/wait-and-continue.ts"
 import { createSetTaskNameToolDef } from "./task-tools/set-task-name.ts";
 import { createRequestApprovalToolDef } from "./task-tools/request-approval.ts";
 import { createCheckpointSessionToolDef } from "./task-tools/checkpoint-session.ts";
+import { createLoadSubskillToolDef } from "./task-tools/load-subskill.ts";
 
 // ── Factory ────────────────────────────────────────────
 
@@ -67,6 +69,8 @@ export function createTaskToolsForLeader(opts: {
    */
   projectPath?: string;
   minionSystemPrompt: string;
+  /** Loaded system model (active layer) for the packet-required trigger. */
+  systemModel?: LoadedSystemModel | null;
   existingTaskState?: TaskManagerState;
   worktreeBranch?: string | null;
   worktreeInfo?: WorktreeInfo | null;
@@ -94,6 +98,7 @@ export function createTaskToolsForLeader(opts: {
     cwd: opts.cwd,
     projectPath: opts.projectPath ?? opts.cwd,
     minionSystemPrompt: opts.minionSystemPrompt,
+    systemModel: opts.systemModel ?? null,
     taskState,
     getSessionRuntime: opts.getSessionRuntime,
     onStateChange: opts.onStateChange,
@@ -116,6 +121,7 @@ export function createTaskToolsForLeader(opts: {
     createSetTaskNameToolDef(ctx),
     createWaitAndContinueToolDef(ctx),
     createCheckpointSessionToolDef(ctx),
+    createLoadSubskillToolDef(ctx),
   ];
 
   // Only add request_approval when worktree isolation is active

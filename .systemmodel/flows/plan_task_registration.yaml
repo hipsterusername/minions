@@ -1,0 +1,30 @@
+id: flow.plan_task_registration
+type: flow
+name: Plan Task Registration
+summary: plan_task validates leader input, creates one planned leader owned task record for a new taskId, emits task_plan_update, and can append a system model packet note for gated file scopes.
+capabilities:
+  - capability.task_delegation
+constraints:
+  - constraint.bus_only_broadcasts
+decisions:
+  - decision.graph_as_bus
+  - decision.relevance_scoped_context
+risks:
+  - risk.command_contract_drift
+  - risk.session_state_drift
+suggested_files:
+  - server/task-tools/plan-task.ts
+  - server/task-tools/shared.ts
+  - server/task-tools/types.ts
+  - server/task-tools.ts
+suggested_tests:
+  - server/task-tools/plan-task.test.ts
+steps:
+  - Parse taskId, title, description, optional files, optional constraints, optional acceptance criteria, and priority through the Zod input schema.
+  - Return a no op text result when taskId already exists without replacing the record or broadcasting another update.
+  - Insert a TaskRecord with executor leader, no minion session key, status planned, timestamps, and empty result fields.
+  - Emit task_plan_update to the leader session through emitTaskPlanUpdate and call onStateChange when present.
+  - When a loaded system model exists, compute packet applicability from files and append a compact packet note only on gated surface hits.
+freshness:
+  class: code_coupled
+risk: low

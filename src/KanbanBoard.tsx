@@ -7,7 +7,7 @@ import type {
   ModelOption,
   PermissionMode,
 } from "./kanban-types.ts";
-import { getAllSkills, getSkill } from "./skills/registry.ts";
+import { getPickableSkills, getSkill } from "./skills/registry.ts";
 import type { SkillTemplate } from "./skills/types.ts";
 import type { ServerMessage } from "./use-socket.ts";
 import type { CanvasNode } from "./types.ts";
@@ -25,7 +25,6 @@ import {
   gridColumnFor,
   injectStyles as injectRenderStyles,
 } from "./nodes/RenderNode.tsx";
-import type { RenderNodeData } from "./nodes/RenderNode.tsx";
 import type { RenderState } from "../shared/render-dsl.ts";
 import "./kanban.css";
 
@@ -280,7 +279,7 @@ function SkillPicker({
   onUpdate: (ids: string[], values: Record<string, Record<string, string>>) => void;
 }) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const allSkills = getAllSkills();
+  const allSkills = getPickableSkills();
   const taggedSkills = skillIds
     .map((id) => getSkill(id))
     .filter((s): s is SkillTemplate => s !== undefined);
@@ -2129,7 +2128,6 @@ function KanbanInspectorPanel({
   onUpdateNodeData,
   inspectorOpen,
   contextNodes,
-  nodes,
 }: {
   selectedCard: KanbanCard | null;
   leaderStatus?: LeaderStatus | undefined;
@@ -2147,7 +2145,6 @@ function KanbanInspectorPanel({
   onUpdateNodeData?: ((nodeId: string, data: unknown) => void) | undefined;
   inspectorOpen?: boolean | undefined;
   contextNodes?: ContextNodeOption[] | undefined;
-  nodes: CanvasNode[];
 }) {
   const [activeTab, setActiveTab] = useState<InspectorTab>("activity");
   const [chatInput, setChatInput] = useState("");
@@ -2214,21 +2211,14 @@ function KanbanInspectorPanel({
     socketSend({ type: "stop_session", sessionKey: leaderData.sessionKey });
   }, [leaderData?.sessionKey, socketSend]);
 
-  // Resolve the paired RenderNode (if any) by matching its leaderSessionKey
-  // to the selected card's leader session. The dashboard lives on the
-  // canvas RenderNode — we read it here so the inspector tab and the
-  // canvas always show the same state. Computed *before* any early return
-  // so the hook order is stable across renders with/without a selection.
+  // Read the dashboard straight off the leader's own `renderState` — the
+  // dashboard is embedded in the Leader node now (the standalone render node
+  // was retired), so the inspector tab and the canvas share one source of
+  // truth. Computed *before* any early return so the hook order is stable
+  // across renders with/without a selection.
   const dashboardState = useMemo<RenderState | null>(() => {
-    if (!leaderData?.sessionKey) return null;
-    const paired = nodes.find(
-      (n) =>
-        n.type === "render" &&
-        (n.data as RenderNodeData | undefined)?.leaderSessionKey === leaderData.sessionKey,
-    );
-    if (!paired) return null;
-    return (paired.data as RenderNodeData).renderState ?? null;
-  }, [nodes, leaderData?.sessionKey]);
+    return leaderData?.renderState ?? null;
+  }, [leaderData?.renderState]);
 
   if (!selectedCard) {
     return (
@@ -2976,10 +2966,13 @@ export function KanbanBoard({
         </div>
 
         {/* Right: persistent inspector (with overlay backdrop for tablet/mobile) */}
-        {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
-        <div
+        <button
+          type="button"
           className={cx("kb-panel-backdrop", inspectorOpen && "kb-panel-backdrop--visible")}
           onClick={() => { setInspectorOpen(false); setSelectedCardId(null); }}
+          aria-label="Close inspector overlay"
+          aria-hidden={!inspectorOpen}
+          tabIndex={inspectorOpen ? 0 : -1}
         />
         <KanbanInspectorPanel
           selectedCard={selectedCard}
@@ -2994,7 +2987,6 @@ export function KanbanBoard({
           onFocusNode={onFocusNode}
           recentCards={recentCards}
           onSelectCard={(cardId) => { setSelectedCardId(cardId); setInspectorOpen(true); }}
-          nodes={nodes}
           socketSend={socketSend}
           onUpdateNodeData={onUpdateNodeData}
           inspectorOpen={inspectorOpen}

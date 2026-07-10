@@ -4,6 +4,9 @@
 
 import type { Bus } from "../bus.ts";
 import type { TaskManagerState } from "./types.ts";
+import { serverLogger } from "../logging.ts";
+
+const log = serverLogger.child("task-tools");
 
 /** Broadcast the plan + optionally notify the persistence layer (Phase 4.4). */
 export function emitTaskPlanUpdate(
@@ -17,6 +20,9 @@ export function emitTaskPlanUpdate(
     leaderSessionKey,
     tasks: Array.from(taskState.tasks.values()),
   });
-  try { onStateChange?.(taskState); }
-  catch (err) { console.warn("[task-tools] onStateChange failed:", err); }
+  try {
+    onStateChange?.(taskState);
+  } catch (err) {
+    log.warn("state_change_callback_failed", { error: err });
+  }
 }

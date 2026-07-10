@@ -7,7 +7,9 @@
  *     any skills, listing their IDs + names + descriptions.
  *   - Tagged skills (active for the leader itself) are compiled and
  *     appended via the existing Active Skills section.
- *   - When the registry is empty, no Available Skills section appears.
+ *   - Built-in skill presets (e.g. the Skill Builder) always appear in the
+ *     arming inventory even when the project registry is empty, so the leader
+ *     can discover and grant them by id.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -42,9 +44,14 @@ describe("buildLeaderSystemPrompt", () => {
     clearSkills();
   });
 
-  it("returns just the base prompt when registry and tags are empty", () => {
+  it("surfaces built-in presets in the inventory even when the registry is empty", () => {
     const out = buildLeaderSystemPrompt({ skillIds: [], skillValues: {} });
-    expect(out).toBe(LEADER_SYSTEM_PROMPT);
+    // Base prompt is present, plus the always-available built-in inventory.
+    expect(out).toContain(LEADER_SYSTEM_PROMPT);
+    expect(out).toContain("# Available Skills (for arming Minions)");
+    expect(out).toContain("`skill-builder`");
+    // Nothing tagged → no active section.
+    expect(out).not.toContain("# Active Skills");
   });
 
   it("appends the arming inventory when the registry has skills", () => {
@@ -82,6 +89,39 @@ describe("buildLeaderSystemPrompt", () => {
     // Both armed and unarmed skills appear in the inventory
     expect(out).toContain("`lint` — **Lint**: Cleanup");
     expect(out).toContain("`review` — **Review**: Read code");
+  });
+
+  it("injects a tagged skill's sub-skill map into the Active Skills section", () => {
+    registerSkill(
+      makeSkill({
+        id: "design",
+        name: "Design",
+        template: "Design base.",
+        subskills: [
+          {
+            id: "layout",
+            name: "Layout",
+            description: "layout rules",
+            body: "LAYOUT BODY",
+          },
+          {
+            id: "color",
+            name: "Color",
+            description: "palette rules",
+            body: "COLOR BODY",
+            alwaysInclude: true,
+          },
+        ],
+      }),
+    );
+
+    const out = buildLeaderSystemPrompt({ skillIds: ["design"], skillValues: {} });
+    expect(out).toContain("### Sub-skills of Design");
+    expect(out).toContain("- `layout` — **Layout**: layout rules.");
+    expect(out).toContain("load_subskill");
+    // Eager body inlined; on-demand body withheld.
+    expect(out).toContain("COLOR BODY");
+    expect(out).not.toContain("LAYOUT BODY");
   });
 
   // Removed: '(no description)' substring assertion — implementation-coupled

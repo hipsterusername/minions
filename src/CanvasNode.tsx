@@ -1,4 +1,4 @@
-import { useCallback, useRef, memo } from "react";
+import { useCallback, useRef, memo, useState } from "react";
 import type { CanvasNode, Position, Size } from "./types.ts";
 import { getNodeType } from "./node-registry.ts";
 import { getContract, isPortOpen } from "./graph.ts";
@@ -18,6 +18,7 @@ interface CanvasNodeProps {
   socketSend?: ((data: unknown) => void) | undefined;
   socketSubscribe?: SocketSubscribe | undefined;
   getContextForNode?: (() => import("./types.ts").ContextItem[]) | undefined;
+  getIncomingContextModes?: (() => string[]) | undefined;
   projectPath?: string | undefined;
   onResize?: ((id: string, size: Size) => void) | undefined;
   /** Callback to add text content as a new markdown node */
@@ -32,6 +33,8 @@ interface CanvasNodeProps {
   onRevealMinion?: ((minionSessionKey: string) => void) | undefined;
   /** Callback for LeaderNode: duplicate setup without runtime session state */
   onDuplicateLeaderSetup?: (() => void) | undefined;
+  /** Callback for LeaderNode: open a System Model node for this session */
+  onOpenSystemModel?: (() => void) | undefined;
   /** Callback for LeaderNode: save setup as a reusable preset */
   onSaveLeaderPreset?: ((input: {
     name: string;
@@ -144,12 +147,14 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
   socketSend,
   socketSubscribe,
   getContextForNode,
+  getIncomingContextModes,
   projectPath,
   onResize,
   onAddContentNode,
   onCreateKanbanCardFromMarkdown,
   onRevealMinion,
   onDuplicateLeaderSetup,
+  onOpenSystemModel,
   onSaveLeaderPreset,
   onFocusNode,
   onConnectionStart,
@@ -166,6 +171,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
   connectedPorts,
 }: CanvasNodeProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
+  const [isResizing, setIsResizing] = useState(false);
   const dragRef = useRef<{
     startX: number;
     startY: number;
@@ -318,6 +324,12 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
     (size: Size) => onResize?.(node.id, size),
     [node.id, onResize],
   );
+  const handleResizeStart = useCallback(() => {
+    setIsResizing(true);
+  }, []);
+  const handleResizeEnd = useCallback(() => {
+    setIsResizing(false);
+  }, []);
 
   const typeDef = getNodeType(node.type);
   if (!typeDef) return null;
@@ -400,6 +412,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
   return (
     <div
       ref={nodeRef}
+      className="canvas-node-card"
       onMouseDown={handleMouseDown}
       onDoubleClick={handleDoubleClick}
       onWheel={handleWheel}
@@ -421,15 +434,22 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
           ? "2px solid var(--accent)"
           : "2px solid transparent",
         outlineOffset: 2,
-        borderRadius: 10,
+        borderRadius: "var(--radius-node)",
         // Smooth transitions for position when not being actively dragged
         // (e.g. after drop when context-group restacks nodes).
-        // Width/height are NOT transitioned — they must update instantly
-        // for resize handles and context-group auto-fit to feel responsive.
+        // Width/height transition outside manual resize so host-triggered
+        // growth (for example the embedded leader dashboard) has motion while
+        // drag resizing remains direct.
         transition: isBeingDragged || isInsideDraggingGroup
           ? "outline-color 0.15s, filter 0.2s"
           : [
             "transform 0.35s cubic-bezier(0.22, 1, 0.36, 1)",
+            ...(isResizing
+              ? []
+              : [
+                "width 0.28s cubic-bezier(0.22, 1, 0.36, 1)",
+                "height 0.28s cubic-bezier(0.22, 1, 0.36, 1)",
+              ]),
             "outline-color 0.15s",
             "filter 0.2s",
           ].join(", "),
@@ -459,12 +479,16 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
         socketSend={socketSend}
         socketSubscribe={socketSubscribe}
         getContextForNode={getContextForNode}
+        getIncomingContextModes={getIncomingContextModes}
         projectPath={projectPath}
         onResize={handleResize}
+        onResizeStart={handleResizeStart}
+        onResizeEnd={handleResizeEnd}
         onAddContentNode={onAddContentNode}
         onCreateKanbanCardFromMarkdown={onCreateKanbanCardFromMarkdown}
         onRevealMinion={onRevealMinion}
         onDuplicateLeaderSetup={onDuplicateLeaderSetup}
+        onOpenSystemModel={onOpenSystemModel}
         onSaveLeaderPreset={onSaveLeaderPreset}
         isDropTarget={isDropTarget}
         isBeingDragged={isBeingDragged}

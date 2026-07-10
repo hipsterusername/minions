@@ -4,7 +4,7 @@ import type { WebSocket } from "ws";
 import { attachConnectionListeners } from "../../server/ws-connection.ts";
 import type { ConnectionDeps } from "../../server/ws-connection.ts";
 import { dispatchCommand } from "../../server/commands/index.ts";
-import { cmd, setup } from "../../server/commands/test-harness.ts";
+import { cmd, setup } from "../support/server-command-harness.ts";
 import { copyValidFixture } from "../../server/system-model/load.test.ts";
 import { getWorkPacket, saveWorkPacket } from "../../server/system-model/store.ts";
 import type { WorkPacket } from "../../shared/system-model/index.ts";

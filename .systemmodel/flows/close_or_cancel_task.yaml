@@ -1,0 +1,32 @@
+id: flow.close_or_cancel_task
+type: flow
+name: Close Or Cancel Task
+summary: complete_task lets the leader finish a known nonterminal task directly while cancel_task marks a nonterminal task cancelled and aborts its live minion when attached.
+capabilities:
+  - capability.task_delegation
+constraints:
+  - constraint.bus_only_broadcasts
+decisions:
+  - decision.graph_as_bus
+risks:
+  - risk.session_state_drift
+  - risk.command_contract_drift
+suggested_files:
+  - server/task-tools/complete-task.ts
+  - server/task-tools/cancel-task.ts
+  - server/task-lifecycle.ts
+  - server/task-tools/shared.ts
+  - server/task-tools/types.ts
+suggested_tests:
+  - server/task-tools/complete-task.test.ts
+  - server/task-tools/cancel-task.test.ts
+  - server/task-lifecycle.test.ts
+steps:
+  - complete_task rejects unknown task IDs and no ops on terminal records without overwriting prior results.
+  - For known nonterminal tasks, complete_task applies leader_completed, sets executor leader, clears minion session key, stores result, stores completedAt, and emits task_plan_update.
+  - cancel_task rejects unknown task IDs and no ops on terminal records without killing sessions or emitting updates.
+  - For known nonterminal tasks, cancel_task aborts the attached minion session when present, then applies cancelled with the leader supplied reason.
+  - Terminal lifecycle state clears any scheduled task timeout and makes later events absorbing except retry assignment for retryable statuses.
+freshness:
+  class: code_coupled
+risk: medium

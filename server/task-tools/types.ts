@@ -6,6 +6,7 @@ import type { Bus } from "../bus.ts";
 import type { ThinkingConfig } from "../session-host-config.ts";
 import type { WorktreeInfo, DetailedDiff } from "../worktree.js";
 import type { MergeGateVerdict } from "../system-model/gates.ts";
+import type { LoadedSystemModel } from "../system-model/types.ts";
 
 // ── Public state types ────────────────────────────────
 
@@ -21,6 +22,12 @@ export interface TaskRecord {
   acceptanceCriteria?: string[];
   /** Files/globs this minion may edit. */
   ownedPaths?: string[];
+  /**
+   * Resolved skill IDs armed on this task (after dropping unknown IDs).
+   * Used to gate opt-in tool surfaces (e.g. the skill-authoring tools only
+   * load for a minion whose task armed the `skill-builder` skill).
+   */
+  skillIds?: string[];
   priority: "low" | "medium" | "high" | "critical";
   /** Who is executing this task */
   executor: "leader" | "minion";
@@ -145,6 +152,12 @@ export interface TaskToolContext {
    */
   projectPath: string;
   minionSystemPrompt: string;
+  /**
+   * Loaded system model when the layer is active (advisory/enforced), else
+   * null. Powers the deterministic packet-required trigger in plan_task /
+   * assign_task (redesign §5). Null when the layer is off.
+   */
+  systemModel?: LoadedSystemModel | null;
   taskState: TaskManagerState;
   /** Latest full connected-canvas context snapshot for this leader, if any. */
   getCanvasContext?: () => string | null;

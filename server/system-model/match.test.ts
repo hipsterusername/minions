@@ -20,6 +20,48 @@ describe("matchSystemModel", () => {
     expect(result.candidates[0]?.reasons).toContain("file matched 1 suggested path");
   });
 
+  it("scores every object type from its contract fields", () => {
+    const model = loadSystemModel("tests/fixtures/system-model/valid").model!;
+
+    expect(matchSystemModel({ model, request: "workspace" }).candidates[0]).toMatchObject({
+      id: "capability.workspace_management",
+      score: 5,
+      reasons: expect.arrayContaining(["name matched 1 term", "keyword matched 1 term"]),
+    });
+    expect(matchSystemModel({ model, request: "approve inspect" }).candidates[0]).toMatchObject({
+      id: "flow.approve_changes",
+      score: 7,
+      reasons: expect.arrayContaining(["name matched 1 term", "flow matched 2 terms"]),
+    });
+    expect(matchSystemModel({ model, request: "outbound direct", files: ["server/commands/index.ts"] }).candidates[0]).toMatchObject({
+      id: "constraint.bus_only",
+      score: 9,
+      reasons: expect.arrayContaining(["name matched 1 term", "instruction matched 1 term", "file matched 1 suggested path"]),
+    });
+    expect(matchSystemModel({ model, request: "typed payloads" }).candidates[0]).toMatchObject({
+      id: "decision.bus_architecture",
+      score: 5,
+      reasons: expect.arrayContaining(["name matched 1 term", "summary matched 2 terms"]),
+    });
+    expect(matchSystemModel({ model, request: "centrally" }).candidates[0]).toMatchObject({
+      id: "risk.merge_bypass",
+      score: 1,
+      reasons: expect.arrayContaining(["summary matched 1 term"]),
+    });
+  });
+
+  it("applies topK after deterministic score and id ordering", () => {
+    const model = loadSystemModel("tests/fixtures/system-model/valid").model!;
+    const result = matchSystemModel({ model, request: "merge", topK: 1 });
+
+    expect(result.candidates.map((candidate) => candidate.id)).toEqual([
+      "flow.approve_changes",
+    ]);
+    expect(result.candidates.map((candidate) => candidate.id)).toEqual(
+      [...result.candidates].sort((a, b) => b.score - a.score || a.id.localeCompare(b.id)).map((candidate) => candidate.id),
+    );
+  });
+
   it("returns low confidence with fallback instruction when no candidate scores", () => {
     const model = loadSystemModel("tests/fixtures/system-model/valid").model!;
     const result = matchSystemModel({ model, request: "paint a canvas", files: ["src/App.tsx"] });

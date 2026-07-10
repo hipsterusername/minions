@@ -8,13 +8,18 @@
  *     row above them; their child nodes (minions, dashboards) fan out
  *     in a column to the right.
  *   - Chained leaders (where leader A's dashboard feeds leader B's
- *     context-in port via a context edge) are sequenced horizontally
- *     on a single row in producer-first order so the data-flow reads
+ *     context-in port via a context edge) are kept together as one
+ *     connected unit in producer-first order so the data-flow reads
  *     left-to-right.
- *   - Remaining leader clusters are packed left-to-right, wrapping
- *     when the row exceeds MAX_ROW_WIDTH.  Each cluster's bounding box
- *     includes its right-side children so the next cluster avoids
- *     overlap.
+ *   - Every workstream unit — a lone leader cluster or a multi-cluster
+ *     chain — participates in a single horizontal row flow, packed
+ *     left-to-right and ordered by last update date (running agents
+ *     treated as most recent) so a unit's place in the row reflects the
+ *     most recently updated node it contains.  A connected unit's
+ *     clusters stay contiguous; the flow wraps to a new row only when
+ *     appending the next unit would exceed MAX_ROW_WIDTH.  Each cluster's
+ *     bounding box includes its right-side children so the next cluster
+ *     avoids overlap.
  *   - Unconnected (isolate) nodes are arranged below the cluster region
  *     in a horizontal flow.
  *   - Context-group containment is spatial in this codebase — contained
@@ -49,6 +54,104 @@ const ISOLATE_GAP = 120;
 const MAX_ROW_WIDTH = 2400;
 
 // ── Internal helpers ─────────────────────────────────────────────
+
+const RUNNING_AGENT_STATUSES = new Set(["creating", "running", "starting"]);
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function timestampValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function latestTimestampFromArray(value: unknown): number {
+  if (!Array.isArray(value)) return 0;
+  let latest = 0;
+  for (const item of value) {
+    const rec = asRecord(item);
+    if (!rec) continue;
+    const direct =
+      timestampValue(rec["timestamp"]) ??
+      timestampValue(rec["updatedAt"]) ??
+      timestampValue(rec["updated_at"]) ??
+      timestampValue(rec["lastUpdatedAt"]) ??
+      timestampValue(rec["last_updated_at"]) ??
+      timestampValue(rec["lastActivityAt"]) ??
+      timestampValue(rec["last_activity_at"]) ??
+      timestampValue(rec["completedAt"]) ??
+      timestampValue(rec["completed_at"]) ??
+      timestampValue(rec["createdAt"]) ??
+      timestampValue(rec["created_at"]);
+    if (direct != null) latest = Math.max(latest, direct);
+  }
+  return latest;
+}
+
+function nodeLastUpdatedAt(node: CanvasNode): number {
+  const data = asRecord(node.data);
+  if (!data) return 0;
+
+  const directCandidates = [
+    data["lastUpdatedAt"],
+    data["last_updated_at"],
+    data["updatedAt"],
+    data["updated_at"],
+    data["lastActivityAt"],
+    data["last_activity_at"],
+    data["completedAt"],
+    data["completed_at"],
+    data["createdAt"],
+    data["created_at"],
+    data["timestamp"],
+  ];
+
+  let latest = 0;
+  for (const candidate of directCandidates) {
+    latest = Math.max(latest, timestampValue(candidate) ?? 0);
+  }
+  latest = Math.max(latest, latestTimestampFromArray(data["messages"]));
+  latest = Math.max(latest, latestTimestampFromArray(data["taskPlan"]));
+  latest = Math.max(latest, latestTimestampFromArray(data["taskQueue"]));
+
+  return latest;
+}
+
+function hasRunningAgent(node: CanvasNode): boolean {
+  const data = asRecord(node.data);
+  if (!data) return false;
+
+  const status =
+    typeof data["status"] === "string" ? data["status"] : null;
+  if (
+    (node.type === "leader" ||
+      node.type === "minion" ||
+      node.type === "claude-session") &&
+    status != null &&
+    RUNNING_AGENT_STATUSES.has(status)
+  ) {
+    return true;
+  }
+
+  if (node.type !== "leader" || !Array.isArray(data["taskPlan"])) {
+    return false;
+  }
+
+  return data["taskPlan"].some((task) => {
+    const rec = asRecord(task);
+    return (
+      typeof rec?.["status"] === "string" &&
+      RUNNING_AGENT_STATUSES.has(rec["status"])
+    );
+  });
+}
 
 /**
  * Mirrors `isInsideGroup` from Canvas.tsx (GROUP_HEADER = 36).
@@ -116,6 +219,30 @@ export function computeAutoLayout(
   if (nodes.length === 0) return [];
 
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const originalIndex = new Map(nodes.map((n, index) => [n.id, index]));
+  const nodeFreshness = new Map(
+    nodes.map((n, index) => [
+      n.id,
+      {
+        hasRunningAgent: hasRunningAgent(n),
+        updatedAt: nodeLastUpdatedAt(n),
+        index,
+      },
+    ]),
+  );
+
+  function compareNodesByFreshness(a: CanvasNode, b: CanvasNode): number {
+    const af = nodeFreshness.get(a.id)!;
+    const bf = nodeFreshness.get(b.id)!;
+    const runningDelta =
+      Number(bf.hasRunningAgent) - Number(af.hasRunningAgent);
+    if (runningDelta !== 0) return runningDelta;
+
+    const updatedDelta = bf.updatedAt - af.updatedAt;
+    if (updatedDelta !== 0) return updatedDelta;
+
+    return af.index - bf.index;
+  }
 
   // ── Phase 0: Snapshot context-group membership ───────────────
   // Containment is determined at runtime by position overlap.
@@ -159,25 +286,15 @@ export function computeAutoLayout(
       .map((e) => nodeMap.get(e.targetNodeId))
       .filter((n): n is CanvasNode => !!n && !assignedIds.has(n.id));
 
-    // Dashboard (render) nodes are linked to leaders via data.leaderId,
-    // not through graph edges.
-    const dashboards = nodes.filter(
-      (n) =>
-        n.type === "render" &&
-        (n.data as { leaderId?: string | null })?.leaderId === node.id &&
-        !assignedIds.has(n.id),
-    );
-
     const contextNodes = edges
       .filter(
         (e) => e.targetNodeId === node.id && e.protocol === "context",
       )
       .map((e) => nodeMap.get(e.sourceNodeId))
-      .filter((n): n is CanvasNode => !!n && !assignedIds.has(n.id));
+      .filter((n): n is CanvasNode => !!n && !assignedIds.has(n.id))
+      .sort(compareNodesByFreshness);
 
-    // Children = dashboards first, then minions (dashboard sits closest
-    // to the leader for quick glance).
-    const children = [...dashboards, ...minions];
+    const children = [...minions].sort(compareNodesByFreshness);
 
     assignedIds.add(node.id);
     for (const ch of children) assignedIds.add(ch.id);
@@ -220,12 +337,12 @@ export function computeAutoLayout(
       }
     }
 
-    // Children (dashboards + minions): stacked vertically to the right
-    // of the leader.  The column starts at the leader's top edge and
-    // each child is placed below the previous one.
+    // Children (minions): stacked vertically to the right of the leader.
+    // The column starts at the leader's top edge and each child is placed
+    // below the previous one.
     if (children.length > 0) {
-      const childX = leader.size.width + CHILD_GAP_X;
       let childY = leaderY;
+      const childX = leader.size.width + CHILD_GAP_X;
       for (const ch of children) {
         pos.set(ch.id, { x: childX, y: childY });
         childY += ch.size.height + NODE_GAP;
@@ -265,6 +382,75 @@ export function computeAutoLayout(
     clusterByLeaderId.set(cl.cluster.leader.id, cl);
   }
 
+  function clusterNodes(cl: LaidOutCluster): CanvasNode[] {
+    return [
+      cl.cluster.leader,
+      ...cl.cluster.children,
+      ...cl.cluster.contextNodes,
+    ];
+  }
+
+  function clusterLastUpdatedAt(cl: LaidOutCluster): number {
+    return clusterNodes(cl).reduce(
+      (latest, node) =>
+        Math.max(latest, nodeFreshness.get(node.id)?.updatedAt ?? 0),
+      0,
+    );
+  }
+
+  function clusterHasRunningAgent(cl: LaidOutCluster): boolean {
+    return clusterNodes(cl).some(
+      (node) => nodeFreshness.get(node.id)?.hasRunningAgent === true,
+    );
+  }
+
+  function compareClustersByFreshness(
+    a: LaidOutCluster,
+    b: LaidOutCluster,
+  ): number {
+    const runningDelta =
+      Number(clusterHasRunningAgent(b)) - Number(clusterHasRunningAgent(a));
+    if (runningDelta !== 0) return runningDelta;
+
+    const updatedDelta = clusterLastUpdatedAt(b) - clusterLastUpdatedAt(a);
+    if (updatedDelta !== 0) return updatedDelta;
+
+    return (
+      (originalIndex.get(a.cluster.leader.id) ?? 0) -
+      (originalIndex.get(b.cluster.leader.id) ?? 0)
+    );
+  }
+
+  function groupHasRunningAgent(group: LaidOutCluster[]): boolean {
+    return group.some(clusterHasRunningAgent);
+  }
+
+  function groupLastUpdatedAt(group: LaidOutCluster[]): number {
+    return group.reduce(
+      (latest, cl) => Math.max(latest, clusterLastUpdatedAt(cl)),
+      0,
+    );
+  }
+
+  function compareGroupsByFreshness(
+    a: LaidOutCluster[],
+    b: LaidOutCluster[],
+  ): number {
+    const runningDelta =
+      Number(groupHasRunningAgent(b)) - Number(groupHasRunningAgent(a));
+    if (runningDelta !== 0) return runningDelta;
+
+    const updatedDelta = groupLastUpdatedAt(b) - groupLastUpdatedAt(a);
+    if (updatedDelta !== 0) return updatedDelta;
+
+    const aLeader = a[0]?.cluster.leader.id;
+    const bLeader = b[0]?.cluster.leader.id;
+    return (
+      (originalIndex.get(aLeader ?? "") ?? 0) -
+      (originalIndex.get(bLeader ?? "") ?? 0)
+    );
+  }
+
   const chainOut = new Map<string, string[]>();
   const chainIn = new Map<string, string[]>();
   for (const cl of clusterLayouts) {
@@ -273,24 +459,24 @@ export function computeAutoLayout(
   }
 
   for (const cl of clusterLayouts) {
-    const dashboards = cl.cluster.children.filter((n) => n.type === "render");
-    for (const d of dashboards) {
-      for (const e of edges) {
-        if (
-          e.sourceNodeId !== d.id ||
-          e.protocol !== "context" ||
-          !clusterByLeaderId.has(e.targetNodeId) ||
-          e.targetNodeId === cl.cluster.leader.id
-        ) {
-          continue;
-        }
-        const upstream = cl.cluster.leader.id;
-        const downstream = e.targetNodeId;
-        const outs = chainOut.get(upstream)!;
-        if (!outs.includes(downstream)) {
-          outs.push(downstream);
-          chainIn.get(downstream)!.push(upstream);
-        }
+    // The leader now exports its embedded dashboard as context directly (the
+    // standalone render node was retired), so chain clusters via the leader's
+    // own context-out edges.
+    const upstream = cl.cluster.leader.id;
+    for (const e of edges) {
+      if (
+        e.sourceNodeId !== upstream ||
+        e.protocol !== "context" ||
+        !clusterByLeaderId.has(e.targetNodeId) ||
+        e.targetNodeId === upstream
+      ) {
+        continue;
+      }
+      const downstream = e.targetNodeId;
+      const outs = chainOut.get(upstream)!;
+      if (!outs.includes(downstream)) {
+        outs.push(downstream);
+        chainIn.get(downstream)!.push(upstream);
       }
     }
   }
@@ -330,6 +516,12 @@ export function computeAutoLayout(
     for (const id of componentIds) {
       if ((indeg.get(id) ?? 0) === 0) ready.push(id);
     }
+    ready.sort((a, b) =>
+      compareClustersByFreshness(
+        clusterByLeaderId.get(a)!,
+        clusterByLeaderId.get(b)!,
+      ),
+    );
     const ordered: string[] = [];
     const orderedSet = new Set<string>();
     while (ready.length > 0) {
@@ -339,43 +531,65 @@ export function computeAutoLayout(
       for (const next of chainOut.get(id) ?? []) {
         if (!componentIds.has(next)) continue;
         indeg.set(next, (indeg.get(next) ?? 0) - 1);
-        if (indeg.get(next) === 0) ready.push(next);
+        if (indeg.get(next) === 0) {
+          ready.push(next);
+          ready.sort((a, b) =>
+            compareClustersByFreshness(
+              clusterByLeaderId.get(a)!,
+              clusterByLeaderId.get(b)!,
+            ),
+          );
+        }
       }
     }
     // Cycles: append remaining members in input order so nothing is dropped.
-    for (const id of componentIds) {
+    const remaining = [...componentIds]
+      .filter((id) => !orderedSet.has(id))
+      .sort((a, b) =>
+        compareClustersByFreshness(
+          clusterByLeaderId.get(a)!,
+          clusterByLeaderId.get(b)!,
+        ),
+      );
+    for (const id of remaining) {
       if (!orderedSet.has(id)) ordered.push(id);
     }
 
     orderedGroups.push(ordered.map((id) => clusterByLeaderId.get(id)!));
   }
 
-  const chainRows = orderedGroups.filter((g) => g.length > 1);
-  const singletonClusters = orderedGroups
-    .filter((g) => g.length === 1)
-    .map((g) => g[0]!);
+  // Order independent content by recency. Multi-cluster chains remain
+  // producer-first internally, but the chain as a unit participates in
+  // freshness ordering with every other cluster.
+  const sortedGroups = [...orderedGroups].sort(compareGroupsByFreshness);
 
-  // Wrap singleton clusters into rows that respect MAX_ROW_WIDTH so
-  // unrelated clusters keep the previous packing behaviour.
-  const singletonRows: LaidOutCluster[][] = [];
-  {
-    let row: LaidOutCluster[] = [];
-    let rowW = 0;
-    for (const cl of singletonClusters) {
-      const addW = (row.length > 0 ? CLUSTER_GAP : 0) + cl.rect.w;
-      if (row.length > 0 && rowW + addW > MAX_ROW_WIDTH) {
-        singletonRows.push(row);
-        row = [cl];
-        rowW = cl.rect.w;
-      } else {
-        row.push(cl);
-        rowW += addW;
-      }
-    }
-    if (row.length > 0) singletonRows.push(row);
+  // Pack every workstream unit — a singleton leader cluster or a
+  // multi-cluster chain — into a single horizontal row flow ordered by
+  // freshness.  A unit's clusters stay contiguous (producer-first for
+  // chains) so connected workstreams read together, and we wrap to a
+  // new row only when appending the whole unit would push the row past
+  // MAX_ROW_WIDTH.  A unit wider than MAX_ROW_WIDTH simply occupies its
+  // own row and overflows rather than being split.
+  const allRows: LaidOutCluster[][] = [];
+  let currentRow: LaidOutCluster[] = [];
+
+  function rowWidth(row: LaidOutCluster[]): number {
+    if (row.length === 0) return 0;
+    return (
+      row.reduce((s, cl) => s + cl.rect.w, 0) + CLUSTER_GAP * (row.length - 1)
+    );
   }
 
-  const allRows: LaidOutCluster[][] = [...chainRows, ...singletonRows];
+  for (const group of sortedGroups) {
+    const prospective = [...currentRow, ...group];
+    if (currentRow.length > 0 && rowWidth(prospective) > MAX_ROW_WIDTH) {
+      allRows.push(currentRow);
+      currentRow = [...group];
+    } else {
+      currentRow = prospective;
+    }
+  }
+  if (currentRow.length > 0) allRows.push(currentRow);
 
   function rowDimensions(row: LaidOutCluster[]): { w: number; h: number } {
     if (row.length === 0) return { w: 0, h: 0 };
@@ -434,7 +648,7 @@ export function computeAutoLayout(
   // Nodes not owned by any cluster and not inside a context-group.
   const isolates = nodes.filter(
     (n) => !assignedIds.has(n.id) && !insideGroupIds.has(n.id),
-  );
+  ).sort(compareNodesByFreshness);
 
   if (isolates.length > 0) {
     let ix = originX;

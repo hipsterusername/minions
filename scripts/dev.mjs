@@ -3,11 +3,12 @@ import { spawn } from "child_process";
 
 const isWin = process.platform === "win32";
 const SERVER_RESTART_CODE = 42;
+const vitePort = process.env["VITE_PORT"] ?? "6173";
 
 let shuttingDown = false;
 let server = spawnServer();
 
-const vite = spawn("npx", ["vite", "--open"], {
+const vite = spawn("npx", ["vite", "--port", vitePort, "--strictPort", "--open"], {
   stdio: "inherit",
   shell: isWin,
 });

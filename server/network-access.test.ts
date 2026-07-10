@@ -27,14 +27,14 @@ describe("network access allowlist", () => {
   });
 
   it("allows browser origins from loopback and Tailscale hosts", () => {
-    expect(isAllowedOrigin("http://localhost:5173")).toBe(true);
-    expect(isAllowedOrigin("http://100.100.100.100:5173")).toBe(true);
-    expect(isAllowedOrigin("http://workstation.tailnet.ts.net:5173")).toBe(true);
+    expect(isAllowedOrigin("http://localhost:6173")).toBe(true);
+    expect(isAllowedOrigin("http://100.100.100.100:6173")).toBe(true);
+    expect(isAllowedOrigin("http://workstation.tailnet.ts.net:6173")).toBe(true);
   });
 
   it("rejects browser origins outside the dev allowlist", () => {
     expect(isAllowedOrigin("ftp://localhost")).toBe(false);
-    expect(isAllowedOrigin("http://example.com:5173")).toBe(false);
+    expect(isAllowedOrigin("http://example.com:6173")).toBe(false);
     expect(isAllowedOrigin("not a url")).toBe(false);
   });
 

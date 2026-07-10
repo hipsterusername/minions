@@ -7,7 +7,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { reconnectMcpServer, toggleMcpServer } from "./mcp-control.ts";
-import { setup, cmd, fakeRunControl } from "./test-harness.ts";
+import { setup, cmd, fakeRunControl } from "../../tests/support/server-command-harness.ts";
 
 describe("reconnect_mcp_server", () => {
   it("invokes runControl.reconnectMcpServer with serverName and replies success", async () => {

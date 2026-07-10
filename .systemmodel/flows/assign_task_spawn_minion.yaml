@@ -1,0 +1,38 @@
+id: flow.assign_task_spawn_minion
+type: flow
+name: Assign Task And Spawn Minion
+summary: assign_task creates or updates a task, blocks invalid duplicate assignment, moves the task to starting, schedules timeout handling, starts a minion session, and emits minion_spawned for canvas creation.
+capabilities:
+  - capability.task_delegation
+constraints:
+  - constraint.bus_only_broadcasts
+decisions:
+  - decision.graph_as_bus
+  - decision.worktree_isolation
+  - decision.relevance_scoped_context
+risks:
+  - risk.parallel_work_conflicts
+  - risk.command_contract_drift
+  - risk.session_state_drift
+  - risk.prompt_bloat
+suggested_files:
+  - server/task-tools/assign-task.ts
+  - server/task-tools/task-prompt.ts
+  - server/task-lifecycle.ts
+  - server/task-tools/types.ts
+  - server/task-tools.ts
+  - src/KanbanBoard.tsx
+suggested_tests:
+  - server/task-tools/assign-task.test.ts
+  - server/task-tools/task-prompt.test.ts
+  - server/task-lifecycle.test.ts
+steps:
+  - Parse task metadata, model selection fields, timeout, owned paths, skills, canvas context preference, and optional work packet id.
+  - Reject tasks already starting, running, completed, or cancelled while allowing planned and retryable terminal records to continue.
+  - Create a new task or update the existing task fields, then warn when owned paths exactly overlap with starting or running sibling tasks.
+  - Apply the assigned lifecycle event, schedule the inactivity timeout, and resolve model, harness, and thinking settings from task args and project settings.
+  - Build the minion prompt with worktree boundary text, task sections, optional context pack, owned paths, and optional truncated canvas context.
+  - Start the minion session and emit minion_spawned with task metadata, worktree branch, armed skill IDs, model, harness, and timestamp.
+freshness:
+  class: code_coupled
+risk: high

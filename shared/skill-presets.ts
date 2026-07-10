@@ -9,6 +9,19 @@ export interface SkillPresetVariable {
   description?: string;
 }
 
+/**
+ * Sub-skill preset — mirror of `SubSkill` (hand-copied across type trees
+ * because cross-tree imports are banned by the architecture suite).
+ */
+export interface SubSkillPreset {
+  id: string;
+  name: string;
+  description: string;
+  body: string;
+  whenToUse?: string;
+  alwaysInclude?: boolean;
+}
+
 export interface SkillPreset {
   id: string;
   name: string;
@@ -25,6 +38,7 @@ export interface SkillPreset {
   accentColor: string;
   template: string;
   variables: SkillPresetVariable[];
+  subskills?: SubSkillPreset[];
 }
 
 export const systemModelAuthoringSkill: SkillPreset = {
@@ -111,6 +125,55 @@ Policies:
   variables: [],
 };
 
+export const skillBuilderSkill: SkillPreset = {
+  id: "skill-builder",
+  name: "Skill Builder",
+  description:
+    "Author reusable Minions skills — design the template, variables, and sub-skills, then persist them with the skill-authoring tools (create_skill, update_skill, list_skills, get_skill, delete_skill).",
+  category: "general",
+  icon: "SB",
+  accentColor: "#7c3aed",
+  template: `# Skill Builder
+
+You are acting as a skill author for this Minions project. Your job is to turn a
+capability request into a well-formed, reusable **skill** and persist it to the
+project's skill library. A skill is a Markdown instruction template that the
+Leader can later "arm" a Minion with; its compiled body is appended to that
+agent's system prompt.
+
+## Tools you have
+You have a dedicated set of skill-authoring tools (MCP prefix \`mcp__skills__\`):
+- \`list_skills\` — see what already exists (id, name, description, category, source). Do this FIRST so you extend rather than duplicate.
+- \`get_skill\` — read a full skill (template, variables, sub-skills) before editing it.
+- \`create_skill\` — persist a new skill. Provide at minimum \`name\` and \`template\`; the id is derived from the name unless you pass one.
+- \`update_skill\` — patch an existing skill by \`id\`. Unspecified fields are preserved; editing a built-in creates a project override.
+- \`delete_skill\` — remove a project skill by \`id\`. Built-in presets cannot be deleted, only overridden.
+
+## Anatomy of a good skill
+- **name** — short, capability-oriented (e.g. "API Contract Reviewer"), not a file name.
+- **description** — one line an agent reads to decide whether to use it. State the outcome and the trigger.
+- **category** — one of: code, docs, testing, devops, analysis, design, general.
+- **template** — the instruction body in Markdown. Write it as a direct playbook: what to read first, the step-by-step process, the invariants to hold, and the definition of done. Prefer imperative, checkable steps over prose.
+- **variables** — declare a \`{{placeholder}}\` for anything that changes per use (target path, ticket id, style guide). Any \`{{placeholder}}\` you leave undeclared is auto-added as a plain text variable, so only declare the ones that need a label, select options, or help text.
+- **sub-skills** (optional) — when a skill is large, split rarely-needed detail into sub-skills. The parent injects only a compact *map*; the agent pulls a body on demand with \`load_subskill\`. Use \`alwaysInclude\` only for content every run needs.
+
+## Authoring process
+1. Restate the requested capability in one sentence. If it is vague, narrow it to something observable.
+2. Call \`list_skills\` and, if a close match exists, \`get_skill\` it — prefer \`update_skill\` over creating a near-duplicate.
+3. Draft the template: read-first pointers → numbered process → constraints → definition of done. Keep it tight; every line costs the armed agent context budget.
+4. Factor variables. Name them in \`snake_case\`. Give required inputs a clear label and, where the choice is closed, \`select\` options.
+5. If the body exceeds a few hundred words, move optional depth into sub-skills and leave a map.
+6. Persist with \`create_skill\` (or \`update_skill\`). Then \`get_skill\` the result to confirm the id, variables, and body compiled as intended.
+7. Report the new skill's id so the Leader can arm a Minion with it via \`assign_task\`'s \`skillIds\`.
+
+## Quality bar
+- Replace, don't accumulate: fix an existing skill rather than shipping v2 alongside v1.
+- A skill should read like an expert's checklist, not a description of a checklist.
+- Never invent tool names or repo conventions inside a template — describe process, not fictional APIs.`,
+  variables: [],
+};
+
 export const builtInSkillPresets: SkillPreset[] = [
   systemModelAuthoringSkill,
+  skillBuilderSkill,
 ];

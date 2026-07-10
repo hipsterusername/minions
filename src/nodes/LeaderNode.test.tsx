@@ -23,6 +23,7 @@ import {
   type LeaderData,
 } from "./LeaderNode.tsx";
 import type { CanvasNode, ContextItem, NodeRenderProps } from "../types.ts";
+import type { Size } from "../types.ts";
 import { DEFAULT_THINKING_CONFIG } from "../types.ts";
 import { canvasScale } from "../canvas-scale.ts";
 import type { ServerMessage } from "../use-socket.ts";
@@ -50,16 +51,18 @@ interface ProbeProps {
   socket: ReturnType<typeof createReplaySocket>["socket"];
   initial: LeaderData;
   onState?: (d: LeaderData) => void;
+  size?: Size;
+  onResize?: ((size: Size) => void) | undefined;
   onAddContentNode?: ((content: string) => void) | undefined;
 }
 
-function Probe({ socket, initial, onState, onAddContentNode }: ProbeProps) {
+function Probe({ socket, initial, onState, size, onResize, onAddContentNode }: ProbeProps) {
   const [data, setData] = useState<LeaderData>(initial);
   const node: CanvasNode = {
     id: "leader-test",
     type: "leader",
     position: { x: 0, y: 0 },
-    size: { width: 480, height: 400 },
+    size: size ?? { width: 480, height: 400 },
     data,
   };
   const props: NodeRenderProps = {
@@ -74,6 +77,7 @@ function Probe({ socket, initial, onState, onAddContentNode }: ProbeProps) {
     socketSend: () => {
       /* no-op */
     },
+    onResize,
     onAddContentNode,
   };
   return <LeaderNodeRenderer {...props} />;
@@ -745,6 +749,73 @@ describe("LeaderNode: ignores mismatched sessionKey", () => {
     ]);
 
     expect(onState).not.toHaveBeenCalled();
+  });
+});
+
+// ── Embedded dashboard sizing ─────────────────────────────
+
+describe("LeaderNode: embedded dashboard sizing", () => {
+  it("expands a narrow leader when dashboard content is first rendered", async () => {
+    const { socket, replay } = createReplaySocket();
+    const onResize = vi.fn();
+    const states: LeaderData[] = [];
+
+    render(
+      <Probe
+        socket={socket}
+        initial={makeInitialData()}
+        size={{ width: 560, height: 520 }}
+        onResize={onResize}
+        onState={(d) => states.push(d)}
+      />,
+    );
+
+    await pump(replay, [
+      {
+        message: {
+          type: "render_update",
+          leaderSessionKey: "leader-1",
+          action: "set",
+          layout: { title: "Work" },
+          components: [{ id: "status", type: "status", label: "Build", state: "running" }],
+        } as ServerMessage,
+      },
+    ]);
+
+    expect(onResize).toHaveBeenCalledWith({ width: 1040, height: 620 });
+    expect(states.at(-1)?.renderState?.components).toHaveLength(1);
+  });
+
+  it("does not force-resize later dashboard patches", async () => {
+    const { socket, replay } = createReplaySocket();
+    const onResize = vi.fn();
+
+    render(
+      <Probe
+        socket={socket}
+        initial={makeInitialData({
+          renderState: {
+            layout: { title: "Existing" },
+            components: [{ id: "status", type: "status", label: "Build", state: "pending" }],
+          },
+        })}
+        size={{ width: 560, height: 520 }}
+        onResize={onResize}
+      />,
+    );
+
+    await pump(replay, [
+      {
+        message: {
+          type: "render_update",
+          leaderSessionKey: "leader-1",
+          action: "patch",
+          updates: [{ id: "status", state: "running" }],
+        } as ServerMessage,
+      },
+    ]);
+
+    expect(onResize).not.toHaveBeenCalled();
   });
 });
 

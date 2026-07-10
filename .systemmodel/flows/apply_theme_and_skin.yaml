@@ -1,0 +1,29 @@
+id: flow.apply_theme_and_skin
+type: flow
+name: Apply Theme And Skin
+summary: The theme system persists the selected theme, applies CSS variables and data theme, exposes picker metadata, and activates scoped skin stylesheets by root theme id.
+capabilities:
+  - capability.canvas_ui
+constraints: []
+decisions: []
+risks: []
+suggested_files:
+  - src/themes.ts
+  - src/use-theme.ts
+  - src/App.tsx
+  - src/SettingsMenu.tsx
+  - src/main.tsx
+  - src/theme-skins/index.css
+suggested_tests:
+  - src/themes.test.ts
+  - src/components/UserContextHeader.test.tsx
+  - src/chat-bubble-style.test.ts
+steps:
+  - themes.ts defines base themes, skinThemes, themeMap, DEFAULT_THEME_ID, CSS variable maps, fonts, swatches, and Google Fonts URL construction.
+  - use-theme.ts loads and persists the selected id in localStorage under canvas-theme and exposes ThemeContext.
+  - App initializes themeId, calls applyTheme on mount and selection changes, and provides theme context to project and canvas surfaces.
+  - SettingsMenu renders all themes from context and calls setTheme for picker selections.
+  - main.ts imports theme-skins index CSS and each imported skin stylesheet stays inert until root data theme matches its id.
+freshness:
+  class: code_coupled
+risk: low

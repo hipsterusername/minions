@@ -7,7 +7,7 @@
  * refactor; when a phase finishes, ratchet the corresponding number
  * downward.
  *
- * Tracked in `docs/refactor-test-plan.md` Phase 0.
+ * Refactor outcomes are summarized in `docs/archive/phase-5-complete.md`.
  */
 
 /**
@@ -17,7 +17,6 @@
  * SHRINK it. Adding code that pushes a file past its allowed ceiling
  * is a CI failure.
  *
- * Phases referenced map to `docs/refactor-test-plan.md`.
  */
 export const SERVER_FILE_SIZE_ALLOWLIST: Readonly<Record<string, number>> = {
   // Phase 5.3 split server/task-tools.ts into per-tool modules
@@ -72,7 +71,7 @@ export const BROADCAST_CALL_SITE_BASELINE: Readonly<Record<string, number>> = {}
  * shrink still passes (only growth fails).
  */
 export const CLIENT_FILE_SIZE_ALLOWLIST: Readonly<Record<string, number>> = {
-  "src/Canvas.tsx": 4626,
+  "src/Canvas.tsx": 4470,
   "src/nodes/LeaderNode.tsx": 1671,
   "src/nodes/ClaudeSessionNode.tsx": 1521,
 };

@@ -7,6 +7,9 @@ import {
 } from "../shared/ws-envelope.ts";
 import type { NormalizedEvent } from "../shared/normalized-event.ts";
 import type { RenderState } from "../shared/render-dsl.ts";
+import { browserLogger } from "./logging.ts";
+
+const log = browserLogger.child("websocket");
 
 export type ServerMessage =
   | { type: "session_list"; sessions: SessionInfo[] }
@@ -244,14 +247,26 @@ export function useSocket(url: string): SocketHandle {
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const attemptRef = useRef(0);
+  // True while a connect() is between "started" and "socket resolved". The
+  // socket is created inside an async getAuthToken() .then(), so without this
+  // guard a rapid re-invoke (React StrictMode's mount→unmount→mount) starts a
+  // second connect before the first resolves; the teardown runs while
+  // wsRef.current is still null and closes nothing, leaving BOTH sockets open
+  // and sharing listenersRef → every event is delivered twice.
+  const connectingRef = useRef(false);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    if (connectingRef.current) return;
+    connectingRef.current = true;
 
     // Fetch the auth token, then connect with it as a query param
     void getAuthToken().then((token) => {
       // Re-check after async gap
-      if (wsRef.current?.readyState === WebSocket.OPEN) return;
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        connectingRef.current = false;
+        return;
+      }
 
       const separator = url.includes("?") ? "&" : "?";
       const authedUrl = `${url}${separator}token=${encodeURIComponent(token)}`;
@@ -259,6 +274,7 @@ export function useSocket(url: string): SocketHandle {
       wsRef.current = ws;
 
       ws.onopen = () => {
+        connectingRef.current = false;
         setConnected(true);
         setReconnectState("connected");
         attemptRef.current = 0;
@@ -277,6 +293,7 @@ export function useSocket(url: string): SocketHandle {
       };
 
       ws.onclose = () => {
+        connectingRef.current = false;
         setConnected(false);
         // Clear cached auth token so the next reconnect fetches a fresh one
         // (the server generates a new token on every restart)
@@ -295,16 +312,18 @@ export function useSocket(url: string): SocketHandle {
         reconnectTimer.current = setTimeout(connect, delay);
       };
 
-      ws.onerror = () => ws.close();
+      ws.onerror = () => {
+        connectingRef.current = false;
+        ws.close();
+      };
       ws.onmessage = (ev) => {
         try {
           const parsed: unknown = JSON.parse(String(ev.data));
           const result = wsEnvelopeSchema.safeParse(parsed);
           if (!result.success) {
-            console.warn(
-              "[ws] Rejected message failing envelope schema:",
-              (parsed as Record<string, unknown>)?.["type"],
-            );
+            log.warn("envelope_rejected", {
+              envelopeType: (parsed as Record<string, unknown>)?.["type"],
+            });
             return;
           }
           const envelope: WsEnvelope = result.data;
@@ -320,6 +339,10 @@ export function useSocket(url: string): SocketHandle {
           // ignore malformed messages
         }
       };
+    }).catch(() => {
+      // Token fetch failed before a socket was created — release the guard so
+      // a later connect() (reconnect, manualReconnect) can retry.
+      connectingRef.current = false;
     });
   }, [url]);
 
@@ -347,9 +370,10 @@ export function useSocket(url: string): SocketHandle {
     if (queue.length > MAX_PENDING_SENDS) {
       const overflow = queue.length - MAX_PENDING_SENDS;
       queue.splice(0, overflow);
-      console.warn(
-        `[ws] outbound queue exceeded ${MAX_PENDING_SENDS}; dropped ${overflow} oldest message(s)`,
-      );
+      log.warn("outbound_queue_trimmed", {
+        maxQueuedMessages: MAX_PENDING_SENDS,
+        droppedCount: overflow,
+      });
     }
   }, []);
 
@@ -382,6 +406,9 @@ export function useSocket(url: string): SocketHandle {
       wsRef.current.close();
       wsRef.current = null;
     }
+    // We just tore down any in-flight attempt (onclose was nulled above, so its
+    // reset won't fire) — release the guard so the fresh connect can proceed.
+    connectingRef.current = false;
     connect();
   }, [connect]);
 

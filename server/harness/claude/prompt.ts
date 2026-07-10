@@ -12,6 +12,7 @@
  * message shape stops leaking through code that other harnesses also touch.
  */
 
+import { randomUUID } from "node:crypto";
 import type { HarnessStartOptions } from "../types.ts";
 
 /**
@@ -24,16 +25,6 @@ export interface SDKUserMessage {
   parent_tool_use_id: null;
   message: { role: "user"; content: unknown[] };
   uuid: string;
-}
-
-/** UUID v4 — lightweight, avoids dragging in `crypto.randomUUID` polyfills. */
-function uuid(): string {
-  // eslint-disable-next-line no-bitwise -- standard uuidv4 bit twiddling
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
 }
 
 /** Collect an async-iterable of user messages into a single string. */
@@ -79,7 +70,7 @@ export async function buildClaudePrompt(
         })),
       ],
     },
-    uuid: uuid(),
+    uuid: randomUUID(),
   };
 
   return (async function* promptIterable() {

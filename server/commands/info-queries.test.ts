@@ -19,7 +19,7 @@ import {
   getSupportedCommands,
   getSupportedModels,
 } from "./info-queries.ts";
-import { setup, cmd, fakeRunControl } from "./test-harness.ts";
+import { setup, cmd, fakeRunControl } from "../../tests/support/server-command-harness.ts";
 import type { CommandHandler } from "./types.ts";
 import "../harness/codex/index.ts";
 

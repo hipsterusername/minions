@@ -9,8 +9,12 @@
  *   • Each field kind renders the appropriate HTML input element.
  *   • Validation (required, pattern, maxLength, min/max) runs on submit.
  *   • Per-field error messages are shown below the input on failure.
- *   • When component.submittedAnswers is set, the form is locked (read-only)
- *     and a green "Submitted ✓" badge replaces the submit button.
+ *   • On a successful submit the form locks itself optimistically (before the
+ *     agent round-trips) so the user gets immediate feedback: fields disable,
+ *     a green "Submitted ✓" badge appears, and a confirmation line explains
+ *     the response was sent to the agent.
+ *   • When component.submittedAnswers is set by the agent, the form is also
+ *     locked (read-only) with the same acknowledgement.
  *   • CSS variables match the existing RenderNode card styling.
  *
  * DO NOT register or import this from RenderNode.tsx — the Leader wires that in.
@@ -41,6 +45,15 @@ function fieldDefaultValue(field: FormField): unknown {
   if (field.kind === "checkbox") return false;
   if (field.kind === "multiselect") return [];
   if (field.kind === "slider" || field.kind === "number") return field.min ?? 0;
+  // A required select renders WITHOUT a "— select —" placeholder option, so the
+  // native <select> shows its first option as selected. Mirror that in state so
+  // the pre-selected (recommended-first) option counts as a real answer. Without
+  // this the value stays "" and required-validation rejects a submit the user
+  // believes is a valid selection.
+  if (field.kind === "select" && field.required) {
+    const first = field.options?.[0];
+    if (first !== undefined) return optionValue(first);
+  }
   return "";
 }
 
@@ -662,10 +675,16 @@ function FormFieldView({
 // ── Main component ─────────────────────────────────────────
 
 export function FormComponent({ component, onSubmit }: FormComponentProps) {
-  const isLocked = component.submittedAnswers != null;
+  // Locked by the agent (it re-rendered the form carrying submittedAnswers).
+  const serverLocked = component.submittedAnswers != null;
+
+  // Locked optimistically the moment the user submits, so feedback is
+  // immediate and doesn't depend on the agent choosing to re-render.
+  const [locallySubmitted, setLocallySubmitted] = useState(false);
+  const isLocked = serverLocked || locallySubmitted;
 
   const [values, setValues] = useState<Record<string, unknown>>(
-    isLocked
+    serverLocked
       ? { ...buildInitialValues(component.fields), ...component.submittedAnswers }
       : buildInitialValues(component.fields),
   );
@@ -688,6 +707,9 @@ export function FormComponent({ component, onSubmit }: FormComponentProps) {
     }
     setErrors(nextErrors);
     if (!hasError) {
+      // Lock optimistically first so the acknowledgement paints on this click,
+      // then hand the answers off to the paired session.
+      setLocallySubmitted(true);
       onSubmit({ ...values });
     }
   }
@@ -774,8 +796,29 @@ export function FormComponent({ component, onSubmit }: FormComponentProps) {
           ))}
         </div>
 
-        {/* Submit button — hidden when locked */}
-        {!isLocked && (
+        {/* Submit button — replaced by a confirmation line once locked */}
+        {isLocked ? (
+          <div
+            role="status"
+            style={{
+              padding: "0 14px 14px",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 11,
+              color: "var(--status-success, #4caf50)",
+            }}
+          >
+            <span aria-hidden="true" style={{ fontWeight: 700 }}>
+              ✓
+            </span>
+            <span>
+              {serverLocked
+                ? "Response received."
+                : "Response submitted — the agent has been notified."}
+            </span>
+          </div>
+        ) : (
           <div
             style={{
               padding: "0 14px 14px",

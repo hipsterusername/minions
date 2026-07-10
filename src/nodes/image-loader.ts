@@ -20,6 +20,10 @@
  *    trust the browser.
  */
 
+import { browserLogger } from "../logging.ts";
+
+const log = browserLogger.child("image-loader");
+
 /**
  * Claude's vision models resample images larger than ~1568px on the long
  * edge, so anything beyond that is wasted bandwidth and tokens.
@@ -172,10 +176,7 @@ export async function loadImageFromFile(file: File): Promise<LoadedImage> {
       mediaType: plan.outputMediaType,
     };
   } catch (err) {
-    console.warn(
-      "[image-loader] downscale failed, falling back to original:",
-      err instanceof Error ? err.message : err,
-    );
+    log.warn("downscale_failed", { error: err });
     return {
       src: rawSrc,
       naturalWidth,

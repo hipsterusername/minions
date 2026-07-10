@@ -14,6 +14,7 @@
 
 import { readSkills } from "./project-store.ts";
 import { builtInSkillPresets } from "../shared/skill-presets.ts";
+import { buildSubskillMap } from "./subskills.ts";
 
 /** Variable definition extracted from {{name}} patterns in a template. */
 export interface SkillVariable {
@@ -25,6 +26,20 @@ export interface SkillVariable {
   defaultValue?: string;
   options?: { value: string; label: string }[];
   description?: string;
+}
+
+/**
+ * A sub-skill nested inside a parent skill. Mirror of `SubSkill` in
+ * `src/skills/types.ts` (cross-tree imports are banned by the architecture
+ * suite, so the shape is hand-copied).
+ */
+export interface SubSkill {
+  id: string;
+  name: string;
+  description: string;
+  body: string;
+  whenToUse?: string;
+  alwaysInclude?: boolean;
 }
 
 /** A skill template loaded from `.minions/skills.json`. */
@@ -44,6 +59,7 @@ export interface SkillTemplate {
   accentColor: string;
   template: string;
   variables: SkillVariable[];
+  subskills?: SubSkill[];
 }
 
 /**
@@ -75,7 +91,8 @@ export function compileSkills(
   const sections = skills.map((skill) => {
     const values = allValues[skill.id] ?? {};
     const compiled = compileSkillTemplate(skill, values);
-    return `## Skill: ${skill.name}\n\n${compiled}`;
+    const map = buildSubskillMap(skill);
+    return `## Skill: ${skill.name}\n\n${compiled}${map ? `\n\n${map}` : ""}`;
   });
   return (
     `\n\n# Active Skills\n\n` +

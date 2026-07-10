@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import type { BufferedEvent } from "../session-host.ts";
 import { syncSession } from "./sync-session.ts";
-import { setup, cmd } from "./test-harness.ts";
+import { setup, cmd } from "../../tests/support/server-command-harness.ts";
 
 describe("sync_session", () => {
   it("emits sync_response with found=false when the session is unknown", () => {

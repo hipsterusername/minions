@@ -97,6 +97,7 @@ export const createSession: CommandHandler = (
     cwd,
     systemPrompt: cmd.systemPrompt,
     role: cmd.role,
+    ...(cmd.skillIds ? { skillIds: cmd.skillIds } : {}),
     worktreeIsolation: cmd.worktreeIsolation,
     initialModel: cmd.model ?? null,
     thinkingConfig: initialThinking,

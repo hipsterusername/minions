@@ -17,6 +17,8 @@ import { EventEmitter } from "node:events";
 import type { WebSocket } from "ws";
 import { attachConnectionListeners } from "./ws-connection.ts";
 import type { ConnectionDeps } from "./ws-connection.ts";
+import type { SessionListItem } from "./session-list-item.ts";
+import { emptyUsageTotals } from "./usage-telemetry.ts";
 
 class FakeWs extends EventEmitter {
   readyState = 1; // OPEN
@@ -62,7 +64,7 @@ describe("attachConnectionListeners", () => {
 
   it("sends the session_list snapshot on attach", () => {
     const ws = new FakeWs();
-    const snapshot = [
+    const snapshot: SessionListItem[] = [
       {
         sessionKey: "abc",
         sessionId: null,
@@ -70,17 +72,20 @@ describe("attachConnectionListeners", () => {
         cwd: "/tmp",
         totalCost: 0,
         turns: 0,
+        usageTotals: emptyUsageTotals(),
         model: null,
         permissionMode: null,
         taskName: null,
         role: "leader",
+        harness: "claude",
+        harnessCapabilities: null,
+        lastActivityAt: null,
         activeMinions: [],
       },
     ];
     attachConnectionListeners(
       ws as unknown as WebSocket,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      makeDeps({ snapshotSessions: () => snapshot as any }),
+      makeDeps({ snapshotSessions: () => snapshot }),
     );
 
     expect(ws.sent).toHaveLength(1);

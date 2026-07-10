@@ -1,0 +1,213 @@
+/**
+ * LeaderBody — responsive chat｜dashboard layout for the Leader node.
+ *
+ * Progressive disclosure:
+ *   - No dashboard data yet  → render chat only (looks exactly like before the
+ *     embedded dashboard existed).
+ *   - Has data + node is wide → split-pane: chat left, dashboard right, with a
+ *     draggable divider (persisted ratio).
+ *   - Has data + node is narrow → tabbed: a "Conversation | Dashboard" toggle,
+ *     defaulting to Conversation (chat-forward).
+ *
+ * This keeps the dashboard embedded in the leader card, replacing the retired
+ * standalone `render` node.
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { RenderState } from "../../../shared/render-dsl.ts";
+import { DashboardSurface } from "../render/DashboardSurface.tsx";
+import { PaneDivider } from "./fullscreen/PaneDivider.tsx";
+
+/** Below this content width, the split collapses to a tab toggle. */
+export const LEADER_BODY_SPLIT_MIN_WIDTH = 640;
+/** Default chat-pane fraction of the split (chat-forward → chat gets more). */
+export const LEADER_BODY_DEFAULT_SPLIT = 0.56;
+const MIN_CHAT_FRACTION = 0.3;
+const MAX_CHAT_FRACTION = 0.78;
+
+function clampChatFraction(v: number): number {
+  if (!Number.isFinite(v)) return LEADER_BODY_DEFAULT_SPLIT;
+  return Math.min(MAX_CHAT_FRACTION, Math.max(MIN_CHAT_FRACTION, v));
+}
+
+export interface LeaderBodyProps {
+  /** The chat column: messages feed + config footer + prompt bar. */
+  chat: ReactNode;
+  renderState: RenderState;
+  payloadError?: string | null | undefined;
+  onSubmitForm?: ((componentId: string, answers: Record<string, unknown>) => void) | undefined;
+  onAddContentNode?: ((text: string) => void) | undefined;
+  /** Persisted tab selection when narrow. Chat-forward when unset. */
+  activeBodyView?: "chat" | "dashboard" | undefined;
+  onActiveBodyViewChange?: ((view: "chat" | "dashboard") => void) | undefined;
+  /** Persisted chat-pane fraction of the split. */
+  splitRatio?: number | undefined;
+  onSplitRatioChange?: ((ratio: number) => void) | undefined;
+  /**
+   * Content pinned to the top of the dashboard pane (e.g. the task plan), so it
+   * only occupies the dashboard half rather than spanning the full node width.
+   */
+  dashboardHeader?: ReactNode;
+  /**
+   * Whether {@link dashboardHeader} currently has content. When true, the
+   * dashboard side is revealed even before any render components arrive so the
+   * plan has somewhere to live.
+   */
+  dashboardHeaderActive?: boolean | undefined;
+}
+
+export function LeaderBody({
+  chat,
+  renderState,
+  payloadError,
+  onSubmitForm,
+  onAddContentNode,
+  activeBodyView,
+  onActiveBodyViewChange,
+  splitRatio,
+  onSplitRatioChange,
+  dashboardHeader,
+  dashboardHeaderActive,
+}: LeaderBodyProps) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [width, setWidth] = useState<number>(0);
+
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    // Seed from the current layout width first, then let the observer take
+    // over — so the observed value always wins over the initial read.
+    setWidth(el.clientWidth);
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) setWidth(entry.contentRect.width);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const hasRenderContent = renderState.components.length > 0;
+  // The dashboard side is shown when there are render components OR a task plan
+  // to host — so the plan lives on the dashboard half, never full width.
+  const showDashboard = hasRenderContent || !!dashboardHeaderActive;
+  const chatFraction = clampChatFraction(splitRatio ?? LEADER_BODY_DEFAULT_SPLIT);
+  const isWide = width >= LEADER_BODY_SPLIT_MIN_WIDTH;
+  const view: "chat" | "dashboard" = activeBodyView ?? "chat";
+
+  const handleDividerResize = useCallback(
+    (deltaX: number) => {
+      if (!onSplitRatioChange || width <= 0) return;
+      const next = clampChatFraction(chatFraction + deltaX / width);
+      onSplitRatioChange(next);
+    },
+    [onSplitRatioChange, width, chatFraction],
+  );
+
+  const dashboard = useMemo(
+    () => (
+      <div style={fillColumn}>
+        {dashboardHeader != null && (
+          <div style={{ flexShrink: 0 }}>{dashboardHeader}</div>
+        )}
+        {hasRenderContent && (
+          <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+            <DashboardSurface
+              renderState={renderState}
+              payloadError={payloadError}
+              onSubmitForm={onSubmitForm}
+              onAddContentNode={onAddContentNode}
+            />
+          </div>
+        )}
+      </div>
+    ),
+    [dashboardHeader, hasRenderContent, renderState, payloadError, onSubmitForm, onAddContentNode],
+  );
+
+  // Progressive disclosure: nothing to show on the dashboard side → chat only
+  // (unchanged look).
+  if (!showDashboard) {
+    return (
+      <div ref={rootRef} style={fillColumn}>
+        {chat}
+      </div>
+    );
+  }
+
+  // Wide → split-pane (chat left, dashboard right).
+  if (isWide) {
+    return (
+      <div ref={rootRef} style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row" }}>
+        <div style={{ flex: `0 0 ${(chatFraction * 100).toFixed(3)}%`, minWidth: 0, display: "flex", flexDirection: "column" }}>
+          {chat}
+        </div>
+        <PaneDivider
+          side="left"
+          onResize={handleDividerResize}
+          onReset={() => onSplitRatioChange?.(LEADER_BODY_DEFAULT_SPLIT)}
+          ariaLabel="Resize conversation and dashboard panes"
+        />
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", borderLeft: "1px solid var(--border-default)" }}>
+          {dashboard}
+        </div>
+      </div>
+    );
+  }
+
+  // Narrow → tabbed (Conversation | Dashboard), chat-forward default.
+  return (
+    <div ref={rootRef} style={fillColumn}>
+      <div
+        role="tablist"
+        aria-label="Leader body view"
+        style={{
+          display: "flex",
+          flexShrink: 0,
+          gap: 2,
+          padding: "4px 6px",
+          borderBottom: "1px solid var(--border-default)",
+          background: "var(--bg-secondary)",
+        }}
+      >
+        <BodyTab label="Conversation" active={view === "chat"} onClick={() => onActiveBodyViewChange?.("chat")} />
+        <BodyTab label="Dashboard" active={view === "dashboard"} onClick={() => onActiveBodyViewChange?.("dashboard")} />
+      </div>
+      {/* Keep chat mounted (hidden) so scroll/stream state survives tab switches. */}
+      <div style={{ ...fillColumn, display: view === "chat" ? "flex" : "none" }}>{chat}</div>
+      {view === "dashboard" && <div style={fillColumn}>{dashboard}</div>}
+    </div>
+  );
+}
+
+const fillColumn = {
+  flex: 1,
+  minHeight: 0,
+  display: "flex",
+  flexDirection: "column",
+} as const;
+
+function BodyTab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      style={{
+        flex: 1,
+        padding: "5px 8px",
+        borderRadius: 5,
+        border: "1px solid",
+        borderColor: active ? "color-mix(in srgb, var(--accent) 40%, var(--border-default))" : "transparent",
+        background: active ? "color-mix(in srgb, var(--accent) 12%, var(--bg-surface))" : "transparent",
+        color: active ? "var(--accent)" : "var(--text-secondary)",
+        cursor: "pointer",
+        fontSize: 11,
+        fontWeight: active ? 600 : 500,
+        letterSpacing: "-0.01em",
+      }}
+    >
+      {label}
+    </button>
+  );
+}

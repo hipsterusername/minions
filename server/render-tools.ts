@@ -25,6 +25,11 @@ import {
   type RenderState,
 } from "../shared/render-dsl.ts";
 import { elideDefaults } from "../shared/render-defaults.ts";
+import { sanitizeToSandboxDocument } from "./html-sanitize.ts";
+import { createPublishHtmlToolDef } from "./render-html-tool.ts";
+import { serverLogger } from "./logging.ts";
+
+const log = serverLogger.child("render-tools");
 
 // RenderState is imported from shared/render-dsl.ts — single source of truth.
 export type { RenderState };
@@ -35,6 +40,7 @@ const DASHBOARD_COMPONENT_GUIDE = [
   "Cell-width types: metric(label,value), progress(label,value 0-100), status(label,state success|error|warning|running|pending), sparkline(data), kv(entries), checklist(items), tags(items).",
   "Full-width types: table(headers,rows), list(items), text(content), code(content), copyable(content), timeline(events), callout(variant,content), diff(before,after), separator.",
   "Rich types: form(fields) for user input, chart(series) for SVG charts, section(components) and tabs(tabs[].components) for layout, image(src,alt), file-preview(source).",
+  "html-artifact(html,title?) shows a static, NON-FUNCTIONAL HTML visualization in a locked-down sandboxed iframe with click-to-expand. Prefer the dedicated `publish_html` tool to create one — it sanitizes the HTML and writes a session-scoped temp file. Never rely on scripts, forms, or network requests inside it.",
   "Use render_set for initial layout, then render_patch with stable ids for value/state updates.",
 ].join(" ");
 
@@ -72,6 +78,13 @@ function parseRenderComponent(component: unknown): RenderComponent {
         components: parseRenderComponents(tab.components),
       })),
     };
+  }
+  // Security chokepoint: every `html-artifact` that flows through the render
+  // tools is reduced to a non-functional, CSP-wrapped, script-free document
+  // before it can reach a client. `sanitizeToSandboxDocument` is idempotent,
+  // so content already sanitized by `publish_html` passes through unchanged.
+  if (parsed.type === "html-artifact") {
+    return { ...parsed, html: sanitizeToSandboxDocument(parsed.html) };
   }
   return parsed;
 }
@@ -112,8 +125,32 @@ export function createRenderToolsForLeader(opts: {
     try {
       onStateChange(renderState);
     } catch (err) {
-      console.warn("[render-tools] onStateChange failed:", err);
+      log.warn("state_change_callback_failed", { error: err });
     }
+  }
+
+  /**
+   * Shared append primitive: elide defaults, merge into state (id-collision =
+   * replace, matching the client reducer), broadcast the append envelope, and
+   * persist. Callers pass already-parsed/sanitized components. Reused by both
+   * `render_append` and the `publish_html` tool.
+   */
+  function appendComponents(components: RenderComponent[]): void {
+    const elided = components.map(elideDefaults);
+    const incomingIds = new Set(elided.map((c) => c.id));
+    renderState.components = [
+      ...renderState.components.filter((c) => !incomingIds.has(c.id)),
+      ...elided,
+    ];
+
+    bus.emitToSession(leaderSessionKey, {
+      type: "render_update",
+      leaderSessionKey,
+      action: "append",
+      components: elided,
+    });
+
+    notifyStateChange();
   }
 
   // ── render_set ────────────────────────────────────
@@ -176,8 +213,16 @@ export function createRenderToolsForLeader(opts: {
     inputSchema: renderPatchInputSchema,
     handler: async (input: unknown) => {
       const args = renderPatchInputSchema.parse(input);
+      // Security chokepoint: any patch that carries an `html` string (only
+      // `html-artifact` uses that field) is sanitized before it is applied to
+      // state OR broadcast — the patch envelope ships these updates verbatim.
+      const updates = args.updates.map((update) =>
+        typeof update["html"] === "string"
+          ? { ...update, html: sanitizeToSandboxDocument(update["html"]) }
+          : update,
+      );
       // Apply patches to local state
-      for (const update of args.updates) {
+      for (const update of updates) {
         const idx = renderState.components.findIndex(
           (c) => c.id === update["id"],
         );
@@ -196,7 +241,7 @@ export function createRenderToolsForLeader(opts: {
         type: "render_update",
         leaderSessionKey,
         action: "patch",
-        updates: args.updates,
+        updates,
       });
 
       notifyStateChange();
@@ -214,28 +259,14 @@ export function createRenderToolsForLeader(opts: {
     inputSchema: renderAppendInputSchema,
     handler: async (input: unknown) => {
       const parsed = renderAppendInputSchema.parse(input);
-      const args = { components: parseRenderComponents(parsed.components) };
       // Match the client-side `applyRenderMessage("append")` semantics: a
       // component whose id already exists is treated as a replace, not a
-      // duplicate.
-      const elided = args.components.map(elideDefaults);
-      const incomingIds = new Set(elided.map((c) => c.id));
-      renderState.components = [
-        ...renderState.components.filter((c) => !incomingIds.has(c.id)),
-        ...elided,
-      ];
-
-      bus.emitToSession(leaderSessionKey, {
-        type: "render_update",
-        leaderSessionKey,
-        action: "append",
-        components: elided,
-      });
-
-      notifyStateChange();
+      // duplicate. `appendComponents` handles elision, state, and broadcast.
+      const components = parseRenderComponents(parsed.components);
+      appendComponents(components);
 
       return textResult(
-        `Appended ${args.components.length} component(s). Total: ${renderState.components.length}.`,
+        `Appended ${components.length} component(s). Total: ${renderState.components.length}.`,
       );
     },
   };
@@ -273,8 +304,23 @@ export function createRenderToolsForLeader(opts: {
     },
   };
 
+  // ── publish_html ──────────────────────────────────
+  // A convenience tool that sanitizes + persists a temp file + appends an
+  // `html-artifact`. Lives in its own module to keep this file within the
+  // 400-line server budget; it shares this closure's `appendComponents`.
+  const publishHtmlDef = createPublishHtmlToolDef({
+    leaderSessionKey,
+    appendComponents,
+  });
+
   return {
-    toolDefs: [renderSetDef, renderPatchDef, renderAppendDef, renderRemoveDef],
+    toolDefs: [
+      renderSetDef,
+      renderPatchDef,
+      renderAppendDef,
+      renderRemoveDef,
+      publishHtmlDef,
+    ],
     renderState,
   };
 }

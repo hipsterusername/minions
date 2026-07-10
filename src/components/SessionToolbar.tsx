@@ -23,7 +23,7 @@ export type PermissionMode =
 export interface SessionToolbarProps {
   sessionKey: string | null;
   status: string;
-  /** Either a Claude alias ("sonnet") or a concrete harness model id ("gpt-5.5"). */
+  /** Either a Claude alias ("sonnet") or a concrete harness model id ("gpt-5.6-sol"). */
   model: string;
   permissionMode: PermissionMode;
   onInterrupt: () => void;
@@ -143,59 +143,15 @@ function providerMark(label: string): string {
   return label.slice(0, 2).toUpperCase();
 }
 
-interface ModelDisplayMeta {
-  family: string;
-  description: string;
-}
-
-function modelDisplayMeta(modelId: string, label: string, provider: string): ModelDisplayMeta {
-  const text = `${modelId} ${label}`.toLowerCase();
-  if (text.includes("opus")) {
-    return {
-      family: "Claude Opus",
-      description: "Highest capability for complex planning and review",
-    };
-  }
-  if (text.includes("fable")) {
-    return {
-      family: "Claude Fable",
-      description: "Frontier model for long, complex coding tasks",
-    };
-  }
-  if (text.includes("sonnet")) {
-    return {
-      family: "Claude Sonnet",
-      description: "Strong default for sustained coding work",
-    };
-  }
-  if (text.includes("haiku")) {
-    return {
-      family: "Claude Haiku",
-      description: "Lower-latency model for lighter turns",
-    };
-  }
-  if (text.includes("codex")) {
-    return {
-      family: "GPT-5 Codex",
-      description: "OpenAI model tuned for codebase work",
-    };
-  }
-  if (text.includes("gpt-5")) {
-    return {
-      family: "GPT-5",
-      description: "OpenAI general reasoning model",
-    };
-  }
-  if (provider === "Echo") {
-    return {
-      family: "Echo",
-      description: "Local echo harness for UI and flow checks",
-    };
-  }
-  return {
-    family: label,
-    description: "Available through this harness",
-  };
+/**
+ * Display order for provider tabs. OpenAI/GPT leads per product direction,
+ * Anthropic next, then everything else, with the Echo test harness last.
+ */
+function providerRank(label: string): number {
+  if (label === "OpenAI") return 0;
+  if (label === "Anthropic") return 1;
+  if (label === "Echo") return 9;
+  return 5;
 }
 
 function Dropdown<T extends string>({
@@ -399,7 +355,7 @@ function ModelSelectionPicker({
   open: boolean;
   onToggle: () => void;
 }) {
-  const groups =
+  const groups = (
     harnesses.length > 0
       ? harnesses.map((h) => ({
           harness: h.name,
@@ -416,7 +372,16 @@ function ModelSelectionPicker({
             locked: hasSession,
             source: activeHarness,
           },
-        ];
+        ]
+  )
+    .slice()
+    .sort((a, b) => providerRank(a.label) - providerRank(b.label));
+
+  // The provider whose models are currently listed. Provider selection drives
+  // the model list (provider → model → thinking), so the active provider is
+  // always the one backing the current harness. Fall back to the first tab.
+  const activeGroup =
+    groups.find((g) => g.harness === activeHarnessName) ?? groups[0];
 
   const activeHarnessLabel = providerLabel(activeHarness, activeHarnessName);
   const activeModelLabel = modelLabels[model] ?? model;
@@ -490,8 +455,10 @@ function ModelSelectionPicker({
             top: "calc(100% + 4px)",
             left: 0,
             zIndex: 100,
-            width: 310,
+            width: 300,
             maxWidth: "calc(100vw - 24px)",
+            maxHeight: "min(60vh, 420px)",
+            overflowY: "auto",
             background: "var(--bg-elevated)",
             border: "1px solid var(--border-default)",
             borderRadius: 6,
@@ -502,27 +469,65 @@ function ModelSelectionPicker({
             gap: 8,
           }}
         >
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {groups.map((group) => (
-              <div key={group.harness} style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 8,
-                    padding: "0 2px",
-                    fontSize: 9,
-                    color: "var(--text-muted)",
-                    fontFamily: "var(--font-mono)",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          {/* Level 1 — Provider. Selecting a provider commits its harness and
+              preselects that provider's default (first) model. */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            <div
+              style={{
+                fontSize: 9,
+                color: "var(--text-muted)",
+                fontFamily: "var(--font-mono)",
+                textTransform: "uppercase",
+                padding: "0 2px",
+              }}
+            >
+              Provider
+            </div>
+            <div
+              role="tablist"
+              aria-label="Provider"
+              style={{ display: "flex", flexWrap: "wrap", gap: 4 }}
+            >
+              {groups.map((group) => {
+                const isActiveProvider = group.harness === activeHarnessName;
+                const selectable = !hasSession || isActiveProvider;
+                return (
+                  <button
+                    key={group.harness}
+                    role="tab"
+                    aria-selected={isActiveProvider}
+                    disabled={!selectable}
+                    title={
+                      selectable
+                        ? group.label
+                        : `${group.label} — fixed for session`
+                    }
+                    onClick={() => {
+                      if (isActiveProvider || !selectable) return;
+                      const defaultModel = group.models[0]?.id;
+                      onHarnessChange?.(group.harness, defaultModel);
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    style={{
+                      ...pillStyle,
+                      gap: 6,
+                      borderColor: isActiveProvider
+                        ? "var(--accent)"
+                        : "var(--border-default)",
+                      background: isActiveProvider
+                        ? "var(--state-active)"
+                        : "var(--bg-primary)",
+                      color: isActiveProvider
+                        ? "var(--text-primary)"
+                        : "var(--text-secondary)",
+                      cursor: selectable ? "pointer" : "default",
+                      opacity: selectable ? 1 : 0.5,
+                    }}
+                  >
                     <span
                       style={{
-                        width: 18,
-                        height: 18,
+                        width: 16,
+                        height: 16,
                         borderRadius: 4,
                         border: "1px solid var(--border-default)",
                         background: "var(--bg-secondary)",
@@ -532,113 +537,109 @@ function ModelSelectionPicker({
                         justifyContent: "center",
                         fontSize: 8,
                         fontWeight: 700,
+                        flexShrink: 0,
                       }}
                     >
                       {providerMark(group.label)}
                     </span>
                     {group.label}
-                  </span>
-                  {group.locked && <span>fixed for session</span>}
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 4 }}>
-                  {group.models.map((option) => {
-                    const isActive =
-                      option.id === model && group.harness === activeHarnessName;
-                    const canSelect = !hasSession || group.harness === activeHarnessName;
-                    const meta = modelDisplayMeta(option.id, option.label, group.label);
-                    return (
-                      <button
-                        key={`${group.harness}:${option.id}`}
-                        onClick={() => {
-                          if (!canSelect) return;
-                          if (group.harness !== activeHarnessName) {
-                            onHarnessChange?.(group.harness, option.id);
-                            onSelectComplete();
-                            return;
-                          }
-                          onModelChange(option.id);
-                          onSelectComplete();
-                        }}
-                        onMouseDown={(e) => e.stopPropagation()}
-                        disabled={!canSelect}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          width: "100%",
-                          minHeight: 50,
-                          padding: "8px",
-                          borderRadius: 4,
-                          border: isActive
-                            ? "1px solid var(--accent)"
-                            : "1px solid var(--border-default)",
-                          background: isActive
-                            ? "var(--state-active)"
-                            : "var(--bg-primary)",
-                          color: isActive
-                            ? "var(--text-primary)"
-                            : "var(--text-secondary)",
-                          cursor: canSelect ? "pointer" : "default",
-                          opacity: canSelect ? 1 : 0.55,
-                          fontFamily: "var(--font-mono)",
-                          fontSize: 11,
-                          textAlign: "left",
-                        }}
-                      >
-                        <span
-                          style={{
-                            width: 4,
-                            alignSelf: "stretch",
-                            borderRadius: 2,
-                            background: modelColor(option.id) ?? "var(--accent)",
-                            flexShrink: 0,
-                          }}
-                        />
-                        <span
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 2,
-                            flex: 1,
-                            minWidth: 0,
-                          }}
-                        >
-                          <span
-                            style={{
-                              display: "flex",
-                              alignItems: "baseline",
-                              gap: 6,
-                              minWidth: 0,
-                            }}
-                          >
-                            <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>
-                              {option.label}
-                            </span>
-                            <span style={{ color: "var(--text-muted)", fontSize: 10 }}>
-                              {meta.family}
-                            </span>
-                          </span>
-                          <span
-                            style={{
-                              color: "var(--text-muted)",
-                              fontFamily: "var(--font-sans)",
-                              fontSize: 10,
-                              lineHeight: 1.25,
-                            }}
-                          >
-                            {meta.description}
-                          </span>
-                        </span>
-                        {isActive && (
-                          <span style={{ color: "var(--accent)", fontSize: 10 }}>✓</span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+                  </button>
+                );
+              })}
+            </div>
+            {hasSession && (
+              <div
+                style={{
+                  fontSize: 9,
+                  color: "var(--text-muted)",
+                  fontFamily: "var(--font-mono)",
+                  fontStyle: "italic",
+                  padding: "0 2px",
+                }}
+              >
+                fixed for session
               </div>
-            ))}
+            )}
           </div>
+
+          {/* Level 2 — Model. Scoped to the selected provider. */}
+          {activeGroup && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            <div
+              style={{
+                fontSize: 9,
+                color: "var(--text-muted)",
+                fontFamily: "var(--font-mono)",
+                textTransform: "uppercase",
+                padding: "0 2px",
+              }}
+            >
+              {activeGroup.label} Model
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 4 }}>
+              {activeGroup.models.map((option) => {
+                const isActive = option.id === model;
+                return (
+                  <button
+                    key={`${activeGroup.harness}:${option.id}`}
+                    onClick={() => {
+                      onModelChange(option.id);
+                      onSelectComplete();
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      width: "100%",
+                      padding: "6px 8px",
+                      borderRadius: 4,
+                      border: isActive
+                        ? "1px solid var(--accent)"
+                        : "1px solid var(--border-default)",
+                      background: isActive
+                        ? "var(--state-active)"
+                        : "var(--bg-primary)",
+                      color: isActive
+                        ? "var(--text-primary)"
+                        : "var(--text-secondary)",
+                      cursor: "pointer",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 11,
+                      textAlign: "left",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 3,
+                        alignSelf: "stretch",
+                        borderRadius: 2,
+                        background: modelColor(option.id) ?? "var(--accent)",
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span
+                      style={{
+                        color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
+                        fontWeight: isActive ? 600 : 500,
+                        flex: 1,
+                        minWidth: 0,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {option.label}
+                    </span>
+                    {isActive && (
+                      <span style={{ color: "var(--accent)", fontSize: 10 }}>✓</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          )}
 
           {showThinkingControls && thinkingConfig && onThinkingConfigChange && (
             <div

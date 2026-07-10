@@ -1,11 +1,8 @@
 /**
  * Singleton streamable-HTTP MCP server bound to loopback.
  *
- * Stands up a real MCP endpoint that any harness can be pointed at — not just
- * the harnesses that can call `createSdkMcpServer` in-process (Claude). Codex
- * runs as its own process and reaches our tools through HTTP, so this bridge
- * is the substrate Phase D depends on. The Claude harness keeps its existing
- * in-process `wrapTools()` path; migrating it onto the bridge is deferred.
+ * Codex runs as its own process and reaches Minions-internal tools through
+ * this endpoint. Claude keeps its in-process `wrapTools()` path.
  *
  * Wire protocol: streamable HTTP MCP per
  * https://modelcontextprotocol.io/specification/2025-06-18/basic/transports.

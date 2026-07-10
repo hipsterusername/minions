@@ -124,6 +124,52 @@ describe("SettingsMenu", () => {
     });
   });
 
+  it("emits merged settings when the system model mode changes", () => {
+    const onChange = vi.fn();
+    render(
+      <SettingsMenu
+        settings={{ defaultLeaderModel: "opus" }}
+        onSettingsChange={onChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+
+    const dialog = screen.getByRole("dialog", { name: /settings/i });
+    const selects = dialog.querySelectorAll("select");
+    // Order in the popover: permission mode, leader model, minion model, system model.
+    const systemModelSelect = selects[3]!;
+    expect(systemModelSelect.value).toBe("off");
+    fireEvent.change(systemModelSelect, { target: { value: "advisory" } });
+
+    expect(onChange).toHaveBeenCalledWith({
+      defaultLeaderModel: "opus",
+      systemModel: "advisory",
+    });
+  });
+
+  it("tidy layout is on by default and toggles off to tidyLayout:false", () => {
+    const onChange = vi.fn();
+    render(
+      <SettingsMenu
+        settings={{ defaultLeaderModel: "opus" }}
+        onSettingsChange={onChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+
+    const toggle = screen.getByRole("checkbox", { name: /tidy layout/i });
+    // Absent setting → treated as on.
+    expect((toggle as HTMLInputElement).checked).toBe(true);
+
+    fireEvent.click(toggle);
+    expect(onChange).toHaveBeenCalledWith({
+      defaultLeaderModel: "opus",
+      tidyLayout: false,
+    });
+  });
+
   it("stores harness and concrete model when leader model changes", () => {
     const onChange = vi.fn();
     renderWithHarnesses([CLAUDE_ENTRY, CODEX_ENTRY], {

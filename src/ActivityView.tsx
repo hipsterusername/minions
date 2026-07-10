@@ -4,13 +4,19 @@ import type { CanvasNode } from "./types.ts";
 import type { LeaderData } from "./nodes/leader/types.ts";
 import type { MobileSessionInfo } from "./mobile/mobile-selectors.ts";
 import {
-  groupSessionsByActivity,
+  groupSessionsForTriage,
   needsAttention,
   sessionDisplayTitle,
   sessionRoleLabel,
 } from "./mobile/mobile-selectors.ts";
 import { timeAgo } from "./nodes/leader-message-helpers.ts";
 import { SessionTranscript } from "./components/SessionTranscript.tsx";
+import { GitCompare } from "lucide-react";
+import {
+  SessionChangesPanel,
+  leaderHasReviewableChanges,
+} from "./ChangesView.tsx";
+import type { SocketSubscribe } from "./use-socket.ts";
 import "./activity.css";
 
 /**
@@ -46,12 +52,22 @@ export interface ActivityViewProps {
    * revealing it on the canvas.
    */
   onAttachToCanvas: (sessionKey: string) => void;
+  /** WS send — used by the inline worktree review panel. */
+  socketSend?: ((data: unknown) => void) | undefined;
+  /** WS subscribe — used by the inline worktree review panel. */
+  socketSubscribe?: SocketSubscribe | undefined;
+  /** Update a leader node's data (e.g. after a merge is requested). */
+  onUpdateNodeData: (nodeId: string, data: LeaderData) => void;
 }
 
 interface LeaderNodeRef {
   nodeId: string;
   data: LeaderData;
 }
+
+type ActivitySession = MobileSessionInfo & {
+  reviewableChanges?: boolean;
+};
 
 function formatCost(cost: number | undefined): string {
   if (cost == null || !Number.isFinite(cost)) return "$0.00";
@@ -76,15 +92,105 @@ function StatusPill({ status }: { status: string }) {
   return <span className={`act-pill act-pill--${status}`}>{status}</span>;
 }
 
-function SessionCard({
+function attentionKind(session: ActivitySession): "error" | "waiting" | "changes" {
+  if (session.status === "error") return "error";
+  if (session.status === "waiting" || session.pendingAttention === true) return "waiting";
+  return "changes";
+}
+
+function attentionReason(session: ActivitySession): string {
+  switch (attentionKind(session)) {
+    case "error":
+      return "errored";
+    case "waiting":
+      return "waiting for you";
+    case "changes":
+      return "changes ready";
+  }
+}
+
+function attentionAction(session: ActivitySession): string {
+  switch (attentionKind(session)) {
+    case "error":
+      return "Open";
+    case "waiting":
+      return "Reply";
+    case "changes":
+      return "Review";
+  }
+}
+
+function SessionTriageRow({
   session,
   selected,
   onCanvas,
   onSelect,
 }: {
-  session: MobileSessionInfo;
+  session: ActivitySession;
   selected: boolean;
   onCanvas: boolean;
+  onSelect: () => void;
+}) {
+  const kind = attentionKind(session);
+  const classes = [
+    "act-triage-row",
+    `act-triage-row--${kind}`,
+    selected && "act-triage-row--selected",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    <div className={classes}>
+      <button
+        className="act-triage-main"
+        type="button"
+        onClick={onSelect}
+        aria-pressed={selected}
+      >
+        <span className={`act-triage-icon act-triage-icon--${kind}`} aria-hidden>
+          {kind === "error" ? "!" : kind === "waiting" ? "?" : <GitCompare size={15} />}
+        </span>
+        <span className="act-triage-body">
+          <span className="act-triage-line">
+            <span className="act-triage-title">{sessionDisplayTitle(session)}</span>
+            <span className={`act-triage-reason act-triage-reason--${kind}`}>
+              {attentionReason(session)}
+            </span>
+          </span>
+          <span className="act-triage-sub">
+            {sessionRoleLabel(session).toUpperCase()} · {formatCost(session.totalCost)} ·{" "}
+            {session.turns ?? 0} turns
+            {session.lastActivity ? ` · ${session.lastActivity}` : ""}
+            {session.lastActivityAt ? ` · ${timeAgo(session.lastActivityAt)}` : ""}
+          </span>
+        </span>
+      </button>
+      <span className="act-triage-actions">
+        <button className="act-mini-btn act-mini-btn--primary" type="button" onClick={onSelect}>
+          {attentionAction(session)}
+        </button>
+        {onCanvas && (
+          <button className="act-mini-btn" type="button" onClick={onSelect}>
+            Open
+          </button>
+        )}
+      </span>
+    </div>
+  );
+}
+
+function SessionCard({
+  session,
+  selected,
+  onCanvas,
+  hasChanges,
+  onSelect,
+}: {
+  session: ActivitySession;
+  selected: boolean;
+  onCanvas: boolean;
+  hasChanges: boolean;
   onSelect: () => void;
 }) {
   const classes = [
@@ -111,7 +217,14 @@ function SessionCard({
       </span>
       <span className="act-card-foot">
         {session.lastActivityAt ? <span>{timeAgo(session.lastActivityAt)}</span> : <span />}
-        {onCanvas && <span className="act-card-oncanvas">on canvas</span>}
+        <span className="act-card-foot-tags">
+          {hasChanges && (
+            <span className="act-card-changes">
+              <GitCompare size={9} strokeWidth={2.5} aria-hidden /> changes
+            </span>
+          )}
+          {onCanvas && <span className="act-card-oncanvas">on canvas</span>}
+        </span>
       </span>
     </button>
   );
@@ -125,6 +238,9 @@ function Inspector({
   onExpandFullscreen,
   onStopSession,
   onAttachToCanvas,
+  socketSend,
+  socketSubscribe,
+  onUpdateNodeData,
 }: {
   session: MobileSessionInfo;
   leader: LeaderNodeRef | undefined;
@@ -133,8 +249,12 @@ function Inspector({
   onExpandFullscreen: (nodeId: string) => void;
   onStopSession: (sessionKey: string) => void;
   onAttachToCanvas: (sessionKey: string) => void;
+  socketSend?: ((data: unknown) => void) | undefined;
+  socketSubscribe?: SocketSubscribe | undefined;
+  onUpdateNodeData: (nodeId: string, data: LeaderData) => void;
 }) {
   const isRunning = session.status === "running" || session.status === "creating";
+  const showChanges = !!leader && leaderHasReviewableChanges(leader.data);
 
   return (
     <aside className="act-inspector" aria-label="Session details">
@@ -206,6 +326,23 @@ function Inspector({
         </button>
       </div>
 
+      {showChanges && leader && (
+        <div className="act-inspector-section">
+          <div className="act-inspector-label">
+            <GitCompare size={12} strokeWidth={2} aria-hidden /> Changes
+          </div>
+          <SessionChangesPanel
+            nodeId={leader.nodeId}
+            sessionKey={session.sessionKey}
+            data={leader.data}
+            socketSend={socketSend}
+            socketSubscribe={socketSubscribe}
+            onUpdateNodeData={onUpdateNodeData}
+            onOpenInCanvas={onOpenInCanvas}
+          />
+        </div>
+      )}
+
       <div className="act-inspector-section">
         <div className="act-inspector-label">Conversation</div>
         {leader ? (
@@ -235,6 +372,9 @@ export function ActivityView({
   onExpandFullscreen,
   onStopSession,
   onAttachToCanvas,
+  socketSend,
+  socketSubscribe,
+  onUpdateNodeData,
 }: ActivityViewProps) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
@@ -243,21 +383,31 @@ export function ActivityView({
     () => sessions.filter((session) => session.role !== "minion"),
     [sessions],
   );
-  const sections = useMemo(() => groupSessionsByActivity(visibleSessions), [visibleSessions]);
   const leaderIndex = useMemo(() => buildLeaderNodeIndex(nodes), [nodes]);
+  const activitySessions = useMemo<ActivitySession[]>(
+    () =>
+      visibleSessions.map((session) => {
+        const leader = leaderIndex.get(session.sessionKey);
+        const reviewableChanges = !!leader && leaderHasReviewableChanges(leader.data);
+        if (session.reviewableChanges === reviewableChanges) return session;
+        return { ...session, reviewableChanges };
+      }),
+    [leaderIndex, visibleSessions],
+  );
+  const triage = useMemo(() => groupSessionsForTriage(activitySessions), [activitySessions]);
 
   const selectedSession = useMemo(
-    () => visibleSessions.find((s) => s.sessionKey === selectedKey) ?? null,
-    [visibleSessions, selectedKey],
+    () => activitySessions.find((s) => s.sessionKey === selectedKey) ?? null,
+    [activitySessions, selectedKey],
   );
 
   // If the selected session disappears (cleared/ended off the list), drop the
   // inspector rather than leaving a dangling selection.
   useEffect(() => {
-    if (selectedKey && !visibleSessions.some((s) => s.sessionKey === selectedKey)) {
+    if (selectedKey && !activitySessions.some((s) => s.sessionKey === selectedKey)) {
       setSelectedKey(null);
     }
-  }, [selectedKey, visibleSessions]);
+  }, [activitySessions, selectedKey]);
 
   return (
     <div className="act-root">
@@ -305,25 +455,48 @@ export function ActivityView({
             </button>
           </div>
         ) : (
-          sections.map((section) => (
-            <section className="act-section" key={section.id} aria-label={section.title}>
-              <h2 className="act-section-head">
-                <span>{section.title}</span>
-                <span className="act-section-count">{section.sessions.length}</span>
-              </h2>
-              <div className="act-grid">
-                {section.sessions.map((session) => (
-                  <SessionCard
-                    key={session.sessionKey}
-                    session={session}
-                    selected={session.sessionKey === selectedKey}
-                    onCanvas={leaderIndex.has(session.sessionKey)}
-                    onSelect={() => setSelectedKey(session.sessionKey)}
-                  />
-                ))}
-              </div>
-            </section>
-          ))
+          <>
+            {triage.needsYou.length > 0 && (
+              <section className="act-section act-section--triage" aria-label="Needs you">
+                <h2 className="act-section-head">
+                  <span>Needs you</span>
+                  <span className="act-section-count">{triage.needsYou.length}</span>
+                </h2>
+                <div className="act-triage-list">
+                  {triage.needsYou.map((session) => (
+                    <SessionTriageRow
+                      key={session.sessionKey}
+                      session={session}
+                      selected={session.sessionKey === selectedKey}
+                      onCanvas={leaderIndex.has(session.sessionKey)}
+                      onSelect={() => setSelectedKey(session.sessionKey)}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {triage.sections.map((section) => (
+              <section className="act-section" key={section.id} aria-label={section.title}>
+                <h2 className="act-section-head">
+                  <span>{section.title}</span>
+                  <span className="act-section-count">{section.sessions.length}</span>
+                </h2>
+                <div className="act-grid">
+                  {section.sessions.map((session) => (
+                    <SessionCard
+                      key={session.sessionKey}
+                      session={session}
+                      selected={session.sessionKey === selectedKey}
+                      onCanvas={leaderIndex.has(session.sessionKey)}
+                      hasChanges={session.reviewableChanges === true}
+                      onSelect={() => setSelectedKey(session.sessionKey)}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+          </>
         )}
       </div>
 
@@ -336,6 +509,9 @@ export function ActivityView({
           onExpandFullscreen={onExpandFullscreen}
           onStopSession={onStopSession}
           onAttachToCanvas={onAttachToCanvas}
+          socketSend={socketSend}
+          socketSubscribe={socketSubscribe}
+          onUpdateNodeData={onUpdateNodeData}
         />
       )}
     </div>

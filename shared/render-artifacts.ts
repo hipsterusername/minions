@@ -54,6 +54,43 @@ export const filePreviewComponentSchema = z.object({
 export type FilePreviewComponent = z.infer<typeof filePreviewComponentSchema>;
 export type FilePreviewSource = z.infer<typeof filePreviewSourceSchema>;
 
+// ── HTML artifact ──────────────────────────────────────────
+
+/**
+ * A non-functional, visualization-only HTML artifact.
+ *
+ * The `html` field is ALWAYS sanitized on the server (see
+ * `server/html-sanitize.ts`) before it is broadcast — no unsanitized HTML
+ * ever reaches a client. On the client it is rendered inside an
+ * empty-`sandbox` iframe (no scripts, no same-origin, no forms, no
+ * top-navigation) as defense-in-depth. It is intended for static
+ * visualizations only: scripts, forms, event handlers, external resource
+ * loads, and navigation are all stripped and/or blocked.
+ */
+export const htmlArtifactComponentSchema = z.object({
+  id: z.string(),
+  type: z.literal("html-artifact"),
+  /**
+   * Sanitized, visualization-only HTML. The server rewrites this field
+   * through the sanitizer before broadcast; the client renders it via
+   * `<iframe sandbox srcdoc={html}>`.
+   */
+  html: z.string(),
+  /** Optional heading shown above the preview. */
+  title: z.string().optional(),
+  /** Preview height in px. Defaults to 240 on the client. */
+  height: z.number().optional(),
+  /**
+   * Opaque id of the persisted temp artifact file (session-scoped). Present
+   * when the artifact was created via `publish_html`; used for bookkeeping
+   * and lifecycle cleanup, not for rendering.
+   */
+  artifactId: z.string().optional(),
+  span: spanSchema.optional(),
+});
+
+export type HtmlArtifactComponent = z.infer<typeof htmlArtifactComponentSchema>;
+
 // ── Markdown helpers ───────────────────────────────────────
 
 /**
@@ -79,4 +116,15 @@ export function formatFilePreview(c: FilePreviewComponent): string {
   const size = c.source.content.length;
   const type = c.source.mime ?? "unknown type";
   return `File preview: ${name} (${size} bytes, ${type})`;
+}
+
+/**
+ * Serialize an html-artifact component as a compact markdown summary.
+ * The raw HTML is intentionally NOT inlined — it is a visualization surface,
+ * not text — so we emit a one-line descriptor instead.
+ */
+export function formatHtmlArtifact(c: HtmlArtifactComponent): string {
+  const name = c.title ?? "HTML artifact";
+  const size = c.html.length;
+  return `HTML artifact: ${name} (${size} bytes, visualization only)`;
 }

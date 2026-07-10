@@ -1,5 +1,5 @@
 /**
- * Component tests for ImageRenderer and FilePreviewRenderer.
+ * Component tests for ImageRenderer, HtmlArtifactRenderer, and FilePreviewRenderer.
  *
  * Tests behavior at the component boundary: DOM structure, user interactions,
  * and edge-case rendering. No snapshot tests — we query by role/text.
@@ -8,8 +8,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, beforeAll } from "vitest";
 
-import { ImageRenderer, FilePreviewRenderer } from "./ArtifactComponents.tsx";
-import type { ImageComponent, FilePreviewComponent } from "../../../shared/render-artifacts.ts";
+import { ImageRenderer, HtmlArtifactRenderer, FilePreviewRenderer } from "./ArtifactComponents.tsx";
+import type { ImageComponent, FilePreviewComponent, HtmlArtifactComponent } from "../../../shared/render-dsl.ts";
 
 // jsdom doesn't ship ResizeObserver; provide a no-op so any child that
 // uses it doesn't blow up.
@@ -87,6 +87,86 @@ describe("ImageRenderer", () => {
     fireEvent.click(dialog);
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
+
+// ── HtmlArtifactRenderer ─────────────────────────────────
+
+describe("HtmlArtifactRenderer", () => {
+  const html = "<!doctype html><html><head><title>Artifact</title></head><body><main>MARKER_CONTENT</main></body></html>";
+  const baseArtifact: HtmlArtifactComponent = {
+    id: "html-1",
+    type: "html-artifact",
+    html,
+    title: "Report preview",
+    height: 320,
+  };
+
+  function getIframes(): HTMLIFrameElement[] {
+    return Array.from(document.querySelectorAll("iframe"));
+  }
+
+  it("renders preview HTML through iframe srcdoc only", () => {
+    render(<HtmlArtifactRenderer c={baseArtifact} />);
+
+    const iframe = getIframes()[0];
+    expect(iframe).toBeDefined();
+    expect(iframe?.getAttribute("srcdoc")).toContain("MARKER_CONTENT");
+    expect(iframe?.getAttribute("sandbox")).toBe("");
+    expect(iframe).toHaveAttribute("referrerPolicy", "no-referrer");
+  });
+
+  it("does not render artifact HTML as raw DOM text outside the iframe", () => {
+    render(<HtmlArtifactRenderer c={baseArtifact} />);
+
+    expect(document.body.textContent).not.toContain("MARKER_CONTENT");
+    const iframesWithMarker = getIframes().filter((iframe) => iframe.getAttribute("srcdoc")?.includes("MARKER_CONTENT") === true);
+    expect(iframesWithMarker).toHaveLength(1);
+  });
+
+  it("opens a sandboxed modal iframe and closes it with Escape", () => {
+    render(<HtmlArtifactRenderer c={baseArtifact} />);
+    expect(getIframes()).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /expand/i }));
+
+    expect(screen.getByRole("dialog", { name: /report preview lightbox/i })).toBeInTheDocument();
+    const modalIframes = getIframes();
+    expect(modalIframes).toHaveLength(2);
+    expect(modalIframes[1]?.getAttribute("srcdoc")).toContain("MARKER_CONTENT");
+    expect(modalIframes[1]?.getAttribute("sandbox")).toBe("");
+    expect(modalIframes[1]).toHaveAttribute("referrerPolicy", "no-referrer");
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(getIframes()).toHaveLength(1);
+  });
+
+  it("closes the modal when the backdrop is clicked", () => {
+    render(<HtmlArtifactRenderer c={baseArtifact} />);
+    fireEvent.click(screen.getByRole("button", { name: /expand/i }));
+    const dialog = screen.getByRole("dialog", { name: /report preview lightbox/i });
+
+    fireEvent.click(dialog);
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("portals the expand modal to document.body (escapes the node subtree)", () => {
+    // The dashboard renders inside a canvas node whose ancestors are
+    // CSS-transformed for pan/zoom. A position:fixed element nested in a
+    // transformed ancestor is positioned relative to that ancestor, not the
+    // viewport — so the modal must portal to document.body to take over the
+    // full app screen instead of popping over / interacting with nodes.
+    const { container } = render(<HtmlArtifactRenderer c={baseArtifact} />);
+    fireEvent.click(screen.getByRole("button", { name: /expand/i }));
+
+    const dialog = screen.getByRole("dialog", { name: /report preview lightbox/i });
+    // Rendered outside the component's own container subtree…
+    expect(container.contains(dialog)).toBe(false);
+    // …and mounted directly under document.body.
+    expect(dialog.parentElement).toBe(document.body);
   });
 });
 

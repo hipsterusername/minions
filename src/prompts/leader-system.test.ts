@@ -54,6 +54,28 @@ describe("buildBaseLeaderPrompt", () => {
     expect(buildBaseLeaderPrompt(CLAUDE_BUILT_IN_TOOLS)).not.toContain("Approval Workflow");
   });
 
+  it("has a dedicated section teaching the form as the way to ask the user a question", () => {
+    expect(LEADER_SYSTEM_PROMPT).toContain("## Asking the User a Question");
+    // The form component must be named as the mechanism.
+    expect(LEADER_SYSTEM_PROMPT).toMatch(/render a `form`/i);
+  });
+
+  it("explicitly disclaims a native AskUserQuestion tool so Opus agents stop reaching for it", () => {
+    // The whole point of the fix: tell agents the tool they're trained to
+    // reach for does not exist here, and point them at the form instead.
+    expect(LEADER_SYSTEM_PROMPT).toContain("AskUserQuestion");
+    expect(LEADER_SYSTEM_PROMPT).toMatch(/no `AskUserQuestion` tool/i);
+  });
+
+  it("surfaces the ask-user guidance from the capabilities list too", () => {
+    // A reader skimming only the capabilities section should still learn the
+    // form is how you ask the user — the guidance must not be buried.
+    const capabilitiesIdx = LEADER_SYSTEM_PROMPT.indexOf("## Your Capabilities");
+    const renderIdx = LEADER_SYSTEM_PROMPT.indexOf("## Render Dashboard");
+    const capabilitiesBlock = LEADER_SYSTEM_PROMPT.slice(capabilitiesIdx, renderIdx);
+    expect(capabilitiesBlock).toMatch(/ask the \*user\* a question/i);
+  });
+
   it("Wait & Continue section explains early auto-wake and recommends generous durations", () => {
     // Must explain that the system wakes the leader early when all minion tasks finish.
     expect(LEADER_SYSTEM_PROMPT).toMatch(/auto-wake|wakes you early/i);

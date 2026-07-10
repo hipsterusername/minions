@@ -4,17 +4,9 @@
  * Wraps the `query()` loop from `@anthropic-ai/claude-agent-sdk` and translates
  * its output to the normalized event stream defined in server/harness/types.ts.
  *
- * This is the ONLY file outside server/harness/claude/ that may import from
- * `@anthropic-ai/claude-agent-sdk`. The architecture test added in Phase 2
- * enforces this boundary.
- *
- * Phase 1: ClaudeHarness exists alongside the existing session-host.ts loop.
- *   Neither session-host.ts nor any caller uses this class yet.
- *   It is exercised only by translate.test.ts and tools.test.ts.
- *
- * Phase 2: session-host.ts will switch over to this harness.
- *
- * See docs/model-agnosticism-spec.md §3.2 and Phase 1.
+ * This is the registered Claude implementation used by SessionHost. Imports
+ * of `@anthropic-ai/claude-agent-sdk` stay inside this harness subtree; an
+ * architecture test enforces that boundary.
  */
 
 import { query } from "@anthropic-ai/claude-agent-sdk";

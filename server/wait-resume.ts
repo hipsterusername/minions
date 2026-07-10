@@ -8,6 +8,9 @@ import {
   cancelCoalescedWake,
   requestCoalescedWake,
 } from "./wake-coalescer.ts";
+import { serverLogger } from "./logging.ts";
+
+const log = serverLogger.child("wait-resume");
 
 export interface WaitResumeRequest {
   opts: StartSessionOptions;
@@ -33,11 +36,11 @@ export function pauseActiveRunForWait(host: SessionHost): void {
     if (!control) return;
     try {
       if (control.interrupt) void control.interrupt().catch((err: unknown) => {
-        console.warn(`[wait] Failed to interrupt ${host.id}:`, err);
+        log.warn("interrupt_failed", { sessionKey: host.id, error: err });
       });
       else control.abort();
     } catch (err) {
-      console.warn(`[wait] Failed to pause ${host.id}:`, err);
+      log.warn("pause_failed", { sessionKey: host.id, error: err });
     }
   }, 0);
   timer.unref?.();

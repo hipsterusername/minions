@@ -1,0 +1,33 @@
+id: flow.create_session_worktree
+type: flow
+name: Create Session Worktree
+summary: A leader session with worktree isolation creates or reuses a canvas branch under .canvas-worktrees before the harness starts and follow-up turns create a fresh worktree after merge or discard.
+capabilities:
+  - capability.worktree_approval
+constraints: []
+decisions:
+  - decision.worktree_isolation
+  - decision.graph_as_bus
+risks:
+  - risk.parallel_work_conflicts
+  - risk.session_state_drift
+suggested_files:
+  - server/session-host-run.ts
+  - server/session-host.ts
+  - server/commands/send-message.ts
+  - server/worktree-create.ts
+  - server/worktree.ts
+suggested_tests:
+  - server/worktree-create.test.ts
+  - server/commands/send-message.test.ts
+  - server/session-host.test.ts
+  - server/session-host-run.test.ts
+steps:
+  - SessionHost.start records worktreeIsolation from create_session or preserves it on resume.
+  - ensureWorktree inherits a parent worktree for minions reuses an existing leader worktree or checks isGitRepo before creating a new one.
+  - createWorktree makes .canvas-worktrees/<session> creates branch canvas/<session> and returns WorktreeInfo with lifecycle active.
+  - The host cwd changes to the worktree path and worktree_created is emitted on the bus before harness.start runs.
+  - If initial creation fails worktree_failed is emitted isolation is disabled for that run and the original cwd is used.
+freshness:
+  class: code_coupled
+risk: medium

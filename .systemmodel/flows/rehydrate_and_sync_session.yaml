@@ -1,0 +1,37 @@
+id: flow.rehydrate_and_sync_session
+type: flow
+name: rehydrate_and_sync_session
+summary: Restores persisted session shells at server boot and lets clients recover status, buffered events, task state, render state, worktree metadata, and harness controls through sync_session.
+capabilities:
+  - capability.canvas_sessions
+constraints:
+  - constraint.bus_only_broadcasts
+  - constraint.no_cross_tree_imports
+decisions:
+  - decision.graph_as_bus
+  - decision.relevance_scoped_context
+risks:
+  - risk.session_state_drift
+  - risk.render_schema_drift
+suggested_files:
+  - server/session-registry.ts
+  - server/commands/sync-session.ts
+  - src/session-stream.ts
+  - src/use-session-stream.ts
+  - src/nodes/LeaderNode.tsx
+  - src/nodes/ClaudeSessionNode.tsx
+suggested_tests:
+  - server/session-registry.test.ts
+  - server/commands/sync-session.test.ts
+  - src/session-stream.test.ts
+  - src/nodes/LeaderNode.test.tsx
+  - src/nodes/ClaudeSessionNode.test.tsx
+steps:
+  - SessionRegistry.hydrateFromDb creates stopped SessionHost instances from persisted rows and restores sessionId role model usage totals worktree info harness name task state render state and eventBuffer.
+  - Rehydrated running starting or blocked task records are converted through task lifecycle rehydrated_orphan handling when registry deps are available.
+  - sync_session looks up the host and unicasts found false when missing, otherwise it returns host status ids cwd costs usage errors model permission mode worktree approval task plan render state task name role harness capabilities active minions and buffered events.
+  - sync_session re emits render_update when a restored render dashboard exists so render subscribers can rebuild after reconnect.
+  - Frontend stream reducers rebuild messages cost turns status error and streaming buffers from sync_response, while LeaderNode layers worktree approval task harness and full error fields back onto node state.
+freshness:
+  class: code_coupled
+risk: high

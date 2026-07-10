@@ -9,7 +9,9 @@ import {
 
 export interface SystemModelUsageHit {
   objectId: string;
-  workPacketId: string;
+  source: "packet" | "query";
+  workPacketId?: string;
+  sessionKey?: string;
   usedAt: number;
 }
 
@@ -21,11 +23,11 @@ export function recordSystemModelUsage(
   const db = openProjectDb(projectPath);
   const stmt = db.prepare(
     `INSERT OR REPLACE INTO system_model_usage
-      (object_id, work_packet_id, used_at)
-     VALUES (@objectId, @workPacketId, @usedAt)`,
+      (object_id, work_packet_id, source, session_key, used_at)
+     VALUES (@objectId, @workPacketId, @source, @sessionKey, @usedAt)`,
   );
   const tx = db.transaction((rows: SystemModelUsageHit[]) => {
-    for (const row of rows) stmt.run(row);
+    for (const row of rows) stmt.run(normalizeUsageHit(row));
   });
   tx(hits);
 }
@@ -79,10 +81,10 @@ export function saveWorkPacket(
     if (usage.length > 0) {
       const stmt = db.prepare(
         `INSERT OR REPLACE INTO system_model_usage
-          (object_id, work_packet_id, used_at)
-         VALUES (@objectId, @workPacketId, @usedAt)`,
+          (object_id, work_packet_id, source, session_key, used_at)
+         VALUES (@objectId, @workPacketId, @source, @sessionKey, @usedAt)`,
       );
-      for (const row of usage) stmt.run(row);
+      for (const row of usage) stmt.run(normalizeUsageHit(row));
     }
   });
   tx();
@@ -274,5 +276,21 @@ function usageHitsForPacket(packet: WorkPacket, usedAt: number): SystemModelUsag
     ...packet.scope.constraints,
     ...packet.scope.decisions,
     ...packet.scope.risks,
-  ].map((objectId) => ({ objectId, workPacketId: packet.id, usedAt }));
+  ].map((objectId) => ({ objectId, source: "packet", workPacketId: packet.id, usedAt }));
+}
+
+function normalizeUsageHit(hit: SystemModelUsageHit): {
+  objectId: string;
+  workPacketId: string;
+  source: SystemModelUsageHit["source"];
+  sessionKey: string;
+  usedAt: number;
+} {
+  return {
+    objectId: hit.objectId,
+    workPacketId: hit.source === "packet" ? hit.workPacketId ?? "" : "",
+    source: hit.source,
+    sessionKey: hit.sessionKey ?? "",
+    usedAt: hit.usedAt,
+  };
 }

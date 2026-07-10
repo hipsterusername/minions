@@ -7,7 +7,9 @@ import { ResizeHandle } from "../components/ResizeHandle.tsx";
 import { MarkdownPreview } from "../components/MarkdownPreview.tsx";
 import { copyText } from "../components/CopyButton.tsx";
 import { getAuthToken } from "../api.ts";
+import { browserLogger } from "../logging.ts";
 
+const log = browserLogger.child("file-viewer-node");
 
 // ── Graph contract ─────────────────────────────────────
 
@@ -128,6 +130,8 @@ function FileViewerNodeRenderer({
   node,
   projectPath,
   onResize,
+  onResizeStart,
+  onResizeEnd,
   onUpdateData,
 }: NodeRenderProps) {
   const data = node.data as FileViewerData;
@@ -159,7 +163,7 @@ function FileViewerNodeRenderer({
         copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
       })
       .catch((err: unknown) => {
-        console.warn("[FileViewerNode] copy failed:", err);
+        log.warn("copy_failed", { error: err });
       });
   }, [content]);
 
@@ -484,6 +488,8 @@ function FileViewerNodeRenderer({
           minWidth={280}
           minHeight={200}
           onResize={onResize}
+          {...(onResizeStart ? { onResizeStart } : {})}
+          {...(onResizeEnd ? { onResizeEnd } : {})}
         />
       )}
     </div>

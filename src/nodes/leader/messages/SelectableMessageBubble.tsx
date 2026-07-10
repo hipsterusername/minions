@@ -16,6 +16,9 @@ import {
   MessageSelectionButton,
   MessageSelectionGroup,
 } from "./MessageSelection.tsx";
+import { browserLogger } from "../../../logging.ts";
+
+const log = browserLogger.child("selectable-message-bubble");
 
 /**
  * Returns true if the selection state relevant to `messageId` changed
@@ -125,7 +128,7 @@ export const SelectableMessageBubble = memo(
           setTimeout(() => setCopied(false), 1500);
         })
         .catch((err: unknown) => {
-          console.warn("[SelectableMessageBubble] copy failed:", err);
+          log.warn("copy_failed", { error: err });
         });
     }, []);
 

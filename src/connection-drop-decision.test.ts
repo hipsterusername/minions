@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import { decideConnectionDropAction } from "./connection-drop-decision.ts";
 import type { PortInfo } from "./components/PortDot.tsx";
 
+// The dashboard is embedded in the Leader now, so its context-out port lives
+// on a leader node (the standalone render node was retired).
 const renderContextOutput: PortInfo = {
-  nodeId: "render-1",
+  nodeId: "leader-dash-1",
   portId: "context-out",
-  nodeType: "render",
+  nodeType: "leader",
   direction: "output",
   protocol: "context",
 };
@@ -58,7 +60,7 @@ describe("decideConnectionDropAction", () => {
     ).toEqual({ kind: "snap-connect", snap: leaderContextInput });
   });
 
-  it("shows the dashboard menu only for render+context output dropped on empty canvas", () => {
+  it("shows the dashboard menu only for leader+context output dropped on empty canvas", () => {
     expect(
       decideConnectionDropAction({
         source: renderContextOutput,

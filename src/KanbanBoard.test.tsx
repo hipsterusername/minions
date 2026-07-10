@@ -48,11 +48,16 @@ function makeBoard(cards: KanbanCard[] = []): KanbanBoardType {
   return { columns: DEFAULT_COLUMNS, cards };
 }
 
-function makeLeaderNode(sessionKey: string, messages: DisplayMessage[] = []): CanvasNode {
+function makeLeaderNode(
+  sessionKey: string,
+  messages: DisplayMessage[] = [],
+  renderState?: RenderState,
+): CanvasNode {
   const leaderData: LeaderData = {
     sessionKey,
     status: "running",
     messages,
+    ...(renderState ? { renderState } : {}),
     streamingText: "",
     totalCost: 0,
     turns: 0,
@@ -75,20 +80,6 @@ function makeLeaderNode(sessionKey: string, messages: DisplayMessage[] = []): Ca
     position: { x: 0, y: 0 },
     size: { width: 400, height: 300 },
     data: leaderData as unknown as Record<string, unknown>,
-  };
-}
-
-function makeRenderNode(leaderSessionKey: string, renderState: RenderState): CanvasNode {
-  return {
-    id: "render-" + leaderSessionKey,
-    type: "render",
-    position: { x: 0, y: 0 },
-    size: { width: 400, height: 300 },
-    data: {
-      leaderSessionKey,
-      leaderId: "leader-" + leaderSessionKey,
-      renderState,
-    } as unknown as Record<string, unknown>,
   };
 }
 
@@ -354,6 +345,27 @@ describe("KanbanBoard — column counts", () => {
 });
 
 describe("KanbanBoard inspector — chat tool filtering", () => {
+  it("exposes an accessible overlay control that closes the inspector", () => {
+    const card = makeCard({
+      id: "card-overlay",
+      title: "Overlay card",
+      columnId: "in-progress",
+    });
+    render(<Harness initial={makeBoard([card])} />);
+
+    const backdrop = screen.getByLabelText("Close inspector overlay");
+    expect(backdrop).toHaveAttribute("aria-hidden", "true");
+    expect(backdrop).toHaveAttribute("tabindex", "-1");
+
+    fireEvent.click(screen.getByText("Overlay card"));
+    expect(backdrop).toHaveAttribute("aria-hidden", "false");
+    expect(backdrop).toHaveAttribute("tabindex", "0");
+
+    fireEvent.click(backdrop);
+    expect(backdrop).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByText(/select a card to inspect/i)).toBeInTheDocument();
+  });
+
   it("hides pure-orchestration tool calls (set_task_name, render_*, etc.)", () => {
     const sk = "sess-1";
     const messages: DisplayMessage[] = [
@@ -427,7 +439,7 @@ describe("KanbanBoard inspector — chat tool filtering", () => {
 });
 
 describe("KanbanBoard inspector — Dashboard tab", () => {
-  it("shows a Dashboard tab and renders the paired RenderNode's components", () => {
+  it("shows a Dashboard tab and renders the leader's embedded dashboard components", () => {
     const sk = "sess-dash-1";
     const renderState: RenderState = {
       layout: { columns: 2, gap: 12 },
@@ -450,7 +462,7 @@ describe("KanbanBoard inspector — Dashboard tab", () => {
     render(
       <Harness
         initial={makeBoard([card])}
-        nodes={[makeLeaderNode(sk), makeRenderNode(sk, renderState)]}
+        nodes={[makeLeaderNode(sk, [], renderState)]}
       />,
     );
 

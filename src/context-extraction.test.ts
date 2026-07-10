@@ -17,7 +17,7 @@ import "./nodes/ImageNode.tsx";
 import "./nodes/MarkdownNode.tsx";
 import "./nodes/FileViewerNode.tsx";
 import "./nodes/FolderNode.tsx";
-import "./nodes/RenderNode.tsx";
+import "./nodes/LeaderNode.tsx";
 
 import { extractContextItem } from "./context-extraction.ts";
 import type { CanvasNode } from "./types.ts";
@@ -150,11 +150,10 @@ describe("extractContextItem", () => {
     expect(item?.attachments).toBeUndefined();
   });
 
-  it("flattens a render (dashboard) node so its components flow as Leader context", () => {
+  it("flattens a leader's embedded dashboard so its components flow as context", () => {
     const item = extractContextItem(
-      node("render", {
-        leaderSessionKey: "abc",
-        leaderId: "leader-1",
+      node("leader", {
+        sessionKey: "abc",
         renderState: {
           layout: { columns: 2, gap: 12, title: "Build Status" },
           components: [
@@ -172,19 +171,18 @@ describe("extractContextItem", () => {
       }),
     );
     expect(item).not.toBeNull();
-    expect(item!.nodeType).toBe("render");
+    expect(item!.nodeType).toBe("leader");
     expect(item!.content).toContain("# Build Status");
     expect(item!.content).toContain("**Tests**: 42");
     expect(item!.content).toContain("- [x] lint");
     expect(item!.content).toContain("- [ ] typecheck");
   });
 
-  it("returns null for a render node with no components yet", () => {
+  it("returns null for a leader whose embedded dashboard has no components yet", () => {
     expect(
       extractContextItem(
-        node("render", {
-          leaderSessionKey: null,
-          leaderId: null,
+        node("leader", {
+          sessionKey: null,
           renderState: { layout: { columns: 2, gap: 12 }, components: [] },
         }),
       ),

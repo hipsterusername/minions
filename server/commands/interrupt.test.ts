@@ -7,7 +7,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { interrupt, interruptSession } from "./interrupt.ts";
-import { setup, cmd, fakeRunControl } from "./test-harness.ts";
+import { setup, cmd, fakeRunControl } from "../../tests/support/server-command-harness.ts";
 
 describe.each([
   { name: "interrupt", handler: interrupt },

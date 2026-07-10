@@ -49,7 +49,7 @@ export function decideConnectionDropAction(
   if (!opts.compatibleLeaderInputPortId) {
     return { kind: "noop" };
   }
-  if (opts.source.nodeType === "render" && opts.source.protocol === "context") {
+  if (opts.source.nodeType === "leader" && opts.source.protocol === "context") {
     return { kind: "show-dashboard-menu" };
   }
   return { kind: "create-default-leader" };

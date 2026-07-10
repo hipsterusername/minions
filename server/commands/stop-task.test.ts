@@ -6,7 +6,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { stopTask } from "./stop-task.ts";
-import { setup, cmd, fakeRunControl } from "./test-harness.ts";
+import { setup, cmd, fakeRunControl } from "../../tests/support/server-command-harness.ts";
 
 describe("stop_task", () => {
   it("calls runControl.stopTask with the supplied taskId", async () => {

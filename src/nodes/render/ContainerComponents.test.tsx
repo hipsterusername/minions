@@ -2,7 +2,7 @@
  * Component tests for SectionRenderer and TabsRenderer.
  *
  * Tests verify:
- *   - open/close toggle and defaultOpen seeding (SectionRenderer)
+ *   - open/close toggle, defaultOpen seeding, and global expand/collapse (SectionRenderer)
  *   - tab switching, activeTabId seeding, renderChild call counts (TabsRenderer)
  *   - ARIA attributes (aria-expanded, role=tablist, aria-selected)
  *   - keyboard arrow-key navigation (TabsRenderer)
@@ -47,12 +47,26 @@ describe("SectionRenderer", () => {
     expect(screen.getByText("My Section")).toBeInTheDocument();
   });
 
-  it("renders children by default (defaultOpen omitted → true)", () => {
+  it("does not render children by default (defaultOpen omitted -> false)", () => {
+    const renderChild = makeRenderChild();
+    const c: SectionComponent = {
+      id: "s1",
+      type: "section",
+      title: "Default Closed",
+      components: [textChild("c1"), textChild("c2")],
+    };
+    render(<SectionRenderer c={c} renderChild={renderChild} />);
+    expect(screen.queryByTestId("child-c1")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("child-c2")).not.toBeInTheDocument();
+  });
+
+  it("renders children when defaultOpen is true", () => {
     const renderChild = makeRenderChild();
     const c: SectionComponent = {
       id: "s1",
       type: "section",
       title: "Default Open",
+      defaultOpen: true,
       components: [textChild("c1"), textChild("c2")],
     };
     render(<SectionRenderer c={c} renderChild={renderChild} />);
@@ -160,6 +174,26 @@ describe("SectionRenderer", () => {
     };
     render(<SectionRenderer c={c} renderChild={renderChild} />);
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("responds to dashboard-level expand/collapse state", () => {
+    const renderChild = makeRenderChild();
+    const c: SectionComponent = {
+      id: "s1",
+      type: "section",
+      title: "Global Toggle",
+      components: [textChild("c1")],
+    };
+    const { rerender } = render(
+      <SectionRenderer c={c} renderChild={renderChild} globalOpenState={false} />,
+    );
+    expect(screen.queryByTestId("child-c1")).not.toBeInTheDocument();
+
+    rerender(<SectionRenderer c={c} renderChild={renderChild} globalOpenState={true} />);
+    expect(screen.getByTestId("child-c1")).toBeInTheDocument();
+
+    rerender(<SectionRenderer c={c} renderChild={renderChild} globalOpenState={false} />);
+    expect(screen.queryByTestId("child-c1")).not.toBeInTheDocument();
   });
 });
 

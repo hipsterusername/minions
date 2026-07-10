@@ -3,7 +3,7 @@
  *
  * `crypto.randomUUID()` is only defined in **secure contexts** (HTTPS or
  * `localhost`). The mobile app is often opened over plain HTTP on a LAN
- * address — e.g. `http://192.168.1.5:5173/m` on a phone — where
+ * address — e.g. `http://192.168.1.5:6173/m` on a phone — where
  * `crypto.randomUUID` is `undefined` and calling it throws a `TypeError`.
  * That previously broke leader launch (the session key was minted with
  * `crypto.randomUUID()` before `send()`, so the whole handler threw) and

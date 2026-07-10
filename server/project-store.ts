@@ -31,6 +31,12 @@ export interface ProjectSettings {
   defaultMinionThinkingConfig?: ThinkingConfig;
   defaultPermissionMode?: string;
   defaultWorktreeIsolation?: boolean;
+  /**
+   * Keep the canvas tidy: dropped nodes snap to the grid and shift to the
+   * nearest free spot, and dashboards stay affixed to their leader. Absent =
+   * on; only `false` disables it.
+   */
+  tidyLayout?: boolean;
   /** Leader proactive compaction mode; see server/compaction-advisor.ts. */
   proactiveCompaction?: "off" | "recommend" | "auto";
   /** System-model layer mode; see docs/system-model-implementation-plan.md. */
@@ -57,9 +63,9 @@ const HARNESS_DEFAULT_MINION_MODELS: Record<string, Record<ExecutorClass, string
     reasoning: "claude-opus-4-8",
   },
   codex: {
-    mechanical: "gpt-5.5",
-    standard: "gpt-5.5",
-    reasoning: "gpt-5.5",
+    mechanical: "gpt-5.6-luna",
+    standard: "gpt-5.6-terra",
+    reasoning: "gpt-5.6-sol",
   },
 };
 
@@ -155,8 +161,8 @@ export function initSidecar(projectPath: string): Database.Database {
   if (!fs.existsSync(settingsPath)) {
     fs.writeFileSync(settingsPath, JSON.stringify({
       defaultModel: "claude-sonnet-5",
-      defaultLeaderHarness: "claude",
-      defaultLeaderModel: "claude-opus-4-8",
+      defaultLeaderHarness: "codex",
+      defaultLeaderModel: "gpt-5.6-sol",
       defaultLeaderThinkingConfig: DEFAULT_LEADER_THINKING_CONFIG,
       defaultMinionHarness: "claude",
       defaultMinionModel: "claude-sonnet-5",
@@ -220,8 +226,8 @@ export function readSettings(projectPath: string): ProjectSettings {
 function defaultProjectSettings(): ProjectSettings {
   return {
     defaultModel: "claude-sonnet-5",
-    defaultLeaderHarness: "claude",
-    defaultLeaderModel: "claude-opus-4-8",
+    defaultLeaderHarness: "codex",
+    defaultLeaderModel: "gpt-5.6-sol",
     defaultLeaderThinkingConfig: DEFAULT_LEADER_THINKING_CONFIG,
     defaultMinionHarness: "claude",
     defaultMinionModel: "claude-sonnet-5",

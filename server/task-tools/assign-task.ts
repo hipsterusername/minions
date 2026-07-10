@@ -13,6 +13,7 @@ import { getSessionCanvasContext } from "../canvas-context-store.ts";
 import { buildTaskSpawnPrompt } from "./task-prompt.ts";
 import { hasSystemModelManifest } from "../system-model/load.ts";
 import { getWorkPacketContextPack } from "../system-model/store.ts";
+import { computePacketApplicability, renderPacketNote } from "../system-model/applicability.ts";
 import {
   applyLifecycleEvent,
   isRetryableTaskStatus,
@@ -211,6 +212,12 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
       const requestedIds = skillIds ?? [];
       const skills = loadSkillsByIds(ctx.projectPath, requestedIds);
       const armedSkillIds = skills.map((s) => s.id);
+      // Record the resolved skill IDs on the task so the spawned minion can
+      // gate opt-in tool surfaces (e.g. skill-authoring tools) on them.
+      // Re-fetch: the lifecycle/timeout events above replace the record
+      // immutably, so the `task` captured earlier is now stale.
+      const armedTask = ctx.taskState.tasks.get(taskId);
+      if (armedTask) armedTask.skillIds = armedSkillIds;
       const skillsAddendum = compileSkills(skills, skillValues ?? {});
       const minionSystemPrompt = ctx.minionSystemPrompt + skillsAddendum;
       const settings = readSettings(ctx.projectPath);
@@ -291,8 +298,22 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
       const overlapNote =
         overlapWarnings.length > 0 ? `\n${overlapWarnings.join("\n")}` : "";
 
+      // Redesign §5: deterministic packet-required trigger over files ∪ ownedPaths.
+      // On a gate hit with no workPacketId passed, remind the leader to attach one
+      // so the minion receives the Context Pack. Silent on a miss.
+      const current = ctx.taskState.tasks.get(taskId);
+      const scopedFiles = [
+        ...(current?.files ?? task.files ?? []),
+        ...(current?.ownedPaths ?? task.ownedPaths ?? []),
+      ];
+      const packetNote = ctx.systemModel
+        ? renderPacketNote(computePacketApplicability(ctx.systemModel, scopedFiles), {
+          remindWorkPacket: !args.workPacketId,
+        })
+        : "";
+
       return textResult(
-        `Task ${taskId} delegated to minion ${minionKey}${retryNote}.${droppedNote}${overlapNote}`,
+        `Task ${taskId} delegated to minion ${minionKey}${retryNote}.${droppedNote}${overlapNote}${packetNote}`,
       );
     },
   };

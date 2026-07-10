@@ -8,7 +8,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { seedReadState } from "./seed-read-state.ts";
-import { setup, cmd, fakeRunControl } from "./test-harness.ts";
+import { setup, cmd, fakeRunControl } from "../../tests/support/server-command-harness.ts";
 
 describe("seed_read_state", () => {
   it("forwards { path, mtime } to runControl.seedReadState and replies success", async () => {

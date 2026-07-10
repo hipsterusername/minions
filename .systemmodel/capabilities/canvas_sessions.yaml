@@ -1,14 +1,56 @@
 id: capability.canvas_sessions
 type: capability
-name: Canvas Sessions
-summary: Users create, resume, arrange, and control agent sessions on an infinite canvas.
-linked_flows: [flow.canvas_session_lifecycle]
-constraints: [constraint.bus_only_broadcasts]
-decisions: [decision.graph_as_bus]
-risks: [risk.session_state_drift]
-suggested_files: [src/Canvas.tsx, src/CanvasNode.tsx, src/nodes/LeaderNode.tsx, src/nodes/MinionNode.tsx, src/nodes/ClaudeSessionNode.tsx, server/session-host*.ts, server/session-registry.ts]
-suggested_tests: [src/CanvasNode.test.tsx, src/nodes/LeaderNode.test.tsx, server/session-host.test.ts, server/session-registry.test.ts]
-keywords: [canvas, session, leader, minion, node, resume]
+name: canvas_sessions
+summary: Owns canvas visible agent session lifecycle from WebSocket commands through registry hosts harness query execution bus scoped event fan out resumable snapshots controls and frontend streaming display state.
+linked_flows:
+  - flow.create_canvas_session
+  - flow.rehydrate_and_sync_session
+  - flow.send_followup_resume_turn
+  - flow.build_agent_prompt_and_tools
+  - flow.run_harness_query_loop
+  - flow.stream_session_events_to_canvas
+  - flow.interrupt_active_turn
+  - flow.terminate_session_run
+constraints:
+  - constraint.bus_only_broadcasts
+  - constraint.no_cross_tree_imports
+  - constraint.server_file_size_ceiling
+decisions:
+  - decision.graph_as_bus
+  - decision.worktree_isolation
+  - decision.relevance_scoped_context
+risks:
+  - risk.session_state_drift
+  - risk.command_contract_drift
+  - risk.render_schema_drift
+  - risk.prompt_bloat
+suggested_files:
+  - server/session-host.ts
+  - server/session-host-run.ts
+  - server/session-registry.ts
+  - server/commands/create-session.ts
+  - server/commands/send-message.ts
+  - server/session-host-terminate.ts
+  - src/session-stream.ts
+  - src/nodes/LeaderNode.tsx
+suggested_tests:
+  - server/session-host.test.ts
+  - server/session-registry.test.ts
+  - server/commands/create-session.test.ts
+  - server/commands/send-message.test.ts
+  - server/commands/stop-session.test.ts
+  - server/commands/interrupt.test.ts
+  - src/session-stream.test.ts
+  - src/nodes/LeaderNode.test.tsx
+keywords:
+  - session_host
+  - session_registry
+  - harness_start
+  - sdk_event
+  - sync_response
+  - streaming_text
+  - interrupt_session
+  - wait_and_continue
 freshness:
   class: code_coupled
 risk: high

@@ -1,6 +1,6 @@
 import { useLayoutEffect, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { getAllSkills, getSkill } from "../../../skills/registry.ts";
+import { getPickableSkills, getSkill } from "../../../skills/registry.ts";
 import type { SkillTemplate } from "../../../skills/types.ts";
 import { SkillTagChip } from "./SkillTagChip.tsx";
 import { SkillVariableInputs } from "./SkillVariableInputs.tsx";
@@ -81,7 +81,7 @@ export function SkillFlyout({
     setPos({ top, left });
   }, [open, anchorRef]);
 
-  const allSkills = getAllSkills();
+  const allSkills = getPickableSkills();
   const taggedSkills = skillIds
     .map((id) => getSkill(id))
     .filter((s): s is SkillTemplate => s !== undefined);

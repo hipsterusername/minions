@@ -1,0 +1,37 @@
+id: flow.load_validate_model
+type: flow
+name: Load and Validate System Model
+summary: Loads .systemmodel objects through the custom parser and shared schemas then rejects duplicates broken references and overbroad applicability.
+capabilities:
+  - capability.system_model_layer
+constraints:
+  - constraint.model_bloat_guard
+  - constraint.no_cross_tree_imports
+  - constraint.server_file_size_ceiling
+decisions:
+  - decision.relevance_scoped_context
+risks:
+  - risk.model_rot
+  - risk.command_contract_drift
+suggested_files:
+  - shared/system-model/objects.ts
+  - shared/system-model/policies.ts
+  - server/system-model/yaml-parser.ts
+  - server/system-model/load.ts
+  - server/system-model/validate.ts
+  - scripts/system-model-validate.mjs
+suggested_tests:
+  - shared/system-model/objects.test.ts
+  - shared/system-model/policies.test.ts
+  - server/system-model/yaml-parser.test.ts
+  - server/system-model/load.test.ts
+  - server/system-model/validate.test.ts
+steps:
+  - Locate .systemmodel manifest data and return a manifest missing validation error when absent.
+  - Read capabilities flows constraints risks policies and decision front matter through the YAML subset parser.
+  - Parse each object through the shared zod schema and build deterministic id indexes.
+  - Reject duplicate ids unknown object references and constraints that name missing review gates.
+  - Compare gate and constraint globs with tracked files for overbreadth warnings during strict validation.
+freshness:
+  class: code_coupled
+risk: high

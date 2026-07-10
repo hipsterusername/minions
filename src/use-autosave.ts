@@ -2,6 +2,9 @@ import { useRef, useEffect, useState, useCallback } from "react";
 import type { CanvasNode, CanvasTransform } from "./types.ts";
 import type { GraphDocument } from "./graph.ts";
 import { saveProjectState } from "./api.ts";
+import { browserLogger } from "./logging.ts";
+
+const log = browserLogger.child("autosave");
 
 export type SaveStatus = "saved" | "saving" | "unsaved" | "error" | "idle";
 
@@ -168,7 +171,7 @@ export function useAutosave(
       setRetryCount(0);
       clearRetryTimer();
     } catch (err) {
-      console.error("Autosave failed:", err);
+      log.error("save_failed", { error: err });
       setStatus("error");
 
       // Schedule automatic retry with exponential backoff

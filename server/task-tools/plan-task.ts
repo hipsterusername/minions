@@ -7,6 +7,7 @@ import type { NormalizedToolDef } from "../harness/types.ts";
 import { textResult } from "../harness/tool-result.ts";
 import type { TaskToolContext, TaskRecord } from "./types.ts";
 import { emitTaskPlanUpdate } from "./shared.ts";
+import { computePacketApplicability, renderPacketNote } from "../system-model/applicability.ts";
 
 const planTaskInputSchema = z.object({
   taskId: z.string().describe("Unique identifier for this task"),
@@ -65,9 +66,15 @@ export function createPlanTaskToolDef(ctx: TaskToolContext): NormalizedToolDef {
 
       emitTaskPlanUpdate(ctx.bus, ctx.leaderSessionKey, ctx.taskState, ctx.onStateChange);
 
+      // Redesign §5: deterministic packet-required trigger. Append a compact
+      // note ONLY when the task's files hit a gated surface; silent otherwise.
+      const packetNote = ctx.systemModel
+        ? renderPacketNote(computePacketApplicability(ctx.systemModel, args.files ?? []))
+        : "";
+
       // Terse ack — the model already knows the title it sent, and the
       // execute/delegate guidance lives in the tool description.
-      return textResult(`Task ${taskId} planned.`);
+      return textResult(`Task ${taskId} planned.${packetNote}`);
     },
   };
 }

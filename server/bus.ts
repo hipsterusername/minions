@@ -28,6 +28,9 @@ import {
   type Topic,
   type WsEnvelope,
 } from "../shared/ws-envelope.ts";
+import { serverLogger } from "./logging.ts";
+
+const log = serverLogger.child("bus");
 
 // Re-export topic helpers so consumers only import from `./bus.ts`.
 export { sessionTopic, projectTopic, GLOBAL_TOPIC, type Topic };
@@ -131,10 +134,7 @@ export function createBus(wss: WebSocketServer): Bus {
       try {
         handler(envelope);
       } catch (err) {
-        console.warn(
-          "[bus] in-process subscriber threw:",
-          err instanceof Error ? err.message : err,
-        );
+        log.warn("subscriber_failed", { error: err });
       }
     }
   }

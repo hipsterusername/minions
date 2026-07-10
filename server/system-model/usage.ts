@@ -25,24 +25,44 @@ export async function unusedInLastNPackets(input: {
   const limit = Math.max(1, input.n ?? 30);
   const db = openProjectDb(input.projectPath);
   const packetRows = db.prepare(
-    `SELECT id FROM work_packets
+    `SELECT id, created_at FROM work_packets
      ORDER BY updated_at DESC, created_at DESC, id DESC
      LIMIT ?`,
-  ).all(limit) as Array<{ id: string }>;
+  ).all(limit) as Array<{ id: string; created_at: number }>;
   const recentPacketIds = packetRows.map((row) => row.id);
   if (recentPacketIds.length === 0) {
-    return sortedObjects(input.model).map((object) => describeObject(object, "No recent Work Packets"));
+    const queryRows = db.prepare(
+      `SELECT DISTINCT object_id FROM system_model_usage
+       WHERE source = 'query'`,
+    ).all() as Array<{ object_id: string }>;
+    const queried = new Set(queryRows.map((row) => row.object_id));
+    return sortedObjects(input.model)
+      .filter((object) => !queried.has(object.id))
+      .map((object) => describeObject(object, "No Work Packets and no query usage recorded"));
   }
 
+  const oldestCreatedAt = Math.min(...packetRows.map((row) => row.created_at));
   const placeholders = recentPacketIds.map(() => "?").join(", ");
-  const usedRows = db.prepare(
+  const packetUsageRows = db.prepare(
     `SELECT DISTINCT object_id FROM system_model_usage
-     WHERE work_packet_id IN (${placeholders})`,
+     WHERE source = 'packet' AND work_packet_id IN (${placeholders})`,
   ).all(...recentPacketIds) as Array<{ object_id: string }>;
-  const used = new Set(usedRows.map((row) => row.object_id));
+  const queryUsageRows = db.prepare(
+    `SELECT DISTINCT object_id FROM system_model_usage
+     WHERE source = 'query' AND used_at >= ?`,
+  ).all(oldestCreatedAt) as Array<{ object_id: string }>;
+  const used = new Set([
+    ...packetUsageRows.map((row) => row.object_id),
+    ...queryUsageRows.map((row) => row.object_id),
+  ]);
   return sortedObjects(input.model)
     .filter((object) => !used.has(object.id))
-    .map((object) => describeObject(object, `Unused in last ${recentPacketIds.length} Work Packets`));
+    .map((object) =>
+      describeObject(
+        object,
+        `No packet usage in last ${recentPacketIds.length} Work Packets and no query usage since ${oldestCreatedAt}`,
+      ),
+    );
 }
 
 export async function staleObjects(input: {

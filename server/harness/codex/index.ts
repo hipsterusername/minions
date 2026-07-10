@@ -141,11 +141,10 @@ class CodexHarness implements AgentHarness {
       let bridgeReg: McpBridgeRegistration | null = null;
       let scratch: CodexAttachmentScratch | null = null;
       try {
-        // Reject permission modes Codex cannot honor before any I/O. `plan`
-        // is unsupported for MVP per docs/codex-harness-spec.md Open Questions
-        // §5; surface a clean terminal error instead of silently mapping it to
-        // a half-correct approvalPolicy/sandboxMode pair. UI gating for `plan`
-        // on Codex sessions lands in Phase E.
+        // Reject permission modes Codex cannot honor before any I/O. Surface a
+        // clean terminal error instead of silently mapping `plan` to a
+        // half-correct approvalPolicy/sandboxMode pair; the UI also removes
+        // that option for Codex sessions.
         const permissionMapping = mapPermission(opts.permissionMode);
         if (permissionMapping.unsupported) {
           yield {

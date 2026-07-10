@@ -5,10 +5,8 @@
  * the AgentHarness interface, normalized event/tool types, and
  * per-harness capability flags.
  *
- * Phase 0: types only, no callers yet.
- * Phase 3: NormalizedEvent moved to shared/normalized-event.ts so both
- *          server and client can import it from the same source.
- * See docs/model-agnosticism-spec.md §3 for the full design rationale.
+ * Normalized events live in `shared/normalized-event.ts` so server and client
+ * consume one wire contract.
  */
 
 import type { ZodTypeAny } from "zod/v4";

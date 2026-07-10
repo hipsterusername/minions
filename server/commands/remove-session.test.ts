@@ -10,7 +10,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorktreeInfo } from "../worktree-types.ts";
-import { setup, cmd, fakeRunControl } from "./test-harness.ts";
+import { setup, cmd, fakeRunControl } from "../../tests/support/server-command-harness.ts";
 
 const removeWorktreeCalls: { path: string; project: string }[] = [];
 const removePersistedCalls: string[] = [];

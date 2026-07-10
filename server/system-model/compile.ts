@@ -10,6 +10,7 @@ import type {
 } from "../../shared/system-model/index.ts";
 import { checkFreshness, type FreshnessReport, type FreshnessTimestampFn } from "./freshness.ts";
 import { globMatches, LOW_CONFIDENCE_FALLBACK, type MatchCandidate } from "./match.ts";
+import { computePacketApplicability } from "./applicability.ts";
 import type { LoadedSystemModel } from "./types.ts";
 
 export const CONTEXT_PACK_PREAMBLE =
@@ -165,9 +166,9 @@ function renderContextPack(
 }
 
 function derivePacketRequired(model: LoadedSystemModel, scope: { files: string[]; capabilities: string[]; flows: string[] }): boolean {
-  return model.policies.reviewGates.some((gate) => scope.files.some((file) => gate.requiredWhen.files.some((glob) => globMatches(glob, file))))
-    || model.constraints.some((constraint) => constraint.severity === "critical"
-      && scope.files.some((file) => constraint.appliesTo.files.some((glob) => globMatches(glob, file))));
+  // Single source of truth for the gate/critical-constraint intersection —
+  // shared with the plan_task / assign_task structural trigger (redesign §5).
+  return computePacketApplicability(model, scope.files).packetRequired;
 }
 
 function deriveReviewGateRequirements(

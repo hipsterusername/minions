@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { listSessions } from "./list-sessions.ts";
 import { SessionHost } from "../session-host.ts";
-import { setup, cmd } from "./test-harness.ts";
+import { setup, cmd } from "../../tests/support/server-command-harness.ts";
 
 describe("listSessions", () => {
   it("emits a session_list with the live registry snapshot scoped to the global topic", () => {

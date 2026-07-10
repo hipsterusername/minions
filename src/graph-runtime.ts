@@ -17,6 +17,11 @@ export type GraphAction =
   | { type: "ADD_EDGE"; edge: GraphEdge }
   | { type: "REMOVE_EDGE"; id: string }
   | { type: "REMOVE_EDGES_FOR_NODE"; nodeId: string }
+  | {
+      type: "SET_EDGE_CONTEXT_MODE";
+      id: string;
+      contextMode: "dashboard" | "lean" | "full";
+    }
   | { type: "SET_EDGES"; edges: GraphEdge[] };
 
 export function graphReducer(
@@ -37,6 +42,12 @@ export function graphReducer(
     }
     case "REMOVE_EDGE":
       return { edges: state.edges.filter((e) => e.id !== action.id) };
+    case "SET_EDGE_CONTEXT_MODE":
+      return {
+        edges: state.edges.map((e) =>
+          e.id === action.id ? { ...e, contextMode: action.contextMode } : e,
+        ),
+      };
     case "REMOVE_EDGES_FOR_NODE":
       return {
         edges: state.edges.filter(

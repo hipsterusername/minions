@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getProjectSettings, listProjects, restartServer, updateProjectSettings } from "../api.ts";
@@ -6,6 +6,25 @@ import MobileApp from "./MobileApp.tsx";
 
 const send = vi.fn();
 const manualReconnect = vi.fn();
+const socketSubscribers: Array<(msg: unknown) => void> = [];
+const socketSubscribe = vi.fn((
+  topicOrFn: string | ((msg: unknown) => void),
+  maybeFn?: (msg: unknown) => void,
+) => {
+  const fn = typeof topicOrFn === "function" ? topicOrFn : maybeFn;
+  if (!fn) return () => {};
+  socketSubscribers.push(fn);
+  return () => {
+    const index = socketSubscribers.indexOf(fn);
+    if (index >= 0) socketSubscribers.splice(index, 1);
+  };
+});
+
+function emitSocketMessage(msg: unknown) {
+  act(() => {
+    for (const subscriber of [...socketSubscribers]) subscriber(msg);
+  });
+}
 
 vi.mock("../api.ts", () => ({
   getProjectSettings: vi.fn(async () => ({})),
@@ -23,7 +42,7 @@ vi.mock("../use-socket.ts", () => ({
   useSocket: () => ({
     connected: true,
     send,
-    subscribe: vi.fn(() => () => {}),
+    subscribe: socketSubscribe,
     reconnectState: "connected",
     manualReconnect,
   }),
@@ -64,6 +83,8 @@ function installPushGlobals() {
 afterEach(() => {
   send.mockClear();
   manualReconnect.mockClear();
+  socketSubscribers.splice(0);
+  socketSubscribe.mockClear();
   vi.mocked(listProjects).mockReset();
   vi.mocked(listProjects).mockResolvedValue([]);
   vi.mocked(getProjectSettings).mockReset();
@@ -221,5 +242,68 @@ describe("MobileApp", () => {
 
     await screen.findByText(/restart requested/i);
     expect(restartServer).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows an actionable activity notice when mobile launch hits the session limit", async () => {
+    installPushGlobals();
+    vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000010");
+    vi.mocked(listProjects).mockResolvedValue([
+      { id: "alpha", name: "Alpha", path: "/work/alpha", lastOpened: "2026-06-01T00:00:00.000Z", hasSidecar: true },
+    ]);
+
+    render(<MobileApp />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("main", { name: "Projects" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Alpha"));
+
+    emitSocketMessage({
+      type: "session_list",
+      sessions: [
+        {
+          sessionKey: "leader-old",
+          sessionId: null,
+          status: "idle",
+          cwd: "/work/alpha",
+          taskName: "Old idle work",
+          role: "leader",
+        },
+      ],
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
+    fireEvent.change(screen.getByLabelText("Prompt"), {
+      target: { value: "Start a new leader" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Launch leader" }));
+
+    const payload = send.mock.calls.find(
+      ([message]) =>
+        typeof message === "object" &&
+        message !== null &&
+        "type" in message &&
+        message.type === "create_session",
+    )?.[0] as { sessionKey: string } | undefined;
+    expect(payload?.sessionKey).toBe("leader-00000000-0000-4000-8000-000000000010");
+
+    emitSocketMessage({
+      type: "session_error",
+      sessionKey: payload!.sessionKey,
+      error: "Maximum session limit (50) reached. Remove unused sessions first.",
+    });
+
+    expect(await screen.findByRole("alert", { name: "Session limit reached" })).toBeInTheDocument();
+    expect(screen.getByText(/50 non-stopped sessions/i)).toBeInTheDocument();
+    expect(screen.getByText(/tap Stop/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open session to stop" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("main", { name: "Session chat" })).toBeInTheDocument();
+    });
+    expect(screen.getByRole("heading", { name: "Old idle work" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
   });
 });

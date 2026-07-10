@@ -9,6 +9,15 @@ import {
 interface ActivityScreenProps {
   sessions: MobileSessionInfo[];
   onOpenSession: (sessionKey: string) => void;
+  notice?: ActivityNotice | null;
+}
+
+export interface ActivityNotice {
+  title: string;
+  message: string;
+  actionLabel?: string;
+  onAction?: () => void;
+  onDismiss?: () => void;
 }
 
 function formatCost(cost: number | undefined): string {
@@ -47,7 +56,30 @@ function SessionCard({
   );
 }
 
-export function ActivityScreen({ sessions, onOpenSession }: ActivityScreenProps) {
+function NoticeBanner({ notice }: { notice: ActivityNotice }) {
+  return (
+    <section className="mob-activity-notice" role="alert" aria-label={notice.title}>
+      <div>
+        <h2>{notice.title}</h2>
+        <p>{notice.message}</p>
+      </div>
+      <div className="mob-activity-notice-actions">
+        {notice.actionLabel && notice.onAction ? (
+          <button type="button" onClick={notice.onAction}>
+            {notice.actionLabel}
+          </button>
+        ) : null}
+        {notice.onDismiss ? (
+          <button type="button" onClick={notice.onDismiss} aria-label="Dismiss notice">
+            Dismiss
+          </button>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+export function ActivityScreen({ sessions, onOpenSession, notice }: ActivityScreenProps) {
   // Minions are spawned and managed by their leader; the mobile Activity list
   // surfaces top-level sessions only, so their cards are filtered out here.
   const visibleSessions = sessions.filter((session) => session.role !== "minion");
@@ -56,6 +88,7 @@ export function ActivityScreen({ sessions, onOpenSession }: ActivityScreenProps)
   if (visibleSessions.length === 0) {
     return (
       <main className="mob-screen mob-activity" aria-label="Activity">
+        {notice ? <NoticeBanner notice={notice} /> : null}
         <div className="mob-empty">
           <h1>Activity</h1>
           <p>No sessions are running.</p>
@@ -70,6 +103,7 @@ export function ActivityScreen({ sessions, onOpenSession }: ActivityScreenProps)
         <h1>Activity</h1>
         <span className="mob-count">{visibleSessions.length}</span>
       </header>
+      {notice ? <NoticeBanner notice={notice} /> : null}
       {sections.map((section) => (
         <section
           className="mob-activity-section"

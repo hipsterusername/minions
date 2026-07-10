@@ -14,7 +14,6 @@ import { useEffect, type Dispatch, type MutableRefObject } from "react";
 import type { CanvasNode, CanvasAction } from "./types.ts";
 import type { GraphDocument } from "./graph.ts";
 import type { GraphAction } from "./graph-runtime.ts";
-import type { RenderNodeData } from "./nodes/RenderNode.tsx";
 
 /** Helper: returns true if the event target is a text input element. */
 function isTextInput(target: EventTarget | null): boolean {
@@ -105,7 +104,7 @@ export function useCanvasKeyboard({
         }
 
         // Expand deletion: when a leader is deleted, also delete its
-        // connected minions + render node
+        // connected minions
         const toDelete = new Set(selectedIds);
         for (const id of selectedIds) {
           const node = nodes.find((n) => n.id === id);
@@ -113,12 +112,6 @@ export function useCanvasKeyboard({
             for (const edge of graph.edges) {
               if (edge.sourceNodeId === id && edge.sourcePortId === "task-out") {
                 toDelete.add(edge.targetNodeId);
-              }
-            }
-            // Also delete affixed render nodes
-            for (const n of nodes) {
-              if (n.type === "render" && (n.data as RenderNodeData).leaderId === id) {
-                toDelete.add(n.id);
               }
             }
           }

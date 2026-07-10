@@ -100,6 +100,47 @@ export function createDefaultNodeData(
   }
 }
 
+/**
+ * Seed freshly-created node data with a user-typed value (from the Ctrl+K
+ * command palette). The palette lets you type once and pick an action; the
+ * typed text lands in the field that makes sense for the chosen node type.
+ * Types with nowhere sensible to put text are returned untouched.
+ */
+export function applyPromptSeed(
+  type: string,
+  data: unknown,
+  value: string,
+): unknown {
+  const seed = value.trim();
+  if (!seed) return data;
+  const base = data as Record<string, unknown>;
+  switch (type) {
+    case "leader":
+      // Auto-start the session with the typed prompt.
+      return { ...base, autoStartPrompt: seed };
+    case "markdown":
+      return { ...base, content: seed, title: deriveTitle(seed) };
+    case "note":
+      return { ...base, text: seed };
+    case "file-viewer":
+      return { ...base, filePath: seed };
+    case "folder":
+      return { ...base, folderPath: seed };
+    case "context-group":
+      return { ...base, name: seed };
+    default:
+      return data;
+  }
+}
+
+/** First non-empty line, clipped — a readable card title for markdown. */
+function deriveTitle(value: string, max = 60): string {
+  const firstLine = value.split("\n").find((line) => line.trim()) ?? "";
+  const flat = firstLine.trim();
+  if (!flat) return "Untitled";
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
 function cloneThinkingConfig(config: ThinkingConfig): ThinkingConfig {
   return { ...config };
 }

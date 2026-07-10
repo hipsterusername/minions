@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { Activity, LayoutGrid, Columns3 } from "lucide-react";
 import type { SaveStatus } from "./use-autosave.ts";
 import type { ProjectSettings } from "./api.ts";
 import { SettingsMenu } from "./SettingsMenu.tsx";
@@ -18,7 +19,10 @@ interface ProjectHeaderProps {
   onViewChange: (view: ActiveView) => void;
   /** Number of cards blocked/needing attention — shows a badge on the Kanban tab */
   kanbanBlockedCount?: number;
-  /** Number of sessions needing attention — shows a badge on the Activity tab */
+  /**
+   * Number of sessions needing attention (includes sessions with pending
+   * worktree changes) — shows a badge on the Activity tab.
+   */
   activityAttentionCount?: number;
   settings: ProjectSettings;
   onSettingsChange: (settings: ProjectSettings) => void;
@@ -217,42 +221,20 @@ export function ProjectHeader({
           active={activeView === "activity"}
           onClick={() => onViewChange("activity")}
           badge={activityAttentionCount > 0 ? activityAttentionCount : undefined}
-          icon={
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-              <path
-                d="M1 6.5h2L4.5 2l3 8L9 6.5h2"
-                stroke="currentColor"
-                strokeWidth="1.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          }
+          icon={<Activity size={12} strokeWidth={1.75} aria-hidden />}
         />
         <ViewTab
           label="Canvas"
           active={activeView === "canvas"}
           onClick={() => onViewChange("canvas")}
-          icon={
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-              <rect x="1" y="1" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.2" />
-              <rect x="7" y="3" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.2" />
-              <rect x="2" y="7" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.2" />
-            </svg>
-          }
+          icon={<LayoutGrid size={12} strokeWidth={1.75} aria-hidden />}
         />
         <ViewTab
           label="Kanban"
           active={activeView === "kanban"}
           onClick={() => onViewChange("kanban")}
           badge={kanbanBlockedCount > 0 ? kanbanBlockedCount : undefined}
-          icon={
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-              <rect x="1" y="1" width="2.5" height="10" rx="0.75" stroke="currentColor" strokeWidth="1.1" />
-              <rect x="4.75" y="1" width="2.5" height="7" rx="0.75" stroke="currentColor" strokeWidth="1.1" />
-              <rect x="8.5" y="1" width="2.5" height="5" rx="0.75" stroke="currentColor" strokeWidth="1.1" />
-            </svg>
-          }
+          icon={<Columns3 size={12} strokeWidth={1.75} aria-hidden />}
         />
       </div>
 

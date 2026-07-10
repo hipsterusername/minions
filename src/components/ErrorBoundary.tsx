@@ -20,6 +20,9 @@
  */
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { browserLogger } from "../logging.ts";
+
+const log = browserLogger.child("error-boundary");
 
 interface Props {
   children: ReactNode;
@@ -42,8 +45,10 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
-    // Surface the error to the console with component stack for debugging.
-    console.error("[ErrorBoundary] Caught render error:", error, info.componentStack);
+    log.error("render_failed", {
+      error,
+      componentStack: info.componentStack,
+    });
   }
 
   handleReset = (): void => {

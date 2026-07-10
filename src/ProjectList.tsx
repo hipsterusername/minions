@@ -6,6 +6,9 @@ import {
   deleteProject,
   type ProjectSummary,
 } from "./api.ts";
+import { browserLogger } from "./logging.ts";
+
+const log = browserLogger.child("project-list");
 
 interface ProjectListProps {
   onOpenProject: (id: string, projectPath: string) => void;
@@ -25,7 +28,7 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
       const data = await listProjects();
       setProjects(data);
     } catch (err) {
-      console.error("Failed to load projects:", err);
+      log.error("projects_load_failed", { error: err });
     } finally {
       setLoading(false);
     }
@@ -43,7 +46,7 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
       const project = await openProject(p);
       onOpenProject(project.id, project.path);
     } catch (err) {
-      console.error("Failed to open project:", err);
+      log.error("project_open_failed", { error: err });
       alert(`Failed to open project: ${err}`);
     } finally {
       setCreating(false);
@@ -59,7 +62,7 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
       const project = await createProject(name ?? "Untitled", p);
       onOpenProject(project.id, project.path);
     } catch (err) {
-      console.error("Failed to create project:", err);
+      log.error("project_create_failed", { error: err });
       alert(`Failed to create project: ${err}`);
     } finally {
       setCreating(false);
@@ -72,7 +75,7 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
       await deleteProject(id);
       setProjects((prev) => prev.filter((p) => p.id !== id));
     } catch (err) {
-      console.error("Failed to remove project:", err);
+      log.error("project_remove_failed", { error: err });
     }
   };
 

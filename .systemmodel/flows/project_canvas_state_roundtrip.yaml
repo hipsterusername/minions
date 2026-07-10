@@ -1,0 +1,31 @@
+id: flow.project_canvas_state_roundtrip
+type: flow
+name: project_canvas_state_roundtrip
+summary: Round trip project canvas metadata, transform, nodes, and edges through the per project sidecar database.
+capabilities:
+  - capability.persistence_project_state
+constraints:
+  - constraint.no_cross_tree_imports
+  - constraint.server_file_size_ceiling
+decisions: []
+risks:
+  - risk.command_contract_drift
+suggested_files:
+  - server/routes/projects.ts
+  - server/routes/projects/core.ts
+  - server/routes/projects/helpers.ts
+  - server/project-store.ts
+  - tests/contracts/projects-core-routes.test.ts
+  - server/project-store.test.ts
+suggested_tests:
+  - pnpm test:run -- tests/contracts/projects-core-routes.test.ts server/project-store.test.ts
+steps:
+  - Mount core project routes and restore path allowlist entries from recent projects.
+  - Register and validate home scoped project paths before project operations.
+  - Initialize or open the sidecar database and ensure one project row exists.
+  - Load project rows, ordered nodes, ordered edges, context, settings, and skills into responses.
+  - Save canvas state in a transaction by replacing transform, node rows, and edge rows.
+  - Update or remove the recent projects index without deleting the project folder.
+freshness:
+  class: code_coupled
+risk: medium

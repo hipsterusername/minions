@@ -40,6 +40,7 @@ interface StateEdge {
   targetNodeId: string;
   targetPortId: string;
   protocol: string;
+  contextMode?: "dashboard" | "lean" | "full";
 }
 
 function loadProjectEdges(db: ReturnType<typeof getDb>, projectId: string): StateEdge[] {
@@ -295,9 +296,9 @@ export function mountCoreRoutes(router: Router): void {
         const insert = db.prepare(
           `INSERT INTO edges (
              id, project_id, source_node_id, source_port_id,
-             target_node_id, target_port_id, protocol, z_index
+             target_node_id, target_port_id, protocol, z_index, context_mode
            )
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         );
 
         for (let i = 0; i < graph.edges.length; i++) {
@@ -311,6 +312,7 @@ export function mountCoreRoutes(router: Router): void {
             e.targetPortId,
             e.protocol,
             i,
+            e.contextMode ?? null,
           );
         }
       }

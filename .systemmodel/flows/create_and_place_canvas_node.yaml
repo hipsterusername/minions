@@ -1,0 +1,30 @@
+id: flow.create_and_place_canvas_node
+type: flow
+name: Create And Place A Canvas Node
+summary: Toolbar, context menu, command palette, empty canvas, paste, and file drop routes resolve default data, size, anchor, non overlap placement, selection, and optional focus.
+capabilities:
+  - capability.canvas_ui
+constraints: []
+decisions: []
+risks: []
+suggested_files:
+  - src/Canvas.tsx
+  - src/canvas-utils.ts
+  - src/node-registry.ts
+  - src/node-defaults.ts
+  - src/use-canvas-file-drop.ts
+  - src/nodes/markdown-node-factory.ts
+suggested_tests:
+  - src/canvas-utils.test.ts
+  - src/node-registry.test.ts
+  - src/nodes/markdown-node-factory.test.ts
+  - src/CanvasNode.test.tsx
+steps:
+  - User action enters Canvas through toolbar addNode, empty canvas start, right click CanvasContextMenu, command palette, addContentNode, paste handler, or useCanvasFileDrop.
+  - Canvas resolves the node type definition from the registry and builds default data with createDefaultNodeData.
+  - resolveNodePosition selects a world, smart, cursor, selected node, recent active leader, viewport center, or above top anchor.
+  - findNonOverlappingPosition grid snaps the candidate and searches outward in rings to avoid existing node rectangles.
+  - Canvas dispatches ADD_NODE, selects the new node, and optionally adjusts transform so the card is visible at a readable zoom.
+freshness:
+  class: code_coupled
+risk: low

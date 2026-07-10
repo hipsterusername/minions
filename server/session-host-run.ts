@@ -32,6 +32,9 @@ import { injectSessionMessage } from "./session-message.ts";
 import { pauseActiveRunForWait, requestWaitResume } from "./wait-resume.ts";
 import { captureUsageEvent } from "./session-usage-capture.ts";
 import { captureCheckpointHandoffEvent, recordCompactionUsage, withCompactionReminder } from "./proactive-compaction.ts";
+import { serverLogger } from "./logging.ts";
+
+const log = serverLogger.child("session-host");
 /**
  * Ensure the host has the correct cwd + worktree wiring before the SDK
  * query opens. Mutates `host` in place and emits bus events on failure.
@@ -51,9 +54,7 @@ export async function ensureWorktree(
     host.worktree = opts.parentWorktree;
     host.cwd = opts.parentWorktree.path;
     effectiveCwd = opts.parentWorktree.path;
-    console.log(
-      `[worktree] Minion ${host.id} inheriting worktree ${opts.parentWorktree.branch} at ${opts.parentWorktree.path}`,
-    );
+    log.debug("parent_worktree_inherited", { sessionKey: host.id, branch: opts.parentWorktree.branch, worktreePath: opts.parentWorktree.path });
   } else {
     host.cwd = effectiveCwd;
   }
@@ -82,14 +83,12 @@ export async function ensureWorktree(
         worktreePath: worktreeInfo.path,
         branch: worktreeInfo.branch,
       });
-      console.log(
-        `[worktree] Created worktree for ${host.id} at ${worktreeInfo.path} (branch: ${worktreeInfo.branch})`,
-      );
+      log.info("worktree_created", { sessionKey: host.id, branch: worktreeInfo.branch, worktreePath: worktreeInfo.path });
       effectiveCwd = worktreeInfo.path;
     }
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    console.error(`[worktree] Failed to create worktree for ${host.id}: ${errMsg}`);
+    log.error("worktree_create_failed", { sessionKey: host.id, error: err });
     bus.emitToSession(host.id, {
       type: "worktree_failed",
       sessionKey: host.id,
@@ -343,9 +342,7 @@ export function buildAgentContext(
     },
     scheduleWaitContinue: (durationMs, reason) => {
       host.clearWaitTimer();
-      console.log(
-        `[wait] Leader ${host.id} waiting ${durationMs}ms: ${reason}`,
-      );
+      log.debug("wait_scheduled", { sessionKey: host.id, durationMs, reason });
       host.waitTimerId = setTimeout(() => {
         host.waitTimerId = null;
         requestWaitResume(host, deps, {
@@ -371,6 +368,7 @@ export function buildAgentContext(
   };
   if (host.taskState) ctx.existingTaskState = host.taskState;
   if (host.renderState) ctx.existingRenderState = host.renderState;
+  if (host.skillIds.length > 0) ctx.skillIds = host.skillIds;
   if (opts.parentWorktree) ctx.parentWorktree = opts.parentWorktree;
   return ctx;
 }

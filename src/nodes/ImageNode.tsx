@@ -32,6 +32,9 @@ import {
   rasterizeAnnotatedImage,
   lookupRasterizedAnnotatedImage,
 } from "./rasterize-annotations.ts";
+import { browserLogger } from "../logging.ts";
+
+const log = browserLogger.child("image-node");
 
 // ── Data shape ──────────────────────────────────────────
 
@@ -289,11 +292,7 @@ export function ImageNodeRenderer({
       void rasterizeAnnotatedImage(src, annotations, naturalWidth, naturalHeight).catch(
         (err: unknown) => {
           if (cancelled) return;
-          // eslint-disable-next-line no-console -- diagnostic for a non-fatal degradation path
-          console.warn(
-            "[image-node] annotation rasterize failed; sending unannotated image as fallback:",
-            err instanceof Error ? err.message : err,
-          );
+          log.warn("annotation_rasterize_failed", { error: err });
         },
       );
     }, 250);
@@ -809,6 +808,7 @@ registerNodeType({
   // the image area needs a comfortable minimum beside it.
   defaultSize: { width: 600, height: 440 },
   render: ImageNodeRenderer,
+  userCreatable: false,
   providesContext: true,
   extractContent: extractImageNodeContent,
   extractAttachments: extractImageNodeAttachments,

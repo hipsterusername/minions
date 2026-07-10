@@ -65,6 +65,7 @@ describe("ProjectTree filterActive toggle", () => {
     }
 
     render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: /expand all project folders/i }));
     expect(screen.getByText("touched.ts")).toBeInTheDocument();
     expect(screen.getByText("untouched.ts")).toBeInTheDocument();
 
@@ -99,6 +100,8 @@ describe("ProjectTree filterActive toggle", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: /expand all project folders/i }));
+
     expect(screen.getByText("src")).toBeInTheDocument();
     expect(screen.getByText("nested")).toBeInTheDocument();
     expect(screen.getByText("deep.ts")).toBeInTheDocument();
@@ -107,14 +110,43 @@ describe("ProjectTree filterActive toggle", () => {
   });
 });
 
-describe("ProjectTree query filter", () => {
-  it("renders every node when the query is empty", () => {
+describe("ProjectTree expansion controls", () => {
+  it("starts with project folders collapsed", () => {
     render(
       <ProjectTree tree={tree} rootName="proj" leaders={[]} query="" />,
     );
-    expect(screen.getByText("touched.ts")).toBeInTheDocument();
-    expect(screen.getByText("untouched.ts")).toBeInTheDocument();
+
+    expect(screen.getByText("src")).toBeInTheDocument();
     expect(screen.getByText("README.md")).toBeInTheDocument();
+    expect(screen.queryByText("touched.ts")).toBeNull();
+    expect(screen.queryByText("deep.ts")).toBeNull();
+    expect(screen.getByRole("button", { name: /expand all project folders/i })).toBeInTheDocument();
+  });
+
+  it("expands and collapses all project folders from the toolbar", () => {
+    render(
+      <ProjectTree tree={tree} rootName="proj" leaders={[]} query="" />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /expand all project folders/i }));
+    expect(screen.getByText("touched.ts")).toBeInTheDocument();
+    expect(screen.getByText("deep.ts")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /collapse all project folders/i }));
+    expect(screen.queryByText("touched.ts")).toBeNull();
+    expect(screen.queryByText("deep.ts")).toBeNull();
+  });
+});
+
+describe("ProjectTree query filter", () => {
+  it("renders top-level nodes when the query is empty", () => {
+    render(
+      <ProjectTree tree={tree} rootName="proj" leaders={[]} query="" />,
+    );
+    expect(screen.getByText("src")).toBeInTheDocument();
+    expect(screen.getByText("README.md")).toBeInTheDocument();
+    expect(screen.queryByText("touched.ts")).toBeNull();
+    expect(screen.queryByText("untouched.ts")).toBeNull();
   });
 
   it("hides non-matching files when a query is set", () => {
@@ -154,7 +186,7 @@ describe("ProjectTree query filter", () => {
       <ProjectTree tree={tree} rootName="proj" leaders={[]} query="   " />,
     );
     expect(screen.getByText("README.md")).toBeInTheDocument();
-    expect(screen.getByText("untouched.ts")).toBeInTheDocument();
+    expect(screen.queryByText("untouched.ts")).toBeNull();
   });
 
   it("does not crash when typing a query after the first render", () => {

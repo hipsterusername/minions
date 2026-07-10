@@ -33,8 +33,8 @@ describe("canConnect", () => {
     ).toBe(true);
   });
 
-  it("returns true for render.context-out → leader.context-in (dashboards as context)", () => {
-    expect(canConnect("render", "context-out", "leader", "context-in")).toBe(
+  it("returns true for leader.context-out → leader.context-in (embedded dashboards as context)", () => {
+    expect(canConnect("leader", "context-out", "leader", "context-in")).toBe(
       true,
     );
   });

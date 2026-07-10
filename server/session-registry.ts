@@ -25,6 +25,9 @@ import { persistTaskState } from "./session-persist.ts";
 import { requestWaitResume } from "./wait-resume.ts";
 import { buildWakeTaskDigest, isWakeWorthyStatus, requestCoalescedWake } from "./wake-coalescer.ts";
 import { buildSessionListItem, type SessionListItem } from "./session-list-item.ts";
+import { serverLogger } from "./logging.ts";
+
+const log = serverLogger.child("session-registry");
 
 export class SessionRegistry {
   private readonly map = new Map<string, SessionHost>();
@@ -307,13 +310,11 @@ export class SessionRegistry {
         this.map.set(row.session_key, host);
       }
       if (hydrated.length > 0) {
-        console.log(
-          `[session-persist] hydrated ${hydrated.length} session(s) from disk`,
-        );
+        log.info("sessions_hydrated", { count: hydrated.length });
       }
       return hydrated.length;
     } catch (err) {
-      console.warn("[session-persist] hydrate failed:", err);
+      log.warn("session_hydration_failed", { error: err });
       return 0;
     }
   }

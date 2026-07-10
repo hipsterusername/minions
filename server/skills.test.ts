@@ -83,6 +83,57 @@ describe("compileSkills", () => {
     );
     expect(out).toContain("First\n\n---\n\n## Skill: Beta");
   });
+
+  it("folds a sub-skill map (with load_subskill instruction) into a skill section", () => {
+    const out = compileSkills(
+      [
+        makeSkill({
+          id: "map",
+          name: "Mapper",
+          template: "Base",
+          subskills: [
+            {
+              id: "deep",
+              name: "Deep",
+              description: "deep dive",
+              body: "DEEP BODY",
+            },
+          ],
+        }),
+      ],
+      {},
+    );
+    expect(out).toContain("## Skill: Mapper");
+    expect(out).toContain("### Sub-skills of Mapper");
+    expect(out).toContain("- `deep` — **Deep**: deep dive.");
+    expect(out).toContain("load_subskill");
+    expect(out).toContain('skillId: "map"');
+    // On-demand body must NOT be inlined.
+    expect(out).not.toContain("DEEP BODY");
+  });
+
+  it("eager-inlines an alwaysInclude sub-skill body", () => {
+    const out = compileSkills(
+      [
+        makeSkill({
+          id: "map",
+          name: "Mapper",
+          subskills: [
+            {
+              id: "eager",
+              name: "Eager",
+              description: "always",
+              body: "EAGER BODY",
+              alwaysInclude: true,
+            },
+          ],
+        }),
+      ],
+      {},
+    );
+    expect(out).toContain("#### Eager");
+    expect(out).toContain("EAGER BODY");
+  });
 });
 
 describe("loadAllSkills + loadSkillsByIds", () => {
@@ -99,6 +150,7 @@ describe("loadAllSkills + loadSkillsByIds", () => {
   it("returns built-in skills when the sidecar has no skills.json", () => {
     expect(loadAllSkills(projectDir).map((skill) => skill.id)).toEqual([
       "system-model-authoring",
+      "skill-builder",
     ]);
     expect(loadSkillsByIds(projectDir, ["anything"])).toEqual([]);
   });
@@ -111,6 +163,7 @@ describe("loadAllSkills + loadSkillsByIds", () => {
     const all = loadAllSkills(projectDir);
     expect(all.map((s) => s.id)).toEqual([
       "system-model-authoring",
+      "skill-builder",
       "lint",
       "test",
     ]);
@@ -123,7 +176,11 @@ describe("loadAllSkills + loadSkillsByIds", () => {
       "not even an object",
     ]);
     const all = loadAllSkills(projectDir);
-    expect(all.map((s) => s.id)).toEqual(["system-model-authoring", "ok"]);
+    expect(all.map((s) => s.id)).toEqual([
+      "system-model-authoring",
+      "skill-builder",
+      "ok",
+    ]);
   });
 
   it("loads skills by id in the order requested", () => {
@@ -134,6 +191,27 @@ describe("loadAllSkills + loadSkillsByIds", () => {
     ]);
     const got = loadSkillsByIds(projectDir, ["c", "a"]);
     expect(got.map((s) => s.id)).toEqual(["c", "a"]);
+  });
+
+  it("preserves subskills through the load guard", () => {
+    writeSkills(projectDir, [
+      makeSkill({
+        id: "withsubs",
+        subskills: [
+          {
+            id: "s1",
+            name: "S1",
+            description: "d",
+            body: "b",
+            alwaysInclude: true,
+          },
+        ],
+      }),
+    ]);
+    const got = loadSkillsByIds(projectDir, ["withsubs"]);
+    expect(got[0]!.subskills).toEqual([
+      { id: "s1", name: "S1", description: "d", body: "b", alwaysInclude: true },
+    ]);
   });
 
   it("silently skips unknown ids", () => {

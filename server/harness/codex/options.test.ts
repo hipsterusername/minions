@@ -25,24 +25,34 @@ describe("resolveCodexModel", () => {
   });
 
   it.each([
-    ["codex", "gpt-5.5"],
-    ["default", "gpt-5.5"],
-    ["fast", "gpt-5.5"],
-    ["codex-default", "gpt-5.5"],
-    ["gpt-5", "gpt-5.5"],
-    ["gpt-5-codex", "gpt-5.5"],
-    ["gpt-5-codex-mini", "gpt-5.5"],
-    ["gpt-5.4", "gpt-5.4"],
-    ["gpt-5.3-codex-spark", "gpt-5.3-codex-spark"],
+    // Short harness aliases + flagship default.
+    ["codex", "gpt-5.6-sol"],
+    ["default", "gpt-5.6-sol"],
+    ["codex-default", "gpt-5.6-sol"],
+    ["fast", "gpt-5.6-luna"],
+    // Bare generation alias routes to the flagship tier.
+    ["gpt-5.6", "gpt-5.6-sol"],
+    // Canonical tier IDs are identities.
+    ["gpt-5.6-sol", "gpt-5.6-sol"],
+    ["gpt-5.6-terra", "gpt-5.6-terra"],
+    ["gpt-5.6-luna", "gpt-5.6-luna"],
+    // Legacy persisted IDs resolve forward to the nearest current tier.
+    ["gpt-5.5", "gpt-5.6-sol"],
+    ["gpt-5.4", "gpt-5.6-terra"],
+    ["gpt-5.3-codex-spark", "gpt-5.6-luna"],
+    ["gpt-5", "gpt-5.6-sol"],
+    ["gpt-5-codex", "gpt-5.6-sol"],
+    ["gpt-5-codex-mini", "gpt-5.6-luna"],
   ] as const)("maps alias '%s' to '%s'", (alias, expected) => {
     expect(resolveCodexModel(alias)).toBe(expected);
   });
 
   it.each([
-    ["CODEX", "gpt-5.5"],
-    ["Default", "gpt-5.5"],
-    ["FAST", "gpt-5.5"],
-    ["Codex", "gpt-5.5"],
+    ["CODEX", "gpt-5.6-sol"],
+    ["Default", "gpt-5.6-sol"],
+    ["FAST", "gpt-5.6-luna"],
+    ["Codex", "gpt-5.6-sol"],
+    ["GPT-5.6-Sol", "gpt-5.6-sol"],
   ] as const)("resolves alias '%s' case-insensitively", (alias, expected) => {
     expect(resolveCodexModel(alias)).toBe(expected);
   });
@@ -70,12 +80,14 @@ describe("CODEX_STATIC_MODELS", () => {
     }
   });
 
-  it("exposes only current ChatGPT-backed Codex model options", () => {
+  it("exposes only the current GPT-5.6 tier options", () => {
     const ids = CODEX_STATIC_MODELS.map((m) => m.id);
-    expect(ids).toEqual(["gpt-5.5", "gpt-5.4", "gpt-5.3-codex-spark"]);
+    expect(ids).toEqual(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
+    // Legacy / bare generation IDs are not exposed as selectable options.
     expect(ids).not.toContain("gpt-5");
-    expect(ids).not.toContain("gpt-5-codex");
-    expect(ids).not.toContain("gpt-5-codex-mini");
+    expect(ids).not.toContain("gpt-5.6");
+    expect(ids).not.toContain("gpt-5.5");
+    expect(ids).not.toContain("gpt-5.3-codex-spark");
   });
 });
 

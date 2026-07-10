@@ -68,6 +68,43 @@ describe("graphReducer", () => {
     });
   });
 
+  describe("SET_EDGE_CONTEXT_MODE", () => {
+    it("sets the contextMode on the matching edge only", () => {
+      const state: GraphDocument = {
+        edges: [makeEdge("e1", "a", "b"), makeEdge("e2", "c", "d")],
+      };
+      const next = graphReducer(state, {
+        type: "SET_EDGE_CONTEXT_MODE",
+        id: "e1",
+        contextMode: "full",
+      });
+      expect(next.edges.find((e) => e.id === "e1")?.contextMode).toBe("full");
+      expect(next.edges.find((e) => e.id === "e2")?.contextMode).toBeUndefined();
+    });
+
+    it("overwrites a previously set mode", () => {
+      const state: GraphDocument = {
+        edges: [{ ...makeEdge("e1", "a", "b"), contextMode: "lean" }],
+      };
+      const next = graphReducer(state, {
+        type: "SET_EDGE_CONTEXT_MODE",
+        id: "e1",
+        contextMode: "dashboard",
+      });
+      expect(next.edges[0]?.contextMode).toBe("dashboard");
+    });
+
+    it("is a no-op for an unknown id", () => {
+      const state: GraphDocument = { edges: [makeEdge("e1", "a", "b")] };
+      const next = graphReducer(state, {
+        type: "SET_EDGE_CONTEXT_MODE",
+        id: "ghost",
+        contextMode: "full",
+      });
+      expect(next.edges[0]?.contextMode).toBeUndefined();
+    });
+  });
+
   describe("REMOVE_EDGES_FOR_NODE", () => {
     it("removes edges where the node is the source", () => {
       const state: GraphDocument = {

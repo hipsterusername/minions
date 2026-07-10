@@ -1,0 +1,33 @@
+id: flow.resume_idle_session_message_and_event_log
+type: flow
+name: resume_idle_session_message_and_event_log
+summary: Deliver steering prompts only to idle sessions and persist the resulting buffered event tail.
+capabilities:
+  - capability.persistence_project_state
+constraints:
+  - constraint.bus_only_broadcasts
+  - constraint.no_cross_tree_imports
+decisions:
+  - decision.graph_as_bus
+risks:
+  - risk.session_state_drift
+  - risk.command_contract_drift
+suggested_files:
+  - server/session-message.ts
+  - server/session-host-run.ts
+  - server/session-host.ts
+  - server/session-persist.ts
+  - server/session-repo.ts
+  - server/session-message.test.ts
+suggested_tests:
+  - pnpm test:run -- server/session-message.test.ts server/session-persist.test.ts
+steps:
+  - Wire task tool message delivery to injectSessionMessage through the agent context.
+  - Look up runtime metadata and reject unknown, running, completed, stopped, or errored sessions.
+  - Start idle sessions with the steering prompt, cwd, persisted session id, and original harness.
+  - Process resumed normalized events and push client visible events through SessionHost.bufferEvent.
+  - Cap the in memory event tail and append the same payload to event_log.
+  - Restore recent events in chronological order during hydration without writing them again.
+freshness:
+  class: code_coupled
+risk: high

@@ -14,7 +14,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MergeResult } from "../worktree-types.ts";
-import { setup, cmd } from "./test-harness.ts";
+import { setup, cmd } from "../../tests/support/server-command-harness.ts";
 import { disablePersistence } from "../session-persist.ts";
 
 interface MergeCall {

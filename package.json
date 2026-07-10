@@ -2,7 +2,23 @@
   "name": "minions",
   "private": true,
   "version": "0.1.0",
-  "description": "A canvas for managing agentic context and workflows",
+  "description": "A spatial workspace for orchestrating coding agents and parallel workflows",
+  "keywords": [
+    "ai-agents",
+    "coding-agents",
+    "claude-code",
+    "codex",
+    "developer-tools",
+    "orchestration"
+  ],
+  "homepage": "https://github.com/hipsterusername/minions#readme",
+  "bugs": {
+    "url": "https://github.com/hipsterusername/minions/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hipsterusername/minions.git"
+  },
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -18,7 +34,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "serve:tailscale": "node scripts/tailscale-serve.mjs --port 4173",
-    "serve:tailscale:dev": "node scripts/tailscale-serve.mjs --port 5173",
+    "serve:tailscale:dev": "node scripts/tailscale-serve.mjs --port 6173",
     "typecheck": "tsc -b --noEmit",
     "typecheck:server": "tsc -p server/tsconfig.json --noEmit",
     "test": "vitest",
@@ -26,11 +42,10 @@
     "test:coverage": "vitest run --coverage",
     "test:mutation": "stryker run",
     "check:licenses": "node scripts/check-licenses.mjs",
-    "system-model:validate": "tsx scripts/system-model-validate.mjs",
-    "verify": "pnpm typecheck && pnpm typecheck:server && pnpm test:run && pnpm check:licenses && pnpm build",
+    "system-model:validate": "node --import tsx scripts/system-model-validate.mjs",
+    "verify": "pnpm typecheck && pnpm typecheck:server && pnpm test:run && pnpm check:licenses && pnpm system-model:validate -- --strict && pnpm build",
     "agent:preflight": "node scripts/agent-workflow-preflight.mjs",
-    "preflight": "node scripts/preflight.mjs",
-    "configure": "node scripts/preflight.mjs && node scripts/setup-permissions.mjs"
+    "preflight": "node scripts/preflight.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.177",
@@ -41,9 +56,10 @@
     "@codemirror/state": "6.6.0",
     "@codemirror/view": "6.43.1",
     "@lezer/highlight": "1.2.3",
-    "@openai/codex-sdk": "^0.139.0",
+    "@openai/codex-sdk": "^0.144.1",
     "better-sqlite3": "^12.10.1",
     "express": "^5.2.1",
+    "lucide-react": "1.23.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "ws": "^8.21.0",

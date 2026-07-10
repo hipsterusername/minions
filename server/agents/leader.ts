@@ -8,7 +8,9 @@ import type { AgentType, AgentTypeContext, AgentToolResult } from "./types.ts";
 import { createTaskToolsForLeader } from "../task-tools.ts";
 import { createRenderToolsForLeader } from "../render-tools.ts";
 import { createSystemModelToolsForLeader } from "../system-model-tools/index.ts";
+import { createSkillAuthoringTools } from "../skill-authoring-tools.ts";
 import { resolveSystemModelRuntime, type SystemModelRuntime } from "../system-model/runtime.ts";
+import { gatedSurfaceGlobs } from "../system-model/applicability.ts";
 import { MINION_SYSTEM_PROMPT } from "./minion.ts";
 import {
   persistTaskState,
@@ -153,7 +155,7 @@ Interactive / rich:
 - \`chart\` renders SVG charts with axes, multi-series data, and optional reference lines. Variants: \`line\`, \`bar\`, \`scatter\`, \`area\`.
 
 Container / layout:
-- \`section\` is a collapsible group with \`title\`, optional \`badge\`, optional \`defaultOpen\`, and child \`components\`.
+- \`section\` is a collapsible group with \`title\`, optional \`badge\`, optional \`defaultOpen\` (defaults false), and child \`components\`.
 - \`tabs\` contains tabs with \`id\`, \`label\`, optional \`badge\`, and child \`components\`.
 
 Artifacts:
@@ -244,15 +246,16 @@ export const LEADER_SYSTEM_PROMPT = buildLeaderPromptBody(LEADER_PROMPT_TOOLS);
 
 function appendSystemModelAddendum(prompt: string, runtime: SystemModelRuntime): string {
   if (runtime.mode === "off" || !runtime.model) return prompt;
+  // Redesign §6: factual addendum listing gated surfaces, no "query for planning" mandate.
+  const globs = gatedSurfaceGlobs(runtime.model);
+  const surfaces = globs.length > 0 ? globs.join(", ") : "(none currently defined)";
   const addendum = `
 
 ## System Model
 
-The \`system-model\` tool group is active. Use \`query_system_model\` for planning context, \`create_work_packet\` before delegating gated-surface work, \`amend_work_packet\` whenever replanning changes scope, \`check_freshness\` for ad hoc staleness checks, and \`record_verification\` after required checks are complete.
+A system model is active. Gated surfaces — a work packet is required when a task touches them: ${surfaces}. You do not need to check preemptively: \`plan_task\` and \`assign_task\` compute this deterministically and tell you when a task hits one. When assigning a minion for packet-scoped work, pass \`workPacketId\` to \`assign_task\` so the stored Context Pack is injected.
 
-A Work Packet is required when task files, owned paths, or matched suggested files intersect review-gate file globs or critical constraint file globs. Enforcement is structural at the worktree boundary; this prompt is orientation only.
-
-When assigning a minion for packet-scoped work, pass \`workPacketId\` to \`assign_task\` so the stored Context Pack is injected into the spawn prompt.`;
+Tools (available, not mandated): \`query_system_model\` (scored, topK), \`create_work_packet\`, \`amend_work_packet\`, \`check_freshness\`, \`record_verification\`.`;
   const maxChars = runtime.model.policies.contextBudgets.leaderPromptAddendum * 4;
   return `${prompt}${addendum.length <= maxChars ? addendum : `${addendum.slice(0, Math.max(0, maxChars - 40))}\n[system-model addendum truncated]`}`;
 }
@@ -267,11 +270,28 @@ const LEADER_MCP_TOOLS = [
   "mcp__task-manager__set_task_name",
   "mcp__task-manager__wait_and_continue",
   "mcp__task-manager__request_approval",
+  "mcp__task-manager__load_subskill",
   "mcp__render-dashboard__render_set",
   "mcp__render-dashboard__render_patch",
   "mcp__render-dashboard__render_append",
   "mcp__render-dashboard__render_remove",
 ];
+
+/**
+ * Skill-authoring tool names — opt-in. Only loaded for a leader whose session
+ * tagged the `skill-builder` skill. Keeps ~1.5k tokens of tool schemas off
+ * every other leader.
+ */
+const SKILL_AUTHORING_TOOLS = [
+  "mcp__skills__list_skills",
+  "mcp__skills__get_skill",
+  "mcp__skills__create_skill",
+  "mcp__skills__update_skill",
+  "mcp__skills__delete_skill",
+];
+
+/** The skill ID that gates the skill-authoring tools. */
+const SKILL_BUILDER_ID = "skill-builder";
 
 // ── AgentType implementation ──────────────────────────────────────────────
 
@@ -293,6 +313,9 @@ const leaderAgent: AgentType = {
 
     const leaderSessionKey = ctx.sessionKey;
 
+    // Resolved once up front: task tools need it for the packet trigger (§5).
+    const systemModelRuntime = resolveSystemModelRuntime(ctx);
+
     const { toolDefs: taskDefs, taskState } = createTaskToolsForLeader({
       leaderSessionKey,
       bus: ctx.bus,
@@ -301,6 +324,7 @@ const leaderAgent: AgentType = {
       // Skills live in the sidecar of the original project, not the worktree.
       projectPath: ctx.worktreeInfo?.projectPath ?? ctx.cwd,
       minionSystemPrompt: MINION_SYSTEM_PROMPT,
+      systemModel: systemModelRuntime.mode !== "off" ? systemModelRuntime.model : null,
       existingTaskState: ctx.existingTaskState,
       getSessionRuntime: ctx.getSessionRuntime,
       worktreeBranch: ctx.worktreeInfo?.branch ?? null,
@@ -322,7 +346,6 @@ const leaderAgent: AgentType = {
       onStateChange: (state) => persistRenderState(leaderSessionKey, state),
     });
 
-    const systemModelRuntime = resolveSystemModelRuntime(ctx);
     const systemModelDefs = systemModelRuntime.mode !== "off" && systemModelRuntime.model
       ? createSystemModelToolsForLeader({
         leaderSessionKey,
@@ -333,9 +356,21 @@ const leaderAgent: AgentType = {
       })
       : [];
 
+    // Skill authoring is opt-in: load the tools only when this leader session
+    // tagged the `skill-builder` skill. Reads/writes the sidecar of the
+    // original project, not the worktree — same projectPath resolution as the
+    // task tools above.
+    const hasSkillBuilder = ctx.skillIds?.includes(SKILL_BUILDER_ID) ?? false;
+    const skillAuthoringDefs = hasSkillBuilder
+      ? createSkillAuthoringTools({
+        projectPath: ctx.worktreeInfo?.projectPath ?? ctx.cwd,
+      })
+      : [];
+
     const toolGroups: Record<string, import("../harness/types.ts").NormalizedToolDef[]> = {
       "task-manager": taskDefs,
       "render-dashboard": renderDefs,
+      ...(hasSkillBuilder ? { skills: skillAuthoringDefs } : {}),
       ...(systemModelDefs.length > 0 ? { "system-model": systemModelDefs } : {}),
     };
 
@@ -343,6 +378,7 @@ const leaderAgent: AgentType = {
       toolGroups,
       mcpToolNames: [
         ...LEADER_MCP_TOOLS,
+        ...(hasSkillBuilder ? SKILL_AUTHORING_TOOLS : []),
         ...systemModelDefs.map((def) => `mcp__system-model__${def.name}`),
       ],
       taskState,

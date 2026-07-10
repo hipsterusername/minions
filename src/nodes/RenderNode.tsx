@@ -1,26 +1,28 @@
 /**
- * RenderNode — Agent-driven adaptive dashboard node.
+ * Render primitives — the agent-driven dashboard component library.
  *
- * Auto-spawned and affixed to the right of a Leader node. Subscribes to
- * `render_update` WebSocket events matching its paired Leader session and
- * renders a live grid of pre-built component primitives.
- *
- * Not user-creatable from the palette — only created programmatically
- * when a Leader session starts.
+ * The standalone render node was retired; the dashboard is now embedded
+ * directly in the Leader node via `DashboardSurface` (see
+ * `./render/DashboardSurface.tsx`). This module is the shared source of the
+ * component renderers (`RenderComponentView`), grid helpers (`gridColumnFor`,
+ * `isFullWidth`), selection UI, and injected styles that the surface consumes.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import type { NodeRenderProps } from "../types.ts";
-import { registerNodeType } from "../node-registry.ts";
-import { CONTEXT_OUT_PORT, registerContract } from "../graph.ts";
-import type { NodeInterfaceContract } from "../graph.ts";
-import { flattenRenderStateToText, formatRenderComponentToText } from "../render-flatten.ts";
-import { copyText as copyToClipboard } from "../components/CopyButton.tsx";
-import { subscribeSocketTopic, type ServerMessage } from "../use-socket.ts";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import {
+  Check,
+  X as XIcon,
+  AlertTriangle,
+  Circle,
+  Dot,
+  Info,
+  ArrowUp,
+  ArrowDown,
+  ArrowRight,
+  type LucideIcon,
+} from "lucide-react";
 import { SimpleMarkdown } from "../components/SimpleMarkdown.tsx";
-import { ResizeHandle } from "../components/ResizeHandle.tsx";
 import type {
-  RenderState,
   RenderComponent,
   MetricComponent,
   ProgressComponent,
@@ -44,8 +46,8 @@ import type {
   TabsComponent,
   ImageComponent,
   FilePreviewComponent,
+  HtmlArtifactComponent,
 } from "../../shared/render-dsl.ts";
-import { applyRenderMessage, renderMessageSchema } from "../../shared/render-dsl.ts";
 import { FormComponent } from "./render/FormComponent.tsx";
 import { ChartComponent } from "./render/ChartComponent.tsx";
 import {
@@ -55,19 +57,11 @@ import {
 import {
   ImageRenderer,
   FilePreviewRenderer,
+  HtmlArtifactRenderer,
 } from "./render/ArtifactComponents.tsx";
-import { sessionTopic } from "../../shared/ws-envelope.ts";
+import { browserLogger } from "../logging.ts";
 
-// ── Data shape ────────────────────────────────────────────
-
-export interface RenderNodeData {
-  /** Session key of the paired Leader */
-  leaderSessionKey: string | null;
-  /** Canvas node ID of the paired Leader (used for group-move affixing) */
-  leaderId: string | null;
-  /** Current render state */
-  renderState: RenderState;
-}
+const log = browserLogger.child("render-node");
 
 // ── Color palette ─────────────────────────────────────────
 
@@ -88,24 +82,24 @@ const DSL_COLORS: { [K in DslColorKey]: string } = {
 };
 
 type StatusKey = "success" | "error" | "warning" | "running" | "pending";
-const STATUS_CONFIG: { [K in StatusKey]: { color: string; icon: string; bg: string } } = {
-  success: { color: "var(--status-success)", icon: "\u2713", bg: "var(--success-bg)" },
-  error: { color: "var(--status-error)", icon: "\u2717", bg: "var(--error-bg)" },
-  warning: { color: "var(--status-warning)", icon: "!", bg: "var(--warning-bg)" },
-  running: { color: "var(--info-color)", icon: "\u25CB", bg: "var(--info-bg)" },
-  pending: { color: "var(--text-muted)", icon: "\u2022", bg: "var(--muted-bg)" },
+const STATUS_CONFIG: { [K in StatusKey]: { color: string; Icon: LucideIcon; bg: string } } = {
+  success: { color: "var(--status-success)", Icon: Check, bg: "var(--success-bg)" },
+  error: { color: "var(--status-error)", Icon: XIcon, bg: "var(--error-bg)" },
+  warning: { color: "var(--status-warning)", Icon: AlertTriangle, bg: "var(--warning-bg)" },
+  running: { color: "var(--info-color)", Icon: Circle, bg: "var(--info-bg)" },
+  pending: { color: "var(--text-muted)", Icon: Dot, bg: "var(--muted-bg)" },
 };
 
 type TrendKey = "up" | "down" | "flat";
-const TREND_ARROWS: { [K in TrendKey]: { symbol: string; color: string } } = {
-  up: { symbol: "\u2191", color: "var(--status-success)" },
-  down: { symbol: "\u2193", color: "var(--status-error)" },
-  flat: { symbol: "\u2192", color: "var(--text-muted)" },
+const TREND_ARROWS: { [K in TrendKey]: { Icon: LucideIcon; color: string } } = {
+  up: { Icon: ArrowUp, color: "var(--status-success)" },
+  down: { Icon: ArrowDown, color: "var(--status-error)" },
+  flat: { Icon: ArrowRight, color: "var(--text-muted)" },
 };
 
 // ── Shared CSS class names (injected via injectStyles) ────
 
-const CLS = {
+export const CLS = {
   card: "rd-card",
   cardHover: "rd-card--hover",
   tableRow: "rd-table-row",
@@ -198,12 +192,12 @@ function MetricCard({ c }: { c: MetricComponent }) {
         </span>
         {trend && (
           <span style={{
-            fontSize: 14,
             color: trend.color,
-            fontWeight: 600,
             lineHeight: 1,
+            display: "inline-flex",
+            alignItems: "center",
           }}>
-            {trend.symbol}
+            <trend.Icon size={16} strokeWidth={2.5} aria-hidden />
           </span>
         )}
       </div>
@@ -346,7 +340,7 @@ function StatusBadge({ c }: { c: StatusComponent }) {
               }}
             />
           ) : (
-            cfg.icon
+            <cfg.Icon size={12} strokeWidth={3} aria-hidden />
           )}
         </span>
       </span>
@@ -958,11 +952,11 @@ function TimelineView({ c }: { c: TimelineComponent }) {
 
 /** Callout variant configuration */
 type CalloutVariant = "info" | "warning" | "success" | "error";
-const CALLOUT_CONFIG: { [K in CalloutVariant]: { color: string; bg: string; icon: string } } = {
-  info: { color: "var(--info-color)", bg: "var(--info-bg)", icon: "\u2139" },
-  warning: { color: "var(--status-warning)", bg: "var(--warning-bg)", icon: "\u26A0" },
-  success: { color: "var(--status-success)", bg: "var(--success-bg)", icon: "\u2713" },
-  error: { color: "var(--status-error)", bg: "var(--error-bg)", icon: "\u2717" },
+const CALLOUT_CONFIG: { [K in CalloutVariant]: { color: string; bg: string; Icon: LucideIcon } } = {
+  info: { color: "var(--info-color)", bg: "var(--info-bg)", Icon: Info },
+  warning: { color: "var(--status-warning)", bg: "var(--warning-bg)", Icon: AlertTriangle },
+  success: { color: "var(--status-success)", bg: "var(--success-bg)", Icon: Check },
+  error: { color: "var(--status-error)", bg: "var(--error-bg)", Icon: XIcon },
 };
 
 /**
@@ -1000,7 +994,7 @@ function CalloutBlock({ c }: { c: CalloutComponent }) {
         color: cfg.color,
         fontWeight: 700,
       }}>
-        {cfg.icon}
+        <cfg.Icon size={13} strokeWidth={2.75} aria-hidden />
       </span>
       <div style={{ flex: 1, minWidth: 0 }}>
         {c.title && (
@@ -1385,7 +1379,7 @@ function CopyableBlock({ c }: { c: CopyableComponent }) {
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => setCopied(false), 1500);
     } catch (err) {
-      console.warn("[copyable] clipboard write failed:", err);
+      log.warn("copy_failed", { error: err });
     }
   }, [c.content]);
 
@@ -1560,6 +1554,8 @@ export interface RenderViewContext {
    * a synthetic user turn.
    */
   onSubmitForm?: ((componentId: string, answers: Record<string, unknown>) => void) | undefined;
+  /** Dashboard-level expand/collapse state for all section components. */
+  sectionExpansionState?: boolean | undefined;
 }
 
 export function RenderComponentView({
@@ -1617,6 +1613,7 @@ export function RenderComponentView({
       return (
         <SectionRenderer
           c={component as SectionComponent}
+          globalOpenState={context?.sectionExpansionState}
           renderChild={(child) => (
             <RenderComponentView component={child} context={context} />
           )}
@@ -1635,9 +1632,21 @@ export function RenderComponentView({
       return <ImageRenderer c={component as ImageComponent} />;
     case "file-preview":
       return <FilePreviewRenderer c={component as FilePreviewComponent} />;
+    case "html-artifact":
+      return <HtmlArtifactRenderer c={component as HtmlArtifactComponent} />;
     default:
       return null;
   }
+}
+
+export function hasSectionComponent(components: readonly RenderComponent[]): boolean {
+  for (const component of components) {
+    if (component.type === "section") return true;
+    if (component.type === "tabs") {
+      if (component.tabs.some((tab) => hasSectionComponent(tab.components))) return true;
+    }
+  }
+  return false;
 }
 
 type DashboardSelectionIconKind =
@@ -1713,7 +1722,7 @@ function DashboardSelectionIcon({ kind }: { kind: DashboardSelectionIconKind }) 
   }
 }
 
-function DashboardSelectionGroup({
+export function DashboardSelectionGroup({
   label,
   children,
 }: {
@@ -1737,7 +1746,7 @@ function DashboardSelectionGroup({
   );
 }
 
-function DashboardSelectionButton({
+export function DashboardSelectionButton({
   icon,
   label,
   onClick,
@@ -1800,7 +1809,7 @@ function isDashboardInteractiveTarget(target: EventTarget | null): boolean {
   );
 }
 
-function SelectableDashboardComponent({
+export function SelectableDashboardComponent({
   componentId,
   selectionActive,
   selected,
@@ -1889,6 +1898,7 @@ const ALWAYS_FULL_WIDTH = new Set<RenderComponent["type"]>([
   "tabs",
   "image",
   "file-preview",
+  "html-artifact",
 ]);
 
 function isFullWidth(c: RenderComponent, columns: number): boolean {
@@ -2244,450 +2254,3 @@ export function injectStyles() {
   `;
   document.head.appendChild(style);
 }
-
-// ── Main RenderNode component ─────────────────────────────
-
-export function RenderNodeRenderer({
-  node,
-  onUpdateData,
-  socketSubscribe,
-  socketSend,
-  onResize,
-  onAddContentNode,
-}: NodeRenderProps) {
-  const data = node.data as RenderNodeData;
-  const dataRef = useRef(data);
-  dataRef.current = data;
-
-  // Build the dispatcher context once per render so interactive children
-  // (e.g. `form`) can post user input back to the paired Leader session.
-  // The `submit_form` command is dispatched server-side in
-  // `server/commands/submit-form.ts`.
-  const renderViewContext = useCallback(
-    (): RenderViewContext => ({
-      onSubmitForm: (componentId, answers) => {
-        const sessionKey = dataRef.current.leaderSessionKey;
-        if (!sessionKey || !socketSend) return;
-        socketSend({
-          type: "submit_form",
-          sessionKey,
-          formComponentId: componentId,
-          formAnswers: answers,
-        });
-      },
-    }),
-    [socketSend],
-  );
-
-  // Inject CSS animation
-  useEffect(() => { injectStyles(); }, []);
-
-  const [contextSelectionActive, setContextSelectionActive] = useState(false);
-  const [selectedComponentIds, setSelectedComponentIds] = useState<string[]>([]);
-  const [payloadError, setPayloadError] = useState<string | null>(null);
-
-  // Subscribe to render_update events from the paired Leader session
-  useEffect(() => {
-    if (!socketSubscribe || !data.leaderSessionKey) return;
-
-    return subscribeSocketTopic(socketSubscribe, sessionTopic(data.leaderSessionKey), (msg: unknown) => {
-      const serverMsg = msg as ServerMessage & {
-        type: string;
-        leaderSessionKey?: string;
-        action?: string;
-        layout?: unknown;
-        components?: unknown;
-        updates?: unknown;
-        ids?: unknown;
-      };
-
-      if (
-        serverMsg.type !== "render_update" ||
-        serverMsg.leaderSessionKey !== dataRef.current.leaderSessionKey
-      ) {
-        return;
-      }
-
-      // Validate the wire payload before applying it so a malformed message
-      // from the server never causes an uncaught runtime error here.
-      const parsed = renderMessageSchema.safeParse(serverMsg);
-      if (!parsed.success) {
-        const detail = parsed.error.issues.map((i) => i.message).join("; ");
-        setPayloadError(`Invalid render payload: ${detail}`);
-        return;
-      }
-      setPayloadError(null);
-      const newState = applyRenderMessage(dataRef.current.renderState, parsed.data);
-      onUpdateData({ ...dataRef.current, renderState: newState });
-    });
-  }, [socketSubscribe, data.leaderSessionKey, onUpdateData]);
-
-  const { renderState } = data;
-  const { layout, components } = renderState;
-  const columns = layout.columns ?? 2;
-  const gap = layout.gap ?? 12;
-  const hasContent = components.length > 0;
-  const selectedIdSet = useMemo(
-    () => new Set(selectedComponentIds),
-    [selectedComponentIds],
-  );
-  const selectedText = useMemo(
-    () =>
-      components
-        .filter((component) => selectedIdSet.has(component.id))
-        .map(formatRenderComponentToText)
-        .join("\n\n"),
-    [components, selectedIdSet],
-  );
-  const fullDashboardText = useMemo(
-    () => flattenRenderStateToText(renderState),
-    [renderState],
-  );
-  const toggleSelectedComponent = useCallback((componentId: string) => {
-    setContextSelectionActive(true);
-    setSelectedComponentIds((current) =>
-      current.includes(componentId)
-        ? current.filter((id) => id !== componentId)
-        : [...current, componentId],
-    );
-  }, []);
-  const copyText = useCallback((text: string) => {
-    void copyToClipboard(text).catch((err: unknown) => {
-      console.warn("[RenderNode] copy failed:", err);
-    });
-  }, []);
-  const exitContextSelection = useCallback(() => {
-    setContextSelectionActive(false);
-    setSelectedComponentIds([]);
-  }, []);
-
-  return (
-    <div
-      style={{
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-        background: "var(--bg-surface)",
-        borderRadius: 8,
-        border: "1px solid var(--border-default)",
-        overflow: "hidden",
-        position: "relative",
-      }}
-    >
-      {/* Resize handle */}
-      {onResize && (
-        <ResizeHandle
-          currentSize={node.size}
-          minWidth={300}
-          minHeight={200}
-          onResize={onResize}
-          color="var(--accent)"
-        />
-      )}
-
-      {/* Header */}
-      <div
-        style={{
-          padding: "8px 14px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          borderBottom: "1px solid var(--border-default)",
-          flexShrink: 0,
-          background: "var(--bg-secondary)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <img
-            src="/icons/dashboard.svg"
-            alt="Dashboard"
-            width={20}
-            height={20}
-            style={{ display: "block", flexShrink: 0 }}
-          />
-          <span style={{
-            fontSize: 12,
-            fontWeight: 600,
-            color: "var(--text-primary)",
-            letterSpacing: "-0.01em",
-          }}>
-            {layout.title || "Dashboard"}
-          </span>
-        </div>
-        {hasContent && (
-          <span style={{
-            fontSize: 9,
-            color: "var(--text-muted)",
-            fontFamily: "var(--font-mono)",
-            opacity: 0.7,
-          }}>
-            {components.length} component{components.length !== 1 ? "s" : ""}
-          </span>
-        )}
-      </div>
-
-      {/* Content area — scroll-capture zone so mouse wheel and trackpad
-          two-finger scroll over the dashboard scroll its content instead of
-          zooming/panning the canvas. The Canvas wheel handler checks for
-          `data-scroll-capture` on the event target's ancestors. */}
-      <div
-        className={hasContent ? CLS.scrollArea : undefined}
-        data-scroll-capture
-        style={{
-          flex: 1,
-          overflow: "auto",
-          padding: hasContent ? gap : 0,
-          // Prevent scroll chaining: when the dashboard reaches its scroll
-          // boundary, don't let the scroll propagate to the canvas/page.
-          overscrollBehavior: "contain",
-        }}
-      >
-        {payloadError !== null && (
-          <div
-            role="alert"
-            style={{
-              margin: gap,
-              padding: "8px 12px",
-              background: "var(--error-bg, #fef2f2)",
-              border: "1px solid var(--status-error, #dc2626)",
-              borderRadius: 6,
-              fontSize: 11,
-              color: "var(--status-error, #dc2626)",
-              fontFamily: "var(--font-mono, monospace)",
-              wordBreak: "break-all",
-            }}
-          >
-            {payloadError}
-          </div>
-        )}
-        {!hasContent ? (
-          <div style={{
-            height: "100%",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexDirection: "column",
-            gap: 10,
-            color: "var(--text-muted)",
-            padding: 24,
-          }}>
-            <div style={{
-              width: 44,
-              height: 44,
-              borderRadius: 12,
-              background: "var(--bg-secondary)",
-              border: "1px solid var(--border-default)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: 0.5,
-            }}>
-              <img
-                src="/icons/dashboard.svg"
-                alt="Dashboard"
-                width={28}
-                height={28}
-                style={{ display: "block" }}
-              />
-            </div>
-            <div style={{
-              fontSize: 12,
-              textAlign: "center",
-              lineHeight: 1.6,
-            }}>
-              Waiting for dashboard data...
-              <br />
-              <span style={{ fontSize: 10, opacity: 0.6 }}>
-                The Leader agent will populate this panel
-              </span>
-            </div>
-          </div>
-        ) : (
-          <>
-            {contextSelectionActive && (
-              <div
-                data-testid="render-context-selection-toolbar"
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  zIndex: 20,
-                  display: "flex",
-                  justifyContent: "flex-end",
-                  marginBottom: gap,
-                  pointerEvents: "none",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 4,
-                    padding: 2,
-                    borderRadius: 5,
-                    background: "var(--bg-primary)",
-                    border: "1px solid var(--border-default)",
-                    boxShadow: "var(--shadow-sm)",
-                    pointerEvents: "auto",
-                  }}
-                >
-                  <span
-                    aria-live="polite"
-                    style={{
-                      padding: "0 5px",
-                      color: "var(--text-muted)",
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 10,
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {selectedComponentIds.length} component
-                    {selectedComponentIds.length === 1 ? "" : "s"}
-                  </span>
-                  <DashboardSelectionGroup label="Selection controls">
-                    <DashboardSelectionButton
-                      icon="select-all"
-                      label="Select all dashboard components"
-                      onClick={() => setSelectedComponentIds(components.map((component) => component.id))}
-                      disabled={components.length === 0}
-                    />
-                    <DashboardSelectionButton
-                      icon="clear"
-                      label="Clear selected dashboard components"
-                      onClick={() => setSelectedComponentIds([])}
-                      disabled={selectedComponentIds.length === 0}
-                    />
-                  </DashboardSelectionGroup>
-                  <DashboardSelectionGroup label="Copy and create actions">
-                    <DashboardSelectionButton
-                      icon="copy"
-                      label="Copy selected dashboard context"
-                      onClick={() => copyText(selectedText)}
-                      disabled={selectedText.length === 0}
-                      tone="primary"
-                    />
-                    <DashboardSelectionButton
-                      icon="node"
-                      label="Add selected dashboard context as node"
-                      onClick={() => onAddContentNode?.(selectedText)}
-                      disabled={!onAddContentNode || selectedText.length === 0}
-                      tone="primary"
-                    />
-                    <DashboardSelectionButton
-                      icon="copy-full"
-                      label="Copy full dashboard context"
-                      onClick={() => copyText(fullDashboardText)}
-                      disabled={fullDashboardText.length === 0}
-                      tone="primary"
-                    />
-                  </DashboardSelectionGroup>
-                  <DashboardSelectionGroup label="Selection mode">
-                    <DashboardSelectionButton
-                      icon="exit"
-                      label="Exit dashboard context selection"
-                      onClick={exitContextSelection}
-                    />
-                  </DashboardSelectionGroup>
-                </div>
-              </div>
-            )}
-            <div
-              className="rd-grid-container"
-              style={{
-                // Container query lets the grid step down to fewer columns
-                // when the node is resized narrow, independent of the
-                // agent-declared `columns` (which is treated as a maximum).
-                containerType: "inline-size",
-                // Expose the declared max column count to the CSS via a
-                // custom property so the @container rules can clamp it.
-                ["--rd-max-cols" as string]: String(columns),
-                ["--rd-gap" as string]: `${gap}px`,
-              }}
-            >
-              <div
-                className="rd-grid"
-                style={{
-                  display: "grid",
-                  // `minmax(0, 1fr)` prevents overflow when a child has
-                  // intrinsic min-content wider than its track.
-                  gridTemplateColumns: `repeat(var(--rd-cols, ${columns}), minmax(0, 1fr))`,
-                  gap,
-                  // `start` on both axes + `min-content` rows stops short
-                  // components from being stretched to match a tall sibling.
-                  alignContent: "start",
-                  alignItems: "start",
-                  gridAutoRows: "min-content",
-                  // Dense packing backfills holes created by full-width
-                  // items or size-mismatched rows.
-                  gridAutoFlow: "dense",
-                }}
-              >
-                {components.map((c) => {
-                  const col = gridColumnFor(c, columns);
-                  return (
-                    <div
-                      key={c.id}
-                      style={{
-                        gridColumn: col,
-                        minWidth: 0,
-                      }}
-                    >
-                      <SelectableDashboardComponent
-                        componentId={c.id}
-                        selectionActive={contextSelectionActive}
-                        selected={selectedIdSet.has(c.id)}
-                        onToggle={toggleSelectedComponent}
-                      >
-                        <RenderComponentView
-                          component={c}
-                          context={renderViewContext()}
-                        />
-                      </SelectableDashboardComponent>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Graph contract ────────────────────────────────────────
-//
-// Render nodes expose a `context-out` port so the dashboard a Leader
-// has built up can be wired into another Leader as context. The node
-// is still not user-creatable from the palette — it's auto-spawned
-// alongside its paired Leader — but once it exists on the canvas it
-// can act as any other context provider.
-
-const RENDER_CONTRACT: NodeInterfaceContract = {
-  nodeType: "render",
-  label: "Dashboard",
-  description:
-    "Live agent-driven dashboard. Connect its context-out port to a " +
-    "Leader's context-in port to feed the rendered components into the " +
-    "next session as text.",
-  ports: [CONTEXT_OUT_PORT],
-};
-
-registerContract(RENDER_CONTRACT);
-
-// ── Register ──────────────────────────────────────────────
-
-registerNodeType({
-  type: "render",
-  label: "Dashboard",
-  defaultSize: { width: 460, height: 500 },
-  render: RenderNodeRenderer,
-  userCreatable: false,  // Only auto-spawned with Leaders
-  providesContext: true,
-  extractContent: (data) => {
-    const renderState = (data as RenderNodeData | undefined)?.renderState;
-    if (!renderState) return null;
-    const text = flattenRenderStateToText(renderState);
-    return text.length > 0 ? text : null;
-  },
-});

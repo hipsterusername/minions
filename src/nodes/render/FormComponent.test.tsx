@@ -370,6 +370,164 @@ describe("FormComponent — locked (submitted) state", () => {
   });
 });
 
+// ── Test 6: optimistic feedback on submit ──────────────────
+
+describe("FormComponent — optimistic submit feedback", () => {
+  const simpleForm: FormComponentType = {
+    id: "fb",
+    type: "form",
+    title: "Quick question",
+    fields: [{ id: "answer", kind: "text", label: "Answer", default: "hi" }],
+  };
+
+  it("locks the form and shows a confirmation line after a valid submit", () => {
+    render(<FormComponent component={simpleForm} onSubmit={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+
+    // Submit button is gone, confirmation is shown, badge appears.
+    expect(screen.queryByRole("button", { name: /submit/i })).toBeNull();
+    expect(screen.getByText(/the agent has been notified/i)).toBeInTheDocument();
+    expect(screen.getByText(/Submitted/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Answer/)).toBeDisabled();
+  });
+
+  it("does NOT lock or acknowledge when validation fails", () => {
+    const form: FormComponentType = {
+      id: "reqfb",
+      type: "form",
+      fields: [{ id: "name", kind: "text", label: "Name", required: true }],
+    };
+    const onSubmit = vi.fn();
+    render(<FormComponent component={form} onSubmit={onSubmit} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    // Still interactive, no acknowledgement.
+    expect(screen.getByRole("button", { name: /submit/i })).toBeInTheDocument();
+    expect(screen.queryByText(/the agent has been notified/i)).toBeNull();
+    expect(screen.getByLabelText(/Name/)).not.toBeDisabled();
+  });
+
+  it("still forwards the answers to onSubmit while locking", () => {
+    const onSubmit = vi.fn();
+    render(<FormComponent component={simpleForm} onSubmit={onSubmit} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual({ answer: "hi" });
+  });
+
+  it("uses a distinct confirmation copy for agent-locked forms", () => {
+    render(<FormComponent component={submittedForm} onSubmit={vi.fn()} />);
+    expect(screen.getByText(/Response received/i)).toBeInTheDocument();
+    expect(screen.queryByText(/the agent has been notified/i)).toBeNull();
+  });
+});
+
+// ── Test 7: required select pre-selects first option ───────
+
+describe("FormComponent — required select defaulting", () => {
+  it("submits the visibly-selected first option when no default is set", () => {
+    const form: FormComponentType = {
+      id: "reqsel",
+      type: "form",
+      fields: [
+        {
+          id: "env",
+          kind: "select",
+          label: "Environment",
+          required: true,
+          options: ["staging", "prod"],
+        },
+      ],
+    };
+    const onSubmit = vi.fn();
+    render(<FormComponent component={form} onSubmit={onSubmit} />);
+
+    // User does NOT touch the dropdown — the first option is already shown.
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+
+    // No "is required" error, and the first option is submitted.
+    expect(screen.queryByText(/is required/i)).toBeNull();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual({ env: "staging" });
+  });
+
+  it("uses the option value (not label) for {value,label} options", () => {
+    const form: FormComponentType = {
+      id: "reqsel2",
+      type: "form",
+      fields: [
+        {
+          id: "region",
+          kind: "select",
+          label: "Region",
+          required: true,
+          options: [
+            { value: "us-east-1", label: "US East (Recommended)" },
+            { value: "eu-west-1", label: "EU West" },
+          ],
+        },
+      ],
+    };
+    const onSubmit = vi.fn();
+    render(<FormComponent component={form} onSubmit={onSubmit} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual({ region: "us-east-1" });
+  });
+
+  it("still honours an explicit default over the first option", () => {
+    const form: FormComponentType = {
+      id: "reqsel3",
+      type: "form",
+      fields: [
+        {
+          id: "env",
+          kind: "select",
+          label: "Environment",
+          required: true,
+          default: "prod",
+          options: ["staging", "prod"],
+        },
+      ],
+    };
+    const onSubmit = vi.fn();
+    render(<FormComponent component={form} onSubmit={onSubmit} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual({ env: "prod" });
+  });
+
+  it("leaves an optional select empty (placeholder) by default", () => {
+    const form: FormComponentType = {
+      id: "optsel",
+      type: "form",
+      fields: [
+        {
+          id: "env",
+          kind: "select",
+          label: "Environment",
+          options: ["staging", "prod"],
+        },
+      ],
+    };
+    const onSubmit = vi.fn();
+    render(<FormComponent component={form} onSubmit={onSubmit} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+
+    // Optional: empty is allowed and submitted as "".
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual({ env: "" });
+  });
+});
+
 // ── Edge cases ─────────────────────────────────────────────
 
 describe("FormComponent — edge cases", () => {

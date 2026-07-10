@@ -4,6 +4,7 @@ export type MobileSessionInfo = SessionInfo & {
   lastActivity?: string | null;
   lastActivityAt?: number | null;
   pendingAttention?: boolean;
+  reviewableChanges?: boolean;
 };
 
 /** Statuses where the agent is doing work right now. */
@@ -38,7 +39,12 @@ export interface ActivitySection<T extends MobileSessionInfo> {
 }
 
 export function needsAttention(session: MobileSessionInfo): boolean {
-  return session.status === "error" || session.pendingAttention === true;
+  return (
+    session.status === "error" ||
+    session.status === "waiting" ||
+    session.pendingAttention === true ||
+    session.reviewableChanges === true
+  );
 }
 
 /**
@@ -128,4 +134,31 @@ export function groupSessionsByActivity<T extends MobileSessionInfo>(
     if (bucket.length === 0) return [];
     return [{ id, title: ACTIVITY_SECTION_TITLES[id], sessions: bucket }];
   });
+}
+
+export interface ActivityTriage<T extends MobileSessionInfo> {
+  needsYou: T[];
+  sections: ActivitySection<T>[];
+}
+
+/**
+ * Split sessions into a pinned attention lane and the normal activity buckets.
+ * Attention-worthy sessions are removed from their original bucket so the
+ * Activity surface has one obvious place to resolve them.
+ */
+export function groupSessionsForTriage<T extends MobileSessionInfo>(
+  sessions: ReadonlyArray<T>,
+): ActivityTriage<T> {
+  const needsYou: T[] = [];
+  const rest: T[] = [];
+
+  for (const session of sessions) {
+    if (needsAttention(session)) needsYou.push(session);
+    else rest.push(session);
+  }
+
+  return {
+    needsYou: needsYou.sort(compareWithinSection),
+    sections: groupSessionsByActivity(rest),
+  };
 }

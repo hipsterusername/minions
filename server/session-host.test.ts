@@ -323,8 +323,6 @@ describe("SessionHost.start — error path", () => {
     harnessRef.startFnOverride = () => ({
       events: (async function* () {
         throw new Error("boom");
-        // eslint-disable-next-line no-unreachable
-        yield {} as never;
       })(),
       control: { abort: () => {} },
     });
@@ -560,8 +558,6 @@ describe("SessionHost.start — error path", () => {
     harnessRef.startFnOverride = () => ({
       events: (async function* () {
         throw new Error("network");
-        // eslint-disable-next-line no-unreachable
-        yield {} as never;
       })(),
       control: { abort: () => {} },
     });
@@ -865,8 +861,6 @@ describe("SessionHost.start — abort/error distinction", () => {
         yield { kind: "init", sessionId: "s", model: "" } as NormalizedEvent;
         host.abortController.abort(); // signal fires
         throw new Error("The operation was aborted"); // harness propagates it
-        // eslint-disable-next-line no-unreachable
-        yield {} as never;
       })(),
       control: { abort: () => {} },
     });

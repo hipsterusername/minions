@@ -1,0 +1,35 @@
+id: flow.interrupt_active_turn
+type: flow
+name: interrupt_active_turn
+summary: Cancels an in flight harness turn without stopping the session by using optional runControl.interrupt and returning a correlated control response or control error.
+capabilities:
+  - capability.canvas_sessions
+constraints:
+  - constraint.bus_only_broadcasts
+  - constraint.no_cross_tree_imports
+decisions:
+  - decision.graph_as_bus
+risks:
+  - risk.command_contract_drift
+  - risk.session_state_drift
+suggested_files:
+  - server/commands/interrupt.ts
+  - server/commands/helpers.ts
+  - server/commands/index.ts
+  - server/commands/types.ts
+  - server/session-host.ts
+  - server/harness/types.ts
+suggested_tests:
+  - server/commands/interrupt.test.ts
+  - server/commands/schemas.test.ts
+  - server/harness/claude/index.test.ts
+  - server/wait-resume.test.ts
+steps:
+  - COMMAND_TABLE maps both interrupt and interrupt_session command names to the same handler behavior.
+  - The handler resolves the target host or sends the standard session lookup error through command helpers.
+  - If there is no active runControl, the handler sends a control_error of No active query without changing host status.
+  - If the harness lacks interrupt, the handler sends an unsupported by harness control_error and preserves active session state.
+  - If interrupt exists, it is invoked on runControl and resolves to control_response or rejects to control_error using the original requestId.
+freshness:
+  class: code_coupled
+risk: medium

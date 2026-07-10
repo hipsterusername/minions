@@ -10,6 +10,8 @@ import type { ThinkingConfig } from "../../types.ts";
 import { DEFAULT_THINKING_CONFIG } from "../../types.ts";
 import type { PermissionMode } from "../../components/SessionToolbar.tsx";
 import type { DisplayMessage } from "../../sdk-messages.ts";
+import type { RenderState } from "../../../shared/render-dsl.ts";
+import { emptyRenderState } from "../../../shared/render-dsl.ts";
 
 /**
  * Zoom level below which the leader prompt overlay (zoomed-in prompt editor)
@@ -115,6 +117,23 @@ export interface LeaderData {
     commits: string[];
     branch: string;
   } | null | undefined;
+  /**
+   * Live agent-driven dashboard state, populated from `render_update` events on
+   * this leader's session topic. Rendered inside the leader body (embedded
+   * dashboard) — this replaces the retired standalone `render` node.
+   *
+   * Optional so the many `LeaderData` construction sites (clone, presets,
+   * Kanban) don't all need to seed it; read sites fall back to
+   * `emptyRenderState()`.
+   */
+  renderState?: RenderState | undefined;
+  /**
+   * Which body pane is foregrounded when the node is too narrow for a split
+   * view. Chat-forward by default (see progressive-disclosure in `LeaderBody`).
+   */
+  activeBodyView?: "chat" | "dashboard" | undefined;
+  /** Persisted split ratio (0–1) for the chat｜dashboard divider when wide. */
+  dashboardSplitRatio?: number | undefined;
 }
 
 /**
@@ -154,4 +173,5 @@ export const LEADER_DEFAULT_DATA: LeaderData = {
   skillPanelOpen: false,
   waitUntil: null,
   waitReason: null,
+  renderState: emptyRenderState(),
 };

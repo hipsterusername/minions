@@ -1,0 +1,59 @@
+/* ── Nocturne skin ────────────────────────────────────────
+   Gradient luxe dark: deep plum-to-indigo surfaces, rose-gold accent and
+   a warm ambient glow behind the canvas — richer and more chromatic than
+   the OLED minimal. Palette lives in src/themes.ts (id "nocturne"). */
+
+:root[data-theme="nocturne"] {
+  --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --radius-node: 16px;
+  --radius-panel: 16px;
+  --radius-control: 10px;
+  --radius-pill: 999px;
+  --border-width: 1px;
+  --surface-blur: none;
+}
+
+/* Layered plum / rose-gold aurora behind the canvas. */
+:root[data-theme="nocturne"] body,
+:root[data-theme="nocturne"] .canvas-root {
+  background-image:
+    radial-gradient(58% 50% at 12% 8%, rgba(176, 106, 179, 0.24), transparent 70%),
+    radial-gradient(52% 48% at 88% 12%, rgba(240, 165, 143, 0.16), transparent 70%),
+    radial-gradient(68% 60% at 60% 108%, rgba(124, 58, 150, 0.22), transparent 72%);
+  background-attachment: fixed;
+}
+
+/* Softly glowing, rounded node cards. */
+:root[data-theme="nocturne"] .canvas-node-card {
+  box-shadow: var(--shadow-lg);
+}
+
+/* Rounded controls in the display face. */
+:root[data-theme="nocturne"] button,
+:root[data-theme="nocturne"] input,
+:root[data-theme="nocturne"] textarea,
+:root[data-theme="nocturne"] select {
+  border-radius: var(--radius-control) !important;
+  font-family: var(--font-display);
+}
+
+/* Display headings. */
+:root[data-theme="nocturne"] h1,
+:root[data-theme="nocturne"] h2,
+:root[data-theme="nocturne"] h3 {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+/* Rose-gold tinted scrollbars. */
+:root[data-theme="nocturne"] ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+:root[data-theme="nocturne"] ::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 999px;
+}
+:root[data-theme="nocturne"] ::-webkit-scrollbar-track {
+  background: transparent;
+}

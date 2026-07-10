@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { loadSystemModel } from "./load.ts";
 import { copyValidFixture } from "./load.test.ts";
-import { saveWorkPacket } from "./store.ts";
+import { recordSystemModelUsage, saveWorkPacket } from "./store.ts";
 import { orphanedObjects, staleObjects, unusedInLastNPackets } from "./usage.ts";
 import type { WorkPacket } from "../../shared/system-model/index.ts";
 
@@ -27,6 +27,54 @@ describe("system-model usage queries", () => {
     const unused = await unusedInLastNPackets({ projectPath: project, model: model!, n: 1 });
 
     expect(unused.map((item) => item.id)).toEqual(["capability.workspace_management"]);
+    expect(unused[0]?.reason).toBe("No packet usage in last 1 Work Packets and no query usage since 2");
+  });
+
+  it("treats query usage as a live signal when no packets exist", async () => {
+    const project = copyValidFixture();
+    const { model } = loadSystemModel(project);
+    recordSystemModelUsage(project, [{
+      objectId: "capability.workspace_management",
+      source: "query",
+      sessionKey: "leader-1",
+      usedAt: 10,
+    }]);
+
+    const unused = await unusedInLastNPackets({ projectPath: project, model: model!, n: 30 });
+
+    expect(unused.map((item) => item.id)).not.toContain("capability.workspace_management");
+    expect(unused[0]?.reason).toBe("No Work Packets and no query usage recorded");
+  });
+
+  it("counts query usage since the oldest recent packet", async () => {
+    const project = copyValidFixture();
+    const { model } = loadSystemModel(project);
+    saveWorkPacket(project, packet("wp-window", {
+      capabilities: [],
+      flows: [],
+      constraints: [],
+      decisions: [],
+      risks: [],
+    }), "window", 20);
+    recordSystemModelUsage(project, [
+      {
+        objectId: "capability.workspace_management",
+        source: "query",
+        sessionKey: "leader-1",
+        usedAt: 3,
+      },
+      {
+        objectId: "flow.approve_changes",
+        source: "query",
+        sessionKey: "leader-1",
+        usedAt: 1,
+      },
+    ]);
+
+    const unused = await unusedInLastNPackets({ projectPath: project, model: model!, n: 1 });
+
+    expect(unused.map((item) => item.id)).not.toContain("capability.workspace_management");
+    expect(unused.map((item) => item.id)).toContain("flow.approve_changes");
   });
 
   it("reports stale code-coupled objects via freshness.ts", async () => {

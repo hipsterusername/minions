@@ -1,14 +1,17 @@
 # Minions
 
-A canvas for managing agentic context and workflows. Give a Leader agent a complex task, and it spawns parallel Minion agents that collaborate in real time.
+A spatial workspace for coordinating coding agents through supported Claude
+Code and OpenAI Codex harnesses. Give a Leader a complex task, and it spawns
+parallel Minion agents that collaborate in real time.
 
-> **Status**: Early development. Shared for private testing — expect rough edges.
+> **Status:** Early-stage open-source software. Interfaces and data formats may
+> change, and rough edges should be expected.
 
 ---
 
 ## What This Is
 
-Minions gives you a spatial interface on top of Claude Code:
+Minions gives you a spatial interface for orchestrating coding agents:
 
 - **Infinite canvas** — drag, zoom, arrange nodes visually
 - **Leader/Minion orchestration** — give a Leader a complex task, and it spawns Minion agents, wires them up, and tracks progress through a live task board
@@ -16,6 +19,7 @@ Minions gives you a spatial interface on top of Claude Code:
 - **Git worktree isolation** — each Minion works in its own worktree so parallel agents don't conflict, and changes route through an explicit approval flow before merging
 - **Skills browser** — browse, create, and launch pre-configured skill templates
 - **Project management** — persistent projects with SQLite storage, session history, cost tracking
+- **Multiple agent harnesses** — run Leaders and Minions with Claude Code or OpenAI Codex, with provider-aware model and permission controls
 
 ## Prerequisites
 
@@ -23,10 +27,11 @@ You need all of the following installed before starting:
 
 | Requirement | Why |
 |---|---|
-| **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** | Canvas runs Claude sessions through the Agent SDK — you must have `claude` CLI installed and authenticated |
-| **Node.js ≥ 22** | Required by the Agent SDK and modern ES features |
+| **Claude Code and/or OpenAI Codex** | Minions supports both harnesses. Authenticate Claude Code for Claude sessions; for Codex, run `codex login` or provide `CODEX_API_KEY`/`OPENAI_API_KEY`. New projects currently default to Codex Leaders and Claude Minions, so authenticate both unless you change the project defaults. |
+| **Node.js ≥ 22** | Required by the agent SDKs and modern runtime features |
 | **pnpm** | Package manager (`npm install -g pnpm` if you don't have it) |
-| **git** | Used for worktree isolation when running parallel agents |
+| **git** | Used for repository access and optional worktree isolation |
+| **[Tailscale](https://tailscale.com/download)** | Required by the current `pnpm start` workflow, which configures tailnet HTTPS before launching |
 
 ### Verify your setup
 
@@ -34,20 +39,28 @@ You need all of the following installed before starting:
 pnpm preflight
 ```
 
-This checks all prerequisites and tells you what's missing.
+This checks Node.js, pnpm, git, and configured Claude executable overrides.
+Provider authentication is also validated when a session starts.
 
 ## Quick Start
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/hipsterusername/minions.git
 cd minions
 pnpm install
+pnpm preflight
 pnpm start
 ```
 
-The app opens automatically at **http://localhost:5173**. The backend server runs on port 3141.
-It also listens on your Tailscale interface by default, so you can open
-`http://<tailscale-hostname-or-ip>:5173` from another device on your tailnet.
+`pnpm start` configures `tailscale serve`, launches the backend and Vite in the
+background, and returns to the terminal. It currently fails closed if Tailscale
+HTTPS cannot be configured.
+
+- App: **https://<machine>.<tailnet>.ts.net:6173/**
+- Local URL: **http://localhost:6173**
+- Logs: `.run/minions.log`
+- Status: `pnpm status`
+- Stop: `pnpm stop`
 
 That's it. No environment variables, no database setup, no Docker — SQLite handles storage automatically.
 
@@ -90,6 +103,10 @@ All optional — sane defaults are provided:
 |---|---|---|
 | `PORT` | `3141` | Backend server port |
 | `HOST` | `0.0.0.0` | Server bind address |
+| `VITE_PORT` | `6173` | Vite and Tailscale-facing application port |
+| `CLAUDE_CODE_PATH` | SDK discovery | Optional Claude executable override |
+| `CODEX_PATH` | SDK discovery | Optional Codex executable override |
+| `CODEX_API_KEY` / `OPENAI_API_KEY` | Codex CLI login | Optional Codex API credentials |
 
 Set them as environment variables:
 
@@ -110,42 +127,36 @@ PORT=8080 pnpm start
 
 The mobile companion at `/m` uses **Web Push** for notifications, and browsers
 only expose the Service Worker / Push APIs in a **secure context** (HTTPS, or
-`localhost`). Opening the app from a phone over `http://<host>:5173` is *not* a
+`localhost`). Opening the app from a phone over `http://<host>:6173` is *not* a
 secure context, so the notifications button shows **"Notifications Unsupported"**.
 
-Serve the app over real HTTPS on your tailnet — no self-signed certs:
+`pnpm start` serves the dev app over real HTTPS on your tailnet — no
+self-signed certs:
 
 ```bash
-# Terminal 1 — run the app (built preview is best for a phone):
-pnpm build && pnpm preview        # serves the built app on :4173
-
-# Terminal 2 — front it over tailnet HTTPS on :443:
-pnpm serve:tailscale              # tailscale serve → https://<machine>.<tailnet>.ts.net
+pnpm start
 ```
 
-Then open `https://<machine>.<tailnet>.ts.net/m` on your phone (small screens
+Then open `https://<machine>.<tailnet>.ts.net:6173/m` on your phone (small screens
 auto-redirect to `/m`). Notifications now work: tap **Enable notifications**.
 
-- Fronting the **dev** server instead: `pnpm serve:tailscale:dev` (port 5173).
-- Stop fronting: `node scripts/tailscale-serve.mjs --off`.
+- Stop the app and HTTPS front: `pnpm stop`.
+- Fronting a built preview is still available: `pnpm build && pnpm preview`,
+  then `pnpm serve:tailscale` (port 4173).
 - On **iOS**, Web Push additionally requires iOS 16.4+ and adding the app to the
   Home Screen (Share → *Add to Home Screen*), then launching it from that icon.
 
-This stays tailnet-only; it does not enable `tailscale funnel` (public internet).
-
-To pre-approve all in-process MCP tools so the Leader/Minion flow runs without interactive permission prompts:
-
-```bash
-pnpm configure
-```
-
-This writes a project-level allowlist to `.claude/settings.json`.
+This stays tailnet-only; it does not enable `tailscale funnel` (public internet)
+or claim the bare `https://<machine>.<tailnet>.ts.net/` origin.
 
 ## Scripts
 
 | Command | What it does |
 |---|---|
-| `pnpm start` | Run everything (server + frontend dev) |
+| `pnpm start` | Run everything (server + frontend dev) and serve it over Tailscale HTTPS |
+| `pnpm stop` | Stop the background app and its Tailscale serve mapping |
+| `pnpm restart` | Restart the background app and restore Tailscale serving |
+| `pnpm status` | Report whether the background app is running |
 | `pnpm dev` | Vite frontend only (hot reload) |
 | `pnpm server` | Backend server only |
 | `pnpm build` | Production build |
@@ -153,9 +164,8 @@ This writes a project-level allowlist to `.claude/settings.json`.
 | `pnpm test` | Run vitest in watch mode |
 | `pnpm test:run` | Run all tests once (used by CI) |
 | `pnpm test:coverage` | Run all tests once and produce a coverage report |
-| `pnpm verify` | Run the full CI gate locally (typecheck + test:run + build) |
+| `pnpm verify` | Run the full CI gate locally (typechecks, tests, licenses, system model, build) |
 | `pnpm preflight` | Validate prerequisites |
-| `pnpm configure` | Run preflight, then pre-approve all in-process MCP tools |
 
 ## Testing & development workflow
 
@@ -164,7 +174,7 @@ Tests are required for all behavioural changes. The full strategy is in
 
 The short version:
 
-1. **Before pushing**, run `pnpm verify` (typecheck + test:run + build).
+1. **Before pushing**, run `pnpm verify` (typechecks, tests, license and system-model checks, build).
    CI runs the same gate and will fail the PR otherwise.
    For an even tighter local loop, install `prek` once
    (`prek install`) — the hook config in `.pre-commit-config.yaml`
@@ -185,16 +195,25 @@ server file size ceilings (≤ 400 lines), no cross-tree imports between
 `src/` and `server/`, broadcasts only through `server/bus.ts`, and a
 handler registered for every WebSocket command.
 
+## Contributing and security
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the development workflow and
+pull-request expectations. Report suspected vulnerabilities privately as
+described in [SECURITY.md](./SECURITY.md); do not include credentials, private
+repository content, or local transcripts in public issues.
+
 ## Architecture
 
 ```
-Browser (localhost:5173 or Tailscale host:5173)
+Browser (localhost:6173 or Tailscale HTTPS host:6173)
   │
   ├── React 19 + Vite 8 (infinite canvas UI)
   │
-  └── WebSocket ──► Express server (same host:3141)
+  └── WebSocket ──► Express session host (same host:3141)
                       │
-                      ├── Claude Agent SDK ──► claude CLI sessions
+                      ├── AgentHarness
+                      │   ├── Claude Agent SDK / Claude Code
+                      │   └── OpenAI Codex SDK / Codex CLI
                       ├── SQLite (per-project state)
                       ├── MCP tools (task management, render dashboard)
                       └── Git worktree manager (agent isolation)
@@ -209,6 +228,8 @@ src/                  Frontend React application
   components/         Shared UI components
 server/               Backend Express + WebSocket server
   agents/             Per-agent (leader, minion, default) wiring
+  harness/            Claude, Codex, and test harness adapters
+  mcp-bridge/         Loopback bridge for harness MCP tool access
   commands/           Per-command WebSocket handlers
   routes/             REST API route handlers
   task-tools/         MCP tools for Leader task management
@@ -227,6 +248,10 @@ Install Claude Code and sign in: https://docs.anthropic.com/en/docs/claude-code
 **Sessions fail to start**
 Make sure `claude` works on its own first — run `claude` in your terminal to verify authentication.
 
+**Codex sessions report missing credentials**
+Run `codex login`, or start Minions with `CODEX_API_KEY` or `OPENAI_API_KEY`
+available in the server environment.
+
 **Port already in use**
 Another instance may be running. Kill it or use a different port: `PORT=3142 pnpm start`
 
@@ -235,4 +260,6 @@ Another instance may be running. Kill it or use a different port: `PORT=3142 pnp
 
 ---
 
-Built with the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk).
+Built with the
+[Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk)
+and [OpenAI Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk).

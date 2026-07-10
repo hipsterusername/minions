@@ -1,9 +1,8 @@
 # Visual Context — Implementation Plan
 
-**Status:** Proposed. No code has landed yet.
-**Companion to:** [`architecture-review-2026-04-16.md`](./architecture-review-2026-04-16.md)
-(what's broken today) and [`testing-strategy.md`](./testing-strategy.md)
-(the testing working agreement).
+**Status:** Archived historical plan. File references and sequencing describe
+the repository state at the time of writing.
+**Current testing agreement:** [`../testing-strategy.md`](../testing-strategy.md)
 
 ---
 

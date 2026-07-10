@@ -13,7 +13,10 @@
  * server state with duplicates the user never sees. The first test below is
  * the regression pin.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync, readdirSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { WebSocketServer } from "ws";
 import { createBus, type Bus } from "./bus.ts";
 import { createRenderToolsForLeader } from "./render-tools.ts";
@@ -307,6 +310,130 @@ describe("render-tools", () => {
 
       // Both components remain after all invalid calls.
       expect(renderState.components).toHaveLength(2);
+    });
+  });
+
+  describe("html-artifact sanitization (security chokepoint)", () => {
+    const MALICIOUS =
+      '<div>hi</div><script>alert(1)</script>' +
+      '<img src="x" onerror="alert(2)">' +
+      '<a href="javascript:alert(3)">link</a>' +
+      '<iframe src="https://evil.example"></iframe>';
+
+    function lastEnvelope(sent: object[]): Record<string, unknown> {
+      return sent[sent.length - 1] as Record<string, unknown>;
+    }
+
+    function assertSafe(html: string): void {
+      expect(html).not.toContain("<script");
+      expect(html).not.toContain("onerror");
+      expect(html.toLowerCase()).not.toContain("javascript:");
+      expect(html).not.toContain("<iframe");
+      // Defense-in-depth: server wraps in a CSP-locked standalone document.
+      expect(html).toContain("Content-Security-Policy");
+      expect(html.toLowerCase()).toContain("<!doctype html>");
+      // Benign content survives.
+      expect(html).toContain("hi");
+    }
+
+    it("sanitizes html-artifact.html on render_set (state + wire)", async () => {
+      const { bus, sent } = makeBus();
+      const { toolDefs, renderState } = createRenderToolsForLeader({
+        leaderSessionKey: "s-html-set",
+        bus,
+      });
+      const setTool = findTool(toolDefs, "render_set");
+
+      await call(setTool, {
+        components: [{ id: "viz", type: "html-artifact", html: MALICIOUS }],
+      });
+
+      const stored = renderState.components[0] as { type: string; html: string };
+      expect(stored.type).toBe("html-artifact");
+      assertSafe(stored.html);
+
+      const envelope = lastEnvelope(sent);
+      const wire = (envelope["components"] as Array<{ html: string }>)[0]!;
+      assertSafe(wire.html);
+    });
+
+    it("sanitizes html-artifact.html on render_append and render_patch", async () => {
+      const { bus, sent } = makeBus();
+      const { toolDefs, renderState } = createRenderToolsForLeader({
+        leaderSessionKey: "s-html-patch",
+        bus,
+      });
+      const appendTool = findTool(toolDefs, "render_append");
+      const patchTool = findTool(toolDefs, "render_patch");
+
+      await call(appendTool, {
+        components: [{ id: "viz", type: "html-artifact", html: "<p>ok</p>" }],
+      });
+
+      // A patch that swaps in malicious html must be sanitized both in state
+      // AND in the patch envelope (which ships updates verbatim to clients).
+      await call(patchTool, {
+        updates: [{ id: "viz", html: MALICIOUS }],
+      });
+
+      const stored = renderState.components[0] as { html: string };
+      assertSafe(stored.html);
+
+      const envelope = lastEnvelope(sent);
+      const update = (envelope["updates"] as Array<{ html: string }>)[0]!;
+      assertSafe(update.html);
+    });
+  });
+
+  describe("publish_html tool", () => {
+    let dir: string;
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), "minions-render-html-"));
+      process.env["MINIONS_ARTIFACTS_DIR"] = dir;
+    });
+    afterEach(() => {
+      delete process.env["MINIONS_ARTIFACTS_DIR"];
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    it("sanitizes, writes a session-scoped temp file, and appends a sandboxed artifact", async () => {
+      const { bus, sent } = makeBus();
+      const { toolDefs, renderState } = createRenderToolsForLeader({
+        leaderSessionKey: "sess-pub",
+        bus,
+      });
+      const publishTool = findTool(toolDefs, "publish_html");
+      expect(publishTool).toBeTruthy();
+
+      await call(publishTool, {
+        html: '<h1>Report</h1><script>alert(1)</script>',
+        title: "My report",
+      });
+
+      // Appended to the dashboard as a sanitized html-artifact.
+      const comp = renderState.components[0] as {
+        type: string;
+        html: string;
+        title?: string;
+        artifactId?: string;
+      };
+      expect(comp.type).toBe("html-artifact");
+      expect(comp.title).toBe("My report");
+      expect(comp.artifactId).toBeTruthy();
+      expect(comp.html).not.toContain("<script");
+      expect(comp.html).toContain("Report");
+
+      // Emitted append envelope carries the sanitized document.
+      const envelope = sent[sent.length - 1] as Record<string, unknown>;
+      expect(envelope["action"]).toBe("append");
+
+      // A temp file was written under the session-scoped dir, sanitized.
+      const sessionDir = join(dir, "sess-pub");
+      const files = readdirSync(sessionDir).filter((f) => f.endsWith(".html"));
+      expect(files).toHaveLength(1);
+      const onDisk = readFileSync(join(sessionDir, files[0]!), "utf8");
+      expect(onDisk).not.toContain("<script");
+      expect(onDisk).toContain("Content-Security-Policy");
     });
   });
 

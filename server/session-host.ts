@@ -5,11 +5,9 @@
  * the abort controller, SDK query handle, event buffer, task/render state,
  * wait timer, and worktree handle. Owns the SDK `query()` loop and the
  * SQLite write-through persistence calls.
- * Non-goals:
- *   - Does not own the WebSocket dispatcher (that stays in `server/index.ts`
- *     until Phase 5.2 splits the command table).
- *   - Does not own worktree lifecycle semantics (those still live in
- *     `server/worktree.ts`; the host merely holds the handle).
+ * WebSocket dispatch lives under `server/commands/`; worktree lifecycle
+ * semantics live under `server/worktree*.ts`. The host coordinates those
+ * subsystems but does not own their policies.
  */
 
 import "./harness/claude/index.ts"; // side-effect: registers ClaudeHarness
@@ -104,6 +102,8 @@ export interface StartSessionOptions {
   resumeId?: string | undefined;
   systemPrompt?: string | undefined;
   role?: SessionRole | undefined;
+  /** Skill IDs tagged on this session; gate opt-in tools (leader only). */
+  skillIds?: string[] | undefined;
   worktreeIsolation?: boolean | undefined;
   parentWorktree?: WorktreeInfo | undefined;
   initialModel?: string | null | undefined;
@@ -144,6 +144,8 @@ export class SessionHost {
   status: SessionStatus = "idle";
   cwd: string;
   role: SessionRole = "default";
+  /** Skill IDs tagged on this session (leader only); gate opt-in tools. */
+  skillIds: string[] = [];
   taskName: string | null = null;
 
   // ── Persisted metrics ──────────────────────────────
@@ -258,6 +260,9 @@ export class SessionHost {
       this.lastError = null;
       this.lastErrorFull = null;
       this.role = resolvedRole;
+      // Seed tagged skills from the launch payload; persist across resume/wait
+      // cycles where opts no longer carries them.
+      if (opts.skillIds) this.skillIds = opts.skillIds;
       if (opts.resumeId) this.sessionId = opts.resumeId;
       if (opts.harness) this.harnessName = opts.harness;
       if (opts.initialModel && !this.model) this.model = opts.initialModel;

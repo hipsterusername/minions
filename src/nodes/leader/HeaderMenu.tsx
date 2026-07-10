@@ -15,12 +15,14 @@ export function HeaderMenu({
   onReset,
   onExportLog,
   onDuplicateSetup,
+  onOpenSystemModel,
   onSavePreset,
   data,
 }: {
   onReset: () => void;
   onExportLog: () => void;
   onDuplicateSetup?: (() => void) | undefined;
+  onOpenSystemModel?: (() => void) | undefined;
   onSavePreset?:
     | ((input: {
         name: string;
@@ -241,6 +243,36 @@ export function HeaderMenu({
                 }
               >
                 <span style={{ opacity: 0.6 }}>⧉</span> Duplicate Setup
+              </button>
+            )}
+            {onOpenSystemModel && data.sessionKey && (
+              <button
+                onClick={() => {
+                  onOpenSystemModel();
+                  setOpen(false);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  width: "100%",
+                  padding: "8px 12px",
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--text-secondary)",
+                  fontSize: 11,
+                  fontFamily: "var(--font-mono)",
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+                onMouseEnter={(e) =>
+                  (e.currentTarget.style.background = "var(--bg-surface)")
+                }
+                onMouseLeave={(e) =>
+                  (e.currentTarget.style.background = "transparent")
+                }
+              >
+                <span style={{ opacity: 0.6 }}>◫</span> Open System Model
               </button>
             )}
             <button

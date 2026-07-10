@@ -1,7 +1,7 @@
 # Minions Quality / Operational Posture Review
 
 Date: 2026-07-03
-Repo: `/home/hipsterusername/PersonalRepos/minions`
+Repo: Minions repository root
 Scope: read-only review of testing reality vs `docs/testing-strategy.md`, CI, error handling, observability, restart recovery, telemetry, dependencies.
 
 ## Reality-vs-Strategy Scorecard

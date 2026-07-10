@@ -16,6 +16,7 @@ import { formatSection, formatTabs } from "../shared/render-containers.ts";
 import {
   formatImage,
   formatFilePreview,
+  formatHtmlArtifact,
 } from "../shared/render-artifacts.ts";
 
 /**
@@ -83,6 +84,8 @@ export function formatRenderComponentToText(c: RenderComponent): string {
       return formatImage(c);
     case "file-preview":
       return formatFilePreview(c);
+    case "html-artifact":
+      return formatHtmlArtifact(c);
   }
 }
 

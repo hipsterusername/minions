@@ -23,7 +23,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render } from "@testing-library/react";
-import { useEffect, useState } from "react";
+import { StrictMode, useEffect, useState } from "react";
 
 vi.mock("./api.ts", () => {
   return {
@@ -195,6 +195,52 @@ describe("useSocket — initial connection", () => {
     expect(lastFake().url).toBe(
       "ws://localhost:3141/ws?token=test-token-123",
     );
+  });
+
+  it("opens exactly one socket under StrictMode double-mount (no duplicate connection)", async () => {
+    // Regression: the socket is created inside an async getAuthToken().then(),
+    // so StrictMode's mount→unmount→mount used to start two connects before
+    // either resolved. The teardown ran while wsRef.current was still null and
+    // closed nothing, leaving BOTH sockets open on a shared listener set — every
+    // server broadcast was then delivered (and rendered) twice.
+    render(
+      <StrictMode>
+        <Probe url="ws://localhost:3141/ws" onState={() => {}} />
+      </StrictMode>,
+    );
+    await flushAsync();
+    expect(ALL_FAKES).toHaveLength(1);
+  });
+
+  it("delivers each message once under StrictMode (no doubled events)", async () => {
+    // Faithful to the real bug: the server broadcasts to EVERY open socket, so
+    // deliver the frame to all constructed fakes. Pre-fix, two leaked sockets
+    // share listenersRef and the subscriber fires twice; post-fix there is one.
+    const seen: string[] = [];
+    let sub: ReturnType<typeof useSocket>["subscribe"] | null = null;
+    render(
+      <StrictMode>
+        <Probe
+          url="ws://x"
+          onState={() => {}}
+          onSubscribe={(s) => {
+            sub = s;
+          }}
+        />
+      </StrictMode>,
+    );
+    await flushAsync();
+    act(() => ALL_FAKES.forEach((f) => f.triggerOpen()));
+    act(() => {
+      sub!((m) => seen.push(m.type));
+    });
+    const frame = JSON.stringify({
+      topic: "global",
+      type: "session_list",
+      sessions: [],
+    });
+    act(() => ALL_FAKES.forEach((f) => f.triggerMessage(frame)));
+    expect(seen).toEqual(["session_list"]);
   });
 
   it("uses `&` separator when the url already has a query string", async () => {

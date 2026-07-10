@@ -1,0 +1,11 @@
+id: constraint.server_file_size_ceiling
+type: constraint
+statement: Server source files must stay at or under 400 lines; oversized files are split rather than grown.
+applies_to:
+  capabilities: [capability.canvas_sessions, capability.ws_command_bus, capability.worktree_approval]
+  flows: []
+  files: [tests/architecture/file-size.test.ts]
+severity: medium
+agent_instruction: When a server/*.ts file approaches 400 lines, split it into focused modules instead of growing it; the architecture test enforces the ceiling.
+suggested_tests: [tests/architecture/file-size.test.ts]
+evidence: []

@@ -80,6 +80,44 @@ describe("frozen leader prompts", () => {
     expect(followUp.prompt).toMatch(/\n\nUse the latest setup\.$/);
   });
 
+  it("treats a sub-skill edit on a tagged skill as an active change and emits the map", () => {
+    registerSkill(
+      makeSkill({ id: "design", name: "Design", template: "Design base." }),
+    );
+    const frozen = freezeLeaderSystemPrompt({
+      skillIds: ["design"],
+      skillValues: {},
+    });
+
+    // Same id/template, but now the skill grows a sub-skill mid-session.
+    registerSkill(
+      makeSkill({
+        id: "design",
+        name: "Design",
+        template: "Design base.",
+        subskills: [
+          {
+            id: "layout",
+            name: "Layout",
+            description: "layout rules",
+            body: "LAYOUT BODY",
+          },
+        ],
+      }),
+    );
+
+    const reminder = buildSkillDeltaReminder(frozen, {
+      skillIds: ["design"],
+      skillValues: {},
+    });
+    expect(reminder).not.toBeNull();
+    expect(reminder!).toContain("### Sub-skills of Design");
+    expect(reminder!).toContain("- `layout` — **Layout**: layout rules.");
+    expect(reminder!).toContain("load_subskill");
+    // On-demand body stays out of the map.
+    expect(reminder!).not.toContain("LAYOUT BODY");
+  });
+
   it("omits the reminder when skills are unchanged since session start", () => {
     registerSkill(makeSkill({ id: "review", name: "Review", template: "Review {{target}}." }));
     const frozen = freezeLeaderSystemPrompt({

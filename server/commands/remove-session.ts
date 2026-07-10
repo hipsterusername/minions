@@ -11,8 +11,11 @@
 import { unicastGlobal } from "../bus.ts";
 import { removeWorktree } from "../worktree.ts";
 import { removePersistedSession } from "../session-persist.ts";
-import { errToMessage } from "./helpers.ts";
+import { deleteHtmlArtifactsForSession } from "../html-artifact-store.ts";
+import { serverLogger } from "../logging.ts";
 import type { CommandHandler } from "./types.ts";
+
+const log = serverLogger.child("remove-session");
 
 export const removeSession: CommandHandler = (ctx, cmd, ws) => {
   if (!cmd.sessionKey) {
@@ -29,9 +32,10 @@ export const removeSession: CommandHandler = (ctx, cmd, ws) => {
     if (host.worktree) {
       const { path: wtPath, projectPath: wtProject } = host.worktree;
       removeWorktree(wtPath, wtProject).catch((err: unknown) => {
-        console.warn(
-          `[worktree] Cleanup on remove_session failed for ${cmd.sessionKey}: ${errToMessage(err)}`,
-        );
+        log.warn("worktree_cleanup_failed", {
+          sessionKey: cmd.sessionKey,
+          error: err,
+        });
       });
       host.worktree = null;
     }
@@ -39,5 +43,16 @@ export const removeSession: CommandHandler = (ctx, cmd, ws) => {
     ctx.registry.delete(cmd.sessionKey);
     removePersistedSession(cmd.sessionKey);
   }
+
+  // Delete any temporary HTML visualization artifacts for this session. These
+  // live outside the worktree and DB, so they are cleaned up explicitly here
+  // (and swept on startup if a session ever dies without this path running).
+  deleteHtmlArtifactsForSession(cmd.sessionKey).catch((err: unknown) => {
+    log.warn("artifact_cleanup_failed", {
+      sessionKey: cmd.sessionKey,
+      error: err,
+    });
+  });
+
   ctx.bus.emitGlobal({ type: "session_list", sessions: ctx.registry.snapshot() });
 };

@@ -12,8 +12,6 @@ import {
   type DisplayMessage,
 } from "../sdk-messages.ts";
 import { useStatusBanners, StatusBannerStack } from "../components/StatusBanner.tsx";
-import { StreamingBubble, StreamingIndicator } from "../components/StreamingBubble.tsx";
-import { chatRoleStyle } from "../chat-bubble-style.ts";
 import { type SessionStreamState } from "../session-stream.ts";
 import { useSessionStream } from "../use-session-stream.ts";
 import { SessionToolbar } from "../components/SessionToolbar.tsx";
@@ -24,11 +22,13 @@ import { ResizeHandle } from "../components/ResizeHandle.tsx";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { debugFlagStore } from "../debug.ts";
 import { useLeaderFullscreenRequest } from "../use-leader-fullscreen-request.ts";
-import { DebugInspector } from "../components/DebugInspector.tsx";
 import { ConfirmModal } from "../components/ConfirmModal.tsx";
 import { canvasScale } from "../canvas-scale.ts";
 import { groupMessages } from "./leader-message-helpers.ts";
 import { sessionTopic } from "../../shared/ws-envelope.ts";
+import { applyRenderMessage, emptyRenderState, renderMessageSchema } from "../../shared/render-dsl.ts";
+import { flattenRenderStateToText } from "../render-flatten.ts";
+import { LeaderBody } from "./leader/LeaderBody.tsx";
 import {
   LEADER_DEFAULT_DATA,
   LEADER_PROMPT_OVERLAY_ZOOM_THRESHOLD,
@@ -43,7 +43,6 @@ import {
   msgId,
 } from "./leader/session-context.ts";
 import { EditableTitle } from "./leader/EditableTitle.tsx";
-import { WaitCountdown } from "./leader/WaitCountdown.tsx";
 import {
   buildContextBlock,
   seedContextHashes,
@@ -53,11 +52,15 @@ import {
   type CanvasContextSignature,
 } from "../connected-context.ts";
 import { buildFrozenLeaderFollowUpPrompt, freezeLeaderSystemPrompt, type FrozenLeaderPrompt } from "./leader/frozen-prompt.ts";
+import { mergeContextPreamble, resolveContextMode } from "../leader-context-mode.ts";
+import { consumeLeaderInputFocus } from "../leader-focus-request.ts";
 
 registerContract(LEADER_CONTRACT);
 
 const LEADER_AUTOSTART_DEDUPE_WINDOW_MS = 10_000;
 const leaderAutoStartClaims = new Map<string, number>();
+const LEADER_DASHBOARD_EXPANDED_WIDTH = 1040;
+const LEADER_DASHBOARD_EXPANDED_HEIGHT = 620;
 
 export function claimLeaderAutoStart(
   nodeId: string,
@@ -96,10 +99,7 @@ export type { LeaderData, TaskPlanItem };
 
 
 // Message-rendering components extracted to ./leader/messages/
-import { LeaderToolGroup } from "./leader/messages/ToolItem.tsx";
-import { LeaderThinkingGroup } from "./leader/messages/ThinkingGroup.tsx";
-import { UserMessageBubble } from "./leader/messages/UserMessageBubble.tsx";
-import { SelectableMessageBubble } from "./leader/messages/SelectableMessageBubble.tsx";
+import { LeaderMessageFeed } from "./leader/messages/LeaderMessageFeed.tsx";
 
 // Task Plan Panel extracted to ./leader/TaskPlanPanel.tsx
 import { TaskPlanPanel } from "./leader/TaskPlanPanel.tsx";
@@ -125,11 +125,15 @@ export function LeaderNodeRenderer({
   socketSend,
   socketSubscribe,
   getContextForNode,
+  getIncomingContextModes,
   projectPath,
   onResize,
+  onResizeStart,
+  onResizeEnd,
   onAddContentNode,
   onRevealMinion,
   onDuplicateLeaderSetup,
+  onOpenSystemModel,
   onSaveLeaderPreset,
 }: NodeRenderProps) {
   const data = node.data as LeaderData;
@@ -146,6 +150,17 @@ export function LeaderNodeRenderer({
   // MarkdownNode focus-mode rationale). Toggle via the header button or
   // Cmd/Ctrl+Shift+F when the leader card owns focus; Esc to exit.
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // Wire-validation error for the most recent embedded-dashboard render_update.
+  const [renderPayloadError, setRenderPayloadError] = useState<string | null>(null);
+  // Post embedded-dashboard `form` answers back to this leader session.
+  const handleSubmitForm = useCallback(
+    (formComponentId: string, formAnswers: Record<string, unknown>) => {
+      const sessionKey = dataRef.current.sessionKey;
+      if (!sessionKey || !socketSend) return;
+      socketSend({ type: "submit_form", sessionKey, formComponentId, formAnswers });
+    },
+    [socketSend],
+  );
   const [messageContextSelection, setMessageContextSelection] =
     useState<MessageContextSelection | null>(null);
   const skillAnchorRef = useRef<HTMLDivElement>(null);
@@ -155,6 +170,7 @@ export function LeaderNodeRenderer({
   const outputRef = useRef<HTMLDivElement>(null);
   const scrollZoneRef = useRef<HTMLDivElement>(null);
   const nodeRootRef = useRef<HTMLDivElement | null>(null);
+  const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const syncedRef = useRef(false);
   const frozenPromptRef = useRef<FrozenLeaderPrompt | null>(null);
   const contextHashesRef = useRef<ContextHashes>({});
@@ -703,6 +719,39 @@ export function LeaderNodeRenderer({
         return;
       }
 
+      // render_update — live dashboard payload for the embedded surface.
+      // The leader owns `renderState` now (the standalone render node is
+      // retired); apply validated payloads and surface wire errors locally.
+      if (
+        serverMsg.type === "render_update" &&
+        (serverMsg as { leaderSessionKey?: string }).leaderSessionKey === current.sessionKey
+      ) {
+        const parsed = renderMessageSchema.safeParse(serverMsg);
+        if (!parsed.success) {
+          const detail = parsed.error.issues.map((i) => i.message).join("; ");
+          setRenderPayloadError(`Invalid render payload: ${detail}`);
+          return;
+        }
+        setRenderPayloadError(null);
+        const hadDashboardContent = (current.renderState?.components.length ?? 0) > 0;
+        const newState = applyRenderMessage(
+          current.renderState ?? emptyRenderState(),
+          parsed.data,
+        );
+        const hasDashboardContent = newState.components.length > 0;
+        if (!hadDashboardContent && hasDashboardContent && onResize) {
+          const nextSize = {
+            width: Math.max(node.size.width, LEADER_DASHBOARD_EXPANDED_WIDTH),
+            height: Math.max(node.size.height, LEADER_DASHBOARD_EXPANDED_HEIGHT),
+          };
+          if (nextSize.width !== node.size.width || nextSize.height !== node.size.height) {
+            onResize(nextSize);
+          }
+        }
+        emitUpdate({ ...current, renderState: newState });
+        return;
+      }
+
       // Handle session_completed — session lifecycle is done (e.g. after merge)
       if (serverMsg.type === "session_completed" && serverMsg.sessionKey === current.sessionKey) {
         emitUpdate({
@@ -721,10 +770,13 @@ export function LeaderNodeRenderer({
         return;
       }
     });
-  }, [socketSubscribe, data.sessionKey, emitUpdate, processNormalizedEvent]);
+  }, [socketSubscribe, data.sessionKey, emitUpdate, processNormalizedEvent, onResize, node.size.width, node.size.height]);
 
   const handleCreate = useCallback(() => {
     if (!socketSend) return;
+    // syncedRef is claimed synchronously by the first path (autoStart / create /
+    // reattach); guarding here closes the double-create race (duplicate host).
+    if (syncedRef.current) return;
     const key = `leader-${Date.now().toString(36)}`;
     const userPrompt =
       input.trim() || "Analyze the project and suggest how to proceed.";
@@ -748,11 +800,8 @@ export function LeaderNodeRenderer({
       fullPrompt = `${sessionContext}\n\n${fullPrompt}`;
     }
 
-    const frozenPrompt = freezeLeaderSystemPrompt({
-      skillIds: data.skillIds ?? [],
-      skillValues: data.skillValues ?? {},
-      systemPromptPrefix: data.systemPromptPrefix,
-    });
+    const incomingModes = (getIncomingContextModes?.() ?? []).map(resolveContextMode);
+    const frozenPrompt = freezeLeaderSystemPrompt({ skillIds: data.skillIds ?? [], skillValues: data.skillValues ?? {}, systemPromptPrefix: mergeContextPreamble(incomingModes, data.systemPromptPrefix) });
     frozenPromptRef.current = frozenPrompt;
 
     socketSend({
@@ -761,6 +810,7 @@ export function LeaderNodeRenderer({
       prompt: fullPrompt,
       systemPrompt: frozenPrompt.systemPrompt,
       role: "leader",
+      skillIds: data.skillIds ?? [],
       model: data.model,
       thinkingConfig: data.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
       worktreeIsolation: data.worktreeIsolation,
@@ -785,12 +835,12 @@ export function LeaderNodeRenderer({
       ],
     });
     setInput("");
-  }, [socketSend, input, onUpdateData, getContextForNode, publishCanvasContext, data.skillIds, data.skillValues, data.model, data.thinkingConfig]);
+  }, [socketSend, input, onUpdateData, getContextForNode, getIncomingContextModes, publishCanvasContext, data.skillIds, data.skillValues, data.model, data.thinkingConfig]);
   const autoStartFired = useRef(false);
   useEffect(() => {
     if (autoStartFired.current) return;
     const prompt = dataRef.current.autoStartPrompt;
-    if (!prompt || dataRef.current.sessionKey || !socketSend) return;
+    if (!prompt || dataRef.current.sessionKey || !socketSend || syncedRef.current) return;
     if (!claimLeaderAutoStart(node.id, prompt)) return;
     autoStartFired.current = true;
 
@@ -813,10 +863,11 @@ export function LeaderNodeRenderer({
       fullPrompt = `${sessionContext}\n\n${fullPrompt}`;
     }
 
+    const incomingModes = (getIncomingContextModes?.() ?? []).map(resolveContextMode);
     const frozenPrompt = freezeLeaderSystemPrompt({
       skillIds: dataRef.current.skillIds ?? [],
       skillValues: dataRef.current.skillValues ?? {},
-      systemPromptPrefix: dataRef.current.systemPromptPrefix,
+      systemPromptPrefix: mergeContextPreamble(incomingModes, dataRef.current.systemPromptPrefix),
     });
     frozenPromptRef.current = frozenPrompt;
 
@@ -826,6 +877,7 @@ export function LeaderNodeRenderer({
       prompt: fullPrompt,
       systemPrompt: frozenPrompt.systemPrompt,
       role: "leader",
+      skillIds: dataRef.current.skillIds ?? [],
       model: dataRef.current.model,
       thinkingConfig: dataRef.current.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
       worktreeIsolation: dataRef.current.worktreeIsolation,
@@ -850,7 +902,18 @@ export function LeaderNodeRenderer({
         },
       ],
     });
-  }, [socketSend, onUpdateData, getContextForNode, publishCanvasContext, projectPath]);
+  }, [socketSend, onUpdateData, getContextForNode, getIncomingContextModes, publishCanvasContext, projectPath]);
+
+  // Focus the prompt input when this node was just created by the user, so they
+  // can start typing immediately. The one-shot request (set by Canvas at
+  // creation) is claimed exactly once and never fires for rehydrated nodes.
+  const focusClaimedRef = useRef(false);
+  useEffect(() => {
+    if (focusClaimedRef.current) return;
+    if (!consumeLeaderInputFocus(node.id)) return;
+    focusClaimedRef.current = true;
+    promptTextareaRef.current?.focus();
+  }, [node.id]);
 
   const handleSend = useCallback(() => {
     const current = dataRef.current;
@@ -1112,6 +1175,8 @@ export function LeaderNodeRenderer({
           minWidth={420}
           minHeight={320}
           onResize={onResize}
+          {...(onResizeStart ? { onResizeStart } : {})}
+          {...(onResizeEnd ? { onResizeEnd } : {})}
           color="var(--accent)"
         />
       )}
@@ -1273,6 +1338,7 @@ export function LeaderNodeRenderer({
             onReset={handleReset}
             onExportLog={handleExportLog}
             onDuplicateSetup={onDuplicateLeaderSetup}
+            onOpenSystemModel={onOpenSystemModel}
             onSavePreset={onSaveLeaderPreset}
             data={data}
           />
@@ -1357,14 +1423,6 @@ export function LeaderNodeRenderer({
         onClose={() => setSkillFlyoutOpen(false)}
       />
 
-      {/* P4: Task Plan Panel */}
-      <TaskPlanPanel
-        taskPlan={data.taskPlan ?? []}
-        expanded={tasksExpanded}
-        onToggle={() => setTasksExpanded((p) => !p)}
-        onRevealMinion={onRevealMinion}
-      />
-
       {/* Scroll-capture zone: hover or click to capture scroll, click outside to release */}
       <div
         ref={scrollZoneRef}
@@ -1379,132 +1437,37 @@ export function LeaderNodeRenderer({
           position: "relative",
         }}
       >
-      {/* Messages — P5: with markdown rendering and collapsible user messages */}
-      <div
-        ref={outputRef}
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflow: "auto",
-          padding: "8px 10px",
-          display: "flex",
-          flexDirection: "column",
-          gap: 4,
-        }}
-      >
-        {data.messages.length === 0 && (
-          <div
-            style={{
-              flex: 1,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "var(--text-muted)",
-              fontSize: 12,
-            }}
-          >
-            {data.sessionKey
-              ? "Leader is thinking..."
-              : "Describe your project goal to begin orchestration"}
-          </div>
-        )}
-        {groupedMessages.map((group, gi) => {
-          if (group.kind === "tool-group") {
-            return <LeaderToolGroup key={`tg-${gi}`} msgs={group.msgs} />;
-          }
-          if (group.kind === "thinking-group") {
-            return (
-              <LeaderThinkingGroup
-                key={`thg-${gi}`}
-                msgs={group.msgs}
-                effort={data.thinkingConfig?.effort}
-              />
-            );
-          }
-          const msg = group.msg;
-
-          // P5: User messages get collapsible treatment
-          if (msg.role === "user") {
-            return <UserMessageBubble key={msg.id} msg={msg} />;
-          }
-
-          // Thinking messages (singleton — rare, usually grouped)
-          if (msg.role === "thinking") {
-            return (
-              <LeaderThinkingGroup
-                key={msg.id}
-                msgs={[msg]}
-                effort={data.thinkingConfig?.effort}
-              />
-            );
-          }
-
-          // P5: Assistant messages get markdown rendering
-          if (msg.role === "assistant") {
-            return (
-              <SelectableMessageBubble
-                key={msg.id}
-                msg={msg}
-                selection={messageContextSelection}
-                onActivate={activateMessageSelection}
-                onSelectionChange={setMessageContextSelection}
-                onExit={exitMessageSelection}
-                onAddContentNode={onAddContentNode}
-              />
-            );
-          }
-
-          // P5: Result messages get markdown too
-          if (msg.role === "result") {
-            return (
-              <SelectableMessageBubble
-                key={msg.id}
-                msg={msg}
-                selection={messageContextSelection}
-                onActivate={activateMessageSelection}
-                onSelectionChange={setMessageContextSelection}
-                onExit={exitMessageSelection}
-                onAddContentNode={onAddContentNode}
-              />
-            );
-          }
-
-          // System messages — compact
-          return (
-            <div
-              key={msg.id}
-              style={chatRoleStyle("system")}
-            >
-              {msg.content}
-              {msg.suffix && (
-                <span style={{ display: "inline-block", marginLeft: 6, fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", opacity: 0.7 }}>
-                  {msg.suffix}
-                </span>
-              )}
-            </div>
-          );
-        })}
-        {/* Streaming partial text with blinking cursor */}
-        {data.streamingText ? (
-          <StreamingBubble text={data.streamingText.replace(/<!--task-name:.+?-->\s*/g, "")} role="assistant" />
-        ) : data.status === "running" && data.messages.length > 0 ? (
-          <StreamingIndicator label="Leader is thinking..." />
-        ) : null}
-        {debugEnabled && data.sessionKey && (
-          <DebugInspector
-            sessionKey={data.sessionKey}
-            streamingText={data.streamingText}
-            streamingBlockIndex={data.streamingBlockIndex ?? null}
-            messages={data.messages}
-            label="leader"
+      <LeaderBody
+        renderState={data.renderState ?? emptyRenderState()}
+        payloadError={renderPayloadError}
+        onSubmitForm={handleSubmitForm}
+        onAddContentNode={onAddContentNode}
+        activeBodyView={data.activeBodyView}
+        onActiveBodyViewChange={(v) => emitUpdate({ ...dataRef.current, activeBodyView: v })}
+        splitRatio={data.dashboardSplitRatio}
+        onSplitRatioChange={(r) => emitUpdate({ ...dataRef.current, dashboardSplitRatio: r })}
+        dashboardHeaderActive={(data.taskPlan?.length ?? 0) > 0}
+        dashboardHeader={
+          <TaskPlanPanel
+            taskPlan={data.taskPlan ?? []}
+            expanded={tasksExpanded}
+            onToggle={() => setTasksExpanded((p) => !p)}
+            onRevealMinion={onRevealMinion}
           />
-        )}
-        {/* Wait countdown timer */}
-        {data.waitUntil && data.waitUntil > Date.now() && (
-          <WaitCountdown waitUntil={data.waitUntil} reason={data.waitReason ?? "Waiting..."} />
-        )}
-      </div>
+        }
+        chat={
+          <>
+      <LeaderMessageFeed
+        outputRef={outputRef}
+        data={data}
+        groupedMessages={groupedMessages}
+        messageContextSelection={messageContextSelection}
+        onActivateMessageSelection={activateMessageSelection}
+        onMessageSelectionChange={setMessageContextSelection}
+        onExitMessageSelection={exitMessageSelection}
+        onAddContentNode={onAddContentNode}
+        debugEnabled={debugEnabled}
+      />
 
       {/* P4: Unified config footer (worktree + context) */}
       <ConfigFooter
@@ -1527,6 +1490,10 @@ export function LeaderNodeRenderer({
         disabled={promptSubmitDisabled}
         active={promptSubmitActive}
         onTextareaFocus={handlePromptTextareaFocus}
+        textareaRef={promptTextareaRef}
+      />
+          </>
+        }
       />
       </div>{/* end scroll-capture zone */}
 
@@ -1662,7 +1629,16 @@ registerNodeType({
   defaultSize: { width: 560, height: 520 },
   render: LeaderNodeRenderer,
   agentType: "leader",
-  ownsChildrenOfType: ["minion", "render"],
+  ownsChildrenOfType: ["minion"],
+  // The embedded dashboard can be exported as context to another Leader,
+  // preserving the retired render node's context-out capability.
+  providesContext: true,
+  extractContent: (data) => {
+    const renderState = (data as LeaderData | undefined)?.renderState;
+    if (!renderState) return null;
+    const text = flattenRenderStateToText(renderState);
+    return text.length > 0 ? text : null;
+  },
 });
 
 // LEADER_DEFAULT_DATA has moved to ./leader/types.ts and is re-exported above.

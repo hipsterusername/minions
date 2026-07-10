@@ -26,7 +26,7 @@ TDD lens and surfaced four systemic problems that the prior strategy permitted:
    rule.
 4. **Matchers that cannot fail.** `getBy*(...).toBeDefined()` / `.toBeTruthy()`
    epidemic — the query throws on miss; the matcher always passes. Fix:
-   §5.5 React assertion rule + lint check (§6.3).
+   §5.5 React assertion rule + architecture fitness check (§6.3).
 
 This rewrite doesn't add new layers. It tightens the rules inside the
 existing layers so the suite tells the truth about what's covered.
@@ -209,7 +209,7 @@ real. The Anthropic SDK is never reached from a component test.
 
 **Target.** Properties of the code as a whole: file size, cross-tree
 imports, broadcast call sites, command-table coverage, banned assertion
-patterns (new — see §6.3).
+patterns (see §6.3).
 
 **Tool.** vitest with `fs` + regex; `ts-morph` only when AST is required.
 
@@ -373,19 +373,18 @@ The history of this allowlist before this rule landed (per `git log`):
 The lesson: the allowlist functioned as a record of accepted regressions,
 not as a gate. The new rule stops that.
 
-**Enforcement.** A CI lint asserts the baselines file's diffs are
-monotonic non-increasing for every key. PRs that bump a key up fail
-without a manual override. The override is `// RATCHET_UP_OK: <reason>`
-on the line being changed; reviewers treat it as a red flag.
+**Enforcement.** `tests/architecture/baselines-monotonic.test.ts`
+compares the numeric baselines with `HEAD~1`. Upward changes require a
+`// RATCHET_UP_OK: <reason>` annotation in `baselines.ts`.
 
 ### 6.2 Cross-tree imports
 
 The allowlist is empty. It stays empty. A PR adding `from "../src/"` to
 `server/` (or vice versa) fails the test. There is no allowlist back door.
 
-### 6.3 Banned-assertion lint (new)
+### 6.3 Banned-assertion fitness test
 
-A new architecture test (`tests/architecture/no-banned-assertions.test.ts`)
+The architecture test (`tests/architecture/banned-assertions.test.ts`)
 greps the test tree for the patterns §5.5 forbids:
 
 - `getBy[A-Z]\w+\([^)]*\)\.toBeDefined\(\)`
@@ -396,7 +395,7 @@ greps the test tree for the patterns §5.5 forbids:
 
 The original list of offenders lived in
 `docs/archive/testing-gaps-2026-04-28-closed.md`; they were all fixed
-before the lint was enabled. The lint is now the gate — any new offender
+before the fitness test was enabled. The fitness test is now the gate — any new offender
 fails CI.
 
 ### 6.4 Mutation-testing chore (new)
@@ -445,27 +444,26 @@ matrix.
 | Surface | Test layer | Test file (target) | Notes |
 |---|---|---|---|
 | `server/bus.ts` | L2 | `server/bus.test.ts` | Producer-side emit captured + parsed; do not just round-trip schemas. |
-| `server/db.ts` | L1 | `server/db.test.ts` (NEW) | Schema migration on a fresh tmpdir DB; guard against destructive migrations. |
-| `server/project-store.ts` | L1 | `server/project-store.test.ts` (NEW) | Register / list / unregister round-trip; conflict on duplicate path. |
+| `server/db.ts` | L1 | `server/db.test.ts` | Schema migration on a fresh tmpdir DB; guard against destructive migrations. |
+| `server/project-store.ts` | L1 | `server/project-store.test.ts` | Register / list / unregister round-trip; conflict on duplicate path. |
 | `server/path-guard.ts` | L1 | exists | Trim duplicates per §5.9. |
-| `server/render-tools.ts` | L2 | `server/render-tools.test.ts` (NEW) | Each `render_*` tool factory: invoke handler, assert on captured broadcast and updated state. |
-| `server/minion-tools.ts` | L2 | `server/minion-tools.test.ts` (NEW) | Each tool: invoke handler, assert task/state mutations. |
-| `server/task-tools/<tool>.ts` | L2 | colocated `<tool>.test.ts` | One per tool; cover happy path + error path + state-already-completed guard. Currently only `assign-task` covered. |
-| `server/session-host.ts` | L1 | `server/session-host.test.ts` (NEW) | Lifecycle: start, abort, query loop, persistence callbacks. Mock SDK at boundary. |
-| `server/session-host-config.ts` | L1 | colocated `.test.ts` (NEW) | Config build per role + permission mode. |
-| `server/session-host-run.ts` | L1 | colocated `.test.ts` (NEW) | Run-loop transitions; abort race conditions. |
-| `server/agents/<role>.ts` | L1 | colocated `.test.ts` (NEW) | Each agent factory's tool list, prompt, and registration. |
-| `server/agents/registry.ts` | L1 | colocated `.test.ts` (NEW) | Lookup, register, list. |
-| `server/commands/<cmd>.ts` | L2 | colocated `.test.ts` (NEW) | One per WS command. Currently only `attachment-sanitize` and `create-session` covered — 28 commands need tests. |
+| `server/render-tools.ts` | L2 | `server/render-tools.test.ts` | Each `render_*` tool factory: invoke handler, assert on captured broadcast and updated state. |
+| `server/minion-tools.ts` | L2 | `server/minion-tools.test.ts` | Each tool: invoke handler, assert task/state mutations. |
+| `server/task-tools/<tool>.ts` | L2 | colocated `<tool>.test.ts` | One per tool; cover happy path, error path, and guarded state transitions. |
+| `server/session-host.ts` | L1 | `server/session-host.test.ts` | Lifecycle: start, abort, query loop, persistence callbacks. Mock SDK at boundary. |
+| `server/session-host-config.ts` | L1 | colocated `.test.ts` | Config build per role + permission mode. |
+| `server/session-host-run.ts` | L1 | colocated `.test.ts` | Run-loop transitions; abort race conditions. |
+| `server/agents/<role>.ts` | L1 | colocated `.test.ts` | Each agent factory's tool list, prompt, and registration. |
+| `server/agents/registry.ts` | L1 | colocated `.test.ts` | Lookup, register, list. |
+| `server/commands/<cmd>.ts` | L2 | direct or grouped command tests | New command handlers require matching behavioral coverage. |
 | `server/commands/index.ts` | L4 | drop the runtime test; `satisfies` is the gate | Per §6.5. |
-| `server/routes/<area>.ts` | L2 | colocated `.test.ts` (NEW) | Real Express + supertest round-trips per route. |
-| `server/worktree.ts` (barrel) | L1 | colocated `.test.ts` (NEW) | API stability — the public re-exports. |
-| `server/worktree-create.ts` | L1 | colocated `.test.ts` (NEW) | Mock `child_process`; assert git invocation + error surface. |
-| `server/worktree-diff.ts` | L1 | colocated `.test.ts` (NEW) | Same. |
-| `server/worktree-merge.ts` | L1 | colocated `.test.ts` (NEW) | Same; merge-strategy branches. |
-| `server/worktree-exec.ts` | L1 | colocated `.test.ts` (NEW) | Stdio routing, exit-code translation. |
+| `server/routes/<area>.ts` | L2 | colocated and `tests/contracts/*routes*.test.ts` | Real Express route round-trips. |
+| `server/worktree.ts` (barrel) | L1 | missing | API stability — the public re-exports. |
+| `server/worktree-create.ts` | L1 | colocated `.test.ts` | Mock `child_process`; assert git invocation + error surface. |
+| `server/worktree-diff.ts` | L1 | colocated `.test.ts` | Same. |
+| `server/worktree-merge.ts` | L1 | colocated `.test.ts` | Same; merge-strategy branches. |
+| `server/worktree-exec.ts` | L1 | colocated `.test.ts` | Stdio routing, exit-code translation. |
 | `server/mcp-server-store.ts` | L1 | exists | Parameterise transport duplicates per §5.9. |
-| `server/multimodal-prompt.ts` | L1 | exists | Keep. |
 | `server/skills.ts` | L1 | exists | Drop the empty-input trivial cases per §5.7. |
 | `server/session-registry.ts` | L1 | exists | Drop the impl-coupled `map` reach-in per §5.2. |
 | `server/session-repo.ts` | L1 | exists | Drop the `Object.keys` surface assertion per §5.7. |
@@ -477,7 +475,7 @@ matrix.
 |---|---|---|---|
 | `src/canvas-state.ts` | L1 | exists | Drop the no-mutate cases per §5.3. |
 | `src/canvas-utils.ts` | L1 | exists | Drop arithmetic-identity cases per §5.7. |
-| `src/canvas-scale.ts` | L1 | NEW | Currently untested. |
+| `src/canvas-scale.ts` | L1 | missing | Currently untested. |
 | `src/graph.ts` | L1 | exists | Drop mock-of-self lifecycle tests per §5.2. |
 | `src/graph-runtime.ts` | L1 | exists | Drop "no hidden ports" type-as-runtime cases per §5.7. |
 | `src/auto-layout.ts` | L1 | exists | Drop trivial single-node cases per §5.9. |
@@ -493,33 +491,32 @@ matrix.
 | `src/context-extraction.ts` | L1 | exists | Audit found this acceptable. |
 | `src/kanban-types.ts` | L1 | exists | Trim trivials. |
 | `src/use-kanban.ts` | L1 | exists (`use-kanban.dom.test.ts`) | Keep. |
-| `src/use-socket.ts` | L1 | NEW | Reconnect logic, `sync_response` handling, message routing — currently untested. |
-| `src/use-autosave.ts` | L1 | NEW | Debounce + flush — currently untested. |
-| `src/use-canvas-keyboard.ts` | L1 | NEW | Keyboard mapping — currently untested. |
-| `src/use-canvas-file-drop.ts` | L1 | NEW | File-drop dispatch — currently untested. |
-| `src/use-theme.ts` | L1 | NEW | If non-trivial. |
-| `src/wheel-detector.ts` | L1 | NEW | Trackpad vs mouse heuristic — currently untested. |
-| `src/api.ts` | L1 | NEW | Fetch wrapper — currently untested. |
-| `src/node-registry.ts` | L1 | NEW | Register / lookup / fallthrough — currently untested. |
-| `src/skills/registry.ts` | L1 | NEW | Currently untested. |
-| `src/skills/user-skills.ts` | L1 | NEW | Currently untested. |
-| `src/skills/built-in/index.ts` | L1 | exists | Drop idempotency-of-set test per §5.2. |
+| `src/use-socket.ts` | L1 | exists (`src/use-socket.test.tsx`) | Reconnect logic, sync handling, and routing. |
+| `src/use-autosave.ts` | L1 | exists (`src/use-autosave.test.tsx`) | Debounce and flush behavior. |
+| `src/use-canvas-keyboard.ts` | L1 | exists (`src/use-canvas-keyboard.test.tsx`) | Keyboard mapping. |
+| `src/use-canvas-file-drop.ts` | L1 | missing | File-drop dispatch. |
+| `src/use-theme.ts` | L1 | missing if retained as non-trivial | Theme persistence behavior. |
+| `src/wheel-detector.ts` | L1 | exists (`src/wheel-detector.dom.test.ts`) | Trackpad vs mouse heuristic. |
+| `src/api.ts` | L1 | missing | Fetch wrapper. |
+| `src/node-registry.ts` | L1 | exists (`src/node-registry.test.ts`) | Register, lookup, and fallback behavior. |
+| `src/skills/registry.ts` | L1 | exists (`src/skills/registry.test.ts`) | Registry behavior. |
+| `src/skills/user-skills.ts` | L1 | exists (`src/skills/user-skills.test.ts`) | User-skill behavior. |
 
 ### 7.3 src/ — React components
 
 | Surface | Layer | Test file | Notes |
 |---|---|---|---|
-| `src/Canvas.tsx` | L3 | NEW (the file is too big to grow without tests) | Keyboard nav, drag, edge add/remove. |
-| `src/CanvasNode.tsx` | L3 | NEW | Drag, select, port socket. |
-| `src/EdgeRenderer.tsx` | L3 | NEW | Port-anchor math at scale; not visual. |
+| `src/Canvas.tsx` | L3 | missing (the file is too big to grow without tests) | Keyboard nav, drag, edge add/remove. |
+| `src/CanvasNode.tsx` | L3 | exists | Drag, select, port socket. |
+| `src/EdgeRenderer.tsx` | L3 | exists | Port-anchor math at scale; not visual. |
 | `src/SessionPanel.tsx` | L3 | exists | Drop `getByText.toBeDefined()` patterns per §5.5. |
-| `src/UsagePopover.tsx` | L3 | exists — DELETE current and replace | Every test in current file violates §5.5. Rewrite minimally or drop. |
+| `src/UsagePopover.tsx` | L3 | missing after obsolete test removal | Add only focused behavioral coverage. |
 | `src/BottomRightDock.tsx` | L3 | exists | Trim per §5.5. |
 | `src/KanbanBoard.tsx` | L3 | exists | Audit found this acceptable. |
 | `src/components/AnnotationLayer.tsx` | L3 | exists | Keep. |
 | `src/components/AnnotationList.tsx` | L3 | exists | Keep. |
 | `src/components/AnnotationSidebar.tsx` | L3 | exists | Drop CSS-flex assertions per §5.5. |
-| `src/components/markup-palette.tsx` | L3 | NEW | Currently untested. |
+| `src/components/markup-palette.ts` | L3 | missing | Currently untested. |
 | `src/nodes/ClaudeSessionNode.tsx` | L3 | exists | Audit found this acceptable. |
 | `src/nodes/LeaderNode.tsx` | L3 | exists | Audit found this acceptable. |
 | `src/nodes/MinionNode.tsx` | L3 | exists | Keep. |
@@ -530,33 +527,30 @@ matrix.
 
 | Surface | Layer | Test file | Notes |
 |---|---|---|---|
-| `shared/ws-envelope.ts` | L2 | exists — REWRITE | Replace zod-pass/fail tests with bus-emit-then-parse round-trips per §5.4. |
-| `shared/render-dsl.ts` | L2 | exists — REWRITE | Drop schema-identity cases (~150 LoC); keep one round-trip per component variant via a real `applyRenderMessage` consumer. |
+| `shared/ws-envelope.ts` | L2 | exists | Bus-producer-to-schema round-trips per §5.4. |
+| `shared/render-dsl.ts` | L2 | exists | Real render-tool round-trips cover component variants. |
 
 ### 7.5 tests/architecture/
 
 | File | Status |
 |---|---|
-| `file-size.test.ts` | Keep + add the "monotonic non-increasing baselines" lint per §6.1. |
-| `no-cross-tree-imports.test.ts` | Drop the empty-allowlist scaffolding per §5.7 / §5.9. |
-| `no-direct-broadcast.test.ts` | Drop the trivial "bus.ts has at least one broadcast" sanity per §5.7. |
+| `file-size.test.ts` | Keep; monotonic baseline enforcement lives in `baselines-monotonic.test.ts`. |
+| `no-cross-tree-imports.test.ts` | Keep; the cross-tree allowlist remains empty. |
+| `no-direct-broadcast.test.ts` | Keep; it enforces the bus chokepoint. |
 | `no-direct-ws-send.test.ts` | Keep. |
-| `no-banned-assertions.test.ts` | NEW — see §6.3. |
+| `banned-assertions.test.ts` | Keep — enforces §6.3. |
 
 ### 7.6 tests/contracts/
 
 | File | Status |
 |---|---|
-| `command-table.test.ts` | DELETE — replace with `satisfies` in `commands/index.ts` per §6.5. |
-| `image-node.test.ts` | DELETE — re-reads literal fields from the same module that registered them. |
-| `ws-envelope.test.ts` | Rewrite per §5.4. |
+| `ws-envelope.test.ts` | Keep; it drives the real bus producer through the shared schema. |
 
 ### 7.7 tests/harness/
 
 | File | Status |
 |---|---|
-| `sdk-messages-snapshot.test.ts` | REWRITE — replace ~240 LoC inline snapshot with property assertions per §5.6. |
-| `session-stream-snapshot.test.ts` | REWRITE — same. The duplicate vs `sdk-messages-snapshot` collapses. |
+| `session-stream-snapshot.test.ts` | Keep; it uses targeted property assertions. |
 | `ws-replay.test.ts` | Keep the replay harness; drop the trivial fake-self-tests per §5.7. |
 
 ---
@@ -570,7 +564,7 @@ matrix.
 | Component queries | **@testing-library/react** + **@testing-library/jest-dom** | `getByRole` / `getByText`. `getByTestId` only when role is unavailable. |
 | Coverage | **@vitest/coverage-v8** | `pnpm test:coverage`. Reported, never gated. |
 | Mutation testing | **stryker-mutator** with `vitest` runner | Quarterly chore, single module at a time. |
-| Lint | **oxlint** | Per the global standard. Custom rules for §6.3 banned assertions in tests/. |
+| Static test-policy checks | **vitest architecture tests** | `tests/architecture/banned-assertions.test.ts` enforces §6.3. |
 | Schema | **zod** | Production schemas; tests do not redefine them. |
 | Mocks | **vitest `vi.fn`, `vi.mock`** | Boundary modules only — see §5.2. |
 
@@ -606,13 +600,12 @@ tests/
   architecture/
     baselines.ts
     file-size.test.ts                 ← L4
-    no-banned-assertions.test.ts      ← L4 (new)
+    banned-assertions.test.ts         ← L4
   contracts/
     ws-envelope.test.ts
   harness/
     ws-replay.test.ts                 ← replay harness for L3 by fixture
-    sdk-messages-snapshot.test.ts     ← (rewrite: property assertions, not blobs)
-    session-stream-snapshot.test.ts   ← (rewrite: same)
+    session-stream-snapshot.test.ts   ← targeted stream properties
   fixtures/
     sdk-message-streams/
       leader-plan-and-delegate.jsonl
@@ -666,8 +659,8 @@ Bug-regression tests are non-negotiable.
 Required to pass before merge:
 
 - `pnpm install --frozen-lockfile`
-- `pnpm verify` (typecheck + test:run + build)
-- The new fitness tests (§6.3) gate after the gap remediation lands.
+- `pnpm verify` (typechecks, tests, licenses, system-model validation, build)
+- Architecture fitness tests run under `pnpm test:run` as part of `pnpm verify`.
 
 ### Coverage
 
@@ -773,7 +766,7 @@ The project additions are:
 
 - The audit-driven anti-pattern list (§5).
 - The one-way ratchet for architecture baselines (§6.1).
-- The banned-assertion lint (§6.3).
+- The banned-assertion fitness test (§6.3).
 - The mutation-testing rotation (§6.4).
 - The full coverage matrix (§7).
 

@@ -96,6 +96,8 @@ export interface WsCommand {
   permissionMode?: string;
   systemPrompt?: string;
   role?: SessionRole;
+  /** Skill IDs tagged on a leader session; gate opt-in tools. */
+  skillIds?: string[];
   worktreeIsolation?: boolean;
   // Configuration params
   model?: string;

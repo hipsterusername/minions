@@ -80,6 +80,10 @@
   margin-bottom: 26px;
 }
 
+.act-section--triage {
+  margin-bottom: 28px;
+}
+
 .act-section-head {
   display: flex;
   align-items: center;
@@ -102,6 +106,170 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 12px;
+}
+
+/* ── Needs-you triage lane ─────────────────────────────── */
+
+.act-triage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.act-triage-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--border-default);
+  border-left-width: 3px;
+  border-radius: 10px;
+  background: var(--bg-surface);
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+.act-triage-row:hover {
+  border-color: var(--border-hover);
+}
+
+.act-triage-row--selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-surface));
+}
+
+.act-triage-row--error {
+  border-left-color: var(--status-error);
+}
+
+.act-triage-row--waiting {
+  border-left-color: var(--status-warning);
+}
+
+.act-triage-row--changes {
+  border-left-color: var(--status-success);
+}
+
+.act-triage-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.act-triage-icon {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+}
+
+.act-triage-icon--error {
+  color: var(--status-error);
+  background: color-mix(in srgb, var(--status-error) 18%, transparent);
+}
+
+.act-triage-icon--waiting {
+  color: var(--status-warning);
+  background: color-mix(in srgb, var(--status-warning) 18%, transparent);
+}
+
+.act-triage-icon--changes {
+  color: var(--status-success);
+  background: color-mix(in srgb, var(--status-success) 18%, transparent);
+}
+
+.act-triage-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.act-triage-line {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.act-triage-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.act-triage-reason {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.act-triage-reason--error {
+  color: var(--status-error);
+}
+
+.act-triage-reason--waiting {
+  color: var(--status-warning);
+}
+
+.act-triage-reason--changes {
+  color: var(--status-success);
+}
+
+.act-triage-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.act-triage-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.act-mini-btn {
+  padding: 4px 9px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+
+.act-mini-btn:hover {
+  border-color: var(--border-hover);
+}
+
+.act-mini-btn--primary {
+  color: var(--status-success);
+  border-color: color-mix(in srgb, var(--status-success) 45%, transparent);
+  background: color-mix(in srgb, var(--status-success) 16%, var(--bg-elevated));
 }
 
 /* ── Card ──────────────────────────────────────────────── */
@@ -197,6 +365,23 @@
 .act-card-oncanvas {
   color: var(--accent);
   border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 999px;
+  padding: 0 7px;
+}
+
+.act-card-foot-tags {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.act-card-changes {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--status-success);
+  border: 1px solid color-mix(in srgb, var(--status-success) 40%, transparent);
   border-radius: 999px;
   padding: 0 7px;
 }

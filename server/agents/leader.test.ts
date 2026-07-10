@@ -45,12 +45,66 @@ describe("leader agent wiring", () => {
       scheduleWaitContinue: vi.fn(),
     });
 
+    // Skill-authoring is opt-in: an untagged leader gets no "skills" group.
     expect(Object.keys(result.toolGroups).sort()).toEqual([
       "render-dashboard",
       "task-manager",
     ]);
     expect(result.mcpToolNames).toContain("mcp__task-manager__plan_task");
+    expect(result.mcpToolNames).toContain("mcp__task-manager__load_subskill");
     expect(result.mcpToolNames).toContain("mcp__render-dashboard__render_set");
+    expect(result.mcpToolNames).not.toContain("mcp__skills__create_skill");
+    // The load_subskill tool def is registered under task-manager.
+    expect(
+      result.toolGroups["task-manager"]!.map((d) => d.name),
+    ).toContain("load_subskill");
+    expect(result.toolGroups["skills"]).toBeUndefined();
+  });
+
+  it("exposes the skill-authoring tools when skill-builder is tagged", () => {
+    const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+    const result = getAgentType("leader").getToolGroups({
+      sessionKey: "leader-1",
+      cwd: "/tmp/project",
+      bus,
+      worktreeInfo: null,
+      worktreeIsolation: false,
+      skillIds: ["skill-builder"],
+      startMinionSession: vi.fn(),
+      scheduleWaitContinue: vi.fn(),
+    });
+
+    expect(Object.keys(result.toolGroups).sort()).toEqual([
+      "render-dashboard",
+      "skills",
+      "task-manager",
+    ]);
+    expect(result.mcpToolNames).toContain("mcp__skills__create_skill");
+    // Skill-authoring tools live in their own "skills" group.
+    expect(result.toolGroups["skills"]!.map((d) => d.name)).toEqual([
+      "list_skills",
+      "get_skill",
+      "create_skill",
+      "update_skill",
+      "delete_skill",
+    ]);
+  });
+
+  it("omits the skill-authoring tools when only other skills are tagged", () => {
+    const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+    const result = getAgentType("leader").getToolGroups({
+      sessionKey: "leader-1",
+      cwd: "/tmp/project",
+      bus,
+      worktreeInfo: null,
+      worktreeIsolation: false,
+      skillIds: ["code-review"],
+      startMinionSession: vi.fn(),
+      scheduleWaitContinue: vi.fn(),
+    });
+
+    expect(result.toolGroups["skills"]).toBeUndefined();
+    expect(result.mcpToolNames).not.toContain("mcp__skills__create_skill");
   });
 
   it("keeps flag-off tool groups and prompt byte-identical", () => {
@@ -133,6 +187,12 @@ describe("leader agent wiring", () => {
     expect(prompt).toContain("## System Model");
     expect(prompt).toContain("create_work_packet");
     expect(prompt).toContain("workPacketId");
+    // Redesign §6: the addendum lists the concrete gated surfaces …
+    expect(prompt).toContain("Gated surfaces");
+    expect(prompt).toContain("server/**/*.ts");
+    // … and no longer mandates querying the model for general planning.
+    expect(prompt).not.toContain("planning context");
+    expect(prompt).toContain("available, not mandated");
   });
 
   // Regression (2026-06): the child-task sweep used to live in `onComplete`,

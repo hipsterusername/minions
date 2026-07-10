@@ -1,0 +1,33 @@
+id: flow.session_snapshot_hydration
+type: flow
+name: session_snapshot_hydration
+summary: Persist stable session metadata and restore stopped SessionHost instances during boot hydration.
+capabilities:
+  - capability.persistence_project_state
+constraints:
+  - constraint.no_cross_tree_imports
+  - constraint.server_file_size_ceiling
+decisions:
+  - decision.worktree_isolation
+risks:
+  - risk.session_state_drift
+  - risk.parallel_work_conflicts
+suggested_files:
+  - server/session-host.ts
+  - server/session-persist.ts
+  - server/session-repo.ts
+  - server/session-registry.ts
+  - server/session-persist.test.ts
+  - server/session-registry.test.ts
+suggested_tests:
+  - pnpm test:run -- server/session-persist.test.ts server/session-registry.test.ts
+steps:
+  - Snapshot stable runtime fields while excluding abort controllers, streams, handles, and timers.
+  - Upsert the session row through the persistence facade and repository layer.
+  - Rewrite stale task records, upsert current records, and store leader approval json.
+  - Load session rows, leader task state, render state, event tails, and usage totals from SQLite.
+  - Rebuild stopped SessionHost instances with cwd, role, model, session id, harness, and worktree fields.
+  - Mark rehydrated running, starting, or blocked child tasks through lifecycle handling.
+freshness:
+  class: code_coupled
+risk: high

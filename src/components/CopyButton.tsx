@@ -1,10 +1,13 @@
 import { useState, useCallback } from "react";
+import { browserLogger } from "../logging.ts";
+
+const log = browserLogger.child("copy-button");
 
 /**
  * Copy text to the clipboard, robust across browsers and contexts.
  *
  * `navigator.clipboard` is only defined in secure contexts. Firefox served
- * over a plain-http LAN address (e.g. http://192.168.x.x:5173) leaves it
+ * over a plain-http LAN address (e.g. http://192.168.x.x:6173) leaves it
  * `undefined`, so calling `.writeText` there throws synchronously. We fall
  * back to a hidden-textarea + `execCommand("copy")`, which still works in
  * that situation. Rejects if neither path succeeds so callers can react.
@@ -70,7 +73,7 @@ export function CopyButton({
       } catch (err) {
         // Surface the failure instead of silently no-op'ing (Firefox in a
         // non-secure context leaves navigator.clipboard undefined).
-        console.warn("[CopyButton] copy failed:", err);
+        log.warn("copy_failed", { error: err });
       }
     },
     [text],

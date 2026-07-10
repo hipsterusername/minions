@@ -1,0 +1,33 @@
+id: flow.persist_render_dashboard_state
+type: flow
+name: persist_render_dashboard_state
+summary: Persist leader dashboard RenderState mutations and restore dashboard state into resumed sessions.
+capabilities:
+  - capability.persistence_project_state
+constraints:
+  - constraint.bus_only_broadcasts
+  - constraint.no_cross_tree_imports
+decisions:
+  - decision.graph_as_bus
+risks:
+  - risk.render_schema_drift
+  - risk.session_state_drift
+suggested_files:
+  - server/render-tools.ts
+  - server/agents/leader.ts
+  - server/session-persist.ts
+  - server/session-repo.ts
+  - server/session-persist.test.ts
+  - server/render-tools.test.ts
+suggested_tests:
+  - pnpm test:run -- server/render-tools.test.ts server/session-persist.test.ts server/session-repo.test.ts
+steps:
+  - Create render dashboard tools with existing render state from session context when present.
+  - Validate Render DSL input, mutate held RenderState, and emit render_update through the bus.
+  - Call onStateChange after each successful render mutation.
+  - Wire the leader onStateChange callback to persistRenderState for the leader session key.
+  - Store layout fields as columns and components as json in render_state.
+  - Read render_state during hydration and assign it to the resumed leader host.
+freshness:
+  class: code_coupled
+risk: high

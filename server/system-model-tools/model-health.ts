@@ -7,6 +7,9 @@ import {
   unusedInLastNPackets,
   type UsageObject,
 } from "../system-model/usage.ts";
+import type { LoadedSystemModel } from "../system-model/types.ts";
+import * as validationModule from "../system-model/validate.ts";
+import { exec } from "../worktree-exec.ts";
 import {
   getHeadSha,
   gitTimestampFn,
@@ -26,11 +29,19 @@ interface PruneRecommendation {
   recommendation: "prune_or_update" | "prune_or_link" | "review_for_prune";
 }
 
-export function createModelHealthToolDef(ctx: SystemModelToolContext): NormalizedToolDef {
+type ComputeOverbreadthFn = (model: LoadedSystemModel, trackedFiles: string[]) => unknown[];
+
+interface ModelHealthToolContext extends SystemModelToolContext {
+  trackedFiles?: () => Promise<string[]>;
+  computeOverbreadth?: ComputeOverbreadthFn;
+  overbreadthThreshold?: number;
+}
+
+export function createModelHealthToolDef(ctx: ModelHealthToolContext): NormalizedToolDef {
   return {
     name: "model_health",
     description:
-      "Report unused, stale, and orphaned system-model objects with prune recommendations.",
+      "Report unused, stale, orphaned, and overbroad system-model objects with prune recommendations.",
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true },
     inputSchema: modelHealthInputSchema,
     handler: async (input: unknown) => {
@@ -41,11 +52,12 @@ export function createModelHealthToolDef(ctx: SystemModelToolContext): Normalize
           unused: [],
           stale: [],
           orphaned: [],
+          overbroad: [],
           pruneRecommendations: [],
           loadErrors: ctx.runtime.loadErrors,
         });
       }
-      const [unused, stale, orphaned] = await Promise.all([
+      const [unused, stale, orphaned, overbroad] = await Promise.all([
         unusedInLastNPackets({
           projectPath: ctx.projectPath,
           model,
@@ -59,15 +71,123 @@ export function createModelHealthToolDef(ctx: SystemModelToolContext): Normalize
           timestampFn: ctx.timestampFn ?? gitTimestampFn,
         }),
         Promise.resolve(orphanedObjects(model)),
+        overbroadApplicability(ctx, model),
       ]);
       return jsonResult({
         unused,
         stale,
         orphaned,
+        overbroad,
         pruneRecommendations: recommendations(unused, stale, orphaned),
       });
     },
   };
+}
+
+interface OverbroadApplicability {
+  id: string;
+  type: string;
+  label: string;
+  coveragePercent: number;
+  thresholdPercent: number;
+  matchedFiles?: number;
+  totalFiles?: number;
+  globs: string[];
+}
+
+async function overbroadApplicability(
+  ctx: ModelHealthToolContext,
+  model: LoadedSystemModel,
+): Promise<OverbroadApplicability[]> {
+  const compute = ctx.computeOverbreadth ?? exportedComputeOverbreadth();
+  if (!compute) return [];
+  const trackedFiles = await getTrackedFiles(ctx);
+  const threshold = ctx.overbreadthThreshold ?? exportedOverbreadthThreshold();
+  return compute(model, trackedFiles).map((item) => normalizeOverbroadItem(item, threshold, model));
+}
+
+async function getTrackedFiles(ctx: ModelHealthToolContext): Promise<string[]> {
+  if (ctx.trackedFiles) return ctx.trackedFiles();
+  try {
+    const { stdout } = await exec(["ls-files"], ctx.cwd);
+    return stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function exportedComputeOverbreadth(): ComputeOverbreadthFn | undefined {
+  const exports = validationModule as unknown as { computeOverbreadth?: ComputeOverbreadthFn };
+  return exports.computeOverbreadth;
+}
+
+function exportedOverbreadthThreshold(): number {
+  const exports = validationModule as unknown as { OVERBREADTH_THRESHOLD?: number };
+  return exports.OVERBREADTH_THRESHOLD ?? 0.4;
+}
+
+function normalizeOverbroadItem(
+  item: unknown,
+  threshold: number,
+  model: LoadedSystemModel,
+): OverbroadApplicability {
+  const record = item as Record<string, unknown>;
+  const id = stringField(record, "id", "objectId", "gateId");
+  const type = stringField(record, "type", "kind");
+  const coverage = numberField(record, "coverage", "ratio", "coverageRatio");
+  const percent = coverage > 1 ? coverage : coverage * 100;
+  const globs = arrayField(record, "globs", "files", "patterns");
+  return {
+    id,
+    type,
+    label: stringField(record, "label", "name", "statement") || labelForOverbroad(id, model),
+    coveragePercent: Math.round(percent * 10) / 10,
+    thresholdPercent: Math.round(threshold * 1000) / 10,
+    matchedFiles: optionalNumberField(record, "matchedFiles", "matchedFileCount"),
+    totalFiles: optionalNumberField(record, "totalFiles", "trackedFiles", "sourceFiles"),
+    globs: globs.length > 0 ? globs : globsForOverbroad(id, type, model),
+  };
+}
+
+function labelForOverbroad(id: string, model: LoadedSystemModel): string {
+  const object = model.objectsById.get(id);
+  if (object?.type === "constraint") return object.statement;
+  const gate = model.reviewGatesById.get(id);
+  return gate?.name ?? id;
+}
+
+function globsForOverbroad(id: string, type: string, model: LoadedSystemModel): string[] {
+  if (type === "gate") return model.reviewGatesById.get(id)?.requiredWhen.files ?? [];
+  const object = model.objectsById.get(id);
+  return object?.type === "constraint" ? object.appliesTo.files : [];
+}
+
+function stringField(record: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return "";
+}
+
+function numberField(record: Record<string, unknown>, ...keys: string[]): number {
+  return optionalNumberField(record, ...keys) ?? 0;
+}
+
+function optionalNumberField(record: Record<string, unknown>, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+function arrayField(record: Record<string, unknown>, ...keys: string[]): string[] {
+  for (const key of keys) {
+    const value = record[key];
+    if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
+  }
+  return [];
 }
 
 function recommendations(

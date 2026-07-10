@@ -1,0 +1,37 @@
+id: flow.skill_subskill_map_load
+type: flow
+name: Subskill Map And On-Demand Load
+summary: Parent skills inject a compact subskill map into prompts while full subskill bodies are resolved on demand through tolerant load_subskill tools.
+capabilities:
+  - capability.skill_library
+constraints:
+  - constraint.model_bloat_guard
+  - constraint.no_cross_tree_imports
+decisions:
+  - decision.relevance_scoped_context
+risks:
+  - risk.prompt_bloat
+  - risk.command_contract_drift
+  - risk.model_rot
+suggested_files:
+  - server/subskills.ts
+  - server/subskill-tools.ts
+  - server/task-tools/load-subskill.ts
+  - server/skills.ts
+  - src/skills/types.ts
+  - server/subskills.test.ts
+suggested_tests:
+  - server/subskills.test.ts
+  - server/task-tools/load-subskill.test.ts
+  - server/skills.test.ts
+  - src/skills/types.test.ts
+steps:
+  - buildSubskillMap emits ids, names, descriptions, when-to-use hints, and the load_subskill instruction for a parent skill.
+  - Subskills marked alwaysInclude are eagerly inlined below the map while other bodies stay out of the prompt.
+  - The minion skills tool group always exposes load_subskill through createSubskillToolsForSession.
+  - The leader task-tool surface also exposes load_subskill through createLoadSubskillToolDef.
+  - resolveSubskillBody reloads the merged skill library and tolerantly reports misses with valid ids.
+  - formatSubskillLoad returns either a framed body or a normal text miss message.
+freshness:
+  class: code_coupled
+risk: high

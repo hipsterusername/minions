@@ -51,6 +51,7 @@ export function initDb(dbPath?: string): Database.Database {
       target_port_id  TEXT NOT NULL,
       protocol        TEXT NOT NULL,
       z_index         INTEGER NOT NULL DEFAULT 0,
+      context_mode    TEXT,
       created_at      TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (id, project_id)
@@ -182,9 +183,11 @@ export function initDb(dbPath?: string): Database.Database {
 
     CREATE TABLE IF NOT EXISTS system_model_usage (
       object_id       TEXT NOT NULL,
-      work_packet_id  TEXT NOT NULL,
+      work_packet_id  TEXT NOT NULL DEFAULT '',
+      source          TEXT NOT NULL DEFAULT 'packet',
+      session_key     TEXT NOT NULL DEFAULT '',
       used_at         INTEGER NOT NULL,
-      PRIMARY KEY (object_id, work_packet_id)
+      PRIMARY KEY (object_id, work_packet_id, source, session_key)
     );
   `);
 
@@ -211,6 +214,10 @@ export function initDb(dbPath?: string): Database.Database {
   ensureColumn(db, "session_usage", "harness_session_id", "TEXT");
   ensureColumn(db, "session_usage", "usage_identity", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "work_packets", "context_pack", "TEXT NOT NULL DEFAULT ''");
+  // Per-edge context forwarding mode for leader→leader context edges
+  // ("dashboard" | "lean" | "full"). NULL = default ("dashboard").
+  ensureColumn(db, "edges", "context_mode", "TEXT");
+  ensureSystemModelUsageSchema(db);
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_session_usage_identity
       ON session_usage(
@@ -290,6 +297,57 @@ function ensureTaskRecordsCompositePk(db: Database.Database): void {
       executor, minion_session_key, status, result, created_at, completed_at
     FROM task_records_legacy;
     DROP TABLE task_records_legacy;
+  `);
+}
+
+function ensureSystemModelUsageSchema(db: Database.Database): void {
+  const rows = db.pragma("table_info(system_model_usage)") as Array<{
+    name: string;
+    pk: number;
+  }>;
+  const pk = rows
+    .filter((row) => row.pk > 0)
+    .sort((a, b) => a.pk - b.pk)
+    .map((row) => row.name);
+  const hasNewColumns =
+    rows.some((row) => row.name === "source") &&
+    rows.some((row) => row.name === "session_key");
+  const hasNewPk =
+    pk.join(",") === "object_id,work_packet_id,source,session_key";
+  if (hasNewColumns && hasNewPk) return;
+  if (!rows.some((row) => row.name === "source")) {
+    ensureColumn(db, "system_model_usage", "source", "TEXT NOT NULL DEFAULT 'packet'");
+  }
+  if (!rows.some((row) => row.name === "session_key")) {
+    ensureColumn(db, "system_model_usage", "session_key", "TEXT NOT NULL DEFAULT ''");
+  }
+
+  db.exec(`
+    ALTER TABLE system_model_usage RENAME TO system_model_usage_legacy;
+    CREATE TABLE system_model_usage (
+      object_id       TEXT NOT NULL,
+      work_packet_id  TEXT NOT NULL DEFAULT '',
+      source          TEXT NOT NULL DEFAULT 'packet',
+      session_key     TEXT NOT NULL DEFAULT '',
+      used_at         INTEGER NOT NULL,
+      PRIMARY KEY (object_id, work_packet_id, source, session_key)
+    );
+    INSERT OR REPLACE INTO system_model_usage (
+      object_id, work_packet_id, source, session_key, used_at
+    )
+    SELECT
+      object_id,
+      COALESCE(work_packet_id, ''),
+      COALESCE(source, 'packet'),
+      COALESCE(session_key, ''),
+      MAX(used_at)
+    FROM system_model_usage_legacy
+    GROUP BY
+      object_id,
+      COALESCE(work_packet_id, ''),
+      COALESCE(source, 'packet'),
+      COALESCE(session_key, '');
+    DROP TABLE system_model_usage_legacy;
   `);
 }
 

@@ -26,6 +26,27 @@ export interface SkillVariable {
   description?: string;
 }
 
+/**
+ * A sub-skill nested inside a parent {@link SkillTemplate}. The parent's
+ * compiled prompt always injects a *map* of its sub-skills (name +
+ * when-to-use + description); the full `body` is pulled on demand via the
+ * `load_subskill` tool unless `alwaysInclude` eagerly inlines it.
+ */
+export interface SubSkill {
+  /** Auto-generated from the name in the editor */
+  id: string;
+  /** Display name */
+  name: string;
+  /** One-line summary shown in the map */
+  description: string;
+  /** Full content, pulled on demand (or eager-inlined when alwaysInclude) */
+  body: string;
+  /** Trigger hint shown in the map so an agent knows when to load it */
+  whenToUse?: string;
+  /** Eager-inline the body into the parent prompt instead of on-demand */
+  alwaysInclude?: boolean;
+}
+
 export interface SkillTemplate {
   /** Unique skill identifier */
   id: string;
@@ -52,6 +73,52 @@ export interface SkillTemplate {
    * get a default text input.
    */
   variables: SkillVariable[];
+  /**
+   * Optional nested sub-skills. Stored inline (one level only). The parent's
+   * compiled prompt injects a map of these; bodies are pulled on demand.
+   */
+  subskills?: SubSkill[];
+  /**
+   * True for read-only, code-authored built-in presets (bridged from
+   * `shared/skill-presets.ts`). These are pickable/taggable but never written
+   * to the project's `.minions/skills.json` and cannot be deleted from the UI.
+   * Editing one creates a project override (a normal, persisted copy).
+   */
+  builtIn?: boolean;
+}
+
+/**
+ * Build the always-injected *map* of a skill's sub-skills: a compact list of
+ * each sub-skill's id/name/description (+ when-to-use), an instruction to pull
+ * a body on demand via `load_subskill`, and eager-inlined bodies for any
+ * sub-skill flagged `alwaysInclude`. Returns `""` when the skill has none.
+ */
+export function buildSubskillMap(skill: SkillTemplate): string {
+  const subskills = skill.subskills ?? [];
+  if (subskills.length === 0) return "";
+
+  const bullets = subskills.map((sub) => {
+    const desc = sub.description?.trim() || "(no description)";
+    const when = sub.whenToUse?.trim()
+      ? ` When to use: ${sub.whenToUse.trim()}`
+      : "";
+    const loaded = sub.alwaysInclude ? " (loaded below)" : "";
+    return `- \`${sub.id}\` — **${sub.name}**: ${desc}.${when}${loaded}`;
+  });
+
+  const eager = subskills
+    .filter((sub) => sub.alwaysInclude)
+    .map((sub) => `#### ${sub.name}\n\n${sub.body.trim()}`);
+
+  const parts = [
+    `### Sub-skills of ${skill.name}`,
+    `This skill is a map. The sub-skills below are not loaded by default. ` +
+      `To pull one into context, call \`load_subskill\` with ` +
+      `\`skillId: "${skill.id}"\` and the sub-skill's id.`,
+    bullets.join("\n"),
+  ];
+  if (eager.length > 0) parts.push(eager.join("\n\n"));
+  return parts.join("\n\n");
 }
 
 /**
@@ -99,7 +166,8 @@ export function compileSkills(
   const sections = skills.map((skill) => {
     const values = allValues[skill.id] ?? {};
     const compiled = compileSkillTemplate(skill, values);
-    return `## Skill: ${skill.name}\n\n${compiled}`;
+    const map = buildSubskillMap(skill);
+    return `## Skill: ${skill.name}\n\n${compiled}${map ? `\n\n${map}` : ""}`;
   });
 
   return `\n\n# Active Skills\n\nThe following skills are active for this session. Follow their instructions.\n\n${sections.join("\n\n---\n\n")}`;

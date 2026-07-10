@@ -55,6 +55,20 @@ function getPortPosition(
   return { x: node.position.x, y };
 }
 
+type ContextBadgeMode = "dashboard" | "lean" | "full";
+
+const CONTEXT_BADGE_LETTER: Record<ContextBadgeMode, string> = {
+  dashboard: "D",
+  lean: "L",
+  full: "F",
+};
+
+const CONTEXT_BADGE_TOOLTIP: Record<ContextBadgeMode, string> = {
+  dashboard: "Dashboard: forwards this leader's dashboard only (default). Click to change.",
+  lean: "Lean: forwards inputs + responses (no thinking/tools). Click to change.",
+  full: "Full: forwards inputs + thinking + responses (no tools). Click to change.",
+};
+
 interface BezierEdgeProps {
   edgeId: string;
   x1: number;
@@ -66,6 +80,11 @@ interface BezierEdgeProps {
   isHovered: boolean;
   /** True when *some other* edge is selected — used to fade unrelated edges. */
   isDimmed: boolean;
+  /**
+   * When set, renders a small mode badge over the target (input) port for
+   * leader→leader context edges. Clicking it selects the edge.
+   */
+  contextBadge?: ContextBadgeMode | undefined;
   onClick?: ((edgeId: string, e: React.MouseEvent) => void) | undefined;
   onHover?: ((edgeId: string | null) => void) | undefined;
 }
@@ -80,6 +99,7 @@ const BezierEdge = memo(function BezierEdge({
   isSelected,
   isHovered,
   isDimmed,
+  contextBadge,
   onClick,
   onHover,
 }: BezierEdgeProps) {
@@ -167,6 +187,45 @@ const BezierEdge = memo(function BezierEdge({
           onMouseLeave={() => onHover?.(null)}
         />
       )}
+      {/* Context-mode badge over the target (input) port — leader→leader only.
+          Clicking it selects the edge, which opens the EdgeInspector menu. */}
+      {contextBadge && (
+        <g
+          data-testid={`edge-context-badge-${edgeId}`}
+          transform={`translate(${x2 - 16}, ${y2 - 16})`}
+          style={{ pointerEvents: "all", cursor: "pointer" }}
+          opacity={isDimmed ? 0.3 : 1}
+          onMouseDown={(e) => {
+            if (onClick) e.stopPropagation();
+          }}
+          onClick={(e) => {
+            if (onClick) {
+              e.stopPropagation();
+              onClick(edgeId, e);
+            }
+          }}
+          onMouseEnter={() => onHover?.(edgeId)}
+          onMouseLeave={() => onHover?.(null)}
+        >
+          <title>{CONTEXT_BADGE_TOOLTIP[contextBadge]}</title>
+          <circle
+            r={9}
+            fill="var(--bg-secondary)"
+            stroke={baseColor}
+            strokeWidth={isSelected ? 2 : 1.5}
+          />
+          <text
+            textAnchor="middle"
+            dominantBaseline="central"
+            fontSize={11}
+            fontWeight={700}
+            fill="var(--text-primary)"
+            style={{ userSelect: "none", fontFamily: "var(--font-mono)" }}
+          >
+            {CONTEXT_BADGE_LETTER[contextBadge]}
+          </text>
+        </g>
+      )}
     </g>
   );
 });
@@ -213,6 +272,14 @@ export const EdgeRenderer = memo(function EdgeRenderer({
           const isHovered = hoveredEdgeId === edge.id;
           const isDimmed = hasSelection && !isSelected;
 
+          // Leader→leader context edges carry a forwarding-mode badge.
+          const contextBadge =
+            edge.protocol === "context" &&
+            sourceNode.type === "leader" &&
+            targetNode.type === "leader"
+              ? ((edge.contextMode ?? "dashboard") as ContextBadgeMode)
+              : undefined;
+
           return (
             <BezierEdge
               key={edge.id}
@@ -225,6 +292,7 @@ export const EdgeRenderer = memo(function EdgeRenderer({
               isSelected={isSelected}
               isHovered={isHovered}
               isDimmed={isDimmed}
+              contextBadge={contextBadge}
               onClick={onEdgeClick}
               onHover={onEdgeHover}
             />

@@ -8,8 +8,12 @@
  */
 
 import { useState, useEffect } from "react";
-import type { ImageComponent, FilePreviewComponent } from "../../../shared/render-artifacts.ts";
+import { createPortal } from "react-dom";
+import type { ImageComponent, FilePreviewComponent, HtmlArtifactComponent } from "../../../shared/render-dsl.ts";
 import { copyText } from "../../components/CopyButton.tsx";
+import { browserLogger } from "../../logging.ts";
+
+const log = browserLogger.child("artifact-components");
 
 // ── Shared card baseline style ────────────────────────────
 
@@ -76,7 +80,7 @@ export function ImageRenderer({ c }: { c: ImageComponent }) {
           </div>
         )}
       </div>
-      {lightboxOpen && (
+      {lightboxOpen && typeof document !== "undefined" && createPortal(
         <div
           role="dialog"
           aria-modal="true"
@@ -105,7 +109,8 @@ export function ImageRenderer({ c }: { c: ImageComponent }) {
             }}
             onClick={(e) => e.stopPropagation()}
           />
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
@@ -288,6 +293,138 @@ function ActionBtn({ label, onClick }: { label: string; onClick: () => void }) {
   );
 }
 
+// ── HtmlArtifactRenderer ─────────────────────────────────
+
+export function HtmlArtifactRenderer({ c }: { c: HtmlArtifactComponent }) {
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const title = c.title ?? "HTML artifact";
+
+  useEffect(() => {
+    if (!lightboxOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setLightboxOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightboxOpen]);
+
+  return (
+    <>
+      <div className="rd-card rd-card--hover rd-fade-in" style={{ ...CARD, overflow: "hidden" }}>
+        <div style={{
+          padding: "8px 12px",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          borderBottom: "1px solid var(--border-default)",
+          background: "var(--bg-elevated)",
+        }}>
+          {c.title !== undefined && (
+            <div style={{
+              flex: 1,
+              minWidth: 0,
+              fontSize: 11,
+              fontFamily: "var(--font-mono)",
+              fontWeight: 600,
+              color: "var(--text-primary)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}>
+              {c.title}
+            </div>
+          )}
+          <div style={{ marginLeft: "auto" }}>
+            <ActionBtn label="Expand" onClick={() => setLightboxOpen(true)} />
+          </div>
+        </div>
+        <div style={{ padding: 10 }}>
+          <iframe
+            sandbox=""
+            srcDoc={c.html}
+            referrerPolicy="no-referrer"
+            title={title}
+            loading="lazy"
+            style={{
+              display: "block",
+              width: "100%",
+              height: c.height ?? 240,
+              border: "1px solid var(--border-default)",
+              borderRadius: 4,
+              background: "white",
+            }}
+          />
+        </div>
+      </div>
+      {lightboxOpen && typeof document !== "undefined" && createPortal(
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${title} lightbox`}
+          onClick={() => setLightboxOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            background: "rgba(0,0,0,0.85)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 24,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: "relative",
+              width: "min(1100px, 92vw)",
+              height: "82vh",
+            }}
+          >
+            <button
+              type="button"
+              aria-label="Close HTML artifact lightbox"
+              onClick={() => setLightboxOpen(false)}
+              style={{
+                position: "absolute",
+                top: -16,
+                right: -16,
+                width: 32,
+                height: 32,
+                borderRadius: 16,
+                border: "1px solid rgba(255,255,255,0.25)",
+                background: "rgba(0,0,0,0.75)",
+                color: "white",
+                cursor: "pointer",
+                fontSize: 18,
+                lineHeight: "30px",
+              }}
+            >
+              ×
+            </button>
+            <iframe
+              sandbox=""
+              srcDoc={c.html}
+              referrerPolicy="no-referrer"
+              title={title}
+              style={{
+                display: "block",
+                width: "100%",
+                height: "100%",
+                border: "1px solid rgba(255,255,255,0.2)",
+                borderRadius: 4,
+                background: "white",
+                boxShadow: "0 8px 40px rgba(0,0,0,0.5)",
+              }}
+            />
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
 // ── PathSourcePreview ─────────────────────────────────────
 //
 // For path-source components, file content is not available client-side in v1.
@@ -312,7 +449,7 @@ function PathSourcePreview({ c }: { c: FilePreviewComponent }) {
 
   function handleCopyPath() {
     void copyText(srcPath).catch((err: unknown) => {
-      console.warn("[ArtifactComponents] copy path failed:", err);
+      log.warn("path_copy_failed", { error: err });
     });
   }
 

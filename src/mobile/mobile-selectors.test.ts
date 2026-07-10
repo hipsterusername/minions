@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   activitySection,
   groupSessionsByActivity,
+  groupSessionsForTriage,
   needsAttention,
   sessionBelongsToProject,
   sessionDisplayTitle,
@@ -22,7 +23,9 @@ function session(overrides: Partial<MobileSessionInfo>): MobileSessionInfo {
 describe("mobile selectors", () => {
   it("marks error and pending sessions as needing attention", () => {
     expect(needsAttention(session({ status: "error" }))).toBe(true);
+    expect(needsAttention(session({ status: "waiting" }))).toBe(true);
     expect(needsAttention(session({ pendingAttention: true }))).toBe(true);
+    expect(needsAttention(session({ reviewableChanges: true }))).toBe(true);
     expect(needsAttention(session({ status: "running" }))).toBe(false);
   });
 
@@ -125,5 +128,25 @@ describe("mobile selectors", () => {
 
     expect(section!.id).toBe("stopped");
     expect(section!.sessions.map((s) => s.sessionKey)).toEqual(["z-new", "a-old"]);
+  });
+
+  it("splits attention sessions into a pinned needs-you lane", () => {
+    const running = session({ sessionKey: "running", status: "running", lastActivityAt: 20 });
+    const error = session({ sessionKey: "error", status: "error", lastActivityAt: 30 });
+    const waiting = session({ sessionKey: "waiting", status: "waiting", lastActivityAt: 40 });
+    const changes = session({
+      sessionKey: "changes",
+      status: "idle",
+      reviewableChanges: true,
+      lastActivityAt: 10,
+    });
+    const completed = session({ sessionKey: "completed", status: "completed", lastActivityAt: 5 });
+
+    const triage = groupSessionsForTriage([running, error, waiting, changes, completed]);
+
+    expect(triage.needsYou.map((s) => s.sessionKey)).toEqual(["waiting", "error", "changes"]);
+    expect(triage.sections.map((s) => s.id)).toEqual(["active", "stopped"]);
+    expect(triage.sections[0]!.sessions.map((s) => s.sessionKey)).toEqual(["running"]);
+    expect(triage.sections[1]!.sessions.map((s) => s.sessionKey)).toEqual(["completed"]);
   });
 });

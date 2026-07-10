@@ -354,6 +354,8 @@ export function MarkdownNodeRenderer({
   node,
   onUpdateData,
   onResize,
+  onResizeStart,
+  onResizeEnd,
   projectPath,
   onCreateKanbanCardFromMarkdown,
 }: NodeRenderProps) {
@@ -1777,6 +1779,8 @@ export function MarkdownNodeRenderer({
               minWidth={240}
               minHeight={200}
               onResize={onResize}
+              {...(onResizeStart ? { onResizeStart } : {})}
+              {...(onResizeEnd ? { onResizeEnd } : {})}
               color="var(--text-muted)"
             />
           )}

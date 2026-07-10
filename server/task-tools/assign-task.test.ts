@@ -27,7 +27,10 @@ import type {
 import type { Bus, BusPayload } from "../bus.ts";
 import { writeSettings, writeSkills } from "../project-store.ts";
 import { saveWorkPacket } from "../system-model/store.ts";
+import { loadSystemModel } from "../system-model/load.ts";
 import type { WorkPacket } from "../../shared/system-model/index.ts";
+
+const FIXTURE_MODEL = loadSystemModel("tests/fixtures/system-model/valid").model!;
 
 const BASE_MINION_PROMPT = "You are a Minion. Do the work.";
 
@@ -197,6 +200,44 @@ describe("assign_task", () => {
     expect(sent.startsWith(BASE_MINION_PROMPT)).toBe(true);
   });
 
+  it("injects an armed skill's sub-skill map into the minion systemPrompt", async () => {
+    writeSkills(projectDir, [
+      {
+        id: "design",
+        name: "Design",
+        description: "Design system",
+        category: "design",
+        icon: "🎨",
+        accentColor: "#000",
+        template: "Follow the design system.",
+        variables: [],
+        subskills: [
+          {
+            id: "layout",
+            name: "Layout",
+            description: "layout rules",
+            body: "LAYOUT BODY",
+          },
+        ],
+      },
+    ]);
+
+    await callAssign(harness.ctx, {
+      taskId: "t-map",
+      title: "Design work",
+      description: "details",
+      priority: "medium",
+      skillIds: ["design"],
+    });
+
+    const sent = harness.spawns[0]!.systemPrompt;
+    expect(sent).toContain("### Sub-skills of Design");
+    expect(sent).toContain("- `layout` — **Layout**: layout rules.");
+    expect(sent).toContain("load_subskill");
+    // On-demand body must not be inlined into the arming prompt.
+    expect(sent).not.toContain("LAYOUT BODY");
+  });
+
   it("substitutes skillValues into {{placeholders}}", async () => {
     writeSkills(projectDir, [
       {
@@ -329,6 +370,36 @@ describe("assign_task", () => {
     expect(
       (spawned!.payload as { skillIds?: string[] }).skillIds,
     ).toEqual(["a", "b"]);
+  });
+
+  it("records the resolved armed skill IDs on the task (dropping unknowns)", async () => {
+    writeSkills(projectDir, [
+      {
+        id: "skill-builder",
+        name: "Skill Builder",
+        description: "Build skills",
+        category: "meta",
+        icon: "S",
+        accentColor: "#000",
+        template: "Build skills.",
+        variables: [],
+        subskills: [],
+      },
+    ]);
+
+    await callAssign(harness.ctx, {
+      taskId: "t-record",
+      title: "Armed",
+      description: "x",
+      priority: "low",
+      skillIds: ["skill-builder", "ghost"],
+    });
+
+    // Unknown IDs are dropped; only the resolved set is stored so the minion
+    // can gate opt-in tools (skill-authoring) on it.
+    expect(harness.ctx.taskState.tasks.get("t-record")?.skillIds).toEqual([
+      "skill-builder",
+    ]);
   });
 
   // Note: an "emits minion_spawned with empty skillIds when none passed"
@@ -562,7 +633,7 @@ describe("assign_task", () => {
     });
 
     expect(harness.spawns[0]?.harness).toBe("codex");
-    expect(harness.spawns[0]?.model).toBe("gpt-5.5");
+    expect(harness.spawns[0]?.model).toBe("gpt-5.6-luna");
     expect(harness.spawns[0]?.model).not.toBe("claude-haiku-4-5");
   });
 
@@ -787,6 +858,60 @@ describe("assign_task", () => {
     expect(text).toContain("create a new task instead");
     // No second spawn
     expect(harness.spawns).toHaveLength(1);
+  });
+
+  describe("packet-required trigger (redesign §5)", () => {
+    it("notes packetRequired + reminds to pass a workPacketId when ownedPaths hit a gate", async () => {
+      harness.ctx.systemModel = FIXTURE_MODEL;
+      const { text } = await callAssign(harness.ctx, {
+        taskId: "gated",
+        title: "Touch server",
+        description: "details",
+        priority: "high",
+        ownedPaths: ["server/commands/approve-changes.ts"],
+      });
+      expect(text).toContain("packetRequired: true");
+      expect(text).toContain("gate.review");
+      expect(text).toContain("workPacketId");
+    });
+
+    it("notes the hit but omits the reminder when a workPacketId is already passed", async () => {
+      harness.ctx.systemModel = FIXTURE_MODEL;
+      const { text } = await callAssign(harness.ctx, {
+        taskId: "gated-with-packet",
+        title: "Touch server",
+        description: "details",
+        priority: "high",
+        ownedPaths: ["server/commands/approve-changes.ts"],
+        workPacketId: "wp_x",
+      });
+      expect(text).toContain("packetRequired: true");
+      expect(text).not.toContain("workPacketId (create_work_packet)");
+    });
+
+    it("stays silent when ownedPaths miss every gated surface", async () => {
+      harness.ctx.systemModel = FIXTURE_MODEL;
+      const { text } = await callAssign(harness.ctx, {
+        taskId: "ungated",
+        title: "Touch src",
+        description: "details",
+        priority: "low",
+        ownedPaths: ["src/App.tsx"],
+      });
+      expect(text).not.toContain("systemModel:");
+      expect(text).not.toContain("packetRequired");
+    });
+
+    it("stays silent when the task carries no files/ownedPaths", async () => {
+      harness.ctx.systemModel = FIXTURE_MODEL;
+      const { text } = await callAssign(harness.ctx, {
+        taskId: "nofiles",
+        title: "No scope",
+        description: "details",
+        priority: "low",
+      });
+      expect(text).not.toContain("systemModel:");
+    });
   });
 });
 

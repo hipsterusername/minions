@@ -10,6 +10,9 @@ import type { Bus } from "./bus.ts";
 import { emitTaskPlanUpdate } from "./task-tools/shared.ts";
 import type { TaskManagerState, TaskRecord, TaskStatus } from "./task-tools/types.ts";
 import { persistTaskState } from "./session-persist.ts";
+import { serverLogger } from "./logging.ts";
+
+const log = serverLogger.child("task-lifecycle");
 
 export const DEFAULT_TASK_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -288,9 +291,11 @@ export function applyLifecycleEvent(opts: {
   const next = reduceTaskLifecycle(current, opts.event);
   if (next === current) {
     if (isTerminalTaskStatus(current.status)) {
-      console.debug(
-        `[task-lifecycle] ignored ${opts.event.type} for task ${opts.taskId} (${current.status})`,
-      );
+      log.debug("terminal_transition_ignored", {
+        eventType: opts.event.type,
+        taskId: opts.taskId,
+        status: current.status,
+      });
     }
     return current;
   }

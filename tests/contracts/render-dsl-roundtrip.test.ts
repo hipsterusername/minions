@@ -218,4 +218,53 @@ describe("render-DSL producer↔consumer round-trip", () => {
       "k1", "k2", "k3", "k4", "k5", "k6", "k7",
     ]);
   });
+
+  it("callout without a variant round-trips without a validation error", async () => {
+    // Regression: the token-efficiency guidance tells agents to omit
+    // callout.variant (default "info"), but the schema used to mark it
+    // required — so a variant-less callout threw at the producer's
+    // renderComponentSchema.parse with 'Invalid option: expected one of
+    // info|warning|success|error'. The producer must now accept the
+    // omission; elideDefaults then strips the "info" default back out, and
+    // every consumer treats a missing variant as "info".
+    const { bus, captured } = rig();
+    const { toolDefs } = createRenderToolsForLeader({
+      leaderSessionKey: "leader-1",
+      bus,
+    });
+    const setTool = findTool(toolDefs, "render_set");
+
+    // Producing this used to throw; now it resolves cleanly.
+    await callTool(setTool, {
+      components: [{ id: "c1", type: "callout", content: "heads up" }],
+    });
+
+    const next = applyRenderMessage(emptyRenderState(), lastRenderMessage(captured));
+    const callout = next.components.find((c) => c.id === "c1")!;
+    if (callout.type !== "callout") throw new Error("expected callout");
+    // "info" is the documented default, so elideDefaults strips it from the
+    // broadcast payload; downstream renderers restore it via `?? "info"`.
+    expect(callout.variant).toBeUndefined();
+    expect(callout.content).toBe("heads up");
+  });
+
+  it("callout preserves a non-default variant through the round-trip", async () => {
+    const { bus, captured } = rig();
+    const { toolDefs } = createRenderToolsForLeader({
+      leaderSessionKey: "leader-1",
+      bus,
+    });
+    const setTool = findTool(toolDefs, "render_set");
+
+    await callTool(setTool, {
+      components: [
+        { id: "c2", type: "callout", variant: "error", content: "boom" },
+      ],
+    });
+
+    const next = applyRenderMessage(emptyRenderState(), lastRenderMessage(captured));
+    const callout = next.components.find((c) => c.id === "c2")!;
+    if (callout.type !== "callout") throw new Error("expected callout");
+    expect(callout.variant).toBe("error");
+  });
 });

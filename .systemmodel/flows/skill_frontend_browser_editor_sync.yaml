@@ -1,0 +1,33 @@
+id: flow.skill_frontend_browser_editor_sync
+type: flow
+name: Frontend Skill Browser And Editor Sync
+summary: The UI browses pickable skills, edits project skills or built-in overrides, imports and exports JSON, and persists only project skills through the server API.
+capabilities:
+  - capability.skill_library
+constraints:
+  - constraint.no_cross_tree_imports
+decisions:
+  - decision.relevance_scoped_context
+risks:
+  - risk.session_state_drift
+  - risk.model_rot
+suggested_files:
+  - src/SkillsBrowser.tsx
+  - src/SkillEditor.tsx
+  - src/SkillSubskillEditor.tsx
+  - src/skills/user-skills.ts
+  - src/skills/registry.ts
+  - src/api.ts
+suggested_tests:
+  - src/skills/user-skills.test.ts
+  - src/skills/registry.test.ts
+steps:
+  - SkillsBrowser reads getPickableSkills, searches and groups by category, and hides delete controls for built-in presets.
+  - SkillEditor validates name and template, derives ids for new skills, detects template variables, and emits a complete SkillTemplate.
+  - SkillSubskillEditor manages one-level subskill drafts with auto-derived ids and alwaysInclude flags.
+  - saveUserSkill and deleteUserSkill mutate the project-only registry and then persist getAllSkills through saveProjectSkills.
+  - importUserSkills accepts JSON arrays with id, name, and template and preserves nested subskills before persisting.
+  - exportUserSkills serializes only project registry entries so shared built-ins are not written to skills.json.
+freshness:
+  class: code_coupled
+risk: medium

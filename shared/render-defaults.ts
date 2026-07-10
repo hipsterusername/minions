@@ -64,11 +64,12 @@ export const COMPONENT_DEFAULTS: Record<string, Readonly<Record<string, unknown>
   kv: { ...SPAN_DEFAULT, layout: "vertical" },
   sparkline: { ...SPAN_DEFAULT, variant: "line", showRange: false },
   chart: { ...SPAN_DEFAULT, variant: "line" },
-  section: { ...SPAN_DEFAULT, defaultOpen: true },
+  section: { ...SPAN_DEFAULT, defaultOpen: false },
   tabs: { ...SPAN_DEFAULT },
   form: { ...SPAN_DEFAULT },
   image: { ...SPAN_DEFAULT, fit: "contain" },
   "file-preview": { ...SPAN_DEFAULT, view: "auto" },
+  "html-artifact": { ...SPAN_DEFAULT },
 };
 
 // ── Elision ────────────────────────────────────────────────

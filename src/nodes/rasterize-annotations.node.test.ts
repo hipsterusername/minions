@@ -71,9 +71,7 @@ function makeMockCtx(): { ctx: OverlayContext; calls: CtxCall[] } {
   const proxy = new Proxy(ctx, {
     set(target, prop, value) {
       if (prop === "font") calls.push({ op: "font", value: String(value) });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (target as any)[prop] = value;
-      return true;
+      return Reflect.set(target, prop, value);
     },
   });
   return { ctx: proxy, calls };

@@ -6,6 +6,7 @@
 //   pnpm start restart  restart the background service
 //   pnpm start status   report whether it is running
 import { spawn } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -23,6 +24,7 @@ const runDir = join(root, ".run");
 const logFile = join(runDir, "minions.log");
 const pidFile = join(runDir, "minions.pid");
 const isWin = process.platform === "win32";
+const vitePort = process.env["VITE_PORT"] ?? "6173";
 
 const action = process.argv[2] ?? "start";
 
@@ -69,10 +71,13 @@ function start() {
   const existing = readPid();
   if (isRunning(existing)) {
     console.log(`Minions is already running (pid ${existing}).`);
+    enableTailscaleServe();
     console.log(`  logs: ${rel(logFile)}`);
     console.log(`  stop: pnpm stop`);
     return;
   }
+
+  enableTailscaleServe();
 
   mkdirSync(runDir, { recursive: true });
   // Append so a restart keeps history; truncate is the alternative if noisy.
@@ -100,6 +105,7 @@ function stop() {
   if (!isRunning(pid)) {
     console.log("Minions is not running.");
     if (existsSync(pidFile)) rmSync(pidFile);
+    disableTailscaleServe();
     return;
   }
 
@@ -120,6 +126,7 @@ function stop() {
   }
 
   if (existsSync(pidFile)) rmSync(pidFile);
+  disableTailscaleServe();
   console.log(`Minions stopped (pid ${pid}).`);
 }
 
@@ -142,7 +149,35 @@ function status() {
   if (isRunning(pid)) {
     console.log(`Minions is running (pid ${pid}).`);
     console.log(`  logs: ${rel(logFile)}`);
+    showTailscaleServeStatus();
   } else {
     console.log("Minions is not running.");
   }
+}
+
+function runTailscaleServe(args, stdio = "inherit") {
+  return spawnSync(process.execPath, [join(scriptDir, "tailscale-serve.mjs"), ...args], {
+    cwd: root,
+    stdio,
+    shell: isWin,
+  });
+}
+
+function enableTailscaleServe() {
+  const result = runTailscaleServe(["--port", vitePort]);
+  if (result.status !== 0) {
+    console.error("\nMinions was not started because Tailscale HTTPS serving could not be configured.");
+    process.exit(result.status ?? 1);
+  }
+}
+
+function disableTailscaleServe() {
+  const result = runTailscaleServe(["--port", vitePort, "--off"]);
+  if (result.status !== 0) {
+    console.error("Warning: failed to tear down Tailscale serve config.");
+  }
+}
+
+function showTailscaleServeStatus() {
+  runTailscaleServe(["--status"]);
 }

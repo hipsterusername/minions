@@ -6,12 +6,14 @@ summary: Agent edits run in isolated git worktrees and merge through explicit ap
 ---
 # Worktree Isolation
 
-Leaders and minions may run parallel code-editing work, so Minions isolates
-agent changes in git worktrees and routes integration through approval,
-merge, retry, discard, and cleanup commands.
+Agent-authored changes never mutate the shared checkout directly. Each session
+that edits code runs against its own git worktree branch. Changes reach the
+project branch only through explicit approval, merge, retry, force-merge, or
+discard commands — the merge boundary is the single enforcement point for
+review gates.
 
 Consequences:
 
-- Merge code must avoid disrupting the user's main checkout.
-- Approval state and merge results must be visible through bus events.
-- Parallel tasks need narrow ownership boundaries to reduce conflict risk.
+- Parallel agents get disjoint write sets via per-session worktrees.
+- Merge/approval command paths must evaluate gates from the actual diff before
+  cleanup, and emit results through the bus.

@@ -46,6 +46,14 @@ describe("MINION_SYSTEM_PROMPT (base)", () => {
     expect(MINION_SYSTEM_PROMPT).toContain("report_fail");
   });
 
+  it("routes human questions through report_blocked and disclaims a native ask tool", () => {
+    // Minions have no dashboard/form, so an Opus minion reaching for
+    // AskUserQuestion must be redirected to report_blocked.
+    expect(MINION_SYSTEM_PROMPT).toContain("AskUserQuestion");
+    expect(MINION_SYSTEM_PROMPT).toMatch(/only channel for asking a question/i);
+    expect(MINION_SYSTEM_PROMPT).toMatch(/report_blocked/);
+  });
+
   it("instructs minions to keep final reports summary-first and reference artifact files", () => {
     expect(MINION_SYSTEM_PROMPT).toMatch(/under 2000 characters/i);
     expect(MINION_SYSTEM_PROMPT).toMatch(/file in the repo\/worktree/i);

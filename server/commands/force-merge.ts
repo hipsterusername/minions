@@ -5,21 +5,26 @@
 
 import { getSessionOrError, sendControlError, runMergeFlow } from "./helpers.ts";
 import type { CommandHandler } from "./types.ts";
+import { serverLogger } from "../logging.ts";
+
+const log = serverLogger.child("force-merge");
 
 export const forceMerge: CommandHandler = (ctx, cmd, ws) => {
-  console.log(`[worktree] force_merge received for ${cmd.sessionKey}`);
+  log.debug("request_received", { sessionKey: cmd.sessionKey });
   const host = getSessionOrError(ctx.registry, cmd.sessionKey, ws);
   if (!host) {
-    console.log("[worktree] force_merge: session not found");
+    log.debug("session_missing", { sessionKey: cmd.sessionKey });
     return;
   }
   if (!host.worktree) {
-    console.log("[worktree] force_merge: no worktree on session");
+    log.debug("worktree_missing", { sessionKey: cmd.sessionKey });
     sendControlError(ws, "force_merge", cmd.sessionKey!, cmd.requestId, "No worktree for this session");
     return;
   }
-  console.log(
-    `[worktree] force_merge: starting merge for ${host.worktree.branch} at ${host.worktree.path}`,
-  );
+  log.debug("merge_started", {
+    sessionKey: cmd.sessionKey,
+    branch: host.worktree.branch,
+    worktreePath: host.worktree.path,
+  });
   runMergeFlow(ctx.bus, host, ws, "force_merge", cmd, { force: true });
 };

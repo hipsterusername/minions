@@ -4,7 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DetailedDiff, WorktreeInfo } from "../worktree-types.ts";
-import { setup, cmd } from "./test-harness.ts";
+import { setup, cmd } from "../../tests/support/server-command-harness.ts";
 
 let throwFromDiff = false;
 const fakeDiff: DetailedDiff = {

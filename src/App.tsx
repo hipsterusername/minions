@@ -7,8 +7,9 @@ import "./nodes/FolderNode.tsx";
 import "./nodes/ContextGroupNode.tsx";
 import "./nodes/RenderNode.tsx";
 import "./nodes/ImageNode.tsx";
-import { loadProjectSkillsFromData, saveUserSkill, deleteUserSkill as removeUserSkill, exportUserSkills, importUserSkills } from "./skills/user-skills.ts";
-import { useState, useEffect, useReducer, useCallback, useMemo, useRef } from "react";
+import { loadProjectSkillsFromData, saveUserSkill, deleteUserSkill as removeUserSkill, exportUserSkills, importSkillList } from "./skills/user-skills.ts";
+import { parseSkillTransfer } from "./skills/skill-transfer.ts";
+import { Suspense, lazy, useState, useEffect, useReducer, useCallback, useMemo, useRef } from "react";
 import { Canvas } from "./Canvas.tsx";
 import { useSocket } from "./use-socket.ts";
 import type { ServerMessage } from "./use-socket.ts";
@@ -34,26 +35,58 @@ import type { LeaderData } from "./nodes/LeaderNode.tsx";
 import { useKanban } from "./use-kanban.ts";
 import { KanbanBoard } from "./KanbanBoard.tsx";
 import { ActivityView } from "./ActivityView.tsx";
+import { countReviewableLeaders } from "./ChangesView.tsx";
 import { useSessionActivity } from "./use-session-activity.ts";
 import { sessionBelongsToProject, needsAttention } from "./mobile/mobile-selectors.ts";
 import { requestLeaderFullscreen } from "./leader-fullscreen-request.ts";
 import type { KanbanCard } from "./kanban-types.ts";
 import { McpServersBrowser } from "./McpServersBrowser.tsx";
 import { SkillsBrowser } from "./SkillsBrowser.tsx";
-import { SkillEditor } from "./SkillEditor.tsx";
 import { DockProvider, DockBar } from "./BottomRightDock.tsx";
 import { DebugModeAffordance } from "./components/DebugModeAffordance.tsx";
 import { LeaderLoadingScreen } from "./LeaderLoadingScreen.tsx";
 import type { SkillTemplate } from "./skills/types.ts";
-import { getSkill } from "./skills/registry.ts";
+import { getSkill, getAllSkills } from "./skills/registry.ts";
 import { themes, themeMap, applyTheme, DEFAULT_THEME_ID } from "./themes.ts";
 import { ThemeContext, loadPersistedThemeId, persistThemeId } from "./use-theme.ts";
 import { usePreventBrowserZoom } from "./use-prevent-browser-zoom.ts";
 import { buildWsUrl } from "./ws-url.ts";
+import { browserLogger } from "./logging.ts";
 
 const WS_URL = buildWsUrl();
+const log = browserLogger.child("app");
 const PROJECT_HEADER_HEIGHT = 44;
 const DEFAULT_DOCUMENT_TITLE = "Minions";
+
+const SkillEditor = lazy(() =>
+  import("./SkillEditor.tsx").then(({ SkillEditor: Component }) => ({ default: Component })),
+);
+const SkillImportModal = lazy(() =>
+  import("./SkillImportModal.tsx").then(({ SkillImportModal: Component }) => ({ default: Component })),
+);
+
+function ModalLoadingFallback({ label }: { label: string }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 9998,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "var(--overlay-bg)",
+        color: "var(--text-secondary)",
+        fontFamily: "var(--font-sans)",
+        fontSize: 13,
+      }}
+    >
+      {label}
+    </div>
+  );
+}
 
 export function formatProjectDocumentTitle(projectName: string): string {
   const name = projectName.trim();
@@ -157,6 +190,11 @@ function ProjectView({
   const [skillEditorOpen, setSkillEditorOpen] = useState(false);
   const [editingSkill, setEditingSkill] = useState<SkillTemplate | null>(null);
   const [skillsRefreshKey, setSkillsRefreshKey] = useState(0);
+  const [skillImport, setSkillImport] = useState<{
+    incoming: SkillTemplate[];
+    existingIds: Set<string>;
+    skipped: number;
+  } | null>(null);
 
   useEffect(() => {
     document.title = formatProjectDocumentTitle(projectName);
@@ -181,7 +219,7 @@ function ProjectView({
         graphDispatch({ type: "SET_EDGES", edges: project.graph?.edges ?? [] });
         setLoaded(true);
       } catch (err) {
-        console.error("Failed to load project:", err);
+        log.error("project_load_failed", { error: err });
       }
     })();
     return () => {
@@ -404,6 +442,10 @@ function ProjectView({
       activitySessions.filter((s) => s.role !== "minion" && needsAttention(s)).length,
     [activitySessions],
   );
+  const changesCount = useMemo(
+    () => countReviewableLeaders(nodes),
+    [nodes],
+  );
 
   // Reveal a leader on the canvas and open its existing fullscreen cockpit.
   // `handleFocusNode` switches to the canvas and centers the node; the
@@ -487,6 +529,29 @@ function ProjectView({
     setSkillsRefreshKey((k) => k + 1);
   }, []);
 
+  // Parse a skills file's text and open the import-preview modal. Shared by the
+  // header import button and drag-and-drop onto the panel.
+  const openImportPreview = useCallback((text: string) => {
+    try {
+      const { skills, skipped } = parseSkillTransfer(text);
+      if (skills.length === 0) {
+        alert(
+          skipped > 0
+            ? `No valid skills found (${skipped} entr${skipped === 1 ? "y" : "ies"} skipped).`
+            : "No skills found in that file.",
+        );
+        return;
+      }
+      setSkillImport({
+        incoming: skills,
+        existingIds: new Set(getAllSkills().map((s) => s.id)),
+        skipped,
+      });
+    } catch (err) {
+      alert(`Import failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    }
+  }, []);
+
   const handleImportSkills = useCallback(() => {
     const input = document.createElement("input");
     input.type = "file";
@@ -495,31 +560,52 @@ function ProjectView({
       const file = input.files?.[0];
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = () => {
-        void (async () => {
-          try {
-            const count = await importUserSkills(reader.result as string);
-            setSkillsRefreshKey((k) => k + 1);
-            alert(`Imported ${count} skill(s)`);
-          } catch (err) {
-            alert(`Import failed: ${err instanceof Error ? err.message : "Unknown error"}`);
-          }
-        })();
-      };
+      reader.onload = () => openImportPreview(reader.result as string);
       reader.readAsText(file);
     };
     input.click();
+  }, [openImportPreview]);
+
+  const handleConfirmImport = useCallback((selected: SkillTemplate[]) => {
+    void importSkillList(selected).then(() => {
+      setSkillsRefreshKey((k) => k + 1);
+    });
+    setSkillImport(null);
   }, []);
 
-  const handleExportSkills = useCallback(() => {
-    const json = exportUserSkills();
+  // Trigger a JSON download of the given skills under `filename`.
+  const downloadSkills = useCallback((skills: SkillTemplate[], filename: string) => {
+    const json = exportUserSkills(skills);
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "skills.json";
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+  }, []);
+
+  const handleExportSkills = useCallback(() => {
+    downloadSkills(getAllSkills(), "skills.json");
+  }, [downloadSkills]);
+
+  const handleExportSkill = useCallback(
+    (skill: SkillTemplate) => {
+      downloadSkills([skill], `${skill.id}.skill.json`);
+    },
+    [downloadSkills],
+  );
+
+  const handleDuplicateSkill = useCallback((skill: SkillTemplate) => {
+    // Open the editor pre-filled with a copy: a fresh id/name, no builtIn flag,
+    // so saving creates a new, editable project skill.
+    const existing = new Set(getAllSkills().map((s) => s.id));
+    let newId = `${skill.id}-copy`;
+    let n = 2;
+    while (existing.has(newId)) newId = `${skill.id}-copy-${n++}`;
+    const { builtIn: _builtIn, ...rest } = skill;
+    setEditingSkill({ ...rest, id: newId, name: `${skill.name} Copy` });
+    setSkillEditorOpen(true);
   }, []);
 
   // Launch a Leader node from a Kanban card
@@ -999,7 +1085,7 @@ function ProjectView({
               activeView={activeView}
               onViewChange={setActiveView}
               kanbanBlockedCount={kanbanBlockedCount}
-              activityAttentionCount={activityAttentionCount}
+              activityAttentionCount={activityAttentionCount + changesCount}
               settings={projectSettings}
               onSettingsChange={handleSettingsChange}
               socketSend={socket.send}
@@ -1015,6 +1101,9 @@ function ProjectView({
                   onExpandFullscreen={handleExpandFullscreen}
                   onStopSession={handleStopSession}
                   onAttachToCanvas={handleAttachSessionToCanvas}
+                  socketSend={socket.send}
+                  socketSubscribe={socket.subscribe}
+                  onUpdateNodeData={(nodeId, data) => dispatch({ type: "UPDATE_NODE_DATA", id: nodeId, data })}
                 />
               </div>
             ) : activeView === "kanban" ? (
@@ -1072,20 +1161,36 @@ function ProjectView({
                     onCreateSkill={handleCreateSkill}
                     onEditSkill={handleEditSkill}
                     onDeleteSkill={handleDeleteSkill}
+                    onDuplicateSkill={handleDuplicateSkill}
+                    onExportSkill={handleExportSkill}
                     onImportSkills={handleImportSkills}
                     onExportSkills={handleExportSkills}
+                    onImportFile={openImportPreview}
                     refreshKey={skillsRefreshKey}
                   />
                   <McpServersBrowser projectId={projectId} />
                   {skillEditorOpen && (
-                    <SkillEditor
-                      skill={editingSkill}
-                      onSave={handleSaveSkill}
-                      onClose={() => {
-                        setSkillEditorOpen(false);
-                        setEditingSkill(null);
-                      }}
-                    />
+                    <Suspense fallback={<ModalLoadingFallback label="Loading skill editor…" />}>
+                      <SkillEditor
+                        skill={editingSkill}
+                        onSave={handleSaveSkill}
+                        onClose={() => {
+                          setSkillEditorOpen(false);
+                          setEditingSkill(null);
+                        }}
+                      />
+                    </Suspense>
+                  )}
+                  {skillImport && (
+                    <Suspense fallback={<ModalLoadingFallback label="Loading skill import…" />}>
+                      <SkillImportModal
+                        incoming={skillImport.incoming}
+                        existingIds={skillImport.existingIds}
+                        skipped={skillImport.skipped}
+                        onConfirm={handleConfirmImport}
+                        onClose={() => setSkillImport(null)}
+                      />
+                    </Suspense>
                   )}
                   <DockBar />
                 </div>

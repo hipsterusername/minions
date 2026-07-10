@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DetailedDiff, MergeResult, WorktreeInfo } from "../../server/worktree-types.ts";
-import { cmd, setup } from "../../server/commands/test-harness.ts";
+import { cmd, setup } from "../support/server-command-harness.ts";
 import { copyValidFixture } from "../../server/system-model/load.test.ts";
 import { writeSettings } from "../../server/project-store.ts";
 import { saveWorkPacket } from "../../server/system-model/store.ts";

@@ -1,9 +1,11 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { listProjects } from "../api.ts";
+import { getProjectSkills, listProjects } from "../api.ts";
 import { HarnessListProvider } from "../use-harness-list.tsx";
 import type { HarnessListEntry } from "../use-socket.ts";
+import type { SkillTemplate } from "../skills/types.ts";
+import { clearSkills } from "../skills/registry.ts";
 import { LaunchScreen } from "./LaunchScreen.tsx";
 
 const CLAUDE_HARNESS: HarnessListEntry = {
@@ -50,10 +52,15 @@ const CODEX_HARNESS: HarnessListEntry = {
 
 vi.mock("../api.ts", () => ({
   listProjects: vi.fn(),
+  getProjectSkills: vi.fn().mockResolvedValue([]),
+  saveProjectSkills: vi.fn().mockResolvedValue(undefined),
 }));
 
 afterEach(() => {
   vi.mocked(listProjects).mockReset();
+  vi.mocked(getProjectSkills).mockReset();
+  vi.mocked(getProjectSkills).mockResolvedValue([]);
+  clearSkills();
   vi.restoreAllMocks();
 });
 
@@ -313,5 +320,77 @@ describe("LaunchScreen", () => {
         worktreeIsolation: false,
       });
     });
+  });
+
+  const LINT_SKILL: SkillTemplate = {
+    id: "lint",
+    name: "Lint Cleanup",
+    description: "Fix lint violations",
+    category: "code",
+    icon: "🧹",
+    accentColor: "#7c3aed",
+    template: "Clean up all lint violations.",
+    variables: [],
+  };
+
+  it("loads project skills and arms the leader with skillIds + a compiled system prompt", async () => {
+    vi.mocked(getProjectSkills).mockResolvedValue([LINT_SKILL]);
+    vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000006");
+    const send = vi.fn();
+
+    render(
+      <LaunchScreen
+        send={send}
+        onLaunched={vi.fn()}
+        lockedProject={{ id: "proj-skills", path: "/work/skills", name: "Skills" }}
+      />,
+    );
+
+    // Skills load for the locked project, enabling the Add button.
+    const addButton = await screen.findByRole("button", { name: "Add" });
+    await waitFor(() => expect(addButton).toBeEnabled());
+
+    fireEvent.click(addButton);
+    // The skill appears in the bottom-sheet browser; tap to arm it.
+    fireEvent.click(screen.getByRole("button", { name: /Lint Cleanup/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Done/ }));
+
+    // A chip now summarizes the armed skill.
+    expect(screen.getByText("Lint Cleanup")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Go" } });
+    fireEvent.click(screen.getByRole("button", { name: "Launch leader" }));
+
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    const payload = send.mock.calls[0]![0] as {
+      skillIds?: string[];
+      systemPrompt?: string;
+    };
+    expect(payload.skillIds).toEqual(["lint"]);
+    expect(payload.systemPrompt).toContain("Clean up all lint violations.");
+  });
+
+  it("omits skill fields from the payload when no skills are armed", async () => {
+    vi.mocked(getProjectSkills).mockResolvedValue([LINT_SKILL]);
+    vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000007");
+    const send = vi.fn();
+
+    render(
+      <LaunchScreen
+        send={send}
+        onLaunched={vi.fn()}
+        lockedProject={{ id: "proj-skills", path: "/work/skills", name: "Skills" }}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add" })).toBeEnabled());
+
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Go" } });
+    fireEvent.click(screen.getByRole("button", { name: "Launch leader" }));
+
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    const payload = send.mock.calls[0]![0] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("skillIds");
+    expect(payload).not.toHaveProperty("systemPrompt");
   });
 });

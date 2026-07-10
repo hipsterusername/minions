@@ -1,39 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
 import { sessionTopic } from "../../shared/ws-envelope.ts";
-import type {
-  SystemGraph,
-  SystemGraphEdge,
-  SystemGraphNode as BaseSystemGraphNode,
-} from "../../shared/system-model/graph.ts";
+import type { SystemGraph, SystemGraphEdge } from "../../shared/system-model/graph.ts";
 import { registerNodeType } from "../node-registry.ts";
+import { ResizeHandle } from "../components/ResizeHandle.tsx";
 import type { NodeRenderProps } from "../types.ts";
 import { subscribeSocketTopic } from "../use-socket.ts";
 import type { ServerMessage } from "../use-socket.ts";
+import {
+  ALL_RELATIONS,
+  activePacketsFor,
+  cardBadge,
+  connectedNodes,
+  LENSES,
+  lastUsedLabel,
+  PRIMARY_TYPES,
+  primaryNodes,
+  RELATIONS,
+  relatedCount,
+  relatedGroups,
+  usageLabel,
+  type GraphNode,
+  type LensId,
+  type PrimaryType,
+  type RelationType,
+} from "./system-graph-model.ts";
 import "../system-graph.css";
 
-type RiskFilter = "all" | "elevated";
-type FreshnessFilter = "all" | "attention";
-type PacketFilter = "all" | "active";
-type UsageFilter = "all" | "attention";
 type LoadState = "idle" | "loading" | "loaded" | "error";
-
-type GraphNode = BaseSystemGraphNode & {
-  constraints?: string[];
-  gates?: string[];
-  reviewGate?: string;
-  activePackets?: string[];
-  activeWorkPackets?: string[];
-  packets?: string[];
-  usage?: {
-    lastUsedAt?: number | null;
-    recentPacketCount?: number;
-    unusedInLastPackets?: number;
-  };
-  lastUsedAt?: number | null;
-  recentPacketCount?: number;
-  unusedInLastPackets?: number;
-  orphaned?: boolean;
-};
 
 interface GraphResponse {
   graph?: { nodes?: GraphNode[]; edges?: SystemGraphEdge[] };
@@ -44,21 +37,7 @@ interface SystemGraphNodeData {
   sessionKey?: string | null;
 }
 
-interface PositionedNode {
-  node: GraphNode;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
 const REQUEST_PREFIX = "system-graph";
-const HIGH_RISK = new Set(["high", "critical"]);
-const COLUMN_X: Record<string, number> = {
-  capability: 42,
-  flow: 236,
-  support: 430,
-};
 
 function asData(data: unknown): SystemGraphNodeData {
   return data && typeof data === "object" ? (data as SystemGraphNodeData) : {};
@@ -68,47 +47,6 @@ function requestId(nodeId: string): string {
   return `${REQUEST_PREFIX}-${nodeId}-${Date.now().toString(36)}`;
 }
 
-function activePacketsFor(node: GraphNode): string[] {
-  return [...new Set([
-    ...(node.activePackets ?? []),
-    ...(node.activeWorkPackets ?? []),
-    ...(node.packets ?? []),
-  ].filter(Boolean))];
-}
-
-function isElevatedRisk(node: GraphNode): boolean {
-  return !!node.risk && HIGH_RISK.has(node.risk);
-}
-
-function needsFreshnessAttention(node: GraphNode): boolean {
-  return node.freshness !== "fresh";
-}
-
-function needsUsageAttention(node: GraphNode): boolean {
-  return !!node.orphaned || (node.usage?.recentPacketCount ?? node.recentPacketCount ?? 1) === 0
-    || (node.usage?.unusedInLastPackets ?? node.unusedInLastPackets ?? 0) > 0;
-}
-
-function usageLabel(node: GraphNode): string | null {
-  if (node.orphaned) return "orphaned";
-  const unusedWindow = node.usage?.unusedInLastPackets ?? node.unusedInLastPackets;
-  if (unusedWindow && unusedWindow > 0) return `unused ${unusedWindow}`;
-  const recent = node.usage?.recentPacketCount ?? node.recentPacketCount;
-  if (recent !== undefined) return recent === 0 ? "unused" : `used ${recent}`;
-  return null;
-}
-
-function lastUsedLabel(node: GraphNode): string | null {
-  const lastUsedAt = node.usage?.lastUsedAt ?? node.lastUsedAt;
-  return typeof lastUsedAt === "number" ? new Date(lastUsedAt).toLocaleString() : null;
-}
-
-function nodeColumn(type: GraphNode["type"]): string {
-  if (type === "capability") return "capability";
-  if (type === "flow") return "flow";
-  return "support";
-}
-
 function graphFromResponse(msg: ServerMessage): GraphResponse | null {
   if (msg.type !== "control_response" || msg.command !== "get_system_graph") {
     return null;
@@ -116,121 +54,48 @@ function graphFromResponse(msg: ServerMessage): GraphResponse | null {
   return msg as ServerMessage & GraphResponse;
 }
 
-function filterGraph(
-  graph: SystemGraph,
-  riskFilter: RiskFilter,
-  freshnessFilter: FreshnessFilter,
-  packetFilter: PacketFilter,
-  usageFilter: UsageFilter,
-): SystemGraph {
-  const nodes = (graph.nodes as GraphNode[]).filter((node) => {
-    if (riskFilter === "elevated" && !isElevatedRisk(node)) return false;
-    if (freshnessFilter === "attention" && !needsFreshnessAttention(node)) return false;
-    if (packetFilter === "active" && activePacketsFor(node).length === 0) return false;
-    if (usageFilter === "attention" && !needsUsageAttention(node)) return false;
-    return true;
-  });
-  const visibleIds = new Set(nodes.map((node) => node.id));
-  const edges = graph.edges.filter(
-    (edge) => visibleIds.has(edge.source) && visibleIds.has(edge.target),
-  );
-  return { nodes, edges };
-}
-
-function layoutNodes(nodes: GraphNode[]): PositionedNode[] {
-  const grouped = new Map<string, GraphNode[]>();
-  for (const node of nodes) {
-    const column = nodeColumn(node.type);
-    grouped.set(column, [...(grouped.get(column) ?? []), node]);
-  }
-  return ["capability", "flow", "support"].flatMap((column) =>
-    (grouped.get(column) ?? []).map((node, index) => ({
-      node,
-      x: COLUMN_X[column] ?? COLUMN_X["support"]!,
-      y: 42 + index * 74,
-      width: 148,
-      height: 54,
-    })),
-  );
-}
-
-function connectedNodes(
-  node: GraphNode,
-  graph: SystemGraph,
-  type?: GraphNode["type"],
-): GraphNode[] {
-  const nodes = new Map((graph.nodes as GraphNode[]).map((n) => [n.id, n]));
-  const ids = graph.edges
-    .filter((edge) => edge.source === node.id || edge.target === node.id)
-    .map((edge) => (edge.source === node.id ? edge.target : edge.source));
-  return ids
-    .map((id) => nodes.get(id))
-    .filter((n): n is GraphNode => !!n && (!type || n.type === type));
-}
-
-function SvgGraph({
-  graph,
-  selectedId,
+function Card({
+  node,
+  selected,
+  dim,
   onSelect,
+  count,
 }: {
-  graph: SystemGraph;
-  selectedId: string | null;
+  node: GraphNode;
+  selected?: boolean;
+  dim?: boolean;
   onSelect: (id: string) => void;
+  count?: number;
 }) {
-  const positioned = layoutNodes(graph.nodes as GraphNode[]);
-  const byId = new Map(positioned.map((entry) => [entry.node.id, entry]));
-
+  const badge = cardBadge(node);
+  const classes = [
+    "sg-card",
+    `sg-card-${node.type}`,
+    selected ? "sg-card-selected" : "",
+    dim ? "sg-card-dim" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
-    <svg className="sg-svg" viewBox="0 0 620 360" role="img" aria-label="System model graph">
-      <text x="42" y="22" className="sg-column-label">Capability</text>
-      <text x="236" y="22" className="sg-column-label">Flow</text>
-      <text x="430" y="22" className="sg-column-label">Model Area</text>
-      {graph.edges.map((edge) => {
-        const source = byId.get(edge.source);
-        const target = byId.get(edge.target);
-        if (!source || !target) return null;
-        const x1 = source.x + source.width;
-        const y1 = source.y + source.height / 2;
-        const x2 = target.x;
-        const y2 = target.y + target.height / 2;
-        const mid = (x1 + x2) / 2;
-        return (
-          <path
-            key={edge.id}
-            className={`sg-edge sg-edge-${edge.relation}`}
-            d={`M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`}
-          />
-        );
-      })}
-      {positioned.map(({ node, x, y, width, height }) => {
-        const selected = selectedId === node.id;
-        return (
-          <g
-            key={node.id}
-            role="button"
-            tabIndex={0}
-            aria-label={`Inspect ${node.label}`}
-            className={`sg-graph-node ${selected ? "sg-graph-node-selected" : ""}`}
-            onClick={() => onSelect(node.id)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") onSelect(node.id);
-            }}
-          >
-            <rect x={x} y={y} width={width} height={height} rx="6" />
-            <text x={x + 10} y={y + 18} className="sg-node-type">
-              {node.type}
-            </text>
-            <text x={x + 10} y={y + 36} className="sg-node-label">
-              {node.label.slice(0, 22)}
-            </text>
-            <text x={x + 10} y={y + 48} className="sg-node-meta">
-              {[node.freshness, usageLabel(node)].filter(Boolean).join(" | ")}
-            </text>
-            {node.risk && <circle cx={x + width - 14} cy={y + 14} r="5" className={`sg-risk-dot sg-risk-${node.risk}`} />}
-          </g>
-        );
-      })}
-    </svg>
+    <button
+      type="button"
+      className={classes}
+      aria-pressed={selected}
+      aria-label={`Inspect ${node.label}`}
+      title={node.summary ?? node.label}
+      onClick={() => onSelect(node.id)}
+    >
+      <span className="sg-card-rail" aria-hidden="true" />
+      <span className="sg-card-head">
+        <span className="sg-card-type">{node.type}</span>
+        {node.risk && <span className={`sg-card-risk sg-risk-${node.risk}`} aria-hidden="true" />}
+      </span>
+      <span className="sg-card-name">{node.label}</span>
+      <span className="sg-card-meta">
+        {badge ?? node.freshness}
+        {typeof count === "number" && count > 0 ? ` · ${count} related` : ""}
+      </span>
+    </button>
   );
 }
 
@@ -240,15 +105,11 @@ function Inspector({ graph, selectedId }: { graph: SystemGraph; selectedId: stri
     return (
       <aside className="sg-inspector">
         <div className="sg-panel-title">Inspector</div>
-        <p className="sg-muted">Select a graph node to inspect execution impact.</p>
+        <p className="sg-muted">Select a card to inspect its attributes and relationships.</p>
       </aside>
     );
   }
 
-  const constraints = [
-    ...(node.constraints ?? []),
-    ...connectedNodes(node, graph, "constraint").map((n) => n.label),
-  ];
   const gates = [
     ...(node.gates ?? []),
     ...(node.reviewGate ? [node.reviewGate] : []),
@@ -257,7 +118,6 @@ function Inspector({ graph, selectedId }: { graph: SystemGraph; selectedId: stri
       .filter((gate): gate is string => !!gate),
   ];
   const packets = activePacketsFor(node);
-  const related = connectedNodes(node, graph).filter((n) => n.type !== "constraint");
   const usage = usageLabel(node);
   const lastUsed = lastUsedLabel(node);
 
@@ -273,12 +133,6 @@ function Inspector({ graph, selectedId }: { graph: SystemGraph; selectedId: stri
         {usage && <div><dt>Usage</dt><dd>{usage}</dd></div>}
         {lastUsed && <div><dt>Last used</dt><dd>{lastUsed}</dd></div>}
       </dl>
-      {constraints.length > 0 && (
-        <section>
-          <h4>Constraints</h4>
-          <ul>{constraints.map((item) => <li key={item}>{item}</li>)}</ul>
-        </section>
-      )}
       {gates.length > 0 && (
         <section>
           <h4>Gates</h4>
@@ -291,12 +145,6 @@ function Inspector({ graph, selectedId }: { graph: SystemGraph; selectedId: stri
           <ul>{packets.map((item) => <li key={item}>{item}</li>)}</ul>
         </section>
       )}
-      {related.length > 0 && (
-        <section>
-          <h4>Touches</h4>
-          <ul>{related.slice(0, 5).map((item) => <li key={item.id}>{item.label}</li>)}</ul>
-        </section>
-      )}
     </aside>
   );
 }
@@ -304,6 +152,9 @@ function Inspector({ graph, selectedId }: { graph: SystemGraph; selectedId: stri
 export function SystemGraphNodeRenderer({
   node,
   onUpdateData,
+  onResize,
+  onResizeStart,
+  onResizeEnd,
   socketSend,
   socketSubscribe,
 }: NodeRenderProps) {
@@ -314,10 +165,11 @@ export function SystemGraphNodeRenderer({
   const [loadErrors, setLoadErrors] = useState<string[]>([]);
   const [graph, setGraph] = useState<SystemGraph>({ nodes: [], edges: [] });
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [riskFilter, setRiskFilter] = useState<RiskFilter>("all");
-  const [freshnessFilter, setFreshnessFilter] = useState<FreshnessFilter>("all");
-  const [packetFilter, setPacketFilter] = useState<PacketFilter>("all");
-  const [usageFilter, setUsageFilter] = useState<UsageFilter>("all");
+  const [primary, setPrimary] = useState<PrimaryType>("capability");
+  const [lens, setLens] = useState<LensId>("structure");
+  const [relationEnabled, setRelationEnabled] = useState<Set<RelationType>>(
+    () => new Set(ALL_RELATIONS),
+  );
 
   useEffect(() => {
     setSessionKeyDraft(data.sessionKey ?? "");
@@ -350,7 +202,7 @@ export function SystemGraphNodeRenderer({
         setSelectedId((current) =>
           current && nextGraph.nodes.some((graphNode) => graphNode.id === current)
             ? current
-            : (nextGraph.nodes[0]?.id ?? null),
+            : null,
         );
         setLoadErrors(response.loadErrors ?? []);
         setLoadState("loaded");
@@ -360,28 +212,61 @@ export function SystemGraphNodeRenderer({
     return unsubscribe;
   }, [socketSend, socketSubscribe, data.sessionKey, node.id]);
 
-  const visibleGraph = useMemo(
-    () => filterGraph(graph, riskFilter, freshnessFilter, packetFilter, usageFilter),
-    [graph, riskFilter, freshnessFilter, packetFilter, usageFilter],
+  const row = useMemo(() => primaryNodes(graph, primary, lens), [graph, primary, lens]);
+  const selectedNode = useMemo(
+    () => (graph.nodes as GraphNode[]).find((n) => n.id === selectedId) ?? null,
+    [graph, selectedId],
+  );
+  const groups = useMemo(
+    () => (selectedNode ? relatedGroups(selectedId, graph, relationEnabled) : []),
+    [selectedNode, selectedId, graph, relationEnabled],
   );
 
-  useEffect(() => {
-    if (selectedId && !visibleGraph.nodes.some((graphNode) => graphNode.id === selectedId)) {
-      setSelectedId(visibleGraph.nodes[0]?.id ?? null);
-    }
-  }, [selectedId, visibleGraph]);
+  const changePrimary = (next: PrimaryType) => {
+    setPrimary(next);
+    setSelectedId((current) => {
+      const stillPrimary = (graph.nodes as GraphNode[]).some(
+        (n) => n.id === current && n.type === next,
+      );
+      return stillPrimary ? current : null;
+    });
+  };
+
+  const toggleRelation = (relation: RelationType) => {
+    setRelationEnabled((current) => {
+      const nextSet = new Set(current);
+      if (nextSet.has(relation)) nextSet.delete(relation);
+      else nextSet.add(relation);
+      return nextSet;
+    });
+  };
 
   const saveSessionKey = () => {
     const next = sessionKeyDraft.trim();
     onUpdateData({ ...data, sessionKey: next || null });
   };
 
+  const selectedIsPrimary = selectedNode?.type === primary;
+
   return (
     <div className="sg-node">
+      {onResize && (
+        <ResizeHandle
+          currentSize={node.size}
+          minWidth={520}
+          minHeight={360}
+          onResize={onResize}
+          {...(onResizeStart ? { onResizeStart } : {})}
+          {...(onResizeEnd ? { onResizeEnd } : {})}
+          color="var(--accent)"
+        />
+      )}
       <header className="sg-header">
         <div>
           <div className="sg-title">System Model</div>
-          <div className="sg-subtitle">{data.sessionKey ? `Session ${data.sessionKey}` : "No session selected"}</div>
+          <div className="sg-subtitle">
+            {data.sessionKey ? `Session ${data.sessionKey}` : "No session selected"}
+          </div>
         </div>
         <div className="sg-session-form">
           <input
@@ -394,36 +279,35 @@ export function SystemGraphNodeRenderer({
           <button type="button" onClick={saveSessionKey}>Load</button>
         </div>
       </header>
-      <div className="sg-filters" aria-label="System graph filters">
-        <button
-          type="button"
-          aria-pressed={riskFilter === "elevated"}
-          onClick={() => setRiskFilter((current) => (current === "all" ? "elevated" : "all"))}
-        >
-          Risk
-        </button>
-        <button
-          type="button"
-          aria-pressed={freshnessFilter === "attention"}
-          onClick={() => setFreshnessFilter((current) => (current === "all" ? "attention" : "all"))}
-        >
-          Freshness
-        </button>
-        <button
-          type="button"
-          aria-pressed={packetFilter === "active"}
-          onClick={() => setPacketFilter((current) => (current === "all" ? "active" : "all"))}
-        >
-          Active Packet
-        </button>
-        <button
-          type="button"
-          aria-pressed={usageFilter === "attention"}
-          onClick={() => setUsageFilter((current) => (current === "all" ? "attention" : "all"))}
-        >
-          Usage
-        </button>
+
+      <div className="sg-toolbar">
+        <div className="sg-segment" role="group" aria-label="Primary row">
+          {PRIMARY_TYPES.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              aria-pressed={primary === option.id}
+              onClick={() => changePrimary(option.id)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <div className="sg-segment sg-segment-muted" role="group" aria-label="Lens filter">
+          {LENSES.map((meta) => (
+            <button
+              key={meta.id}
+              type="button"
+              title={meta.description}
+              aria-pressed={lens === meta.id}
+              onClick={() => setLens(meta.id)}
+            >
+              {meta.label}
+            </button>
+          ))}
+        </div>
       </div>
+
       {!data.sessionKey && (
         <div className="sg-state">Enter a leader session key to load the system model graph.</div>
       )}
@@ -434,18 +318,86 @@ export function SystemGraphNodeRenderer({
       )}
       {loadState === "loaded" && graph.nodes.length > 0 && (
         <>
-          {loadErrors.length > 0 && (
-            <div className="sg-warning">{loadErrors.join("; ")}</div>
-          )}
+          {loadErrors.length > 0 && <div className="sg-warning">{loadErrors.join("; ")}</div>}
           <main className="sg-content">
-            <div className="sg-graph-wrap">
-              {visibleGraph.nodes.length > 0 ? (
-                <SvgGraph graph={visibleGraph} selectedId={selectedId} onSelect={setSelectedId} />
-              ) : (
-                <div className="sg-state">No graph nodes match the active filters.</div>
-              )}
+            <div className="sg-board">
+              <section className="sg-primary" aria-label={`${primary} row`}>
+                <div className="sg-row-label">
+                  {PRIMARY_TYPES.find((p) => p.id === primary)?.label}
+                  <span className="sg-row-count">{row.length}</span>
+                </div>
+                {row.length > 0 ? (
+                  <div className="sg-primary-row">
+                    {row.map((item) => (
+                      <Card
+                        key={item.id}
+                        node={item}
+                        selected={selectedId === item.id}
+                        onSelect={setSelectedId}
+                        count={relatedCount(item.id, graph, relationEnabled)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="sg-state">No {primary} objects match the current lens.</div>
+                )}
+              </section>
+
+              <section className="sg-related" aria-label="Related objects">
+                {!selectedIsPrimary ? (
+                  <div className="sg-related-hint">
+                    Select a {primary} above to reveal only the objects it relates to.
+                  </div>
+                ) : (
+                  <>
+                    <div className="sg-legend" role="group" aria-label="Relationship filter">
+                      {RELATIONS.map((relation) => (
+                        <button
+                          key={relation.id}
+                          type="button"
+                          className={`sg-legend-item${relationEnabled.has(relation.id) ? "" : " sg-legend-item-off"}`}
+                          title={relation.description}
+                          aria-pressed={relationEnabled.has(relation.id)}
+                          aria-label={`${relation.label} relationships`}
+                          onClick={() => toggleRelation(relation.id)}
+                        >
+                          <span className={`sg-legend-swatch sg-swatch-${relation.id}`} aria-hidden="true" />
+                          {relation.label}
+                        </button>
+                      ))}
+                    </div>
+                    {groups.length > 0 ? (
+                      <div className="sg-groups">
+                        {groups.map((group) => (
+                          <div key={group.relation} className={`sg-group sg-group-${group.relation}`}>
+                            <div className="sg-group-head">
+                              <span className={`sg-group-dot sg-swatch-${group.relation}`} aria-hidden="true" />
+                              {group.meta.label}
+                              <span className="sg-row-count">{group.nodes.length}</span>
+                            </div>
+                            <div className="sg-group-cards">
+                              {group.nodes.map((related) => (
+                                <Card
+                                  key={related.id}
+                                  node={related}
+                                  selected={selectedId === related.id}
+                                  onSelect={setSelectedId}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="sg-related-hint">
+                        {selectedNode?.label} has no related objects in the enabled relationships.
+                      </div>
+                    )}
+                  </>
+                )}
+              </section>
             </div>
-            <Inspector graph={visibleGraph} selectedId={selectedId} />
+            <Inspector graph={graph} selectedId={selectedId} />
           </main>
         </>
       )}
@@ -456,7 +408,7 @@ export function SystemGraphNodeRenderer({
 registerNodeType({
   type: "system-graph",
   label: "System Model",
-  defaultSize: { width: 640, height: 480 },
+  defaultSize: { width: 720, height: 540 },
   render: SystemGraphNodeRenderer,
-  userCreatable: true,
+  userCreatable: false,
 });

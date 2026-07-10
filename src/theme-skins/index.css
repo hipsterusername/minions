@@ -1,0 +1,9 @@
+/* Skin stylesheets. Each is scoped under :root[data-theme="<id>"] and is
+   inert unless that skin is the active theme. Skins are permanent picker
+   entries defined in src/themes.ts. */
+@import "./glass.css";
+@import "./ink.css";
+@import "./blueprint.css";
+@import "./porcelain.css";
+@import "./obsidian.css";
+@import "./nocturne.css";

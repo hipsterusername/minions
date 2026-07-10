@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { canvasContext } from "../../server/commands/canvas-context.ts";
 import { validateWsCommand } from "../../server/commands/schemas.ts";
-import { cmd, setup } from "../../server/commands/test-harness.ts";
+import { cmd, setup } from "../support/server-command-harness.ts";
 
 describe("canvas_context WS command contract", () => {
   it("accepts a full connected-canvas snapshot", () => {

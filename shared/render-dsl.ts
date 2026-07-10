@@ -39,8 +39,10 @@ import {
 import {
   imageComponentSchema,
   filePreviewComponentSchema,
+  htmlArtifactComponentSchema,
   type ImageComponent,
   type FilePreviewComponent,
+  type HtmlArtifactComponent,
 } from "./render-artifacts.ts";
 
 // Re-export the shared primitives so existing imports (`from "./render-dsl"`)
@@ -57,6 +59,7 @@ export {
   tabsComponentSchema,
   imageComponentSchema,
   filePreviewComponentSchema,
+  htmlArtifactComponentSchema,
 };
 export type {
   FormComponent,
@@ -65,6 +68,7 @@ export type {
   TabsComponent,
   ImageComponent,
   FilePreviewComponent,
+  HtmlArtifactComponent,
 };
 
 // ── Component primitives ───────────────────────────────
@@ -197,7 +201,12 @@ export const timelineComponentSchema = z.object({
 export const calloutComponentSchema = z.object({
   id: z.string(),
   type: z.literal("callout"),
-  variant: z.enum(["info", "warning", "success", "error"]),
+  // Optional with an "info" default so omission is valid — matches the
+  // token-efficiency guidance ("omit fields equal to their default") and the
+  // renderer's existing `CALLOUT_CONFIG[c.variant] ?? CALLOUT_CONFIG.info`
+  // fallback. Keeps callout consistent with its optional-variant siblings
+  // (sparkline.variant, kv.layout, metric.trend).
+  variant: z.enum(["info", "warning", "success", "error"]).default("info"),
   title: z.string().optional(),
   content: z.string(),
   span: spanSchema.optional(),
@@ -321,6 +330,7 @@ export const RENDER_COMPONENT_TYPES = [
   "tabs",
   "image",
   "file-preview",
+  "html-artifact",
 ] as const;
 
 /**
@@ -369,6 +379,7 @@ export const renderComponentSchema = z.discriminatedUnion("type", [
   tabsComponentSchema,
   imageComponentSchema,
   filePreviewComponentSchema,
+  htmlArtifactComponentSchema,
 ]);
 
 export type MetricComponent = z.infer<typeof metricComponentSchema>;

@@ -1,14 +1,59 @@
 id: capability.system_model_layer
 type: capability
 name: System Model Layer
-summary: A repo-versioned model gives leaders structured capability, flow, constraint, decision, risk, and policy context.
-linked_flows: [flow.ws_command_dispatch]
-constraints: [constraint.model_bloat_guard, constraint.no_cross_tree_imports]
-decisions: [decision.graph_as_bus]
-risks: [risk.model_rot]
-suggested_files: [.systemmodel/**/*.yaml, .systemmodel/decisions/*.md, shared/system-model/*.ts, server/system-model/*.ts, server/system-model-tools/*.ts, scripts/system-model-validate.mjs]
-suggested_tests: [shared/system-model/*.test.ts, server/system-model/*.test.ts, server/system-model-tools/query-system-model.test.ts]
-keywords: [system model, capability, flow, constraint, validation, context pack]
+summary: Loads validates queries scopes persists checks reconciles and reports on repo authored model objects used by Work Packets and review gates.
+linked_flows:
+  - flow.load_validate_model
+  - flow.scored_model_query_retrieval
+  - flow.compile_work_packet_context_pack
+  - flow.amend_work_packet_scope
+  - flow.compute_packet_applicability
+  - flow.check_freshness_status
+  - flow.record_required_verification
+  - flow.evaluate_merge_gates
+  - flow.reconcile_work_packet_drift
+  - flow.report_model_health
+constraints:
+  - constraint.model_bloat_guard
+  - constraint.review_gated_merges
+  - constraint.no_cross_tree_imports
+  - constraint.server_file_size_ceiling
+decisions:
+  - decision.relevance_scoped_context
+  - decision.graph_as_bus
+  - decision.worktree_isolation
+risks:
+  - risk.model_rot
+  - risk.prompt_bloat
+  - risk.merge_bypass
+  - risk.command_contract_drift
+  - risk.parallel_work_conflicts
+suggested_files:
+  - shared/system-model/objects.ts
+  - shared/system-model/packet.ts
+  - shared/system-model/reconcile.ts
+  - server/system-model/load.ts
+  - server/system-model/compile.ts
+  - server/system-model/gates.ts
+  - server/system-model/reconcile.ts
+  - server/system-model-tools/index.ts
+suggested_tests:
+  - server/system-model/load.test.ts
+  - server/system-model/compile.test.ts
+  - server/system-model/gates.test.ts
+  - server/system-model/reconcile.test.ts
+  - server/system-model-tools/query-system-model.test.ts
+  - server/system-model-tools/model-health.test.ts
+  - tests/contracts/system-model-commands.test.ts
+keywords:
+  - system_model
+  - work_packet
+  - context_pack
+  - review_gate
+  - freshness
+  - reconciliation
+  - model_health
+  - query_system_model
 freshness:
   class: code_coupled
 risk: high

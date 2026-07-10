@@ -14,9 +14,7 @@
  *
  * This is a pure function with no side effects. All SDK coupling lives here.
  *
- * Phase 1: new module, not yet wired into session-host.ts.
- * Phase 3: extended to handle streaming events and tool_progress.
- * See docs/model-agnosticism-spec.md §3.3.
+ * Translates Claude SDK messages into the shared normalized event contract.
  */
 
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";

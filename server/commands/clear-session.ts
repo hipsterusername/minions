@@ -10,7 +10,11 @@
  */
 
 import { clearSessionEvents } from "../session-persist.ts";
+import { deleteHtmlArtifactsForSession } from "../html-artifact-store.ts";
+import { serverLogger } from "../logging.ts";
 import type { CommandHandler } from "./types.ts";
+
+const log = serverLogger.child("clear-session");
 
 export const clearSession: CommandHandler = (ctx, cmd) => {
   if (!cmd.sessionKey) return;
@@ -25,6 +29,15 @@ export const clearSession: CommandHandler = (ctx, cmd) => {
   host.persist();
 
   clearSessionEvents(cmd.sessionKey);
+
+  // Clearing a session wipes its history; drop its temporary HTML artifacts
+  // too. Fire-and-forget — cleanup must not block the clear acknowledgement.
+  deleteHtmlArtifactsForSession(cmd.sessionKey).catch((err: unknown) => {
+    log.warn("artifact_cleanup_failed", {
+      sessionKey: cmd.sessionKey,
+      error: err,
+    });
+  });
 
   ctx.bus.emitToSession(cmd.sessionKey, {
     type: "session_cleared",

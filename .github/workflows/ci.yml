@@ -64,5 +64,8 @@ jobs:
       - name: Check licenses
         run: pnpm check:licenses
 
+      - name: Validate system model
+        run: pnpm system-model:validate -- --strict
+
       - name: Build
         run: pnpm build

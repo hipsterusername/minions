@@ -8,7 +8,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { closeSession } from "./close-session.ts";
 import { disablePersistence } from "../session-persist.ts";
-import { setup, cmd, fakeRunControl } from "./test-harness.ts";
+import { setup, cmd, fakeRunControl } from "../../tests/support/server-command-harness.ts";
 
 beforeEach(() => disablePersistence());
 

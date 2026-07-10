@@ -1,0 +1,34 @@
+id: flow.render_patch_update_component
+type: flow
+name: render_patch updates existing components by id
+summary: The leader sends partial updates keyed by component id and both server and client merge matching components while preserving original id and type.
+capabilities:
+  - capability.render_dashboard
+constraints:
+  - constraint.bus_only_broadcasts
+  - constraint.no_cross_tree_imports
+decisions:
+  - decision.graph_as_bus
+risks:
+  - risk.render_schema_drift
+  - risk.session_state_drift
+suggested_files:
+  - server/render-tools.ts
+  - shared/render-dsl.ts
+  - shared/render-defaults.ts
+  - src/nodes/RenderNode.tsx
+  - tests/contracts/render-dsl-roundtrip.test.ts
+  - shared/render-dsl.test.ts
+suggested_tests:
+  - tests/contracts/render-dsl-roundtrip.test.ts
+  - server/render-tools.test.ts
+  - shared/render-dsl.test.ts
+steps:
+  - renderPatchInputSchema accepts an updates array where each patch must include id and may passthrough other fields.
+  - server render tools finds root components by id and ignores unknown ids.
+  - matching server components are shallow merged with the patch while preserving the original id and type then passed through elideDefaults.
+  - the server emits a render_update action patch envelope carrying the raw updates array.
+  - RenderNode validates the message and applyRenderMessage maps over existing components applying matching patches while preserving each original id and type.
+freshness:
+  class: code_coupled
+risk: high

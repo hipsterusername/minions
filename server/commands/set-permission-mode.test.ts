@@ -7,7 +7,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { setPermissionMode } from "./set-permission-mode.ts";
-import { setup, cmd, fakeRunControl } from "./test-harness.ts";
+import { setup, cmd, fakeRunControl } from "../../tests/support/server-command-harness.ts";
 
 describe("set_permission_mode", () => {
   it("invokes setPermissionMode and mirrors the value onto host.permissionMode", async () => {
