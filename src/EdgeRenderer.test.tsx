@@ -13,6 +13,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
 import { EdgeRenderer } from "./EdgeRenderer.tsx";
+import { seedContextDelivery } from "./context-delivery.ts";
+import { resolveLeaderContextItem } from "./leader-context-mode.ts";
 import type { CanvasNode } from "./types.ts";
 import type { GraphDocument } from "./graph.ts";
 
@@ -64,6 +66,49 @@ const TWO_EDGE_GRAPH: GraphDocument = {
 function renderInSvg(ui: React.ReactNode) {
   // EdgeRenderer is its own <svg>; we render it directly inside a container.
   return render(<div>{ui}</div>);
+}
+
+function contextLeader(id: string, data: Record<string, unknown>): CanvasNode {
+  return {
+    id,
+    type: "leader",
+    position: { x: id === "upstream" ? 0 : 400, y: 0 },
+    size: { width: 200, height: 100 },
+    data,
+  };
+}
+
+const CONTEXT_EDGE_GRAPH: GraphDocument = {
+  edges: [
+    {
+      id: "context-edge",
+      sourceNodeId: "upstream",
+      sourcePortId: "context-out",
+      targetNodeId: "downstream",
+      targetPortId: "context-in",
+      protocol: "context",
+      contextMode: "lean",
+    },
+  ],
+};
+
+function contextEdgeNodes(fresh: boolean): CanvasNode[] {
+  const source = contextLeader("upstream", {
+    taskName: "Upstream task",
+    messages: [
+      { id: "u1", role: "user", content: "Please investigate", timestamp: 1 },
+      { id: "a1", role: "assistant", content: "Investigation complete", timestamp: 2 },
+    ],
+  });
+  const item = resolveLeaderContextItem(source, "lean");
+  if (!item) throw new Error("Expected the source leader to provide lean context");
+
+  const target = contextLeader("downstream", {
+    sessionKey: "leader-session",
+    messages: [],
+    contextDelivery: fresh ? seedContextDelivery([item], 1_000) : {},
+  });
+  return [source, target];
 }
 
 describe("EdgeRenderer interactivity", () => {
@@ -192,5 +237,41 @@ describe("EdgeRenderer interactivity", () => {
     );
     // No edge group emitted for the orphan.
     expect(container.querySelector("g[data-edge-id]")).toBeNull();
+  });
+});
+
+describe("EdgeRenderer context staleness", () => {
+  it("marks a stale lean edge badge and renders its base path dashed amber", () => {
+    const { container, getByTestId } = renderInSvg(
+      <EdgeRenderer graph={CONTEXT_EDGE_GRAPH} nodes={contextEdgeNodes(false)} />,
+    );
+
+    const badge = getByTestId("edge-context-badge-context-edge");
+    expect(badge).toHaveAttribute("data-stale", "true");
+    expect(badge).toHaveTextContent("L");
+    expect(badge.querySelector("title")).toHaveTextContent("not yet delivered");
+    expect(badge.querySelector('circle[r="3"]')).not.toBeNull();
+
+    const basePath = container.querySelector(
+      'g[data-edge-id="context-edge"] > path:not(.edge-flow)',
+    );
+    expect(basePath).toHaveAttribute("stroke", "var(--warning, #f59e0b)");
+    expect(basePath).toHaveAttribute("stroke-dasharray", "4 4");
+  });
+
+  it("keeps a fresh lean edge badge unmarked and its base path unchanged", () => {
+    const { container, getByTestId } = renderInSvg(
+      <EdgeRenderer graph={CONTEXT_EDGE_GRAPH} nodes={contextEdgeNodes(true)} />,
+    );
+
+    const badge = getByTestId("edge-context-badge-context-edge");
+    expect(badge).not.toHaveAttribute("data-stale");
+    expect(badge).toHaveTextContent("L");
+
+    const basePath = container.querySelector(
+      'g[data-edge-id="context-edge"] > path:not(.edge-flow)',
+    );
+    expect(basePath).toHaveAttribute("stroke", "var(--edge-context)");
+    expect(basePath).not.toHaveAttribute("stroke-dasharray");
   });
 });

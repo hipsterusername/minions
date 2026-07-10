@@ -11,6 +11,7 @@
  */
 import type { GraphEdge } from "../graph.ts";
 import type { ContextEdgeMode } from "../leader-context-mode.ts";
+import type { EdgeContextStaleness } from "../context-staleness.ts";
 
 const MODE_LABELS: Record<ContextEdgeMode, string> = {
   dashboard: "Dashboard",
@@ -25,6 +26,32 @@ export const MODE_HINTS: Record<ContextEdgeMode, string> = {
 };
 
 const MODE_ORDER: ContextEdgeMode[] = ["dashboard", "lean", "full"];
+
+function formatRelative(ms: number, now = Date.now()): string {
+  const elapsedSeconds = Math.max(0, Math.floor((now - ms) / 1_000));
+  if (elapsedSeconds < 60) return "just now";
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours}h ago`;
+
+  return `${Math.floor(elapsedHours / 24)}d ago`;
+}
+
+function describeDelivery(staleness: EdgeContextStaleness): string {
+  if (staleness.deliveredAt == null) {
+    return "Not yet delivered · sent with your next message";
+  }
+  if (!staleness.stale) {
+    return `Up to date · delivered ${formatRelative(staleness.deliveredAt)}`;
+  }
+  if (staleness.pendingBlocks != null && staleness.pendingBlocks > 0) {
+    return `${staleness.pendingBlocks} new ${staleness.pendingBlocks === 1 ? "turn" : "turns"} upstream · sent with your next message`;
+  }
+  return "Changed upstream · sent with your next message";
+}
 
 interface EdgeInspectorProps {
   edge: GraphEdge;
@@ -47,6 +74,7 @@ interface EdgeInspectorProps {
   contextMode?:
     | { current: ContextEdgeMode; onChange: (mode: ContextEdgeMode) => void }
     | undefined;
+  staleness?: EdgeContextStaleness | null | undefined;
 }
 
 export function EdgeInspector({
@@ -60,6 +88,7 @@ export function EdgeInspector({
   onFocusTarget,
   onClose,
   contextMode,
+  staleness,
 }: EdgeInspectorProps) {
   // Approximate panel size for centering; the actual width grows with the
   // labels but the offset is good enough that the panel always sits above
@@ -200,6 +229,37 @@ export function EdgeInspector({
           <div style={{ color: "var(--text-muted)", fontSize: 10 }}>
             {MODE_HINTS[contextMode.current]}
           </div>
+        </div>
+      )}
+      {staleness && (
+        <div
+          data-testid="edge-inspector-delivery"
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: 6,
+            fontSize: 10,
+          }}
+        >
+          <span
+            style={{
+              color: "var(--text-muted)",
+              textTransform: "uppercase",
+              letterSpacing: 0.6,
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            Delivery
+          </span>
+          <span
+            style={{
+              color: staleness.stale
+                ? "var(--warning, #f59e0b)"
+                : "var(--text-muted)",
+            }}
+          >
+            {describeDelivery(staleness)}
+          </span>
         </div>
       )}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>

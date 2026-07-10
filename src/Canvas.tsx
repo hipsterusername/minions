@@ -41,6 +41,7 @@ import { ConfirmModal } from "./components/ConfirmModal.tsx";
 import { NodeStatusOverlay } from "./components/NodeStatusOverlay.tsx";
 import { ViewportOverlay } from "./components/ViewportOverlay.tsx";
 import { EdgeInspector } from "./components/EdgeInspector.tsx";
+import { findContextEdgeStaleness } from "./context-staleness.ts";
 import { CanvasMiniMap } from "./CanvasMiniMap.tsx";
 import { applyPromptSeed, createDefaultNodeData } from "./node-defaults.ts";
 import { wheelDetector } from "./wheel-detector.ts";
@@ -1618,6 +1619,11 @@ export function Canvas({
     const tgt = nodes.find((n) => n.id === selectedEdge.targetNodeId);
     return src?.type === "leader" && tgt?.type === "leader";
   }, [selectedEdge, nodes]);
+
+  const selectedEdgeStaleness = useMemo(
+    () => (selectedEdge ? findContextEdgeStaleness(selectedEdge, nodes) : null),
+    [selectedEdge, nodes],
+  );
 
   const selectedEdgeMidpoint = useMemo(() => {
     if (!selectedEdge) return null;
@@ -4037,6 +4043,7 @@ export function Canvas({
           onFocusSource={() => handleFocusEdgeEndpoint("source")}
           onFocusTarget={() => handleFocusEdgeEndpoint("target")}
           onClose={() => setSelectedEdgeId(null)}
+          staleness={selectedEdgeStaleness}
           contextMode={
             selectedEdgeIsLeaderContext
               ? {

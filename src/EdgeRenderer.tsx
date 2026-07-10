@@ -2,6 +2,10 @@ import { memo, useMemo } from "react";
 import type { CanvasNode } from "./types.ts";
 import type { GraphDocument } from "./graph.ts";
 import { getContract } from "./graph.ts";
+import {
+  computeContextEdgeStaleness,
+  type EdgeContextStaleness,
+} from "./context-staleness.ts";
 
 interface EdgeRendererProps {
   graph: GraphDocument;
@@ -85,6 +89,7 @@ interface BezierEdgeProps {
    * leader→leader context edges. Clicking it selects the edge.
    */
   contextBadge?: ContextBadgeMode | undefined;
+  staleness?: EdgeContextStaleness | null | undefined;
   onClick?: ((edgeId: string, e: React.MouseEvent) => void) | undefined;
   onHover?: ((edgeId: string | null) => void) | undefined;
 }
@@ -100,6 +105,7 @@ const BezierEdge = memo(function BezierEdge({
   isHovered,
   isDimmed,
   contextBadge,
+  staleness,
   onClick,
   onHover,
 }: BezierEdgeProps) {
@@ -110,16 +116,20 @@ const BezierEdge = memo(function BezierEdge({
   const cy2 = y2;
   const d = `M ${x1} ${y1} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${x2} ${y2}`;
 
-  const baseColor =
+  const edgeColor =
     protocol === "task-assignment"
       ? "var(--accent)"
       : "var(--edge-context)";
+  const isStale = staleness?.stale === true;
+  const baseColor = isStale ? "var(--warning, #f59e0b)" : edgeColor;
 
   // Selection/hover modulate stroke weights and opacity.
   // Dimmed edges fade back so the selected one reads as primary.
   const baseStrokeWidth = isSelected ? 3 : 2;
   const flowStrokeWidth = isSelected ? 1.5 : 1;
-  const baseOpacity = isDimmed ? 0.12 : isSelected ? 0.7 : isHovered ? 0.55 : 0.3;
+  const baseOpacity = isStale
+    ? isDimmed ? 0.2 : isSelected ? 0.82 : isHovered ? 0.7 : 0.48
+    : isDimmed ? 0.12 : isSelected ? 0.7 : isHovered ? 0.55 : 0.3;
   const flowOpacity = isDimmed ? 0.2 : isSelected ? 1 : 0.8;
   const endpointOpacity = isDimmed ? 0.2 : isSelected ? 1 : 0.6;
   const endpointRadius = isSelected ? 4 : 3;
@@ -134,6 +144,7 @@ const BezierEdge = memo(function BezierEdge({
         stroke={baseColor}
         strokeWidth={baseStrokeWidth}
         strokeOpacity={baseOpacity}
+        strokeDasharray={isStale ? "4 4" : undefined}
       />
       {/* Use CSS animation class instead of SVG <animate> element.
           CSS animations are compositor-friendly and can be paused globally
@@ -143,7 +154,7 @@ const BezierEdge = memo(function BezierEdge({
         className="edge-flow"
         d={d}
         fill="none"
-        stroke={baseColor}
+        stroke={edgeColor}
         strokeWidth={flowStrokeWidth}
         strokeOpacity={flowOpacity}
         strokeDasharray="6 4"
@@ -153,13 +164,13 @@ const BezierEdge = memo(function BezierEdge({
           without requiring CanvasNode to know about edge selection. */}
       {isSelected && (
         <>
-          <circle cx={x1} cy={y1} r={8} fill={baseColor} opacity={0.18} />
-          <circle cx={x2} cy={y2} r={8} fill={baseColor} opacity={0.18} />
+          <circle cx={x1} cy={y1} r={8} fill={edgeColor} opacity={0.18} />
+          <circle cx={x2} cy={y2} r={8} fill={edgeColor} opacity={0.18} />
         </>
       )}
       {/* Target / source dots. */}
-      <circle cx={x2} cy={y2} r={endpointRadius} fill={baseColor} opacity={endpointOpacity} />
-      <circle cx={x1} cy={y1} r={endpointRadius} fill={baseColor} opacity={endpointOpacity} />
+      <circle cx={x2} cy={y2} r={endpointRadius} fill={edgeColor} opacity={endpointOpacity} />
+      <circle cx={x1} cy={y1} r={endpointRadius} fill={edgeColor} opacity={endpointOpacity} />
       {/* Invisible wide hit path on top — gives the edge a comfortable click
           target without changing the visible line weight. The path itself
           opts into stroke-only pointer events so empty fill area inside the
@@ -192,6 +203,7 @@ const BezierEdge = memo(function BezierEdge({
       {contextBadge && (
         <g
           data-testid={`edge-context-badge-${edgeId}`}
+          data-stale={isStale ? "true" : undefined}
           transform={`translate(${x2 - 16}, ${y2 - 16})`}
           style={{ pointerEvents: "all", cursor: "pointer" }}
           opacity={isDimmed ? 0.3 : 1}
@@ -207,11 +219,19 @@ const BezierEdge = memo(function BezierEdge({
           onMouseEnter={() => onHover?.(edgeId)}
           onMouseLeave={() => onHover?.(null)}
         >
-          <title>{CONTEXT_BADGE_TOOLTIP[contextBadge]}</title>
+          <title>
+            {CONTEXT_BADGE_TOOLTIP[contextBadge]}
+            {isStale && staleness?.pendingBlocks != null && staleness.pendingBlocks > 0
+              ? ` · ${staleness.pendingBlocks} new ${staleness.pendingBlocks === 1 ? "turn" : "turns"} upstream — delivered with your next message`
+              : isStale
+                ? " · changed upstream — refreshed with your next message"
+                : ""}
+            {isStale && staleness?.deliveredAt == null ? " · not yet delivered" : ""}
+          </title>
           <circle
             r={9}
             fill="var(--bg-secondary)"
-            stroke={baseColor}
+            stroke={edgeColor}
             strokeWidth={isSelected ? 2 : 1.5}
           />
           <text
@@ -224,6 +244,9 @@ const BezierEdge = memo(function BezierEdge({
           >
             {CONTEXT_BADGE_LETTER[contextBadge]}
           </text>
+          {isStale && (
+            <circle cx={7} cy={-7} r={3} fill="var(--warning, #f59e0b)" />
+          )}
         </g>
       )}
     </g>
@@ -240,6 +263,20 @@ export const EdgeRenderer = memo(function EdgeRenderer({
 }: EdgeRendererProps) {
   // Always create the node map (hooks must be called unconditionally).
   const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
+  const edgeStaleness = useMemo(() => {
+    const byEdgeId = new Map<string, EdgeContextStaleness | null>();
+    for (const edge of graph.edges) {
+      const sourceNode = nodeMap.get(edge.sourceNodeId);
+      const targetNode = nodeMap.get(edge.targetNodeId);
+      byEdgeId.set(
+        edge.id,
+        sourceNode && targetNode
+          ? computeContextEdgeStaleness(edge, sourceNode, targetNode)
+          : null,
+      );
+    }
+    return byEdgeId;
+  }, [graph, nodeMap]);
   if (graph.edges.length === 0) return null;
 
   const hasSelection = selectedEdgeId != null;
@@ -293,6 +330,7 @@ export const EdgeRenderer = memo(function EdgeRenderer({
               isHovered={isHovered}
               isDimmed={isDimmed}
               contextBadge={contextBadge}
+              staleness={edgeStaleness.get(edge.id)}
               onClick={onEdgeClick}
               onHover={onEdgeHover}
             />

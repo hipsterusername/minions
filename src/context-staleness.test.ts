@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { computeContextEdgeStaleness } from "./context-staleness.ts";
+import {
+  computeContextEdgeStaleness,
+  findContextEdgeStaleness,
+} from "./context-staleness.ts";
 import { seedContextDelivery } from "./context-delivery.ts";
 import { resolveLeaderContextItem } from "./leader-context-mode.ts";
 import type { CanvasNode } from "./types.ts";
@@ -115,5 +118,25 @@ describe("computeContextEdgeStaleness", () => {
     const source = node("md", "markdown", { title: "Spec", content: "v2", viewMode: "view" });
     const result = computeContextEdgeStaleness(contextEdge("md", "b"), source, target);
     expect(result).toMatchObject({ stale: true, pendingBlocks: null, deliveredAt: T0 });
+  });
+});
+
+describe("findContextEdgeStaleness", () => {
+  it("resolves endpoints from the node list and delegates", () => {
+    const source = leaderSource("a", ["hi"]);
+    const target = leaderTarget("b");
+    const edge = contextEdge("a", "b", "lean");
+    expect(findContextEdgeStaleness(edge, [target, source])).toEqual(
+      computeContextEdgeStaleness(edge, source, target),
+    );
+  });
+
+  it("returns null when either endpoint is missing", () => {
+    const source = leaderSource("a", ["hi"]);
+    const target = leaderTarget("b");
+    const edge = contextEdge("a", "b", "lean");
+    expect(findContextEdgeStaleness(edge, [source])).toBeNull();
+    expect(findContextEdgeStaleness(edge, [target])).toBeNull();
+    expect(findContextEdgeStaleness(edge, [])).toBeNull();
   });
 });

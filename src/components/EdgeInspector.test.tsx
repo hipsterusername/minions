@@ -74,3 +74,62 @@ describe("EdgeInspector context-mode control", () => {
     expect(onChange).toHaveBeenCalledWith("full");
   });
 });
+
+describe("EdgeInspector delivery status", () => {
+  it("does not render a delivery row when staleness is absent", () => {
+    render(<EdgeInspector {...baseProps()} />);
+    expect(screen.queryByTestId("edge-inspector-delivery")).toBeNull();
+  });
+
+  it("shows an up-to-date status with the relative delivery time", () => {
+    render(
+      <EdgeInspector
+        {...baseProps()}
+        staleness={{
+          stale: false,
+          pendingBlocks: 0,
+          deliveredAt: Date.now() - 3 * 60 * 1_000,
+        }}
+      />,
+    );
+    expect(screen.getByTestId("edge-inspector-delivery")).toHaveTextContent(
+      "DeliveryUp to date · delivered 3m ago",
+    );
+  });
+
+  it("shows the pending upstream turn count for a stale transcript", () => {
+    render(
+      <EdgeInspector
+        {...baseProps()}
+        staleness={{ stale: true, pendingBlocks: 2, deliveredAt: 1_000 }}
+      />,
+    );
+    expect(screen.getByTestId("edge-inspector-delivery")).toHaveTextContent(
+      "2 new turns upstream · sent with your next message",
+    );
+  });
+
+  it("shows a generic changed-upstream status when no turn count applies", () => {
+    render(
+      <EdgeInspector
+        {...baseProps()}
+        staleness={{ stale: true, pendingBlocks: null, deliveredAt: 1_000 }}
+      />,
+    );
+    expect(screen.getByTestId("edge-inspector-delivery")).toHaveTextContent(
+      "Changed upstream · sent with your next message",
+    );
+  });
+
+  it("prioritizes never-delivered status over a pending turn count", () => {
+    render(
+      <EdgeInspector
+        {...baseProps()}
+        staleness={{ stale: true, pendingBlocks: 2, deliveredAt: null }}
+      />,
+    );
+    expect(screen.getByTestId("edge-inspector-delivery")).toHaveTextContent(
+      "Not yet delivered · sent with your next message",
+    );
+  });
+});

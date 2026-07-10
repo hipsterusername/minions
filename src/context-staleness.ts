@@ -83,3 +83,18 @@ export function computeContextEdgeStaleness(
 
   return { stale: true, pendingBlocks, deliveredAt: record.deliveredAt };
 }
+
+/**
+ * Convenience wrapper: resolve the edge's endpoints from the node list, then
+ * compute staleness. Returns `null` when either endpoint is missing.
+ */
+export function findContextEdgeStaleness(
+  edge: GraphEdge,
+  nodes: readonly CanvasNode[],
+): EdgeContextStaleness | null {
+  const source = nodes.find((n) => n.id === edge.sourceNodeId);
+  const target = nodes.find((n) => n.id === edge.targetNodeId);
+  return source && target
+    ? computeContextEdgeStaleness(edge, source, target)
+    : null;
+}
