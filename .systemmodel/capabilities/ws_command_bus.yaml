@@ -3,14 +3,8 @@ type: capability
 name: WebSocket Command Bus
 summary: Typed WebSocket infrastructure validates inbound commands, dispatches handlers, wraps server messages in topics, and routes client subscriptions over a reconnecting socket.
 linked_flows:
-  - flow.ws_url_auth_connect
-  - flow.connection_snapshot_attach
-  - flow.inbound_command_validation
-  - flow.command_table_dispatch
-  - flow.bus_envelope_fanout
-  - flow.unicast_envelope_reply
-  - flow.client_envelope_topic_dispatch
-  - flow.client_send_queue_reconnect
+  - flow.connect_to_live_workspace
+  - flow.exchange_typed_ws_commands
 constraints:
   - constraint.bus_only_broadcasts
   - constraint.no_cross_tree_imports

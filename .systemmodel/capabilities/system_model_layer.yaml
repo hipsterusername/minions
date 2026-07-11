@@ -3,16 +3,11 @@ type: capability
 name: System Model Layer
 summary: Loads validates queries scopes persists checks reconciles and reports on repo authored model objects used by Work Packets and review gates.
 linked_flows:
-  - flow.load_validate_model
-  - flow.scored_model_query_retrieval
-  - flow.compile_work_packet_context_pack
-  - flow.amend_work_packet_scope
-  - flow.compute_packet_applicability
-  - flow.check_freshness_status
-  - flow.record_required_verification
-  - flow.evaluate_merge_gates
-  - flow.reconcile_work_packet_drift
-  - flow.report_model_health
+  - flow.explore_system_model
+  - flow.prepare_scoped_work_packet
+  - flow.verify_and_reconcile_gated_work
+  - flow.review_and_merge_changes
+  - flow.maintain_system_model
 constraints:
   - constraint.model_bloat_guard
   - constraint.review_gated_merges

@@ -3,14 +3,9 @@ type: capability
 name: Skill Library And Authoring
 summary: Project-scoped skill templates can be browsed, authored, persisted, merged with shared built-in presets, compiled with variables, and extended with on-demand subskills.
 linked_flows:
-  - flow.skill_library_list_get
-  - flow.skill_authoring_create_tool
-  - flow.skill_authoring_update_override_tool
-  - flow.skill_authoring_delete_tool
-  - flow.skill_frontend_browser_editor_sync
-  - flow.skill_builtin_preset_resolution
-  - flow.skill_template_variable_compile
-  - flow.skill_subskill_map_load
+  - flow.browse_and_author_skills
+  - flow.prepare_skills_for_agents
+  - flow.delegate_work_to_minion
 constraints:
   - constraint.no_cross_tree_imports
   - constraint.model_bloat_guard

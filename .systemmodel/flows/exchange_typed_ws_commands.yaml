@@ -1,0 +1,17 @@
+id: flow.exchange_typed_ws_commands
+type: flow
+name: Exchange Typed WebSocket Commands
+summary: A client sends a typed command, receives a correlated reply, and observes session or project updates through the shared topic envelope contract.
+capabilities: [capability.ws_command_bus]
+constraints: [constraint.bus_only_broadcasts, constraint.no_cross_tree_imports]
+decisions: [decision.graph_as_bus]
+risks: [risk.command_contract_drift]
+suggested_files: [server/commands/index.ts, server/bus.ts, shared/ws-envelope.ts, src/use-socket.ts]
+suggested_tests: [tests/contracts/ws-command-validation.test.ts, tests/contracts/ws-envelope-roundtrip.test.ts, tests/architecture/no-direct-broadcast.test.ts]
+steps:
+  - Validate inbound commands and reject invalid input with a correlated error.
+  - Dispatch valid commands and return acknowledgements or control responses through the bus.
+  - Publish resulting state by topic and deliver it to matching client subscribers.
+freshness:
+  class: code_coupled
+risk: high

@@ -1,39 +1,17 @@
 id: flow.render_form_submit_round_trip
 type: flow
-name: form submission resumes the leader session
-summary: A form component validates user answers in the client sends submit_form over WebSocket and the server resumes the paired leader with a compact synthetic user turn.
-capabilities:
-  - capability.render_dashboard
-constraints:
-  - constraint.bus_only_broadcasts
-  - constraint.no_cross_tree_imports
-  - constraint.model_bloat_guard
-decisions:
-  - decision.graph_as_bus
-risks:
-  - risk.command_contract_drift
-  - risk.session_state_drift
-  - risk.prompt_bloat
-  - risk.render_schema_drift
-suggested_files:
-  - shared/render-form.ts
-  - src/nodes/render/FormComponent.tsx
-  - src/nodes/RenderNode.tsx
-  - server/commands/schemas.ts
-  - server/commands/types.ts
-  - server/commands/submit-form.ts
-suggested_tests:
-  - shared/render-form.test.ts
-  - src/nodes/render/FormComponent.test.tsx
-  - server/commands/schemas.test.ts
-  - server/commands/submit-form.test.ts
+name: Submit A Dashboard Form
+summary: A user completes a dashboard form, receives immediate validation feedback, and resumes the paired leader with the submitted answers.
+capabilities: [capability.render_dashboard, capability.canvas_sessions]
+constraints: [constraint.bus_only_broadcasts, constraint.no_cross_tree_imports, constraint.model_bloat_guard]
+decisions: [decision.graph_as_bus]
+risks: [risk.render_schema_drift, risk.command_contract_drift]
+suggested_files: [shared/render-form.ts, src/nodes/render/FormComponent.tsx, server/commands/submit-form.ts]
+suggested_tests: [shared/render-form.test.ts, src/nodes/render/FormComponent.test.tsx, server/commands/submit-form.test.ts]
 steps:
-  - shared render form defines fields supported field kinds optional submittedAnswers and formatForm for text extraction.
-  - FormComponent initializes field defaults validates required pattern maxLength min and max constraints then locks optimistically after a valid submit.
-  - RenderComponentView passes an onSubmitForm callback down to FormComponent.
-  - RenderNode socketSend emits submit_form with sessionKey formComponentId and formAnswers.
-  - command schema validation accepts submit_form shape then server submit form checks sessionKey formComponentId and non array object formAnswers.
-  - submitForm builds a compact JSON synthetic user turn and calls registry.start with host cwd resumeId role and thinkingConfig.
+  - Render the form from the shared component contract and validate required answers in the client.
+  - Send the answers as a typed submit_form command for the paired leader.
+  - Resume the waiting leader with a compact synthetic user turn containing the submission.
 freshness:
   class: code_coupled
 risk: high

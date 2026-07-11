@@ -3,14 +3,9 @@ type: capability
 name: Task Delegation And Minions
 summary: Leader MCP tools register tasks, spawn minion sessions, steer live children, project server owned task lifecycle state, and receive structured minion reports for UI and status surfaces.
 linked_flows:
-  - flow.plan_task_registration
-  - flow.assign_task_spawn_minion
-  - flow.arm_minion_skills_and_subskills
-  - flow.minion_status_reporting
-  - flow.leader_status_and_steering
-  - flow.close_or_cancel_task
-  - flow.retry_terminal_task
-  - flow.checkpoint_session_handoff
+  - flow.delegate_work_to_minion
+  - flow.steer_and_handoff_work
+  - flow.prepare_scoped_work_packet
 constraints:
   - constraint.bus_only_broadcasts
   - constraint.no_cross_tree_imports

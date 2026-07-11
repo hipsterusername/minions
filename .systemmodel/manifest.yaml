@@ -1,3 +1,7 @@
 version: 1
 name: Minions system model
-summary: Relevance-scoped context model for the Minions canvas agent-orchestration app. Flows are authored fine-grained and single-purpose so any one flow pulls in only its own small file footprint, never the whole model.
+summary: Relevance-scoped context model for the Minions canvas agent-orchestration app, organized around durable user and agent journeys.
+provenance:
+  authored_by: Minions maintainers
+  reviewed_on: 2026-07-10
+  purpose: Curated repository model for planning, delegation, review, and maintenance.

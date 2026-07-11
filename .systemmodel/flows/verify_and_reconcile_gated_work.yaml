@@ -1,0 +1,18 @@
+id: flow.verify_and_reconcile_gated_work
+type: flow
+name: Verify And Reconcile Gated Work
+summary: An agent records required evidence, reconciles the actual diff with the planned packet, and gives the user a trustworthy gate verdict before merge.
+capabilities: [capability.system_model_layer, capability.worktree_approval]
+constraints: [constraint.review_gated_merges, constraint.model_bloat_guard]
+decisions: [decision.worktree_isolation, decision.relevance_scoped_context]
+risks: [risk.merge_bypass, risk.model_rot]
+suggested_files: [server/system-model/freshness.ts, server/system-model/reconcile.ts, server/system-model/gates.ts, server/system-model-tools/record-verification.ts]
+suggested_tests: [server/system-model/freshness.test.ts, server/system-model/reconcile.test.ts, server/system-model/gates.test.ts]
+steps:
+  - Check whether relevant model guidance is fresh enough for the required verification.
+  - Record test or review evidence against each required target.
+  - Reconcile the actual diff with packet scope and capture justified constraint verdicts.
+  - Evaluate the completed evidence and reconciliation before allowing merge.
+freshness:
+  class: code_coupled
+risk: critical

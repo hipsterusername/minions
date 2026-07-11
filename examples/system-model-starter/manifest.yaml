@@ -1,0 +1,4 @@
+version: 1
+name: Workspace starter model
+summary: Minimal system model for a repository that opens and saves workspaces.
+

@@ -1,0 +1,17 @@
+id: flow.connect_to_live_workspace
+type: flow
+name: Connect To A Live Workspace
+summary: A user authenticates a WebSocket connection, receives the current session snapshot, and keeps outbound commands available across reconnects.
+capabilities: [capability.ws_command_bus]
+constraints: [constraint.no_cross_tree_imports]
+decisions: [decision.graph_as_bus]
+risks: [risk.command_contract_drift]
+suggested_files: [src/ws-url.ts, src/use-socket.ts, server/ws-connection.ts]
+suggested_tests: [src/ws-url.test.ts, src/use-socket.test.tsx, server/ws-connection.test.ts]
+steps:
+  - Build an authenticated same-origin socket URL and establish the connection.
+  - Attach the client to scoped topics and deliver the current session snapshot.
+  - Queue user commands while disconnected and flush them after reconnect.
+freshness:
+  class: code_coupled
+risk: medium

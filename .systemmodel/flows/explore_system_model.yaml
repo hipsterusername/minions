@@ -1,0 +1,17 @@
+id: flow.explore_system_model
+type: flow
+name: Explore The System Model
+summary: A user or agent loads a validated repository model, retrieves the smallest relevant objects, and explores their relationships in the canvas graph.
+capabilities: [capability.system_model_layer, capability.canvas_ui]
+constraints: [constraint.model_bloat_guard, constraint.no_cross_tree_imports, constraint.server_file_size_ceiling]
+decisions: [decision.relevance_scoped_context, decision.graph_as_bus]
+risks: [risk.model_rot, risk.prompt_bloat]
+suggested_files: [server/system-model/load.ts, server/system-model/match.ts, server/system-model-tools/query-system-model.ts, src/nodes/SystemGraphNode.tsx]
+suggested_tests: [server/system-model/load.test.ts, server/system-model/match.test.ts, server/system-model-tools/query-system-model.test.ts, src/nodes/SystemGraphNode.test.tsx]
+steps:
+  - Load authored objects and reject invalid schemas, duplicate ids, broken references, or overbroad applicability.
+  - Retrieve exact ids or a bounded set of scored objects for the current question.
+  - Open the system graph to filter capabilities, flows, constraints, and their relationships.
+freshness:
+  class: code_coupled
+risk: high

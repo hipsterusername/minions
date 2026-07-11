@@ -1,0 +1,18 @@
+id: flow.build_and_update_dashboard
+type: flow
+name: Build And Update A Dashboard
+summary: A leader presents a structured dashboard, revises it incrementally, and relies on the shared schema and persisted render state to keep server and client views aligned.
+capabilities: [capability.render_dashboard, capability.persistence_project_state]
+constraints: [constraint.bus_only_broadcasts, constraint.no_cross_tree_imports, constraint.server_file_size_ceiling, constraint.model_bloat_guard]
+decisions: [decision.graph_as_bus, decision.relevance_scoped_context]
+risks: [risk.render_schema_drift, risk.session_state_drift]
+suggested_files: [shared/render-dsl.ts, server/render-tools.ts, src/nodes/RenderNode.tsx, server/session-persist.ts]
+suggested_tests: [tests/contracts/render-dsl-roundtrip.test.ts, server/render-tools.test.ts, src/nodes/render/ArtifactComponents.test.tsx]
+steps:
+  - Submit a schema-valid component tree to establish the dashboard.
+  - Append, patch, or remove components by stable id as the presentation evolves.
+  - Deliver each update through the session topic and render the same shared DSL on the client.
+  - Persist the resulting dashboard so it is restored with the leader session.
+freshness:
+  class: code_coupled
+risk: high

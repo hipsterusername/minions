@@ -1,0 +1,17 @@
+id: flow.prepare_skills_for_agents
+type: flow
+name: Prepare Skills For An Agent
+summary: Selected skill templates resolve built-in overrides and variables, then expose compact subskill choices without loading unnecessary instructions into the agent prompt.
+capabilities: [capability.skill_library, capability.task_delegation]
+constraints: [constraint.model_bloat_guard, constraint.no_cross_tree_imports]
+decisions: [decision.relevance_scoped_context]
+risks: [risk.prompt_bloat, risk.model_rot]
+suggested_files: [server/skills.ts, server/subskills.ts, shared/skill-presets.ts, server/task-tools/task-prompt.ts]
+suggested_tests: [server/skills.test.ts, server/subskills.test.ts, server/task-tools/task-prompt.test.ts]
+steps:
+  - Resolve selected ids against project skills and shared built-in presets.
+  - Substitute supplied variables and compile the active instructions into the agent prompt.
+  - Include only a compact subskill map and load a full subskill on demand.
+freshness:
+  class: code_coupled
+risk: high

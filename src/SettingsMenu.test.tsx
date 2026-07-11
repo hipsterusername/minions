@@ -13,6 +13,9 @@ import { SettingsMenu } from "./SettingsMenu.tsx";
 import { HarnessListProvider } from "./use-harness-list.tsx";
 import type { HarnessListEntry, ServerMessage, SocketSubscribe } from "./use-socket.ts";
 import { restartServer } from "./api.ts";
+// The main Vitest project intentionally scans src/server/shared only. Import the
+// colocated example contract so the copyable starter remains part of `pnpm verify`.
+import "../examples/system-model-starter/starter.test.ts";
 
 vi.mock("./api.ts", () => ({
   restartServer: vi.fn(),
@@ -146,6 +149,63 @@ describe("SettingsMenu", () => {
       defaultLeaderModel: "opus",
       systemModel: "advisory",
     });
+  });
+
+  it("shows seeding guidance when the enabled system model has no manifest", () => {
+    const socketSend = vi.fn();
+    const subscribers: Array<(msg: ServerMessage) => void> = [];
+    const socketSubscribe = vi.fn(
+      (
+        topicOrFn: string | ((msg: ServerMessage) => void),
+        maybeFn?: (msg: ServerMessage) => void,
+      ) => {
+        const fn = typeof topicOrFn === "function" ? topicOrFn : maybeFn;
+        if (fn) subscribers.push(fn);
+        return () => {};
+      },
+    ) as unknown as SocketSubscribe;
+
+    render(
+      <SettingsMenu
+        settings={{ systemModel: "advisory" }}
+        onSettingsChange={() => {}}
+        socketSend={socketSend}
+        socketSubscribe={socketSubscribe}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    expect(socketSend).toHaveBeenCalledWith({ type: "list_sessions" });
+
+    act(() => {
+      subscribers.forEach((fn) => fn({
+        type: "session_list",
+        sessions: [{ sessionKey: "leader-1", role: "leader" } as never],
+      }));
+    });
+    const request = socketSend.mock.calls.find(
+      ([payload]) => (payload as { type?: string }).type === "get_system_model_status",
+    )?.[0] as { requestId: string };
+
+    act(() => {
+      subscribers.forEach((fn) => fn({
+        type: "control_response",
+        command: "get_system_model_status",
+        sessionKey: "leader-1",
+        requestId: request.requestId,
+        success: true,
+        status: {
+          enabled: false,
+          mode: "off",
+          manifestFound: false,
+          loadErrors: [],
+        },
+      }));
+    });
+
+    expect(screen.getByRole("status")).toHaveTextContent(/enabled but inactive/i);
+    expect(screen.getByRole("link", { name: /system model guide/i }))
+      .toHaveAttribute("href", "docs/system-model.md");
   });
 
   it("tidy layout is on by default and toggles off to tidyLayout:false", () => {

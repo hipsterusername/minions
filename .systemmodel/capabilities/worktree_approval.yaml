@@ -3,13 +3,9 @@ type: capability
 name: Worktree Approval And Merge
 summary: Isolated leader worktrees collect code changes for review expose diffs to the UI and only merge or discard through explicit WS commands that update session state and cleanup the worktree branch.
 linked_flows:
-  - flow.create_session_worktree
-  - flow.load_worktree_diff
-  - flow.approve_changes
-  - flow.merge_worktree
-  - flow.force_merge
-  - flow.retry_merge
-  - flow.discard_worktree
+  - flow.review_and_merge_changes
+  - flow.resolve_worktree_outcome
+  - flow.verify_and_reconcile_gated_work
 constraints:
   - constraint.review_gated_merges
   - constraint.bus_only_broadcasts

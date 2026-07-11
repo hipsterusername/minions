@@ -1,0 +1,12 @@
+id: constraint.workspace_changes_are_reviewed
+type: constraint
+statement: Changes to workspace persistence must retain validation and receive review.
+applies_to:
+  capabilities: [capability.workspace]
+  flows: [flow.open_workspace, flow.save_workspace]
+  files: [src/workspace.ts]
+severity: high
+agent_instruction: Preserve validation on both read and write paths and run the workspace tests.
+review_gate: gate.workspace_review
+suggested_tests: [src/workspace.test.ts]
+

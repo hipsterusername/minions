@@ -3,13 +3,10 @@ type: capability
 name: persistence_project_state
 summary: Durable project and session state across sidecars, SQLite schema setup, session hydration, usage accounting, event replay, and render persistence.
 linked_flows:
-  - flow.sqlite_schema_init_and_migration
-  - flow.project_canvas_state_roundtrip
-  - flow.project_sidecar_configuration_state
-  - flow.session_snapshot_hydration
-  - flow.resume_idle_session_message_and_event_log
-  - flow.capture_session_usage_cost
-  - flow.persist_render_dashboard_state
+  - flow.persist_project_workspace
+  - flow.preserve_session_record
+  - flow.recover_session_on_canvas
+  - flow.build_and_update_dashboard
 constraints:
   - constraint.no_cross_tree_imports
   - constraint.server_file_size_ceiling

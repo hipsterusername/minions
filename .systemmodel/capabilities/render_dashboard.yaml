@@ -3,13 +3,9 @@ type: capability
 name: render dashboard dsl
 summary: Agent driven structured dashboard surface for leader sessions backed by shared schemas MCP render tools bus delivered render_update messages client reducers component renderers and form submissions.
 linked_flows:
-  - flow.render_set_replace_dashboard
-  - flow.render_patch_update_component
-  - flow.render_append_component
-  - flow.render_remove_component
+  - flow.build_and_update_dashboard
   - flow.render_form_submit_round_trip
-  - flow.render_server_schema_validation
-  - flow.render_client_apply_dsl_tree
+  - flow.preserve_session_record
 constraints:
   - constraint.bus_only_broadcasts
   - constraint.no_cross_tree_imports

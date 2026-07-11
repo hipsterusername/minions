@@ -1,0 +1,17 @@
+id: flow.browse_and_author_skills
+type: flow
+name: Browse And Author Skills
+summary: A user browses the merged skill library and creates, edits, overrides, imports, exports, or removes project-scoped skills.
+capabilities: [capability.skill_library]
+constraints: [constraint.no_cross_tree_imports, constraint.server_file_size_ceiling]
+decisions: [decision.relevance_scoped_context]
+risks: [risk.command_contract_drift, risk.session_state_drift]
+suggested_files: [server/skill-authoring.ts, server/skill-authoring-tools.ts, src/skills/registry.ts, src/skills/user-skills.ts]
+suggested_tests: [server/skill-authoring.test.ts, server/skill-authoring-tools.test.ts, src/skills/user-skills.test.ts]
+steps:
+  - Browse valid project skills together with shared built-in presets.
+  - Create or edit a project skill, writing built-in changes as explicit project overrides.
+  - Import or export project definitions, or delete an override to reveal the built-in preset again.
+freshness:
+  class: code_coupled
+risk: high

@@ -1,0 +1,17 @@
+id: flow.launch_agent_session
+type: flow
+name: Launch An Agent Session
+summary: A user starts a leader or minion session with the selected harness, model, instructions, tools, context, and optional isolated worktree.
+capabilities: [capability.canvas_sessions]
+constraints: [constraint.bus_only_broadcasts, constraint.no_cross_tree_imports, constraint.server_file_size_ceiling, constraint.model_bloat_guard]
+decisions: [decision.graph_as_bus, decision.worktree_isolation, decision.relevance_scoped_context]
+risks: [risk.session_state_drift, risk.prompt_bloat]
+suggested_files: [server/commands/create-session.ts, server/session-host.ts, server/session-host-run.ts, server/agents/types.ts]
+suggested_tests: [server/commands/create-session.test.ts, server/session-host.test.ts, server/session-host-run.test.ts]
+steps:
+  - Validate the requested role, harness, model, prompt, attachments, and isolation settings.
+  - Assemble role-specific instructions and tools, then start the session host.
+  - Run the harness turn and acknowledge the new live session to the canvas.
+freshness:
+  class: code_coupled
+risk: high

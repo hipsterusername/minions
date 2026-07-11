@@ -32,6 +32,13 @@ interface UsageProviderState {
   error?: string | undefined;
 }
 
+interface SystemModelStatus {
+  enabled: boolean;
+  mode: "off" | "advisory" | "enforced";
+  manifestFound: boolean;
+  loadErrors: Array<{ file?: string; message?: string }>;
+}
+
 const USAGE_PROVIDERS: ReadonlyArray<{
   id: UsageProvider;
   label: string;
@@ -139,6 +146,8 @@ function SettingsPopover({
     claude: { state: "idle", sessionKey: null },
     openai: { state: "idle", sessionKey: null },
   });
+  const [systemModelStatus, setSystemModelStatus] = useState<SystemModelStatus | null>(null);
+  const [systemModelStatusUnavailable, setSystemModelStatusUnavailable] = useState(false);
   const modelGroups = useMemo(
     () => buildModelGroups(harnesses, harnessesLoaded),
     [harnesses, harnessesLoaded],
@@ -165,6 +174,53 @@ function SettingsPopover({
   );
   const leaderCapability = getModelCapability(leaderSelection.model, leaderHarness);
   const minionCapability = getModelCapability(minionSelection.model, minionHarness);
+
+  useEffect(() => {
+    if (settings.systemModel === undefined || settings.systemModel === "off") {
+      setSystemModelStatus(null);
+      setSystemModelStatusUnavailable(false);
+      return;
+    }
+    if (!socketSend || !socketSubscribe) {
+      setSystemModelStatusUnavailable(true);
+      return;
+    }
+
+    const requestId = `system-model-status-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    let statusRequested = false;
+    const unsubscribe = socketSubscribe("*", (msg: ServerMessage) => {
+      if (msg.type === "session_list" && !statusRequested) {
+        const session = msg.sessions.find((item) => item.role === "leader") ?? msg.sessions[0];
+        if (!session) {
+          setSystemModelStatusUnavailable(true);
+          return;
+        }
+        statusRequested = true;
+        socketSend({
+          type: "get_system_model_status",
+          sessionKey: session.sessionKey,
+          requestId,
+        });
+        return;
+      }
+      if (
+        msg.type !== "control_response"
+        || msg.command !== "get_system_model_status"
+        || msg.requestId !== requestId
+      ) return;
+
+      const status = msg["status"];
+      if (!msg.success || !isSystemModelStatus(status)) {
+        setSystemModelStatusUnavailable(true);
+        return;
+      }
+      setSystemModelStatus(status);
+      setSystemModelStatusUnavailable(false);
+    });
+
+    socketSend({ type: "list_sessions" });
+    return unsubscribe;
+  }, [settings.systemModel, socketSend, socketSubscribe]);
 
   const requestRestart = async () => {
     setRestartState("pending");
@@ -561,6 +617,26 @@ function SettingsPopover({
         minions. Enforced blocks merges that fail review gates. Requires a{" "}
         <code>.systemmodel/manifest.yaml</code> in the worktree.
       </FieldHint>
+      {settings.systemModel !== undefined
+        && settings.systemModel !== "off"
+        && (systemModelStatus?.manifestFound === false || systemModelStatusUnavailable) && (
+          <div
+            role="status"
+            style={{
+              marginTop: -8,
+              marginBottom: 12,
+              color: "var(--warning-color, var(--text-secondary))",
+              fontSize: 11,
+              fontFamily: "var(--font-sans)",
+              lineHeight: 1.4,
+            }}
+          >
+            {systemModelStatus?.manifestFound === false
+              ? <>System model is enabled but inactive. Seed <code>.systemmodel/manifest.yaml</code></>
+              : <>For a new system model, seed <code>.systemmodel/manifest.yaml</code></>}{" "}
+            using <a href="docs/system-model.md">the system model guide</a>.
+          </div>
+        )}
 
       <Divider />
 
@@ -682,6 +758,15 @@ function SettingsPopover({
       )}
     </>
   );
+}
+
+function isSystemModelStatus(value: unknown): value is SystemModelStatus {
+  if (typeof value !== "object" || value === null) return false;
+  const status = value as Record<string, unknown>;
+  return typeof status["enabled"] === "boolean"
+    && (status["mode"] === "off" || status["mode"] === "advisory" || status["mode"] === "enforced")
+    && typeof status["manifestFound"] === "boolean"
+    && Array.isArray(status["loadErrors"]);
 }
 
 function UsageReportSection({

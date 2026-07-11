@@ -3,14 +3,11 @@ type: capability
 name: Canvas UI Nodes Layout Themes And Mobile Surfaces
 summary: Infinite canvas and mobile frontend surface for node registration, node rendering, placement, tidy layout, spatial context grouping, system model graph viewing, theme skins, activity, and mobile launch.
 linked_flows:
-  - flow.register_node_type
-  - flow.create_and_place_canvas_node
-  - flow.auto_layout_and_tidy_drop
+  - flow.create_and_arrange_canvas
   - flow.context_group_create_select_and_resolve
-  - flow.system_graph_node_load_and_filter
+  - flow.navigate_project_activity
   - flow.apply_theme_and_skin
-  - flow.activity_surfaces_group_sessions
-  - flow.mobile_launch_leader
+  - flow.explore_system_model
 constraints:
   - constraint.model_bloat_guard
   - constraint.review_gated_merges

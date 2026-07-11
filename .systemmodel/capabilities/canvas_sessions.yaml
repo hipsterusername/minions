@@ -3,14 +3,12 @@ type: capability
 name: canvas_sessions
 summary: Owns canvas visible agent session lifecycle from WebSocket commands through registry hosts harness query execution bus scoped event fan out resumable snapshots controls and frontend streaming display state.
 linked_flows:
-  - flow.create_canvas_session
-  - flow.rehydrate_and_sync_session
-  - flow.send_followup_resume_turn
-  - flow.build_agent_prompt_and_tools
-  - flow.run_harness_query_loop
-  - flow.stream_session_events_to_canvas
-  - flow.interrupt_active_turn
-  - flow.terminate_session_run
+  - flow.launch_agent_session
+  - flow.continue_and_control_session
+  - flow.recover_session_on_canvas
+  - flow.render_form_submit_round_trip
+  - flow.navigate_project_activity
+  - flow.preserve_session_record
 constraints:
   - constraint.bus_only_broadcasts
   - constraint.no_cross_tree_imports

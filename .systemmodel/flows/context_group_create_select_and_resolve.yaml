@@ -1,33 +1,17 @@
 id: flow.context_group_create_select_and_resolve
 type: flow
-name: Context Group Creation Selection And Resolution
-summary: Multi selected context nodes can be framed as a group while drag drop, auto fit, and context resolution preserve spatial membership and registered provider extraction.
-capabilities:
-  - capability.canvas_ui
-constraints:
-  - constraint.model_bloat_guard
-decisions:
-  - decision.relevance_scoped_context
-risks:
-  - risk.prompt_bloat
-suggested_files:
-  - src/Canvas.tsx
-  - src/CanvasNode.tsx
-  - src/nodes/ContextGroupNode.tsx
-  - src/node-registry.ts
-  - src/context-extraction.ts
-suggested_tests:
-  - src/CanvasNode.test.ts
-  - src/node-registry.test.ts
-  - src/connected-context.test.ts
-  - src/graph.test.ts
+name: Organize Canvas Context
+summary: A user groups related context nodes spatially, moves and selects them together, and supplies the resolved group as context to agent work.
+capabilities: [capability.canvas_ui]
+constraints: [constraint.model_bloat_guard]
+decisions: [decision.relevance_scoped_context]
+risks: [risk.prompt_bloat]
+suggested_files: [src/Canvas.tsx, src/nodes/ContextGroupNode.tsx, src/context-registry.ts]
+suggested_tests: [src/canvas-utils.test.ts, src/nodes/ContextGroupNode.test.tsx, src/context-registry.test.ts]
 steps:
-  - Canvas multiSelectInfo allows the Group as Context action only when every selected node is context compatible and not already inside the same group.
-  - groupSelectedAsContext creates a context group around selected bounds, stacks selected nodes inside it, resizes the frame, and selects the new group.
-  - Drag start snapshots children inside dragged context groups so group movement carries intended members without latching onto unrelated nodes.
-  - Drag move computes overlap and top center drop targeting for context compatible nodes while ContextGroupNode renders active drop affordances and counts.
-  - Debounced membership tracking restacks or shrinks groups after membership, position, or size changes and freezes while context groups are dragged.
-  - getContextForNode resolves context group sources by spatial containment and includes any registered provider type through extractContextItem.
+  - Frame selected context nodes as a named group.
+  - Preserve membership while the group is moved, resized, or auto-fitted.
+  - Resolve registered provider content when the group is attached to an agent request.
 freshness:
   class: code_coupled
-risk: high
+risk: medium

@@ -1,0 +1,13 @@
+id: capability.workspace
+type: capability
+name: Workspace
+summary: Users can open an existing workspace, change it, and save their work.
+linked_flows: [flow.open_workspace, flow.save_workspace]
+constraints: [constraint.workspace_changes_are_reviewed]
+suggested_files: [src/workspace.ts]
+suggested_tests: [src/workspace.test.ts]
+keywords: [workspace, open, save]
+freshness:
+  class: code_coupled
+risk: medium
+

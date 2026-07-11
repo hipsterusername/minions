@@ -1,0 +1,17 @@
+id: flow.navigate_project_activity
+type: flow
+name: Navigate Project Activity
+summary: Desktop and mobile users find sessions by project and attention state, open the relevant canvas or chat, and launch a new leader with deliberate settings.
+capabilities: [capability.canvas_ui, capability.canvas_sessions]
+constraints: [constraint.review_gated_merges]
+decisions: [decision.worktree_isolation]
+risks: [risk.session_state_drift, risk.command_contract_drift]
+suggested_files: [src/ActivityView.tsx, src/mobile/MobileApp.tsx, src/mobile/LaunchScreen.tsx]
+suggested_tests: [src/ActivityView.test.tsx, src/mobile/MobileApp.test.tsx, src/mobile/LaunchScreen.test.tsx]
+steps:
+  - Group sessions by project, recency, and attention while keeping child minions under their leaders.
+  - Open the selected session in the appropriate canvas or mobile chat surface.
+  - Launch a new leader with chosen project, model, harness, skills, attachments, and isolation.
+freshness:
+  class: code_coupled
+risk: medium
