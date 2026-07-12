@@ -65,6 +65,32 @@ describe("worktree integration client state", () => {
 });
 
 describe("WorktreeIntegrationControls", () => {
+  it("visualizes each leader contribution flowing into the combined lineage and target", () => {
+    render(<WorktreeIntegrationControls lineage={snapshot({ contributions: [
+      snapshot().contributions[0]!,
+      { ...snapshot().contributions[0]!, id: "contrib-2", workItemId: "work-2",
+        originatingRunKey: "run-2", runKeys: ["run-2", "run-3"],
+        branchName: "minions/contribution/two", state: "discarded" },
+    ] })} workItemId="work-1" runKey="run-1" send={vi.fn()} />);
+    const map = screen.getByRole("region", { name: "Combined lineage map" });
+    expect(map).toHaveTextContent("This leader");
+    expect(map).toHaveTextContent("Leader work-2");
+    expect(map).toHaveTextContent("Combined lineage");
+    expect(map).toHaveTextContent("Target");
+    expect(map).toHaveTextContent("1 included · 1 discarded");
+    expect(map).toHaveTextContent("Set before the first worktree run");
+  });
+
+  it("explains approve, reject, discard, and new-iteration semantics", () => {
+    render(<WorktreeIntegrationControls lineage={snapshot()} workItemId="work-1"
+      runKey="run-1" send={vi.fn()} />);
+    const guide = screen.getByRole("group", { name: "Contribution decision guide" });
+    expect(guide).toHaveTextContent("Accept this exact contribution head");
+    expect(guide).toHaveTextContent("Keep the contribution and worktree");
+    expect(guide).toHaveTextContent("Terminally exclude this contribution");
+    expect(guide).toHaveTextContent("Reuses the same contribution branch/worktree");
+  });
+
   it("keeps contribution approval and enqueue as separate user actions", () => {
     const send = vi.fn();
     const { rerender } = render(<WorktreeIntegrationControls lineage={snapshot()}

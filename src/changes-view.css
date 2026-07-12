@@ -9,6 +9,33 @@
 .integration-controls__actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .integration-controls__actions button { padding: 5px 9px; border: 1px solid var(--border-default); border-radius: 5px; background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; }
 .integration-controls__actions button:disabled { cursor: not-allowed; opacity: .45; }
+.lineage-map { display: grid; gap: 8px; padding: 8px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-primary); }
+.lineage-map__header { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; color: var(--text-secondary); }
+.lineage-map__header code, .lineage-map__join-hint code { color: var(--text-primary); user-select: all; }
+.lineage-map__assignment { font-size: 10px; text-align: right; }
+.lineage-map__flow { display: grid; grid-template-columns: minmax(150px, 1fr) auto minmax(145px, .8fr) auto minmax(115px, .55fr); gap: 7px; align-items: center; }
+.lineage-map__contributions { display: grid; gap: 6px; }
+.lineage-map__node { display: grid; gap: 4px; min-width: 0; padding: 7px; border: 1px solid var(--border-default); border-radius: 5px; color: var(--text-secondary); background: var(--bg-secondary); }
+.lineage-map__node code { overflow: hidden; text-overflow: ellipsis; color: var(--text-primary); white-space: nowrap; }
+.lineage-map__node-title { display: flex; justify-content: space-between; gap: 6px; color: var(--text-primary); }
+.lineage-map__node-title span { color: var(--text-secondary); }
+.lineage-map__node--contribution[data-selected="true"] { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.lineage-map__node--contribution[data-state="discarded"] { opacity: .55; text-decoration-color: var(--text-secondary); }
+.lineage-map__node--combined { border-style: double; }
+.lineage-map__node--target { border-color: var(--status-success); }
+.lineage-map__arrow { color: var(--text-secondary); font-size: 16px; }
+.lineage-map__empty, .lineage-map__join-hint { color: var(--text-secondary); }
+.integration-controls__decision-help { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 0; }
+.integration-controls__decision-help div { padding: 6px; border-radius: 5px; background: var(--bg-primary); }
+.integration-controls__decision-help dt { font-weight: 600; color: var(--text-primary); }
+.integration-controls__decision-help dd { margin: 2px 0 0; color: var(--text-secondary); }
+@media (max-width: 760px) {
+  .lineage-map__header { display: grid; }
+  .lineage-map__assignment { text-align: left; }
+  .lineage-map__flow { grid-template-columns: 1fr; }
+  .lineage-map__arrow { transform: rotate(90deg); justify-self: center; }
+  .integration-controls__decision-help { grid-template-columns: 1fr; }
+}
 
 .changes-view {
   position: absolute;

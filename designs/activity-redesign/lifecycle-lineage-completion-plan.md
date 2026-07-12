@@ -111,6 +111,30 @@ This avoids two unsafe alternatives:
 - each leader merging directly to `main`, making the final combined result
   order-dependent and impossible to review as one unit.
 
+### Deliberate evolution from the source plan
+
+The source plan's contribution flow described creating a branch/worktree for
+each run. The implemented model refined that boundary: an ordinary new run for
+the same work item is attached to the existing editable contribution and keeps
+its branch and worktree. The run is still a new immutable attempt, but it does
+not create a new Git ownership lane merely because the user sent another
+prompt.
+
+That makes the identities line up with their responsibilities:
+
+- **run identity** changes for every user iteration and preserves what happened;
+- **contribution identity** remains stable while one leader's proposed change
+  is being developed, reviewed, or repaired;
+- **lineage identity** remains stable while the combined target candidate is
+  being assembled and promoted.
+
+A fresh contribution is created after the prior one becomes terminal through
+integration or discard. Conflict-resolution runs are also attached to retained
+state: contribution conflicts reuse the contribution worktree, while final
+promotion conflicts use the lineage's integration worktree. This is an
+intentional implementation decision, covered by repository and service tests,
+not an accidental departure from immutable run history.
+
 ### Durable objects
 
 | Object | Responsibility |
@@ -267,6 +291,23 @@ Add tests that exercise the written plan rather than only nearby primitives:
    mobile for every canonical lifecycle state.
 5. Remove/recreate Canvas and Kanban bindings while preserving run reports,
    task history, usage, and lineage history.
+
+### P1 — add pre-run lineage assignment
+
+The merged review controls now visualize the current leader contribution,
+other contributions, the combined integration ref, and the target. Complete
+the assignment workflow at the draft/pre-run boundary:
+
+1. List compatible open lineages for the work item's project and repository.
+2. Offer **Create new lineage** (with target branch) or **Join existing
+   lineage** before the first worktree run.
+3. Preview lineage members, combined head, target, and active queue before the
+   user confirms.
+4. Commit membership with both work-item and lineage revision CAS, then launch
+   the first contribution from the selected integration head.
+5. Lock assignment after contribution provisioning. Moving a provisioned
+   contribution would invalidate its base SHA, branch ownership, reviews, and
+   audit history; the safe alternative is discard plus a new contribution.
 
 ### P2 — finish deprecation and operations documentation
 
