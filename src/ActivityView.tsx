@@ -570,6 +570,17 @@ export function ActivityView({
     [activitySessions, selectedKey],
   );
 
+  // The launch-only renderer owns the existing, well-tested session creation
+  // path. Once that new session reaches Activity, replace the form with its
+  // inspector instead of sending the user over to the canvas.
+  useEffect(() => {
+    if (!launchNode) return;
+    const sessionKey = (launchNode.data as LeaderData).sessionKey;
+    if (!sessionKey || !activitySessions.some((session) => session.sessionKey === sessionKey)) return;
+    setSelectedKey(sessionKey);
+    setLaunchNodeId(null);
+  }, [activitySessions, launchNode]);
+
   // If the selected session disappears (cleared/ended off the list), drop the
   // inspector rather than leaving a dangling selection.
   useEffect(() => {
@@ -774,10 +785,6 @@ export function ActivityView({
                 projectPath={projectPath}
               />
             </div>
-            <footer className="act-launch-foot">
-              <span><strong>Saved to canvas</strong> · You can close this panel without losing the draft.</span>
-              <button type="button" onClick={() => onOpenInCanvas(launchNode.id)}>Open on canvas</button>
-            </footer>
           </section>
         </div>
       )}

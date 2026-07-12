@@ -193,7 +193,7 @@ describe("ActivityView", () => {
     expect(advancedSetup).toHaveAttribute("open");
     fireEvent.click(screen.getByRole("button", { name: /^skills$/i }));
     expect(screen.getByRole("dialog", { name: /choose skills/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /open on canvas/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /open on canvas/i })).not.toBeInTheDocument();
   });
 
   it("offers Launch from the empty activity state", () => {
