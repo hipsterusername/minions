@@ -51,6 +51,7 @@ export type WsCommandType =
   | "retry_worktree_contribution" | "discard_worktree_contribution"
   | "review_worktree_lineage" | "waive_worktree_integration_gate"
   | "resolve_worktree_conflict" | "promote_worktree_lineage" | "get_worktree_lineage_status"
+  | "list_worktree_lineages"
   // Execution control
   | "interrupt"
   | "interrupt_session"

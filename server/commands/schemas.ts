@@ -238,6 +238,7 @@ export const COMMAND_SCHEMAS = {
   get_worktree_lineage_status: command("get_worktree_lineage_status", {
     lineageId: requiredId.optional(), workItemId: requiredId.optional(), runKey: requiredId.optional(),
   }),
+  list_worktree_lineages: command("list_worktree_lineages", {}),
   // Execution control
   interrupt: sessionScoped("interrupt"),
   interrupt_session: sessionScoped("interrupt_session"),

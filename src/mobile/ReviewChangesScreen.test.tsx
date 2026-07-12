@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ServerMessage, SocketSubscribe } from "../use-socket.ts";
+import type { WorktreeLineageSnapshot } from "../../shared/worktree-integration.ts";
 import { ReviewChangesScreen } from "./ReviewChangesScreen.tsx";
 import type { DetailedDiff } from "./mobile-approvals.ts";
 
@@ -20,6 +21,24 @@ const diff: DetailedDiff = {
   commits: ["Extract token validation", "Add token tests"],
   branch: "worktree/s-1",
 };
+
+function lineageSnapshot(): WorktreeLineageSnapshot {
+  return {
+    id: "lineage-mobile-01", projectId: "project-1", repositoryPath: "/repo", targetRef: "main",
+    baseSha: "base", integrationRef: "refs/minions/integration/1",
+    integrationWorktreePath: "/repo/.worktrees/integration", integrationHeadSha: "head",
+    revision: 3, integrationState: "active", status: "open",
+    memberships: [{ workItemId: "work-1", status: "active", revision: 1, actor: "user",
+      joinedAt: 1, leftAt: null }],
+    resolutionRuns: [],
+    contributions: [{ id: "contrib-1", lineageId: "lineage-mobile-01", workItemId: "work-1",
+      originatingRunKey: "s-1", runKeys: ["s-1"], branchName: "feature",
+      worktreePath: "/repo/.worktrees/feature", baseSha: "base", headSha: "head",
+      revision: 2, state: "ready", reviewState: "pending", cleanupState: "retained",
+      createdAt: 1, updatedAt: 2 }],
+    queue: [], gates: [], reviews: [], createdAt: 1, updatedAt: 3,
+  };
+}
 
 function fakeSocket() {
   const listeners = new Set<ServerListener>();
@@ -149,6 +168,29 @@ describe("ReviewChangesScreen", () => {
     expect(screen.queryByRole("button", { name: "Discard" })).toBeNull();
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "approve_changes" }));
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "discard_worktree" }));
+  });
+
+  it("surfaces the lineage strip and expands the modal with the all-lineages view", () => {
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(requestId);
+    const socket = fakeSocket();
+    const send = vi.fn();
+    render(<ReviewChangesScreen sessionKey="s-1" workItemId="work-1" send={send}
+      subscribe={socket.subscribe} onClose={() => {}} />);
+
+    act(() => socket.deliver({ type: "worktree_integration_response",
+      command: "get_worktree_lineage_status", requestId: null, success: true,
+      result: lineageSnapshot() }));
+
+    // View 1 strip renders inside the mobile Integration section.
+    const integration = screen.getByRole("region", { name: "Worktree integration" });
+    expect(within(integration).getByTestId("lineage-node-strip")).toBeInTheDocument();
+
+    // Expanding surfaces the new modal with both the this-lineage detail and the
+    // all-lineages big-picture capability (the request that fetches them fires).
+    fireEvent.click(screen.getByRole("button", { name: "Expand lineage" }));
+    expect(screen.getByRole("button", { name: /This lineage/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /All lineages/ })).toBeInTheDocument();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "list_worktree_lineages" }));
   });
 
   it("starts a canonical iteration when requesting changes", () => {

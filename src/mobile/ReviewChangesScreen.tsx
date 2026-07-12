@@ -233,7 +233,7 @@ export function ReviewChangesScreen({
           aria-label="Worktree integration">
           <h2>Integration</h2>
           <WorktreeIntegrationControls lineage={integration.lineage} workItemId={workItemId}
-            runKey={sessionKey} send={send} className="integration-controls--mobile" />
+            runKey={sessionKey} send={send} className="integration-controls--mobile" subscribe={subscribe} />
         </section> : null}
       </section>
 

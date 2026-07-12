@@ -5,7 +5,7 @@ test("creates, launches, persists, and reloads an echo-backed project", async ({
   if (!projectPath) throw new Error("MINIONS_E2E_PROJECT is required");
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Projects", exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "New Project" }).click();
   await page.getByPlaceholder("/path/to/new/project...").fill(projectPath);
@@ -40,7 +40,7 @@ test("creates, launches, persists, and reloads an echo-backed project", async ({
   await autosaved;
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Projects", exact: true })).toBeVisible();
   await page.getByText("Smoke Project", { exact: true }).click();
   await page.getByRole("tab", { name: "Canvas" }).click();
   await expect(page.getByLabel("Enter fullscreen")).toBeVisible();

@@ -23,6 +23,8 @@ export type ServerMessage =
       latest?: WorktreeLineageSnapshot | null }
   | { type: "worktree_integration_changed"; operation: string; workItemId: string | null;
       lineage: WorktreeLineageSnapshot; timestamp: number }
+  | { type: "worktree_lineages_list"; requestId: string | null;
+      lineages: WorktreeLineageSnapshot[]; error?: string }
   | { type: "work_item_changed"; workItem: WorkItemSnapshot; revision: number; cause: string; timestamp: number }
   | { type: "work_item_created"; workItem: WorkItemSnapshot; timestamp: number }
   | { type: "work_item_run_created" | "work_item_run_sealed"; workItemId: string; run: WorkItemRunSnapshot; timestamp: number }

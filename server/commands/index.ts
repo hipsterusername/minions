@@ -57,6 +57,7 @@ import { getWorkPackets } from "./get-work-packets.ts";
 import { waiveReviewGate } from "./waive-review-gate.ts";
 import { workItemCommand } from "./work-items.ts";
 import { worktreeIntegrationCommand } from "./worktree-integration.ts";
+import { listWorktreeLineages } from "./list-worktree-lineages.ts";
 import type { CommandContext, CommandTable, WsCommand } from "./types.ts";
 import type { WebSocket } from "ws";
 
@@ -102,6 +103,7 @@ export const COMMAND_TABLE = {
   resolve_worktree_conflict: worktreeIntegrationCommand,
   promote_worktree_lineage: worktreeIntegrationCommand,
   get_worktree_lineage_status: worktreeIntegrationCommand,
+  list_worktree_lineages: listWorktreeLineages,
   // Execution control
   interrupt,
   interrupt_session: interruptSession,

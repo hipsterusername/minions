@@ -360,4 +360,14 @@ export class SqliteWorktreeIntegrationService implements WorktreeIntegrationServ
     ? repo.getLineage(this.db, input.lineageId) : contribution ? repo.getLineage(this.db, contribution.lineage_id)
       : input.workItemId ? repo.findLatestLineageByWorkItem(this.db, input.workItemId) : undefined;
     return lineage ? this.state(lineage.id) : null; }
+  async listLineages(): Promise<WorktreeLineageSnapshot[]> {
+    const rows = this.db.prepare("SELECT id FROM worktree_lineages ORDER BY created_at,id")
+      .all() as Array<{ id: string }>;
+    const snapshots: WorktreeLineageSnapshot[] = [];
+    for (const row of rows) {
+      const value = snapshot(this.db, repo.getLineageState(this.db, row.id));
+      if (value) snapshots.push(value);
+    }
+    return snapshots;
+  }
 }

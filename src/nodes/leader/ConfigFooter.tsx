@@ -922,7 +922,8 @@ export function ConfigFooter({
         {data.workItemId && integration.lineage && socketSend ? (
           <div onMouseDown={(event) => event.stopPropagation()} style={{ margin: "0 6px 6px" }}>
             <WorktreeIntegrationControls lineage={integration.lineage} workItemId={data.workItemId}
-              runKey={data.sessionKey} send={socketSend} className="integration-controls--canvas" />
+              runKey={data.sessionKey} send={socketSend} className="integration-controls--canvas"
+              {...(socketSubscribe ? { subscribe: socketSubscribe } : {})} />
           </div>
         ) : null}
 

@@ -29,4 +29,6 @@ export interface WorktreeIntegrationService {
   promote(input: { requestId: string; lineageId: string;
     expectedRevision: number }): Promise<WorktreeLineageSnapshot>;
   getStatus(input: { lineageId?: string; workItemId?: string; runKey?: string }): Promise<WorktreeLineageSnapshot | null>;
+  /** Every lineage the service can see, newest snapshot per row, for the big-picture list. */
+  listLineages(): Promise<WorktreeLineageSnapshot[]>;
 }

@@ -207,7 +207,8 @@ export function SessionChangesPanel({
       {integration.error ? <div className="changes-card__none" role="alert">{integration.error}</div> : null}
       {data.workItemId && integration.lineage && socketSend ? (
         <WorktreeIntegrationControls lineage={integration.lineage} workItemId={data.workItemId}
-          runKey={sessionKey} send={socketSend} />
+          runKey={sessionKey} send={socketSend}
+          {...(socketSubscribe ? { subscribe: socketSubscribe } : {})} />
       ) : null}
 
       <div className="changes-card__actions">

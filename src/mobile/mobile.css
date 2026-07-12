@@ -2672,8 +2672,9 @@ article.mob-plan-row {
     flex-wrap: wrap;
   }
 }
+/* Wrapper for the progressive-disclosure lineage controls on mobile. The strip
+ * and modal internals (.lin-strip / .lin-modal / .lin2-* / .lin3-*) are styled
+ * in src/lineage.css, including a narrow-viewport bottom-sheet + touch-target
+ * treatment. Keep this to the wrapper only — the old .integration-controls__*
+ * sub-elements no longer exist. */
 .integration-controls--mobile { display: grid; gap: 10px; }
-.integration-controls--mobile .integration-controls__status { display: grid; gap: 4px; }
-.integration-controls--mobile .integration-controls__alert { color: var(--status-error); }
-.integration-controls--mobile .integration-controls__gates { margin: 0; padding-left: 20px; }
-.integration-controls--mobile .integration-controls__actions { display: grid; gap: 8px; }

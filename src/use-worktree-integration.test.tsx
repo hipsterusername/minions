@@ -1,7 +1,6 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { WorktreeLineageSnapshot } from "../shared/worktree-integration.ts";
-import { WorktreeIntegrationControls } from "./WorktreeIntegrationControls.tsx";
 import { mergeWorktreeIntegrationSnapshot, selectLatestLineageReview, selectLatestQueueEntry,
   selectWorktreeContribution, useWorktreeIntegration } from "./use-worktree-integration.ts";
 
@@ -84,107 +83,5 @@ describe("worktree integration client state", () => {
       lineage: snapshot({ integrationState: "integrated", status: "integrated", revision: 5,
         memberships: [{ ...snapshot().memberships[0]!, status: "left", revision: 2, leftAt: 8 }] }) }); });
     expect(screen.getByText("integrated")).toBeInTheDocument();
-  });
-});
-
-describe("WorktreeIntegrationControls", () => {
-  it("visualizes each leader contribution flowing into the combined lineage and target", () => {
-    render(<WorktreeIntegrationControls lineage={snapshot({ contributions: [
-      { ...snapshot().contributions[0]!, state: "integrated" },
-      { ...snapshot().contributions[0]!, id: "contrib-2", workItemId: "work-2",
-        originatingRunKey: "run-2", runKeys: ["run-2", "run-3"],
-        branchName: "minions/contribution/two", state: "discarded" },
-    ] })} workItemId="work-1" runKey="run-1" send={vi.fn()} />);
-    const map = screen.getByRole("region", { name: "Combined lineage map" });
-    expect(map).toHaveTextContent("This leader");
-    expect(map).toHaveTextContent("Leader work-2");
-    expect(map).toHaveTextContent("Combined lineage");
-    expect(map).toHaveTextContent("Target");
-    expect(map).toHaveTextContent("1 integrated · 0 pending · 1 discarded");
-    expect(map).toHaveTextContent("Set before the first worktree run");
-  });
-
-  it("explains approve, reject, discard, and new-iteration semantics", () => {
-    render(<WorktreeIntegrationControls lineage={snapshot()} workItemId="work-1"
-      runKey="run-1" send={vi.fn()} />);
-    const guide = screen.getByRole("group", { name: "Contribution decision guide" });
-    expect(guide).toHaveTextContent("Accept this exact contribution head");
-    expect(guide).toHaveTextContent("Keep the contribution and worktree");
-    expect(guide).toHaveTextContent("Terminally exclude this contribution");
-    expect(guide).toHaveTextContent("Reuses the same contribution branch/worktree");
-  });
-
-  it("keeps contribution approval and enqueue as separate user actions", () => {
-    const send = vi.fn();
-    const { rerender } = render(<WorktreeIntegrationControls lineage={snapshot()}
-      workItemId="work-1" runKey="run-1" send={send} />);
-    fireEvent.click(screen.getByRole("button", { name: "Approve contribution" }));
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "review_worktree_contribution" }));
-    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "enqueue_worktree_contribution" }));
-    fireEvent.click(screen.getByRole("button", { name: "Reject contribution" }));
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "review_worktree_contribution",
-      decision: "rejected" }));
-
-    rerender(<WorktreeIntegrationControls lineage={snapshot({ contributions: [{
-      ...snapshot().contributions[0]!, reviewState: "approved",
-    }] })} workItemId="work-1" runKey="run-1" send={send} />);
-    fireEvent.click(screen.getByRole("button", { name: "Enqueue contribution" }));
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "enqueue_worktree_contribution" }));
-  });
-
-  it("blocks approval on pending gates and guides conflicts into a new iteration", () => {
-    render(<WorktreeIntegrationControls lineage={snapshot({
-      integrationState: "conflicted",
-      contributions: [{ ...snapshot().contributions[0]!, state: "conflicted" }],
-      gates: [{ id: "gate-1", lineageId: "lineage-1", contributionId: "contrib-1",
-        scope: "contribution", name: "tests", status: "pending", details: null, recordedAt: 4 }],
-    })} workItemId="work-1" runKey="run-1" send={vi.fn()} />);
-    expect(screen.getByRole("alert")).toHaveTextContent("Start a new iteration");
-    expect(screen.queryByRole("button", { name: "Retry contribution" })).toBeNull();
-    expect(screen.getByText("tests: pending")).toBeInTheDocument();
-  });
-
-  it("keeps final review and promotion as separate user actions", () => {
-    const send = vi.fn();
-    const integrated = { ...snapshot().contributions[0]!, state: "integrated" as const,
-      reviewState: "approved" as const };
-    const { rerender } = render(<WorktreeIntegrationControls lineage={snapshot({
-      integrationHeadSha: "combined", contributions: [integrated],
-    })} workItemId="work-1" send={send} />);
-    fireEvent.click(screen.getByRole("button", { name: "Approve combined lineage" }));
-    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "promote_worktree_lineage" }));
-    fireEvent.click(screen.getByRole("button", { name: "Reject combined lineage" }));
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "review_worktree_lineage",
-      decision: "rejected" }));
-    rerender(<WorktreeIntegrationControls lineage={snapshot({ integrationHeadSha: "combined",
-      contributions: [integrated], reviews: [{ id: "review-1", lineageId: "lineage-1",
-        contributionId: null, scope: "lineage", decision: "approved", actor: "user", notes: null,
-        reviewedHeadSha: "combined", recordedAt: 5 }] })} workItemId="work-1" send={send} />);
-    fireEvent.click(screen.getByRole("button", { name: "Promote to main" }));
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "promote_worktree_lineage" }));
-    rerender(<WorktreeIntegrationControls lineage={snapshot({ integrationHeadSha: "combined",
-      contributions: [integrated], reviews: [
-        { id: "review-1", lineageId: "lineage-1", contributionId: null, scope: "lineage",
-          decision: "approved", actor: "user", notes: null, reviewedHeadSha: "combined", recordedAt: 5 },
-        { id: "review-2", lineageId: "lineage-1", contributionId: null, scope: "lineage",
-          decision: "rejected", actor: "user", notes: null, reviewedHeadSha: "combined", recordedAt: 5 },
-      ] })} workItemId="work-1" send={send} />);
-    expect(screen.queryByRole("button", { name: "Promote to main" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Approve combined lineage" })).toBeInTheDocument();
-  });
-
-  it("does not offer final review while promotion is conflicted and renders preserved paths", () => {
-    const integrated = { ...snapshot().contributions[0]!, state: "integrated" as const };
-    render(<WorktreeIntegrationControls lineage={snapshot({ integrationState: "conflicted",
-      contributions: [integrated], queue: [{ id: "queue-1", lineageId: "lineage-1",
-        contributionId: null, kind: "lineage", repositoryPath: "/repo", targetRef: "main",
-        expectedSourceSha: "head", expectedTargetSha: "base", state: "conflicted", revision: 2,
-        attempt: 1, workerId: null, resultSha: null, fencingToken: 1, error: "merge conflict",
-        conflictDetails: { conflicts: ["src/a.ts"], preservedPaths: ["/repo/.worktrees/integration"],
-          targetSha: "base", sourceSha: "head" }, position: null, enqueuedAt: 2, startedAt: 3,
-        finishedAt: 4, updatedAt: 4 }] })} workItemId="work-1" send={vi.fn()} />);
-    expect(screen.queryByRole("button", { name: "Approve combined lineage" })).toBeNull();
-    expect(screen.getByText(/src\/a.ts/)).toBeInTheDocument();
-    expect(screen.getByText(/\.worktrees\/integration/)).toBeInTheDocument();
   });
 });

@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lineage — progressive disclosure (3 views)</title>
+<style>
+  :root{
+    --accent:#f59e3b; --accent-dark:#d97a1c;
+    --bg-primary:#0a0e1a; --bg-secondary:#10131f; --bg-surface:#161a26; --bg-elevated:#1c2030;
+    --border-default:#232940; --border-hover:#313a5a;
+    --text-primary:#e6ecf5; --text-secondary:#aab3c5; --text-muted:#7c849a; --text-dim:#5c637a;
+    --status-success:#34d399; --status-error:#f87171; --status-running:#38bdf8;
+    --status-warning:#fbbf24; --status-idle:#60a5fa;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg-primary);color:var(--text-primary);padding:18px;
+    font:13px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text-primary);}
+  .stage-label{display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:11px;
+    letter-spacing:.06em;text-transform:uppercase;color:var(--text-dim);}
+  .stage-label b{color:var(--accent);font-size:12px;letter-spacing:0;text-transform:none;}
+  .pill-n{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-size:10px;
+    background:var(--accent);color:#1a1206;font-weight:700;}
+  .flow{display:grid;grid-template-columns:minmax(230px,300px) 22px 1fr;gap:12px;align-items:start;}
+  .flow-arrow{align-self:center;text-align:center;color:var(--text-dim);}
+  .flow-arrow small{display:block;font-size:9px;color:var(--text-muted);margin-top:3px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--text-muted);flex:none;}
+  .dot.ok{background:var(--status-success)} .dot.run{background:var(--status-running)}
+  .dot.warn{background:var(--status-warning)} .dot.idle{background:var(--status-idle)}
+  .btn{font:inherit;font-size:11px;padding:4px 9px;border-radius:6px;border:1px solid var(--border-default);
+    background:var(--bg-elevated);color:var(--text-primary);cursor:pointer;}
+  .btn.pri{background:linear-gradient(135deg,var(--accent),var(--accent-dark));border-color:transparent;color:#1a1206;font-weight:600;}
+  .btn.ok{border-color:color-mix(in srgb,var(--status-success) 45%,transparent);color:var(--status-success);background:transparent;}
+  .btn.no{border-color:color-mix(in srgb,var(--status-error) 45%,transparent);color:var(--status-error);background:transparent;}
+  .btn.ghost{background:transparent;color:var(--text-secondary);}
+  .btn.sm{padding:2px 7px;font-size:10.5px;}
+  .chip{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;font-size:11px;
+    border:1px solid var(--border-default);background:var(--bg-elevated);color:var(--text-secondary);}
+  .chip b{color:var(--text-primary);font-weight:600}
+
+  /* ===== VIEW 1: in-node strip ===== */
+  .node{background:var(--bg-secondary);border:1px solid var(--border-default);border-radius:8px;padding:8px 9px;}
+  .node .ey{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);margin-bottom:6px;display:flex;justify-content:space-between;align-items:center}
+  .node .expand{cursor:pointer;color:var(--text-muted);font-size:12px}
+  .node .line1{display:flex;align-items:center;gap:7px;font-size:11.5px;margin-bottom:7px}
+  .node .rev{margin-left:auto;padding:1px 6px;border-radius:999px;font-size:10px;color:var(--text-muted);border:1px solid var(--border-default)}
+  .node .acts{display:flex;gap:6px}
+  .node .acts .btn{flex:1;text-align:center}
+  .node .foot{margin-top:6px;font-size:10px;color:var(--text-dim)}
+
+  /* ===== VIEW 2 & 3: modal ===== */
+  .modal{background:var(--bg-surface);border:1px solid var(--border-hover);border-radius:11px;
+    box-shadow:0 18px 48px rgba(0,0,0,.5);overflow:hidden;}
+  .modal-head{display:flex;align-items:center;gap:10px;padding:11px 13px;border-bottom:1px solid var(--border-default);background:var(--bg-secondary)}
+  .modal-head h3{margin:0;font-size:13px}
+  .modal-head .spacer{flex:1}
+  .tabs{display:flex;gap:4px;padding:9px 13px 0;background:var(--bg-secondary)}
+  .tab{font-size:11px;padding:6px 11px;border-radius:7px 7px 0 0;border:1px solid transparent;color:var(--text-secondary);cursor:pointer}
+  .tab.active{background:var(--bg-surface);border-color:var(--border-default);border-bottom-color:var(--bg-surface);color:var(--text-primary)}
+  .tab small{color:var(--text-dim)}
+  .modal-body{padding:13px;display:grid;gap:11px;}
+
+  .lin-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .seg{display:flex;height:6px;border-radius:999px;overflow:hidden;background:var(--bg-elevated);}
+  .legend{display:flex;gap:12px;font-size:10.5px;color:var(--text-muted)}
+  .legend span{display:inline-flex;align-items:center;gap:4px}
+  .sq{width:8px;height:8px;border-radius:2px;display:inline-block}
+  .rail{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .stage{display:flex;align-items:center;gap:7px;padding:6px 9px;border:1px solid var(--border-default);border-radius:7px;background:var(--bg-elevated)}
+  .stage small{color:var(--text-muted);font-size:10px;display:block}
+  .stage.target{border-color:color-mix(in srgb,var(--status-success) 55%,transparent)}
+  .arw{color:var(--text-dim);font-size:13px}
+
+  .rows{display:grid;gap:5px}
+  .row{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:9px;padding:7px 9px;
+    border:1px solid var(--border-default);border-radius:7px;background:var(--bg-elevated)}
+  .row .who{min-width:0}
+  .row .who b{font-size:12px}
+  .row .who .meta{color:var(--text-muted);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rev2{padding:1px 6px;border-radius:999px;font-size:10px;border:1px solid var(--border-default)}
+  .rev2.appr{color:var(--status-success);border-color:color-mix(in srgb,var(--status-success) 45%,transparent)}
+  .rev2.rej{color:var(--status-error);border-color:color-mix(in srgb,var(--status-error) 45%,transparent)}
+  .rev2.pend{color:var(--text-muted)}
+  .kebab{color:var(--text-muted);font-size:15px;padding:0 4px}
+  .row.sel{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+  .row.dis{opacity:.5}
+  .detail{border:1px solid var(--border-default);border-radius:7px;background:var(--bg-secondary);padding:9px;display:grid;gap:8px}
+  .detail .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;font-size:11px}
+  .detail .grid div{background:var(--bg-elevated);border-radius:5px;padding:6px 8px}
+  .detail .grid dt{color:var(--text-muted);font-size:10px;margin-bottom:2px}
+  .gates{display:flex;gap:6px;flex-wrap:wrap;font-size:10.5px}
+  .gate{display:inline-flex;gap:5px;align-items:center;padding:2px 7px;border-radius:999px;border:1px solid var(--border-default);background:var(--bg-elevated);color:var(--text-secondary)}
+  .actions{display:flex;gap:6px;flex-wrap:wrap}
+  .section-hint{font-size:10.5px;color:var(--text-dim);display:flex;align-items:center;gap:6px}
+
+  /* all-lineages list */
+  .lin-list{display:grid;gap:6px}
+  .lin-item{display:grid;grid-template-columns:auto 1fr auto auto;gap:9px;align-items:center;padding:8px 10px;
+    border:1px solid var(--border-default);border-radius:8px;background:var(--bg-elevated)}
+  .lin-item.current{border-color:var(--accent)}
+  .lin-item .cur-tag{font-size:9.5px;color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);border-radius:999px;padding:1px 6px}
+  .lin-item .m{color:var(--text-muted);font-size:10.5px}
+  .map{margin-top:2px;padding:11px;border:1px dashed var(--border-hover);border-radius:9px;background:var(--bg-secondary)}
+  .map h4{margin:0 0 3px;font-size:11.5px}
+  .map p{margin:0 0 9px;font-size:10.5px;color:var(--text-muted)}
+  .map-row{display:flex;gap:8px;align-items:center}
+  .fake-select{flex:1;display:flex;align-items:center;justify-content:space-between;padding:7px 9px;border-radius:7px;
+    border:1px solid var(--border-default);background:var(--bg-elevated);color:var(--text-secondary);font-size:11px}
+  .note{font-size:10px;color:var(--text-dim);margin-top:8px}
+</style>
+</head>
+<body>
+
+  <!-- VIEW 1 -> VIEW 2 flow -->
+  <p class="stage-label"><span class="pill-n">1</span> <b>In-action</b> — lives inside the leader node · slim, glanceable</p>
+  <div class="flow">
+    <!-- VIEW 1: node strip -->
+    <div class="node">
+      <div class="ey"><span>Lineage</span><span class="expand" title="Expand">⤢</span></div>
+      <div class="line1">
+        <span class="dot warn"></span>
+        <code>9a25f88f…e0</code>
+        <span class="chip" style="padding:1px 7px">integrating</span>
+        <span class="rev">review pending</span>
+      </div>
+      <div class="acts">
+        <button class="btn ok sm">✓ Approve</button>
+        <button class="btn no sm">✕ Reject</button>
+      </div>
+      <div class="foot">This contribution · head <code>4c05c2</code> · tap ⤢ for detail</div>
+    </div>
+
+    <div class="flow-arrow">→<small>expand</small></div>
+
+    <!-- VIEW 2: modal / this lineage -->
+    <div class="modal">
+      <div class="modal-head">
+        <h3>Lineage <code>9a25f88f…e0</code></h3>
+        <span class="chip">integrating</span>
+        <span class="spacer"></span>
+        <button class="btn ghost sm">✕</button>
+      </div>
+      <div class="tabs">
+        <div class="tab active">This lineage</div>
+        <div class="tab">All lineages <small>· 2</small></div>
+      </div>
+      <div class="modal-body">
+        <div class="lin-head">
+          <span class="chip">→ <b><code>main</code></b></span>
+          <span class="chip">head <code>b12f0a</code></span>
+          <span class="spacer" style="flex:1"></span>
+          <button class="btn ghost sm">Map to another lineage →</button>
+        </div>
+        <div class="seg" title="2 integrated · 1 pending · 1 discarded">
+          <i style="width:50%;background:var(--status-success)"></i><i style="width:25%;background:var(--status-warning)"></i><i style="width:25%;background:var(--border-hover)"></i>
+        </div>
+        <div class="legend">
+          <span><i class="sq" style="background:var(--status-success)"></i> 2 integrated</span>
+          <span><i class="sq" style="background:var(--status-warning)"></i> 1 pending</span>
+          <span><i class="sq" style="background:var(--border-hover)"></i> 1 discarded</span>
+        </div>
+        <div class="rail">
+          <div class="stage"><span class="dot run"></span><div><b>4 contributions</b><small>3 leaders</small></div></div>
+          <span class="arw">→</span>
+          <div class="stage"><span class="dot warn"></span><div><b>Combined</b><small><code>integ/9a25</code></small></div></div>
+          <span class="arw">→</span>
+          <div class="stage target"><span class="dot idle"></span><div><b>Target</b><small><code>main</code></small></div></div>
+        </div>
+        <div class="rows">
+          <div class="row sel">
+            <span class="dot warn"></span>
+            <span class="who"><b>This leader</b> <span class="meta"><code>contribution/9a25-a1</code> · 2 iters</span></span>
+            <span style="display:flex;gap:6px;align-items:center"><span class="rev2 pend">pending</span><span class="kebab">⋮</span></span>
+          </div>
+          <div class="detail">
+            <div class="grid">
+              <div><dt>State</dt><b>ready</b></div>
+              <div><dt>Queue</dt><b>—</b></div>
+              <div><dt>Cleanup</dt><b>retained</b></div>
+            </div>
+            <div class="gates">
+              <span class="gate"><span class="dot ok"></span> typecheck: passed</span>
+              <span class="gate"><span class="dot warn"></span> smoke: pending</span>
+            </div>
+            <div class="actions">
+              <button class="btn pri sm">Approve</button>
+              <button class="btn sm">Reject</button>
+              <button class="btn sm">Enqueue</button>
+              <button class="btn ghost sm">Discard</button>
+              <button class="btn ghost sm">New iteration</button>
+            </div>
+          </div>
+          <div class="row">
+            <span class="dot ok"></span>
+            <span class="who"><b>Leader 62108a2c</b> <span class="meta"><code>9a25-b2</code> · integrated</span></span>
+            <span style="display:flex;gap:6px;align-items:center"><span class="rev2 appr">approved</span><span class="kebab">⋮</span></span>
+          </div>
+          <div class="row dis">
+            <span class="dot"></span>
+            <span class="who"><b>Leader 4c05c257</b> <span class="meta"><code>9a25-d4</code> · discarded</span></span>
+            <span style="display:flex;gap:6px;align-items:center"><span class="rev2 rej">rejected</span><span class="kebab">⋮</span></span>
+          </div>
+        </div>
+        <div class="section-hint">Promote to <code>main</code> unlocks once every contribution is integrated or discarded and the combined review is approved.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VIEW 3 -->
+  <p class="stage-label" style="margin-top:20px"><span class="pill-n">3</span> <b>Big picture</b> — same modal, “All lineages” tab · view every lineage &amp; map this leader onto an active one</p>
+  <div class="modal" style="max-width:640px">
+    <div class="modal-head">
+      <h3>Lineages</h3>
+      <span class="chip">project · 2 active</span>
+      <span class="spacer"></span>
+      <button class="btn ghost sm">+ New lineage</button>
+      <button class="btn ghost sm">✕</button>
+    </div>
+    <div class="tabs">
+      <div class="tab">This lineage</div>
+      <div class="tab active">All lineages <small>· 2</small></div>
+    </div>
+    <div class="modal-body">
+      <div class="lin-list">
+        <div class="lin-item current">
+          <span class="dot run"></span>
+          <span><b><code>9a25f88f…e0</code></b> <span class="cur-tag">current</span><br><span class="m">4 contributions · 3 leaders · → main</span></span>
+          <span class="chip">integrating</span>
+          <button class="btn ghost sm">Open</button>
+        </div>
+        <div class="lin-item">
+          <span class="dot ok"></span>
+          <span><b><code>7b301c4a…9f</code></b><br><span class="m">2 contributions · 2 leaders · → release/2.1</span></span>
+          <span class="chip">integrated</span>
+          <button class="btn ghost sm">Open</button>
+        </div>
+      </div>
+
+      <div class="map">
+        <h4>Map this leader to an active lineage</h4>
+        <p>Combine this leader’s contribution into an existing lineage instead of its own.</p>
+        <div class="map-row">
+          <div class="fake-select"><span>Select an active lineage…&nbsp; <code>7b301c4a…9f</code></span><span>▾</span></div>
+          <button class="btn pri sm">Map</button>
+        </div>
+        <p class="note">⚠ Only possible before this leader’s first worktree run — assignment locks at provisioning (existing rule).</p>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

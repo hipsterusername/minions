@@ -1,0 +1,162 @@
+/*
+ * Lineage visualization — progressive disclosure (3 views).
+ *
+ * View 1 (in-action): `.lin-strip`   — slim strip inside the leader node.
+ * View 2 (this lineage): `.lin-modal` + `.lin2-*` — expanded detail.
+ * View 3 (big picture): `.lin-modal` + `.lin3-*` — all lineages + map.
+ *
+ * This file is the shared class contract consumed by LineageNodeStrip.tsx
+ * and LineageModal.tsx. Colours come from the app theme tokens.
+ */
+
+/* ============================================================= shared bits */
+.lin-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); flex: none; display: inline-block; }
+.lin-dot--ok { background: var(--status-success); }
+.lin-dot--run { background: var(--status-running); }
+.lin-dot--warn { background: var(--status-warning); }
+.lin-dot--idle { background: var(--status-idle); }
+.lin-dot--err { background: var(--status-error); }
+
+.lin-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px;
+  font-size: 11px; border: 1px solid var(--border-default); background: var(--bg-elevated); color: var(--text-secondary); }
+.lin-chip b { color: var(--text-primary); font-weight: 600; }
+
+.lin-btn { font: inherit; font-size: 11px; padding: 4px 9px; border-radius: 6px; border: 1px solid var(--border-default);
+  background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; }
+.lin-btn:disabled { cursor: not-allowed; opacity: .45; }
+.lin-btn--sm { padding: 2px 7px; font-size: 10.5px; }
+.lin-btn--primary { background: linear-gradient(135deg, var(--accent), var(--accent-dark)); border-color: transparent; color: #1a1206; font-weight: 600; }
+.lin-btn--ghost { background: transparent; color: var(--text-secondary); }
+.lin-btn--approve { border-color: color-mix(in srgb, var(--status-success) 45%, transparent); color: var(--status-success); background: transparent; }
+.lin-btn--reject { border-color: color-mix(in srgb, var(--status-error) 45%, transparent); color: var(--status-error); background: transparent; }
+
+.lin-rev { padding: 1px 6px; border-radius: 999px; font-size: 10px; border: 1px solid var(--border-default); color: var(--text-muted); white-space: nowrap; }
+.lin-rev--approved { color: var(--status-success); border-color: color-mix(in srgb, var(--status-success) 45%, transparent); }
+.lin-rev--rejected { color: var(--status-error); border-color: color-mix(in srgb, var(--status-error) 45%, transparent); }
+.lin-rev--pending { color: var(--text-muted); }
+
+/* ============================================================= VIEW 1: strip */
+.lin-strip { display: grid; gap: 7px; padding: 8px 9px; border: 1px solid var(--border-default);
+  border-radius: 8px; background: var(--bg-secondary); }
+.lin-strip__head { display: flex; align-items: center; gap: 7px; font-size: 11.5px; }
+.lin-strip__eyebrow { font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); }
+.lin-strip__id { font-family: var(--font-mono, ui-monospace, monospace); color: var(--text-primary); }
+.lin-strip__rev { margin-left: auto; }
+.lin-strip__expand { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 13px; padding: 0 2px; line-height: 1; }
+.lin-strip__actions { display: flex; gap: 6px; }
+.lin-strip__actions .lin-btn { flex: 1; text-align: center; }
+.lin-strip__foot { font-size: 10px; color: var(--text-dim); }
+
+/* ============================================================= VIEW 2+3: modal */
+.lin-modal__backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center;
+  background: rgba(4, 7, 14, .62); padding: 24px; }
+.lin-modal { width: min(680px, 96vw); max-height: 88vh; overflow: hidden; display: flex; flex-direction: column;
+  background: var(--bg-surface); border: 1px solid var(--border-hover); border-radius: 11px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .5); }
+.lin-modal__head { display: flex; align-items: center; gap: 10px; padding: 11px 13px;
+  border-bottom: 1px solid var(--border-default); background: var(--bg-secondary); }
+.lin-modal__head h3 { margin: 0; font-size: 13px; }
+.lin-modal__spacer { flex: 1; }
+.lin-modal__close { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 15px; line-height: 1; }
+.lin-modal__tabs { display: flex; gap: 4px; padding: 9px 13px 0; background: var(--bg-secondary); }
+.lin-modal__tab { font: inherit; font-size: 11px; padding: 6px 11px; border-radius: 7px 7px 0 0;
+  border: 1px solid transparent; background: none; color: var(--text-secondary); cursor: pointer; }
+.lin-modal__tab--active { background: var(--bg-surface); border-color: var(--border-default);
+  border-bottom-color: var(--bg-surface); color: var(--text-primary); }
+.lin-modal__tab small { color: var(--text-dim); }
+.lin-modal__body { padding: 13px; display: grid; gap: 11px; overflow-y: auto; }
+
+/* -------- View 2: this lineage -------- */
+.lin2-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.lin2-seg { display: flex; height: 6px; border-radius: 999px; overflow: hidden; background: var(--bg-elevated); }
+.lin2-seg i { display: block; height: 100%; }
+.lin2-seg .i { background: var(--status-success); }
+.lin2-seg .p { background: var(--status-warning); }
+.lin2-seg .d { background: var(--border-hover); }
+.lin2-legend { display: flex; gap: 12px; font-size: 10.5px; color: var(--text-muted); }
+.lin2-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.lin2-sq { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.lin2-rail { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.lin2-stage { display: flex; align-items: center; gap: 7px; padding: 6px 9px; border: 1px solid var(--border-default);
+  border-radius: 7px; background: var(--bg-elevated); }
+.lin2-stage small { color: var(--text-muted); font-size: 10px; display: block; }
+.lin2-stage--target { border-color: color-mix(in srgb, var(--status-success) 55%, transparent); }
+.lin2-arrow { color: var(--text-dim); font-size: 13px; }
+.lin2-rows { display: grid; gap: 5px; }
+.lin2-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 9px; padding: 7px 9px;
+  border: 1px solid var(--border-default); border-radius: 7px; background: var(--bg-elevated); width: 100%;
+  text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.lin2-row--selected { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.lin2-row--discarded { opacity: .5; }
+.lin2-row__who { min-width: 0; }
+.lin2-row__who b { font-size: 12px; }
+.lin2-row__meta { color: var(--text-muted); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.lin2-row__end { display: flex; gap: 6px; align-items: center; }
+.lin2-kebab { color: var(--text-muted); font-size: 15px; line-height: 1; }
+.lin2-detail { border: 1px solid var(--border-default); border-radius: 7px; background: var(--bg-secondary); padding: 9px; display: grid; gap: 8px; }
+.lin2-detail__grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; font-size: 11px; }
+.lin2-detail__grid div { background: var(--bg-elevated); border-radius: 5px; padding: 6px 8px; }
+.lin2-detail__grid dt { color: var(--text-muted); font-size: 10px; margin-bottom: 2px; }
+.lin2-gates { display: flex; gap: 6px; flex-wrap: wrap; font-size: 10.5px; margin: 0; padding: 0; list-style: none; }
+.lin2-gate { display: inline-flex; gap: 5px; align-items: center; padding: 2px 7px; border-radius: 999px;
+  border: 1px solid var(--border-default); background: var(--bg-elevated); color: var(--text-secondary); }
+.lin2-gate[data-status="failed"] { color: var(--status-error); }
+.lin2-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.lin2-alert { padding: 7px 9px; border-radius: 6px; background: var(--danger-bg); color: var(--status-error); font-size: 11px; }
+.lin2-hint { font-size: 10.5px; color: var(--text-dim); }
+
+/* -------- View 3: all lineages + map -------- */
+.lin3-list { display: grid; gap: 6px; }
+.lin3-item { display: grid; grid-template-columns: auto 1fr auto auto; gap: 9px; align-items: center; padding: 8px 10px;
+  border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-elevated); }
+.lin3-item--current { border-color: var(--accent); }
+.lin3-item__id { font-family: var(--font-mono, ui-monospace, monospace); color: var(--text-primary); }
+.lin3-item__meta { color: var(--text-muted); font-size: 10.5px; }
+.lin3-item__cur { font-size: 9.5px; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 999px; padding: 1px 6px; }
+.lin3-map { padding: 11px; border: 1px dashed var(--border-hover); border-radius: 9px; background: var(--bg-secondary); }
+.lin3-map h4 { margin: 0 0 3px; font-size: 11.5px; }
+.lin3-map p { margin: 0 0 9px; font-size: 10.5px; color: var(--text-muted); }
+.lin3-map__row { display: flex; gap: 8px; align-items: center; }
+.lin3-map select { flex: 1; padding: 7px 9px; border-radius: 7px; border: 1px solid var(--border-default);
+  background: var(--bg-elevated); color: var(--text-primary); font: inherit; font-size: 11px; }
+.lin3-map__note { font-size: 10px; color: var(--text-dim); margin-top: 8px; }
+.lin3-empty { color: var(--text-muted); font-size: 11px; padding: 8px; }
+
+/* ---- host overrides: the strip sits inside the dense config footer ---- */
+.integration-controls--canvas .lin-strip,
+.integration-controls--mobile .lin-strip { background: var(--bg-primary); }
+
+/* ============================================================= narrow / touch
+ * On phones (and the mobile review tab) the centred desktop dialog becomes a
+ * full-width bottom sheet and every control grows to a comfortable tap target.
+ * Viewport-driven so a narrow desktop window gets the same responsive layout. */
+@media (max-width: 640px) {
+  .lin-modal__backdrop { padding: 0; place-items: end stretch; }
+  .lin-modal { width: 100%; max-width: 100%; max-height: 92vh; border-radius: 14px 14px 0 0; }
+  .lin-modal__head { padding: 14px 16px; }
+  .lin-modal__head h3 { font-size: 15px; }
+  .lin-modal__close { font-size: 22px; padding: 4px 10px; }
+  .lin-modal__tabs { padding: 10px 14px 0; }
+  .lin-modal__tab { font-size: 13px; padding: 10px 15px; }
+  .lin-modal__body { padding: 14px; gap: 13px; }
+
+  /* Touch targets: buttons and selects reach the ~40px comfortable minimum. */
+  .lin-btn { font-size: 13px; padding: 9px 14px; min-height: 40px; }
+  .lin-btn--sm { font-size: 12px; padding: 8px 12px; min-height: 36px; }
+  .lin2-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .lin2-actions .lin-btn { width: 100%; }
+  .lin2-detail__grid { grid-template-columns: 1fr; }
+  .lin2-row { padding: 11px 12px; }
+  .lin2-row__who b { font-size: 14px; }
+  .lin3-item { padding: 11px 12px; }
+  .lin3-map__row { flex-wrap: wrap; }
+  .lin3-map select { flex: 1 1 100%; padding: 11px 12px; font-size: 13px; }
+  .lin3-map__row .lin-btn { width: 100%; }
+
+  /* Strip: larger head text and an easier expand hit area. */
+  .lin-strip { padding: 11px 12px; }
+  .lin-strip__head { font-size: 13px; }
+  .lin-strip__expand { font-size: 19px; padding: 6px 8px; margin: -6px -4px -6px 0; }
+  .lin-strip__actions .lin-btn { min-height: 40px; }
+}
