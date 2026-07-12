@@ -1,7 +1,7 @@
 # Leader lifecycle and contribution-lineage completion plan
 
-**Status:** Canonical workflow merged; compatibility removal and final acceptance remain  
-**Merged checkpoint:** `3cc9748`  
+**Status:** Canonical workflow merged; compatibility removal and final acceptance remain
+**Merged checkpoint:** `3cc9748`
 **Source plan:** [`unified-work-item-lifecycle.md`](./unified-work-item-lifecycle.md)
 
 ## Executive summary

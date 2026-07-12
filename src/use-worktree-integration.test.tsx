@@ -67,7 +67,7 @@ describe("worktree integration client state", () => {
 describe("WorktreeIntegrationControls", () => {
   it("visualizes each leader contribution flowing into the combined lineage and target", () => {
     render(<WorktreeIntegrationControls lineage={snapshot({ contributions: [
-      snapshot().contributions[0]!,
+      { ...snapshot().contributions[0]!, state: "integrated" },
       { ...snapshot().contributions[0]!, id: "contrib-2", workItemId: "work-2",
         originatingRunKey: "run-2", runKeys: ["run-2", "run-3"],
         branchName: "minions/contribution/two", state: "discarded" },
@@ -77,7 +77,7 @@ describe("WorktreeIntegrationControls", () => {
     expect(map).toHaveTextContent("Leader work-2");
     expect(map).toHaveTextContent("Combined lineage");
     expect(map).toHaveTextContent("Target");
-    expect(map).toHaveTextContent("1 included · 1 discarded");
+    expect(map).toHaveTextContent("1 integrated · 0 pending · 1 discarded");
     expect(map).toHaveTextContent("Set before the first worktree run");
   });
 

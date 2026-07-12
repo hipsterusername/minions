@@ -8,7 +8,9 @@ function LineageMap({ lineage, selectedContributionId }: {
   lineage: WorktreeLineageSnapshot;
   selectedContributionId?: string | null;
 }) {
-  const activeContributions = lineage.contributions.filter((entry) => entry.state !== "discarded");
+  const integratedCount = lineage.contributions.filter((entry) => entry.state === "integrated").length;
+  const discardedCount = lineage.contributions.filter((entry) => entry.state === "discarded").length;
+  const pendingCount = lineage.contributions.length - integratedCount - discardedCount;
   return <section className="lineage-map" aria-label="Combined lineage map">
     <header className="lineage-map__header">
       <div><span>Lineage</span> <code title={lineage.id}>{short(lineage.id, 16)}</code></div>
@@ -40,7 +42,7 @@ function LineageMap({ lineage, selectedContributionId }: {
           <span>{lineage.integrationState}</span></div>
         <code title={lineage.integrationRef}>{lineage.integrationRef}</code>
         <div>Head: {short(lineage.integrationHeadSha ?? lineage.baseSha)}</div>
-        <div>{activeContributions.length} included · {lineage.contributions.length - activeContributions.length} discarded</div>
+        <div>{integratedCount} integrated · {pendingCount} pending · {discardedCount} discarded</div>
       </article>
       <div className="lineage-map__arrow" aria-hidden>→</div>
       <article className="lineage-map__node lineage-map__node--target" data-state={lineage.status}>
