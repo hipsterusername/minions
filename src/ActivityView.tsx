@@ -523,6 +523,20 @@ export function ActivityView({
     ? nodes.find((node) => node.id === launchNodeId && node.type === "leader")
     : undefined;
 
+  useEffect(() => {
+    if (!launchNode) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setLaunchNodeId(null);
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [launchNode]);
+
   function openLaunchExperience() {
     const nodeId = onLaunchLeader();
     if (typeof nodeId === "string") setLaunchNodeId(nodeId);
@@ -726,15 +740,28 @@ export function ActivityView({
       )}
 
       {launchNode && (
-        <div className="act-launch-backdrop" role="dialog" aria-modal="true" aria-label="Launch leader">
-          <section className="act-launch-experience">
+        <div
+          className="act-launch-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setLaunchNodeId(null);
+          }}
+        >
+          <section
+            className="act-launch-experience"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Launch leader"
+          >
             <header className="act-launch-head">
               <div>
                 <span className="act-launch-eyebrow">New canvas leader</span>
-                <h2>Launch</h2>
-                <p>Configure and start a leader without leaving Activity.</p>
+                <h2 id="activity-launch-title">What should your leader do?</h2>
+                <p>Start with the goal. Add a model, permissions, or skills only when you need them.</p>
               </div>
-              <button type="button" onClick={() => setLaunchNodeId(null)} aria-label="Close launch">×</button>
+              <button className="act-launch-close" type="button" onClick={() => setLaunchNodeId(null)} aria-label="Close launch">
+                <span aria-hidden>×</span>
+              </button>
             </header>
             <div className="act-launch-leader">
               <LeaderNodeRenderer
@@ -747,7 +774,7 @@ export function ActivityView({
               />
             </div>
             <footer className="act-launch-foot">
-              <span>This leader is already placed on the canvas.</span>
+              <span><strong>Saved to canvas</strong> · You can close this panel without losing the draft.</span>
               <button type="button" onClick={() => onOpenInCanvas(launchNode.id)}>Open on canvas</button>
             </footer>
           </section>

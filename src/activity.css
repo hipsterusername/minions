@@ -774,35 +774,49 @@
 /* Narrow viewports: inspector overlays the list. */
 .act-launch-backdrop {
   position: fixed;
-  inset: 48px 0 0;
+  inset: 0;
   z-index: 80;
   display: grid;
   place-items: center;
-  padding: 24px;
-  background: color-mix(in srgb, var(--bg-primary) 72%, transparent);
-  backdrop-filter: blur(8px);
+  padding: clamp(12px, 2.5vw, 32px);
+  background: color-mix(in srgb, var(--bg-primary) 78%, transparent);
+  backdrop-filter: blur(10px);
 }
 .act-launch-experience {
-  width: min(680px, 100%);
-  max-height: calc(100vh - 96px);
+  width: min(960px, 100%);
+  height: min(820px, calc(100dvh - clamp(24px, 5vw, 64px)));
+  min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
   border: 1px solid var(--border-default);
-  border-radius: 16px;
+  border-radius: 18px;
   background: var(--bg-surface);
   box-shadow: var(--shadow-lg);
 }
-.act-launch-head, .act-launch-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 18px; }
+.act-launch-head, .act-launch-foot { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px clamp(16px, 2.5vw, 24px); }
 .act-launch-head { border-bottom: 1px solid var(--border-default); }
-.act-launch-head h2 { margin: 2px 0; font-size: 20px; }
+.act-launch-head h2 { margin: 3px 0 2px; font-size: clamp(18px, 2vw, 23px); letter-spacing: -.02em; }
 .act-launch-head p, .act-launch-foot span { margin: 0; color: var(--text-muted); font-size: 12px; }
 .act-launch-eyebrow { color: var(--accent); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-.act-launch-head button { border: 0; background: transparent; color: var(--text-muted); font-size: 26px; }
-.act-launch-leader { min-height: 0; overflow: auto; padding: 18px; }
-.act-launch-leader > * { width: 100%; min-height: 520px; }
+.act-launch-close { width: 36px; height: 36px; flex: 0 0 36px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--text-muted); font-size: 25px; line-height: 1; cursor: pointer; }
+.act-launch-close:hover { border-color: var(--border-default); background: var(--bg-elevated); color: var(--text-primary); }
+.act-launch-leader { min-height: 0; overflow: hidden; padding: clamp(12px, 2vw, 20px); background: color-mix(in srgb, var(--bg-primary) 55%, var(--bg-surface)); }
+.act-launch-leader > * { width: 100%; height: 100% !important; min-height: 0; border-radius: 12px !important; }
 .act-launch-foot { border-top: 1px solid var(--border-default); }
-.act-launch-foot button { min-height: 36px; padding: 0 12px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-primary); color: var(--text-primary); }
+.act-launch-foot strong { color: var(--text-secondary); font-weight: 600; }
+.act-launch-foot button { min-height: 36px; padding: 0 14px; flex: 0 0 auto; border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-primary); color: var(--text-primary); cursor: pointer; }
+.act-launch-foot button:hover { border-color: var(--border-hover); background: var(--bg-elevated); }
+
+@media (max-width: 640px), (max-height: 620px) {
+  .act-launch-backdrop { padding: 0; place-items: stretch; }
+  .act-launch-experience { width: 100%; height: 100dvh; border: 0; border-radius: 0; }
+  .act-launch-head { padding-block: 12px; }
+  .act-launch-head p { display: none; }
+  .act-launch-leader { padding: 0; }
+  .act-launch-leader > * { border: 0 !important; border-radius: 0 !important; }
+  .act-launch-foot span { max-width: 60%; }
+}
 
 @media (max-width: 900px) {
   .act-main { flex: 1; border-right: 0; }

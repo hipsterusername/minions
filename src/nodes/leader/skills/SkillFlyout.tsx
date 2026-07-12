@@ -29,6 +29,7 @@ const SKILL_CATEGORIES: { key: string; label: string }[] = [
 const FLYOUT_W = 680;
 const FLYOUT_H = 480;
 const FLYOUT_GAP = 6; // px below anchor
+const VIEWPORT_GAP = 8;
 
 export function SkillFlyout({
   skillIds,
@@ -52,33 +53,47 @@ export function SkillFlyout({
   onClose: () => void;
 }) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [layout, setLayout] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+    compact: boolean;
+  } | null>(null);
 
   useLayoutEffect(() => {
     if (!open) {
-      setPos(null);
+      setLayout(null);
       return;
     }
-    const el = anchorRef?.current;
-    if (!el) {
-      setPos(null);
-      return;
-    }
+    const positionFlyout = () => {
+      const rect = anchorRef?.current?.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const compact = vw < 720;
+      const width = compact ? vw : Math.min(FLYOUT_W, vw - VIEWPORT_GAP * 2);
+      const height = compact
+        ? Math.min(620, Math.max(320, vh - VIEWPORT_GAP))
+        : Math.min(FLYOUT_H, vh - VIEWPORT_GAP * 2);
 
-    const rect = el.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+      if (compact || !rect) {
+        setLayout({ top: vh - height, left: 0, width, height, compact });
+        return;
+      }
 
-    // Prefer opening below the anchor; flip above if it would clip
-    let top = rect.bottom + FLYOUT_GAP;
-    if (top + FLYOUT_H > vh - 8) top = rect.top - FLYOUT_H - FLYOUT_GAP;
+      let top = rect.bottom + FLYOUT_GAP;
+      if (top + height > vh - VIEWPORT_GAP) top = rect.top - height - FLYOUT_GAP;
+      top = Math.max(VIEWPORT_GAP, Math.min(top, vh - height - VIEWPORT_GAP));
+      const left = Math.max(
+        VIEWPORT_GAP,
+        Math.min(rect.left, vw - width - VIEWPORT_GAP),
+      );
+      setLayout({ top, left, width, height, compact });
+    };
 
-    // Left-align with anchor, clamp to viewport
-    let left = rect.left;
-    if (left + FLYOUT_W > vw - 8) left = vw - FLYOUT_W - 8;
-    if (left < 8) left = 8;
-
-    setPos({ top, left });
+    positionFlyout();
+    window.addEventListener("resize", positionFlyout);
+    return () => window.removeEventListener("resize", positionFlyout);
   }, [open, anchorRef]);
 
   const allSkills = getPickableSkills();
@@ -129,17 +144,20 @@ export function SkillFlyout({
 
       {/* Wide split-panel modal — anchored below the skills button */}
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Choose skills"
         onMouseDown={(e) => e.stopPropagation()}
         style={{
           position: "fixed",
-          top: pos?.top ?? 120,
-          left: pos?.left ?? 120,
+          top: layout?.top ?? VIEWPORT_GAP,
+          left: layout?.left ?? VIEWPORT_GAP,
           zIndex: 9999,
-          width: FLYOUT_W,
-          height: FLYOUT_H,
+          width: layout?.width ?? `calc(100vw - ${VIEWPORT_GAP * 2}px)`,
+          height: layout?.height ?? `calc(100vh - ${VIEWPORT_GAP * 2}px)`,
           background: "var(--bg-secondary)",
           border: "1px solid var(--border-default)",
-          borderRadius: 10,
+          borderRadius: layout?.compact ? "14px 14px 0 0" : 10,
           boxShadow: "var(--shadow-lg)",
           display: "flex",
           flexDirection: "column",
@@ -204,13 +222,20 @@ export function SkillFlyout({
         </div>
 
         {/* ── Body: left browser + right config ── */}
-        <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+        <div style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: layout?.compact ? "column" : "row",
+          minHeight: 0,
+        }}>
           {/* LEFT PANEL — skill browser */}
           <div
             style={{
-              width: 220,
+              width: layout?.compact ? "100%" : 220,
+              height: layout?.compact ? "42%" : "auto",
               flexShrink: 0,
-              borderRight: "1px solid var(--border-default)",
+              borderRight: layout?.compact ? "none" : "1px solid var(--border-default)",
+              borderBottom: layout?.compact ? "1px solid var(--border-default)" : "none",
               display: "flex",
               flexDirection: "column",
               background: "var(--bg-primary)",
