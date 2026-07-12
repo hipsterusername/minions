@@ -97,15 +97,15 @@ describe("mapPermission", () => {
   it.each([
     [
       "bypassPermissions" as const,
-      { approvalPolicy: "never", sandboxMode: "workspace-write", unsupported: false },
+      { approvalPolicy: "never", sandboxMode: "danger-full-access", unsupported: false },
     ],
     [
       "auto" as const,
-      { approvalPolicy: "on-failure", sandboxMode: "workspace-write", unsupported: false },
+      { approvalPolicy: "on-failure", sandboxMode: "danger-full-access", unsupported: false },
     ],
     [
       "default" as const,
-      { approvalPolicy: "on-request", sandboxMode: "workspace-write", unsupported: false },
+      { approvalPolicy: "on-request", sandboxMode: "danger-full-access", unsupported: false },
     ],
     [
       "plan" as const,
@@ -115,10 +115,10 @@ describe("mapPermission", () => {
     expect(mapPermission(mode)).toEqual(expected);
   });
 
-  it("treats undefined as auto — returns on-failure / workspace-write / unsupported:false", () => {
+  it("treats undefined as auto with Claude-equivalent filesystem access", () => {
     expect(mapPermission(undefined)).toEqual({
       approvalPolicy: "on-failure",
-      sandboxMode: "workspace-write",
+      sandboxMode: "danger-full-access",
       unsupported: false,
     });
   });
@@ -148,17 +148,17 @@ describe("mapSandboxMode", () => {
     ["bypassPermissions" as const],
     ["auto" as const],
     ["default" as const],
-  ])("returns 'workspace-write' when permissionMode is '%s'", (mode) => {
+  ])("returns 'danger-full-access' when permissionMode is '%s'", (mode) => {
     expect(mapSandboxMode({ worktreeIsolation: false, permissionMode: mode })).toBe(
-      "workspace-write",
+      "danger-full-access",
     );
     expect(mapSandboxMode({ worktreeIsolation: true, permissionMode: mode })).toBe(
-      "workspace-write",
+      "danger-full-access",
     );
   });
 
-  it("returns 'workspace-write' when permissionMode is undefined", () => {
-    expect(mapSandboxMode({ worktreeIsolation: false })).toBe("workspace-write");
-    expect(mapSandboxMode({ worktreeIsolation: true })).toBe("workspace-write");
+  it("returns 'danger-full-access' when permissionMode is undefined", () => {
+    expect(mapSandboxMode({ worktreeIsolation: false })).toBe("danger-full-access");
+    expect(mapSandboxMode({ worktreeIsolation: true })).toBe("danger-full-access");
   });
 });

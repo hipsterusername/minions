@@ -776,7 +776,7 @@ Explicitly **not** required for MVP (Phase E):
 
    | Minions `permissionMode` | Codex `approvalPolicy` | Codex `sandboxMode` |
    |---|---|---|
-   | `bypassPermissions` | `never` | `workspace-write` |
-   | `auto` (default) | `on-failure` | `workspace-write` |
-   | `default` | `on-request` | `workspace-write` |
+   | `bypassPermissions` | `never` | `danger-full-access` |
+   | `auto` (default) | `on-failure` | `danger-full-access` |
+   | `default` | `on-request` | `danger-full-access` |
    | `plan` | unsupported (UI disables for Codex in Phase E) | n/a |

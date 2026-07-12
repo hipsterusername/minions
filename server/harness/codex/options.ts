@@ -27,23 +27,23 @@ export interface MappedPermission {
  *
  * | permissionMode    | approvalPolicy | sandboxMode     | unsupported |
  * |-------------------|----------------|-----------------|-------------|
- * | bypassPermissions | never          | workspace-write | false       |
- * | auto              | on-failure     | workspace-write | false       |
- * | default           | on-request     | workspace-write | false       |
+ * | bypassPermissions | never          | danger-full-access | false    |
+ * | auto              | on-failure     | danger-full-access | false    |
+ * | default           | on-request     | danger-full-access | false    |
  * | plan              | on-request     | read-only       | true        |
- * | undefined         | on-failure     | workspace-write | false       |
+ * | undefined         | on-failure     | danger-full-access | false    |
  */
 export function mapPermission(mode: NormalizedPermissionMode | undefined): MappedPermission {
   switch (mode) {
     case "bypassPermissions":
-      return { approvalPolicy: "never", sandboxMode: "workspace-write", unsupported: false };
+      return { approvalPolicy: "never", sandboxMode: "danger-full-access", unsupported: false };
     case "default":
-      return { approvalPolicy: "on-request", sandboxMode: "workspace-write", unsupported: false };
+      return { approvalPolicy: "on-request", sandboxMode: "danger-full-access", unsupported: false };
     case "plan":
       return { approvalPolicy: "on-request", sandboxMode: "read-only", unsupported: true };
     case "auto":
     case undefined:
-      return { approvalPolicy: "on-failure", sandboxMode: "workspace-write", unsupported: false };
+      return { approvalPolicy: "on-failure", sandboxMode: "danger-full-access", unsupported: false };
   }
 }
 
@@ -65,12 +65,13 @@ export function mapReasoningEffort(effort: "low" | "medium" | "high"): ModelReas
  * Determine the Codex SandboxMode for a given set of session options.
  *
  * - plan mode → "read-only" (agent may read only, not write)
- * - all other modes → "workspace-write" (full write access in the worktree)
+ * - all other modes → "danger-full-access", matching Claude's filesystem
+ *   reach while preserving Codex's approval policy for command execution
  *
- * The worktreeIsolation parameter is a forward-compatibility hook. When
- * worktree isolation is active the session already runs inside an isolated
- * git worktree, so "workspace-write" is safe. The value is reserved for
- * future use and is not consulted in the MVP mapping.
+ * The worktreeIsolation parameter is a forward-compatibility hook. Isolation
+ * still selects the session cwd and branch, but—like Claude—it does not impose
+ * an additional OS-level filesystem boundary. The value is therefore not
+ * consulted by the current mapping.
  */
 export function mapSandboxMode(opts: {
   worktreeIsolation: boolean;
@@ -79,5 +80,5 @@ export function mapSandboxMode(opts: {
   if (opts.permissionMode === "plan") {
     return "read-only";
   }
-  return "workspace-write";
+  return "danger-full-access";
 }

@@ -456,9 +456,9 @@ describe("CodexHarness permission mode", () => {
       approvalPolicy?: string;
       sandboxMode?: string;
     };
-    // bypassPermissions → approvalPolicy "never" + sandboxMode "workspace-write"
+    // bypassPermissions mirrors Claude: no approval prompts or filesystem jail.
     expect(startThreadOpts.approvalPolicy).toBe("never");
-    expect(startThreadOpts.sandboxMode).toBe("workspace-write");
+    expect(startThreadOpts.sandboxMode).toBe("danger-full-access");
   });
 
   it("uses the auto fallback when permissionMode is omitted", async () => {
@@ -469,7 +469,7 @@ describe("CodexHarness permission mode", () => {
       sandboxMode?: string;
     };
     expect(startThreadOpts.approvalPolicy).toBe("on-failure");
-    expect(startThreadOpts.sandboxMode).toBe("workspace-write");
+    expect(startThreadOpts.sandboxMode).toBe("danger-full-access");
   });
 
   it("rejects plan mode with a single done(error) and never opens a thread", async () => {
