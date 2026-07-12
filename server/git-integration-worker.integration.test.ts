@@ -16,6 +16,9 @@ function repository(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "minions-git-worker-")); roots.push(root);
   git(root, "init", "-b", "main"); git(root, "config", "user.name", "Minions Test");
   git(root, "config", "user.email", "minions@example.test");
+  // Mirror production: worktree dirs live under an ignored path so they never
+  // register as uncommitted changes in the target checkout's status.
+  fs.writeFileSync(path.join(root, ".gitignore"), ".canvas-worktrees/\n");
   fs.writeFileSync(path.join(root, "base.txt"), "base\n"); git(root, "add", ".");
   git(root, "commit", "-m", "initial"); return root;
 }

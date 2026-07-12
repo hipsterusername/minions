@@ -31,8 +31,11 @@ describe.runIf(canSpawnGit())("worktree lifecycle against a real temporary Git r
     git(root, "init", "-b", "main");
     git(root, "config", "user.email", "minions-test@example.invalid");
     git(root, "config", "user.name", "Minions Test");
+    // Mirror production: worktree dirs live under an ignored path so they never
+    // register as uncommitted changes in the main checkout's status.
+    fs.writeFileSync(path.join(root, ".gitignore"), ".canvas-worktrees/\n");
     fs.writeFileSync(path.join(root, "README.md"), "before\n");
-    git(root, "add", "README.md");
+    git(root, "add", ".gitignore", "README.md");
     git(root, "commit", "-m", "initial");
 
     const info = await createWorktree(root, "leader-integration");
