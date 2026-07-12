@@ -33,7 +33,14 @@ import {
   type TextAttachment,
 } from "./attachments.ts";
 import type { MobileSessionInfo } from "./mobile-selectors.ts";
-import { sessionDisplayTitle, sessionRoleLabel } from "./mobile-selectors.ts";
+import {
+  activeMinionSummary,
+  sessionDisplayTitle,
+  sessionRoleLabel,
+} from "./mobile-selectors.ts";
+
+/** Statuses where the leader is actively doing work right now. */
+const LEADER_LIVE_STATUSES = new Set(["running", "creating", "waiting"]);
 
 interface SessionChatScreenProps {
   sessionKey: string;
@@ -94,6 +101,51 @@ function SessionCallout({ session }: { session?: MobileSessionInfo | undefined }
       </div>
       <strong>{cost} · {metric}</strong>
       {session.lastActivity ? <p>{session.lastActivity}</p> : null}
+    </section>
+  );
+}
+
+/**
+ * Compact, always-visible activity strip for a leader session. Unlike the
+ * chat-feed callout it stays pinned under the tab bar, so the leader's live
+ * status and its active-minion roster remain legible on the Plan and Dashboard
+ * tabs — not just while reading the conversation.
+ */
+function LeaderActivityStrip({ session }: { session: MobileSessionInfo }) {
+  const summary = activeMinionSummary(session);
+  const live = LEADER_LIVE_STATUSES.has(session.status);
+  return (
+    <section
+      className="mob-leader-strip"
+      data-status={session.status}
+      data-live={live ? "true" : "false"}
+      aria-label="Leader activity"
+    >
+      <div className="mob-leader-strip-row">
+        <span
+          className={`mob-status-pill mob-status-pill--${session.status}`}
+          data-live={live ? "true" : "false"}
+        >
+          {session.status}
+        </span>
+        {summary.total > 0 ? (
+          <span className="mob-leader-strip-minions" aria-label="Active minions summary">
+            {summary.running > 0 ? (
+              <span data-tone="running" data-live="true">
+                <i aria-hidden="true" />
+                {summary.running} running
+              </span>
+            ) : null}
+            {summary.blocked > 0 ? <span data-tone="blocked">{summary.blocked} blocked</span> : null}
+            {summary.planned > 0 ? <span data-tone="planned">{summary.planned} queued</span> : null}
+          </span>
+        ) : (
+          <span className="mob-leader-strip-empty">No active minions</span>
+        )}
+      </div>
+      {session.lastActivity ? (
+        <p className="mob-leader-strip-activity">{session.lastActivity}</p>
+      ) : null}
     </section>
   );
 }
@@ -543,6 +595,10 @@ export function SessionChatScreen({
   const taskPlan = session?.role === "leader" ? (session.taskPlan ?? []) : [];
   const isLeader = session?.role === "leader";
   const hasDashboard = renderState.components.length > 0;
+  const planTotal = taskPlan.length || activeMinions.length;
+  const liveWork =
+    activeMinions.filter((minion) => isCurrentTask(minion.status)).length
+    + taskPlan.filter((task) => isCurrentTask(task.status)).length;
 
   return (
     <main className="mob-chat" aria-label="Session chat">
@@ -580,8 +636,8 @@ export function SessionChatScreen({
             onClick={() => setActiveTab("plan")}
           >
             Plan
-            {taskPlan.length > 0 || activeMinions.length > 0 ? (
-              <span>{taskPlan.length || activeMinions.length}</span>
+            {planTotal > 0 ? (
+              <span data-live={liveWork > 0 ? "true" : "false"}>{planTotal}</span>
             ) : null}
           </button>
           <button
@@ -596,10 +652,12 @@ export function SessionChatScreen({
         </nav>
       ) : null}
 
+      {isLeader && session ? <LeaderActivityStrip session={session} /> : null}
+
       {activeTab === "chat" ? (
         <>
           <div className="mob-chat-feed" ref={feedRef}>
-            <SessionCallout session={session} />
+            {isLeader ? null : <SessionCallout session={session} />}
             {state.messages.length === 0 && !state.streamingText ? (
               <div className="mob-empty mob-empty--chat">
                 <h2>Ready</h2>

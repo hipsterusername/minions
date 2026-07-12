@@ -5,6 +5,9 @@ import { applySessionEndedForMinion } from "./task-lifecycle.ts";
 import { persistTaskState } from "./session-persist.ts";
 import { getAgentTypeOrDefault } from "./agents/index.ts";
 import { cancelQueuedWaitResume } from "./wait-resume.ts";
+import { commitReviewLifecycle, finishRun } from "./session-review-lifecycle.ts";
+import type { WorkItemRuntimeLifecycle } from "./session-host-types.ts";
+import { notifyRuntimeTerminal } from "./session-host-identity.ts";
 
 export type SessionTerminateReason = "stop" | "close" | "remove" | "abort";
 
@@ -16,6 +19,28 @@ export interface SessionTerminateDeps {
   wakeWaitingLeaderIfAllChildrenTerminal?: (leaderKey: string) => void;
   /** Terminate another live session by key (used by leader child cleanup). */
   terminateSession?: (sessionKey: string, reason: SessionTerminateReason) => void;
+  workItemLifecycle?: WorkItemRuntimeLifecycle;
+  cleanupLiveEditRun?: (runKey: string) => void;
+}
+
+function hasTerminalReviewOutcome(host: SessionHost): boolean {
+  const lifecycle = host.reviewLifecycle;
+  return lifecycle.terminalReason !== null || [
+    "completion_to_review",
+    "error_to_review",
+    "interrupted_to_review",
+  ].includes(lifecycle.reviewState);
+}
+
+function hasOpenWaitEvidence(host: SessionHost, deps: SessionTerminateDeps | null): boolean {
+  if (host.reviewLifecycle.reviewState === "decision_needed" || host.waitTimerId !== null
+    || Boolean(host.taskState?.pendingWait)) return true;
+  let blocked = false;
+  deps?.forEachLeaderTaskState?.((_leaderKey, state) => {
+    if ([...state.tasks.values()].some((task) =>
+      task.minionSessionKey === host.id && task.status === "blocked")) blocked = true;
+  });
+  return blocked;
 }
 
 export async function terminateSessionHost(
@@ -23,6 +48,11 @@ export async function terminateSessionHost(
   deps: SessionTerminateDeps | null,
   reason: SessionTerminateReason,
 ): Promise<void> {
+  // Capture openness before teardown changes the runtime status. Termination
+  // may stop an already-idle host, but it must only seal a genuinely live run.
+  const shouldSealInterrupted = !hasTerminalReviewOutcome(host)
+    && (host.status === "running" || (Boolean(host.workItemId)
+      && !host.runtimeTerminalNotified && hasOpenWaitEvidence(host, deps)));
   const hadWaitTimer = host.waitTimerId !== null;
   host.clearWaitTimer();
   cancelQueuedWaitResume(host);
@@ -49,9 +79,21 @@ export async function terminateSessionHost(
     host.runControl?.abort();
   }
   host.abortController.abort();
+  // Abort paths deliberately leave claims to the harness stream finalizer.
+  // Merely signalling abort is not proof that an in-flight mutation process
+  // has stopped. Close paths release below only after close() acknowledges.
   host.status = "stopped";
   host.eventStream = null;
   host.runControl = null;
+  if (reason !== "remove" && deps && shouldSealInterrupted) {
+    commitReviewLifecycle(host, deps.bus, finishRun(host.reviewLifecycle, {
+      reason: reason === "stop" ? "stop" : "abort",
+      at: Date.now(),
+    }));
+    notifyRuntimeTerminal(host, deps.workItemLifecycle, {
+      outcome: "interrupted", finalReportId: null, finalReport: null, at: Date.now(),
+    });
+  }
   host.persist();
 
   const event = {
@@ -105,5 +147,8 @@ export async function terminateSessionHost(
   // Await orderly harness shutdown (close releases SDK resources such as
   // stdio handles or HTTP connections). All synchronous teardown above has
   // already completed at this point, so awaiting here is safe.
-  if (closePromise !== undefined) await closePromise;
+  if (closePromise !== undefined) {
+    await closePromise;
+    deps?.cleanupLiveEditRun?.(host.runKey);
+  }
 }

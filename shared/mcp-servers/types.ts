@@ -24,33 +24,64 @@ const baseSchema = z.object({
       "id must start with a lowercase letter or digit and contain only [a-z0-9_-]",
   }),
   /** Human-readable display name shown in the UI. */
-  name: z.string().min(1),
+  name: z.string().min(1).max(160),
   /** Optional description shown in the browser panel. */
-  description: z.string().optional(),
+  description: z.string().max(2000).optional(),
   /**
    * Optional list of tool names this server exposes. Each name is
    * formatted as `mcp__<id>__<toolName>` and added to allowedTools.
    */
-  toolNames: z.array(z.string().min(1)).optional(),
+  toolNames: z.array(z.string().min(1).max(160)).max(256).optional(),
 });
+
+const headersSchema = z.record(
+  z.string().min(1).max(256).regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/, "invalid HTTP header name"),
+  z.string().max(16_384).refine((value) => !/[\r\n]/.test(value), "HTTP header values cannot contain newlines"),
+).refine((value) => Object.keys(value).length <= 128, "must contain at most 128 entries");
+const envSchema = z.record(
+  z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "invalid environment variable name"),
+  z.string().max(16_384),
+).refine((value) => Object.keys(value).length <= 128, "must contain at most 128 entries");
+
+/** Remote MCP credentials and traffic require TLS. Plain HTTP is limited to
+ * the local machine for development and process-local sidecars. */
+export function isSecureMcpUrl(raw: string): boolean {
+  try {
+    const url = new URL(raw);
+    if (url.username || url.password) return false;
+    if (url.protocol === "https:") return true;
+    if (url.protocol !== "http:") return false;
+    const hostname = url.hostname.toLowerCase();
+    if (hostname === "localhost" || hostname === "[::1]" || hostname === "::1") return true;
+    const match = /^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname);
+    return match !== null && match.slice(1).every((part) => Number(part) <= 255);
+  } catch {
+    return false;
+  }
+}
+
+const secureMcpUrlSchema = z.string().url().max(4096).refine(
+  isSecureMcpUrl,
+  "remote MCP URLs must use HTTPS; HTTP is allowed only for loopback hosts",
+);
 
 export const mcpHttpEntrySchema = baseSchema.extend({
   transport: z.literal("http"),
-  url: z.string().url(),
-  headers: z.record(z.string(), z.string()).optional(),
+  url: secureMcpUrlSchema,
+  headers: headersSchema.optional(),
 });
 
 export const mcpSseEntrySchema = baseSchema.extend({
   transport: z.literal("sse"),
-  url: z.string().url(),
-  headers: z.record(z.string(), z.string()).optional(),
+  url: secureMcpUrlSchema,
+  headers: headersSchema.optional(),
 });
 
 export const mcpStdioEntrySchema = baseSchema.extend({
   transport: z.literal("stdio"),
-  command: z.string().min(1),
-  args: z.array(z.string()).optional(),
-  env: z.record(z.string(), z.string()).optional(),
+  command: z.string().min(1).max(4096),
+  args: z.array(z.string().max(16_384)).max(512).optional(),
+  env: envSchema.optional(),
 });
 
 /**

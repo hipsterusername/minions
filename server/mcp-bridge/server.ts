@@ -41,6 +41,10 @@ import {
   type JsonRpcResponse,
 } from "./dispatch.ts";
 
+/** Hard cap for the loopback bridge. Tool arguments must not be able to grow
+ * the server process without bound, even when a local child is compromised. */
+export const MAX_MCP_REQUEST_BYTES = 1024 * 1024;
+
 // ── Public surface ────────────────────────────────────────────────────────────
 
 export interface McpBridgeServer {
@@ -236,7 +240,12 @@ async function handleRequest(
     return;
   }
 
-  const body = await readBody(req);
+  const bodyResult = await readBody(req, MAX_MCP_REQUEST_BYTES);
+  if (!bodyResult.ok) {
+    writeJsonRpcError(res, null, ERR_INVALID_REQUEST, bodyResult.error, 413);
+    return;
+  }
+  const body = bodyResult.body;
   const parsed = parseJsonRpc(body);
   if (!parsed.ok) {
     // parseJsonRpc reports `-32700 Parse error` for invalid JSON / empty
@@ -284,12 +293,30 @@ function extractBearer(header: string | string[] | undefined): string | null {
   return token === undefined || token.length === 0 ? null : token;
 }
 
-async function readBody(req: IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : (chunk as Buffer));
+async function readBody(
+  req: IncomingMessage,
+  maxBytes: number,
+): Promise<{ ok: true; body: string } | { ok: false; error: string }> {
+  const declaredLength = req.headers["content-length"];
+  if (typeof declaredLength === "string") {
+    const parsed = Number(declaredLength);
+    if (Number.isFinite(parsed) && parsed > maxBytes) {
+      // Drain the request so keep-alive connections remain usable.
+      req.resume();
+      return { ok: false, error: `MCP request body exceeds ${maxBytes} bytes` };
+    }
   }
-  return Buffer.concat(chunks).toString("utf8");
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req) {
+    const buffer = typeof chunk === "string" ? Buffer.from(chunk) : (chunk as Buffer);
+    total += buffer.length;
+    if (total > maxBytes) {
+      return { ok: false, error: `MCP request body exceeds ${maxBytes} bytes` };
+    }
+    chunks.push(buffer);
+  }
+  return { ok: true, body: Buffer.concat(chunks, total).toString("utf8") };
 }
 
 // ── Response helpers ──────────────────────────────────────────────────────────

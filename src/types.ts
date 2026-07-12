@@ -158,6 +158,7 @@ export interface NodeRenderProps {
    */
   getIncomingContextModes?: (() => string[]) | undefined;
   projectPath?: string | undefined;
+  projectId?: string | undefined;
   /** Callback to resize this node on the canvas */
   onResize?: ((size: Size) => void) | undefined;
   /** Called when the user starts dragging this node's resize handle. */

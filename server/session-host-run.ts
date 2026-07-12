@@ -11,7 +11,6 @@ import type {
   AgentTypeContext,
   AgentToolResult,
 } from "./agents/index.ts";
-import type { SessionHostDeps } from "./session-host.ts";
 import type {
   AgentHarness,
   HarnessStartOptions,
@@ -20,7 +19,7 @@ import type {
 } from "./harness/types.ts";
 import type { NormalizedEvent } from "../shared/normalized-event.ts";
 import type { Bus } from "./bus.ts";
-import { createWorktree, isGitRepo, type WorktreeInfo } from "./worktree.ts";
+import { createWorktree, isGitRepo, provisionPlannedWorktree, type WorktreeInfo } from "./worktree.ts";
 import {
   enrichSystemPromptForWorktree,
   modelSupportsAdaptive,
@@ -28,13 +27,18 @@ import {
 } from "./session-host-config.ts";
 import type { SessionHost, StartSessionOptions } from "./session-host.ts";
 import { applySessionRunningForMinion } from "./task-lifecycle.ts";
-import { injectSessionMessage } from "./session-message.ts";
-import { pauseActiveRunForWait, requestWaitResume } from "./wait-resume.ts";
 import { captureUsageEvent } from "./session-usage-capture.ts";
 import { captureCheckpointHandoffEvent, recordCompactionUsage, withCompactionReminder } from "./proactive-compaction.ts";
 import { serverLogger } from "./logging.ts";
+import { commitReviewLifecycle, finishRun } from "./session-review-lifecycle.ts";
+import { emitMutationToolObservation } from "./mutation-observability.ts";
+import { normalizedEventEnvelope, notifyRuntimeTerminal, sessionHostLogFields } from "./session-host-identity.ts";
+import type { SessionHostDeps, WorkItemRuntimeLifecycle } from "./session-host-types.ts";
+export { buildAgentContext } from "./session-host-agent-context.ts";
+export { sessionHostLogFields } from "./session-host-identity.ts";
 
 const log = serverLogger.child("session-host");
+
 /**
  * Ensure the host has the correct cwd + worktree wiring before the SDK
  * query opens. Mutates `host` in place and emits bus events on failure.
@@ -54,7 +58,7 @@ export async function ensureWorktree(
     host.worktree = opts.parentWorktree;
     host.cwd = opts.parentWorktree.path;
     effectiveCwd = opts.parentWorktree.path;
-    log.debug("parent_worktree_inherited", { sessionKey: host.id, branch: opts.parentWorktree.branch, worktreePath: opts.parentWorktree.path });
+    log.debug("parent_worktree_inherited", { ...sessionHostLogFields(host), branch: opts.parentWorktree.branch, worktreePath: opts.parentWorktree.path });
   } else {
     host.cwd = effectiveCwd;
   }
@@ -73,33 +77,42 @@ export async function ensureWorktree(
 
   try {
     const inGitRepo = await isGitRepo(effectiveCwd);
-    if (inGitRepo) {
-      const worktreeInfo = await createWorktree(effectiveCwd, host.id);
-      host.worktree = worktreeInfo;
-      host.cwd = worktreeInfo.path;
-      bus.emitToSession(host.id, {
-        type: "worktree_created",
-        sessionKey: host.id,
-        worktreePath: worktreeInfo.path,
-        branch: worktreeInfo.branch,
-      });
-      log.info("worktree_created", { sessionKey: host.id, branch: worktreeInfo.branch, worktreePath: worktreeInfo.path });
-      effectiveCwd = worktreeInfo.path;
-    }
+    if (!inGitRepo) throw new Error("Worktree isolation requires a Git repository");
+    const worktreeInfo = opts.plannedContribution
+      ? await provisionPlannedWorktree(opts.plannedContribution)
+      : await createWorktree(effectiveCwd, host.id);
+    host.worktree = worktreeInfo;
+    host.cwd = worktreeInfo.path;
+    bus.emitToSession(host.id, {
+      type: "worktree_created",
+      sessionKey: host.id,
+      worktreePath: worktreeInfo.path,
+      branch: worktreeInfo.branch,
+    });
+    log.info("worktree_created", { ...sessionHostLogFields(host), branch: worktreeInfo.branch, worktreePath: worktreeInfo.path });
+    effectiveCwd = worktreeInfo.path;
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    log.error("worktree_create_failed", { sessionKey: host.id, error: err });
+    log.error("worktree_create_failed", { ...sessionHostLogFields(host), error: err });
     bus.emitToSession(host.id, {
       type: "worktree_failed",
       sessionKey: host.id,
       error: `Worktree creation failed: ${errMsg}`,
     });
-    host.worktreeIsolation = false;
-    return effectiveCwd;
+    // Isolation is a safety boundary, especially for harnesses whose mutation
+    // interception is observe-only. Never downgrade a requested worktree run
+    // into a shared-directory writer when provisioning fails.
+    throw err;
   }
   return effectiveCwd;
 }
-
+export async function ensureContributionWorktree(host: SessionHost, opts: StartSessionOptions, bus: Bus,
+  agentType: AgentType, transition?: SessionHostDeps["transitionWorktreeProvisioning"]): Promise<void> {
+  transition?.(host.runKey, "provisioning");
+  try { await ensureWorktree(host, opts, bus, agentType); transition?.(host.runKey, "active"); }
+  catch (error) { transition?.(host.runKey, "failed",
+    error instanceof Error ? error.message : String(error)); throw error; }
+}
 /** Parameters for `buildHarnessStartOpts`. */
 export interface HarnessStartInput {
   host: SessionHost;
@@ -111,7 +124,6 @@ export interface HarnessStartInput {
   harness: AgentHarness;
   prompt: string | AsyncIterable<{ role: "user"; content: string }>;
 }
-
 /**
  * Assemble the HarnessStartOptions passed to `harness.start()`.
  *
@@ -139,6 +151,9 @@ export function buildHarnessStartOpts(
       ? enrichSystemPromptForWorktree(basePrompt, host.worktree, agentType.id === "minion")
       : basePrompt
     : "";
+  const effectiveSystemPrompt = opts.plannedContribution?.resolutionTargetRef
+    ? `${systemPrompt}\n\nThis is a ${opts.plannedContribution.resolutionKind === "lineage" ? "final-lineage" : "contribution"} conflict-resolution iteration. In the retained worktree, merge the latest ${opts.plannedContribution.resolutionTargetRef} into ${opts.plannedContribution.branch}, resolve conflicts, and leave the branch clean. Do not promote directly; gates and approval run afterward.`
+    : systemPrompt;
 
   const resolvedModel = host.model ? (harness.resolveModel(host.model) ?? host.model) : "";
 
@@ -146,12 +161,18 @@ export function buildHarnessStartOpts(
     sessionKey: host.id,
     cwd: host.cwd,
     prompt: withCompactionReminder(host, prompt),
-    systemPrompt,
+    systemPrompt: effectiveSystemPrompt,
     model: resolvedModel,
     allowedTools,
     abortSignal: abortController.signal,
-    resumeId: opts.resumeId,
+    // Provider continuations intentionally open a fresh SDK thread while
+    // retaining the same Minions run identity.
+    resumeId: opts.invocationKind === "provider_continuation"
+      ? undefined
+      : opts.resumeId,
     externalMcpServers: opts.externalMcpServers,
+    ...(agentCtx.mutationCoordination
+      ? { mutationCoordination: agentCtx.mutationCoordination } : {}),
   };
 
   if (opts.attachments && opts.attachments.length > 0) {
@@ -197,6 +218,7 @@ export function processNormalizedEvent(
   agentType: AgentType,
   agentCtx: AgentTypeContext,
   event: NormalizedEvent,
+  runtimeLifecycle?: WorkItemRuntimeLifecycle,
 ): void {
   const now = Date.now();
   if (host.role === "minion")
@@ -215,6 +237,12 @@ export function processNormalizedEvent(
     // `meta` carries Claude-specific init data (tools, mcp_servers, etc.).
     if (event.meta) host.initData = event.meta;
     host.persist();
+    if (host.workItemId) {
+      const identity = { workItemId: host.workItemId, runKey: host.runKey, runKind: host.runKind, parentRunKey: host.parentRunKey, taskId: host.taskId };
+      runtimeLifecycle?.providerInitialized({ ...identity, providerSessionId: event.sessionId,
+        providerGeneration: host.providerInvocationGeneration, at: now });
+      runtimeLifecycle?.runStarted({ ...identity, at: now });
+    }
   }
 
   // ── Sub-agent events (Claude Agent-tool) ────────────────────────────────
@@ -249,39 +277,29 @@ export function processNormalizedEvent(
   }
   captureCheckpointHandoffEvent(host, event);
 
+  // Phase 0 is deliberately observe-only: no lease, wait, block, or event
+  // rewriting happens at this boundary.
+  if (event.kind === "tool_call") {
+    emitMutationToolObservation({
+      bus,
+      sessionKey: host.id,
+      runKey: host.runKey,
+      workItemId: host.workItemId,
+      harness: host.harnessName,
+      event,
+      timestamp: now,
+    });
+  }
+
   // ── Session completion ──────────────────────────────────────────────────
   if (event.kind === "done") {
     if (event.turns != null) host.turns = event.turns;
     if (event.costUSD != null) host.totalCost = event.costUSD;
 
+    host.status = event.reason === "error" ? "error" : "idle";
     if (event.reason === "error") {
-      host.status = "error";
       host.lastError = event.error ?? "unknown";
       host.lastErrorFull = event.fullError ?? host.lastError;
-      host.persist();
-
-      const errEvent: BufferedEvent = {
-        type: "session_error",
-        sessionKey: host.id,
-        error: host.lastError,
-        fullError: host.lastErrorFull,
-        timestamp: now,
-      };
-      host.bufferEvent(errEvent);
-      bus.emitToSession(host.id, errEvent);
-    } else {
-      host.status = "idle";
-      host.persist();
-
-      const idleEvent: BufferedEvent = {
-        type: "session_status",
-        sessionKey: host.id,
-        status: "idle",
-        sessionId: host.sessionId ?? undefined,
-        timestamp: now,
-      };
-      host.bufferEvent(idleEvent);
-      bus.emitToSession(host.id, idleEvent);
     }
 
     if (agentType.onComplete) {
@@ -290,87 +308,72 @@ export function processNormalizedEvent(
         result: event.result ?? null,
       });
     }
+    let blocked = false;
+    let durableTask: { status: string; result: string | null; taskId: string } | null = null;
+    let durableLeaderKey: string | null = null;
+    agentCtx.forEachLeaderTaskState?.((leaderKey, state) => {
+      const task = [...state.tasks.values()].find((candidate) => candidate.minionSessionKey === host.id);
+      if (!task) return;
+      if (task.status === "blocked") blocked = true;
+      durableTask = task;
+      durableLeaderKey = leaderKey;
+    });
+    const waitKind = host.reviewLifecycle.reviewState === "decision_needed" ? "decision"
+      : host.taskState?.pendingWait ? "timer"
+      : blocked ? "blocked"
+      : (host.status as string) === "running" ? "continuation" : null;
+    if (waitKind) {
+      if (host.workItemId && (waitKind === "blocked" || waitKind === "continuation")) runtimeLifecycle?.runWaiting({
+        workItemId: host.workItemId, runKey: host.runKey, runKind: host.runKind,
+        parentRunKey: host.parentRunKey, taskId: host.taskId, waitKind, at: now,
+      });
+      if ((host.status as string) !== "running") {
+        host.status = "idle";
+        const idle: BufferedEvent = { type: "session_status", sessionKey: host.id, status: "idle", sessionId: host.sessionId ?? undefined, timestamp: now };
+        host.bufferEvent(idle);
+        bus.emitToSession(host.id, idle);
+      }
+    } else {
+      agentCtx.cleanupLiveEditRun?.(host.runKey);
+      const normalizedReason = event.reason !== "error" && event.reason !== "abort"
+        && Boolean(event.result?.trim()) ? "completed" : event.reason;
+      commitReviewLifecycle(host, bus, finishRun(host.reviewLifecycle, { reason: normalizedReason, report: event.reason === "error" ? event.error : event.result, at: now }), now);
+      const payload: BufferedEvent = event.reason === "error"
+        ? { type: "session_error", sessionKey: host.id, error: host.lastError ?? "unknown", fullError: host.lastErrorFull ?? undefined, timestamp: now }
+        : { type: "session_status", sessionKey: host.id, status: "idle", sessionId: host.sessionId ?? undefined, timestamp: now };
+      host.bufferEvent(payload);
+      bus.emitToSession(host.id, payload);
+      if (host.workItemId) {
+        const durable = durableTask as { status: string; result: string | null; taskId: string } | null;
+        const taskStatus = durable?.status;
+        const taskReport = durable?.result?.trim() || null;
+        const eventReport = event.result?.trim() || null;
+        const completed = host.runKind === "child" && taskStatus === "completed"
+          ? Boolean(taskReport)
+          : event.reason !== "error" && event.reason !== "abort" && Boolean(eventReport);
+        const failed = host.runKind === "child" && taskStatus === "failed";
+        const finalReport = host.runKind === "child" && (completed || failed)
+          ? taskReport : completed ? eventReport : null;
+        const finalReportId = finalReport && host.runKind === "child" && durableLeaderKey
+          ? `task:${durableLeaderKey}:${durable!.taskId}:report`
+          : finalReport ? `${host.runKey}:final-report` : null;
+        notifyRuntimeTerminal(host, runtimeLifecycle, {
+          outcome: event.reason === "error" || failed ? "error" : completed ? "completed" : "interrupted",
+          finalReportId, finalReport, at: now,
+        });
+      }
+    }
+    log.info("run_finished", {
+      ...sessionHostLogFields(host),
+      outcome: event.reason,
+    });
     return; // `done` is not emitted as sdk_event (signalled via session_status or session_error)
   }
 
   // ── Fan all remaining events to the bus as sdk_events ──────────────────
-  const sdkEvent: BufferedEvent = {
-    type: "sdk_event",
-    sessionKey: host.id,
-    event,
-    timestamp: now,
-  };
+  const sdkEvent = normalizedEventEnvelope(host, event, now);
   host.bufferEvent(sdkEvent);
   bus.emitToSession(host.id, sdkEvent);
-}
-
-// ── Agent context builder ───────────────────────────────────────────────────
-
-/**
- * Build the MCP agent context for a session run.
- */
-export function buildAgentContext(
-  host: SessionHost,
-  opts: StartSessionOptions,
-  deps: SessionHostDeps,
-): AgentTypeContext {
-  const ctx: AgentTypeContext = {
-    sessionKey: host.id,
-    cwd: host.cwd,
-    bus: deps.bus,
-    worktreeInfo: host.worktree,
-    worktreeIsolation: host.worktreeIsolation,
-    forEachLeaderTaskState: deps.forEachLeaderTaskState,
-    getSessionRuntime: deps.getSessionRuntime,
-    startMinionSession: (params) => {
-      // Default the spawned minion to the leader's current harness so a
-      // non-Claude leader spawns same-harness minions unless the caller
-      // explicitly overrides it.
-      deps.startChildSession({
-        sessionKey: params.sessionKey,
-        prompt: params.prompt,
-        cwd: params.cwd,
-        systemPrompt: params.systemPrompt,
-        role: "minion",
-        worktreeIsolation: false,
-        parentWorktree: host.worktree ?? undefined,
-        initialModel: params.model ?? null,
-        thinkingConfig: params.thinkingConfig ?? undefined,
-        resumeId: params.sessionKey === host.id ? host.sessionId ?? undefined : undefined,
-        harness: params.harness ?? host.harnessName,
-      });
-    },
-    scheduleWaitContinue: (durationMs, reason) => {
-      host.clearWaitTimer();
-      log.debug("wait_scheduled", { sessionKey: host.id, durationMs, reason });
-      host.waitTimerId = setTimeout(() => {
-        host.waitTimerId = null;
-        requestWaitResume(host, deps, {
-          completedReason: reason,
-          opts: {
-            sessionKey: host.id,
-            prompt: `Continue. The ${Math.round(durationMs / 1000)}s wait has elapsed (reason: ${reason}). Pick up where you left off.`,
-            cwd: host.cwd,
-            resumeId: host.sessionId ?? undefined,
-            systemPrompt: opts.systemPrompt,
-            role: host.role,
-            harness: host.harnessName,
-          },
-        });
-      }, durationMs);
-      pauseActiveRunForWait(host);
-      return host.waitTimerId;
-    },
-    terminateSession: deps.terminateSession,
-    messageSession: (sessionKey, message) =>
-      injectSessionMessage(deps, sessionKey, message),
-    wakeWaitingLeaderIfAllChildrenTerminal: deps.wakeWaitingLeaderIfAllChildrenTerminal,
-  };
-  if (host.taskState) ctx.existingTaskState = host.taskState;
-  if (host.renderState) ctx.existingRenderState = host.renderState;
-  if (host.skillIds.length > 0) ctx.skillIds = host.skillIds;
-  if (opts.parentWorktree) ctx.parentWorktree = opts.parentWorktree;
-  return ctx;
 }
 
 // Context-window recovery — extracted to session-host-context-recovery.ts.

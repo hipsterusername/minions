@@ -94,6 +94,22 @@ describe("remove_session", () => {
     expect(closeFn).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects a work-item-bound host before any teardown mutation", () => {
+    const h = setup({ status: "running" });
+    h.host.workItemId = "work-1";
+    h.host.worktree = fakeWorktree;
+    removeSession(h.ctx, cmd({ type: "remove_session" }), h.ws);
+    expect(h.ctx.registry.get("leader-1")).toBe(h.host);
+    expect(h.host.worktree).toBe(fakeWorktree);
+    expect(h.host.abortController.signal.aborted).toBe(false);
+    expect(removeWorktreeCalls).toEqual([]);
+    expect(removePersistedCalls).toEqual([]);
+    expect(h.wsSent[0]).toMatchObject({
+      topic: "session:leader-1", type: "session_error", code: "WORK_ITEM_SESSION_PROTECTED",
+      workItemId: "work-1",
+    });
+  });
+
   it("does not error when runControl has no close() method", () => {
     const h = setup({ status: "running" });
     h.setRunControl({ abort() {} });

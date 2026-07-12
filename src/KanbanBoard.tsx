@@ -739,7 +739,9 @@ function CardForm({
                 id="kb-worktree"
                 type="button"
                 className={cx("kb-toggle", worktreeIsolation && "kb-toggle--on")}
-                onClick={() => setWorktreeIsolation((v) => !v)}
+                onClick={() => { if (!initial) setWorktreeIsolation((v) => !v); }}
+                disabled={Boolean(initial)}
+                title={initial ? "Change mode is fixed when the work item is created" : undefined}
                 role="switch"
                 aria-checked={worktreeIsolation}
                 aria-label="Worktree isolation"
@@ -1200,6 +1202,8 @@ interface LeaderStatus {
   worktreeStatus: string;
   cost: number;
   turns: number;
+  presentationLabel?: string;
+  presentationBadge?: string;
 }
 
 function InProgressCard({
@@ -1228,7 +1232,13 @@ function InProgressCard({
   let dotClass: string;
   let statusText: string;
 
-  if (!leaderStatus) {
+  if (leaderStatus?.presentationLabel) {
+    dotClass = leaderStatus.presentationBadge === "active"
+      ? "kb-status__dot--running"
+      : leaderStatus.presentationBadge === "waiting" || leaderStatus.presentationBadge === "error"
+        ? "kb-status__dot--waiting" : "kb-status__dot--idle";
+    statusText = leaderStatus.presentationLabel;
+  } else if (!leaderStatus) {
     dotClass = "kb-status__dot--waiting";
     statusText = "Waiting...";
   } else if (leaderStatus.status === "running" || leaderStatus.status === "creating") {
@@ -1337,6 +1347,7 @@ const BLOCK_REASON_LABELS: Record<string, { label: string; icon: string; color: 
 
 function HaltedCard({
   card,
+  leaderStatus,
   onResume,
   onCloseCard,
   onFocusNode,
@@ -1344,6 +1355,7 @@ function HaltedCard({
   isSelected,
 }: {
   card: KanbanCard;
+  leaderStatus?: LeaderStatus | undefined;
   onResume: (card: KanbanCard) => void;
   onCloseCard: (card: KanbanCard) => void;
   onFocusNode?: ((nodeId: string) => void) | undefined;
@@ -1357,7 +1369,10 @@ function HaltedCard({
   useScrollIntoView(bodyRef, expanded);
 
   const reason = card.blockReason ?? "session_lost";
-  const info = BLOCK_REASON_LABELS[reason] ?? BLOCK_REASON_LABELS["session_lost"]!;
+  const fallbackInfo = BLOCK_REASON_LABELS[reason] ?? BLOCK_REASON_LABELS["session_lost"]!;
+  const info = leaderStatus?.presentationLabel
+    ? { ...fallbackInfo, label: leaderStatus.presentationLabel }
+    : fallbackInfo;
 
   return (
     <article className={cx("kb-card", "kb-card--halted", `kb-card--${card.priority}`, isSelected && "kb-card--selected")} aria-label={`${card.title} - Halted`} onClick={() => onSelect(card.id)}>
@@ -1547,14 +1562,19 @@ function KanbanColumnComponent({
                   <InProgressCard
                     key={card.id}
                     card={card}
-                    leaderStatus={card.leaderNodeId ? leaderStatuses.get(card.leaderNodeId) : undefined}
+                    leaderStatus={leaderStatuses.get(card.id)
+                      ?? (card.leaderNodeId ? leaderStatuses.get(card.leaderNodeId) : undefined)}
                     onFocusNode={onFocusNode}
                     onSelect={onSelectCard}
                     isSelected={isSelected}
                   />
                 );
               case "halted":
-                return <HaltedCard key={card.id} card={card} onResume={onResume} onCloseCard={onCloseCard} onFocusNode={onFocusNode} onSelect={onSelectCard} isSelected={isSelected} />;
+                return <HaltedCard key={card.id} card={card}
+                  leaderStatus={leaderStatuses.get(card.id)
+                    ?? (card.leaderNodeId ? leaderStatuses.get(card.leaderNodeId) : undefined)}
+                  onResume={onResume} onCloseCard={onCloseCard} onFocusNode={onFocusNode}
+                  onSelect={onSelectCard} isSelected={isSelected} />;
               case "history":
                 return <HistoryCard key={card.id} card={card} dispatch={dispatch} onSelect={onSelectCard} isSelected={isSelected} onLaunchLeader={onLaunchLeader} />;
               default:
@@ -2351,7 +2371,6 @@ function KanbanInspectorPanel({
                       subtasks: data.subtasks,
                       model: data.model,
                       permissionMode: data.permissionMode,
-                      worktreeIsolation: data.worktreeIsolation,
                       skillIds: data.skillIds,
                       skillValues: data.skillValues,
                       linkedContextNodeIds: data.linkedContextNodeIds,
@@ -2829,8 +2848,9 @@ export function KanbanBoard({
 
   // Compute selected card's leader status
   const selectedCard = board.cards.find(c => c.id === selectedCardId) ?? null;
-  const selectedLeaderStatus = selectedCard?.leaderNodeId
-    ? leaderStatuses.get(selectedCard.leaderNodeId)
+  const selectedLeaderStatus = selectedCard
+    ? leaderStatuses.get(selectedCard.id)
+      ?? (selectedCard.leaderNodeId ? leaderStatuses.get(selectedCard.leaderNodeId) : undefined)
     : undefined;
 
   return (

@@ -9,10 +9,16 @@ import type { SessionHost, SessionRole, SessionStatus } from "./session-host.ts"
 import { getHarness } from "./harness/index.ts";
 import type { HarnessCapabilities } from "./harness/types.ts";
 import type { SessionUsageTotals } from "./usage-telemetry.ts";
+import type { SessionReviewLifecycle } from "./session-review-lifecycle.ts";
 
 /** Compact shape broadcast to clients in `session_list` messages. */
 export interface SessionListItem {
   sessionKey: string;
+  runKey?: string;
+  workItemId?: string | null;
+  runKind?: "primary" | "child";
+  parentRunKey?: string | null;
+  taskId?: string | null;
   sessionId: string | null;
   status: SessionStatus;
   cwd: string;
@@ -42,6 +48,7 @@ export interface SessionListItem {
    * stopped/hydrated sessions sorted by recent engagement.
    */
   lastActivityAt: number | null;
+  reviewLifecycle?: SessionReviewLifecycle;
   activeMinions: Array<{
     taskId: string;
     title: string;
@@ -95,6 +102,11 @@ export function buildSessionListItem(key: string, s: SessionHost): SessionListIt
   const lastActivityAt = lastResponseOrActivityAt(s.eventBuffer);
   return {
     sessionKey: key,
+    runKey: s.runKey,
+    workItemId: s.workItemId,
+    runKind: s.runKind,
+    parentRunKey: s.parentRunKey,
+    taskId: s.taskId,
     sessionId: s.sessionId,
     status: s.status,
     cwd: s.cwd,
@@ -108,6 +120,7 @@ export function buildSessionListItem(key: string, s: SessionHost): SessionListIt
     harness,
     harnessCapabilities,
     lastActivityAt,
+    reviewLifecycle: s.reviewLifecycle,
     activeMinions: s.taskState
       ? Array.from(s.taskState.tasks.entries())
           .filter(

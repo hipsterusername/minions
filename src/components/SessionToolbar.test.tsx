@@ -26,6 +26,7 @@ import type { HarnessListEntry } from "../use-socket.ts";
 const CLAUDE_ENTRY: HarnessListEntry = {
   name: "claude",
   capabilities: {
+    mutationInterception: "complete",
     thinking: true,
     promptCaching: true,
     mcp: true,
@@ -49,6 +50,7 @@ const CLAUDE_ENTRY: HarnessListEntry = {
 const CODEX_ENTRY: HarnessListEntry = {
   name: "codex",
   capabilities: {
+    mutationInterception: "observe_only",
     thinking: true,
     promptCaching: true,
     mcp: true,
@@ -71,6 +73,7 @@ const CODEX_ENTRY: HarnessListEntry = {
 const ECHO_ENTRY: HarnessListEntry = {
   name: "echo",
   capabilities: {
+    mutationInterception: "none",
     thinking: false,
     promptCaching: false,
     mcp: false,
@@ -94,7 +97,11 @@ const DEFAULT_THINKING: ThinkingConfig = {
 
 function renderWithHarnesses(
   entries: HarnessListEntry[],
-  overrides: Partial<React.ComponentProps<typeof SessionToolbar>> = {},
+  overrides: {
+    [K in keyof React.ComponentProps<typeof SessionToolbar>]?:
+      | React.ComponentProps<typeof SessionToolbar>[K]
+      | undefined;
+  } = {},
 ): React.ComponentProps<typeof SessionToolbar> {
   // Capture the subscriber the provider registers on mount, then deliver
   // the `harness_list` payload from the test in an `act()` wrapper after
@@ -121,8 +128,13 @@ function renderWithHarnesses(
     onThinkingConfigChange: vi.fn(),
     harness: "claude",
     onHarnessChange: vi.fn(),
-    ...overrides,
   };
+  Object.assign(baseProps, overrides);
+  // An explicit `undefined` override means "omit this optional prop" — under
+  // exactOptionalPropertyTypes the property must be absent, not undefined.
+  if ("onInterrupt" in overrides && overrides.onInterrupt === undefined) {
+    delete (baseProps as { onInterrupt?: () => void }).onInterrupt;
+  }
 
   render(
     <HarnessListProvider send={send} subscribe={subscribe} connected={true}>
@@ -298,6 +310,22 @@ describe("SessionToolbar — capability gating", () => {
     fireEvent.click(screen.getByTitle("Model selection"));
     expect(screen.queryByText("Reasoning")).not.toBeInTheDocument();
     expect(screen.queryByText("Summaries")).not.toBeInTheDocument();
+  });
+
+  it("renders the interrupt button on a running session when onInterrupt is provided", () => {
+    renderWithHarnesses(
+      [CLAUDE_ENTRY],
+      { sessionKey: "leader-1", status: "running", onInterrupt: vi.fn() },
+    );
+    expect(screen.getByText("Interrupt")).toBeInTheDocument();
+  });
+
+  it("omits the interrupt button when onInterrupt is not provided", () => {
+    renderWithHarnesses(
+      [CLAUDE_ENTRY],
+      { sessionKey: "leader-1", status: "running", onInterrupt: undefined },
+    );
+    expect(screen.queryByText("Interrupt")).not.toBeInTheDocument();
   });
 });
 

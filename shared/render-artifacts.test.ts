@@ -10,10 +10,19 @@ import {
   formatImage,
   formatFilePreview,
   formatHtmlArtifact,
+  toSafeEmbeddedRasterDataUrl,
   type ImageComponent,
   type FilePreviewComponent,
   type HtmlArtifactComponent,
 } from "./render-artifacts.ts";
+
+describe("embedded raster URL policy", () => {
+  it("builds request-free raster URLs and rejects active image formats", () => {
+    expect(toSafeEmbeddedRasterDataUrl("image/webp", "AA==")).toBe("data:image/webp;base64,AA==");
+    expect(toSafeEmbeddedRasterDataUrl("image/svg+xml", "PHN2Zy8+")).toBeNull();
+    expect(toSafeEmbeddedRasterDataUrl("text/html", "PGgxPng8L2gxPg==")).toBeNull();
+  });
+});
 
 // ── imageComponentSchema ───────────────────────────────────
 
@@ -22,7 +31,7 @@ describe("imageComponentSchema", () => {
     const result = imageComponentSchema.safeParse({
       id: "img-1",
       type: "image",
-      src: "https://example.com/photo.jpg",
+      src: "data:image/png;base64,AA==",
       alt: "A photo",
     });
     expect(result.success).toBe(true);
@@ -32,7 +41,7 @@ describe("imageComponentSchema", () => {
     const result = imageComponentSchema.safeParse({
       id: "img-2",
       type: "image",
-      src: "file:///tmp/img.png",
+      src: "data:image/jpeg;base64,AA==",
       alt: "Local file",
       caption: "A caption",
       width: 800,
@@ -48,7 +57,7 @@ describe("imageComponentSchema", () => {
       const result = imageComponentSchema.safeParse({
         id: "img-fit",
         type: "image",
-        src: "https://example.com/x.jpg",
+        src: "data:image/png;base64,AA==",
         alt: "test",
         fit,
       });
@@ -60,7 +69,7 @@ describe("imageComponentSchema", () => {
     const result = imageComponentSchema.safeParse({
       id: "img-3",
       type: "image",
-      src: "https://example.com/x.jpg",
+      src: "data:image/png;base64,AA==",
       alt: "test",
       fit: "stretch",
     });
@@ -71,7 +80,7 @@ describe("imageComponentSchema", () => {
     const result = imageComponentSchema.safeParse({
       id: "img-4",
       type: "image",
-      src: "https://example.com/x.jpg",
+      src: "data:image/png;base64,AA==",
     });
     expect(result.success).toBe(false);
   });
@@ -80,10 +89,19 @@ describe("imageComponentSchema", () => {
     const result = imageComponentSchema.safeParse({
       id: "img-5",
       type: "photo",
-      src: "https://example.com/x.jpg",
+      src: "data:image/png;base64,AA==",
       alt: "test",
     });
     expect(result.success).toBe(false);
+  });
+
+  it.each([
+    "https://tracker.example/pixel.png",
+    "file:///home/user/secret.png",
+    "javascript:alert(1)",
+    "data:image/svg+xml,<svg/>",
+  ])("rejects unsafe model-generated source %s", (src) => {
+    expect(imageComponentSchema.safeParse({ id: "unsafe", type: "image", src, alt: "x" }).success).toBe(false);
   });
 });
 
@@ -267,22 +285,22 @@ describe("formatImage", () => {
     const c: ImageComponent = {
       id: "img-1",
       type: "image",
-      src: "https://example.com/photo.jpg",
+      src: "data:image/png;base64,AA==",
       alt: "A photo",
     };
-    expect(formatImage(c)).toBe("![A photo](https://example.com/photo.jpg)");
+    expect(formatImage(c)).toBe("![A photo](data:image/png;base64,AA==)");
   });
 
   it("appends italic caption on next line when provided", () => {
     const c: ImageComponent = {
       id: "img-2",
       type: "image",
-      src: "https://example.com/photo.jpg",
+      src: "data:image/png;base64,AA==",
       alt: "Figure 1",
       caption: "Performance over time",
     };
     const result = formatImage(c);
-    expect(result).toContain("![Figure 1](https://example.com/photo.jpg)");
+    expect(result).toContain("![Figure 1](data:image/png;base64,AA==)");
     expect(result).toContain("\n*Performance over time*");
   });
 

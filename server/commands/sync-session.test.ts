@@ -33,6 +33,8 @@ describe("sync_session", () => {
     h.host.permissionMode = "auto";
     h.host.taskName = "Audit";
     h.host.role = "leader";
+    h.host.workItemId = "work-1";
+    h.host.seedRunLineage({ runKind: "child", parentRunKey: "root-run", taskId: "task-1" });
     const event: BufferedEvent = {
       type: "session_status",
       sessionKey: "leader-1",
@@ -54,6 +56,10 @@ describe("sync_session", () => {
     expect(env["permissionMode"]).toBe("auto");
     expect(env["taskName"]).toBe("Audit");
     expect(env["role"]).toBe("leader");
+    expect(env).toMatchObject({
+      runKey: "leader-1", workItemId: "work-1", runKind: "child",
+      parentRunKey: "root-run", taskId: "task-1",
+    });
     expect(env["events"]).toEqual([event]);
   });
 

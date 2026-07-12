@@ -8,7 +8,7 @@
  *   - Click outside closes the active panel.
  *   - Live badges (count + dot + tail) round-trip through useDockBadge.
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import {
   DockBar,
@@ -20,6 +20,11 @@ import {
   useDockPanelOpen,
   type DockPanelId,
 } from "./BottomRightDock.tsx";
+import {
+  FLAG_MCP_SERVERS,
+  resetFeatureFlags,
+  setFeatureFlag,
+} from "./feature-flags.ts";
 
 function PanelProbe({ id }: { id: DockPanelId }) {
   const open = useDockPanelOpen(id);
@@ -67,6 +72,18 @@ function pill(id: string): HTMLElement {
 }
 
 describe("BottomRightDock", () => {
+  // The MCP dock button is gated behind a feature flag (off by default).
+  // These tests use MCP as a representative panel, so enable it here; the
+  // gating itself is covered by the dedicated describe below.
+  beforeEach(() => {
+    window.localStorage.clear();
+    setFeatureFlag(FLAG_MCP_SERVERS, true);
+  });
+  afterEach(() => {
+    resetFeatureFlags();
+    window.localStorage.clear();
+  });
+
   // Removed `renders one consistent pill...` smoke (§5.5 TRIVIAL): every
   // assertion was `getBy*(...).toBeDefined()` which throws on absence
   // already, so the matcher added nothing.
@@ -293,5 +310,39 @@ describe("BottomRightDock", () => {
       expect(screen.queryByText("$0.42")).toBeNull();
       expect(screen.getByText("3")).toBeInTheDocument();
     });
+  });
+});
+
+describe("DockBar MCP feature-flag gating", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+  afterEach(() => {
+    resetFeatureFlags();
+    window.localStorage.clear();
+  });
+
+  function renderBar() {
+    return render(
+      <DockProvider>
+        <PanelProbe id="mcp" />
+        <DockBar />
+      </DockProvider>,
+    );
+  }
+
+  it("omits the MCP dock button by default (flag off)", () => {
+    renderBar();
+    expect(screen.queryByLabelText("MCP")).toBeNull();
+    // Sessions is unaffected — the bar still renders its other tools.
+    expect(screen.getByLabelText("Sessions")).toBeInTheDocument();
+  });
+
+  it("renders the MCP dock button when the flag is enabled", () => {
+    setFeatureFlag(FLAG_MCP_SERVERS, true);
+    renderBar();
+    expect(screen.getByLabelText("MCP")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("MCP"));
+    expect(screen.queryByTestId("panel-mcp-body")).not.toBeNull();
   });
 });

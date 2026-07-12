@@ -38,13 +38,27 @@ export interface FeatureFlagDefinition {
 }
 
 /**
+ * Stable id for the MCP-servers feature flag. Exported so gating call
+ * sites and tests reference one constant instead of a loose string.
+ */
+export const FLAG_MCP_SERVERS = "mcp-servers";
+
+/**
  * Registry of every flag the app knows about.
  *
  * Keep this short. A flag is a temporary tool — when a feature is either
  * fully shipped or fully removed, delete the entry rather than letting
  * the registry rot. (Per project convention: replace, don't deprecate.)
  */
-export const FEATURE_FLAGS: ReadonlyArray<FeatureFlagDefinition> = [];
+export const FEATURE_FLAGS: ReadonlyArray<FeatureFlagDefinition> = [
+  {
+    id: FLAG_MCP_SERVERS,
+    label: "MCP servers",
+    description:
+      "Project-owned MCP server management (the MCP dock panel). Still evolving — off by default.",
+    defaultValue: false,
+  },
+];
 
 /** Map view of {@link FEATURE_FLAGS} for O(1) lookup by id. */
 const DEFINITIONS_BY_ID: ReadonlyMap<string, FeatureFlagDefinition> = new Map(

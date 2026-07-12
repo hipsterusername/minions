@@ -25,6 +25,9 @@ import type { LeaderData } from "./nodes/leader/types.ts";
 import { ConfirmModal } from "./components/ConfirmModal.tsx";
 import { subscribeSocketTopic, type SocketSubscribe } from "./use-socket.ts";
 import { sessionTopic } from "../shared/ws-envelope.ts";
+import { randomUuid } from "./random-id.ts";
+import { useWorktreeIntegration } from "./use-worktree-integration.ts";
+import { WorktreeIntegrationControls } from "./WorktreeIntegrationControls.tsx";
 import "./changes-view.css";
 
 type WorktreeDiff = NonNullable<LeaderData["approvalDiff"]>;
@@ -79,6 +82,9 @@ export function SessionChangesPanel({
   const [loading, setLoading] = useState(true);
   const [diff, setDiff] = useState<WorktreeDiff | null>(null);
   const [confirm, setConfirm] = useState<"merge" | "discard" | null>(null);
+  const integration = useWorktreeIntegration({ workItemId: data.workItemId ?? null,
+    runKey: sessionKey, ...(socketSend ? { send: socketSend } : {}),
+    ...(socketSubscribe ? { subscribe: socketSubscribe } : {}) });
 
   const hasConflict = !!data.mergeConflict;
   const approvalPending = !!data.approvalPending;
@@ -115,7 +121,7 @@ export function SessionChangesPanel({
   }, [sessionKey, socketSubscribe, socketSend]);
 
   const doMerge = useCallback(() => {
-    if (socketSend) socketSend({ type: "approve_changes", sessionKey });
+    if (socketSend && !data.workItemId) socketSend({ type: "approve_changes", sessionKey });
     onUpdateNodeData(nodeId, {
       ...data,
       worktreeStatus: "merging",
@@ -125,22 +131,28 @@ export function SessionChangesPanel({
   }, [socketSend, sessionKey, nodeId, data, onUpdateNodeData]);
 
   const doDiscard = useCallback(() => {
-    if (socketSend) socketSend({ type: "discard_worktree", sessionKey });
+    if (socketSend && integration.contribution) socketSend({
+      type: "discard_worktree_contribution", requestId: randomUuid(),
+      contributionId: integration.contribution.id,
+      expectedIntegrationRevision: integration.contribution.revision,
+      reason: "Discarded in Changes review",
+    });
+    else if (socketSend && !data.workItemId) socketSend({ type: "discard_worktree", sessionKey });
     setConfirm(null);
-  }, [socketSend, sessionKey]);
+  }, [data.workItemId, integration.contribution, socketSend, sessionKey]);
 
   return (
     <div className="changes-card changes-card--inline" data-testid="session-changes-panel">
       <div className="changes-card__top">
-        {approvalPending && (
+        {!data.workItemId && approvalPending && (
           <span className="changes-badge changes-badge--pending">Ready for review</span>
         )}
-        {hasConflict && (
+        {!data.workItemId && hasConflict && (
           <span className="changes-badge changes-badge--conflict">
             <AlertTriangle size={11} strokeWidth={2.5} aria-hidden /> Conflicts
           </span>
         )}
-        {data.worktreeStatus === "merging" && (
+        {!data.workItemId && data.worktreeStatus === "merging" && (
           <span className="changes-badge changes-badge--merging">Merging…</span>
         )}
       </div>
@@ -192,32 +204,38 @@ export function SessionChangesPanel({
         <div className="changes-card__none">No changes yet.</div>
       )}
 
+      {integration.error ? <div className="changes-card__none" role="alert">{integration.error}</div> : null}
+      {data.workItemId && integration.lineage && socketSend ? (
+        <WorktreeIntegrationControls lineage={integration.lineage} workItemId={data.workItemId}
+          runKey={sessionKey} send={socketSend} />
+      ) : null}
+
       <div className="changes-card__actions">
-        <button
+        {!data.workItemId && <button
           className="changes-btn changes-btn--merge"
           disabled={hasConflict || (diff != null && diff.filesChanged === 0)}
           onClick={() => setConfirm("merge")}
         >
           <GitMerge size={13} strokeWidth={2} aria-hidden /> Merge
-        </button>
+        </button>}
         <button className="changes-btn" onClick={fetchDiff}>
           <RefreshCw size={13} strokeWidth={2} aria-hidden /> Refresh
         </button>
-        {hasConflict && (
+        {!data.workItemId && hasConflict && (
           <button className="changes-btn" onClick={() => onOpenInCanvas(nodeId)}>
             <ExternalLink size={13} strokeWidth={2} aria-hidden /> Resolve in Canvas
           </button>
         )}
-        <span className="changes-card__spacer" />
-        <button
+        {!data.workItemId && <span className="changes-card__spacer" />}
+        {!data.workItemId && <button
           className="changes-btn changes-btn--discard"
           onClick={() => setConfirm("discard")}
         >
           <Trash2 size={13} strokeWidth={2} aria-hidden /> Discard
-        </button>
+        </button>}
       </div>
 
-      {confirm === "merge" && (
+      {!data.workItemId && confirm === "merge" && (
         <ConfirmModal
           title="Merge worktree changes?"
           description="Merge this session's reviewed worktree changes into your working tree."
@@ -225,7 +243,7 @@ export function SessionChangesPanel({
           actions={[{ label: "Merge", variant: "primary", onClick: doMerge }]}
         />
       )}
-      {confirm === "discard" && (
+      {!data.workItemId && confirm === "discard" && (
         <ConfirmModal
           title="Discard worktree changes?"
           description="This will remove all changes from this session's isolated worktree."

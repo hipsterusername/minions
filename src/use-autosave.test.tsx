@@ -204,4 +204,17 @@ describe("toPersistableNodes", () => {
       nodesToPersist[1],
     ]);
   });
+
+  it("does not persist canonical lifecycle projections on leader nodes", () => {
+    const node: CanvasNode = {
+      id: "leader-1", type: "leader", position: { x: 0, y: 0 },
+      size: { width: 100, height: 100 }, data: {
+        workItemId: "work-1", currentRunKey: "run-1", status: "completed",
+        worktreeStatus: "merged", workItemSnapshot: { id: "work-1" }, messages: [],
+      },
+    };
+    expect(toPersistableNodes([node])).toEqual([{ ...node, data: {
+      workItemId: "work-1", currentRunKey: "run-1", messages: [],
+    } }]);
+  });
 });

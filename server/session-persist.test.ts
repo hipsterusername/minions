@@ -141,6 +141,32 @@ describe("session-persist integration", () => {
     expect(hydrated[0]?.tasks?.tasks.size).toBe(0);
   });
 
+  it("preserves project and immutable run metadata across generic session writes", () => {
+    persistSession(makeSession({ projectId: "project-1", sessionId: "provider-1" }));
+    const db = openPersistDb();
+    db.prepare(`
+      INSERT INTO work_items (
+        id, project_id, project_path, title, runtime_state, outcome, resolution,
+        change_mode, integration_state, workflow_rank, last_transition_at, created_at, updated_at
+      ) VALUES ('work-1', 'project-1', '/repo', 'T', 'inactive', 'completed', 'open', 'live', 'live_clean', 'a', 1, 1, 1)
+    `).run();
+    db.prepare(`
+      UPDATE sessions SET work_item_id = 'work-1', run_number = 1, run_kind = 'primary',
+        started_at = 1, ended_at = 2, run_outcome = 'completed'
+      WHERE session_key = 'sess-1'
+    `).run();
+
+    persistSession(makeSession({ sessionId: "provider-overwrite-attempt" }));
+    const row = db.prepare(`
+      SELECT project_id, work_item_id, run_number, run_kind, ended_at, run_outcome, session_id
+      FROM sessions WHERE session_key = 'sess-1'
+    `).get();
+    expect(row).toEqual({
+      project_id: "project-1", work_item_id: "work-1", run_number: 1,
+      run_kind: "primary", ended_at: 2, run_outcome: "completed", session_id: "provider-1",
+    });
+  });
+
   it("persists active worktree metadata and approval state across hydrate", () => {
     persistSession(makeSession({
       worktree: {
@@ -214,6 +240,80 @@ describe("session-persist integration", () => {
     const hydrated = hydrateSessionsFromDb();
     expect(hydrated).toEqual([]);
     expect(loadRecentEvents("sess-1")).toEqual([]);
+  });
+
+  it("refuses legacy deletion of a work-item-bound immutable run", () => {
+    persistSession(makeSession({ projectId: "project-1" }));
+    const db = openPersistDb();
+    db.prepare(`
+      INSERT INTO work_items (
+        id, project_id, project_path, title, runtime_state, outcome, resolution,
+        change_mode, integration_state, workflow_rank, last_transition_at, created_at, updated_at
+      ) VALUES ('work-1', 'project-1', '/repo', 'T', 'working', 'none', 'open', 'live', 'live_clean', 'a', 1, 1, 1)
+    `).run();
+    db.prepare(`
+      UPDATE sessions SET work_item_id = 'work-1', run_number = 1,
+        run_kind = 'primary', started_at = 1 WHERE session_key = 'sess-1'
+    `).run();
+
+    expect(removePersistedSession("sess-1")).toBe(false);
+    expect(db.prepare("SELECT session_key FROM sessions WHERE session_key = 'sess-1'").get())
+      .toEqual({ session_key: "sess-1" });
+  });
+
+  it("rolls back session deletion when one cleanup step fails", () => {
+    persistSession(makeSession());
+    persistTaskState("sess-1", makeTaskState([makeTaskRecord()]));
+    const db = openPersistDb();
+    db.exec(`
+      CREATE TRIGGER reject_task_cleanup
+      BEFORE DELETE ON task_records
+      BEGIN
+        SELECT RAISE(ABORT, 'cleanup blocked');
+      END
+    `);
+
+    removePersistedSession("sess-1");
+
+    const hydrated = hydrateSessionsFromDb();
+    expect(hydrated.map((entry) => entry.row.session_key)).toEqual(["sess-1"]);
+    expect(hydrated[0]?.tasks?.tasks.has("t1")).toBe(true);
+  });
+
+  it("rolls back stale-task deletion when a later task upsert fails", () => {
+    persistSession(makeSession());
+    persistTaskState(
+      "sess-1",
+      makeTaskState([
+        makeTaskRecord({ taskId: "t1" }),
+        makeTaskRecord({ taskId: "t2" }),
+      ]),
+    );
+    const db = openPersistDb();
+    db.exec(`
+      CREATE TRIGGER reject_t3_insert
+      BEFORE INSERT ON task_records
+      WHEN NEW.task_id = 't3'
+      BEGIN
+        SELECT RAISE(ABORT, 'insert blocked');
+      END
+    `);
+
+    persistTaskState(
+      "sess-1",
+      makeTaskState([
+        makeTaskRecord({ taskId: "t2" }),
+        makeTaskRecord({ taskId: "t3" }),
+      ]),
+    );
+
+    const tasks = hydrateSessionsFromDb()[0]?.tasks?.tasks;
+    expect(Array.from(tasks?.keys() ?? []).sort()).toEqual(["t1", "t2"]);
+  });
+
+  it.runIf(process.platform !== "win32")("creates the transcript database with owner-only permissions", () => {
+    const mode = fs.statSync(dbPath).mode & 0o777;
+    expect(mode).toBe(0o600);
   });
 
   it("persisted events round-trip via hydrate (regression: completed leader chat history was lost on restart)", () => {
@@ -307,6 +407,35 @@ describe("session-persist integration", () => {
     const hydrated = hydrateSessionsFromDb();
     expect(hydrated).toHaveLength(1);
     expect(hydrated[0]?.row.harness_name).toBe("echo");
+  });
+
+  it("review lifecycle and frozen completion report survive restart", () => {
+    persistSession(makeSession({
+      id: "reviewed",
+      status: "idle",
+      reviewLifecycle: {
+        reviewState: "completion_to_review",
+        reviewReason: "Read the final report and review the dashboard",
+        finalReport: "All requested work is complete.",
+        finalDashboardRevision: 7,
+        dashboardRevision: 7,
+        terminalReason: "completed",
+        terminalAt: 100,
+        acknowledgedAt: 110,
+        dismissedAt: null,
+        lifecycleRevision: 4,
+      },
+    }));
+    closePersistDb();
+    openPersistDb(dbPath);
+    const row = hydrateSessionsFromDb()[0]!.row;
+    expect(row).toMatchObject({
+      review_state: "completion_to_review",
+      final_report: "All requested work is complete.",
+      final_dashboard_revision: 7,
+      acknowledged_at: 110,
+      lifecycle_revision: 4,
+    });
   });
 
   it("rows written before the harness column existed hydrate as 'claude'", () => {

@@ -132,7 +132,7 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
       const isRetry = existing != null && isRetryableTaskStatus(existing.status);
       const retryAttempt = isRetry ? (existing!.attempt ?? 1) + 1 : undefined;
 
-      const minionKey = `minion-${Date.now().toString(36)}-${taskId.slice(0, 8)}`;
+      let minionKey = `minion-${Date.now().toString(36)}-${taskId.slice(0, 8)}`;
 
       if (existing) {
         existing.title = title;
@@ -182,29 +182,10 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
         }
       }
 
-      applyLifecycleEvent({
-        bus: ctx.bus,
-        leaderSessionKey: ctx.leaderSessionKey,
-        taskState: ctx.taskState,
-        taskId,
-        event: { type: "assigned", minionSessionKey: minionKey },
-        onStateChange: ctx.onStateChange,
-      });
-
       const timeoutMs =
         args.timeout_minutes != null
           ? args.timeout_minutes * 60_000
           : ctx.taskTimeoutMs;
-
-      scheduleTaskTimeout({
-        bus: ctx.bus,
-        leaderSessionKey: ctx.leaderSessionKey,
-        taskState: ctx.taskState,
-        taskId,
-        timeoutMs,
-        onStateChange: ctx.onStateChange,
-        onTimeout: () => ctx.terminateSession?.(minionKey, "abort"),
-      });
 
       // Arm the minion with any requested skills by appending their
       // compiled instructions to the minion's system prompt. Unknown
@@ -259,15 +240,49 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
         : undefined;
 
       // Start the minion session on the server
-      ctx.startMinionSession({
-        sessionKey: minionKey,
-        prompt,
-        cwd: ctx.cwd,
-        systemPrompt: minionSystemPrompt,
-        ...(minionModel ? { model: minionModel } : {}),
-        ...(minionThinkingConfig ? { thinkingConfig: minionThinkingConfig } : {}),
-        ...(minionHarness ? { harness: minionHarness } : {}),
-      });
+      let launched: Awaited<ReturnType<TaskToolContext["startMinionSession"]>>;
+      let allocationPersisted = false;
+      const onAllocated = (authoritativeKey: string) => {
+        minionKey = authoritativeKey;
+        if (allocationPersisted) return;
+        applyLifecycleEvent({ bus: ctx.bus, leaderSessionKey: ctx.leaderSessionKey,
+          taskState: ctx.taskState, taskId,
+          event: { type: "assigned", minionSessionKey: minionKey }, onStateChange: ctx.onStateChange });
+        allocationPersisted = true;
+      };
+      try {
+        launched = await ctx.startMinionSession({
+          sessionKey: minionKey,
+          taskId,
+          prompt,
+          cwd: ctx.cwd,
+          systemPrompt: minionSystemPrompt,
+          ...(minionModel ? { model: minionModel } : {}),
+          ...(minionThinkingConfig ? { thinkingConfig: minionThinkingConfig } : {}),
+          ...(minionHarness ? { harness: minionHarness } : {}),
+          permissionMode: typeof settings.defaultPermissionMode === "string" ? settings.defaultPermissionMode : "auto",
+          executorClass: args.executorClass,
+          skillIds: armedSkillIds,
+          onAllocated,
+        });
+        const allocatedKey = launched?.sessionKey;
+        onAllocated(allocatedKey ?? minionKey);
+        scheduleTaskTimeout({ bus: ctx.bus, leaderSessionKey: ctx.leaderSessionKey,
+          taskState: ctx.taskState, taskId, timeoutMs, onStateChange: ctx.onStateChange,
+          onTimeout: () => ctx.terminateSession?.(minionKey, "abort") });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Minion session launch failed.";
+        onAllocated(minionKey);
+        applyLifecycleEvent({
+          bus: ctx.bus,
+          leaderSessionKey: ctx.leaderSessionKey,
+          taskState: ctx.taskState,
+          taskId,
+          event: { type: "session_ended", reason: "error", result: message },
+          onStateChange: ctx.onStateChange,
+        });
+        return textResult(`Task ${taskId} could not start and may be retried: ${message}`);
+      }
 
       // Broadcast: minion_spawned so Canvas creates the node
       ctx.bus.emitToSession(ctx.leaderSessionKey, {
@@ -280,8 +295,9 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
         priority,
         worktreeBranch: ctx.worktreeBranch ?? null,
         skillIds: armedSkillIds,
-        model: minionModel ?? null,
-        harness: minionHarness ?? null,
+        model: launched?.model ?? minionModel ?? null,
+        harness: launched?.harness ?? minionHarness ?? null,
+        permissionMode: launched?.permissionMode ?? settings.defaultPermissionMode ?? "auto",
         timestamp: Date.now(),
       });
 

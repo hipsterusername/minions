@@ -27,11 +27,11 @@ You need all of the following installed before starting:
 
 | Requirement | Why |
 |---|---|
-| **Claude Code and/or OpenAI Codex** | Minions supports both harnesses. Authenticate Claude Code for Claude sessions; for Codex, run `codex login` or provide `CODEX_API_KEY`/`OPENAI_API_KEY`. New projects currently default to Codex Leaders and Claude Minions, so authenticate both unless you change the project defaults. |
+| **Claude Code and/or OpenAI Codex** | One authenticated harness is enough. Run `claude auth login` and/or `codex login`; API-key based Codex authentication is also supported. New-project defaults are derived from whichever harnesses are ready. |
 | **Node.js ≥ 22** | Required by the agent SDKs and modern runtime features |
 | **pnpm** | Package manager (`npm install -g pnpm` if you don't have it) |
 | **git** | Used for repository access and optional worktree isolation |
-| **[Tailscale](https://tailscale.com/download)** | Required by the current `pnpm start` workflow, which configures tailnet HTTPS before launching |
+| **[Tailscale](https://tailscale.com/download)** | Optional, for tailnet HTTPS and the mobile companion |
 
 ### Verify your setup
 
@@ -39,8 +39,9 @@ You need all of the following installed before starting:
 pnpm preflight
 ```
 
-This checks Node.js, pnpm, git, and configured Claude executable overrides.
-Provider authentication is also validated when a session starts.
+This checks the host, loopback ports, native dependencies, and the exact Claude
+and Codex runtimes used by sessions. It succeeds when at least one harness is
+authenticated and prints controlled remediation for the others.
 
 ## Quick Start
 
@@ -52,15 +53,11 @@ pnpm preflight
 pnpm start
 ```
 
-`pnpm start` configures `tailscale serve`, launches the backend and Vite in the
-background, and returns to the terminal. It currently fails closed if Tailscale
-HTTPS cannot be configured.
+`pnpm start` launches the backend and Vite together in the foreground, streams
+their logs, opens the browser, and stops both on `Ctrl-C`. It never configures
+Tailscale.
 
-- App: **https://<machine>.<tailnet>.ts.net:6173/**
 - Local URL: **http://localhost:6173**
-- Logs: `.run/minions.log`
-- Status: `pnpm status`
-- Stop: `pnpm stop`
 
 That's it. No environment variables, no database setup, no Docker — SQLite handles storage automatically.
 
@@ -102,7 +99,7 @@ All optional — sane defaults are provided:
 | Variable | Default | Description |
 |---|---|---|
 | `PORT` | `3141` | Backend server port |
-| `HOST` | `0.0.0.0` | Server bind address |
+| `HOST` | `127.0.0.1` | Server bind address; set explicitly for remote binding |
 | `VITE_PORT` | `6173` | Vite and Tailscale-facing application port |
 | `CLAUDE_CODE_PATH` | SDK discovery | Optional Claude executable override |
 | `CODEX_PATH` | SDK discovery | Optional Codex executable override |
@@ -130,19 +127,17 @@ only expose the Service Worker / Push APIs in a **secure context** (HTTPS, or
 `localhost`). Opening the app from a phone over `http://<host>:6173` is *not* a
 secure context, so the notifications button shows **"Notifications Unsupported"**.
 
-`pnpm start` serves the dev app over real HTTPS on your tailnet — no
-self-signed certs:
+Start the optional background service with tailnet HTTPS:
 
 ```bash
-pnpm start
+pnpm serve -- --tailscale
 ```
 
 Then open `https://<machine>.<tailnet>.ts.net:6173/m` on your phone (small screens
 auto-redirect to `/m`). Notifications now work: tap **Enable notifications**.
 
-- Stop the app and HTTPS front: `pnpm stop`.
-- Fronting a built preview is still available: `pnpm build && pnpm preview`,
-  then `pnpm serve:tailscale` (port 4173).
+- Stop the background app: `pnpm stop`.
+- A local built preview is `pnpm build && pnpm preview` and includes the backend.
 - On **iOS**, Web Push additionally requires iOS 16.4+ and adding the app to the
   Home Screen (Share → *Add to Home Screen*), then launching it from that icon.
 
@@ -153,11 +148,14 @@ or claim the bare `https://<machine>.<tailnet>.ts.net/` origin.
 
 | Command | What it does |
 |---|---|
-| `pnpm start` | Run everything (server + frontend dev) and serve it over Tailscale HTTPS |
-| `pnpm stop` | Stop the background app and its Tailscale serve mapping |
-| `pnpm restart` | Restart the background app and restore Tailscale serving |
+| `pnpm start` | Foreground backend + frontend development server on loopback |
+| `pnpm dev` | Exact alias of `pnpm start` |
+| `pnpm preview` | Foreground backend + built frontend preview on loopback |
+| `pnpm serve` | Start the full stack as a background service |
+| `pnpm serve -- --tailscale` | Start the background service and opt into tailnet HTTPS |
+| `pnpm stop` | Stop the background service |
+| `pnpm restart` | Restart the background service |
 | `pnpm status` | Report whether the background app is running |
-| `pnpm dev` | Vite frontend only (hot reload) |
 | `pnpm server` | Backend server only |
 | `pnpm build` | Production build |
 | `pnpm typecheck` | TypeScript type checking |
@@ -201,6 +199,12 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the development workflow and
 pull-request expectations. Report suspected vulnerabilities privately as
 described in [SECURITY.md](./SECURITY.md); do not include credentials, private
 repository content, or local transcripts in public issues.
+
+Run Minions only on a trusted local machine or private tailnet. Worktrees are
+coordination boundaries, not sandboxes: agents, local MCP commands, and enabled
+tools run with the permissions of the account that started Minions. Review
+provider permissions and project-owned `.minions/mcp-servers.json` entries
+before launching unattended sessions.
 
 ## Architecture
 

@@ -25,9 +25,11 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { featureFlagStore, FLAG_MCP_SERVERS } from "./feature-flags.ts";
 import { ViewportOverlay } from "./components/ViewportOverlay.tsx";
 
 /**
@@ -525,6 +527,15 @@ export function DockBar() {
   const density = useDockDensity();
   const compact = density === "compact";
 
+  // MCP servers is gated behind a debug feature flag, off by default. When
+  // disabled we omit its dock button entirely so the tool is hidden.
+  const mcpFlagStore = useMemo(() => featureFlagStore(FLAG_MCP_SERVERS), []);
+  const mcpEnabled = useSyncExternalStore(
+    mcpFlagStore.subscribe,
+    mcpFlagStore.getSnapshot,
+    mcpFlagStore.getSnapshot,
+  );
+
   const buttons: DockButtonConfig[] = useMemo(() => {
     return [
       {
@@ -537,18 +548,22 @@ export function DockBar() {
         label: "Map",
         icon: <MapIcon />,
       },
-      {
-        id: "mcp",
-        label: "MCP",
-        icon: <McpIcon />,
-      },
+      ...(mcpEnabled
+        ? [
+            {
+              id: "mcp" as const,
+              label: "MCP",
+              icon: <McpIcon />,
+            },
+          ]
+        : []),
       {
         id: "skills",
         label: "Skills",
         icon: <SkillsIcon />,
       },
     ];
-  }, []);
+  }, [mcpEnabled]);
 
   return (
     <ViewportOverlay>

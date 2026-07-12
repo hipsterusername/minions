@@ -26,7 +26,8 @@ export interface SessionToolbarProps {
   /** Either a Claude alias ("sonnet") or a concrete harness model id ("gpt-5.6-sol"). */
   model: string;
   permissionMode: PermissionMode;
-  onInterrupt: () => void;
+  /** Interrupt callback. When omitted, the interrupt button is not rendered. */
+  onInterrupt?: () => void;
   onModelChange: (model: string) => void;
   onPermissionModeChange: (mode: PermissionMode) => void;
   /** Adaptive-thinking config. Hidden when the active harness/model don't support it. */
@@ -794,7 +795,8 @@ export function SessionToolbar({
   // unsupported. We *don't* hide model/permission selectors — those are
   // also legitimately changed before the run starts.
   const showInterrupt =
-    !harnessCapabilities || harnessCapabilities.partialMessages;
+    !!onInterrupt &&
+    (!harnessCapabilities || harnessCapabilities.partialMessages);
 
   const closeAll = useCallback(() => {
     setModelPickerOpen(false);

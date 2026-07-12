@@ -1,6 +1,7 @@
 import type { SessionInfo } from "../use-socket.ts";
 
 export type MobileSessionInfo = SessionInfo & {
+  liveEditAwareness?: import("../../shared/live-edit-coordination.ts").LiveEditAwareness;
   lastActivity?: string | null;
   lastActivityAt?: number | null;
   pendingAttention?: boolean;
@@ -38,13 +39,89 @@ export interface ActivitySection<T extends MobileSessionInfo> {
   sessions: T[];
 }
 
+/**
+ * A leader's active-minion roster, reduced to the counts the mobile surfaces
+ * use to advertise live progress. `total` is the raw number of minions the
+ * leader is currently tracking; the tone buckets classify each by status so
+ * the UI can pulse the ones that are actually working right now.
+ */
+export interface MinionActivitySummary {
+  running: number;
+  blocked: number;
+  planned: number;
+  total: number;
+}
+
+/** Statuses where a tracked minion is actively executing work right now. */
+const MINION_RUNNING_STATUSES = new Set(["running", "starting"]);
+
+/**
+ * Reduce a session's `activeMinions` into the counts the mobile Activity list
+ * and leader session strip use to show live progress at a glance. Non-leader
+ * sessions (and sessions with no roster) collapse to all-zero counts.
+ */
+export function activeMinionSummary(session: MobileSessionInfo): MinionActivitySummary {
+  const minions = session.role === "leader" ? session.activeMinions ?? [] : [];
+  const summary: MinionActivitySummary = { running: 0, blocked: 0, planned: 0, total: minions.length };
+  for (const minion of minions) {
+    if (MINION_RUNNING_STATUSES.has(minion.status)) summary.running += 1;
+    else if (minion.status === "blocked") summary.blocked += 1;
+    else if (minion.status === "planned") summary.planned += 1;
+  }
+  return summary;
+}
+
+/** Whether any tracked minion is actively executing (used to drive live pulses). */
+export function hasLiveMinions(summary: MinionActivitySummary): boolean {
+  return summary.running > 0;
+}
+
 export function needsAttention(session: MobileSessionInfo): boolean {
+  const lifecycle = session.reviewLifecycle;
+  if (lifecycle) {
+    if (lifecycle.dismissedAt !== null || lifecycle.acknowledgedAt !== null) {
+      return session.reviewableChanges === true;
+    }
+    if (lifecycle.reviewState !== "none") return true;
+  }
   return (
     session.status === "error" ||
     session.status === "waiting" ||
     session.pendingAttention === true ||
     session.reviewableChanges === true
   );
+}
+
+export type ActivityVisibility = "open" | "all" | "dismissed";
+
+export function isVisibleInActivity(
+  session: MobileSessionInfo,
+  visibility: ActivityVisibility,
+): boolean {
+  const dismissed = session.reviewLifecycle?.dismissedAt != null;
+  if (visibility === "all") return true;
+  return visibility === "dismissed" ? dismissed : !dismissed;
+}
+
+const REVIEW_PRIORITY: Record<string, number> = {
+  decision_needed: 0,
+  error_to_review: 1,
+  interrupted_to_review: 2,
+  completion_to_review: 3,
+  none: 4,
+};
+
+export function compareActivityPriority<T extends MobileSessionInfo>(a: T, b: T): number {
+  const aLifecycle = a.reviewLifecycle;
+  const bLifecycle = b.reviewLifecycle;
+  const aAcknowledged = aLifecycle?.acknowledgedAt != null;
+  const bAcknowledged = bLifecycle?.acknowledgedAt != null;
+  const aPriority = aAcknowledged ? 5 : REVIEW_PRIORITY[aLifecycle?.reviewState ?? "none"] ?? 4;
+  const bPriority = bAcknowledged ? 5 : REVIEW_PRIORITY[bLifecycle?.reviewState ?? "none"] ?? 4;
+  if (aPriority !== bPriority) return aPriority - bPriority;
+  const aAt = aLifecycle?.terminalAt ?? a.lastActivityAt ?? 0;
+  const bAt = bLifecycle?.terminalAt ?? b.lastActivityAt ?? 0;
+  return bAt - aAt || sessionDisplayTitle(a).localeCompare(sessionDisplayTitle(b));
 }
 
 /**

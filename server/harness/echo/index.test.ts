@@ -57,6 +57,7 @@ describe("EchoHarness static properties", () => {
 
   it("all capabilities are false", () => {
     const caps = echoHarness.capabilities;
+    expect(caps.mutationInterception).toBe("none");
     expect(caps.thinking).toBe(false);
     expect(caps.promptCaching).toBe(false);
     expect(caps.mcp).toBe(false);

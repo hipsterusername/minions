@@ -20,6 +20,7 @@ interface CanvasNodeProps {
   getContextForNode?: (() => import("./types.ts").ContextItem[]) | undefined;
   getIncomingContextModes?: (() => string[]) | undefined;
   projectPath?: string | undefined;
+  projectId?: string | undefined;
   onResize?: ((id: string, size: Size) => void) | undefined;
   /** Callback to add text content as a new markdown node */
   onAddContentNode?: ((content: string) => void) | undefined;
@@ -149,6 +150,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
   getContextForNode,
   getIncomingContextModes,
   projectPath,
+  projectId,
   onResize,
   onAddContentNode,
   onCreateKanbanCardFromMarkdown,
@@ -481,6 +483,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
         getContextForNode={getContextForNode}
         getIncomingContextModes={getIncomingContextModes}
         projectPath={projectPath}
+        projectId={projectId}
         onResize={handleResize}
         onResizeStart={handleResizeStart}
         onResizeEnd={handleResizeEnd}

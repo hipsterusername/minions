@@ -6,7 +6,7 @@
  */
 
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, beforeAll } from "vitest";
+import { describe, expect, it, beforeAll, vi } from "vitest";
 
 import { ImageRenderer, HtmlArtifactRenderer, FilePreviewRenderer } from "./ArtifactComponents.tsx";
 import type { ImageComponent, FilePreviewComponent, HtmlArtifactComponent } from "../../../shared/render-dsl.ts";
@@ -29,14 +29,14 @@ describe("ImageRenderer", () => {
   const baseImage: ImageComponent = {
     id: "img-1",
     type: "image",
-    src: "https://example.com/photo.jpg",
+    src: "data:image/png;base64,AA==",
     alt: "Test photo",
   };
 
   it("renders an img tag with the correct src and alt", () => {
     render(<ImageRenderer c={baseImage} />);
     const img = screen.getAllByRole("img")[0];
-    expect(img).toHaveAttribute("src", "https://example.com/photo.jpg");
+    expect(img).toHaveAttribute("src", "data:image/png;base64,AA==");
     expect(img).toHaveAttribute("alt", "Test photo");
   });
 
@@ -87,6 +87,14 @@ describe("ImageRenderer", () => {
     fireEvent.click(dialog);
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("does not create a request-capable element for an unsafe restored URL", () => {
+    const unsafe = { ...baseImage, src: "https://tracker.example/pixel.png" };
+    render(<ImageRenderer c={unsafe} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("External image blocked");
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /open image lightbox/i })).not.toBeInTheDocument();
   });
 });
 
@@ -319,6 +327,23 @@ describe("FilePreviewRenderer: inline text with maxBytes truncation", () => {
   });
 });
 
+describe("FilePreviewRenderer: unsafe inline content", () => {
+  it("does not render SVG data as an image or open active HTML in a new tab", () => {
+    const html: FilePreviewComponent = {
+      id: "active-html",
+      type: "file-preview",
+      source: { kind: "inline", content: "<script>alert(1)</script>", mime: "text/html" },
+      view: "image",
+      actions: ["open"],
+    };
+    render(<FilePreviewRenderer c={html} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Unsafe image preview blocked");
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open" })).not.toBeInTheDocument();
+  });
+});
+
 // ── FilePreviewRenderer — path source ────────────────────
 
 describe("FilePreviewRenderer: path source placeholder", () => {
@@ -334,9 +359,9 @@ describe("FilePreviewRenderer: path source placeholder", () => {
     expect(screen.getByText("results.csv")).toBeInTheDocument();
   });
 
-  it("renders the placeholder message (no inline content available)", () => {
+  it("renders the placeholder message and explains unsafe actions are disabled", () => {
     render(<FilePreviewRenderer c={pathComponent} />);
-    expect(screen.getByText(/File content not available client-side/)).toBeInTheDocument();
+    expect(screen.getByText(/Open and download are disabled for untrusted paths/)).toBeInTheDocument();
   });
 
   it("does not render a table (no CSV body for path sources)", () => {
@@ -359,8 +384,12 @@ describe("FilePreviewRenderer: path source placeholder", () => {
     expect(screen.getByText("/tmp/output.txt")).toBeInTheDocument();
   });
 
-  it("renders a Download button", () => {
+  it("never opens a model-provided path as a browser target", () => {
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
     render(<FilePreviewRenderer c={pathComponent} />);
-    expect(screen.getByRole("button", { name: "Download" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Download" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open" })).not.toBeInTheDocument();
+    expect(open).not.toHaveBeenCalled();
+    open.mockRestore();
   });
 });

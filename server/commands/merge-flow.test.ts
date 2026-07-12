@@ -105,6 +105,18 @@ describe.each(CASES)(
       expect(mergeCalls).toHaveLength(0);
     });
 
+    it("rejects canonical work-item runs before entering the legacy merge flow", () => {
+      const h = setup({ status: "running" });
+      h.host.worktree = fakeWorktree;
+      h.host.workItemId = "work-1";
+      handler(h.ctx, cmd({ type: command as never, requestId: "canonical" }), h.ws);
+      expect(mergeCalls).toHaveLength(0);
+      expect(h.wsSent).toContainEqual(expect.objectContaining({
+        requestId: "canonical", success: false,
+        error: expect.stringContaining("lineage integration queue"),
+      }));
+    });
+
     it("on merge success: clears worktree, emits the four success envelopes, replies with success", async () => {
       const h = setup({ status: "running" });
       h.host.worktree = fakeWorktree;
@@ -180,3 +192,31 @@ describe.each(CASES)(
     });
   },
 );
+
+it("rejects a duplicate destructive command while a merge is still in flight", async () => {
+  let finishMerge!: (result: MergeResult) => void;
+  mergeResult = () =>
+    new Promise<MergeResult>((resolve) => {
+      finishMerge = resolve;
+    });
+  const h = setup({ status: "running" });
+  h.host.worktree = fakeWorktree;
+
+  approveChanges(h.ctx, cmd({ type: "approve_changes", requestId: "first" }), h.ws);
+  forceMerge(h.ctx, cmd({ type: "force_merge", requestId: "second" }), h.ws);
+
+  expect(mergeCalls).toHaveLength(1);
+  const rejected = h.wsSent.find((e) => e["requestId"] === "second");
+  expect(rejected?.["success"]).toBe(false);
+  expect(rejected?.["error"]).toContain("already in progress");
+
+  finishMerge({
+    success: true,
+    conflicts: [],
+    summary: "merged",
+    targetBranch: "main",
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+});

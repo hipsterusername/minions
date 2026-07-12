@@ -66,3 +66,27 @@ describe("mobile.css overflow guards", () => {
     expect(body).toContain("font-size: 16px");
   });
 });
+
+describe("mobile.css live activity cues", () => {
+  it("defines the live-state animations", () => {
+    expect(css).toContain("@keyframes mob-live-glow");
+    expect(css).toContain("@keyframes mob-live-ring");
+  });
+
+  it("animates the live status pill and live plan badge", () => {
+    expect(ruleBody('.mob-status-pill[data-live="true"]')).toContain("mob-live-glow");
+    expect(ruleBody('.mob-chat-tab span[data-live="true"]')).toContain("mob-live-glow");
+  });
+
+  it("animates the running status dots on plan and minion rows", () => {
+    expect(ruleBody('.mob-minion-row[data-tone="running"] .mob-minion-dot')).toContain("mob-live-ring");
+    expect(ruleBody('.mob-plan-row[data-tone="running"] .mob-plan-dot')).toContain("mob-live-ring");
+  });
+
+  it("disables the looping animations under prefers-reduced-motion", () => {
+    const guard = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+    expect(guard).toContain("animation: none");
+    expect(guard).toContain('.mob-status-pill[data-live="true"]');
+    expect(guard).toContain('.mob-minion-row[data-tone="running"] .mob-minion-dot');
+  });
+});

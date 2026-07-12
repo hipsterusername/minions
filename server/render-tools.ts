@@ -39,7 +39,7 @@ const DASHBOARD_COMPONENT_GUIDE = [
   "Use structured Render DSL components, not arbitrary HTML/React. Every component is a JSON object with stable id and type; never pass stringified JSON, HTML, markdown, or JSX as a component.",
   "Cell-width types: metric(label,value), progress(label,value 0-100), status(label,state success|error|warning|running|pending), sparkline(data), kv(entries), checklist(items), tags(items).",
   "Full-width types: table(headers,rows), list(items), text(content), code(content), copyable(content), timeline(events), callout(variant,content), diff(before,after), separator.",
-  "Rich types: form(fields) for user input, chart(series) for SVG charts, section(components) and tabs(tabs[].components) for layout, image(src,alt), file-preview(source).",
+  "Rich types: form(fields) for user input, chart(series) for SVG charts, section(components) and tabs(tabs[].components) for layout, image(src,alt), file-preview(source). Image src must be an embedded PNG/JPEG/GIF/WebP data URL; external URLs are rejected. Path file previews are display/copy-only and cannot open or download arbitrary paths.",
   "html-artifact(html,title?) shows a static, NON-FUNCTIONAL HTML visualization in a locked-down sandboxed iframe with click-to-expand. Prefer the dedicated `publish_html` tool to create one — it sanitizes the HTML and writes a session-scoped temp file. Never rely on scripts, forms, or network requests inside it.",
   "Use render_set for initial layout, then render_patch with stable ids for value/state updates.",
 ].join(" ");

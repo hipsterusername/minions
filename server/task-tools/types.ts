@@ -4,9 +4,11 @@
 
 import type { Bus } from "../bus.ts";
 import type { ThinkingConfig } from "../session-host-config.ts";
+import type { SessionInvocationKind } from "../session-host-types.ts";
 import type { WorktreeInfo, DetailedDiff } from "../worktree.js";
 import type { MergeGateVerdict } from "../system-model/gates.ts";
 import type { LoadedSystemModel } from "../system-model/types.ts";
+import type { RenderComponent } from "../../shared/render-dsl.ts";
 
 // ── Public state types ────────────────────────────────
 
@@ -68,6 +70,9 @@ export type TaskStatus =
 
 export interface RuntimeSessionInfo {
   sessionKey: string;
+  workItemId?: string | null;
+  runKey?: string;
+  runKind?: "primary" | "child";
   sessionId: string | null;
   status: string;
   role: string;
@@ -130,6 +135,8 @@ export interface TaskToolContext {
   bus: Bus;
   startMinionSession: (params: {
     sessionKey: string;
+    taskId?: string;
+    invocationKind?: SessionInvocationKind;
     prompt: string;
     cwd: string;
     systemPrompt: string;
@@ -142,7 +149,11 @@ export interface TaskToolContext {
      * to the leader's current `harnessName`.
      */
     harness?: string;
-  }) => void;
+    permissionMode?: string;
+    executorClass?: "mechanical" | "standard" | "reasoning";
+    skillIds?: string[];
+    onAllocated?: (sessionKey: string) => void;
+  }) => void | Promise<{ sessionKey: string; harness: string; model: string; permissionMode: string }>;
   cwd: string;
   /**
    * The canonical project path (sidecar root). When the leader is running
@@ -178,4 +189,6 @@ export interface TaskToolContext {
     message: string,
   ) => { delivered: boolean; status: string | null };
   taskTimeoutMs?: number;
+  /** Live dashboard snapshot used to block checkpoints with pending forms. */
+  getRenderComponents?: () => RenderComponent[];
 }

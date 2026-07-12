@@ -29,6 +29,7 @@ function emitSocketMessage(msg: unknown) {
 vi.mock("../api.ts", () => ({
   getProjectSettings: vi.fn(async () => ({})),
   listProjects: vi.fn(async () => []),
+  getHarnessReadiness: vi.fn(async () => ({ schemaVersion: 1, checkedAt: "", expiresAt: "", ready: true, readyHarnesses: ["claude"], harnesses: [] })),
   restartServer: vi.fn(async () => ({ ok: true, restarting: true })),
   updateProjectSettings: vi.fn(async () => ({})),
 }));

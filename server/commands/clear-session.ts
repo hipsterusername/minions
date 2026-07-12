@@ -12,14 +12,25 @@
 import { clearSessionEvents } from "../session-persist.ts";
 import { deleteHtmlArtifactsForSession } from "../html-artifact-store.ts";
 import { serverLogger } from "../logging.ts";
+import { unicastToSession } from "../bus.ts";
 import type { CommandHandler } from "./types.ts";
 
 const log = serverLogger.child("clear-session");
 
-export const clearSession: CommandHandler = (ctx, cmd) => {
+export const clearSession: CommandHandler = (ctx, cmd, ws) => {
   if (!cmd.sessionKey) return;
   const host = ctx.registry.get(cmd.sessionKey);
   if (!host) return;
+
+  if (host.workItemId) {
+    unicastToSession(ws, cmd.sessionKey, {
+      type: "session_error", sessionKey: cmd.sessionKey,
+      error: "Canonical work-item run history cannot be cleared directly",
+      code: "WORK_ITEM_SESSION_PROTECTED", workItemId: host.workItemId,
+      guidance: "Start a new work-item iteration; prior run history remains immutable.", timestamp: Date.now(),
+    });
+    return;
+  }
 
   if (host.status === "running") return;
 

@@ -5,7 +5,16 @@ import { validateLoadedSystemModel } from "../server/system-model/validate.ts";
 
 const cwd = process.cwd();
 const strict = process.argv.includes("--strict");
+const requireManifest = process.argv.includes("--require-manifest");
 const { model, errors } = loadSystemModel(cwd);
+
+const manifestMissing = !model && errors.length === 1
+  && errors[0]?.file === ".systemmodel/manifest.yaml"
+  && errors[0]?.message === "manifest.yaml not found";
+if (manifestMissing && !requireManifest) {
+  console.log("System model not configured; validation skipped");
+  process.exit(0);
+}
 
 if (!model || errors.length > 0) {
   const fatalErrors = errors.filter((error) => error.severity !== "warning");

@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  activeMinionSummary,
   activitySection,
   groupSessionsByActivity,
   groupSessionsForTriage,
+  compareActivityPriority,
+  hasLiveMinions,
+  isVisibleInActivity,
   needsAttention,
   sessionBelongsToProject,
   sessionDisplayTitle,
@@ -20,6 +24,22 @@ function session(overrides: Partial<MobileSessionInfo>): MobileSessionInfo {
   };
 }
 
+function lifecycle(reviewState: NonNullable<MobileSessionInfo["reviewLifecycle"]>["reviewState"], extra = {}) {
+  return {
+    reviewState,
+    reviewReason: null,
+    finalReport: null,
+    finalDashboardRevision: null,
+    dashboardRevision: 0,
+    terminalReason: null,
+    terminalAt: 1,
+    acknowledgedAt: null,
+    dismissedAt: null,
+    lifecycleRevision: 1,
+    ...extra,
+  };
+}
+
 describe("mobile selectors", () => {
   it("marks error and pending sessions as needing attention", () => {
     expect(needsAttention(session({ status: "error" }))).toBe(true);
@@ -27,6 +47,35 @@ describe("mobile selectors", () => {
     expect(needsAttention(session({ pendingAttention: true }))).toBe(true);
     expect(needsAttention(session({ reviewableChanges: true }))).toBe(true);
     expect(needsAttention(session({ status: "running" }))).toBe(false);
+  });
+
+  it("uses the durable lifecycle for attention and visibility", () => {
+    const complete = session({ reviewLifecycle: lifecycle("completion_to_review") });
+    const acknowledged = session({
+      reviewLifecycle: lifecycle("completion_to_review", { acknowledgedAt: 2 }),
+    });
+    const dismissed = session({
+      reviewLifecycle: lifecycle("error_to_review", { dismissedAt: 3 }),
+    });
+    expect(needsAttention(complete)).toBe(true);
+    expect(needsAttention(acknowledged)).toBe(false);
+    expect(isVisibleInActivity(dismissed, "open")).toBe(false);
+    expect(isVisibleInActivity(dismissed, "dismissed")).toBe(true);
+    expect(isVisibleInActivity(dismissed, "all")).toBe(true);
+  });
+
+  it("orders lifecycle outcomes before working and acknowledged sessions", () => {
+    const sessions = [
+      session({ sessionKey: "working", status: "running" }),
+      session({ sessionKey: "complete", reviewLifecycle: lifecycle("completion_to_review") }),
+      session({ sessionKey: "interrupted", reviewLifecycle: lifecycle("interrupted_to_review") }),
+      session({ sessionKey: "error", reviewLifecycle: lifecycle("error_to_review") }),
+      session({ sessionKey: "decision", reviewLifecycle: lifecycle("decision_needed") }),
+      session({ sessionKey: "read", reviewLifecycle: lifecycle("completion_to_review", { acknowledgedAt: 2 }) }),
+    ];
+    expect(sessions.sort(compareActivityPriority).map((s) => s.sessionKey)).toEqual([
+      "decision", "error", "interrupted", "complete", "working", "read",
+    ]);
   });
 
   it("uses taskName for display title and falls back to sessionKey", () => {
@@ -148,5 +197,33 @@ describe("mobile selectors", () => {
     expect(triage.sections.map((s) => s.id)).toEqual(["active", "stopped"]);
     expect(triage.sections[0]!.sessions.map((s) => s.sessionKey)).toEqual(["running"]);
     expect(triage.sections[1]!.sessions.map((s) => s.sessionKey)).toEqual(["completed"]);
+  });
+
+  it("summarizes a leader's active minions by live status", () => {
+    const summary = activeMinionSummary(
+      session({
+        role: "leader",
+        activeMinions: [
+          { taskId: "a", title: "A", status: "running", sessionKey: "m-a" },
+          { taskId: "b", title: "B", status: "starting", sessionKey: "m-b" },
+          { taskId: "c", title: "C", status: "blocked", sessionKey: "m-c" },
+          { taskId: "d", title: "D", status: "planned", sessionKey: "m-d" },
+        ],
+      }),
+    );
+    expect(summary).toEqual({ running: 2, blocked: 1, planned: 1, total: 4 });
+    expect(hasLiveMinions(summary)).toBe(true);
+  });
+
+  it("collapses to zero counts for non-leaders and empty rosters", () => {
+    expect(activeMinionSummary(session({ role: "minion", status: "running" }))).toEqual({
+      running: 0,
+      blocked: 0,
+      planned: 0,
+      total: 0,
+    });
+    const empty = activeMinionSummary(session({ role: "leader" }));
+    expect(empty).toEqual({ running: 0, blocked: 0, planned: 0, total: 0 });
+    expect(hasLiveMinions(empty)).toBe(false);
   });
 });

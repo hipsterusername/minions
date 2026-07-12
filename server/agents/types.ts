@@ -7,21 +7,27 @@
  */
 
 import type { Bus } from "../bus.ts";
+import type { RunMutationCoordination } from "../mutation-coordination.ts";
 import type { RuntimeSessionInfo, TaskManagerState } from "../task-tools.ts";
 import type { RenderState } from "../../shared/render-dsl.ts";
 import type { WorktreeInfo } from "../worktree.ts";
 import type { NormalizedToolDef } from "../harness/types.ts";
 import type { ThinkingConfig } from "../session-host-config.ts";
 import type { SessionTerminateReason } from "../session-host-terminate.ts";
+import type { SessionInvocationKind } from "../session-host-types.ts";
 
 // ── Context passed to every AgentType method ──────────────────────────────
 
 export interface AgentTypeContext {
   sessionKey: string;
+  workItemId?: string | null;
+  runKey?: string;
+  taskId?: string | null;
   cwd: string;
   bus: Bus;
   worktreeInfo: WorktreeInfo | null;
   worktreeIsolation: boolean;
+  mutationCoordination?: RunMutationCoordination;
   /** Existing task state to preserve across resume calls (leader only) */
   existingTaskState?: TaskManagerState;
   /** Existing render state to preserve across resume calls (leader only) */
@@ -44,13 +50,19 @@ export interface AgentTypeContext {
    */
   startMinionSession?: (params: {
     sessionKey: string;
+    taskId?: string;
+    invocationKind?: SessionInvocationKind;
     prompt: string;
     cwd: string;
     systemPrompt: string;
     model?: string;
     harness?: string;
     thinkingConfig?: ThinkingConfig;
-  }) => void;
+    permissionMode?: string;
+    executorClass?: "mechanical" | "standard" | "reasoning";
+    skillIds?: string[];
+    onAllocated?: (sessionKey: string) => void;
+  }) => void | Promise<{ sessionKey: string; harness: string; model: string; permissionMode: string }>;
   /** Callback to schedule a delayed "Continue" resume (leader only) */
   scheduleWaitContinue?: (durationMs: number, reason: string) => ReturnType<typeof setTimeout> | null | void;
   /** Callback to terminate another live session by key. */
@@ -66,6 +78,7 @@ export interface AgentTypeContext {
   ) => { delivered: boolean; status: string | null };
   /** Wake a waiting leader as soon as every child task is terminal. */
   wakeWaitingLeaderIfAllChildrenTerminal?: (leaderKey: string) => void;
+  cleanupLiveEditRun?: (runKey: string) => void;
   /**
    * Iterate over all sessions that have a taskState (i.e., leaders).
    * Used by minion onComplete to propagate results back.
@@ -75,6 +88,12 @@ export interface AgentTypeContext {
   ) => void;
   /** Return live host/session metadata for a known session key, if loaded. */
   getSessionRuntime?: (sessionKey: string) => RuntimeSessionInfo | null;
+  /** Latest render components for safe checkpoint-boundary validation. */
+  getRenderComponents?: () => RenderState["components"];
+  /** Raise a durable, structured user-input requirement for Activity. */
+  markDecisionNeeded?: (reason: string) => void;
+  /** Advance the persisted dashboard revision after a render mutation. */
+  markDashboardChanged?: () => void;
 }
 
 // ── Agent tool result ─────────────────────────────────────────────────────

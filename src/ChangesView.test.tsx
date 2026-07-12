@@ -131,6 +131,15 @@ describe("<SessionChangesPanel />", () => {
     expect(send).toHaveBeenCalledWith({ type: "discard_worktree", sessionKey: "s1" });
   });
 
+  it("never exposes legacy merge authority for a canonical work item", () => {
+    const send = vi.fn();
+    renderPanel({ workItemId: "work-1", approvalPending: true }, { send });
+    expect(screen.queryByRole("button", { name: "Merge" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Discard" })).toBeNull();
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "approve_changes" }));
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "discard_worktree" }));
+  });
+
   it("deep-links to canvas to resolve conflicts", () => {
     const onOpen = vi.fn();
     renderPanel(

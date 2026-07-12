@@ -14,6 +14,7 @@ import type { NormalizedToolDef } from "./harness/types.ts";
 import type { Bus } from "./bus.ts";
 import type { WorktreeInfo } from "./worktree.js";
 import type { LoadedSystemModel } from "./system-model/types.ts";
+import type { RenderComponent } from "../shared/render-dsl.ts";
 
 // Re-export public types so callers keep importing from "server/task-tools"
 export type {
@@ -84,6 +85,7 @@ export function createTaskToolsForLeader(opts: {
   taskTimeoutMs?: number;
   getSessionRuntime?: (sessionKey: string) => RuntimeSessionInfo | null;
   onStateChange?: (state: TaskManagerState) => void;
+  getRenderComponents?: () => RenderComponent[];
 }): { toolDefs: NormalizedToolDef[]; taskState: TaskManagerState } {
   const taskState: TaskManagerState = opts.existingTaskState ?? {
     tasks: new Map(),
@@ -109,6 +111,7 @@ export function createTaskToolsForLeader(opts: {
     terminateSession: opts.terminateSession,
     messageSession: opts.messageSession,
     taskTimeoutMs: opts.taskTimeoutMs,
+    getRenderComponents: opts.getRenderComponents,
   };
 
   const baseDefs = [

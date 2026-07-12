@@ -12,12 +12,29 @@ import {
 } from "../system-model/gates.ts";
 import { blockForMergeGates, getSessionOrError, sendControlError, sendControlResponse, errToMessage } from "./helpers.ts";
 import type { CommandHandler } from "./types.ts";
+import { activeWorktreeOperation, beginWorktreeOperation } from "./worktree-operation-lock.ts";
 
 export const mergeWorktree: CommandHandler = (ctx, cmd, ws) => {
   const host = getSessionOrError(ctx.registry, cmd.sessionKey, ws);
   if (!host) return;
+  if (host.workItemId) {
+    sendControlError(ws, "merge_worktree", host.id, cmd.requestId,
+      "Canonical work-item contributions must use review and the lineage integration queue");
+    return;
+  }
   if (!host.worktree) {
     sendControlError(ws, "merge_worktree", cmd.sessionKey!, cmd.requestId, "No worktree for this session");
+    return;
+  }
+  const lease = beginWorktreeOperation(host, "merge_worktree");
+  if (!lease) {
+    sendControlError(
+      ws,
+      "merge_worktree",
+      host.id,
+      cmd.requestId,
+      `Worktree operation "${activeWorktreeOperation(host) ?? "unknown"}" is already in progress`,
+    );
     return;
   }
   const projectPath = host.worktree.projectPath;
@@ -33,6 +50,7 @@ export const mergeWorktree: CommandHandler = (ctx, cmd, ws) => {
           });
         }
         if (blockForMergeGates(ctx.bus, host.id, ws, "merge_worktree", cmd.requestId, verdict)) {
+          lease.release();
           return null;
         }
         return mergeAndCleanup(host.worktree!);
@@ -65,5 +83,6 @@ export const mergeWorktree: CommandHandler = (ctx, cmd, ws) => {
     })
     .catch((err: unknown) => {
       sendControlError(ws, "merge_worktree", cmd.sessionKey!, cmd.requestId, errToMessage(err));
-    });
+    })
+    .finally(() => lease.release());
 };

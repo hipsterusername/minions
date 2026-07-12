@@ -462,6 +462,43 @@ describe("useSocket — subscribe / topic filtering", () => {
     expect(seen).toEqual([]);
     warn.mockRestore();
   });
+
+  it("validates normalized sdk events before delivering them", async () => {
+    const seen: unknown[] = [];
+    let sub: ReturnType<typeof useSocket>["subscribe"] | null = null;
+    render(<Probe url="ws://x" onState={() => {}} onSubscribe={(value) => { sub = value; }} />);
+    await flushAsync();
+    act(() => lastFake().triggerOpen());
+    act(() => sub!((message) => seen.push(message)));
+
+    act(() => {
+      lastFake().triggerMessage(JSON.stringify({
+        topic: sessionTopic("s1"),
+        type: "sdk_event",
+        sessionKey: "s1",
+        event: { kind: "text", role: "assistant" },
+      }));
+      lastFake().triggerMessage(JSON.stringify({
+        topic: sessionTopic("s1"),
+        type: "sdk_event",
+        sessionKey: "s1",
+        runKey: "",
+        workItemId: "work-1",
+        event: { kind: "text", role: "assistant", text: "bad identity" },
+      }));
+      lastFake().triggerMessage(JSON.stringify({
+        topic: sessionTopic("s1"),
+        type: "sdk_event",
+        sessionKey: "s1",
+        runKey: "s1",
+        workItemId: "work-1",
+        event: { kind: "text", role: "assistant", text: "complete" },
+      }));
+    });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ event: { kind: "text", text: "complete" } });
+  });
 });
 
 describe("useSocket — send", () => {

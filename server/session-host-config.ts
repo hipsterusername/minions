@@ -33,6 +33,14 @@ export interface BufferedEvent {
   type: string;
   sessionKey: string;
   /**
+   * Canonical immutable run identity. During the Phase 0 compatibility
+   * window this is the same value as `sessionKey`; old persisted events may
+   * omit it and remain readable.
+   */
+  runKey?: string;
+  /** Durable work-item identity when the launch boundary supplied one. */
+  workItemId?: string | null;
+  /**
    * For type="sdk_event" (Phase 3+): the normalized event payload.
    * The client reads this field on inbound `sdk_event` envelopes.
    */

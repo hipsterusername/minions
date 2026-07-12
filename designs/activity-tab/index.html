@@ -185,6 +185,55 @@
   .reply button { padding:8px 12px; background:var(--accent); color:#1a0f02; border:none; border-radius:7px; font:600 12px var(--font-sans); cursor:pointer; }
   .note { font:10.5px var(--font-mono); color:var(--text-muted); margin-top:2px; }
 
+  /* ── Directions C–E ───────────────────────────────────── */
+  .cockpit { display:grid; grid-template-columns:minmax(300px,.9fr) minmax(380px,1.35fr); gap:14px; min-height:540px; }
+  .queue,.workspace { border:1px solid var(--border-default); border-radius:12px; background:var(--bg-surface); overflow:hidden; }
+  .panel-head { display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border-bottom:1px solid var(--border-default); font-weight:700; }
+  .queue-item { padding:12px 14px; border-bottom:1px solid var(--border-default); cursor:pointer; }
+  .queue-item:hover,.queue-item.selected { background:var(--bg-elevated); }
+  .queue-item.selected { box-shadow:inset 3px 0 var(--accent); }
+  .qi-top { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .qi-title { font-weight:600; }
+  .qi-sub { margin-top:5px; color:var(--text-muted); font:10.5px var(--font-mono); }
+  .workspace { padding:16px; display:flex; flex-direction:column; gap:14px; }
+  .work-title { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+  .work-title h2 { margin:0 0 4px; font-size:17px; }
+  .work-title p { margin:0; color:var(--text-muted); font:11px var(--font-mono); }
+  .decision { border:1px solid color-mix(in srgb,var(--status-warning) 35%,var(--border-default)); background:color-mix(in srgb,var(--status-warning) 6%,var(--bg-elevated)); border-radius:9px; padding:12px; }
+  .decision strong { display:block; margin-bottom:5px; }
+  .decision p { color:var(--text-secondary); margin:0 0 10px; line-height:1.45; }
+  .composer { margin-top:auto; display:flex; gap:7px; }
+  .composer textarea { flex:1; min-height:72px; resize:none; background:var(--bg-secondary); border:1px solid var(--border-default); border-radius:8px; padding:10px; color:var(--text-primary); font:13px var(--font-sans); }
+
+  .timeline { position:relative; margin-left:120px; border-left:1px solid var(--border-hover); padding:4px 0 8px 24px; }
+  .event { position:relative; margin:0 0 12px; padding:12px 14px; border:1px solid var(--border-default); border-radius:9px; background:var(--bg-surface); }
+  .event:before { content:""; position:absolute; width:9px; height:9px; border-radius:50%; left:-29px; top:16px; background:var(--status-running); box-shadow:0 0 0 4px var(--bg-primary); }
+  .event.attn:before { background:var(--status-warning); } .event.done:before { background:var(--status-success); }
+  .event-time { position:absolute; right:calc(100% + 40px); top:12px; width:94px; text-align:right; font:10.5px var(--font-mono); color:var(--text-muted); }
+  .event-top { display:flex; justify-content:space-between; gap:12px; font-weight:600; }
+  .event-copy { color:var(--text-muted); margin-top:5px; font-size:12px; }
+  .timeline-filters { display:flex; gap:6px; margin-bottom:18px; }
+
+  .focus-layout { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(250px,.65fr); gap:16px; }
+  .focus-card { min-height:260px; padding:22px; border:1px solid color-mix(in srgb,var(--accent) 45%,var(--border-default)); border-radius:14px; background:linear-gradient(145deg,color-mix(in srgb,var(--accent) 8%,var(--bg-surface)),var(--bg-surface)); display:flex; flex-direction:column; gap:14px; }
+  .focus-card h2 { margin:0; font-size:22px; }
+  .focus-card p { color:var(--text-secondary); line-height:1.5; margin:0; }
+  .focus-actions { margin-top:auto; display:flex; gap:8px; }
+  .up-next { display:flex; flex-direction:column; gap:8px; }
+  .next-card { border:1px solid var(--border-default); background:var(--bg-surface); border-radius:9px; padding:12px; }
+  .next-card strong { display:block; margin-bottom:4px; }
+  .next-card span { color:var(--text-muted); font:10px var(--font-mono); }
+  .progress { height:5px; border-radius:99px; overflow:hidden; background:var(--bg-primary); margin-top:9px; }
+  .progress i { display:block; height:100%; background:var(--status-running); border-radius:inherit; }
+
+  .table-shell { border:1px solid var(--border-default); border-radius:11px; overflow:hidden; background:var(--bg-surface); }
+  .agent-table { width:100%; border-collapse:collapse; }
+  .agent-table th { text-align:left; padding:9px 12px; color:var(--text-muted); font:9.5px var(--font-mono); text-transform:uppercase; letter-spacing:.06em; background:var(--bg-secondary); }
+  .agent-table td { padding:12px; border-top:1px solid var(--border-default); vertical-align:middle; }
+  .agent-table tr:hover td { background:var(--bg-elevated); }
+  .agent-name { font-weight:600; } .agent-desc { margin-top:3px; color:var(--text-muted); font-size:11px; }
+  .util { width:90px; }
+
   .caption { padding:8px 24px; background:#05070e; border-top:1px solid var(--border-default); font:11.5px var(--font-mono); color:var(--text-muted); flex-shrink:0; }
   .caption b { color:var(--text-secondary); font-weight:500; }
 </style>
@@ -195,9 +244,12 @@
   <div class="demo-bar">
     <span class="brand">Activity Tab — Redesign <small>hi-fi mockup · dark theme · real tokens</small></span>
     <div class="switch">
-      <button id="btnA" class="active" onclick="setView('A')">Direction A · Triage Inbox</button>
-      <button id="btnB" onclick="setView('B')">Direction B · Mission Control</button>
-      <button id="btnCur" onclick="setView('Cur')">Current (baseline)</button>
+      <button id="btnA" class="active" onclick="setView('A')">A · Inbox</button>
+      <button id="btnB" onclick="setView('B')">B · Mission control</button>
+      <button id="btnC" onclick="setView('C')">C · Cockpit</button>
+      <button id="btnD" onclick="setView('D')">D · Timeline</button>
+      <button id="btnE" onclick="setView('E')">E · Focus queue</button>
+      <button id="btnCur" onclick="setView('Cur')">Baseline</button>
     </div>
   </div>
 
@@ -378,6 +430,51 @@
         </div>
       </div>
 
+      <!-- ══════════ DIRECTION C — INLINE COCKPIT ══════════ -->
+      <div id="viewC" class="view">
+        <div class="head-row"><div class="grow"><h1 class="title">Activity cockpit</h1><span class="count-pill">3 need you</span></div><button class="launch">✦ Launch</button></div>
+        <div class="cockpit">
+          <section class="queue">
+            <div class="panel-head"><span>Action queue</span><span class="sc">sorted by urgency</span></div>
+            <div class="queue-item selected" onclick="selC(this,'mcp')"><div class="qi-top"><span class="qi-title">Add MCP render-tools tests</span><span class="pill waiting">waiting</span></div><div class="qi-sub">QUESTION · 1m ago · $0.87</div></div>
+            <div class="queue-item" onclick="selC(this,'worktree')"><div class="qi-top"><span class="qi-title">Migrate worktree approval flow</span><span class="pill running">review</span></div><div class="qi-sub">7 FILES CHANGED · 2m ago · $3.40</div></div>
+            <div class="queue-item" onclick="selC(this,'refactor')"><div class="qi-top"><span class="qi-title">Refactor event bus routing</span><span class="pill error">error</span></div><div class="qi-sub">RUN HALTED · 4m ago · $2.14</div></div>
+            <div class="panel-head"><span>Still working</span><span class="sc">2</span></div>
+            <div class="queue-item"><div class="qi-top"><span class="qi-title">Fix file-size architecture test</span><span class="pill running">running</span></div><div class="qi-sub">EDITING server/index.ts · now</div></div>
+          </section>
+          <section class="workspace">
+            <div class="work-title"><div><h2>Add MCP render-tools tests</h2><p>LEADER · SONNET · 18 TURNS · $0.87</p></div><span class="pill waiting">waiting</span></div>
+            <div class="transcript" style="max-height:none;flex:1"><div class="msg user"><span class="who">You</span>Add coverage for the render-tools MCP surface.</div><div class="msg"><span class="who">Leader</span>I have the harness in place. The tool response can be asserted as a raw MCP envelope or as the normalized render artifact.</div></div>
+            <div class="decision"><strong>Decision needed</strong><p>Which snapshot format should the tests assert?</p><div class="actions"><button class="btn primary">Normalized artifact</button><button class="btn">Raw MCP envelope</button></div></div>
+            <div class="composer"><textarea placeholder="Reply or steer this leader…"></textarea><button class="launch">Send</button></div>
+          </section>
+        </div>
+      </div>
+
+      <!-- ══════════ DIRECTION D — EVENT TIMELINE ══════════ -->
+      <div id="viewD" class="view">
+        <div class="head-row"><div class="grow"><h1 class="title">Activity timeline</h1><span class="count-pill">live</span></div><button class="launch">✦ Launch</button></div>
+        <div class="timeline-filters"><button class="mini-btn primary">All events</button><button class="mini-btn">Needs you · 3</button><button class="mini-btn">Changes</button><button class="mini-btn">Errors</button><button class="mini-btn">↻ Live</button></div>
+        <div class="timeline">
+          <div class="event"><span class="event-time">just now</span><div class="event-top"><span>Fix file-size architecture test</span><span class="pill running">editing</span></div><div class="event-copy">Split command routing out of server/index.ts · 3 files touched</div></div>
+          <div class="event attn"><span class="event-time">1m ago</span><div class="event-top"><span>Add MCP render-tools tests</span><span class="pill waiting">asked you</span></div><div class="event-copy">“Which snapshot format should I assert?” · <button class="mini-btn primary">Reply</button></div></div>
+          <div class="event done"><span class="event-time">2m ago</span><div class="event-top"><span>Migrate worktree approval flow</span><span class="pill completed">changes ready</span></div><div class="event-copy">7 files · +214 / −86 · <button class="mini-btn primary">Review changes</button></div></div>
+          <div class="event"><span class="event-time">3m ago</span><div class="event-top"><span>Update CI workflow</span><span class="pill running">tool call</span></div><div class="event-copy">Running pnpm test with frozen lockfile</div></div>
+          <div class="event attn"><span class="event-time">4m ago</span><div class="event-top"><span>Refactor event bus routing</span><span class="pill error">error</span></div><div class="event-copy">TypeError in graph-as-bus dispatch · <button class="mini-btn">Inspect</button> <button class="mini-btn">Retry</button></div></div>
+          <div class="event done"><span class="event-time">22m ago</span><div class="event-top"><span>Draft mobile spec doc</span><span class="pill idle">paused</span></div><div class="event-copy">Edited docs/mobile-experience-spec.md and became idle</div></div>
+        </div>
+      </div>
+
+      <!-- ══════════ DIRECTION E — FOCUS QUEUE ══════════ -->
+      <div id="viewE" class="view">
+        <div class="head-row"><div class="grow"><h1 class="title">Your focus</h1><span class="count-pill">1 of 3</span></div><button class="launch">✦ Launch</button></div>
+        <div class="focus-layout">
+          <section class="focus-card"><span class="inbox-reason k-waiting">QUESTION · HIGHEST PRIORITY</span><h2>Add MCP render-tools tests</h2><p>The leader is blocked on a test design choice. Answering now will unblock the run immediately.</p><div class="decision"><strong>Which output should be snapshotted?</strong><div class="actions" style="margin-top:10px"><button class="btn primary">Normalized artifact</button><button class="btn">Raw envelope</button></div></div><div class="focus-actions"><button class="launch">Send answer &amp; continue</button><button class="btn">Open session</button><button class="btn">Skip for now</button></div></section>
+          <aside class="up-next"><div class="section-head" style="margin:0 0 2px">Up next</div><div class="next-card"><strong>Migrate worktree approval flow</strong><span>REVIEW · 7 FILES · 2m ago</span><div class="progress"><i style="width:100%;background:var(--status-success)"></i></div></div><div class="next-card"><strong>Refactor event bus routing</strong><span>ERROR · RUN HALTED · 4m ago</span><div class="progress"><i style="width:68%;background:var(--status-error)"></i></div></div><div class="section-head" style="margin:12px 0 2px">Running quietly</div><div class="next-card"><strong>2 agents progressing</strong><span>NO ACTION NEEDED</span><div class="progress"><i style="width:54%"></i></div></div></aside>
+        </div>
+        <div class="section" style="margin-top:22px"><div class="section-head">All agents · compact roster</div><div class="table-shell"><table class="agent-table"><thead><tr><th>Agent</th><th>Status</th><th>Last event</th><th>Cost</th><th>Progress</th></tr></thead><tbody><tr><td><div class="agent-name">Fix file-size architecture test</div><div class="agent-desc">Leader · sonnet</div></td><td><span class="pill running">running</span></td><td>Editing server/index.ts</td><td>$0.34</td><td class="util"><div class="progress"><i style="width:62%"></i></div></td></tr><tr><td><div class="agent-name">Update CI workflow</div><div class="agent-desc">Leader · sonnet</div></td><td><span class="pill running">running</span></td><td>Running test suite</td><td>$0.55</td><td><div class="progress"><i style="width:43%"></i></div></td></tr><tr><td><div class="agent-name">Draft mobile spec doc</div><div class="agent-desc">Leader · sonnet</div></td><td><span class="pill idle">idle</span></td><td>Edited mobile spec</td><td>$1.02</td><td><div class="progress"><i style="width:84%;background:var(--status-idle)"></i></div></td></tr></tbody></table></div></div>
+      </div>
+
       <!-- ══════════ CURRENT BASELINE ══════════ -->
       <div id="viewCur" class="view">
         <div class="head-row">
@@ -461,6 +558,9 @@
   const captions = {
     A: "<b>Direction A · Triage Inbox</b> — a pinned “Needs you” lane unions errors, waiting-for-input, and changes-ready regardless of run state; each row has a one-click resolve. Working / Idle collapse below.",
     B: "<b>Direction B · Mission Control</b> — summary strip (running / idle / needs-you / changes / cost) + activity sparkline, a pinned attention lane, per-kind colored borders, and per-card Stop / Review / Reply.",
+    C: "<b>Direction C · Inline Cockpit</b> — an urgency-sorted action queue and a full resolution workspace live side by side, so questions, approvals, and retries can be handled without leaving Activity.",
+    D: "<b>Direction D · Event Timeline</b> — a chronological operations log prioritizes what changed, when it changed, and which moments require intervention; best for supervising many concurrent agents.",
+    E: "<b>Direction E · Focus Queue</b> — one human decision at a time, with the next two actions visible and quiet agents compressed into a roster; optimized for low cognitive load.",
     Cur: "<b>Current baseline</b> — flat Active / Idle / Stopped grouping. Note the errored session sits inside “Idle”, and “changes ready” is only a small footer tag. Compare with A and B."
   };
   const data = {
@@ -473,10 +573,11 @@
     explore:{t:"Explore node registry",pill:"completed",cost:"$0.19",turns:5,model:"haiku",chg:false},
   };
   function setView(v){
-    for (const id of ["A","B","Cur"]) {
+    for (const id of ["A","B","C","D","E","Cur"]) {
       document.getElementById("view"+id).classList.toggle("active", id===v);
       document.getElementById("btn"+(id==="Cur"?"Cur":id)).classList.toggle("active", id===v);
     }
+    document.getElementById("inspector").style.display = ["A","B","Cur"].includes(v) ? "flex" : "none";
     document.getElementById("caption").innerHTML = captions[v];
   }
   function fill(key){
@@ -491,6 +592,7 @@
   function clearSel(sel){ document.querySelectorAll(sel).forEach(e=>e.classList.remove("selected")); }
   function selA(el,key){ clearSel(".inbox-row,.compact"); el.classList.add("selected"); fill(key); }
   function selB(el,key){ clearSel(".card"); el.classList.add("selected"); fill(key); }
+  function selC(el,key){ clearSel(".queue-item"); el.classList.add("selected"); fill(key); }
   function toggle(id){
     const box = document.getElementById(id);
     const chev = document.getElementById("chev-"+id);
@@ -498,8 +600,8 @@
     box.style.display = hidden ? "grid" : "none";
     chev.style.transform = hidden ? "none" : "rotate(-90deg)";
   }
-  // Deep-link / screenshot support: ?v=A|B|Cur
-  (function(){ const v = new URLSearchParams(location.search).get("v"); if (["A","B","Cur"].includes(v)) setView(v); })();
+  // Deep-link / screenshot support: ?v=A|B|C|D|E|Cur
+  (function(){ const v = new URLSearchParams(location.search).get("v"); if (["A","B","C","D","E","Cur"].includes(v)) setView(v); })();
 </script>
 </body>
 </html>

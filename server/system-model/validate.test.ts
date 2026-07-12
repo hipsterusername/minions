@@ -43,8 +43,12 @@ describe("validateLoadedSystemModel", () => {
     expect(validateLoadedSystemModel(model!, trackedFiles).filter((error) => "severity" in error)).toEqual([]);
   });
 
-  it("accepts the current gate references after architecture review deletion", () => {
+  it("accepts current gate references when this checkout has a project model", () => {
     const { model, errors } = loadSystemModel(process.cwd());
+    if (errors.some((error) => error.message === "manifest.yaml not found")) {
+      expect(model).toBeNull();
+      return;
+    }
     expect(errors.filter((error) => error.message.includes("Unknown review gate"))).toEqual([]);
     expect(model).not.toBeNull();
   });

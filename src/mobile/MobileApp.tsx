@@ -5,6 +5,7 @@ import type { ProjectSummary } from "../api.ts";
 import { useSocket } from "../use-socket.ts";
 import { HarnessListProvider } from "../use-harness-list.tsx";
 import { useSessionActivity } from "../use-session-activity.ts";
+import { mergeCanonicalActivity, useWorkItems } from "../use-work-items.ts";
 import { ActivityScreen } from "./ActivityScreen.tsx";
 import type { ActivityNotice } from "./ActivityScreen.tsx";
 import { ApprovalsScreen } from "./ApprovalsScreen.tsx";
@@ -221,6 +222,13 @@ export default function MobileApp() {
   const keyboard = useMobileKeyboard();
   const { sessions, mobileSessions } = useSessionActivity(subscribe);
   const [selectedProject, setSelectedProject] = useState<ProjectScope | null>(null);
+  const workItemState = useWorkItems({ projectId: selectedProject?.id ?? null,
+    connected, subscribe, send });
+  const canonicalSessions = useMemo(
+    () => mergeCanonicalActivity(mobileSessions, workItemState.orderedItems,
+      workItemState.coordination),
+    [mobileSessions, workItemState.orderedItems, workItemState.coordination],
+  );
   const [selectedSessionKey, setSelectedSessionKey] = useState<string | null>(null);
   const [selectedReviewSessionKey, setSelectedReviewSessionKey] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<MobileTab>("activity");
@@ -239,7 +247,7 @@ export default function MobileApp() {
     send({ type: "list_sessions" });
   }, [activeTab, connected, send]);
 
-  const selectedSession = mobileSessions.find((session) => session.sessionKey === selectedSessionKey);
+  const selectedSession = canonicalSessions.find((session) => session.sessionKey === selectedSessionKey);
 
   // Once a project is chosen, every list screen is scoped to it. Sessions are
   // matched by working directory (see sessionBelongsToProject), which also
@@ -247,11 +255,11 @@ export default function MobileApp() {
   const scopedSessions = useMemo(
     () =>
       selectedProject
-        ? mobileSessions.filter((session) =>
+        ? canonicalSessions.filter((session) =>
             sessionBelongsToProject(session, selectedProject.path),
           )
-        : mobileSessions,
-    [mobileSessions, selectedProject],
+        : canonicalSessions,
+    [canonicalSessions, selectedProject],
   );
 
   const approvalRows = useMemo(
@@ -281,6 +289,9 @@ export default function MobileApp() {
 
   const selectedApproval = selectedReviewSessionKey
     ? approvalRows.find((approval) => approval.sessionKey === selectedReviewSessionKey)
+    : undefined;
+  const selectedReviewSession = selectedReviewSessionKey
+    ? canonicalSessions.find((session) => session.sessionKey === selectedReviewSessionKey)
     : undefined;
   const approvalCount = scopedApprovalRows.length;
 
@@ -453,6 +464,14 @@ export default function MobileApp() {
       {selectedReviewSessionKey ? (
         <ReviewChangesScreen
           sessionKey={selectedReviewSessionKey}
+          workItemId={selectedReviewSession?.workItemId ?? null}
+          onRequestChanges={(prompt) => {
+            const workItemId = selectedReviewSession?.workItemId;
+            const item = workItemId ? workItemState.items[workItemId] : undefined;
+            if (!item) return false;
+            workItemState.start(item, prompt);
+            return true;
+          }}
           send={send}
           subscribe={subscribe}
           onClose={() => setSelectedReviewSessionKey(null)}
@@ -485,6 +504,12 @@ export default function MobileApp() {
           sessions={scopedSessions}
           onOpenSession={openSession}
           notice={activityNotice}
+          workItemRuns={workItemState.runs}
+          runNextCursor={workItemState.runNextCursor}
+          onLoadRuns={(workItemId, cursor) => {
+            const item = workItemState.items[workItemId];
+            if (item) workItemState.loadRuns(item, cursor);
+          }}
         />
       )}
 

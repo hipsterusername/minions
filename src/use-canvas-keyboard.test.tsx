@@ -24,6 +24,8 @@ function makeOpts(overrides: {
   dispatch?: Dispatch<CanvasAction>;
   graphDispatch?: Dispatch<GraphAction>;
   graph?: GraphDocument;
+  nodes?: CanvasNode[];
+  onRemoveNode?: (node: CanvasNode) => void;
 }) {
   // We need a stable spaceRef but renderHook makes new refs each render.
   // For these tests we manufacture one directly.
@@ -33,9 +35,10 @@ function makeOpts(overrides: {
     setSelectedIds: vi.fn(),
     selectedEdgeId: overrides.selectedEdgeId ?? null,
     onDeleteSelectedEdge: overrides.onDeleteSelectedEdge,
-    nodes: [] as CanvasNode[],
+    nodes: overrides.nodes ?? [],
     graph: overrides.graph ?? { edges: [] },
     dispatch: overrides.dispatch ?? (vi.fn() as unknown as Dispatch<CanvasAction>),
+    onRemoveNode: overrides.onRemoveNode,
     graphDispatch:
       overrides.graphDispatch ?? (vi.fn() as unknown as Dispatch<GraphAction>),
     spaceRef,
@@ -84,5 +87,17 @@ describe("useCanvasKeyboard — Delete with edge selection", () => {
     // Edge handler is suppressed; node-delete dispatch runs.
     expect(onDeleteSelectedEdge).not.toHaveBeenCalled();
     expect(dispatch).toHaveBeenCalledWith({ type: "REMOVE_NODE", id: "node-1" });
+  });
+
+  it("invokes the surface detach hook before removing a leader node", () => {
+    const calls: string[] = [];
+    const node = { id: "leader-1", type: "leader", position: { x: 0, y: 0 },
+      size: { width: 1, height: 1 }, data: { workItemId: "work-1" } };
+    const opts = makeOpts({ selectedIds: new Set([node.id]), nodes: [node],
+      onRemoveNode: () => calls.push("detach"),
+      dispatch: ((action: CanvasAction) => calls.push(action.type)) as Dispatch<CanvasAction> });
+    renderHook(() => useCanvasKeyboard(opts));
+    fireEvent.keyDown(window, { code: "Delete" });
+    expect(calls).toEqual(["detach", "REMOVE_NODE"]);
   });
 });

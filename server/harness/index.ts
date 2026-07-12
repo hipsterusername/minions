@@ -43,3 +43,8 @@ export function getHarness(name: string): AgentHarness {
 export function registeredHarnessNames(): string[] {
   return [...registry.keys()];
 }
+
+/** User-facing harnesses in stable registration order. */
+export function productionHarnesses(): AgentHarness[] {
+  return [...registry.values()].filter((harness) => harness.exposure === "production");
+}

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { createProject, listProjects, type ProjectSummary } from "../api.ts";
+import { createProject, getHarnessReadiness, listProjects, type HarnessReadinessSnapshot, type ProjectSummary } from "../api.ts";
 import type { MobileSessionInfo } from "./mobile-selectors.ts";
 import { needsAttention, sessionBelongsToProject } from "./mobile-selectors.ts";
 
@@ -38,6 +38,7 @@ export function ProjectsScreen({ sessions, onSelectProject }: ProjectsScreenProp
   const [creating, setCreating] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [readiness, setReadiness] = useState<HarnessReadinessSnapshot | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,6 +57,7 @@ export function ProjectsScreen({ sessions, onSelectProject }: ProjectsScreenProp
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+    void getHarnessReadiness().then((value) => { if (!cancelled) setReadiness(value); });
 
     return () => {
       cancelled = true;
@@ -123,6 +125,7 @@ export function ProjectsScreen({ sessions, onSelectProject }: ProjectsScreenProp
 
       {showCreateForm ? (
         <form className="mob-project-create" onSubmit={handleCreateProject}>
+          <div className="mob-muted">{readiness?.harnesses.map((h) => `${h.name}: ${h.ready ? "Ready" : h.state.replaceAll("_", " ")}`).join(" · ")}</div>
           <label className="mob-launch-field">
             <span>Project path</span>
             <input
@@ -154,7 +157,7 @@ export function ProjectsScreen({ sessions, onSelectProject }: ProjectsScreenProp
             <button
               className="mob-launch-submit"
               type="submit"
-              disabled={creating || !projectPath.trim()}
+              disabled={creating || !projectPath.trim() || readiness?.ready === false}
             >
               {creating ? "Creating..." : "Create project"}
             </button>

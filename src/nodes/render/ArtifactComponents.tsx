@@ -10,6 +10,7 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import type { ImageComponent, FilePreviewComponent, HtmlArtifactComponent } from "../../../shared/render-dsl.ts";
+import { isSafeModelGeneratedImageSrc, toSafeEmbeddedRasterDataUrl } from "../../../shared/render-artifacts.ts";
 import { copyText } from "../../components/CopyButton.tsx";
 import { browserLogger } from "../../logging.ts";
 
@@ -29,6 +30,8 @@ export function ImageRenderer({ c }: { c: ImageComponent }) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const fit = c.fit ?? "contain";
   const objectFit = fit === "actual" ? "none" : fit;
+  // Defense in depth for restored state and callers using stale data.
+  const safeSrc = isSafeModelGeneratedImageSrc(c.src) ? c.src : null;
 
   useEffect(() => {
     if (!lightboxOpen) return;
@@ -42,6 +45,11 @@ export function ImageRenderer({ c }: { c: ImageComponent }) {
   return (
     <>
       <div className="rd-card rd-card--hover rd-fade-in" style={{ ...CARD, overflow: "hidden", padding: 0 }}>
+        {safeSrc === null ? (
+          <div role="alert" style={{ padding: 12, color: "var(--text-muted)", fontSize: 11 }}>
+            External image blocked. Embed PNG, JPEG, GIF, or WebP data instead.
+          </div>
+        ) : (
         <button
           type="button"
           onClick={() => setLightboxOpen(true)}
@@ -56,7 +64,7 @@ export function ImageRenderer({ c }: { c: ImageComponent }) {
           }}
         >
           <img
-            src={c.src}
+            src={safeSrc}
             alt={c.alt}
             loading="lazy"
             style={{
@@ -67,6 +75,7 @@ export function ImageRenderer({ c }: { c: ImageComponent }) {
             }}
           />
         </button>
+        )}
         {c.caption !== undefined && (
           <div style={{
             padding: "6px 12px 8px",
@@ -80,7 +89,7 @@ export function ImageRenderer({ c }: { c: ImageComponent }) {
           </div>
         )}
       </div>
-      {lightboxOpen && typeof document !== "undefined" && createPortal(
+      {safeSrc !== null && lightboxOpen && typeof document !== "undefined" && createPortal(
         <div
           role="dialog"
           aria-modal="true"
@@ -98,7 +107,7 @@ export function ImageRenderer({ c }: { c: ImageComponent }) {
           }}
         >
           <img
-            src={c.src}
+            src={safeSrc}
             alt={c.alt}
             style={{
               maxWidth: "100%",
@@ -244,16 +253,15 @@ interface PreviewBodyProps {
 }
 
 function PreviewBody({ viewMode, content, mime }: PreviewBodyProps) {
+  const imageSrc = viewMode === "image" ? toSafeEmbeddedRasterDataUrl(mime, content) : null;
   return (
     <div style={{ maxHeight: 300, overflowY: "auto" }}>
       {viewMode === "json" && <JsonTree text={content} />}
       {viewMode === "csv" && <CsvTable text={content} />}
       {viewMode === "image" && (
-        <img
-          src={`data:${mime ?? "image/png"};base64,${content}`}
-          alt="file preview"
-          style={{ maxWidth: "100%", display: "block" }}
-        />
+        imageSrc === null
+          ? <div role="alert" style={{ padding: 12, color: "var(--text-muted)", fontSize: 11 }}>Unsafe image preview blocked.</div>
+          : <img src={imageSrc} alt="file preview" style={{ maxWidth: "100%", display: "block" }} />
       )}
       {viewMode === "hex" && (
         <pre style={{ margin: 0, padding: "10px 12px", fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-primary)", overflowX: "auto", lineHeight: 1.5 }}>
@@ -430,7 +438,8 @@ export function HtmlArtifactRenderer({ c }: { c: HtmlArtifactComponent }) {
 // For path-source components, file content is not available client-side in v1.
 // Actual file fetching (via a server endpoint that reads the path and streams
 // the content back) is out of scope for v1. We render a placeholder card with
-// the filename and a Download action (window.open) only.
+// the filename and an optional Copy path action only. A model-provided path is
+// never treated as a browser URL or passed to window.open.
 
 function PathSourcePreview({ c }: { c: FilePreviewComponent }) {
   const src = c.source;
@@ -441,11 +450,7 @@ function PathSourcePreview({ c }: { c: FilePreviewComponent }) {
   const srcPath = src.path;
 
   const displayName = c.filename ?? srcPath;
-  const enabledActions = c.actions ?? ["download"];
-
-  function handleDownload() {
-    window.open(srcPath, "_blank", "noopener");
-  }
+  const enabledActions = c.actions ?? ["copy-path"];
 
   function handleCopyPath() {
     void copyText(srcPath).catch((err: unknown) => {
@@ -459,11 +464,10 @@ function PathSourcePreview({ c }: { c: FilePreviewComponent }) {
         <span style={{ flex: 1, fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
           {displayName}
         </span>
-        {enabledActions.includes("download") && <ActionBtn label="Download" onClick={handleDownload} />}
         {enabledActions.includes("copy-path") && <ActionBtn label="Copy path" onClick={handleCopyPath} />}
       </div>
       <div style={{ padding: "12px 14px", color: "var(--text-muted)", fontSize: 11, fontStyle: "italic" }}>
-        File content not available client-side.
+        File content not available client-side. Open and download are disabled for untrusted paths.
       </div>
     </div>
   );
@@ -487,6 +491,15 @@ function InlineSourcePreview({ c }: { c: FilePreviewComponent }) {
   const bytesOmitted = isTruncated ? rawContent.length - byteCap : 0;
   const viewMode = detectView(c.filename, srcMime, c.view);
   const enabledActions = c.actions ?? ["open"];
+  const canOpen = srcMime === undefined || [
+    "text/plain",
+    "text/csv",
+    "application/json",
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+  ].includes(srcMime.toLowerCase());
 
   function handleOpen() {
     const blob = new Blob([rawContent], { type: srcMime ?? "text/plain" });
@@ -518,7 +531,7 @@ function InlineSourcePreview({ c }: { c: FilePreviewComponent }) {
         <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", flexShrink: 0 }}>
           {sizeLabel}
         </span>
-        {enabledActions.includes("open") && <ActionBtn label="Open" onClick={handleOpen} />}
+        {enabledActions.includes("open") && canOpen && <ActionBtn label="Open" onClick={handleOpen} />}
         {enabledActions.includes("download") && <ActionBtn label="Download" onClick={handleDownload} />}
       </div>
       {/* Body */}

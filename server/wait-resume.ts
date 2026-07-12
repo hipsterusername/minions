@@ -51,13 +51,17 @@ export function requestWaitResume(
   deps: SessionHostDeps,
   request: WaitResumeRequest,
 ): boolean {
+  const continuation: WaitResumeRequest = {
+    ...request,
+    opts: { ...request.opts, invocationKind: "resume_open_run" },
+  };
   if (host.status === "running") {
     host.clearWaitTimer();
-    if (!queuedWaitResumes.has(host)) queuedWaitResumes.set(host, request);
+    if (!queuedWaitResumes.has(host)) queuedWaitResumes.set(host, continuation);
     if (host.taskState) persistTaskState(host.id, host.taskState);
     return false;
   }
-  return completeWaitAndResume(host, deps, request);
+  return completeWaitAndResume(host, deps, continuation);
 }
 
 export function drainQueuedWaitResume(

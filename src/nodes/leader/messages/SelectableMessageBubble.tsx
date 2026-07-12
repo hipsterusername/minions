@@ -46,7 +46,7 @@ export function selectionForMessageChanged(
  * Assistant / result message bubble with built-in chunk-selection mode.
  * Click to enter selection mode → individual chunks become checkboxes;
  * the floating toolbar exposes select-all, clear, copy-selected,
- * add-selected-as-node, copy-full, and exit.
+ * add-selected-as-node, and exit.
  *
  * Extracted from `src/nodes/LeaderNode.tsx` (Phase 4 of the leader refactor).
  */
@@ -189,14 +189,6 @@ export const SelectableMessageBubble = memo(
       [onAddContentNode, selectedText],
     );
 
-    const handleCopyFull = useCallback(
-      (e: MouseEvent<HTMLButtonElement>) => {
-        e.stopPropagation();
-        copyText(msg.content);
-      },
-      [copyText, msg.content],
-    );
-
     const handleExitSelection = useCallback(
       (e: MouseEvent<HTMLButtonElement>) => {
         e.stopPropagation();
@@ -287,12 +279,6 @@ export const SelectableMessageBubble = memo(
                   label="Add selected chunks as node"
                   onClick={handleAddSelected}
                   disabled={!onAddContentNode || selectedText.length === 0}
-                  tone="primary"
-                />
-                <MessageSelectionButton
-                  icon="copy-full"
-                  label="Copy full message"
-                  onClick={handleCopyFull}
                   tone="primary"
                 />
               </MessageSelectionGroup>

@@ -84,5 +84,9 @@ describe("wait resume coordination", () => {
 
     await vi.advanceTimersByTimeAsync(15_000);
     expect(startChildSession).toHaveBeenCalledOnce();
+    expect(startChildSession).toHaveBeenCalledWith(expect.objectContaining({
+      invocationKind: "resume_open_run",
+      resumeId: "sdk-1",
+    }));
   });
 });

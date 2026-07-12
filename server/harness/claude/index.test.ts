@@ -10,7 +10,7 @@ const sdkMock = vi.hoisted(() => ({
 
 vi.mock("@anthropic-ai/claude-agent-sdk", () => sdkMock);
 
-const TEST_CLAUDE_PATH = "/tmp/test-claude-code";
+const TEST_CLAUDE_PATH = process.execPath;
 const originalClaudePath = process.env["CLAUDE_CODE_PATH"];
 
 type SdkMessage = Record<string, unknown>;
@@ -126,6 +126,33 @@ afterEach(() => {
 });
 
 describe("ClaudeHarness.start()", () => {
+  it("reports complete pre-mutation interception", async () => {
+    expect((await importHarness()).capabilities.mutationInterception).toBe("complete");
+  });
+
+  it("releases mutation coordination only after the aborted SDK stream stops", async () => {
+    const order: string[] = [];
+    const coordination = {
+      setLeaseLostHandler: vi.fn(), disconnect: vi.fn(() => order.push("release")),
+      beforeTool: vi.fn(), finishTool: vi.fn(), cancelTool: vi.fn(),
+    };
+    sdkMock.query.mockImplementation((request: { options: { abortController: AbortController } }) => ({
+      async *[Symbol.asyncIterator]() {
+        const signal = request.options.abortController.signal;
+        if (!signal.aborted) await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve(), { once: true }));
+        order.push("sdk-stopped");
+      },
+    }));
+    const harness = await importHarness();
+    const run = harness.start(baseOpts({ mutationCoordination: coordination as never }));
+    const collecting = collect(run.events);
+    await vi.waitFor(() => expect(sdkMock.query).toHaveBeenCalledOnce());
+    run.control.abort();
+    await collecting;
+    expect(order).toEqual(["sdk-stopped", "release"]);
+    expect(coordination.disconnect).toHaveBeenCalledOnce();
+  });
   it("exposes Fable 5 in static model metadata", async () => {
     const harness = await importHarness();
 
@@ -153,7 +180,7 @@ describe("ClaudeHarness.start()", () => {
       permissionMode: "auto",
       strictMcpConfig: true,
     });
-    expect(options).not.toHaveProperty("pathToClaudeCodeExecutable");
+    expect(options["pathToClaudeCodeExecutable"]).toEqual(expect.any(String));
     expect(options["abortController"]).toBeInstanceOf(AbortController);
     expect(sdkMock.query).toHaveBeenCalledWith({
       prompt: "hello",

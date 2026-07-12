@@ -93,6 +93,10 @@ export function setup(opts?: {
     bus,
     generateKey: () => "auto-gen",
     maxSessions: 50,
+    launchSession: async (options) => {
+      registry.start(options);
+      return { sessionKey: options.sessionKey, harness: options.harness ?? "claude", model: options.initialModel ?? "", permissionMode: options.permissionMode ?? "auto", reasons: [] };
+    },
   };
 
   return {

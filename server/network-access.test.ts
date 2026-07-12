@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isAllowedAuthBootstrapRequest,
   isAllowedAuthRequestHost,
   isAllowedDevHost,
   isAllowedOrigin,
@@ -40,6 +41,41 @@ describe("network access allowlist", () => {
 
   it("allows auth bootstrap when Vite proxies a Tailscale request through loopback", () => {
     expect(isAllowedAuthRequestHost("workstation.tailnet.ts.net", "127.0.0.1")).toBe(true);
-    expect(isAllowedAuthRequestHost("example.com", "127.0.0.1")).toBe(true);
+    expect(isAllowedAuthRequestHost("example.com", "127.0.0.1")).toBe(false);
+    expect(isAllowedAuthRequestHost("localhost", "100.100.100.100")).toBe(false);
+  });
+
+  it("requires trusted host, peer, and a matching tailnet origin", () => {
+    expect(isAllowedAuthBootstrapRequest({
+      hostname: "workstation.tailnet.ts.net",
+      remoteAddress: "127.0.0.1",
+      origin: "https://workstation.tailnet.ts.net",
+    })).toBe(true);
+    expect(isAllowedAuthBootstrapRequest({
+      hostname: "workstation.tailnet.ts.net",
+      remoteAddress: "192.168.1.20",
+      origin: "https://workstation.tailnet.ts.net",
+    })).toBe(false);
+    expect(isAllowedAuthBootstrapRequest({
+      hostname: "workstation.tailnet.ts.net",
+      remoteAddress: "127.0.0.1",
+      origin: "https://other.tailnet.ts.net",
+    })).toBe(false);
+    expect(isAllowedAuthBootstrapRequest({
+      hostname: "example.com",
+      remoteAddress: "127.0.0.1",
+      origin: "https://example.com",
+    })).toBe(false);
+  });
+
+  it("allows origin-less bootstrap only for a loopback host and peer", () => {
+    expect(isAllowedAuthBootstrapRequest({
+      hostname: "localhost",
+      remoteAddress: "::ffff:127.0.0.1",
+    })).toBe(true);
+    expect(isAllowedAuthBootstrapRequest({
+      hostname: "workstation.tailnet.ts.net",
+      remoteAddress: "127.0.0.1",
+    })).toBe(false);
   });
 });

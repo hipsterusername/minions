@@ -15,6 +15,51 @@ function session(overrides: Partial<MobileSessionInfo>): MobileSessionInfo {
 }
 
 describe("ActivityScreen", () => {
+  it("does not open synthetic draft work items as nonexistent sessions", () => {
+    const onOpenSession = vi.fn();
+    render(<ActivityScreen sessions={[session({ sessionKey: "work-item:draft", workItemId: "draft" })]}
+      onOpenSession={onOpenSession} />);
+    const card = screen.getByTitle("No run has started for this work item");
+    expect(card).toBeDisabled();
+    fireEvent.click(card);
+    expect(onOpenSession).not.toHaveBeenCalled();
+  });
+  it("expands canonical run history and requests subsequent pages", () => {
+    const load = vi.fn();
+    render(<ActivityScreen sessions={[session({ sessionKey: "run-1", workItemId: "work-1", taskName: "Task" })]}
+      onOpenSession={() => {}} onLoadRuns={load} runNextCursor={{ "work-1": "next" }}
+      workItemRuns={{ "work-1": [{ runKey: "run-1", workItemId: "work-1", runKind: "primary",
+        parentRunKey: null, taskId: null, runNumber: 1, previousRunKey: null,
+        providerSessionId: null, outcome: "completed", startedAt: 1, endedAt: 2,
+        finalReport: "Shipped safely" }] }} />);
+    fireEvent.click(screen.getByText("Run history"));
+    expect(screen.getByText(/Iteration 1 · completed/)).toBeInTheDocument();
+    expect(screen.getByText("Shipped safely")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(load).toHaveBeenCalledWith("work-1", "next");
+  });
+
+  it("keeps non-dismissed completions visible and hides dismissed history", () => {
+    const lifecycle = {
+      reviewState: "completion_to_review" as const,
+      reviewReason: "Review completion",
+      finalReport: "Done",
+      finalDashboardRevision: 1,
+      dashboardRevision: 1,
+      terminalReason: "completed" as const,
+      terminalAt: 1,
+      acknowledgedAt: null,
+      dismissedAt: null,
+      lifecycleRevision: 1,
+    };
+    render(<ActivityScreen sessions={[
+      session({ sessionKey: "open", taskName: "Read me", reviewLifecycle: lifecycle }),
+      session({ sessionKey: "dismissed", taskName: "Hidden history", reviewLifecycle: { ...lifecycle, dismissedAt: 2 } }),
+    ]} onOpenSession={() => {}} />);
+    expect(screen.getByText("Read me")).toBeInTheDocument();
+    expect(screen.getByText("complete · read report")).toBeInTheDocument();
+    expect(screen.queryByText("Hidden history")).not.toBeInTheDocument();
+  });
   it("groups sessions into activity sections in Active → Idle → Stopped order", () => {
     render(
       <ActivityScreen
@@ -98,6 +143,44 @@ describe("ActivityScreen", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /ship mobile/i }));
     expect(onOpenSession).toHaveBeenCalledWith("leader-1");
+  });
+
+  it("surfaces a leader's active minion counts on its card", () => {
+    render(
+      <ActivityScreen
+        sessions={[
+          session({
+            sessionKey: "leader-1",
+            role: "leader",
+            status: "running",
+            taskName: "Ship mobile",
+            activeMinions: [
+              { taskId: "a", title: "A", status: "running", sessionKey: "m-a" },
+              { taskId: "b", title: "B", status: "running", sessionKey: "m-b" },
+              { taskId: "c", title: "C", status: "blocked", sessionKey: "m-c" },
+            ],
+          }),
+        ]}
+        onOpenSession={() => {}}
+      />,
+    );
+
+    const card = screen.getByRole("button", { name: /ship mobile/i });
+    const summary = within(card).getByLabelText("Active minions summary");
+    expect(within(summary).getByText("2 running")).toBeInTheDocument();
+    expect(within(summary).getByText("1 blocked")).toBeInTheDocument();
+  });
+
+  it("omits the minion summary when a leader has no active minions", () => {
+    render(
+      <ActivityScreen
+        sessions={[session({ sessionKey: "leader-1", role: "leader", status: "running", taskName: "Solo leader" })]}
+        onOpenSession={() => {}}
+      />,
+    );
+
+    const card = screen.getByRole("button", { name: /solo leader/i });
+    expect(within(card).queryByLabelText("Active minions summary")).not.toBeInTheDocument();
   });
 
   it("shows a prominent activity notice with actions", () => {

@@ -182,6 +182,7 @@ const minionAgent: AgentType = {
       if (nudged !== parent.task) {
         ctx.startMinionSession({
           sessionKey: ctx.sessionKey,
+          invocationKind: "resume_open_run",
           prompt: REPORT_NUDGE_PROMPT,
           cwd: ctx.cwd,
           systemPrompt: MINION_SYSTEM_PROMPT,

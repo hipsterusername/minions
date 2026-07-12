@@ -26,6 +26,12 @@ import { requestWaitResume } from "./wait-resume.ts";
 import { buildWakeTaskDigest, isWakeWorthyStatus, requestCoalescedWake } from "./wake-coalescer.ts";
 import { buildSessionListItem, type SessionListItem } from "./session-list-item.ts";
 import { serverLogger } from "./logging.ts";
+import { loadLatestContextCheckpoint } from "./context-checkpoint-store.ts";
+import {
+  finishRun,
+  type SessionReviewState,
+  type SessionTerminalReason,
+} from "./session-review-lifecycle.ts";
 
 const log = serverLogger.child("session-registry");
 
@@ -138,6 +144,9 @@ export class SessionRegistry {
 
     return {
       sessionKey,
+      workItemId: host.workItemId,
+      runKey: host.runKey,
+      runKind: host.runKind,
       sessionId: host.sessionId,
       status: host.status,
       role: host.role,
@@ -187,6 +196,7 @@ export class SessionRegistry {
         immediate: wakeOn === "all_terminal",
         opts: {
           sessionKey: host.id,
+          invocationKind: "resume_open_run",
           prompt:
             `Continue. All delegated child tasks reached a wake-worthy state (terminal or blocked) while waiting (${pendingWait.reason}). Pick up where you left off.` +
             (digest ? `\n\nTask results:\n${digest}` : ""),
@@ -224,6 +234,7 @@ export class SessionRegistry {
     requestCoalescedWake(host, this.deps, {
       opts: {
         sessionKey: host.id,
+        invocationKind: "resume_open_run",
         prompt: `A delegated task reached a state needing your attention while you were idle:\n${digest}\nReview it (answer a blocked task with message_task) and continue orchestrating.`,
         cwd: host.cwd,
         resumeId: host.sessionId ?? undefined,
@@ -256,13 +267,41 @@ export class SessionRegistry {
           row.session_key,
           row.cwd ?? process.cwd(),
         );
+        const wasActive = row.status === "running";
+        // Volatile harnesses never survive a process restart. Runtime always
+        // rehydrates inactive; the durable review outcome below remains exact.
         host.status = "stopped";
+        host.reviewLifecycle = {
+          reviewState: (row.review_state ?? "none") as SessionReviewState,
+          reviewReason: row.review_reason ?? null,
+          finalReport: row.final_report ?? null,
+          finalDashboardRevision: row.final_dashboard_revision ?? null,
+          dashboardRevision: row.dashboard_revision ?? 0,
+          terminalReason: (row.terminal_reason ?? null) as SessionTerminalReason,
+          terminalAt: row.terminal_at ?? null,
+          acknowledgedAt: row.acknowledged_at ?? null,
+          dismissedAt: row.dismissed_at ?? null,
+          lifecycleRevision: row.lifecycle_revision ?? 0,
+        };
+        if (wasActive) {
+          host.reviewLifecycle = finishRun(host.reviewLifecycle, {
+            reason: "abort",
+            at: Date.now(),
+          });
+        }
         host.totalCost = row.total_cost;
         host.turns = row.turns;
         host.usageTotals = usageTotals;
         host.model = row.model;
         host.role = (row.role as SessionRole) ?? "default";
         host.taskName = row.task_name;
+        host.workItemId = row.work_item_id ?? null;
+        host.seedRunLineage({
+          runKind: row.run_kind ?? "primary",
+          parentRunKey: row.parent_run_key ?? null,
+          taskId: row.task_id ?? null,
+        });
+        host.contextCheckpoint = loadLatestContextCheckpoint(row.session_key);
         // Restore the SDK session id so a follow-up `send_message` can
         // pass it as `resume:` and the SDK picks the conversation back up
         // mid-stream. Pre-migration rows return `null` here, in which
@@ -307,6 +346,7 @@ export class SessionRegistry {
         // Restore the event buffer in place — using bufferEvent() here
         // would re-persist every event we just loaded.
         host.eventBuffer = events;
+        if (wasActive) host.persist();
         this.map.set(row.session_key, host);
       }
       if (hydrated.length > 0) {

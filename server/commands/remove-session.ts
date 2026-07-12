@@ -8,7 +8,7 @@
  * is a teardown path, not a user-facing feature gate.
  */
 
-import { unicastGlobal } from "../bus.ts";
+import { unicastGlobal, unicastToSession } from "../bus.ts";
 import { removeWorktree } from "../worktree.ts";
 import { removePersistedSession } from "../session-persist.ts";
 import { deleteHtmlArtifactsForSession } from "../html-artifact-store.ts";
@@ -24,6 +24,15 @@ export const removeSession: CommandHandler = (ctx, cmd, ws) => {
   }
   const host = ctx.registry.get(cmd.sessionKey);
   if (host) {
+    if (host.workItemId) {
+      unicastToSession(ws, cmd.sessionKey, {
+        type: "session_error", sessionKey: cmd.sessionKey,
+        error: "Canonical work-item runs cannot be removed directly",
+        code: "WORK_ITEM_SESSION_PROTECTED", workItemId: host.workItemId,
+        guidance: "Archive the work item or start a new work-item iteration.", timestamp: Date.now(),
+      });
+      return;
+    }
     host.terminate("remove", {
       bus: ctx.bus,
       forEachLeaderTaskState: ctx.registry.forEachLeaderTaskState,

@@ -9,6 +9,7 @@
  * from session-host-run.ts to keep that file under its architectural size budget.
  */
 
+import { randomUUID } from "node:crypto";
 import type { SessionHostDeps } from "./session-host.ts";
 
 export function injectSessionMessage(
@@ -23,8 +24,15 @@ export function injectSessionMessage(
   }
   // Omit role so the resumed host keeps its own persisted value (start()
   // falls back to this.role when unset).
+  if (runtime.workItemId && runtime.runKind === "child" && deps.continueWorkItemChild) {
+    void deps.continueWorkItemChild({ workItemId: runtime.workItemId,
+      runKey: runtime.runKey ?? sessionKey, prompt: message,
+      requestId: `message:${sessionKey}:${randomUUID()}` });
+    return { delivered: true, status: runtime.status };
+  }
   deps.startChildSession({
     sessionKey,
+    invocationKind: "resume_open_run",
     prompt: message,
     cwd: runtime.cwd,
     resumeId: runtime.sessionId ?? undefined,

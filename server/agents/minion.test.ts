@@ -60,6 +60,7 @@ describe("minion task lifecycle", () => {
     expect(startMinionSession).toHaveBeenCalledTimes(1);
     expect(startMinionSession).toHaveBeenCalledWith({
       sessionKey: "minion-1",
+      invocationKind: "resume_open_run",
       prompt:
         "Your task is still open. Call mcp__minion-status__report_done with a one-line summary of what you completed, or report_fail with what blocked you. Do not start new work.",
       cwd: "/tmp/project",

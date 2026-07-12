@@ -1,18 +1,20 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createProject, listProjects } from "../api.ts";
+import { createProject, getHarnessReadiness, listProjects } from "../api.ts";
 import type { MobileSessionInfo } from "./mobile-selectors.ts";
 import { ProjectsScreen } from "./ProjectsScreen.tsx";
 
 vi.mock("../api.ts", () => ({
   createProject: vi.fn(),
   listProjects: vi.fn(),
+  getHarnessReadiness: vi.fn(async () => ({ schemaVersion: 1, checkedAt: "", expiresAt: "", ready: true, readyHarnesses: ["claude"], harnesses: [] })),
 }));
 
 afterEach(() => {
   vi.mocked(createProject).mockReset();
   vi.mocked(listProjects).mockReset();
+  vi.mocked(getHarnessReadiness).mockResolvedValue({ schemaVersion: 1, checkedAt: "", expiresAt: "", ready: true, readyHarnesses: ["claude"], harnesses: [] });
   vi.restoreAllMocks();
 });
 

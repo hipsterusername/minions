@@ -1,25 +1,41 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { getAuthToken, clearAuthToken } from "./api.ts";
 import {
+  normalizedEventEnvelopeSchema,
   wsEnvelopeSchema,
   topicMatches,
   type WsEnvelope,
 } from "../shared/ws-envelope.ts";
 import type { NormalizedEvent } from "../shared/normalized-event.ts";
 import type { RenderState } from "../shared/render-dsl.ts";
+import type { WorkItemListSnapshot, WorkItemRunListSnapshot, WorkItemRunSnapshot, WorkItemSnapshot } from "../shared/work-item-contracts.ts";
+import type { LiveEditCoordinationEvent } from "../shared/live-edit-coordination.ts";
+import type { WorktreeLineageSnapshot } from "../shared/worktree-integration.ts";
 import { browserLogger } from "./logging.ts";
 
 const log = browserLogger.child("websocket");
 
 export type ServerMessage =
+  | { type: "live_edit_coordination"; workItemId: string; event: LiveEditCoordinationEvent; timestamp: number }
+  | { type: "work_item_response"; command: string; requestId: string | null; success: boolean; result?: WorkItemListSnapshot | WorkItemRunListSnapshot | unknown; error?: string; code?: string; latest?: unknown }
+  | { type: "worktree_integration_response"; command: string; requestId: string | null;
+      success: boolean; result?: WorktreeLineageSnapshot | null; error?: string; code?: string;
+      latest?: WorktreeLineageSnapshot | null }
+  | { type: "worktree_integration_changed"; operation: string; workItemId: string | null;
+      lineage: WorktreeLineageSnapshot; timestamp: number }
+  | { type: "work_item_changed"; workItem: WorkItemSnapshot; revision: number; cause: string; timestamp: number }
+  | { type: "work_item_created"; workItem: WorkItemSnapshot; timestamp: number }
+  | { type: "work_item_run_created" | "work_item_run_sealed"; workItemId: string; run: WorkItemRunSnapshot; timestamp: number }
   | { type: "session_list"; sessions: SessionInfo[] }
   | { type: "harness_list"; harnesses: HarnessListEntry[] }
   | { type: "session_created"; sessionKey: string }
+  | { type: "session_launch_resolved"; sessionKey: string; requested: { harness?: string; model?: string; permissionMode?: string }; effective: { harness: string; model: string; permissionMode: string }; reasons: Array<"harness_not_ready" | "model_incompatible" | "permission_unsupported">; transient: true }
   | { type: "session_status"; sessionKey: string; status: string; sessionId?: string }
+  | { type: "session_compacted"; sessionKey: string; checkpointId?: string; trigger?: "proactive" | "context_recovery"; oldSessionId: string | null; newSessionId: string | null; contextTokensBefore?: number; contextWindowTokens?: number; ratioBefore?: number; timestamp: number }
   | { type: "session_error"; sessionKey: string; error: string; fullError?: string }
   | { type: "kanban_card_created"; sessionKey: string; card: { title: string; description: string; context: string; priority: "low" | "medium" | "high" | "critical"; subtasks: string[] }; timestamp: number }
-  | { type: "sdk_event"; sessionKey: string; event: NormalizedEvent; timestamp?: number }
-  | { type: "sync_response"; sessionKey: string; found: boolean; status?: string; sessionId?: string | null; cwd?: string; totalCost?: number; turns?: number; usageTotals?: SessionUsageTotals; lastError?: string | null; lastErrorFull?: string | null; events?: SyncEvent[]; model?: string | null; permissionMode?: string | null; initData?: Record<string, unknown>; taskName?: string | null; role?: "leader" | "minion" | "default" | "card-composer"; activeMinions?: ActiveMinion[]; taskPlan?: SyncTaskRecord[]; renderState?: RenderState | null; worktree?: { path: string; branch: string } | null; approval?: { requested?: boolean; summary?: string; diff?: unknown; graceUntil?: number } | null; harness?: string; harnessCapabilities?: HarnessCapabilities | null }
+  | { type: "sdk_event"; sessionKey: string; runKey?: string; workItemId?: string | null; event: NormalizedEvent; timestamp?: number }
+  | { type: "sync_response"; sessionKey: string; runKey?: string; workItemId?: string | null; runKind?: "primary" | "child"; parentRunKey?: string | null; taskId?: string | null; found: boolean; status?: string; sessionId?: string | null; cwd?: string; totalCost?: number; turns?: number; usageTotals?: SessionUsageTotals; lastError?: string | null; lastErrorFull?: string | null; events?: SyncEvent[]; model?: string | null; permissionMode?: string | null; initData?: Record<string, unknown>; taskName?: string | null; role?: "leader" | "minion" | "default" | "card-composer"; activeMinions?: ActiveMinion[]; taskPlan?: SyncTaskRecord[]; renderState?: RenderState | null; worktree?: { path: string; branch: string } | null; approval?: { requested?: boolean; summary?: string; diff?: unknown; graceUntil?: number } | null; harness?: string; harnessCapabilities?: HarnessCapabilities | null; reviewLifecycle?: SessionReviewLifecycle }
   | { type: "control_response"; command: string; sessionKey: string | null; requestId: string | null; success: boolean; error?: string; [key: string]: unknown }
   | { type: "session_cleared"; sessionKey: string }
   | { type: "session_task_name"; sessionKey: string; taskName: string }
@@ -32,6 +48,7 @@ export type ServerMessage =
   | { type: "worktree_merged"; sessionKey: string }
   | { type: "worktree_merge_failed"; sessionKey: string; result?: { conflicts?: string[]; summary?: string; targetBranch?: string }; error?: string }
   | { type: "session_completed"; sessionKey: string; reason: string; timestamp: number }
+  | { type: "session_lifecycle_changed"; sessionKey: string; lifecycle: SessionReviewLifecycle; timestamp: number }
   | { type: "minion_status"; minionSessionKey: string; trigger: "step" | "done" | "fail"; message: string; timestamp: number; leaderSessionKey?: string; taskId?: string }
   | { type: "minion_completed"; leaderSessionKey: string; minionSessionKey: string; taskId: string; status: "completed" | "failed"; result: string; timestamp: number }
   | { type: "agent_task_update"; leaderSessionKey: string; taskId: string; status: string; summary?: string; timestamp: number }
@@ -43,12 +60,17 @@ export type ServerMessage =
 export interface SyncEvent {
   type: string;
   sessionKey: string;
+  /** Canonical identity fields are absent on older replayed events. */
+  runKey?: string;
+  workItemId?: string | null;
   event?: NormalizedEvent;
   /** @deprecated legacy test compat only — new writes use `event` */
   message?: unknown;
   status?: string;
   error?: string;
   fullError?: string;
+  checkpointId?: string;
+  trigger?: "proactive" | "context_recovery";
   timestamp: number;
 }
 
@@ -58,6 +80,7 @@ export interface SyncEvent {
  * `HarnessCapabilities` — keep the two in sync.
  */
 export interface HarnessCapabilities {
+  mutationInterception: "complete" | "observe_only" | "none";
   thinking: boolean;
   promptCaching: boolean;
   mcp: boolean;
@@ -79,10 +102,16 @@ export interface HarnessListEntry {
   commands: ReadonlyArray<{ name: string; description: string }>;
   agents: ReadonlyArray<{ id: string; description: string }>;
   account: { provider: string } & Record<string, unknown>;
+  readiness?: import("./api.ts").HarnessReadiness;
 }
 
 export interface SessionInfo {
   sessionKey: string;
+  runKey?: string;
+  workItemId?: string | null;
+  runKind?: "primary" | "child";
+  parentRunKey?: string | null;
+  taskId?: string | null;
   sessionId: string | null;
   status: string;
   cwd: string;
@@ -106,6 +135,27 @@ export interface SessionInfo {
   harnessCapabilities?: HarnessCapabilities | null;
   /** Most recent assistant response/activity timestamp from the server snapshot. */
   lastActivityAt?: number | null;
+  reviewLifecycle?: SessionReviewLifecycle;
+}
+
+export type SessionReviewState =
+  | "none"
+  | "decision_needed"
+  | "completion_to_review"
+  | "error_to_review"
+  | "interrupted_to_review";
+
+export interface SessionReviewLifecycle {
+  reviewState: SessionReviewState;
+  reviewReason: string | null;
+  finalReport: string | null;
+  finalDashboardRevision: number | null;
+  dashboardRevision: number;
+  terminalReason: "completed" | "error" | "stop" | "abort" | null;
+  terminalAt: number | null;
+  acknowledgedAt: number | null;
+  dismissedAt: number | null;
+  lifecycleRevision: number;
 }
 
 export interface SessionUsageTotals {
@@ -327,6 +377,12 @@ export function useSocket(url: string): SocketHandle {
             return;
           }
           const envelope: WsEnvelope = result.data;
+          if (envelope.type === "sdk_event") {
+            if (!normalizedEventEnvelopeSchema.safeParse(envelope).success) {
+              log.warn("invalid_normalized_event", { topic: envelope.topic });
+              return;
+            }
+          }
           // Envelope's top-level `type` + payload fields make it
           // structurally compatible with ServerMessage.
           const asMessage = envelope as unknown as ServerMessage;

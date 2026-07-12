@@ -10,29 +10,21 @@
  * subsystems but does not own their policies.
  */
 
-import "./harness/claude/index.ts"; // side-effect: registers ClaudeHarness
+import "./harness/register-production.ts";
 import "./harness/echo/index.ts"; // side-effect: registers EchoHarness
-import "./harness/codex/index.ts"; // side-effect: registers CodexHarness
 import { getHarness } from "./harness/index.ts";
+import { assertSafeHarnessMutationMode, installChangeIntentTools } from "./session-mutation-enforcement.ts";
 import type {
   HarnessRunControl,
   NormalizedEvent,
 } from "./harness/types.ts";
-import type { Bus } from "./bus.ts";
 import { getAgentType } from "./agents/index.ts";
 import type { WorktreeInfo } from "./worktree.ts";
-import type { RuntimeSessionInfo, TaskManagerState } from "./task-tools.ts";
+import type { TaskManagerState } from "./task-tools.ts";
 import type { RenderState } from "./render-tools.ts";
-import {
-  persistEvent as persistEventToDb,
-  persistSession as persistSessionToDb,
-  type PersistableSession,
-} from "./session-persist.ts";
-import {
-  emptyUsageTotals,
-  type SessionUsageTotals,
-} from "./usage-telemetry.ts";
-import { buildPendingCompactionStartOptions, createProactiveCompactionState, emitSessionCompacted, type ProactiveCompactionState } from "./proactive-compaction.ts";
+import { persistEvent as persistEventToDb, persistSession as persistSessionToDb, type PersistableSession } from "./session-persist.ts";
+import { emptyUsageTotals, type SessionUsageTotals } from "./usage-telemetry.ts";
+import { buildPendingCompactionStartOptions, createProactiveCompactionState, type ProactiveCompactionState } from "./proactive-compaction.ts";
 import {
   MAX_BUFFERED_EVENTS,
   deriveTaskName,
@@ -42,8 +34,7 @@ import {
   type ThinkingConfig,
 } from "./session-host-config.ts";
 import {
-  ensureWorktree,
-  buildAgentContext,
+  ensureContributionWorktree,
   buildContextRecoveryStartOptions,
   buildHarnessStartOpts,
   processNormalizedEvent,
@@ -57,7 +48,21 @@ import {
 import { applySessionEndedForMinion } from "./task-lifecycle.ts";
 import { setSessionCanvasContext } from "./canvas-context-store.ts";
 import { drainQueuedWaitResume } from "./wait-resume.ts";
+import type { ContextCheckpoint } from "./context-checkpoint.ts";
+import { commitCheckpointOnInit, failUninitializedCheckpoint } from "./session-host-checkpoint.ts";
+import { beginRun, commitReviewLifecycle, finishRun, initialSessionReviewLifecycle, type SessionReviewLifecycle } from "./session-review-lifecycle.ts";
+import { serverLogger } from "./logging.ts";
+import { normalizedEventEnvelope, notifyRuntimeTerminal, seedSessionRunLineage, sessionHostLogFields } from "./session-host-identity.ts";
+import { buildAgentContext } from "./session-host-agent-context.ts";
+import type {
+  SessionHostDeps,
+  SessionInvocationKind,
+  SessionRunKind,
+  WorkItemRuntimeLifecycle,
+  StartSessionOptions,
+} from "./session-host-types.ts";
 
+const log = serverLogger.child("session-host");
 export {
   MAX_BUFFERED_EVENTS,
   isValidThinkingConfig,
@@ -70,77 +75,33 @@ export type {
   EffortLevel,
   ThinkingDisplay,
 } from "./session-host-config.ts";
-
-// ── Host dependencies + options ────────────────────────────
-
-export interface SessionHostDeps {
-  bus: Bus;
-  startChildSession: (opts: StartSessionOptions) => void;
-  forEachLeaderTaskState: (
-    fn: (leaderKey: string, state: TaskManagerState) => void,
-  ) => void;
-  /** Lookup live/persisted runtime metadata for a session key. */
-  getSessionRuntime?: (sessionKey: string) => RuntimeSessionInfo | null;
-  /** Terminate another live session by key. */
-  terminateSession?: (sessionKey: string, reason: SessionTerminateReason) => void;
-  /** Wake a waiting leader once every delegated child is terminal. */
-  wakeWaitingLeaderIfAllChildrenTerminal?: (leaderKey: string) => void;
-}
-
-export interface ImageAttachment {
-  kind: "image";
-  filename?: string;
-  mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
-  /** Pure base64 payload — no `data:` prefix. */
-  data: string;
-}
-
-export interface StartSessionOptions {
-  sessionKey: string;
-  prompt: string;
-  cwd: string;
-  resumeId?: string | undefined;
-  systemPrompt?: string | undefined;
-  role?: SessionRole | undefined;
-  /** Skill IDs tagged on this session; gate opt-in tools (leader only). */
-  skillIds?: string[] | undefined;
-  worktreeIsolation?: boolean | undefined;
-  parentWorktree?: WorktreeInfo | undefined;
-  initialModel?: string | null | undefined;
-  thinkingConfig?: ThinkingConfig | null | undefined;
-  /** Multimodal attachments riding on the first user message. */
-  attachments?: ImageAttachment[] | undefined;
-  /** External MCP servers merged alongside the agent's built-in servers. */
-  externalMcpServers?: Record<string, unknown> | undefined;
-  /**
-   * Formatted tool names for servers in `externalMcpServers`.
-   * Each name follows the `mcp__<serverId>__<toolName>` convention and
-   * is appended to `allowedTools` so the agent can call without prompts.
-   */
-  externalMcpToolNames?: string[] | undefined;
-  /** Registered AgentHarness name. Defaults to "claude". */
-  harness?: string | undefined;
-  /** Initial permission mode; only honoured on the first start. */
-  permissionMode?: string | undefined;
-  /**
-   * Internal guard for automatic context-window recovery. When a resumable
-   * harness thread becomes too large, the host may start one fresh thread with
-   * compacted context instead of surfacing a hard error.
-   */
-  contextRecoveryAttempt?: number | undefined;
-}
+export type {
+  ImageAttachment,
+  SessionHostDeps,
+  SessionInvocationKind,
+  SessionRunKind,
+  WorkItemRuntimeLifecycle,
+  StartSessionOptions,
+} from "./session-host-types.ts";
 
 // ── SessionHost ────────────────────────────────────────────
-
 /**
  * Per-session lifecycle owner. Instances are long-lived — they survive
  * across `start()` calls (resume) until `dispose()` is invoked by the
  * registry on `remove_session`.
  */
 export class SessionHost {
-  // ── Identity ───────────────────────────────────────
   readonly id: string;
+  /** Canonical run identity; `sessionKey` remains its compatibility alias. */
+  readonly runKey: string;
+  /** Durable parent identity, if supplied by the launch boundary. */
+  workItemId: string | null = null;
+  runKind: SessionRunKind = "primary";
+  parentRunKey: string | null = null;
+  taskId: string | null = null;
+  runLineageSeeded = false; runtimeTerminalNotified = false; runtimeTerminalInFlight = false;
   sessionId: string | null = null;
+  providerInvocationGeneration = 0;
   status: SessionStatus = "idle";
   cwd: string;
   role: SessionRole = "default";
@@ -148,7 +109,6 @@ export class SessionHost {
   skillIds: string[] = [];
   taskName: string | null = null;
 
-  // ── Persisted metrics ──────────────────────────────
   totalCost = 0;
   turns = 0;
   usageTotals: SessionUsageTotals = emptyUsageTotals();
@@ -173,15 +133,23 @@ export class SessionHost {
   renderState: RenderState | null = null;
   canvasContext: string | null = null;
   proactiveCompaction: ProactiveCompactionState = createProactiveCompactionState();
+  contextCheckpoint: ContextCheckpoint | null = null;
+  reviewLifecycle: SessionReviewLifecycle = initialSessionReviewLifecycle();
   private terminateDeps: SessionTerminateDeps | null = null;
-
   constructor(id: string, cwd: string) {
     this.id = id;
+    this.runKey = id;
     this.cwd = cwd;
+  }
+  seedRunLineage(input: {
+    runKind?: SessionRunKind;
+    parentRunKey?: string | null;
+    taskId?: string | null;
+  }): boolean {
+    return seedSessionRunLineage(this, input);
   }
 
   // ── Small helpers ───────────────────────────────────
-
   /**
    * Push an event onto the buffer, trimming to the retention cap, and
    * write it through to the on-disk event_log so it survives a restart.
@@ -212,10 +180,10 @@ export class SessionHost {
       totalCost: this.totalCost,
       turns: this.turns,
       harnessName: this.harnessName,
+      reviewLifecycle: this.reviewLifecycle,
     };
     persistSessionToDb(snap);
   }
-
   /** Clear any active wait_and_continue timer. */
   clearWaitTimer(): void {
     if (this.waitTimerId) {
@@ -231,7 +199,6 @@ export class SessionHost {
   }
 
   // ── Lifecycle ───────────────────────────────────────
-
   /**
    * Start or resume this session. Corresponds to the old `runSession` flow:
    *   1. Reset volatile state for a fresh SDK run
@@ -247,14 +214,44 @@ export class SessionHost {
     this.terminateDeps = deps;
 
     try {
+      if ((opts.runKind !== undefined || opts.parentRunKey !== undefined || opts.taskId !== undefined)
+        && !this.seedRunLineage(opts)) {
+        log.warn("run_lineage_context_mismatch", {
+          ...sessionHostLogFields(this),
+          receivedRunKind: opts.runKind ?? null,
+          receivedParentRunKey: opts.parentRunKey ?? null,
+          receivedTaskId: opts.taskId ?? null,
+        });
+      } else if (!this.runLineageSeeded) {
+        this.seedRunLineage({ runKind: "primary" });
+      }
+      if (opts.workItemId !== undefined) {
+        if (opts.workItemId && this.workItemId === null) {
+          this.workItemId = opts.workItemId;
+        } else if (opts.workItemId && this.workItemId !== opts.workItemId) {
+          // Phase 0 must not alter session behavior. Keep the first identity
+          // and expose a mismatch for Phase 1's command boundary to reject.
+          log.warn("work_item_context_mismatch", {
+            ...sessionHostLogFields(this),
+            receivedWorkItemId: opts.workItemId,
+          });
+        }
+      }
+      log.info("run_starting", sessionHostLogFields(this));
       this.abortController = abortController;
       // Derive a task name for agent types that want one (leader) — done
       // before we might mutate cwd based on worktree.
       const resolvedRole: SessionRole = opts.role ?? this.role ?? "default";
       const agentType = getAgentType(resolvedRole);
-
       // ── Reset per-run volatile state ──────────────────
       this.status = "running";
+      // Internal continuations supply explicit invocation semantics.
+      const invocationKind: SessionInvocationKind = opts.invocationKind ?? "new_run";
+      this.providerInvocationGeneration += 1;
+      if (invocationKind === "new_run") {
+        this.runtimeTerminalNotified = false; this.runtimeTerminalInFlight = false;
+        this.reviewLifecycle = beginRun(this.reviewLifecycle);
+      }
       this.eventStream = null;
       this.runControl = null;
       this.lastError = null;
@@ -277,7 +274,8 @@ export class SessionHost {
       if (opts.worktreeIsolation !== undefined) {
         this.worktreeIsolation = opts.worktreeIsolation === true;
       }
-
+      const harness = getHarness(this.harnessName);
+      assertSafeHarnessMutationMode(this, harness, deps.bus, opts.parentWorktree !== undefined);
       // Clear any existing wait timer when the session resumes.
       this.clearWaitTimer();
 
@@ -285,7 +283,7 @@ export class SessionHost {
         this.taskName = deriveTaskName(opts.prompt);
       }
 
-      await ensureWorktree(this, opts, deps.bus, agentType);
+      await ensureContributionWorktree(this, opts, deps.bus, agentType, deps.transitionWorktreeProvisioning);
       this.persist();
 
       // ── Broadcast running status ──────────────────────
@@ -301,12 +299,9 @@ export class SessionHost {
       // ── Run the harness query ─────────────────────────
       const agentCtx = buildAgentContext(this, opts, deps);
       const toolResult = agentType.getToolGroups(agentCtx);
-
+      installChangeIntentTools(agentCtx, toolResult);
       if (toolResult.taskState) this.taskState = toolResult.taskState;
       if (toolResult.renderState) this.renderState = toolResult.renderState;
-
-      const harness = getHarness(this.harnessName);
-
       // Register tools with the harness (grouped by MCP server name).
       harness.registerTools(toolResult.toolGroups);
 
@@ -325,7 +320,7 @@ export class SessionHost {
       this.eventStream = events;
       this.runControl = control;
       let recoveryOpts: StartSessionOptions | null = null;
-      let compactedFrom: string | null = null;
+      let checkpointInitialized = false;
       try {
         for await (const event of events) {
           if (abortController.signal.aborted) break;
@@ -334,40 +329,47 @@ export class SessionHost {
             shouldRecoverFromContextWindow(opts, event)
           ) {
             recoveryOpts = buildContextRecoveryStartOptions(this, opts, event);
-            const recoveryEvent: BufferedEvent = {
-              type: "sdk_event",
-              sessionKey: this.id,
-              event: {
+            const recoveryEvent = normalizedEventEnvelope(
+              this,
+              {
                 kind: "text",
                 role: "assistant",
                 text:
                   "The Codex thread exceeded the model context window. Starting a fresh continuation with compacted session state.",
               },
-              timestamp: Date.now(),
-            };
+            );
             this.bufferEvent(recoveryEvent);
             deps.bus.emitToSession(this.id, recoveryEvent);
             break;
           }
-          processNormalizedEvent(this, deps.bus, agentType, agentCtx, event);
+          processNormalizedEvent(this, deps.bus, agentType, agentCtx, event, deps.workItemLifecycle);
+          checkpointInitialized = commitCheckpointOnInit(this, deps, opts, event) || checkpointInitialized;
         }
       } finally {
         this.eventStream = null;
         this.runControl = null;
       }
       if (!recoveryOpts) {
-        compactedFrom = this.sessionId;
         recoveryOpts = buildPendingCompactionStartOptions(this, opts);
       }
+      failUninitializedCheckpoint(this, opts, checkpointInitialized, "Fresh provider thread ended before initialization.");
       // Reset status so the guard allows the recursive recovery start.
-      if (recoveryOpts) { this.status = "idle"; await this.start(recoveryOpts, deps); if (compactedFrom) emitSessionCompacted(this, deps, compactedFrom, null); }
+      if (recoveryOpts) { this.status = "idle"; await this.start(recoveryOpts, deps); }
       else drainQueuedWaitResume(this, deps);
     } catch (err: unknown) {
       if (abortController.signal.aborted || this.abortController !== abortController) return;
       const errorMessage = err instanceof Error ? err.message : String(err);
+      failUninitializedCheckpoint(this, opts, false, errorMessage);
       this.status = "error";
       this.lastError = errorMessage;
       this.lastErrorFull = errorMessage;
+      deps.cleanupLiveEditRun?.(this.runKey);
+      notifyRuntimeTerminal(this, deps.workItemLifecycle, { outcome: "error", finalReportId: null, finalReport: null, at: Date.now() });
+      log.error("run_failed", {
+        ...sessionHostLogFields(this),
+        error: err,
+      });
+      commitReviewLifecycle(this, deps.bus, finishRun(this.reviewLifecycle, { reason: "error", report: errorMessage, at: Date.now() }));
       this.persist();
       const errorEvent: BufferedEvent = {
         type: "session_error",
@@ -390,8 +392,9 @@ export class SessionHost {
       }
     }
   }
-
   terminate(reason: SessionTerminateReason, deps?: SessionTerminateDeps): void {
-    void terminateSessionHost(this, deps ?? this.terminateDeps, reason);
+    const base = this.terminateDeps;
+    const effective = deps ? { ...base, ...deps, workItemLifecycle: deps.workItemLifecycle ?? base?.workItemLifecycle } : base;
+    void terminateSessionHost(this, effective, reason);
   }
 }

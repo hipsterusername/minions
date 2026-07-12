@@ -31,18 +31,23 @@ interface StoredPacket {
 }
 
 export async function evaluateMergeGates(host: SessionHost): Promise<MergeGateVerdict> {
-  const worktree = host.worktree;
-  const projectPath = worktree?.projectPath ?? host.cwd;
+  return evaluateMergeGatesForContext({ worktree: host.worktree, cwd: host.cwd, sessionKey: host.id });
+}
+
+export async function evaluateMergeGatesForContext(input: { worktree: SessionHost["worktree"];
+  cwd: string; sessionKey: string }): Promise<MergeGateVerdict> {
+  const worktree = input.worktree;
+  const projectPath = worktree?.projectPath ?? input.cwd;
   const mode = normalizeMode(readSettings(projectPath).systemModel);
   if (mode === "off" || !worktree) return { allowed: true, mode: "off", gates: [] };
-  if (!hasSystemModelManifest(host.cwd)) return { allowed: true, mode: "off", gates: [] };
+  if (!hasSystemModelManifest(input.cwd)) return { allowed: true, mode: "off", gates: [] };
 
-  const { model } = loadSystemModel(host.cwd);
+  const { model } = loadSystemModel(input.cwd);
   if (!model) return { allowed: true, mode, gates: [] };
 
   const diff = await getDetailedDiff(worktree);
   const changedFiles = diff.files.map((file) => file.file);
-  const packet = readLatestSessionPacket(projectPath, host.id);
+  const packet = readLatestSessionPacket(projectPath, input.sessionKey);
 
   const gates = model.policies.reviewGates.map((gate) => {
     const hit = changedFiles.find((file) =>

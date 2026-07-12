@@ -1,0 +1,284 @@
+import { type ComponentType, Fragment } from "react";
+import {
+  Sparkles,
+  Play,
+  Microscope,
+  Slash,
+  CornerDownLeft,
+  ArrowDownUp,
+  type LucideProps,
+} from "lucide-react";
+import type { DashboardLeaderAction } from "../../../dashboard-leader-actions.ts";
+import type { SlashCommand } from "./slash-commands.ts";
+
+/**
+ * Icon per built-in leader action. Keyed on the stable command `id` so it
+ * survives user relabelling; unknown ids fall back to a generic slash glyph.
+ */
+const COMMAND_ICONS: Record<DashboardLeaderAction, ComponentType<LucideProps>> =
+  {
+    improve: Sparkles,
+    execute: Play,
+    analyze: Microscope,
+  };
+
+function commandIcon(id: string): ComponentType<LucideProps> {
+  return COMMAND_ICONS[id as DashboardLeaderAction] ?? Slash;
+}
+
+/**
+ * Split `text` around the first case-insensitive occurrence of `query` and
+ * wrap the match in an emphasized span so users can see why a command matched.
+ */
+function highlightMatch(text: string, query: string, emphasized: boolean) {
+  if (!query) return text;
+  const matchIndex = text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
+  if (matchIndex < 0) return text;
+  const before = text.slice(0, matchIndex);
+  const match = text.slice(matchIndex, matchIndex + query.length);
+  const after = text.slice(matchIndex + query.length);
+  return (
+    <Fragment>
+      {before}
+      <mark
+        style={{
+          background: emphasized
+            ? "color-mix(in srgb, var(--text-on-accent, #fff) 26%, transparent)"
+            : "color-mix(in srgb, var(--accent) 26%, transparent)",
+          color: "inherit",
+          borderRadius: 3,
+          padding: "0 1px",
+        }}
+      >
+        {match}
+      </mark>
+      {after}
+    </Fragment>
+  );
+}
+
+export function LeaderSlashMenu({
+  commands,
+  selectedIndex,
+  onSelect,
+  onHover,
+  query = "",
+}: {
+  commands: SlashCommand[];
+  selectedIndex: number;
+  onSelect: (command: SlashCommand) => void;
+  onHover: (index: number) => void;
+  query?: string;
+}) {
+  return (
+    <div
+      role="listbox"
+      aria-label="Leader context shortcuts"
+      data-no-drag
+      onMouseDown={(event) => event.stopPropagation()}
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        bottom: "calc(100% + 8px)",
+        zIndex: 100,
+        display: "flex",
+        flexDirection: "column",
+        boxSizing: "border-box",
+        overflow: "hidden",
+        background: "var(--bg-elevated)",
+        border: "1px solid var(--border-hover)",
+        borderRadius: "var(--radius-panel, 10px)",
+        boxShadow: "var(--shadow-lg)",
+        fontFamily: "var(--font-sans)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+          padding: "7px 12px",
+          borderBottom: "1px solid var(--border-default)",
+          background: "var(--bg-secondary)",
+        }}
+      >
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: "0.07em",
+            textTransform: "uppercase",
+            color: "var(--text-muted)",
+            fontFamily: "var(--font-mono)",
+          }}
+        >
+          <Slash size={11} strokeWidth={2.5} aria-hidden="true" />
+          Commands
+        </span>
+        <span
+          style={{
+            fontSize: 10,
+            fontFamily: "var(--font-mono)",
+            color: "var(--text-dim)",
+          }}
+        >
+          {commands.length} match{commands.length === 1 ? "" : "es"}
+        </span>
+      </div>
+
+      <div
+        style={{
+          maxHeight: 240,
+          overflowY: "auto",
+          padding: 6,
+          display: "flex",
+          flexDirection: "column",
+          gap: 2,
+        }}
+      >
+        {commands.map((command, index) => {
+          const selected = index === selectedIndex;
+          const Icon = commandIcon(command.id);
+          return (
+            <button
+              key={command.id}
+              type="button"
+              role="option"
+              aria-selected={selected}
+              data-testid={`leader-slash-command-${command.id}`}
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseEnter={() => onHover(index)}
+              onClick={() => onSelect(command)}
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "8px 10px",
+                border: "none",
+                borderRadius: "var(--radius-control, 6px)",
+                background: selected ? "var(--accent)" : "transparent",
+                color: selected
+                  ? "var(--text-on-accent, #fff)"
+                  : "var(--text-primary)",
+                cursor: "pointer",
+                textAlign: "left",
+                fontFamily: "var(--font-sans)",
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  width: 26,
+                  height: 26,
+                  borderRadius: "var(--radius-control, 6px)",
+                  background: selected
+                    ? "color-mix(in srgb, var(--text-on-accent, #fff) 18%, transparent)"
+                    : "color-mix(in srgb, var(--accent) 14%, transparent)",
+                  color: selected
+                    ? "var(--text-on-accent, #fff)"
+                    : "var(--accent)",
+                }}
+              >
+                <Icon size={15} strokeWidth={2} />
+              </span>
+              <span
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 1,
+                  minWidth: 0,
+                  flex: 1,
+                }}
+              >
+                <span style={{ fontSize: 13, fontWeight: 650 }}>
+                  {highlightMatch(command.label, query, selected)}
+                </span>
+                <span
+                  style={{
+                    maxWidth: "100%",
+                    overflow: "hidden",
+                    color: selected
+                      ? "var(--text-on-accent, #fff)"
+                      : "var(--text-muted)",
+                    fontSize: 11,
+                    lineHeight: 1.35,
+                    opacity: selected ? 0.85 : 1,
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {command.description}
+                </span>
+              </span>
+              {selected && (
+                <kbd
+                  aria-hidden="true"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 3,
+                    flexShrink: 0,
+                    padding: "2px 6px",
+                    borderRadius: 4,
+                    fontSize: 10,
+                    fontFamily: "var(--font-mono)",
+                    lineHeight: 1.4,
+                    border:
+                      "1px solid color-mix(in srgb, var(--text-on-accent, #fff) 45%, transparent)",
+                    color: "var(--text-on-accent, #fff)",
+                    opacity: 0.9,
+                  }}
+                >
+                  <CornerDownLeft size={10} strokeWidth={2.5} />
+                  Enter
+                </kbd>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 14,
+          padding: "6px 12px",
+          borderTop: "1px solid var(--border-default)",
+          background: "var(--bg-secondary)",
+          fontSize: 10,
+          fontFamily: "var(--font-mono)",
+          color: "var(--text-dim)",
+        }}
+      >
+        <span style={FOOTER_HINT_STYLE}>
+          <ArrowDownUp size={11} strokeWidth={2.5} aria-hidden="true" />
+          Navigate
+        </span>
+        <span style={FOOTER_HINT_STYLE}>
+          <CornerDownLeft size={11} strokeWidth={2.5} aria-hidden="true" />
+          Select
+        </span>
+        <span style={{ ...FOOTER_HINT_STYLE, marginLeft: "auto" }}>
+          Esc to dismiss
+        </span>
+      </div>
+    </div>
+  );
+}
+
+const FOOTER_HINT_STYLE = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 4,
+} as const;

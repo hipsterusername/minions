@@ -32,6 +32,7 @@ import type { NormalizedEvent } from "../../../shared/normalized-event.ts";
 // ── Capability declaration ────────────────────────────────────────────────────
 
 const ECHO_CAPABILITIES: HarnessCapabilities = {
+  mutationInterception: "none",
   thinking: false,
   promptCaching: false,
   mcp: false,
@@ -45,8 +46,17 @@ const ECHO_CAPABILITIES: HarnessCapabilities = {
 
 class EchoHarness implements AgentHarness {
   readonly name = "echo";
+  readonly exposure = "test" as const;
   readonly capabilities = ECHO_CAPABILITIES;
   readonly builtInTools: string[] = [];
+
+  async checkReadiness() {
+    return {
+      state: "ready" as const,
+      runtime: { available: true, source: "sdk_bundled" as const },
+      auth: { authenticated: true, source: "unknown" as const },
+    };
+  }
 
   private registeredDefs: NormalizedToolDef[] = [];
 

@@ -28,7 +28,7 @@ export function createPushRoutes({
 
   router.post("/unsubscribe", (req: Request, res: Response) => {
     const body = req.body as Record<string, unknown>;
-    if (!body || typeof body["endpoint"] !== "string") {
+    if (!body || typeof body["endpoint"] !== "string" || !isSecurePushEndpoint(body["endpoint"])) {
       res.status(400).json({ error: "Malformed push unsubscribe request" });
       return;
     }
@@ -43,21 +43,30 @@ function parseSubscription(body: unknown): PushSubscription | null {
   if (!isRecord(body)) return null;
   const endpoint = body["endpoint"];
   const keys = body["keys"];
-  if (typeof endpoint !== "string" || !isRecord(keys)) return null;
+  if (typeof endpoint !== "string" || !isSecurePushEndpoint(endpoint) || !isRecord(keys)) return null;
   const p256dh = keys["p256dh"];
   const auth = keys["auth"];
-  if (typeof p256dh !== "string" || typeof auth !== "string") return null;
-
-  try {
-    new URL(endpoint);
-  } catch {
-    return null;
-  }
+  if (!isBase64Url(p256dh, 4096) || !isBase64Url(auth, 1024)) return null;
 
   return {
     endpoint,
     keys: { p256dh, auth },
   };
+}
+
+function isSecurePushEndpoint(raw: string): boolean {
+  if (raw.length > 4096) return false;
+  try {
+    const url = new URL(raw);
+    return url.protocol === "https:" && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
+
+function isBase64Url(value: unknown, maxLength: number): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= maxLength &&
+    /^[A-Za-z0-9_-]+$/.test(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

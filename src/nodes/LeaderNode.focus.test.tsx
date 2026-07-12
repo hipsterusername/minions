@@ -9,7 +9,7 @@
 
 import { render, screen } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { LeaderNodeRenderer, type LeaderData } from "./LeaderNode.tsx";
 import type { CanvasNode, NodeRenderProps } from "../types.ts";
@@ -30,6 +30,7 @@ beforeAll(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   resetLeaderInputFocusRequestsForTests();
 });
 
@@ -82,11 +83,13 @@ function renderLeader(nodeId: string) {
 
 describe("LeaderNode prompt auto-focus", () => {
   it("focuses the prompt input when a focus request was registered", () => {
+    const focus = vi.spyOn(HTMLTextAreaElement.prototype, "focus");
     requestLeaderInputFocus("leader-focus-1");
     renderLeader("leader-focus-1");
 
     const textarea = screen.getByTestId("leader-prompt-input-inline");
     expect(document.activeElement).toBe(textarea);
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
   });
 
   it("does not focus the prompt input without a request (rehydrated node)", () => {

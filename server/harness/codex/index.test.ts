@@ -347,6 +347,21 @@ describe("CodexHarness.start()", () => {
 // ── Tools / bridge integration ────────────────────────────────────────────────
 
 describe("CodexHarness MCP bridge", () => {
+  it("fails explicitly when external project MCP configuration is supplied", async () => {
+    const out = await collect(codexHarness.start(baseOpts({
+      externalMcpServers: { filesystem: { type: "stdio", command: "node" } },
+    })).events);
+    expect(out).toEqual([
+      expect.objectContaining({
+        kind: "done",
+        reason: "error",
+        error: expect.stringContaining("not supported by harness \"codex\""),
+      }),
+    ]);
+    expect(sdkMock.calls.constructor).toHaveLength(0);
+    expect(bridgeMock.calls.register).toHaveLength(0);
+  });
+
   it("registers, exposes, and disposes bridge groups when tools are present", async () => {
     codexHarness.registerTools({
       "task-manager": [toolDef("plan_task"), toolDef("assign_task")],
@@ -395,6 +410,7 @@ describe("CodexHarness static info", () => {
 
   it("declares the expected capabilities", () => {
     expect(codexHarness.capabilities).toMatchObject({
+      mutationInterception: "observe_only",
       thinking: true,
       mcp: true,
       resume: true,
@@ -546,13 +562,15 @@ describe("CodexHarness abort determinism", () => {
 // ── Codex CLI environment ────────────────────────────────────────────────────
 
 describe("buildCodexEnv", () => {
-  it("returns undefined when no bridge env is needed and the default Codex home is usable", async () => {
+  it("returns a scrubbed operational environment when the default Codex home is usable", async () => {
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "codex-home-ok-"));
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "codex-cwd-"));
     await fs.mkdir(path.join(home, ".codex"));
 
-    await withEnv({ HOME: home, CODEX_HOME: undefined }, async () => {
-      expect(buildCodexEnv({}, cwd)).toBeUndefined();
+    await withEnv({ HOME: home, CODEX_HOME: undefined, AWS_SECRET_ACCESS_KEY: "secret" }, async () => {
+      const env = buildCodexEnv({}, cwd);
+      expect(env["HOME"]).toBe(home);
+      expect(env["AWS_SECRET_ACCESS_KEY"]).toBeUndefined();
     });
   });
 
@@ -586,6 +604,24 @@ describe("buildCodexEnv", () => {
     await withEnv({ CODEX_HOME: "/custom/codex-home" }, async () => {
       const env = buildCodexEnv({ MINIONS_BRIDGE_TOKEN_TASKS: "tok" }, cwd);
       expect(env?.["CODEX_HOME"]).toBe("/custom/codex-home");
+    });
+  });
+
+  it("keeps provider and bridge credentials but drops unrelated ambient credentials", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "codex-home-allowlist-"));
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "codex-cwd-"));
+    await fs.mkdir(path.join(home, ".codex"));
+    await withEnv({
+      HOME: home,
+      OPENAI_API_KEY: "openai-token",
+      GITHUB_TOKEN: "github-token",
+      AWS_SECRET_ACCESS_KEY: "aws-token",
+    }, async () => {
+      const env = buildCodexEnv({ MINIONS_BRIDGE_TOKEN_TASKS: "bridge-token" }, cwd);
+      expect(env["OPENAI_API_KEY"]).toBe("openai-token");
+      expect(env["MINIONS_BRIDGE_TOKEN_TASKS"]).toBe("bridge-token");
+      expect(env["GITHUB_TOKEN"]).toBeUndefined();
+      expect(env["AWS_SECRET_ACCESS_KEY"]).toBeUndefined();
     });
   });
 });

@@ -50,6 +50,18 @@ describe("clear_session", () => {
     expect(h.busSent).toHaveLength(0);
   });
 
+  it("rejects a work-item-bound host before clearing history", () => {
+    const h = setup({ status: "idle" });
+    h.host.workItemId = "work-1";
+    h.host.eventBuffer = [fakeEvent("leader-1")];
+    clearSession(h.ctx, cmd({ type: "clear_session" }), h.ws);
+    expect(h.host.eventBuffer).toHaveLength(1);
+    expect(h.wsSent[0]).toMatchObject({
+      topic: "session:leader-1", type: "session_error", code: "WORK_ITEM_SESSION_PROTECTED",
+      workItemId: "work-1",
+    });
+  });
+
   it("is a no-op when sessionKey is missing", () => {
     const h = setup({ status: "idle" });
     h.host.eventBuffer = [fakeEvent("leader-1")];

@@ -1,9 +1,6 @@
 import type { NormalizedEvent } from "../shared/normalized-event.ts";
-import type { RenderComponent } from "../shared/render-dsl.ts";
 import type { Bus } from "./bus.ts";
 import type { SessionHost, StartSessionOptions } from "./session-host.ts";
-import type { TaskRecord } from "./task-tools.ts";
-import { capTaskTextForSummary } from "./task-tools/result-summary.ts";
 import {
   DEFAULT_PROACTIVE_COMPACTION,
   evaluateCompactionUsage,
@@ -15,12 +12,17 @@ import {
 import {
   consumeCheckpointHandoff,
   isCheckpointRequested,
+  validateCheckpointBoundary,
 } from "./task-tools/checkpoint-session.ts";
 import { readSettings } from "./project-store.ts";
+import { activeWorktreeOperation } from "./commands/worktree-operation-lock.ts";
+import {
+  checkpointStartOptions,
+  compileContextCheckpoint,
+  renderCheckpointPrompt,
+} from "./context-checkpoint.ts";
 
 const MAX_HANDOFF_CHARS = 4_000;
-const MAX_SEED_PROMPT_CHARS = 24_000;
-const MAX_TASK_RESULT_CHARS = 800;
 const RECOMMEND_REMINDER =
   "System reminder: Context is above the proactive checkpoint recommendation threshold. Call `checkpoint_session` at the next safe boundary to continue in a fresh thread.";
 
@@ -32,6 +34,7 @@ export interface ProactiveCompactionState {
   recommended: CompactionAdvice | null;
   forcePending: CompactionAdvice | null;
   handoffText: string;
+  handoffSawDelta: boolean;
   oldSessionIds: string[];
 }
 
@@ -43,6 +46,7 @@ export function createProactiveCompactionState(): ProactiveCompactionState {
     recommended: null,
     forcePending: null,
     handoffText: "",
+    handoffSawDelta: false,
     oldSessionIds: [],
   };
 }
@@ -78,10 +82,7 @@ export function recordCompactionUsage(
   if (state.setting === "off") return;
   const advice = evaluateCompactionUsage(state.advisor, usage, host.model);
   if (advice.action === "recommend") state.recommended = advice;
-  if (advice.action === "force" && state.setting === "recommend") {
-    state.recommended = advice;
-  }
-  if (advice.action === "force" && state.setting === "auto") {
+  if (advice.action === "force" && (state.setting === "recommend" || state.setting === "auto")) {
     state.forcePending = advice;
   }
 }
@@ -105,8 +106,11 @@ export function captureCheckpointHandoffEvent(
 ): void {
   if (!isCheckpointRequested(host.id)) return;
   if (event.kind === "text" && event.role === "assistant") {
-    appendHandoff(host, event.text);
+    // A complete assistant text supersedes any deltas captured for the same
+    // block, preventing the durable handoff from being duplicated.
+    host.proactiveCompaction.handoffText = truncate(event.text, MAX_HANDOFF_CHARS);
   } else if (event.kind === "text_delta" && !event.parentId) {
+    host.proactiveCompaction.handoffSawDelta = true;
     appendHandoff(host, event.text);
   }
 }
@@ -116,26 +120,24 @@ export function buildPendingCompactionStartOptions(
   opts: StartSessionOptions,
 ): StartSessionOptions | null {
   if (host.role !== "leader") return null;
+  if ((isCheckpointRequested(host.id) || host.proactiveCompaction.forcePending) && !isSafeToAutoCompact(host)) return null;
   const handoff = consumeCheckpointHandoff(host.id) ?? autoHandoff(host);
   const manual = host.proactiveCompaction.handoffText.trim();
   const forced = host.proactiveCompaction.forcePending;
   if (!manual && !forced && !handoff) return null;
-  if (host.proactiveCompaction.forcePending && !isSafeToAutoCompact(host)) {
-    return null;
-  }
   const priorSessionId = host.sessionId;
   if (priorSessionId) host.proactiveCompaction.oldSessionIds.push(priorSessionId);
+  const checkpoint = compileContextCheckpoint(host, {
+    trigger: "proactive",
+    originalPrompt: opts.prompt,
+    modelHandoff: manual || handoff || "Automatic checkpoint at idle boundary.",
+    usage: forced,
+  });
+  host.contextCheckpoint = checkpoint;
   host.proactiveCompaction.forcePending = null;
   host.proactiveCompaction.handoffText = "";
-  return {
-    ...opts,
-    prompt: buildProactiveCompactionSeed(
-      host,
-      manual || handoff || "Automatic checkpoint at idle boundary.",
-    ),
-    resumeId: undefined,
-    contextRecoveryAttempt: undefined,
-  };
+  host.proactiveCompaction.handoffSawDelta = false;
+  return checkpointStartOptions(checkpoint, opts);
 }
 
 export function emitSessionCompacted(
@@ -144,35 +146,38 @@ export function emitSessionCompacted(
   oldSessionId: string | null,
   advice: CompactionAdvice | null,
 ): void {
-  deps.bus.emitToSession(host.id, {
-    type: "session_compacted",
-    sessionKey: host.id,
-    oldSessionId,
-    newSessionId: host.sessionId,
-    contextTokensBefore: advice?.contextTokens,
-    contextWindowTokens: advice?.contextWindowTokens,
-    ratioBefore: advice?.ratio,
-    timestamp: Date.now(),
-  });
+  try {
+    const event = {
+      type: "session_compacted",
+      sessionKey: host.id,
+      checkpointId: host.contextCheckpoint?.checkpointId,
+      trigger: host.contextCheckpoint?.trigger,
+      oldSessionId,
+      newSessionId: host.sessionId,
+      contextTokensBefore: advice?.contextTokens,
+      contextWindowTokens: advice?.contextWindowTokens,
+      ratioBefore: advice?.ratio,
+      timestamp: Date.now(),
+    };
+    host.bufferEvent(event);
+    deps.bus.emitToSession(host.id, event);
+  } catch {
+    // The checkpoint transaction is committed once the provider initializes;
+    // a faulty observer must not roll a healthy fresh thread back to error.
+  }
 }
 
 export function buildProactiveCompactionSeed(
   host: SessionHost,
   handoff: string,
 ): string {
-  const sections = [
-    "<previous-session-context>",
-    `Prior session id: ${host.sessionId ?? "(unknown)"}`,
-    `Session name: ${host.taskName ?? "(unnamed)"}`,
-    renderTasks(host.taskState?.tasks.values() ?? []),
-    renderDashboardInventory(host.renderState?.components ?? []),
-    renderWorktree(host),
-    "<model-authored-handoff>",
-    truncate(handoff, MAX_HANDOFF_CHARS),
-    "</model-authored-handoff>",
-    "</previous-session-context>",
-  ];
-  return truncate(sections.filter(Boolean).join("\n"), MAX_SEED_PROMPT_CHARS);
+  const checkpoint = compileContextCheckpoint(host, {
+    trigger: "proactive",
+    originalPrompt: host.taskName ?? "Continue the active objective.",
+    modelHandoff: handoff,
+    persist: false,
+  });
+  return renderCheckpointPrompt(checkpoint);
 }
 
 function appendHandoff(host: SessionHost, text: string): void {
@@ -188,54 +193,12 @@ function autoHandoff(host: SessionHost): string | null {
 }
 
 function isSafeToAutoCompact(host: SessionHost): boolean {
-  const taskState = host.taskState;
-  if (taskState?.approval?.requested) return false;
-  if (taskState?.pendingWait?.wakeOn === "any_terminal") return false;
-  return true;
-}
-
-function renderTasks(tasks: Iterable<TaskRecord>): string {
-  const lines = ["<task-registry>"];
-  for (const task of tasks) {
-    const result = task.result
-      ? ` result=${JSON.stringify(capTaskTextForSummary(task.result, MAX_TASK_RESULT_CHARS, "result"))}`
-      : "";
-    lines.push(
-      `- ${task.taskId} [${task.status}] ${task.title}; executor=${task.executor}${result}`,
-    );
-  }
-  lines.push("</task-registry>");
-  return lines.length > 2 ? lines.join("\n") : "";
-}
-
-function renderDashboardInventory(components: RenderComponent[]): string {
-  const rows: string[] = [];
-  walkComponents(components, rows);
-  return rows.length
-    ? ["<dashboard-components>", ...rows, "</dashboard-components>"].join("\n")
-    : "";
-}
-
-function walkComponents(components: RenderComponent[], rows: string[]): void {
-  for (const component of components) {
-    rows.push(`- ${component.id}: ${component.type}`);
-    if (component.type === "section") walkComponents(component.components, rows);
-    if (component.type === "tabs") {
-      for (const tab of component.tabs) walkComponents(tab.components, rows);
-    }
-  }
-}
-
-function renderWorktree(host: SessionHost): string {
-  if (!host.worktree) return "";
-  return [
-    "<worktree>",
-    `cwd: ${host.cwd}`,
-    `branch: ${host.worktree.branch}`,
-    `path: ${host.worktree.path}`,
-    `projectPath: ${host.worktree.projectPath}`,
-    "</worktree>",
-  ].join("\n");
+  if (activeWorktreeOperation(host)) return false;
+  if (!host.taskState) return true;
+  return validateCheckpointBoundary({
+    taskState: host.taskState,
+    renderComponents: host.renderState?.components,
+  }).safe;
 }
 
 function truncate(text: string, maxChars: number): string {

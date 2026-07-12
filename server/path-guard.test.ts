@@ -31,6 +31,7 @@ import {
   validateProjectPath,
   unregisterProjectPath,
   validateSessionCwd,
+  validateOwnedSessionCwd,
   rehydrateFromPaths,
   resolveCreatableProjectPath,
   resolveExistingProjectPath,
@@ -183,11 +184,24 @@ describe("rehydrateFromPaths", () => {
 });
 
 describe("validateSessionCwd", () => {
-  // Note: a "accepts a path under the home directory" duplicate of
-  // isUnderHomeDir was removed per §5.9.
+  it("accepts only an existing registered project root", () => {
+    const project = uniqueProject("session-registered");
+    registerProjectPath(project);
+    expect(validateSessionCwd(project)).toBe(fs.realpathSync(project));
+
+    const arbitrary = uniqueProject("session-arbitrary");
+    expect(validateSessionCwd(arbitrary)).toBeNull();
+  });
 
   it("rejects a path outside the home directory", () => {
     expect(validateSessionCwd("/var/run/something")).toBeNull();
+  });
+
+  it("accepts only an explicitly supplied active worktree path", () => {
+    const worktree = uniqueProject("session-worktree");
+    const sibling = uniqueProject("session-worktree-sibling");
+    expect(validateOwnedSessionCwd(worktree, [worktree])).toBe(fs.realpathSync(worktree));
+    expect(validateOwnedSessionCwd(sibling, [worktree])).toBeNull();
   });
 });
 

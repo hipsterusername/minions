@@ -42,6 +42,27 @@ export interface SessionRow {
    * started on. Defaults to "claude" via the schema for pre-migration rows.
    */
   harness_name: string;
+  review_state?: string;
+  review_reason?: string | null;
+  final_report?: string | null;
+  final_dashboard_revision?: number | null;
+  dashboard_revision?: number;
+  terminal_reason?: string | null;
+  terminal_at?: number | null;
+  acknowledged_at?: number | null;
+  dismissed_at?: number | null;
+  lifecycle_revision?: number;
+  work_item_id?: string | null;
+  run_number?: number | null;
+  run_kind?: "primary" | "child";
+  previous_run_key?: string | null;
+  parent_run_key?: string | null;
+  task_id?: string | null;
+  started_at?: number | null;
+  ended_at?: number | null;
+  run_outcome?: string;
+  final_report_event_id?: string | null;
+  start_idempotency_key?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -62,13 +83,18 @@ export function upsertSession(db: Database.Database, row: SessionRow): void {
       task_name, session_id, worktree_isolation, worktree_path,
       worktree_branch, worktree_project_path, worktree_created_at,
       worktree_lifecycle, approval_json, total_cost, turns, harness_name,
-      created_at, updated_at
+      review_state, review_reason, final_report, final_dashboard_revision,
+      dashboard_revision, terminal_reason, terminal_at, acknowledged_at,
+      dismissed_at, lifecycle_revision, created_at, updated_at
     ) VALUES (
       @session_key, @project_id, @node_id, @status, @cwd, @model, @role,
       @task_name, @session_id, @worktree_isolation, @worktree_path,
       @worktree_branch, @worktree_project_path, @worktree_created_at,
       @worktree_lifecycle, @approval_json, @total_cost, @turns,
-      @harness_name, @created_at, @updated_at
+      @harness_name, @review_state, @review_reason, @final_report,
+      @final_dashboard_revision, @dashboard_revision, @terminal_reason,
+      @terminal_at, @acknowledged_at, @dismissed_at, @lifecycle_revision,
+      @created_at, @updated_at
     )
     ON CONFLICT(session_key) DO UPDATE SET
       project_id = excluded.project_id,
@@ -89,9 +115,31 @@ export function upsertSession(db: Database.Database, row: SessionRow): void {
       total_cost = excluded.total_cost,
       turns = excluded.turns,
       harness_name = excluded.harness_name,
+      review_state = excluded.review_state,
+      review_reason = excluded.review_reason,
+      final_report = excluded.final_report,
+      final_dashboard_revision = excluded.final_dashboard_revision,
+      dashboard_revision = excluded.dashboard_revision,
+      terminal_reason = excluded.terminal_reason,
+      terminal_at = excluded.terminal_at,
+      acknowledged_at = excluded.acknowledged_at,
+      dismissed_at = excluded.dismissed_at,
+      lifecycle_revision = excluded.lifecycle_revision,
       updated_at = excluded.updated_at
   `);
-  stmt.run(row);
+  stmt.run({
+    review_state: "none",
+    review_reason: null,
+    final_report: null,
+    final_dashboard_revision: null,
+    dashboard_revision: 0,
+    terminal_reason: null,
+    terminal_at: null,
+    acknowledged_at: null,
+    dismissed_at: null,
+    lifecycle_revision: 0,
+    ...row,
+  });
 }
 
 export function getSession(

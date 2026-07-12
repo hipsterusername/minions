@@ -11,7 +11,6 @@ import { memo, type MouseEvent, type ReactNode } from "react";
 
 export type MessageSelectionIconKind =
   | "copy"
-  | "copy-full"
   | "node"
   | "select-all"
   | "clear"
@@ -36,16 +35,6 @@ export function MessageSelectionIcon({ kind }: { kind: MessageSelectionIconKind 
         <svg {...common}>
           <rect x="9" y="9" width="13" height="13" rx="2" />
           <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-        </svg>
-      );
-    case "copy-full":
-      return (
-        <svg {...common}>
-          <rect x="4" y="3" width="14" height="18" rx="2" />
-          <path d="M8 7h6" />
-          <path d="M8 11h6" />
-          <path d="M8 15h4" />
-          <path d="M18 8h2v13a2 2 0 0 1-2 2h-9v-2" />
         </svg>
       );
     case "node":

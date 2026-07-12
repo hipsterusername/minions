@@ -32,8 +32,10 @@ import { createEdge } from "./graph-runtime.ts";
 import type { PortInfo } from "./components/PortDot.tsx";
 import { PROTOCOL_COLORS } from "./components/PortDot.tsx";
 import type { LeaderData, TaskPlanItem } from "./nodes/LeaderNode.tsx";
+import { canvasDetachCommand } from "./nodes/leader/work-item.ts";
 import { requestLeaderInputFocus } from "./leader-focus-request.ts";
 import type { MinionData, MinionTaskState } from "./nodes/MinionNode.tsx";
+import type { PermissionMode } from "./components/SessionToolbar.tsx";
 import { sessionTopic } from "../shared/ws-envelope.ts";
 import { CanvasContextMenu } from "./components/CanvasContextMenu.tsx";
 import type { ContextMenuOption } from "./components/CanvasContextMenu.tsx";
@@ -44,14 +46,15 @@ import { EdgeInspector } from "./components/EdgeInspector.tsx";
 import { findContextEdgeStaleness } from "./context-staleness.ts";
 import { CanvasMiniMap } from "./CanvasMiniMap.tsx";
 import { applyPromptSeed, createDefaultNodeData } from "./node-defaults.ts";
-import { wheelDetector } from "./wheel-detector.ts";
+import { wheelDetector, wheelZoomFactor } from "./wheel-detector.ts";
 import { canvasScale as canvasScaleRef } from "./canvas-scale.ts";
 import { useCanvasKeyboard } from "./use-canvas-keyboard.ts";
 import { useCanvasFileDrop } from "./use-canvas-file-drop.ts";
+import { agentSpawnDedupKey, claimSpawnEvent } from "./canvas/spawn-event.ts";
 import { useSuppressMiddleClickPaste } from "./use-suppress-middle-click-paste.ts";
 import { createImageNodeFromFile } from "./nodes/image-node-factory.ts";
 import { createMarkdownNodeFromText } from "./nodes/markdown-node-factory.ts";
-import { ABOVE_TOP_GAP, findNonOverlappingPosition, placeAboveTopNode, viewportCenter, snapToGrid, resolveTidyDrop, shouldRelocateOnDrop, centerTransformOnRect, didReposition } from "./canvas-utils.ts";
+import { ABOVE_TOP_GAP, findNonOverlappingPosition, placeAboveTopNode, viewportCenter, snapToGrid, resolveTidyDrop, shouldRelocateOnDrop, centerTransformOnRect, focusTransformOnRects, didReposition } from "./canvas-utils.ts";
 import { computeAutoLayout } from "./auto-layout.ts";
 import { cloneLeaderContextEdges, cloneLeaderSetupData } from "./leader-setup-clone.ts";
 import {
@@ -632,6 +635,7 @@ interface CanvasProps {
   socketSubscribe?: SocketSubscribe;
   socketConnected?: boolean;
   projectPath?: string;
+  projectId?: string;
   projectSettings?: import("./api.ts").ProjectSettings;
   onProjectSettingsChange?: (settings: import("./api.ts").ProjectSettings) => void;
   undo?: () => void;
@@ -658,6 +662,7 @@ export function Canvas({
   socketSubscribe,
   socketConnected,
   projectPath,
+  projectId,
   projectSettings,
   onProjectSettingsChange,
   undo,
@@ -743,6 +748,7 @@ export function Canvas({
     worldY: number;
     source: PortInfo;
     compatiblePortId: string;
+    placement: NonNullable<ReturnType<typeof computeLeaderDropPlacement>>;
   } | null>(null);
 
   // ── Connection drag state ─────────────────────────────
@@ -845,6 +851,7 @@ export function Canvas({
     worktreeBranch?: string | null | undefined;
     model?: string | null | undefined;
     harness?: string | null | undefined;
+    permissionMode?: PermissionMode | undefined;
     isAgent?: boolean | undefined;
     parentSessionKey?: string | undefined;
   }
@@ -892,15 +899,15 @@ export function Canvas({
   );
 
   /**
-   * Pan the camera to center a node's placement, preserving the current zoom.
-   * No-op unless the node actually moved (see {@link didReposition}). Called
-   * on drag-end so the viewport follows a node repositioned by the user.
+   * Pan the camera to center a node placement, preserving the current zoom.
+   * A missing start position means this is a newly-created placement and
+   * should always be followed.
    */
   const recenterCameraOnPlacement = useCallback(
     (startPos: Position | null, endPos: Position | null, size: Size | null) => {
       const container = containerRef.current;
       if (!container || !endPos || !size) return;
-      if (!didReposition(startPos, endPos)) return;
+      if (startPos && !didReposition(startPos, endPos)) return;
       const target = centerTransformOnRect(
         { x: endPos.x, y: endPos.y, width: size.width, height: size.height },
         { width: container.clientWidth, height: container.clientHeight },
@@ -1291,36 +1298,12 @@ export function Canvas({
       const targets = nodes.filter((n) => targetIds.has(n.id));
       if (targets.length === 0) return;
 
-      // Compute bounding box of all target nodes
-      let minX = Infinity;
-      let minY = Infinity;
-      let maxX = -Infinity;
-      let maxY = -Infinity;
-      for (const n of targets) {
-        minX = Math.min(minX, n.position.x);
-        minY = Math.min(minY, n.position.y);
-        maxX = Math.max(maxX, n.position.x + n.size.width);
-        maxY = Math.max(maxY, n.position.y + n.size.height);
-      }
-
-      const padding = 80;
-      const contentW = maxX - minX + padding * 2;
-      const contentH = maxY - minY + padding * 2;
-      const scaleX = container.clientWidth / contentW;
-      const scaleY = container.clientHeight / contentH;
-      // Fit the node(s) in viewport but clamp to a comfortable range:
-      // - At least 0.4 so you can read text
-      // - At most 1.0 so it doesn't zoom in absurdly on small nodes
-      const scale = Math.min(1.0, Math.max(0.4, Math.min(scaleX, scaleY)));
-
-      const centerX = (minX + maxX) / 2;
-      const centerY = (minY + maxY) / 2;
-
-      setTransform({
-        x: container.clientWidth / 2 - centerX * scale,
-        y: container.clientHeight / 2 - centerY * scale,
-        scale,
-      });
+      const target = focusTransformOnRects(
+        targets.map((node) => ({ ...node.position, ...node.size })),
+        { width: container.clientWidth, height: container.clientHeight },
+        { padding: 80, maxScale: 1 },
+      );
+      if (target) setTransform(target);
     },
     [nodes, setTransform],
   );
@@ -1519,7 +1502,7 @@ export function Canvas({
         error: null,
         model: spawn.model ?? projectSettingsRef.current?.defaultMinionModel ?? "claude-sonnet-5",
         harness: spawn.harness ?? projectSettingsRef.current?.defaultMinionHarness ?? "claude",
-        permissionMode: "bypassPermissions" as const,
+        permissionMode: (spawn.permissionMode ?? projectSettingsRef.current?.defaultPermissionMode ?? "auto") as PermissionMode,
         thinkingConfig: {
           ...(projectSettingsRef.current?.defaultMinionThinkingConfig ?? MINION_THINKING_CONFIG),
         },
@@ -1653,6 +1636,11 @@ export function Canvas({
     [selectedEdge, focusNodes],
   );
 
+  const removeCanvasNode = useCallback((node: CanvasNode) => {
+    if (node.type !== "leader" || !socketSend) return;
+    const command = canvasDetachCommand(node.data as LeaderData, node.id);
+    if (command) socketSend(command);
+  }, [socketSend]);
   // Keyboard shortcuts: space (pan), delete, undo/redo
   useCanvasKeyboard({
     selectedIds,
@@ -1662,6 +1650,7 @@ export function Canvas({
     nodes,
     graph,
     dispatch,
+    onRemoveNode: removeCanvasNode,
     graphDispatch,
     spaceRef,
     isInsideGroup,
@@ -1748,7 +1737,9 @@ export function Canvas({
       const isPinch = e.ctrlKey || e.metaKey;
 
       // ── Device detection via heuristic engine ───────────────────
-      const device = wheelDetector.classify(e);
+      // Pinch is conclusive and must not seed the heuristic used by the next
+      // ordinary wheel gesture.
+      const device = isPinch ? null : wheelDetector.classify(e);
 
       // ── Scroll-capture zones (chat areas, dashboards, etc.) ─────
       // Any element marked with `data-scroll-capture` (or an ancestor of
@@ -1790,20 +1781,7 @@ export function Canvas({
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
 
-        // Normalise deltaY into a zoom multiplier
-        let notches: number;
-        if (isPinch) {
-          notches = e.deltaY / 4;
-        } else if (e.deltaMode === 1) {
-          notches = e.deltaY / 3;
-          notches = Math.max(-1, Math.min(1, notches));
-        } else {
-          notches = e.deltaY / 100;
-          notches = Math.max(-1, Math.min(1, notches));
-        }
-
-        const ZOOM_STEP = 0.07;
-        const zoomFactor = 1 - notches * ZOOM_STEP;
+        const zoomFactor = wheelZoomFactor(e, isPinch);
 
         // Accumulate: multiply zoom factors and use latest mouse position
         if (pendingZoom) {
@@ -1830,6 +1808,7 @@ export function Canvas({
     return () => {
       container.removeEventListener("wheel", handleWheel);
       if (rafId !== null) cancelAnimationFrame(rafId);
+      wheelDetector.reset();
     };
   }, [setTransform, cancelCameraAnim]);
 
@@ -1863,28 +1842,44 @@ export function Canvas({
         cancelCameraAnim();
         setIsPanning(true);
         panRef.current = { startX: e.clientX, startY: e.clientY };
+        const startTransform = transformRef.current;
+        let latestX = e.clientX;
+        let latestY = e.clientY;
+        let panRafId: number | null = null;
+
+        const flushPan = () => {
+          panRafId = null;
+          const start = panRef.current;
+          if (!start) return;
+          setTransform({
+            ...startTransform,
+            x: startTransform.x + latestX - start.startX,
+            y: startTransform.y + latestY - start.startY,
+          });
+        };
 
         const handleMouseMove = (ev: MouseEvent) => {
           if (!panRef.current) return;
-          const dx = ev.clientX - panRef.current.startX;
-          const dy = ev.clientY - panRef.current.startY;
-          panRef.current = { startX: ev.clientX, startY: ev.clientY };
-          setTransform((prev) => ({
-            ...prev,
-            x: prev.x + dx,
-            y: prev.y + dy,
-          }));
+          latestX = ev.clientX;
+          latestY = ev.clientY;
+          if (panRafId === null) panRafId = requestAnimationFrame(flushPan);
         };
 
         const handleMouseUp = () => {
+          if (panRafId !== null) {
+            cancelAnimationFrame(panRafId);
+            flushPan();
+          }
           panRef.current = null;
           setIsPanning(false);
           window.removeEventListener("mousemove", handleMouseMove);
           window.removeEventListener("mouseup", handleMouseUp);
+          window.removeEventListener("blur", handleMouseUp);
         };
 
         window.addEventListener("mousemove", handleMouseMove);
         window.addEventListener("mouseup", handleMouseUp);
+        window.addEventListener("blur", handleMouseUp);
         return;
       }
 
@@ -2452,6 +2447,7 @@ export function Canvas({
       prompt: string | null,
       count = 1,
       contextMode?: ContextEdgeMode,
+      resolvedPosition?: Position,
     ) => {
       const safeCount = Math.max(1, Math.min(3, Math.floor(count)));
       if (safeCount > 1) {
@@ -2482,7 +2478,8 @@ export function Canvas({
         nodesRef.current,
       );
       if (!placement) return;
-      const { leaderDef, position } = placement;
+      const { leaderDef } = placement;
+      const position = resolvedPosition ?? placement.position;
 
       const baseData = createDefaultNodeData(
         "leader",
@@ -2501,6 +2498,7 @@ export function Canvas({
       };
       dispatch({ type: "ADD_NODE", node: newNode });
       setSelectedIds(new Set([newNode.id]));
+      recenterCameraOnPlacement(null, position, newNode.size);
 
       // Empty drop-created leaders focus their prompt input; ones seeded with a
       // prompt auto-start and don't need the textarea focused.
@@ -2525,7 +2523,7 @@ export function Canvas({
         graphDispatch({ type: "ADD_EDGE", edge });
       }
     },
-    [dispatch, graphDispatch],
+    [dispatch, graphDispatch, recenterCameraOnPlacement],
   );
 
   const handleConnectionStart = useCallback(
@@ -2669,14 +2667,26 @@ export function Canvas({
             const dropY = (upEvent.clientY - rect.top - t.y) / t.scale;
 
             if (action.kind === "show-dashboard-menu") {
-              setDashboardDropMenu({
-                screenX: upEvent.clientX,
-                screenY: upEvent.clientY,
-                worldX: dropX,
-                worldY: dropY,
-                source: { ...port },
-                compatiblePortId: compatiblePort.id,
-              });
+              const placement = computeLeaderDropPlacement(
+                dropX,
+                dropY,
+                nodesRef.current,
+              );
+              if (placement) {
+                setDashboardDropMenu({
+                  screenX: upEvent.clientX,
+                  screenY: upEvent.clientY,
+                  worldX: dropX,
+                  worldY: dropY,
+                  source: { ...port },
+                  compatiblePortId: compatiblePort.id,
+                  placement,
+                });
+                // Follow the collision-resolved placement, not the raw drop
+                // point. The same resolved position is retained by the menu
+                // and used when the leader is actually created.
+                recenterCameraOnPlacement(null, placement.position, placement.size);
+              }
             } else {
               createConnectedLeaderFromDrop(
                 port,
@@ -2701,7 +2711,7 @@ export function Canvas({
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseup", handleMouseUp);
     },
-    [createConnectedLeaderFromDrop, graphDispatch],
+    [createConnectedLeaderFromDrop, graphDispatch, recenterCameraOnPlacement],
   );
 
   const handleConnectionEnd = useCallback(
@@ -2881,28 +2891,21 @@ export function Canvas({
 
       const container = containerRef.current;
       if (focus && container) {
-        const padding = 80;
-        const minX = position.x;
-        const minY = position.y;
-        const maxX = position.x + typeDef.defaultSize.width;
-        const maxY = position.y + typeDef.defaultSize.height;
-        const contentW = maxX - minX + padding * 2;
-        const contentH = maxY - minY + padding * 2;
-        const scaleX = container.clientWidth / contentW;
-        const scaleY = container.clientHeight / contentH;
-        const scale = Math.min(1.0, Math.max(0.4, Math.min(scaleX, scaleY)));
-        const nodeCenterX = (minX + maxX) / 2;
-        const nodeCenterY = (minY + maxY) / 2;
-        setTransform({
-          x: container.clientWidth / 2 - nodeCenterX * scale,
-          y: container.clientHeight / 2 - nodeCenterY * scale,
-          scale,
-        });
+        // Creation focus is authoritative. Without cancelling an older glide
+        // (for example, one started by a preceding node drag), its next rAF
+        // tick can overwrite this transform and pull the new node off-screen.
+        cancelCameraAnim();
+        const target = focusTransformOnRects(
+          [{ ...position, ...typeDef.defaultSize }],
+          { width: container.clientWidth, height: container.clientHeight },
+          { padding: 80, maxScale: 1 },
+        );
+        if (target) setTransform(target);
       }
 
       return node;
     },
-    [dispatch, resolveNodePosition, setTransform],
+    [cancelCameraAnim, dispatch, resolveNodePosition, setTransform],
   );
 
   const addNode = useCallback(
@@ -3016,6 +3019,7 @@ export function Canvas({
         null,
         1,
         contextMode,
+        dashboardDropMenu.placement.position,
       );
       setDashboardDropMenu(null);
     },
@@ -3120,6 +3124,7 @@ export function Canvas({
           setSelectedIds,
           transformRef.current,
           nodesRef.current,
+          getViewportCenterPoint(),
         );
         return;
       }
@@ -3132,12 +3137,13 @@ export function Canvas({
         setSelectedIds,
         transformRef.current,
         nodesRef.current,
+        getViewportCenterPoint(),
       );
       if (created) e.preventDefault();
     };
     window.addEventListener("paste", handlePaste);
     return () => window.removeEventListener("paste", handlePaste);
-  }, [dispatch, setSelectedIds]);
+  }, [dispatch, getViewportCenterPoint, setSelectedIds]);
 
   const zoomTo = useCallback(
     (newScale: number) => {
@@ -3202,7 +3208,13 @@ export function Canvas({
   }, [nodes, setTransform]);
 
   const handleTidyLayout = useCallback(() => {
-    const center = viewportCenter(transform);
+    const container = containerRef.current;
+    const center = viewportCenter(
+      transform,
+      container
+        ? { width: container.clientWidth, height: container.clientHeight }
+        : undefined,
+    );
     const moves = computeAutoLayout(nodes, graph.edges, { center });
     if (moves.length > 0) {
       dispatch({ type: "MOVE_GROUP", moves });
@@ -3428,6 +3440,7 @@ export function Canvas({
           worktreeBranch,
           model,
           harness,
+          permissionMode,
         } = serverMsg as unknown as {
           leaderSessionKey: string;
           minionSessionKey: string;
@@ -3438,10 +3451,8 @@ export function Canvas({
           worktreeBranch?: string | null;
           model?: string | null;
           harness?: string | null;
+          permissionMode?: PermissionMode;
         };
-
-        if (spawnedMinionsRef.current.has(minionSessionKey)) return;
-        spawnedMinionsRef.current.add(minionSessionKey);
 
         const leader = nodesRef.current.find(
           (n) => n.type === "leader" && (n.data as LeaderData).sessionKey === leaderSessionKey,
@@ -3453,6 +3464,7 @@ export function Canvas({
           });
           return;
         }
+        if (!claimSpawnEvent(spawnedMinionsRef.current, minionSessionKey, true)) return;
 
         // Store spawn data — node created on demand via revealMinion
         pendingMinionsRef.current.set(minionSessionKey, {
@@ -3465,6 +3477,7 @@ export function Canvas({
           worktreeBranch,
           model,
           harness,
+          permissionMode,
         });
 
         return;
@@ -3485,10 +3498,6 @@ export function Canvas({
           description: string;
         };
 
-        const dedupKey = `agent-${taskId}`;
-        if (spawnedMinionsRef.current.has(dedupKey)) return;
-        spawnedMinionsRef.current.add(dedupKey);
-
         const leader = nodesRef.current.find(
           (n) => n.type === "leader" && (n.data as LeaderData).sessionKey === leaderSessionKey,
         );
@@ -3499,6 +3508,8 @@ export function Canvas({
           });
           return;
         }
+        const dedupKey = agentSpawnDedupKey(taskId);
+        if (!claimSpawnEvent(spawnedMinionsRef.current, dedupKey, true)) return;
 
         // Store spawn data — node created on demand via revealMinion
         pendingMinionsRef.current.set(dedupKey, {
@@ -3760,12 +3771,7 @@ export function Canvas({
     );
     if (!sourcePort) return null;
 
-    const placement = computeLeaderDropPlacement(
-      dashboardDropMenu.worldX,
-      dashboardDropMenu.worldY,
-      nodes,
-    );
-    if (!placement) return null;
+    const placement = dashboardDropMenu.placement;
 
     return {
       sourcePort,
@@ -3986,6 +3992,7 @@ export function Canvas({
             getContextForNode={getStableContextGetter(node.id)}
             getIncomingContextModes={getStableIncomingModesGetter(node.id)}
             projectPath={projectPath}
+            projectId={projectId}
             onConnectionStart={handleConnectionStart}
             onConnectionEnd={handleConnectionEnd}
             isDragActive={isDragActive}
@@ -4341,8 +4348,9 @@ export function Canvas({
               label: "Remove grouping only",
               variant: "ghost",
               onClick: () => {
-                // Delete only the group node(s) + other selected non-group nodes
                 for (const id of [...pendingGroupDelete.groupIds, ...pendingGroupDelete.otherIds]) {
+                  const removed = nodes.find((node) => node.id === id);
+                  if (removed) removeCanvasNode(removed);
                   dispatch({ type: "REMOVE_NODE", id });
                   graphDispatch({ type: "REMOVE_EDGES_FOR_NODE", nodeId: id });
                 }
@@ -4354,13 +4362,14 @@ export function Canvas({
               label: "Delete all",
               variant: "danger",
               onClick: () => {
-                // Delete groups + contained + other selected nodes
                 const all = [
                   ...pendingGroupDelete.groupIds,
                   ...pendingGroupDelete.containedIds,
                   ...pendingGroupDelete.otherIds,
                 ];
                 for (const id of all) {
+                  const removed = nodes.find((node) => node.id === id);
+                  if (removed) removeCanvasNode(removed);
                   dispatch({ type: "REMOVE_NODE", id });
                   graphDispatch({ type: "REMOVE_EDGES_FOR_NODE", nodeId: id });
                 }

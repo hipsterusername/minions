@@ -63,6 +63,7 @@ function makeCtx(host: FakeHost | null): {
     bus: makeBus(),
     generateKey: () => "key",
     maxSessions: 10,
+    launchSession: async (options) => ({ sessionKey: options.sessionKey, harness: options.harness ?? "claude", model: options.initialModel ?? "", permissionMode: options.permissionMode ?? "auto", reasons: [] }),
   };
   return { ctx, startMock };
 }
@@ -99,6 +100,7 @@ describe("submitForm — success path", () => {
 
     const opts = startMock.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(opts["sessionKey"]).toBe("sess-1");
+    expect(opts["invocationKind"]).toBe("resume_open_run");
     expect(opts["prompt"]).toContain("[The user submitted form 'form-abc'");
     // Compact JSON (no pretty-print spacing) — the prompt is paid for in
     // model tokens on every subsequent turn.

@@ -12,6 +12,16 @@ import type { CommandHandler } from "./types.ts";
 export const approveChanges: CommandHandler = (ctx, cmd, ws) => {
   const host = getSessionOrError(ctx.registry, cmd.sessionKey, ws);
   if (!host) return;
+  if (host.workItemId) {
+    sendControlError(
+      ws,
+      "approve_changes",
+      host.id,
+      cmd.requestId,
+      "Canonical work-item contributions must use review and the lineage integration queue",
+    );
+    return;
+  }
   if (!host.worktree) {
     sendControlError(ws, "approve_changes", cmd.sessionKey!, cmd.requestId, "No worktree for this session");
     return;

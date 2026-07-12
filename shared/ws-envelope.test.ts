@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 import {
   sessionTopic,
   projectTopic,
+  lineageTopic,
   sessionKeyFromTopic,
   topicMatches,
 } from "./ws-envelope.ts";
@@ -34,6 +35,12 @@ describe("ws-envelope: helpers", () => {
 
   it("projectTopic rejects an empty id", () => {
     expect(() => projectTopic("")).toThrow();
+  });
+
+  it("lineageTopic builds a durable integration subscription topic", () => {
+    expect(lineageTopic("lineage-42")).toBe("lineage:lineage-42");
+    expect(() => lineageTopic("")).toThrow();
+    expect(topicMatches("lineage:lineage-42", "lineage:lineage-42")).toBe(true);
   });
 
   it("sessionKeyFromTopic extracts the key from a session topic", () => {

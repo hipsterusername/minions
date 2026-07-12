@@ -159,10 +159,53 @@ export function rehydrateFromPaths(paths: readonly string[]): void {
  */
 export function validateSessionCwd(cwd: string): string | null {
   const resolved = path.resolve(cwd);
-  if (!isUnderHomeDir(resolved)) {
+  if (!isUnderHomeDir(resolved)) return null;
+
+  const real = (() => {
+    try {
+      return fs.realpathSync(resolved);
+    } catch {
+      return null;
+    }
+  })();
+  if (!real || !isUnderHomeDir(real)) return null;
+
+  for (const project of openedProjects) {
+    let projectReal: string;
+    try {
+      projectReal = fs.realpathSync(project);
+    } catch {
+      continue;
+    }
+    if (real === projectReal) return real;
+  }
+  return null;
+}
+
+/** Validate a session CWD against registered projects or registry-owned active worktrees. */
+export function validateOwnedSessionCwd(
+  cwd: string,
+  activeWorktreePaths: readonly string[],
+): string | null {
+  const project = validateSessionCwd(cwd);
+  if (project) return project;
+
+  let real: string;
+  try {
+    real = fs.realpathSync(path.resolve(cwd));
+  } catch {
     return null;
   }
-  return resolved;
+  if (!isUnderHomeDir(real)) return null;
+
+  for (const worktreePath of activeWorktreePaths) {
+    try {
+      if (fs.realpathSync(path.resolve(worktreePath)) === real) return real;
+    } catch {
+      // A stale or concurrently removed worktree is not an allowed CWD.
+    }
+  }
+  return null;
 }
 
 /**

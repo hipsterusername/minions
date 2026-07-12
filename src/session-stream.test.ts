@@ -16,10 +16,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   emptySessionStreamState,
+  preserveOptimisticUserMessages,
   sessionStreamReducer,
   type SessionStreamState,
 } from "./session-stream.ts";
 import type { ServerMessage } from "./use-socket.ts";
+import type { DisplayMessage } from "./sdk-messages.ts";
 import type { NormalizedEvent } from "../shared/normalized-event.ts";
 
 // ── Builders (kept tiny — only what these tests need) ──
@@ -471,5 +473,95 @@ describe("emptySessionStreamState", () => {
 
   it("defaults sessionKey to null", () => {
     expect(emptySessionStreamState().sessionKey).toBeNull();
+  });
+});
+
+describe("sessionStreamReducer: continuity marker", () => {
+  it("adds one durable system marker for a committed checkpoint", () => {
+    const state = freshState();
+    const message: ServerMessage = {
+      type: "session_compacted",
+      sessionKey: "k1",
+      checkpointId: "cp-1",
+      trigger: "context_recovery",
+      oldSessionId: "old",
+      newSessionId: "new",
+      timestamp: 42,
+    };
+    const first = sessionStreamReducer(state, message, "test");
+    const second = sessionStreamReducer(first, message, "test");
+    expect(first.messages.at(-1)).toMatchObject({
+      id: "test-checkpoint-cp-1",
+      role: "system",
+      content: expect.stringContaining("context-window recovery"),
+    });
+    expect(second).toBe(first);
+  });
+
+  it("rebuilds checkpoint markers from the persisted event buffer", () => {
+    const next = sessionStreamReducer(freshState(), {
+      type: "sync_response", sessionKey: "k1", found: true,
+      events: [{ type: "session_compacted", sessionKey: "k1", checkpointId: "cp-2", trigger: "proactive", timestamp: 43 }],
+    }, "test");
+    expect(next.messages).toContainEqual(expect.objectContaining({ id: "test-checkpoint-cp-2", role: "system" }));
+  });
+});
+
+// ── preserveOptimisticUserMessages ─────────────────────
+
+describe("preserveOptimisticUserMessages", () => {
+  const m = (
+    id: string,
+    role: DisplayMessage["role"],
+    content = id,
+  ): DisplayMessage => ({ id, role, content, timestamp: 0 });
+
+  it("returns next unchanged (same reference) when no user turns are missing", () => {
+    const prev = [m("u1", "user"), m("a1", "assistant")];
+    const next = [m("u1", "user"), m("a1", "assistant"), m("a2", "assistant")];
+    expect(preserveOptimisticUserMessages(prev, next)).toBe(next);
+  });
+
+  it("re-grafts a user turn wiped by a sync rebuild (events carry no user turns)", () => {
+    // Feed the user sees before a reconnect.
+    const prev = [m("u1", "user"), m("a1", "assistant")];
+    // sync_response rebuilds purely from sdk events → no user messages.
+    const next = [m("a1", "assistant")];
+    const merged = preserveOptimisticUserMessages(prev, next);
+    expect(merged.map((x) => x.id)).toEqual(["u1", "a1"]);
+  });
+
+  it("re-inserts the latest optimistic user turn after its predecessor (stale-snapshot race)", () => {
+    // prev is the authoritative feed with the just-sent user turn last.
+    const prev = [
+      m("u1", "user"),
+      m("a1", "assistant"),
+      m("u2", "user"),
+    ];
+    // A reduction that ran against the pre-append snapshot appended a2 but
+    // never saw u2.
+    const next = [m("u1", "user"), m("a1", "assistant"), m("a2", "assistant")];
+    const merged = preserveOptimisticUserMessages(prev, next);
+    expect(merged.map((x) => x.id)).toEqual(["u1", "a1", "u2", "a2"]);
+  });
+
+  it("keeps relative order of a run of consecutive missing user turns", () => {
+    const prev = [m("a1", "assistant"), m("u1", "user"), m("u2", "user")];
+    const next = [m("a1", "assistant")];
+    const merged = preserveOptimisticUserMessages(prev, next);
+    expect(merged.map((x) => x.id)).toEqual(["a1", "u1", "u2"]);
+  });
+
+  it("prepends a missing user turn that has no surviving predecessor", () => {
+    const prev = [m("u1", "user"), m("a1", "assistant")];
+    const next = [m("a1", "assistant")];
+    const merged = preserveOptimisticUserMessages(prev, next);
+    expect(merged.map((x) => x.id)).toEqual(["u1", "a1"]);
+  });
+
+  it("never re-adds non-user messages the reducer dropped", () => {
+    const prev = [m("a1", "assistant"), m("t1", "tool")];
+    const next = [m("a1", "assistant")];
+    expect(preserveOptimisticUserMessages(prev, next)).toBe(next);
   });
 });

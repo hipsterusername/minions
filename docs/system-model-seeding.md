@@ -47,6 +47,9 @@ pnpm system-model:validate
 `pnpm system-model:validate` loads `.systemmodel/manifest.yaml`, parses YAML and
 ADR front matter, validates object schemas, and checks references between
 capabilities, flows, constraints, decisions, risks, and review gates.
+Repositories that have not configured a model are skipped. Use
+`--require-manifest` when the presence of `.systemmodel/manifest.yaml` is
+itself part of the acceptance contract.
 
 Validation is the acceptance gate for seeding and can be used in CI. A malformed
 model should be fixed in the seed worktree before approval; generated packets or

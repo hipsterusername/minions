@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   SessionHost,
   SessionHostDeps,
@@ -150,5 +151,14 @@ function deliverWake(
           ]),
         ].join("\n").trim();
 
-  deps.startChildSession({ ...first.opts, prompt });
+  if (host.workItemId && host.runKind === "primary" && deps.resumeWorkItemRun) {
+    void deps.resumeWorkItemRun({ workItemId: host.workItemId, runKey: host.runKey,
+      prompt, requestId: `wake:${host.runKey}:${randomUUID()}` });
+    return;
+  }
+  deps.startChildSession({
+    ...first.opts,
+    invocationKind: "resume_open_run",
+    prompt,
+  });
 }

@@ -13,6 +13,8 @@ import type { PermissionMode } from "../../components/SessionToolbar.tsx";
 import type { DisplayMessage } from "../../sdk-messages.ts";
 import type { RenderState } from "../../../shared/render-dsl.ts";
 import { emptyRenderState } from "../../../shared/render-dsl.ts";
+import type { WorkItemSnapshot } from "../../../shared/work-item-contracts.ts";
+import type { LiveEditAwareness } from "../../../shared/live-edit-coordination.ts";
 
 /**
  * Zoom level below which the leader prompt overlay (zoomed-in prompt editor)
@@ -55,6 +57,12 @@ export interface TaskPlanItem {
 }
 
 export interface LeaderData {
+  /** Durable lifecycle identity. `sessionKey` remains a legacy run alias. */
+  workItemId?: string | null;
+  currentRunKey?: string | null;
+  /** Read-only canonical server snapshot used by shared presentation selectors. */
+  workItemSnapshot?: WorkItemSnapshot | null;
+  liveEditAwareness?: LiveEditAwareness;
   sessionKey: string | null;
   status: "disconnected" | "creating" | "running" | "idle" | "stopped" | "error" | "completed";
   messages: LeaderMessage[];

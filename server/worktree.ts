@@ -13,6 +13,8 @@ export type {
 
 export {
   createWorktree,
+  provisionPlannedWorktree,
+  resolveWorktreeBase,
   removeWorktree,
   listWorktrees,
   isGitRepo,

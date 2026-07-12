@@ -58,5 +58,13 @@ describe("checkpoint_session tool", () => {
 
     expect(boundary).toEqual({ safe: false, reason: "form input is pending" });
   });
-});
 
+  it("wires live render state into tool boundary validation", async () => {
+    const tool = createCheckpointSessionToolDef(ctx({
+      getRenderComponents: () => [{ id: "form-1", type: "form", fields: [] }],
+    }));
+    const result = await tool.handler({});
+    expect(result.content[0]!.text).toContain("deferred: form input is pending");
+    expect(isCheckpointRequested("leader-1")).toBe(false);
+  });
+});

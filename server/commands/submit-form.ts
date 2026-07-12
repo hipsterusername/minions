@@ -67,6 +67,7 @@ export const submitForm: CommandHandler = (ctx, cmd, ws) => {
 
   ctx.registry.start({
     sessionKey: cmd.sessionKey,
+    invocationKind: "resume_open_run",
     prompt,
     cwd: host.cwd,
     resumeId: host.sessionId ?? undefined,

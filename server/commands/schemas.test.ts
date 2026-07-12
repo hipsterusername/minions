@@ -50,6 +50,7 @@ describe("validateWsCommand – accept", () => {
     accept({
       type: "create_session",
       sessionKey: "s1",
+      workItemId: "work-1",
       cwd: "/home/user",
       role: "leader",
       worktreeIsolation: true,
@@ -130,6 +131,30 @@ describe("validateWsCommand – accept", () => {
   it("accepts requestId alongside any command type", () => {
     accept({ type: "get_context_usage", sessionKey: "s1", requestId: "req-1" });
   });
+
+  it("accepts Phase 1 work-item mutation and query contracts", () => {
+    const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+    accept({ type: "create_work_item", requestId: id(1), projectId: "p1", projectPath: "/repo", title: "Task", changeMode: "live" });
+    accept({ type: "start_work_item_run", requestId: id(2), workItemId: "w1", prompt: "Start",
+      expectedLifecycleRevision: 0, expectedCurrentRunKey: null, harness: "codex", model: "gpt-5",
+      permissionMode: "auto", thinkingConfig: { enabled: true }, skillIds: ["review"] });
+    accept({ type: "reply_to_waiting_run", requestId: id(3), workItemId: "w1", runKey: "r1", prompt: "Continue", expectedLifecycleRevision: 1, expectedCurrentRunKey: "r1" });
+    accept({ type: "review_work_item", requestId: id(4), workItemId: "w1", expectedLifecycleRevision: 2, expectedCurrentRunKey: "r1" });
+    accept({ type: "archive_work_item", requestId: id(5), workItemId: "w1", expectedLifecycleRevision: 3, expectedCurrentRunKey: "r1" });
+    accept({ type: "restore_work_item", requestId: id(6), workItemId: "w1", expectedLifecycleRevision: 4, expectedCurrentRunKey: "r1" });
+    accept({ type: "attach_work_item_surface", requestId: id(7), workItemId: "w1", surface: "canvas", bindingId: "n1", expectedLifecycleRevision: 5, expectedCurrentRunKey: "r1" });
+    accept({ type: "detach_work_item_surface", requestId: id(8), workItemId: "w1", surface: "kanban", bindingId: "c1", expectedLifecycleRevision: 6, expectedCurrentRunKey: "r1" });
+    accept({ type: "get_work_item", workItemId: "w1", limit: 25 });
+    accept({ type: "list_work_items", projectId: "p1", includeArchived: true, limit: 50 });
+    accept({ type: "get_work_item_runs", workItemId: "w1", cursor: "next" });
+    accept({ type: "update_work_item_card", requestId: id(9), workItemId: "w1",
+      expectedWorkflowRevision: 0, title: "Updated", cardPatch: { priority: "critical" } });
+    accept({ type: "move_work_item_card", requestId: id(10), workItemId: "w1",
+      expectedWorkflowRevision: 1, columnId: "in-progress", targetIndex: 0 });
+    accept({ type: "import_kanban_board", requestId: id(11), projectId: "p1",
+      projectPath: "/repo", migrationKey: "local-storage-v1", cards: [{ id: "legacy",
+        title: "Legacy", columnId: "history", rank: "1", createdAt: 1 }] });
+  });
 });
 
 // ── Reject cases ──────────────────────────────────────────
@@ -164,6 +189,10 @@ describe("validateWsCommand – reject", () => {
       { type: "create_session", role: "superadmin" },
       "create_session",
     );
+  });
+
+  it("rejects create_session with an empty workItemId", () => {
+    reject({ type: "create_session", workItemId: "" }, "create_session");
   });
 
   it("rejects send_message when attachments is not an array", () => {
@@ -219,6 +248,15 @@ describe("validateWsCommand – reject", () => {
       { type: "create_session", worktreeIsolation: "yes" },
       "create_session",
     );
+  });
+
+  it("requires idempotency keys on work-item mutations", () => {
+    reject({ type: "archive_work_item", workItemId: "w1", expectedLifecycleRevision: 1, expectedCurrentRunKey: "r1" }, "requestId");
+  });
+
+  it("rejects invalid work-item surfaces and page sizes", () => {
+    reject({ type: "attach_work_item_surface", requestId: "r", workItemId: "w", surface: "activity", bindingId: "b" }, "surface");
+    reject({ type: "list_work_items", projectId: "p", limit: 101 }, "limit");
   });
 });
 

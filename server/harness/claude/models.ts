@@ -18,6 +18,15 @@ const MODEL_ALIAS_MAP: Record<string, string> = {
   haiku: "claude-haiku-4-5",
 };
 
+export const CLAUDE_MODEL_POLICY = {
+  leader: ["claude-opus-4-8", "claude-fable-5", "claude-sonnet-5", "claude-opus-4-7", "claude-haiku-4-5"],
+  minion: {
+    mechanical: ["claude-haiku-4-5", "claude-sonnet-5", "claude-fable-5", "claude-opus-4-8", "claude-opus-4-7"],
+    standard: ["claude-sonnet-5", "claude-fable-5", "claude-haiku-4-5", "claude-opus-4-8", "claude-opus-4-7"],
+    reasoning: ["claude-opus-4-8", "claude-fable-5", "claude-sonnet-5", "claude-opus-4-7", "claude-haiku-4-5"],
+  },
+} as const;
+
 /**
  * Resolve a user-supplied alias or concrete model ID to a canonical model ID.
  *

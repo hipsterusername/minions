@@ -6,6 +6,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorktreeInfo } from "../worktree-types.ts";
+import type { WorkItemService } from "../work-item-service.ts";
+import { initialWorkItemLifecycle } from "../../shared/work-item-lifecycle.ts";
 import { setup, cmd } from "../../tests/support/server-command-harness.ts";
 
 interface StartCall {
@@ -85,6 +87,7 @@ describe("send_message", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
       sessionKey: "leader-1",
+      invocationKind: "new_run",
       prompt: "hello",
       cwd: "/proj",
       resumeId: "sdk-id",
@@ -128,6 +131,36 @@ describe("send_message", () => {
     expect(h.wsSent).toHaveLength(1);
     expect(h.wsSent[0]!["type"]).toBe("error");
     expect(h.wsSent[0]!["topic"]).toBe("session:ghost");
+  });
+
+  it("bridges a legacy continuation into a canonical interrupted-run restart", async () => {
+    const h = setup();
+    h.host.workItemId = "work-1";
+    h.host.taskState = {
+      tasks: new Map(), pendingWait: null,
+      approval: { requested: true, requestedAt: 1, summary: "Review", diff: null },
+    };
+    const { calls } = captureRegistryStart(h);
+    const detail = { workItem: { id: "work-1", projectId: "project-1", projectPath: "/proj",
+      title: "Task", lifecycle: { ...initialWorkItemLifecycle(), runtimeState: "inactive" as const,
+        outcome: "interrupted" as const, lifecycleRevision: 4 }, waitKind: null,
+      currentRunKey: h.host.runKey, iteration: 1, workflowColumnId: "todo", workflowRank: "a",
+      workflowRevision: 0, card: { description: "", subtasks: [], context: "", priority: "medium" as const,
+        model: "", permissionMode: "auto", worktreeIsolation: false, skillIds: [], skillValues: {},
+        linkedContextNodeIds: [] }, lastTransitionAt: 1, createdAt: 1, updatedAt: 1 },
+      bindings: [], currentRun: null, runs: [], nextCursor: null };
+    const startRun = vi.fn(async () => detail);
+    h.ctx.workItems = { get: vi.fn(async () => detail), startRun } as unknown as WorkItemService;
+    await sendMessage(h.ctx, cmd({
+      type: "send_message", sessionKey: h.host.id, prompt: "Continue old row",
+    }), h.ws);
+
+    expect(calls).toEqual([]);
+    expect(h.host.taskState.approval?.requested).toBe(true);
+    expect(startRun).toHaveBeenCalledWith(expect.objectContaining({ workItemId: "work-1",
+      prompt: "Continue old row", expectedLifecycleRevision: 4,
+      expectedCurrentRunKey: h.host.runKey }));
+    expect(h.wsSent).toEqual([]);
   });
 
   it("when approval was requested, wraps the prompt as a change request and emits approval_resolved", () => {

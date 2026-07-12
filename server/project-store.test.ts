@@ -88,7 +88,11 @@ afterEach(() => {
 describe("initSidecar / openProjectDb", () => {
   it("creates the sidecar directory, default context.md, and settings.json", () => {
     expect(hasSidecar(project)).toBe(false);
-    const db = initSidecar(project);
+    const db = initSidecar(project, {
+      defaultModel: "claude-sonnet-5", defaultLeaderHarness: "codex", defaultLeaderModel: "gpt-5.6-sol",
+      defaultMinionHarness: "claude", defaultMinionModel: "claude-sonnet-5", mechanicalMinionModel: "claude-haiku-4-5",
+      reasoningMinionModel: "claude-opus-4-8", defaultPermissionMode: "auto", defaultWorktreeIsolation: false,
+    });
     // On Windows, SQLite holds a file lock until the connection is closed.
     // Push the close before the project rmSync so afterEach cleanup succeeds.
     cleanup.push(() => db.close());
@@ -115,7 +119,7 @@ describe("initSidecar / openProjectDb", () => {
     expect(typeof settings.defaultWorktreeIsolation).toBe("boolean");
   });
 
-  it("openProjectDb initialises a fresh project and re-uses an existing sidecar", () => {
+  it("openProjectDb initialises without provider defaults and re-uses an existing sidecar", () => {
     expect(hasSidecar(project)).toBe(false);
     const db1 = openProjectDb(project);
     expect(hasSidecar(project)).toBe(true);
@@ -140,7 +144,7 @@ describe("context / settings / skills / mcp-servers round-trip", () => {
   beforeEach(() => {
     // Capture the db handle so afterEach can close it before the project dir
     // is deleted.  On Windows, SQLite holds a file lock until close().
-    const db = initSidecar(project);
+    const db = initSidecar(project, {});
     cleanup.push(() => db.close());
   });
 
@@ -166,6 +170,33 @@ describe("context / settings / skills / mcp-servers round-trip", () => {
     writeSettings(project, next);
     // readSettings merges in defaults for new harness fields; assert written values are preserved
     expect(readSettings(project)).toMatchObject(next);
+  });
+
+  it("upgrades untouched legacy dashboard shortcuts but preserves custom ones", () => {
+    writeSettings(project, {
+      dashboardLeaderActionNames: {
+        improve: "Improve",
+        execute: "Ship it",
+        analyze: "Analyze",
+      },
+      dashboardLeaderActionPrompts: {
+        improve: "Improve the connected dashboard context. Identify the highest-impact changes, then implement or produce the improved result.",
+        execute: "Use my custom implementation workflow.",
+        analyze: "Analyze the connected dashboard context. Summarize the key findings, risks, and recommended next steps.",
+      },
+    });
+
+    const settings = readSettings(project);
+    expect(settings.dashboardLeaderActionNames).toEqual({
+      improve: "Fix",
+      execute: "Ship it",
+      analyze: "Review",
+    });
+    expect(settings.dashboardLeaderActionPrompts?.execute).toBe(
+      "Use my custom implementation workflow.",
+    );
+    expect(settings.dashboardLeaderActionPrompts?.improve).toContain("root cause");
+    expect(settings.dashboardLeaderActionPrompts?.analyze).toContain("Do not make changes");
   });
 
   it("uses medium leader thinking for fable when no explicit setting is stored", () => {

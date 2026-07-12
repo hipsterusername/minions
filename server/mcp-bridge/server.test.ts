@@ -29,6 +29,7 @@ import { createRenderToolsForLeader } from "../render-tools.ts";
 import {
   createMemoizedAttempt,
   handleBridgeRequestForTests,
+  MAX_MCP_REQUEST_BYTES,
   type McpBridgeServer,
 } from "./server.ts";
 import { BridgeRegistry } from "./registry.ts";
@@ -500,6 +501,21 @@ describe("MCP bridge HTTP server", () => {
     expect(response.status).toBe(400);
     const json = (await response.json()) as JsonRpcEnvelope;
     expect(json.error?.code).toBe(-32700);
+  });
+
+  it("rejects an authenticated body above the bridge byte limit", async () => {
+    const response = await fetch(registration.urlFor("task-manager"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${registration.bearerToken}`,
+      },
+      body: "x".repeat(MAX_MCP_REQUEST_BYTES + 1),
+    });
+    expect(response.status).toBe(413);
+    const json = (await response.json()) as JsonRpcEnvelope;
+    expect(json.error).toMatchObject({ code: -32600 });
+    expect(json.error?.message).toContain("exceeds");
   });
 
   it("missing jsonrpc field returns -32600 invalid request", async () => {

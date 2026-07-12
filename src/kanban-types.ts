@@ -25,6 +25,8 @@ export interface KanbanCard {
   createdAt: number;
   /** Model to use for the leader session */
   model: ModelOption;
+  /** Registered harness to use for the leader session. */
+  harness?: string | undefined;
   /** Permission mode for the leader session */
   permissionMode: PermissionMode;
   /** Whether to isolate the leader in a git worktree */

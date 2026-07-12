@@ -12,10 +12,7 @@ import { createSkillAuthoringTools } from "../skill-authoring-tools.ts";
 import { resolveSystemModelRuntime, type SystemModelRuntime } from "../system-model/runtime.ts";
 import { gatedSurfaceGlobs } from "../system-model/applicability.ts";
 import { MINION_SYSTEM_PROMPT } from "./minion.ts";
-import {
-  persistTaskState,
-  persistRenderState,
-} from "../session-persist.ts";
+import { createLeaderStateCallbacks } from "./leader-state-callbacks.ts";
 import type { SessionTerminateReason } from "../session-host-terminate.ts";
 import { cancelChildrenOnLeaderTeardown } from "./leader-teardown.ts";
 
@@ -151,7 +148,7 @@ Full-width:
 \`table\`, \`list\`, \`text\`, \`code\`, \`copyable\`, \`timeline\`, \`callout\`, \`diff\`, \`separator\`.
 
 Interactive / rich:
-- \`form\` collects structured user input. Field kinds: \`text\`, \`textarea\`, \`number\`, \`select\`, \`multiselect\`, \`slider\`, \`checkbox\`, \`date\`.
+- \`form\` collects structured user input. Whenever progress requires a user answer or decision, render a form instead of relying on question-like prose; this is the server-owned signal that Activity uses for “Decision needed.” Field kinds: \`text\`, \`textarea\`, \`number\`, \`select\`, \`multiselect\`, \`slider\`, \`checkbox\`, \`date\`.
 - \`chart\` renders SVG charts with axes, multi-series data, and optional reference lines. Variants: \`line\`, \`bar\`, \`scatter\`, \`area\`.
 
 Container / layout:
@@ -159,8 +156,8 @@ Container / layout:
 - \`tabs\` contains tabs with \`id\`, \`label\`, optional \`badge\`, and child \`components\`.
 
 Artifacts:
-- \`image\` displays an image by \`src\` (\`file://\`, \`https://\`, or \`data:\` URI), with \`alt\` and optional \`caption\` / \`fit\`.
-- \`file-preview\` renders a path or inline file. Use \`source: { kind: "path", path }\` or \`{ kind: "inline", content, mime }\`.
+- \`file-preview\` renders a path or inline file. Use \`source: { kind: "path", path }\` or \`{ kind: "inline", content, mime }\`. Path previews are display/copy-only; they cannot open or download arbitrary paths.
+- \`image\` accepts embedded PNG/JPEG/GIF/WebP \`data:\` URLs only. External or executable URL schemes are rejected.
 
 Examples:
 
@@ -316,6 +313,7 @@ const leaderAgent: AgentType = {
     // Resolved once up front: task tools need it for the packet trigger (§5).
     const systemModelRuntime = resolveSystemModelRuntime(ctx);
 
+    const lifecycleCallbacks = createLeaderStateCallbacks(ctx, leaderSessionKey);
     const { toolDefs: taskDefs, taskState } = createTaskToolsForLeader({
       leaderSessionKey,
       bus: ctx.bus,
@@ -335,7 +333,8 @@ const leaderAgent: AgentType = {
       messageSession: ctx.messageSession,
       // Phase 4.4: write-through cache — every task-state mutation is
       // persisted to SQLite so the plan survives a server restart.
-      onStateChange: (state) => persistTaskState(leaderSessionKey, state),
+      onStateChange: lifecycleCallbacks.onTaskStateChange,
+      getRenderComponents: ctx.getRenderComponents,
     });
 
     const { toolDefs: renderDefs, renderState } = createRenderToolsForLeader({
@@ -343,7 +342,7 @@ const leaderAgent: AgentType = {
       bus: ctx.bus,
       existingRenderState: ctx.existingRenderState,
       // Phase 4.4: persist dashboard state on every mutation.
-      onStateChange: (state) => persistRenderState(leaderSessionKey, state),
+      onStateChange: lifecycleCallbacks.onRenderStateChange,
     });
 
     const systemModelDefs = systemModelRuntime.mode !== "off" && systemModelRuntime.model

@@ -48,6 +48,7 @@ function sessionWithSyncResponse(session: SessionInfo, msg: Extract<ServerMessag
     ...(msg.taskPlan !== undefined ? { taskPlan: msg.taskPlan } : {}),
     ...(msg.activeMinions !== undefined ? { activeMinions: msg.activeMinions } : {}),
     ...(msg.renderState !== undefined ? { renderState: msg.renderState } : {}),
+    ...(msg.reviewLifecycle !== undefined ? { reviewLifecycle: msg.reviewLifecycle } : {}),
   };
 }
 
@@ -196,6 +197,15 @@ export function reduceSessionActivity(
     );
   }
 
+  if (msg.type === "session_lifecycle_changed") {
+    sessions = sessions.map((session) =>
+      session.sessionKey === msg.sessionKey &&
+      (session.reviewLifecycle?.lifecycleRevision ?? -1) < msg.lifecycle.lifecycleRevision
+        ? { ...session, reviewLifecycle: msg.lifecycle }
+        : session,
+    );
+  }
+
   const activity = activityFromMessage(msg);
   if (!activity) return { sessions, activities, attention };
 
@@ -261,6 +271,16 @@ export function useSessionActivity(subscribe: SocketSubscribe): SessionActivityS
               : session,
           ),
         );
+      }
+
+
+      if (msg.type === "session_lifecycle_changed") {
+        setSessions((current) => current.map((session) =>
+          session.sessionKey === msg.sessionKey &&
+          (session.reviewLifecycle?.lifecycleRevision ?? -1) < msg.lifecycle.lifecycleRevision
+            ? { ...session, reviewLifecycle: msg.lifecycle }
+            : session,
+        ));
       }
 
       const activity = activityFromMessage(msg);

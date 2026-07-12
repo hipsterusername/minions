@@ -12,6 +12,7 @@ const RETRY_BASE_MS = 3000;
 const RETRY_MAX_MS = 30000;
 const SESSION_NODE_TYPES = new Set(["leader", "minion", "claude-session"]);
 const TRANSIENT_SESSION_FIELDS = ["streamingText", "streamingBlockIndex"] as const;
+const CANONICAL_LEADER_LIFECYCLE_FIELDS = ["status", "worktreeStatus", "workItemSnapshot"] as const;
 
 interface AutosaveResult {
   status: SaveStatus;
@@ -35,6 +36,14 @@ export function toPersistableNodes(nodes: CanvasNode[]): CanvasNode[] {
         changed = true;
       }
     }
+    if (node.type === "leader" && typeof data["workItemId"] === "string") {
+      for (const key of CANONICAL_LEADER_LIFECYCLE_FIELDS) {
+        if (key in data) {
+          delete data[key];
+          changed = true;
+        }
+      }
+    }
 
     return changed ? { ...node, data } : node;
   });
@@ -52,6 +61,11 @@ function isTransientSessionField(key: string): boolean {
   return (TRANSIENT_SESSION_FIELDS as readonly string[]).includes(key);
 }
 
+function isCanonicalLeaderLifecycleField(type: string, data: Record<string, unknown>, key: string): boolean {
+  return type === "leader" && typeof data["workItemId"] === "string"
+    && (CANONICAL_LEADER_LIFECYCLE_FIELDS as readonly string[]).includes(key);
+}
+
 function persistableDataEqual(
   type: string,
   a: unknown,
@@ -64,6 +78,8 @@ function persistableDataEqual(
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
   for (const key of keys) {
     if (ignoreTransient && isTransientSessionField(key)) continue;
+    if (isCanonicalLeaderLifecycleField(type, a, key)
+      || isCanonicalLeaderLifecycleField(type, b, key)) continue;
     if (!Object.is(a[key], b[key])) return false;
   }
   return true;

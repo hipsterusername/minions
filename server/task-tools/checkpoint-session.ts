@@ -57,7 +57,10 @@ export function createCheckpointSessionToolDef(
       if (pendingHandoff.has(ctx.leaderSessionKey)) {
         return textResult("checkpoint already requested; emit the handoff next.");
       }
-      const boundary = validateCheckpointBoundary({ taskState: ctx.taskState });
+      const boundary = validateCheckpointBoundary({
+        taskState: ctx.taskState,
+        renderComponents: ctx.getRenderComponents?.(),
+      });
       if (!boundary.safe) return textResult(`deferred: ${boundary.reason}`);
       pendingHandoff.set(ctx.leaderSessionKey, "");
       return textResult(
@@ -81,4 +84,3 @@ function hasPendingForm(components: RenderComponent[]): boolean {
   }
   return false;
 }
-

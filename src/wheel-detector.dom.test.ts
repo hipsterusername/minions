@@ -19,7 +19,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { wheelDetector } from "./wheel-detector.ts";
+import { wheelDetector, wheelZoomFactor } from "./wheel-detector.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -77,11 +77,49 @@ describe("wheelDetector.classify()", () => {
     expect(wheelDetector.isPanGestureActive).toBe(false);
   });
 
+  it("classifies line and page deltas as mouse wheel input", () => {
+    expect(wheelDetector.classify(mouseEvent({ deltaY: 3, deltaMode: 1 }))).toBe(
+      "mouse",
+    );
+    wheelDetector.reset();
+    expect(wheelDetector.classify(mouseEvent({ deltaY: 1, deltaMode: 2 }))).toBe(
+      "mouse",
+    );
+  });
+
+  it("treats ambiguous small integer pixel deltas as trackpad input", () => {
+    expect(wheelDetector.classify(trackpadEvent({ deltaX: 0, deltaY: 12 }))).toBe(
+      "trackpad",
+    );
+  });
+
   it("locks the device for the duration of a gesture", () => {
     expect(wheelDetector.classify(trackpadEvent())).toBe("trackpad");
     // A subsequent event that would otherwise look mouse-like should still
     // classify as trackpad while the gesture is in flight.
     expect(wheelDetector.classify(mouseEvent())).toBe("trackpad");
+  });
+});
+
+describe("wheelZoomFactor()", () => {
+  it("makes equal opposite wheel movements reversible", () => {
+    const zoomIn = wheelZoomFactor(mouseEvent({ deltaY: -100 }), false);
+    const zoomOut = wheelZoomFactor(mouseEvent({ deltaY: 100 }), false);
+    expect(zoomIn * zoomOut).toBeCloseTo(1, 12);
+  });
+
+  it("normalizes line and pixel wheel deltas to the same notch", () => {
+    const pixels = wheelZoomFactor(mouseEvent({ deltaY: 100, deltaMode: 0 }), false);
+    const lines = wheelZoomFactor(mouseEvent({ deltaY: 3, deltaMode: 1 }), false);
+    expect(lines).toBeCloseTo(pixels, 12);
+  });
+
+  it("bounds pinch spikes while preserving direction", () => {
+    const zoomIn = wheelZoomFactor(trackpadEvent({ deltaY: -10_000 }), true);
+    const zoomOut = wheelZoomFactor(trackpadEvent({ deltaY: 10_000 }), true);
+    expect(zoomIn).toBeLessThanOrEqual(1.25);
+    expect(zoomOut).toBeGreaterThanOrEqual(0.8);
+    expect(zoomIn * zoomOut).toBeCloseTo(1, 12);
   });
 });
 

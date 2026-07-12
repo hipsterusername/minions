@@ -13,10 +13,10 @@ import "../harness/echo/index.ts";
 import "../harness/codex/index.ts";
 
 describe("listHarnesses", () => {
-  it("emits a global harness_list envelope including registered harness metadata", () => {
+  it("emits a global harness_list envelope including registered harness metadata", async () => {
     const h = setup();
 
-    listHarnesses(h.ctx, cmd({ type: "list_harnesses" }), h.ws);
+    await listHarnesses(h.ctx, cmd({ type: "list_harnesses" }), h.ws);
 
     expect(h.wsSent).toHaveLength(1);
     const env = h.wsSent[0]!;
@@ -54,12 +54,12 @@ describe("listHarnesses", () => {
     expect(byName.has("echo")).toBe(false);
   });
 
-  it("does not require a session to be present", () => {
+  it("does not require a session to be present", async () => {
     const h = setup();
     // Drain the seeded session so the registry is empty.
     (h.ctx.registry as unknown as { map: Map<string, unknown> }).map.clear();
 
-    listHarnesses(h.ctx, cmd({ type: "list_harnesses" }), h.ws);
+    await listHarnesses(h.ctx, cmd({ type: "list_harnesses" }), h.ws);
 
     expect(h.wsSent).toHaveLength(1);
     const harnesses = h.wsSent[0]!["harnesses"] as Array<{ name: string }>;

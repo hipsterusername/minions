@@ -25,13 +25,43 @@ export function snapPositionToGrid(pos: Position): Position {
 
 /** Calculate the canvas-space center of the current viewport.
  *  Useful for placing new nodes where the user is currently looking. */
-export function viewportCenter(transform: CanvasTransform): Position {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
+export function viewportCenter(
+  transform: CanvasTransform,
+  viewport: { width: number; height: number } = {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  },
+): Position {
+  const w = viewport.width;
+  const h = viewport.height;
   return {
     x: (w / 2 - transform.x) / transform.scale,
     y: (h / 2 - transform.y) / transform.scale,
   };
+}
+
+/** Fit one or more world-space rectangles inside the viewport and center them. */
+export function focusTransformOnRects(
+  rects: ReadonlyArray<{ x: number; y: number; width: number; height: number }>,
+  viewport: { width: number; height: number },
+  options: { padding: number; maxScale: number },
+): CanvasTransform | null {
+  if (rects.length === 0 || viewport.width <= 0 || viewport.height <= 0) return null;
+
+  const minX = Math.min(...rects.map((rect) => rect.x));
+  const minY = Math.min(...rects.map((rect) => rect.y));
+  const maxX = Math.max(...rects.map((rect) => rect.x + rect.width));
+  const maxY = Math.max(...rects.map((rect) => rect.y + rect.height));
+  const contentWidth = maxX - minX + options.padding * 2;
+  const contentHeight = maxY - minY + options.padding * 2;
+  const fitScale = Math.min(viewport.width / contentWidth, viewport.height / contentHeight);
+  const scale = Math.min(options.maxScale, fitScale);
+
+  return centerTransformOnRect(
+    { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
+    viewport,
+    scale,
+  );
 }
 
 /**

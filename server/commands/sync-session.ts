@@ -49,6 +49,11 @@ export const syncSession: CommandHandler = (ctx, cmd, ws) => {
   unicastToSession(ws, cmd.sessionKey, {
     type: "sync_response",
     sessionKey: cmd.sessionKey,
+    runKey: host.runKey,
+    workItemId: host.workItemId,
+    runKind: host.runKind,
+    parentRunKey: host.parentRunKey,
+    taskId: host.taskId,
     found: true,
     status: host.status,
     sessionId: host.sessionId,
@@ -69,6 +74,7 @@ export const syncSession: CommandHandler = (ctx, cmd, ws) => {
     role: host.role,
     harness,
     harnessCapabilities,
+    reviewLifecycle: host.reviewLifecycle,
     activeMinions: host.taskState
       ? Array.from(host.taskState.tasks.entries())
           .filter(

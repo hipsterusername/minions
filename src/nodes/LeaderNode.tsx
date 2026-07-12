@@ -3,16 +3,13 @@ import type { NodeRenderProps, ThinkingConfig } from "../types.ts";
 import { DEFAULT_THINKING_CONFIG } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
 import { registerContract, LEADER_CONTRACT } from "../graph.ts";
-import {
-  subscribeSocketTopic,
-  type ServerMessage,
-} from "../use-socket.ts";
+import { subscribeSocketTopic, type ServerMessage } from "../use-socket.ts";
 import {
   normalizedToDisplayMessages,
   type DisplayMessage,
 } from "../sdk-messages.ts";
 import { useStatusBanners, StatusBannerStack } from "../components/StatusBanner.tsx";
-import { type SessionStreamState } from "../session-stream.ts";
+import { preserveOptimisticUserMessages, type SessionStreamState } from "../session-stream.ts";
 import { useSessionStream } from "../use-session-stream.ts";
 import { SessionToolbar } from "../components/SessionToolbar.tsx";
 import type { PermissionMode } from "../components/SessionToolbar.tsx";
@@ -32,62 +29,29 @@ import { LeaderBody } from "./leader/LeaderBody.tsx";
 import {
   LEADER_DEFAULT_DATA,
   LEADER_PROMPT_OVERLAY_ZOOM_THRESHOLD,
-  type LeaderData,
-  type LeaderMessage,
-  type MessageContextSelection,
+  type LeaderData, type LeaderMessage, type MessageContextSelection,
   type TaskPlanItem,
 } from "./leader/types.ts";
-import {
-  buildSessionContext,
-  extractLeaderCore,
-  msgId,
-} from "./leader/session-context.ts";
+import { buildSessionContext, extractLeaderCore, msgId } from "./leader/session-context.ts";
 import { EditableTitle } from "./leader/EditableTitle.tsx";
 import {
   buildContextBlock,
   sendCanvasContextSnapshotIfChanged,
   type CanvasContextSignature,
 } from "../connected-context.ts";
-import {
-  seedContextDelivery,
-  diffContextDelivery,
-  buildContextUpdateBlock,
-} from "../context-delivery.ts";
+import { diffContextDelivery, buildContextUpdateBlock } from "../context-delivery.ts";
 import { buildFrozenLeaderFollowUpPrompt, freezeLeaderSystemPrompt, type FrozenLeaderPrompt } from "./leader/frozen-prompt.ts";
-import { mergeContextPreamble, resolveContextMode } from "../leader-context-mode.ts";
 import { consumeLeaderInputFocus } from "../leader-focus-request.ts";
+import { applyCanvasWorkItemSnapshot, canonicalPromptCommand,
+  formatCanvasWorkItemStatus, selectCanvasPrompt } from "./leader/work-item.ts";
+import { useCanvasWorkItem } from "./leader/use-canvas-work-item.ts";
+import { buildInitialLeaderRun, claimLeaderAutoStart } from "./leader/initial-run.ts";
+export { claimLeaderAutoStart, resetLeaderAutoStartClaimsForTests } from "./leader/initial-run.ts";
 
 registerContract(LEADER_CONTRACT);
 
-const LEADER_AUTOSTART_DEDUPE_WINDOW_MS = 10_000;
-const leaderAutoStartClaims = new Map<string, number>();
 const LEADER_DASHBOARD_EXPANDED_WIDTH = 1040;
 const LEADER_DASHBOARD_EXPANDED_HEIGHT = 620;
-
-export function claimLeaderAutoStart(
-  nodeId: string,
-  prompt: string,
-  now: number = Date.now(),
-): boolean {
-  for (const [key, claimedAt] of leaderAutoStartClaims) {
-    if (now - claimedAt > LEADER_AUTOSTART_DEDUPE_WINDOW_MS) {
-      leaderAutoStartClaims.delete(key);
-    }
-  }
-
-  const key = `${nodeId}\0${prompt}`;
-  const claimedAt = leaderAutoStartClaims.get(key);
-  if (claimedAt !== undefined && now - claimedAt <= LEADER_AUTOSTART_DEDUPE_WINDOW_MS) {
-    return false;
-  }
-
-  leaderAutoStartClaims.set(key, now);
-  return true;
-}
-
-export function resetLeaderAutoStartClaimsForTests(): void {
-  leaderAutoStartClaims.clear();
-}
 
 // Re-exports preserved so external consumers (Canvas, KanbanBoard, leader-preset,
 // tests, etc.) keep importing types from "./LeaderNode.tsx" without churn while
@@ -98,7 +62,6 @@ export {
   buildSessionContext,
 };
 export type { LeaderData, TaskPlanItem };
-
 
 // Message-rendering components extracted to ./leader/messages/
 import { LeaderMessageFeed } from "./leader/messages/LeaderMessageFeed.tsx";
@@ -115,9 +78,10 @@ import { ConfigFooter } from "./leader/ConfigFooter.tsx";
 
 // Header menu + prompt components extracted to ./leader/
 import { HeaderMenu } from "./leader/HeaderMenu.tsx";
-import { LeaderPromptBar } from "./leader/prompt/LeaderPromptBar.tsx";
+import { LeaderPromptBar, LeaderSlashCommandsProvider } from "./leader/prompt/LeaderPromptBar.tsx";
 import { LeaderPromptOverlay } from "./leader/prompt/LeaderPromptOverlay.tsx";
 import { LeaderFullscreen } from "./leader/fullscreen/LeaderFullscreen.tsx";
+import { buildSlashCommands } from "./leader/prompt/slash-commands.ts";
 
 /* ── Main component ───────────────────────────────────────────────────── */
 
@@ -129,6 +93,7 @@ export function LeaderNodeRenderer({
   getContextForNode,
   getIncomingContextModes,
   projectPath,
+  projectId,
   onResize,
   onResizeStart,
   onResizeEnd,
@@ -139,6 +104,7 @@ export function LeaderNodeRenderer({
   onSaveLeaderPreset,
 }: NodeRenderProps) {
   const data = node.data as LeaderData;
+  const slashCommands = useMemo(() => buildSlashCommands(undefined), []);
   const dataRef = useRef(data);
   dataRef.current = data;
 
@@ -154,6 +120,7 @@ export function LeaderNodeRenderer({
   const [isFullscreen, setIsFullscreen] = useState(false);
   // Wire-validation error for the most recent embedded-dashboard render_update.
   const [renderPayloadError, setRenderPayloadError] = useState<string | null>(null);
+  const [launchNotice, setLaunchNotice] = useState<string | null>(null);
   // Post embedded-dashboard `form` answers back to this leader session.
   const handleSubmitForm = useCallback(
     (formComponentId: string, formAnswers: Record<string, unknown>) => {
@@ -307,11 +274,19 @@ export function LeaderNodeRenderer({
   // same frame each see the latest state, then dispatch to React.
   const emitUpdate = useCallback(
     (next: LeaderData) => {
-      dataRef.current = next;
-      onUpdateData(next);
+      const current = dataRef.current;
+      const protectedNext = current.workItemSnapshot
+        ? { ...next, status: current.status, worktreeStatus: current.worktreeStatus }
+        : next;
+      dataRef.current = protectedNext;
+      onUpdateData(protectedNext);
     },
     [onUpdateData],
   );
+
+  const { requestWorkItem, beginCanonicalRun } = useCanvasWorkItem({ nodeId: node.id,
+    projectId, projectPath, socketSend, socketSubscribe, dataRef, emitUpdate,
+    publishCanvasContext });
 
   // ── Shared session-stream concerns via the controlled hook ────────
   //
@@ -330,7 +305,11 @@ export function LeaderNodeRenderer({
         ...current,
         sessionKey: next.sessionKey,
         status: next.status,
-        messages: next.messages,
+        // The session-stream reducer never emits user turns (they exist only
+        // as optimistic local appends), and a sync_response rebuild or a
+        // stale-snapshot reduction can omit ones already in the feed. Re-graft
+        // them so the user's own messages never disappear between agent turns.
+        messages: preserveOptimisticUserMessages(current.messages, next.messages),
         streamingText: next.streamingText,
         streamingBlockIndex: next.streamingBlockIndex,
         totalCost: next.totalCost,
@@ -370,6 +349,12 @@ export function LeaderNodeRenderer({
     return subscribeSocketTopic(socketSubscribe, sessionTopic(data.sessionKey), (msg: unknown) => {
       const serverMsg = msg as ServerMessage & Record<string, any>;
       const current = dataRef.current;
+
+      if (serverMsg.type === "session_launch_resolved" && serverMsg.sessionKey === current.sessionKey) {
+        setLaunchNotice(
+          `Using ${serverMsg.effective.harness} / ${serverMsg.effective.model} with ${serverMsg.effective.permissionMode} for this session (${serverMsg.reasons.join(", ").replaceAll("_", " ")}).`,
+        );
+      }
 
       // Handle sync_response — rebuild or reset state after reconnect
       if (
@@ -487,7 +472,6 @@ export function LeaderNodeRenderer({
       }
 
       if (!current.sessionKey) return;
-
 
       if (
         serverMsg.type === "sdk_event" &&
@@ -782,28 +766,24 @@ export function LeaderNodeRenderer({
     const userPrompt =
       input.trim() || "Analyze the project and suggest how to proceed.";
 
-    // ── Build previous-session context for restarts ──────────
-    // If there are existing messages from a prior session, this is a restart.
-    // Serialize conversation + task plan so the new Claude instance has continuity.
-    const prevMessages = dataRef.current.messages;
-    const prevTaskPlan = dataRef.current.taskPlan ?? [];
-    const prevTaskName = dataRef.current.taskName;
-    const sessionContext = buildSessionContext(prevMessages, prevTaskPlan, prevTaskName);
-
     const contextItems = getContextForNode?.() ?? [];
-    const attachments = contextItems.flatMap((item) => item.attachments ?? []);
-
-    const block = buildContextBlock(contextItems);
-    let fullPrompt = block ? `${block}\n\n${userPrompt}` : userPrompt;
-    const contextDelivery = seedContextDelivery(contextItems, Date.now());
-
-    if (sessionContext) {
-      fullPrompt = `${sessionContext}\n\n${fullPrompt}`;
-    }
-
-    const incomingModes = (getIncomingContextModes?.() ?? []).map(resolveContextMode);
-    const frozenPrompt = freezeLeaderSystemPrompt({ skillIds: data.skillIds ?? [], skillValues: data.skillValues ?? {}, systemPromptPrefix: mergeContextPreamble(incomingModes, data.systemPromptPrefix) });
+    const { prompt: fullPrompt, frozen: frozenPrompt, previousMessages: prevMessages,
+      attachments, contextDelivery } = buildInitialLeaderRun({ userPrompt,
+      data: dataRef.current, contextItems, incomingModes: getIncomingContextModes?.() ?? [] });
     frozenPromptRef.current = frozenPrompt;
+
+    if (projectId && projectPath) {
+      syncedRef.current = true;
+      emitUpdate({ ...dataRef.current, status: "creating", contextDelivery,
+        messages: [...prevMessages, { id: msgId(), role: "user" as const,
+          content: userPrompt, timestamp: Date.now() }] });
+      setInput("");
+      void beginCanonicalRun({ userPrompt, prompt: fullPrompt,
+        systemPrompt: frozenPrompt.systemPrompt, attachments, contextItems })
+        .catch((error: unknown) => emitUpdate({ ...dataRef.current, status: "error",
+          error: error instanceof Error ? error.message : String(error) }));
+      return;
+    }
 
     socketSend({
       type: "create_session",
@@ -837,7 +817,9 @@ export function LeaderNodeRenderer({
       ],
     });
     setInput("");
-  }, [socketSend, input, onUpdateData, getContextForNode, getIncomingContextModes, publishCanvasContext, data.skillIds, data.skillValues, data.model, data.thinkingConfig]);
+  }, [socketSend, input, getContextForNode, getIncomingContextModes, publishCanvasContext,
+    data.skillIds, data.skillValues, data.model, data.thinkingConfig, projectId,
+    projectPath, emitUpdate, beginCanonicalRun]);
   const autoStartFired = useRef(false);
   useEffect(() => {
     if (autoStartFired.current) return;
@@ -848,30 +830,23 @@ export function LeaderNodeRenderer({
 
     const key = `leader-${Date.now().toString(36)}`;
 
-    // ── Build previous-session context for restarts ──────────
-    const prevMessages = dataRef.current.messages;
-    const prevTaskPlan = dataRef.current.taskPlan ?? [];
-    const prevTaskName = dataRef.current.taskName;
-    const sessionContext = buildSessionContext(prevMessages, prevTaskPlan, prevTaskName);
-
     const contextItems = getContextForNode?.() ?? [];
-    const attachments = contextItems.flatMap((item) => item.attachments ?? []);
-
-    const block = buildContextBlock(contextItems);
-    let fullPrompt = block ? `${block}\n\n${prompt}` : prompt;
-    const contextDelivery = seedContextDelivery(contextItems, Date.now());
-
-    if (sessionContext) {
-      fullPrompt = `${sessionContext}\n\n${fullPrompt}`;
-    }
-
-    const incomingModes = (getIncomingContextModes?.() ?? []).map(resolveContextMode);
-    const frozenPrompt = freezeLeaderSystemPrompt({
-      skillIds: dataRef.current.skillIds ?? [],
-      skillValues: dataRef.current.skillValues ?? {},
-      systemPromptPrefix: mergeContextPreamble(incomingModes, dataRef.current.systemPromptPrefix),
-    });
+    const { prompt: fullPrompt, frozen: frozenPrompt, previousMessages: prevMessages,
+      attachments, contextDelivery } = buildInitialLeaderRun({ userPrompt: prompt,
+      data: dataRef.current, contextItems, incomingModes: getIncomingContextModes?.() ?? [] });
     frozenPromptRef.current = frozenPrompt;
+
+    if (projectId && projectPath) {
+      syncedRef.current = true;
+      emitUpdate({ ...dataRef.current, status: "creating", autoStartPrompt: null,
+        contextDelivery, messages: [...prevMessages, { id: msgId(), role: "user" as const,
+          content: prompt, timestamp: Date.now() }] });
+      void beginCanonicalRun({ userPrompt: prompt, prompt: fullPrompt,
+        systemPrompt: frozenPrompt.systemPrompt, attachments, contextItems })
+        .catch((error: unknown) => emitUpdate({ ...dataRef.current, status: "error",
+          error: error instanceof Error ? error.message : String(error) }));
+      return;
+    }
 
     socketSend({
       type: "create_session",
@@ -905,7 +880,8 @@ export function LeaderNodeRenderer({
         },
       ],
     });
-  }, [socketSend, onUpdateData, getContextForNode, getIncomingContextModes, publishCanvasContext, projectPath]);
+  }, [socketSend, onUpdateData, getContextForNode, getIncomingContextModes,
+    publishCanvasContext, projectPath, projectId, emitUpdate, beginCanonicalRun]);
 
   // Focus the prompt input when this node was just created by the user, so they
   // can start typing immediately. The one-shot request (set by Canvas at
@@ -915,7 +891,9 @@ export function LeaderNodeRenderer({
     if (focusClaimedRef.current) return;
     if (!consumeLeaderInputFocus(node.id)) return;
     focusClaimedRef.current = true;
-    promptTextareaRef.current?.focus();
+    // The canvas owns viewport movement. Native focus scrolling can otherwise
+    // fight its creation transform and shift the page/canvas a second time.
+    promptTextareaRef.current?.focus({ preventScroll: true });
   }, [node.id]);
 
   const handleSend = useCallback(() => {
@@ -948,6 +926,36 @@ export function LeaderNodeRenderer({
     frozenPromptRef.current = frozen;
     const followUp = buildFrozenLeaderFollowUpPrompt({ frozen, current, prompt });
 
+    const canonical = current.workItemSnapshot;
+    const canonicalCanRestart = canonical && (canonical.lifecycle.runtimeState === "waiting"
+      || canonical.lifecycle.runtimeState === "inactive"
+      || canonical.lifecycle.runtimeState === "draft");
+    // A legacy node can receive its durable workItemId from session sync one
+    // render before get_work_item hydrates the snapshot. Never fall through to
+    // send_message during that window: canonical hosts deliberately reject it.
+    if (canonicalCanRestart || (current.workItemId && !canonical)) {
+      onUpdateData({ ...current, contextDelivery: nextLedger,
+        messages: [...current.messages, { id: msgId(), role: "user" as const,
+          content: rawPrompt, timestamp: Date.now() }] });
+      setInput("");
+      void (async () => {
+        const snapshot = canonical ?? (await requestWorkItem({ type: "get_work_item",
+          requestId: crypto.randomUUID(), workItemId: current.workItemId })).workItem;
+        if (!(snapshot.lifecycle.runtimeState === "waiting"
+          || snapshot.lifecycle.runtimeState === "inactive"
+          || snapshot.lifecycle.runtimeState === "draft")) {
+          throw new Error("This work-item run is already active and cannot be restarted.");
+        }
+        return requestWorkItem(canonicalPromptCommand(snapshot, followUp.prompt));
+      })().then((detail) => {
+        const next = applyCanvasWorkItemSnapshot(dataRef.current, detail.workItem);
+        emitUpdate({ ...next, sessionKey: detail.workItem.currentRunKey,
+          currentRunKey: detail.workItem.currentRunKey });
+      }).catch((error: unknown) => emitUpdate({ ...dataRef.current,
+        error: error instanceof Error ? error.message : String(error) }));
+      return;
+    }
+
     socketSend({
       type: "send_message",
       sessionKey: current.sessionKey,
@@ -971,18 +979,12 @@ export function LeaderNodeRenderer({
       ],
     });
     setInput("");
-  }, [socketSend, input, onUpdateData, getContextForNode]);
+  }, [socketSend, input, onUpdateData, getContextForNode, requestWorkItem, emitUpdate]);
 
   const handleStop = useCallback(() => {
     const current = dataRef.current;
     if (!socketSend || !current.sessionKey) return;
     socketSend({ type: "stop_session", sessionKey: current.sessionKey });
-  }, [socketSend]);
-
-  const handleInterrupt = useCallback(() => {
-    const current = dataRef.current;
-    if (!socketSend || !current.sessionKey) return;
-    socketSend({ type: "interrupt_session", sessionKey: current.sessionKey });
   }, [socketSend]);
 
   const handleModelChange = useCallback(
@@ -1087,26 +1089,17 @@ export function LeaderNodeRenderer({
     setInput("");
   }, [socketSend, emitUpdate, input]);
 
-  const promptPlaceholder =
-    data.status === "completed"
-      ? "Describe next goal (context preserved)..."
-      : data.sessionKey
-        ? "Guide the leader..."
-        : "Describe your project goal...";
-
-  const promptSubmitLabel =
-    data.status === "completed" ? "New Session" : data.sessionKey ? "Send" : "Start";
-
-  const promptSubmitDisabled =
-    !input.trim() && !!data.sessionKey && data.status !== "completed";
-
-  const promptSubmitActive =
-    data.status === "completed" || !!input.trim() || !data.sessionKey;
+  const { displayStatus, placeholder: promptPlaceholder,
+    submitLabel: promptSubmitLabel, submitDisabled: promptSubmitDisabled,
+    submitActive: promptSubmitActive } = selectCanvasPrompt(data, Boolean(input.trim()));
 
   const handlePromptSubmit = useCallback(() => {
     if (promptSubmitDisabled) return;
 
-    if (dataRef.current.status === "completed") {
+    if (dataRef.current.workItemSnapshot
+      && dataRef.current.workItemSnapshot.lifecycle.outcome !== "none") {
+      handleSend();
+    } else if (dataRef.current.status === "completed") {
       handleNewSession();
     } else if (dataRef.current.sessionKey) {
       handleSend();
@@ -1165,8 +1158,8 @@ export function LeaderNodeRenderer({
   };
 
   const taggedSkillCount = (data.skillIds ?? []).length;
-
   return (
+    <LeaderSlashCommandsProvider commands={slashCommands}>
     <div
       ref={nodeRootRef}
       tabIndex={-1}
@@ -1212,11 +1205,11 @@ export function LeaderNodeRenderer({
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <img
             src={
-              data.status === "running" || data.status === "creating"
+              displayStatus === "running" || displayStatus === "creating"
                 ? "/icons/leader-active.svg"
                 : "/icons/leader-idle.svg"
             }
-            alt={data.status === "running" || data.status === "creating" ? "Active" : "Idle"}
+            alt={displayStatus === "running" || displayStatus === "creating" ? "Active" : "Idle"}
             width={20}
             height={20}
             className="leader-status-icon"
@@ -1264,7 +1257,7 @@ export function LeaderNodeRenderer({
             <div
               style={{
                 fontSize: 9,
-                color: statusColor[data.status] ?? "var(--text-muted)",
+                color: statusColor[displayStatus] ?? "var(--text-muted)",
                 fontFamily: "var(--font-mono)",
                 textTransform: "uppercase",
                 letterSpacing: 0.5,
@@ -1273,7 +1266,7 @@ export function LeaderNodeRenderer({
                 gap: 6,
               }}
             >
-              {data.status}
+              {formatCanvasWorkItemStatus(data.workItemSnapshot, data.liveEditAwareness) ?? displayStatus}
               {/* Turn count badge */}
               {data.turns > 0 && (
                 <span style={{ color: "var(--text-muted)", textTransform: "none" }}>
@@ -1295,7 +1288,7 @@ export function LeaderNodeRenderer({
               ${data.totalCost.toFixed(4)}
             </span>
           )}
-          {data.status === "running" && (
+          {displayStatus === "running" && (
             <button
               onClick={handleStop}
               onMouseDown={(e) => e.stopPropagation()}
@@ -1364,10 +1357,9 @@ export function LeaderNodeRenderer({
       {/* Session control toolbar */}
       <SessionToolbar
         sessionKey={data.sessionKey}
-        status={data.status}
+        status={displayStatus}
         model={data.model ?? "opus"}
         permissionMode={data.permissionMode ?? "auto"}
-        onInterrupt={handleInterrupt}
         onModelChange={handleModelChange}
         onPermissionModeChange={handlePermissionModeChange}
         thinkingConfig={data.thinkingConfig ?? DEFAULT_THINKING_CONFIG}
@@ -1425,6 +1417,7 @@ export function LeaderNodeRenderer({
 
       {/* Status banners */}
       <StatusBannerStack banners={banners} onDismiss={dismissBanner} />
+      {launchNotice ? <div role="status" style={{ padding: "6px 10px", fontSize: 11, background: "var(--warning-bg)", color: "var(--text-primary)" }}>{launchNotice}</div> : null}
 
       {/* P3: Skill Flyout */}
       <SkillFlyout
@@ -1498,6 +1491,7 @@ export function LeaderNodeRenderer({
       {/* P2: Auto-growing input */}
       <LeaderPromptBar
         input={input}
+        slashCommands={slashCommands}
         onInputChange={setInput}
         onKeyDown={handleKeyDown}
         onSubmit={handlePromptSubmit}
@@ -1519,7 +1513,7 @@ export function LeaderNodeRenderer({
         title={data.taskName ?? "Leader"}
         messages={data.messages}
         streamingText={data.streamingText}
-        status={data.status}
+        status={displayStatus}
         onClose={() => setPromptOverlayOpen(false)}
         onInputChange={setInput}
         onKeyDown={handleKeyDown}
@@ -1555,11 +1549,10 @@ export function LeaderNodeRenderer({
           toolbarSlot={
             <SessionToolbar
               sessionKey={data.sessionKey}
-              status={data.status}
+              status={displayStatus}
               model={data.model ?? "opus"}
               permissionMode={data.permissionMode ?? "auto"}
-              onInterrupt={handleInterrupt}
-              onModelChange={handleModelChange}
+                    onModelChange={handleModelChange}
               onPermissionModeChange={handlePermissionModeChange}
               thinkingConfig={data.thinkingConfig ?? DEFAULT_THINKING_CONFIG}
               onThinkingConfigChange={handleThinkingConfigChange}
@@ -1569,7 +1562,10 @@ export function LeaderNodeRenderer({
             />
           }
           bannerSlot={
-            <StatusBannerStack banners={banners} onDismiss={dismissBanner} />
+            <>
+              <StatusBannerStack banners={banners} onDismiss={dismissBanner} />
+              {launchNotice ? <div role="status" style={{ padding: "6px 10px", fontSize: 11, background: "var(--warning-bg)", color: "var(--text-primary)" }}>{launchNotice}</div> : null}
+            </>
           }
         />
       )}
@@ -1636,6 +1632,7 @@ export function LeaderNodeRenderer({
         </div>
       )}
     </div>
+    </LeaderSlashCommandsProvider>
   );
 }
 

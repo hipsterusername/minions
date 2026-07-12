@@ -114,6 +114,18 @@ describe("wake coalescer", () => {
     expect(startChildSession.mock.calls[1]![0].prompt).toBe("second");
   });
 
+  it("routes a bound primary wake through the canonical resume seam", () => {
+    const startChildSession = vi.fn();
+    const deps = makeDeps(startChildSession);
+    deps.resumeWorkItemRun = vi.fn();
+    const host = makeLeader(); host.workItemId = "work-1"; host.runKind = "primary";
+    wake(host, deps, "canonical", true);
+    expect(deps.resumeWorkItemRun).toHaveBeenCalledWith(expect.objectContaining({
+      workItemId: "work-1", runKey: "leader-1", prompt: "canonical",
+    }));
+    expect(startChildSession).not.toHaveBeenCalled();
+  });
+
   it("cleans up a deferred wake through the termination cleanup path", async () => {
     const startChildSession = vi.fn();
     const deps = makeDeps(startChildSession);

@@ -55,6 +55,7 @@ describe("injectSessionMessage", () => {
     expect(started[0]!.sessionKey).toBe("m-1");
     expect(started[0]!.prompt).toBe("redirect please");
     expect(started[0]!.resumeId).toBe("sid-1");
+    expect(started[0]!.invocationKind).toBe("resume_open_run");
   });
 
   it("does NOT deliver to a running session because start() would drop the resume", () => {
@@ -75,6 +76,16 @@ describe("injectSessionMessage", () => {
     const { deps, started } = makeDeps(null);
     const result = injectSessionMessage(deps, "ghost", "x");
     expect(result).toEqual({ delivered: false, status: null });
+    expect(started).toHaveLength(0);
+  });
+
+  it("routes a bound child through the canonical continuation seam", () => {
+    const { deps, started } = makeDeps(runtime({ workItemId: "work-1", runKey: "run-1", runKind: "child" }));
+    const continued: unknown[] = [];
+    deps.continueWorkItemChild = (input) => { continued.push(input); };
+    expect(injectSessionMessage(deps, "m-1", "continue").delivered).toBe(true);
+    expect(continued).toHaveLength(1);
+    expect(continued[0]).toMatchObject({ workItemId: "work-1", runKey: "run-1", prompt: "continue" });
     expect(started).toHaveLength(0);
   });
 });

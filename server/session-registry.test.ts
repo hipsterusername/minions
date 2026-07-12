@@ -491,6 +491,30 @@ describe("SessionRegistry.hydrateFromDb — sessionId round-trip", () => {
     expect(host?.sessionId).toBe("abc-123");
   });
 
+  it("restores immutable work-item and child-run lineage columns", () => {
+    persistSession(makePersisted({ id: "child-1", role: "minion" }));
+    const db = openPersistDb();
+    db.prepare(`
+      INSERT INTO work_items (
+        id, project_id, project_path, title, runtime_state, outcome, resolution,
+        change_mode, integration_state, workflow_rank, last_transition_at, created_at, updated_at
+      ) VALUES ('work-1', 'project-1', '/repo', 'T', 'starting', 'none', 'open',
+        'live', 'live_clean', 'a', 1, 1, 1)
+    `).run();
+    db.prepare(`
+      UPDATE sessions SET work_item_id = 'work-1', run_kind = 'child',
+        parent_run_key = 'root-run', task_id = 'task-1', started_at = 1
+      WHERE session_key = 'child-1'
+    `).run();
+
+    const r = new SessionRegistry();
+    r.hydrateFromDb();
+    expect(r.get("child-1")).toMatchObject({
+      workItemId: "work-1", runKey: "child-1", runKind: "child",
+      parentRunKey: "root-run", taskId: "task-1",
+    });
+  });
+
   it("hydrated sessions come back as 'stopped' so they don't count against the cap", () => {
     // Persist N === any cap and hydrate — activeCount should stay 0
     // because hydrated rows resurrect with status "stopped". This is
@@ -503,6 +527,34 @@ describe("SessionRegistry.hydrateFromDb — sessionId round-trip", () => {
     r.hydrateFromDb();
     expect(r.size).toBe(10);
     expect(r.activeCount()).toBe(0);
+  });
+
+  it("reconciles a persisted live run to interrupted without erasing terminal outcomes", () => {
+    persistSession(makePersisted({ id: "lost", status: "running" }));
+    persistSession(makePersisted({
+      id: "done",
+      status: "idle",
+      reviewLifecycle: {
+        reviewState: "completion_to_review",
+        reviewReason: "Review completion",
+        finalReport: "Done",
+        finalDashboardRevision: 1,
+        dashboardRevision: 1,
+        terminalReason: "completed",
+        terminalAt: 5,
+        acknowledgedAt: null,
+        dismissedAt: null,
+        lifecycleRevision: 1,
+      },
+    }));
+    const r = new SessionRegistry();
+    r.hydrateFromDb();
+    expect(r.get("lost")?.reviewLifecycle.reviewState).toBe("interrupted_to_review");
+    expect(r.get("done")?.reviewLifecycle).toMatchObject({
+      reviewState: "completion_to_review",
+      finalReport: "Done",
+      terminalReason: "completed",
+    });
   });
 
   it("hydrates active worktree metadata and approval state back onto the host", () => {

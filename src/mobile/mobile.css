@@ -254,6 +254,14 @@
   gap: 8px;
 }
 
+.mob-card-lifecycle {
+  color: var(--status-warning);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .mob-card-role,
 .mob-card-meta,
 .mob-card-activity,
@@ -417,6 +425,125 @@
   color: var(--accent);
   font-size: 11px;
   font-weight: 800;
+}
+
+/* Live plan badge: work is actively running behind this tab. */
+.mob-chat-tab span[data-live="true"] {
+  background: color-mix(in srgb, var(--status-running) 22%, var(--muted-bg));
+  color: var(--status-running);
+  animation: mob-live-glow 2s ease-in-out infinite;
+}
+
+/* Persistent leader activity strip, pinned under the tab bar on every tab. */
+.mob-leader-strip {
+  flex: none;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border-default);
+  background: color-mix(in srgb, var(--bg-secondary) 92%, var(--bg-primary));
+}
+
+.mob-leader-strip[data-live="true"] {
+  border-bottom-color: color-mix(in srgb, var(--status-running) 40%, var(--border-default));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--status-running) 8%, transparent),
+      transparent
+    ),
+    color-mix(in srgb, var(--bg-secondary) 92%, var(--bg-primary));
+}
+
+.mob-leader-strip-row {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mob-leader-strip-minions,
+.mob-card-minions {
+  min-width: 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mob-leader-strip-minions span,
+.mob-card-minions span {
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--muted-bg);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.mob-leader-strip-minions span[data-tone="running"],
+.mob-card-minions span[data-tone="running"] {
+  background: color-mix(in srgb, var(--status-running) 16%, transparent);
+  color: var(--status-running);
+}
+
+.mob-leader-strip-minions span[data-tone="blocked"],
+.mob-card-minions span[data-tone="blocked"] {
+  background: color-mix(in srgb, var(--status-warning) 18%, transparent);
+  color: var(--status-warning);
+}
+
+.mob-leader-strip-minions span[data-tone="planned"],
+.mob-card-minions span[data-tone="planned"] {
+  background: color-mix(in srgb, var(--text-muted) 16%, transparent);
+  color: var(--text-muted);
+}
+
+.mob-leader-strip-minions span[data-live="true"] i,
+.mob-card-minions span[data-live="true"] i {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: mob-live-glow 1.8s ease-in-out infinite;
+}
+
+.mob-leader-strip-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.mob-leader-strip-activity {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mob-card-minions {
+  --pulse-color: var(--status-running);
+}
+
+/* Live status pill: pulse while the agent is actively working. */
+.mob-status-pill[data-live="true"] {
+  animation: mob-live-glow 2s ease-in-out infinite;
+}
+
+.mob-status-pill--creating[data-live="true"] {
+  --pulse-color: var(--status-creating);
+}
+
+.mob-status-pill--waiting[data-live="true"] {
+  --pulse-color: var(--status-waiting);
 }
 
 .mob-chat-feed {
@@ -635,6 +762,7 @@
 .mob-plan-row[data-tone="running"] .mob-plan-dot {
   background: var(--status-running);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--status-running) 14%, transparent);
+  animation: mob-live-ring 1.8s ease-in-out infinite;
 }
 
 .mob-plan-row[data-tone="blocked"] .mob-plan-dot {
@@ -931,6 +1059,7 @@ article.mob-plan-row {
 .mob-minion-row[data-tone="running"] .mob-minion-dot {
   background: var(--status-running);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--status-running) 14%, transparent);
+  animation: mob-live-ring 1.8s ease-in-out infinite;
 }
 
 .mob-minion-row[data-tone="blocked"] .mob-minion-dot {
@@ -1318,6 +1447,40 @@ article.mob-plan-row {
   40% {
     opacity: 1;
     transform: translateY(-2px);
+  }
+}
+
+/* Soft glow used by live status pills, live plan badges, and live chip dots. */
+@keyframes mob-live-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--pulse-color, var(--status-running)) 34%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 7px 1px color-mix(in srgb, var(--pulse-color, var(--status-running)) 22%, transparent);
+  }
+}
+
+/* Expanding ring used by running status dots (minion + plan rows). */
+@keyframes mob-live-ring {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--pulse-color, var(--status-running)) 26%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--pulse-color, var(--status-running)) 4%, transparent);
+  }
+}
+
+/* Honor reduced-motion: keep the color cues, drop the looping animation. */
+@media (prefers-reduced-motion: reduce) {
+  .mob-status-pill[data-live="true"],
+  .mob-chat-tab span[data-live="true"],
+  .mob-leader-strip-minions span[data-live="true"] i,
+  .mob-card-minions span[data-live="true"] i,
+  .mob-minion-row[data-tone="running"] .mob-minion-dot,
+  .mob-plan-row[data-tone="running"] .mob-plan-dot {
+    animation: none;
   }
 }
 
@@ -2509,3 +2672,8 @@ article.mob-plan-row {
     flex-wrap: wrap;
   }
 }
+.integration-controls--mobile { display: grid; gap: 10px; }
+.integration-controls--mobile .integration-controls__status { display: grid; gap: 4px; }
+.integration-controls--mobile .integration-controls__alert { color: var(--status-error); }
+.integration-controls--mobile .integration-controls__gates { margin: 0; padding-left: 20px; }
+.integration-controls--mobile .integration-controls__actions { display: grid; gap: 8px; }

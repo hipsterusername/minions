@@ -79,7 +79,10 @@ function encodePath(p: string): string {
 
 function buildApp(): express.Express {
   const router = Router();
-  mountCoreRoutes(router);
+  mountCoreRoutes(router, { getReadiness: async () => ({
+    schemaVersion: 1, checkedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 30_000).toISOString(),
+    ready: true, readyHarnesses: ["claude", "codex"], harnesses: [],
+  }) });
   const app = express();
   app.use(express.json({ limit: "1mb" }));
   app.use("/", router);

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 
 import { randomUuid } from "../random-id.ts";
+import { useWorktreeIntegration } from "../use-worktree-integration.ts";
+import { WorktreeIntegrationControls } from "../WorktreeIntegrationControls.tsx";
 import type { ServerMessage, SocketSubscribe } from "../use-socket.ts";
 import {
   fileStatusSymbol,
@@ -12,9 +14,11 @@ import {
 
 interface ReviewChangesScreenProps {
   sessionKey: string;
+  workItemId?: string | null | undefined;
   send: (data: unknown) => void;
   subscribe: SocketSubscribe;
   onClose: () => void;
+  onRequestChanges?: ((prompt: string) => boolean) | undefined;
   summary?: string | undefined;
   title?: string | undefined;
 }
@@ -31,9 +35,11 @@ function makeRequestId(): string {
 
 export function ReviewChangesScreen({
   sessionKey,
+  workItemId,
   send,
   subscribe,
   onClose,
+  onRequestChanges,
   summary,
   title,
 }: ReviewChangesScreenProps) {
@@ -46,6 +52,8 @@ export function ReviewChangesScreen({
   const [expandedFile, setExpandedFile] = useState<string | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [conflict, setConflict] = useState<MergeConflict | null>(null);
+  const integration = useWorktreeIntegration({ workItemId: workItemId ?? null,
+    runKey: sessionKey, send, subscribe });
 
   useEffect(() => {
     send({ type: "get_worktree_diff", sessionKey, requestId });
@@ -78,7 +86,7 @@ export function ReviewChangesScreen({
         return;
       }
 
-      if (msg.type === "worktree_merge_failed" && msg.sessionKey === sessionKey) {
+      if (!workItemId && msg.type === "worktree_merge_failed" && msg.sessionKey === sessionKey) {
         setConflict({
           conflicts: msg.result?.conflicts ?? [],
           summary: msg.result?.summary ?? msg.error ?? "Merge conflicts detected.",
@@ -94,7 +102,7 @@ export function ReviewChangesScreen({
         onClose();
       }
     });
-  }, [onClose, requestId, sessionKey, subscribe]);
+  }, [onClose, requestId, sessionKey, subscribe, workItemId]);
 
   const commitsLabel = useMemo(() => {
     if (!diff) return "";
@@ -105,7 +113,12 @@ export function ReviewChangesScreen({
     event.preventDefault();
     const prompt = feedback.trim();
     if (!prompt) return;
-    send({ type: "send_message", sessionKey, prompt });
+    if (workItemId) {
+      if (onRequestChanges?.(prompt) !== true) {
+        setError("Work item details are still loading. Your feedback has been preserved.");
+        return;
+      }
+    } else send({ type: "send_message", sessionKey, prompt });
     setFeedback("");
     setRequestingChanges(false);
     onClose();
@@ -203,7 +216,7 @@ export function ReviewChangesScreen({
                 ))}
               </ul>
             ) : null}
-            <div className="mob-conflict-actions">
+            {!workItemId ? <div className="mob-conflict-actions">
               <button type="button" onClick={() => send({ type: "retry_merge", sessionKey })}>
                 Retry
               </button>
@@ -213,9 +226,15 @@ export function ReviewChangesScreen({
               <button type="button" onClick={() => send({ type: "theirs_merge", sessionKey })}>
                 Theirs
               </button>
-            </div>
+            </div> : null}
           </section>
         ) : null}
+        {workItemId && integration.lineage ? <section className="mob-review-section"
+          aria-label="Worktree integration">
+          <h2>Integration</h2>
+          <WorktreeIntegrationControls lineage={integration.lineage} workItemId={workItemId}
+            runKey={sessionKey} send={send} className="integration-controls--mobile" />
+        </section> : null}
       </section>
 
       <footer className="mob-review-actions">
@@ -250,26 +269,32 @@ export function ReviewChangesScreen({
             <button type="button" onClick={() => setConfirmDiscard(false)}>
               Cancel
             </button>
-            <button type="button" onClick={() => send({ type: "discard_worktree", sessionKey })}>
+            <button type="button" onClick={() => {
+              if (integration.contribution) send({ type: "discard_worktree_contribution",
+                requestId: randomUuid(), contributionId: integration.contribution.id,
+                expectedIntegrationRevision: integration.contribution.revision,
+                reason: "Discarded from mobile review" });
+              else if (!workItemId) send({ type: "discard_worktree", sessionKey });
+            }}>
               Discard
             </button>
           </div>
         ) : null}
 
         <div className="mob-review-action-row">
-          <button
+          {!workItemId ? <button
             className="mob-primary-action"
             type="button"
             onClick={() => send({ type: "approve_changes", sessionKey })}
           >
             Approve &amp; Merge
-          </button>
+          </button> : null}
           <button type="button" onClick={() => setRequestingChanges(true)}>
             Request changes
           </button>
-          <button type="button" onClick={() => setConfirmDiscard(true)}>
+          {!workItemId ? <button type="button" onClick={() => setConfirmDiscard(true)}>
             Discard
-          </button>
+          </button> : null}
         </div>
       </footer>
     </main>

@@ -24,6 +24,7 @@ vi.mock("./api.ts", () => ({
 const CLAUDE_ENTRY: HarnessListEntry = {
   name: "claude",
   capabilities: {
+    mutationInterception: "complete",
     thinking: true,
     promptCaching: true,
     mcp: true,
@@ -47,6 +48,7 @@ const CLAUDE_ENTRY: HarnessListEntry = {
 const CODEX_ENTRY: HarnessListEntry = {
   name: "codex",
   capabilities: {
+    mutationInterception: "observe_only",
     thinking: true,
     promptCaching: true,
     mcp: true,

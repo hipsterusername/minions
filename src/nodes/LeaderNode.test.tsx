@@ -169,6 +169,58 @@ describe("LeaderNode: replays leader-plan-and-delegate fixture", () => {
   });
 });
 
+describe("LeaderNode: user messages survive stream reconciliation", () => {
+  // Regression: user chat turns exist only as optimistic local appends
+  // (the server maps every `user` event to no display message). A
+  // sync_response rebuilds the feed purely from buffered sdk events — which
+  // contain no user turns — so before the fix the reducer output replaced
+  // `data.messages` wholesale and every user bubble vanished on the next
+  // reconnect / refocus sync.
+  it("keeps prior user messages when a sync_response rebuilds the feed", async () => {
+    const { socket, replay } = createReplaySocket();
+    const states: LeaderData[] = [];
+
+    render(
+      <Probe
+        socket={socket}
+        initial={makeInitialData({
+          messages: [
+            { id: "u1", role: "user", content: "Investigate the parser", timestamp: 0 },
+            { id: "a1", role: "assistant", content: "On it.", timestamp: 1 },
+          ],
+        })}
+        onState={(d) => states.push(d)}
+      />,
+    );
+
+    // A reconnect sync that replays only assistant activity.
+    await pump(replay, [
+      {
+        message: {
+          type: "sync_response",
+          sessionKey: "leader-1",
+          found: true,
+          status: "running",
+          events: [
+            {
+              type: "sdk_event",
+              sessionKey: "leader-1",
+              event: { kind: "text", text: "Found the entry point.", role: "assistant" },
+              timestamp: 0,
+            },
+          ],
+        } as unknown as ServerMessage,
+      },
+    ]);
+
+    const last = states.at(-1) ?? makeInitialData();
+    const userBubbles = last.messages.filter((m) => m.role === "user");
+    expect(userBubbles.map((m) => m.content)).toEqual(["Investigate the parser"]);
+    // The rebuilt assistant content still lands in the feed.
+    expect(last.messages.some((m) => m.content === "Found the entry point.")).toBe(true);
+  });
+});
+
 describe("LeaderNode: message actions", () => {
   it("opens a shared enlarged prompt when the inline prompt is focused at zoomed-out scale", async () => {
     const { socket } = createReplaySocket();
@@ -873,11 +925,15 @@ describe("LeaderNode: connected-context dedup", () => {
     });
 
     const nonCanvasCommands = () =>
-      captured.filter((msg) => (msg as { type?: string }).type !== "canvas_context");
+      captured.filter((msg) => !["canvas_context", "get_worktree_lineage_status"]
+        .includes((msg as { type?: string }).type ?? ""));
+    const integrationStatusQueries = () => captured.filter((msg) =>
+      (msg as { type?: string }).type === "get_worktree_lineage_status");
     const canvasCommands = () =>
       captured.filter((msg) => (msg as { type?: string }).type === "canvas_context");
 
     expect(nonCanvasCommands()).toHaveLength(1);
+    expect(integrationStatusQueries()).toHaveLength(1);
     expect(canvasCommands()).toHaveLength(1);
     const createMsg = nonCanvasCommands()[0] as { type: string; prompt: string };
     expect(createMsg.type).toBe("create_session");
@@ -979,7 +1035,8 @@ describe("LeaderNode: connected-context dedup", () => {
     });
 
     const nonCanvasCommands = () =>
-      captured.filter((msg) => (msg as { type?: string }).type !== "canvas_context");
+      captured.filter((msg) => !["canvas_context", "get_worktree_lineage_status"]
+        .includes((msg as { type?: string }).type ?? ""));
     expect((nonCanvasCommands()[0] as { type: string }).type).toBe("create_session");
 
     // Only change node-b; node-a remains the same

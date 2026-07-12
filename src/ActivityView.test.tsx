@@ -17,6 +17,19 @@ function session(overrides: Partial<MobileSessionInfo>): MobileSessionInfo {
   };
 }
 
+const completeLifecycle = {
+  reviewState: "completion_to_review" as const,
+  reviewReason: "Read the final report and review the dashboard",
+  finalReport: "Implemented the migration and verified all tests.",
+  finalDashboardRevision: 2,
+  dashboardRevision: 2,
+  terminalReason: "completed" as const,
+  terminalAt: 10,
+  acknowledgedAt: null,
+  dismissedAt: null,
+  lifecycleRevision: 3,
+};
+
 function leaderNode(
   sessionKey: string,
   messages: DisplayMessage[] = [],
@@ -50,6 +63,97 @@ const noop = {
 };
 
 describe("ActivityView", () => {
+  it("shows all non-dismissed sessions by default and exposes history filters", () => {
+    render(
+      <ActivityView
+        sessions={[
+          session({ sessionKey: "open", taskName: "Open work", reviewLifecycle: completeLifecycle }),
+          session({
+            sessionKey: "dismissed",
+            taskName: "Dismissed work",
+            reviewLifecycle: { ...completeLifecycle, dismissedAt: 20 },
+          }),
+        ]}
+        nodes={[]}
+        {...noop}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /open work/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /dismissed work/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^dismissed$/i }));
+    expect(screen.getByRole("button", { name: /dismissed work/i })).toBeInTheDocument();
+  });
+
+  it("removes a session from Open after the server confirms dismissal", () => {
+    const { rerender } = render(
+      <ActivityView
+        sessions={[session({ sessionKey: "done", taskName: "Dismiss this", reviewLifecycle: completeLifecycle })]}
+        nodes={[]}
+        {...noop}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /dismiss this/i })).toBeInTheDocument();
+    rerender(
+      <ActivityView
+        sessions={[session({
+          sessionKey: "done",
+          taskName: "Dismiss this",
+          reviewLifecycle: { ...completeLifecycle, dismissedAt: 30, lifecycleRevision: 4 },
+        })]}
+        nodes={[]}
+        {...noop}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /dismiss this/i })).not.toBeInTheDocument();
+  });
+
+  it("shows the persisted final report and sends revisioned review commands", () => {
+    const socketSend = vi.fn();
+    render(
+      <ActivityView
+        sessions={[session({ sessionKey: "done", taskName: "Finished task", reviewLifecycle: completeLifecycle })]}
+        nodes={[]}
+        {...noop}
+        socketSend={socketSend}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /finished task/i }));
+    expect(screen.getByText(/implemented the migration/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /mark reviewed/i }));
+    expect(socketSend).toHaveBeenCalledWith({
+      type: "acknowledge_session",
+      sessionKey: "done",
+      expectedLifecycleRevision: 3,
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^dismiss$/i }));
+    expect(socketSend).toHaveBeenCalledWith({
+      type: "dismiss_session",
+      sessionKey: "done",
+      expectedLifecycleRevision: 3,
+    });
+  });
+
+  it("steers a selected session from the inline Activity composer", () => {
+    const socketSend = vi.fn();
+    render(
+      <ActivityView
+        sessions={[session({ sessionKey: "run", status: "running", taskName: "Working" })]}
+        nodes={[]}
+        {...noop}
+        socketSend={socketSend}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /working/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: /reply or steer/i }), {
+      target: { value: "Use the safer migration." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+    expect(socketSend).toHaveBeenCalledWith({
+      type: "send_message",
+      sessionKey: "run",
+      prompt: "Use the safer migration.",
+    });
+  });
   it("offers a Launch action from the activity header", () => {
     const onLaunchLeader = vi.fn();
     render(
@@ -63,6 +167,26 @@ describe("ActivityView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /launch leader/i }));
     expect(onLaunchLeader).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens a real canvas leader as the Activity launch experience", () => {
+    const draft = leaderNode("", [], { sessionKey: null, status: "disconnected" });
+    const onUpdateNodeData = vi.fn();
+    render(
+      <ActivityView
+        sessions={[]}
+        nodes={[draft]}
+        {...noop}
+        onLaunchLeader={() => draft.id}
+        onUpdateNodeData={onUpdateNodeData}
+        projectPath="/tmp/project"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /launch leader/i }));
+    expect(screen.getByRole("dialog", { name: /launch leader/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Describe your project goal...")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /open on canvas/i })).toBeInTheDocument();
   });
 
   it("offers Launch from the empty activity state", () => {

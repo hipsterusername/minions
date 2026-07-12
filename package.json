@@ -25,14 +25,15 @@
   },
   "packageManager": "pnpm@10.15.1",
   "scripts": {
-    "dev": "vite",
-    "server": "npx tsx server/index.ts",
-    "start": "node scripts/start.mjs",
+    "dev": "node scripts/run.mjs dev",
+    "server": "tsx server/index.ts",
+    "start": "node scripts/run.mjs dev",
+    "serve": "node scripts/start.mjs start",
     "stop": "node scripts/start.mjs stop",
     "restart": "node scripts/start.mjs restart",
     "status": "node scripts/start.mjs status",
     "build": "tsc -b && vite build",
-    "preview": "vite preview",
+    "preview": "node scripts/run.mjs preview",
     "serve:tailscale": "node scripts/tailscale-serve.mjs --port 4173",
     "serve:tailscale:dev": "node scripts/tailscale-serve.mjs --port 6173",
     "typecheck": "tsc -b --noEmit",
@@ -40,12 +41,15 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:smoke": "playwright test",
     "test:mutation": "stryker run",
+    "coverage:report": "node scripts/coverage-report.mjs",
+    "audit:prod": "pnpm audit --prod --audit-level high",
     "check:licenses": "node scripts/check-licenses.mjs",
     "system-model:validate": "node --import tsx scripts/system-model-validate.mjs",
     "verify": "pnpm typecheck && pnpm typecheck:server && pnpm test:run && pnpm check:licenses && pnpm system-model:validate -- --strict && pnpm build",
     "agent:preflight": "node scripts/agent-workflow-preflight.mjs",
-    "preflight": "node scripts/preflight.mjs"
+    "preflight": "node --import tsx scripts/preflight.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.177",
@@ -67,6 +71,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "1.61.1",
     "@stryker-mutator/core": "^9.6.1",
     "@stryker-mutator/vitest-runner": "^9.6.1",
     "@testing-library/dom": "10.4.1",

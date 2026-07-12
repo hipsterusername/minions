@@ -105,6 +105,27 @@ export interface ProjectWithNodes {
   skills?: import("./skills/types.ts").SkillTemplate[];
 }
 
+export interface HarnessReadiness {
+  name: string;
+  ready: boolean;
+  state: "ready" | "runtime_missing" | "unauthenticated" | "probe_timeout" | "probe_failed";
+  runtime: { available: boolean; source: "env_override" | "sdk_bundled"; version?: string };
+  auth: { authenticated: boolean; source: "api_key" | "oauth" | "cli_login" | "unknown" };
+  checkedAt: string;
+  expiresAt: string;
+  durationMs: number;
+  remediation?: { label: string; command?: string };
+}
+
+export interface HarnessReadinessSnapshot {
+  schemaVersion: 1;
+  checkedAt: string;
+  expiresAt: string;
+  ready: boolean;
+  readyHarnesses: string[];
+  harnesses: HarnessReadiness[];
+}
+
 // ── Fetch helper ─────────────────────────────────────────
 
 async function apiFetch<T>(
@@ -132,6 +153,10 @@ async function apiFetch<T>(
 
 export function listProjects(): Promise<ProjectSummary[]> {
   return apiFetch("/projects");
+}
+
+export function getHarnessReadiness(refresh = false): Promise<HarnessReadinessSnapshot> {
+  return apiFetch(`/readiness${refresh ? "?refresh=1" : ""}`);
 }
 
 export function createProject(name: string, projectPath: string): Promise<ProjectWithNodes> {

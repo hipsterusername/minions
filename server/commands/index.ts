@@ -22,6 +22,7 @@ import { stopSession } from "./stop-session.ts";
 import { syncSession } from "./sync-session.ts";
 import { listSessions } from "./list-sessions.ts";
 import { listHarnesses } from "./list-harnesses.ts";
+import { acknowledgeSession, dismissSession, reopenSession } from "./session-review.ts";
 import { interrupt, interruptSession } from "./interrupt.ts";
 import { closeSession } from "./close-session.ts";
 import { removeSession } from "./remove-session.ts";
@@ -54,6 +55,8 @@ import { getSystemModelStatus } from "./get-system-model-status.ts";
 import { getSystemGraph } from "./get-system-graph.ts";
 import { getWorkPackets } from "./get-work-packets.ts";
 import { waiveReviewGate } from "./waive-review-gate.ts";
+import { workItemCommand } from "./work-items.ts";
+import { worktreeIntegrationCommand } from "./worktree-integration.ts";
 import type { CommandContext, CommandTable, WsCommand } from "./types.ts";
 import type { WebSocket } from "ws";
 
@@ -71,6 +74,34 @@ export const COMMAND_TABLE = {
   sync_session: syncSession,
   list_sessions: listSessions,
   list_harnesses: listHarnesses,
+  acknowledge_session: acknowledgeSession,
+  dismiss_session: dismissSession,
+  reopen_session: reopenSession,
+  create_work_item: workItemCommand,
+  start_work_item_run: workItemCommand,
+  reply_to_waiting_run: workItemCommand,
+  review_work_item: workItemCommand,
+  archive_work_item: workItemCommand,
+  restore_work_item: workItemCommand,
+  attach_work_item_surface: workItemCommand,
+  detach_work_item_surface: workItemCommand,
+  get_work_item: workItemCommand,
+  list_work_items: workItemCommand,
+  get_work_item_runs: workItemCommand,
+  update_work_item_card: workItemCommand,
+  move_work_item_card: workItemCommand,
+  import_kanban_board: workItemCommand,
+  create_worktree_lineage: worktreeIntegrationCommand,
+  join_worktree_lineage: worktreeIntegrationCommand,
+  review_worktree_contribution: worktreeIntegrationCommand,
+  enqueue_worktree_contribution: worktreeIntegrationCommand,
+  retry_worktree_contribution: worktreeIntegrationCommand,
+  discard_worktree_contribution: worktreeIntegrationCommand,
+  review_worktree_lineage: worktreeIntegrationCommand,
+  waive_worktree_integration_gate: worktreeIntegrationCommand,
+  resolve_worktree_conflict: worktreeIntegrationCommand,
+  promote_worktree_lineage: worktreeIntegrationCommand,
+  get_worktree_lineage_status: worktreeIntegrationCommand,
   // Execution control
   interrupt,
   interrupt_session: interruptSession,
@@ -131,7 +162,9 @@ export function dispatchCommand(
     });
     return;
   }
-  handler(ctx, cmd, ws);
+  void Promise.resolve(handler(ctx, cmd, ws)).catch(() => {
+    unicastGlobal(ws, { type: "error", message: "Command failed" });
+  });
 }
 
 export type { CommandContext, CommandHandler, WsCommand, WsCommandType, CommandTable } from "./types.ts";

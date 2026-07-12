@@ -24,6 +24,7 @@ vi.mock("./harness/index.ts", () => ({
   getHarness: () => ({
     name: "claude",
     capabilities: {
+      mutationInterception: "none",
       thinking: false,
       promptCaching: false,
       mcp: true,
@@ -88,6 +89,24 @@ function makeDeps(
 }
 
 describe("Phase B — minion harness inheritance", () => {
+  it("routes a bound primary's new child through the durable allocator once", async () => {
+    const calls: StartSessionOptions[] = [];
+    const deps = makeDeps((opts) => calls.push(opts));
+    const allocate = vi.fn(async () => ({ sessionKey: "allocated-run", harness: "echo", model: "m", permissionMode: "auto" }));
+    deps.startWorkItemChildRun = allocate;
+    const host = new SessionHost("primary-run", "/tmp/work");
+    host.workItemId = "work-1";
+    const ctx = buildAgentContext(host, { sessionKey: host.id, prompt: "p", cwd: host.cwd }, deps);
+    const result = await ctx.startMinionSession!({ sessionKey: "provisional", taskId: "task-1", prompt: "do", cwd: host.cwd, systemPrompt: "s" });
+    expect(result?.sessionKey).toBe("allocated-run");
+    expect(allocate).toHaveBeenCalledOnce();
+    expect(allocate).toHaveBeenCalledWith(expect.objectContaining({
+      workItemId: "work-1", parentRunKey: "primary-run", taskId: "task-1",
+      requestId: "child:primary-run:task-1",
+    }));
+    expect(calls).toEqual([]);
+  });
+
   it("a leader running under harness X spawns a minion on harness X by default", async () => {
     const calls: StartSessionOptions[] = [];
     const deps = makeDeps((opts) => calls.push(opts));
@@ -103,6 +122,7 @@ describe("Phase B — minion harness inheritance", () => {
         cwd: "/tmp/work",
         role: "leader",
         harness: "echo",
+        workItemId: "work-1",
       },
       deps,
     );
@@ -123,6 +143,7 @@ describe("Phase B — minion harness inheritance", () => {
     }
     ctx.startMinionSession({
       sessionKey: "minion-1",
+      taskId: "task-1",
       prompt: "do",
       cwd: "/tmp/work",
       systemPrompt: "be a minion",
@@ -132,6 +153,13 @@ describe("Phase B — minion harness inheritance", () => {
     expect(spawn).toBeDefined();
     expect(spawn?.harness).toBe("echo");
     expect(spawn?.role).toBe("minion");
+    expect(spawn).toMatchObject({
+      workItemId: "work-1",
+      runKind: "child",
+      parentRunKey: "leader-1",
+      taskId: "task-1",
+    });
+    expect(ctx).toMatchObject({ workItemId: "work-1", runKey: "leader-1" });
   });
 
   it("an explicit harness override on startMinionSession is respected", async () => {

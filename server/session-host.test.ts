@@ -39,7 +39,8 @@ const harnessRef: {
     events: AsyncIterable<NormalizedEvent>;
     control: { abort: () => void };
   }) | null;
-} = { events: [], starts: [], startFnOverride: null };
+  mutationInterception: "complete" | "observe_only" | "none";
+} = { events: [], starts: [], startFnOverride: null, mutationInterception: "none" };
 
 // Declared before imports — vitest hoists vi.mock() calls above the ESM
 // import graph, so the factory runs before any module under test is loaded.
@@ -47,6 +48,7 @@ vi.mock("./harness/index.ts", () => ({
   getHarness: () => ({
     name: "claude",
     capabilities: {
+      mutationInterception: harnessRef.mutationInterception,
       thinking: false,
       promptCaching: false,
       mcp: true,
@@ -109,7 +111,7 @@ interface Harness {
   deps: SessionHostDeps;
 }
 
-function makeHarness(id = "host-1", cwd = "/tmp/fake-cwd"): Harness {
+function makeHarness(id = "host-1", cwd = "/tmp"): Harness {
   // Fake WebSocketServer: a `clients` set that's always empty so `broadcast`
   // is a no-op. The bus's in-process `subscribe` is what carries our capture.
   const fakeWss = { clients: new Set() } as unknown as Parameters<
@@ -138,6 +140,9 @@ beforeEach(() => {
   harnessRef.events = [];
   harnessRef.starts = [];
   harnessRef.startFnOverride = null;
+  // The test harness models Claude unless a case explicitly exercises a
+  // degraded adapter capability.
+  harnessRef.mutationInterception = "complete";
   // Disable SQLite persistence for the duration of these tests.
   disablePersistence();
 });
@@ -148,6 +153,106 @@ afterEach(() => {
 });
 
 describe("SessionHost.start — happy-path lifecycle", () => {
+  it("labels uncoordinated legacy Claude live mode as compatibility observe-only", async () => {
+    const { host, deps, envelopes } = makeHarness("legacy-claude");
+    await host.start({ sessionKey: host.id, prompt: "read", cwd: host.cwd,
+      role: "default", worktreeIsolation: false }, deps);
+    expect(envelopes).toContainEqual(expect.objectContaining({
+      type: "mutation_enforcement_compatibility",
+      payload: expect.objectContaining({ observeOnly: true, mode: "live" }),
+    }));
+  });
+
+  it("rejects an unsupported legacy live run with actionable relaunch guidance", async () => {
+    harnessRef.mutationInterception = "observe_only";
+    const { host, deps, envelopes } = makeHarness("legacy-unsafe");
+    await host.start({ sessionKey: host.id, prompt: "change files", cwd: host.cwd,
+      role: "default", worktreeIsolation: false }, deps);
+    expect(harnessRef.starts).toHaveLength(0);
+    expect(host.lastError).toContain("relaunch with worktree isolation");
+    expect(envelopes.some((event) => event.type === "mutation_enforcement_fallback")).toBe(true);
+  });
+
+  it("rejects a canonical live run when the harness has no interception", async () => {
+    harnessRef.mutationInterception = "none";
+    const { host, deps, envelopes } = makeHarness("unsafe-none");
+    host.workItemId = "work-1";
+    await host.start({ sessionKey: host.id, workItemId: "work-1",
+      prompt: "change files", cwd: host.cwd, role: "leader",
+      worktreeIsolation: false }, deps);
+    expect(harnessRef.starts).toHaveLength(0);
+    expect(host.lastError).toContain("start this work item in worktree mode");
+    expect(envelopes.some((event) => event.type === "mutation_enforcement_fallback")).toBe(true);
+  });
+
+  it("rejects a canonical live run when the harness is only observe-only", async () => {
+    harnessRef.mutationInterception = "observe_only";
+    const { host, deps, envelopes } = makeHarness("unsafe-live");
+    host.workItemId = "work-1";
+    await host.start({ sessionKey: host.id, workItemId: "work-1",
+      prompt: "change files", cwd: host.cwd, role: "leader",
+      worktreeIsolation: false }, deps);
+    expect(harnessRef.starts).toHaveLength(0);
+    expect(host).toMatchObject({ status: "error",
+      lastError: expect.stringContaining("start this work item in worktree mode") });
+    expect(envelopes.some((event) => event.type === "mutation_enforcement_fallback")).toBe(true);
+  });
+
+  it("allows an observe-only child that inherits its parent's worktree", async () => {
+    harnessRef.mutationInterception = "observe_only";
+    const { host, deps } = makeHarness("safe-child", "/repo"); host.workItemId = "work-1";
+    await host.start({ sessionKey: host.id, workItemId: "work-1", prompt: "change",
+      cwd: "/repo", role: "minion", worktreeIsolation: false,
+      parentWorktree: { path: "/repo/.minions/worktrees/parent", branch: "minions/parent",
+        projectPath: "/repo", leaderSessionKey: "parent", createdAt: 1, lifecycle: "active" } }, deps);
+    expect(harnessRef.starts).toHaveLength(1);
+    expect(host.cwd).toBe("/repo/.minions/worktrees/parent");
+  });
+  it("seeds primary/child lineage once and preserves it across later starts", () => {
+    const host = new SessionHost("child-run", "/tmp/work");
+    expect(host.seedRunLineage({
+      runKind: "child", parentRunKey: "root-run", taskId: "task-1",
+    })).toBe(true);
+    expect(host.seedRunLineage({ runKind: "primary" })).toBe(false);
+    expect(host).toMatchObject({
+      runKey: "child-run", runKind: "child", parentRunKey: "root-run", taskId: "task-1",
+    });
+  });
+
+  it("advances lifecycle only for new-run invocations while retaining one runKey", async () => {
+    const { host, deps } = makeHarness("stable-run");
+    harnessRef.events = [
+      { kind: "init", sessionId: "provider", model: "sonnet" },
+      { kind: "done", reason: "stop" },
+    ];
+
+    await host.start({
+      sessionKey: host.id,
+      invocationKind: "new_run",
+      prompt: "first",
+      cwd: host.cwd,
+    }, deps);
+    expect(host.reviewLifecycle.lifecycleRevision).toBe(2);
+
+    await host.start({
+      sessionKey: host.id,
+      invocationKind: "resume_open_run",
+      prompt: "reply",
+      cwd: host.cwd,
+      resumeId: host.sessionId ?? undefined,
+    }, deps);
+    expect(host.reviewLifecycle.lifecycleRevision).toBe(3);
+
+    await host.start({
+      sessionKey: host.id,
+      invocationKind: "provider_continuation",
+      prompt: "checkpoint",
+      cwd: host.cwd,
+    }, deps);
+    expect(host.reviewLifecycle.lifecycleRevision).toBe(4);
+    expect(host.runKey).toBe("stable-run");
+  });
+
   it("transitions running → idle when the harness closes with a done event", async () => {
     const { host, deps, envelopes } = makeHarness();
 
@@ -166,13 +271,16 @@ describe("SessionHost.start — happy-path lifecycle", () => {
     expect(host.totalCost).toBe(0.42);
     expect(host.turns).toBe(3);
 
-    // The bus saw: running, sdk_event(init), idle.
+    // The bus saw: legacy coordination disclosure, running, sdk_event(init),
+    // durable lifecycle outcome, idle.
     // The `done` NormalizedEvent is signalled as session_status(idle),
     // NOT emitted as an sdk_event.
     const types = envelopes.map((e) => e.type);
     expect(types).toEqual([
+      "mutation_enforcement_compatibility", // legacy live mode is observe-only
       "session_status", // running
       "sdk_event",      // init
+      "session_lifecycle_changed", // interrupted: stop has no final report
       "session_status", // idle (from done)
     ]);
 
@@ -304,14 +412,84 @@ describe("SessionHost.start — happy-path lifecycle", () => {
 
     await host.start({ sessionKey: host.id, prompt: "p", cwd: host.cwd }, deps);
 
-    // running + 3 sdk_events (init, text, text) + idle = 5 buffered events.
+    // running + 3 sdk_events + lifecycle outcome + idle = 6 buffered events.
     // The `done` NormalizedEvent → session_status(idle), not sdk_event.
     expect(host.eventBuffer.map((e) => e.type)).toEqual([
       "session_status",
       "sdk_event",
       "sdk_event",
       "sdk_event",
+      "session_lifecycle_changed",
       "session_status",
+    ]);
+  });
+
+  it("adds canonical run and work-item identity at the normalized event boundary", async () => {
+    const { host, deps, envelopes } = makeHarness("run-7");
+    harnessRef.events = [
+      { kind: "init", sessionId: "provider-7", model: "sonnet" },
+      { kind: "text", text: "working", role: "assistant" },
+      { kind: "done", reason: "stop" },
+    ];
+
+    await host.start({
+      sessionKey: host.id,
+      workItemId: "work-3",
+      prompt: "p",
+      cwd: host.cwd,
+    }, deps);
+
+    const sdkEvents = envelopes.filter((envelope) => envelope.type === "sdk_event");
+    expect(sdkEvents).toHaveLength(2);
+    for (const envelope of sdkEvents) {
+      expect(envelope.payload).toMatchObject({
+        sessionKey: "run-7",
+        runKey: "run-7",
+        workItemId: "work-3",
+      });
+    }
+    expect(host.eventBuffer.filter((event) => event.type === "sdk_event"))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ runKey: "run-7", workItemId: "work-3" }),
+      ]));
+  });
+
+  it("emits an explicit null work-item identity for compatibility launches", async () => {
+    const { host, deps, envelopes } = makeHarness("legacy-run");
+    harnessRef.events = [
+      { kind: "init", sessionId: "provider-old", model: "sonnet" },
+      { kind: "done", reason: "stop" },
+    ];
+
+    await host.start({ sessionKey: host.id, prompt: "p", cwd: host.cwd }, deps);
+
+    expect(envelopes.find((envelope) => envelope.type === "sdk_event")?.payload)
+      .toMatchObject({
+        sessionKey: "legacy-run",
+        runKey: "legacy-run",
+        workItemId: null,
+      });
+  });
+
+  it("documents the Phase 0 runKey alias across repeated starts", async () => {
+    const { host, deps } = makeHarness("compat-session");
+    harnessRef.events = [
+      { kind: "init", sessionId: "provider-1", model: "sonnet" },
+      { kind: "done", reason: "stop" },
+    ];
+    await host.start({ sessionKey: host.id, workItemId: "work-1", prompt: "first", cwd: host.cwd }, deps);
+
+    harnessRef.events = [
+      { kind: "init", sessionId: "provider-1", model: "sonnet" },
+      { kind: "done", reason: "stop" },
+    ];
+    await host.start({ sessionKey: host.id, workItemId: "work-1", prompt: "second", cwd: host.cwd }, deps);
+
+    const sdkEvents = host.eventBuffer.filter((event) => event.type === "sdk_event");
+    expect(sdkEvents).toHaveLength(2);
+    expect(sdkEvents.map((event) => event.runKey)).toEqual([
+      "compat-session",
+      "compat-session",
     ]);
   });
 });
@@ -319,6 +497,11 @@ describe("SessionHost.start — happy-path lifecycle", () => {
 describe("SessionHost.start — error path", () => {
   it("transitions to status='error' and emits a session_error event when the harness throws synchronously", async () => {
     const { host, deps, envelopes } = makeHarness();
+    host.workItemId = "work-1";
+    const runTerminal = vi.fn();
+    deps.workItemLifecycle = {
+      providerInitialized: vi.fn(), runStarted: vi.fn(), runWaiting: vi.fn(), runTerminal,
+    };
 
     harnessRef.startFnOverride = () => ({
       events: (async function* () {
@@ -337,6 +520,8 @@ describe("SessionHost.start — error path", () => {
     const errorEvents = envelopes.filter((e) => e.type === "session_error");
     expect(errorEvents).toHaveLength(1);
     expect(errorEvents[0]!.payload["error"]).toBe("boom");
+    expect(runTerminal).toHaveBeenCalledOnce();
+    expect(runTerminal).toHaveBeenCalledWith(expect.objectContaining({ outcome: "error" }));
   });
 
   it("recovers a resumed Codex context-window failure in a fresh compacted thread", async () => {
@@ -386,6 +571,10 @@ describe("SessionHost.start — error path", () => {
     expect(starts).toBe(2);
     expect(host.status).toBe("idle");
     expect(host.sessionId).toBe("fresh-thread");
+    // Provider-thread recovery continues the same logical run: one beginRun
+    // plus one terminal transition, not a second lifecycle reset.
+    expect(host.reviewLifecycle.lifecycleRevision).toBe(2);
+    expect(host.reviewLifecycle.terminalReason).toBe("stop");
     expect(envelopes.filter((e) => e.type === "session_error")).toHaveLength(0);
 
     const secondStart = harnessRef.starts[1] as {

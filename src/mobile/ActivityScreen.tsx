@@ -1,15 +1,21 @@
 import type { MobileSessionInfo } from "./mobile-selectors.ts";
+import type { WorkItemRunSnapshot } from "../../shared/work-item-contracts.ts";
 import {
+  activeMinionSummary,
   groupSessionsByActivity,
   needsAttention,
   sessionDisplayTitle,
   sessionRoleLabel,
+  isVisibleInActivity,
 } from "./mobile-selectors.ts";
 
 interface ActivityScreenProps {
   sessions: MobileSessionInfo[];
   onOpenSession: (sessionKey: string) => void;
   notice?: ActivityNotice | null;
+  workItemRuns?: Record<string, WorkItemRunSnapshot[]>;
+  runNextCursor?: Record<string, string | null>;
+  onLoadRuns?: (workItemId: string, cursor?: string) => void;
 }
 
 export interface ActivityNotice {
@@ -26,6 +32,23 @@ function formatCost(cost: number | undefined): string {
   return `$${cost.toFixed(2)}`;
 }
 
+function MinionSummary({ session }: { session: MobileSessionInfo }) {
+  const summary = activeMinionSummary(session);
+  if (summary.total === 0) return null;
+  return (
+    <span className="mob-card-minions" aria-label="Active minions summary">
+      {summary.running > 0 ? (
+        <span data-tone="running" data-live="true">
+          <i aria-hidden="true" />
+          {summary.running} running
+        </span>
+      ) : null}
+      {summary.blocked > 0 ? <span data-tone="blocked">{summary.blocked} blocked</span> : null}
+      {summary.planned > 0 ? <span data-tone="planned">{summary.planned} queued</span> : null}
+    </span>
+  );
+}
+
 function SessionCard({
   session,
   onOpenSession,
@@ -33,10 +56,25 @@ function SessionCard({
   session: MobileSessionInfo;
   onOpenSession: (sessionKey: string) => void;
 }) {
+  const lifecycle = session.reviewLifecycle;
+  const hasSessionRun = !session.sessionKey.startsWith("work-item:");
+  const lifecycleLabel = lifecycle?.acknowledgedAt
+    ? "reviewed"
+    : lifecycle?.reviewState === "decision_needed"
+      ? "decision needed"
+      : lifecycle?.reviewState === "completion_to_review"
+        ? "complete · read report"
+        : lifecycle?.reviewState === "error_to_review"
+          ? "error"
+          : lifecycle?.reviewState === "interrupted_to_review"
+            ? "interrupted"
+            : null;
   return (
     <button
       className={`mob-session-card${needsAttention(session) ? " mob-session-card--attention" : ""}`}
-      onClick={() => onOpenSession(session.sessionKey)}
+      onClick={() => { if (hasSessionRun) onOpenSession(session.sessionKey); }}
+      disabled={!hasSessionRun}
+      title={hasSessionRun ? undefined : "No run has started for this work item"}
       type="button"
     >
       <span className="mob-card-topline">
@@ -49,6 +87,8 @@ function SessionCard({
       <span className="mob-card-meta">
         {formatCost(session.totalCost)} · {session.turns ?? 0} turns
       </span>
+      {lifecycleLabel ? <span className="mob-card-lifecycle">{lifecycleLabel}</span> : null}
+      <MinionSummary session={session} />
       <span className="mob-card-activity">
         {session.lastActivity || session.cwd || session.sessionKey}
       </span>
@@ -79,10 +119,13 @@ function NoticeBanner({ notice }: { notice: ActivityNotice }) {
   );
 }
 
-export function ActivityScreen({ sessions, onOpenSession, notice }: ActivityScreenProps) {
+export function ActivityScreen({ sessions, onOpenSession, notice,
+  workItemRuns = {}, runNextCursor = {}, onLoadRuns }: ActivityScreenProps) {
   // Minions are spawned and managed by their leader; the mobile Activity list
   // surfaces top-level sessions only, so their cards are filtered out here.
-  const visibleSessions = sessions.filter((session) => session.role !== "minion");
+  const visibleSessions = sessions.filter(
+    (session) => session.role !== "minion" && isVisibleInActivity(session, "open"),
+  );
   const sections = groupSessionsByActivity(visibleSessions);
 
   if (visibleSessions.length === 0) {
@@ -116,11 +159,25 @@ export function ActivityScreen({ sessions, onOpenSession, notice }: ActivityScre
           </h2>
           <div className="mob-session-list">
             {section.sessions.map((session) => (
-              <SessionCard
-                key={session.sessionKey}
-                session={session}
-                onOpenSession={onOpenSession}
-              />
+              <div key={session.sessionKey}>
+                <SessionCard session={session} onOpenSession={onOpenSession} />
+                {session.workItemId ? <details onToggle={(event) => {
+                  if (event.currentTarget.open && !(workItemRuns[session.workItemId!]?.length)) {
+                    onLoadRuns?.(session.workItemId!);
+                  }
+                }}>
+                  <summary>Run history</summary>
+                  <ol aria-label={`Run history for ${sessionDisplayTitle(session)}`}>
+                    {(workItemRuns[session.workItemId] ?? []).map((run) => <li key={run.runKey}>
+                      Iteration {run.runNumber ?? "child"} · {run.outcome}
+                      {run.endedAt ? ` · ${new Date(run.endedAt).toLocaleDateString()}` : " · active"}
+                      {run.finalReport ? <p>{run.finalReport}</p> : null}
+                    </li>)}
+                  </ol>
+                  {runNextCursor[session.workItemId] ? <button type="button" onClick={() =>
+                    onLoadRuns?.(session.workItemId!, runNextCursor[session.workItemId!]!)}>Load more</button> : null}
+                </details> : null}
+              </div>
             ))}
           </div>
         </section>

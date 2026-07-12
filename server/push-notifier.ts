@@ -51,7 +51,7 @@ export function notificationFromEnvelope(
     const summary = stringField(envelope, "summary");
     return {
       title: "Approval requested",
-      body: summary || "A session is waiting for review.",
+      body: boundedBody(summary || "A session is waiting for review."),
       data: {
         url: `/m?session=${encodeURIComponent(sessionKey)}&review=1`,
         kind: "approval",
@@ -68,7 +68,7 @@ export function notificationFromEnvelope(
     const result = stringField(envelope, "result");
     return {
       title: status === "failed" ? "Minion failed" : "Minion completed",
-      body: result || (taskId ? `Task ${taskId} ${status || "finished"}.` : "A minion finished."),
+      body: boundedBody(result || (taskId ? `Task ${taskId} ${status || "finished"}.` : "A minion finished.")),
       data: {
         url: `/m?session=${encodeURIComponent(sessionKey)}`,
         kind: "minion_done",
@@ -83,7 +83,7 @@ export function notificationFromEnvelope(
     const error = stringField(envelope, "error");
     return {
       title: "Session error",
-      body: error || "A session reported an error.",
+      body: boundedBody(error || "A session reported an error."),
       data: {
         url: `/m?session=${encodeURIComponent(sessionKey)}`,
         kind: "error",
@@ -93,6 +93,10 @@ export function notificationFromEnvelope(
   }
 
   return null;
+}
+
+function boundedBody(value: string): string {
+  return value.length <= 2000 ? value : `${value.slice(0, 1999)}…`;
 }
 
 async function notifySubscriptions({

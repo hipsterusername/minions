@@ -9,6 +9,14 @@ import type { WebSocket } from "ws";
 import type { Bus } from "../bus.ts";
 import type { SessionRegistry } from "../session-registry.ts";
 import type { SessionRole } from "../session-host.ts";
+import type { SessionLaunchResult } from "../session-launch.ts";
+import type { StartSessionOptions } from "../session-host.ts";
+import type { WorkItemService } from "../work-item-service.ts";
+import type { ChangeMode } from "../../shared/work-item-lifecycle.ts";
+import type { WorkItemBindingSurface } from "../../shared/work-item-contracts.ts";
+import type { KanbanCardMetadata, KanbanImportCard } from "../../shared/work-item-kanban.ts";
+import type { LiveEditAwareness } from "../../shared/live-edit-coordination.ts";
+import type { WorktreeIntegrationService } from "../worktree-integration-service.ts";
 
 /** Every WebSocket command recognised by the server. */
 export type WsCommandType =
@@ -20,6 +28,29 @@ export type WsCommandType =
   | "sync_session"
   | "list_sessions"
   | "list_harnesses"
+  | "acknowledge_session"
+  | "dismiss_session"
+  | "reopen_session"
+  // Durable work items
+  | "create_work_item"
+  | "start_work_item_run"
+  | "reply_to_waiting_run"
+  | "review_work_item"
+  | "archive_work_item"
+  | "restore_work_item"
+  | "attach_work_item_surface"
+  | "detach_work_item_surface"
+  | "get_work_item"
+  | "list_work_items"
+  | "get_work_item_runs"
+  | "update_work_item_card"
+  | "move_work_item_card"
+  | "import_kanban_board"
+  | "create_worktree_lineage" | "join_worktree_lineage"
+  | "review_worktree_contribution" | "enqueue_worktree_contribution"
+  | "retry_worktree_contribution" | "discard_worktree_contribution"
+  | "review_worktree_lineage" | "waive_worktree_integration_gate"
+  | "resolve_worktree_conflict" | "promote_worktree_lineage" | "get_worktree_lineage_status"
   // Execution control
   | "interrupt"
   | "interrupt_session"
@@ -87,6 +118,9 @@ export interface WsCanvasContextItem {
 export interface WsCommand {
   type: WsCommandType;
   sessionKey?: string;
+  /** Durable leader/work-item identity for additive lifecycle migration. */
+  workItemId?: string;
+  runKey?: string;
   prompt?: string;
   /** Multimodal attachments that accompany `prompt` on the first user turn. */
   attachments?: WsImageAttachment[];
@@ -104,6 +138,23 @@ export interface WsCommand {
   /** Adaptive-thinking config — may be updated on every send_message */
   thinkingConfig?: unknown;
   projectPath?: string;
+  projectId?: string;
+  title?: string;
+  changeMode?: ChangeMode;
+  workflowColumnId?: string;
+  workflowRank?: string;
+  expectedWorkflowRevision?: number;
+  columnId?: string;
+  rank?: string;
+  targetIndex?: number;
+  migrationKey?: string;
+  cardPatch?: Partial<KanbanCardMetadata>;
+  cards?: KanbanImportCard[];
+  surface?: WorkItemBindingSurface;
+  bindingId?: string;
+  includeArchived?: boolean;
+  cursor?: string;
+  limit?: number;
   workPacketId?: string;
   gateId?: string;
   reason?: string;
@@ -124,6 +175,10 @@ export interface WsCommand {
   formAnswers?: Record<string, unknown>;
   // Request ID for correlating async responses
   requestId?: string;
+  /** Compare-and-set guard for durable Activity lifecycle mutations. */
+  expectedLifecycleRevision?: number;
+  /** Compare-and-set guard paired with lifecycle revision. */
+  expectedCurrentRunKey?: string | null;
   /**
    * Name of the registered AgentHarness to drive this session.
    * Honoured only by `create_session`; mid-thread switches via `send_message`
@@ -132,6 +187,17 @@ export interface WsCommand {
    * follow-up turn. See docs/codex-harness-spec.md §3 / Open Questions §1.
    */
   harness?: string;
+  lineageId?: string;
+  contributionId?: string;
+  targetBranch?: string;
+  expectedIntegrationRevision?: number;
+  summary?: string;
+  gates?: Array<{ id: string; state: "passed" | "failed" | "waived"; detail?: string }>;
+  decision?: "approved" | "rejected";
+  actor?: string;
+  strategy?: "manual" | "ours" | "theirs";
+  queueId?: string;
+  integrationScope?: "contribution" | "lineage";
 }
 
 /**
@@ -147,6 +213,13 @@ export interface CommandContext {
   generateKey: () => string;
   /** Upper bound on simultaneous sessions. */
   maxSessions: number;
+  launchSession: (options: StartSessionOptions) => Promise<SessionLaunchResult>;
+  /** Optional until the Phase 1 repository is installed at server startup. */
+  workItems?: WorkItemService;
+  worktreeIntegrations?: WorktreeIntegrationService;
+  getLiveEditAwareness?: (projectPath: string, workItemIds: readonly string[]) => Record<string, LiveEditAwareness>;
+  /** Canonical registered-path/project ownership seam. */
+  resolveWorkItemProject?: (projectId: string, projectPath: string) => string | null;
 }
 
 /** A command handler takes context + command + the originating socket. */
@@ -154,7 +227,7 @@ export type CommandHandler = (
   ctx: CommandContext,
   cmd: WsCommand,
   ws: WebSocket,
-) => void;
+) => void | Promise<void>;
 
 /** Registry shape: every WsCommandType maps to a handler. */
 export type CommandTable = Readonly<Record<WsCommandType, CommandHandler>>;

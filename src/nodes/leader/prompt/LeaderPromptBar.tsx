@@ -1,5 +1,39 @@
-import { type KeyboardEvent, type RefObject } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { AutoTextarea } from "../../../components/AutoTextarea.tsx";
+import { LeaderSlashMenu } from "./LeaderSlashMenu.tsx";
+import {
+  filterSlashCommands,
+  parseSlashQuery,
+  type SlashCommand,
+} from "./slash-commands.ts";
+
+const LeaderSlashCommandsContext = createContext<SlashCommand[] | undefined>(
+  undefined,
+);
+
+export function LeaderSlashCommandsProvider({
+  commands,
+  children,
+}: {
+  commands: SlashCommand[];
+  children: ReactNode;
+}) {
+  return (
+    <LeaderSlashCommandsContext.Provider value={commands}>
+      {children}
+    </LeaderSlashCommandsContext.Provider>
+  );
+}
 
 /**
  * Shared Leader prompt bar used by both the in-node prompt and the
@@ -21,6 +55,7 @@ export function LeaderPromptBar({
   autoFocus = false,
   textareaRef,
   onTextareaFocus,
+  slashCommands,
 }: {
   input: string;
   onInputChange: (value: string) => void;
@@ -34,18 +69,94 @@ export function LeaderPromptBar({
   autoFocus?: boolean;
   textareaRef?: RefObject<HTMLTextAreaElement | null>;
   onTextareaFocus?: (() => void) | undefined;
+  slashCommands?: SlashCommand[];
 }) {
+  const contextSlashCommands = useContext(LeaderSlashCommandsContext);
+  const availableSlashCommands = slashCommands ?? contextSlashCommands;
+  const [menuDismissed, setMenuDismissed] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const internalTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const resolvedTextareaRef = textareaRef ?? internalTextareaRef;
+  const pendingCaretPosition = useRef<number | null>(null);
+  const query = availableSlashCommands?.length
+    ? parseSlashQuery(input)
+    : null;
+  const matches =
+    query === null || !availableSlashCommands
+      ? []
+      : filterSlashCommands(availableSlashCommands, query);
+  const menuOpen = query !== null && matches.length > 0 && !menuDismissed;
   const isOverlay = variant === "overlay";
+  const overlayMenuSpace = menuOpen ? Math.min(220, matches.length * 52 + 12) : 0;
   const buttonHeight = isOverlay ? 52 : 38;
   const buttonMinWidth = isOverlay ? 124 : 88;
   const buttonIsPrimary = active && !disabled;
+
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [query, matches.length]);
+
+  useLayoutEffect(() => {
+    const caretPosition = pendingCaretPosition.current;
+    if (caretPosition === null) return;
+    const textarea = resolvedTextareaRef.current;
+    if (!textarea) return;
+    textarea.focus();
+    textarea.setSelectionRange(caretPosition, caretPosition);
+    pendingCaretPosition.current = null;
+  }, [input, resolvedTextareaRef]);
+
+  const selectCommand = (command: SlashCommand) => {
+    pendingCaretPosition.current = command.insertText.length;
+    onInputChange(command.insertText);
+    setMenuDismissed(true);
+  };
+
+  const handleInputChange = (value: string) => {
+    onInputChange(value);
+    setMenuDismissed(false);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (!menuOpen) {
+      onKeyDown(event);
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setSelectedIndex((index) => Math.min(matches.length - 1, index + 1));
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setSelectedIndex((index) => Math.max(0, index - 1));
+      return;
+    }
+    if ((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") {
+      event.preventDefault();
+      if (event.key === "Enter") event.stopPropagation();
+      const command = matches[selectedIndex];
+      if (command) selectCommand(command);
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setMenuDismissed(true);
+      return;
+    }
+
+    onKeyDown(event);
+  };
 
   return (
     <div
       data-testid={`leader-prompt-bar-${variant}`}
       data-no-drag
       style={{
-        padding: isOverlay ? "10px" : "8px 10px",
+        padding: isOverlay
+          ? `${10 + overlayMenuSpace}px 10px 10px`
+          : "8px 10px",
         borderTop: isOverlay ? "none" : "1px solid var(--border-default)",
         display: "flex",
         gap: isOverlay ? 8 : 6,
@@ -54,24 +165,35 @@ export function LeaderPromptBar({
         alignItems: "flex-end",
       }}
     >
-      <AutoTextarea
-        value={input}
-        onChange={onInputChange}
-        onKeyDown={onKeyDown}
-        autoFocus={autoFocus}
-        ariaLabel="Leader prompt"
-        testId={`leader-prompt-input-${variant}`}
-        placeholder={placeholder}
-        maxRows={isOverlay ? 10 : 8}
-        {...(onTextareaFocus ? { onFocus: onTextareaFocus } : {})}
-        {...(textareaRef ? { textareaRef } : {})}
-        style={{
-          fontSize: isOverlay ? 15 : 12,
-          lineHeight: isOverlay ? "24px" : "20px",
-          padding: isOverlay ? "12px 14px" : "8px 10px",
-          minHeight: isOverlay ? 52 : undefined,
-        }}
-      />
+      <div style={{ position: "relative", display: "flex", flex: 1 }}>
+        {menuOpen && (
+          <LeaderSlashMenu
+            commands={matches}
+            selectedIndex={selectedIndex}
+            onSelect={selectCommand}
+            onHover={setSelectedIndex}
+            query={query ?? ""}
+          />
+        )}
+        <AutoTextarea
+          value={input}
+          onChange={handleInputChange}
+          onKeyDown={handleKeyDown}
+          autoFocus={autoFocus}
+          ariaLabel="Leader prompt"
+          testId={`leader-prompt-input-${variant}`}
+          placeholder={placeholder}
+          maxRows={isOverlay ? 10 : 8}
+          {...(onTextareaFocus ? { onFocus: onTextareaFocus } : {})}
+          textareaRef={resolvedTextareaRef}
+          style={{
+            fontSize: isOverlay ? 15 : 12,
+            lineHeight: isOverlay ? "24px" : "20px",
+            padding: isOverlay ? "12px 14px" : "8px 10px",
+            minHeight: isOverlay ? 52 : undefined,
+          }}
+        />
+      </div>
       <button
         type="button"
         onClick={onSubmit}

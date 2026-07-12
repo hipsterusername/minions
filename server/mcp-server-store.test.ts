@@ -11,7 +11,9 @@ import {
   deleteMcpServer,
   listMcpServers,
   loadMcpServersByIds,
+  mcpServerSecurityWarnings,
   mcpServersFilePath,
+  resolveClaudeMcpServers,
   saveMcpServer,
 } from "./mcp-server-store.ts";
 import type { McpServerEntry } from "../shared/mcp-servers/types.ts";
@@ -65,7 +67,7 @@ describe("mcp-server-store", () => {
 
   describe("listMcpServers", () => {
     it("returns empty results when the file does not exist", () => {
-      expect(listMcpServers(projectDir)).toEqual({ entries: [], invalid: [] });
+      expect(listMcpServers(projectDir)).toEqual({ entries: [], invalid: [], securityWarnings: [] });
     });
 
     // Note: an "empty JSON array" case was collapsed into the missing-file
@@ -100,14 +102,14 @@ describe("mcp-server-store", () => {
       const p = mcpServersFilePath(projectDir);
       fs.mkdirSync(path.dirname(p), { recursive: true });
       fs.writeFileSync(p, JSON.stringify({ not: "an array" }));
-      expect(listMcpServers(projectDir)).toEqual({ entries: [], invalid: [] });
+      expect(listMcpServers(projectDir)).toEqual({ entries: [], invalid: [], securityWarnings: [] });
     });
 
     it("tolerates invalid JSON without throwing", () => {
       const p = mcpServersFilePath(projectDir);
       fs.mkdirSync(path.dirname(p), { recursive: true });
       fs.writeFileSync(p, "{ not valid json");
-      expect(listMcpServers(projectDir)).toEqual({ entries: [], invalid: [] });
+      expect(listMcpServers(projectDir)).toEqual({ entries: [], invalid: [], securityWarnings: [] });
     });
 
     it("preserves all three transport types", () => {
@@ -177,6 +179,10 @@ describe("mcp-server-store", () => {
       expect(fs.existsSync(mcpServersFilePath(projectDir))).toBe(false);
       saveMcpServer(projectDir, makeStdio());
       expect(fs.existsSync(mcpServersFilePath(projectDir))).toBe(true);
+      if (process.platform !== "win32") {
+        expect(fs.statSync(path.dirname(mcpServersFilePath(projectDir))).mode & 0o777).toBe(0o700);
+        expect(fs.statSync(mcpServersFilePath(projectDir)).mode & 0o777).toBe(0o600);
+      }
     });
 
     it("round-trips a fully-populated entry unchanged", () => {
@@ -206,6 +212,33 @@ describe("mcp-server-store", () => {
     // Note: a "keeps list sorted by id after each save" check was removed
     // per §5.9 — already covered by the listMcpServers describe above
     // (sort is a property of listMcpServers, not of saveMcpServer).
+  });
+
+  describe("resolveClaudeMcpServers", () => {
+    it("converts saved transports and derives explicitly allowed tool names", () => {
+      const result = resolveClaudeMcpServers([
+        makeStdio({ id: "local", toolNames: ["read", "write"], args: ["server.js"] }),
+        makeHttp({ id: "remote", headers: { Authorization: "Bearer secret" } }),
+      ]);
+      expect(result.servers).toEqual({
+        local: { type: "stdio", command: "node", args: ["server.js"] },
+        remote: {
+          type: "http",
+          url: "https://example.com/mcp",
+          headers: { Authorization: "Bearer secret" },
+        },
+      });
+      expect(result.allowedTools).toEqual(["mcp__local__read", "mcp__local__write"]);
+    });
+  });
+
+  describe("security warnings", () => {
+    it("warns about command execution and plaintext sidecar secrets without echoing them", () => {
+      const messages = mcpServerSecurityWarnings(makeStdio({ env: { TOKEN: "super-secret" } }));
+      expect(messages.join(" ")).toMatch(/executes a local command/);
+      expect(messages.join(" ")).toMatch(/stored in the project sidecar/);
+      expect(messages.join(" ")).not.toContain("super-secret");
+    });
   });
 
   // ── deleteMcpServer ─────────────────────────────────────────────────────────

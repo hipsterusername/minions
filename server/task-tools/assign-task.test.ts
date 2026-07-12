@@ -36,6 +36,7 @@ const BASE_MINION_PROMPT = "You are a Minion. Do the work.";
 
 interface CapturedSpawn {
   sessionKey: string;
+  taskId?: string;
   prompt: string;
   cwd: string;
   systemPrompt: string;
@@ -167,7 +168,36 @@ describe("assign_task", () => {
     });
 
     expect(harness.spawns).toHaveLength(1);
+    expect(harness.spawns[0]!.taskId).toBe("t1");
     expect(harness.spawns[0]!.systemPrompt).toBe(BASE_MINION_PROMPT);
+  });
+
+  it("replaces the provisional key with the authoritative allocated run key", async () => {
+    harness.ctx.startMinionSession = async (params) => {
+      harness.spawns.push(params);
+      return { sessionKey: "allocated-child", harness: "echo", model: "m", permissionMode: "auto" };
+    };
+    await callAssign(harness.ctx, {
+      taskId: "allocated-task", title: "Allocated", description: "details", priority: "medium",
+    });
+    expect(harness.ctx.taskState.tasks.get("allocated-task")?.minionSessionKey).toBe("allocated-child");
+    expect(harness.emissions.find((entry) => entry.payload.type === "minion_spawned")?.payload)
+      .toMatchObject({ minionSessionKey: "allocated-child" });
+  });
+
+  it("persists the authoritative allocation before provider launch continues", async () => {
+    harness.ctx.startMinionSession = async (params) => {
+      params.onAllocated?.("durable-child");
+      expect(harness.ctx.taskState.tasks.get("prelaunch")?.minionSessionKey)
+        .toBe("durable-child");
+      expect(params.skillIds).toEqual([]);
+      throw new Error("provider unavailable");
+    };
+    await callAssign(harness.ctx, {
+      taskId: "prelaunch", title: "Prelaunch", description: "details", priority: "high",
+    });
+    expect(harness.ctx.taskState.tasks.get("prelaunch")?.minionSessionKey).toBe("durable-child");
+    expect(harness.ctx.taskState.tasks.get("prelaunch")?.status).toBe("failed");
   });
 
   it("appends compiled skill markdown when skillIds are provided", async () => {

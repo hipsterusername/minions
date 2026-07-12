@@ -1,0 +1,132 @@
+import { z } from "zod/v4";
+import {
+  changeModeSchema,
+  outcomeSchema,
+  workItemLifecycleSchema,
+} from "./work-item-lifecycle.ts";
+import { liveEditAwarenessSchema } from "./live-edit-coordination.ts";
+import { kanbanCardMetadataSchema } from "./work-item-kanban.ts";
+import { worktreeLineageSnapshotSchema } from "./worktree-integration.ts";
+
+export const workItemBindingSurfaceSchema = z.enum(["canvas", "kanban"]);
+export const workItemWaitKindSchema = z.enum(["decision", "file_conflict", "other"]);
+
+export const workItemSnapshotSchema = z.object({
+  id: z.string().min(1),
+  projectId: z.string().min(1),
+  projectPath: z.string().min(1),
+  title: z.string().min(1),
+  lifecycle: workItemLifecycleSchema,
+  waitKind: workItemWaitKindSchema.nullable(),
+  currentRunKey: z.string().min(1).nullable(),
+  iteration: z.number().int().nonnegative(),
+  workflowColumnId: z.string().min(1),
+  workflowRank: z.string().min(1),
+  workflowRevision: z.number().int().nonnegative(),
+  card: kanbanCardMetadataSchema,
+  lastTransitionAt: z.number().int().nonnegative(),
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+});
+
+export const workItemRunSnapshotSchema = z.object({
+  runKey: z.string().min(1),
+  workItemId: z.string().min(1),
+  runKind: z.enum(["primary", "child"]),
+  parentRunKey: z.string().min(1).nullable(),
+  taskId: z.string().min(1).nullable(),
+  runNumber: z.number().int().positive().nullable(),
+  previousRunKey: z.string().min(1).nullable(),
+  providerSessionId: z.string().min(1).nullable(),
+  outcome: outcomeSchema,
+  startedAt: z.number().int().nonnegative(),
+  endedAt: z.number().int().nonnegative().nullable(),
+  finalReport: z.string().min(1).nullable(),
+}).superRefine((run, ctx) => {
+  if (run.runKind === "primary") {
+    if (run.runNumber === null) ctx.addIssue({ code: "custom", message: "primary runs require runNumber" });
+    if (run.parentRunKey !== null || run.taskId !== null) {
+      ctx.addIssue({ code: "custom", message: "primary runs cannot have parentRunKey or taskId" });
+    }
+  } else {
+    if (run.runNumber !== null) ctx.addIssue({ code: "custom", message: "child runs cannot have runNumber" });
+    if (run.parentRunKey === null || run.taskId === null) {
+      ctx.addIssue({ code: "custom", message: "child runs require parentRunKey and taskId" });
+    }
+    if (run.previousRunKey !== null) ctx.addIssue({ code: "custom", message: "child runs cannot have previousRunKey" });
+  }
+  if (run.outcome === "none") {
+    if (run.endedAt !== null || run.finalReport !== null) {
+      ctx.addIssue({ code: "custom", message: "open runs cannot have terminal fields" });
+    }
+  } else {
+    if (run.endedAt === null) ctx.addIssue({ code: "custom", message: "terminal runs require endedAt" });
+    if (run.outcome === "completed" && run.finalReport === null) {
+      ctx.addIssue({ code: "custom", message: "completed runs require finalReport" });
+    }
+  }
+  if (run.endedAt !== null && run.endedAt < run.startedAt) {
+    ctx.addIssue({ code: "custom", message: "endedAt cannot precede startedAt" });
+  }
+});
+
+export const workItemBindingSnapshotSchema = z.object({
+  workItemId: z.string().min(1),
+  surface: workItemBindingSurfaceSchema,
+  bindingId: z.string().min(1),
+  attachedAt: z.number().int().nonnegative(),
+  detachedAt: z.number().int().nonnegative().nullable(),
+});
+
+export const workItemDetailSnapshotSchema = z.object({
+  workItem: workItemSnapshotSchema,
+  bindings: z.array(workItemBindingSnapshotSchema),
+  currentRun: workItemRunSnapshotSchema.nullable(),
+  runs: z.array(workItemRunSnapshotSchema),
+  nextCursor: z.string().nullable(),
+  integration: worktreeLineageSnapshotSchema.nullable().optional(),
+});
+
+export const workItemServiceErrorCodeSchema = z.enum([
+  "not_found", "conflict", "invalid_transition",
+  "idempotency_mismatch", "validation_failed", "internal", "unavailable",
+]);
+
+export const workItemServiceErrorSchema = z.object({
+  code: workItemServiceErrorCodeSchema,
+  message: z.string().min(1),
+  latest: workItemDetailSnapshotSchema.nullable(),
+});
+
+export const workItemListSnapshotSchema = z.object({
+  projectId: z.string().min(1),
+  items: z.array(workItemSnapshotSchema),
+  nextCursor: z.string().nullable(),
+  coordination: z.record(z.string(), liveEditAwarenessSchema).optional(),
+});
+
+export const workItemRunListSnapshotSchema = z.object({
+  workItemId: z.string().min(1),
+  runs: z.array(workItemRunSnapshotSchema),
+  nextCursor: z.string().nullable(),
+});
+
+export const createWorkItemInputSchema = z.object({
+  projectId: z.string().min(1),
+  projectPath: z.string().min(1),
+  title: z.string().min(1),
+  changeMode: changeModeSchema,
+  workflowColumnId: z.string().min(1).optional(),
+  workflowRank: z.string().min(1).optional(),
+});
+
+export type WorkItemSnapshot = z.infer<typeof workItemSnapshotSchema>;
+export type WorkItemRunSnapshot = z.infer<typeof workItemRunSnapshotSchema>;
+export type WorkItemBindingSnapshot = z.infer<typeof workItemBindingSnapshotSchema>;
+export type WorkItemDetailSnapshot = z.infer<typeof workItemDetailSnapshotSchema>;
+export type WorkItemListSnapshot = z.infer<typeof workItemListSnapshotSchema>;
+export type WorkItemRunListSnapshot = z.infer<typeof workItemRunListSnapshotSchema>;
+export type WorkItemBindingSurface = z.infer<typeof workItemBindingSurfaceSchema>;
+export type WorkItemWaitKind = z.infer<typeof workItemWaitKindSchema>;
+export type WorkItemServiceErrorCode = z.infer<typeof workItemServiceErrorCodeSchema>;
+export type WorkItemServiceErrorShape = z.infer<typeof workItemServiceErrorSchema>;

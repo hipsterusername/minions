@@ -4,7 +4,9 @@ import {
   createProject,
   openProject,
   deleteProject,
+  getHarnessReadiness,
   type ProjectSummary,
+  type HarnessReadinessSnapshot,
 } from "./api.ts";
 import { browserLogger } from "./logging.ts";
 
@@ -21,16 +23,30 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
   const [creating, setCreating] = useState(false);
   const [mode, setMode] = useState<"open" | "create">("open");
   const [newName, setNewName] = useState("");
+  const [readiness, setReadiness] = useState<HarnessReadinessSnapshot | null>(null);
+  const [checkingReadiness, setCheckingReadiness] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
+    const [projectsResult, readinessResult] = await Promise.allSettled([
+      listProjects(),
+      getHarnessReadiness(),
+    ]);
+    if (projectsResult.status === "fulfilled") setProjects(projectsResult.value);
+    else log.error("projects_load_failed", { error: projectsResult.reason });
+    if (readinessResult.status === "fulfilled") setReadiness(readinessResult.value);
+    else log.warn("harness_readiness_load_failed", { error: readinessResult.reason });
+    setLoading(false);
+  }, []);
+
+  const retryReadiness = useCallback(async () => {
+    setCheckingReadiness(true);
     try {
-      const data = await listProjects();
-      setProjects(data);
+      setReadiness(await getHarnessReadiness(true));
     } catch (err) {
-      log.error("projects_load_failed", { error: err });
+      log.warn("harness_readiness_retry_failed", { error: err });
     } finally {
-      setLoading(false);
+      setCheckingReadiness(false);
     }
   }, []);
 
@@ -92,6 +108,8 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
     if (days < 7) return `${days}d ago`;
     return d.toLocaleDateString();
   };
+
+  const projectActionDisabled = creating || !folderPath.trim() || readiness?.ready === false;
 
   return (
     <div
@@ -209,16 +227,16 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
             />
             <button
               onClick={() => void (mode === "open" ? handleOpen() : handleCreate())}
-              disabled={creating || !folderPath.trim()}
+              disabled={projectActionDisabled}
               style={{
                 padding: "10px 20px",
                 fontSize: 14,
                 fontWeight: 500,
-                background: folderPath.trim() ? "var(--accent)" : "var(--bg-elevated)",
-                color: folderPath.trim() ? "var(--text-primary)" : "var(--text-muted)",
+                background: projectActionDisabled ? "var(--bg-elevated)" : "var(--accent)",
+                color: projectActionDisabled ? "var(--text-muted)" : "var(--text-primary)",
                 border: "none",
                 borderRadius: 8,
-                cursor: creating || !folderPath.trim() ? "not-allowed" : "pointer",
+                cursor: projectActionDisabled ? "not-allowed" : "pointer",
                 fontFamily: "var(--font-sans)",
                 opacity: creating ? 0.6 : 1,
                 whiteSpace: "nowrap",
@@ -245,6 +263,44 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
                 outline: "none",
               }}
             />
+          )}
+          {readiness?.ready === false && (
+            <div
+              role="alert"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 16,
+                marginTop: 12,
+                padding: "10px 12px",
+                border: "1px solid var(--warning-color)",
+                borderRadius: 8,
+                background: "var(--bg-surface)",
+                color: "var(--text-secondary)",
+                fontSize: 12,
+              }}
+            >
+              <span>Sign in to Claude or Codex to open or create a project.</span>
+              <button
+                type="button"
+                onClick={() => void retryReadiness()}
+                disabled={checkingReadiness}
+                style={{
+                  flexShrink: 0,
+                  padding: "5px 9px",
+                  border: "1px solid var(--border-default)",
+                  borderRadius: 6,
+                  background: "var(--bg-elevated)",
+                  color: "var(--text-primary)",
+                  cursor: checkingReadiness ? "wait" : "pointer",
+                  fontSize: 12,
+                  fontFamily: "var(--font-sans)",
+                }}
+              >
+                {checkingReadiness ? "Checking…" : "Check again"}
+              </button>
+            </div>
           )}
         </div>
 
@@ -286,7 +342,11 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
               fontSize: 14,
             }}
           >
-            No recent projects. Open a folder to get started.
+            <div>No recent projects. Open a folder to get started.</div>
+            <div style={{ marginTop: 12, lineHeight: 1.6 }}>
+              Worktree isolation is optional, merges require approval, and project data lives under <code>.minions/</code>.
+              A safe first task is: “Summarize this repository’s structure without changing files.”
+            </div>
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

@@ -30,7 +30,9 @@ export function mcpServersFilePath(projectPath: string): string {
 }
 
 function ensureDir(filePath: string): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  fs.chmodSync(dir, 0o700);
 }
 
 // ── Read raw array ──────────────────────────────────────────────────────────
@@ -55,7 +57,35 @@ function readRawEntries(projectPath: string): unknown[] {
 function writeRawEntries(projectPath: string, entries: McpServerEntry[]): void {
   const filePath = mcpServersFilePath(projectPath);
   ensureDir(filePath);
-  fs.writeFileSync(filePath, JSON.stringify(entries, null, 2));
+  fs.writeFileSync(filePath, JSON.stringify(entries, null, 2), { mode: 0o600 });
+  fs.chmodSync(filePath, 0o600);
+}
+
+/** Convert persisted entries into the native shape consumed by Claude's SDK.
+ * Keeping this conversion beside storage gives launch producers one explicit,
+ * tested boundary instead of passing sidecar records through accidentally. */
+export function resolveClaudeMcpServers(
+  entries: readonly McpServerEntry[],
+): { servers: Record<string, unknown>; allowedTools: string[] } {
+  const servers: Record<string, unknown> = {};
+  const allowedTools: string[] = [];
+  for (const entry of entries) {
+    const {
+      id,
+      name: _name,
+      description: _description,
+      toolNames,
+      transport,
+      ...config
+    } = entry;
+    servers[id] = transport === "stdio"
+      ? { type: "stdio", ...config }
+      : { type: transport, ...config };
+    for (const toolName of toolNames ?? []) {
+      allowedTools.push(`mcp__${id}__${toolName}`);
+    }
+  }
+  return { servers, allowedTools };
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -64,6 +94,7 @@ function writeRawEntries(projectPath: string, entries: McpServerEntry[]): void {
 export interface ListMcpServersResult {
   entries: McpServerEntry[];
   invalid: { index: number; errors: { path: string; message: string }[] }[];
+  securityWarnings: { id: string; messages: string[] }[];
 }
 
 /**
@@ -87,7 +118,32 @@ export function listMcpServers(projectPath: string): ListMcpServersResult {
 
   // Stable ordering by id.
   entries.sort((a, b) => a.id.localeCompare(b.id));
-  return { entries, invalid };
+  const securityWarnings = entries.flatMap((entry) => {
+    const messages = mcpServerSecurityWarnings(entry);
+    return messages.length > 0 ? [{ id: entry.id, messages }] : [];
+  });
+  return { entries, invalid, securityWarnings };
+}
+
+/** Capability warnings suitable for an API/UI to show before enabling a
+ * project-owned server. Never include secret values in these messages. */
+export function mcpServerSecurityWarnings(entry: McpServerEntry): string[] {
+  const messages: string[] = [];
+  if (entry.transport === "stdio") {
+    messages.push(
+      "This server executes a local command with the Minions process user's privileges.",
+    );
+    if (entry.env && Object.keys(entry.env).length > 0) {
+      messages.push(
+        "Environment values are stored in the project sidecar; do not commit the .minions directory.",
+      );
+    }
+  } else if (entry.headers && Object.keys(entry.headers).length > 0) {
+    messages.push(
+      "HTTP header values are stored in the project sidecar; do not commit the .minions directory.",
+    );
+  }
+  return messages;
 }
 
 /**

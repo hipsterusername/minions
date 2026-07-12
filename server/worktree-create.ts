@@ -1,5 +1,5 @@
 import { mkdir, readdir, rmdir } from "node:fs/promises";
-import { join, basename } from "node:path";
+import { join, basename, resolve, relative } from "node:path";
 
 import type { WorktreeInfo, WorktreeLifecycle } from "./worktree-types.js";
 import { exec, WORKTREE_DIR } from "./worktree-exec.js";
@@ -15,23 +15,51 @@ export async function createWorktree(
 ): Promise<WorktreeInfo> {
   const worktreeBase = join(projectPath, WORKTREE_DIR);
   await mkdir(worktreeBase, { recursive: true });
-
   const worktreePath = join(worktreeBase, leaderSessionKey);
   const branch = `canvas/${leaderSessionKey}`;
+  await exec(["worktree", "add", worktreePath, "-b", branch], projectPath);
+  return { path: worktreePath, branch, leaderSessionKey, createdAt: Date.now(),
+    projectPath, lifecycle: "active" as WorktreeLifecycle };
+}
 
-  await exec(
-    ["worktree", "add", worktreePath, "-b", branch],
-    projectPath,
-  );
+export type PlannedWorktree = Omit<WorktreeInfo, "lifecycle"> & { lifecycle?: WorktreeLifecycle };
 
-  return {
-    path: worktreePath,
-    branch,
-    leaderSessionKey,
-    createdAt: Date.now(),
-    projectPath,
-    lifecycle: "active" as WorktreeLifecycle,
-  };
+export async function resolveWorktreeBase(projectPath: string,
+  targetRef?: string): Promise<{ targetRef: string; baseSha: string }> {
+  const resolvedTarget = targetRef ?? (await exec(
+    ["symbolic-ref", "--quiet", "--short", "HEAD"], projectPath)).stdout.trim();
+  const ref = resolvedTarget.startsWith("refs/") ? resolvedTarget : `refs/heads/${resolvedTarget}`;
+  await exec(["check-ref-format", ref], projectPath);
+  const baseSha = (await exec(["rev-parse", ref], projectPath)).stdout.trim();
+  return { targetRef: ref, baseSha };
+}
+
+/** Provision or idempotently reuse an exact persisted contribution identity. */
+export async function provisionPlannedWorktree(plan: PlannedWorktree,
+  startPoint = "HEAD"): Promise<WorktreeInfo> {
+  const projectPath = resolve(plan.projectPath); const worktreePath = resolve(plan.path);
+  const base = resolve(projectPath, WORKTREE_DIR); const rel = relative(base, worktreePath);
+  if (!rel || rel.startsWith("..") || resolve(base, rel) !== worktreePath) {
+    throw new Error("planned worktree path must be a child of the repository worktree directory");
+  }
+  const branch = plan.branch.startsWith("refs/heads/")
+    ? plan.branch.slice("refs/heads/".length) : plan.branch;
+  await exec(["check-ref-format", "--branch", branch], projectPath);
+  await mkdir(base, { recursive: true });
+  try {
+    const { stdout } = await exec(["rev-parse", "--abbrev-ref", "HEAD"], worktreePath);
+    if (stdout.trim() !== branch) throw new Error(
+      `planned worktree path is already attached to ${stdout.trim()}, expected ${branch}`);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("already attached")) throw error;
+    let branchExists = true;
+    try { await exec(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], projectPath); }
+    catch { branchExists = false; }
+    await exec(branchExists
+      ? ["worktree", "add", worktreePath, branch]
+      : ["worktree", "add", worktreePath, "-b", branch, startPoint], projectPath);
+  }
+  return { ...plan, branch, path: worktreePath, projectPath, lifecycle: "active" };
 }
 
 /**
@@ -40,10 +68,13 @@ export async function createWorktree(
  * @param worktreePath - Absolute path to the worktree directory
  * @param projectPath  - Absolute path to the main project root (avoids fragile `../..` derivation)
  */
-export async function removeWorktree(worktreePath: string, projectPath?: string): Promise<void> {
+export async function removeWorktree(worktreePath: string, projectPath?: string,
+  persistedBranch?: string): Promise<void> {
   // Derive the branch name from the worktree directory name.
   const key = basename(worktreePath);
-  const branch = `canvas/${key}`;
+  const branch = persistedBranch?.startsWith("refs/heads/")
+    ? persistedBranch.slice("refs/heads/".length)
+    : persistedBranch ?? `canvas/${key}`;
 
   // Use explicit projectPath if provided, otherwise fall back to derivation.
   const resolvedProjectPath = projectPath ?? join(worktreePath, "..", "..");

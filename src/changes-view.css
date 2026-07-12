@@ -1,5 +1,15 @@
 /* ── Changes view (top-level worktree review tab) ── */
 
+.integration-controls { display: grid; gap: 8px; padding: 9px; border: 1px solid var(--border-default); border-radius: 7px; background: var(--bg-secondary); font-size: 11px; }
+.integration-controls__status { display: grid; gap: 3px; color: var(--text-secondary); }
+.integration-controls__status strong { color: var(--text-primary); }
+.integration-controls__alert { padding: 7px; border-radius: 5px; background: var(--danger-bg); color: var(--status-error); }
+.integration-controls__gates { display: grid; gap: 3px; margin: 0; padding-left: 18px; color: var(--text-secondary); }
+.integration-controls__gates [data-status="failed"] { color: var(--status-error); }
+.integration-controls__actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.integration-controls__actions button { padding: 5px 9px; border: 1px solid var(--border-default); border-radius: 5px; background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; }
+.integration-controls__actions button:disabled { cursor: not-allowed; opacity: .45; }
+
 .changes-view {
   position: absolute;
   inset: 0;

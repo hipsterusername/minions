@@ -9,10 +9,10 @@ import "./nodes/RenderNode.tsx";
 import "./nodes/ImageNode.tsx";
 import { loadProjectSkillsFromData, saveUserSkill, deleteUserSkill as removeUserSkill, exportUserSkills, importSkillList } from "./skills/user-skills.ts";
 import { parseSkillTransfer } from "./skills/skill-transfer.ts";
-import { Suspense, lazy, useState, useEffect, useReducer, useCallback, useMemo, useRef } from "react";
+import { Suspense, lazy, useState, useEffect, useReducer, useCallback, useMemo, useSyncExternalStore } from "react";
+import { featureFlagStore, FLAG_MCP_SERVERS } from "./feature-flags.ts";
 import { Canvas } from "./Canvas.tsx";
 import { useSocket } from "./use-socket.ts";
-import type { ServerMessage } from "./use-socket.ts";
 import { HarnessListProvider } from "./use-harness-list.tsx";
 import { useAutosave } from "./use-autosave.ts";
 import { ProjectList } from "./ProjectList.tsx";
@@ -32,11 +32,14 @@ import { CONTEXT_EXPLORER_PROMPT } from "./prompts/context-explorer.ts";
 import { getAllNodeTypes } from "./node-registry.ts";
 import { createDefaultNodeData } from "./node-defaults.ts";
 import type { LeaderData } from "./nodes/LeaderNode.tsx";
-import { useKanban } from "./use-kanban.ts";
+import { useServerKanban } from "./use-server-kanban.ts";
 import { KanbanBoard } from "./KanbanBoard.tsx";
 import { ActivityView } from "./ActivityView.tsx";
 import { countReviewableLeaders } from "./ChangesView.tsx";
 import { useSessionActivity } from "./use-session-activity.ts";
+import { mergeCanonicalActivity, useWorkItems } from "./use-work-items.ts";
+import { reconcileLegacyCanvasLeaders } from "./canvas-work-item-reconcile.ts";
+import { projectKanbanWorkItemStatus } from "./kanban-work-item-status.ts";
 import { sessionBelongsToProject, needsAttention } from "./mobile/mobile-selectors.ts";
 import { requestLeaderFullscreen } from "./leader-fullscreen-request.ts";
 import type { KanbanCard } from "./kanban-types.ts";
@@ -186,6 +189,15 @@ function ProjectView({
   const [loaderUnmounted, setLoaderUnmounted] = useState(false);
   const [activeView, setActiveView] = useState<ActiveView>("activity");
 
+  // MCP servers is a still-evolving feature, gated off by default behind
+  // a debug feature flag. When off, the dock panel is not mounted at all.
+  const mcpFlagStore = useMemo(() => featureFlagStore(FLAG_MCP_SERVERS), []);
+  const mcpServersEnabled = useSyncExternalStore(
+    mcpFlagStore.subscribe,
+    mcpFlagStore.getSnapshot,
+    mcpFlagStore.getSnapshot,
+  );
+
   // Skills customization state
   const [skillEditorOpen, setSkillEditorOpen] = useState(false);
   const [editingSkill, setEditingSkill] = useState<SkillTemplate | null>(null);
@@ -254,7 +266,10 @@ function ProjectView({
   /** Compute a non-overlapping position centered in the current viewport. */
   const positionInViewport = useCallback(
     (w: number, h: number) => {
-      const center = viewportCenter(transform);
+      const center = viewportCenter(transform, {
+        width: window.innerWidth,
+        height: Math.max(0, window.innerHeight - PROJECT_HEADER_HEIGHT),
+      });
       return findNonOverlappingPosition(
         center.x - w / 2,
         center.y - h / 2,
@@ -269,7 +284,7 @@ function ProjectView({
   // Spawn a Leader node to explore the project and generate context.md
   const handleSpawnContextExplorer = useCallback(() => {
     const typeDef = getAllNodeTypes().find((t) => t.type === "leader");
-    if (!typeDef) return;
+    if (!typeDef) return undefined;
 
     const node: CanvasNode = {
       id: generateId(),
@@ -315,6 +330,10 @@ function ProjectView({
           noop,
           transform,
           nodes,
+          viewportCenter(transform, {
+            width: window.innerWidth,
+            height: Math.max(0, window.innerHeight - PROJECT_HEADER_HEIGHT),
+          }),
         );
         if (ok) return;
       }
@@ -422,16 +441,27 @@ function ProjectView({
     const x = window.innerWidth / 2 - position.x - width / 2;
     const y = window.innerHeight / 2 - position.y - height / 2;
     setTransform({ x, y, scale: 1 });
-    setFocusNodeId(nodeId);
-    setActiveView("canvas");
+    return nodeId;
   }, [positionInViewport, projectSettings, setTransform]);
 
   // Session activity (Activity view) — the same live stream the mobile Activity
   // screen consumes, scoped to this project by working directory.
   const { mobileSessions } = useSessionActivity(socket.subscribe);
+  const workItemState = useWorkItems({ projectId, connected: socket.connected,
+    subscribe: socket.subscribe, send: socket.send });
+  useEffect(() => {
+    for (const patch of reconcileLegacyCanvasLeaders(
+      nodes, workItemState.orderedItems, mobileSessions,
+    )) dispatch({ type: "UPDATE_NODE_DATA", id: patch.nodeId, data: patch.data });
+  }, [nodes, workItemState.orderedItems, mobileSessions, dispatch]);
+  const canonicalActivitySessions = useMemo(
+    () => mergeCanonicalActivity(mobileSessions, workItemState.orderedItems,
+      workItemState.coordination),
+    [mobileSessions, workItemState.orderedItems, workItemState.coordination],
+  );
   const activitySessions = useMemo(
-    () => mobileSessions.filter((s) => sessionBelongsToProject(s, projectPath)),
-    [mobileSessions, projectPath],
+    () => canonicalActivitySessions.filter((s) => sessionBelongsToProject(s, projectPath)),
+    [canonicalActivitySessions, projectPath],
   );
   useEffect(() => {
     if (activeView !== "activity" || !socket.connected) return;
@@ -465,8 +495,20 @@ function ProjectView({
     [socket],
   );
 
-  // Kanban board state
-  const { board: kanbanBoard, dispatch: kanbanDispatch } = useKanban(projectId);
+  const existingWorkItemsByLeader = useMemo(() => new Map(nodes.flatMap((node) => {
+    if (node.type !== "leader") return [];
+    const data = node.data as LeaderData;
+    const workItemId = data.workItemId
+      ?? workItemState.orderedItems.find((item) => item.currentRunKey === data.sessionKey)?.id
+      ?? mobileSessions.find((session) => session.sessionKey === data.sessionKey)?.workItemId;
+    return workItemId ? [[node.id, workItemId] as const] : [];
+  })), [nodes, workItemState.orderedItems, mobileSessions]);
+  const { board: kanbanBoard, dispatch: kanbanDispatch } = useServerKanban({
+    projectId, projectPath,
+    connected: socket.connected && workItemState.projectId === projectId,
+    items: workItemState.orderedItems, send: socket.send, subscribe: socket.subscribe,
+    existingByLeaderNodeId: existingWorkItemsByLeader,
+  });
 
   // Launch a Leader node pre-tagged with a skill from the SkillsBrowser
   const handleLaunchSkill = useCallback((skillId: string) => {
@@ -623,6 +665,9 @@ function ProjectView({
         position: positionInViewport(typeDef.defaultSize.width, typeDef.defaultSize.height),
         size: { ...typeDef.defaultSize },
         data: {
+          workItemId: card.id,
+          currentRunKey: workItemState.items[card.id]?.currentRunKey ?? null,
+          workItemSnapshot: workItemState.items[card.id] ?? null,
           sessionKey: null,
           status: "disconnected",
           messages: [],
@@ -631,6 +676,7 @@ function ProjectView({
           turns: 0,
           error: null,
           model: card.model ?? "sonnet",
+          ...(card.harness ? { harness: card.harness } : {}),
           permissionMode: card.permissionMode ?? "auto",
           taskPlan: [],
           autoStartPrompt: prompt,
@@ -666,7 +712,7 @@ function ProjectView({
       // Bind the kanban card to this leader node and move to in-progress
       kanbanDispatch({ type: "BIND_LEADER", cardId: card.id, leaderNodeId: nodeId });
     },
-    [kanbanDispatch, nodes, graphDispatch, positionInViewport],
+    [kanbanDispatch, nodes, graphDispatch, positionInViewport, workItemState.items],
   );
 
   const handleCreateKanbanCardFromMarkdown = useCallback(
@@ -707,21 +753,10 @@ function ProjectView({
           ? `Completed in ${leaderData.turns} turns`
           : undefined,
         cost: leaderData?.totalCost,
-        archivedMessages: leaderData?.messages,
-        archivedTaskPlan: leaderData?.taskPlan,
-        archivedTaskName: leaderData?.taskName,
-        archivedTurns: leaderData?.turns,
       });
 
-      // Stop the session and remove the canvas node
-      if (leaderData?.sessionKey) {
-        socket.send({ type: "stop_session", sessionKey: leaderData.sessionKey });
-      }
-      if (card.leaderNodeId) {
-        dispatch({ type: "REMOVE_NODE", id: card.leaderNodeId });
-      }
     },
-    [nodes, kanbanDispatch, socket, dispatch],
+    [nodes, kanbanDispatch],
   );
 
   const handleResumeCard = useCallback(
@@ -739,11 +774,25 @@ function ProjectView({
     [kanbanDispatch],
   );
 
-  // Build leaderStatuses map from canvas nodes for the Kanban board
+  // Project canonical lifecycle state for Kanban without making column placement
+  // or the persisted Canvas compatibility cache authoritative.
   const leaderStatuses = useMemo(() => {
-    const map = new Map<string, { status: string; worktreeStatus: string; cost: number; turns: number }>();
+    const map = new Map<string, { status: string; worktreeStatus: string; cost: number;
+      turns: number; presentationLabel?: string; presentationBadge?: string }>();
+    const leaders = new Map(nodes.filter((node) => node.type === "leader")
+      .map((node) => [node.id, node] as const));
+    for (const item of workItemState.orderedItems) {
+      const awareness = workItemState.coordination[item.id];
+      const leaderId = item.card.leaderNodeId;
+      const leader = leaderId ? leaders.get(leaderId) : undefined;
+      const data = leader?.data as LeaderData | undefined;
+      const projected = projectKanbanWorkItemStatus(item, awareness,
+        data ? { cost: data.totalCost, turns: data.turns } : undefined);
+      map.set(item.id, projected);
+      if (leaderId) map.set(leaderId, projected);
+    }
     for (const node of nodes) {
-      if (node.type === "leader") {
+      if (node.type === "leader" && !map.has(node.id)) {
         const data = node.data as LeaderData;
         map.set(node.id, {
           status: data.status,
@@ -754,276 +803,7 @@ function ProjectView({
       }
     }
     return map;
-  }, [nodes]);
-
-  const nodesRef = useRef(nodes);
-  nodesRef.current = nodes;
-  const kanbanCardsRef = useRef(kanbanBoard.cards);
-  kanbanCardsRef.current = kanbanBoard.cards;
-
-  // Auto-transition kanban cards based on leader node status changes
-  const prevLeaderStatusesRef = useRef<Map<string, { status: string; worktreeStatus: string }>>(new Map());
-  useEffect(() => {
-    const prev = prevLeaderStatusesRef.current;
-    for (const card of kanbanBoard.cards) {
-      if (!card.leaderNodeId) continue;
-      const current = leaderStatuses.get(card.leaderNodeId);
-
-      // Leader node was removed from canvas — remove the kanban card (1:1 sync)
-      if (!current) {
-        if (card.columnId !== "history") {
-          kanbanDispatch({ type: "REMOVE_CARD", cardId: card.id });
-        }
-        continue;
-      }
-
-      const prevStatus = prev.get(card.leaderNodeId);
-
-      // Auto-block when leader is idle/stopped with active worktree (ready for review)
-      if (
-        card.columnId === "in-progress" &&
-        current.worktreeStatus === "active" &&
-        (current.status === "idle" || current.status === "stopped") &&
-        prevStatus?.status !== current.status
-      ) {
-        kanbanDispatch({ type: "HALT_CARD", cardId: card.id, reason: "idle_review", detail: "Agent finished — review changes and approve or resume." });
-      }
-
-      // Auto-block when leader is idle/stopped without a worktree (no-isolation workflow)
-      if (
-        card.columnId === "in-progress" &&
-        current.worktreeStatus === "none" &&
-        (current.status === "idle" || current.status === "stopped") &&
-        prevStatus?.status !== current.status
-      ) {
-        kanbanDispatch({ type: "HALT_CARD", cardId: card.id, reason: "idle_review", detail: "Agent finished — review results and close or resume." });
-      }
-
-      // Auto-block when leader disconnects (session lost after server restart)
-      if (
-        card.columnId === "in-progress" &&
-        current.status === "disconnected" &&
-        prevStatus?.status && prevStatus.status !== "disconnected"
-      ) {
-        kanbanDispatch({ type: "HALT_CARD", cardId: card.id, reason: "session_lost", detail: "Session was lost (server restart or disconnect). Resume to re-launch." });
-      }
-
-      // Auto-block when leader hits an error
-      if (
-        card.columnId === "in-progress" &&
-        current.status === "error" &&
-        prevStatus?.status !== "error"
-      ) {
-        kanbanDispatch({ type: "HALT_CARD", cardId: card.id, reason: "error", detail: "Agent encountered an error. View on canvas for details." });
-      }
-
-      // Auto-resume when user sends a message (status transitions to "running")
-      if (
-        card.columnId === "halted" &&
-        current.status === "running" &&
-        prevStatus?.status !== "running"
-      ) {
-        kanbanDispatch({ type: "RESUME_HALTED_CARD", cardId: card.id });
-      }
-
-      // Auto-move to "history" when worktree is merged/discarded
-      if (
-        card.columnId !== "history" &&
-        (current.worktreeStatus === "merged" || current.worktreeStatus === "discarded") &&
-        prevStatus?.worktreeStatus !== current.worktreeStatus
-      ) {
-        // Archive leader data before completing
-        const leaderNode = card.leaderNodeId ? nodes.find((n) => n.id === card.leaderNodeId) : undefined;
-        const ld = leaderNode?.data as LeaderData | undefined;
-        kanbanDispatch({
-          type: "COMPLETE_CARD",
-          cardId: card.id,
-          summary: `Worktree ${current.worktreeStatus}`,
-          cost: current.cost,
-          archivedMessages: ld?.messages,
-          archivedTaskPlan: ld?.taskPlan,
-          archivedTaskName: ld?.taskName,
-          archivedTurns: ld?.turns,
-        });
-      }
-    }
-
-    // Update prev ref
-    const newPrev = new Map<string, { status: string; worktreeStatus: string }>();
-    for (const [id, s] of leaderStatuses) {
-      newPrev.set(id, { status: s.status, worktreeStatus: s.worktreeStatus });
-    }
-    prevLeaderStatusesRef.current = newPrev;
-  }, [leaderStatuses, kanbanBoard.cards, kanbanDispatch]);
-
-  // ─── Canvas → Kanban reconciliation ──────────────────────
-  // Auto-create kanban cards for any active leader node that doesn't already have one,
-  // so that ALL active agents are represented on the Kanban board.
-  const reconciledLeadersRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    const boundLeaderIds = new Set(
-      kanbanBoard.cards
-        .filter((c) => c.leaderNodeId)
-        .map((c) => c.leaderNodeId!),
-    );
-
-    for (const node of nodes) {
-      if (node.type !== "leader") continue;
-      const data = node.data as LeaderData;
-      // Skip disconnected leaders (not yet active)
-      if (data.status === "disconnected") continue;
-      // Skip if this leader already has a kanban card
-      if (boundLeaderIds.has(node.id)) continue;
-      // Skip if we already reconciled this leader (avoid duplicate creates)
-      if (reconciledLeadersRef.current.has(node.id)) continue;
-
-      reconciledLeadersRef.current.add(node.id);
-
-      // Derive a title from taskName, autoStartPrompt, or fallback
-      let title = "Canvas Agent";
-      if (data.taskName) {
-        title = data.taskName;
-      } else if (data.autoStartPrompt) {
-        // Extract first meaningful line from the prompt
-        const firstLine = data.autoStartPrompt
-          .split("\n")
-          .map((l) => l.replace(/^#+\s*/, "").replace(/^Task:\s*/i, "").trim())
-          .find((l) => l.length > 0);
-        if (firstLine) {
-          title = firstLine.length > 60 ? firstLine.slice(0, 57) + "..." : firstLine;
-        }
-      } else if (data.messages.length > 0) {
-        const firstUser = data.messages.find((m) => m.role === "user");
-        if (firstUser) {
-          const text = typeof firstUser.content === "string"
-            ? firstUser.content
-            : "";
-          if (text) {
-            title = text.length > 60 ? text.slice(0, 57) + "..." : text;
-          }
-        }
-      }
-
-      const card: KanbanCard = {
-        id: `auto-${node.id}`,
-        title,
-        description: "",
-        subtasks: [],
-        context: "",
-        priority: "medium",
-        columnId: "in-progress",
-        createdAt: Date.now(),
-        model: data.model ?? "sonnet",
-        permissionMode: data.permissionMode ?? "auto",
-        worktreeIsolation: data.worktreeIsolation ?? false,
-        skillIds: data.skillIds ?? [],
-        skillValues: data.skillValues ?? {},
-        linkedContextNodeIds: [],
-        leaderNodeId: node.id,
-        autoSynced: true,
-      };
-      kanbanDispatch({ type: "ADD_CARD", card });
-    }
-  }, [nodes, kanbanBoard.cards, kanbanDispatch]);
-
-  // Update auto-synced card titles when the leader's taskName changes
-  useEffect(() => {
-    for (const card of kanbanBoard.cards) {
-      if (!card.autoSynced || !card.leaderNodeId) continue;
-      const node = nodes.find((n) => n.id === card.leaderNodeId);
-      if (!node) continue;
-      const data = node.data as LeaderData;
-      if (data.taskName && data.taskName !== card.title) {
-        kanbanDispatch({
-          type: "UPDATE_CARD",
-          cardId: card.id,
-          data: { title: data.taskName },
-        });
-      }
-    }
-  }, [nodes, kanbanBoard.cards, kanbanDispatch]);
-
-  // Reconcile in-progress kanban cards after page load
-  // Two mechanisms:
-  // 1. Immediate: halt cards whose leader has no sessionKey (session ended before save)
-  //    or whose leader node no longer exists on the canvas.
-  // 2. sync_response: when sync_session returns found:false, halt the card.
-  // 3. Timeout safety net: after 5s, halt any remaining in-progress cards whose
-  //    leader is still "disconnected" (sync_session should have resolved by then).
-  const loadReconciledRef = useRef(false);
-  useEffect(() => {
-    if (!loaded || loadReconciledRef.current) return;
-    loadReconciledRef.current = true;
-
-    // Immediate reconciliation: cards whose leader has no sessionKey or no node
-    for (const card of kanbanCardsRef.current) {
-      if (card.columnId !== "in-progress" || !card.leaderNodeId) continue;
-      const node = nodesRef.current.find((n) => n.id === card.leaderNodeId);
-      if (!node) {
-        // Leader node was removed — halt the card
-        kanbanDispatch({
-          type: "HALT_CARD",
-          cardId: card.id,
-          reason: "session_lost",
-          detail: "Leader node no longer exists. Create a new agent to resume this work.",
-        });
-        continue;
-      }
-      const data = node.data as LeaderData;
-      if (!data.sessionKey) {
-        // Session already ended before save — halt immediately
-        kanbanDispatch({
-          type: "HALT_CARD",
-          cardId: card.id,
-          reason: "session_lost",
-          detail: "Session was lost (server restart or disconnect). Resume to re-launch.",
-        });
-      }
-    }
-
-    // Timeout safety net: after 5s, halt any remaining in-progress cards
-    // whose leader is still disconnected (sync_session should have resolved)
-    const timer = setTimeout(() => {
-      for (const card of kanbanCardsRef.current) {
-        if (card.columnId !== "in-progress" || !card.leaderNodeId) continue;
-        const node = nodesRef.current.find((n) => n.id === card.leaderNodeId);
-        if (!node) continue;
-        const data = node.data as LeaderData;
-        if (data.status === "disconnected") {
-          kanbanDispatch({
-            type: "HALT_CARD",
-            cardId: card.id,
-            reason: "session_lost",
-            detail: "Session was lost (server restart or disconnect). Resume to re-launch.",
-          });
-        }
-      }
-    }, 5000);
-
-    return () => clearTimeout(timer);
-  }, [loaded, kanbanDispatch]);
-
-  // When sync_response returns found: false, halt the corresponding card
-  useEffect(() => {
-    if (!loaded) return;
-    return socket.subscribe((msg: ServerMessage) => {
-      if (msg.type !== "sync_response" || msg.found) return;
-      const leaderNode = nodesRef.current.find(
-        (n) => n.type === "leader" && (n.data as LeaderData).sessionKey === msg.sessionKey,
-      );
-      if (!leaderNode) return;
-      const card = kanbanCardsRef.current.find(
-        (c) => c.columnId === "in-progress" && c.leaderNodeId === leaderNode.id,
-      );
-      if (!card) return;
-      kanbanDispatch({
-        type: "HALT_CARD",
-        cardId: card.id,
-        reason: "session_lost",
-        detail: "Session was lost (server restart or disconnect). Resume to re-launch.",
-      });
-    });
-  }, [loaded, socket, kanbanDispatch]);
+  }, [nodes, workItemState.orderedItems, workItemState.coordination]);
 
   // The loader overlay sits on top of the project until both data is
   // ready AND the one-shot animation + hold are done. Then it fades
@@ -1103,7 +883,14 @@ function ProjectView({
                   onAttachToCanvas={handleAttachSessionToCanvas}
                   socketSend={socket.send}
                   socketSubscribe={socket.subscribe}
+                  projectPath={projectPath}
                   onUpdateNodeData={(nodeId, data) => dispatch({ type: "UPDATE_NODE_DATA", id: nodeId, data })}
+                  workItemRuns={workItemState.runs}
+                  runNextCursor={workItemState.runNextCursor}
+                  onLoadRuns={(workItemId, cursor) => {
+                    const item = workItemState.items[workItemId];
+                    if (item) workItemState.loadRuns(item, cursor);
+                  }}
                 />
               </div>
             ) : activeView === "kanban" ? (
@@ -1139,6 +926,7 @@ function ProjectView({
                     socketSubscribe={socket.subscribe}
                     socketConnected={socket.connected}
                     projectPath={projectPath}
+                    projectId={projectId}
                     projectSettings={projectSettings}
                     onProjectSettingsChange={handleSettingsChange}
                     onCreateKanbanCardFromMarkdown={handleCreateKanbanCardFromMarkdown}
@@ -1168,7 +956,9 @@ function ProjectView({
                     onImportFile={openImportPreview}
                     refreshKey={skillsRefreshKey}
                   />
-                  <McpServersBrowser projectId={projectId} />
+                  {mcpServersEnabled && (
+                    <McpServersBrowser projectId={projectId} />
+                  )}
                   {skillEditorOpen && (
                     <Suspense fallback={<ModalLoadingFallback label="Loading skill editor…" />}>
                       <SkillEditor

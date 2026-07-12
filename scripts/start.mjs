@@ -23,10 +23,12 @@ const root = join(scriptDir, "..");
 const runDir = join(root, ".run");
 const logFile = join(runDir, "minions.log");
 const pidFile = join(runDir, "minions.pid");
+const tailscaleFile = join(runDir, "tailscale.enabled");
 const isWin = process.platform === "win32";
 const vitePort = process.env["VITE_PORT"] ?? "6173";
 
 const action = process.argv[2] ?? "start";
+const tailscale = process.argv.includes("--tailscale");
 
 switch (action) {
   case "stop":
@@ -67,23 +69,25 @@ function rel(p) {
   return relative(process.cwd(), p) || p;
 }
 
-function start() {
+function start(enableTail = tailscale) {
   const existing = readPid();
   if (isRunning(existing)) {
     console.log(`Minions is already running (pid ${existing}).`);
-    enableTailscaleServe();
+    if (enableTail) {
+      enableTailscaleServe();
+      mkdirSync(runDir, { recursive: true });
+      writeFileSync(tailscaleFile, vitePort);
+    }
     console.log(`  logs: ${rel(logFile)}`);
     console.log(`  stop: pnpm stop`);
     return;
   }
 
-  enableTailscaleServe();
-
   mkdirSync(runDir, { recursive: true });
   // Append so a restart keeps history; truncate is the alternative if noisy.
   const out = openSync(logFile, "a");
 
-  const child = spawn("node", [join(scriptDir, "dev.mjs")], {
+  const child = spawn(process.execPath, [join(scriptDir, "run.mjs"), "dev"], {
     cwd: root,
     detached: true,
     stdio: ["ignore", out, out],
@@ -94,9 +98,20 @@ function start() {
   // Detach from the parent's event loop so the terminal returns immediately.
   child.unref();
 
+  if (enableTail) {
+    try {
+      enableTailscaleServe();
+    } catch {
+      try { process.kill(isWin ? child.pid : -child.pid, "SIGTERM"); } catch {}
+      if (existsSync(pidFile)) rmSync(pidFile);
+      process.exit(1);
+    }
+    writeFileSync(tailscaleFile, vitePort);
+  }
+
   console.log(`Minions started in background (pid ${child.pid}).`);
   console.log(`  logs:   ${rel(logFile)}`);
-  console.log(`  status: pnpm start status`);
+  console.log(`  status: pnpm status`);
   console.log(`  stop:   pnpm stop`);
 }
 
@@ -105,7 +120,10 @@ function stop() {
   if (!isRunning(pid)) {
     console.log("Minions is not running.");
     if (existsSync(pidFile)) rmSync(pidFile);
-    disableTailscaleServe();
+    if (existsSync(tailscaleFile)) {
+      disableTailscaleServe();
+      rmSync(tailscaleFile, { force: true });
+    }
     return;
   }
 
@@ -126,11 +144,15 @@ function stop() {
   }
 
   if (existsSync(pidFile)) rmSync(pidFile);
-  disableTailscaleServe();
+  if (existsSync(tailscaleFile)) {
+    disableTailscaleServe();
+    rmSync(tailscaleFile, { force: true });
+  }
   console.log(`Minions stopped (pid ${pid}).`);
 }
 
 function restart() {
+  const restoreTailscale = tailscale || existsSync(tailscaleFile);
   const pid = readPid();
   if (isRunning(pid)) {
     stop();
@@ -141,7 +163,7 @@ function restart() {
   } else if (existsSync(pidFile)) {
     rmSync(pidFile);
   }
-  start();
+  start(restoreTailscale);
 }
 
 function status() {
@@ -149,7 +171,7 @@ function status() {
   if (isRunning(pid)) {
     console.log(`Minions is running (pid ${pid}).`);
     console.log(`  logs: ${rel(logFile)}`);
-    showTailscaleServeStatus();
+    if (existsSync(tailscaleFile)) showTailscaleServeStatus();
   } else {
     console.log("Minions is not running.");
   }
@@ -167,7 +189,7 @@ function enableTailscaleServe() {
   const result = runTailscaleServe(["--port", vitePort]);
   if (result.status !== 0) {
     console.error("\nMinions was not started because Tailscale HTTPS serving could not be configured.");
-    process.exit(result.status ?? 1);
+    throw new Error("Tailscale configuration failed");
   }
 }
 

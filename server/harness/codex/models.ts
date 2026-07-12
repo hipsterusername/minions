@@ -31,6 +31,15 @@ export const CODEX_STATIC_MODELS: ReadonlyArray<{ id: string; label: string }> =
   { id: CODEX_LUNA_MODEL_ID, label: "GPT-5.6 Luna" },
 ];
 
+export const CODEX_MODEL_POLICY = {
+  leader: [CODEX_SOL_MODEL_ID, CODEX_TERRA_MODEL_ID, CODEX_LUNA_MODEL_ID],
+  minion: {
+    mechanical: [CODEX_LUNA_MODEL_ID, CODEX_TERRA_MODEL_ID, CODEX_SOL_MODEL_ID],
+    standard: [CODEX_TERRA_MODEL_ID, CODEX_LUNA_MODEL_ID, CODEX_SOL_MODEL_ID],
+    reasoning: [CODEX_SOL_MODEL_ID, CODEX_TERRA_MODEL_ID, CODEX_LUNA_MODEL_ID],
+  },
+} as const;
+
 /**
  * Short aliases the Codex harness accepts, mapped to canonical model IDs.
  * Lookup is done after lowercasing the input, so aliases are case-insensitive.

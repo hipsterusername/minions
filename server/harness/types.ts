@@ -10,6 +10,8 @@
  */
 
 import type { ZodTypeAny } from "zod/v4";
+import type { RunMutationCoordination } from "../mutation-coordination.ts";
+import type { HarnessReadinessContext, HarnessReadinessProbe } from "./readiness-types.ts";
 
 // Re-export the canonical type so server-internal code that was importing
 // NormalizedEvent from here continues to work unchanged.
@@ -23,6 +25,8 @@ export type { NormalizedEvent } from "../../shared/normalized-event.ts";
  * these values, not on the harness name — see spec §4.
  */
 export interface HarnessCapabilities {
+  /** Whether mutation routes can be blocked before execution in live mode. */
+  mutationInterception: "complete" | "observe_only" | "none";
   /** Whether adaptive/extended thinking blocks are supported. */
   thinking: boolean;
   /** Whether cache_read / cache_creation token accounting is supported. */
@@ -130,6 +134,8 @@ export interface HarnessStartOptions {
    * Harnesses that lack a permission concept ignore the field.
    */
   permissionMode?: NormalizedPermissionMode;
+  /** Present only for canonical live runs on a completely intercepting harness. */
+  mutationCoordination?: RunMutationCoordination;
 }
 
 // ── Normalized tool types ─────────────────────────────────────────────────────
@@ -242,6 +248,9 @@ export interface AgentHarness {
   /** Stable harness name, e.g. "claude", "codex", "pi". */
   readonly name: string;
 
+  /** Whether this harness is user-facing or only a deterministic test fixture. */
+  readonly exposure: "production" | "test";
+
   /** Static feature flags. Branch on these, not on name. */
   readonly capabilities: HarnessCapabilities;
 
@@ -257,6 +266,9 @@ export interface AgentHarness {
    * `server/session-host-run.ts`.
    */
   readonly builtInTools: string[];
+
+  /** Probe the same runtime used by start(), without starting a session. */
+  checkReadiness(context: HarnessReadinessContext): Promise<HarnessReadinessProbe>;
 
   /**
    * Start the session. Returns the event stream the host pulls until the

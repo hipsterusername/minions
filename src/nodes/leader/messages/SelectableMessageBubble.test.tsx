@@ -44,11 +44,11 @@ const msg: LeaderMessage = {
 
 const activeSelection: MessageContextSelection = {
   messageId: "m1",
-  selectedChunkIds: [],
-  anchorChunkId: null,
+  selectedChunkIds: ["paragraph-0"],
+  anchorChunkId: "paragraph-0",
 };
 
-it("copies the full message via the fallback when navigator.clipboard is undefined", async () => {
+it("copies selected chunks via the fallback when navigator.clipboard is undefined", async () => {
   setClipboard(undefined);
   const exec = vi.fn().mockReturnValue(true);
   (document as unknown as { execCommand: unknown }).execCommand = exec;
@@ -63,8 +63,8 @@ it("copies the full message via the fallback when navigator.clipboard is undefin
     />,
   );
 
-  // "Copy full message" is always enabled in selection mode.
-  fireEvent.click(screen.getByRole("button", { name: "Copy full message" }));
+  // The "hello world" message parses to a single selected chunk.
+  fireEvent.click(screen.getByRole("button", { name: "Copy selected chunks" }));
 
   expect(exec).toHaveBeenCalledWith("copy");
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Copied"));

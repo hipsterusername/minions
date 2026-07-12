@@ -1,6 +1,6 @@
 /**
  * Floating panel for browsing, adding, editing, and deleting MCP server
- * entries stored in `.claude-canvas/mcp-servers.json`. Mirrors the design
+ * entries stored in `.minions/mcp-servers.json`. Mirrors the design
  * and placement style of SkillsBrowser.
  */
 

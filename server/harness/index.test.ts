@@ -19,6 +19,7 @@ import { registerHarness, getHarness, registeredHarnessNames } from "./index.ts"
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const STUB_CAPABILITIES: HarnessCapabilities = {
+  mutationInterception: "none",
   thinking: false,
   promptCaching: false,
   mcp: false,
@@ -31,8 +32,12 @@ const STUB_CAPABILITIES: HarnessCapabilities = {
 function makeStubHarness(name: string): AgentHarness {
   return {
     name,
+    exposure: "test",
     capabilities: { ...STUB_CAPABILITIES },
     builtInTools: [],
+    async checkReadiness() {
+      return { state: "ready", runtime: { available: true, source: "sdk_bundled" }, auth: { authenticated: true, source: "unknown" } };
+    },
     start() {
       return {
         events: (async function* () {})(),

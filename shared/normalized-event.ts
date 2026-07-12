@@ -18,6 +18,8 @@
  * See docs/model-agnosticism-spec.md §3.3 and Phase 3.
  */
 
+import { z } from "zod/v4";
+
 // ── Core event union ──────────────────────────────────────────────────────────
 
 export type NormalizedEvent =
@@ -102,3 +104,39 @@ export type NormalizedEvent =
    * a tool. `elapsedSeconds` is the wall-clock time since the tool started.
    */
   | { kind: "tool_progress"; id: string; name: string; elapsedSeconds: number; parentId?: string };
+
+const usageSchema = z.object({
+  kind: z.literal("usage"),
+  source: z.enum(["assistant", "result", "turn_completed"]).optional(),
+  input: z.number().nonnegative(),
+  output: z.number().nonnegative(),
+  cacheRead: z.number().nonnegative().optional(),
+  cacheCreation: z.number().nonnegative().optional(),
+  costUSD: z.number().nonnegative().optional(),
+  messageId: z.string().optional(),
+  turnId: z.string().optional(),
+  sdkSessionId: z.string().optional(),
+});
+
+/** Runtime form of the producer/consumer contract used on persisted and WS data. */
+export const normalizedEventSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("init"), sessionId: z.string(), model: z.string(), permissionMode: z.string().optional(), meta: z.record(z.string(), z.unknown()).optional() }),
+  z.object({ kind: z.literal("text"), text: z.string(), role: z.enum(["assistant", "user"]) }),
+  z.object({ kind: z.literal("thinking"), text: z.string() }),
+  z.object({ kind: z.literal("tool_call"), id: z.string(), name: z.string(), input: z.unknown(), parentId: z.string().optional() }),
+  z.object({ kind: z.literal("tool_result"), callId: z.string(), output: z.unknown(), isError: z.boolean() }),
+  usageSchema,
+  z.object({ kind: z.literal("permission_denial"), tool: z.string(), reason: z.string() }),
+  z.object({ kind: z.literal("rate_limit"), retryAfterMs: z.number().nonnegative(), resetAtMs: z.number().optional(), message: z.string().optional() }),
+  z.object({ kind: z.literal("api_retry"), attempt: z.number().int().positive(), reason: z.string() }),
+  z.object({ kind: z.literal("done"), reason: z.enum(["stop", "abort", "error", "completed"]), error: z.string().optional(), fullError: z.string().optional(), result: z.string().optional(), turns: z.number().int().nonnegative().optional(), costUSD: z.number().nonnegative().optional() }),
+  z.object({ kind: z.literal("agent_spawned"), taskId: z.string(), description: z.string() }),
+  z.object({ kind: z.literal("agent_task_update"), taskId: z.string(), status: z.string(), summary: z.string() }),
+  z.object({ kind: z.literal("text_delta"), text: z.string(), blockIndex: z.number().int().nonnegative(), parentId: z.string().optional() }),
+  z.object({ kind: z.literal("stream_end") }),
+  z.object({ kind: z.literal("tool_progress"), id: z.string(), name: z.string(), elapsedSeconds: z.number().nonnegative(), parentId: z.string().optional() }),
+]);
+
+export function parseNormalizedEvent(value: unknown): NormalizedEvent {
+  return normalizedEventSchema.parse(value) as NormalizedEvent;
+}

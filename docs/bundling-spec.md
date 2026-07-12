@@ -326,9 +326,9 @@ before locking the `files` list — under-listing is the most common cause of
 ### 4.1 `electron-builder.yml`
 
 ```yaml
-appId: com.anthropic.minions
+appId: io.github.hipsterusername.minions
 productName: Minions
-copyright: © Anthropic PBC
+copyright: © Minions contributors
 directories:
   output: release
   buildResources: build

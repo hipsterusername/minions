@@ -32,6 +32,9 @@ import {
   rowToEdge,
 } from "./helpers.ts";
 import type { ProjectRow, NodeRow, EdgeRow } from "./helpers.ts";
+import { getHarnessReadiness } from "../../harness/readiness.ts";
+import type { HarnessReadinessSnapshot } from "../../harness/readiness-types.ts";
+import { resolveNewProjectDefaults } from "../../project-defaults.ts";
 
 interface StateEdge {
   id: string;
@@ -50,7 +53,11 @@ function loadProjectEdges(db: ReturnType<typeof getDb>, projectId: string): Stat
   return edgeRows.map(rowToEdge);
 }
 
-export function mountCoreRoutes(router: Router): void {
+export function mountCoreRoutes(
+  router: Router,
+  deps: { getReadiness?: (opts: { fresh: true }) => Promise<HarnessReadinessSnapshot> } = {},
+): void {
+  const readiness = deps.getReadiness ?? getHarnessReadiness;
   // Restore the path allowlist from durable storage so projects remain
   // accessible across server restarts without requiring re-open.
   rehydrateFromPaths(listRecentProjects().map((p) => p.path));
@@ -70,7 +77,7 @@ export function mountCoreRoutes(router: Router): void {
   });
 
   // Create a new project (creates folder + sidecar)
-  router.post("/", (req: Request, res: Response) => {
+  router.post("/", async (req: Request, res: Response) => {
     const { name, path: projectPath } = req.body as { name?: string; path?: string };
 
     if (!projectPath) {
@@ -84,12 +91,20 @@ export function mountCoreRoutes(router: Router): void {
       return;
     }
 
+    const snapshot = await readiness({ fresh: true });
+    const initialSettings = resolveNewProjectDefaults(snapshot);
+    if (!initialSettings) {
+      unregisterProjectPath(absPath);
+      res.status(409).json({ code: "HARNESS_NOT_READY", readiness: snapshot });
+      return;
+    }
+
     // Create the project directory if it doesn't exist
     if (!fs.existsSync(absPath)) {
       fs.mkdirSync(absPath, { recursive: true });
     }
 
-    const db = initSidecar(absPath);
+    const db = initSidecar(absPath, initialSettings);
     const projectName = name ?? path.basename(absPath);
 
     // Create the project row
@@ -112,7 +127,7 @@ export function mountCoreRoutes(router: Router): void {
   });
 
   // Open an existing folder as a project
-  router.post("/open", (req: Request, res: Response) => {
+  router.post("/open", async (req: Request, res: Response) => {
     const { path: projectPath } = req.body as { path?: string };
 
     if (!projectPath) {
@@ -131,6 +146,15 @@ export function mountCoreRoutes(router: Router): void {
       return;
     }
 
+    if (!hasSidecar(absPath)) {
+      const snapshot = await readiness({ fresh: true });
+      const initialSettings = resolveNewProjectDefaults(snapshot);
+      if (!initialSettings) {
+        res.status(409).json({ code: "HARNESS_NOT_READY", readiness: snapshot });
+        return;
+      }
+      setDbCache(absPath, initSidecar(absPath, initialSettings));
+    }
     const db = getDb(absPath);
     const projectId = ensureProjectRow(db, absPath);
     const projectName = path.basename(absPath);
@@ -153,7 +177,7 @@ export function mountCoreRoutes(router: Router): void {
   });
 
   // Get a project by encoded path
-  router.get("/:encodedPath", (req: Request, res: Response) => {
+  router.get("/:encodedPath", async (req: Request, res: Response) => {
     const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
     if (!projectPath) {
       res.status(403).json({ error: "Project path not registered or outside home directory" });
@@ -165,6 +189,15 @@ export function mountCoreRoutes(router: Router): void {
       return;
     }
 
+    if (!hasSidecar(projectPath)) {
+      const snapshot = await readiness({ fresh: true });
+      const initialSettings = resolveNewProjectDefaults(snapshot);
+      if (!initialSettings) {
+        res.status(409).json({ code: "HARNESS_NOT_READY", readiness: snapshot });
+        return;
+      }
+      setDbCache(projectPath, initSidecar(projectPath, initialSettings));
+    }
     const db = getDb(projectPath);
     const projectId = ensureProjectRow(db, projectPath);
 

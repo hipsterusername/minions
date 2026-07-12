@@ -9,12 +9,29 @@ import { getSessionOrError, sendControlError, sendControlResponse, errToMessage 
 import type { CommandHandler } from "./types.ts";
 import { applyLifecycleEvent, isTerminalTaskStatus } from "../task-lifecycle.ts";
 import { persistTaskState } from "../session-persist.ts";
+import { activeWorktreeOperation, beginWorktreeOperation } from "./worktree-operation-lock.ts";
 
 export const discardWorktree: CommandHandler = (ctx, cmd, ws) => {
   const host = getSessionOrError(ctx.registry, cmd.sessionKey, ws);
   if (!host) return;
+  if (host.workItemId) {
+    sendControlError(ws, "discard_worktree", host.id, cmd.requestId,
+      "Canonical work-item contributions must use discard_worktree_contribution");
+    return;
+  }
   if (!host.worktree) {
     sendControlError(ws, "discard_worktree", cmd.sessionKey!, cmd.requestId, "No worktree for this session");
+    return;
+  }
+  const lease = beginWorktreeOperation(host, "discard_worktree");
+  if (!lease) {
+    sendControlError(
+      ws,
+      "discard_worktree",
+      host.id,
+      cmd.requestId,
+      `Worktree operation "${activeWorktreeOperation(host) ?? "unknown"}" is already in progress`,
+    );
     return;
   }
   const { path: worktreePath, projectPath: worktreeProject } = host.worktree;
@@ -53,5 +70,6 @@ export const discardWorktree: CommandHandler = (ctx, cmd, ws) => {
     })
     .catch((err: unknown) => {
       sendControlError(ws, "discard_worktree", cmd.sessionKey!, cmd.requestId, errToMessage(err));
-    });
+    })
+    .finally(() => lease.release());
 };

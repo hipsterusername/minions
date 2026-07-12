@@ -20,7 +20,6 @@ data/
 *.db-wal
 
 # Minions runtime data
-.claude-canvas/
 .canvas-worktrees/
 .minions/
 .run/
@@ -60,3 +59,5 @@ reports/
 
 # Test coverage output
 coverage/
+playwright-report/
+test-results/

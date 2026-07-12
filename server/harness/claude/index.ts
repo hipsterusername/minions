@@ -13,11 +13,6 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { registerHarness } from "../index.ts";
 
-function resolveClaudePathFromEnv(): string | undefined {
-  const configuredPath = process.env["CLAUDE_CODE_PATH"]?.trim();
-  return configuredPath ? configuredPath : undefined;
-}
-
 function compareNames(a: string, b: string): number {
   return a.localeCompare(b);
 }
@@ -47,10 +42,13 @@ import { isClaudeToolUseDiagnostic, sdkToNormalized } from "./translate.ts";
 import { wrapTools } from "./tools.ts";
 import { resolveModelAlias, supportsAdaptiveThinking } from "./models.ts";
 import { buildClaudePrompt } from "./prompt.ts";
+import { checkClaudeReadiness, resolveClaudeRuntime } from "./runtime.ts";
+import { createClaudeMutationHooks } from "./mutation-hooks.ts";
 
 // ── Capability declaration ────────────────────────────────────────────────────
 
 const CLAUDE_CAPABILITIES: HarnessCapabilities = {
+  mutationInterception: "complete",
   thinking: true,
   promptCaching: true,
   mcp: true,
@@ -118,8 +116,11 @@ interface SdkQueryHandle extends AsyncIterable<SDKMessage> {
 
 class ClaudeHarness implements AgentHarness {
   readonly name = "claude";
+  readonly exposure = "production" as const;
   readonly capabilities = CLAUDE_CAPABILITIES;
   readonly builtInTools: string[] = [...CLAUDE_BUILT_IN_TOOLS];
+
+  checkReadiness = checkClaudeReadiness;
 
   private registeredGroups: Record<string, NormalizedToolDef[]> = {};
 
@@ -173,6 +174,7 @@ class ClaudeHarness implements AgentHarness {
     // in that scenario the "abort" event has already fired and won't fire again.
     opts.abortSignal.addEventListener("abort", () => abortController.abort(), { once: true });
     if (opts.abortSignal.aborted) abortController.abort();
+    opts.mutationCoordination?.setLeaseLostHandler(() => abortController.abort());
 
     // Snapshot registered groups so the generator captures its own copy and
     // concurrent calls cannot step on each other.
@@ -211,10 +213,9 @@ class ClaudeHarness implements AgentHarness {
 
       // Claude executable path override. When unset, let the SDK use its own
       // platform-aware bundled/default discovery instead of repo-side probing.
-      const claudeExecutable = resolveClaudePathFromEnv();
-      if (claudeExecutable) {
-        options["pathToClaudeCodeExecutable"] = claudeExecutable;
-      }
+      const claudeRuntime = resolveClaudeRuntime();
+      if (!claudeRuntime) throw new Error("Claude runtime is unavailable. Reinstall dependencies or set CLAUDE_CODE_PATH.");
+      options["pathToClaudeCodeExecutable"] = claudeRuntime.executable;
 
       // Merge externally-supplied pre-wrapped MCP servers (e.g. from the project
       // sidecar's mcp-servers.json) alongside the tool-group servers.
@@ -226,6 +227,12 @@ class ClaudeHarness implements AgentHarness {
       if (opts.thinking && CLAUDE_CAPABILITIES.thinking && supportsAdaptiveThinking(opts.model)) {
         options["thinking"] = { type: "adaptive", display: opts.thinking.display };
         options["effort"] = opts.thinking.effort;
+      }
+      if (opts.mutationCoordination) {
+        const readOnlyTools = new Set(sortedRecordEntries(registeredGroups).flatMap(
+          ([serverName, defs]) => defs.filter((def) => def.annotations?.readOnlyHint === true)
+            .map((def) => `mcp__${serverName}__${def.name}`)));
+        options["hooks"] = createClaudeMutationHooks(opts.mutationCoordination, readOnlyTools);
       }
 
       const sdkPrompt = await buildClaudePrompt(opts);
@@ -304,6 +311,8 @@ class ClaudeHarness implements AgentHarness {
         }
         yield { kind: "done", reason: "error", error };
         return;
+      } finally {
+        opts.mutationCoordination?.disconnect();
       }
 
       // Ensure `done` is always emitted, even when the loop exits cleanly
@@ -315,6 +324,9 @@ class ClaudeHarness implements AgentHarness {
 
     const control: HarnessRunControl = {
       abort(): void {
+        // Signal the SDK first. The generator's `finally` releases mutation
+        // leases only after the SDK stream has actually unwound, preventing a
+        // queued writer from starting while the aborted tool is still stopping.
         abortController.abort();
       },
       close: () => handle?.close?.() ?? Promise.resolve(),

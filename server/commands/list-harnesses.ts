@@ -13,7 +13,8 @@
  */
 
 import { unicastGlobal } from "../bus.ts";
-import { getHarness, registeredHarnessNames } from "../harness/index.ts";
+import { productionHarnesses } from "../harness/index.ts";
+import { getHarnessReadiness } from "../harness/readiness.ts";
 import type { CommandHandler } from "./types.ts";
 
 /**
@@ -22,13 +23,10 @@ import type { CommandHandler } from "./types.ts";
  * fixture (see server/harness/echo/index.ts); exposing its single "echo"
  * model in the toolbar would mislead users into picking a placeholder.
  */
-const HIDDEN_HARNESSES = new Set<string>(["echo"]);
-
-export const listHarnesses: CommandHandler = (_ctx, _cmd, ws) => {
-  const harnesses = registeredHarnessNames()
-    .filter((name) => !HIDDEN_HARNESSES.has(name))
-    .map((name) => {
-      const h = getHarness(name);
+export const listHarnesses: CommandHandler = async (_ctx, _cmd, ws) => {
+  const snapshot = await getHarnessReadiness();
+  const harnesses = productionHarnesses()
+    .map((h) => {
       const info = h.staticInfo();
       return {
         name: h.name,
@@ -38,6 +36,7 @@ export const listHarnesses: CommandHandler = (_ctx, _cmd, ws) => {
         commands: info.commands,
         agents: info.agents,
         account: info.account,
+        readiness: snapshot.harnesses.find((item) => item.name === h.name),
       };
     });
   unicastGlobal(ws, { type: "harness_list", harnesses });

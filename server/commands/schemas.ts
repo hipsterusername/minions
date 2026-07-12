@@ -20,8 +20,11 @@
  */
 
 import { z } from "zod/v4";
+import { kanbanCardMetadataSchema, kanbanImportCardSchema } from "../../shared/work-item-kanban.ts";
 import type { SessionRole } from "../session-host.ts";
 import type { WsCommand, WsCommandType } from "./types.ts";
+import { changeModeSchema } from "../../shared/work-item-lifecycle.ts";
+import { workItemBindingSurfaceSchema } from "../../shared/work-item-contracts.ts";
 
 // ── Field vocabulary ───────────────────────────────────────
 
@@ -44,6 +47,13 @@ const sessionKey = z.string().optional();
 const requestId = z.string().optional();
 const prompt = z.string().optional();
 const cwd = z.string().optional();
+const requiredId = z.string().min(1);
+const workItemRequestId = z.string().uuid();
+const mutationFields = {
+  requestId: workItemRequestId,
+  expectedLifecycleRevision: z.number().int().nonnegative(),
+  expectedCurrentRunKey: requiredId.nullable(),
+};
 
 /** Mirrors `WsImageAttachment` in `./types.ts`. */
 const attachmentSchema = z.object({
@@ -84,6 +94,7 @@ export const COMMAND_SCHEMAS = {
   // Session lifecycle
   create_session: command("create_session", {
     sessionKey,
+    workItemId: z.string().min(1).optional(),
     cwd,
     role: z.enum(SESSION_ROLES).optional(),
     skillIds: z.array(z.string()).optional(),
@@ -104,6 +115,129 @@ export const COMMAND_SCHEMAS = {
   sync_session: sessionScoped("sync_session"),
   list_sessions: command("list_sessions", {}),
   list_harnesses: command("list_harnesses", {}),
+  acknowledge_session: command("acknowledge_session", {
+    sessionKey: z.string().min(1),
+    expectedLifecycleRevision: z.number().int().nonnegative(),
+  }),
+  dismiss_session: command("dismiss_session", {
+    sessionKey: z.string().min(1),
+    expectedLifecycleRevision: z.number().int().nonnegative(),
+  }),
+  reopen_session: command("reopen_session", {
+    sessionKey: z.string().min(1),
+    expectedLifecycleRevision: z.number().int().nonnegative(),
+  }),
+  // Durable work items
+  create_work_item: command("create_work_item", {
+    requestId: workItemRequestId,
+    projectId: requiredId,
+    projectPath: requiredId,
+    title: requiredId,
+    changeMode: changeModeSchema,
+    workflowColumnId: requiredId.optional(),
+    workflowRank: requiredId.optional(),
+    cardPatch: kanbanCardMetadataSchema.optional(),
+  }),
+  start_work_item_run: command("start_work_item_run", {
+    ...mutationFields, workItemId: requiredId, prompt: z.string().min(1),
+    harness: requiredId.optional(), model: requiredId.optional(),
+    permissionMode: requiredId.optional(), thinkingConfig: z.unknown().optional(),
+    skillIds: z.array(requiredId).optional(), systemPrompt: requiredId.optional(),
+    attachments: z.array(z.unknown()).optional(),
+  }),
+  reply_to_waiting_run: command("reply_to_waiting_run", {
+    ...mutationFields, workItemId: requiredId, runKey: requiredId, prompt: z.string().min(1),
+  }),
+  review_work_item: command("review_work_item", {
+    ...mutationFields, workItemId: requiredId,
+  }),
+  archive_work_item: command("archive_work_item", {
+    ...mutationFields, workItemId: requiredId,
+  }),
+  restore_work_item: command("restore_work_item", {
+    ...mutationFields, workItemId: requiredId,
+  }),
+  attach_work_item_surface: command("attach_work_item_surface", {
+    ...mutationFields, workItemId: requiredId,
+    surface: workItemBindingSurfaceSchema, bindingId: requiredId,
+  }),
+  detach_work_item_surface: command("detach_work_item_surface", {
+    ...mutationFields, workItemId: requiredId,
+    surface: workItemBindingSurfaceSchema, bindingId: requiredId,
+  }),
+  get_work_item: command("get_work_item", {
+    workItemId: requiredId, cursor: requiredId.optional(),
+    limit: z.number().int().positive().max(100).optional(),
+  }),
+  list_work_items: command("list_work_items", {
+    projectId: requiredId, includeArchived: z.boolean().optional(),
+    cursor: requiredId.optional(), limit: z.number().int().positive().max(100).optional(),
+  }),
+  get_work_item_runs: command("get_work_item_runs", {
+    workItemId: requiredId, cursor: requiredId.optional(),
+    limit: z.number().int().positive().max(100).optional(),
+  }),
+  update_work_item_card: command("update_work_item_card", {
+    requestId: workItemRequestId, workItemId: requiredId,
+    expectedWorkflowRevision: z.number().int().nonnegative(), title: requiredId.optional(),
+    cardPatch: kanbanCardMetadataSchema.partial(),
+  }),
+  move_work_item_card: command("move_work_item_card", {
+    requestId: workItemRequestId, workItemId: requiredId,
+    expectedWorkflowRevision: z.number().int().nonnegative(),
+    columnId: requiredId, targetIndex: z.number().int().nonnegative(),
+  }),
+  import_kanban_board: command("import_kanban_board", {
+    requestId: workItemRequestId, projectId: requiredId, projectPath: requiredId,
+    migrationKey: requiredId, cards: z.array(kanbanImportCardSchema).max(5000),
+  }),
+  create_worktree_lineage: command("create_worktree_lineage", {
+    requestId: workItemRequestId, workItemId: requiredId, targetBranch: requiredId.optional(),
+  }),
+  join_worktree_lineage: command("join_worktree_lineage", {
+    requestId: workItemRequestId, workItemId: requiredId, lineageId: requiredId,
+    expectedIntegrationRevision: z.number().int().nonnegative(), actor: requiredId,
+  }),
+  review_worktree_contribution: command("review_worktree_contribution", {
+    requestId: workItemRequestId, contributionId: requiredId,
+    expectedIntegrationRevision: z.number().int().nonnegative(), summary: requiredId,
+    decision: z.enum(["approved", "rejected"]), actor: requiredId,
+  }),
+  enqueue_worktree_contribution: command("enqueue_worktree_contribution", {
+    requestId: workItemRequestId, contributionId: requiredId,
+    expectedIntegrationRevision: z.number().int().nonnegative(),
+  }),
+  retry_worktree_contribution: command("retry_worktree_contribution", {
+    requestId: workItemRequestId, contributionId: requiredId,
+    expectedIntegrationRevision: z.number().int().nonnegative(),
+  }),
+  discard_worktree_contribution: command("discard_worktree_contribution", {
+    requestId: workItemRequestId, contributionId: requiredId,
+    expectedIntegrationRevision: z.number().int().nonnegative(), reason: z.string().optional(),
+  }),
+  review_worktree_lineage: command("review_worktree_lineage", {
+    requestId: workItemRequestId, lineageId: requiredId,
+    expectedIntegrationRevision: z.number().int().nonnegative(), summary: requiredId,
+    decision: z.enum(["approved", "rejected"]), actor: requiredId,
+  }),
+  waive_worktree_integration_gate: command("waive_worktree_integration_gate", {
+    requestId: workItemRequestId, integrationScope: z.enum(["contribution", "lineage"]),
+    contributionId: requiredId.optional(), lineageId: requiredId,
+    expectedIntegrationRevision: z.number().int().nonnegative(), gateId: requiredId,
+    actor: requiredId, reason: requiredId,
+  }),
+  resolve_worktree_conflict: command("resolve_worktree_conflict", {
+    requestId: workItemRequestId, contributionId: requiredId, queueId: requiredId,
+    expectedIntegrationRevision: z.number().int().nonnegative(),
+    strategy: z.enum(["manual", "ours", "theirs"]), actor: requiredId, reason: requiredId,
+  }),
+  promote_worktree_lineage: command("promote_worktree_lineage", {
+    requestId: workItemRequestId, lineageId: requiredId,
+    expectedIntegrationRevision: z.number().int().nonnegative(),
+  }),
+  get_worktree_lineage_status: command("get_worktree_lineage_status", {
+    lineageId: requiredId.optional(), workItemId: requiredId.optional(), runKey: requiredId.optional(),
+  }),
   // Execution control
   interrupt: sessionScoped("interrupt"),
   interrupt_session: sessionScoped("interrupt_session"),

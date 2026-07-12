@@ -26,6 +26,11 @@ import { createBus } from "./bus.ts";
 import { disablePersistence, closePersistDb } from "./session-persist.ts";
 import type { TaskManagerState } from "./task-tools/types.ts";
 import type { HarnessRunControl } from "./harness/types.ts";
+import {
+  beginRun,
+  finishRun,
+  initialSessionReviewLifecycle,
+} from "./session-review-lifecycle.ts";
 import "./agents/index.ts"; // registers agent types
 
 beforeEach(() => disablePersistence());
@@ -73,6 +78,62 @@ function makeLeaderFixture() {
 }
 
 describe("terminateSessionHost — leader child cleanup", () => {
+  it("notifies interrupted exactly once for a genuinely open bound run", async () => {
+    const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+    const host = new SessionHost("run-1", "/tmp");
+    host.workItemId = "work-1";
+    host.status = "running";
+    const runTerminal = vi.fn();
+    const lifecycle = {
+      providerInitialized: vi.fn(), runStarted: vi.fn(), runWaiting: vi.fn(), runTerminal,
+    };
+    await terminateSessionHost(host, { bus, workItemLifecycle: lifecycle }, "stop");
+    await terminateSessionHost(host, { bus, workItemLifecycle: lifecycle }, "abort");
+    expect(runTerminal).toHaveBeenCalledOnce();
+    expect(runTerminal).toHaveBeenCalledWith(expect.objectContaining({ outcome: "interrupted" }));
+  });
+
+  it("cleans volatile live-edit claims after orderly close acknowledges", async () => {
+    const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+    const host = new SessionHost("cleanup-run", "/tmp"); host.status = "running";
+    host.runControl = { abort: vi.fn(), close: vi.fn().mockResolvedValue(undefined) };
+    const cleanupLiveEditRun = vi.fn();
+    await terminateSessionHost(host, { bus, cleanupLiveEditRun }, "close");
+    expect(cleanupLiveEditRun).toHaveBeenCalledWith("cleanup-run");
+  });
+
+  it("does not release volatile claims merely because abort was signalled", async () => {
+    const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+    const host = new SessionHost("ordered-cleanup", "/tmp"); host.status = "running";
+    const order: string[] = [];
+    host.runControl = { abort: () => order.push("abort") } as never;
+    await terminateSessionHost(host, { bus, cleanupLiveEditRun: () => order.push("cleanup") }, "abort");
+    expect(order).toEqual(["abort"]);
+  });
+
+  it.each(["decision", "timer", "blocked"] as const)(
+    "interrupts an idle bound run with open %s evidence",
+    async (kind) => {
+      const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+      const host = new SessionHost(`idle-${kind}`, "/tmp");
+      host.workItemId = "work-1"; host.status = "idle";
+      if (kind === "decision") host.reviewLifecycle = {
+        ...host.reviewLifecycle, reviewState: "decision_needed",
+      };
+      if (kind === "timer") host.taskState = { tasks: new Map(),
+        pendingWait: { durationMs: 10, reason: "wait", scheduledAt: 1, timerId: null }, approval: null };
+      const runTerminal = vi.fn();
+      const taskState = { tasks: new Map(kind === "blocked" ? [["t", {
+        taskId: "t", minionSessionKey: host.id, status: "blocked",
+      } as never]] : []), pendingWait: null, approval: null };
+      await terminateSessionHost(host, { bus,
+        forEachLeaderTaskState: (fn) => fn("leader", taskState),
+        workItemLifecycle: { providerInitialized: vi.fn(), runStarted: vi.fn(),
+          runWaiting: vi.fn(), runTerminal } }, "stop");
+      expect(runTerminal).toHaveBeenCalledWith(expect.objectContaining({ outcome: "interrupted" }));
+    },
+  );
+
   it("aborts running minion children when the leader is removed", () => {
     const { host, deps, taskState, terminations } = makeLeaderFixture();
 
@@ -177,5 +238,67 @@ describe("terminateSessionHost — awaits harness close", () => {
 
     expect(abortFn).toHaveBeenCalledOnce();
     expect(closeFn).not.toHaveBeenCalled();
+  });
+});
+
+describe("terminateSessionHost — terminal review immutability", () => {
+  it.each(["stop", "close", "abort"] as const)(
+    "preserves a completed outcome on %s",
+    async (reason) => {
+      const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+      const host = new SessionHost(`completed-${reason}`, "/tmp");
+      host.reviewLifecycle = finishRun(beginRun(initialSessionReviewLifecycle()), {
+        reason: "completed",
+        report: "Finished successfully",
+        at: 10,
+      });
+      const terminal = host.reviewLifecycle;
+
+      await terminateSessionHost(host, { bus }, reason);
+
+      expect(host.reviewLifecycle).toBe(terminal);
+      expect(host.reviewLifecycle).toMatchObject({
+        reviewState: "completion_to_review",
+        terminalReason: "completed",
+        finalReport: "Finished successfully",
+      });
+    },
+  );
+
+  it.each(["stop", "close", "abort"] as const)(
+    "preserves an error outcome on %s",
+    async (reason) => {
+      const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+      const host = new SessionHost(`error-${reason}`, "/tmp");
+      host.status = "error";
+      host.reviewLifecycle = finishRun(beginRun(initialSessionReviewLifecycle()), {
+        reason: "error",
+        report: "Provider failed",
+        at: 10,
+      });
+      const terminal = host.reviewLifecycle;
+
+      await terminateSessionHost(host, { bus }, reason);
+
+      expect(host.reviewLifecycle).toBe(terminal);
+      expect(host.reviewLifecycle).toMatchObject({
+        reviewState: "error_to_review",
+        terminalReason: "error",
+      });
+    },
+  );
+
+  it("seals a genuinely open run as interrupted", async () => {
+    const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+    const host = new SessionHost("open-run", "/tmp");
+    host.status = "running";
+    host.reviewLifecycle = beginRun(initialSessionReviewLifecycle());
+
+    await terminateSessionHost(host, { bus }, "stop");
+
+    expect(host.reviewLifecycle).toMatchObject({
+      reviewState: "interrupted_to_review",
+      terminalReason: "stop",
+    });
   });
 });

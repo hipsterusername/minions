@@ -139,6 +139,46 @@ describe("ReviewChangesScreen", () => {
     expect(send).toHaveBeenCalledWith({ type: "discard_worktree", sessionKey: "s-1" });
   });
 
+  it("does not expose legacy merge or discard commands for a canonical work item", async () => {
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(requestId);
+    const socket = fakeSocket();
+    const send = vi.fn();
+    render(<ReviewChangesScreen sessionKey="s-1" workItemId="work-1" send={send}
+      subscribe={socket.subscribe} onClose={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Approve & Merge" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Discard" })).toBeNull();
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "approve_changes" }));
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "discard_worktree" }));
+  });
+
+  it("starts a canonical iteration when requesting changes", () => {
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(requestId);
+    const socket = fakeSocket();
+    const send = vi.fn();
+    const onRequestChanges = vi.fn(() => true);
+    render(<ReviewChangesScreen sessionKey="s-1" workItemId="work-1" send={send}
+      subscribe={socket.subscribe} onClose={() => {}} onRequestChanges={onRequestChanges} />);
+    fireEvent.click(screen.getByRole("button", { name: "Request changes" }));
+    fireEvent.change(screen.getByLabelText("Request changes"), { target: { value: "Resolve conflicts." } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(onRequestChanges).toHaveBeenCalledWith("Resolve conflicts.");
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "send_message" }));
+  });
+
+  it("preserves canonical feedback while work item details are loading", () => {
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(requestId);
+    const socket = fakeSocket();
+    const onClose = vi.fn();
+    render(<ReviewChangesScreen sessionKey="s-1" workItemId="work-1" send={vi.fn()}
+      subscribe={socket.subscribe} onClose={onClose} onRequestChanges={() => false} />);
+    fireEvent.click(screen.getByRole("button", { name: "Request changes" }));
+    fireEvent.change(screen.getByLabelText("Request changes"), { target: { value: "Keep this text." } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("feedback has been preserved");
+    expect(screen.getByLabelText("Request changes")).toHaveValue("Keep this text.");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("reveals conflict resolution actions after merge failure", async () => {
     vi.spyOn(crypto, "randomUUID").mockReturnValue(requestId);
     const socket = fakeSocket();

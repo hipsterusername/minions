@@ -173,4 +173,30 @@ describe("createPushNotifier", () => {
 
     expect(store.removed).toEqual(["https://push.example.test/a"]);
   });
+
+  it("prunes 404 endpoints, tolerates send failures, and bounds model text", async () => {
+    const bus = createFakeBus();
+    const store = createStore(subscriptions);
+    const send: PushSend = async (subscription, payload) => {
+      const parsed = JSON.parse(payload.toString()) as { body: string };
+      expect(parsed.body.length).toBe(2000);
+      if (subscription.endpoint.endsWith("/b")) throw new Error("network unavailable");
+      return { statusCode: 404 };
+    };
+    createPushNotifier({
+      bus,
+      store,
+      vapid: { publicKey: "public", privateKey: "private" },
+      send,
+    });
+    bus.emit({
+      topic: "session:s1",
+      type: "session_error",
+      sessionKey: "s1",
+      error: "x".repeat(3000),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(store.removed).toEqual(["https://push.example.test/a"]);
+  });
 });

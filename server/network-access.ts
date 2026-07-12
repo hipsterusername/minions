@@ -39,6 +39,9 @@ export function isAllowedDevHost(host: string): boolean {
 }
 
 export function isAllowedOrigin(origin: string | undefined): boolean {
+  // Auth bootstrap applies its stricter origin-less policy separately. Other
+  // authenticated protocol clients (notably CLI WebSocket clients) may not
+  // send the browser-only Origin header.
   if (!origin) return true;
   try {
     const url = new URL(origin);
@@ -50,6 +53,43 @@ export function isAllowedOrigin(origin: string | undefined): boolean {
 }
 
 export function isAllowedAuthRequestHost(hostname: string, remoteAddress?: string): boolean {
-  if (isAllowedDevHost(hostname)) return true;
-  return remoteAddress ? isAllowedDevHost(remoteAddress) : false;
+  if (!isAllowedDevHost(hostname) || !remoteAddress || !isAllowedDevHost(remoteAddress)) {
+    return false;
+  }
+  // Loopback is a valid peer for both direct localhost traffic and the two
+  // supported local proxies. A direct tailnet peer must address a tailnet
+  // host; otherwise Host: localhost would be a spoofable shortcut.
+  return isLoopbackHost(remoteAddress) || isTailscaleHost(hostname);
+}
+
+/**
+ * Fail-closed policy for the one unauthenticated endpoint.
+ *
+ * A loopback peer may be either the browser itself, Vite, or Tailscale Serve.
+ * Host is never inferred from the peer: both values must independently be in
+ * the supported loopback/tailnet boundary. Browser requests for a tailnet host
+ * must additionally carry an Origin for that same host, preventing a caller
+ * from minting a token with only a spoofed Host header. Origin-less access is
+ * retained solely for local command-line clients talking to a loopback host.
+ */
+export function isAllowedAuthBootstrapRequest(input: {
+  hostname: string;
+  remoteAddress?: string;
+  origin?: string;
+}): boolean {
+  if (!isAllowedAuthRequestHost(input.hostname, input.remoteAddress)) return false;
+
+  if (!input.origin) {
+    return isLoopbackHost(input.hostname) && isLoopbackHost(input.remoteAddress ?? "");
+  }
+
+  try {
+    const url = new URL(input.origin);
+    if ((url.protocol !== "http:" && url.protocol !== "https:") || !isAllowedDevHost(url.hostname)) {
+      return false;
+    }
+    return normalizeAddress(url.hostname) === normalizeAddress(input.hostname);
+  } catch {
+    return false;
+  }
 }

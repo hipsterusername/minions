@@ -9,13 +9,34 @@
 import { z } from "zod/v4";
 import { spanSchema } from "./render-base.ts";
 
+/**
+ * Model-produced dashboards must not be able to make the browser contact an
+ * arbitrary host. Only embedded, non-SVG raster images are accepted. SVG is
+ * deliberately excluded because it can contain active or external content.
+ */
+const SAFE_IMAGE_DATA_URL = /^data:image\/(?:png|jpeg|gif|webp);base64,[a-z\d+/=_-]*$/i;
+
+export function isSafeModelGeneratedImageSrc(src: string): boolean {
+  return SAFE_IMAGE_DATA_URL.test(src);
+}
+
+export function toSafeEmbeddedRasterDataUrl(
+  mime: string | undefined,
+  base64: string,
+): string | null {
+  const candidate = `data:${mime ?? "image/png"};base64,${base64}`;
+  return isSafeModelGeneratedImageSrc(candidate) ? candidate : null;
+}
+
 // ── Image ──────────────────────────────────────────────────
 
 export const imageComponentSchema = z.object({
   id: z.string(),
   type: z.literal("image"),
-  /** file://, https://, or data: URI. Passed through as-is. */
-  src: z.string(),
+  /** Embedded raster data only; external and active URLs are rejected. */
+  src: z.string().refine(isSafeModelGeneratedImageSrc, {
+    message: "image src must be an embedded PNG, JPEG, GIF, or WebP data URL",
+  }),
   alt: z.string(),
   caption: z.string().optional(),
   width: z.number().optional(),

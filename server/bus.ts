@@ -24,6 +24,8 @@ import type { WebSocketServer, WebSocket } from "ws";
 import {
   sessionTopic,
   projectTopic,
+  workItemTopic,
+  lineageTopic,
   GLOBAL_TOPIC,
   type Topic,
   type WsEnvelope,
@@ -33,7 +35,7 @@ import { serverLogger } from "./logging.ts";
 const log = serverLogger.child("bus");
 
 // Re-export topic helpers so consumers only import from `./bus.ts`.
-export { sessionTopic, projectTopic, GLOBAL_TOPIC, type Topic };
+export { sessionTopic, projectTopic, workItemTopic, lineageTopic, GLOBAL_TOPIC, type Topic };
 
 /** A payload is any JSON-serializable object with a `type` discriminator. */
 export type BusPayload = { type: string } & Record<string, unknown>;
@@ -68,6 +70,10 @@ export interface Bus {
 
   /** Send an event scoped to a project. */
   emitToProject(projectId: string, payload: BusPayload): void;
+
+  /** Send an event scoped to a durable work item. */
+  emitToWorkItem?(workItemId: string, payload: BusPayload): void;
+  emitToLineage?(lineageId: string, payload: BusPayload): void;
 
   /** Send an event every connected client should see. */
   emitGlobal(payload: BusPayload): void;
@@ -113,6 +119,18 @@ export function unicastToSession(
   unicast(ws, sessionTopic(sessionKey), payload);
 }
 
+/** Convenience: unicast scoped to a durable work-item topic. */
+export function unicastToWorkItem(
+  ws: WebSocket,
+  workItemId: string,
+  payload: BusPayload,
+): void {
+  unicast(ws, workItemTopic(workItemId), payload);
+}
+export function unicastToLineage(ws: WebSocket, lineageId: string, payload: BusPayload): void {
+  unicast(ws, lineageTopic(lineageId), payload);
+}
+
 /**
  * Convenience: unicast with the global topic. Use for messages that
  * aren't scoped to any specific session (generic errors, session lists).
@@ -148,6 +166,12 @@ export function createBus(wss: WebSocketServer): Bus {
     },
     emitToProject(projectId, payload) {
       fanOut(wrap(projectTopic(projectId), payload));
+    },
+    emitToWorkItem(workItemId, payload) {
+      fanOut(wrap(workItemTopic(workItemId), payload));
+    },
+    emitToLineage(lineageId, payload) {
+      fanOut(wrap(lineageTopic(lineageId), payload));
     },
     emitGlobal(payload) {
       fanOut(wrap(GLOBAL_TOPIC, payload));

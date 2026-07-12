@@ -5,6 +5,9 @@ import { subscribeSocketTopic, type SocketSubscribe } from "../../use-socket.ts"
 import { sessionTopic } from "../../../shared/ws-envelope.ts";
 import type { LeaderData } from "./types.ts";
 import { GateStrip, type MergeGateVerdict } from "./GateStrip.tsx";
+import { randomUuid } from "../../random-id.ts";
+import { useWorktreeIntegration } from "../../use-worktree-integration.ts";
+import { WorktreeIntegrationControls } from "../../WorktreeIntegrationControls.tsx";
 
 /**
  * P4: Compact config footer.
@@ -42,6 +45,9 @@ export function ConfigFooter({
   const [expanded, setExpanded] = useState(false);
   const contextCount = getContextForNode?.().length ?? 0;
   const hasSession = !!data.sessionKey;
+  const integration = useWorktreeIntegration({ workItemId: data.workItemId ?? null,
+    runKey: data.sessionKey ?? null, ...(socketSend ? { send: socketSend } : {}),
+    ...(socketSubscribe ? { subscribe: socketSubscribe } : {}) });
 
   // ── Manual worktree review state ─────────────────────────────────
   const [manualReviewOpen, setManualReviewOpen] = useState(false);
@@ -111,14 +117,19 @@ export function ConfigFooter({
     wtStatus === "failed";
 
   const discardWorktree = useCallback(() => {
-    if (socketSend && data.sessionKey) {
+    if (socketSend && integration.contribution) {
+      socketSend({ type: "discard_worktree_contribution", requestId: randomUuid(),
+        contributionId: integration.contribution.id,
+        expectedIntegrationRevision: integration.contribution.revision,
+        reason: "Discarded from Canvas leader" });
+    } else if (socketSend && data.sessionKey && !data.workItemId) {
       socketSend({ type: "discard_worktree", sessionKey: data.sessionKey });
     }
     setConfirmAction(null);
-  }, [socketSend, data.sessionKey]);
+  }, [data.sessionKey, data.workItemId, integration.contribution, socketSend]);
 
   const mergeManualDiff = useCallback(() => {
-    if (socketSend && data.sessionKey) {
+    if (socketSend && data.sessionKey && !data.workItemId) {
       socketSend({ type: "approve_changes", sessionKey: data.sessionKey });
       onUpdateData({ ...data, worktreeStatus: "merging" });
       setManualReviewOpen(false);
@@ -328,7 +339,7 @@ export function ConfigFooter({
             )}
 
             {/* Worktree actions — always available when worktree is active */}
-            {worktreeIsActive && hasSession && !data.approvalPending && (
+            {!data.workItemId && worktreeIsActive && hasSession && !data.approvalPending && (
               <div style={{ marginTop: 4 }}>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <button
@@ -361,7 +372,7 @@ export function ConfigFooter({
                       fontWeight: manualReviewOpen ? 600 : 400,
                     }}
                   >
-                    {manualReviewOpen ? "▾ Review & Merge" : "▸ Review & Merge"}
+                    {manualReviewOpen ? "▾ Review changes" : "▸ Review changes"}
                   </button>
                   <button
                     onClick={() => {
@@ -548,7 +559,7 @@ export function ConfigFooter({
                         <div
                           style={{ display: "flex", gap: 6, alignItems: "center" }}
                         >
-                          {manualDiff.filesChanged > 0 && (
+                          {manualDiff.filesChanged > 0 && !data.workItemId && (
                             <button
                               onClick={() => {
                                 if (socketSend && data.sessionKey)
@@ -633,7 +644,7 @@ export function ConfigFooter({
         )}
 
         {/* Merge confirmed banner — shown briefly after successful merge */}
-        {data.mergeConfirmed && (
+        {!data.workItemId && data.mergeConfirmed && (
           <div
             onMouseDown={(e) => e.stopPropagation()}
             style={{
@@ -716,7 +727,7 @@ export function ConfigFooter({
         )}
 
         {/* Merge conflict panel — shown when approve & merge fails */}
-        {data.approvalPending && data.mergeConflict && (
+        {!data.workItemId && data.approvalPending && data.mergeConflict && (
           <div
             onMouseDown={(e) => e.stopPropagation()}
             style={{
@@ -796,14 +807,14 @@ export function ConfigFooter({
               Choose a resolution strategy:
             </div>
             <div
-              style={{ display: "flex", gap: 6, flexWrap: "wrap" }}
+              style={{ display: data.workItemId ? "none" : "flex", gap: 6, flexWrap: "wrap" }}
               data-no-drag
             >
               <button
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (socketSend && data.sessionKey) {
+                  if (socketSend && data.sessionKey && !data.workItemId) {
                     socketSend({ type: "force_merge", sessionKey: data.sessionKey });
                     onUpdateData({
                       ...data,
@@ -832,7 +843,7 @@ export function ConfigFooter({
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (socketSend && data.sessionKey) {
+                  if (socketSend && data.sessionKey && !data.workItemId) {
                     socketSend({ type: "theirs_merge", sessionKey: data.sessionKey });
                     onUpdateData({
                       ...data,
@@ -861,7 +872,7 @@ export function ConfigFooter({
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (socketSend && data.sessionKey) {
+                  if (socketSend && data.sessionKey && !data.workItemId) {
                     socketSend({ type: "retry_merge", sessionKey: data.sessionKey });
                     onUpdateData({
                       ...data,
@@ -908,8 +919,15 @@ export function ConfigFooter({
           </div>
         )}
 
+        {data.workItemId && integration.lineage && socketSend ? (
+          <div onMouseDown={(event) => event.stopPropagation()} style={{ margin: "0 6px 6px" }}>
+            <WorktreeIntegrationControls lineage={integration.lineage} workItemId={data.workItemId}
+              runKey={data.sessionKey} send={socketSend} className="integration-controls--canvas" />
+          </div>
+        ) : null}
+
         {/* Approval pending banner — shown when no conflicts (normal flow) */}
-        {data.approvalPending && !data.mergeConflict && (
+        {!data.workItemId && data.approvalPending && !data.mergeConflict && (
           <div
             onMouseDown={(e) => e.stopPropagation()}
             style={{
@@ -978,7 +996,7 @@ export function ConfigFooter({
               </div>
             )}
             <div style={{ display: "flex", gap: 8 }}>
-              <button
+              {!data.workItemId && <button
                 onClick={() => {
                   if (socketSend && data.sessionKey) {
                     socketSend({
@@ -1005,7 +1023,7 @@ export function ConfigFooter({
                 }}
               >
                 ✓ Approve & Merge
-              </button>
+              </button>}
               <button
                 onClick={() => {
                   if (socketSend && data.sessionKey) {

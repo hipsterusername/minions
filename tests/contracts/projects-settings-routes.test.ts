@@ -85,7 +85,7 @@ beforeEach(() => {
   project = fs.mkdtempSync(path.join(parentDir, "p-"));
   registerProjectPath(project);
   encoded = encodePath(project);
-  sidecarDb = initSidecar(project);
+  sidecarDb = initSidecar(project, {});
 });
 
 afterEach(() => {
@@ -140,7 +140,7 @@ describe("settings routes", () => {
   });
 
   it("GET returns the documented defaults when settings.json is absent", async () => {
-    fs.rmSync(path.join(project, ".claude-canvas", "settings.json"), {
+    fs.rmSync(path.join(project, ".minions", "settings.json"), {
       force: true,
     });
     const res = await fetch(`${baseUrl}/${encoded}/settings`);

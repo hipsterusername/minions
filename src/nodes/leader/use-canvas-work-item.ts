@@ -1,0 +1,120 @@
+import { useCallback, useEffect, useRef, type MutableRefObject } from "react";
+import type { WorkItemDetailSnapshot, WorkItemSnapshot } from "../../../shared/work-item-contracts.ts";
+import type { ServerMessage, SocketSubscribeLike } from "../../use-socket.ts";
+import { subscribeSocketTopic } from "../../use-socket.ts";
+import { DEFAULT_THINKING_CONFIG, type ContextItem } from "../../types.ts";
+import type { LeaderData } from "./types.ts";
+import { applyCanvasWorkItemSnapshot, canonicalPromptCommand, detailFromWorkItemResponse } from "./work-item.ts";
+import { reduceLiveEditAwareness } from "../../../shared/live-edit-coordination.ts";
+
+interface Input {
+  nodeId: string; projectId: string | undefined; projectPath: string | undefined;
+  socketSend: ((data: unknown) => void) | undefined; socketSubscribe: SocketSubscribeLike;
+  dataRef: MutableRefObject<LeaderData>;
+  emitUpdate: (data: LeaderData) => void;
+  publishCanvasContext: (sessionKey: string, items: ContextItem[], previous: null) => void;
+}
+
+export function useCanvasWorkItem(input: Input) {
+  const pending = useRef(new Map<string, { resolve: (detail: WorkItemDetailSnapshot) => void;
+    reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>());
+  useEffect(() => () => {
+    for (const request of pending.current.values()) {
+      clearTimeout(request.timer);
+      request.reject(new Error("Canvas work-item requester unmounted"));
+    }
+    pending.current.clear();
+  }, []);
+  const request = useCallback((command: Record<string, unknown>) => {
+    const requestId = command["requestId"] as string;
+    return new Promise<WorkItemDetailSnapshot>((resolve, reject) => {
+      const timer = setTimeout(() => { pending.current.delete(requestId);
+        reject(new Error("Work-item command timed out")); }, 15_000);
+      pending.current.set(requestId, { resolve, reject, timer });
+      input.socketSend?.(command);
+    });
+  }, [input.socketSend]);
+
+  useEffect(() => subscribeSocketTopic(input.socketSubscribe, "*", (raw: unknown) => {
+    const msg = raw as ServerMessage & { requestId?: string | null; success?: boolean;
+      result?: unknown; error?: string; workItem?: WorkItemSnapshot };
+    if (msg.type === "work_item_response" && msg.requestId) {
+      const found = pending.current.get(msg.requestId);
+      if (found) {
+        clearTimeout(found.timer); pending.current.delete(msg.requestId);
+        const detail = detailFromWorkItemResponse(msg);
+        if (detail) found.resolve(detail); else found.reject(new Error(msg.error ?? "Work-item command failed"));
+      }
+    }
+    if (msg.type === "work_item_changed" && msg.workItem
+      && msg.workItem.id === input.dataRef.current.workItemId) {
+      input.emitUpdate(applyCanvasWorkItemSnapshot(input.dataRef.current, msg.workItem));
+    }
+    if (msg.type === "live_edit_coordination"
+      && msg.workItemId === input.dataRef.current.workItemId) input.emitUpdate({
+        ...input.dataRef.current, liveEditAwareness: reduceLiveEditAwareness(
+          input.dataRef.current.liveEditAwareness, msg.event) });
+  }), [input.socketSubscribe, input.emitUpdate, input.dataRef]);
+
+  useEffect(() => {
+    const current = input.dataRef.current;
+    if (!input.socketSend || !current.workItemId || current.workItemSnapshot) return;
+    void request({ type: "get_work_item", requestId: crypto.randomUUID(),
+      workItemId: current.workItemId }).then(async (detail) => {
+      input.emitUpdate(applyCanvasWorkItemSnapshot(input.dataRef.current, detail.workItem));
+      const attached = detail.bindings.some((binding) => binding.surface === "canvas"
+        && binding.bindingId === input.nodeId && binding.detachedAt === null);
+      if (!attached) {
+        const bound = await request({ type: "attach_work_item_surface", requestId: crypto.randomUUID(),
+          workItemId: detail.workItem.id, surface: "canvas", bindingId: input.nodeId,
+          expectedLifecycleRevision: detail.workItem.lifecycle.lifecycleRevision,
+          expectedCurrentRunKey: detail.workItem.currentRunKey });
+        input.emitUpdate(applyCanvasWorkItemSnapshot(input.dataRef.current, bound.workItem));
+      }
+    }).catch(() => { /* legacy binding remains usable */ });
+  }, [input.socketSend, input.dataRef.current.workItemId,
+    input.dataRef.current.workItemSnapshot, input.nodeId, request, input.emitUpdate]);
+
+  const begin = useCallback(async (run: { userPrompt: string; prompt: string;
+    systemPrompt: string; attachments: unknown[]; contextItems: ContextItem[] }) => {
+    if (!input.projectId || !input.projectPath) throw new Error("Canonical project identity is unavailable");
+    let item = input.dataRef.current.workItemSnapshot ?? null;
+    if (!item) {
+      const created = await request({ type: "create_work_item", requestId: crypto.randomUUID(),
+        projectId: input.projectId, projectPath: input.projectPath,
+        title: input.dataRef.current.taskName?.trim() || run.userPrompt.split("\n")[0]!.slice(0, 120),
+        changeMode: input.dataRef.current.worktreeIsolation ? "worktree" : "live",
+        workflowColumnId: "in-progress",
+        cardPatch: { leaderNodeId: input.nodeId, autoSynced: true,
+          model: input.dataRef.current.model,
+          ...(input.dataRef.current.harness ? { harness: input.dataRef.current.harness } : {}),
+          permissionMode: input.dataRef.current.permissionMode,
+          worktreeIsolation: input.dataRef.current.worktreeIsolation ?? false,
+          skillIds: input.dataRef.current.skillIds ?? [],
+          skillValues: input.dataRef.current.skillValues ?? {} } });
+      item = created.workItem;
+      input.emitUpdate(applyCanvasWorkItemSnapshot(input.dataRef.current, item));
+      const attached = await request({ type: "attach_work_item_surface", requestId: crypto.randomUUID(),
+        workItemId: item.id, surface: "canvas", bindingId: input.nodeId,
+        expectedLifecycleRevision: item.lifecycle.lifecycleRevision,
+        expectedCurrentRunKey: item.currentRunKey });
+      item = attached.workItem;
+      input.emitUpdate(applyCanvasWorkItemSnapshot(input.dataRef.current, item));
+    }
+    const started = await request({ ...canonicalPromptCommand(item, run.prompt),
+      systemPrompt: run.systemPrompt, skillIds: input.dataRef.current.skillIds ?? [],
+      model: input.dataRef.current.model,
+      thinkingConfig: input.dataRef.current.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
+      permissionMode: input.dataRef.current.permissionMode,
+      ...(input.dataRef.current.harness ? { harness: input.dataRef.current.harness } : {}),
+      ...(run.attachments.length > 0 ? { attachments: run.attachments } : {}) });
+    const next = applyCanvasWorkItemSnapshot(input.dataRef.current, started.workItem);
+    input.emitUpdate({ ...next, sessionKey: started.workItem.currentRunKey,
+      currentRunKey: started.workItem.currentRunKey });
+    if (started.workItem.currentRunKey) input.publishCanvasContext(
+      started.workItem.currentRunKey, run.contextItems, null);
+    return started;
+  }, [input.projectId, input.projectPath, input.nodeId, input.emitUpdate,
+    input.publishCanvasContext, input.dataRef, request]);
+  return { requestWorkItem: request, beginCanonicalRun: begin };
+}

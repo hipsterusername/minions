@@ -3,6 +3,7 @@ import path from "path";
 import os from "os";
 import { initDb } from "./db.ts";
 import type Database from "better-sqlite3";
+export { resolveMinionModelForHarness } from "./project-model-settings.ts";
 
 const SIDECAR_DIR = ".minions";
 const GLOBAL_DIR = path.join(os.homedir(), ".minions");
@@ -55,19 +56,6 @@ export interface ProjectSettings {
 }
 
 export type ExecutorClass = "mechanical" | "standard" | "reasoning";
-
-const HARNESS_DEFAULT_MINION_MODELS: Record<string, Record<ExecutorClass, string>> = {
-  claude: {
-    mechanical: "claude-haiku-4-5",
-    standard: "claude-sonnet-5",
-    reasoning: "claude-opus-4-8",
-  },
-  codex: {
-    mechanical: "gpt-5.6-luna",
-    standard: "gpt-5.6-terra",
-    reasoning: "gpt-5.6-sol",
-  },
-};
 
 export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
 export type ThinkingDisplay = "summarized" | "omitted";
@@ -141,7 +129,7 @@ export function hasSidecar(projectPath: string): boolean {
  * Creates the directory, SQLite DB, empty context.md, and default settings.
  * Returns the initialized database handle.
  */
-export function initSidecar(projectPath: string): Database.Database {
+export function initSidecar(projectPath: string, initialSettings: ProjectSettings): Database.Database {
   const sidecar = sidecarPath(projectPath);
   fs.mkdirSync(sidecar, { recursive: true });
 
@@ -160,18 +148,7 @@ export function initSidecar(projectPath: string): Database.Database {
   const settingsPath = path.join(sidecar, "settings.json");
   if (!fs.existsSync(settingsPath)) {
     fs.writeFileSync(settingsPath, JSON.stringify({
-      defaultModel: "claude-sonnet-5",
-      defaultLeaderHarness: "codex",
-      defaultLeaderModel: "gpt-5.6-sol",
-      defaultLeaderThinkingConfig: DEFAULT_LEADER_THINKING_CONFIG,
-      defaultMinionHarness: "claude",
-      defaultMinionModel: "claude-sonnet-5",
-      mechanicalMinionModel: "claude-haiku-4-5",
-      reasoningMinionModel: "claude-opus-4-8",
-      defaultMinionThinkingConfig: DEFAULT_MINION_THINKING_CONFIG,
-      defaultPermissionMode: "auto",
-      defaultWorktreeIsolation: false,
-      systemModel: "off",
+      ...initialSettings,
       dashboardLeaderActionNames: defaultDashboardLeaderActionNames(),
       dashboardLeaderActionPrompts: defaultDashboardLeaderActionPrompts(),
     }, null, 2));
@@ -182,7 +159,7 @@ export function initSidecar(projectPath: string): Database.Database {
 
 export function openProjectDb(projectPath: string): Database.Database {
   if (!hasSidecar(projectPath)) {
-    return initSidecar(projectPath);
+    return initSidecar(projectPath, {});
   }
   const dbPath = path.join(sidecarPath(projectPath), "canvas.db");
   return initDb(dbPath);
@@ -216,11 +193,48 @@ export function readSettings(projectPath: string): ProjectSettings {
   }
   try {
     const raw = fs.readFileSync(settingsPath, "utf-8");
-    const parsed = JSON.parse(raw) as ProjectSettings;
+    const parsed = migrateLegacyDashboardActions(JSON.parse(raw) as ProjectSettings);
     return withLeaderThinkingDefaults({ ...defaultProjectSettings(), ...parsed }, parsed);
   } catch {
     return defaultProjectSettings();
   }
+}
+
+const LEGACY_DASHBOARD_ACTIONS = {
+  improve: {
+    name: "Improve",
+    prompt: "Improve the connected dashboard context. Identify the highest-impact changes, then implement or produce the improved result.",
+  },
+  execute: {
+    name: "Execute",
+    prompt: "Execute the work implied by the connected dashboard context. Use the dashboard as source context and carry the task through to completion.",
+  },
+  analyze: {
+    name: "Analyze",
+    prompt: "Analyze the connected dashboard context. Summarize the key findings, risks, and recommended next steps.",
+  },
+} as const;
+
+/** Upgrade only untouched defaults; any customized name or prompt wins. */
+function migrateLegacyDashboardActions(settings: ProjectSettings): ProjectSettings {
+  const names = { ...settings.dashboardLeaderActionNames };
+  const prompts = { ...settings.dashboardLeaderActionPrompts };
+  const nextNames = defaultDashboardLeaderActionNames();
+  const nextPrompts = defaultDashboardLeaderActionPrompts();
+  let changed = false;
+
+  for (const action of Object.keys(LEGACY_DASHBOARD_ACTIONS) as Array<keyof typeof LEGACY_DASHBOARD_ACTIONS>) {
+    const legacy = LEGACY_DASHBOARD_ACTIONS[action];
+    if (names[action] === legacy.name && prompts[action] === legacy.prompt) {
+      names[action] = nextNames[action];
+      prompts[action] = nextPrompts[action];
+      changed = true;
+    }
+  }
+
+  return changed
+    ? { ...settings, dashboardLeaderActionNames: names, dashboardLeaderActionPrompts: prompts }
+    : settings;
 }
 
 function defaultProjectSettings(): ProjectSettings {
@@ -240,54 +254,6 @@ function defaultProjectSettings(): ProjectSettings {
     dashboardLeaderActionNames: defaultDashboardLeaderActionNames(),
     dashboardLeaderActionPrompts: defaultDashboardLeaderActionPrompts(),
   };
-}
-
-export function resolveMinionModelForHarness(
-  settings: ProjectSettings,
-  harnessName: string | undefined,
-  executorClass: ExecutorClass | undefined,
-): string | undefined {
-  const configured =
-    executorClass === "mechanical"
-      ? settings.mechanicalMinionModel
-      : executorClass === "reasoning"
-        ? settings.reasoningMinionModel
-        : settings.defaultMinionModel;
-  const fallback =
-    executorClass
-      ? defaultMinionModelForHarness(harnessName, executorClass)
-      : firstString(settings.defaultMinionModel, settings.defaultModel);
-  return compatibleOrFallback(configured, harnessName, fallback);
-}
-
-function defaultMinionModelForHarness(
-  harnessName: string | undefined,
-  executorClass: ExecutorClass,
-): string | undefined {
-  return HARNESS_DEFAULT_MINION_MODELS[harnessName ?? "claude"]?.[executorClass];
-}
-
-function compatibleOrFallback(
-  model: unknown,
-  harnessName: string | undefined,
-  fallback: string | undefined,
-): string | undefined {
-  if (typeof model !== "string") return fallback;
-  if (isModelCompatibleWithHarness(model, harnessName)) return model;
-  return fallback;
-}
-
-function isModelCompatibleWithHarness(
-  model: string,
-  harnessName: string | undefined,
-): boolean {
-  if (harnessName === "codex") return !model.startsWith("claude-");
-  if (harnessName === "claude" || harnessName == null) return !model.startsWith("gpt-");
-  return true;
-}
-
-function firstString(...values: unknown[]): string | undefined {
-  return values.find((value): value is string => typeof value === "string");
 }
 
 function withLeaderThinkingDefaults(
@@ -315,9 +281,9 @@ function defaultDashboardLeaderActionNames(): NonNullable<
   ProjectSettings["dashboardLeaderActionNames"]
 > {
   return {
-    improve: "Improve",
-    execute: "Execute",
-    analyze: "Analyze",
+    improve: "Fix",
+    execute: "Implement",
+    analyze: "Review",
   };
 }
 
@@ -326,11 +292,11 @@ function defaultDashboardLeaderActionPrompts(): NonNullable<
 > {
   return {
     improve:
-      "Improve the connected dashboard context. Identify the highest-impact changes, then implement or produce the improved result.",
+      "Investigate the problem in the connected context. Trace the root cause, implement the smallest robust fix, add or update regression coverage, and verify the result.",
     execute:
-      "Execute the work implied by the connected dashboard context. Use the dashboard as source context and carry the task through to completion.",
+      "Implement the change described by the connected context. Inspect the relevant code, make a complete production-ready change, run focused tests, and summarize what changed.",
     analyze:
-      "Analyze the connected dashboard context. Summarize the key findings, risks, and recommended next steps.",
+      "Review the connected context and relevant code. Identify concrete bugs, risks, and missing cases, then report prioritized findings with file references. Do not make changes unless asked.",
   };
 }
 

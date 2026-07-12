@@ -181,6 +181,22 @@ export function initDb(dbPath?: string): Database.Database {
       created_at      INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS context_checkpoints (
+      checkpoint_id     TEXT PRIMARY KEY,
+      session_key       TEXT NOT NULL,
+      source_session_id TEXT,
+      target_session_id TEXT,
+      trigger           TEXT NOT NULL,
+      status            TEXT NOT NULL,
+      checkpoint_json   TEXT NOT NULL,
+      created_at        INTEGER NOT NULL,
+      committed_at      INTEGER,
+      failed_at         INTEGER,
+      failure_reason    TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_context_checkpoints_session
+      ON context_checkpoints(session_key, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS system_model_usage (
       object_id       TEXT NOT NULL,
       work_packet_id  TEXT NOT NULL DEFAULT '',
@@ -208,6 +224,16 @@ export function initDb(dbPath?: string): Database.Database {
   // rows back-fill to "claude" via the column DEFAULT — exactly the behaviour
   // before this column existed.
   ensureColumn(db, "sessions", "harness_name", "TEXT NOT NULL DEFAULT 'claude'");
+  ensureColumn(db, "sessions", "review_state", "TEXT NOT NULL DEFAULT 'none'");
+  ensureColumn(db, "sessions", "review_reason", "TEXT");
+  ensureColumn(db, "sessions", "final_report", "TEXT");
+  ensureColumn(db, "sessions", "final_dashboard_revision", "INTEGER");
+  ensureColumn(db, "sessions", "dashboard_revision", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "sessions", "terminal_reason", "TEXT");
+  ensureColumn(db, "sessions", "terminal_at", "INTEGER");
+  ensureColumn(db, "sessions", "acknowledged_at", "INTEGER");
+  ensureColumn(db, "sessions", "dismissed_at", "INTEGER");
+  ensureColumn(db, "sessions", "lifecycle_revision", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "session_usage", "source", "TEXT NOT NULL DEFAULT 'assistant'");
   ensureColumn(db, "session_usage", "message_id", "TEXT");
   ensureColumn(db, "session_usage", "turn_id", "TEXT");

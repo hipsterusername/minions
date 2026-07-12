@@ -36,6 +36,7 @@ export interface UseCanvasKeyboardOpts {
   nodes: CanvasNode[];
   graph: GraphDocument;
   dispatch: Dispatch<CanvasAction>;
+  onRemoveNode?: ((node: CanvasNode) => void) | undefined;
   graphDispatch: Dispatch<GraphAction>;
   /** Ref to the space-bar pressed state, shared with pan handling */
   spaceRef: MutableRefObject<boolean>;
@@ -67,6 +68,7 @@ export function useCanvasKeyboard({
   nodes,
   graph,
   dispatch,
+  onRemoveNode,
   graphDispatch,
   spaceRef,
   isInsideGroup,
@@ -141,6 +143,8 @@ export function useCanvasKeyboard({
         }
 
         for (const id of toDelete) {
+          const node = nodes.find((candidate) => candidate.id === id);
+          if (node) onRemoveNode?.(node);
           dispatch({ type: "REMOVE_NODE", id });
           graphDispatch({ type: "REMOVE_EDGES_FOR_NODE", nodeId: id });
         }
@@ -234,5 +238,5 @@ export function useCanvasKeyboard({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [selectedIds, selectedEdgeId, onDeleteSelectedEdge, nodes, graph, dispatch, graphDispatch, spaceRef, isInsideGroup, setPendingGroupDelete, focusNodes, focusNextActive, copyLeaderSetup, pasteLeaderSetup, createLeaderAtCursor, openCommandPalette, undo, redo]);
+  }, [selectedIds, selectedEdgeId, onDeleteSelectedEdge, nodes, graph, dispatch, onRemoveNode, graphDispatch, spaceRef, isInsideGroup, setPendingGroupDelete, focusNodes, focusNextActive, copyLeaderSetup, pasteLeaderSetup, createLeaderAtCursor, openCommandPalette, undo, redo]);
 }

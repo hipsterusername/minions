@@ -3,7 +3,7 @@
  *
  * `server/project-store.ts` captures `os.homedir()` at module-load time.
  * Any test that imports it (transitively) and exercises `addRecentProject`
- * will land entries in the real `~/.claude-canvas/recent-projects.json`
+ * will land entries in the real `~/.minions/recent-projects.json`
  * unless `node:os` is mocked first.
  *
  * Concretely: contract tests that mount `server/routes/projects/core.ts`

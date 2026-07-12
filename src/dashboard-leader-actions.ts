@@ -6,9 +6,9 @@ export const DASHBOARD_LEADER_ACTIONS: Array<{
   action: DashboardLeaderAction;
   label: string;
 }> = [
-  { action: "improve", label: "Improve" },
-  { action: "execute", label: "Execute" },
-  { action: "analyze", label: "Analyze" },
+  { action: "execute", label: "Implement" },
+  { action: "improve", label: "Fix" },
+  { action: "analyze", label: "Review" },
 ];
 
 export const DEFAULT_DASHBOARD_LEADER_ACTION_PROMPTS: Record<
@@ -16,11 +16,11 @@ export const DEFAULT_DASHBOARD_LEADER_ACTION_PROMPTS: Record<
   string
 > = {
   improve:
-    "Improve the connected dashboard context. Identify the highest-impact changes, then implement or produce the improved result.",
+    "Investigate the problem in the connected context. Trace the root cause, implement the smallest robust fix, add or update regression coverage, and verify the result.",
   execute:
-    "Execute the work implied by the connected dashboard context. Use the dashboard as source context and carry the task through to completion.",
+    "Implement the change described by the connected context. Inspect the relevant code, make a complete production-ready change, run focused tests, and summarize what changed.",
   analyze:
-    "Analyze the connected dashboard context. Summarize the key findings, risks, and recommended next steps.",
+    "Review the connected context and relevant code. Identify concrete bugs, risks, and missing cases, then report prioritized findings with file references. Do not make changes unless asked.",
 };
 
 export const DEFAULT_DASHBOARD_LEADER_ACTION_NAMES: Record<

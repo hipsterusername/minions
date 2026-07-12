@@ -18,6 +18,11 @@ import {
   shouldEvaluateMergeGates,
   shouldWarnForMergeGates,
 } from "../system-model/gates.ts";
+import {
+  activeWorktreeOperation,
+  beginWorktreeOperation,
+  type WorktreeOperationLease,
+} from "./worktree-operation-lock.ts";
 
 /** Options bag accepted by mergeAndCleanup. Inlined here because worktree.ts
  *  does not export the shape directly. */
@@ -144,9 +149,25 @@ export function runMergeFlow(
   cmd: WsCommand,
   options?: MergeOptions,
 ): void {
+  if (host.workItemId) {
+    sendControlError(ws, command, host.id, cmd.requestId,
+      "Canonical work-item contributions must use review and the lineage integration queue");
+    return;
+  }
+  const lease = beginWorktreeOperation(host, command);
+  if (!lease) {
+    sendControlError(
+      ws,
+      command,
+      host.id,
+      cmd.requestId,
+      `Worktree operation "${activeWorktreeOperation(host) ?? "unknown"}" is already in progress`,
+    );
+    return;
+  }
   const gateVerdict = shouldEvaluateMergeGates(host) ? evaluateMergeGates(host) : null;
   if (!gateVerdict) {
-    continueMergeFlow(bus, host, ws, command, cmd, options);
+    continueMergeFlow(bus, host, ws, command, cmd, lease, options);
     return;
   }
 
@@ -160,10 +181,14 @@ export function runMergeFlow(
           timestamp: Date.now(),
         });
       }
-      if (blockForMergeGates(bus, host.id, ws, command, cmd.requestId, verdict)) return;
-      continueMergeFlow(bus, host, ws, command, cmd, options);
+      if (blockForMergeGates(bus, host.id, ws, command, cmd.requestId, verdict)) {
+        lease.release();
+        return;
+      }
+      continueMergeFlow(bus, host, ws, command, cmd, lease, options);
     })
     .catch((err: unknown) => {
+      lease.release();
       sendControlError(ws, command, cmd.sessionKey!, cmd.requestId, errToMessage(err));
     });
 }
@@ -195,6 +220,7 @@ function continueMergeFlow(
   ws: WebSocket,
   command: string,
   cmd: WsCommand,
+  lease: WorktreeOperationLease,
   options?: MergeOptions,
 ): void {
   const projectPath = host.worktree!.projectPath;
@@ -254,5 +280,6 @@ function continueMergeFlow(
     })
     .catch((err: unknown) => {
       sendControlError(ws, command, cmd.sessionKey!, cmd.requestId, errToMessage(err));
-    });
+    })
+    .finally(() => lease.release());
 }

@@ -13,6 +13,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   FEATURE_FLAGS,
+  FLAG_MCP_SERVERS,
+  getFeatureFlag,
 } from "../feature-flags.ts";
 import { FeatureFlagsPanel } from "./FeatureFlagsPanel.tsx";
 
@@ -32,15 +34,28 @@ describe("FeatureFlagsPanel", () => {
     }
   });
 
-  it("renders no flag rows when the registry is empty", () => {
+  it("renders one checkbox per registered flag, reflecting defaults", () => {
     render(<FeatureFlagsPanel onClose={() => {}} onDisableDebug={() => {}} />);
-    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(FEATURE_FLAGS.length);
+    // mcp-servers ships off, so its row starts unchecked.
+    const mcp = screen.getByLabelText(/mcp servers/i);
+    expect(mcp).not.toBeChecked();
   });
 
-  it("Reset to defaults is available with an empty registry", () => {
+  it("toggling a flag writes through to the store", () => {
     render(<FeatureFlagsPanel onClose={() => {}} onDisableDebug={() => {}} />);
+    fireEvent.click(screen.getByLabelText(/mcp servers/i));
+    expect(getFeatureFlag(FLAG_MCP_SERVERS)).toBe(true);
+    expect(screen.getByLabelText(/mcp servers/i)).toBeChecked();
+  });
+
+  it("Reset to defaults restores flags to their defaults", () => {
+    render(<FeatureFlagsPanel onClose={() => {}} onDisableDebug={() => {}} />);
+    fireEvent.click(screen.getByLabelText(/mcp servers/i));
+    expect(getFeatureFlag(FLAG_MCP_SERVERS)).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: /reset to defaults/i }));
-    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+    expect(getFeatureFlag(FLAG_MCP_SERVERS)).toBe(false);
+    expect(screen.getByLabelText(/mcp servers/i)).not.toBeChecked();
   });
 
   it("Disable debug button calls the prop", () => {

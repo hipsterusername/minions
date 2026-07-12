@@ -11,6 +11,7 @@ function harness(overrides: Partial<HarnessInfo> & Pick<HarnessInfo, "name">): H
   return {
     name: overrides.name,
     capabilities: {
+      mutationInterception: overrides.name === "codex" ? "observe_only" : "complete",
       thinking: true,
       promptCaching: true,
       mcp: true,

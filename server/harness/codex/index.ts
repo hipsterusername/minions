@@ -44,7 +44,7 @@ import { getBridgeServer } from "../../mcp-bridge/server.ts";
 import type { McpBridgeRegistration } from "../../mcp-bridge/registry.ts";
 
 import { createCodexTranslator } from "./translate.ts";
-import { missingCodexAuth, resolveCodexCredentials } from "./auth.ts";
+import { resolveCodexCredentials } from "./auth.ts";
 import { mapPermission, mapReasoningEffort } from "./options.ts";
 import { CODEX_STATIC_MODELS, resolveCodexModel } from "./models.ts";
 import {
@@ -54,10 +54,12 @@ import {
 } from "./attachments.ts";
 import { buildCodexEnv } from "./env.ts";
 import { renderBridgeServers, type CodexConfigObject } from "./mcp-config.ts";
+import { checkCodexReadiness, resolveCodexRuntime } from "./runtime.ts";
 
 // ── Capability declaration ────────────────────────────────────────────────────
 
 const CODEX_CAPABILITIES: HarnessCapabilities = {
+  mutationInterception: "observe_only",
   thinking: true,
   promptCaching: true,
   mcp: true,
@@ -76,8 +78,11 @@ const CODEX_BUILT_IN_TOOLS: ReadonlyArray<string> = [];
 
 class CodexHarness implements AgentHarness {
   readonly name = "codex";
+  readonly exposure = "production" as const;
   readonly capabilities = CODEX_CAPABILITIES;
   readonly builtInTools: string[] = [...CODEX_BUILT_IN_TOOLS];
+
+  checkReadiness = checkCodexReadiness;
 
   private registeredGroups: Record<string, NormalizedToolDef[]> = {};
 
@@ -100,7 +105,7 @@ class CodexHarness implements AgentHarness {
 
   async getUsageReport(): Promise<unknown> {
     const creds = resolveCodexCredentials();
-    const authProblem = creds.apiKey ? null : missingCodexAuth();
+    const authenticated = Boolean(creds.apiKey);
     return {
       provider: "openai",
       subscription_type: null,
@@ -109,9 +114,8 @@ class CodexHarness implements AgentHarness {
       unavailable_reason:
         "OpenAI/Codex rate-limit reset windows are not exposed by the installed Codex SDK or CLI.",
       auth: {
-        authenticated: authProblem === null,
-        source: creds.apiKey ? "api_key" : authProblem === null ? "codex_cli" : "missing",
-        error: authProblem ?? undefined,
+        authenticated,
+        source: creds.apiKey ? "api_key" : "unknown",
       },
     };
   }
@@ -145,7 +149,7 @@ class CodexHarness implements AgentHarness {
         // clean terminal error instead of silently mapping `plan` to a
         // half-correct approvalPolicy/sandboxMode pair; the UI also removes
         // that option for Codex sessions.
-        const permissionMapping = mapPermission(opts.permissionMode);
+      const permissionMapping = mapPermission(opts.permissionMode);
         if (permissionMapping.unsupported) {
           yield {
             kind: "done",
@@ -157,16 +161,27 @@ class CodexHarness implements AgentHarness {
           return;
         }
 
+        if (Object.keys(opts.externalMcpServers ?? {}).length > 0) {
+          yield {
+            kind: "done",
+            reason: "error",
+            error:
+              "External project MCP servers are not supported by harness \"codex\" yet. " +
+              "Use the Claude harness or remove the external MCP configuration.",
+          };
+          return;
+        }
+
         // Fail fast when Codex has no credentials. Without this preflight
         // the CLI spawn fails or hangs while emitting zero events, and the
         // session sits silent at 0 turns until a task timeout aborts it
         // (observed: every minion spawn dying with "Session abort.").
-        const creds = resolveCodexCredentials();
-        const authProblem = creds.apiKey ? null : missingCodexAuth();
-        if (authProblem) {
-          yield { kind: "done", reason: "error", error: authProblem };
+        const runtime = resolveCodexRuntime();
+        if (!runtime) {
+          yield { kind: "done", reason: "error", error: "Codex runtime is unavailable. Reinstall dependencies or set CODEX_PATH." };
           return;
         }
+        const creds = resolveCodexCredentials();
 
         // Materialize image attachments to disk if any.
         if (opts.attachments && opts.attachments.length > 0) {
@@ -194,17 +209,7 @@ class CodexHarness implements AgentHarness {
           bridgeEnv = rendered.env;
         }
 
-        // External user-configured MCP servers (`opts.externalMcpServers`) are
-        // intentionally NOT rendered here. Phase D wires Minions-internal tool
-        // groups through the bridge only; external MCP renderers per-harness
-        // (Codex stdio + streamable HTTP shape) are deferred to a follow-up
-        // because external MCP server definitions are already resolved before
-        // is still Claude SDK-shaped. See docs/codex-harness-spec.md §"External
-        // MCP" — silently passing the Claude config object into Codex would
-        // either be dropped by the SDK or render incorrectly, so we drop it on
-        // the floor here until the normalization lands. Capabilities and
-        // staticInfo do not advertise external MCP support.
-        const codexOpts: CodexOptions = { ...creds };
+        const codexOpts: CodexOptions = { ...creds, codexPathOverride: runtime.executable };
         const env = buildCodexEnv(bridgeEnv, opts.cwd);
         if (env) codexOpts.env = env;
         if (Object.keys(bridgeConfig).length > 0) {

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { SessionChatScreen } from "./SessionChatScreen.tsx";
@@ -188,13 +188,16 @@ describe("SessionChatScreen", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /plan/i }));
 
-    expect(screen.getByRole("region", { name: "Active minions" })).toBeInTheDocument();
+    const dashboard = screen.getByRole("region", { name: "Active minions" });
+    expect(dashboard).toBeInTheDocument();
     expect(screen.getByText("Minion dashboard")).toBeInTheDocument();
     expect(screen.getByText("2 active")).toBeInTheDocument();
-    expect(screen.getByText("Repair API test coverage")).toBeInTheDocument();
-    expect(screen.getByText("Polish dashboard layout")).toBeInTheDocument();
-    expect(screen.getByText("1 running")).toBeInTheDocument();
-    expect(screen.getByText("1 blocked")).toBeInTheDocument();
+    expect(within(dashboard).getByText("Repair API test coverage")).toBeInTheDocument();
+    expect(within(dashboard).getByText("Polish dashboard layout")).toBeInTheDocument();
+    // Counts scoped to the dashboard: the persistent activity strip renders the
+    // same summary text, so query within the region to avoid the collision.
+    expect(within(dashboard).getByText("1 running")).toBeInTheDocument();
+    expect(within(dashboard).getByText("1 blocked")).toBeInTheDocument();
   });
 
   it("progressively discloses task plan details", () => {
@@ -313,6 +316,75 @@ describe("SessionChatScreen", () => {
     expect(screen.getByRole("region", { name: "Up Next" })).toHaveTextContent("Update release notes");
     expect(screen.getByRole("region", { name: "Finished" })).toHaveTextContent("Run lint");
     expect(screen.queryByText("Minion dashboard")).not.toBeInTheDocument();
+  });
+
+  it("keeps a live leader activity strip visible across tabs", () => {
+    render(
+      <SessionChatScreen
+        sessionKey="leader-1"
+        session={leaderSession({
+          status: "running",
+          lastActivity: "Editing SessionChatScreen.tsx",
+          activeMinions: [
+            { taskId: "api-tests", title: "Repair API test coverage", status: "running", sessionKey: "minion-1" },
+            { taskId: "design", title: "Polish layout", status: "blocked", sessionKey: "minion-2" },
+          ],
+        })}
+        subscribe={fakeSubscribe()}
+        send={vi.fn()}
+        onBack={() => {}}
+      />,
+    );
+
+    // Visible on the default chat tab...
+    const strip = screen.getByRole("region", { name: "Leader activity" });
+    expect(within(strip).getByText("running")).toBeInTheDocument();
+    expect(within(strip).getByText("1 running")).toBeInTheDocument();
+    expect(within(strip).getByText("1 blocked")).toBeInTheDocument();
+    expect(within(strip).getByText("Editing SessionChatScreen.tsx")).toBeInTheDocument();
+
+    // ...and still visible after switching to the Plan tab.
+    fireEvent.click(screen.getByRole("button", { name: /plan/i }));
+    expect(screen.getByRole("region", { name: "Leader activity" })).toBeInTheDocument();
+  });
+
+  it("marks the plan tab badge live when work is running", () => {
+    render(
+      <SessionChatScreen
+        sessionKey="leader-1"
+        session={leaderSession({
+          activeMinions: [
+            { taskId: "api-tests", title: "Repair API test coverage", status: "running", sessionKey: "minion-1" },
+          ],
+        })}
+        subscribe={fakeSubscribe()}
+        send={vi.fn()}
+        onBack={() => {}}
+      />,
+    );
+
+    const planTab = screen.getByRole("button", { name: /plan/i });
+    expect(planTab.querySelector('span[data-live="true"]')).not.toBeNull();
+  });
+
+  it("does not mark the plan tab badge live when nothing is running", () => {
+    render(
+      <SessionChatScreen
+        sessionKey="leader-1"
+        session={leaderSession({
+          activeMinions: [
+            { taskId: "docs", title: "Write docs", status: "planned", sessionKey: "minion-1" },
+          ],
+        })}
+        subscribe={fakeSubscribe()}
+        send={vi.fn()}
+        onBack={() => {}}
+      />,
+    );
+
+    const planTab = screen.getByRole("button", { name: /plan/i });
+    expect(planTab.querySelector("span")).not.toBeNull();
+    expect(planTab.querySelector('span[data-live="true"]')).toBeNull();
   });
 
   it("switches to the dashboard tab and renders the session render state", () => {

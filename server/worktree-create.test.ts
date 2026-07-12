@@ -117,6 +117,15 @@ describe("createWorktree", () => {
 });
 
 describe("removeWorktree", () => {
+  it("deletes the exact persisted branch instead of deriving it from the path", async () => {
+    const wtPath = join(projectDir, ".canvas-worktrees", "opaque-id");
+    mkdirSync(wtPath, { recursive: true });
+    queue.push({ expected: null, result: { ok: true } });
+    queue.push({ expected: null, result: { ok: true } });
+    await removeWorktree(wtPath, projectDir, "refs/heads/contributions/reviewed");
+    expect(observed[1]!.args).toEqual(["branch", "-D", "contributions/reviewed"]);
+  });
+
   it("issues both `git worktree remove --force` and `git branch -D`", async () => {
     const wtPath = join(projectDir, ".canvas-worktrees", "leader-1");
     mkdirSync(wtPath, { recursive: true });

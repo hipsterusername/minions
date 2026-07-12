@@ -11,6 +11,7 @@ import { LaunchScreen } from "./LaunchScreen.tsx";
 const CLAUDE_HARNESS: HarnessListEntry = {
   name: "claude",
   capabilities: {
+    mutationInterception: "complete",
     thinking: true,
     promptCaching: true,
     mcp: true,
@@ -32,6 +33,7 @@ const CLAUDE_HARNESS: HarnessListEntry = {
 const CODEX_HARNESS: HarnessListEntry = {
   name: "codex",
   capabilities: {
+    mutationInterception: "observe_only",
     thinking: true,
     promptCaching: false,
     mcp: true,

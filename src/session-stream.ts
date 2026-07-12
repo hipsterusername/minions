@@ -97,9 +97,30 @@ export function sessionStreamReducer(
       return reduceSessionStatus(state, msg);
     case "session_error":
       return reduceSessionError(state, msg);
+    case "session_compacted":
+      return reduceSessionCompacted(state, msg, prefix);
     default:
       return state;
   }
+}
+
+function reduceSessionCompacted(
+  state: SessionStreamState,
+  msg: Extract<ServerMessage, { type: "session_compacted" }>,
+  prefix: string,
+): SessionStreamState {
+  if (msg.sessionKey !== state.sessionKey) return state;
+  const marker = checkpointDisplayMessage(prefix, msg.checkpointId ?? String(msg.timestamp), msg.trigger, msg.timestamp);
+  if (state.messages.some((message) => message.id === marker.id)) return state;
+  return {
+    ...state,
+    messages: [...state.messages, marker],
+  };
+}
+
+function checkpointDisplayMessage(prefix: string, id: string, trigger: "proactive" | "context_recovery" | undefined, timestamp: number): DisplayMessage {
+  const reason = trigger === "context_recovery" ? "after context-window recovery" : "at a context checkpoint";
+  return { id: `${prefix}-checkpoint-${id}`, role: "system", content: `Continued in a fresh thread ${reason}.`, timestamp };
 }
 
 // ── sync_response ────────────────────────────────────────
@@ -163,6 +184,9 @@ function reduceSyncResponse(
       status = "error";
       error = evt.error;
       fullError = evt.fullError ?? evt.error;
+    } else if (evt.type === "session_compacted") {
+      const marker = checkpointDisplayMessage(prefix, evt.checkpointId ?? String(evt.timestamp), evt.trigger, evt.timestamp);
+      if (!seen.has(marker.id)) { seen.add(marker.id); rebuilt.push(marker); }
     }
   }
 
@@ -369,6 +393,65 @@ function collapseAssistantResultDup(
 
 function stripTaskNameMarker(s: string): string {
   return s.replace(/<!--task-name:.+?-->\s*/g, "");
+}
+
+/**
+ * Re-insert optimistic user turns that a reducer output dropped.
+ *
+ * User messages are never produced by the server stream — `normalizedTo
+ * DisplayMessages` maps every `user` event to `[]`, so a user bubble only
+ * ever exists as a client-side optimistic append (see LeaderNode.handleSend
+ * / MinionNode.startTask). Two paths can therefore lose them:
+ *
+ *   1. **sync_response rebuild** — {@link reduceSyncResponse} reconstructs the
+ *      feed purely from buffered sdk events, which contain no user turns, and
+ *      the caller replaces `messages` wholesale. Every user bubble vanishes on
+ *      the next reconnect / refocus sync.
+ *   2. **stale-snapshot race** — an inbound event reduced against a feed
+ *      snapshot taken *before* the latest optimistic append drops that append
+ *      when the caller overwrites `messages` with the reducer output.
+ *
+ * This helper takes the caller's authoritative `prev` feed (which holds the
+ * optimistic user turns) and the reducer's `next` feed, and re-inserts any
+ * `user` message missing from `next` at the position it held in `prev` —
+ * immediately after its nearest surviving predecessor. When nothing is
+ * missing it returns `next` unchanged so reference equality is preserved.
+ */
+export function preserveOptimisticUserMessages(
+  prev: ReadonlyArray<DisplayMessage>,
+  next: ReadonlyArray<DisplayMessage>,
+): DisplayMessage[] {
+  const nextIds = new Set(next.map((m) => m.id));
+  const missing: DisplayMessage[] = [];
+  for (const m of prev) {
+    if (m.role === "user" && !nextIds.has(m.id)) missing.push(m);
+  }
+  if (missing.length === 0) return next as DisplayMessage[];
+
+  const result = [...next];
+  for (const u of missing) {
+    const idxInPrev = prev.indexOf(u);
+    // Nearest preceding message in `prev` that survives in `result` becomes
+    // the anchor; the missing turn is spliced in right after it. Earlier
+    // re-inserted turns are already in `result`, so a run of consecutive
+    // missing user turns keeps its relative order.
+    let anchorIdx = -1;
+    for (let i = idxInPrev - 1; i >= 0; i--) {
+      const p = prev[i];
+      if (!p) continue;
+      const at = result.findIndex((r) => r.id === p.id);
+      if (at >= 0) {
+        anchorIdx = at;
+        break;
+      }
+    }
+    if (anchorIdx < 0) {
+      result.unshift(u);
+    } else {
+      result.splice(anchorIdx + 1, 0, u);
+    }
+  }
+  return result;
 }
 
 /** Convenience: a fresh empty state. */

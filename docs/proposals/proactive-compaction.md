@@ -1,7 +1,13 @@
 # Proposal: Proactive Compaction Checkpoints for Leader Sessions
 
-Status: PROPOSED (design only — no implementation yet)
+Status: SHIPPED (continuity compiler and transactional checkpoint lifecycle)
 Depends on: per-turn usage telemetry (`session_usage`, shipped), frozen leader prompt prefix (shipped)
+
+Implementation note: proactive checkpoints and context-window recovery now compile
+the same typed, persisted `ContextCheckpoint` artifact in
+`server/context-checkpoint.ts`. The artifact is prepared before thread replacement,
+committed on the fresh provider thread's first initialization, retained for audit,
+and rendered into a salience-ordered continuation prompt.
 
 ## Problem
 

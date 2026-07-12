@@ -41,9 +41,11 @@ import {
   type SessionUsageTotals,
 } from "./usage-telemetry.ts";
 import { serverLogger } from "./logging.ts";
+import { reviewLifecycleToColumns, type SessionReviewLifecycle } from "./session-review-lifecycle.ts";
+import { ensureWorkItemSchema } from "./work-item-schema.ts";
+import { removeSessionPersistence } from "./session-persist-remove.ts";
 
 const log = serverLogger.child("session-persist");
-
 // ── Connection management ───────────────────────────────
 
 let dbHandle: Database.Database | null = null;
@@ -55,7 +57,12 @@ function defaultDbPath(): string {
     return process.env["MINIONS_SERVER_DB"]!;
   }
   const dir = path.join(os.homedir(), ".minions");
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try {
+    fs.chmodSync(dir, 0o700);
+  } catch {
+    // Windows and restricted filesystems may not expose POSIX modes.
+  }
   return path.join(dir, "server.db");
 }
 
@@ -65,7 +72,14 @@ function defaultDbPath(): string {
  */
 export function openPersistDb(dbPath?: string): Database.Database {
   if (dbHandle) return dbHandle;
-  dbHandle = initDb(dbPath ?? defaultDbPath());
+  const resolvedPath = dbPath ?? defaultDbPath();
+  dbHandle = initDb(resolvedPath);
+  ensureWorkItemSchema(dbHandle);
+  try {
+    fs.chmodSync(resolvedPath, 0o600);
+  } catch {
+    // Best effort on platforms without POSIX permissions.
+  }
   disabled = false;
   return dbHandle;
 }
@@ -106,6 +120,8 @@ function ensureDb(): Database.Database | null {
   return dbHandle;
 }
 
+/** Shared only by narrowly scoped persistence companions. */
+export function persistenceDb(): Database.Database | null { return ensureDb(); }
 // ── Shape adapters ──────────────────────────────────────
 
 /**
@@ -115,6 +131,8 @@ function ensureDb(): Database.Database | null {
  */
 export interface PersistableSession {
   id: string;
+  projectId?: string | null;
+  nodeId?: string | null;
   status: string;
   cwd: string;
   model: string | null;
@@ -138,22 +156,26 @@ export interface PersistableSession {
    * to "claude" when the row was written before this column existed.
    */
   harnessName: string;
+  reviewLifecycle?: SessionReviewLifecycle;
 }
 
 function sessionToRow(
   s: PersistableSession,
   nowIso: string,
+  existing: repo.SessionRow | null,
 ): repo.SessionRow {
   return {
     session_key: s.id,
-    project_id: null,
-    node_id: null,
+    project_id: s.projectId ?? existing?.project_id ?? null,
+    node_id: s.nodeId ?? existing?.node_id ?? null,
     status: s.status,
     cwd: s.cwd,
     model: s.model,
     role: s.role,
     task_name: s.taskName,
-    session_id: s.sessionId,
+    session_id: existing?.work_item_id && existing.ended_at != null
+      ? existing.session_id
+      : s.sessionId,
     worktree_isolation: s.worktreeIsolation ? 1 : 0,
     worktree_path: s.worktree?.path ?? null,
     worktree_branch: s.worktree?.branch ?? null,
@@ -164,6 +186,7 @@ function sessionToRow(
     total_cost: s.totalCost,
     turns: s.turns,
     harness_name: s.harnessName,
+    ...reviewLifecycleToColumns(s.reviewLifecycle),
     // created_at is only used when the row is new; upsert preserves the
     // existing value on conflict so it's safe to send "now" here as a
     // placeholder — the schema default would cover new rows anyway, but
@@ -172,7 +195,6 @@ function sessionToRow(
     updated_at: nowIso,
   };
 }
-
 // ── Write helpers (called from mutation sites) ──────────
 
 export function persistSession(s: PersistableSession): void {
@@ -180,26 +202,20 @@ export function persistSession(s: PersistableSession): void {
   if (!db) return;
   try {
     const nowIso = new Date().toISOString();
-    repo.upsertSession(db, sessionToRow(s, nowIso));
+    repo.upsertSession(db, sessionToRow(s, nowIso, repo.getSession(db, s.id)));
   } catch (err) {
     log.warn("session_upsert_failed", { error: err });
   }
 }
 
-export function removePersistedSession(sessionKey: string): void {
+export function removePersistedSession(sessionKey: string): boolean {
   const db = ensureDb();
-  if (!db) return;
+  if (!db) return false;
   try {
-    repo.deleteSession(db, sessionKey);
-    repo.deleteRenderState(db, sessionKey);
-    repo.purgeEventsForSession(db, sessionKey);
-    // task records are cascaded logically (we delete rows whose leader key
-    // matches) — no FK so we do it explicitly.
-    db.prepare(
-      "DELETE FROM task_records WHERE leader_session_key = ?",
-    ).run(sessionKey);
+    return removeSessionPersistence(db, sessionKey);
   } catch (err) {
     log.warn("session_remove_failed", { error: err });
+    return false;
   }
 }
 
@@ -279,17 +295,19 @@ export function persistTaskState(
   const db = ensureDb();
   if (!db) return;
   try {
-    const currentIds = new Set(state.tasks.keys());
-    const existing = repo.getTaskRecordsForLeader(db, leaderSessionKey);
-    for (const row of existing) {
-      if (!currentIds.has(row.taskId)) {
-        repo.deleteTaskRecord(db, leaderSessionKey, row.taskId);
+    db.transaction(() => {
+      const currentIds = new Set(state.tasks.keys());
+      const existing = repo.getTaskRecordsForLeader(db, leaderSessionKey);
+      for (const row of existing) {
+        if (!currentIds.has(row.taskId)) {
+          repo.deleteTaskRecord(db, leaderSessionKey, row.taskId);
+        }
       }
-    }
-    for (const rec of state.tasks.values()) {
-      repo.upsertTaskRecord(db, rec);
-    }
-    repo.updateSessionApproval(db, leaderSessionKey, state.approval);
+      for (const rec of state.tasks.values()) {
+        repo.upsertTaskRecord(db, rec);
+      }
+      repo.updateSessionApproval(db, leaderSessionKey, state.approval);
+    })();
   } catch (err) {
     log.warn("task_state_persist_failed", { error: err });
   }

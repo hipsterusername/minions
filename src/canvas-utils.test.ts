@@ -16,6 +16,7 @@ import {
   resolveTidyDrop,
   shouldRelocateOnDrop,
   centerTransformOnRect,
+  focusTransformOnRects,
   didReposition,
 } from "./canvas-utils.ts";
 import { makeNode } from "../tests/fixtures/builders.ts";
@@ -50,6 +51,30 @@ describe("centerTransformOnRect", () => {
     // rect center = (200, 200); x = 400 - 200*0.5 = 300
     expect(t.scale).toBe(0.5);
     expect(t).toEqual({ x: 300, y: 300, scale: 0.5 });
+  });
+});
+
+describe("focusTransformOnRects", () => {
+  it("zooms below the comfort floor when needed to keep the target visible", () => {
+    const t = focusTransformOnRects(
+      [{ x: 100, y: 200, width: 1000, height: 800 }],
+      { width: 400, height: 300 },
+      { padding: 50, maxScale: 1 },
+    );
+
+    expect(t?.scale).toBe(1 / 3);
+    expect(t).toEqual({ x: 0, y: -50, scale: 1 / 3 });
+  });
+
+  it("centers the union of multiple targets without zooming past the maximum", () => {
+    expect(focusTransformOnRects(
+      [
+        { x: 0, y: 0, width: 100, height: 100 },
+        { x: 300, y: 100, width: 100, height: 100 },
+      ],
+      { width: 1000, height: 600 },
+      { padding: 50, maxScale: 1 },
+    )).toEqual({ x: 300, y: 200, scale: 1 });
   });
 });
 

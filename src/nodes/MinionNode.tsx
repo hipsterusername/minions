@@ -20,6 +20,7 @@ import { UserContextHeader } from "../components/UserContextHeader.tsx";
 import { SimpleMarkdown } from "../components/SimpleMarkdown.tsx";
 import { STATUS_COLORS, PRIORITY_COLORS } from "../palette.ts";
 import {
+  preserveOptimisticUserMessages,
   type SessionStreamState,
   type SessionStreamStatus,
 } from "../session-stream.ts";
@@ -373,7 +374,10 @@ export function MinionNodeRenderer({
         ...current,
         sessionKey: next.sessionKey,
         status: nextStatus,
-        messages: next.messages,
+        // Preserve optimistic user turns the reducer never re-emits (e.g. the
+        // "Starting task: …" marker) so a sync rebuild or stale-snapshot
+        // reduction can't wipe them from the execution log.
+        messages: preserveOptimisticUserMessages(current.messages, next.messages),
         streamingText: next.streamingText,
         streamingBlockIndex: next.streamingBlockIndex,
         totalCost: next.totalCost,
@@ -780,15 +784,11 @@ export function MinionNodeRenderer({
     }
   };
 
-  // Inject pulse animation
-  useEffect(() => {
-    const id = "minion-pulse-keyframes";
-    if (document.getElementById(id)) return;
-    const style = document.createElement("style");
-    style.id = id;
-    style.textContent = `@keyframes minion-pulse{0%,100%{opacity:1}50%{opacity:0.4}}`;
-    document.head.appendChild(style);
-  }, []);
+  // Pulse keyframes are injected at module load (see injectPulseKeyframes),
+  // NOT here — they must exist before the badge first paints. Browsers do not
+  // retroactively start an animation whose animation-name resolved to an empty
+  // keyframe set at paint time, so a deferred (useEffect) injection leaves the
+  // very first minion badge frozen at opacity 1.
 
   // Auto-resize: observe content height and report to canvas
   useEffect(() => {
@@ -936,7 +936,7 @@ export function MinionNodeRenderer({
           sessionKey={data.sessionKey}
           status={data.status}
           model={data.model ?? "sonnet"}
-          permissionMode={data.permissionMode ?? "bypassPermissions"}
+          permissionMode={data.permissionMode ?? "auto"}
           onInterrupt={handleInterrupt}
           onModelChange={handleModelChange}
           onPermissionModeChange={handlePermissionModeChange}
@@ -1283,6 +1283,25 @@ export function MinionNodeRenderer({
   );
 }
 
+// ── Pulse keyframes (inject once, at module load) ──────────────────────
+//
+// Injected eagerly — before any MinionNode renders — so the `minion-pulse`
+// keyframes exist in the document by the time a running minion's badge first
+// paints. Deferring this to a per-instance useEffect (which runs after the
+// first paint) left the animation frozen: Chromium resolves `animation-name:
+// minion-pulse` against an empty keyframe set at paint time and never restarts
+// the animation when the keyframes are added later.
+export function injectPulseKeyframes(): void {
+  if (typeof document === "undefined") return;
+  const id = "minion-pulse-keyframes";
+  if (document.getElementById(id)) return;
+  const style = document.createElement("style");
+  style.id = id;
+  style.textContent = `@keyframes minion-pulse{0%,100%{opacity:1}50%{opacity:0.4}}`;
+  document.head.appendChild(style);
+}
+injectPulseKeyframes();
+
 registerNodeType({
   type: "minion",
   label: "Minion",
@@ -1306,7 +1325,7 @@ export const MINION_DEFAULT_DATA: MinionData = {
   turns: 0,
   error: null,
   model: "sonnet",
-  permissionMode: "bypassPermissions",
+  permissionMode: "auto",
   thinkingConfig: { ...MINION_THINKING_CONFIG },
   worktreeBranch: null,
 };

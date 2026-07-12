@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   FEATURE_FLAGS,
+  FLAG_MCP_SERVERS,
   featureFlagStore,
   getAllFeatureFlags,
   getFeatureFlag,
@@ -28,8 +29,12 @@ afterEach(() => {
 });
 
 describe("feature-flags registry", () => {
-  it("ships without any registered flags", () => {
-    expect(FEATURE_FLAGS).toEqual([]);
+  it("registers the mcp-servers flag, disabled by default", () => {
+    const def = FEATURE_FLAGS.find((f) => f.id === FLAG_MCP_SERVERS);
+    expect(def).toBeDefined();
+    expect(def?.defaultValue).toBe(false);
+    // With no override persisted, the flag reads as its default.
+    expect(getFeatureFlag(FLAG_MCP_SERVERS)).toBe(false);
   });
 
   it("returns false for unknown ids (fail-closed)", () => {
@@ -82,7 +87,9 @@ describe("storage robustness", () => {
       STORAGE_KEY,
       JSON.stringify({ stale: "yes please" }),
     );
-    expect(getAllFeatureFlags()).toEqual({});
+    // Non-boolean overrides are dropped, so every registered flag falls
+    // back to its default value.
+    expect(getAllFeatureFlags()).toEqual({ [FLAG_MCP_SERVERS]: false });
   });
 
   it("ignores unknown ids in the persisted blob", () => {

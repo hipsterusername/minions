@@ -18,6 +18,7 @@ import { errToMessage } from "./helpers.ts";
 import type { CommandHandler } from "./types.ts";
 import { persistTaskState } from "../session-persist.ts";
 import { dirname, basename } from "node:path";
+import { randomUUID } from "node:crypto";
 import { serverLogger } from "../logging.ts";
 
 const log = serverLogger.child("send-message");
@@ -27,7 +28,7 @@ function projectPathForNewWorktree(cwd: string): string {
   return basename(parent) === ".canvas-worktrees" ? dirname(parent) : cwd;
 }
 
-export const sendMessage: CommandHandler = (ctx, cmd, ws) => {
+export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
   if (!cmd.sessionKey || !cmd.prompt) {
     unicastGlobal(ws, {
       type: "error",
@@ -41,6 +42,43 @@ export const sendMessage: CommandHandler = (ctx, cmd, ws) => {
       type: "error",
       message: `Session ${cmd.sessionKey} not found`,
     });
+    return;
+  }
+  if (host.workItemId) {
+    const service = ctx.workItems;
+    try {
+      const detail = await service?.get(host.workItemId);
+      const item = detail?.workItem;
+      if (!service || !item) throw new Error("Canonical work item is unavailable");
+      const mutation = {
+        requestId: randomUUID(), workItemId: item.id, prompt: cmd.prompt,
+        expectedLifecycleRevision: item.lifecycle.lifecycleRevision,
+        expectedCurrentRunKey: item.currentRunKey,
+      };
+      if (item.lifecycle.runtimeState === "waiting" && item.waitKind === "decision"
+        && item.currentRunKey) {
+        await service.replyToWaitingRun({ ...mutation, runKey: item.currentRunKey });
+      } else if (["inactive", "draft"].includes(item.lifecycle.runtimeState)) {
+        await service.startRun({ ...mutation,
+          ...(cmd.model ? { model: cmd.model } : {}),
+          ...(cmd.systemPrompt ? { systemPrompt: cmd.systemPrompt } : {}),
+          ...(cmd.thinkingConfig ? { thinkingConfig: cmd.thinkingConfig } : {}),
+          ...(cmd.skillIds ? { skillIds: cmd.skillIds } : {}),
+          ...(cmd.attachments ? { attachments: cmd.attachments } : {}),
+        });
+      } else {
+        throw new Error(`Canonical work-item run is ${item.lifecycle.runtimeState}`);
+      }
+    } catch (error) {
+      unicastToSession(ws, cmd.sessionKey, {
+        type: "session_error", sessionKey: cmd.sessionKey,
+        code: "WORK_ITEM_COMMAND_REQUIRED",
+        error: error instanceof Error ? error.message : "Canonical work-item continuation failed",
+        workItemId: host.workItemId, runKey: host.runKey,
+        guidance: "Wait for the canonical work-item snapshot, then retry.",
+        suggestedCommands: ["reply_to_waiting_run", "start_work_item_run"], timestamp: Date.now(),
+      });
+    }
     return;
   }
 
@@ -78,6 +116,10 @@ export const sendMessage: CommandHandler = (ctx, cmd, ws) => {
     // §3 / Open Questions §1.
     ctx.registry.start({
       sessionKey: cmd.sessionKey!,
+      // Until Phase 1 persistence can distinguish terminal from open runs,
+      // the external legacy follow-up path deliberately retains new-run
+      // behavior. Internal replies are annotated separately.
+      invocationKind: "new_run",
       prompt,
       cwd,
       resumeId: host.sessionId ?? undefined,
