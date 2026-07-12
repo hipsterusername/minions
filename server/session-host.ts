@@ -24,7 +24,7 @@ import type { TaskManagerState } from "./task-tools.ts";
 import type { RenderState } from "./render-tools.ts";
 import { persistEvent as persistEventToDb, persistSession as persistSessionToDb, type PersistableSession } from "./session-persist.ts";
 import { emptyUsageTotals, type SessionUsageTotals } from "./usage-telemetry.ts";
-import { buildPendingCompactionStartOptions, createProactiveCompactionState, type ProactiveCompactionState } from "./proactive-compaction.ts";
+import { createProactiveCompactionState, type ProactiveCompactionState } from "./proactive-compaction.ts";
 import {
   MAX_BUFFERED_EVENTS,
   deriveTaskName,
@@ -35,10 +35,7 @@ import {
 } from "./session-host-config.ts";
 import {
   ensureContributionWorktree,
-  buildContextRecoveryStartOptions,
   buildHarnessStartOpts,
-  processNormalizedEvent,
-  shouldRecoverFromContextWindow,
 } from "./session-host-run.ts";
 import {
   terminateSessionHost,
@@ -49,11 +46,12 @@ import { applySessionEndedForMinion } from "./task-lifecycle.ts";
 import { setSessionCanvasContext } from "./canvas-context-store.ts";
 import { drainQueuedWaitResume } from "./wait-resume.ts";
 import type { ContextCheckpoint } from "./context-checkpoint.ts";
-import { commitCheckpointOnInit, failUninitializedCheckpoint } from "./session-host-checkpoint.ts";
+import { failUninitializedCheckpoint } from "./session-host-checkpoint.ts";
 import { beginRun, commitReviewLifecycle, finishRun, initialSessionReviewLifecycle, type SessionReviewLifecycle } from "./session-review-lifecycle.ts";
 import { serverLogger } from "./logging.ts";
-import { normalizedEventEnvelope, notifyRuntimeTerminal, seedSessionRunLineage, sessionHostLogFields } from "./session-host-identity.ts";
+import { notifyRuntimeTerminal, seedSessionRunLineage, sessionHostLogFields } from "./session-host-identity.ts";
 import { buildAgentContext } from "./session-host-agent-context.ts";
+import { consumeProviderInvocation } from "./session-host-provider-loop.ts";
 import type {
   SessionHostDeps,
   SessionInvocationKind,
@@ -209,7 +207,9 @@ export class SessionHost {
    * Safe to call repeatedly — each call supersedes the previous run.
    */
   async start(opts: StartSessionOptions, deps: SessionHostDeps): Promise<void> {
-    if (this.status === "running") { return; }
+    const isCheckpointContinuation = opts.invocationKind === "provider_continuation"
+      && Boolean(opts.contextCheckpointId);
+    if (this.status === "running" && !isCheckpointContinuation) { return; }
     const abortController = new AbortController();
     this.terminateDeps = deps;
 
@@ -319,42 +319,18 @@ export class SessionHost {
       const { events, control } = harness.start(startOpts);
       this.eventStream = events;
       this.runControl = control;
-      let recoveryOpts: StartSessionOptions | null = null;
-      let checkpointInitialized = false;
+      let continuationOpts: StartSessionOptions | null;
+      let checkpointInitialized: boolean;
       try {
-        for await (const event of events) {
-          if (abortController.signal.aborted) break;
-          if (
-            event.kind === "done" &&
-            shouldRecoverFromContextWindow(opts, event)
-          ) {
-            recoveryOpts = buildContextRecoveryStartOptions(this, opts, event);
-            const recoveryEvent = normalizedEventEnvelope(
-              this,
-              {
-                kind: "text",
-                role: "assistant",
-                text:
-                  "The Codex thread exceeded the model context window. Starting a fresh continuation with compacted session state.",
-              },
-            );
-            this.bufferEvent(recoveryEvent);
-            deps.bus.emitToSession(this.id, recoveryEvent);
-            break;
-          }
-          processNormalizedEvent(this, deps.bus, agentType, agentCtx, event, deps.workItemLifecycle);
-          checkpointInitialized = commitCheckpointOnInit(this, deps, opts, event) || checkpointInitialized;
-        }
+        ({ continuationOpts, checkpointInitialized } = await consumeProviderInvocation({
+          host: this, opts, deps, agentType, agentCtx, events, abortController,
+        }));
       } finally {
         this.eventStream = null;
         this.runControl = null;
       }
-      if (!recoveryOpts) {
-        recoveryOpts = buildPendingCompactionStartOptions(this, opts);
-      }
       failUninitializedCheckpoint(this, opts, checkpointInitialized, "Fresh provider thread ended before initialization.");
-      // Reset status so the guard allows the recursive recovery start.
-      if (recoveryOpts) { this.status = "idle"; await this.start(recoveryOpts, deps); }
+      if (continuationOpts) await this.start(continuationOpts, deps);
       else drainQueuedWaitResume(this, deps);
     } catch (err: unknown) {
       if (abortController.signal.aborted || this.abortController !== abortController) return;

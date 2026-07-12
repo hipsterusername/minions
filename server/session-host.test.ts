@@ -671,6 +671,64 @@ describe("SessionHost.start — error path", () => {
     expect(envelopes.some((e) => e.type === "session_compacted")).toBe(true);
   });
 
+  it("keeps the logical run active while a checkpoint opens its fresh provider thread", async () => {
+    const { host, deps, envelopes } = makeHarness("leader-checkpoint-lifecycle");
+    host.workItemId = "work-checkpoint-lifecycle";
+    const runtimeLifecycle = {
+      providerInitialized: vi.fn(),
+      runStarted: vi.fn(),
+      runWaiting: vi.fn(),
+      runTerminal: vi.fn(),
+    };
+    deps.workItemLifecycle = runtimeLifecycle;
+    await createCheckpointSessionToolDef(taskToolCtx(host.id)).handler({});
+
+    let starts = 0;
+    harnessRef.startFnOverride = () => {
+      starts += 1;
+      if (starts === 1) {
+        return {
+          events: (async function* () {
+            yield { kind: "init", sessionId: "old-thread", model: "sonnet" } as NormalizedEvent;
+            yield { kind: "text", role: "assistant", text: "Continue the same run." } as NormalizedEvent;
+            yield { kind: "done", reason: "stop" } as NormalizedEvent;
+          })(),
+          control: { abort: () => {} },
+        };
+      }
+      return {
+        events: (async function* () {
+          yield { kind: "init", sessionId: "new-thread", model: "sonnet" } as NormalizedEvent;
+          expect(host.status).toBe("running");
+          expect(host.reviewLifecycle.terminalAt).toBeNull();
+          expect(runtimeLifecycle.runTerminal).not.toHaveBeenCalled();
+          yield { kind: "done", reason: "completed", result: "Actually finished." } as NormalizedEvent;
+        })(),
+        control: { abort: () => {} },
+      };
+    };
+
+    await host.start({
+      sessionKey: host.id,
+      workItemId: host.workItemId,
+      invocationKind: "new_run",
+      prompt: "p",
+      cwd: host.cwd,
+      role: "leader",
+      resumeId: "old-thread",
+    }, deps);
+
+    expect(starts).toBe(2);
+    expect(runtimeLifecycle.runTerminal).toHaveBeenCalledOnce();
+    expect(runtimeLifecycle.runTerminal).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: "completed",
+      finalReport: "Actually finished.",
+    }));
+    expect(envelopes.filter((event) => event.type === "session_status")
+      .map((event) => event.payload["status"]))
+      .toEqual(["running", "running", "idle"]);
+  });
+
   it("does not let a stale recovery frame persist error after a healthy compacted run", async () => {
     const db = openPersistDb(":memory:");
     const { host, deps } = makeHarness("leader-db-status");
