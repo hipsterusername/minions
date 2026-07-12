@@ -169,7 +169,7 @@ describe("ActivityView", () => {
     expect(onLaunchLeader).toHaveBeenCalledTimes(1);
   });
 
-  it("opens a real canvas leader as the Activity launch experience", () => {
+  it("opens compact leader inputs in the Activity panel", () => {
     const draft = leaderNode("", [], { sessionKey: null, status: "disconnected" });
     const onUpdateNodeData = vi.fn();
     render(
@@ -184,7 +184,7 @@ describe("ActivityView", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /launch leader/i }));
-    expect(screen.getByRole("dialog", { name: /launch leader/i })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: /new leader/i })).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Describe your project goal...")).toBeInTheDocument();
     const advancedSetup = screen.getByText("Advanced setup").closest("details");
     expect(advancedSetup).not.toHaveAttribute("open");
@@ -194,6 +194,34 @@ describe("ActivityView", () => {
     fireEvent.click(screen.getByRole("button", { name: /^skills$/i }));
     expect(screen.getByRole("dialog", { name: /choose skills/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /open on canvas/i })).not.toBeInTheDocument();
+  });
+
+  it("selects the newly created leader in Activity when its session appears", () => {
+    const draft = leaderNode("", [], { sessionKey: null, status: "disconnected" });
+    const props = {
+      ...noop,
+      onLaunchLeader: () => draft.id,
+      projectPath: "/tmp/project",
+    };
+    const { rerender } = render(<ActivityView sessions={[]} nodes={[draft]} {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /launch leader/i }));
+    expect(screen.getByRole("region", { name: /new leader/i })).toBeInTheDocument();
+
+    const startedNode = {
+      ...leaderNode("leader-new", [], { taskName: "Fresh task", status: "running" }),
+      id: draft.id,
+    };
+    rerender(
+      <ActivityView
+        sessions={[session({ sessionKey: "leader-new", taskName: "Fresh task", status: "running" })]}
+        nodes={[startedNode]}
+        {...props}
+      />,
+    );
+
+    expect(screen.queryByRole("region", { name: /new leader/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: /session details/i })).toHaveTextContent("Fresh task");
   });
 
   it("offers Launch from the empty activity state", () => {

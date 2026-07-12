@@ -523,23 +523,12 @@ export function ActivityView({
     ? nodes.find((node) => node.id === launchNodeId && node.type === "leader")
     : undefined;
 
-  useEffect(() => {
-    if (!launchNode) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setLaunchNodeId(null);
-    };
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [launchNode]);
-
   function openLaunchExperience() {
     const nodeId = onLaunchLeader();
-    if (typeof nodeId === "string") setLaunchNodeId(nodeId);
+    if (typeof nodeId === "string") {
+      setSelectedKey(null);
+      setLaunchNodeId(nodeId);
+    }
   }
   const allActivitySessions = useMemo<ActivitySession[]>(
     () =>
@@ -644,7 +633,7 @@ export function ActivityView({
         {visibleSessions.length === 0 ? (
           <div className="act-empty">
             <p className="act-empty-title">No sessions yet</p>
-            <p className="act-empty-sub">Launch a leader to start from the canvas.</p>
+            <p className="act-empty-sub">Launch a leader and follow its work here.</p>
             <button
               className="act-btn act-btn--primary act-empty-launch"
               type="button"
@@ -699,7 +688,7 @@ export function ActivityView({
         )}
       </div>
 
-      {!selectedSession && activitySessions.length > 0 && (
+      {!selectedSession && !launchNode && activitySessions.length > 0 && (
         <div className="act-workspace-empty" aria-label="Activity workspace">
           <div>
             <span className="act-workspace-empty-icon" aria-hidden>↗</span>
@@ -751,42 +740,29 @@ export function ActivityView({
       )}
 
       {launchNode && (
-        <div
-          className="act-launch-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setLaunchNodeId(null);
-          }}
-        >
-          <section
-            className="act-launch-experience"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Launch leader"
-          >
-            <header className="act-launch-head">
-              <div>
-                <span className="act-launch-eyebrow">New canvas leader</span>
-                <h2 id="activity-launch-title">What should your leader do?</h2>
-                <p>Start with the goal. Add a model, permissions, or skills only when you need them.</p>
-              </div>
-              <button className="act-launch-close" type="button" onClick={() => setLaunchNodeId(null)} aria-label="Close launch">
-                <span aria-hidden>×</span>
-              </button>
-            </header>
-            <div className="act-launch-leader">
-              <LeaderNodeRenderer
-                node={launchNode}
-                launchMode
-                isSelected
-                onUpdateData={(data) => onUpdateNodeData(launchNode.id, data as LeaderData)}
-                socketSend={socketSend}
-                socketSubscribe={socketSubscribe}
-                projectPath={projectPath}
-              />
+        <section className="act-launch-panel" aria-label="New leader">
+          <header className="act-launch-head">
+            <div>
+              <span className="act-launch-eyebrow">New leader</span>
+              <h2>What should it do?</h2>
+              <p>The new leader will open here as soon as it starts.</p>
             </div>
-          </section>
-        </div>
+            <button className="act-launch-close" type="button" onClick={() => setLaunchNodeId(null)} aria-label="Close launch">
+              <span aria-hidden>×</span>
+            </button>
+          </header>
+          <div className="act-launch-inputs">
+            <LeaderNodeRenderer
+              node={launchNode}
+              launchMode
+              isSelected
+              onUpdateData={(data) => onUpdateNodeData(launchNode.id, data as LeaderData)}
+              socketSend={socketSend}
+              socketSubscribe={socketSubscribe}
+              projectPath={projectPath}
+            />
+          </div>
+        </section>
       )}
     </div>
   );
