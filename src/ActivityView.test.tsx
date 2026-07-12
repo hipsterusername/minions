@@ -186,6 +186,13 @@ describe("ActivityView", () => {
     fireEvent.click(screen.getByRole("button", { name: /launch leader/i }));
     expect(screen.getByRole("dialog", { name: /launch leader/i })).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Describe your project goal...")).toBeInTheDocument();
+    const advancedSetup = screen.getByText("Advanced setup").closest("details");
+    expect(advancedSetup).not.toHaveAttribute("open");
+
+    fireEvent.click(screen.getByText("Advanced setup"));
+    expect(advancedSetup).toHaveAttribute("open");
+    fireEvent.click(screen.getByRole("button", { name: /^skills$/i }));
+    expect(screen.getByRole("dialog", { name: /choose skills/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /open on canvas/i })).toBeInTheDocument();
   });
 

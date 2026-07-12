@@ -102,7 +102,8 @@ export function LeaderNodeRenderer({
   onDuplicateLeaderSetup,
   onOpenSystemModel,
   onSaveLeaderPreset,
-}: NodeRenderProps) {
+  launchMode = false,
+}: NodeRenderProps & { launchMode?: boolean }) {
   const data = node.data as LeaderData;
   const slashCommands = useMemo(() => buildSlashCommands(undefined), []);
   const dataRef = useRef(data);
@@ -1158,6 +1159,84 @@ export function LeaderNodeRenderer({
   };
 
   const taggedSkillCount = (data.skillIds ?? []).length;
+
+  if (launchMode) {
+    return (
+      <LeaderSlashCommandsProvider commands={slashCommands}>
+        <div className="leader-launch-form">
+          <div className="leader-launch-goal">
+            <label htmlFor={`leader-launch-title-${node.id}`}>Name</label>
+            <input
+              id={`leader-launch-title-${node.id}`}
+              value={data.taskName ?? ""}
+              placeholder="Untitled leader"
+              onChange={(event) => onUpdateData({ ...dataRef.current, taskName: event.target.value || null })}
+            />
+            <label>Goal</label>
+            <LeaderPromptBar
+              input={input}
+              slashCommands={slashCommands}
+              onInputChange={setInput}
+              onKeyDown={handleKeyDown}
+              onSubmit={handlePromptSubmit}
+              placeholder={promptPlaceholder}
+              submitLabel={promptSubmitLabel}
+              disabled={promptSubmitDisabled}
+              active={promptSubmitActive}
+              variant="overlay"
+              autoFocus
+              textareaRef={promptTextareaRef}
+            />
+          </div>
+
+          <details className="leader-launch-options">
+            <summary>
+              <span>Advanced setup</span>
+              <span className="leader-launch-options-summary">
+                {data.harness ?? "claude"} · {data.model ?? "opus"}
+                {taggedSkillCount > 0 ? ` · ${taggedSkillCount} skill${taggedSkillCount === 1 ? "" : "s"}` : ""}
+              </span>
+            </summary>
+            <div className="leader-launch-toolbar">
+              <SessionToolbar
+                sessionKey={data.sessionKey}
+                status={displayStatus}
+                model={data.model ?? "opus"}
+                permissionMode={data.permissionMode ?? "auto"}
+                onModelChange={handleModelChange}
+                onPermissionModeChange={handlePermissionModeChange}
+                thinkingConfig={data.thinkingConfig ?? DEFAULT_THINKING_CONFIG}
+                onThinkingConfigChange={handleThinkingConfigChange}
+                harness={data.harness ?? "claude"}
+                onHarnessChange={handleHarnessChange}
+                accent="var(--accent)"
+                skillsContent={
+                  <div ref={skillAnchorRef}>
+                    <button className="leader-launch-skills" type="button" onClick={() => setSkillFlyoutOpen(true)}>
+                      Skills{taggedSkillCount > 0 ? ` (${taggedSkillCount})` : ""}
+                    </button>
+                  </div>
+                }
+              />
+            </div>
+          </details>
+
+          <SkillFlyout
+            skillIds={data.skillIds ?? []}
+            skillValues={data.skillValues ?? {}}
+            open={skillFlyoutOpen}
+            readOnly={false}
+            anchorRef={skillAnchorRef}
+            onUpdate={(patch) => onUpdateData({ ...dataRef.current, ...patch })}
+            onClose={() => setSkillFlyoutOpen(false)}
+          />
+          {launchNotice ? <div className="leader-launch-notice" role="status">{launchNotice}</div> : null}
+          {data.error ? <div className="leader-launch-error" role="alert">{data.error}</div> : null}
+        </div>
+      </LeaderSlashCommandsProvider>
+    );
+  }
+
   return (
     <LeaderSlashCommandsProvider commands={slashCommands}>
     <div

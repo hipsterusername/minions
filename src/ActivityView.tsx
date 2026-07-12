@@ -766,6 +766,7 @@ export function ActivityView({
             <div className="act-launch-leader">
               <LeaderNodeRenderer
                 node={launchNode}
+                launchMode
                 isSelected
                 onUpdateData={(data) => onUpdateNodeData(launchNode.id, data as LeaderData)}
                 socketSend={socketSend}
