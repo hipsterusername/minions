@@ -143,6 +143,7 @@ New server files must be under 400 lines; split them if they grow.
 | The render DSL | `shared/render-dsl.ts` (single source of truth for types + schemas) and `server/render-tools.ts` (MCP tool surface) |
 | A new WebSocket command | `server/commands/<name>.ts` + an entry in `server/commands/index.ts` `COMMAND_TABLE` |
 | Session lifecycle (abort, query loop, persistence) | `server/session-host.ts` |
+| Leader reply continuity / follow-up / resume | `docs/leader-session-lifecycle.md`, `server/commands/send-message.ts` |
 | Worktree / approval flow | `server/worktree-*.ts`, `server/commands/approve-changes.ts`, `server/commands/*-merge.ts` |
 | Persistence | `server/db.ts`, `server/project-store.ts` |
 | Anything that looks "stringly typed" by role | `src/prompts/`, `server/index.ts` |
