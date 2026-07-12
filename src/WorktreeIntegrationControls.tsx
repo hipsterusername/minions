@@ -1,6 +1,7 @@
 import { randomUuid } from "./random-id.ts";
 import type { WorktreeLineageSnapshot } from "../shared/worktree-integration.ts";
-import { selectWorktreeContribution } from "./use-worktree-integration.ts";
+import { selectLatestLineageReview, selectLatestQueueEntry,
+  selectWorktreeContribution } from "./use-worktree-integration.ts";
 
 const short = (value: string | null, length = 10) => value ? value.slice(0, length) : "pending";
 
@@ -11,6 +12,8 @@ function LineageMap({ lineage, selectedContributionId }: {
   const integratedCount = lineage.contributions.filter((entry) => entry.state === "integrated").length;
   const discardedCount = lineage.contributions.filter((entry) => entry.state === "discarded").length;
   const pendingCount = lineage.contributions.length - integratedCount - discardedCount;
+  const contributions = [...lineage.contributions].sort((left, right) =>
+    left.createdAt - right.createdAt || left.id.localeCompare(right.id));
   return <section className="lineage-map" aria-label="Combined lineage map">
     <header className="lineage-map__header">
       <div><span>Lineage</span> <code title={lineage.id}>{short(lineage.id, 16)}</code></div>
@@ -20,8 +23,8 @@ function LineageMap({ lineage, selectedContributionId }: {
     </header>
     <div className="lineage-map__flow">
       <div className="lineage-map__contributions" aria-label="Leader contributions">
-        {lineage.contributions.map((entry) => {
-          const queue = [...lineage.queue].reverse().find((item) => item.contributionId === entry.id);
+        {contributions.map((entry) => {
+          const queue = selectLatestQueueEntry(lineage, (item) => item.contributionId === entry.id);
           const selected = entry.id === selectedContributionId;
           return <article key={entry.id} className="lineage-map__node lineage-map__node--contribution"
             data-state={entry.state} data-selected={selected ? "true" : "false"}>
@@ -67,8 +70,8 @@ export function WorktreeIntegrationControls({ lineage, workItemId, runKey, send,
   const contribution = selectWorktreeContribution(lineage,
     { workItemId: workItemId ?? null, runKey: runKey ?? null });
   const contributionQueue = contribution
-    ? [...lineage.queue].reverse().find((entry) => entry.contributionId === contribution.id) : null;
-  const lineageQueue = [...lineage.queue].reverse().find((entry) => entry.kind === "lineage");
+    ? selectLatestQueueEntry(lineage, (entry) => entry.contributionId === contribution.id) : null;
+  const lineageQueue = selectLatestQueueEntry(lineage, (entry) => entry.kind === "lineage");
   const queue = contributionQueue && !["succeeded", "cancelled"].includes(contributionQueue.state)
     ? contributionQueue : lineageQueue ?? contributionQueue;
   const contributionGates = contribution
@@ -80,7 +83,7 @@ export function WorktreeIntegrationControls({ lineage, workItemId, runKey, send,
     && lineage.contributions.every((entry) => entry.state === "integrated" || entry.state === "discarded")
     && lineage.contributions.some((entry) => entry.state === "integrated")
     && lineage.status === "open" && lineage.integrationState === "active";
-  const latestFinalReview = lineage.reviews.filter((review) => review.scope === "lineage").at(-1);
+  const latestFinalReview = selectLatestLineageReview(lineage);
   const finalApproved = latestFinalReview?.decision === "approved"
     && latestFinalReview.reviewedHeadSha === lineage.integrationHeadSha;
   const command = (value: Record<string, unknown>) => send({ requestId: randomUuid(), ...value });

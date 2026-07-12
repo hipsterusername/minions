@@ -2,8 +2,8 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { WorktreeLineageSnapshot } from "../shared/worktree-integration.ts";
 import { WorktreeIntegrationControls } from "./WorktreeIntegrationControls.tsx";
-import { mergeWorktreeIntegrationSnapshot, selectWorktreeContribution,
-  useWorktreeIntegration } from "./use-worktree-integration.ts";
+import { mergeWorktreeIntegrationSnapshot, selectLatestLineageReview, selectLatestQueueEntry,
+  selectWorktreeContribution, useWorktreeIntegration } from "./use-worktree-integration.ts";
 
 function snapshot(overrides: Partial<WorktreeLineageSnapshot> = {}): WorktreeLineageSnapshot {
   return {
@@ -38,6 +38,29 @@ describe("worktree integration client state", () => {
       startedAt: 4, finishedAt: null }] });
     expect(selectWorktreeContribution(lineage, { workItemId: "work-1", runKey: "resolution-run" })?.id)
       .toBe("contrib-1");
+  });
+
+  it("selects current queue and review records independently of snapshot array order", () => {
+    const queue = (id: string, updatedAt: number): WorktreeLineageSnapshot["queue"][number] => ({
+      id, lineageId: "lineage-1", contributionId: "contrib-1", kind: "contribution",
+      repositoryPath: "/repo", targetRef: "main", expectedSourceSha: "head",
+      expectedTargetSha: "base", state: updatedAt === 9 ? "running" : "failed", revision: 1,
+      attempt: 1, workerId: null, resultSha: null, fencingToken: 1, error: null,
+      conflictDetails: null, position: null, enqueuedAt: updatedAt, startedAt: null,
+      finishedAt: null, updatedAt,
+    });
+    const review = (id: string, recordedAt: number, decision: "approved" | "rejected") => ({
+      id, lineageId: "lineage-1", contributionId: null, scope: "lineage" as const,
+      decision, actor: "user", notes: null, reviewedHeadSha: "head", recordedAt,
+    });
+    const lineage = snapshot({
+      queue: [queue("new-queue", 9), queue("old-queue", 4)],
+      reviews: [review("new-review", 9, "rejected"), review("old-review", 4, "approved")],
+    });
+
+    expect(selectLatestQueueEntry(lineage, (entry) => entry.contributionId === "contrib-1")?.id)
+      .toBe("new-queue");
+    expect(selectLatestLineageReview(lineage)?.decision).toBe("rejected");
   });
 
   it("consumes successful mutation responses even when a changed event is missed", () => {

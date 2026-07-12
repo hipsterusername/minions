@@ -7,6 +7,29 @@ import { subscribeSocketTopic, type ServerMessage, type SocketSubscribeLike } fr
 import { workItemTopic } from "../shared/ws-envelope.ts";
 
 type Send = (data: unknown) => void;
+type QueueEntry = WorktreeLineageSnapshot["queue"][number];
+type Review = WorktreeLineageSnapshot["reviews"][number];
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function newest<T>(entries: readonly T[], compare: (left: T, right: T) => number): T | null {
+  let result: T | null = null;
+  for (const entry of entries) {
+    if (result === null || compare(entry, result) > 0) result = entry;
+  }
+  return result;
+}
+
+const compareQueueRecency = (left: QueueEntry, right: QueueEntry) =>
+  left.updatedAt - right.updatedAt
+  || left.revision - right.revision
+  || left.enqueuedAt - right.enqueuedAt
+  || compareText(left.id, right.id);
+
+const compareReviewRecency = (left: Review, right: Review) =>
+  left.recordedAt - right.recordedAt || compareText(left.id, right.id);
 
 function mergeRevisioned<T extends { id: string; revision: number }>(
   current: readonly T[], incoming: readonly T[],
@@ -65,7 +88,24 @@ export function selectWorktreeContribution(
     ? entry.runKeys.includes(identity.runKey)
       || (!!resolution && entry.workItemId === resolution.workItemId)
     : entry.workItemId === identity.workItemId);
-  return candidates.sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null;
+  return newest(candidates, (left, right) =>
+    left.updatedAt - right.updatedAt
+    || left.revision - right.revision
+    || left.createdAt - right.createdAt
+    || compareText(left.id, right.id));
+}
+
+/** Snapshot arrays are merged by identity and do not carry a meaningful display order. */
+export function selectLatestQueueEntry(
+  lineage: WorktreeLineageSnapshot,
+  matches: (entry: QueueEntry) => boolean,
+): QueueEntry | null {
+  return newest(lineage.queue.filter(matches), compareQueueRecency);
+}
+
+/** Reviews are immutable history; select the latest explicitly instead of trusting array order. */
+export function selectLatestLineageReview(lineage: WorktreeLineageSnapshot): Review | null {
+  return newest(lineage.reviews.filter((review) => review.scope === "lineage"), compareReviewRecency);
 }
 
 export function useWorktreeIntegration(input: {
