@@ -1,7 +1,8 @@
-import { useState, type RefObject } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { buildLeaderSystemPrompt } from "../../../prompts/build-leader-prompt.ts";
 import { CopyButton } from "../../../components/CopyButton.tsx";
 import type { LeaderData } from "../types.ts";
+import { selectCanvasChangeMode } from "../work-item.ts";
 
 /**
  * Right-side tabbed context drawer for the Leader fullscreen cockpit.
@@ -32,19 +33,24 @@ export function ContextDrawer({
   skillFlyoutAnchorRef: RefObject<HTMLElement | null>;
   onOpenSkillFlyout: () => void;
 }) {
-  const approvalPending = !!data.approvalPending;
+  const isWorktreeMode = selectCanvasChangeMode(data) === "worktree";
+  const approvalPending = isWorktreeMode && !!data.approvalPending;
   const [activeTab, setActiveTab] = useState<TabId>(
     approvalPending ? "approval" : "overview",
   );
 
+  useEffect(() => {
+    if (!isWorktreeMode && activeTab === "approval") setActiveTab("overview");
+  }, [activeTab, isWorktreeMode]);
+
   const tabs: { id: TabId; label: string; badge?: string | undefined }[] = [
     { id: "overview", label: "Overview" },
     { id: "worktree", label: "Worktree" },
-    {
+    ...(isWorktreeMode ? [{
       id: "approval",
       label: "Approval",
       ...(approvalPending ? { badge: "•" } : {}),
-    },
+    } as const] : []),
     { id: "skills", label: "Skills" },
     { id: "prompt", label: "Prompt" },
   ];
@@ -395,11 +401,11 @@ function OverviewPanel({ data }: { data: LeaderData }) {
 }
 
 function WorktreePanel({ data }: { data: LeaderData }) {
-  if (!data.worktreeIsolation) {
+  if (selectCanvasChangeMode(data) === "live") {
     return (
       <div style={{ color: "var(--text-muted)", fontStyle: "italic" }}>
-        Worktree isolation is disabled. Changes apply directly to the working
-        tree.
+        Live mode is active. Changes apply directly to the current working tree
+        and do not wait for approval.
       </div>
     );
   }

@@ -430,7 +430,7 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
           </div>
           <div>
             <span>Isolation</span>
-            <strong>{worktreeIsolation ? "Worktree" : "Current tree"}</strong>
+            <strong>{worktreeIsolation ? "Worktree" : "Live"}</strong>
           </div>
           <div>
             <span>Files</span>

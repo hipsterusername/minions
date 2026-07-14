@@ -677,7 +677,7 @@ function CardForm({
               {[
                 model !== "sonnet" ? (modelInventory.labels[model] ?? MODEL_LABELS[model] ?? model) : null,
                 permissionMode !== "auto" ? PERMISSION_LABELS[permissionMode] : null,
-                !worktreeIsolation ? "No Worktree" : null,
+                !worktreeIsolation ? "Live" : null,
                 skillIds.length > 0 ? `${skillIds.length} skill${skillIds.length !== 1 ? "s" : ""}` : null,
               ]
                 .filter(Boolean)
@@ -1127,7 +1127,7 @@ function BacklogCard({
               <span className="kb-config-chip kb-config-chip--perm">{PERMISSION_LABELS[cardPermission]}</span>
             )}
             {!cardWorktree && (
-              <span className="kb-config-chip kb-config-chip--worktree">No Worktree</span>
+              <span className="kb-config-chip kb-config-chip--worktree">Live</span>
             )}
             {taggedSkills.map((skill) => (
               <span key={skill.id} className="kb-config-chip kb-config-chip--skill" style={{ borderColor: `color-mix(in srgb, ${skill.accentColor} 40%, transparent)` }}>
@@ -2106,10 +2106,10 @@ function InspectorConfigSection({
               checked={card.worktreeIsolation}
               onChange={() => dispatch({ type: "UPDATE_CARD", cardId: card.id, data: { worktreeIsolation: !card.worktreeIsolation } })}
             />
-            <span>{card.worktreeIsolation ? "Isolated" : "Shared"}</span>
+            <span>{card.worktreeIsolation ? "Worktree" : "Live"}</span>
           </label>
         ) : (
-          <span className="kb-panel__config-value">{card.worktreeIsolation ? "Isolated" : "Shared"}</span>
+          <span className="kb-panel__config-value">{card.worktreeIsolation ? "Worktree" : "Live"}</span>
         )}
       </div>
 

@@ -283,7 +283,7 @@ describe("ActivityView", () => {
           }),
           session({ sessionKey: "idle", status: "idle", taskName: "Idle normal" }),
         ]}
-        nodes={[leaderNode("changes", [], { worktreeStatus: "active" })]}
+        nodes={[leaderNode("changes", [], { worktreeIsolation: true, worktreeStatus: "active" })]}
         {...noop}
       />,
     );

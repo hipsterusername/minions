@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { WorkItemSnapshot } from "../../../shared/work-item-contracts.ts";
-import { applyCanvasWorkItemSnapshot, canonicalPromptCommand, selectCanvasWorkItem } from "./work-item.ts";
+import { applyCanvasWorkItemSnapshot, canonicalPromptCommand, selectCanvasChangeMode,
+  selectCanvasWorkItem } from "./work-item.ts";
 
 function item(over: Partial<WorkItemSnapshot> = {}): WorkItemSnapshot {
   return {
@@ -17,6 +18,15 @@ function item(over: Partial<WorkItemSnapshot> = {}): WorkItemSnapshot {
 }
 
 describe("Canvas canonical work-item projection", () => {
+  it("prefers the canonical change mode over the legacy leader setup flag", () => {
+    expect(selectCanvasChangeMode({ worktreeIsolation: true,
+      workItemSnapshot: item() })).toBe("live");
+    expect(selectCanvasChangeMode({ worktreeIsolation: false,
+      workItemSnapshot: item({ lifecycle: { ...item().lifecycle, changeMode: "worktree",
+        integrationState: "worktree_active" } }) })).toBe("worktree");
+    expect(selectCanvasChangeMode({ worktreeIsolation: false })).toBe("live");
+  });
+
   it("uses the same shared lifecycle label as other surfaces", () => {
     expect(selectCanvasWorkItem(item())?.presentation.label).toBe("Ready for review");
     expect(selectCanvasWorkItem(item({ lifecycle: { ...item().lifecycle,

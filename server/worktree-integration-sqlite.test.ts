@@ -19,6 +19,21 @@ function setup(gates: () => Promise<MergeGateVerdict> = async () =>
 }
 
 describe("SQLite worktree integration runtime", () => {
+  it("rejects lineage creation, membership, and run binding for live work items", async () => {
+    const { db, service } = setup();
+    createWorkItem(db, { id: "live-work", projectId: "project", projectPath: "/repo",
+      title: "Live", changeMode: "live", workflowRank: "b", at: 2 });
+    await expect(service.createLineage({ requestId: "live-create", workItemId: "live-work" }))
+      .rejects.toMatchObject({ code: "invalid_state" });
+    const lineage = await service.createLineage({ requestId: "worktree-create", workItemId: "work" });
+    await expect(service.joinLineage({ requestId: "live-join", workItemId: "live-work",
+      lineageId: lineage.id, expectedRevision: lineage.revision, actor: "user" }))
+      .rejects.toMatchObject({ code: "invalid_state" });
+    await expect(service.bindRun({ workItemId: "live-work", runKey: "live-run" }))
+      .rejects.toThrow(/live work items/i);
+    db.close();
+  });
+
   it("persists a planned contribution and returns its exact worker identity before launch", async () => {
     const { db, service } = setup(); const plan = await service.bindRun({ workItemId: "work", runKey: "run-1" });
     expect(plan).toMatchObject({ projectPath: "/repo", leaderSessionKey: "run-1",

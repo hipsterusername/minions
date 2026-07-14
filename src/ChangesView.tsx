@@ -28,6 +28,7 @@ import { sessionTopic } from "../shared/ws-envelope.ts";
 import { randomUuid } from "./random-id.ts";
 import { useWorktreeIntegration } from "./use-worktree-integration.ts";
 import { WorktreeIntegrationControls } from "./WorktreeIntegrationControls.tsx";
+import { selectCanvasChangeMode } from "./nodes/leader/work-item.ts";
 import "./changes-view.css";
 
 type WorktreeDiff = NonNullable<LeaderData["approvalDiff"]>;
@@ -39,6 +40,7 @@ type WorktreeDiff = NonNullable<LeaderData["approvalDiff"]>;
  */
 export function leaderHasReviewableChanges(data: LeaderData): boolean {
   if (!data.sessionKey) return false;
+  if (selectCanvasChangeMode(data) !== "worktree") return false;
   if (data.approvalPending) return true;
   if (data.mergeConflict) return true;
   return data.worktreeStatus === "active" || data.worktreeStatus === "merging";
@@ -63,6 +65,38 @@ const fileStatusLetter = (s: string) =>
   s === "added" ? "A" : s === "deleted" ? "D" : "M";
 
 export function SessionChangesPanel({
+  nodeId,
+  sessionKey,
+  data,
+  socketSend,
+  socketSubscribe,
+  onUpdateNodeData,
+  onOpenInCanvas,
+}: {
+  nodeId: string;
+  sessionKey: string;
+  data: LeaderData;
+  socketSend?: ((data: unknown) => void) | undefined;
+  socketSubscribe?: SocketSubscribe | undefined;
+  onUpdateNodeData: (nodeId: string, data: LeaderData) => void;
+  onOpenInCanvas: (nodeId: string) => void;
+}) {
+  if (selectCanvasChangeMode(data) !== "worktree") return null;
+
+  return (
+    <WorktreeSessionChangesPanel
+      nodeId={nodeId}
+      sessionKey={sessionKey}
+      data={data}
+      socketSend={socketSend}
+      socketSubscribe={socketSubscribe}
+      onUpdateNodeData={onUpdateNodeData}
+      onOpenInCanvas={onOpenInCanvas}
+    />
+  );
+}
+
+function WorktreeSessionChangesPanel({
   nodeId,
   sessionKey,
   data,

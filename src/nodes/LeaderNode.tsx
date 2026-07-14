@@ -43,7 +43,7 @@ import { diffContextDelivery, buildContextUpdateBlock } from "../context-deliver
 import { buildFrozenLeaderFollowUpPrompt, freezeLeaderSystemPrompt, type FrozenLeaderPrompt } from "./leader/frozen-prompt.ts";
 import { consumeLeaderInputFocus } from "../leader-focus-request.ts";
 import { applyCanvasWorkItemSnapshot, canonicalPromptCommand,
-  formatCanvasWorkItemStatus, selectCanvasPrompt } from "./leader/work-item.ts";
+  formatCanvasWorkItemStatus, selectCanvasChangeMode, selectCanvasPrompt } from "./leader/work-item.ts";
 import { useCanvasWorkItem } from "./leader/use-canvas-work-item.ts";
 import { buildInitialLeaderRun, claimLeaderAutoStart } from "./leader/initial-run.ts";
 export { claimLeaderAutoStart, resetLeaderAutoStartClaimsForTests } from "./leader/initial-run.ts";
@@ -445,7 +445,7 @@ export function LeaderNodeRenderer({
             syncData.worktreeBranch = null;
             syncData.worktreeStatus = "merged";
             syncData.mergeConfirmed = true;
-          } else if (syncApproval?.requested) {
+          } else if (syncApproval?.requested && selectCanvasChangeMode(current) === "worktree") {
             syncData.approvalPending = true;
             syncData.approvalSummary = syncApproval?.summary ?? null;
             syncData.approvalDiff = syncApproval?.diff ?? null;
@@ -544,7 +544,7 @@ export function LeaderNodeRenderer({
             }
           | null
           | undefined;
-        if (syncApproval?.requested) {
+        if (syncApproval?.requested && selectCanvasChangeMode(current) === "worktree") {
           syncData.approvalPending = true;
           syncData.approvalSummary = syncApproval.summary ?? null;
           syncData.approvalDiff = syncApproval.diff ?? null;
@@ -609,7 +609,6 @@ export function LeaderNodeRenderer({
         emitUpdate({
           ...current,
           worktreeStatus: "failed",
-          worktreeIsolation: false,
           error: (serverMsg.error as string) ?? "Worktree creation failed",
         });
         return;
@@ -680,6 +679,7 @@ export function LeaderNodeRenderer({
         serverMsg.type === "approval_requested" &&
         serverMsg.sessionKey === current.sessionKey
       ) {
+        if (selectCanvasChangeMode(current) !== "worktree") return;
         emitUpdate({
           ...current,
           approvalPending: true,

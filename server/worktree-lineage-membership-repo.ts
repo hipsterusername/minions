@@ -13,10 +13,12 @@ export function joinWorkItemLineage(db: Database.Database, input: { lineageId: s
     const lineage = getLineage(db, input.lineageId);
     if (!lineage || lineage.status !== "open" || lineage.revision !== input.expectedLineageRevision)
       throw new Error("open lineage revision required");
-    const item = db.prepare("SELECT project_id,project_path FROM work_items WHERE id=?")
-      .get(input.workItemId) as { project_id: string; project_path: string } | undefined;
+    const item = db.prepare("SELECT project_id,project_path,change_mode FROM work_items WHERE id=?")
+      .get(input.workItemId) as { project_id: string; project_path: string;
+        change_mode: "live" | "worktree" } | undefined;
     if (!item || item.project_id !== lineage.project_id || item.project_path !== lineage.repository_path)
       throw new Error("work item and lineage project ownership must match");
+    if (item.change_mode !== "worktree") throw new Error("live work items cannot join worktree lineages");
     db.prepare(`UPDATE worktree_lineage_memberships SET status='left',revision=revision+1,left_at=?
       WHERE work_item_id=? AND status='active' AND lineage_id IN
         (SELECT id FROM worktree_lineages WHERE status<>'open')`).run(input.at, input.workItemId);

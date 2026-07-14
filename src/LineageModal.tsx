@@ -368,7 +368,7 @@ function ContributionDetail({
               })
             }
           >
-            Reject contribution
+            Request contribution changes
           </button>
         ) : null}
         {entry.state === "ready" && entry.reviewState === "approved" ? (
@@ -452,7 +452,7 @@ function ContributionDetail({
               })
             }
           >
-            Reject combined lineage
+            Request lineage changes
           </button>
         ) : null}
         {finalReady && finalApproved ? (
