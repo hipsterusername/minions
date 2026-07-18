@@ -119,7 +119,7 @@ export interface HarnessStartOptions {
    * Harnesses that do not support thinking ignore this field entirely.
    */
   thinking?: {
-    effort: "low" | "medium" | "high";
+    effort: "low" | "medium" | "high" | "xhigh";
     display: "summarized" | "omitted";
   };
   /**

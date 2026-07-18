@@ -52,10 +52,12 @@ export function mapPermission(mode: NormalizedPermissionMode | undefined): Mappe
 /**
  * Map a Minions thinking effort level to a Codex ModelReasoningEffort value.
  *
- * The harness thinking.effort union is low/medium/high. Codex also supports
- * "minimal" and "xhigh", but those are not surfaced through the harness API yet.
+ * The harness surfaces the reasoning levels shared by its supported models,
+ * including the documented `xhigh` value for GPT-5.6 Sol.
  */
-export function mapReasoningEffort(effort: "low" | "medium" | "high"): ModelReasoningEffort {
+export function mapReasoningEffort(
+  effort: "low" | "medium" | "high" | "xhigh",
+): ModelReasoningEffort {
   return effort;
 }
 
