@@ -82,6 +82,7 @@ import { LeaderPromptBar, LeaderSlashCommandsProvider } from "./leader/prompt/Le
 import { LeaderPromptOverlay } from "./leader/prompt/LeaderPromptOverlay.tsx";
 import { LeaderFullscreen } from "./leader/fullscreen/LeaderFullscreen.tsx";
 import { buildSlashCommands } from "./leader/prompt/slash-commands.ts";
+import { MinionsSurface } from "./leader/MinionsSurface.tsx";
 
 /* ── Main component ───────────────────────────────────────────────────── */
 
@@ -98,7 +99,6 @@ export function LeaderNodeRenderer({
   onResizeStart,
   onResizeEnd,
   onAddContentNode,
-  onRevealMinion,
   onDuplicateLeaderSetup,
   onOpenSystemModel,
   onSaveLeaderPreset,
@@ -115,6 +115,7 @@ export function LeaderNodeRenderer({
   const [promptOverlayOpen, setPromptOverlayOpen] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [scrollLocked, setScrollLocked] = useState(false);
+  const [selectedMinionTaskId, setSelectedMinionTaskId] = useState<string | null>(null);
   // Fullscreen cockpit (ephemeral, per-instance, per-session — mirrors the
   // MarkdownNode focus-mode rationale). Toggle via the header button or
   // Cmd/Ctrl+Shift+F when the leader card owns focus; Esc to exit.
@@ -151,6 +152,10 @@ export function LeaderNodeRenderer({
     debugFlagStore.getSnapshot,
   );
   const groupedMessages = useMemo(() => groupMessages(data.messages), [data.messages]);
+  const minionTasks = useMemo(
+    () => (data.taskPlan ?? []).filter((task) => task.executor === "minion"),
+    [data.taskPlan],
+  );
   const activateMessageSelection = useCallback((messageId: string) => {
     setMessageContextSelection({
       messageId,
@@ -284,6 +289,16 @@ export function LeaderNodeRenderer({
     },
     [onUpdateData],
   );
+  const selectMinionTask = useCallback((taskIdOrSessionKey: string) => {
+    const task = (dataRef.current.taskPlan ?? []).find(
+      (candidate) =>
+        candidate.executor === "minion" &&
+        (candidate.taskId === taskIdOrSessionKey || candidate.minionSessionKey === taskIdOrSessionKey),
+    );
+    if (!task) return;
+    setSelectedMinionTaskId(task.taskId);
+    emitUpdate({ ...dataRef.current, activeBodyView: "minions" });
+  }, [emitUpdate]);
 
   const { requestWorkItem, beginCanonicalRun } = useCanvasWorkItem({ nodeId: node.id,
     projectId, projectPath, socketSend, socketSubscribe, dataRef, emitUpdate,
@@ -1535,12 +1550,23 @@ export function LeaderNodeRenderer({
         splitRatio={data.dashboardSplitRatio}
         onSplitRatioChange={(r) => emitUpdate({ ...dataRef.current, dashboardSplitRatio: r })}
         dashboardHeaderActive={(data.taskPlan?.length ?? 0) > 0}
+        minionsActive={minionTasks.length > 0}
+        minionCount={minionTasks.length}
+        minions={
+          <MinionsSurface
+            tasks={minionTasks}
+            selectedTaskId={selectedMinionTaskId}
+            onSelectTask={setSelectedMinionTaskId}
+            socketSend={socketSend}
+            socketSubscribe={socketSubscribe}
+          />
+        }
         dashboardHeader={
           <TaskPlanPanel
             taskPlan={data.taskPlan ?? []}
             expanded={tasksExpanded}
             onToggle={() => setTasksExpanded((p) => !p)}
-            onRevealMinion={onRevealMinion}
+            onRevealMinion={selectMinionTask}
           />
         }
         chat={
@@ -1622,7 +1648,10 @@ export function LeaderNodeRenderer({
           setMessageContextSelection={setMessageContextSelection}
           exitMessageSelection={exitMessageSelection}
           onAddContentNode={onAddContentNode}
-          onRevealMinion={onRevealMinion}
+          onRevealMinion={(taskIdOrSessionKey) => {
+            selectMinionTask(taskIdOrSessionKey);
+            setIsFullscreen(false);
+          }}
           onOpenSkillFlyout={() => setSkillFlyoutOpen(true)}
           skillFlyoutAnchorRef={fullscreenSkillAnchorRef}
           toolbarSlot={
