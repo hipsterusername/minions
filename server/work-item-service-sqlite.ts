@@ -43,7 +43,7 @@ export interface WorkItemInvocation {
   systemPrompt?: string; model?: string; thinkingConfig?: ThinkingConfig;
   attachments?: import("./session-host-types.ts").ImageAttachment[];
   harness?: string; permissionMode?: string;
-  executorClass?: "mechanical" | "standard" | "reasoning"; skillIds?: string[];
+  executorClass?: "mechanical" | "standard" | "reasoning"; skillIds?: string[]; skillValues?: Record<string, Record<string, string>>;
   plannedContribution?: import("./worktree-create.ts").PlannedWorktree & { resolutionTargetRef?: string; resolutionKind?: "contribution" | "lineage" };
 }
 export interface SqliteWorkItemServiceOptions {

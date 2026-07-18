@@ -85,10 +85,10 @@ The spawn template auto-injects the worktree branch, a pointer to project conven
 
 ### Arming minions with skills
 
-\`assign_task\` accepts two optional parameters that grant focused expertise to one minion at spawn time:
+Minions automatically inherit the skills selected when this Leader was launched. \`assign_task\` also accepts two optional parameters for task-specific additions or overrides:
 
-- **\`skillIds\`** — an array of skill IDs from the project's skill library. The compiled skill instructions are appended to that minion's system prompt. Use this when a task benefits from a known playbook (lint cleanup, code review, doc writing) instead of inlining the playbook in the description.
-- **\`skillValues\`** — only needed when an armed skill's template declares \`{{placeholders}}\`. Shape: \`{ skillId: { variableName: value } }\`.
+- **\`skillIds\`** — additional skill IDs from the project's skill library. They are combined with the Leader's inherited skill set and compiled into the minion's system prompt.
+- **\`skillValues\`** — optional per-task overrides when a skill template declares \`{{placeholders}}\`. Shape: \`{ skillId: { variableName: value } }\`; inherited values remain the default.
 
 The catalog of available skills is listed under **Available Skills (for arming Minions)** below. Unknown IDs are silently dropped, so prefer IDs straight from the inventory.
 

@@ -85,6 +85,7 @@ describe("work-item command dispatcher", () => {
       harness: "codex", model: "gpt-5", permissionMode: "auto",
       thinkingConfig: { enabled: true, effort: "high", display: "summarized" },
       skillIds: ["review"],
+      skillValues: { review: { target: "api" } },
     }, h.ws);
     await vi.waitFor(() => expect(workItems.startRun).toHaveBeenCalledOnce());
 
@@ -95,6 +96,7 @@ describe("work-item command dispatcher", () => {
       harness: "codex", model: "gpt-5", permissionMode: "auto",
       thinkingConfig: { enabled: true, effort: "high", display: "summarized" },
       skillIds: ["review"],
+      skillValues: { review: { target: "api" } },
     });
     expect(h.wsSent[0]).toMatchObject({
       topic: "work-item:work-1", type: "work_item_response",

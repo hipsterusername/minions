@@ -98,6 +98,7 @@ export const COMMAND_SCHEMAS = {
     cwd,
     role: z.enum(SESSION_ROLES).optional(),
     skillIds: z.array(z.string()).optional(),
+    skillValues: z.record(z.string(), z.record(z.string(), z.string())).optional(),
     worktreeIsolation: z.boolean().optional(),
     model: z.string().optional(),
     permissionMode: z.string().optional(),
@@ -143,6 +144,7 @@ export const COMMAND_SCHEMAS = {
     harness: requiredId.optional(), model: requiredId.optional(),
     permissionMode: requiredId.optional(), thinkingConfig: z.unknown().optional(),
     skillIds: z.array(requiredId).optional(), systemPrompt: requiredId.optional(),
+    skillValues: z.record(z.string(), z.record(z.string(), z.string())).optional(),
     attachments: z.array(z.unknown()).optional(),
   }),
   reply_to_waiting_run: command("reply_to_waiting_run", {

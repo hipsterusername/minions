@@ -107,6 +107,7 @@ export function bootstrapWorkItemRuntime(
       ...(input.permissionMode ? { permissionMode: input.permissionMode } : {}),
       ...(input.executorClass ? { executorClass: input.executorClass } : {}),
       ...(input.skillIds ? { skillIds: input.skillIds } : {}),
+      ...(input.skillValues ? { skillValues: input.skillValues } : {}),
       ...(input.attachments ? { attachments: input.attachments } : {}),
     };
     await launch(sessionOptions);

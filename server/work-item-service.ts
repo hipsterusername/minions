@@ -35,6 +35,7 @@ export interface WorkItemService {
   }): Promise<WorkItemDetailSnapshot>;
   startRun(input: ExistingWorkItemMutationContext & { workItemId: string; prompt: string;
     harness?: string; model?: string; permissionMode?: string; thinkingConfig?: unknown; skillIds?: string[];
+    skillValues?: Record<string, Record<string, string>>;
     systemPrompt?: string; attachments?: unknown[] }): Promise<WorkItemDetailSnapshot>;
   replyToWaitingRun(input: ExistingWorkItemMutationContext & { workItemId: string; runKey: string; prompt: string }): Promise<WorkItemDetailSnapshot>;
   review(input: ExistingWorkItemMutationContext & { workItemId: string }): Promise<WorkItemDetailSnapshot>;

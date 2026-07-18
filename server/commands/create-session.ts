@@ -181,6 +181,7 @@ export const createSession: CommandHandler = async (
     systemPrompt: cmd.systemPrompt,
     role: canonicalConfig ? "leader" : cmd.role,
     ...(cmd.skillIds ? { skillIds: cmd.skillIds } : {}),
+    ...(cmd.skillValues ? { skillValues: cmd.skillValues } : {}),
     worktreeIsolation: canonicalConfig
       ? canonicalConfig.changeMode === "worktree"
       : cmd.worktreeIsolation,
