@@ -162,7 +162,7 @@ describe("ReviewChangesScreen", () => {
     vi.spyOn(crypto, "randomUUID").mockReturnValue(requestId);
     const socket = fakeSocket();
     const send = vi.fn();
-    render(<ReviewChangesScreen sessionKey="s-1" workItemId="work-1" send={send}
+    render(<ReviewChangesScreen sessionKey="s-1" workItemId="work-1" changeMode="worktree" send={send}
       subscribe={socket.subscribe} onClose={() => {}} />);
     expect(screen.queryByRole("button", { name: "Approve & Merge" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Discard" })).toBeNull();
@@ -174,7 +174,7 @@ describe("ReviewChangesScreen", () => {
     vi.spyOn(crypto, "randomUUID").mockReturnValue(requestId);
     const socket = fakeSocket();
     const send = vi.fn();
-    render(<ReviewChangesScreen sessionKey="s-1" workItemId="work-1" send={send}
+    render(<ReviewChangesScreen sessionKey="s-1" workItemId="work-1" changeMode="worktree" send={send}
       subscribe={socket.subscribe} onClose={() => {}} />);
 
     act(() => socket.deliver({ type: "worktree_integration_response",
@@ -198,7 +198,7 @@ describe("ReviewChangesScreen", () => {
     const socket = fakeSocket();
     const send = vi.fn();
     const onRequestChanges = vi.fn(() => true);
-    render(<ReviewChangesScreen sessionKey="s-1" workItemId="work-1" send={send}
+    render(<ReviewChangesScreen sessionKey="s-1" workItemId="work-1" changeMode="worktree" send={send}
       subscribe={socket.subscribe} onClose={() => {}} onRequestChanges={onRequestChanges} />);
     fireEvent.click(screen.getByRole("button", { name: "Request changes" }));
     fireEvent.change(screen.getByLabelText("Request changes"), { target: { value: "Resolve conflicts." } });
@@ -211,7 +211,7 @@ describe("ReviewChangesScreen", () => {
     vi.spyOn(crypto, "randomUUID").mockReturnValue(requestId);
     const socket = fakeSocket();
     const onClose = vi.fn();
-    render(<ReviewChangesScreen sessionKey="s-1" workItemId="work-1" send={vi.fn()}
+    render(<ReviewChangesScreen sessionKey="s-1" workItemId="work-1" changeMode="worktree" send={vi.fn()}
       subscribe={socket.subscribe} onClose={onClose} onRequestChanges={() => false} />);
     fireEvent.click(screen.getByRole("button", { name: "Request changes" }));
     fireEvent.change(screen.getByLabelText("Request changes"), { target: { value: "Keep this text." } });
@@ -219,6 +219,19 @@ describe("ReviewChangesScreen", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("feedback has been preserved");
     expect(screen.getByLabelText("Request changes")).toHaveValue("Keep this text.");
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("does not expose lineage or approval actions for a live work item", () => {
+    const socket = fakeSocket();
+    const send = vi.fn();
+    render(<ReviewChangesScreen sessionKey="s-1" workItemId="work-1" changeMode="live"
+      send={send} subscribe={socket.subscribe} onClose={() => {}} />);
+    expect(screen.getByRole("main", { name: "Live changes" })).toHaveTextContent(
+      "Live changes are applied directly",
+    );
+    expect(screen.queryByTestId("worktree-integration-controls")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Approve & Merge" })).toBeNull();
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("reveals conflict resolution actions after merge failure", async () => {

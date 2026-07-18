@@ -465,6 +465,9 @@ export default function MobileApp() {
         <ReviewChangesScreen
           sessionKey={selectedReviewSessionKey}
           workItemId={selectedReviewSession?.workItemId ?? null}
+          changeMode={selectedReviewSession?.workItemId
+            ? workItemState.items[selectedReviewSession.workItemId]?.lifecycle.changeMode
+            : undefined}
           onRequestChanges={(prompt) => {
             const workItemId = selectedReviewSession?.workItemId;
             const item = workItemId ? workItemState.items[workItemId] : undefined;

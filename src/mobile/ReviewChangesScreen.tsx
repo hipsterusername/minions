@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
+import type { ChangeMode } from "../../shared/work-item-lifecycle.ts";
 
 import { randomUuid } from "../random-id.ts";
 import { useWorktreeIntegration } from "../use-worktree-integration.ts";
@@ -15,6 +16,7 @@ import {
 interface ReviewChangesScreenProps {
   sessionKey: string;
   workItemId?: string | null | undefined;
+  changeMode?: ChangeMode | undefined;
   send: (data: unknown) => void;
   subscribe: SocketSubscribe;
   onClose: () => void;
@@ -34,6 +36,35 @@ function makeRequestId(): string {
 }
 
 export function ReviewChangesScreen({
+  changeMode,
+  workItemId,
+  ...props
+}: ReviewChangesScreenProps) {
+  if (workItemId && changeMode !== "worktree") {
+    return (
+      <main className="mob-review" aria-label="Live changes">
+        <header className="mob-chat-header">
+          <button className="mob-icon-button" type="button" onClick={props.onClose} aria-label="Close">
+            x
+          </button>
+          <div className="mob-chat-title">
+            <span>Live mode</span>
+            <h1>{props.title ?? props.sessionKey}</h1>
+          </div>
+        </header>
+        <section className="mob-review-body">
+          <div className="mob-review-summary">
+            <h2>No approval required</h2>
+            <p>Live changes are applied directly to the current working tree.</p>
+          </div>
+        </section>
+      </main>
+    );
+  }
+  return <WorktreeReviewChangesScreen {...props} workItemId={workItemId} changeMode={changeMode} />;
+}
+
+function WorktreeReviewChangesScreen({
   sessionKey,
   workItemId,
   send,

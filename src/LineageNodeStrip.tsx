@@ -15,7 +15,7 @@ const REVIEW_TEXT = {
 /**
  * View 1 ("in-action") of the progressive-disclosure lineage redesign: a slim
  * strip that lives inside the leader node. Shows the current lineage, this
- * leader's review state, Approve/Reject for a ready+pending contribution, and
+ * leader's review state, contribution review actions for a ready+pending contribution, and
  * an affordance to expand into the fuller modal views.
  *
  * Pure presentational — all data arrives via props, all actions go out through
@@ -82,14 +82,14 @@ export function LineageNodeStrip(props: {
             className="lin-btn lin-btn--approve lin-btn--sm"
             onClick={() => review("approved")}
           >
-            ✓ Approve
+            ✓ Approve contribution
           </button>
           <button
             type="button"
             className="lin-btn lin-btn--reject lin-btn--sm"
             onClick={() => review("rejected")}
           >
-            ✕ Reject
+            ↶ Request changes
           </button>
         </div>
       )}

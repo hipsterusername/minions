@@ -81,7 +81,7 @@ describe("<LineageNodeStrip />", () => {
     expect(screen.getByText("No contribution yet")).toBeInTheDocument();
   });
 
-  it("shows Approve/Reject for a ready+pending contribution and approves with the right payload", () => {
+  it("shows explicit contribution review actions and approves with the right payload", () => {
     const send = vi.fn();
     const contrib = contribution({ id: "contrib-9", revision: 12 });
     render(
@@ -93,8 +93,8 @@ describe("<LineageNodeStrip />", () => {
       />,
     );
 
-    const approve = screen.getByRole("button", { name: "✓ Approve" });
-    expect(screen.getByRole("button", { name: "✕ Reject" })).toBeInTheDocument();
+    const approve = screen.getByRole("button", { name: "✓ Approve contribution" });
+    expect(screen.getByRole("button", { name: "↶ Request changes" })).toBeInTheDocument();
 
     fireEvent.click(approve);
     expect(send).toHaveBeenCalledTimes(1);
@@ -108,7 +108,7 @@ describe("<LineageNodeStrip />", () => {
     );
   });
 
-  it("hides Approve/Reject when the contribution is not ready+pending", () => {
+  it("hides review actions when the contribution is not ready+pending", () => {
     const { rerender } = render(
       <LineageNodeStrip
         lineage={lineage()}
@@ -117,8 +117,8 @@ describe("<LineageNodeStrip />", () => {
         onExpand={vi.fn()}
       />,
     );
-    expect(screen.queryByRole("button", { name: "✓ Approve" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "✕ Reject" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "✓ Approve contribution" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "↶ Request changes" })).toBeNull();
 
     rerender(
       <LineageNodeStrip
@@ -128,8 +128,8 @@ describe("<LineageNodeStrip />", () => {
         onExpand={vi.fn()}
       />,
     );
-    expect(screen.queryByRole("button", { name: "✓ Approve" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "✕ Reject" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "✓ Approve contribution" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "↶ Request changes" })).toBeNull();
   });
 
   it("calls onExpand when the expand button is clicked", () => {

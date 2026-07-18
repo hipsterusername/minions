@@ -125,6 +125,8 @@ export class SqliteWorktreeIntegrationService implements WorktreeIntegrationServ
   }
   async createLineage(input: { requestId: string; workItemId: string; targetBranch?: string }) {
     const item = getWorkItem(this.db, input.workItemId); if (!item) throw new WorktreeIntegrationServiceError("not_found", "Work item not found");
+    if (item.change_mode !== "worktree") throw new WorktreeIntegrationServiceError(
+      "invalid_state", "Live work items do not use worktree lineages");
     const existing = repo.findOpenLineageByWorkItem(this.db, item.id); if (existing) return this.state(existing.id);
     const base = await this.resolveBase(item.project_path, input.targetBranch); const lineageId = id("lineage", input.requestId);
     return this.command(input.requestId, "create_lineage", input, () => { repo.createLineage(this.db,
@@ -147,6 +149,8 @@ export class SqliteWorktreeIntegrationService implements WorktreeIntegrationServ
   }
   async bindRun(input: { workItemId: string; runKey: string; lineageId?: string }): Promise<PlannedWorktree & {
     resolutionTargetRef?: string; resolutionKind?: "contribution" | "lineage" }> {
+    const item = getWorkItem(this.db, input.workItemId); if (!item) throw new Error("work item not found");
+    if (item.change_mode !== "worktree") throw new Error("live work items cannot bind worktree lineages");
     const priorLineageResolution = getLineageResolutionRun(this.db, input.runKey);
     if (priorLineageResolution) { const lineage = repo.getLineage(this.db, priorLineageResolution.lineage_id)!;
       return { path: lineage.integration_worktree_path,
@@ -159,7 +163,6 @@ export class SqliteWorktreeIntegrationService implements WorktreeIntegrationServ
         branch: prior.branch_name, projectPath: lineage.repository_path, leaderSessionKey: input.runKey,
         createdAt: prior.created_at, lifecycle: prior.state === "active" ? "active" : "initializing" };
     }
-    const item = getWorkItem(this.db, input.workItemId); if (!item) throw new Error("work item not found");
     let lineage = input.lineageId ? repo.getLineage(this.db, input.lineageId) : repo.findOpenLineageByWorkItem(this.db, item.id);
     if (lineage?.integration_state === "conflicted") {
       attachLineageResolutionRun(this.db, { lineageId: lineage.id, workItemId: item.id,

@@ -64,12 +64,16 @@ describe("work-item production bootstrap", () => {
     });
     await runtime.workItems.startRun({
       requestId: "primary", workItemId: detail.workItem.id, prompt: "Lead",
+      skillIds: ["code-review"],
+      skillValues: { "code-review": { target: "the API" } },
       expectedLifecycleRevision: 0, expectedCurrentRunKey: null,
     });
     expect(launched[0]).toMatchObject({
       workItemId: detail.workItem.id, runKind: "primary", parentRunKey: null,
       taskId: null, role: "leader", cwd: "/repo", worktreeIsolation: true,
       invocationKind: "new_run",
+      skillIds: ["code-review"],
+      skillValues: { "code-review": { target: "the API" } },
     });
 
     parent.workItemId = detail.workItem.id;

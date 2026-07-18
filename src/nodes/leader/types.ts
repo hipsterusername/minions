@@ -140,7 +140,7 @@ export interface LeaderData {
    * Which body pane is foregrounded when the node is too narrow for a split
    * view. Chat-forward by default (see progressive-disclosure in `LeaderBody`).
    */
-  activeBodyView?: "chat" | "dashboard" | undefined;
+  activeBodyView?: "chat" | "dashboard" | "minions" | undefined;
   /** Persisted split ratio (0–1) for the chat｜dashboard divider when wide. */
   dashboardSplitRatio?: number | undefined;
   /**

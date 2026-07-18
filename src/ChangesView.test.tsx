@@ -36,7 +36,8 @@ function renderPanel(data: Partial<LeaderData>, extra?: {
   onUpdate?: (id: string, d: LeaderData) => void;
   onOpen?: (id: string) => void;
 }) {
-  const full = leaderData({ sessionKey: "s1", worktreeStatus: "active", ...data });
+  const full = leaderData({ sessionKey: "s1", worktreeIsolation: true,
+    worktreeStatus: "active", ...data });
   return render(
     <SessionChangesPanel
       nodeId="l1"
@@ -57,14 +58,16 @@ describe("leaderHasReviewableChanges", () => {
 
   it("is true for an active isolated worktree", () => {
     expect(
-      leaderHasReviewableChanges(leaderData({ sessionKey: "s1", worktreeStatus: "active" })),
+      leaderHasReviewableChanges(leaderData({ sessionKey: "s1", worktreeIsolation: true,
+        worktreeStatus: "active" })),
     ).toBe(true);
   });
 
   it("is true when approval is pending even if status is none", () => {
     expect(
       leaderHasReviewableChanges(
-        leaderData({ sessionKey: "s1", worktreeStatus: "none", approvalPending: true }),
+        leaderData({ sessionKey: "s1", worktreeIsolation: true,
+          worktreeStatus: "none", approvalPending: true }),
       ),
     ).toBe(true);
   });
@@ -74,6 +77,7 @@ describe("leaderHasReviewableChanges", () => {
       leaderHasReviewableChanges(
         leaderData({
           sessionKey: "s1",
+          worktreeIsolation: true,
           worktreeStatus: "none",
           mergeConflict: { conflicts: ["a.ts"], summary: "", targetBranch: "main" },
         }),
@@ -81,10 +85,23 @@ describe("leaderHasReviewableChanges", () => {
     ).toBe(true);
   });
 
+  it("uses canonical live mode even when legacy review flags are stale", () => {
+    expect(leaderHasReviewableChanges(leaderData({
+      sessionKey: "s1",
+      worktreeIsolation: true,
+      worktreeStatus: "active",
+      approvalPending: true,
+      workItemSnapshot: {
+        lifecycle: { changeMode: "live" },
+      } as NonNullable<LeaderData["workItemSnapshot"]>,
+    }))).toBe(false);
+  });
+
   it("is false for merged / discarded / creating / none states", () => {
     for (const s of ["merged", "discarded", "creating", "none"] as const) {
       expect(
-        leaderHasReviewableChanges(leaderData({ sessionKey: "s1", worktreeStatus: s })),
+        leaderHasReviewableChanges(leaderData({ sessionKey: "s1", worktreeIsolation: true,
+          worktreeStatus: s })),
       ).toBe(false);
     }
   });
@@ -93,7 +110,7 @@ describe("leaderHasReviewableChanges", () => {
 describe("countReviewableLeaders", () => {
   it("counts only reviewable leader nodes and ignores other types", () => {
     const nodes: CanvasNode[] = [
-      leaderNode("l1", { sessionKey: "s1", worktreeStatus: "active" }),
+      leaderNode("l1", { sessionKey: "s1", worktreeIsolation: true, worktreeStatus: "active" }),
       leaderNode("l2", { sessionKey: "s2", worktreeStatus: "merged" }),
       { id: "m1", type: "markdown", position: { x: 0, y: 0 }, size: { width: 1, height: 1 }, data: {} },
     ];
@@ -106,6 +123,13 @@ describe("<SessionChangesPanel />", () => {
     const send = vi.fn();
     renderPanel({}, { send });
     expect(send).toHaveBeenCalledWith({ type: "get_worktree_diff", sessionKey: "s1" });
+  });
+
+  it("does not mount a review surface or request a diff in live mode", () => {
+    const send = vi.fn();
+    const view = renderPanel({ worktreeIsolation: false, approvalPending: true }, { send });
+    expect(view.container).toBeEmptyDOMElement();
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("merges via approve_changes after confirming", () => {

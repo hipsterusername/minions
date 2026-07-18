@@ -8,6 +8,7 @@ import { GateStrip, type MergeGateVerdict } from "./GateStrip.tsx";
 import { randomUuid } from "../../random-id.ts";
 import { useWorktreeIntegration } from "../../use-worktree-integration.ts";
 import { WorktreeIntegrationControls } from "../../WorktreeIntegrationControls.tsx";
+import { selectCanvasChangeMode } from "./work-item.ts";
 
 /**
  * P4: Compact config footer.
@@ -45,8 +46,13 @@ export function ConfigFooter({
   const [expanded, setExpanded] = useState(false);
   const contextCount = getContextForNode?.().length ?? 0;
   const hasSession = !!data.sessionKey;
-  const integration = useWorktreeIntegration({ workItemId: data.workItemId ?? null,
-    runKey: data.sessionKey ?? null, ...(socketSend ? { send: socketSend } : {}),
+  const changeMode = selectCanvasChangeMode(data);
+  const isWorktreeMode = changeMode === "worktree";
+  const changeModeLocked = hasSession || !!data.workItemSnapshot;
+  const integration = useWorktreeIntegration({
+    workItemId: isWorktreeMode ? data.workItemId ?? null : null,
+    runKey: isWorktreeMode ? data.sessionKey ?? null : null,
+    ...(socketSend ? { send: socketSend } : {}),
     ...(socketSubscribe ? { subscribe: socketSubscribe } : {}) });
 
   // ── Manual worktree review state ─────────────────────────────────
@@ -171,13 +177,13 @@ export function ConfigFooter({
               gap: 3,
               padding: "1px 6px",
               borderRadius: 3,
-              background: data.worktreeIsolation
+              background: isWorktreeMode
                 ? "var(--state-active)"
                 : "var(--state-hover)",
-              color: data.worktreeIsolation ? "var(--accent)" : "var(--text-muted)",
+              color: isWorktreeMode ? "var(--accent)" : "var(--text-muted)",
             }}
           >
-            {"\u{1F33F}"} {data.worktreeIsolation ? "isolated" : "shared"}
+            {"\u{1F33F}"} {isWorktreeMode ? "Worktree" : "Live"}
           </span>
 
           {/* Context count — locked after session starts */}
@@ -255,14 +261,15 @@ export function ConfigFooter({
             >
               <button
                 onClick={() => {
-                  if (!hasSession) {
+                  if (!changeModeLocked) {
                     onUpdateData({
                       ...data,
                       worktreeIsolation: !data.worktreeIsolation,
                     });
                   }
                 }}
-                disabled={hasSession}
+                disabled={changeModeLocked}
+                title={changeModeLocked ? "Change mode is fixed when the work item is created" : undefined}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -272,12 +279,12 @@ export function ConfigFooter({
                   padding: "4px 10px",
                   borderRadius: 4,
                   border: "none",
-                  cursor: hasSession ? "default" : "pointer",
-                  opacity: hasSession ? 0.7 : 1,
-                  background: data.worktreeIsolation
+                  cursor: changeModeLocked ? "default" : "pointer",
+                  opacity: changeModeLocked ? 0.7 : 1,
+                  background: isWorktreeMode
                     ? "var(--state-active)"
                     : "var(--state-hover)",
-                  color: data.worktreeIsolation
+                  color: isWorktreeMode
                     ? "var(--accent)"
                     : "var(--text-muted)",
                 }}
@@ -289,7 +296,7 @@ export function ConfigFooter({
                     width: 8,
                     height: 8,
                     borderRadius: "50%",
-                    background: data.worktreeIsolation
+                    background: isWorktreeMode
                       ? "var(--accent)"
                       : "var(--text-muted)",
                     marginLeft: 2,
@@ -332,14 +339,13 @@ export function ConfigFooter({
                   lineHeight: 1.4,
                 }}
               >
-                <strong>Isolation failed:</strong> This session is operating
-                directly on your working tree. Changes will not be isolated in a
-                branch.
+                <strong>Isolation failed:</strong> The run was stopped before
+                making changes because an isolated worktree could not be created.
               </div>
             )}
 
             {/* Worktree actions — always available when worktree is active */}
-            {!data.workItemId && worktreeIsActive && hasSession && !data.approvalPending && (
+            {isWorktreeMode && !data.workItemId && worktreeIsActive && hasSession && !data.approvalPending && (
               <div style={{ marginTop: 4 }}>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <button
@@ -727,7 +733,7 @@ export function ConfigFooter({
         )}
 
         {/* Merge conflict panel — shown when approve & merge fails */}
-        {!data.workItemId && data.approvalPending && data.mergeConflict && (
+        {isWorktreeMode && !data.workItemId && data.approvalPending && data.mergeConflict && (
           <div
             onMouseDown={(e) => e.stopPropagation()}
             style={{
@@ -919,7 +925,7 @@ export function ConfigFooter({
           </div>
         )}
 
-        {data.workItemId && integration.lineage && socketSend ? (
+        {isWorktreeMode && data.workItemId && integration.lineage && socketSend ? (
           <div onMouseDown={(event) => event.stopPropagation()} style={{ margin: "0 6px 6px" }}>
             <WorktreeIntegrationControls lineage={integration.lineage} workItemId={data.workItemId}
               runKey={data.sessionKey} send={socketSend} className="integration-controls--canvas"
@@ -928,7 +934,7 @@ export function ConfigFooter({
         ) : null}
 
         {/* Approval pending banner — shown when no conflicts (normal flow) */}
-        {!data.workItemId && data.approvalPending && !data.mergeConflict && (
+        {isWorktreeMode && !data.workItemId && data.approvalPending && !data.mergeConflict && (
           <div
             onMouseDown={(e) => e.stopPropagation()}
             style={{

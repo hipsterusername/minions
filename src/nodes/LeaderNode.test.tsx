@@ -618,6 +618,17 @@ describe("LeaderNode: wait_state events", () => {
 // ── worktree lifecycle ─────────────────────────────
 
 describe("LeaderNode: worktree events", () => {
+  it("keeps Worktree mode when isolation provisioning fails closed", async () => {
+    const { socket, replay } = createReplaySocket();
+    const states: LeaderData[] = [];
+    render(<Probe socket={socket} initial={makeInitialData({ worktreeIsolation: true })}
+      onState={(d) => states.push(d)} />);
+    await pump(replay, [{ message: { type: "worktree_failed", sessionKey: "leader-1",
+      error: "git worktree add failed" } as unknown as ServerMessage }]);
+    expect(states.at(-1)).toMatchObject({ worktreeIsolation: true,
+      worktreeStatus: "failed", error: "git worktree add failed" });
+  });
+
   it("worktree_created sets path/branch and status='active'", async () => {
     const { socket, replay } = createReplaySocket();
     const states: LeaderData[] = [];
@@ -691,7 +702,7 @@ describe("LeaderNode: approval events", () => {
     render(
       <Probe
         socket={socket}
-        initial={makeInitialData()}
+        initial={makeInitialData({ worktreeIsolation: true })}
         onState={(d) => states.push(d)}
       />,
     );
@@ -720,6 +731,16 @@ describe("LeaderNode: approval events", () => {
     expect(last?.approvalPending).toBe(true);
     expect(last?.approvalSummary).toBe("All tests pass");
     expect(last?.approvalDiff).toEqual(diff);
+  });
+
+  it("ignores approval requests for live changes", async () => {
+    const { socket, replay } = createReplaySocket();
+    const states: LeaderData[] = [];
+    render(<Probe socket={socket} initial={makeInitialData({ worktreeIsolation: false })}
+      onState={(d) => states.push(d)} />);
+    await pump(replay, [{ message: { type: "approval_requested", sessionKey: "leader-1",
+      summary: "ambiguous live approval", diff: null } as unknown as ServerMessage }]);
+    expect(states.at(-1)?.approvalPending).not.toBe(true);
   });
 
   it("approval_resolved clears pending + summary + diff", async () => {
@@ -933,7 +954,7 @@ describe("LeaderNode: connected-context dedup", () => {
       captured.filter((msg) => (msg as { type?: string }).type === "canvas_context");
 
     expect(nonCanvasCommands()).toHaveLength(1);
-    expect(integrationStatusQueries()).toHaveLength(1);
+    expect(integrationStatusQueries()).toHaveLength(0);
     expect(canvasCommands()).toHaveLength(1);
     const createMsg = nonCanvasCommands()[0] as { type: string; prompt: string };
     expect(createMsg.type).toBe("create_session");

@@ -10,6 +10,18 @@ export interface CanvasWorkItemFields {
   workItemSnapshot?: WorkItemSnapshot | null;
 }
 
+/**
+ * Resolve the immutable change mode from the canonical work item when one is
+ * available. The legacy leader flag is only a setup-time fallback for leaders
+ * that have not been attached to a canonical work item yet.
+ */
+export function selectCanvasChangeMode(data: CanvasWorkItemFields & {
+  worktreeIsolation: boolean;
+}): "live" | "worktree" {
+  return data.workItemSnapshot?.lifecycle.changeMode
+    ?? (data.worktreeIsolation ? "worktree" : "live");
+}
+
 export function detailFromWorkItemResponse(message: unknown): WorkItemDetailSnapshot | null {
   const msg = message as { type?: string; success?: boolean; result?: unknown };
   if (msg.type !== "work_item_response" || !msg.success || !msg.result) return null;
