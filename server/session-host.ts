@@ -103,8 +103,10 @@ export class SessionHost {
   status: SessionStatus = "idle";
   cwd: string;
   role: SessionRole = "default";
-  /** Skill IDs tagged on this session (leader only); gate opt-in tools. */
+  /** Skill IDs tagged on this session; Leaders pass them to their Minions. */
   skillIds: string[] = [];
+  /** Configured values for tagged skill templates. */
+  skillValues: Record<string, Record<string, string>> = {};
   taskName: string | null = null;
 
   totalCost = 0;
@@ -260,6 +262,7 @@ export class SessionHost {
       // Seed tagged skills from the launch payload; persist across resume/wait
       // cycles where opts no longer carries them.
       if (opts.skillIds) this.skillIds = opts.skillIds;
+      if (opts.skillValues) this.skillValues = opts.skillValues;
       if (opts.resumeId) this.sessionId = opts.resumeId;
       if (opts.harness) this.harnessName = opts.harness;
       if (opts.initialModel && !this.model) this.model = opts.initialModel;

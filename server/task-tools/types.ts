@@ -164,6 +164,13 @@ export interface TaskToolContext {
   projectPath: string;
   minionSystemPrompt: string;
   /**
+   * Skills selected when the Leader was launched. Every delegated Minion
+   * inherits these; assign_task.skillIds may add task-specific skills.
+   */
+  defaultMinionSkillIds?: readonly string[];
+  /** Configured values for the inherited Leader-selected skills. */
+  defaultMinionSkillValues?: Record<string, Record<string, string>>;
+  /**
    * Loaded system model when the layer is active (advisory/enforced), else
    * null. Powers the deterministic packet-required trigger in plan_task /
    * assign_task (redesign §5). Null when the layer is off.

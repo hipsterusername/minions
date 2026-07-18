@@ -132,6 +132,38 @@ function fillRegistryWithRunning(
 }
 
 describe("createSession — MAX_SESSIONS cap", () => {
+  it("passes selected skill IDs and values into the session host", async () => {
+    const registry = new SessionRegistry();
+    const starts: StartSessionOptions[] = [];
+    const ctx = makeCtx(registry, 5);
+    ctx.launchSession = async (options) => {
+      starts.push(options);
+      return {
+        sessionKey: options.sessionKey,
+        harness: "claude",
+        model: "",
+        permissionMode: "auto",
+        reasons: [],
+      };
+    };
+    const { ws } = makeFakeWs();
+
+    await createSession(ctx, {
+      type: "create_session",
+      sessionKey: "leader-skills",
+      prompt: "Review this project",
+      cwd: process.cwd(),
+      role: "leader",
+      skillIds: ["code-review"],
+      skillValues: { "code-review": { target: "the API" } },
+    }, ws as unknown as Parameters<typeof createSession>[2]);
+
+    expect(starts).toEqual([expect.objectContaining({
+      skillIds: ["code-review"],
+      skillValues: { "code-review": { target: "the API" } },
+    })]);
+  });
+
   it("is idempotent for an existing sessionKey and does not start another host", () => {
     const registry = new SessionRegistry();
     const existing = new SessionHost("leader-existing", process.cwd());

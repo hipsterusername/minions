@@ -2,8 +2,8 @@
  * Tests for the assign_task MCP tool.
  *
  * The behaviours these lock in:
- *   1. With no skillIds, the minion's systemPrompt equals the base prompt.
- *   2. With skillIds, the project's skills.json is loaded and the
+ *   1. With no selected or task-specific skills, the Minion uses the base prompt.
+ *   2. Leader-selected and task-specific skills are loaded and the
  *      compiled markdown is appended (without mutating ctx).
  *   3. skillValues fill in {{placeholders}} during compilation.
  *   4. Unknown skill IDs are silently dropped and surfaced in the tool
@@ -42,6 +42,7 @@ interface CapturedSpawn {
   systemPrompt: string;
   model?: string;
   harness?: string;
+  skillIds?: string[];
 }
 
 interface Harness {
@@ -228,6 +229,97 @@ describe("assign_task", () => {
     expect(sent).toContain("## Skill: Lint Cleanup");
     expect(sent).toContain("Run the linter and fix every warning.");
     expect(sent.startsWith(BASE_MINION_PROMPT)).toBe(true);
+  });
+
+  it("inherits Leader-selected skills when assign_task omits skillIds", async () => {
+    writeSkills(projectDir, [
+      {
+        id: "review",
+        name: "Code Review",
+        description: "Review changes",
+        category: "code",
+        icon: "eyes",
+        accentColor: "#000",
+        template: "Review the implementation carefully.",
+        variables: [],
+      },
+    ]);
+    harness.ctx.defaultMinionSkillIds = ["review"];
+
+    await callAssign(harness.ctx, {
+      taskId: "t-inherited",
+      title: "Implement",
+      description: "details",
+      priority: "medium",
+    });
+
+    expect(harness.spawns[0]!.systemPrompt).toContain("## Skill: Code Review");
+    expect(harness.spawns[0]!.skillIds).toEqual(["review"]);
+    expect(harness.ctx.taskState.tasks.get("t-inherited")?.skillIds).toEqual(["review"]);
+    expect(harness.emissions.find((entry) => entry.payload.type === "minion_spawned")?.payload)
+      .toMatchObject({ skillIds: ["review"] });
+  });
+
+  it("inherits configured values for Leader-selected skill templates", async () => {
+    writeSkills(projectDir, [
+      { id: "review", name: "Review", template: "Review {{target}}.", variables: [] },
+    ]);
+    harness.ctx.defaultMinionSkillIds = ["review"];
+    harness.ctx.defaultMinionSkillValues = { review: { target: "the API" } };
+
+    await callAssign(harness.ctx, {
+      taskId: "t-values",
+      title: "Review",
+      description: "details",
+      priority: "medium",
+    });
+
+    expect(harness.spawns[0]!.systemPrompt).toContain("Review the API.");
+  });
+
+  it("overrides individual inherited skill values per task", async () => {
+    writeSkills(projectDir, [
+      {
+        id: "review",
+        name: "Review",
+        template: "Review {{target}} at {{depth}} depth.",
+        variables: [],
+      },
+    ]);
+    harness.ctx.defaultMinionSkillIds = ["review"];
+    harness.ctx.defaultMinionSkillValues = {
+      review: { target: "the API", depth: "normal" },
+    };
+
+    await callAssign(harness.ctx, {
+      taskId: "t-value-override",
+      title: "Deep review",
+      description: "details",
+      priority: "high",
+      skillValues: { review: { depth: "deep" } },
+    });
+
+    expect(harness.spawns[0]!.systemPrompt).toContain("Review the API at deep depth.");
+  });
+
+  it("adds task-specific skills to inherited skills without duplicates", async () => {
+    writeSkills(projectDir, [
+      { id: "review", name: "Review", template: "Review.", variables: [] },
+      { id: "lint", name: "Lint", template: "Lint.", variables: [] },
+    ]);
+    harness.ctx.defaultMinionSkillIds = ["review"];
+
+    await callAssign(harness.ctx, {
+      taskId: "t-combined",
+      title: "Polish",
+      description: "details",
+      priority: "low",
+      skillIds: ["review", "lint"],
+    });
+
+    expect(harness.spawns[0]!.skillIds).toEqual(["review", "lint"]);
+    expect(harness.spawns[0]!.systemPrompt.match(/## Skill: Review/g)).toHaveLength(1);
+    expect(harness.spawns[0]!.systemPrompt).toContain("## Skill: Lint");
   });
 
   it("injects an armed skill's sub-skill map into the minion systemPrompt", async () => {
