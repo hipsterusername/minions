@@ -20,6 +20,7 @@
       color-mix(in srgb, var(--bg-elevated) 34%, var(--bg-surface)) 0,
       var(--bg-surface) 72px
     );
+  background-clip: padding-box;
   box-shadow:
     0 1px 0 color-mix(in srgb, var(--text-primary) 4%, transparent) inset,
     var(--shadow-sm);
