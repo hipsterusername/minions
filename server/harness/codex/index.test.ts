@@ -490,6 +490,23 @@ describe("CodexHarness permission mode", () => {
   });
 });
 
+describe("CodexHarness reasoning effort", () => {
+  it("forwards max reasoning to the Codex thread", async () => {
+    codexHarness.registerTools({});
+    await collect(
+      codexHarness.start(
+        baseOpts({
+          thinking: { effort: "max", display: "summarized" },
+        }),
+      ).events,
+    );
+    const startThreadOpts = sdkMock.calls.startThread[0] as {
+      modelReasoningEffort?: string;
+    };
+    expect(startThreadOpts.modelReasoningEffort).toBe("max");
+  });
+});
+
 // ── Deterministic abort ───────────────────────────────────────────────────────
 
 describe("CodexHarness abort determinism", () => {

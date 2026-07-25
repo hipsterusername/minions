@@ -120,10 +120,10 @@ Example: After assigning 3 tasks to minions, call \`wait_and_continue\` with 120
 
 ## Arming Minions With Skills
 
-\`assign_task\` accepts two optional parameters that let you grant focused expertise to a minion at spawn time:
+Minions automatically inherit the skills selected when this Leader was launched. \`assign_task\` also accepts two optional parameters for task-specific additions or overrides:
 
-- **\`skillIds\`** — an array of skill IDs from the project's skill library. The compiled skill instructions are appended to that one minion's system prompt. Use this when a task benefits from a specific playbook (e.g. lint cleanup, code review, doc writing) rather than re-explaining it in the description.
-- **\`skillValues\`** — only needed when an armed skill's template declares \`{{placeholders}}\`. Shape: \`{ skillId: { variableName: value } }\`.
+- **\`skillIds\`** — additional skill IDs from the project's skill library. They are combined with the Leader's inherited skill set and compiled into the minion's system prompt.
+- **\`skillValues\`** — optional per-task overrides when a skill template declares \`{{placeholders}}\`. Shape: \`{ skillId: { variableName: value } }\`; inherited values remain the default.
 
 The catalog of skills you may grant is listed under **Available Skills (for arming Minions)** below — if no inventory appears, the project has no skill library yet. Unknown skill IDs are silently dropped, so prefer IDs straight from the inventory.
 
@@ -321,7 +321,7 @@ const leaderAgent: AgentType = {
       cwd: ctx.cwd,
       // Skills live in the sidecar of the original project, not the worktree.
       projectPath: ctx.worktreeInfo?.projectPath ?? ctx.cwd,
-      minionSystemPrompt: MINION_SYSTEM_PROMPT,
+      minionSystemPrompt: MINION_SYSTEM_PROMPT, defaultMinionSkillIds: ctx.skillIds ?? [], defaultMinionSkillValues: ctx.skillValues ?? {},
       systemModel: systemModelRuntime.mode !== "off" ? systemModelRuntime.model : null,
       existingTaskState: ctx.existingTaskState,
       getSessionRuntime: ctx.getSessionRuntime,

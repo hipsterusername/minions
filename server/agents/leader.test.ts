@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { WebSocketServer } from "ws";
 import { createBus } from "../bus.ts";
 import { getAgentType } from "./registry.ts";
 import { LEADER_SYSTEM_PROMPT } from "./leader.ts";
 import { disablePersistence } from "../session-persist.ts";
-import { writeSettings } from "../project-store.ts";
+import { writeSettings, writeSkills } from "../project-store.ts";
 import { copyValidFixture } from "../system-model/load.test.ts";
 import type { TaskManagerState } from "../task-tools.ts";
 import "./leader.ts";
@@ -105,6 +108,50 @@ describe("leader agent wiring", () => {
 
     expect(result.toolGroups["skills"]).toBeUndefined();
     expect(result.mcpToolNames).not.toContain("mcp__skills__create_skill");
+  });
+
+  it("passes Leader-selected skills and values into assign_task by default", async () => {
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), "leader-skills-test-"));
+    try {
+      writeSkills(project, [
+        {
+          id: "code-review",
+          name: "Code Review",
+          template: "Review {{target}} carefully.",
+          variables: [],
+        },
+      ]);
+      const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+      const startMinionSession = vi.fn();
+      const result = getAgentType("leader").getToolGroups({
+        sessionKey: "leader-1",
+        cwd: project,
+        bus,
+        worktreeInfo: null,
+        worktreeIsolation: false,
+        skillIds: ["code-review"],
+        skillValues: { "code-review": { target: "the API" } },
+        startMinionSession,
+        scheduleWaitContinue: vi.fn(),
+      });
+      const assignTask = result.toolGroups["task-manager"]!.find(
+        (tool) => tool.name === "assign_task",
+      );
+
+      await assignTask!.handler({
+        taskId: "review-api",
+        title: "Review API",
+        description: "Review the implementation.",
+        priority: "high",
+      });
+
+      expect(startMinionSession).toHaveBeenCalledWith(expect.objectContaining({
+        skillIds: ["code-review"],
+        systemPrompt: expect.stringContaining("Review the API carefully."),
+      }));
+    } finally {
+      fs.rmSync(project, { recursive: true, force: true });
+    }
   });
 
   it("keeps flag-off tool groups and prompt byte-identical", () => {

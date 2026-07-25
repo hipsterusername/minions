@@ -1,13 +1,13 @@
 /**
- * LeaderBody — responsive chat｜dashboard layout for the Leader node.
+ * LeaderBody — responsive conversation + workspace layout for the Leader node.
  *
  * Progressive disclosure:
  *   - No dashboard data yet  → render chat only (looks exactly like before the
  *     embedded dashboard existed).
- *   - Has data + node is wide → split-pane: chat left, dashboard right, with a
- *     draggable divider (persisted ratio).
- *   - Has data + node is narrow → tabbed: a "Conversation | Dashboard" toggle,
- *     defaulting to Conversation (chat-forward).
+ *   - Has data + node is wide → split-pane: conversation left, workspace
+ *     right, with Dashboard and Minions grouped as peer tabs when both exist.
+ *   - Has data + node is narrow → one tab row for Conversation, Dashboard,
+ *     and Minions, defaulting to Conversation (chat-forward).
  *
  * This keeps the dashboard embedded in the leader card, replacing the retired
  * standalone `render` node.
@@ -38,8 +38,8 @@ export interface LeaderBodyProps {
   onSubmitForm?: ((componentId: string, answers: Record<string, unknown>) => void) | undefined;
   onAddContentNode?: ((text: string) => void) | undefined;
   /** Persisted tab selection when narrow. Chat-forward when unset. */
-  activeBodyView?: "chat" | "dashboard" | undefined;
-  onActiveBodyViewChange?: ((view: "chat" | "dashboard") => void) | undefined;
+  activeBodyView?: "chat" | "dashboard" | "minions" | undefined;
+  onActiveBodyViewChange?: ((view: "chat" | "dashboard" | "minions") => void) | undefined;
   /** Persisted chat-pane fraction of the split. */
   splitRatio?: number | undefined;
   onSplitRatioChange?: ((ratio: number) => void) | undefined;
@@ -54,6 +54,10 @@ export interface LeaderBodyProps {
    * plan has somewhere to live.
    */
   dashboardHeaderActive?: boolean | undefined;
+  /** Consolidated minion browser rendered in the same workspace as Dashboard. */
+  minions?: ReactNode;
+  minionsActive?: boolean | undefined;
+  minionCount?: number | undefined;
 }
 
 export function LeaderBody({
@@ -68,6 +72,9 @@ export function LeaderBody({
   onSplitRatioChange,
   dashboardHeader,
   dashboardHeaderActive,
+  minions,
+  minionsActive,
+  minionCount,
 }: LeaderBodyProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState<number>(0);
@@ -90,9 +97,29 @@ export function LeaderBody({
   // The dashboard side is shown when there are render components OR a task plan
   // to host — so the plan lives on the dashboard half, never full width.
   const showDashboard = hasRenderContent || !!dashboardHeaderActive;
+  const showMinions = !!minionsActive && minions != null;
+  const showWorkspace = showDashboard || showMinions;
   const chatFraction = clampChatFraction(splitRatio ?? LEADER_BODY_DEFAULT_SPLIT);
   const isWide = width >= LEADER_BODY_SPLIT_MIN_WIDTH;
-  const view: "chat" | "dashboard" = activeBodyView ?? "chat";
+  const requestedView = activeBodyView ?? "chat";
+  const workspaceView: "dashboard" | "minions" =
+    requestedView === "minions" && showMinions
+      ? "minions"
+      : showDashboard
+        ? "dashboard"
+        : "minions";
+  const view: "chat" | "dashboard" | "minions" =
+    requestedView === "chat"
+      ? "chat"
+      : requestedView === "minions" && showMinions
+        ? "minions"
+        : requestedView === "dashboard" && showDashboard
+          ? "dashboard"
+          : showDashboard
+            ? "dashboard"
+            : showMinions
+              ? "minions"
+              : "chat";
 
   const handleDividerResize = useCallback(
     (deltaX: number) => {
@@ -124,9 +151,25 @@ export function LeaderBody({
     [dashboardHeader, hasRenderContent, renderState, payloadError, onSubmitForm, onAddContentNode],
   );
 
+  const workspace = (
+    <div style={fillColumn}>
+      {showDashboard && showMinions && (
+        <WorkspaceTabs
+          active={workspaceView}
+          minionCount={minionCount ?? 0}
+          onChange={(next) => onActiveBodyViewChange?.(next)}
+        />
+      )}
+      <div style={{ ...fillColumn, display: workspaceView === "dashboard" ? "flex" : "none" }}>
+        {dashboard}
+      </div>
+      {workspaceView === "minions" && <div style={fillColumn}>{minions}</div>}
+    </div>
+  );
+
   // Progressive disclosure: nothing to show on the dashboard side → chat only
   // (unchanged look).
-  if (!showDashboard) {
+  if (!showWorkspace) {
     return (
       <div ref={rootRef} style={fillColumn}>
         {chat}
@@ -134,7 +177,7 @@ export function LeaderBody({
     );
   }
 
-  // Wide → split-pane (chat left, dashboard right).
+  // Wide → split-pane (conversation left, workspace right).
   if (isWide) {
     return (
       <div ref={rootRef} style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row" }}>
@@ -145,16 +188,16 @@ export function LeaderBody({
           side="left"
           onResize={handleDividerResize}
           onReset={() => onSplitRatioChange?.(LEADER_BODY_DEFAULT_SPLIT)}
-          ariaLabel="Resize conversation and dashboard panes"
+          ariaLabel="Resize conversation and workspace panes"
         />
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", borderLeft: "1px solid var(--border-default)" }}>
-          {dashboard}
+          {workspace}
         </div>
       </div>
     );
   }
 
-  // Narrow → tabbed (Conversation | Dashboard), chat-forward default.
+  // Narrow → one tab row for all available surfaces, chat-forward default.
   return (
     <div ref={rootRef} style={fillColumn}>
       <div
@@ -170,12 +213,68 @@ export function LeaderBody({
         }}
       >
         <BodyTab label="Conversation" active={view === "chat"} onClick={() => onActiveBodyViewChange?.("chat")} />
-        <BodyTab label="Dashboard" active={view === "dashboard"} onClick={() => onActiveBodyViewChange?.("dashboard")} />
+        {showDashboard && <BodyTab label="Dashboard" active={view === "dashboard"} onClick={() => onActiveBodyViewChange?.("dashboard")} />}
+        {showMinions && <BodyTab label={`Minions${(minionCount ?? 0) > 0 ? ` (${minionCount})` : ""}`} active={view === "minions"} onClick={() => onActiveBodyViewChange?.("minions")} />}
       </div>
       {/* Keep chat mounted (hidden) so scroll/stream state survives tab switches. */}
       <div style={{ ...fillColumn, display: view === "chat" ? "flex" : "none" }}>{chat}</div>
       {view === "dashboard" && <div style={fillColumn}>{dashboard}</div>}
+      {view === "minions" && <div style={fillColumn}>{minions}</div>}
     </div>
+  );
+}
+
+function WorkspaceTabs({
+  active,
+  minionCount,
+  onChange,
+}: {
+  active: "dashboard" | "minions";
+  minionCount: number;
+  onChange: (view: "dashboard" | "minions") => void;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Leader workspace"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 18,
+        minHeight: 36,
+        padding: "0 14px",
+        borderBottom: "1px solid var(--border-default)",
+        background: "var(--bg-secondary)",
+        flexShrink: 0,
+      }}
+    >
+      <WorkspaceTab label="Dashboard" active={active === "dashboard"} onClick={() => onChange("dashboard")} />
+      <WorkspaceTab label={`Minions · ${minionCount}`} active={active === "minions"} onClick={() => onChange("minions")} />
+    </div>
+  );
+}
+
+function WorkspaceTab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      style={{
+        alignSelf: "stretch",
+        padding: "0 1px",
+        border: "none",
+        borderBottom: `2px solid ${active ? "var(--accent)" : "transparent"}`,
+        background: "transparent",
+        color: active ? "var(--text-primary)" : "var(--text-muted)",
+        cursor: "pointer",
+        fontSize: 11,
+        fontWeight: active ? 650 : 500,
+      }}
+    >
+      {label}
+    </button>
   );
 }
 

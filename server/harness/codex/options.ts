@@ -9,7 +9,10 @@
  */
 
 import type { ApprovalMode, ModelReasoningEffort, SandboxMode } from "@openai/codex-sdk";
-import type { NormalizedPermissionMode } from "../types.ts";
+import type {
+  HarnessReasoningEffort,
+  NormalizedPermissionMode,
+} from "../types.ts";
 
 // ── MappedPermission ──────────────────────────────────────────────────────────
 
@@ -52,11 +55,15 @@ export function mapPermission(mode: NormalizedPermissionMode | undefined): Mappe
 /**
  * Map a Minions thinking effort level to a Codex ModelReasoningEffort value.
  *
- * The harness thinking.effort union is low/medium/high. Codex also supports
- * "minimal" and "xhigh", but those are not surfaced through the harness API yet.
+ * The stable Codex CLI accepts GPT-5.6's documented `max` value, but the
+ * current TypeScript SDK's `ModelReasoningEffort` declaration still stops at
+ * `xhigh`. Keep the compatibility assertion isolated here while forwarding
+ * the value unchanged to the CLI.
  */
-export function mapReasoningEffort(effort: "low" | "medium" | "high"): ModelReasoningEffort {
-  return effort;
+export function mapReasoningEffort(
+  effort: HarnessReasoningEffort,
+): ModelReasoningEffort {
+  return effort as ModelReasoningEffort;
 }
 
 // ── mapSandboxMode ────────────────────────────────────────────────────────────

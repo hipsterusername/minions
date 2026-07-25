@@ -52,6 +52,14 @@ export interface HarnessCapabilities {
 
 // ── Start options ─────────────────────────────────────────────────────────────
 
+/** Provider-neutral reasoning levels accepted at the harness boundary. */
+export type HarnessReasoningEffort =
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max";
+
 /** A normalized user message for multi-turn input streams. */
 export interface NormalizedUserMessage {
   role: "user";
@@ -119,7 +127,7 @@ export interface HarnessStartOptions {
    * Harnesses that do not support thinking ignore this field entirely.
    */
   thinking?: {
-    effort: "low" | "medium" | "high";
+    effort: HarnessReasoningEffort;
     display: "summarized" | "omitted";
   };
   /**

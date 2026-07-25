@@ -61,6 +61,7 @@ const CODEX_ENTRY: HarnessListEntry = {
   },
   builtInTools: [],
   models: [
+    { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
     { id: "gpt-5.5", label: "GPT-5.5" },
     { id: "gpt-5.4", label: "GPT-5.4" },
     { id: "gpt-5.3-codex-spark", label: "GPT-5.3-Codex-Spark" },
@@ -178,9 +179,9 @@ describe("SessionToolbar — model selection picker", () => {
       { sessionKey: null, harness: "claude" },
     );
     fireEvent.click(screen.getByTitle("Model selection"));
-    // The OpenAI provider's default is its first model (gpt-5.5 in the fixture).
+    // The OpenAI provider's default is its first model (GPT-5.6 Sol in the fixture).
     fireEvent.click(screen.getByRole("tab", { name: /OpenAI/ }));
-    expect(props.onHarnessChange).toHaveBeenCalledWith("codex", "gpt-5.5");
+    expect(props.onHarnessChange).toHaveBeenCalledWith("codex", "gpt-5.6-sol");
   });
 
   it("scopes the model list to the active provider", () => {
@@ -365,6 +366,32 @@ describe("SessionToolbar — harness-aware models", () => {
     expect(props.onThinkingConfigChange).toHaveBeenCalledWith({
       ...DEFAULT_THINKING,
       display: "omitted",
+    });
+  });
+
+  it("offers documented xhigh reasoning for GPT-5.6 Sol", () => {
+    const props = renderWithHarnesses(
+      [CODEX_ENTRY],
+      { harness: "codex", model: "gpt-5.6-sol" },
+    );
+    fireEvent.click(screen.getByTitle("Model selection"));
+    fireEvent.click(screen.getByRole("button", { name: "XHigh" }));
+    expect(props.onThinkingConfigChange).toHaveBeenCalledWith({
+      ...DEFAULT_THINKING,
+      effort: "xhigh",
+    });
+  });
+
+  it("offers documented max reasoning for GPT-5.6 Sol", () => {
+    const props = renderWithHarnesses(
+      [CODEX_ENTRY],
+      { harness: "codex", model: "gpt-5.6-sol" },
+    );
+    fireEvent.click(screen.getByTitle("Model selection"));
+    fireEvent.click(screen.getByRole("button", { name: "Max" }));
+    expect(props.onThinkingConfigChange).toHaveBeenCalledWith({
+      ...DEFAULT_THINKING,
+      effort: "max",
     });
   });
 });

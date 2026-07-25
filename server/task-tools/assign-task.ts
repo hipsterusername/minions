@@ -75,13 +75,13 @@ const assignTaskInputSchema = z.object({
     .array(z.string())
     .optional()
     .describe(
-      "Optional list of skill IDs from the project's skill library. The compiled skill instructions are appended to the minion's system prompt — use this to arm the minion with focused expertise for the task.",
+      "Optional task-specific skill IDs from the project's skill library. These are added to the skills inherited from the Leader, and the compiled instructions are appended to the Minion's system prompt.",
     ),
   skillValues: z
     .record(z.string(), z.record(z.string(), z.string()))
     .optional()
     .describe(
-      "Optional values for skill template variables, shaped as { skillId: { variableName: value } }. Only needed for skills whose templates declare {{placeholders}}.",
+      "Optional per-task overrides for inherited skill template values, shaped as { skillId: { variableName: value } }. Only needed for skills whose templates declare {{placeholders}}.",
     ),
   include_canvas_context: z
     .boolean()
@@ -99,7 +99,7 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
   return {
     name: "assign_task",
     description:
-      "Delegate a task to a new Minion agent. Creates a minion session that will execute the task autonomously. Use executorClass to choose mechanical, standard, or reasoning model tiers; pass model only for exact override. If the task was registered with plan_task, it will transition from planned to running. Optionally arm the minion with one or more skills from the project's skill library via `skillIds`. Tasks that ended in failed/ended_without_report/orphaned may be re-assigned with the same taskId to retry.",
+      "Delegate a task to a new Minion agent. Creates a minion session that will execute the task autonomously. Use executorClass to choose mechanical, standard, or reasoning model tiers; pass model only for exact override. If the task was registered with plan_task, it will transition from planned to running. Skills selected on the Leader are inherited automatically; `skillIds` adds task-specific skills. Tasks that ended in failed/ended_without_report/orphaned may be re-assigned with the same taskId to retry.",
     inputSchema: assignTaskInputSchema,
     handler: async (input: unknown) => {
       const args = assignTaskInputSchema.parse(input);
@@ -187,10 +187,12 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
           ? args.timeout_minutes * 60_000
           : ctx.taskTimeoutMs;
 
-      // Arm the minion with any requested skills by appending their
-      // compiled instructions to the minion's system prompt. Unknown
-      // skill IDs are silently dropped by `loadSkillsByIds`.
-      const requestedIds = skillIds ?? [];
+      // Every minion inherits the skills selected on its Leader. A tool call
+      // may add task-specific skills; preserve order while avoiding duplicate
+      // prompt sections when the Leader repeats an inherited ID.
+      const requestedIds = [
+        ...new Set([...(ctx.defaultMinionSkillIds ?? []), ...(skillIds ?? [])]),
+      ];
       const skills = loadSkillsByIds(ctx.projectPath, requestedIds);
       const armedSkillIds = skills.map((s) => s.id);
       // Record the resolved skill IDs on the task so the spawned minion can
@@ -199,7 +201,15 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
       // immutably, so the `task` captured earlier is now stale.
       const armedTask = ctx.taskState.tasks.get(taskId);
       if (armedTask) armedTask.skillIds = armedSkillIds;
-      const skillsAddendum = compileSkills(skills, skillValues ?? {});
+      const inheritedValues = ctx.defaultMinionSkillValues ?? {};
+      const resolvedSkillValues = { ...inheritedValues };
+      for (const [skillId, taskValues] of Object.entries(skillValues ?? {})) {
+        resolvedSkillValues[skillId] = {
+          ...(inheritedValues[skillId] ?? {}),
+          ...taskValues,
+        };
+      }
+      const skillsAddendum = compileSkills(skills, resolvedSkillValues);
       const minionSystemPrompt = ctx.minionSystemPrompt + skillsAddendum;
       const settings = readSettings(ctx.projectPath);
       const contextPack = args.workPacketId && settings.systemModel !== "off" && hasSystemModelManifest(ctx.cwd)

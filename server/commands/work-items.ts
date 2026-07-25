@@ -105,6 +105,7 @@ export const workItemCommand: CommandHandler = async (ctx, cmd, ws) => {
         ...(cmd.permissionMode !== undefined ? { permissionMode: cmd.permissionMode } : {}),
         ...(cmd.thinkingConfig !== undefined ? { thinkingConfig: cmd.thinkingConfig } : {}),
         ...(cmd.skillIds !== undefined ? { skillIds: cmd.skillIds } : {}),
+        ...(cmd.skillValues !== undefined ? { skillValues: cmd.skillValues } : {}),
         ...(cmd.systemPrompt !== undefined ? { systemPrompt: cmd.systemPrompt } : {}),
         ...(cmd.attachments !== undefined ? { attachments: cmd.attachments } : {}) });
       break;
