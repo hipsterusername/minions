@@ -4,10 +4,6 @@ import { DEFAULT_THINKING_CONFIG } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
 import { registerContract, LEADER_CONTRACT } from "../graph.ts";
 import { subscribeSocketTopic, type ServerMessage } from "../use-socket.ts";
-import {
-  normalizedToDisplayMessages,
-  type DisplayMessage,
-} from "../sdk-messages.ts";
 import { useStatusBanners, StatusBannerStack } from "../components/StatusBanner.tsx";
 import { preserveOptimisticUserMessages, type SessionStreamState } from "../session-stream.ts";
 import { useSessionStream } from "../use-session-stream.ts";
@@ -29,7 +25,7 @@ import { LeaderBody } from "./leader/LeaderBody.tsx";
 import {
   LEADER_DEFAULT_DATA,
   LEADER_PROMPT_OVERLAY_ZOOM_THRESHOLD,
-  type LeaderData, type LeaderMessage, type MessageContextSelection,
+  type LeaderData, type MessageContextSelection,
   type TaskPlanItem,
 } from "./leader/types.ts";
 import { buildSessionContext, extractLeaderCore, msgId } from "./leader/session-context.ts";
@@ -370,121 +366,6 @@ export function LeaderNodeRenderer({
         setLaunchNotice(
           `Using ${serverMsg.effective.harness} / ${serverMsg.effective.model} with ${serverMsg.effective.permissionMode} for this session (${serverMsg.reasons.join(", ").replaceAll("_", " ")}).`,
         );
-      }
-
-      // Handle sync_response — rebuild or reset state after reconnect
-      if (
-        serverMsg.type === "sync_response" &&
-        serverMsg.sessionKey === current.sessionKey
-      ) {
-        if (false) {
-        if (serverMsg.found && serverMsg.events) {
-          // Replay buffered events to rebuild messages, cost, turns
-          const rebuiltMessages: LeaderMessage[] = [];
-          let rebuiltCost = serverMsg.totalCost ?? current.totalCost;
-          let rebuiltTurns = serverMsg.turns ?? current.turns;
-          let rebuiltStatus: LeaderData["status"] =
-            (serverMsg.status as LeaderData["status"]) ?? current.status;
-
-          const seenIds = new Set<string>();
-          for (const evt of serverMsg.events) {
-            if (evt.type === "sdk_event" && evt.event) {
-              const event = evt.event;
-              const lms: DisplayMessage[] = normalizedToDisplayMessages(event, "lm");
-              // When a done event arrives, drop the last assistant msg if its
-              // content matches — avoids duplicate bubble on sync rebuild.
-              if (event.kind === "done") {
-                const resultText = lms.find((m) => m.role === "result")?.content;
-                if (resultText) {
-                  const lastIdx = rebuiltMessages.findLastIndex((m) => m.role === "assistant");
-                  const lastMsg = lastIdx >= 0 ? rebuiltMessages[lastIdx] : undefined;
-                  if (lastMsg?.content.trim() === resultText!.trim()) {
-                    rebuiltMessages.splice(lastIdx, 1);
-                  }
-                }
-              }
-              for (const lm of lms) {
-                if (!seenIds.has(lm.id)) {
-                  seenIds.add(lm.id);
-                  rebuiltMessages.push(lm);
-                }
-              }
-              if (event.kind === "usage" && event.costUSD != null) {
-                rebuiltCost = event.costUSD;
-              }
-              if (event.kind === "done" && event.turns != null) {
-                rebuiltTurns = event.turns;
-              }
-            } else if (evt.type === "session_status") {
-              rebuiltStatus = (evt.status as LeaderData["status"]) ?? rebuiltStatus;
-            }
-          }
-
-          const syncData: Partial<LeaderData> = {
-            status: rebuiltStatus,
-            messages: rebuiltMessages.length > 0 ? rebuiltMessages : current.messages,
-            totalCost: rebuiltCost,
-            turns: rebuiltTurns,
-            streamingText: "",
-            streamingBlockIndex: null,
-            error: serverMsg.lastError ?? null,
-            fullError: serverMsg.lastErrorFull ?? serverMsg.lastError ?? null,
-          };
-
-          // Restore worktree info from sync if available
-          if (serverMsg.worktree) {
-            const wt = serverMsg.worktree;
-            syncData.worktreePath = wt.path;
-            syncData.worktreeBranch = wt.branch;
-            syncData.worktreeStatus = "active";
-          }
-
-          // Restore taskName from sync if available
-          if (serverMsg.taskName) {
-            syncData.taskName = serverMsg.taskName;
-          }
-
-          // Restore approval state from sync if available
-          const syncApproval = serverMsg.approval as {
-            requested?: boolean;
-            summary?: string;
-            diff?: LeaderData["approvalDiff"];
-          } | null | undefined;
-          if (rebuiltStatus === "completed") {
-            // Session is done — force-clear all transient state
-            syncData.approvalPending = false;
-            syncData.approvalSummary = null;
-            syncData.approvalDiff = null;
-            syncData.mergeConflict = null;
-            syncData.worktreePath = null;
-            syncData.worktreeBranch = null;
-            syncData.worktreeStatus = "merged";
-            syncData.mergeConfirmed = true;
-          } else if (syncApproval?.requested && selectCanvasChangeMode(current) === "worktree") {
-            syncData.approvalPending = true;
-            syncData.approvalSummary = syncApproval?.summary ?? null;
-            syncData.approvalDiff = syncApproval?.diff ?? null;
-          } else {
-            syncData.approvalPending = false;
-          }
-
-          emitUpdate({
-            ...current,
-            ...syncData,
-          });
-        } else if (!serverMsg.found) {
-          // Session no longer exists on server — reset to disconnected
-          emitUpdate({
-            ...current,
-            status: "disconnected",
-            sessionKey: null,
-            streamingText: "",
-            streamingBlockIndex: null,
-            error: null,
-          });
-        }
-        return;
-        }
       }
 
       if (!current.sessionKey) return;
