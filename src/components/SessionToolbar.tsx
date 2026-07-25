@@ -929,6 +929,7 @@ export function SessionToolbar({
       {/* Stopped/idle resume hint */}
       {hasSession && status === "stopped" && (
         <span
+          className="session-toolbar__status-hint"
           style={{
             fontSize: 9,
             color: "var(--text-muted)",

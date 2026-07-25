@@ -273,6 +273,12 @@
   background: color-mix(in srgb, var(--bg-primary) 68%, var(--bg-secondary)) !important;
 }
 
+.leader-session-toolbar .session-toolbar__status-hint {
+  /* The card header already carries lifecycle status. Keeping the duplicate
+     hint here steals the last few pixels from controls on narrow cards. */
+  display: none;
+}
+
 .leader-node__skills {
   display: flex;
   min-width: 0;
@@ -430,12 +436,10 @@
 }
 
 .leader-header-menu__popover {
-  position: absolute;
+  position: fixed;
   z-index: 999;
-  top: calc(100% + 7px);
-  right: 0;
-  width: min(248px, calc(100cqw - 20px));
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 6px;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-panel);
@@ -557,7 +561,7 @@
   border: 1px solid var(--accent);
   border-radius: var(--radius-control);
   background: var(--accent);
-  color: var(--text-on-accent);
+  color: var(--text-on-accent, var(--bg-primary));
   cursor: pointer;
   font: 700 10px/1 var(--font-sans);
 }
