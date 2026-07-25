@@ -100,7 +100,7 @@ const EFFORT_DESCRIPTIONS: Record<EffortLevel, string> = {
   low: "Skip thinking when possible — fastest, cheapest",
   medium: "Light reasoning on harder requests",
   high: "Always think (default) — deep reasoning",
-  xhigh: "Deeper exploration — Opus 4.8 only",
+  xhigh: "Deeper exploration — Opus 4.8 and GPT-5.6 Sol",
   max: "Maximum effort — no constraints on thinking depth",
 };
 

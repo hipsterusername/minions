@@ -1,6 +1,6 @@
 /**
- * Tests for LeaderBody — the responsive chat｜dashboard layout that embeds the
- * dashboard in the Leader node (replacing the retired standalone render node).
+ * Tests for LeaderBody — the responsive conversation/workspace layout that
+ * embeds Dashboard and Minions in the Leader node.
  *
  * Covers:
  *   - Progressive disclosure: no dashboard data → chat only, no tabs.
@@ -148,9 +148,41 @@ describe("LeaderBody — wide (split)", () => {
     expect(screen.getByTestId("chat-slot")).toBeInTheDocument();
     expect(screen.getByText("PRs")).toBeInTheDocument();
     expect(
-      screen.getByRole("separator", { name: /resize conversation and dashboard/i }),
+      screen.getByRole("separator", { name: /resize conversation and workspace/i }),
     ).toBeInTheDocument();
     // No tab bar in split mode.
     expect(screen.queryByRole("tab", { name: "Dashboard" })).toBeNull();
+  });
+
+  it("groups Dashboard and Minions as tabs in the secondary workspace", () => {
+    const onActiveBodyViewChange = vi.fn();
+    const { rerender } = render(
+      <LeaderBody
+        chat={CHAT}
+        renderState={WITH_CONTENT}
+        minionsActive
+        minionCount={2}
+        minions={<div data-testid="minions-slot">minion cards</div>}
+        onActiveBodyViewChange={onActiveBodyViewChange}
+      />,
+    );
+
+    expect(screen.getByRole("tablist", { name: "Leader workspace" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Minions · 2" }));
+    expect(onActiveBodyViewChange).toHaveBeenCalledWith("minions");
+
+    rerender(
+      <LeaderBody
+        chat={CHAT}
+        renderState={WITH_CONTENT}
+        activeBodyView="minions"
+        minionsActive
+        minionCount={2}
+        minions={<div data-testid="minions-slot">minion cards</div>}
+        onActiveBodyViewChange={onActiveBodyViewChange}
+      />,
+    );
+    expect(screen.getByTestId("minions-slot")).toBeInTheDocument();
+    expect(screen.getByText("PRs")).not.toBeVisible();
   });
 });

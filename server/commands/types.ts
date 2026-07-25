@@ -133,6 +133,8 @@ export interface WsCommand {
   role?: SessionRole;
   /** Skill IDs tagged on a leader session; gate opt-in tools. */
   skillIds?: string[];
+  /** Template values configured for tagged skills. */
+  skillValues?: Record<string, Record<string, string>>;
   worktreeIsolation?: boolean;
   // Configuration params
   model?: string;

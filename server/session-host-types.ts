@@ -89,8 +89,10 @@ export interface StartSessionOptions {
   resumeId?: string | undefined;
   systemPrompt?: string | undefined;
   role?: SessionRole | undefined;
-  /** Skill IDs tagged on this session; gate opt-in tools (leader only). */
+  /** Skill IDs tagged on this session; Leaders pass them to their Minions. */
   skillIds?: string[] | undefined;
+  /** Template values for the tagged skills, inherited by delegated Minions. */
+  skillValues?: Record<string, Record<string, string>> | undefined;
   worktreeIsolation?: boolean | undefined;
   parentWorktree?: WorktreeInfo | undefined;
   /** Durable contribution identity allocated before provider launch. */

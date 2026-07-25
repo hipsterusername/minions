@@ -167,6 +167,7 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
               skillValues,
             }).systemPrompt,
             skillIds: selectedSkillIds,
+            skillValues,
           }
         : {};
     send({

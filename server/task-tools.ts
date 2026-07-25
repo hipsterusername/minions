@@ -70,6 +70,10 @@ export function createTaskToolsForLeader(opts: {
    */
   projectPath?: string;
   minionSystemPrompt: string;
+  /** Skills selected on the Leader and inherited by each spawned Minion. */
+  defaultMinionSkillIds?: readonly string[];
+  /** Template values configured for the inherited Leader-selected skills. */
+  defaultMinionSkillValues?: Record<string, Record<string, string>>;
   /** Loaded system model (active layer) for the packet-required trigger. */
   systemModel?: LoadedSystemModel | null;
   existingTaskState?: TaskManagerState;
@@ -100,6 +104,8 @@ export function createTaskToolsForLeader(opts: {
     cwd: opts.cwd,
     projectPath: opts.projectPath ?? opts.cwd,
     minionSystemPrompt: opts.minionSystemPrompt,
+    defaultMinionSkillIds: opts.defaultMinionSkillIds,
+    defaultMinionSkillValues: opts.defaultMinionSkillValues,
     systemModel: opts.systemModel ?? null,
     taskState,
     getSessionRuntime: opts.getSessionRuntime,

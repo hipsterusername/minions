@@ -53,6 +53,8 @@ describe("validateWsCommand – accept", () => {
       workItemId: "work-1",
       cwd: "/home/user",
       role: "leader",
+      skillIds: ["review"],
+      skillValues: { review: { target: "api" } },
       worktreeIsolation: true,
       model: "claude-3-opus",
       permissionMode: "default",
@@ -137,7 +139,8 @@ describe("validateWsCommand – accept", () => {
     accept({ type: "create_work_item", requestId: id(1), projectId: "p1", projectPath: "/repo", title: "Task", changeMode: "live" });
     accept({ type: "start_work_item_run", requestId: id(2), workItemId: "w1", prompt: "Start",
       expectedLifecycleRevision: 0, expectedCurrentRunKey: null, harness: "codex", model: "gpt-5",
-      permissionMode: "auto", thinkingConfig: { enabled: true }, skillIds: ["review"] });
+      permissionMode: "auto", thinkingConfig: { enabled: true }, skillIds: ["review"],
+      skillValues: { review: { target: "api" } } });
     accept({ type: "reply_to_waiting_run", requestId: id(3), workItemId: "w1", runKey: "r1", prompt: "Continue", expectedLifecycleRevision: 1, expectedCurrentRunKey: "r1" });
     accept({ type: "review_work_item", requestId: id(4), workItemId: "w1", expectedLifecycleRevision: 2, expectedCurrentRunKey: "r1" });
     accept({ type: "archive_work_item", requestId: id(5), workItemId: "w1", expectedLifecycleRevision: 3, expectedCurrentRunKey: "r1" });

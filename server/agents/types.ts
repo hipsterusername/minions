@@ -33,11 +33,13 @@ export interface AgentTypeContext {
   /** Existing render state to preserve across resume calls (leader only) */
   existingRenderState?: RenderState;
   /**
-   * Skill IDs tagged on this session (leader only), used to gate opt-in tool
-   * surfaces such as the skill-authoring tools. Sourced from the frontend at
-   * launch time and persisted on the host across resume/wait cycles.
+   * Skill IDs tagged on this session (leader only). They gate opt-in tool
+   * surfaces and are inherited by delegated Minions. Sourced from the
+   * frontend at launch time and persisted across resume/wait cycles.
    */
   skillIds?: string[];
+  /** Template values configured for the tagged Leader skills. */
+  skillValues?: Record<string, Record<string, string>>;
   /** Worktree inherited from the leader (minion only) */
   parentWorktree?: WorktreeInfo;
   /**

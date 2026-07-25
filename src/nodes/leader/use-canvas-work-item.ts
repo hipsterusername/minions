@@ -103,6 +103,7 @@ export function useCanvasWorkItem(input: Input) {
     }
     const started = await request({ ...canonicalPromptCommand(item, run.prompt),
       systemPrompt: run.systemPrompt, skillIds: input.dataRef.current.skillIds ?? [],
+      skillValues: input.dataRef.current.skillValues ?? {},
       model: input.dataRef.current.model,
       thinkingConfig: input.dataRef.current.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
       permissionMode: input.dataRef.current.permissionMode,

@@ -130,6 +130,7 @@ export function buildAgentContext(
   if (host.taskState) ctx.existingTaskState = host.taskState;
   if (host.renderState) ctx.existingRenderState = host.renderState;
   if (host.skillIds.length > 0) ctx.skillIds = host.skillIds;
+  if (Object.keys(host.skillValues).length > 0) ctx.skillValues = host.skillValues;
   if (opts.parentWorktree) ctx.parentWorktree = opts.parentWorktree;
   return ctx;
 }

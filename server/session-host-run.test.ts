@@ -290,6 +290,25 @@ describe("buildHarnessStartOpts — capability gating", () => {
       });
       expect(startOpts.thinking).toEqual({ effort: "medium", display: "omitted" });
     });
+
+    it("preserves extra-high reasoning for Codex", () => {
+      const harness = fakeHarness("codex", { thinking: true });
+      const host = fakeHost({
+        model: "gpt-5.6-sol",
+        thinkingConfig: { enabled: true, effort: "xhigh", display: "summarized" },
+      });
+      const { startOpts } = buildHarnessStartOpts({
+        host,
+        opts: fakeOpts(),
+        agentType: fakeAgentType,
+        agentCtx: fakeCtx,
+        toolResult: fakeToolResult,
+        abortController: new AbortController(),
+        harness,
+        prompt: "hello",
+      });
+      expect(startOpts.thinking).toEqual({ effort: "xhigh", display: "summarized" });
+    });
   });
 
   describe("builtInFilesystem capability", () => {

@@ -80,7 +80,7 @@ describe("SqliteWorkItemService", () => {
       prompt: "first", expectedLifecycleRevision: 0, expectedCurrentRunKey: null,
       harness: "codex", model: "gpt-5", permissionMode: "auto",
       thinkingConfig: { enabled: true, effort: "high", display: "summarized" },
-      skillIds: ["review"] });
+      skillIds: ["review"], skillValues: { review: { depth: "high" } } });
     service.updateProviderSessionId("run-configured", "provider-first");
     current = service.sealPrimaryRun({ workItemId: created.workItem.id, runKey: "run-configured",
       outcome: "error", expectedLifecycleRevision: current.workItem.lifecycle.lifecycleRevision,
@@ -89,7 +89,8 @@ describe("SqliteWorkItemService", () => {
       prompt: "second", expectedLifecycleRevision: current.workItem.lifecycle.lifecycleRevision,
       expectedCurrentRunKey: "run-configured" });
     expect(launches.at(-1)).toMatchObject({ harness: "codex", model: "gpt-5",
-      permissionMode: "auto", skillIds: ["review"], resumeId: "provider-first" });
+      permissionMode: "auto", skillIds: ["review"],
+      skillValues: { review: { depth: "high" } }, resumeId: "provider-first" });
 
     service.updateProviderSessionId("run-inherited", "provider-second");
     current = service.sealPrimaryRun({ workItemId: created.workItem.id, runKey: "run-inherited",

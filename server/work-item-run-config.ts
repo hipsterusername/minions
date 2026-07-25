@@ -7,13 +7,15 @@ export interface PrimaryRunConfig {
   permissionMode?: string;
   thinkingConfig?: ThinkingConfig;
   skillIds?: string[];
+  skillValues?: Record<string, Record<string, string>>;
   systemPrompt?: string;
   attachments?: ImageAttachment[];
 }
 
 interface ConfigInput {
   harness?: string; model?: string; permissionMode?: string;
-  thinkingConfig?: unknown; skillIds?: string[]; systemPrompt?: string; attachments?: unknown[];
+  thinkingConfig?: unknown; skillIds?: string[]; skillValues?: Record<string, Record<string, string>>;
+  systemPrompt?: string; attachments?: unknown[];
 }
 
 export function resolvePrimaryRunConfig(previousJson: string | null, input: ConfigInput) {
@@ -24,6 +26,7 @@ export function resolvePrimaryRunConfig(previousJson: string | null, input: Conf
   if (input.permissionMode !== undefined) config.permissionMode = input.permissionMode;
   if (input.thinkingConfig !== undefined) config.thinkingConfig = input.thinkingConfig as ThinkingConfig;
   if (input.skillIds !== undefined) config.skillIds = input.skillIds;
+  if (input.skillValues !== undefined) config.skillValues = input.skillValues;
   if (input.systemPrompt !== undefined) config.systemPrompt = input.systemPrompt;
   if (input.attachments !== undefined) config.attachments = input.attachments as ImageAttachment[];
   return { config, json: JSON.stringify(config) };

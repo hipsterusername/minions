@@ -366,9 +366,11 @@ describe("LaunchScreen", () => {
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
     const payload = send.mock.calls[0]![0] as {
       skillIds?: string[];
+      skillValues?: Record<string, Record<string, string>>;
       systemPrompt?: string;
     };
     expect(payload.skillIds).toEqual(["lint"]);
+    expect(payload.skillValues).toEqual({});
     expect(payload.systemPrompt).toContain("Clean up all lint violations.");
   });
 
@@ -393,6 +395,7 @@ describe("LaunchScreen", () => {
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
     const payload = send.mock.calls[0]![0] as Record<string, unknown>;
     expect(payload).not.toHaveProperty("skillIds");
+    expect(payload).not.toHaveProperty("skillValues");
     expect(payload).not.toHaveProperty("systemPrompt");
   });
 });
