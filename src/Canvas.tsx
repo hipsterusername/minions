@@ -69,6 +69,7 @@ import {
 } from "./empty-canvas.ts";
 import { LEADER_PROMPT_OVERLAY_ZOOM_THRESHOLD } from "./nodes/leader/types.ts";
 import { browserLogger } from "./logging.ts";
+import { CanvasBackground } from "./CanvasBackground.tsx";
 
 const log = browserLogger.child("canvas");
 
@@ -99,7 +100,6 @@ function isInsideGroup(node: CanvasNode, group: CanvasNode): boolean {
 // Zoom-in ceiling: ~2× keeps a single leader node (560×520) roughly
 // viewport-sized without blowing past it into unusable territory.
 const MAX_ZOOM = 2;
-const GRID_SIZE = 24;
 
 /** Snap radius in world-space units — connections complete automatically when
  *  the cursor comes this close to a valid target port. */
@@ -159,44 +159,6 @@ function computeLeaderDropPlacement(
 
   return { leaderDef, position, size, targetPort };
 }
-
-const DotGrid = memo(function DotGrid({ transform }: { transform: CanvasTransform }) {
-  const dotSpacing = GRID_SIZE * transform.scale;
-  const offsetX = (transform.x % dotSpacing + dotSpacing) % dotSpacing;
-  const offsetY = (transform.y % dotSpacing + dotSpacing) % dotSpacing;
-
-  return (
-    <svg
-      style={{
-        position: "absolute",
-        inset: 0,
-        width: "100%",
-        height: "100%",
-        pointerEvents: "none",
-      }}
-    >
-      <defs>
-        <pattern
-          id="dot-grid"
-          width={dotSpacing}
-          height={dotSpacing}
-          patternUnits="userSpaceOnUse"
-          x={offsetX}
-          y={offsetY}
-        >
-          <circle
-            cx={1}
-            cy={1}
-            r={1}
-            fill="var(--dot-grid)"
-            opacity={Math.min(1, transform.scale)}
-          />
-        </pattern>
-      </defs>
-      <rect width="100%" height="100%" fill="url(#dot-grid)" />
-    </svg>
-  );
-});
 
 type CreateNodeAnchor =
   | { kind: "world"; x: number; y: number }
@@ -3835,7 +3797,7 @@ export function Canvas({
             : "default",
       }}
     >
-      <DotGrid transform={transform} />
+      <CanvasBackground transform={transform} />
 
       {nodes.length === 0 && (
         <EmptyCanvasState onStart={startFromEmptyCanvas} />

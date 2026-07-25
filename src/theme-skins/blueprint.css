@@ -17,16 +17,33 @@
   --label-transform: uppercase;
 }
 
-/* Drafting grid: major + minor rules across the canvas. */
+/* A faint vignette gives the curved drafting mesh a little depth. The mesh
+   itself lives in CanvasBackground so it can respond gently to canvas pan. */
 :root[data-theme="blueprint"] body,
 :root[data-theme="blueprint"] .canvas-root {
   background-image:
-    linear-gradient(rgba(56, 189, 248, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(56, 189, 248, 0.06) 1px, transparent 1px),
-    linear-gradient(rgba(56, 189, 248, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(56, 189, 248, 0.03) 1px, transparent 1px);
-  background-size: 96px 96px, 96px 96px, 24px 24px, 24px 24px;
+    radial-gradient(ellipse at 50% 48%, rgba(56, 189, 248, 0.035), transparent 58%),
+    radial-gradient(ellipse at 50% 48%, transparent 46%, rgba(2, 8, 18, 0.26) 100%);
   background-attachment: fixed;
+}
+
+/* Blueprint replaces the shared dots with a single barrel-warped mesh. */
+:root[data-theme="blueprint"] {
+  --blueprint-grid-display: block;
+}
+
+:root[data-theme="blueprint"] .canvas-dot-grid {
+  display: none;
+}
+
+:root[data-theme="blueprint"] .blueprint-sphere-grid__minor {
+  stroke: rgba(56, 189, 248, 0.075);
+  stroke-width: 0.7;
+}
+
+:root[data-theme="blueprint"] .blueprint-sphere-grid__major {
+  stroke: rgba(56, 189, 248, 0.16);
+  stroke-width: 1;
 }
 
 /* Hard-edged cards with a crisp offset shadow. */
