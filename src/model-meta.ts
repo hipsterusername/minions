@@ -6,12 +6,12 @@
  * harness-aware: a `HarnessInfo` argument lets non-Claude harnesses
  * declare whether thinking is supported at all and which effort levels
  * apply, while preserving the existing per-model gating Claude needs
- * (Haiku has no thinking; Opus 4.8 supports xhigh/max; GPT-5.6 Sol
- * supports xhigh).
+ * (Haiku has no thinking; Opus 4.8 and GPT-5.6 Sol support xhigh/max).
  *
  * Source for Claude entries: the Anthropic adaptive-thinking docs and
  * `ModelInfo` in the Claude Agent SDK. Codex entries follow the
- * OpenAI model documentation (`xhigh` via `modelReasoningEffort`).
+ * OpenAI model documentation (`xhigh`/`max` via
+ * `modelReasoningEffort`).
  */
 
 import type { EffortLevel } from "./types.ts";
@@ -25,7 +25,13 @@ export interface ModelCapability {
 }
 
 const STANDARD_EFFORTS: EffortLevel[] = ["low", "medium", "high"];
-const CODEX_SOL_EFFORTS: EffortLevel[] = ["low", "medium", "high", "xhigh"];
+const CODEX_SOL_EFFORTS: EffortLevel[] = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
 const OPUS_EFFORTS: EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
 
 /**

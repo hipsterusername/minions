@@ -309,9 +309,10 @@ Update:
 - Phase E: `src/model-meta.ts` accepts an optional `HarnessInfo` argument
   and gates the entire surface on `harness.capabilities.thinking` first.
   Per-Claude-model entries (Haiku has no thinking; Opus 4.7 supports
-  `xhigh`/`max`) still win for known Claude IDs; otherwise a thinking-
-  capable harness gets the standard low/medium/high effort levels, which
-  is the Codex shape. **Done.**
+  `xhigh`/`max`) still win for known Claude IDs. GPT-5.6 Sol has an explicit
+  Codex entry for `low`/`medium`/`high`/`xhigh`/`max`; other thinking-capable
+  harness models fall back to the standard low/medium/high effort levels.
+  **Done.**
 
 ## Codex Harness
 

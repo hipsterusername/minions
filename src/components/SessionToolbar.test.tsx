@@ -381,4 +381,17 @@ describe("SessionToolbar — harness-aware models", () => {
       effort: "xhigh",
     });
   });
+
+  it("offers documented max reasoning for GPT-5.6 Sol", () => {
+    const props = renderWithHarnesses(
+      [CODEX_ENTRY],
+      { harness: "codex", model: "gpt-5.6-sol" },
+    );
+    fireEvent.click(screen.getByTitle("Model selection"));
+    fireEvent.click(screen.getByRole("button", { name: "Max" }));
+    expect(props.onThinkingConfigChange).toHaveBeenCalledWith({
+      ...DEFAULT_THINKING,
+      effort: "max",
+    });
+  });
 });

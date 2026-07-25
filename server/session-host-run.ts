@@ -189,7 +189,7 @@ export function buildHarnessStartOpts(
     modelSupportsThinkingForHarness(harness.name, host.model)
   ) {
     startOpts.thinking = {
-      effort: host.thinkingConfig.effort as "low" | "medium" | "high" | "xhigh",
+      effort: host.thinkingConfig.effort,
       display: host.thinkingConfig.display,
     };
   }
