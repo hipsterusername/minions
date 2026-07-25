@@ -153,6 +153,7 @@ export function LeaderPromptBar({
     <div
       data-testid={`leader-prompt-bar-${variant}`}
       data-no-drag
+      className={`leader-prompt-bar leader-prompt-bar--${variant}`}
       style={{
         padding: isOverlay
           ? `${10 + overlayMenuSpace}px 10px 10px`
@@ -165,7 +166,7 @@ export function LeaderPromptBar({
         alignItems: "flex-end",
       }}
     >
-      <div style={{ position: "relative", display: "flex", flex: 1 }}>
+      <div className="leader-prompt-bar__input-wrap">
         {menuOpen && (
           <LeaderSlashMenu
             commands={matches}
@@ -196,6 +197,7 @@ export function LeaderPromptBar({
       </div>
       <button
         type="button"
+        className="leader-prompt-bar__submit"
         onClick={onSubmit}
         onMouseDown={(e) => e.stopPropagation()}
         disabled={disabled}

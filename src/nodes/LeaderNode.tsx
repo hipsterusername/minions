@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore } from "react";
+import { Maximize2, Square, Zap } from "lucide-react";
 import type { NodeRenderProps, ThinkingConfig } from "../types.ts";
 import { DEFAULT_THINKING_CONFIG } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
@@ -82,6 +83,7 @@ import { LeaderPromptBar, LeaderSlashCommandsProvider } from "./leader/prompt/Le
 import { LeaderPromptOverlay } from "./leader/prompt/LeaderPromptOverlay.tsx";
 import { LeaderFullscreen } from "./leader/fullscreen/LeaderFullscreen.tsx";
 import { buildSlashCommands } from "./leader/prompt/slash-commands.ts";
+import "./leader/leader-node.css";
 
 /* ── Main component ───────────────────────────────────────────────────── */
 
@@ -1243,24 +1245,14 @@ export function LeaderNodeRenderer({
       ref={nodeRootRef}
       tabIndex={-1}
       data-fullscreen={isFullscreen}
-      style={{
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-        background: "var(--bg-surface)",
-        borderRadius: 8,
-        border: "1px solid var(--border-default)",
-        overflow: "hidden",
-        position: "relative",
-        outline: "none",
-      }}
+      data-status={displayStatus}
+      className="leader-node"
     >
       {/* P1: Resize handle */}
       {onResize && (
         <ResizeHandle
           currentSize={node.size}
-          minWidth={420}
+          minWidth={360}
           minHeight={320}
           onResize={onResize}
           {...(onResizeStart ? { onResizeStart } : {})}
@@ -1270,158 +1262,86 @@ export function LeaderNodeRenderer({
       )}
 
       {/* Header — P6: enhanced with menu, turn count, skill badges */}
-      <div
-        style={{
-          padding: "8px 12px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          borderBottom: "1px solid var(--border-default)",
-          flexShrink: 0,
-          background: "var(--bg-surface)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <img
-            src={
-              displayStatus === "running" || displayStatus === "creating"
-                ? "/icons/leader-active.svg"
-                : "/icons/leader-idle.svg"
-            }
-            alt={displayStatus === "running" || displayStatus === "creating" ? "Active" : "Idle"}
-            width={20}
-            height={20}
-            className="leader-status-icon"
-            style={{ display: "block", flexShrink: 0 }}
-          />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                fontSize: 11,
-                color: "var(--text-primary)",
-                fontWeight: 600,
-                lineHeight: 1.2,
-                display: "flex",
-                alignItems: "center",
-                gap: 4,
-              }}
-            >
+      <header className="leader-node__header">
+        <div className="leader-node__identity">
+          <div className="leader-node__avatar" aria-hidden="true">
+            <img
+              src={
+                displayStatus === "running" || displayStatus === "creating"
+                  ? "/icons/leader-active.svg"
+                  : "/icons/leader-idle.svg"
+              }
+              alt=""
+              width={20}
+              height={20}
+              className="leader-status-icon"
+            />
+            <span className="leader-node__presence" />
+          </div>
+          <div className="leader-node__heading">
+            <div className="leader-node__title">
               <EditableTitle
                 value={data.taskName ?? "Leader"}
                 onChange={(name) => onUpdateData({ ...data, taskName: name || null })}
               />
-              {/* Skill badge icons in header */}
               {taggedSkillCount > 0 && (
-                <span
+                <button
+                  type="button"
+                  className="leader-node__skill-count"
                   onClick={() => setSkillFlyoutOpen(true)}
                   onMouseDown={(e) => e.stopPropagation()}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 2,
-                    padding: "1px 5px",
-                    borderRadius: 3,
-                    fontSize: 9,
-                    fontFamily: "var(--font-mono)",
-                    background: "var(--state-active)",
-                    color: "var(--accent)",
-                    cursor: "pointer",
-                  }}
-                  title="Skills configured"
+                  title={`${taggedSkillCount} skill${taggedSkillCount === 1 ? "" : "s"} configured`}
+                  aria-label={`Edit ${taggedSkillCount} configured skill${taggedSkillCount === 1 ? "" : "s"}`}
                 >
-                  ⚡{taggedSkillCount}
-                </span>
+                  <Zap size={10} strokeWidth={2.2} aria-hidden="true" />
+                  {taggedSkillCount}
+                </button>
               )}
             </div>
-            <div
-              style={{
-                fontSize: 9,
-                color: statusColor[displayStatus] ?? "var(--text-muted)",
-                fontFamily: "var(--font-mono)",
-                textTransform: "uppercase",
-                letterSpacing: 0.5,
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-              }}
-            >
-              {formatCanvasWorkItemStatus(data.workItemSnapshot, data.liveEditAwareness) ?? displayStatus}
-              {/* Turn count badge */}
+            <div className="leader-node__meta">
+              <span
+                className="leader-node__status"
+                style={{ color: statusColor[displayStatus] ?? "var(--text-muted)" }}
+              >
+                {formatCanvasWorkItemStatus(data.workItemSnapshot, data.liveEditAwareness) ?? displayStatus}
+              </span>
               {data.turns > 0 && (
-                <span style={{ color: "var(--text-muted)", textTransform: "none" }}>
+                <span className="leader-node__turns">
                   {data.turns} turn{data.turns !== 1 ? "s" : ""}
                 </span>
               )}
             </div>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <div className="leader-node__actions">
           {data.totalCost > 0 && (
-            <span
-              style={{
-                fontSize: 10,
-                color: "var(--text-muted)",
-                fontFamily: "var(--font-mono)",
-              }}
-            >
+            <span className="leader-node__cost" title="Session cost">
               ${data.totalCost.toFixed(4)}
             </span>
           )}
           {displayStatus === "running" && (
             <button
+              type="button"
+              className="leader-node__stop"
               onClick={handleStop}
               onMouseDown={(e) => e.stopPropagation()}
-              style={{
-                padding: "2px 8px",
-                fontSize: 10,
-                background: "var(--danger-bg)",
-                border: "1px solid var(--danger-color)",
-                borderRadius: 4,
-                color: "var(--status-error)",
-                cursor: "pointer",
-                fontFamily: "var(--font-mono)",
-              }}
             >
+              <Square size={8} fill="currentColor" aria-hidden="true" />
               Stop
             </button>
           )}
-          {/* Fullscreen toggle — opens the cockpit overlay */}
           <button
+            type="button"
+            className="leader-node__icon-button"
             onClick={() => setIsFullscreen(true)}
             onMouseDown={(e) => e.stopPropagation()}
             aria-label="Enter fullscreen"
             aria-pressed={isFullscreen}
             title="Fullscreen cockpit (⌘⇧F)"
             data-testid="leader-fullscreen-enter"
-            style={{
-              background: "none",
-              border: "none",
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              padding: "2px 4px",
-              borderRadius: 3,
-              display: "inline-flex",
-              alignItems: "center",
-              transition: "color 0.15s",
-            }}
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.color = "var(--text-primary)")
-            }
-            onMouseLeave={(e) =>
-              (e.currentTarget.style.color = "var(--text-muted)")
-            }
           >
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 16 16"
-              fill="currentColor"
-              aria-hidden
-            >
-              <path d="M2 2h5v1.5H3.5V7H2V2zm12 0v5h-1.5V3.5H9V2h5zM2 14V9h1.5v3.5H7V14H2zm12 0H9v-1.5h3.5V9H14v5z" />
-            </svg>
+            <Maximize2 size={14} strokeWidth={1.8} aria-hidden="true" />
           </button>
-          {/* P6: Header menu */}
           <HeaderMenu
             onReset={handleReset}
             onExportLog={handleExportLog}
@@ -1431,10 +1351,11 @@ export function LeaderNodeRenderer({
             data={data}
           />
         </div>
-      </div>
+      </header>
 
       {/* Session control toolbar */}
       <SessionToolbar
+        className="leader-session-toolbar"
         sessionKey={data.sessionKey}
         status={displayStatus}
         model={data.model ?? "opus"}
@@ -1449,47 +1370,39 @@ export function LeaderNodeRenderer({
         skillsContent={
           <div
             ref={skillAnchorRef}
-            style={{ display: "flex", alignItems: "center", gap: 6 }}
+            className="leader-node__skills"
           >
             <button
+              type="button"
+              className="leader-node__skills-button"
               onClick={() => setSkillFlyoutOpen(true)}
               onMouseDown={(e) => e.stopPropagation()}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 4,
-                padding: "3px 10px",
-                borderRadius: 4,
-                fontSize: 10,
-                fontWeight: 600,
-                fontFamily: "var(--font-mono)",
-                background: taggedSkillCount > 0 ? "var(--state-active)" : "var(--bg-elevated)",
-                border: taggedSkillCount > 0 ? "1px solid var(--accent)" : "1px dashed var(--border-default)",
-                color: taggedSkillCount > 0 ? "var(--accent)" : "var(--text-muted)",
-                cursor: "pointer",
-                transition: "all 0.15s",
-              }}
+              data-active={taggedSkillCount > 0}
+              aria-label={`Configure skills${taggedSkillCount > 0 ? `, ${taggedSkillCount} active` : ""}`}
             >
-              ⚡ Skills {taggedSkillCount > 0 ? `(${taggedSkillCount})` : ""}
+              <Zap size={11} strokeWidth={2.2} aria-hidden="true" />
+              <span>Skills</span>
+              {taggedSkillCount > 0 && <strong>{taggedSkillCount}</strong>}
             </button>
-            {/* Show active skill chips inline */}
-            {(data.skillIds ?? [])
-              .map((id) => getSkill(id))
-              .filter((s): s is SkillTemplate => s !== undefined)
-              .slice(0, 3)
-              .map((skill) => (
-                <SkillTagChip key={skill.id} skill={skill} readOnly={false} onRemove={() => {
-                  const next = (data.skillIds ?? []).filter((s) => s !== skill.id);
-                  const nextValues = { ...(data.skillValues ?? {}) };
-                  delete nextValues[skill.id];
-                  onUpdateData({ ...dataRef.current, skillIds: next, skillValues: nextValues });
-                }} />
-              ))}
-            {taggedSkillCount > 3 && (
-              <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-                +{taggedSkillCount - 3} more
-              </span>
-            )}
+            <div className="leader-node__skill-chips">
+              {(data.skillIds ?? [])
+                .map((id) => getSkill(id))
+                .filter((s): s is SkillTemplate => s !== undefined)
+                .slice(0, 3)
+                .map((skill) => (
+                  <SkillTagChip key={skill.id} skill={skill} readOnly={false} onRemove={() => {
+                    const next = (data.skillIds ?? []).filter((s) => s !== skill.id);
+                    const nextValues = { ...(data.skillValues ?? {}) };
+                    delete nextValues[skill.id];
+                    onUpdateData({ ...dataRef.current, skillIds: next, skillValues: nextValues });
+                  }} />
+                ))}
+              {taggedSkillCount > 3 && (
+                <span className="leader-node__skills-more">
+                  +{taggedSkillCount - 3}
+                </span>
+              )}
+            </div>
           </div>
         }
       />
