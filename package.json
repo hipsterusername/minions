@@ -83,12 +83,12 @@
     "@types/react-dom": "19.2.3",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "6.0.2",
-    "@vitest/coverage-v8": "4.1.6",
+    "@vitest/coverage-v8": "4.1.10",
     "jsdom": "29.1.1",
     "tsx": "^4.22.1",
     "typescript": "6.0.3",
     "vite": "8.0.13",
-    "vitest": "4.1.6"
+    "vitest": "4.1.10"
   },
   "pnpm": {
     "overrides": {
