@@ -103,7 +103,7 @@ function normalizeData(raw: unknown): DialecticData {
 }
 
 /** Fold a coordinator event into node data. */
-function reduce(data: DialecticData, event: DialecticEvent): DialecticData {
+export function reduce(data: DialecticData, event: DialecticEvent): DialecticData {
   switch (event.kind) {
     case "run_status":
       return {
