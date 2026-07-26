@@ -20,6 +20,7 @@ import {
   resumeWaitingWorkItemRun,
   reviewWorkItem,
   sealWorkItemRun,
+  startWorkItemIteration,
   waitWorkItemRun,
 } from "./work-item-repo.ts";
 import { updateRunProviderSessionId } from "./work-item-provider-repo.ts";
@@ -34,7 +35,6 @@ import { continueChildWorkItemRun, continueWorkItemIntent, type RunContinuationI
 import { bindingSnapshot, itemSnapshot, runSnapshot } from "./work-item-snapshots.ts";
 import { importKanbanBoard, moveWorkItemCard, updateWorkItemCard } from "./work-item-workflow-repo.ts";
 import { kanbanCardMetadataSchema } from "../shared/work-item-kanban.ts";
-import { startWorkItemIterationForHarness } from "./work-item-run-start.ts";
 
 export interface WorkItemInvocation {
   requestId?: string; workItemId: string; runKey: string; prompt: string; resumeId?: string;
@@ -136,11 +136,11 @@ export class SqliteWorkItemService implements WorkItemService {
     try {
       const ledger = executeWorkItemCommand(this.options.db, { requestId: input.requestId,
         workItemId: input.workItemId, command: "start_run", payload: input, at: this.now() }, () =>
-        startWorkItemIterationForHarness(this.options.db, {
+        startWorkItemIteration(this.options.db, {
           workItemId: input.workItemId, runKey, idempotencyKey: input.requestId,
           expectedLifecycleRevision: input.expectedLifecycleRevision,
           expectedCurrentRunKey: input.expectedCurrentRunKey,
-          runConfigJson: resolved.json, harness: resolved.config.harness ?? "claude", at: this.now(),
+          runConfigJson: resolved.json, at: this.now(),
         }));
       const started = ledger.value ?? { workItem: getWorkItem(this.options.db, input.workItemId)!,
         run: getRunByStartRequest(this.options.db, input.workItemId, input.requestId), idempotent: true };

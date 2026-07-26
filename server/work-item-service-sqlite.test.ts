@@ -104,15 +104,15 @@ describe("SqliteWorkItemService", () => {
     expect(launches.at(-1)).not.toHaveProperty("resumeId");
   });
 
-  it("atomically falls observe-only harnesses back to canonical worktree mode", async () => {
+  it("preserves canonical live mode for every harness", async () => {
     const codex = await draft("codex-live");
-    const started = await service.startRun({ requestId: "codex-safe",
+    const started = await service.startRun({ requestId: "codex-live-start",
       workItemId: codex.workItem.id, prompt: "change files", harness: "codex",
       expectedLifecycleRevision: 0, expectedCurrentRunKey: null });
-    expect(started.workItem.lifecycle).toMatchObject({ changeMode: "worktree",
-      integrationState: "worktree_unprovisioned" });
-    expect(started.workItem).toMatchObject({ workflowRevision: 1,
-      card: { worktreeIsolation: true } });
+    expect(started.workItem.lifecycle).toMatchObject({ changeMode: "live",
+      integrationState: "live_clean" });
+    expect(started.workItem).toMatchObject({ workflowRevision: 0,
+      card: { worktreeIsolation: false } });
     expect(launches.at(-1)).toMatchObject({ harness: "codex" });
 
     const claude = await draft("claude-live");
@@ -123,11 +123,11 @@ describe("SqliteWorkItemService", () => {
       integrationState: "live_clean" });
 
     const echo = await draft("echo-live");
-    const isolated = await service.startRun({ requestId: "echo-safe",
+    const uncoordinated = await service.startRun({ requestId: "echo-live-start",
       workItemId: echo.workItem.id, prompt: "no interception", harness: "echo",
       expectedLifecycleRevision: 0, expectedCurrentRunKey: null });
-    expect(isolated.workItem.lifecycle).toMatchObject({ changeMode: "worktree",
-      integrationState: "worktree_unprovisioned" });
+    expect(uncoordinated.workItem.lifecycle).toMatchObject({ changeMode: "live",
+      integrationState: "live_clean" });
   });
 
   it("durably replays create independent of a random key generator and hashes workflow input", async () => {

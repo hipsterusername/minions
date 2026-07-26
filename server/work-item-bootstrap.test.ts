@@ -88,17 +88,19 @@ describe("work-item production bootstrap", () => {
     });
   });
 
-  it("launches an observe-only harness in the atomically selected worktree mode", async () => {
+  it("launches an observe-only harness in the selected live mode", async () => {
     const db = initDb(":memory:"); const launched: StartSessionOptions[] = [];
     const runtime = bootstrapWorkItemRuntime({ db, bus: bus(), registry: { get: () => undefined },
       launch: (options) => { launched.push(options); }, now: () => 10 });
     const detail = await runtime.workItems.create({ requestId: "safe-create", projectId: "project",
-      projectPath: "/repo", title: "Safe Codex", changeMode: "live" });
+      projectPath: "/repo", title: "Live Codex", changeMode: "live" });
     const started = await runtime.workItems.startRun({ requestId: "safe-start",
-      workItemId: detail.workItem.id, prompt: "Change files", harness: "codex",
+      workItemId: detail.workItem.id, prompt: "Change files", harness: "codex", model: "gpt-5",
       expectedLifecycleRevision: 0, expectedCurrentRunKey: null });
-    expect(started.workItem.lifecycle.changeMode).toBe("worktree");
-    expect(launched[0]).toMatchObject({ harness: "codex", worktreeIsolation: true });
+    expect(started.workItem.lifecycle.changeMode).toBe("live");
+    expect(launched[0]).toMatchObject({
+      harness: "codex", initialModel: "gpt-5", worktreeIsolation: false,
+    });
   });
 
   it("continues the exact hydrated host and provider thread", async () => {
