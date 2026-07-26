@@ -53,19 +53,19 @@ describe("Canvas canonical work-item projection", () => {
     expect([first.currentRunKey, second.currentRunKey]).toEqual(["run-1", "run-2"]);
   });
 
-  it("replies only to a waiting run and starts a new terminal iteration", () => {
+  it("sends one continuation intent for every lifecycle state", () => {
     vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000001");
     expect(canonicalPromptCommand(item(), "again")).toMatchObject({
-      type: "start_work_item_run", workItemId: "work-1", expectedCurrentRunKey: "run-1",
+      type: "continue_work_item", workItemId: "work-1", expectedCurrentRunKey: "run-1",
     });
     const waiting = item({ lifecycle: { ...item().lifecycle, runtimeState: "waiting", outcome: "none" },
       waitKind: "decision" });
     expect(canonicalPromptCommand(waiting, "answer")).toMatchObject({
-      type: "reply_to_waiting_run", runKey: "run-1",
+      type: "continue_work_item", expectedCurrentRunKey: "run-1",
     });
     const fileWait = item({ lifecycle: { ...item().lifecycle, runtimeState: "waiting", outcome: "none" },
       waitKind: "file_conflict" });
-    expect(canonicalPromptCommand(fileWait, "answer").type).toBe("start_work_item_run");
+    expect(canonicalPromptCommand(fileWait, "answer").type).toBe("continue_work_item");
   });
 
   it("ignores a stale snapshot so a late event cannot roll the node back", () => {

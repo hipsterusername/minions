@@ -33,6 +33,10 @@ export interface WorkItemService {
     projectId: string; projectPath: string; title: string; changeMode: ChangeMode;
     workflowColumnId?: string; workflowRank?: string; card?: Partial<KanbanCardMetadata>;
   }): Promise<WorkItemDetailSnapshot>;
+  continue(input: ExistingWorkItemMutationContext & { workItemId: string; prompt: string;
+    harness?: string; model?: string; permissionMode?: string; thinkingConfig?: unknown; skillIds?: string[];
+    skillValues?: Record<string, Record<string, string>>;
+    systemPrompt?: string; attachments?: unknown[] }): Promise<WorkItemDetailSnapshot>;
   startRun(input: ExistingWorkItemMutationContext & { workItemId: string; prompt: string;
     harness?: string; model?: string; permissionMode?: string; thinkingConfig?: unknown; skillIds?: string[];
     skillValues?: Record<string, Record<string, string>>;

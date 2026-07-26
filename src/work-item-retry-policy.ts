@@ -3,13 +3,12 @@ import type { WorkItemDetailSnapshot } from "../shared/work-item-contracts.ts";
 export const MAX_PROMPT_ATTEMPTS = 3;
 
 export type PromptWorkItemCommand = {
-  type: "start_work_item_run" | "reply_to_waiting_run";
+  type: "continue_work_item";
   requestId: string;
   workItemId: string;
   prompt: string;
   expectedLifecycleRevision: number;
   expectedCurrentRunKey: string | null;
-  runKey?: string;
   [key: string]: unknown;
 };
 
@@ -71,10 +70,9 @@ export function decideConflictRecovery(
     kind: "retry",
     command: {
       ...input.options,
-      type: replying ? "reply_to_waiting_run" : "start_work_item_run",
+      type: "continue_work_item",
       requestId: input.requestId,
       workItemId: item.id,
-      ...(replying ? { runKey: item.currentRunKey! } : {}),
       prompt: input.prompt,
       expectedLifecycleRevision: item.lifecycle.lifecycleRevision,
       expectedCurrentRunKey: item.currentRunKey,

@@ -1,15 +1,27 @@
-import { useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
+import {
+  ChevronDown,
+  Copy,
+  Download,
+  MoreHorizontal,
+  Network,
+  RotateCcw,
+  Save,
+} from "lucide-react";
 import type { LeaderData } from "./types.ts";
 
 /**
- * P6: Header menu — the ⋮ kebab in the leader-card header that exposes
- * "Save as preset", "Duplicate Setup", "Export Log", and "Reset Session"
- * actions.
- *
- * Closes itself on any wheel event (replaces the old canvasScale-prop
- * approach that caused every node to re-render on every zoom frame).
- *
- * Extracted from `src/nodes/LeaderNode.tsx` (Phase 7 of the leader refactor).
+ * Overflow menu for secondary Leader actions. The visual treatment mirrors
+ * the project Settings popover: one elevated surface, clear grouping, and
+ * comfortably sized controls.
  */
 export function HeaderMenu({
   onReset,
@@ -37,305 +49,280 @@ export function HeaderMenu({
   const [presetName, setPresetName] = useState("");
   const [presetDescription, setPresetDescription] = useState("");
   const [presetSystemPromptPrefix, setPresetSystemPromptPrefix] = useState("");
+  const [popoverPosition, setPopoverPosition] = useState<{
+    left: number;
+    maxHeight: number;
+    top: number;
+    width: number;
+  } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
 
-  // Close menu on any wheel event (covers both zoom and pan).
+  const close = useCallback((restoreFocus = false) => {
+    setOpen(false);
+    setSaveFormOpen(false);
+    setPopoverPosition(null);
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => triggerRef.current?.focus());
+    }
+  }, []);
+
   useEffect(() => {
     if (!open) return;
-    const close = () => setOpen(false);
-    window.addEventListener("wheel", close, { passive: true, once: true });
-    return () => window.removeEventListener("wheel", close);
+    const closeOnWheel = () => close();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close(true);
+    };
+    window.addEventListener("wheel", closeOnWheel, { passive: true, once: true });
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("wheel", closeOnWheel);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [close, open]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const trigger = triggerRef.current;
+    const popover = popoverRef.current;
+    if (!trigger || !popover) return;
+
+    const viewportPadding = 10;
+    const gap = 7;
+    const triggerRect = trigger.getBoundingClientRect();
+    const leaderRect = trigger.closest(".leader-node")?.getBoundingClientRect();
+    const width = Math.min(
+      248,
+      Math.max(200, (leaderRect?.width ?? 268) - 20),
+      window.innerWidth - viewportPadding * 2,
+    );
+    const left = Math.min(
+      window.innerWidth - width - viewportPadding,
+      Math.max(viewportPadding, triggerRect.right - width),
+    );
+    const availableBelow =
+      window.innerHeight - triggerRect.bottom - gap - viewportPadding;
+    const availableAbove = triggerRect.top - gap - viewportPadding;
+    const measuredHeight = popover.scrollHeight;
+    const openAbove =
+      measuredHeight > availableBelow && availableAbove > availableBelow;
+    const maxHeight = Math.max(120, openAbove ? availableAbove : availableBelow);
+    const top = openAbove
+      ? Math.max(viewportPadding, triggerRect.top - gap - Math.min(measuredHeight, maxHeight))
+      : triggerRect.bottom + gap;
+
+    setPopoverPosition({ left, maxHeight, top, width });
+  }, [open, saveFormOpen]);
+
+  useEffect(() => {
+    if (!open) return;
+    window.requestAnimationFrame(() => {
+      popoverRef.current
+        ?.querySelector<HTMLElement>('[role="menuitem"]')
+        ?.focus();
+    });
   }, [open]);
 
-  return (
-    <div style={{ position: "relative" }}>
-      <button
-        onClick={() => setOpen(!open)}
-        onMouseDown={(e) => e.stopPropagation()}
+  const overlay = open ? (
+    <>
+      <div
+        className="leader-header-menu__backdrop"
+        onClick={() => close()}
+        aria-hidden="true"
+      />
+      <div
+        ref={popoverRef}
+        className="leader-header-menu__popover"
+        role="menu"
+        aria-label="Leader actions"
+        onMouseDown={(event) => event.stopPropagation()}
         style={{
-          background: "none",
-          border: "none",
-          color: "var(--text-muted)",
-          cursor: "pointer",
-          fontSize: 14,
-          padding: "2px 4px",
-          lineHeight: 1,
-          borderRadius: 3,
-          transition: "color 0.15s",
+          left: popoverPosition?.left ?? 0,
+          maxHeight: popoverPosition?.maxHeight,
+          top: popoverPosition?.top ?? 0,
+          visibility: popoverPosition ? "visible" : "hidden",
+          width: popoverPosition?.width,
         }}
-        onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-primary)")}
-        onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
       >
-        ⋮
-      </button>
-      {open && (
-        <>
-          <div
-            onClick={() => setOpen(false)}
-            style={{ position: "fixed", inset: 0, zIndex: 998 }}
-          />
-          <div
-            onMouseDown={(e) => e.stopPropagation()}
-            style={{
-              position: "absolute",
-              top: "calc(100% + 4px)",
-              right: 0,
-              zIndex: 999,
-              background: "var(--bg-elevated)",
-              border: "1px solid var(--border-default)",
-              borderRadius: 6,
-              boxShadow: "var(--shadow-lg)",
-              overflow: "hidden",
-              minWidth: 160,
-            }}
-          >
-            {onSavePreset && (
-              <>
-                <button
-                  onClick={() => setSaveFormOpen((v) => !v)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    width: "100%",
-                    padding: "8px 12px",
-                    background: "transparent",
-                    border: "none",
-                    color: "var(--text-secondary)",
-                    fontSize: 11,
-                    fontFamily: "var(--font-mono)",
-                    cursor: "pointer",
-                    textAlign: "left",
-                  }}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.background = "var(--bg-surface)")
-                  }
-                  onMouseLeave={(e) =>
-                    (e.currentTarget.style.background = "transparent")
-                  }
-                >
-                  <span style={{ opacity: 0.6 }}>+</span> Save as preset...
-                </button>
-                {saveFormOpen && (
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 6,
-                      padding: 10,
-                      borderTop: "1px solid var(--border-default)",
-                      borderBottom: "1px solid var(--border-default)",
-                      background: "var(--bg-secondary)",
-                    }}
-                  >
-                    <input
-                      value={presetName}
-                      onChange={(e) => setPresetName(e.currentTarget.value)}
-                      placeholder="Name"
-                      style={{
-                        width: "100%",
-                        padding: "6px 8px",
-                        borderRadius: 4,
-                        border: "1px solid var(--border-default)",
-                        background: "var(--bg-surface)",
-                        color: "var(--text-primary)",
-                        fontSize: 11,
-                        fontFamily: "var(--font-mono)",
-                      }}
-                    />
-                    <input
-                      value={presetDescription}
-                      onChange={(e) => setPresetDescription(e.currentTarget.value)}
-                      placeholder="Description"
-                      style={{
-                        width: "100%",
-                        padding: "6px 8px",
-                        borderRadius: 4,
-                        border: "1px solid var(--border-default)",
-                        background: "var(--bg-surface)",
-                        color: "var(--text-primary)",
-                        fontSize: 11,
-                        fontFamily: "var(--font-mono)",
-                      }}
-                    />
-                    <textarea
-                      value={presetSystemPromptPrefix}
-                      onChange={(e) =>
-                        setPresetSystemPromptPrefix(e.currentTarget.value)
-                      }
-                      placeholder="System prompt prefix"
-                      rows={3}
-                      style={{
-                        width: "100%",
-                        resize: "vertical",
-                        padding: "6px 8px",
-                        borderRadius: 4,
-                        border: "1px solid var(--border-default)",
-                        background: "var(--bg-surface)",
-                        color: "var(--text-primary)",
-                        fontSize: 11,
-                        fontFamily: "var(--font-mono)",
-                      }}
-                    />
-                    <button
-                      onClick={() => {
-                        if (!presetName.trim()) return;
-                        const saved = onSavePreset({
-                          name: presetName,
-                          description: presetDescription,
-                          systemPromptPrefix: presetSystemPromptPrefix,
-                        });
-                        if (saved) {
-                          setOpen(false);
-                          setSaveFormOpen(false);
-                          setPresetName("");
-                          setPresetDescription("");
-                          setPresetSystemPromptPrefix("");
-                        }
-                      }}
-                      disabled={!presetName.trim()}
-                      style={{
-                        padding: "6px 8px",
-                        borderRadius: 4,
-                        border: "1px solid var(--accent)",
-                        background: presetName.trim()
-                          ? "var(--accent)"
-                          : "var(--bg-surface)",
-                        color: presetName.trim()
-                          ? "var(--text-on-accent)"
-                          : "var(--text-muted)",
-                        fontSize: 11,
-                        fontWeight: 700,
-                        fontFamily: "var(--font-mono)",
-                        cursor: presetName.trim() ? "pointer" : "default",
-                      }}
-                    >
-                      Save
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
-            {onDuplicateSetup && (
-              <button
-                onClick={() => {
-                  onDuplicateSetup();
-                  setOpen(false);
-                }}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  width: "100%",
-                  padding: "8px 12px",
-                  background: "transparent",
-                  border: "none",
-                  color: "var(--text-secondary)",
-                  fontSize: 11,
-                  fontFamily: "var(--font-mono)",
-                  cursor: "pointer",
-                  textAlign: "left",
-                }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.background = "var(--bg-surface)")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.background = "transparent")
-                }
-              >
-                <span style={{ opacity: 0.6 }}>⧉</span> Duplicate Setup
-              </button>
-            )}
-            {onOpenSystemModel && data.sessionKey && (
-              <button
-                onClick={() => {
-                  onOpenSystemModel();
-                  setOpen(false);
-                }}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  width: "100%",
-                  padding: "8px 12px",
-                  background: "transparent",
-                  border: "none",
-                  color: "var(--text-secondary)",
-                  fontSize: 11,
-                  fontFamily: "var(--font-mono)",
-                  cursor: "pointer",
-                  textAlign: "left",
-                }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.background = "var(--bg-surface)")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.background = "transparent")
-                }
-              >
-                <span style={{ opacity: 0.6 }}>◫</span> Open System Model
-              </button>
-            )}
-            <button
-              onClick={() => {
-                onExportLog();
-                setOpen(false);
-              }}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                width: "100%",
-                padding: "8px 12px",
-                background: "transparent",
-                border: "none",
-                color: "var(--text-secondary)",
-                fontSize: 11,
-                fontFamily: "var(--font-mono)",
-                cursor: "pointer",
-                textAlign: "left",
-              }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.background = "var(--bg-surface)")
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.background = "transparent")
+        <div className="leader-header-menu__label">Leader actions</div>
+
+        {onSavePreset && (
+          <>
+            <MenuItem
+              icon={<Save size={14} />}
+              onClick={() => setSaveFormOpen((value) => !value)}
+              expanded={saveFormOpen}
+              trailing={
+                <ChevronDown
+                  size={12}
+                  className="leader-header-menu__chevron"
+                  data-open={saveFormOpen}
+                />
               }
             >
-              <span style={{ opacity: 0.6 }}>↗</span> Export Log
-            </button>
-            {data.sessionKey && (
-              <button
-                onClick={() => {
-                  onReset();
-                  setOpen(false);
-                }}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  width: "100%",
-                  padding: "8px 12px",
-                  background: "transparent",
-                  border: "none",
-                  color: "var(--status-error)",
-                  fontSize: 11,
-                  fontFamily: "var(--font-mono)",
-                  cursor: "pointer",
-                  textAlign: "left",
-                }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.background = "var(--danger-bg)")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.background = "transparent")
-                }
-              >
-                <span style={{ opacity: 0.6 }}>↺</span> Reset Session
-              </button>
+              Save as preset
+            </MenuItem>
+            {saveFormOpen && (
+              <div className="leader-header-menu__form">
+                <label>
+                  <span>Name</span>
+                  <input
+                    value={presetName}
+                    onChange={(event) => setPresetName(event.currentTarget.value)}
+                    placeholder="My leader preset"
+                    autoFocus
+                  />
+                </label>
+                <label>
+                  <span>Description</span>
+                  <input
+                    value={presetDescription}
+                    onChange={(event) =>
+                      setPresetDescription(event.currentTarget.value)
+                    }
+                    placeholder="What this setup is for"
+                  />
+                </label>
+                <label>
+                  <span>System prompt prefix</span>
+                  <textarea
+                    value={presetSystemPromptPrefix}
+                    onChange={(event) =>
+                      setPresetSystemPromptPrefix(event.currentTarget.value)
+                    }
+                    placeholder="Optional instructions"
+                    rows={3}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="leader-header-menu__save"
+                  onClick={() => {
+                    if (!presetName.trim()) return;
+                    const saved = onSavePreset({
+                      name: presetName,
+                      description: presetDescription,
+                      systemPromptPrefix: presetSystemPromptPrefix,
+                    });
+                    if (!saved) return;
+                    close();
+                    setPresetName("");
+                    setPresetDescription("");
+                    setPresetSystemPromptPrefix("");
+                  }}
+                  disabled={!presetName.trim()}
+                >
+                  Save preset
+                </button>
+              </div>
             )}
-          </div>
-        </>
-      )}
+          </>
+        )}
+
+        {onDuplicateSetup && (
+          <MenuItem
+            icon={<Copy size={14} />}
+            onClick={() => {
+              onDuplicateSetup();
+              close();
+            }}
+          >
+            Duplicate setup
+          </MenuItem>
+        )}
+        {onOpenSystemModel && data.sessionKey && (
+          <MenuItem
+            icon={<Network size={14} />}
+            onClick={() => {
+              onOpenSystemModel();
+              close();
+            }}
+          >
+            Open system model
+          </MenuItem>
+        )}
+        <MenuItem
+          icon={<Download size={14} />}
+          onClick={() => {
+            onExportLog();
+            close();
+          }}
+        >
+          Export log
+        </MenuItem>
+
+        {data.sessionKey && (
+          <>
+            <div className="leader-header-menu__divider" />
+            <MenuItem
+              icon={<RotateCcw size={14} />}
+              tone="danger"
+              onClick={() => {
+                onReset();
+                close();
+              }}
+            >
+              Reset session
+            </MenuItem>
+          </>
+        )}
+      </div>
+    </>
+  ) : null;
+
+  return (
+    <div className="leader-header-menu">
+      <button
+        ref={triggerRef}
+        type="button"
+        className="leader-node__icon-button"
+        onClick={() => {
+          if (open) close();
+          else setOpen(true);
+        }}
+        onMouseDown={(event) => event.stopPropagation()}
+        aria-label="More leader actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="More actions"
+      >
+        <MoreHorizontal size={16} strokeWidth={2} aria-hidden="true" />
+      </button>
+
+      {overlay && createPortal(overlay, document.body)}
     </div>
+  );
+}
+
+function MenuItem({
+  children,
+  icon,
+  trailing,
+  onClick,
+  tone = "default",
+  expanded,
+}: {
+  children: ReactNode;
+  icon: ReactNode;
+  trailing?: ReactNode;
+  onClick: () => void;
+  tone?: "default" | "danger";
+  expanded?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      className="leader-header-menu__item"
+      data-tone={tone}
+      onClick={onClick}
+      aria-expanded={expanded}
+    >
+      <span className="leader-header-menu__item-icon" aria-hidden="true">
+        {icon}
+      </span>
+      <span>{children}</span>
+      {trailing}
+    </button>
   );
 }

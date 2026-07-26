@@ -193,8 +193,7 @@ export function useWorkItems(input: {
   const mutate = useCallback((type: string, item: WorkItemSnapshot,
     extra: Record<string, unknown> = {}) => {
     const requestId = randomUuid();
-    if ((type === "start_work_item_run" || type === "reply_to_waiting_run")
-      && typeof extra["prompt"] === "string") {
+    if (type === "continue_work_item" && typeof extra["prompt"] === "string") {
       clearPromptFailure(item.id);
       pendingPrompts.current.set(requestId, {
         prompt: extra["prompt"], attempts: 1,
@@ -213,7 +212,7 @@ export function useWorkItems(input: {
     review: (item: WorkItemSnapshot) => mutate("review_work_item", item),
     archive: (item: WorkItemSnapshot) => mutate("archive_work_item", item),
     restore: (item: WorkItemSnapshot) => mutate("restore_work_item", item),
-    start: (item: WorkItemSnapshot, prompt: string) => mutate("start_work_item_run", item, { prompt }),
-    reply: (item: WorkItemSnapshot, prompt: string) => mutate("reply_to_waiting_run", item, { runKey: item.currentRunKey, prompt }),
+    start: (item: WorkItemSnapshot, prompt: string) => mutate("continue_work_item", item, { prompt }),
+    reply: (item: WorkItemSnapshot, prompt: string) => mutate("continue_work_item", item, { prompt }),
   }), [state, promptFailures, clearPromptFailure, input.projectId, input.send, mutate]);
 }

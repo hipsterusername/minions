@@ -155,6 +155,14 @@ export const COMMAND_SCHEMAS = {
     workflowRank: requiredId.optional(),
     cardPatch: kanbanCardMetadataSchema.optional(),
   }),
+  continue_work_item: command("continue_work_item", {
+    ...mutationFields, workItemId: requiredId, prompt: z.string().min(1),
+    harness: requiredId.optional(), model: requiredId.optional(),
+    permissionMode: requiredId.optional(), thinkingConfig: z.unknown().optional(),
+    skillIds: z.array(requiredId).optional(), systemPrompt: requiredId.optional(),
+    skillValues: z.record(z.string(), z.record(z.string(), z.string())).optional(),
+    attachments: z.array(z.unknown()).optional(),
+  }),
   start_work_item_run: command("start_work_item_run", {
     ...mutationFields, workItemId: requiredId, prompt: z.string().min(1),
     harness: requiredId.optional(), model: requiredId.optional(),

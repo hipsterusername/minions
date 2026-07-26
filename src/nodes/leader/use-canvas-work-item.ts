@@ -45,7 +45,8 @@ export function useCanvasWorkItem(input: Input) {
 
   useEffect(() => subscribeSocketTopic(input.socketSubscribe, "*", (raw: unknown) => {
     const msg = raw as ServerMessage & { requestId?: string | null; success?: boolean;
-      result?: unknown; error?: string; workItem?: WorkItemSnapshot };
+      result?: unknown; error?: string; code?: string; latest?: WorkItemDetailSnapshot | null;
+      correlationId?: string; workItem?: WorkItemSnapshot };
     if (msg.type === "work_item_response" && msg.requestId) {
       const found = pending.current.get(msg.requestId);
       if (found) {
@@ -76,6 +77,24 @@ export function useCanvasWorkItem(input: Input) {
   // merge inside applyCanvasWorkItemSnapshot discards regressions, so a fresh
   // read is always safe.
   const hydratedItemRef = useRef<string | null>(null);
+
+  const requestMutation = useCallback(async (command: Record<string, unknown>) => {
+    try {
+      return await request(command);
+    } catch (error) {
+      if (!(error instanceof WorkItemCommandError)
+        || error.code !== "conflict" || !error.latest) throw error;
+      input.emitUpdate(applyCanvasWorkItemSnapshot(
+        input.dataRef.current, error.latest.workItem));
+      return request({
+        ...command,
+        requestId: randomUuid(),
+        expectedLifecycleRevision: error.latest.workItem.lifecycle.lifecycleRevision,
+        expectedCurrentRunKey: error.latest.workItem.currentRunKey,
+      });
+    }
+  }, [request, input.emitUpdate, input.dataRef]);
+
   useEffect(() => {
     const current = input.dataRef.current;
     if (!input.socketSend || !current.workItemId) return;
@@ -87,14 +106,15 @@ export function useCanvasWorkItem(input: Input) {
       const attached = detail.bindings.some((binding) => binding.surface === "canvas"
         && binding.bindingId === input.nodeId && binding.detachedAt === null);
       if (!attached) {
-        const bound = await request({ type: "attach_work_item_surface", requestId: randomUuid(),
+        const bound = await requestMutation({ type: "attach_work_item_surface", requestId: randomUuid(),
           workItemId: detail.workItem.id, surface: "canvas", bindingId: input.nodeId,
           expectedLifecycleRevision: detail.workItem.lifecycle.lifecycleRevision,
           expectedCurrentRunKey: detail.workItem.currentRunKey });
         input.emitUpdate(applyCanvasWorkItemSnapshot(input.dataRef.current, bound.workItem));
       }
     }).catch(() => { hydratedItemRef.current = null; /* legacy binding remains usable */ });
-  }, [input.socketSend, input.dataRef.current.workItemId, input.nodeId, request, input.emitUpdate]);
+  }, [input.socketSend, input.dataRef.current.workItemId,
+    input.dataRef.current.workItemSnapshot, input.nodeId, request, requestMutation, input.emitUpdate]);
 
   const sendCanonicalPrompt = useCallback(async (item: WorkItemSnapshot, prompt: string,
     extras: Record<string, unknown> = {}): Promise<CanvasPromptResult> => {
@@ -153,7 +173,7 @@ export function useCanvasWorkItem(input: Input) {
           skillValues: input.dataRef.current.skillValues ?? {} } });
       item = created.workItem;
       input.emitUpdate(applyCanvasWorkItemSnapshot(input.dataRef.current, item));
-      const attached = await request({ type: "attach_work_item_surface", requestId: randomUuid(),
+      const attached = await requestMutation({ type: "attach_work_item_surface", requestId: randomUuid(),
         workItemId: item.id, surface: "canvas", bindingId: input.nodeId,
         expectedLifecycleRevision: item.lifecycle.lifecycleRevision,
         expectedCurrentRunKey: item.currentRunKey });
@@ -176,6 +196,6 @@ export function useCanvasWorkItem(input: Input) {
       started.workItem.currentRunKey, run.contextItems, null);
     return started;
   }, [input.projectId, input.projectPath, input.nodeId, input.emitUpdate,
-    input.publishCanvasContext, input.dataRef, request, sendCanonicalPrompt]);
+    input.publishCanvasContext, input.dataRef, request, requestMutation, sendCanonicalPrompt]);
   return { requestWorkItem: request, beginCanonicalRun: begin, sendCanonicalPrompt };
 }

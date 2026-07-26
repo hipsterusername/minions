@@ -7,6 +7,7 @@ import { createSqliteWorkItemService, type WorkItemInvocation } from "./work-ite
 import { WorkItemServiceError } from "./work-item-service.ts";
 import { startWorkItemIteration } from "./work-item-repo.ts";
 import { createChildWorkItemRun } from "./work-item-child-repo.ts";
+import type { RunContinuationInput } from "./work-item-continuation.ts";
 
 describe("SqliteWorkItemService", () => {
   let db: Database.Database;
@@ -219,6 +220,65 @@ describe("SqliteWorkItemService", () => {
       expectedCurrentRunKey: "run-start",
     });
     expect(continuations).toHaveLength(1);
+  });
+
+  it("routes one continuation intent through waits, active guidance, and orphan recovery", async () => {
+    const created = await draft("intent");
+    let current = await service.startRun({ requestId: "intent-start",
+      workItemId: created.workItem.id, prompt: "start",
+      expectedLifecycleRevision: 0, expectedCurrentRunKey: null });
+    db.prepare(`UPDATE work_items SET runtime_state = 'working' WHERE id = ?`)
+      .run(created.workItem.id);
+    current = service.markWaiting({ workItemId: created.workItem.id,
+      runKey: "run-intent-start", waitKind: "file_conflict",
+      expectedLifecycleRevision: current.workItem.lifecycle.lifecycleRevision,
+      expectedCurrentRunKey: "run-intent-start" });
+    const resumed = await service.continue({ requestId: "intent-wait",
+      workItemId: created.workItem.id, prompt: "files are resolved",
+      expectedLifecycleRevision: current.workItem.lifecycle.lifecycleRevision,
+      expectedCurrentRunKey: "run-intent-start" });
+    expect(resumed.workItem.currentRunKey).toBe("run-intent-start");
+    expect(continuations.at(-1)).toMatchObject({ prompt: "files are resolved",
+      runKey: "run-intent-start" });
+
+    const orphaned = await service.continue({ requestId: "intent-orphan",
+      workItemId: created.workItem.id, prompt: "recover and continue",
+      expectedLifecycleRevision: resumed.workItem.lifecycle.lifecycleRevision,
+      expectedCurrentRunKey: "run-intent-start" });
+    expect(orphaned.workItem).toMatchObject({ currentRunKey: "run-intent-orphan",
+      iteration: 2 });
+    expect(db.prepare(`SELECT run_outcome FROM sessions
+      WHERE session_key = 'run-intent-start'`).get()).toEqual({
+      run_outcome: "interrupted",
+    });
+  });
+
+  it("queues live guidance once and returns structured stale conflicts", async () => {
+    const queued: RunContinuationInput[] = [];
+    service = createSqliteWorkItemService({
+      db, bus: createBus({ clients: new Set() } as never),
+      generateKey: (kind, requestId) => `${kind}-${requestId}`,
+      launchRun: async (input) => { launches.push(input); },
+      continueRun: async (input) => { continuations.push(input); },
+      isRunLive: () => true,
+      queueRunGuidance: async (input) => { queued.push(input); },
+      now: () => tick++,
+    });
+    const created = await draft("live-intent");
+    const started = await service.startRun({ requestId: "live-start",
+      workItemId: created.workItem.id, prompt: "start",
+      expectedLifecycleRevision: 0, expectedCurrentRunKey: null });
+    const intent = { requestId: "live-guidance", workItemId: created.workItem.id,
+      prompt: "steer this turn",
+      expectedLifecycleRevision: started.workItem.lifecycle.lifecycleRevision,
+      expectedCurrentRunKey: "run-live-start" };
+    await service.continue(intent);
+    await service.continue(intent);
+    expect(queued).toHaveLength(1);
+    await expect(service.continue({ ...intent, requestId: "stale",
+      expectedLifecycleRevision: 0 })).rejects.toMatchObject({
+      code: "conflict", latest: { workItem: { currentRunKey: "run-live-start" } },
+    });
   });
 
   it("resumes primary runs through the ledger and atomically clears legacy decisions", async () => {

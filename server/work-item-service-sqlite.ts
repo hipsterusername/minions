@@ -30,7 +30,7 @@ import { WorkItemServiceError, type WorkItemService } from "./work-item-service.
 import { executeWorkItemCommand, findCommandResult } from "./work-item-command-ledger.ts";
 import { emitBindingChanged, emitItemChanged, emitRunChanged } from "./work-item-service-events.ts";
 import { compatibleResumeId, resolvePrimaryRunConfig } from "./work-item-run-config.ts";
-import { continueChildWorkItemRun, type RunContinuationInput } from "./work-item-continuation.ts";
+import { continueChildWorkItemRun, continueWorkItemIntent, type RunContinuationInput } from "./work-item-continuation.ts";
 import { bindingSnapshot, itemSnapshot, runSnapshot } from "./work-item-snapshots.ts";
 import { importKanbanBoard, moveWorkItemCard, updateWorkItemCard } from "./work-item-workflow-repo.ts";
 import { kanbanCardMetadataSchema } from "../shared/work-item-kanban.ts";
@@ -53,13 +53,14 @@ export interface SqliteWorkItemServiceOptions {
   ensureRunLaunched?: (input: WorkItemInvocation) => void | Promise<void>;
   ensureRunContinued?: (input: WorkItemInvocation & { requestId: string }) => void | Promise<void>;
   isRunLive?: (runKey: string) => boolean;
+  queueRunGuidance?: (input: RunContinuationInput) => void | Promise<void>;
   continueRun: (input: WorkItemInvocation) => void | Promise<void>;
   bindWorktreeRun?: (input: { workItemId: string; runKey: string }) => void |
     import("./worktree-create.ts").PlannedWorktree | Promise<void | import("./worktree-create.ts").PlannedWorktree>;
   now?: () => number;
 }
 export class SqliteWorkItemService implements WorkItemService {
-  private readonly now: () => number; constructor(private readonly options: SqliteWorkItemServiceOptions) {
+  readonly now: () => number; constructor(readonly options: SqliteWorkItemServiceOptions) {
     this.now = options.now ?? Date.now;
   }
   private detail(id: string, cursor?: string, limit = 50): WorkItemDetailSnapshot | null {
@@ -76,15 +77,15 @@ export class SqliteWorkItemService implements WorkItemService {
     });
   }
   getSync(id: string): WorkItemDetailSnapshot | null { return this.detail(id); }
-  private latestOrThrow(id: string): WorkItemDetailSnapshot {
+  latestOrThrow(id: string): WorkItemDetailSnapshot {
     const detail = this.detail(id);
     if (!detail) throw new WorkItemServiceError("not_found", `Work item ${id} not found`, null);
     return detail;
   }
-  private emit(detail: WorkItemDetailSnapshot, cause: string, at: number): void { emitItemChanged(this.options.bus, detail, cause, at); }
+  emit(detail: WorkItemDetailSnapshot, cause: string, at: number): void { emitItemChanged(this.options.bus, detail, cause, at); }
   private emitRun(type: "work_item_run_created" | "work_item_run_sealed", detail: WorkItemDetailSnapshot, run: WorkItemRunSnapshot, at: number): void { emitRunChanged(this.options.bus, type, detail, run, at); }
   private emitBinding(detail: WorkItemDetailSnapshot, binding: WorkItemBindingSnapshot, at: number): void { emitBindingChanged(this.options.bus, detail, binding, at); }
-  private translate(error: unknown, id: string): never {
+  translate(error: unknown, id: string): never {
     if (error instanceof WorkItemServiceError) throw error;
     const latest = this.detail(id);
     if (error instanceof WorkItemConflictError) {
@@ -122,7 +123,7 @@ export class SqliteWorkItemService implements WorkItemService {
       return detail;
     } catch (error) { return this.translate(error, id); }
   }
-
+  continue(input: Parameters<WorkItemService["continue"]>[0]) { return continueWorkItemIntent(this, input); }
   async startRun(input: Parameters<WorkItemService["startRun"]>[0]): Promise<WorkItemDetailSnapshot> {
     const runKey = this.options.generateKey("run", input.requestId);
     const previous = input.expectedCurrentRunKey
@@ -228,7 +229,6 @@ export class SqliteWorkItemService implements WorkItemService {
       return detail;
     } catch (error) { return this.translate(error, input.workItemId); }
   }
-
   async resumePrimaryRun(input: RunContinuationInput): Promise<WorkItemDetailSnapshot> {
     const detail = this.latestOrThrow(input.workItemId);
     return this.replyToWaitingRun({ ...input,

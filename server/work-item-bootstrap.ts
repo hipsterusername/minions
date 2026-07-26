@@ -22,6 +22,8 @@ import {
   type WorkItemInvocation,
 } from "./work-item-service-sqlite.ts";
 import { createWorkItemRuntimeLifecycle } from "./work-item-runtime-lifecycle.ts";
+import { queueWorkItemGuidance } from "./work-item-continuation.ts";
+import { randomUUID } from "node:crypto";
 
 /** Stable across restarts and processes; request IDs are globally scoped. */
 export function workItemRequestKey(
@@ -161,7 +163,8 @@ export function bootstrapWorkItemRuntime(
     await continueRun(input);
   };
 
-  const workItems = createSqliteWorkItemService({
+  let workItems!: SqliteWorkItemService;
+  workItems = createSqliteWorkItemService({
     db: options.db,
     bus: options.bus,
     generateKey: workItemRequestKey,
@@ -170,6 +173,22 @@ export function bootstrapWorkItemRuntime(
     continueRun,
     ensureRunContinued,
     isRunLive,
+    queueRunGuidance: (input) => {
+      const host = options.registry.get(input.runKey);
+      if (!host || host.workItemId !== input.workItemId) {
+        throw new Error(`Cannot queue guidance for missing work-item run ${input.runKey}`);
+      }
+      queueWorkItemGuidance(host, async () => {
+        const latest = workItems.getSync(input.workItemId);
+        if (!latest) return;
+        await workItems.continue({
+          requestId: `${input.requestId}:queued:${randomUUID()}`,
+          workItemId: input.workItemId, prompt: input.prompt,
+          expectedLifecycleRevision: latest.workItem.lifecycle.lifecycleRevision,
+          expectedCurrentRunKey: latest.workItem.currentRunKey,
+        });
+      });
+    },
     now: options.now,
     ...(options.bindWorktreeRun ? { bindWorktreeRun: options.bindWorktreeRun } : {}),
   });

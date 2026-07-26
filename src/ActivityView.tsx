@@ -447,11 +447,8 @@ function Inspector({
       return;
     }
     socketSend(canonical ? {
-      type: session.status === "waiting" && session.reviewLifecycle?.reviewState === "decision_needed"
-        ? "reply_to_waiting_run" : "start_work_item_run",
-      requestId: randomUuid(), workItemId: session.workItemId,
-      ...(session.status === "waiting" && session.reviewLifecycle?.reviewState === "decision_needed"
-        ? { runKey: session.sessionKey } : {}), prompt,
+      type: "continue_work_item",
+      requestId: randomUuid(), workItemId: session.workItemId, prompt,
       expectedLifecycleRevision: session.reviewLifecycle?.lifecycleRevision ?? 0,
       expectedCurrentRunKey: session.sessionKey.startsWith("work-item:") ? null : session.sessionKey,
     } : { type: "send_message", sessionKey: session.sessionKey, prompt });

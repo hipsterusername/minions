@@ -21,6 +21,8 @@ export type PermissionMode =
   | "acceptEdits";
 
 export interface SessionToolbarProps {
+  /** Optional styling hook for a host surface. */
+  className?: string;
   sessionKey: string | null;
   status: string;
   /** Either a Claude alias ("sonnet") or a concrete harness model id ("gpt-5.6-sol"). */
@@ -716,6 +718,7 @@ function ModelSelectionPicker({
 }
 
 export function SessionToolbar({
+  className,
   sessionKey,
   status,
   model,
@@ -827,6 +830,7 @@ export function SessionToolbar({
   return (
     <div
       ref={toolbarRef}
+      className={className}
       onMouseDown={(e) => e.stopPropagation()}
       style={{
         display: "flex",
@@ -924,6 +928,7 @@ export function SessionToolbar({
       {/* Stopped/idle resume hint */}
       {hasSession && status === "stopped" && (
         <span
+          className="session-toolbar__status-hint"
           style={{
             fontSize: 9,
             color: "var(--text-muted)",

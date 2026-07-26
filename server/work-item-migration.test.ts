@@ -9,6 +9,7 @@ import {
   legacyWorkItemId,
   recoverOrphanedWorkItemRuns,
 } from "./work-item-migration.ts";
+import { repairInvalidCompletedWorkItemRuns } from "./work-item-run-repair.ts";
 
 function insertLegacy(db: Database.Database, input: {
   key: string;
@@ -237,6 +238,38 @@ describe("boot recovery", () => {
       .toEqual([]);
     expect(db.prepare("SELECT ended_at, run_outcome FROM sessions WHERE session_key = 'live-1'").get())
       .toEqual({ ended_at: null, run_outcome: "none" });
+  });
+
+  it("repairs completed rows without finalReport before snapshot validation", () => {
+    for (const id of ["restore", "downgrade"]) {
+      insertLegacy(db, { key: id, status: "running" });
+    }
+    backfillLegacyWorkItems(db, 100);
+    for (const id of ["restore", "downgrade"]) {
+      db.prepare(`UPDATE sessions SET ended_at = 120, run_outcome = 'completed',
+        final_report = NULL, final_report_event_id = NULL WHERE session_key = ?`).run(id);
+      db.prepare(`UPDATE work_items SET runtime_state = 'inactive',
+        outcome = 'completed' WHERE id = ?`).run(legacyWorkItemId(id));
+    }
+    db.prepare(`INSERT INTO work_item_run_reports
+      (id, work_item_id, run_key, report_text, created_at)
+      VALUES ('report-restore', ?, 'restore', 'Durable result', 119)`)
+      .run(legacyWorkItemId("restore"));
+
+    expect(repairInvalidCompletedWorkItemRuns(db, 130)).toEqual({
+      restoredRunKeys: ["restore"],
+      interruptedRunKeys: ["downgrade"],
+    });
+    expect(db.prepare(`SELECT run_outcome, final_report FROM sessions
+      WHERE session_key = 'restore'`).get()).toEqual({
+      run_outcome: "completed", final_report: "Durable result",
+    });
+    expect(db.prepare(`SELECT run_outcome, final_report FROM sessions
+      WHERE session_key = 'downgrade'`).get()).toEqual({
+      run_outcome: "interrupted", final_report: null,
+    });
+    expect(db.prepare(`SELECT outcome FROM work_items WHERE id = ?`)
+      .get(legacyWorkItemId("downgrade"))).toEqual({ outcome: "interrupted" });
   });
 
   it("recovers orphaned children and tasks without changing the item projection", () => {

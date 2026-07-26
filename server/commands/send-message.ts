@@ -65,22 +65,15 @@ export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
         expectedLifecycleRevision: item.lifecycle.lifecycleRevision,
         expectedCurrentRunKey: item.currentRunKey,
       };
-      if (item.lifecycle.runtimeState === "waiting" && item.waitKind === "decision"
-        && item.currentRunKey) {
-        await service.replyToWaitingRun({ ...mutation, runKey: item.currentRunKey });
-      } else if (["inactive", "draft"].includes(item.lifecycle.runtimeState)) {
-        await service.startRun({ ...mutation,
-          ...(cmd.model ? { model: cmd.model } : {}),
-          ...(cmd.systemPrompt
-            ? { systemPrompt: host.role === "leader" ? cmd.systemPrompt.trim() : cmd.systemPrompt }
-            : {}),
-          ...(cmd.thinkingConfig ? { thinkingConfig: cmd.thinkingConfig } : {}),
-          ...(cmd.skillIds ? { skillIds: cmd.skillIds } : {}),
-          ...(cmd.attachments ? { attachments: cmd.attachments } : {}),
-        });
-      } else {
-        throw new Error(`Canonical work-item run is ${item.lifecycle.runtimeState}`);
-      }
+      await service.continue({ ...mutation,
+        ...(cmd.model ? { model: cmd.model } : {}),
+        ...(cmd.systemPrompt
+          ? { systemPrompt: host.role === "leader" ? cmd.systemPrompt.trim() : cmd.systemPrompt }
+          : {}),
+        ...(cmd.thinkingConfig ? { thinkingConfig: cmd.thinkingConfig } : {}),
+        ...(cmd.skillIds ? { skillIds: cmd.skillIds } : {}),
+        ...(cmd.attachments ? { attachments: cmd.attachments } : {}),
+      });
     } catch (error) {
       unicastToSession(ws, cmd.sessionKey, {
         type: "session_error", sessionKey: cmd.sessionKey,
@@ -88,7 +81,7 @@ export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
         error: error instanceof Error ? error.message : "Canonical work-item continuation failed",
         workItemId: host.workItemId, runKey: host.runKey,
         guidance: "Wait for the canonical work-item snapshot, then retry.",
-        suggestedCommands: ["reply_to_waiting_run", "start_work_item_run"], timestamp: Date.now(),
+        suggestedCommands: ["continue_work_item"], timestamp: Date.now(),
       });
     }
     return;

@@ -20,7 +20,8 @@ const detail = {
 
 function service(): WorkItemService {
   return {
-    create: vi.fn(async () => detail), startRun: vi.fn(async () => detail),
+    create: vi.fn(async () => detail), continue: vi.fn(async () => detail),
+    startRun: vi.fn(async () => detail),
     replyToWaitingRun: vi.fn(async () => detail), review: vi.fn(async () => detail),
     archive: vi.fn(async () => detail), restore: vi.fn(async () => detail),
     attach: vi.fn(async () => detail), detach: vi.fn(async () => detail),
@@ -104,6 +105,23 @@ describe("work-item command dispatcher", () => {
     });
   });
 
+  it("delegates continuation intent without choosing a lifecycle transition", async () => {
+    const h = setup();
+    const workItems = service();
+    h.ctx.workItems = workItems;
+    dispatchCommand(h.ctx, {
+      type: "continue_work_item", requestId: "00000000-0000-4000-8000-000000000030",
+      workItemId: "work-1", prompt: "Continue from authoritative state",
+      expectedLifecycleRevision: 7, expectedCurrentRunKey: "run-7",
+    }, h.ws);
+    await vi.waitFor(() => expect(workItems.continue).toHaveBeenCalledOnce());
+    expect(workItems.continue).toHaveBeenCalledWith({
+      requestId: "00000000-0000-4000-8000-000000000030",
+      workItemId: "work-1", prompt: "Continue from authoritative state",
+      expectedLifecycleRevision: 7, expectedCurrentRunKey: "run-7",
+    });
+  });
+
   it("dispatches workflow moves and canonical-path board imports", async () => {
     const h = setup(); const workItems = service(); h.ctx.workItems = workItems;
     h.ctx.resolveWorkItemProject = vi.fn(() => "/canonical/repo");
@@ -161,7 +179,8 @@ describe("work-item command dispatcher", () => {
     await vi.waitFor(() => expect(h.wsSent).toHaveLength(1));
     expect(h.wsSent[0]).toMatchObject({
       topic: "work-item:work-1", success: false, code: "internal",
-      error: "Work-item command failed", latest: null,
+      error: expect.stringContaining("expected object"), latest: null,
+      correlationId: expect.any(String),
     });
   });
 });

@@ -51,7 +51,7 @@ describe("useWorkItems lifecycle recovery", () => {
     expect(first.expectedLifecycleRevision).toBe(3);
 
     act(() => publish({
-      type: "work_item_response", command: "start_work_item_run",
+      type: "work_item_response", command: "continue_work_item",
       requestId: first.requestId, success: false, error: "stale work-item lifecycle",
       code: "conflict",
       latest: { workItem: terminalItem(4), bindings: [], currentRun: null,
@@ -91,7 +91,7 @@ describe("useWorkItems lifecycle recovery", () => {
     rerender({ projectId: "project-2" });
     const countBeforeConflict = send.mock.calls.length;
     act(() => listener?.({
-      type: "work_item_response", command: "start_work_item_run",
+      type: "work_item_response", command: "continue_work_item",
       requestId: first.requestId, success: false, error: "stale work-item lifecycle",
       code: "conflict",
       latest: { workItem: terminalItem(4), bindings: [], currentRun: null,
@@ -106,7 +106,7 @@ describe("useWorkItems lifecycle recovery", () => {
     const request = send.mock.calls.at(-1)?.[0] as { requestId: string };
 
     act(() => publish({
-      type: "work_item_response", command: "start_work_item_run",
+      type: "work_item_response", command: "continue_work_item",
       requestId: request.requestId, success: false, error: "Harness unavailable",
       code: "unavailable",
     }));
@@ -126,7 +126,7 @@ describe("useWorkItems lifecycle recovery", () => {
     for (const revision of [4, 5, 6]) {
       const request = send.mock.calls.at(-1)?.[0] as { requestId: string };
       act(() => publish({
-        type: "work_item_response", command: "start_work_item_run",
+        type: "work_item_response", command: "continue_work_item",
         requestId: request.requestId, success: false, error: "stale work-item lifecycle",
         code: "conflict",
         latest: { workItem: terminalItem(revision), bindings: [], currentRun: null,
@@ -135,7 +135,7 @@ describe("useWorkItems lifecycle recovery", () => {
     }
 
     expect(send.mock.calls.filter(([command]) =>
-      (command as { type?: string }).type === "start_work_item_run")).toHaveLength(3);
+      (command as { type?: string }).type === "continue_work_item")).toHaveLength(3);
     expect(result.current.promptFailures["work-1"]).toEqual({
       prompt: "Try three times",
       error: "stale work-item lifecycle",

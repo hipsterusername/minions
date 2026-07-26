@@ -80,4 +80,25 @@ describe("concrete work-item runtime lifecycle", () => {
     expect(db.prepare("SELECT session_id FROM sessions WHERE session_key = ?")
       .get(identity.runKey)).toEqual({ session_id: "fresh-thread" });
   });
+
+  it("normalizes a completion signal without a final report to interrupted", async () => {
+    const db = initDb(":memory:"); ensureWorkItemSchema(db);
+    const bus = createBus({ clients: new Set() } as never);
+    const service = createSqliteWorkItemService({ db, bus,
+      generateKey: (kind, id) => `${kind}-${id}`, launchRun: vi.fn(),
+      continueRun: vi.fn(), now: () => 10 });
+    const lifecycle = createWorkItemRuntimeLifecycle({ db, bus, service });
+    const draft = await service.create({ requestId: "create-missing-report",
+      projectId: "p", projectPath: "/repo", title: "T", changeMode: "live" });
+    await service.startRun({ requestId: "missing-report",
+      workItemId: draft.workItem.id, prompt: "go",
+      expectedLifecycleRevision: 0, expectedCurrentRunKey: null });
+    lifecycle.runTerminal({ workItemId: draft.workItem.id,
+      runKey: "run-missing-report", runKind: "primary",
+      parentRunKey: null, taskId: null, outcome: "completed",
+      finalReportId: null, finalReport: null, at: 11 });
+    expect((await service.get(draft.workItem.id))?.currentRun).toMatchObject({
+      outcome: "interrupted", finalReport: null,
+    });
+  });
 });

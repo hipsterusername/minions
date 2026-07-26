@@ -63,17 +63,33 @@ const base = {
 };
 
 describe("decideConflictRecovery", () => {
-  it("retries with fresh fences and re-derives reply intent", () => {
+  it("retries with fresh fences via the unified continuation command", () => {
     const latest = detail("waiting", { waitKind: "decision" });
     const decision = decideConflictRecovery({ ...base, latest });
 
     expect(decision).toEqual({
       kind: "retry",
       command: {
-        type: "reply_to_waiting_run",
+        type: "continue_work_item",
         requestId: "retry-2",
         workItemId: "work-1",
-        runKey: "run-1",
+        prompt: "Continue",
+        expectedLifecycleRevision: 4,
+        expectedCurrentRunKey: "run-1",
+      },
+    });
+  });
+
+  it("retries via continue_work_item when the item is inactive", () => {
+    const latest = detail("inactive");
+    const decision = decideConflictRecovery({ ...base, latest });
+
+    expect(decision).toEqual({
+      kind: "retry",
+      command: {
+        type: "continue_work_item",
+        requestId: "retry-2",
+        workItemId: "work-1",
         prompt: "Continue",
         expectedLifecycleRevision: 4,
         expectedCurrentRunKey: "run-1",

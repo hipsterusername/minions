@@ -64,6 +64,7 @@ describe("work_item_response failure envelope contract", () => {
       error: "stale revision",
       code: "conflict",
       latest: detail,
+      correlationId: expect.any(String),
     });
     expect(workItemDetailSnapshotSchema.safeParse(envelope.latest).success).toBe(true);
   });
@@ -79,6 +80,7 @@ describe("work_item_response failure envelope contract", () => {
       error: "Work-item command failed",
       code: "internal",
       latest: null,
+      correlationId: expect.any(String),
     });
   });
 
