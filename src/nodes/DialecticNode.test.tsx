@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
-import { DialecticNodeRenderer, createDialecticDefaultData, type DialecticData } from "./DialecticNode.tsx";
+import { DialecticNodeRenderer, createDialecticDefaultData, reduce, type DialecticData } from "./DialecticNode.tsx";
 import { getNodeType } from "../node-registry.ts";
 import type { CanvasNode, NodeRenderProps } from "../types.ts";
 import { HarnessListProvider } from "../use-harness-list.tsx";
 import type { HarnessListEntry } from "../use-socket.ts";
+import type { DialecticEvent } from "../../shared/dialectic.ts";
 
 const CAPS = {
   mutationInterception: "complete",
@@ -156,6 +157,65 @@ describe("DialecticNode component", () => {
     expect(screen.getByText("Synthesized plan")).toBeInTheDocument();
   });
 
+  it("shows the exact context communicated to the critic", () => {
+    const node = makeNode({
+      topic: "Cache design",
+      status: "running",
+      config: {
+        ...createDialecticDefaultData().config,
+        mode: "proposer-critic",
+      },
+      turns: [
+        { speaker: "A", round: 0, text: "Use a two-tier cache." },
+        {
+          speaker: "B",
+          round: 0,
+          text: "",
+          context: {
+            systemPrompt: "Your role: CRITIC. Stress-test the plan.",
+            prompt: "The proposer's latest plan:\n\nUse a two-tier cache.",
+            retainedThread: false,
+          },
+        },
+      ],
+      activeSpeaker: "B",
+      activeRound: 0,
+    });
+    renderNode(node);
+
+    const criticContext = screen.getByText("Context sent to Critic").closest("details");
+    expect(criticContext).toBeInTheDocument();
+    expect(criticContext).toHaveAttribute("open");
+    expect(screen.getByText("Your role: CRITIC. Stress-test the plan.")).toBeInTheDocument();
+    expect(screen.getByText(/The proposer's latest plan:/)).toHaveTextContent(
+      "Use a two-tier cache.",
+    );
+    expect(screen.getByText(/Private hidden chain-of-thought is not available/i)).toBeInTheDocument();
+    expect(screen.getByText(/Proposer output forwarded as Critic input/i)).toBeInTheDocument();
+  });
+
+  it("labels resumed context without pretending to resend the full thread", () => {
+    const node = makeNode({
+      status: "completed",
+      turns: [
+        {
+          speaker: "A",
+          round: 1,
+          text: "Revised plan",
+          context: {
+            prompt: "The critic reviewed your latest plan: fix invalidation.",
+            retainedThread: true,
+          },
+        },
+      ],
+    });
+    renderNode(node);
+    expect(
+      screen.getByText("Existing thread retained · one new message appended"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Role instructions")).not.toBeInTheDocument();
+  });
+
   it("shows a Stop button while running and sends stop_dialectic", () => {
     const node = makeNode({ topic: "x", status: "running" });
     const { socketSend } = renderNode(node);
@@ -191,5 +251,68 @@ describe("DialecticNode planner pickers", () => {
     (node.data as DialecticData).config.plannerA = { harness: "codex", model: "gpt-legacy" };
     renderNode(node, {}, [CLAUDE_ENTRY, CODEX_ENTRY]);
     expect(screen.getByRole("option", { name: "gpt-legacy (codex)" })).toBeInTheDocument();
+  });
+});
+
+describe("DialecticNode reduce()", () => {
+  const base = (): DialecticData => ({
+    ...createDialecticDefaultData(),
+    status: "running",
+  });
+
+  it("stores the turn_started context as a placeholder, then carries it forward onto turn_completed", () => {
+    const started: DialecticEvent = {
+      kind: "turn_started",
+      speaker: "B",
+      round: 0,
+      context: {
+        systemPrompt: "Your role: CRITIC.",
+        prompt: "The proposer's latest plan:\n\nUse a two-tier cache.",
+        retainedThread: false,
+      },
+    };
+    const afterStart = reduce(base(), started);
+    const placeholder = afterStart.turns.find((t) => t.speaker === "B" && t.round === 0);
+    expect(placeholder).toMatchObject({ text: "", context: started.context });
+    expect(afterStart.activeSpeaker).toBe("B");
+    expect(afterStart.activeRound).toBe(0);
+
+    const completed: DialecticEvent = {
+      kind: "turn_completed",
+      speaker: "B",
+      round: 0,
+      text: "The cache design has a stale-invalidation gap.",
+    };
+    const afterComplete = reduce(afterStart, completed);
+    expect(afterComplete.turns).toHaveLength(1);
+    expect(afterComplete.turns[0]).toMatchObject({
+      speaker: "B",
+      round: 0,
+      text: "The cache design has a stale-invalidation gap.",
+      // The completed event itself carries no context — it must be preserved
+      // from the turn_started placeholder, not dropped.
+      context: started.context,
+    });
+    expect(afterComplete.activeSpeaker).toBeNull();
+  });
+
+  it("replaces a same (speaker, round) turn idempotently rather than duplicating it", () => {
+    const started: DialecticEvent = { kind: "turn_started", speaker: "A", round: 2 };
+    const restarted: DialecticEvent = { kind: "turn_started", speaker: "A", round: 2 };
+    const next = reduce(reduce(base(), started), restarted);
+    expect(next.turns.filter((t) => t.speaker === "A" && t.round === 2)).toHaveLength(1);
+  });
+
+  it("tolerates a turn_completed with no matching turn_started and no context (legacy/replayed events)", () => {
+    const completed: DialecticEvent = {
+      kind: "turn_completed",
+      speaker: "A",
+      round: 0,
+      text: "Older-coordinator turn with no prior context event.",
+    };
+    const next = reduce(base(), completed);
+    expect(next.turns).toEqual([
+      { speaker: "A", round: 0, text: "Older-coordinator turn with no prior context event." },
+    ]);
   });
 });

@@ -160,13 +160,32 @@ export type DialecticRunStatus =
   | "error";
 
 /**
+ * The explicit context appended to a planner session for a turn.
+ *
+ * This is intentionally the communicated prompt, not private chain-of-thought.
+ * On a new session `systemPrompt` is also present; on resumed turns the existing
+ * thread remains available and only `prompt` is appended.
+ */
+export interface DialecticTurnContext {
+  prompt: string;
+  systemPrompt?: string;
+  retainedThread: boolean;
+}
+
+/**
  * Coordinator events fanned to the node's topic (distinct from the two
  * planners' own session streams, which the node also subscribes to for live
  * transcripts). These carry orchestration progress and the final document.
  */
 export type DialecticEvent =
   | { kind: "run_status"; status: DialecticRunStatus; error?: string }
-  | { kind: "turn_started"; speaker: DialecticSpeaker; round: number }
+  | {
+      kind: "turn_started";
+      speaker: DialecticSpeaker;
+      round: number;
+      /** Optional for compatibility with older coordinators/replayed events. */
+      context?: DialecticTurnContext;
+    }
   | {
       kind: "turn_completed";
       speaker: DialecticSpeaker;

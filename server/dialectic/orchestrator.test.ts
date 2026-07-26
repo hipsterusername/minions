@@ -113,18 +113,50 @@ describe("DialecticOrchestrator", () => {
 
   it("injects the peer's latest turn as the next prompt", async () => {
     const keys = dialecticSessionKeys("n4");
-    const { deps, calls } = makeDeps((key, n) => ({ text: `TURN(${key}#${n})`, isError: false }));
-    const orch = new DialecticOrchestrator("n4", "/cwd", makeConfig({ rounds: 2 }), deps);
+    const { deps, calls, events } = makeDeps((key, n) => ({ text: `TURN(${key}#${n})`, isError: false }));
+    const orch = new DialecticOrchestrator(
+      "n4",
+      "/cwd",
+      makeConfig({ rounds: 2, mode: "proposer-critic" }),
+      deps,
+    );
     await orch.run("the topic");
 
     // B's round-0 prompt carries the topic and A's round-0 output.
     const b0 = calls.filter((c) => c.sessionKey === keys.plannerB)[0]!;
     expect(b0.prompt).toContain("the topic");
     expect(b0.prompt).toContain(`TURN(${keys.plannerA}#1)`);
+    const b0Started = events.find(
+      (event) => event.kind === "turn_started" && event.speaker === "B" && event.round === 0,
+    );
+    expect(b0Started).toMatchObject({
+      kind: "turn_started",
+      speaker: "B",
+      round: 0,
+      context: {
+        prompt: b0.prompt,
+        retainedThread: false,
+      },
+    });
+    expect(
+      b0Started?.kind === "turn_started" ? b0Started.context?.systemPrompt : undefined,
+    ).toContain("Your role: CRITIC");
 
     // A's round-1 prompt carries B's round-0 output.
     const a1 = calls.filter((c) => c.sessionKey === keys.plannerA)[1]!;
     expect(a1.prompt).toContain(`TURN(${keys.plannerB}#1)`);
+    const a1Started = events.find(
+      (event) => event.kind === "turn_started" && event.speaker === "A" && event.round === 1,
+    );
+    expect(a1Started).toMatchObject({
+      context: {
+        prompt: a1.prompt,
+        retainedThread: true,
+      },
+    });
+    expect(
+      a1Started?.kind === "turn_started" ? a1Started.context?.systemPrompt : undefined,
+    ).toBeUndefined();
   });
 
   it("emits an error status and stops when a planner turn errors", async () => {
