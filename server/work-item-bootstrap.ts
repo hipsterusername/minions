@@ -11,6 +11,7 @@ import { ensureWorkItemSchema } from "./work-item-schema.ts";
 import {
   backfillLegacyWorkItems,
   recoverOrphanedWorkItemRuns,
+  repairCompletedRunsWithoutReports,
   type BootRecoveryResult,
   type LegacyBackfillResult,
 } from "./work-item-migration.ts";
@@ -64,11 +65,15 @@ export function bootstrapWorkItemRuntime(
   ensureWorkItemSchema(options.db);
   const at = (options.now ?? Date.now)();
   const backfill = backfillLegacyWorkItems(options.db, at);
-  const recovery = recoverOrphanedWorkItemRuns(
+  // Pre-existing rows can predate the finalReport write-path guard; repair
+  // them before anything tries to read/serialize a work-item snapshot.
+  const repairedCompletedRunKeys = repairCompletedRunsWithoutReports(options.db, at);
+  const orphanRecovery = recoverOrphanedWorkItemRuns(
     options.db,
     options.liveRunKeys ?? new Set(),
     at,
   );
+  const recovery: BootRecoveryResult = { ...orphanRecovery, repairedCompletedRunKeys };
   const launch = options.launch ?? ((sessionOptions: StartSessionOptions) =>
     launchSession({
       registry: options.registry as SessionRegistry,

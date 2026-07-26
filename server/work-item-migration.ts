@@ -257,7 +257,10 @@ export function backfillLegacyWorkItems(
 
 export interface BootRecoveryResult {
   recoveredRunKeys: string[];
+  repairedCompletedRunKeys?: string[];
 }
+
+export { repairCompletedRunsWithoutReports } from "./work-item-report-repair.ts";
 
 /** Seal orphaned active primary runs once; live run keys are left untouched. */
 export function recoverOrphanedWorkItemRuns(
