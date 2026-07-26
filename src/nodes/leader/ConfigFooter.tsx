@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { ChevronDown, GitBranch, LockKeyhole, Paperclip, Radio } from "lucide-react";
 import { ConfirmModal } from "../../components/ConfirmModal.tsx";
 import type { ContextItem } from "../../types.ts";
 import { subscribeSocketTopic, type SocketSubscribe } from "../../use-socket.ts";
@@ -147,6 +148,7 @@ export function ConfigFooter({
   return (
     <>
       <div
+        className="leader-config-footer"
         style={{
           borderTop: "1px solid var(--border-default)",
           background: "var(--bg-secondary)",
@@ -155,6 +157,7 @@ export function ConfigFooter({
       >
         {/* Compact summary row — always visible */}
         <div
+          className="leader-config-footer__summary"
           onClick={() => setExpanded(!expanded)}
           onMouseDown={(e) => e.stopPropagation()}
           style={{
@@ -171,6 +174,8 @@ export function ConfigFooter({
         >
           {/* Worktree badge */}
           <span
+            className="leader-config-footer__badge"
+            data-active={isWorktreeMode}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -183,12 +188,16 @@ export function ConfigFooter({
               color: isWorktreeMode ? "var(--accent)" : "var(--text-muted)",
             }}
           >
-            {"\u{1F33F}"} {isWorktreeMode ? "Worktree" : "Live"}
+            {isWorktreeMode
+              ? <GitBranch size={11} aria-hidden="true" />
+              : <Radio size={11} aria-hidden="true" />}
+            {isWorktreeMode ? "Worktree" : "Live"}
           </span>
 
           {/* Context count — locked after session starts */}
           {contextCount > 0 && (
             <span
+              className="leader-config-footer__context"
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -197,7 +206,10 @@ export function ConfigFooter({
                 opacity: hasSession ? 0.7 : 1,
               }}
             >
-              {hasSession ? "\u{1F512}" : "\u{1F4CE}"} {contextCount}
+              {hasSession
+                ? <LockKeyhole size={10} aria-hidden="true" />
+                : <Paperclip size={10} aria-hidden="true" />}
+              {contextCount}
             </span>
           )}
 
@@ -232,16 +244,16 @@ export function ConfigFooter({
             </span>
           )}
 
-          <span style={{ flex: 1 }} />
-          <span
+          <span className="leader-config-footer__spacer" />
+          <ChevronDown
+            className="leader-config-footer__chevron"
+            size={12}
+            aria-hidden="true"
+            data-expanded={expanded}
             style={{
-              fontSize: 8,
               transform: expanded ? "rotate(0deg)" : "rotate(-90deg)",
-              transition: "transform 0.15s",
             }}
-          >
-            ▼
-          </span>
+          />
         </div>
 
         {/* Expanded config */}

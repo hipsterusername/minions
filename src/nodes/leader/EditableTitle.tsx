@@ -30,6 +30,7 @@ export function EditableTitle({
   if (!editing) {
     return (
       <span
+        className="leader-editable-title"
         onDoubleClick={(e) => {
           e.stopPropagation();
           setEditing(true);
@@ -55,6 +56,7 @@ export function EditableTitle({
 
   return (
     <input
+      className="leader-editable-title__input"
       ref={inputRef}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
@@ -68,19 +70,6 @@ export function EditableTitle({
         e.stopPropagation();
       }}
       onMouseDown={(e) => e.stopPropagation()}
-      style={{
-        all: "unset",
-        fontSize: 11,
-        fontWeight: 600,
-        color: "var(--text-primary)",
-        background: "var(--bg-primary)",
-        border: "1px solid var(--border-active)",
-        borderRadius: 3,
-        padding: "1px 4px",
-        width: "100%",
-        minWidth: 40,
-        boxSizing: "border-box",
-      }}
     />
   );
 }
