@@ -33,6 +33,7 @@ import type { WorkItemRunSnapshot } from "../shared/work-item-contracts.ts";
 import { DashboardSurface } from "./nodes/render/DashboardSurface.tsx";
 import { LeaderNodeRenderer } from "./nodes/LeaderNode.tsx";
 import { ActivityEmptyState } from "./ActivityEmptyState.tsx";
+import { ActivitySessionHome } from "./ActivitySessionHome.tsx";
 import { selectRecentAgentWork } from "./activity-recent-work.ts";
 import { randomUuid } from "./random-id.ts";
 import type { PromptFailure } from "./use-work-items.ts";
@@ -1089,13 +1090,11 @@ export function ActivityView({
       </div>
 
       {!selectedSession && !launchNode && activitySessions.length > 0 && (
-        <div className="act-workspace-empty" aria-label="Activity workspace">
-          <div>
-            <span className="act-workspace-empty-icon" aria-hidden>↗</span>
-            <h2>Select a session</h2>
-            <p>Read its latest report, inspect the dashboard, reply, review changes, or manage the run.</p>
-          </div>
-        </div>
+        <ActivitySessionHome
+          sessions={activitySessions}
+          onOpenSession={setSelectedKey}
+          onLaunch={openLaunchExperience}
+        />
       )}
 
       {selectedSession && (
