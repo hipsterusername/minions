@@ -79,6 +79,7 @@ export const COMMAND_TABLE = {
   dismiss_session: dismissSession,
   reopen_session: reopenSession,
   create_work_item: workItemCommand,
+  continue_work_item: workItemCommand,
   start_work_item_run: workItemCommand,
   reply_to_waiting_run: workItemCommand,
   review_work_item: workItemCommand,

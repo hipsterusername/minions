@@ -33,6 +33,7 @@ export type WsCommandType =
   | "reopen_session"
   // Durable work items
   | "create_work_item"
+  | "continue_work_item"
   | "start_work_item_run"
   | "reply_to_waiting_run"
   | "review_work_item"

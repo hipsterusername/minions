@@ -242,6 +242,7 @@ export const workItemResponseEnvelopeSchema = z.discriminatedUnion("success", [
     error: z.string().min(1),
     code: workItemServiceErrorCodeSchema,
     latest: workItemDetailSnapshotSchema.nullable(),
+    correlationId: z.string().min(1).optional(),
     result: z.never().optional(),
   }),
 ]);

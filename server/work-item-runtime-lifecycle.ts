@@ -84,25 +84,31 @@ export function createWorkItemRuntimeLifecycle(input: {
     },
     runTerminal(value) {
       const { item, run } = latest(value);
+      const hasReport = Boolean(value.finalReportId?.trim() && value.finalReport?.trim());
+      const outcome = value.outcome === "completed" && !hasReport
+        ? "interrupted"
+        : value.outcome;
+      const finalReportId = hasReport ? value.finalReportId : null;
+      const finalReport = hasReport ? value.finalReport : null;
       try { if (value.runKind === "child") {
         input.service.sealChildRun({ workItemId: item.id, runKey: value.runKey,
-          outcome: value.outcome, finalReportEventId: value.finalReportId,
-          finalReport: value.finalReport, at: value.at });
+          outcome, finalReportEventId: finalReportId,
+          finalReport, at: value.at });
         return;
       }
       input.service.sealPrimaryRun({ workItemId: item.id, runKey: value.runKey,
-        outcome: value.outcome, finalReportEventId: value.finalReportId,
-        finalReport: value.finalReport, expectedLifecycleRevision: item.lifecycle_revision,
+        outcome, finalReportEventId: finalReportId,
+        finalReport, expectedLifecycleRevision: item.lifecycle_revision,
         expectedCurrentRunKey: value.runKey, at: value.at });
       if (item.change_mode === "worktree" && input.collectWorktreeRun) {
-        void input.collectWorktreeRun(value.runKey, value.outcome).catch((error) =>
+        void input.collectWorktreeRun(value.runKey, outcome).catch((error) =>
           log.warn("contribution_collection_failed", { workItemId: item.id,
             runKey: value.runKey, error }));
       } }
       catch (error) {
         const after = getWorkItemRun(input.db, value.runKey);
-        if (after?.ended_at !== null && after?.run_outcome === value.outcome
-          && after.final_report_event_id === value.finalReportId && after.final_report === value.finalReport)
+        if (after?.ended_at !== null && after?.run_outcome === outcome
+          && after.final_report_event_id === finalReportId && after.final_report === finalReport)
           log.warn("publication_failed", { workItemId: item.id, cause: "run_terminal", error });
         else throw error;
       }

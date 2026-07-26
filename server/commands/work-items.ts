@@ -8,6 +8,10 @@ import {
 } from "../../shared/work-item-contracts.ts";
 import { WorkItemServiceError } from "../work-item-service.ts";
 import type { CommandHandler, WsCommand } from "./types.ts";
+import { randomUUID } from "node:crypto";
+import { serverLogger } from "../logging.ts";
+
+const log = serverLogger.child("work-item-command");
 
 function send(ws: Parameters<CommandHandler>[2], cmd: WsCommand, payload: Record<string, unknown>): void {
   if (cmd.workItemId) unicastToWorkItem(ws, cmd.workItemId, payload as { type: string } & Record<string, unknown>);
@@ -59,20 +63,29 @@ function reply(ws: Parameters<CommandHandler>[2], cmd: WsCommand, rawResult: unk
 }
 
 function fail(ws: Parameters<CommandHandler>[2], cmd: WsCommand, error: unknown): void {
+  const correlationId = randomUUID();
   const candidate = error instanceof WorkItemServiceError
     ? workItemServiceErrorSchema.safeParse({
         code: error.code, message: error.message, latest: error.latest,
       })
     : null;
   const typed = candidate?.success ? candidate.data : null;
+  const message = typed?.message ?? (error instanceof Error
+    ? error.message
+    : "Work-item command failed");
+  log.error("command_failed", {
+    correlationId, command: cmd.type, requestId: cmd.requestId ?? null,
+    workItemId: cmd.workItemId ?? null, code: typed?.code ?? "internal", error,
+  });
   send(ws, cmd, {
     type: "work_item_response",
     command: cmd.type,
     requestId: cmd.requestId ?? null,
     success: false,
-    error: typed?.message ?? "Work-item command failed",
+    error: message,
     code: typed?.code ?? "internal",
     latest: typed?.latest ?? null,
+    correlationId,
   });
 }
 
@@ -97,6 +110,18 @@ export const workItemCommand: CommandHandler = async (ctx, cmd, ws) => {
       });
       break;
     }
+    case "continue_work_item":
+      result = await service.continue({ ...existingMutationContext(cmd),
+        workItemId: cmd.workItemId!, prompt: cmd.prompt!,
+        ...(cmd.harness !== undefined ? { harness: cmd.harness } : {}),
+        ...(cmd.model !== undefined ? { model: cmd.model } : {}),
+        ...(cmd.permissionMode !== undefined ? { permissionMode: cmd.permissionMode } : {}),
+        ...(cmd.thinkingConfig !== undefined ? { thinkingConfig: cmd.thinkingConfig } : {}),
+        ...(cmd.skillIds !== undefined ? { skillIds: cmd.skillIds } : {}),
+        ...(cmd.skillValues !== undefined ? { skillValues: cmd.skillValues } : {}),
+        ...(cmd.systemPrompt !== undefined ? { systemPrompt: cmd.systemPrompt } : {}),
+        ...(cmd.attachments !== undefined ? { attachments: cmd.attachments } : {}) });
+      break;
     case "start_work_item_run":
       result = await service.startRun({ ...existingMutationContext(cmd),
         workItemId: cmd.workItemId!, prompt: cmd.prompt!,

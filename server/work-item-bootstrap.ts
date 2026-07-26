@@ -10,6 +10,7 @@ import { launchSession } from "./session-launch.ts";
 import { ensureWorkItemSchema } from "./work-item-schema.ts";
 import {
   backfillLegacyWorkItems,
+  repairInvalidCompletedWorkItemRuns,
   recoverOrphanedWorkItemRuns,
   type BootRecoveryResult,
   type LegacyBackfillResult,
@@ -64,6 +65,7 @@ export function bootstrapWorkItemRuntime(
   ensureWorkItemSchema(options.db);
   const at = (options.now ?? Date.now)();
   const backfill = backfillLegacyWorkItems(options.db, at);
+  repairInvalidCompletedWorkItemRuns(options.db, at);
   const recovery = recoverOrphanedWorkItemRuns(
     options.db,
     options.liveRunKeys ?? new Set(),
