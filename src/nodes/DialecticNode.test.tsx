@@ -156,6 +156,65 @@ describe("DialecticNode component", () => {
     expect(screen.getByText("Synthesized plan")).toBeInTheDocument();
   });
 
+  it("shows the exact context communicated to the critic", () => {
+    const node = makeNode({
+      topic: "Cache design",
+      status: "running",
+      config: {
+        ...createDialecticDefaultData().config,
+        mode: "proposer-critic",
+      },
+      turns: [
+        { speaker: "A", round: 0, text: "Use a two-tier cache." },
+        {
+          speaker: "B",
+          round: 0,
+          text: "",
+          context: {
+            systemPrompt: "Your role: CRITIC. Stress-test the plan.",
+            prompt: "The proposer's latest plan:\n\nUse a two-tier cache.",
+            retainedThread: false,
+          },
+        },
+      ],
+      activeSpeaker: "B",
+      activeRound: 0,
+    });
+    renderNode(node);
+
+    const criticContext = screen.getByText("Context sent to Critic").closest("details");
+    expect(criticContext).toBeInTheDocument();
+    expect(criticContext).toHaveAttribute("open");
+    expect(screen.getByText("Your role: CRITIC. Stress-test the plan.")).toBeInTheDocument();
+    expect(screen.getByText(/The proposer's latest plan:/)).toHaveTextContent(
+      "Use a two-tier cache.",
+    );
+    expect(screen.getByText(/Private hidden chain-of-thought is not available/i)).toBeInTheDocument();
+    expect(screen.getByText(/Proposer output forwarded as Critic input/i)).toBeInTheDocument();
+  });
+
+  it("labels resumed context without pretending to resend the full thread", () => {
+    const node = makeNode({
+      status: "completed",
+      turns: [
+        {
+          speaker: "A",
+          round: 1,
+          text: "Revised plan",
+          context: {
+            prompt: "The critic reviewed your latest plan: fix invalidation.",
+            retainedThread: true,
+          },
+        },
+      ],
+    });
+    renderNode(node);
+    expect(
+      screen.getByText("Existing thread retained · one new message appended"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Role instructions")).not.toBeInTheDocument();
+  });
+
   it("shows a Stop button while running and sends stop_dialectic", () => {
     const node = makeNode({ topic: "x", status: "running" });
     const { socketSend } = renderNode(node);

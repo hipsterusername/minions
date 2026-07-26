@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { CSSProperties, ReactElement } from "react";
+import { ArrowDown, Check, Eye, MessageSquareText, Scale } from "lucide-react";
 import { registerNodeType } from "../node-registry.ts";
 import type { NodeRenderProps } from "../types.ts";
 import { subscribeSocketTopic } from "../use-socket.ts";
@@ -26,6 +27,7 @@ import {
   type DialecticMode,
   type DialecticRunStatus,
   type DialecticSpeaker,
+  type DialecticTurnContext,
   type PlannerConfig,
   MAX_DIALECTIC_ROUNDS,
   MIN_DIALECTIC_ROUNDS,
@@ -55,6 +57,7 @@ export interface DialecticTurnRecord {
   speaker: DialecticSpeaker;
   round: number;
   text: string;
+  context?: DialecticTurnContext;
   isError?: boolean;
 }
 
@@ -110,12 +113,33 @@ function reduce(data: DialecticData, event: DialecticEvent): DialecticData {
         activeSpeaker: event.status === "running" ? data.activeSpeaker : null,
       };
     case "turn_started":
-      return { ...data, activeSpeaker: event.speaker, activeRound: event.round };
+      return {
+        ...data,
+        turns: [
+          ...data.turns.filter(
+            (t) => !(t.speaker === event.speaker && t.round === event.round),
+          ),
+          {
+            speaker: event.speaker,
+            round: event.round,
+            text: "",
+            ...(event.context ? { context: event.context } : {}),
+          },
+        ],
+        activeSpeaker: event.speaker,
+        activeRound: event.round,
+      };
     case "turn_completed": {
       // Idempotent: replace a matching (speaker, round) turn if it already exists.
       const same = (t: DialecticTurnRecord) => t.speaker === event.speaker && t.round === event.round;
+      const started = data.turns.find(same);
       const rest = data.turns.filter((t) => !same(t));
-      const record: DialecticTurnRecord = { speaker: event.speaker, round: event.round, text: event.text };
+      const record: DialecticTurnRecord = {
+        speaker: event.speaker,
+        round: event.round,
+        text: event.text,
+        ...(started?.context ? { context: started.context } : {}),
+      };
       if (event.isError !== undefined) record.isError = event.isError;
       return { ...data, turns: [...rest, record], activeSpeaker: null };
     }
@@ -192,13 +216,21 @@ function DialecticNodeRenderer(props: NodeRenderProps): ReactElement {
     patch({ status: "stopped", activeSpeaker: null });
   }, [socketSend, node.id, patch]);
 
-  const turnsA = data.turns.filter((t) => t.speaker === "A").sort((a, b) => a.round - b.round);
-  const turnsB = data.turns.filter((t) => t.speaker === "B").sort((a, b) => a.round - b.round);
+  const dialogueTurns = data.turns.filter((t) => t.speaker === "A" || t.speaker === "B");
+  const hasRun = dialogueTurns.length > 0 || running || Boolean(data.synthesis);
 
   return (
     <div style={S.root} data-testid="dialectic-node">
       <header style={S.header}>
-        <span style={S.title}>⚖️ Dialectic</span>
+        <div style={S.titleGroup}>
+          <span style={S.titleIcon} aria-hidden="true">
+            <Scale size={14} strokeWidth={2} />
+          </span>
+          <span>
+            <span style={S.title}>Dialectic</span>
+            <span style={S.subtitle}>Two-model review</span>
+          </span>
+        </div>
         <StatusBadge status={data.status} />
       </header>
 
@@ -270,20 +302,33 @@ function DialecticNodeRenderer(props: NodeRenderProps): ReactElement {
           </button>
         )}
         {data.activeSpeaker && (
-          <span style={S.active}>
-            {speakerName(data.config.mode, data.activeSpeaker)} thinking… (round{" "}
-            {(data.activeRound ?? 0) + 1})
+          <span style={S.active} aria-live="polite">
+            <span style={S.pulseDot} />
+            {speakerName(data.config.mode, data.activeSpeaker)} preparing a shared response · round{" "}
+            {(data.activeRound ?? 0) + 1}
           </span>
         )}
       </div>
 
       {data.error && <div style={S.error}>{data.error}</div>}
 
-      {(data.turns.length > 0 || running) && (
-        <div style={S.columns}>
-          <TranscriptColumn title={speakerName(data.config.mode, "A")} turns={turnsA} />
-          <TranscriptColumn title={speakerName(data.config.mode, "B")} turns={turnsB} />
-        </div>
+      {hasRun && (
+        <>
+          <RunOverview data={data} />
+          <div style={S.disclosureNote}>
+            <Eye size={13} aria-hidden="true" />
+            <span>
+              This view shows model outputs and the exact context passed between sessions.
+              Private hidden chain-of-thought is not available.
+            </span>
+          </div>
+          <ExchangeTimeline
+            turns={dialogueTurns}
+            config={data.config}
+            activeSpeaker={data.activeSpeaker}
+            activeRound={data.activeRound}
+          />
+        </>
       )}
 
       {data.synthesis && (
@@ -353,18 +398,198 @@ function harnessLabel(h: HarnessInfo): string {
   return base.charAt(0).toUpperCase() + base.slice(1);
 }
 
-function TranscriptColumn(props: { title: string; turns: DialecticTurnRecord[] }): ReactElement {
+function RunOverview(props: { data: DialecticData }): ReactElement {
+  const { data } = props;
+  const stages: Array<{ speaker: DialecticSpeaker; label: string }> = [
+    { speaker: "A", label: speakerName(data.config.mode, "A") },
+    { speaker: "B", label: speakerName(data.config.mode, "B") },
+    { speaker: "synthesis", label: "Synthesis" },
+  ];
+
   return (
-    <div style={S.column}>
-      <div style={S.columnTitle}>{props.title}</div>
-      {props.turns.length === 0 && <div style={S.placeholder}>No turns yet.</div>}
-      {props.turns.map((t) => (
-        <div key={`${t.speaker}-${t.round}`} style={t.isError ? S.turnError : S.turn}>
-          <div style={S.turnMeta}>Round {t.round + 1}</div>
-          <div style={S.turnText}>{t.text || (t.isError ? "(turn failed)" : "")}</div>
+    <section style={S.overview} aria-label="Dialectic context flow">
+      <div style={S.overviewTop}>
+        <div>
+          <div style={S.eyebrow}>Context flow</div>
+          <div style={S.topicPreview}>{data.topic || "Untitled dialectic"}</div>
         </div>
-      ))}
-    </div>
+        <div style={S.roundCount}>
+          {data.config.rounds} {data.config.rounds === 1 ? "round" : "rounds"}
+        </div>
+      </div>
+      <div style={S.flow}>
+        {stages.map((stage, index) => {
+          const isActive = data.activeSpeaker === stage.speaker;
+          const isDone =
+            stage.speaker === "synthesis"
+              ? Boolean(data.synthesis)
+              : data.turns.some((turn) => turn.speaker === stage.speaker && Boolean(turn.text));
+          const planner =
+            stage.speaker === "A"
+              ? data.config.plannerA
+              : stage.speaker === "B"
+                ? data.config.plannerB
+                : data.config.synthesis ?? data.config.plannerA;
+          return (
+            <div key={stage.speaker} style={S.flowGroup}>
+              {index > 0 && <span style={S.flowArrow}>→</span>}
+              <div style={isActive ? S.flowStageActive : S.flowStage}>
+                <span style={isDone ? S.stageDotDone : isActive ? S.stageDotActive : S.stageDot}>
+                  {isDone && <Check size={9} aria-hidden="true" />}
+                </span>
+                <span style={S.stageText}>
+                  <span style={S.stageLabel}>{stage.label}</span>
+                  <span style={S.stageModel}>{planner.model}</span>
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function ExchangeTimeline(props: {
+  turns: DialecticTurnRecord[];
+  config: DialecticConfig;
+  activeSpeaker: DialecticSpeaker | null;
+  activeRound: number | null;
+}): ReactElement {
+  const rounds = Array.from(new Set(props.turns.map((turn) => turn.round))).sort((a, b) => a - b);
+
+  return (
+    <section style={S.timeline} aria-label="Model exchange">
+      <div style={S.timelineHeading}>
+        <MessageSquareText size={13} aria-hidden="true" />
+        <span>Model exchange</span>
+      </div>
+      {rounds.length === 0 && (
+        <div style={S.placeholder}>The first model exchange will appear here.</div>
+      )}
+      {rounds.map((round) => {
+        const turnA = props.turns.find((turn) => turn.speaker === "A" && turn.round === round);
+        const turnB = props.turns.find((turn) => turn.speaker === "B" && turn.round === round);
+        return (
+          <div key={round} style={S.round}>
+            <div style={S.roundHeader}>
+              <span>Round {round + 1}</span>
+              <span style={S.roundRule} />
+            </div>
+            {turnA && (
+              <TurnCard
+                turn={turnA}
+                role={speakerName(props.config.mode, "A")}
+                planner={props.config.plannerA}
+                isActive={props.activeSpeaker === "A" && props.activeRound === round}
+              />
+            )}
+            {(turnA || turnB) && (
+              <div style={S.transfer}>
+                <ArrowDown size={12} aria-hidden="true" />
+                <span>
+                  {turnA?.text
+                    ? `${speakerName(props.config.mode, "A")} output forwarded as ${speakerName(props.config.mode, "B")} input`
+                    : `Waiting to send context to ${speakerName(props.config.mode, "B")}`}
+                </span>
+              </div>
+            )}
+            {turnB && (
+              <TurnCard
+                turn={turnB}
+                role={speakerName(props.config.mode, "B")}
+                planner={props.config.plannerB}
+                isActive={props.activeSpeaker === "B" && props.activeRound === round}
+                emphasizeContext
+              />
+            )}
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
+function TurnCard(props: {
+  turn: DialecticTurnRecord;
+  role: string;
+  planner: PlannerConfig;
+  isActive: boolean;
+  emphasizeContext?: boolean;
+}): ReactElement {
+  const { turn } = props;
+  const hasResponse = Boolean(turn.text);
+  const contextSummary = turn.context
+    ? turn.context.retainedThread
+      ? "Existing thread retained · one new message appended"
+      : "New session · role instructions and message supplied"
+    : "Context details unavailable for this earlier turn";
+
+  return (
+    <article
+      style={
+        turn.isError
+          ? S.turnError
+          : props.isActive
+            ? S.turnActive
+            : props.emphasizeContext
+              ? S.turnCritic
+              : S.turn
+      }
+    >
+      <div style={S.turnHeader}>
+        <div style={S.turnIdentity}>
+          <span style={props.emphasizeContext ? S.avatarCritic : S.avatar}>
+            {props.role.slice(0, 1)}
+          </span>
+          <span>
+            <span style={S.turnRole}>{props.role}</span>
+            <span style={S.turnModel}>
+              {props.planner.model} · {props.planner.harness}
+            </span>
+          </span>
+        </div>
+        <span style={props.isActive ? S.turnStateActive : S.turnState}>
+          {turn.isError ? "Failed" : props.isActive ? "Working" : hasResponse ? "Shared" : "Queued"}
+        </span>
+      </div>
+
+      <div style={S.outputLabel}>Shared model output</div>
+      <div style={hasResponse ? S.turnText : S.pendingText}>
+        {turn.text || (turn.isError ? "(turn failed)" : "Preparing a response that can be shared…")}
+      </div>
+
+      <details style={S.contextDetails} open={props.emphasizeContext || undefined}>
+        <summary style={S.contextSummary}>
+          <span>
+            {props.emphasizeContext ? `Context sent to ${props.role}` : `Context received by ${props.role}`}
+          </span>
+          <span style={S.contextScope}>{contextSummary}</span>
+        </summary>
+        <div style={S.contextBody}>
+          {turn.context ? (
+            <>
+              {turn.context.systemPrompt && (
+                <div style={S.contextSection}>
+                  <div style={S.contextLabel}>Role instructions</div>
+                  <pre style={S.contextText}>{turn.context.systemPrompt}</pre>
+                </div>
+              )}
+              <div style={S.contextSection}>
+                <div style={S.contextLabel}>
+                  {turn.context.retainedThread ? "New message appended" : "User message"}
+                </div>
+                <pre style={S.contextText}>{turn.context.prompt}</pre>
+              </div>
+            </>
+          ) : (
+            <div style={S.contextUnavailable}>
+              This turn predates context capture. Its shared response is still available above.
+            </div>
+          )}
+        </div>
+      </details>
+    </article>
   );
 }
 
@@ -376,7 +601,12 @@ function StatusBadge(props: { status: DialecticRunStatus }): ReactElement {
     stopped: "var(--status-stopped)",
     error: "var(--status-error)",
   };
-  return <span style={{ ...S.badge, background: color[props.status] }}>{props.status}</span>;
+  return (
+    <span style={S.badge}>
+      <span style={{ ...S.badgeDot, background: color[props.status] }} />
+      {props.status}
+    </span>
+  );
 }
 
 function speakerName(mode: DialecticMode, speaker: DialecticSpeaker): string {
@@ -431,7 +661,19 @@ const S = {
     borderBottom: "1px solid var(--border-default)",
     flexShrink: 0,
   },
-  title: { fontWeight: 600, fontSize: 13, color: "var(--text-primary)" },
+  titleGroup: { display: "flex", alignItems: "center", gap: 8 },
+  titleIcon: {
+    display: "grid",
+    placeItems: "center",
+    width: 26,
+    height: 26,
+    borderRadius: "var(--radius-control)",
+    color: "var(--accent)",
+    background: "color-mix(in srgb, var(--accent) 11%, transparent)",
+    border: "1px solid color-mix(in srgb, var(--accent) 24%, transparent)",
+  },
+  title: { display: "block", fontWeight: 650, fontSize: 13, color: "var(--text-primary)" },
+  subtitle: { display: "block", marginTop: 1, fontSize: 9, color: "var(--text-muted)" },
   config: { display: "flex", flexDirection: "column", gap: 8 },
   field: { display: "flex", flexDirection: "column", gap: 3, flex: 1, minWidth: 0 },
   label: LABEL,
@@ -469,11 +711,22 @@ const S = {
     fontFamily: "var(--font-mono)",
   },
   active: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
     fontSize: 10,
     color: "var(--status-running)",
     fontFamily: "var(--font-mono)",
     textTransform: "uppercase",
     letterSpacing: 0.5,
+  },
+  pulseDot: {
+    width: 6,
+    height: 6,
+    borderRadius: "50%",
+    background: "var(--status-running)",
+    boxShadow: "0 0 0 3px color-mix(in srgb, var(--status-running) 16%, transparent)",
+    flexShrink: 0,
   },
   error: {
     padding: "6px 10px",
@@ -484,26 +737,289 @@ const S = {
     fontSize: 11,
     fontFamily: "var(--font-mono)",
   },
-  columns: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 },
-  column: { display: "flex", flexDirection: "column", gap: 6, minWidth: 0 },
-  columnTitle: { ...LABEL, fontSize: 11, color: "var(--text-secondary)" },
+  overview: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 9,
+    padding: 10,
+    borderRadius: "var(--radius-panel)",
+    border: "1px solid var(--border-default)",
+    background: "var(--bg-primary)",
+  },
+  overviewTop: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
+  eyebrow: LABEL,
+  topicPreview: {
+    marginTop: 3,
+    color: "var(--text-primary)",
+    fontSize: 11,
+    fontWeight: 550,
+    lineHeight: 1.35,
+    display: "-webkit-box",
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: "vertical",
+    overflow: "hidden",
+  },
+  roundCount: {
+    flexShrink: 0,
+    padding: "2px 6px",
+    borderRadius: "var(--radius-pill)",
+    background: "var(--bg-elevated)",
+    color: "var(--text-muted)",
+    fontSize: 9,
+    fontFamily: "var(--font-mono)",
+  },
+  flow: { display: "flex", alignItems: "center", minWidth: 0 },
+  flowGroup: { display: "flex", alignItems: "center", flex: 1, minWidth: 0 },
+  flowArrow: { color: "var(--text-dim)", padding: "0 5px", fontSize: 11, flexShrink: 0 },
+  flowStage: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    minWidth: 0,
+    flex: 1,
+    padding: "5px 6px",
+    borderRadius: "var(--radius-control)",
+    border: "1px solid transparent",
+  },
+  flowStageActive: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    minWidth: 0,
+    flex: 1,
+    padding: "5px 6px",
+    borderRadius: "var(--radius-control)",
+    border: "1px solid color-mix(in srgb, var(--status-running) 35%, transparent)",
+    background: "color-mix(in srgb, var(--status-running) 8%, transparent)",
+  },
+  stageDot: {
+    width: 13,
+    height: 13,
+    display: "grid",
+    placeItems: "center",
+    borderRadius: "50%",
+    border: "1px solid var(--border-hover)",
+    color: "var(--bg-primary)",
+    flexShrink: 0,
+  },
+  stageDotActive: {
+    width: 13,
+    height: 13,
+    display: "grid",
+    placeItems: "center",
+    borderRadius: "50%",
+    border: "1px solid var(--status-running)",
+    background: "var(--status-running)",
+    color: "var(--bg-primary)",
+    flexShrink: 0,
+  },
+  stageDotDone: {
+    width: 13,
+    height: 13,
+    display: "grid",
+    placeItems: "center",
+    borderRadius: "50%",
+    border: "1px solid var(--status-success)",
+    background: "var(--status-success)",
+    color: "var(--bg-primary)",
+    flexShrink: 0,
+  },
+  stageText: { display: "flex", flexDirection: "column", minWidth: 0 },
+  stageLabel: { color: "var(--text-secondary)", fontSize: 9, fontWeight: 600 },
+  stageModel: {
+    color: "var(--text-muted)",
+    fontSize: 8,
+    fontFamily: "var(--font-mono)",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  disclosureNote: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 7,
+    padding: "7px 9px",
+    borderRadius: "var(--radius-control)",
+    color: "var(--text-secondary)",
+    background: "var(--info-bg)",
+    border: "1px solid color-mix(in srgb, var(--info-color) 20%, transparent)",
+    fontSize: 10,
+    lineHeight: 1.4,
+  },
+  timeline: { display: "flex", flexDirection: "column", gap: 8 },
+  timelineHeading: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    ...LABEL,
+    color: "var(--text-secondary)",
+    fontSize: 10,
+  },
+  round: { display: "flex", flexDirection: "column", gap: 6 },
+  roundHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    color: "var(--text-muted)",
+    fontFamily: "var(--font-mono)",
+    fontSize: 9,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  roundRule: { height: 1, background: "var(--border-default)", flex: 1 },
   placeholder: { fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" },
   turn: {
-    padding: 8,
-    borderRadius: "var(--radius-control)",
+    padding: 10,
+    borderRadius: "var(--radius-panel)",
     background: "var(--bg-secondary)",
     border: "1px solid var(--border-default)",
     color: "var(--text-primary)",
   },
+  turnCritic: {
+    padding: 10,
+    borderRadius: "var(--radius-panel)",
+    background: "color-mix(in srgb, var(--accent) 4%, var(--bg-secondary))",
+    border: "1px solid color-mix(in srgb, var(--accent) 26%, var(--border-default))",
+    color: "var(--text-primary)",
+  },
+  turnActive: {
+    padding: 10,
+    borderRadius: "var(--radius-panel)",
+    background: "color-mix(in srgb, var(--status-running) 5%, var(--bg-secondary))",
+    border: "1px solid color-mix(in srgb, var(--status-running) 38%, var(--border-default))",
+    color: "var(--text-primary)",
+  },
   turnError: {
-    padding: 8,
-    borderRadius: "var(--radius-control)",
+    padding: 10,
+    borderRadius: "var(--radius-panel)",
     background: "var(--danger-bg)",
     border: "1px solid var(--danger-color)",
     color: "var(--text-primary)",
   },
-  turnMeta: { ...LABEL, marginBottom: 3 },
-  turnText: { whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.4 },
+  turnHeader: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 },
+  turnIdentity: { display: "flex", alignItems: "center", gap: 7, minWidth: 0 },
+  avatar: {
+    display: "grid",
+    placeItems: "center",
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    color: "var(--info-color)",
+    background: "var(--info-bg)",
+    border: "1px solid color-mix(in srgb, var(--info-color) 28%, transparent)",
+    fontSize: 10,
+    fontWeight: 700,
+    flexShrink: 0,
+  },
+  avatarCritic: {
+    display: "grid",
+    placeItems: "center",
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    color: "var(--accent)",
+    background: "color-mix(in srgb, var(--accent) 10%, transparent)",
+    border: "1px solid color-mix(in srgb, var(--accent) 28%, transparent)",
+    fontSize: 10,
+    fontWeight: 700,
+    flexShrink: 0,
+  },
+  turnRole: { display: "block", color: "var(--text-primary)", fontSize: 11, fontWeight: 650 },
+  turnModel: {
+    display: "block",
+    marginTop: 1,
+    color: "var(--text-muted)",
+    fontSize: 8,
+    fontFamily: "var(--font-mono)",
+  },
+  turnState: {
+    padding: "2px 5px",
+    borderRadius: "var(--radius-pill)",
+    background: "var(--bg-elevated)",
+    color: "var(--text-muted)",
+    fontSize: 8,
+    fontFamily: "var(--font-mono)",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  turnStateActive: {
+    padding: "2px 5px",
+    borderRadius: "var(--radius-pill)",
+    background: "color-mix(in srgb, var(--status-running) 14%, transparent)",
+    color: "var(--status-running)",
+    fontSize: 8,
+    fontFamily: "var(--font-mono)",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  outputLabel: { ...LABEL, marginTop: 10, marginBottom: 4, fontSize: 8 },
+  turnText: {
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+    lineHeight: 1.45,
+    color: "var(--text-primary)",
+    fontSize: 11,
+  },
+  pendingText: {
+    color: "var(--text-muted)",
+    fontSize: 10,
+    fontStyle: "italic",
+    lineHeight: 1.4,
+  },
+  transfer: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    marginLeft: 20,
+    paddingLeft: 7,
+    color: "var(--text-muted)",
+    borderLeft: "1px dashed var(--border-hover)",
+    fontSize: 9,
+    lineHeight: 1.3,
+  },
+  contextDetails: {
+    marginTop: 9,
+    borderRadius: "var(--radius-control)",
+    background: "var(--bg-primary)",
+    border: "1px solid var(--border-default)",
+    overflow: "hidden",
+  },
+  contextSummary: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    padding: "7px 8px",
+    color: "var(--text-secondary)",
+    cursor: "pointer",
+    fontSize: 9,
+    fontWeight: 600,
+    listStylePosition: "inside",
+  },
+  contextScope: { color: "var(--text-muted)", fontSize: 8, fontWeight: 400, fontFamily: "var(--font-mono)" },
+  contextBody: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    padding: 8,
+    borderTop: "1px solid var(--border-default)",
+  },
+  contextSection: { display: "flex", flexDirection: "column", gap: 4 },
+  contextLabel: { ...LABEL, fontSize: 8 },
+  contextText: {
+    margin: 0,
+    padding: 7,
+    maxHeight: 180,
+    overflow: "auto",
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+    borderRadius: 5,
+    background: "var(--bg-secondary)",
+    color: "var(--text-secondary)",
+    fontFamily: "var(--font-mono)",
+    fontSize: 9,
+    lineHeight: 1.45,
+  },
+  contextUnavailable: { color: "var(--text-muted)", fontSize: 9, lineHeight: 1.4 },
   synthesis: {
     border: "1px solid var(--status-success)",
     borderRadius: "var(--radius-panel)",
@@ -518,15 +1034,21 @@ const S = {
   },
   synthesisBody: { whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.45, color: "var(--text-primary)" },
   badge: {
-    color: "var(--bg-primary)",
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    color: "var(--text-secondary)",
     borderRadius: "var(--radius-pill)",
-    padding: "1px 8px",
+    padding: "2px 7px",
+    border: "1px solid var(--border-default)",
+    background: "var(--bg-primary)",
     fontSize: 10,
     textTransform: "uppercase",
     letterSpacing: 0.5,
     fontFamily: "var(--font-mono)",
     fontWeight: 600,
   },
+  badgeDot: { width: 6, height: 6, borderRadius: "50%" },
 } satisfies Record<string, CSSProperties>;
 
 // ── Registration ─────────────────────────────────────────────────────────────

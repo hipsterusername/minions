@@ -87,11 +87,22 @@ export class DialecticOrchestrator {
         if (this.aborted) break;
 
         // ── Planner A turn ──────────────────────────────────────────────
-        this.deps.emit({ kind: "turn_started", speaker: "A", round });
         const aPrompt =
           round === 0
             ? buildSeedPrompt(this.config.mode, topic)
             : buildTurnPrompt({ mode: this.config.mode, speaker: "A", round, peerText: lastB });
+        this.deps.emit({
+          kind: "turn_started",
+          speaker: "A",
+          round,
+          context: {
+            prompt: aPrompt,
+            ...(round === 0
+              ? { systemPrompt: buildPlannerSystemPrompt(this.config.mode, "A") }
+              : {}),
+            retainedThread: round > 0,
+          },
+        });
         this.launchPlanner("A", round, aPrompt);
         const a = await this.deps.awaitTurn(this.keys.plannerA);
         if (this.aborted) break;
@@ -101,7 +112,6 @@ export class DialecticOrchestrator {
         if (a.isError) throw new Error(turnFailure("Planner A", a.error));
 
         // ── Planner B turn ──────────────────────────────────────────────
-        this.deps.emit({ kind: "turn_started", speaker: "B", round });
         const bPrompt = buildTurnPrompt({
           mode: this.config.mode,
           speaker: "B",
@@ -109,6 +119,18 @@ export class DialecticOrchestrator {
           peerText: lastA,
           // B needs the topic on its very first turn (not yet in its thread).
           topic: round === 0 ? topic : undefined,
+        });
+        this.deps.emit({
+          kind: "turn_started",
+          speaker: "B",
+          round,
+          context: {
+            prompt: bPrompt,
+            ...(round === 0
+              ? { systemPrompt: buildPlannerSystemPrompt(this.config.mode, "B") }
+              : {}),
+            retainedThread: round > 0,
+          },
         });
         this.launchPlanner("B", round, bPrompt);
         const b = await this.deps.awaitTurn(this.keys.plannerB);
@@ -126,12 +148,22 @@ export class DialecticOrchestrator {
 
       // ── Synthesis pass ────────────────────────────────────────────────
       const synthRound = this.config.rounds;
-      this.deps.emit({ kind: "turn_started", speaker: "synthesis", round: synthRound });
       const synth = resolveSynthesisPlanner(this.config);
+      const synthesisPrompt = buildSynthesisPrompt(this.config.mode, topic, transcript);
+      this.deps.emit({
+        kind: "turn_started",
+        speaker: "synthesis",
+        round: synthRound,
+        context: {
+          prompt: synthesisPrompt,
+          systemPrompt: SYNTHESIS_SYSTEM_PROMPT,
+          retainedThread: false,
+        },
+      });
       this.deps.startSession({
         sessionKey: this.keys.synthesis,
         invocationKind: "new_run",
-        prompt: buildSynthesisPrompt(this.config.mode, topic, transcript),
+        prompt: synthesisPrompt,
         cwd: this.cwd,
         systemPrompt: SYNTHESIS_SYSTEM_PROMPT,
         role: "dialectic-planner",
