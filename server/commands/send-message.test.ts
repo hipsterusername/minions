@@ -149,15 +149,16 @@ describe("send_message", () => {
         model: "", permissionMode: "auto", worktreeIsolation: false, skillIds: [], skillValues: {},
         linkedContextNodeIds: [] }, lastTransitionAt: 1, createdAt: 1, updatedAt: 1 },
       bindings: [], currentRun: null, runs: [], nextCursor: null };
-    const startRun = vi.fn(async () => detail);
-    h.ctx.workItems = { get: vi.fn(async () => detail), startRun } as unknown as WorkItemService;
+    const continueWorkItem = vi.fn(async () => detail);
+    h.ctx.workItems = { get: vi.fn(async () => detail),
+      continue: continueWorkItem } as unknown as WorkItemService;
     await sendMessage(h.ctx, cmd({
       type: "send_message", sessionKey: h.host.id, prompt: "Continue old row",
     }), h.ws);
 
     expect(calls).toEqual([]);
     expect(h.host.taskState.approval?.requested).toBe(true);
-    expect(startRun).toHaveBeenCalledWith(expect.objectContaining({ workItemId: "work-1",
+    expect(continueWorkItem).toHaveBeenCalledWith(expect.objectContaining({ workItemId: "work-1",
       prompt: "Continue old row", expectedLifecycleRevision: 4,
       expectedCurrentRunKey: h.host.runKey }));
     expect(h.wsSent).toEqual([]);

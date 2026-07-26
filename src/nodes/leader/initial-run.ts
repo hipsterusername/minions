@@ -28,6 +28,10 @@ export function resetLeaderAutoStartClaimsForTests(): void {
   leaderAutoStartClaims.clear();
 }
 
+export function releaseLeaderAutoStart(nodeId: string, prompt: string): void {
+  leaderAutoStartClaims.delete(`${nodeId}\0${prompt}`);
+}
+
 export function buildInitialLeaderRun(input: {
   userPrompt: string; data: LeaderData; contextItems: ContextItem[];
   incomingModes: string[]; at?: number;

@@ -15,6 +15,23 @@ interface Input {
   publishCanvasContext: (sessionKey: string, items: ContextItem[], previous: null) => void;
 }
 
+class WorkItemRequestError extends Error {
+  readonly code: string | undefined;
+  readonly latest: WorkItemDetailSnapshot | null;
+  readonly correlationId: string | undefined;
+  constructor(
+    message: string,
+    code: string | undefined,
+    latest: WorkItemDetailSnapshot | null,
+    correlationId: string | undefined,
+  ) {
+    super(correlationId ? `${message} (correlation ${correlationId})` : message);
+    this.code = code;
+    this.latest = latest;
+    this.correlationId = correlationId;
+  }
+}
+
 export function useCanvasWorkItem(input: Input) {
   const pending = useRef(new Map<string, { resolve: (detail: WorkItemDetailSnapshot) => void;
     reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>());
@@ -37,13 +54,16 @@ export function useCanvasWorkItem(input: Input) {
 
   useEffect(() => subscribeSocketTopic(input.socketSubscribe, "*", (raw: unknown) => {
     const msg = raw as ServerMessage & { requestId?: string | null; success?: boolean;
-      result?: unknown; error?: string; workItem?: WorkItemSnapshot };
+      result?: unknown; error?: string; code?: string; latest?: WorkItemDetailSnapshot | null;
+      correlationId?: string; workItem?: WorkItemSnapshot };
     if (msg.type === "work_item_response" && msg.requestId) {
       const found = pending.current.get(msg.requestId);
       if (found) {
         clearTimeout(found.timer); pending.current.delete(msg.requestId);
         const detail = detailFromWorkItemResponse(msg);
-        if (detail) found.resolve(detail); else found.reject(new Error(msg.error ?? "Work-item command failed"));
+        if (detail) found.resolve(detail); else found.reject(new WorkItemRequestError(
+          msg.error ?? "Work-item command failed", msg.code, msg.latest ?? null,
+          msg.correlationId));
       }
     }
     if (msg.type === "work_item_changed" && msg.workItem
@@ -56,6 +76,23 @@ export function useCanvasWorkItem(input: Input) {
           input.dataRef.current.liveEditAwareness, msg.event) });
   }), [input.socketSubscribe, input.emitUpdate, input.dataRef]);
 
+  const requestMutation = useCallback(async (command: Record<string, unknown>) => {
+    try {
+      return await request(command);
+    } catch (error) {
+      if (!(error instanceof WorkItemRequestError)
+        || error.code !== "conflict" || !error.latest) throw error;
+      input.emitUpdate(applyCanvasWorkItemSnapshot(
+        input.dataRef.current, error.latest.workItem));
+      return request({
+        ...command,
+        requestId: crypto.randomUUID(),
+        expectedLifecycleRevision: error.latest.workItem.lifecycle.lifecycleRevision,
+        expectedCurrentRunKey: error.latest.workItem.currentRunKey,
+      });
+    }
+  }, [request, input.emitUpdate, input.dataRef]);
+
   useEffect(() => {
     const current = input.dataRef.current;
     if (!input.socketSend || !current.workItemId || current.workItemSnapshot) return;
@@ -65,7 +102,7 @@ export function useCanvasWorkItem(input: Input) {
       const attached = detail.bindings.some((binding) => binding.surface === "canvas"
         && binding.bindingId === input.nodeId && binding.detachedAt === null);
       if (!attached) {
-        const bound = await request({ type: "attach_work_item_surface", requestId: crypto.randomUUID(),
+        const bound = await requestMutation({ type: "attach_work_item_surface", requestId: crypto.randomUUID(),
           workItemId: detail.workItem.id, surface: "canvas", bindingId: input.nodeId,
           expectedLifecycleRevision: detail.workItem.lifecycle.lifecycleRevision,
           expectedCurrentRunKey: detail.workItem.currentRunKey });
@@ -73,7 +110,7 @@ export function useCanvasWorkItem(input: Input) {
       }
     }).catch(() => { /* legacy binding remains usable */ });
   }, [input.socketSend, input.dataRef.current.workItemId,
-    input.dataRef.current.workItemSnapshot, input.nodeId, request, input.emitUpdate]);
+    input.dataRef.current.workItemSnapshot, input.nodeId, request, requestMutation, input.emitUpdate]);
 
   const begin = useCallback(async (run: { userPrompt: string; prompt: string;
     systemPrompt: string; attachments: unknown[]; contextItems: ContextItem[] }) => {
@@ -94,14 +131,14 @@ export function useCanvasWorkItem(input: Input) {
           skillValues: input.dataRef.current.skillValues ?? {} } });
       item = created.workItem;
       input.emitUpdate(applyCanvasWorkItemSnapshot(input.dataRef.current, item));
-      const attached = await request({ type: "attach_work_item_surface", requestId: crypto.randomUUID(),
+      const attached = await requestMutation({ type: "attach_work_item_surface", requestId: crypto.randomUUID(),
         workItemId: item.id, surface: "canvas", bindingId: input.nodeId,
         expectedLifecycleRevision: item.lifecycle.lifecycleRevision,
         expectedCurrentRunKey: item.currentRunKey });
       item = attached.workItem;
       input.emitUpdate(applyCanvasWorkItemSnapshot(input.dataRef.current, item));
     }
-    const started = await request({ ...canonicalPromptCommand(item, run.prompt),
+    const started = await requestMutation({ ...canonicalPromptCommand(item, run.prompt),
       systemPrompt: run.systemPrompt, skillIds: input.dataRef.current.skillIds ?? [],
       skillValues: input.dataRef.current.skillValues ?? {},
       model: input.dataRef.current.model,
@@ -116,6 +153,6 @@ export function useCanvasWorkItem(input: Input) {
       started.workItem.currentRunKey, run.contextItems, null);
     return started;
   }, [input.projectId, input.projectPath, input.nodeId, input.emitUpdate,
-    input.publishCanvasContext, input.dataRef, request]);
-  return { requestWorkItem: request, beginCanonicalRun: begin };
+    input.publishCanvasContext, input.dataRef, request, requestMutation]);
+  return { requestWorkItem: requestMutation, beginCanonicalRun: begin };
 }

@@ -62,12 +62,10 @@ export function selectCanvasWorkItem(snapshot: WorkItemSnapshot | null | undefin
 }
 
 export function canonicalPromptCommand(item: WorkItemSnapshot, prompt: string) {
-  const base = { requestId: crypto.randomUUID(), workItemId: item.id,
+  return { type: "continue_work_item" as const,
+    requestId: crypto.randomUUID(), workItemId: item.id,
     expectedLifecycleRevision: item.lifecycle.lifecycleRevision,
     expectedCurrentRunKey: item.currentRunKey, prompt };
-  return item.lifecycle.runtimeState === "waiting" && item.waitKind === "decision" && item.currentRunKey
-    ? { type: "reply_to_waiting_run" as const, ...base, runKey: item.currentRunKey }
-    : { type: "start_work_item_run" as const, ...base };
 }
 
 export function selectCanvasPrompt(data: CanvasWorkItemFields & {
@@ -78,17 +76,14 @@ export function selectCanvasPrompt(data: CanvasWorkItemFields & {
   const displayStatus = canonicalView?.status ?? data.status;
   const canonicalTerminal = Boolean(data.workItemSnapshot
     && data.workItemSnapshot.lifecycle.outcome !== "none");
-  const blockedCanonicalWait = Boolean(data.workItemSnapshot?.lifecycle.runtimeState === "waiting"
-    && data.workItemSnapshot.waitKind !== "decision");
   return { canonicalView, displayStatus,
     placeholder: canonicalTerminal || displayStatus === "completed"
       ? "Describe next goal (context preserved)..."
       : data.sessionKey ? "Guide the leader..." : "Describe your project goal...",
     submitLabel: canonicalTerminal ? "New iteration"
       : displayStatus === "completed" ? "New Session" : data.sessionKey ? "Send" : "Start",
-    submitDisabled: blockedCanonicalWait || (!hasInput && Boolean(data.sessionKey) && displayStatus !== "completed"),
-    submitActive: !blockedCanonicalWait
-      && ((!canonicalTerminal && displayStatus === "completed") || hasInput || !data.sessionKey),
+    submitDisabled: !hasInput && Boolean(data.sessionKey) && displayStatus !== "completed",
+    submitActive: (!canonicalTerminal && displayStatus === "completed") || hasInput || !data.sessionKey,
   };
 }
 

@@ -137,6 +137,8 @@ describe("validateWsCommand – accept", () => {
   it("accepts Phase 1 work-item mutation and query contracts", () => {
     const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
     accept({ type: "create_work_item", requestId: id(1), projectId: "p1", projectPath: "/repo", title: "Task", changeMode: "live" });
+    accept({ type: "continue_work_item", requestId: id(11), workItemId: "w1", prompt: "Continue",
+      expectedLifecycleRevision: 0, expectedCurrentRunKey: null });
     accept({ type: "start_work_item_run", requestId: id(2), workItemId: "w1", prompt: "Start",
       expectedLifecycleRevision: 0, expectedCurrentRunKey: null, harness: "codex", model: "gpt-5",
       permissionMode: "auto", thinkingConfig: { enabled: true }, skillIds: ["review"],

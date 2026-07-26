@@ -292,15 +292,11 @@ function Inspector({
   const [reply, setReply] = useState("");
   const submitReply = () => {
     const prompt = reply.trim();
-    const blockedCanonicalWait = Boolean(session.workItemId && session.status === "waiting"
-      && session.reviewLifecycle?.reviewState !== "decision_needed");
-    if (!prompt || !socketSend || blockedCanonicalWait) return;
+    if (!prompt || !socketSend) return;
     socketSend(session.workItemId ? {
-      type: session.status === "waiting" && session.reviewLifecycle?.reviewState === "decision_needed"
-        ? "reply_to_waiting_run" : "start_work_item_run",
+      type: "continue_work_item",
       requestId: crypto.randomUUID(), workItemId: session.workItemId,
-      ...(session.status === "waiting" && session.reviewLifecycle?.reviewState === "decision_needed"
-        ? { runKey: session.sessionKey } : {}), prompt,
+      prompt,
       expectedLifecycleRevision: session.reviewLifecycle?.lifecycleRevision ?? 0,
       expectedCurrentRunKey: session.sessionKey.startsWith("work-item:") ? null : session.sessionKey,
     } : { type: "send_message", sessionKey: session.sessionKey, prompt });

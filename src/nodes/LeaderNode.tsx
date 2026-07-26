@@ -41,7 +41,7 @@ import { consumeLeaderInputFocus } from "../leader-focus-request.ts";
 import { applyCanvasWorkItemSnapshot, canonicalPromptCommand,
   formatCanvasWorkItemStatus, selectCanvasChangeMode, selectCanvasPrompt } from "./leader/work-item.ts";
 import { useCanvasWorkItem } from "./leader/use-canvas-work-item.ts";
-import { buildInitialLeaderRun, claimLeaderAutoStart } from "./leader/initial-run.ts";
+import { buildInitialLeaderRun, claimLeaderAutoStart, releaseLeaderAutoStart } from "./leader/initial-run.ts";
 export { claimLeaderAutoStart, resetLeaderAutoStartClaimsForTests } from "./leader/initial-run.ts";
 
 registerContract(LEADER_CONTRACT);
@@ -677,8 +677,12 @@ export function LeaderNodeRenderer({
       setInput("");
       void beginCanonicalRun({ userPrompt, prompt: fullPrompt,
         systemPrompt: frozenPrompt.systemPrompt, attachments, contextItems })
-        .catch((error: unknown) => emitUpdate({ ...dataRef.current, status: "error",
-          error: error instanceof Error ? error.message : String(error) }));
+        .catch((error: unknown) => {
+          syncedRef.current = false;
+          setInput(userPrompt);
+          emitUpdate({ ...dataRef.current, status: "error",
+            error: error instanceof Error ? error.message : String(error) });
+        });
       return;
     }
 
@@ -740,8 +744,14 @@ export function LeaderNodeRenderer({
           content: prompt, timestamp: Date.now() }] });
       void beginCanonicalRun({ userPrompt: prompt, prompt: fullPrompt,
         systemPrompt: frozenPrompt.systemPrompt, attachments, contextItems })
-        .catch((error: unknown) => emitUpdate({ ...dataRef.current, status: "error",
-          error: error instanceof Error ? error.message : String(error) }));
+        .catch((error: unknown) => {
+          syncedRef.current = false;
+          autoStartFired.current = false;
+          releaseLeaderAutoStart(node.id, prompt);
+          setInput(prompt);
+          emitUpdate({ ...dataRef.current, status: "error", autoStartPrompt: prompt,
+            error: error instanceof Error ? error.message : String(error) });
+        });
       return;
     }
 
@@ -824,13 +834,10 @@ export function LeaderNodeRenderer({
     const followUp = buildFrozenLeaderFollowUpPrompt({ frozen, current, prompt });
 
     const canonical = current.workItemSnapshot;
-    const canonicalCanRestart = canonical && (canonical.lifecycle.runtimeState === "waiting"
-      || canonical.lifecycle.runtimeState === "inactive"
-      || canonical.lifecycle.runtimeState === "draft");
     // A legacy node can receive its durable workItemId from session sync one
     // render before get_work_item hydrates the snapshot. Never fall through to
     // send_message during that window: canonical hosts deliberately reject it.
-    if (canonicalCanRestart || (current.workItemId && !canonical)) {
+    if (canonical || (current.workItemId && !canonical)) {
       onUpdateData({ ...current, contextDelivery: nextLedger,
         messages: [...current.messages, { id: msgId(), role: "user" as const,
           content: rawPrompt, timestamp: Date.now() }] });
@@ -838,11 +845,6 @@ export function LeaderNodeRenderer({
       void (async () => {
         const snapshot = canonical ?? (await requestWorkItem({ type: "get_work_item",
           requestId: crypto.randomUUID(), workItemId: current.workItemId })).workItem;
-        if (!(snapshot.lifecycle.runtimeState === "waiting"
-          || snapshot.lifecycle.runtimeState === "inactive"
-          || snapshot.lifecycle.runtimeState === "draft")) {
-          throw new Error("This work-item run is already active and cannot be restarted.");
-        }
         return requestWorkItem(canonicalPromptCommand(snapshot, followUp.prompt));
       })().then((detail) => {
         const next = applyCanvasWorkItemSnapshot(dataRef.current, detail.workItem);

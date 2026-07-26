@@ -132,7 +132,7 @@ export function useWorkItems(input: {
     review: (item: WorkItemSnapshot) => mutate("review_work_item", item),
     archive: (item: WorkItemSnapshot) => mutate("archive_work_item", item),
     restore: (item: WorkItemSnapshot) => mutate("restore_work_item", item),
-    start: (item: WorkItemSnapshot, prompt: string) => mutate("start_work_item_run", item, { prompt }),
-    reply: (item: WorkItemSnapshot, prompt: string) => mutate("reply_to_waiting_run", item, { runKey: item.currentRunKey, prompt }),
+    start: (item: WorkItemSnapshot, prompt: string) => mutate("continue_work_item", item, { prompt }),
+    reply: (item: WorkItemSnapshot, prompt: string) => mutate("continue_work_item", item, { prompt }),
   }), [state, input.send, mutate]);
 }

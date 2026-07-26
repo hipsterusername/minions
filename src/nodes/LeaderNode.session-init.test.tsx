@@ -425,9 +425,9 @@ describe("LeaderNode: new-session initiation", () => {
     await act(() => replay([{ message: { type: "work_item_response", command: "attach_work_item_surface",
       requestId: attach.requestId, success: true,
       result: { workItem: canonicalItem(null, 1, "draft", "none"), bindings: [], currentRun: null, runs: [], nextCursor: null } } }]));
-    await waitFor(() => expect(latestCommand("start_work_item_run")).toBeDefined());
-    const start = latestCommand("start_work_item_run") as { requestId: string };
-    await act(() => replay([{ message: { type: "work_item_response", command: "start_work_item_run",
+    await waitFor(() => expect(latestCommand("continue_work_item")).toBeDefined());
+    const start = latestCommand("continue_work_item") as { requestId: string };
+    await act(() => replay([{ message: { type: "work_item_response", command: "continue_work_item",
       requestId: start.requestId, success: true,
       result: { workItem: canonicalItem("run-1", 2, "starting", "none"), bindings: [], currentRun: null, runs: [], nextCursor: null } } }]));
     await waitFor(() => expect(latest.currentRunKey).toBe("run-1"));
@@ -439,10 +439,10 @@ describe("LeaderNode: new-session initiation", () => {
       { target: { value: "Second iteration" } });
     fireEvent.click(screen.getByRole("button", { name: "New iteration" }));
     await waitFor(() => expect(socket.sent.filter((message) =>
-      (message as { type?: string }).type === "start_work_item_run")).toHaveLength(2));
-    const second = latestCommand("start_work_item_run") as { requestId: string; expectedCurrentRunKey: string };
+      (message as { type?: string }).type === "continue_work_item")).toHaveLength(2));
+    const second = latestCommand("continue_work_item") as { requestId: string; expectedCurrentRunKey: string };
     expect(second.expectedCurrentRunKey).toBe("run-1");
-    await act(() => replay([{ message: { type: "work_item_response", command: "start_work_item_run",
+    await act(() => replay([{ message: { type: "work_item_response", command: "continue_work_item",
       requestId: second.requestId, success: true,
       result: { workItem: canonicalItem("run-2", 4, "starting", "none"), bindings: [], currentRun: null, runs: [], nextCursor: null } } }]));
     await waitFor(() => expect([latest.workItemId, latest.currentRunKey]).toEqual(["work-1", "run-2"]));
@@ -479,7 +479,7 @@ describe("LeaderNode: new-session initiation", () => {
     } }));
     await act(() => replay(responses));
     await waitFor(() => expect(socket.sent.some((message) =>
-      (message as { type?: string }).type === "start_work_item_run")).toBe(true));
+      (message as { type?: string }).type === "continue_work_item")).toBe(true));
     expect(socket.sent.some((message) =>
       (message as { type?: string }).type === "send_message")).toBe(false);
   });

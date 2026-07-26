@@ -45,6 +45,7 @@ import {
 import { applySessionEndedForMinion } from "./task-lifecycle.ts";
 import { setSessionCanvasContext } from "./canvas-context-store.ts";
 import { drainQueuedWaitResume } from "./wait-resume.ts";
+import { drainQueuedWorkItemGuidance } from "./work-item-continuation.ts";
 import type { ContextCheckpoint } from "./context-checkpoint.ts";
 import { failUninitializedCheckpoint } from "./session-host-checkpoint.ts";
 import { beginRun, commitReviewLifecycle, finishRun, initialSessionReviewLifecycle, type SessionReviewLifecycle } from "./session-review-lifecycle.ts";
@@ -334,7 +335,7 @@ export class SessionHost {
       }
       failUninitializedCheckpoint(this, opts, checkpointInitialized, "Fresh provider thread ended before initialization.");
       if (continuationOpts) await this.start(continuationOpts, deps);
-      else drainQueuedWaitResume(this, deps);
+      else if (!drainQueuedWorkItemGuidance(this, deps)) drainQueuedWaitResume(this, deps);
     } catch (err: unknown) {
       if (abortController.signal.aborted || this.abortController !== abortController) return;
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -369,6 +370,7 @@ export class SessionHost {
           onAfterLifecycle: deps.wakeWaitingLeaderIfAllChildrenTerminal,
         });
       }
+      drainQueuedWorkItemGuidance(this, deps);
     }
   }
   terminate(reason: SessionTerminateReason, deps?: SessionTerminateDeps): void {
