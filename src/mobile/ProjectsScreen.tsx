@@ -11,7 +11,9 @@ interface ProjectsScreenProps {
 
 interface ProjectStats {
   count: number;
-  attention: boolean;
+  running: number;
+  attention: number;
+  cost: number;
 }
 
 function statsForProject(
@@ -19,14 +21,29 @@ function statsForProject(
   projectPath: string,
 ): ProjectStats {
   let count = 0;
-  let attention = false;
+  let running = 0;
+  let attention = 0;
+  let cost = 0;
   for (const session of sessions) {
     if (session.role === "minion") continue;
     if (!sessionBelongsToProject(session, projectPath)) continue;
     count += 1;
-    if (needsAttention(session)) attention = true;
+    if (session.status === "running" || session.status === "creating") running += 1;
+    if (needsAttention(session)) attention += 1;
+    if (session.totalCost != null && Number.isFinite(session.totalCost)) {
+      cost += session.totalCost;
+    }
   }
-  return { count, attention };
+  return { count, running, attention, cost };
+}
+
+function formatProjectStats(stats: ProjectStats): string {
+  const parts = stats.running > 0
+    ? [`▶ ${stats.running} running`]
+    : [stats.count === 1 ? "1 session" : `${stats.count} sessions`];
+  parts.push(`$${stats.cost.toFixed(2)}`);
+  if (stats.attention > 0) parts.push(`⚠ ${stats.attention} needs you`);
+  return parts.join(" · ");
 }
 
 export function ProjectsScreen({ sessions, onSelectProject }: ProjectsScreenProps) {
@@ -173,10 +190,10 @@ export function ProjectsScreen({ sessions, onSelectProject }: ProjectsScreenProp
 
       <div className="mob-project-list">
         {projects.map((project) => {
-          const stat = stats.get(project.id) ?? { count: 0, attention: false };
+          const stat = stats.get(project.id) ?? { count: 0, running: 0, attention: 0, cost: 0 };
           return (
             <button
-              className={`mob-project-card${stat.attention ? " mob-project-card--attention" : ""}`}
+              className={`mob-project-card${stat.attention > 0 ? " mob-project-card--attention" : ""}`}
               key={project.id}
               type="button"
               onClick={() => onSelectProject(project)}
@@ -184,8 +201,7 @@ export function ProjectsScreen({ sessions, onSelectProject }: ProjectsScreenProp
               <span className="mob-project-name">{project.name}</span>
               <span className="mob-project-path">{project.path}</span>
               <span className="mob-project-meta">
-                {stat.count === 1 ? "1 session" : `${stat.count} sessions`}
-                {stat.attention ? " · needs attention" : ""}
+                {formatProjectStats(stat)}
               </span>
             </button>
           );

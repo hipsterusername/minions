@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod/v4";
 import type { HarnessStartOptions, NormalizedEvent, NormalizedToolDef } from "../types.ts";
+import { closePersistDb, disablePersistence } from "../../session-persist.ts";
+import { createWorkItem, startWorkItemIteration } from "../../work-item-repo.ts";
+import { getRunInvocation, startRunInvocation } from "../../work-item-invocations.ts";
 
 const sdkMock = vi.hoisted(() => ({
   query: vi.fn(),
@@ -100,6 +103,7 @@ function lastQueryOptions(): Record<string, unknown> {
 }
 
 beforeEach(() => {
+  disablePersistence();
   sdkMock.query.mockReset();
   sdkMock.createSdkMcpServer.mockReset();
   sdkMock.tool.mockReset();
@@ -118,6 +122,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  closePersistDb();
+  disablePersistence();
   if (originalClaudePath === undefined) {
     delete process.env["CLAUDE_CODE_PATH"];
   } else {
@@ -153,12 +159,59 @@ describe("ClaudeHarness.start()", () => {
     expect(order).toEqual(["sdk-stopped", "release"]);
     expect(coordination.disconnect).toHaveBeenCalledOnce();
   });
+
+  it("drains and records a provider result flushed after abort", async () => {
+    const harness = await importHarness();
+    const persistence = await import("../../session-persist.ts");
+    const db = persistence.openPersistDb(":memory:");
+    createWorkItem(db, {
+      id: "work-drain", projectId: "p", projectPath: "/repo", title: "Drain",
+      changeMode: "live", workflowRank: "a", at: 1,
+    });
+    startWorkItemIteration(db, {
+      workItemId: "work-drain", runKey: "run-drain", idempotencyKey: "start",
+      expectedLifecycleRevision: 0, expectedCurrentRunKey: null, at: 2,
+    });
+    startRunInvocation(db, {
+      runKey: "run-drain", providerId: "claude", startedAt: 3,
+    });
+    sdkMock.query.mockImplementation((request: {
+      options: { abortController: AbortController };
+    }) => ({
+      async *[Symbol.asyncIterator]() {
+        const signal = request.options.abortController.signal;
+        if (!signal.aborted) await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve(), { once: true }));
+        yield doneMessage();
+      },
+    }));
+    const run = harness.start(baseOpts({ sessionKey: "run-drain" }));
+    const collecting = collect(run.events);
+    await vi.waitFor(() => expect(sdkMock.query).toHaveBeenCalledOnce());
+
+    run.control.abort();
+    await collecting;
+
+    expect(getRunInvocation(db, "run-drain", 1)).toMatchObject({
+      phase: "terminal", terminal_kind: "clean", terminal_source: "provider",
+    });
+    persistence.closePersistDb();
+  });
   it("exposes Fable 5 in static model metadata", async () => {
     const harness = await importHarness();
 
     expect(harness.staticInfo().models).toContainEqual({
       id: "claude-fable-5",
       label: "Fable 5",
+    });
+  });
+
+  it("exposes Opus 5 in static model metadata", async () => {
+    const harness = await importHarness();
+
+    expect(harness.staticInfo().models).toContainEqual({
+      id: "claude-opus-5",
+      label: "Opus 5",
     });
   });
 

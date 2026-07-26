@@ -3,8 +3,23 @@ import { describe, expect, it } from "vitest";
 
 import { NodeStatusOverlay, getOverlayNodes, resolveLeaderTitle } from "./NodeStatusOverlay.tsx";
 import type { CanvasNode, CanvasTransform } from "../types.ts";
+import type { WorkItemSnapshot } from "../../shared/work-item-contracts.ts";
 
 const TRANSFORM: CanvasTransform = { x: 20, y: 30, scale: 0.5 };
+
+function workItem(over: Partial<WorkItemSnapshot> = {}): WorkItemSnapshot {
+  return {
+    id: "work-1", projectId: "project", projectPath: "/repo", title: "Task",
+    lifecycle: { runtimeState: "inactive", outcome: "completed", resolution: "open",
+      changeMode: "live", integrationState: "live_clean", lifecycleRevision: 2 },
+    waitKind: null, currentRunKey: "run-1", iteration: 1,
+    workflowColumnId: "todo", workflowRank: "a", workflowRevision: 0,
+    card: { description: "", subtasks: [], context: "", priority: "medium",
+      model: "", permissionMode: "auto", worktreeIsolation: false, skillIds: [],
+      skillValues: {}, linkedContextNodeIds: [] }, lastTransitionAt: 2,
+    createdAt: 1, updatedAt: 2, ...over,
+  };
+}
 
 function node(
   overrides: Partial<CanvasNode> & Pick<CanvasNode, "id" | "type">,
@@ -185,6 +200,55 @@ describe("NodeStatusOverlay", () => {
     );
 
     expect(screen.getByText("ERROR")).toBeInTheDocument();
+  });
+
+  it("derives a leader's status from its work-item snapshot, not raw data.status", () => {
+    // The LeaderNode header shows a work-item-snapshot-derived `displayStatus`.
+    // When a snapshot is present the overlay must show the same value (1:1),
+    // even if the raw `data.status` field lags behind.
+    render(
+      <NodeStatusOverlay
+        nodes={[
+          node({
+            id: "leader-1",
+            type: "leader",
+            data: {
+              status: "idle",
+              taskName: "Canonical run",
+              workItemSnapshot: workItem({
+                lifecycle: {
+                  runtimeState: "working", outcome: "none", resolution: "open",
+                  changeMode: "live", integrationState: "live_clean", lifecycleRevision: 3,
+                },
+              }),
+            },
+          }),
+        ]}
+        transform={TRANSFORM}
+        visible={true}
+      />,
+    );
+
+    expect(screen.getByText("RUNNING")).toBeInTheDocument();
+    expect(screen.queryByText("IDLE")).toBeNull();
+  });
+
+  it("falls back to raw data.status for a leader without a work-item snapshot", () => {
+    render(
+      <NodeStatusOverlay
+        nodes={[
+          node({
+            id: "leader-1",
+            type: "leader",
+            data: { status: "running", taskName: "Bare session" },
+          }),
+        ]}
+        transform={TRANSFORM}
+        visible={true}
+      />,
+    );
+
+    expect(screen.getByText("RUNNING")).toBeInTheDocument();
   });
 
   it("positions an item using the canvas transform", () => {

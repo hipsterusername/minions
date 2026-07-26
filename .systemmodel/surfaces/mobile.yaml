@@ -1,0 +1,7 @@
+id: surface.mobile
+type: surface
+name: Mobile
+summary: Remote project, launch, chat, activity, approval, settings, and push-notification experience.
+keywords: [mobile, remote, launch, chat, activity, approvals, push, settings]
+suggested_files: [src/mobile/MobileApp.tsx, src/mobile/ProjectsScreen.tsx, src/mobile/LaunchScreen.tsx, src/mobile/ActivityScreen.tsx, src/mobile/SessionChatScreen.tsx]
+suggested_tests: [src/mobile/MobileApp.test.tsx, src/mobile/ProjectsScreen.test.tsx, src/mobile/LaunchScreen.test.tsx, src/mobile/ActivityScreen.test.tsx, src/mobile/SessionChatScreen.test.tsx]

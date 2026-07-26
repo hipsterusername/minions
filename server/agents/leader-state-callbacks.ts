@@ -2,6 +2,7 @@ import type { AgentTypeContext } from "./types.ts";
 import type { TaskManagerState } from "../task-tools.ts";
 import type { RenderState } from "../render-tools.ts";
 import { persistRenderState, persistTaskState } from "../session-persist.ts";
+import { findUnansweredForms } from "../../shared/render-dsl.ts";
 
 export function createLeaderStateCallbacks(ctx: AgentTypeContext, sessionKey: string) {
   return {
@@ -14,7 +15,7 @@ export function createLeaderStateCallbacks(ctx: AgentTypeContext, sessionKey: st
     onRenderStateChange(state: RenderState): void {
       persistRenderState(sessionKey, state);
       ctx.markDashboardChanged?.();
-      if (state.components.some((component) => component.type === "form")) {
+      if (findUnansweredForms(state.components).length > 0) {
         ctx.markDecisionNeeded?.("Dashboard input requested");
       }
     },

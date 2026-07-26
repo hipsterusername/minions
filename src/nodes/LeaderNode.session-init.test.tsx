@@ -79,7 +79,7 @@ function disconnectedLeaderData(overrides: Partial<LeaderData> = {}): LeaderData
 }
 
 function canonicalItem(runKey: string | null, revision: number,
-  runtimeState: "draft" | "starting" | "inactive",
+  runtimeState: "draft" | "starting" | "working" | "inactive",
   outcome: "none" | "completed" | "interrupted"): WorkItemSnapshot {
   return { id: "work-1", projectId: "project-1", projectPath: "/repo", title: "Task",
     lifecycle: { runtimeState, outcome, resolution: "open", changeMode: "live",
@@ -446,6 +446,126 @@ describe("LeaderNode: new-session initiation", () => {
       requestId: second.requestId, success: true,
       result: { workItem: canonicalItem("run-2", 4, "starting", "none"), bindings: [], currentRun: null, runs: [], nextCursor: null } } }]));
     await waitFor(() => expect([latest.workItemId, latest.currentRunKey]).toEqual(["work-1", "run-2"]));
+  });
+
+  it("rehydrates a persisted stale snapshot on mount so restarts use fresh fences", async () => {
+    // Regression: node data (including workItemSnapshot) survives page reloads
+    // and server restarts. Boot recovery bumps the lifecycle revision, so the
+    // cached snapshot's fences are stale and every restart failed with
+    // "stale work-item lifecycle". The node must re-read the item on mount.
+    const { socket, replay } = createReplaySocket();
+    let latest: LeaderData = { ...disconnectedLeaderData(), status: "stopped",
+      sessionKey: "run-1", workItemId: "work-1",
+      workItemSnapshot: canonicalItem("run-1", 3, "inactive", "completed") };
+    function Probe() {
+      const [data, setData] = useState(latest); latest = data;
+      return <LeaderNodeRenderer node={{ id: "stale-leader", type: "leader",
+        position: { x: 0, y: 0 }, size: { width: 480, height: 400 }, data }}
+        isSelected={false} projectId="project-1" projectPath="/repo"
+        socketSubscribe={socket.subscribe} socketSend={socket.send}
+        onUpdateData={(next) => setData(next as LeaderData)} />;
+    }
+    render(<Probe />);
+    await waitFor(() => expect(socket.sent.filter((message) =>
+      (message as { type?: string }).type === "get_work_item").length).toBeGreaterThan(0));
+    const gets = socket.sent.filter((message) =>
+      (message as { type?: string }).type === "get_work_item") as Array<{ requestId: string }>;
+    await act(() => replay(gets.map((get) => ({ message: {
+      type: "work_item_response", command: "get_work_item", requestId: get.requestId,
+      success: true, result: {
+        workItem: canonicalItem("run-1", 5, "inactive", "interrupted"),
+        bindings: [{ surface: "canvas", bindingId: "stale-leader", detachedAt: null }],
+        currentRun: null, runs: [], nextCursor: null,
+      } } }))));
+    await waitFor(() => expect(latest.workItemSnapshot?.lifecycle.lifecycleRevision).toBe(5));
+    fireEvent.change(screen.getByTestId("leader-prompt-input-inline"),
+      { target: { value: "Pick it back up" } });
+    fireEvent.click(screen.getByRole("button", { name: "New iteration" }));
+    await waitFor(() => expect(socket.sent.some((message) =>
+      (message as { type?: string }).type === "start_work_item_run")).toBe(true));
+    const start = socket.sent.filter((message) => (message as { type?: string }).type
+      === "start_work_item_run").at(-1) as { expectedLifecycleRevision: number };
+    expect(start.expectedLifecycleRevision).toBe(5);
+  });
+
+  it("retries a conflicted restart once with the server's fresh snapshot", async () => {
+    const { socket, replay } = createReplaySocket();
+    let latest: LeaderData = { ...disconnectedLeaderData(), status: "stopped",
+      sessionKey: "run-1", workItemId: "work-1",
+      workItemSnapshot: canonicalItem("run-1", 3, "inactive", "completed") };
+    function Probe() {
+      const [data, setData] = useState(latest); latest = data;
+      return <LeaderNodeRenderer node={{ id: "conflict-leader", type: "leader",
+        position: { x: 0, y: 0 }, size: { width: 480, height: 400 }, data }}
+        isSelected={false} projectId="project-1" projectPath="/repo"
+        socketSubscribe={socket.subscribe} socketSend={socket.send}
+        onUpdateData={(next) => setData(next as LeaderData)} />;
+    }
+    render(<Probe />);
+    fireEvent.change(screen.getByTestId("leader-prompt-input-inline"),
+      { target: { value: "Restart me" } });
+    fireEvent.click(screen.getByRole("button", { name: "New iteration" }));
+    await waitFor(() => expect(socket.sent.some((message) =>
+      (message as { type?: string }).type === "start_work_item_run")).toBe(true));
+    const first = socket.sent.filter((message) => (message as { type?: string }).type
+      === "start_work_item_run").at(-1) as { requestId: string; expectedLifecycleRevision: number };
+    expect(first.expectedLifecycleRevision).toBe(3);
+    await act(() => replay([{ message: { type: "work_item_response",
+      command: "start_work_item_run", requestId: first.requestId, success: false,
+      error: "stale work-item lifecycle", code: "conflict", latest: null } }]));
+    await waitFor(() => expect(socket.sent.filter((message) =>
+      (message as { type?: string }).type === "get_work_item").length).toBeGreaterThan(0));
+    const gets = socket.sent.filter((message) =>
+      (message as { type?: string }).type === "get_work_item") as Array<{ requestId: string }>;
+    await act(() => replay(gets.map((get) => ({ message: {
+      type: "work_item_response", command: "get_work_item", requestId: get.requestId,
+      success: true, result: {
+        workItem: canonicalItem("run-1", 6, "inactive", "interrupted"),
+        bindings: [{ surface: "canvas", bindingId: "conflict-leader", detachedAt: null }],
+        currentRun: null, runs: [], nextCursor: null,
+      } } }))));
+    await waitFor(() => expect(socket.sent.filter((message) =>
+      (message as { type?: string }).type === "start_work_item_run")).toHaveLength(2));
+    const retried = socket.sent.filter((message) => (message as { type?: string }).type
+      === "start_work_item_run").at(-1) as { expectedLifecycleRevision: number };
+    expect(retried.expectedLifecycleRevision).toBe(6);
+    expect(latest.error ?? null).toBeNull();
+  });
+
+  it("restores the typed prompt when a competing surface already started the run", async () => {
+    const { socket, replay } = createReplaySocket();
+    let latest: LeaderData = { ...disconnectedLeaderData(), status: "stopped",
+      sessionKey: "run-1", workItemId: "work-1",
+      workItemSnapshot: canonicalItem("run-1", 3, "inactive", "completed") };
+    function Probe() {
+      const [data, setData] = useState(latest); latest = data;
+      return <LeaderNodeRenderer node={{ id: "converge-leader", type: "leader",
+        position: { x: 0, y: 0 }, size: { width: 480, height: 400 }, data }}
+        isSelected={false} projectId="project-1" projectPath="/repo"
+        socketSubscribe={socket.subscribe} socketSend={socket.send}
+        onUpdateData={(next) => setData(next as LeaderData)} />;
+    }
+    render(<Probe />);
+    const composer = screen.getByTestId("leader-prompt-input-inline");
+    fireEvent.change(composer, { target: { value: "Keep this canvas prompt" } });
+    fireEvent.click(screen.getByRole("button", { name: "New iteration" }));
+    await waitFor(() => expect(socket.sent.some((message) =>
+      (message as { type?: string }).type === "start_work_item_run")).toBe(true));
+    const start = socket.sent.filter((message) => (message as { type?: string }).type
+      === "start_work_item_run").at(-1) as { requestId: string };
+
+    await act(() => replay([{ message: {
+      type: "work_item_response", command: "start_work_item_run",
+      requestId: start.requestId, success: false, error: "stale work-item lifecycle",
+      code: "conflict",
+      latest: { workItem: canonicalItem("run-2", 4, "working", "none"),
+        bindings: [], currentRun: null, runs: [], nextCursor: null },
+    } }]));
+
+    await waitFor(() => expect(composer).toHaveValue("Keep this canvas prompt"));
+    expect(socket.sent.filter((message) =>
+      (message as { type?: string }).type === "start_work_item_run")).toHaveLength(1);
+    expect(latest.currentRunKey).toBe("run-2");
   });
 
   it("hydrates a legacy work item before restarting instead of using send_message", async () => {

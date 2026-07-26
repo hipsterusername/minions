@@ -4,16 +4,19 @@ import { jsonResult } from "../harness/tool-result.ts";
 import type { SystemModelObject, SystemModelObjectType } from "../../shared/system-model/index.ts";
 import { recordSystemModelUsage } from "../system-model/store.ts";
 import { matchSystemModel } from "../system-model/match.ts";
+import { relatedSystemModelObjects } from "../system-model/relations.ts";
 import type { SystemModelToolContext } from "./shared.ts";
 
 const querySystemModelInputSchema = z.object({
   query: z.string().optional(),
   objectTypes: z.array(z.enum([
     "capability",
+    "domain",
     "flow",
     "constraint",
     "decision",
     "risk",
+    "surface",
   ])).optional(),
   ids: z.array(z.string()).optional(),
   topK: z.number().int().positive().optional(),
@@ -73,7 +76,12 @@ export function createQuerySystemModelToolDef(ctx: SystemModelToolContext): Norm
         const object = model.objectsById.get(match.id);
         return object ? [object] : [];
       });
-      const linked = expandLinked(matches, model.objectsById);
+      const linked = relatedSystemModelObjects(model, matches.map((match) => match.id)).map(({ object, why }) => ({
+        id: object.id,
+        type: object.type,
+        label: labelFor(object),
+        why,
+      }));
       recordSystemModelUsage(ctx.projectPath, matchedObjects.map((object) => ({
         objectId: object.id,
         source: "query",
@@ -98,24 +106,6 @@ function withTypeFilter(model: SystemModelToolContext["runtime"]["model"], typeF
   return { ...model, objectsById };
 }
 
-function expandLinked(
-  matches: Array<{ id: string }>,
-  objectsById: Map<string, SystemModelObject>,
-): Array<{ id: string; type: SystemModelObjectType; label: string }> {
-  const matchIds = new Set(matches.map((object) => object.id));
-  const linked = new Map<string, { id: string; type: SystemModelObjectType; label: string }>();
-  for (const match of matches) {
-    const object = objectsById.get(match.id);
-    if (!object) continue;
-    for (const id of linkedIds(object)) {
-      if (matchIds.has(id)) continue;
-      const linkedObject = objectsById.get(id);
-      if (linkedObject) linked.set(id, { id: linkedObject.id, type: linkedObject.type, label: labelFor(linkedObject) });
-    }
-  }
-  return [...linked.values()];
-}
-
 function renderMatch(object: SystemModelObject, tokens: number) {
   return {
     id: object.id,
@@ -126,14 +116,14 @@ function renderMatch(object: SystemModelObject, tokens: number) {
 }
 
 function labelFor(object: SystemModelObject): string {
-  if (object.type === "capability" || object.type === "flow") return object.name;
+  if (object.type === "domain" || object.type === "capability" || object.type === "flow" || object.type === "surface") return object.name;
   if (object.type === "constraint") return object.statement;
   if (object.type === "decision") return object.title;
   return object.summary;
 }
 
 function summaryFor(object: SystemModelObject): string {
-  if (object.type === "capability" || object.type === "flow") return object.summary;
+  if (object.type === "domain" || object.type === "capability" || object.type === "flow" || object.type === "surface") return object.summary;
   if (object.type === "constraint") return object.agentInstruction ?? object.statement;
   if (object.type === "decision") return object.summary;
   return object.summary;
@@ -142,24 +132,4 @@ function summaryFor(object: SystemModelObject): string {
 function trimToTokens(text: string, tokens: number): string {
   const maxChars = tokens * 4;
   return text.length <= maxChars ? text : `${text.slice(0, Math.max(0, maxChars - 3))}...`;
-}
-
-function linkedIds(object: SystemModelObject): string[] {
-  if (object.type === "capability") {
-    return [...object.linkedFlows, ...object.constraints, ...object.decisions, ...object.risks];
-  }
-  if (object.type === "flow") {
-    return [...object.capabilities, ...object.constraints, ...object.decisions, ...object.risks];
-  }
-  if (object.type === "constraint") {
-    return [
-      ...object.appliesTo.capabilities,
-      ...object.appliesTo.flows,
-      ...object.evidence,
-    ];
-  }
-  if (object.type === "risk") {
-    return [...object.appliesTo.capabilities, ...object.appliesTo.flows];
-  }
-  return [];
 }

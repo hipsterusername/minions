@@ -135,7 +135,7 @@ describe("work-item repository", () => {
     });
   });
 
-  it("rejects completion without a persisted report before mutation", () => {
+  it("rejects sealing a completion without a durable final report", () => {
     seed(db);
     startWorkItemIteration(db, {
       workItemId: "work-1", runKey: "run-1", idempotencyKey: "one",
@@ -144,8 +144,21 @@ describe("work-item repository", () => {
     expect(() => sealWorkItemRun(db, {
       workItemId: "work-1", runKey: "run-1", outcome: "completed",
       expectedLifecycleRevision: 1, expectedCurrentRunKey: "run-1", at: 30,
-    })).toThrow("durable final report");
-    expect(getWorkItem(db, "work-1")).toMatchObject({ outcome: "none", runtime_state: "starting" });
+    })).toThrow("completed runs require a durable final report event and content");
+  });
+
+  it("seals a deliberate stop as the stopped outcome", () => {
+    seed(db);
+    startWorkItemIteration(db, {
+      workItemId: "work-1", runKey: "run-1", idempotencyKey: "one",
+      expectedLifecycleRevision: 0, expectedCurrentRunKey: null, at: 20,
+    });
+    const sealed = sealWorkItemRun(db, {
+      workItemId: "work-1", runKey: "run-1", outcome: "stopped",
+      expectedLifecycleRevision: 1, expectedCurrentRunKey: "run-1", at: 30,
+    });
+    expect(sealed.run).toMatchObject({ run_outcome: "stopped" });
+    expect(getWorkItem(db, "work-1")).toMatchObject({ outcome: "stopped", runtime_state: "inactive" });
   });
 
   it("makes sealing and resolution retries idempotent but rejects stale mutations", () => {
@@ -192,6 +205,80 @@ describe("work-item repository", () => {
       acknowledged_at: 40, dismissed_at: null,
       lifecycle_revision: restored.workItem.lifecycle_revision,
     });
+  });
+
+  it("no-ops when archiving an already-archived item instead of corrupting archived_from_resolution", () => {
+    // Regression: the dismiss_session bound path re-reads the fresh revision, so a
+    // double-dismiss reached writeLifecycle with resolution='archived' and blew up
+    // on the CHECK (archived_from_resolution IN ('open', 'reviewed')) constraint.
+    const draft = seed(db);
+    const first = archiveWorkItem(db, { workItemId: draft.id,
+      expectedLifecycleRevision: 0, expectedCurrentRunKey: null, at: 20 });
+    expect(first.idempotent).toBe(false);
+    const second = archiveWorkItem(db, { workItemId: draft.id,
+      expectedLifecycleRevision: first.workItem.lifecycle_revision,
+      expectedCurrentRunKey: null, at: 30 });
+    expect(second.idempotent).toBe(true);
+    expect(second.workItem).toMatchObject({
+      resolution: "archived", archived_from_resolution: "open",
+      lifecycle_revision: first.workItem.lifecycle_revision,
+    });
+  });
+
+  it("keeps the original prior resolution across a repeated archive of a reviewed item", () => {
+    seed(db);
+    const start = startWorkItemIteration(db, {
+      workItemId: "work-1", runKey: "run-1", idempotencyKey: "one",
+      expectedLifecycleRevision: 0, expectedCurrentRunKey: null, at: 20,
+    });
+    const sealed = sealWorkItemRun(db, {
+      workItemId: "work-1", runKey: "run-1", outcome: "completed",
+      finalReportEventId: "event-1", finalReport: "Done",
+      expectedLifecycleRevision: start.workItem.lifecycle_revision,
+      expectedCurrentRunKey: "run-1", at: 30,
+    });
+    const reviewed = reviewWorkItem(db, { workItemId: "work-1",
+      expectedLifecycleRevision: sealed.workItem.lifecycle_revision,
+      expectedCurrentRunKey: "run-1", at: 40 });
+    const archived = archiveWorkItem(db, { workItemId: "work-1",
+      expectedLifecycleRevision: reviewed.workItem.lifecycle_revision,
+      expectedCurrentRunKey: "run-1", at: 50 });
+    const again = archiveWorkItem(db, { workItemId: "work-1",
+      expectedLifecycleRevision: archived.workItem.lifecycle_revision,
+      expectedCurrentRunKey: "run-1", at: 60 });
+    expect(again.idempotent).toBe(true);
+    expect(again.workItem.archived_from_resolution).toBe("reviewed");
+    const restored = restoreWorkItem(db, { workItemId: "work-1",
+      expectedLifecycleRevision: again.workItem.lifecycle_revision,
+      expectedCurrentRunKey: "run-1", at: 70 });
+    expect(restored.workItem.resolution).toBe("reviewed");
+  });
+
+  it("no-ops a repeated review and a repeated restore", () => {
+    seed(db);
+    const start = startWorkItemIteration(db, {
+      workItemId: "work-1", runKey: "run-1", idempotencyKey: "one",
+      expectedLifecycleRevision: 0, expectedCurrentRunKey: null, at: 20,
+    });
+    const sealed = sealWorkItemRun(db, {
+      workItemId: "work-1", runKey: "run-1", outcome: "completed",
+      finalReportEventId: "event-1", finalReport: "Done",
+      expectedLifecycleRevision: start.workItem.lifecycle_revision,
+      expectedCurrentRunKey: "run-1", at: 30,
+    });
+    const reviewed = reviewWorkItem(db, { workItemId: "work-1",
+      expectedLifecycleRevision: sealed.workItem.lifecycle_revision,
+      expectedCurrentRunKey: "run-1", at: 40 });
+    const reviewedAgain = reviewWorkItem(db, { workItemId: "work-1",
+      expectedLifecycleRevision: reviewed.workItem.lifecycle_revision,
+      expectedCurrentRunKey: "run-1", at: 41 });
+    expect(reviewedAgain.idempotent).toBe(true);
+    expect(reviewedAgain.workItem.lifecycle_revision).toBe(reviewed.workItem.lifecycle_revision);
+    const restoredNotArchived = restoreWorkItem(db, { workItemId: "work-1",
+      expectedLifecycleRevision: reviewed.workItem.lifecycle_revision,
+      expectedCurrentRunKey: "run-1", at: 42 });
+    expect(restoredNotArchived.idempotent).toBe(true);
+    expect(restoredNotArchived.workItem.resolution).toBe("reviewed");
   });
 
   it("accepts only an exactly matching terminal seal retry", () => {

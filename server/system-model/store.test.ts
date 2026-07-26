@@ -171,6 +171,12 @@ describe("system-model persistence", () => {
         source: "packet",
         session_key: "",
       },
+      {
+        object_id: "surface.mobile",
+        work_packet_id: packet.id,
+        source: "packet",
+        session_key: "",
+      },
     ]);
   });
 
@@ -221,7 +227,7 @@ const packet: WorkPacket = {
   userRequest: "request",
   normalizedGoal: "request",
   status: "draft",
-  scope: { capabilities: ["capability.workspace_management"], flows: [], constraints: [], decisions: [], risks: [], suggestedFiles: [], suggestedTests: [] },
+  scope: { capabilities: ["capability.workspace_management"], flows: [], constraints: [], decisions: [], risks: [], surfaces: ["surface.mobile"], entryPoints: [], suggestedFiles: [], suggestedTests: [] },
   nonGoals: [],
   agentInstructions: [],
   freshness: { status: "fresh", warnings: [], requiredVerifications: [] },
@@ -240,6 +246,8 @@ const report: ReconciliationReport = {
     changedFiles: ["server/session-host.ts"],
     affectedCapabilities: ["capability.workspace_management"],
     affectedFlows: [],
+    affectedEntryPoints: [],
+    siblingSurfaces: [],
     constraintsInScope: ["constraint.bus_only"],
     testsMissing: [],
     outOfScopeFiles: [],

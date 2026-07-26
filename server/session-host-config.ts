@@ -20,7 +20,12 @@ import type { NormalizedEvent } from "./harness/types.ts";
 
 // ── Shared types ───────────────────────────────────────────
 
-export type SessionRole = "leader" | "minion" | "default" | "card-composer";
+export type SessionRole =
+  | "leader"
+  | "minion"
+  | "default"
+  | "card-composer"
+  | "dialectic-planner";
 
 export type SessionStatus =
   | "running"
@@ -131,6 +136,64 @@ export function deriveTaskName(prompt: string): string {
 
 // ── System prompt enrichment ───────────────────────────────
 
+export interface WorktreePromptMode {
+  role: "leader" | "minion";
+  canonical: boolean;
+  sharedWorktree: boolean;
+}
+
+/** Compile completion and integration rules for the session's worktree mode. */
+export function compileWorktreeCompletionPolicy(
+  mode: WorktreePromptMode,
+): string[] {
+  if (mode.role === "minion") {
+    return mode.sharedWorktree
+      ? [
+          "- Keep edits within your assigned files and avoid reverting changes you did not make.",
+          "- Do not run `git commit`; the orchestrator owns committing and integration.",
+          "- **Do NOT** create branches, merge, rebase, or push — the orchestrator manages all integration.",
+          "- **Do NOT modify .git files or config** — the worktree shares a .git link with the main repo.",
+        ]
+      : [
+          "- **Commit your work** (`git add -A && git commit -m \"...\"`) before calling `report_done`. The orchestrator has an auto-commit fallback, but explicit commits produce cleaner history.",
+          "- **Do NOT** create branches, merge, rebase, or push — the orchestrator manages all integration.",
+          "- **Do NOT modify .git files or config** — the worktree shares a .git link with the main repo.",
+        ];
+  }
+
+  if (mode.canonical) {
+    return [
+      "- If you spawn subagents via the Agent tool, they inherit your worktree cwd.",
+      "- When delegating to minions via assign_task, they will automatically work in your worktree.",
+      "",
+      "### Canonical Completion",
+      "",
+      "- When ALL work is complete, finish with a final summary report.",
+      "- Contribution collection, gates, and lineage integration are automatic; do not call `request_approval`.",
+    ];
+  }
+
+  return [
+    "- If you spawn subagents via the Agent tool, they inherit your worktree cwd.",
+    "- When delegating to minions via assign_task, they will automatically work in your worktree.",
+    "",
+    "### Approval Workflow (MANDATORY)",
+    "",
+    "1. **When ALL work is complete**, call `request_approval` — it is the **ONLY** path for your changes to reach main. There is no other way.",
+    "2. **Immediately after** calling `request_approval`, render a change-summary dashboard with `render_set`:",
+    "   - A `text` component summarising what was done and why",
+    "   - A `table` component showing files changed (insertions/deletions per file)",
+    "   - `metric` components for overall stats: commit count, files changed, lines added, lines removed",
+    "   - A `status` component with label \"Approval\" and state \"warning\", content \"Waiting for review\"",
+    "3. **Stop and wait.** Do NOT continue working. The user will either:",
+    "   - **Click \"Approve & Merge\"** → your changes are merged into main; you're done.",
+    "   - **Send a follow-up message** → treat it as a change request: make the modifications in the *same* worktree, then call `request_approval` again.",
+    "   - **Click \"Discard\"** → all your changes are thrown away.",
+    "4. **After approval (or discard) + a new message**, the server provisions a **fresh worktree**.",
+    "   Re-read every file you need — do not assume files from the previous cycle still exist on the new branch.",
+  ];
+}
+
 /**
  * Append the mandatory worktree-isolation rules to a base system prompt.
  * The orchestrator relies on agents respecting these rules; the addendum
@@ -139,8 +202,15 @@ export function deriveTaskName(prompt: string): string {
 export function enrichSystemPromptForWorktree(
   basePrompt: string,
   worktree: { path: string; branch: string; projectPath: string },
-  isMinion: boolean,
+  mode: WorktreePromptMode,
 ): string {
+  const integrationRule = mode.role === "leader" && !mode.canonical
+    ? "Your changes go through the worktree and are merged after approval."
+    : mode.role === "leader"
+      ? "Your contribution stays in the worktree until automatic collection, gates, and lineage integration."
+      : mode.sharedWorktree
+        ? "Your edits stay in the Leader's worktree for orchestrator-owned integration."
+        : "Your changes stay in this worktree for orchestrator-managed integration.";
   const worktreeAddendum = [
     "",
     "",
@@ -155,33 +225,9 @@ export function enrichSystemPromptForWorktree(
     "",
     "- **ALL file operations (Read, Write, Edit, Glob, Grep) MUST target paths within your worktree directory.**",
     "- When you discover file paths (from Glob, Grep, error messages, git output, etc.), they will already be within your worktree — use them as-is.",
-    `- **NEVER** use paths under \`${worktree.projectPath}\` directly — that is the user's main working tree. Your changes go through the worktree and are merged after approval.`,
+    `- **NEVER** use paths under \`${worktree.projectPath}\` directly — that is the user's main working tree. ${integrationRule}`,
     "- Bash commands automatically run in your worktree cwd.",
-    ...(isMinion
-      ? [
-          "- **Commit your work** (`git add -A && git commit -m \"...\"`) before calling `report_done`. The orchestrator has an auto-commit fallback, but explicit commits produce cleaner history.",
-          "- **Do NOT** create branches, merge, rebase, or push — the orchestrator manages all integration.",
-          "- **Do NOT modify .git files or config** — the worktree shares a .git link with the main repo.",
-        ]
-      : [
-          "- If you spawn subagents via the Agent tool, they inherit your worktree cwd.",
-          "- When delegating to minions via assign_task, they will automatically work in your worktree.",
-          "",
-          "### Approval Workflow (MANDATORY)",
-          "",
-          "1. **When ALL work is complete**, call `request_approval` — it is the **ONLY** path for your changes to reach main. There is no other way.",
-          "2. **Immediately after** calling `request_approval`, render a change-summary dashboard with `render_set`:",
-          "   - A `text` component summarising what was done and why",
-          "   - A `table` component showing files changed (insertions/deletions per file)",
-          "   - `metric` components for overall stats: commit count, files changed, lines added, lines removed",
-          "   - A `status` component with label \"Approval\" and state \"warning\", content \"Waiting for review\"",
-          "3. **Stop and wait.** Do NOT continue working. The user will either:",
-          "   - **Click \"Approve & Merge\"** → your changes are merged into main; you're done.",
-          "   - **Send a follow-up message** → treat it as a change request: make the modifications in the *same* worktree, then call `request_approval` again.",
-          "   - **Click \"Discard\"** → all your changes are thrown away.",
-          "4. **After approval (or discard) + a new message**, the server provisions a **fresh worktree**.",
-          "   Re-read every file you need — do not assume files from the previous cycle still exist on the new branch.",
-        ]),
+    ...compileWorktreeCompletionPolicy(mode),
     "",
   ].join("\n");
   return basePrompt + worktreeAddendum;

@@ -765,9 +765,9 @@ export function SessionToolbar({
   // first, then by the model entry.
   const capability = getModelCapability(model, activeHarness);
 
-  // Permission options — Codex doesn't have a "plan" mode. Drop it when
-  // the active harness lacks permission prompts entirely; drop only "plan"
-  // for Codex specifically per the Codex permission-mapping table.
+  // Permission options — hidden entirely when the harness has no permission
+  // concept. Codex honors "plan" via a read-only sandbox, so it is offered for
+  // every harness that supports permission prompts.
   const permissionOptions = useMemo<PermissionMode[]>(() => {
     const all: PermissionMode[] = [
       "auto",
@@ -778,9 +778,8 @@ export function SessionToolbar({
     ];
     if (!harnessCapabilities) return all;
     if (!harnessCapabilities.permissionPrompts) return [];
-    if (harness === "codex") return all.filter((m) => m !== "plan");
     return all;
-  }, [harnessCapabilities, harness]);
+  }, [harnessCapabilities]);
 
   const activeHarnessName = harness ?? activeHarness?.name ?? "claude";
   const modelPickerHarnesses = useMemo<ReadonlyArray<HarnessInfo>>(() => {

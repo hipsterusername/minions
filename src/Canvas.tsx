@@ -696,8 +696,8 @@ export function Canvas({
   // The dashboard output port menu lists the three context-forwarding modes.
   // Selecting one spawns a connected leader and stamps the chosen mode onto
   // the new context edge. (The former context 'shortcuts' — named leader
-  // actions, fanout, custom — are deferred; see resolveDashboardLeader* for
-  // the retained prompt helpers still used by settings.)
+  // actions, fanout, custom — are deferred; the configurable Context Actions
+  // now live in the Leader slash menu, driven by dashboard-leader-actions.ts.)
   const dashboardDropMenuOptions: ContextMenuOption[] = useMemo(
     () => CONTEXT_MODE_MENU_OPTIONS.map((o) => ({ label: o.label, type: o.type })),
     [],
@@ -3868,6 +3868,7 @@ export function Canvas({
         socketSend={socketSend}
         socketSubscribe={socketSubscribe}
         socketConnected={socketConnected}
+        projectPath={projectPath}
         onAttachSession={handleAttachSession}
         onFocusSession={handleFocusSession}
         attachedSessionKeys={attachedSessionKeys}

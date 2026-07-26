@@ -8,6 +8,13 @@ import { cancelQueuedWaitResume } from "./wait-resume.ts";
 import { commitReviewLifecycle, finishRun } from "./session-review-lifecycle.ts";
 import type { WorkItemRuntimeLifecycle } from "./session-host-types.ts";
 import { notifyRuntimeTerminal } from "./session-host-identity.ts";
+import {
+  finalizeInvocationTermination,
+  persistInvocationTerminationIntent,
+} from "./work-item-run-start.ts";
+import { awaitHarnessDrain } from "./harness/terminal-provenance.ts";
+import { getRunInvocation, projectRunInvocationSeal } from "./work-item-invocations.ts";
+import { persistenceDb } from "./session-persist.ts";
 
 export type SessionTerminateReason = "stop" | "close" | "remove" | "abort";
 
@@ -23,15 +30,6 @@ export interface SessionTerminateDeps {
   cleanupLiveEditRun?: (runKey: string) => void;
 }
 
-function hasTerminalReviewOutcome(host: SessionHost): boolean {
-  const lifecycle = host.reviewLifecycle;
-  return lifecycle.terminalReason !== null || [
-    "completion_to_review",
-    "error_to_review",
-    "interrupted_to_review",
-  ].includes(lifecycle.reviewState);
-}
-
 function hasOpenWaitEvidence(host: SessionHost, deps: SessionTerminateDeps | null): boolean {
   if (host.reviewLifecycle.reviewState === "decision_needed" || host.waitTimerId !== null
     || Boolean(host.taskState?.pendingWait)) return true;
@@ -43,14 +41,29 @@ function hasOpenWaitEvidence(host: SessionHost, deps: SessionTerminateDeps | nul
   return blocked;
 }
 
+function projectTermination(host: SessionHost, reason: SessionTerminateReason) {
+  const db = persistenceDb();
+  const invocation = db && host.providerInvocationGeneration > 0
+    ? getRunInvocation(db, host.runKey, host.providerInvocationGeneration)
+    : null;
+  return projectRunInvocationSeal({
+    terminalKind: invocation?.terminal_kind ?? "cancelled",
+    terminalSource: invocation?.terminal_source ?? "server",
+    terminationIntent: invocation?.termination_intent ?? reason,
+    cleanTerminalPolicy: "seal",
+  });
+}
+
 export async function terminateSessionHost(
   host: SessionHost,
   deps: SessionTerminateDeps | null,
   reason: SessionTerminateReason,
 ): Promise<void> {
+  // This commit is the crash boundary: no process signal may precede it.
+  persistInvocationTerminationIntent(host, reason);
   // Capture openness before teardown changes the runtime status. Termination
   // may stop an already-idle host, but it must only seal a genuinely live run.
-  const shouldSealInterrupted = !hasTerminalReviewOutcome(host)
+  const shouldSeal = !host.runtimeTerminalNotified
     && (host.status === "running" || (Boolean(host.workItemId)
       && !host.runtimeTerminalNotified && hasOpenWaitEvidence(host, deps)));
   const hadWaitTimer = host.waitTimerId !== null;
@@ -72,11 +85,12 @@ export async function terminateSessionHost(
 
   // Capture the close promise BEFORE nulling runControl so we can await it
   // after the synchronous teardown is complete.
+  const runControl = host.runControl;
   let closePromise: Promise<void> | undefined;
-  if ((reason === "close" || reason === "remove") && host.runControl?.close) {
-    closePromise = host.runControl.close();
+  if ((reason === "close" || reason === "remove") && runControl?.close) {
+    closePromise = runControl.close();
   } else {
-    host.runControl?.abort();
+    runControl?.abort();
   }
   host.abortController.abort();
   // Abort paths deliberately leave claims to the harness stream finalizer.
@@ -85,15 +99,6 @@ export async function terminateSessionHost(
   host.status = "stopped";
   host.eventStream = null;
   host.runControl = null;
-  if (reason !== "remove" && deps && shouldSealInterrupted) {
-    commitReviewLifecycle(host, deps.bus, finishRun(host.reviewLifecycle, {
-      reason: reason === "stop" ? "stop" : "abort",
-      at: Date.now(),
-    }));
-    notifyRuntimeTerminal(host, deps.workItemLifecycle, {
-      outcome: "interrupted", finalReportId: null, finalReport: null, at: Date.now(),
-    });
-  }
   host.persist();
 
   const event = {
@@ -143,6 +148,27 @@ export async function terminateSessionHost(
       reason,
     );
   }
+
+  // Let adapters consume a flushed terminal witness before the server makes
+  // its cancelled claim. The wait is bounded by the harness evidence helper.
+  await awaitHarnessDrain(runControl);
+  const terminalAt = Date.now();
+  finalizeInvocationTermination(host, terminalAt, () => {
+    if (reason === "remove" || !deps || !shouldSeal) return;
+    const projection = projectTermination(host, reason);
+    if (projection.action !== "seal") return;
+    commitReviewLifecycle(host, deps.bus, finishRun(host.reviewLifecycle, {
+      reason: projection.outcome === "error" ? "error"
+        : projection.outcome === "completed" ? "completed"
+          : projection.outcome === "stopped" ? "stop" : "abort",
+      at: terminalAt,
+    }));
+    notifyRuntimeTerminal(host, deps.workItemLifecycle, {
+      outcome: projection.outcome,
+      finalReportId: null, finalReport: null, at: terminalAt,
+    });
+  });
+  host.persist();
 
   // Await orderly harness shutdown (close releases SDK resources such as
   // stdio handles or HTTP connections). All synchronous teardown above has

@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   activeMinionSummary,
   activitySection,
+  attentionAction,
+  attentionKind,
+  attentionReason,
   groupSessionsByActivity,
   groupSessionsForTriage,
   compareActivityPriority,
@@ -225,5 +228,38 @@ describe("mobile selectors", () => {
     const empty = activeMinionSummary(session({ role: "leader" }));
     expect(empty).toEqual({ running: 0, blocked: 0, planned: 0, total: 0 });
     expect(hasLiveMinions(empty)).toBe(false);
+  });
+});
+
+describe("attention classification", () => {
+  it("classifies the triage kind by lifecycle state then raw status", () => {
+    expect(attentionKind(session({ reviewLifecycle: lifecycle("error_to_review") }))).toBe("error");
+    expect(attentionKind(session({ reviewLifecycle: lifecycle("interrupted_to_review") }))).toBe("error");
+    expect(attentionKind(session({ reviewLifecycle: lifecycle("decision_needed") }))).toBe("waiting");
+    expect(attentionKind(session({ status: "error" }))).toBe("error");
+    expect(attentionKind(session({ status: "waiting" }))).toBe("waiting");
+    expect(attentionKind(session({ status: "idle", pendingAttention: true }))).toBe("waiting");
+    // Changes-ready is the fallback (e.g. an acknowledged run with a live diff).
+    expect(attentionKind(session({ reviewableChanges: true }))).toBe("changes");
+  });
+
+  it("gives a human reason for each review state", () => {
+    expect(attentionReason(session({ reviewLifecycle: lifecycle("completion_to_review") })))
+      .toBe("complete · read report");
+    expect(attentionReason(session({ reviewLifecycle: lifecycle("decision_needed") })))
+      .toBe("decision needed");
+    expect(attentionReason(session({ reviewLifecycle: lifecycle("interrupted_to_review") })))
+      .toBe("interrupted");
+    expect(attentionReason(session({ reviewLifecycle: lifecycle("decision_needed", { acknowledgedAt: 1 }) })))
+      .toBe("acknowledged");
+    expect(attentionReason(session({ status: "error" }))).toBe("errored");
+  });
+
+  it("labels the primary action verb per review state", () => {
+    expect(attentionAction(session({ reviewLifecycle: lifecycle("completion_to_review") }))).toBe("Read");
+    expect(attentionAction(session({ reviewLifecycle: lifecycle("interrupted_to_review") }))).toBe("Inspect");
+    expect(attentionAction(session({ reviewLifecycle: lifecycle("decision_needed") }))).toBe("Reply");
+    expect(attentionAction(session({ status: "error" }))).toBe("Open");
+    expect(attentionAction(session({ reviewableChanges: true }))).toBe("Review");
   });
 });

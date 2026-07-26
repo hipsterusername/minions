@@ -1,0 +1,43 @@
+id: capability.context_routing
+type: capability
+name: Context routing
+summary: Users can turn connected project artifacts and card context into ordered, sanitized, bounded, and freshness-aware agent input.
+constraints: []
+decisions: [ decision.typed_event_bus ]
+risks:
+  - risk.project_worktree_content_split
+suggested_files: [ src/connected-context.ts, src/context-extraction.ts, src/context-delivery.ts, server/commands/canvas-context.ts, server/task-tools/task-prompt.ts ]
+suggested_tests: [ src/connected-context.test.ts, src/context-extraction.test.ts, src/context-delivery.test.ts, src/context-staleness.test.ts, server/task-tools/task-prompt.test.ts ]
+keywords: [ context, graph, routing, provider, attachment, canvas_context, stale, snapshot, file, image, markdown, ordering ]
+entry_points:
+  - surface: surface.canvas
+    summary: Connect providers through graph ports and inspect or publish their extracted context.
+    files: [ src/Canvas.tsx, src/connected-context.ts, src/context-extraction.ts, src/ProjectPanel.tsx ]
+    tests: [ src/connected-context.test.ts, src/context-extraction.test.ts, src/ProjectPanel.test.ts ]
+    flows: [ flow.route_canvas_context, flow.save_project_knowledge ]
+  - surface: surface.kanban
+    summary: Configure card-linked context before launch.
+    files: [ src/KanbanBoard.tsx, src/use-server-kanban.ts ]
+    tests: [ src/KanbanBoard.test.tsx, src/use-server-kanban.dom.test.ts ]
+    flows: [ flow.route_canvas_context, flow.launch_or_resume_card ]
+  - surface: surface.agent_tools
+    summary: Freeze selected context and work-packet material into delegated task prompts.
+    files: [ server/task-tools/task-prompt.ts, server/task-tools/assign-task.ts ]
+    tests: [ server/task-tools/task-prompt.test.ts, server/task-tools/assign-task.test.ts ]
+    flows: [ flow.route_canvas_context, flow.delegate_and_steer_minions ]
+  - surface: surface.ws_api
+    summary: Deliver a complete context snapshot to SessionHost before execution.
+    files: [ server/commands/canvas-context.ts, server/canvas-context-store.ts ]
+    tests: [ tests/contracts/canvas-context.test.ts, src/context-delivery.test.ts ]
+    flows: [ flow.route_canvas_context ]
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.workspace
+depends_on:
+  - capability.project_workspace
+bridges:
+  - to: flow.launch_or_resume_card
+    reason: The kanban context entry point supplies workspace-owned context to the execution-owned canonical card launch flow.
+  - to: flow.delegate_and_steer_minions
+    reason: The agent-tools entry point freezes workspace-owned context into delegation-owned task prompts.

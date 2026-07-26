@@ -25,6 +25,7 @@ import type { SessionRole } from "../session-host.ts";
 import type { WsCommand, WsCommandType } from "./types.ts";
 import { changeModeSchema } from "../../shared/work-item-lifecycle.ts";
 import { workItemBindingSurfaceSchema } from "../../shared/work-item-contracts.ts";
+import { isLeaderPromptCustomizationEnvelope } from "../../shared/leader-prompt.ts";
 
 // ── Field vocabulary ───────────────────────────────────────
 
@@ -33,6 +34,7 @@ const SESSION_ROLES = [
   "minion",
   "default",
   "card-composer",
+  "dialectic-planner",
 ] as const satisfies readonly SessionRole[];
 
 // Compile-time guard: adding a SessionRole without updating SESSION_ROLES
@@ -74,6 +76,9 @@ const canvasContextItemSchema = z.object({
 const sessionConfigFields = {
   prompt,
   attachments: z.array(attachmentSchema).optional(),
+  // For `role: "leader"` this carries a structured prefix + frozen skill
+  // addendum envelope; skillIds/skillValues remain separate fields and the
+  // server owns canonical assembly. Other roles retain full-prompt semantics.
   systemPrompt: z.string().optional(),
   // `thinkingConfig` is declared `unknown` on WsCommand; the handlers run it
   // through `isValidThinkingConfig` themselves.
@@ -103,6 +108,17 @@ export const COMMAND_SCHEMAS = {
     model: z.string().optional(),
     permissionMode: z.string().optional(),
     ...sessionConfigFields,
+  }).superRefine((value, ctx) => {
+    const config = value as { role?: SessionRole; systemPrompt?: string };
+    if (config.role === "leader" && config.systemPrompt !== undefined
+      && config.systemPrompt.trimStart().startsWith("{")
+      && !isLeaderPromptCustomizationEnvelope(config.systemPrompt)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["systemPrompt"],
+        message: "Leader systemPrompt contains a malformed customization envelope",
+      });
+    }
   }),
   send_message: command("send_message", {
     sessionKey,
@@ -320,6 +336,15 @@ export const COMMAND_SCHEMAS = {
   }),
   // Session history
   clear_session: sessionScoped("clear_session"),
+  // Dialectic dual-planner (experimental). `sessionKey` carries the node id;
+  // `prompt` is the topic; `dialecticConfig` is normalized by the handler.
+  start_dialectic: command("start_dialectic", {
+    sessionKey,
+    cwd,
+    prompt,
+    dialecticConfig: z.unknown().optional(),
+  }),
+  stop_dialectic: sessionScoped("stop_dialectic"),
 } satisfies Record<WsCommandType, z.ZodType>;
 
 // ── Validation entry point ─────────────────────────────────

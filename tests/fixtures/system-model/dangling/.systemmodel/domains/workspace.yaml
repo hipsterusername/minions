@@ -1,0 +1,5 @@
+id: domain.workspace
+type: domain
+name: Workspace
+summary: Workspace behavior.
+keywords: [workspace]

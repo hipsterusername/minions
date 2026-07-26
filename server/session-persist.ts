@@ -1,24 +1,4 @@
-/**
- * Server-side session persistence glue.
- *
- * Owns a single SQLite connection at `~/.minions/server.db` (overridable
- * via the `MINIONS_SERVER_DB` env var) and exposes small, synchronous helpers
- * that map the in-memory `Session` shape used by `server/index.ts` onto the
- * repo layer in `session-repo.ts`.
- *
- * Phase 4.4 exit criteria:
- *   - `hydrateSessionsFromDb()` populates the in-memory Map at boot so task
- *     plans, render dashboards, and basic metadata survive a server restart.
- *   - `persistSession`, `persistTaskState`, `persistRenderState`, and
- *     `removePersistedSession` are called from every mutation site, so the
- *     on-disk state tracks in-memory state continuously (write-through cache).
- *
- * Non-goals:
- *   - We deliberately do NOT persist volatile handles (`abortController`,
- *     `queryHandle`, `waitTimerId`) — those are tied to the running process.
- *   - We do NOT rehydrate live SDK `queryHandle`s. Restored sessions come back
- *     with `status = "stopped"` and no handle; the client can reopen them.
- */
+/** Server-side write-through persistence and boot hydration glue. */
 
 import fs from "node:fs";
 import os from "node:os";
@@ -49,6 +29,7 @@ const log = serverLogger.child("session-persist");
 // ── Connection management ───────────────────────────────
 
 let dbHandle: Database.Database | null = null;
+const armedSystemPrompts = new Map<string, string>();
 /** Set to `true` to silently no-op all writes/reads (used by tests). */
 let disabled = false;
 
@@ -66,15 +47,18 @@ function defaultDbPath(): string {
   return path.join(dir, "server.db");
 }
 
-/**
- * Open the persistence DB. Idempotent — repeated calls reuse the first handle.
- * Returns the handle so callers can introspect it in tests.
- */
+/** Open the persistence DB, reusing the current handle. */
 export function openPersistDb(dbPath?: string): Database.Database {
   if (dbHandle) return dbHandle;
   const resolvedPath = dbPath ?? defaultDbPath();
   dbHandle = initDb(resolvedPath);
   ensureWorkItemSchema(dbHandle);
+  dbHandle.exec(`
+    CREATE TABLE IF NOT EXISTS session_armed_prompts (
+      session_key TEXT PRIMARY KEY,
+      system_prompt TEXT NOT NULL
+    )
+  `);
   try {
     fs.chmodSync(resolvedPath, 0o600);
   } catch {
@@ -94,13 +78,10 @@ export function closePersistDb(): void {
     }
     dbHandle = null;
   }
+  armedSystemPrompts.clear();
 }
 
-/**
- * Disable persistence for this process. When disabled every helper returns
- * a safe no-op — useful in environments where an on-disk DB would be noise
- * (unit tests that don't care about persistence).
- */
+/** Disable persistence and retain only process-local armed prompts. */
 export function disablePersistence(): void {
   closePersistDb();
   disabled = true;
@@ -122,13 +103,55 @@ function ensureDb(): Database.Database | null {
 
 /** Shared only by narrowly scoped persistence companions. */
 export function persistenceDb(): Database.Database | null { return ensureDb(); }
+
+/** Freeze the fully compiled prompt on first spawn and return its durable value. */
+export function persistArmedSystemPrompt(
+  sessionKey: string,
+  systemPrompt: string,
+): string {
+  const cached = armedSystemPrompts.get(sessionKey);
+  if (cached !== undefined) return cached;
+  const db = ensureDb();
+  if (!db) {
+    armedSystemPrompts.set(sessionKey, systemPrompt);
+    return systemPrompt;
+  }
+  try {
+    db.prepare(`
+      INSERT OR IGNORE INTO session_armed_prompts (session_key, system_prompt)
+      VALUES (?, ?)
+    `).run(sessionKey, systemPrompt);
+    const row = db.prepare(
+      "SELECT system_prompt FROM session_armed_prompts WHERE session_key = ?",
+    ).get(sessionKey) as { system_prompt: string };
+    armedSystemPrompts.set(sessionKey, row.system_prompt);
+    return row.system_prompt;
+  } catch (err) {
+    log.warn("armed_system_prompt_persist_failed", { error: err });
+    armedSystemPrompts.set(sessionKey, systemPrompt);
+    return systemPrompt;
+  }
+}
+
+export function loadArmedSystemPrompt(sessionKey: string): string | null {
+  const cached = armedSystemPrompts.get(sessionKey);
+  if (cached !== undefined) return cached;
+  const db = ensureDb();
+  if (!db) return null;
+  try {
+    const row = db.prepare(
+      "SELECT system_prompt FROM session_armed_prompts WHERE session_key = ?",
+    ).get(sessionKey) as { system_prompt: string } | undefined;
+    if (row) armedSystemPrompts.set(sessionKey, row.system_prompt);
+    return row?.system_prompt ?? null;
+  } catch (err) {
+    log.warn("armed_system_prompt_load_failed", { error: err });
+    return null;
+  }
+}
 // ── Shape adapters ──────────────────────────────────────
 
-/**
- * Minimal subset of the in-memory `Session` struct we care about persisting.
- * We avoid importing the full type to keep the dependency arrow one-way
- * (index.ts → session-persist.ts, not the reverse).
- */
+/** Durable subset of SessionHost without importing it back into this layer. */
 export interface PersistableSession {
   id: string;
   projectId?: string | null;
@@ -138,23 +161,14 @@ export interface PersistableSession {
   model: string | null;
   role: string;
   taskName: string | null;
-  /**
-   * SDK session id from the first `system/init` event. May be `null`
-   * before the SDK has handed one out (e.g. during the brief
-   * `creating → running` window). Persisting it lets `send_message`
-   * pass `resume:` after a server restart.
-   */
+  /** SDK session id used to resume after a restart. */
   sessionId: string | null;
   worktreeIsolation: boolean;
   worktree: WorktreeInfo | null;
   approval: ApprovalState | null;
   totalCost: number;
   turns: number;
-  /**
-   * Registered AgentHarness name driving this session. Persisted so the
-   * restored host resumes on the same harness it started on. Defaults
-   * to "claude" when the row was written before this column existed.
-   */
+  /** Registered harness; legacy rows default to "claude". */
   harnessName: string;
   reviewLifecycle?: SessionReviewLifecycle;
 }
@@ -187,10 +201,7 @@ function sessionToRow(
     turns: s.turns,
     harness_name: s.harnessName,
     ...reviewLifecycleToColumns(s.reviewLifecycle),
-    // created_at is only used when the row is new; upsert preserves the
-    // existing value on conflict so it's safe to send "now" here as a
-    // placeholder — the schema default would cover new rows anyway, but
-    // we set it explicitly for insert consistency.
+    // Upsert preserves the original created_at.
     created_at: nowIso,
     updated_at: nowIso,
   };
@@ -212,21 +223,20 @@ export function removePersistedSession(sessionKey: string): boolean {
   const db = ensureDb();
   if (!db) return false;
   try {
-    return removeSessionPersistence(db, sessionKey);
+    const removed = removeSessionPersistence(db, sessionKey);
+    if (removed) {
+      db.prepare("DELETE FROM session_armed_prompts WHERE session_key = ?")
+        .run(sessionKey);
+      armedSystemPrompts.delete(sessionKey);
+    }
+    return removed;
   } catch (err) {
     log.warn("session_remove_failed", { error: err });
     return false;
   }
 }
 
-/**
- * Append a single buffered event to the on-disk event_log so it survives
- * a restart. Called from `SessionHost.bufferEvent` as a write-through
- * cache — every event the server fans out to clients also lands on disk.
- *
- * Without this, completed/stopped sessions hydrate with an empty buffer
- * and the client has nothing to rebuild chat history from.
- */
+/** Append an event so hydrated sessions can rebuild their transcript. */
 export function persistEvent(
   sessionKey: string,
   event: BufferedEvent,
@@ -261,12 +271,7 @@ export function loadSessionUsageTotals(sessionKey: string): SessionUsageTotals {
   }
 }
 
-/**
- * Load the tail of the event log for a session, capped to the same
- * retention window the in-memory `eventBuffer` keeps. Returned events
- * are in chronological (ASC) order so they slot directly into the
- * buffer.
- */
+/** Load the bounded event tail in chronological order. */
 export function loadRecentEvents(
   sessionKey: string,
   limit: number = MAX_BUFFERED_EVENTS,
@@ -282,12 +287,7 @@ export function loadRecentEvents(
   }
 }
 
-/**
- * Persist the full task-manager state for a leader. This rewrites the leader's
- * task_records rows for that leader: we upsert every current task and drop any
- * stale task_id that's no longer in the in-memory map. Callers invoke this on every
- * task-plan mutation — cost is O(n) in tasks, which is small.
- */
+/** Rewrite a leader's small task set, dropping stale records. */
 export function persistTaskState(
   leaderSessionKey: string,
   state: TaskManagerState,
@@ -313,12 +313,7 @@ export function persistTaskState(
   }
 }
 
-/**
- * Wipe every persisted event for a session without removing the session row
- * itself. Used by `clear_session` to make the event history disappear from
- * both the in-memory buffer and the on-disk log so it doesn't re-appear on
- * reconnect.
- */
+/** Wipe session events while retaining the session row. */
 export function clearSessionEvents(sessionKey: string): void {
   const db = ensureDb();
   if (!db) return;
@@ -344,14 +339,10 @@ export function persistRenderState(
 
 // ── Boot-time hydration ─────────────────────────────────
 
-/**
- * Shape returned to `server/index.ts` for re-materializing in-memory state.
- * The server owns the actual `Session` struct, so we hand it the raw pieces
- * and it wires them together (volatile fields like AbortController are
- * freshly constructed by the caller).
- */
+/** Durable pieces used to rematerialize a host with fresh volatile handles. */
 export interface HydratedSession {
   row: repo.SessionRow;
+  armedSystemPrompt: string | null;
   tasks: TaskManagerState | null;
   render: RenderState | null;
   events: BufferedEvent[];
@@ -393,7 +384,14 @@ export function hydrateSessionsFromDb(): HydratedSession[] {
     const render = repo.getRenderState(db, row.session_key);
     const events = loadRecentEvents(row.session_key);
     const usageTotals = loadSessionUsageTotals(row.session_key);
-    out.push({ row, tasks, render, events, usageTotals });
+    out.push({
+      row,
+      armedSystemPrompt: loadArmedSystemPrompt(row.session_key),
+      tasks,
+      render,
+      events,
+      usageTotals,
+    });
   }
   return out;
 }

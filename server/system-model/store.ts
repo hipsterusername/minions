@@ -276,6 +276,7 @@ function usageHitsForPacket(packet: WorkPacket, usedAt: number): SystemModelUsag
     ...packet.scope.constraints,
     ...packet.scope.decisions,
     ...packet.scope.risks,
+    ...(packet.scope.surfaces ?? []),
   ].map((objectId) => ({ objectId, source: "packet", workPacketId: packet.id, usedAt }));
 }
 

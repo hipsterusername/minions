@@ -72,6 +72,28 @@ describe("canonical client work-item state", () => {
       .toContain("queue #2");
   });
 
+  it("self-heals a tracked item from the latest snapshot on a failed mutation", () => {
+    // Regression: a conflict rejection ("stale work-item lifecycle") carries the
+    // authoritative snapshot in `latest`, but the store previously discarded it,
+    // so every subsequent click re-sent the same stale fences and failed again.
+    const listed = reduceWorkItems(initialWorkItemClientState, {
+      type: "work_item_response", command: "list_work_items", requestId: null,
+      success: true, result: { projectId: "p1", items: [item("a", 3)], nextCursor: null },
+    });
+    const healed = reduceWorkItems(listed, {
+      type: "work_item_response", command: "archive_work_item", requestId: "req-1",
+      success: false, error: "stale work-item lifecycle", code: "conflict",
+      latest: { workItem: item("a", 7), bindings: [], currentRun: null, runs: [], nextCursor: null },
+    } as never);
+    expect(healed.items["a"]?.lifecycle.lifecycleRevision).toBe(7);
+    const untracked = reduceWorkItems(listed, {
+      type: "work_item_response", command: "archive_work_item", requestId: "req-2",
+      success: false, error: "stale work-item lifecycle", code: "conflict",
+      latest: { workItem: item("other", 2), bindings: [], currentRun: null, runs: [], nextCursor: null },
+    } as never);
+    expect(untracked.items["other"]).toBeUndefined();
+  });
+
   it("accepts workflow-only events without requiring a lifecycle revision bump", () => {
     const listed = reduceWorkItems(initialWorkItemClientState, {
       type: "work_item_response", command: "list_work_items", requestId: null,
@@ -96,6 +118,21 @@ describe("canonical client work-item state", () => {
     const merged = mergeCanonicalActivity(sessions, [item("a", 2, 20), item("b", 1, 10)]);
     expect(merged.map((row) => row.workItemId ?? row.sessionKey)).toEqual(["a", "b", "legacy"]);
     expect(merged[0]).toMatchObject({ taskName: "Task a", lastActivity: "Working", status: "running" });
+  });
+
+  it("flags canonical entries so lifecycle actions use the work-item revision space", () => {
+    // Canonical entries carry the work item's lifecycleRevision, so lifecycle
+    // actions may fence work-item commands with it. Fallback sessions (work
+    // item not in the loaded list — e.g. legacy projectId orphans) carry the
+    // session's own revision and must NOT be flagged, or dismiss/ack would be
+    // rejected server-side as "stale work-item lifecycle".
+    const sessions = [{ sessionKey: "orphan-run", sessionId: null,
+      workItemId: "missing-item", status: "idle", cwd: "/repo" }];
+    const merged = mergeCanonicalActivity(sessions, [item("a", 2, 20)]);
+    const canonical = merged.find((row) => row.workItemId === "a");
+    const fallback = merged.find((row) => row.workItemId === "missing-item");
+    expect(canonical?.canonicalWorkItem).toBe(true);
+    expect(fallback?.canonicalWorkItem).toBeUndefined();
   });
 
   it("uses the shared presentation projection for cross-surface labels and visibility", () => {

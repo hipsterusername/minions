@@ -1,7 +1,12 @@
 import type Database from "better-sqlite3";
 import type { Bus } from "./bus.ts";
 import type { WorkItemRuntimeLifecycle, WorkItemRuntimeIdentity } from "./session-host-types.ts";
-import { getWorkItem, getWorkItemRun, WorkItemConflictError } from "./work-item-repo.ts";
+import {
+  getWorkItem,
+  getWorkItemRun,
+  resumeWaitingWorkItemRun,
+  WorkItemConflictError,
+} from "./work-item-repo.ts";
 import type { SqliteWorkItemService } from "./work-item-service-sqlite.ts";
 import { emitItemChanged } from "./work-item-service-events.ts";
 import { serverLogger } from "./logging.ts";
@@ -11,7 +16,7 @@ const log = serverLogger.child("work-item-runtime");
 export function createWorkItemRuntimeLifecycle(input: {
   db: Database.Database; bus: Bus; service: SqliteWorkItemService;
   collectWorktreeRun?: (runKey: string,
-    outcome: "completed" | "error" | "interrupted") => Promise<void>;
+    outcome: "completed" | "error" | "stopped" | "interrupted") => Promise<void>;
 }): WorkItemRuntimeLifecycle {
   const latest = (identity: WorkItemRuntimeIdentity) => {
     const item = getWorkItem(input.db, identity.workItemId);
@@ -47,8 +52,23 @@ export function createWorkItemRuntimeLifecycle(input: {
       }
     },
     runStarted(value) {
-      const { item, run } = latest(value);
+      const current = latest(value);
+      let { item } = current;
+      const { run } = current;
       if (run.ended_at !== null || value.runKind === "child" || item.runtime_state === "working") return;
+      if (item.runtime_state === "waiting") {
+        // A checkpoint rollover can open its fresh provider thread at the
+        // same idle boundary where wait_and_continue projected `waiting`.
+        // There is no command-side resume in that path, so the provider init
+        // itself must advance waiting -> starting -> working.
+        item = resumeWaitingWorkItemRun(input.db, {
+          workItemId: item.id,
+          runKey: value.runKey,
+          expectedLifecycleRevision: item.lifecycle_revision,
+          expectedCurrentRunKey: value.runKey,
+          at: value.at,
+        }).workItem;
+      }
       if (item.runtime_state !== "starting") throw new WorkItemConflictError("run start requires starting item", item);
       const changed = input.db.prepare(`UPDATE work_items SET runtime_state = 'working',
         lifecycle_revision = lifecycle_revision + 1, last_transition_at = ?, updated_at = ?
@@ -84,25 +104,35 @@ export function createWorkItemRuntimeLifecycle(input: {
     },
     runTerminal(value) {
       const { item, run } = latest(value);
+      // A nominal successful completion without its persisted report is
+      // interruption, not an unrecoverable error: normalize before the write
+      // ever reaches the repo-layer guard, instead of letting it throw.
+      const hasReport = Boolean(value.finalReportId?.trim() && value.finalReport?.trim());
+      const outcome = value.outcome === "completed" && !hasReport ? "interrupted" : value.outcome;
+      const finalReportId = outcome === "completed" ? value.finalReportId : null;
+      const finalReport = outcome === "completed" ? value.finalReport : null;
+      if (outcome !== value.outcome) {
+        log.warn("completed_run_missing_final_report", { workItemId: item.id, runKey: value.runKey });
+      }
       try { if (value.runKind === "child") {
         input.service.sealChildRun({ workItemId: item.id, runKey: value.runKey,
-          outcome: value.outcome, finalReportEventId: value.finalReportId,
-          finalReport: value.finalReport, at: value.at });
+          outcome, finalReportEventId: finalReportId,
+          finalReport, at: value.at });
         return;
       }
       input.service.sealPrimaryRun({ workItemId: item.id, runKey: value.runKey,
-        outcome: value.outcome, finalReportEventId: value.finalReportId,
-        finalReport: value.finalReport, expectedLifecycleRevision: item.lifecycle_revision,
+        outcome, finalReportEventId: finalReportId,
+        finalReport, expectedLifecycleRevision: item.lifecycle_revision,
         expectedCurrentRunKey: value.runKey, at: value.at });
       if (item.change_mode === "worktree" && input.collectWorktreeRun) {
-        void input.collectWorktreeRun(value.runKey, value.outcome).catch((error) =>
+        void input.collectWorktreeRun(value.runKey, outcome).catch((error) =>
           log.warn("contribution_collection_failed", { workItemId: item.id,
             runKey: value.runKey, error }));
       } }
       catch (error) {
         const after = getWorkItemRun(input.db, value.runKey);
-        if (after?.ended_at !== null && after?.run_outcome === value.outcome
-          && after.final_report_event_id === value.finalReportId && after.final_report === value.finalReport)
+        if (after?.ended_at !== null && after?.run_outcome === outcome
+          && after.final_report_event_id === finalReportId && after.final_report === finalReport)
           log.warn("publication_failed", { workItemId: item.id, cause: "run_terminal", error });
         else throw error;
       }

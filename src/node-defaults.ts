@@ -8,6 +8,7 @@ import type { ProjectSettings } from "./api.ts";
 import type { ThinkingConfig } from "./types.ts";
 import { DEFAULT_THINKING_CONFIG, MINION_THINKING_CONFIG } from "./types.ts";
 import { createImageNodeDefaultData } from "./nodes/ImageNode.tsx";
+import { createDialecticDefaultData } from "./nodes/DialecticNode.tsx";
 
 export function createDefaultNodeData(
   type: string,
@@ -95,6 +96,9 @@ export function createDefaultNodeData(
     case "image":
       return createImageNodeDefaultData();
 
+    case "dialectic":
+      return createDialecticDefaultData();
+
     default:
       return {};
   }
@@ -128,6 +132,8 @@ export function applyPromptSeed(
       return { ...base, folderPath: seed };
     case "context-group":
       return { ...base, name: seed };
+    case "dialectic":
+      return { ...base, topic: seed };
     default:
       return data;
   }

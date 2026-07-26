@@ -49,6 +49,10 @@ const CLAUDE_MODEL_CAPABILITIES: Record<string, ModelCapability> = {
     supportsAdaptiveThinking: true,
     supportedEffortLevels: STANDARD_EFFORTS,
   },
+  "opus-5": {
+    supportsAdaptiveThinking: true,
+    supportedEffortLevels: OPUS_EFFORTS,
+  },
   opus: {
     supportsAdaptiveThinking: true,
     supportedEffortLevels: OPUS_EFFORTS,
@@ -62,6 +66,10 @@ const CLAUDE_MODEL_CAPABILITIES: Record<string, ModelCapability> = {
     supportedEffortLevels: [],
   },
   // Concrete model ids (matching `staticInfo().models`).
+  "claude-opus-5": {
+    supportsAdaptiveThinking: true,
+    supportedEffortLevels: OPUS_EFFORTS,
+  },
   "claude-fable-5": {
     supportsAdaptiveThinking: true,
     supportedEffortLevels: OPUS_EFFORTS,

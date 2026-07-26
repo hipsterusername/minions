@@ -18,6 +18,7 @@ import {
   loadRecentEvents,
   openPersistDb,
   persistEvent,
+  persistArmedSystemPrompt,
   persistRenderState,
   persistSession,
   persistTaskState,
@@ -139,6 +140,21 @@ describe("session-persist integration", () => {
     expect(hydrated[0]?.row.total_cost).toBeCloseTo(0.15);
     // Leader role yields an empty but present TaskManagerState map.
     expect(hydrated[0]?.tasks?.tasks.size).toBe(0);
+  });
+
+  it("armed minion system prompt survives a persistence restart", () => {
+    const armedPrompt = "Base minion prompt\n\n## Skill: Sentinel Persisted Skill";
+    persistSession(makeSession({ id: "minion-armed", role: "minion" }));
+    persistArmedSystemPrompt("minion-armed", armedPrompt);
+
+    closePersistDb();
+    openPersistDb(dbPath);
+
+    const hydrated = hydrateSessionsFromDb();
+    expect(
+      hydrated.find((entry) => entry.row.session_key === "minion-armed")
+        ?.armedSystemPrompt,
+    ).toBe(armedPrompt);
   });
 
   it("preserves project and immutable run metadata across generic session writes", () => {

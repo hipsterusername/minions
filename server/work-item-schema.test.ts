@@ -105,4 +105,58 @@ describe("global work-item schema migration", () => {
       .not.toThrow();
     db.close();
   });
+
+  it("rebuilds the legacy run_outcome CHECK so stopped rows become valid and history is untouched", () => {
+    const db = initDb(":memory:");
+    ensureWorkItemSchema(db);
+    // Downgrade the sessions table to the pre-`stopped` four-outcome CHECK to
+    // simulate an existing database created before this migration shipped.
+    const table = db.prepare(`SELECT sql FROM sqlite_master
+      WHERE type = 'table' AND name = 'sessions'`).get() as { sql: string };
+    const objects = db.prepare(`SELECT name, sql FROM sqlite_master
+      WHERE tbl_name = 'sessions' AND type IN ('index', 'trigger') AND sql IS NOT NULL`)
+      .all() as Array<{ name: string; sql: string }>;
+    const cols = (db.pragma("table_info(sessions)") as Array<{ name: string }>)
+      .map((row) => `"${row.name}"`).join(", ");
+    db.pragma("foreign_keys = OFF");
+    db.exec(table.sql
+      .replace(/^CREATE TABLE\s+sessions/i, "CREATE TABLE sessions_downgrade")
+      .replace("'none', 'completed', 'error', 'stopped', 'interrupted'",
+        "'none', 'completed', 'error', 'interrupted'"));
+    db.exec(`INSERT INTO sessions_downgrade (${cols}) SELECT ${cols} FROM sessions`);
+    db.exec("DROP TABLE sessions");
+    db.exec("ALTER TABLE sessions_downgrade RENAME TO sessions");
+    for (const object of objects) {
+      if (!object.name.startsWith("validate_work_item_run")) db.exec(object.sql);
+    }
+    db.pragma("foreign_keys = ON");
+
+    db.prepare(`
+      INSERT INTO sessions (session_key, status, cwd, role, created_at, updated_at, ended_at, run_outcome)
+      VALUES ('historic-1', 'stopped', '/repo', 'leader', 'old', 'old', 5, 'interrupted')
+    `).run();
+    expect(() => db.prepare(`
+      INSERT INTO sessions (session_key, status, cwd, role, created_at, updated_at, ended_at, run_outcome)
+      VALUES ('rejected', 'stopped', '/repo', 'leader', 'old', 'old', 6, 'stopped')
+    `).run()).toThrow(); // proves the legacy CHECK is live before migration
+    const before = db.prepare(`SELECT * FROM sessions WHERE session_key = 'historic-1'`).get();
+
+    ensureWorkItemSchema(db);
+
+    expect(db.prepare(`SELECT * FROM sessions WHERE session_key = 'historic-1'`).get())
+      .toEqual(before);
+    expect(() => db.prepare(`
+      INSERT INTO sessions (session_key, status, cwd, role, created_at, updated_at, ended_at, run_outcome)
+      VALUES ('stopped-1', 'stopped', '/repo', 'leader', 'now', 'now', 7, 'stopped')
+    `).run()).not.toThrow();
+    const restored = db.prepare(`SELECT name FROM sqlite_master
+      WHERE tbl_name = 'sessions' AND type = 'index' AND sql IS NOT NULL`)
+      .all() as Array<{ name: string }>;
+    expect(restored.map((row) => row.name)).toEqual(expect.arrayContaining([
+      "idx_sessions_work_item_run",
+      "idx_sessions_one_unsealed_primary",
+      "idx_sessions_parent_task",
+    ]));
+    db.close();
+  });
 });

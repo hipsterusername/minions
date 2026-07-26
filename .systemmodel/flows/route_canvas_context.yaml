@@ -1,0 +1,20 @@
+id: flow.route_canvas_context
+type: flow
+name: Route canvas context into agent work
+summary: Connected provider nodes and linked card context become an ordered, sanitized, staleness-aware snapshot delivered before execution.
+constraints: []
+decisions: [ decision.typed_event_bus ]
+suggested_files: [ src/connected-context.ts, src/context-extraction.ts, src/context-delivery.ts, src/Canvas.tsx, server/commands/canvas-context.ts ]
+suggested_tests: [ src/connected-context.test.ts, src/context-extraction.test.ts, src/context-delivery.test.ts, src/context-staleness.test.ts, src/leader-context-mode.test.ts ]
+steps:
+  - Traverse graph edges and include only eligible context-provider nodes in stable order.
+  - Extract and sanitize text, files, and image attachments while applying size and staleness rules.
+  - Publish canvas_context, including an explicit empty snapshot when context is cleared.
+  - Confirm SessionHost receives the snapshot before the start or send command.
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.workspace
+primary_capability: capability.context_routing
+bridges: []
+risks: []

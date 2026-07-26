@@ -77,6 +77,34 @@ describe("context checkpoint compiler", () => {
     },
   );
 
+  it("uses continuation semantics for proactive compaction", () => {
+    const checkpoint = compileContextCheckpoint(host(), {
+      trigger: "proactive",
+      originalPrompt: "Continue",
+      persist: false,
+    });
+
+    const prompt = renderCheckpointPrompt(checkpoint);
+    expect(prompt).toContain("<session-continuation>");
+    expect(prompt).toContain("</session-continuation>");
+    expect(prompt).not.toContain("<previous-session-context>");
+    expect(prompt).toContain(
+      "Do NOT re-register completed work; the task registry and dashboard are still live.",
+    );
+  });
+
+  it("uses previous-session semantics for context recovery", () => {
+    const checkpoint = compileContextCheckpoint(host(), {
+      trigger: "context_recovery",
+      originalPrompt: "Continue",
+      persist: false,
+    });
+
+    const prompt = renderCheckpointPrompt(checkpoint);
+    expect(prompt).toContain("<previous-session-context>");
+    expect(prompt).toContain("</previous-session-context>");
+  });
+
   it("detects contradictory progress before a swap", () => {
     const checkpoint = compileContextCheckpoint(host(), { trigger: "proactive", originalPrompt: "Continue", modelHandoff: "Goal: Continue" });
     checkpoint.progress.remaining.push(checkpoint.progress.completed[0]!);

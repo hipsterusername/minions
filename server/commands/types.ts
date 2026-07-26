@@ -92,7 +92,10 @@ export type WsCommandType =
   // Render-DSL interactive components
   | "submit_form"
   // Session history
-  | "clear_session";
+  | "clear_session"
+  // Dialectic dual-planner (experimental)
+  | "start_dialectic"
+  | "stop_dialectic";
 
 /**
  * Binary attachment the client pins to a user turn — today only images.
@@ -140,6 +143,11 @@ export interface WsCommand {
   model?: string;
   /** Adaptive-thinking config — may be updated on every send_message */
   thinkingConfig?: unknown;
+  /**
+   * Dialectic run configuration (start_dialectic). Loosely typed here; the
+   * handler normalizes it via `normalizeDialecticConfig` in shared/dialectic.
+   */
+  dialecticConfig?: unknown;
   projectPath?: string;
   projectId?: string;
   title?: string;

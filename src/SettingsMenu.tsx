@@ -1,19 +1,35 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { restartServer, type ProjectSettings } from "./api.ts";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ProjectSettings } from "./api.ts";
 import { useTheme } from "./use-theme.ts";
 import { useHarnessList } from "./use-harness-list.tsx";
 import { findHarness, type HarnessInfo } from "./harness-list.ts";
 import type { EffortLevel, ThinkingConfig } from "./types.ts";
 import { DEFAULT_THINKING_CONFIG, MINION_THINKING_CONFIG } from "./types.ts";
-import { ConfirmModal } from "./components/ConfirmModal.tsx";
 import { getModelCapability } from "./model-meta.ts";
 import {
-  DASHBOARD_LEADER_ACTIONS,
-  DEFAULT_DASHBOARD_LEADER_ACTION_NAMES,
-  DEFAULT_DASHBOARD_LEADER_ACTION_PROMPTS,
-  type DashboardLeaderAction,
+  DASHBOARD_ACTION_ICONS,
+  DEFAULT_DASHBOARD_ACTION_ICON,
+  dashboardActionIcon,
+  defaultDashboardLeaderActions,
+  normalizeDashboardLeaderActions,
+  type DashboardLeaderActionConfig,
 } from "./dashboard-leader-actions.ts";
+import { randomUuid } from "./random-id.ts";
 import type { ServerMessage, SocketSubscribe } from "./use-socket.ts";
+import {
+  Bot,
+  ChevronRight,
+  ChevronUp,
+  ChevronDown,
+  LayoutGrid,
+  MessageSquareText,
+  Palette,
+  Plus,
+  RotateCcw,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
+import "./settings-menu.css";
 
 interface SettingsMenuProps {
   settings: ProjectSettings;
@@ -22,15 +38,12 @@ interface SettingsMenuProps {
   socketSubscribe?: SocketSubscribe | undefined;
 }
 
-type UsageProvider = "claude" | "openai";
-type UsageLoadState = "idle" | "loading" | "loaded" | "error";
-
-interface UsageProviderState {
-  state: UsageLoadState;
-  sessionKey: string | null;
-  usage?: unknown;
-  error?: string | undefined;
-}
+type SettingsCategory =
+  | "general"
+  | "agents"
+  | "workspace"
+  | "actions"
+  | "governance";
 
 interface SystemModelStatus {
   enabled: boolean;
@@ -39,15 +52,52 @@ interface SystemModelStatus {
   loadErrors: Array<{ file?: string; message?: string }>;
 }
 
-const USAGE_PROVIDERS: ReadonlyArray<{
-  id: UsageProvider;
+const SETTINGS_CATEGORIES: ReadonlyArray<{
+  id: SettingsCategory;
   label: string;
-  harness: string;
+  description: string;
+  icon: typeof Palette;
+  section: "project" | "labs";
+  beta?: boolean;
 }> = [
-  { id: "claude", label: "Claude", harness: "claude" },
-  { id: "openai", label: "OpenAI", harness: "codex" },
+  {
+    id: "general",
+    label: "General",
+    description: "Look and feel",
+    icon: Palette,
+    section: "project",
+  },
+  {
+    id: "agents",
+    label: "Agent defaults",
+    description: "Models and access",
+    icon: Bot,
+    section: "project",
+  },
+  {
+    id: "workspace",
+    label: "Workspace",
+    description: "Canvas behavior",
+    icon: LayoutGrid,
+    section: "project",
+  },
+  {
+    id: "actions",
+    label: "Context actions",
+    description: "Dashboard prompts",
+    icon: MessageSquareText,
+    section: "labs",
+    beta: true,
+  },
+  {
+    id: "governance",
+    label: "Governance",
+    description: "System model",
+    icon: ShieldCheck,
+    section: "labs",
+    beta: true,
+  },
 ];
-const USAGE_QUERY_TIMEOUT_MS = 10_000;
 
 /**
  * Header-anchored settings menu. Renders a gear button in the project
@@ -139,13 +189,7 @@ function SettingsPopover({
 }) {
   const { themeId, setTheme, themes: allThemes } = useTheme();
   const { harnesses, loaded: harnessesLoaded } = useHarnessList();
-  const [restartModalOpen, setRestartModalOpen] = useState(false);
-  const [restartState, setRestartState] = useState<"idle" | "pending" | "sent">("idle");
-  const [restartError, setRestartError] = useState<string | null>(null);
-  const [usageReports, setUsageReports] = useState<Record<UsageProvider, UsageProviderState>>({
-    claude: { state: "idle", sessionKey: null },
-    openai: { state: "idle", sessionKey: null },
-  });
+  const [activeCategory, setActiveCategory] = useState<SettingsCategory>("general");
   const [systemModelStatus, setSystemModelStatus] = useState<SystemModelStatus | null>(null);
   const [systemModelStatusUnavailable, setSystemModelStatusUnavailable] = useState(false);
   const modelGroups = useMemo(
@@ -222,541 +266,314 @@ function SettingsPopover({
     return unsubscribe;
   }, [settings.systemModel, socketSend, socketSubscribe]);
 
-  const requestRestart = async () => {
-    setRestartState("pending");
-    setRestartError(null);
-    try {
-      await restartServer();
-      setRestartState("sent");
-    } catch (err) {
-      setRestartState("idle");
-      setRestartError(err instanceof Error ? err.message : String(err));
-    }
-  };
-
-  const refreshUsage = useCallback(() => {
-    if (!socketSend || !socketSubscribe) {
-      setUsageReports({
-        claude: {
-          state: "error",
-          sessionKey: null,
-          error: "Usage queries need a socket connection.",
-        },
-        openai: {
-          state: "error",
-          sessionKey: null,
-          error: "Usage queries need a socket connection.",
-        },
-      });
-      return;
-    }
-
-    const pending = new Map<string, UsageProvider>();
-    const nextReports = {} as Record<UsageProvider, UsageProviderState>;
-    for (const provider of USAGE_PROVIDERS) {
-      const requestId = makeUsageRequestId(provider.id);
-      pending.set(requestId, provider.id);
-      nextReports[provider.id] = { state: "loading", sessionKey: null };
-    }
-
-    setUsageReports(nextReports);
-    let settled = false;
-    let unsubscribe: (() => void) | null = null;
-    const timeoutId = window.setTimeout(() => {
-      finishPending("Usage query timed out. Restart the server if it was running before this update.");
-    }, USAGE_QUERY_TIMEOUT_MS);
-
-    const cleanup = () => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(timeoutId);
-      unsubscribe?.();
-    };
-
-    const finishPending = (error: string) => {
-      if (pending.size === 0) {
-        cleanup();
-        return;
-      }
-      const providers = [...pending.values()];
-      pending.clear();
-      setUsageReports((current) => {
-        const next = { ...current };
-        for (const provider of providers) {
-          next[provider] = {
-            state: "error",
-            sessionKey: current[provider]?.sessionKey ?? null,
-            error,
-          };
-        }
-        return next;
-      });
-      cleanup();
-    };
-
-    unsubscribe = socketSubscribe("*", (msg: ServerMessage) => {
-      if (msg.type === "error" && /get_provider_usage_report|Unknown command type/.test(msg.message)) {
-        finishPending(msg.message);
-        return;
-      }
-      if (msg.type !== "control_response" || msg.command !== "get_provider_usage_report") return;
-      const requestId = msg.requestId;
-      if (!requestId) return;
-      const provider = pending.get(requestId);
-      if (!provider) return;
-      pending.delete(requestId);
-      setUsageReports((current) => ({
-        ...current,
-        [provider]: {
-          state: msg.success ? "loaded" : "error",
-          sessionKey: typeof msg.sessionKey === "string" ? msg.sessionKey : null,
-          usage: msg.success ? msg["usage"] : undefined,
-          error: msg.success ? undefined : msg.error ?? "Usage report unavailable.",
-        },
-      }));
-      if (pending.size === 0) cleanup();
-    });
-
-    for (const provider of USAGE_PROVIDERS) {
-      const requestId = [...pending.entries()].find(([, id]) => id === provider.id)?.[0];
-      if (!requestId) continue;
-      socketSend({
-        type: "get_provider_usage_report",
-        harness: provider.harness,
-        requestId,
-      });
-    }
-  }, [socketSend, socketSubscribe]);
-
   return (
-    <>
-      <div
+    <div
         role="dialog"
         aria-label="Settings"
-        style={{
-          position: "absolute",
-          top: "calc(100% + 6px)",
-          right: 0,
-          width: 320,
-          maxHeight: "calc(100vh - 80px)",
-          overflowY: "auto",
-          background: "var(--bg-secondary)",
-          border: "1px solid var(--border-default)",
-          borderRadius: 10,
-          boxShadow: "var(--shadow-lg)",
-          padding: "14px 14px 16px",
-          zIndex: 250,
-        }}
+        className="settings-dialog"
       >
-      <div
-        style={{
-          fontSize: 11,
-          fontFamily: "var(--font-mono)",
-          color: "var(--text-muted)",
-          textTransform: "uppercase",
-          letterSpacing: 0.5,
-          marginBottom: 10,
-        }}
-      >
-        Settings
-      </div>
-
-      {/* ── Theme ── */}
-      <FieldLabel>Theme</FieldLabel>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 6,
-          marginBottom: 16,
-        }}
-      >
-        {allThemes.map((t) => {
-          const isActive = t.id === themeId;
-          return (
-            <button
-              key={t.id}
-              onClick={() => setTheme(t.id)}
-              title={t.description}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "7px 9px",
-                background: isActive ? "var(--bg-elevated)" : "transparent",
-                border: isActive
-                  ? "1px solid var(--accent)"
-                  : "1px solid var(--border-default)",
-                borderRadius: 6,
-                cursor: "pointer",
-                transition: "border-color 120ms ease, background 120ms ease",
-                outline: "none",
-                textAlign: "left",
-              }}
-              onMouseEnter={(e) => {
-                if (!isActive)
-                  (e.currentTarget as HTMLElement).style.borderColor =
-                    "var(--border-hover)";
-              }}
-              onMouseLeave={(e) => {
-                if (!isActive)
-                  (e.currentTarget as HTMLElement).style.borderColor =
-                    "var(--border-default)";
-              }}
-            >
-              <div
-                style={{
-                  width: 20,
-                  height: 20,
-                  borderRadius: 4,
-                  background: t.swatch.bg,
-                  border: `2px solid ${t.swatch.accent}`,
-                  flexShrink: 0,
-                  position: "relative",
-                  overflow: "hidden",
-                }}
-              >
-                <div
-                  style={{
-                    position: "absolute",
-                    bottom: 1,
-                    right: 1,
-                    width: 6,
-                    height: 6,
-                    borderRadius: "50%",
-                    background: t.swatch.accent,
-                  }}
-                />
+        <aside className="settings-sidebar">
+          <div className="settings-sidebar__heading">
+            <span>Project</span>
+            <strong>Settings</strong>
+          </div>
+          <nav aria-label="Settings categories" className="settings-nav">
+            {(["project", "labs"] as const).map((section) => (
+              <div className="settings-nav__group" key={section}>
+                <span className="settings-nav__group-label">
+                  {section === "project" ? "Project" : "Labs"}
+                </span>
+                {SETTINGS_CATEGORIES
+                  .filter((category) => category.section === section)
+                  .map((category) => {
+                    const Icon = category.icon;
+                    const selected = activeCategory === category.id;
+                    return (
+                      <button
+                        key={category.id}
+                        type="button"
+                        aria-current={selected ? "page" : undefined}
+                        className="settings-nav__item"
+                        onClick={() => setActiveCategory(category.id)}
+                      >
+                        <Icon size={16} aria-hidden="true" />
+                        <span>
+                          <strong>
+                            {category.label}
+                            {category.beta && <BetaBadge />}
+                          </strong>
+                          <small>{category.description}</small>
+                        </span>
+                        <ChevronRight
+                          className="settings-nav__chevron"
+                          size={14}
+                          aria-hidden="true"
+                        />
+                      </button>
+                    );
+                  })}
               </div>
-              <span
-                style={{
-                  fontSize: 11,
-                  fontFamily: "var(--font-sans)",
-                  color: isActive
-                    ? "var(--text-primary)"
-                    : "var(--text-secondary)",
-                  fontWeight: isActive ? 600 : 400,
-                  lineHeight: 1.2,
-                }}
+            ))}
+          </nav>
+          <p className="settings-sidebar__note">Changes save automatically for this project.</p>
+        </aside>
+
+        <main className="settings-content">
+          {activeCategory === "general" && (
+            <>
+              <SettingsHeading
+                eyebrow="Personalize"
+                title="General"
+                description="Choose how Minions looks while you work."
+              />
+              <SettingsCard
+                title="Appearance"
+                description="Theme applies immediately across the application."
               >
-                {t.name}
-              </span>
-            </button>
-          );
-        })}
+                <div className="settings-theme-grid">
+                  {allThemes.map((theme) => {
+                    const isActive = theme.id === themeId;
+                    return (
+                      <button
+                        key={theme.id}
+                        type="button"
+                        aria-pressed={isActive}
+                        className="settings-theme"
+                        onClick={() => setTheme(theme.id)}
+                        title={theme.description}
+                      >
+                        <span
+                          className="settings-theme__swatch"
+                          style={{ background: theme.swatch.bg, borderColor: theme.swatch.accent }}
+                        >
+                          <span style={{ background: theme.swatch.accent }} />
+                        </span>
+                        <span>
+                          <strong>{theme.name}</strong>
+                          <small>{theme.description}</small>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </SettingsCard>
+            </>
+          )}
+
+          {activeCategory === "agents" && (
+            <>
+              <SettingsHeading
+                eyebrow="New sessions"
+                title="Agent defaults"
+                description="Choose the access policy and role defaults used when new sessions start."
+              />
+              <SettingsCard
+                title="Session policy"
+                description="Shared by new Leader and Minion sessions."
+              >
+                <FieldLabel>Default permission mode</FieldLabel>
+                <Select
+                  value={settings.defaultPermissionMode ?? "auto"}
+                  onChange={(value) =>
+                    onSettingsChange({ ...settings, defaultPermissionMode: value })
+                  }
+                  options={[
+                    { value: "auto", label: "Auto (Safe Approve)" },
+                    { value: "bypassPermissions", label: "Bypass Permissions" },
+                    { value: "default", label: "Default (Ask)" },
+                  ]}
+                />
+              </SettingsCard>
+
+              <SettingsCard
+                title="Role defaults"
+                description="Give each role the model and reasoning profile that fits its work."
+              >
+                <div className="settings-agent-list">
+                  <AgentRoleSettings
+                    role="Leader"
+                    description="Plans work and coordinates outcomes."
+                    modelControl={
+                      <ModelSelect
+                        value={leaderSelection.value}
+                        groups={modelGroups}
+                        onChange={(selection) =>
+                          onSettingsChange({
+                            ...settings,
+                            defaultModel: selection.model,
+                            defaultLeaderHarness: selection.harness,
+                            defaultLeaderModel: selection.model,
+                            defaultLeaderThinkingConfig: normalizeThinkingForCapability(
+                              leaderThinking,
+                              getModelCapability(
+                                selection.model,
+                                findHarness(harnesses, selection.harness),
+                              ),
+                            ),
+                          })
+                        }
+                      />
+                    }
+                    reasoningControl={
+                      <ThinkingControls
+                        config={leaderThinking}
+                        capability={leaderCapability}
+                        onChange={(config) =>
+                          onSettingsChange({
+                            ...settings,
+                            defaultLeaderThinkingConfig: normalizeThinkingForCapability(
+                              config,
+                              leaderCapability,
+                            ),
+                          })
+                        }
+                      />
+                    }
+                  />
+                  <AgentRoleSettings
+                    role="Minion"
+                    description="Executes focused delegated tasks."
+                    modelControl={
+                      <ModelSelect
+                        value={minionSelection.value}
+                        groups={modelGroups}
+                        onChange={(selection) =>
+                          onSettingsChange({
+                            ...settings,
+                            defaultMinionHarness: selection.harness,
+                            defaultMinionModel: selection.model,
+                            defaultMinionThinkingConfig: normalizeThinkingForCapability(
+                              minionThinking,
+                              getModelCapability(
+                                selection.model,
+                                findHarness(harnesses, selection.harness),
+                              ),
+                            ),
+                          })
+                        }
+                      />
+                    }
+                    reasoningControl={
+                      <ThinkingControls
+                        config={minionThinking}
+                        capability={minionCapability}
+                        onChange={(config) =>
+                          onSettingsChange({
+                            ...settings,
+                            defaultMinionThinkingConfig: normalizeThinkingForCapability(
+                              config,
+                              minionCapability,
+                            ),
+                          })
+                        }
+                      />
+                    }
+                  />
+                </div>
+              </SettingsCard>
+            </>
+          )}
+
+          {activeCategory === "workspace" && (
+            <>
+              <SettingsHeading
+                eyebrow="Project behavior"
+                title="Workspace"
+                description="Control how new work is isolated and how the canvas stays organized."
+              />
+              <SettingsCard
+                title="Source control"
+                description="Keep concurrent changes separated until they are ready to review."
+              >
+                <ToggleRow
+                  label="Isolate new Leader work"
+                  description="Create a dedicated git worktree branch with approval-based merging."
+                  checked={settings.defaultWorktreeIsolation !== false}
+                  onChange={(checked) =>
+                    onSettingsChange({ ...settings, defaultWorktreeIsolation: checked })
+                  }
+                />
+              </SettingsCard>
+              <SettingsCard
+                title="Canvas layout"
+                description="Keep spatial workflows legible as the project grows."
+              >
+                <ToggleRow
+                  label="Tidy layout"
+                  description="Snap to grid, prevent overlaps, and keep dashboards attached to their Leader."
+                  checked={settings.tidyLayout !== false}
+                  onChange={(checked) =>
+                    onSettingsChange({ ...settings, tidyLayout: checked })
+                  }
+                />
+              </SettingsCard>
+            </>
+          )}
+
+          {activeCategory === "actions" && (
+            <ContextActionsSettings
+              settings={settings}
+              onSettingsChange={onSettingsChange}
+            />
+          )}
+
+          {activeCategory === "governance" && (
+            <>
+              <SettingsHeading
+                eyebrow="Labs"
+                title="Governance"
+                beta
+                description="Choose how the system model informs agents and protects merges."
+              />
+              <SettingsCard
+                title="System model"
+                description="Compile repository knowledge into Context Packs for Minions."
+              >
+                <div className="settings-mode-grid" role="radiogroup" aria-label="System model mode">
+                  {([
+                    ["off", "Off", "No model context or merge gates."],
+                    ["advisory", "Advisory", "Share context without blocking merges."],
+                    ["enforced", "Enforced", "Share context and block failed review gates."],
+                  ] as const).map(([value, label, description]) => (
+                    <label
+                      key={value}
+                      className="settings-mode"
+                      data-active={(settings.systemModel ?? "off") === value}
+                    >
+                      <input
+                        type="radio"
+                        name="system-model-mode"
+                        value={value}
+                        checked={(settings.systemModel ?? "off") === value}
+                        onChange={() =>
+                          onSettingsChange({ ...settings, systemModel: value })
+                        }
+                      />
+                      <strong>{label}</strong>
+                      <small>{description}</small>
+                    </label>
+                  ))}
+                </div>
+                <p className="settings-callout">
+                  Requires <code>.systemmodel/manifest.yaml</code> in the worktree.{" "}
+                  <a href="docs/system-model.md">Open the system model guide</a>
+                </p>
+                {settings.systemModel !== undefined
+                  && settings.systemModel !== "off"
+                  && (systemModelStatus?.manifestFound === false
+                    || systemModelStatusUnavailable) && (
+                    <div role="status" className="settings-status">
+                      {systemModelStatus?.manifestFound === false
+                        ? <>System model is enabled but inactive. Seed <code>.systemmodel/manifest.yaml</code>.</>
+                        : <>For a new system model, seed <code>.systemmodel/manifest.yaml</code>.</>}
+                    </div>
+                  )}
+              </SettingsCard>
+            </>
+          )}
+
+        </main>
       </div>
-
-      <Divider />
-
-      {/* ── Default Permission Mode ── */}
-      <FieldLabel>Default Permission Mode</FieldLabel>
-      <Select
-        value={settings.defaultPermissionMode ?? "auto"}
-        onChange={(v) =>
-          onSettingsChange({ ...settings, defaultPermissionMode: v })
-        }
-        options={[
-          { value: "auto", label: "Auto (Safe Approve)" },
-          { value: "bypassPermissions", label: "Bypass Permissions" },
-          { value: "default", label: "Default (Ask)" },
-        ]}
-      />
-      <Spacer />
-
-      {/* ── Default Leader Model ── */}
-      <FieldLabel>Default Leader Model</FieldLabel>
-      <ModelSelect
-        value={leaderSelection.value}
-        groups={modelGroups}
-        onChange={(selection) =>
-          onSettingsChange({
-            ...settings,
-            defaultModel: selection.model,
-            defaultLeaderHarness: selection.harness,
-            defaultLeaderModel: selection.model,
-            defaultLeaderThinkingConfig: normalizeThinkingForCapability(
-              leaderThinking,
-              getModelCapability(selection.model, findHarness(harnesses, selection.harness)),
-            ),
-          })
-        }
-      />
-      <ThinkingControls
-        config={leaderThinking}
-        capability={leaderCapability}
-        onChange={(config) =>
-          onSettingsChange({
-            ...settings,
-            defaultLeaderThinkingConfig: normalizeThinkingForCapability(
-              config,
-              leaderCapability,
-            ),
-          })
-        }
-      />
-      <FieldHint>Harness, model, and reasoning used when spawning new Leader nodes</FieldHint>
-
-      {/* ── Default Minion Model ── */}
-      <FieldLabel>Default Minion Model</FieldLabel>
-      <ModelSelect
-        value={minionSelection.value}
-        groups={modelGroups}
-        onChange={(selection) =>
-          onSettingsChange({
-            ...settings,
-            defaultMinionHarness: selection.harness,
-            defaultMinionModel: selection.model,
-            defaultMinionThinkingConfig: normalizeThinkingForCapability(
-              minionThinking,
-              getModelCapability(selection.model, findHarness(harnesses, selection.harness)),
-            ),
-          })
-        }
-      />
-      <ThinkingControls
-        config={minionThinking}
-        capability={minionCapability}
-        onChange={(config) =>
-          onSettingsChange({
-            ...settings,
-            defaultMinionThinkingConfig: normalizeThinkingForCapability(
-              config,
-              minionCapability,
-            ),
-          })
-        }
-      />
-      <FieldHint>Harness, model, and reasoning used when spawning new Minion nodes</FieldHint>
-
-      <Divider />
-
-      {/* ── Worktree Isolation ── */}
-      <FieldLabel>Default Worktree Isolation</FieldLabel>
-      <label
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          cursor: "pointer",
-          fontSize: 12,
-          fontFamily: "var(--font-mono)",
-          color: "var(--text-secondary)",
-        }}
-      >
-        <input
-          type="checkbox"
-          checked={settings.defaultWorktreeIsolation !== false}
-          onChange={(e) =>
-            onSettingsChange({
-              ...settings,
-              defaultWorktreeIsolation: e.target.checked,
-            })
-          }
-          style={{ cursor: "pointer" }}
-        />
-        Enable for new Leader nodes
-      </label>
-      <FieldHint>
-        Leaders work in an isolated git worktree branch with approval-based
-        merging
-      </FieldHint>
-
-      <Divider />
-
-      {/* ── Tidy Layout ── */}
-      <FieldLabel>Canvas Layout</FieldLabel>
-      <label
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          cursor: "pointer",
-          fontSize: 12,
-          fontFamily: "var(--font-mono)",
-          color: "var(--text-secondary)",
-        }}
-      >
-        <input
-          type="checkbox"
-          checked={settings.tidyLayout !== false}
-          onChange={(e) =>
-            onSettingsChange({
-              ...settings,
-              tidyLayout: e.target.checked,
-            })
-          }
-          style={{ cursor: "pointer" }}
-        />
-        Tidy layout (snap to grid, prevent overlaps)
-      </label>
-      <FieldHint>
-        Overlapping nodes snap flush against their neighbour on the side
-        nearest where you drop them. Dashboards stay affixed to their leader.
-      </FieldHint>
-
-      <Divider />
-
-      {/* ── System Model ── */}
-      <FieldLabel>System Model</FieldLabel>
-      <Select
-        value={settings.systemModel ?? "off"}
-        onChange={(v) =>
-          onSettingsChange({
-            ...settings,
-            systemModel: v as NonNullable<ProjectSettings["systemModel"]>,
-          })
-        }
-        options={[
-          { value: "off", label: "Off" },
-          { value: "advisory", label: "Advisory (Context Only)" },
-          { value: "enforced", label: "Enforced (Blocks Merges)" },
-        ]}
-      />
-      <FieldHint>
-        Compiles the repo's <code>.systemmodel/</code> into Context Packs for
-        minions. Enforced blocks merges that fail review gates. Requires a{" "}
-        <code>.systemmodel/manifest.yaml</code> in the worktree.
-      </FieldHint>
-      {settings.systemModel !== undefined
-        && settings.systemModel !== "off"
-        && (systemModelStatus?.manifestFound === false || systemModelStatusUnavailable) && (
-          <div
-            role="status"
-            style={{
-              marginTop: -8,
-              marginBottom: 12,
-              color: "var(--warning-color, var(--text-secondary))",
-              fontSize: 11,
-              fontFamily: "var(--font-sans)",
-              lineHeight: 1.4,
-            }}
-          >
-            {systemModelStatus?.manifestFound === false
-              ? <>System model is enabled but inactive. Seed <code>.systemmodel/manifest.yaml</code></>
-              : <>For a new system model, seed <code>.systemmodel/manifest.yaml</code></>}{" "}
-            using <a href="docs/system-model.md">the system model guide</a>.
-          </div>
-        )}
-
-      <Divider />
-
-      <UsageReportSection reports={usageReports} onRefresh={refreshUsage} />
-
-      <Divider />
-
-      {/* ── Dashboard Context Actions ── */}
-      <FieldLabel>Dashboard Context Prompts</FieldLabel>
-      {DASHBOARD_LEADER_ACTIONS.map(({ action }) => (
-        <DashboardActionField
-          key={action}
-          name={dashboardActionNameValue(settings, action)}
-          prompt={dashboardPromptValue(settings, action)}
-          onNameChange={(value) =>
-            onSettingsChange({
-              ...settings,
-              dashboardLeaderActionNames: {
-                ...settings.dashboardLeaderActionNames,
-                [action]: value,
-              },
-            })
-          }
-          onPromptChange={(value) =>
-            onSettingsChange({
-              ...settings,
-              dashboardLeaderActionPrompts: {
-                ...settings.dashboardLeaderActionPrompts,
-                [action]: value,
-              },
-            })
-          }
-        />
-      ))}
-      <FieldHint>
-        Used when dropping dashboard context onto the canvas and choosing an
-        action
-      </FieldHint>
-
-        <Divider />
-
-        <FieldLabel>Server</FieldLabel>
-        <button
-          type="button"
-          onClick={() => {
-            setRestartError(null);
-            setRestartModalOpen(true);
-          }}
-          style={{
-            width: "100%",
-            padding: "7px 10px",
-            borderRadius: 6,
-            border: "1px solid var(--danger-color)",
-            background: "transparent",
-            color: "var(--danger-color)",
-            fontSize: 12,
-            fontFamily: "var(--font-mono)",
-            cursor: "pointer",
-            textAlign: "left",
-          }}
-        >
-          Restart Server
-        </button>
-        <FieldHint>Restarts the active Minions backend to pick up new code</FieldHint>
-        {restartError && (
-          <div
-            role="alert"
-            style={{
-              marginTop: -8,
-              marginBottom: 12,
-              color: "var(--danger-color)",
-              fontSize: 11,
-              fontFamily: "var(--font-sans)",
-              lineHeight: 1.4,
-            }}
-          >
-            {restartError}
-          </div>
-        )}
-      </div>
-
-      {restartModalOpen && (
-        <ConfirmModal
-          title="Restart Minions server?"
-          description={
-            restartState === "sent"
-              ? "Restart requested. The app will reconnect when the server is back."
-              : "Active sessions will disconnect while the backend restarts. Use this only when you need the running server to pick up newly changed code."
-          }
-          onClose={() => {
-            if (restartState !== "pending") {
-              setRestartModalOpen(false);
-              if (restartState === "sent") setRestartState("idle");
-            }
-          }}
-          actions={
-            restartState === "sent"
-              ? [
-                  {
-                    label: "Close",
-                    variant: "primary",
-                    onClick: () => {
-                      setRestartModalOpen(false);
-                      setRestartState("idle");
-                    },
-                  },
-                ]
-              : [
-                  {
-                    label: restartState === "pending" ? "Restarting..." : "Restart Server",
-                    variant: "danger",
-                    onClick: () => {
-                      if (restartState === "idle") void requestRestart();
-                    },
-                  },
-                ]
-          }
-        />
-      )}
-    </>
   );
 }
 
@@ -767,284 +584,6 @@ function isSystemModelStatus(value: unknown): value is SystemModelStatus {
     && (status["mode"] === "off" || status["mode"] === "advisory" || status["mode"] === "enforced")
     && typeof status["manifestFound"] === "boolean"
     && Array.isArray(status["loadErrors"]);
-}
-
-function UsageReportSection({
-  reports,
-  onRefresh,
-}: {
-  reports: Record<UsageProvider, UsageProviderState>;
-  onRefresh: () => void;
-}) {
-  return (
-    <section aria-labelledby="desktop-usage-heading">
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 10,
-          marginBottom: 8,
-        }}
-      >
-        <FieldLabel id="desktop-usage-heading">Usage</FieldLabel>
-        <button
-          type="button"
-          onClick={onRefresh}
-          style={{
-            padding: "4px 8px",
-            borderRadius: 5,
-            border: "1px solid var(--border-default)",
-            background: "var(--bg-primary)",
-            color: "var(--text-secondary)",
-            fontSize: 11,
-            fontFamily: "var(--font-mono)",
-            cursor: "pointer",
-          }}
-        >
-          Refresh
-        </button>
-      </div>
-      <div style={{ display: "grid", gap: 8 }}>
-        {USAGE_PROVIDERS.map((provider) => (
-          <UsageProviderReport
-            key={provider.id}
-            label={provider.label}
-            report={reports[provider.id]}
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function UsageProviderReport({
-  label,
-  report,
-}: {
-  label: string;
-  report: UsageProviderState;
-}) {
-  const rows = usageWindowRows(report.usage);
-  const extra = extraUsageRow(report.usage);
-  const unavailableReason = usageUnavailableReason(report.usage);
-  const rateLimitsAvailable =
-    isRecord(report.usage) && report.usage["rate_limits_available"] === true;
-
-  return (
-    <div
-      style={{
-        padding: "8px 9px",
-        border: "1px solid var(--border-default)",
-        borderRadius: 6,
-        background: "var(--bg-primary)",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 8,
-          marginBottom: 6,
-        }}
-      >
-        <strong
-          style={{
-            fontSize: 12,
-            color: "var(--text-primary)",
-            fontFamily: "var(--font-sans)",
-          }}
-        >
-          {label}
-        </strong>
-        <span
-          style={{
-            fontSize: 10,
-            color: "var(--text-muted)",
-            fontFamily: "var(--font-mono)",
-          }}
-        >
-          {report.state === "loading" ? "Loading" : report.sessionKey ?? "Provider"}
-        </span>
-      </div>
-
-      {report.state === "idle" ? (
-        <UsageText>Refresh to query provider usage.</UsageText>
-      ) : report.state === "loading" ? (
-        <UsageText>Querying provider...</UsageText>
-      ) : report.state === "error" ? (
-        <UsageText tone="error">{report.error}</UsageText>
-      ) : rows.length > 0 || extra ? (
-        <dl style={{ display: "grid", gap: 5, margin: 0 }}>
-          {rows.map((row) => (
-            <UsageWindowRow key={row.label} row={row} />
-          ))}
-          {extra ? (
-            <UsageWindowRow
-              row={{ label: "Extra usage", value: extra.value, reset: extra.reset }}
-            />
-          ) : null}
-        </dl>
-      ) : (
-        <UsageText>
-          {unavailableReason ??
-            (rateLimitsAvailable
-              ? "No reset windows returned for this provider."
-              : "Provider limits are not available for this provider.")}
-        </UsageText>
-      )}
-    </div>
-  );
-}
-
-function UsageWindowRow({
-  row,
-}: {
-  row: { label: string; value: string; reset: string };
-}) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) auto",
-        gap: 8,
-        alignItems: "baseline",
-      }}
-    >
-      <dt
-        style={{
-          fontSize: 11,
-          color: "var(--text-secondary)",
-          fontFamily: "var(--font-sans)",
-        }}
-      >
-        {row.label}
-      </dt>
-      <dd
-        style={{
-          margin: 0,
-          textAlign: "right",
-          fontSize: 11,
-          color: "var(--text-primary)",
-          fontFamily: "var(--font-mono)",
-        }}
-      >
-        <span>{row.value}</span>
-        <small
-          style={{
-            display: "block",
-            color: "var(--text-muted)",
-            fontSize: 10,
-            marginTop: 1,
-          }}
-        >
-          Resets {row.reset}
-        </small>
-      </dd>
-    </div>
-  );
-}
-
-function UsageText({
-  children,
-  tone = "muted",
-}: {
-  children: React.ReactNode;
-  tone?: "muted" | "error";
-}) {
-  return (
-    <p
-      style={{
-        margin: 0,
-        color: tone === "error" ? "var(--danger-color)" : "var(--text-muted)",
-        fontSize: 11,
-        lineHeight: 1.4,
-        fontFamily: "var(--font-sans)",
-      }}
-    >
-      {children}
-    </p>
-  );
-}
-
-function makeUsageRequestId(provider: UsageProvider): string {
-  const suffix =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  return `desktop-usage-${provider}-${suffix}`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function usageWindowRows(usage: unknown): Array<{ label: string; value: string; reset: string }> {
-  if (!isRecord(usage) || !isRecord(usage["rate_limits"])) return [];
-  const windows = usage["rate_limits"];
-  const labels: Record<string, string> = {
-    five_hour: "5 hour",
-    seven_day: "7 day",
-    seven_day_oauth_apps: "7 day OAuth apps",
-    seven_day_opus: "7 day Opus",
-    seven_day_sonnet: "7 day Sonnet",
-  };
-  return Object.entries(labels).flatMap(([key, label]) => {
-    if (!isRecord(windows)) return [];
-    const entry = windows[key];
-    if (!isRecord(entry)) return [];
-    const utilization =
-      typeof entry["utilization"] === "number"
-        ? `${Math.round(entry["utilization"])}%`
-        : "Unknown";
-    const reset =
-      typeof entry["resets_at"] === "string" && entry["resets_at"]
-        ? new Date(entry["resets_at"]).toLocaleString([], {
-            month: "short",
-            day: "numeric",
-            hour: "numeric",
-            minute: "2-digit",
-          })
-        : "Unknown";
-    return [{ label, value: utilization, reset }];
-  });
-}
-
-function extraUsageRow(usage: unknown): { value: string; reset: string } | null {
-  if (!isRecord(usage) || !isRecord(usage["rate_limits"])) return null;
-  const extra = usage["rate_limits"]["extra_usage"];
-  if (!isRecord(extra) || extra["is_enabled"] !== true) return null;
-  const used = typeof extra["used_credits"] === "number" ? extra["used_credits"] : null;
-  const limit = typeof extra["monthly_limit"] === "number" ? extra["monthly_limit"] : null;
-  const currency = typeof extra["currency"] === "string" ? extra["currency"] : "credits";
-  const value = used !== null && limit !== null ? `${used}/${limit} ${currency}` : "Enabled";
-  return { value, reset: "Monthly" };
-}
-
-function usageUnavailableReason(usage: unknown): string | null {
-  if (!isRecord(usage)) return null;
-  return typeof usage["unavailable_reason"] === "string" ? usage["unavailable_reason"] : null;
-}
-
-function dashboardActionNameValue(
-  settings: ProjectSettings,
-  action: DashboardLeaderAction,
-): string {
-  const configured = settings.dashboardLeaderActionNames?.[action];
-  return typeof configured === "string"
-    ? configured
-    : DEFAULT_DASHBOARD_LEADER_ACTION_NAMES[action];
-}
-
-function dashboardPromptValue(
-  settings: ProjectSettings,
-  action: DashboardLeaderAction,
-): string {
-  const configured = settings.dashboardLeaderActionPrompts?.[action];
-  return typeof configured === "string"
-    ? configured
-    : DEFAULT_DASHBOARD_LEADER_ACTION_PROMPTS[action];
 }
 
 // ── Model settings helpers ─────────────────────────────────
@@ -1224,6 +763,120 @@ function isEffortLevel(value: unknown): value is EffortLevel {
 
 // ── Small layout helpers ────────────────────────────────────
 
+function SettingsHeading({
+  eyebrow,
+  title,
+  beta = false,
+  description,
+}: {
+  eyebrow: string;
+  title: string;
+  beta?: boolean;
+  description: string;
+}) {
+  return (
+    <header className="settings-heading">
+      <span>{eyebrow}</span>
+      <h2>
+        {title}
+        {beta && <BetaBadge />}
+      </h2>
+      <p>{description}</p>
+    </header>
+  );
+}
+
+function SettingsCard({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="settings-card">
+      <div className="settings-card__heading">
+        <div>
+          <h3>{title}</h3>
+          <p>{description}</p>
+        </div>
+      </div>
+      <div className="settings-card__body">{children}</div>
+    </section>
+  );
+}
+
+function BetaBadge() {
+  return <span className="settings-beta-badge">Beta</span>;
+}
+
+function AgentRoleSettings({
+  role,
+  description,
+  modelControl,
+  reasoningControl,
+}: {
+  role: "Leader" | "Minion";
+  description: string;
+  modelControl: React.ReactNode;
+  reasoningControl: React.ReactNode;
+}) {
+  return (
+    <section className="settings-agent" aria-label={`${role} defaults`}>
+      <div className="settings-agent__identity">
+        <span className="settings-agent__icon">
+          <Bot size={15} aria-hidden="true" />
+        </span>
+        <span>
+          <strong>{role}</strong>
+          <small>{description}</small>
+        </span>
+      </div>
+      <div className="settings-agent__controls">
+        <div className="settings-agent__field">
+          <FieldLabel>Model</FieldLabel>
+          {modelControl}
+        </div>
+        <div className="settings-agent__field">
+          <FieldLabel>Reasoning</FieldLabel>
+          {reasoningControl}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ToggleRow({
+  label,
+  description,
+  checked,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="settings-toggle">
+      <span>
+        <strong>{label}</strong>
+        <small>{description}</small>
+      </span>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span className="settings-toggle__track" aria-hidden="true">
+        <span />
+      </span>
+    </label>
+  );
+}
+
 function FieldLabel({ children, id }: { children: React.ReactNode; id?: string }) {
   return (
     <label
@@ -1241,38 +894,6 @@ function FieldLabel({ children, id }: { children: React.ReactNode; id?: string }
       {children}
     </label>
   );
-}
-
-function FieldHint({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        fontSize: 10,
-        color: "var(--text-muted)",
-        marginTop: 4,
-        marginBottom: 14,
-        fontFamily: "var(--font-sans)",
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function Divider() {
-  return (
-    <div
-      style={{
-        height: 1,
-        background: "var(--border-default)",
-        margin: "4px 0 14px",
-      }}
-    />
-  );
-}
-
-function Spacer() {
-  return <div style={{ height: 14 }} />;
 }
 
 function Select({
@@ -1310,81 +931,243 @@ function Select({
   );
 }
 
-function DashboardActionField({
-  name,
-  prompt,
-  onNameChange,
-  onPromptChange,
+// ── Context actions manager ─────────────────────────────────
+
+function ContextActionsSettings({
+  settings,
+  onSettingsChange,
 }: {
-  name: string;
-  prompt: string;
-  onNameChange: (value: string) => void;
-  onPromptChange: (value: string) => void;
+  settings: ProjectSettings;
+  onSettingsChange: (settings: ProjectSettings) => void;
+}) {
+  const actions = useMemo(
+    () => normalizeDashboardLeaderActions(settings),
+    [settings],
+  );
+
+  const commit = (next: DashboardLeaderActionConfig[]) => {
+    // Writing the canonical array; strip any legacy records so no dual
+    // config shape survives the round-trip.
+    const { dashboardLeaderActionNames, dashboardLeaderActionPrompts, ...rest } =
+      settings;
+    void dashboardLeaderActionNames;
+    void dashboardLeaderActionPrompts;
+    onSettingsChange({ ...rest, dashboardLeaderActions: next });
+  };
+
+  const updateAction = (
+    id: string,
+    patch: Partial<DashboardLeaderActionConfig>,
+  ) => commit(actions.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+
+  const removeAction = (id: string) =>
+    commit(actions.filter((a) => a.id !== id));
+
+  const moveAction = (index: number, delta: number) => {
+    const target = index + delta;
+    if (target < 0 || target >= actions.length) return;
+    const next = [...actions];
+    const [moved] = next.splice(index, 1);
+    next.splice(target, 0, moved!);
+    commit(next);
+  };
+
+  const addAction = () =>
+    commit([
+      ...actions,
+      {
+        id: randomUuid(),
+        name: "New action",
+        prompt: "",
+        icon: DEFAULT_DASHBOARD_ACTION_ICON,
+      },
+    ]);
+
+  return (
+    <>
+      <SettingsHeading
+        eyebrow="Labs"
+        title="Context actions"
+        beta
+        description="Build the commands the Leader offers in its slash menu. Add, rename, reorder, or remove them freely."
+      />
+      <div className="settings-flow">
+        <span>Type /</span>
+        <ChevronRight size={14} />
+        <span>Pick an action</span>
+        <ChevronRight size={14} />
+        <span>Prompt fills the Leader</span>
+      </div>
+      <SettingsCard
+        title="Action menu"
+        description="Each action needs a short, scannable label and a precise instruction. Order here is the order shown in the menu."
+      >
+        {actions.length === 0 ? (
+          <p className="settings-actions-empty">
+            No actions yet. Add one to populate the Leader slash menu.
+          </p>
+        ) : (
+          <ul className="settings-action-list">
+            {actions.map((action, index) => (
+              <ContextActionRow
+                key={action.id}
+                action={action}
+                index={index}
+                total={actions.length}
+                onChange={(patch) => updateAction(action.id, patch)}
+                onRemove={() => removeAction(action.id)}
+                onMove={(delta) => moveAction(index, delta)}
+              />
+            ))}
+          </ul>
+        )}
+        <div className="settings-action-toolbar">
+          <button
+            type="button"
+            className="settings-action-add"
+            onClick={addAction}
+          >
+            <Plus size={14} aria-hidden="true" />
+            Add action
+          </button>
+          <button
+            type="button"
+            className="settings-action-reset"
+            onClick={() => commit(defaultDashboardLeaderActions())}
+          >
+            <RotateCcw size={13} aria-hidden="true" />
+            Reset to defaults
+          </button>
+        </div>
+      </SettingsCard>
+    </>
+  );
+}
+
+function ContextActionRow({
+  action,
+  index,
+  total,
+  onChange,
+  onRemove,
+  onMove,
+}: {
+  action: DashboardLeaderActionConfig;
+  index: number;
+  total: number;
+  onChange: (patch: Partial<DashboardLeaderActionConfig>) => void;
+  onRemove: () => void;
+  onMove: (delta: number) => void;
 }) {
   return (
-    <div
-      style={{
-        marginBottom: 10,
-      }}
-    >
-      <label
-        style={{
-          display: "block",
-          fontSize: 10,
-          color: "var(--text-secondary)",
-          fontFamily: "var(--font-mono)",
-          marginBottom: 4,
-        }}
-      >
-        Name
+    <li className="settings-action-card">
+      <div className="settings-action-card__head">
+        <IconPicker
+          value={action.icon}
+          label={action.name}
+          onChange={(icon) => onChange({ icon })}
+        />
         <input
-          value={name}
-          onChange={(e) => onNameChange(e.target.value)}
-          style={{
-            width: "100%",
-            marginTop: 4,
-            fontSize: 12,
-            lineHeight: 1.35,
-            color: "var(--text-primary)",
-            padding: "6px 8px",
-            background: "var(--bg-primary)",
-            border: "1px solid var(--border-primary)",
-            borderRadius: 4,
-            fontFamily: "var(--font-sans)",
-            outline: "none",
-          }}
+          className="settings-action-card__name"
+          aria-label={`Action ${index + 1} name`}
+          value={action.name}
+          placeholder="Action name"
+          onChange={(e) => onChange({ name: e.target.value })}
         />
-      </label>
-      <label
-        style={{
-          display: "block",
-          fontSize: 10,
-          color: "var(--text-secondary)",
-          fontFamily: "var(--font-mono)",
-        }}
+        <div className="settings-action-card__controls">
+          <button
+            type="button"
+            aria-label="Move action up"
+            disabled={index === 0}
+            onClick={() => onMove(-1)}
+          >
+            <ChevronUp size={14} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            aria-label="Move action down"
+            disabled={index === total - 1}
+            onClick={() => onMove(1)}
+          >
+            <ChevronDown size={14} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="settings-action-card__delete"
+            aria-label={`Remove ${action.name || "action"}`}
+            onClick={onRemove}
+          >
+            <Trash2 size={14} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+      <textarea
+        className="settings-action-card__prompt"
+        aria-label={`Action ${index + 1} prompt`}
+        value={action.prompt}
+        placeholder="Instruction sent to the Leader when this action is chosen…"
+        rows={3}
+        onChange={(e) => onChange({ prompt: e.target.value })}
+      />
+    </li>
+  );
+}
+
+function IconPicker({
+  value,
+  label,
+  onChange,
+}: {
+  value: string;
+  label: string;
+  onChange: (icon: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const ActiveIcon = dashboardActionIcon(value);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  return (
+    <div className="settings-icon-picker" ref={ref}>
+      <button
+        type="button"
+        className="settings-icon-picker__trigger"
+        aria-label={`Icon for ${label || "action"}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
       >
-        Prompt
-        <textarea
-          value={prompt}
-          onChange={(e) => onPromptChange(e.target.value)}
-          rows={3}
-          style={{
-            width: "100%",
-            marginTop: 4,
-            resize: "vertical",
-            minHeight: 64,
-            fontSize: 11,
-            lineHeight: 1.35,
-            color: "var(--text-secondary)",
-            padding: "7px 8px",
-            background: "var(--bg-primary)",
-            border: "1px solid var(--border-primary)",
-            borderRadius: 4,
-            fontFamily: "var(--font-sans)",
-            outline: "none",
-          }}
-        />
-      </label>
+        <ActiveIcon size={15} aria-hidden="true" />
+      </button>
+      {open && (
+        <div className="settings-icon-picker__menu" role="menu">
+          {DASHBOARD_ACTION_ICONS.map(({ key, label: iconLabel, Icon }) => (
+            <button
+              key={key}
+              type="button"
+              role="menuitemradio"
+              aria-checked={key === value}
+              aria-label={iconLabel}
+              title={iconLabel}
+              data-active={key === value}
+              onClick={() => {
+                onChange(key);
+                setOpen(false);
+              }}
+            >
+              <Icon size={15} aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1444,58 +1227,24 @@ export function ThinkingControls({
 }) {
   if (!capability.supportsAdaptiveThinking) {
     return (
-      <div
-        style={{
-          marginTop: 7,
-          padding: "7px 8px",
-          border: "1px solid var(--border-default)",
-          borderRadius: 4,
-          color: "var(--text-muted)",
-          background: "var(--bg-primary)",
-          fontSize: 10,
-          fontFamily: "var(--font-sans)",
-        }}
-      >
+      <div className="settings-reasoning settings-reasoning--unavailable">
         Reasoning controls are unavailable for this model.
       </div>
     );
   }
 
   return (
-    <div
-      style={{
-        marginTop: 7,
-        padding: 8,
-        border: "1px solid var(--border-default)",
-        borderRadius: 4,
-        background: "var(--bg-primary)",
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-      }}
-    >
-      <label
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 8,
-          fontSize: 11,
-          fontFamily: "var(--font-mono)",
-          color: "var(--text-secondary)",
-          cursor: "pointer",
-        }}
-      >
-        <span>Reasoning</span>
+    <div className="settings-reasoning">
+      <label className="settings-reasoning__toggle">
         <input
           type="checkbox"
           checked={config.enabled}
           onChange={(e) => onChange({ ...config, enabled: e.target.checked })}
-          style={{ cursor: "pointer" }}
         />
+        <span>Enabled</span>
       </label>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+      <div className="settings-reasoning__segment" aria-label="Reasoning effort">
         {capability.supportedEffortLevels.map((effort) => {
           const active = config.effort === effort;
           return (
@@ -1505,19 +1254,7 @@ export function ThinkingControls({
               title={EFFORT_DESCRIPTIONS[effort]}
               disabled={!config.enabled}
               onClick={() => onChange({ ...config, effort })}
-              style={{
-                padding: "4px 7px",
-                borderRadius: 4,
-                border: active
-                  ? "1px solid var(--accent)"
-                  : "1px solid var(--border-default)",
-                background: active ? "var(--state-active)" : "var(--bg-secondary)",
-                color: active ? "var(--text-primary)" : "var(--text-secondary)",
-                opacity: config.enabled ? 1 : 0.55,
-                cursor: config.enabled ? "pointer" : "default",
-                fontSize: 10,
-                fontFamily: "var(--font-mono)",
-              }}
+              data-active={active}
             >
               {EFFORT_LABELS[effort]}
             </button>
@@ -1525,7 +1262,7 @@ export function ThinkingControls({
         })}
       </div>
 
-      <div style={{ display: "flex", gap: 4 }}>
+      <div className="settings-reasoning__segment" aria-label="Reasoning output">
         {(["summarized", "omitted"] as const).map((display) => {
           const active = config.display === display;
           return (
@@ -1534,19 +1271,7 @@ export function ThinkingControls({
               type="button"
               disabled={!config.enabled}
               onClick={() => onChange({ ...config, display })}
-              style={{
-                padding: "4px 7px",
-                borderRadius: 4,
-                border: active
-                  ? "1px solid var(--accent)"
-                  : "1px solid var(--border-default)",
-                background: active ? "var(--state-active)" : "var(--bg-secondary)",
-                color: active ? "var(--text-primary)" : "var(--text-secondary)",
-                opacity: config.enabled ? 1 : 0.55,
-                cursor: config.enabled ? "pointer" : "default",
-                fontSize: 10,
-                fontFamily: "var(--font-mono)",
-              }}
+              data-active={active}
             >
               {display === "summarized" ? "Summaries" : "Hidden"}
             </button>

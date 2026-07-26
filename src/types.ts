@@ -39,6 +39,12 @@ export interface NodeTypeDefinition {
   defaultSize: Size;
   render: React.ComponentType<NodeRenderProps>;
   userCreatable?: boolean;
+  /**
+   * Optional feature-flag id (see `src/feature-flags.ts`). When set, the node
+   * only appears in the create palette/context menu while that flag is on.
+   * Used to keep experimental node types hidden by default.
+   */
+  flag?: string;
   /** When true, the node grows with content instead of using a fixed height */
   autoHeight?: boolean;
   /** Matches server-side AgentType.id — used to select the agent behavior */

@@ -67,6 +67,49 @@ describe("mobile.css overflow guards", () => {
   });
 });
 
+describe("mobile.css activity redesign surfaces", () => {
+  it("lays the summary strip out as three equal, viewport-bounded columns", () => {
+    const body = ruleBody(".mob-activity-summary").replace(/\s+/g, " ");
+    expect(body).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
+  });
+
+  it("accents the attention summary count with the warning token", () => {
+    expect(ruleBody(".mob-summary-item--attention strong")).toContain("var(--status-warning)");
+  });
+
+  it("makes the summary counts touchable and visibly selected", () => {
+    expect(ruleBody(".mob-summary-item")).toContain("touch-action: manipulation");
+    expect(ruleBody(".mob-summary-item--active")).toContain("var(--accent)");
+  });
+
+  it("gives the visibility filters a touch-sized active tab", () => {
+    expect(ruleBody(".mob-filter")).toContain("min-height: 40px");
+    expect(ruleBody(".mob-filter--active")).toContain("var(--bg-surface)");
+  });
+
+  it("colours the triage rows by attention kind", () => {
+    expect(ruleBody(".mob-triage-row--error")).toContain("var(--status-error)");
+    expect(ruleBody(".mob-triage-row--waiting")).toContain("var(--status-warning)");
+    expect(ruleBody(".mob-triage-row--changes")).toContain("var(--status-success)");
+  });
+
+  it("keeps the triage row shrinkable and its title able to wrap", () => {
+    expect(ruleBody(".mob-triage-row")).toContain("min-width: 0");
+    expect(ruleBody(".mob-triage-title")).toContain("overflow-wrap: anywhere");
+  });
+
+  it("sizes the triage action buttons for touch", () => {
+    expect(ruleBody(".mob-mini-btn")).toContain("min-height: 40px");
+    expect(ruleBody(".mob-mini-btn--primary")).toContain("var(--status-success)");
+  });
+
+  it("styles run history as a touch-sized card disclosure", () => {
+    expect(ruleBody(".mob-run-history")).toContain("border-radius: 8px");
+    expect(ruleBody(".mob-run-history > summary")).toContain("min-height: 44px");
+    expect(ruleBody(".mob-run-history-body")).toContain("display: grid");
+  });
+});
+
 describe("mobile.css live activity cues", () => {
   it("defines the live-state animations", () => {
     expect(css).toContain("@keyframes mob-live-glow");
@@ -88,5 +131,35 @@ describe("mobile.css live activity cues", () => {
     expect(guard).toContain("animation: none");
     expect(guard).toContain('.mob-status-pill[data-live="true"]');
     expect(guard).toContain('.mob-minion-row[data-tone="running"] .mob-minion-dot');
+  });
+});
+
+describe("mobile.css chat density", () => {
+  it("keeps auxiliary chat events denser than response bubbles", () => {
+    const body = ruleBody([
+      ".mob-message--tool",
+      ".mob-message--system",
+      ".mob-message--thinking",
+    ].join(",\n"));
+
+    expect(body).toContain("font-size: 11px");
+    expect(body).toContain("box-shadow: none");
+
+    const toggle = ruleBody(".mob-message-toggle");
+    expect(toggle).toContain("grid-template-columns: auto minmax(0, 1fr)");
+    expect(toggle).toContain("padding: 5px 8px");
+  });
+
+  it("truncates the body of a closed auxiliary row", () => {
+    const body = ruleBody('.mob-message[data-expanded="false"] .mob-message-content');
+    expect(body).toContain("overflow: hidden");
+    expect(body).toContain("text-overflow: ellipsis");
+    expect(body).toContain("white-space: nowrap");
+  });
+
+  it("uses a smaller icon for compact tool rows", () => {
+    const body = ruleBody(".mob-tool-icon");
+    expect(body).toContain("width: 16px");
+    expect(body).toContain("height: 16px");
   });
 });

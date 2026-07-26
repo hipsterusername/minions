@@ -51,6 +51,7 @@ import {
 import { reconnectMcpServer, toggleMcpServer } from "./mcp-control.ts";
 import { submitForm } from "./submit-form.ts";
 import { clearSession } from "./clear-session.ts";
+import { startDialectic, stopDialectic } from "./dialectic.ts";
 import { getSystemModelStatus } from "./get-system-model-status.ts";
 import { getSystemGraph } from "./get-system-graph.ts";
 import { getWorkPackets } from "./get-work-packets.ts";
@@ -145,6 +146,9 @@ export const COMMAND_TABLE = {
   submit_form: submitForm,
   // Session history
   clear_session: clearSession,
+  // Dialectic dual-planner (experimental)
+  start_dialectic: startDialectic,
+  stop_dialectic: stopDialectic,
 } satisfies CommandTable;
 
 /**

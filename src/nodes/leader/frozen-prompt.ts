@@ -1,4 +1,7 @@
-import { buildLeaderSystemPrompt } from "../../prompts/build-leader-prompt.ts";
+import {
+  buildLeaderSystemPrompt,
+  buildLeaderSystemPromptPreview,
+} from "../../prompts/build-leader-prompt.ts";
 import { getAllSkills, getSkill } from "../../skills/registry.ts";
 import { compileSkills, type SkillTemplate } from "../../skills/types.ts";
 
@@ -9,7 +12,10 @@ export interface LeaderPromptStateInput {
 }
 
 export interface FrozenLeaderPrompt {
+  /** Structured prefix + skill customization, never a full canonical prompt. */
   systemPrompt: string;
+  /** Non-authoritative client preview of server assembly. */
+  preview: string;
   activeSkillIds: readonly string[];
   activeSkillAddendum: string;
   inventoryIds: readonly string[];
@@ -25,6 +31,7 @@ export function freezeLeaderSystemPrompt(
 ): FrozenLeaderPrompt {
   return {
     systemPrompt: buildLeaderSystemPrompt(input),
+    preview: buildLeaderSystemPromptPreview(input),
     activeSkillIds: [...input.skillIds],
     activeSkillAddendum: compileActiveSkillAddendum(input),
     inventoryIds: getAllSkills().map((skill) => skill.id),

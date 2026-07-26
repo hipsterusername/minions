@@ -1,11 +1,26 @@
-import { useEffect, useCallback, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
+import {
+  ChevronDown,
+  Crosshair,
+  Link2,
+  Square,
+  Trash2,
+} from "lucide-react";
 import type { ServerMessage, SessionInfo } from "./use-socket.ts";
 import { UsageSection } from "./UsagePopover.tsx";
 import {
   emptySessionUsage,
   formatSessionUsageLine,
-  mergeUsageEvent,
   mergeDoneEvent,
+  mergeUsageEvent,
+  shortModelLabel,
   type SessionUsage,
 } from "./usage-aggregator.ts";
 import {
@@ -14,20 +29,44 @@ import {
   useDockBadge,
   useDockPanelOpen,
 } from "./BottomRightDock.tsx";
+import "./session-panel.css";
 
 interface SessionPanelProps {
   socketSend?: ((data: unknown) => void) | undefined;
   socketSubscribe?: ((fn: (msg: unknown) => void) => () => void) | undefined;
   socketConnected?: boolean | undefined;
-  onAttachSession: (sessionKey: string, role?: "leader" | "minion" | "default" | "card-composer") => void;
+  projectPath?: string | undefined;
+  onAttachSession: (
+    sessionKey: string,
+    role?: "leader" | "minion" | "default" | "card-composer",
+  ) => void;
   onFocusSession?: (sessionKey: string) => void;
   attachedSessionKeys: Set<string>;
 }
+
+const STATUS_COLOR: Record<string, string> = {
+  creating: "var(--status-creating)",
+  running: "var(--status-success)",
+  idle: "var(--status-idle)",
+  stopped: "var(--status-stopped)",
+  completed: "var(--status-success)",
+  error: "var(--danger-color-text)",
+};
+
+const STATUS_PRIORITY: Record<string, number> = {
+  running: 0,
+  creating: 1,
+  error: 2,
+  idle: 3,
+  completed: 4,
+  stopped: 5,
+};
 
 export function SessionPanel({
   socketSend,
   socketSubscribe,
   socketConnected,
+  projectPath,
   onAttachSession,
   onFocusSession,
   attachedSessionKeys,
@@ -50,9 +89,9 @@ export function SessionPanel({
         setSessions(serverMsg.sessions);
         setUsageBySession(
           new Map(
-            serverMsg.sessions.map((s) => [
-              s.sessionKey,
-              usageFromSessionInfo(s),
+            serverMsg.sessions.map((session) => [
+              session.sessionKey,
+              usageFromSessionInfo(session),
             ]),
           ),
         );
@@ -60,19 +99,19 @@ export function SessionPanel({
       }
 
       if (serverMsg.type === "session_status") {
-        setSessions((prev) => {
-          const existing = prev.find(
-            (s) => s.sessionKey === serverMsg.sessionKey,
+        setSessions((previous) => {
+          const exists = previous.some(
+            (session) => session.sessionKey === serverMsg.sessionKey,
           );
-          if (existing) {
-            return prev.map((s) =>
-              s.sessionKey === serverMsg.sessionKey
-                ? { ...s, status: serverMsg.status }
-                : s,
+          if (exists) {
+            return previous.map((session) =>
+              session.sessionKey === serverMsg.sessionKey
+                ? { ...session, status: serverMsg.status }
+                : session,
             );
           }
           return [
-            ...prev,
+            ...previous,
             {
               sessionKey: serverMsg.sessionKey,
               sessionId: serverMsg.sessionId ?? null,
@@ -85,23 +124,27 @@ export function SessionPanel({
       }
 
       if (serverMsg.type === "session_task_name") {
-        setSessions((prev) =>
-          prev.map((s) =>
-            s.sessionKey === serverMsg.sessionKey
-              ? { ...s, taskName: serverMsg.taskName }
-              : s,
+        setSessions((previous) =>
+          previous.map((session) =>
+            session.sessionKey === serverMsg.sessionKey
+              ? { ...session, taskName: serverMsg.taskName }
+              : session,
           ),
         );
         return;
       }
 
       if (serverMsg.type === "session_created") {
-        setSessions((prev) => {
-          if (prev.some((s) => s.sessionKey === serverMsg.sessionKey)) {
-            return prev;
+        setSessions((previous) => {
+          if (
+            previous.some(
+              (session) => session.sessionKey === serverMsg.sessionKey,
+            )
+          ) {
+            return previous;
           }
           return [
-            ...prev,
+            ...previous,
             {
               sessionKey: serverMsg.sessionKey,
               sessionId: null,
@@ -113,41 +156,50 @@ export function SessionPanel({
         return;
       }
 
-      // Per-session usage roll-up — fed by NormalizedEvent usage/done events.
-      if (serverMsg.type === "sdk_event") {
-        const key = serverMsg.sessionKey;
-        const ev = serverMsg.event;
-        if (ev.kind === "usage") {
-          setUsageBySession((prev) => {
-            const next = new Map(prev);
-            next.set(key, mergeUsageEvent(prev.get(key) ?? emptySessionUsage(), ev));
-            return next;
-          });
-          const costUSD = ev.costUSD;
-          if (costUSD != null) {
-            setSessions((prev) =>
-              prev.map((s) =>
-                s.sessionKey === key ? { ...s, totalCost: costUSD } : s,
-              ),
-            );
-          }
-        }
-        if (ev.kind === "done" && ev.turns != null) {
-          const turns = ev.turns;
-          setUsageBySession((prev) => {
-            const next = new Map(prev);
-            next.set(key, mergeDoneEvent(prev.get(key) ?? emptySessionUsage(), turns));
-            return next;
-          });
-          setSessions((prev) =>
-            prev.map((s) => (s.sessionKey === key ? { ...s, turns } : s)),
+      if (serverMsg.type !== "sdk_event") return;
+      const key = serverMsg.sessionKey;
+      const event = serverMsg.event;
+      if (event.kind === "usage") {
+        setUsageBySession((previous) => {
+          const next = new Map(previous);
+          next.set(
+            key,
+            mergeUsageEvent(previous.get(key) ?? emptySessionUsage(), event),
+          );
+          return next;
+        });
+        const costUSD = event.costUSD;
+        if (costUSD != null) {
+          setSessions((previous) =>
+            previous.map((session) =>
+              session.sessionKey === key
+                ? { ...session, totalCost: costUSD }
+                : session,
+            ),
           );
         }
+      }
+      if (event.kind === "done" && event.turns != null) {
+        const turns = event.turns;
+        setUsageBySession((previous) => {
+          const next = new Map(previous);
+          next.set(
+            key,
+            mergeDoneEvent(previous.get(key) ?? emptySessionUsage(), turns),
+          );
+          return next;
+        });
+        setSessions((previous) =>
+          previous.map((session) =>
+            session.sessionKey === key
+              ? { ...session, turns }
+              : session,
+          ),
+        );
       }
     });
   }, [socketSubscribe]);
 
-  // Request session list on connect
   useEffect(() => {
     if (socketConnected && socketSend) {
       socketSend({ type: "list_sessions" });
@@ -156,66 +208,86 @@ export function SessionPanel({
 
   const handleStop = useCallback(
     (sessionKey: string) => {
-      if (!socketSend) return;
-      socketSend({ type: "stop_session", sessionKey });
+      socketSend?.({ type: "stop_session", sessionKey });
     },
     [socketSend],
   );
 
-  const handleClearAll = useCallback(() => {
-    if (!socketSend) return;
-    for (const session of sessionsRef.current.filter(
-      (s) =>
-        s.role !== "minion" &&
-        s.role !== "card-composer" &&
-        isSessionClearable(s),
-    )) {
-      socketSend({ type: "remove_session", sessionKey: session.sessionKey });
-    }
-  }, [socketSend]);
+  const handleRemove = useCallback(
+    (sessionKey: string) => {
+      socketSend?.({ type: "remove_session", sessionKey });
+    },
+    [socketSend],
+  );
 
-  const statusColor: Record<string, string> = {
-    creating: "var(--status-creating)",
-    running: "var(--status-success)",
-    idle: "var(--status-idle)",
-    stopped: "var(--danger-color-text)",
-    error: "var(--danger-color)",
-  };
+  const handleClearInactive = useCallback(() => {
+    if (!socketSend) return;
+    for (const session of sessionsRef.current) {
+      const inCurrentPanel =
+        attachedSessionKeys.has(session.sessionKey) ||
+        isSessionInProject(session, projectPath);
+      if (
+        isVisibleSession(session) &&
+        inCurrentPanel &&
+        isSessionClearable(session)
+      ) {
+        socketSend({
+          type: "remove_session",
+          sessionKey: session.sessionKey,
+        });
+      }
+    }
+  }, [attachedSessionKeys, projectPath, socketSend]);
 
   const visibleSessions = sessions.filter(
-    (s) => s.role !== "minion" && s.role !== "card-composer",
+    (session) =>
+      isVisibleSession(session) &&
+      (attachedSessionKeys.has(session.sessionKey) ||
+        isSessionInProject(session, projectPath)),
   );
   const removableSessions = visibleSessions.filter(isSessionClearable);
-  const attachedSessions = visibleSessions.filter((s) =>
-    attachedSessionKeys.has(s.sessionKey),
+  const attachedSessions = sortSessions(
+    visibleSessions.filter((session) =>
+      attachedSessionKeys.has(session.sessionKey),
+    ),
   );
-  const unattachedSessions = visibleSessions.filter(
-    (s) => !attachedSessionKeys.has(s.sessionKey),
+  const unattachedSessions = sortSessions(
+    visibleSessions.filter(
+      (session) => !attachedSessionKeys.has(session.sessionKey),
+    ),
   );
-  const totalCost = visibleSessions.reduce((sum, s) => sum + (s.totalCost ?? 0), 0);
-  // Memoize the usage map identity so UsageSection only re-renders when an
-  // SDK result actually folds new tokens in.
-  const usageView = useMemo(() => usageBySession, [usageBySession]);
+  const totalCost = visibleSessions.reduce(
+    (sum, session) => sum + (session.totalCost ?? 0),
+    0,
+  );
+  const runningCount = visibleSessions.filter(
+    (session) => session.status === "running",
+  ).length;
 
-  const runningCount = visibleSessions.filter((s) => s.status === "running").length;
+  // The panel intentionally excludes minion and card-composer sessions, so
+  // its summary must use that same scope.
+  const usageView = useMemo(
+    () =>
+      new Map(
+        visibleSessions.map((session) => [
+          session.sessionKey,
+          usageBySession.get(session.sessionKey) ??
+            usageFromSessionInfo(session),
+        ]),
+      ),
+    [sessions, usageBySession],
+  );
 
-  // Prevent wheel events from bubbling to the canvas zoom handler.
-  // Canvas uses a native addEventListener so React's onWheel stopPropagation
-  // is ineffective — we need a native listener that fires first.
-  // Depend on isOpen: the panel returns null when closed, so listRef.current
-  // is null on initial mount. Re-running when isOpen becomes true ensures
-  // the listener attaches after the div is in the DOM.
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!isOpen) return;
-    const el = listRef.current;
-    if (!el) return;
-    const stop = (e: WheelEvent) => { e.stopPropagation(); };
-    el.addEventListener("wheel", stop, { passive: false });
-    return () => el.removeEventListener("wheel", stop);
+    const element = listRef.current;
+    if (!element) return;
+    const stopCanvasZoom = (event: WheelEvent) => event.stopPropagation();
+    element.addEventListener("wheel", stopCanvasZoom, { passive: false });
+    return () => element.removeEventListener("wheel", stopCanvasZoom);
   }, [isOpen]);
 
-  // Surface live count + running indicator + cost on the dock pill.
   useDockBadge("sessions", {
     count: visibleSessions.length,
     dot: runningCount > 0 ? "success" : undefined,
@@ -225,502 +297,309 @@ export function SessionPanel({
   if (!isOpen) return null;
 
   return (
-    <DockPanel id="sessions" width={260}>
+    <DockPanel id="sessions" width={320}>
       <DockPanelHeader
         title={
           <>
-            Sessions ({visibleSessions.length})
-            {totalCost > 0 && (
-              <span
-                style={{
-                  color: "var(--text-muted)",
-                  fontFamily: "var(--font-mono)",
-                  textTransform: "none",
-                  letterSpacing: 0,
-                  fontWeight: 400,
-                  marginLeft: 4,
-                }}
-              >
-                · ${totalCost.toFixed(4)}
-              </span>
-            )}
+            Sessions
+            <span className="session-panel__count">{visibleSessions.length}</span>
           </>
         }
         actions={
           <button
             type="button"
-            onClick={handleClearAll}
+            className="session-panel__header-action"
+            onClick={handleClearInactive}
             disabled={!socketSend || removableSessions.length === 0}
-            aria-label="Session Clear All"
+            aria-label="Clear inactive sessions"
             title={
               removableSessions.length > 0
-                ? `Remove ${removableSessions.length} idle or stopped session${
+                ? `Remove ${removableSessions.length} inactive session${
                     removableSessions.length === 1 ? "" : "s"
                   }`
-                : "No idle or stopped sessions to remove"
+                : "No inactive sessions to remove"
             }
-            style={{
-              padding: "3px 7px",
-              fontSize: 10,
-              background:
-                removableSessions.length > 0
-                  ? "color-mix(in srgb, var(--status-stopped) 15%, transparent)"
-                  : "transparent",
-              border: "1px solid var(--border-default)",
-              borderRadius: 4,
-              color:
-                removableSessions.length > 0
-                  ? "var(--text-secondary)"
-                  : "var(--text-muted)",
-              cursor:
-                socketSend && removableSessions.length > 0
-                  ? "pointer"
-                  : "default",
-              fontFamily: "var(--font-mono)",
-              textTransform: "uppercase",
-              letterSpacing: 0,
-              whiteSpace: "nowrap",
-            }}
           >
-            Clear All
+            <Trash2 aria-hidden="true" size={12} strokeWidth={1.8} />
+            Clear inactive
           </button>
         }
       />
 
-      {/* Session list */}
-      <div
-        ref={listRef}
-        style={{
-          flex: 1,
-          overflow: "auto",
-          padding: "6px",
-        }}
-      >
-        {visibleSessions.length === 0 && (
-          <div
-            style={{
-              padding: "20px 12px",
-              textAlign: "center",
-              color: "var(--text-muted)",
-              fontSize: 11,
-              fontStyle: "italic",
-            }}
-          >
-            No active sessions
+      <div ref={listRef} className="session-panel__body">
+        {socketConnected === false && (
+          <div className="session-panel__notice" role="status">
+            Session controls are unavailable while the server reconnects.
           </div>
         )}
-        {attachedSessions.length === 0 && unattachedSessions.length > 0 && (
-          <div
-            style={{
-              padding: "12px",
-              textAlign: "center",
-              color: "var(--text-muted)",
-              fontSize: 11,
-              fontStyle: "italic",
-            }}
-            data-testid="no-attached-sessions"
-          >
-            No sessions on canvas
-          </div>
-        )}
-        {attachedSessions.map((session) => {
-          const isAttached = true;
-          const color = statusColor[session.status] ?? "var(--text-muted)";
-          const usageLine = formatSessionUsageLine(
-            usageBySession.get(session.sessionKey) ?? usageFromSessionInfo(session),
-          );
 
-          return (
-            <div
-              key={session.sessionKey}
-              data-testid="session-row-attached"
-              style={{
-                padding: "8px 10px",
-                borderRadius: 6,
-                marginBottom: 4,
-                background: "var(--bg-surface)",
-                border: `1px solid ${isAttached ? "var(--accent)" : "var(--border-default)"}`,
-                transition: "border-color 0.15s",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginBottom: 4,
-                }}
+        {visibleSessions.length === 0 ? (
+          <EmptySessions />
+        ) : (
+          <>
+            <SessionGroupLabel
+              label="On canvas"
+              count={attachedSessions.length}
+            />
+            {attachedSessions.length === 0 ? (
+              <p
+                className="session-panel__empty-inline"
+                data-testid="no-attached-sessions"
               >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: "50%",
-                      background: color,
-                      boxShadow:
-                        session.status === "running"
-                          ? `0 0 6px ${color}`
-                          : "none",
-                    }}
-                  />
-                  <span
-                    style={{
-                      fontSize: 11,
-                      color: session.taskName ? "var(--text-primary)" : "var(--text-primary)",
-                      fontFamily: "var(--font-mono)",
-                      fontWeight: session.taskName ? 600 : 400,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      maxWidth: 140,
-                    }}
-                  >
-                    {session.taskName ?? session.sessionKey.slice(0, 16)}
-                  </span>
-                </div>
-                <span
-                  style={{
-                    fontSize: 9,
-                    color,
-                    fontFamily: "var(--font-mono)",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  {session.status}
-                </span>
-              </div>
-
-              {/* Stats row */}
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: 8,
-                  marginBottom: 6,
-                  fontSize: 10,
-                  color: "var(--text-muted)",
-                  fontFamily: "var(--font-mono)",
-                }}
-              >
-                {(session.totalCost ?? 0) > 0 && (
-                  <span>${session.totalCost?.toFixed(4)}</span>
-                )}
-                {(session.turns ?? 0) > 0 && (
-                  <span>{session.turns}T</span>
-                )}
-                {usageLine && <span>{usageLine}</span>}
-              </div>
-
-              {/* Active minion tags */}
-              {(session.activeMinions ?? []).length > 0 && (
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 4,
-                    marginBottom: 6,
-                  }}
-                >
-                  {(session.activeMinions ?? []).map((minion) => (
-                    <span
-                      key={minion.taskId}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 4,
-                        padding: "2px 7px",
-                        fontSize: 9,
-                        fontFamily: "var(--font-mono)",
-                        background: "var(--warning-bg)",
-                        border: "1px solid var(--warning-color)",
-                        borderRadius: 10,
-                        color: "var(--warning-color)",
-                      }}
-                    >
-                      <span
-                        style={{
-                          width: 4,
-                          height: 4,
-                          borderRadius: "50%",
-                          background: "var(--warning-color)",
-                          boxShadow: "0 0 4px var(--warning-color)",
-                        }}
-                      />
-                      {minion.title.length > 20
-                        ? minion.title.slice(0, 18) + "…"
-                        : minion.title}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              {/* Actions */}
-              <div style={{ display: "flex", gap: 4 }}>
-                <button
-                  onClick={() => onFocusSession?.(session.sessionKey)}
-                  disabled={!onFocusSession}
-                  style={{
-                    flex: 1,
-                    padding: "4px 0",
-                    fontSize: 10,
-                    background: "var(--bg-primary)",
-                    border: "1px solid var(--accent)",
-                    borderRadius: 4,
-                    color: "var(--accent)",
-                    cursor: onFocusSession ? "pointer" : "default",
-                    fontFamily: "var(--font-mono)",
-                  }}
-                  title="Center canvas on this session"
-                >
-                  Focus
-                </button>
-                {session.status === "running" && (
-                  <button
-                    onClick={() => handleStop(session.sessionKey)}
-                    style={{
-                      padding: "4px 8px",
-                      fontSize: 10,
-                      background: "var(--danger-bg)",
-                      border: "1px solid var(--danger-color)",
-                      borderRadius: 4,
-                      color: "var(--status-error)",
-                      cursor: "pointer",
-                      fontFamily: "var(--font-mono)",
-                    }}
-                  >
-                    Stop
-                  </button>
-                )}
-                {(session.status === "idle" || session.status === "stopped" || session.status === "error") && (
-                  <button
-                    onClick={() => {
-                      if (socketSend) {
-                        socketSend({ type: "remove_session", sessionKey: session.sessionKey });
-                      }
-                    }}
-                    style={{
-                      padding: "4px 8px",
-                      fontSize: 10,
-                      background: "color-mix(in srgb, var(--status-stopped) 15%, transparent)",
-                      border: "1px solid var(--border-default)",
-                      borderRadius: 4,
-                      color: "var(--text-muted)",
-                      cursor: "pointer",
-                      fontFamily: "var(--font-mono)",
-                    }}
-                    title="Remove session"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-            </div>
-          );
-        })}
-
-        {/* Unattached sessions: hidden under a collapsible section at the bottom */}
-        {unattachedSessions.length > 0 && (
-          <div style={{ marginTop: attachedSessions.length > 0 ? 8 : 0 }}>
-            <button
-              type="button"
-              onClick={() => setUnattachedOpen((v) => !v)}
-              aria-expanded={unattachedOpen}
-              data-testid="unattached-toggle"
-              style={{
-                width: "100%",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "6px 8px",
-                fontSize: 10,
-                background: "transparent",
-                border: "1px dashed var(--border-default)",
-                borderRadius: 4,
-                color: "var(--text-muted)",
-                cursor: "pointer",
-                fontFamily: "var(--font-mono)",
-                textTransform: "uppercase",
-                letterSpacing: 0.5,
-              }}
-            >
-              <span>
-                {unattachedOpen ? "▾" : "▸"} Not on canvas ({unattachedSessions.length})
-              </span>
-            </button>
-
-            {unattachedOpen &&
-              unattachedSessions.map((session) => {
-                const color = statusColor[session.status] ?? "var(--text-muted)";
-                const usageLine = formatSessionUsageLine(
-                  usageBySession.get(session.sessionKey) ?? usageFromSessionInfo(session),
-                );
-                return (
-                  <div
+                No sessions are attached to this canvas.
+              </p>
+            ) : (
+              <div className="session-panel__list">
+                {attachedSessions.map((session) => (
+                  <SessionRow
                     key={session.sessionKey}
-                    data-testid="session-row-unattached"
-                    style={{
-                      padding: "8px 10px",
-                      borderRadius: 6,
-                      marginTop: 4,
-                      background: "var(--bg-surface)",
-                      border: "1px solid var(--border-default)",
-                      opacity: 0.85,
-                      transition: "border-color 0.15s",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        marginBottom: 4,
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <div
-                          style={{
-                            width: 6,
-                            height: 6,
-                            borderRadius: "50%",
-                            background: color,
-                            boxShadow:
-                              session.status === "running" ? `0 0 6px ${color}` : "none",
-                          }}
-                        />
-                        <span
-                          style={{
-                            fontSize: 11,
-                            color: "var(--text-primary)",
-                            fontFamily: "var(--font-mono)",
-                            fontWeight: session.taskName ? 600 : 400,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                            maxWidth: 140,
-                          }}
-                        >
-                          {session.taskName ?? session.sessionKey.slice(0, 16)}
-                        </span>
-                      </div>
-                      <span
-                        style={{
-                          fontSize: 9,
-                          color,
-                          fontFamily: "var(--font-mono)",
-                          textTransform: "uppercase",
-                        }}
-                      >
-                        {session.status}
-                      </span>
-                    </div>
+                    session={session}
+                    attached
+                    usage={
+                      usageBySession.get(session.sessionKey) ??
+                      usageFromSessionInfo(session)
+                    }
+                    controlsAvailable={Boolean(socketSend)}
+                    onFocusSession={onFocusSession}
+                    onAttachSession={onAttachSession}
+                    onStop={handleStop}
+                    onRemove={handleRemove}
+                  />
+                ))}
+              </div>
+            )}
 
-                    {/* Stats row */}
-                    <div
-                      style={{
-                        display: "flex",
-                        flexWrap: "wrap",
-                        gap: 8,
-                        marginBottom: 6,
-                        fontSize: 10,
-                        color: "var(--text-muted)",
-                        fontFamily: "var(--font-mono)",
-                      }}
-                    >
-                      {(session.totalCost ?? 0) > 0 && (
-                        <span>${session.totalCost?.toFixed(4)}</span>
-                      )}
-                      {(session.turns ?? 0) > 0 && <span>{session.turns}T</span>}
-                      {usageLine && <span>{usageLine}</span>}
-                    </div>
+            {unattachedSessions.length > 0 && (
+              <section className="session-panel__unattached">
+                <button
+                  type="button"
+                  className="session-panel__group-toggle"
+                  onClick={() => setUnattachedOpen((open) => !open)}
+                  aria-expanded={unattachedOpen}
+                  data-testid="unattached-toggle"
+                >
+                  <span>
+                    Not on canvas
+                    <span className="session-panel__group-count">
+                      {unattachedSessions.length}
+                    </span>
+                  </span>
+                  <ChevronDown
+                    aria-hidden="true"
+                    size={14}
+                    strokeWidth={1.8}
+                    className={
+                      unattachedOpen
+                        ? "session-panel__chevron session-panel__chevron--open"
+                        : "session-panel__chevron"
+                    }
+                  />
+                </button>
 
-                    {/* Actions */}
-                    <div style={{ display: "flex", gap: 4 }}>
-                      <button
-                        onClick={() => onAttachSession(session.sessionKey, session.role)}
-                        style={{
-                          flex: 1,
-                          padding: "4px 0",
-                          fontSize: 10,
-                          background: "var(--bg-primary)",
-                          border: "1px solid var(--border-default)",
-                          borderRadius: 4,
-                          color: "var(--text-secondary)",
-                          cursor: "pointer",
-                          fontFamily: "var(--font-mono)",
-                        }}
-                      >
-                        Attach to canvas
-                      </button>
-                      {session.status === "running" && (
-                        <button
-                          onClick={() => handleStop(session.sessionKey)}
-                          style={{
-                            padding: "4px 8px",
-                            fontSize: 10,
-                            background: "var(--danger-bg)",
-                            border: "1px solid var(--danger-color)",
-                            borderRadius: 4,
-                            color: "var(--status-error)",
-                            cursor: "pointer",
-                            fontFamily: "var(--font-mono)",
-                          }}
-                        >
-                          Stop
-                        </button>
-                      )}
-                      {(session.status === "idle" ||
-                        session.status === "stopped" ||
-                        session.status === "error") && (
-                        <button
-                          onClick={() => {
-                            if (socketSend) {
-                              socketSend({
-                                type: "remove_session",
-                                sessionKey: session.sessionKey,
-                              });
-                            }
-                          }}
-                          style={{
-                            padding: "4px 8px",
-                            fontSize: 10,
-                            background:
-                              "color-mix(in srgb, var(--status-stopped) 15%, transparent)",
-                            border: "1px solid var(--border-default)",
-                            borderRadius: 4,
-                            color: "var(--text-muted)",
-                            cursor: "pointer",
-                            fontFamily: "var(--font-mono)",
-                          }}
-                          title="Remove session"
-                        >
-                          ✕
-                        </button>
-                      )}
-                    </div>
+                {unattachedOpen && (
+                  <div className="session-panel__list session-panel__list--unattached">
+                    {unattachedSessions.map((session) => (
+                      <SessionRow
+                        key={session.sessionKey}
+                        session={session}
+                        attached={false}
+                        usage={
+                          usageBySession.get(session.sessionKey) ??
+                          usageFromSessionInfo(session)
+                        }
+                        controlsAvailable={Boolean(socketSend)}
+                        onFocusSession={onFocusSession}
+                        onAttachSession={onAttachSession}
+                        onStop={handleStop}
+                        onRemove={handleRemove}
+                      />
+                    ))}
                   </div>
-                );
-              })}
-          </div>
+                )}
+              </section>
+            )}
+          </>
         )}
       </div>
 
-      {/* Usage section — pinned at the bottom of the panel */}
-      <div
-        style={{
-          borderTop: "1px solid var(--border-default)",
-          flexShrink: 0,
-        }}
-      >
+      <div className="session-panel__usage">
         <UsageSection sessions={usageView} />
       </div>
     </DockPanel>
+  );
+}
+
+function SessionGroupLabel({
+  label,
+  count,
+}: {
+  label: string;
+  count: number;
+}) {
+  return (
+    <div className="session-panel__group-label">
+      <span>{label}</span>
+      <span>{count}</span>
+    </div>
+  );
+}
+
+function EmptySessions() {
+  return (
+    <div className="session-panel__empty">
+      <span className="session-panel__empty-icon" aria-hidden="true">
+        ◌
+      </span>
+      <strong>No sessions yet</strong>
+      <span>Start work on the canvas and active sessions will appear here.</span>
+    </div>
+  );
+}
+
+interface SessionRowProps {
+  session: SessionInfo;
+  attached: boolean;
+  usage: SessionUsage;
+  controlsAvailable: boolean;
+  onFocusSession?: ((sessionKey: string) => void) | undefined;
+  onAttachSession: SessionPanelProps["onAttachSession"];
+  onStop: (sessionKey: string) => void;
+  onRemove: (sessionKey: string) => void;
+}
+
+function SessionRow({
+  session,
+  attached,
+  usage,
+  controlsAvailable,
+  onFocusSession,
+  onAttachSession,
+  onStop,
+  onRemove,
+}: SessionRowProps) {
+  const displayName = session.taskName?.trim() || "Untitled session";
+  const statusColor =
+    STATUS_COLOR[session.status] ?? "var(--text-muted)";
+  const usageLine = formatSessionUsageLine(usage);
+  const metadata = [
+    session.harness,
+    session.model ? shortModelLabel(session.model) : null,
+  ].filter((value): value is string => Boolean(value));
+  const style = { "--session-status": statusColor } as CSSProperties;
+
+  return (
+    <article
+      className="session-card"
+      data-testid={
+        attached ? "session-row-attached" : "session-row-unattached"
+      }
+      data-status={session.status}
+      style={style}
+    >
+      <div className="session-card__heading">
+        <span className="session-card__status-dot" aria-hidden="true" />
+        <div className="session-card__identity">
+          <strong title={session.taskName ?? session.sessionKey}>
+            {displayName}
+          </strong>
+          <span title={metadata.join(" · ") || session.sessionKey}>
+            {metadata.length > 0
+              ? metadata.join(" · ")
+              : session.sessionKey.slice(0, 24)}
+          </span>
+        </div>
+        <span className="session-card__status">{session.status}</span>
+      </div>
+
+      {((session.totalCost ?? 0) > 0 ||
+        (session.turns ?? 0) > 0 ||
+        usageLine) && (
+        <div className="session-card__stats">
+          {(session.totalCost ?? 0) > 0 && (
+            <span>${session.totalCost!.toFixed(4)}</span>
+          )}
+          {(session.turns ?? 0) > 0 && <span>{session.turns} turns</span>}
+          {usageLine && <span className="session-card__tokens">{usageLine}</span>}
+        </div>
+      )}
+
+      {(session.activeMinions ?? []).length > 0 && (
+        <div className="session-card__delegates">
+          <span className="session-card__delegates-label">Delegated</span>
+          <div>
+            {(session.activeMinions ?? []).map((minion) => (
+              <span
+                className="session-card__delegate"
+                key={minion.taskId}
+                title={`${minion.title} · ${minion.status}`}
+              >
+                <span aria-hidden="true" />
+                {minion.title}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="session-card__actions">
+        {attached ? (
+          <button
+            type="button"
+            className="session-card__button session-card__button--primary"
+            onClick={() => onFocusSession?.(session.sessionKey)}
+            disabled={!onFocusSession}
+            title="Center the canvas on this session"
+          >
+            <Crosshair aria-hidden="true" size={12} />
+            Focus
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="session-card__button session-card__button--primary"
+            onClick={() => onAttachSession(session.sessionKey, session.role)}
+            title="Create a canvas node for this session"
+          >
+            <Link2 aria-hidden="true" size={12} />
+            Attach to canvas
+          </button>
+        )}
+
+        {session.status === "running" && (
+          <button
+            type="button"
+            className="session-card__button session-card__button--danger"
+            onClick={() => onStop(session.sessionKey)}
+            disabled={!controlsAvailable}
+            title={
+              controlsAvailable
+                ? "Stop this session"
+                : "Reconnect to stop this session"
+            }
+          >
+            <Square aria-hidden="true" size={10} fill="currentColor" />
+            Stop
+          </button>
+        )}
+
+        {isSessionClearable(session) && (
+          <button
+            type="button"
+            className="session-card__icon-button"
+            onClick={() => onRemove(session.sessionKey)}
+            disabled={!controlsAvailable}
+            aria-label={`Remove ${displayName}`}
+            title={
+              controlsAvailable
+                ? "Remove session"
+                : "Reconnect to remove this session"
+            }
+          >
+            <Trash2 aria-hidden="true" size={13} strokeWidth={1.8} />
+          </button>
+        )}
+      </div>
+    </article>
   );
 }
 
@@ -738,6 +617,48 @@ function usageFromSessionInfo(session: SessionInfo): SessionUsage {
   return usage;
 }
 
+function isVisibleSession(session: SessionInfo): boolean {
+  return session.role !== "minion" && session.role !== "card-composer";
+}
+
+function isSessionInProject(
+  session: SessionInfo,
+  projectPath: string | undefined,
+): boolean {
+  if (!projectPath) return true;
+  if (!session.cwd) return false;
+  const project = normalizePath(projectPath);
+  const cwd = normalizePath(session.cwd);
+  return cwd === project || cwd.startsWith(`${project}/`);
+}
+
+function normalizePath(value: string): string {
+  const normalized = value.replaceAll("\\", "/").replace(/\/+$/, "");
+  return /^[A-Za-z]:\//.test(normalized)
+    ? normalized.toLocaleLowerCase()
+    : normalized;
+}
+
 function isSessionClearable(session: SessionInfo): boolean {
-  return session.status === "idle" || session.status === "stopped";
+  return (
+    session.status === "idle" ||
+    session.status === "stopped" ||
+    session.status === "completed" ||
+    session.status === "error"
+  );
+}
+
+function sortSessions(sessions: SessionInfo[]): SessionInfo[] {
+  return [...sessions].sort((left, right) => {
+    const statusDifference =
+      (STATUS_PRIORITY[left.status] ?? 99) -
+      (STATUS_PRIORITY[right.status] ?? 99);
+    if (statusDifference !== 0) return statusDifference;
+    const activityDifference =
+      (right.lastActivityAt ?? 0) - (left.lastActivityAt ?? 0);
+    if (activityDifference !== 0) return activityDifference;
+    const leftName = left.taskName ?? left.sessionKey;
+    const rightName = right.taskName ?? right.sessionKey;
+    return leftName.localeCompare(rightName);
+  });
 }

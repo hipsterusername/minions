@@ -1,0 +1,20 @@
+id: flow.navigate_spatial_workspace
+type: flow
+name: Navigate and organize the spatial workspace
+summary: Users create, search, focus, arrange, group, connect, resize, annotate, undo, and safely delete nodes while autosave preserves the graph.
+constraints: []
+decisions: [ decision.canonical_work_item_lifecycle ]
+suggested_files: [ src/Canvas.tsx, src/CanvasNode.tsx, src/CanvasMiniMap.tsx, src/use-canvas-keyboard.ts, src/auto-layout.ts, src/components/AnnotationLayer.tsx ]
+suggested_tests: [ src/canvas-state.dom.test.tsx, src/CanvasNode.test.tsx, src/CanvasMiniMap.test.ts, src/use-canvas-keyboard.test.tsx, src/auto-layout.test.ts, src/components/AnnotationLayer.test.tsx ]
+steps:
+  - Create or locate nodes through toolbar, context menu, palette, keyboard, search, or minimap.
+  - Move, resize, group, connect, annotate, and arrange while preserving graph and selection semantics.
+  - Undo, redo, or delete with group confirmation and Leader surface-detach safeguards.
+  - Autosave nodes, graph, and transform together and expose failed persistence for retry.
+freshness:
+  class: code_coupled
+risk: medium
+domain: domain.workspace
+primary_capability: capability.spatial_canvas
+bridges: []
+risks: []

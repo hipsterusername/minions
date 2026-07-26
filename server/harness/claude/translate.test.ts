@@ -14,6 +14,8 @@
 
 import { describe, it, expect } from "vitest";
 import { sdkToNormalized, translateSdkMessage } from "./translate.ts";
+import { terminalProvenance } from "../terminal-provenance.ts";
+import type { NormalizedEvent } from "../types.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -289,6 +291,8 @@ describe("sdkToNormalized: result success", () => {
     expect(kinds).toEqual(["usage", "done"]);
     const done = events.find((e) => e.kind === "done") as { reason: string } | undefined;
     expect(done?.reason).toBe("completed");
+    expect(terminalProvenance(done as Extract<NormalizedEvent, { kind: "done" }>))
+      .toBe("provider");
   });
 
   it("includes costUSD on the usage event", () => {
@@ -349,6 +353,8 @@ describe("sdkToNormalized: result error", () => {
       reason: "error",
       error: "Context window exceeded",
     });
+    expect(terminalProvenance(events[0] as Extract<NormalizedEvent, { kind: "done" }>))
+      .toBe("provider");
   });
 
   it("falls back to 'Unknown error' when errors array is empty", () => {

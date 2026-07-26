@@ -1,0 +1,25 @@
+id: flow.launch_leader
+type: flow
+name: Launch a Leader on a new intention
+summary: A user launches configured Leader work from canvas, kanban, activity, or mobile and observes the resulting canonical run or bare session.
+constraints:
+  - constraint.skill_freezing_and_role_gate
+decisions: [ decision.canonical_work_item_lifecycle, decision.role_gated_agent_tools ]
+risks:
+  - risk.kanban_bound_without_run
+  - risk.dual_ingress_divergence
+suggested_files: [ src/nodes/LeaderNode.tsx, src/KanbanBoard.tsx, src/ActivityView.tsx, src/mobile/LaunchScreen.tsx, server/commands/create-session.ts, server/commands/work-items.ts ]
+suggested_tests: [ src/nodes/LeaderNode.session-init.test.tsx, src/KanbanBoard.test.tsx, src/ActivityView.test.tsx, src/mobile/LaunchScreen.test.tsx, server/commands/create-session.test.ts, server/commands/work-items.test.ts ]
+steps:
+  - Capture prompt, context, harness, model, permission, thinking, isolation, and armed skill choices.
+  - Create and bind a WorkItem for canonical ingress or explicitly create a bare session for legacy ingress.
+  - Enforce project ownership, revision fences, harness readiness, and active session bounds.
+  - Start SessionHost through the resolved harness and replay status to the initiating surface.
+freshness:
+  class: code_coupled
+risk: critical
+domain: domain.execution_lifecycle
+primary_capability: capability.leader_creation
+bridges:
+  - to: constraint.skill_freezing_and_role_gate
+    reason: Leader launch crosses into delegation policy when it freezes armed skill content and authoring eligibility.

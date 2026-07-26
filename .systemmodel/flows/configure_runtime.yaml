@@ -1,0 +1,20 @@
+id: flow.configure_runtime
+type: flow
+name: Configure harness and runtime controls
+summary: Project defaults and per-launch overrides resolve a valid harness, model, permission mode, thinking configuration, and isolation behavior.
+constraints: []
+decisions: [ decision.role_gated_agent_tools ]
+suggested_files: [ src/SettingsMenu.tsx, src/components/SessionToolbar.tsx, src/KanbanBoard.tsx, src/mobile/SettingsScreen.tsx, src/mobile/LaunchScreen.tsx, server/commands/set-model.ts ]
+suggested_tests: [ src/SettingsMenu.test.tsx, src/components/SessionToolbar.test.tsx, src/KanbanBoard.test.tsx, src/mobile/SettingsScreen.test.tsx, src/mobile/LaunchScreen.test.tsx, server/commands/set-model.test.ts ]
+steps:
+  - Load harness inventory and readiness before presenting compatible choices.
+  - Resolve project defaults and per-card or per-launch overrides at session creation.
+  - Render live controls only for synced runControl capabilities.
+  - Apply model or permission changes through typed handlers and carry thinking configuration on the next turn without swapping harness.
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.platform
+primary_capability: capability.runtime_configuration
+bridges: []
+risks: []

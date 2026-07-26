@@ -187,8 +187,10 @@ export function renderCheckpointPrompt(checkpoint: ContextCheckpoint): string {
   const p = checkpoint;
   const sections = [
     `<context-checkpoint version="${p.version}" id="${p.checkpointId}" trigger="${p.trigger}">`,
-    p.trigger === "proactive" ? "<previous-session-context>" : "<context-window-recovery>",
-    "This is the same logical session in a fresh provider thread. Continue the objective without repeating completed work. Treat the authoritative sections as facts and the model handoff as supplemental.",
+    p.trigger === "proactive" ? "<session-continuation>" : "<previous-session-context>",
+    p.trigger === "proactive"
+      ? "This is the same logical session continuing in a fresh provider thread after proactive compaction. Continue the objective. Do NOT re-register completed work; the task registry and dashboard are still live."
+      : "This is the same logical session in a fresh provider thread. Continue the objective without repeating completed work. Treat the authoritative sections as facts and the model handoff as supplemental.",
     `Prior session id: ${p.sourceSessionId ?? "(unknown)"}`,
     `Session name: ${p.sessionName ?? "(unnamed)"}`,
     section("objective", [p.objective.statement, ...labeled("Acceptance criteria", p.objective.acceptanceCriteria), ...labeled("Scope", p.objective.scope), ...labeled("Exclusions", p.objective.exclusions)]),
@@ -212,7 +214,7 @@ export function renderCheckpointPrompt(checkpoint: ContextCheckpoint): string {
     p.recoveryCause ? section("recovery-cause", [p.recoveryCause]) : "",
     p.modelHandoff ? section("model-authored-handoff", [p.modelHandoff]) : "",
     section("checkpoint-quality", p.qualityWarnings),
-    p.trigger === "proactive" ? "</previous-session-context>" : "</context-window-recovery>",
+    p.trigger === "proactive" ? "</session-continuation>" : "</previous-session-context>",
     "</context-checkpoint>",
   ];
   return truncateMiddle(sections.filter(Boolean).join("\n"), MAX_PROMPT_CHARS);

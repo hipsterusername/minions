@@ -1,15 +1,4 @@
-/**
- * SessionRegistry — the in-memory home for every live SessionHost.
- *
- * Provides typed accessors around the raw `Map<string, SessionHost>` that
- * `server/index.ts` used to own directly, plus the small amount of glue
- * required to spawn children (minions, self-resume after a wait timer)
- * and to rehydrate sessions from SQLite at boot.
- *
- * Extracted in Phase 5.1 so that `server/index.ts` no longer has to
- * know about Map mechanics — it asks the registry for a host by key and
- * dispatches against it.
- */
+/** In-memory home for live and hydrated SessionHost instances. */
 
 import {
   SessionHost,
@@ -17,7 +6,12 @@ import {
   type StartSessionOptions,
   type SessionRole,
 } from "./session-host.ts";
-import { hydrateSessionsFromDb } from "./session-persist.ts";
+import {
+  hydrateSessionsFromDb,
+  loadArmedSystemPrompt,
+  persistenceDb,
+  persistArmedSystemPrompt,
+} from "./session-persist.ts";
 import type { RuntimeSessionInfo, TaskManagerState, TaskRecord } from "./task-tools.ts";
 import type { WorktreeLifecycle } from "./worktree-types.ts";
 import { applyLifecycleEvent } from "./task-lifecycle.ts";
@@ -32,8 +26,13 @@ import {
   type SessionReviewState,
   type SessionTerminalReason,
 } from "./session-review-lifecycle.ts";
+import { inspectRunRecoveryWitness } from "./work-item-recovery.ts";
 
 const log = serverLogger.child("session-registry");
+
+type ArmedPromptHost = SessionHost & {
+  armedSystemPrompt?: string | null;
+};
 
 export class SessionRegistry {
   private readonly map = new Map<string, SessionHost>();
@@ -109,6 +108,25 @@ export class SessionRegistry {
     if (!host) {
       host = new SessionHost(opts.sessionKey, opts.cwd);
       this.map.set(opts.sessionKey, host);
+    }
+    const armedHost = host as ArmedPromptHost;
+    const role = opts.role ?? host.role;
+    if (role === "minion") {
+      let armedPrompt =
+        armedHost.armedSystemPrompt ?? loadArmedSystemPrompt(opts.sessionKey);
+      const invocationKind = opts.invocationKind ?? "new_run";
+      if (
+        armedPrompt == null &&
+        invocationKind === "new_run" &&
+        opts.systemPrompt !== undefined
+      ) {
+        armedPrompt = persistArmedSystemPrompt(
+          opts.sessionKey,
+          opts.systemPrompt,
+        );
+      }
+      armedHost.armedSystemPrompt = armedPrompt;
+      if (armedPrompt !== null) opts = { ...opts, systemPrompt: armedPrompt };
     }
     // Fire-and-forget; the host fans progress out via the bus.
     void host.start(opts, this.deps);
@@ -262,7 +280,14 @@ export class SessionRegistry {
   hydrateFromDb(): number {
     try {
       const hydrated = hydrateSessionsFromDb();
-      for (const { row, tasks, render, events, usageTotals } of hydrated) {
+      for (const {
+        row,
+        armedSystemPrompt,
+        tasks,
+        render,
+        events,
+        usageTotals,
+      } of hydrated) {
         const host = new SessionHost(
           row.session_key,
           row.cwd ?? process.cwd(),
@@ -284,16 +309,24 @@ export class SessionRegistry {
           lifecycleRevision: row.lifecycle_revision ?? 0,
         };
         if (wasActive) {
-          host.reviewLifecycle = finishRun(host.reviewLifecycle, {
-            reason: "abort",
-            at: Date.now(),
-          });
+          const db = persistenceDb();
+          const witness = db
+            ? inspectRunRecoveryWitness(db, row.session_key)
+            : { action: "interrupt" as const, terminationIntent: null };
+          if (witness.action !== "resume") {
+            host.reviewLifecycle = finishRun(host.reviewLifecycle, {
+              reason: witness.action === "stop"
+                && witness.terminationIntent === "stop" ? "stop" : "abort",
+              at: Date.now(),
+            });
+          }
         }
         host.totalCost = row.total_cost;
         host.turns = row.turns;
         host.usageTotals = usageTotals;
         host.model = row.model;
         host.role = (row.role as SessionRole) ?? "default";
+        (host as ArmedPromptHost).armedSystemPrompt = armedSystemPrompt;
         host.taskName = row.task_name;
         host.workItemId = row.work_item_id ?? null;
         host.seedRunLineage({

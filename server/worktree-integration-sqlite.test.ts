@@ -117,6 +117,17 @@ describe("SQLite worktree integration runtime", () => {
     db.close();
   });
 
+  it("recovers a stopped-sealed contribution by collecting its partial work after restart", async () => {
+    const { db, service } = setup(); await service.bindRun({ workItemId: "work", runKey: "run-stopped" });
+    service.transitionProvisioning("run-stopped", "active");
+    db.prepare(`INSERT INTO sessions (session_key,project_id,status,cwd,role,work_item_id,
+      run_number,run_kind,started_at,ended_at,run_outcome)
+      VALUES ('run-stopped','project','stopped','/repo','leader','work',1,'primary',1,2,'stopped')`).run();
+    await expect(service.recoverTerminalContributions()).resolves.toContain("run-stopped");
+    expect(findContributionByRun(db, "run-stopped")).toMatchObject({
+      state: "ready", head_sha: "head456" }); db.close();
+  });
+
   it("recovers an error-sealed lineage resolution as failed after restart", async () => {
     const { db, service } = setup(); await service.bindRun({ workItemId: "work", runKey: "run-1" });
     const contribution = findContributionByRun(db, "run-1")!;

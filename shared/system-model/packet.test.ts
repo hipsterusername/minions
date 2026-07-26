@@ -27,5 +27,7 @@ describe("workPacketSchema", () => {
       matchConfidence: "high",
     });
     expect(packet.amendments).toEqual([]);
+    expect(packet.scope.surfaces).toEqual([]);
+    expect(packet.scope.entryPoints).toEqual([]);
   });
 });

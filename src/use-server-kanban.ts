@@ -3,6 +3,7 @@ import type { WorkItemSnapshot } from "../shared/work-item-contracts.ts";
 import type { KanbanImportCard } from "../shared/work-item-kanban.ts";
 import { DEFAULT_COLUMNS, type KanbanAction, type KanbanBoard, type KanbanCard } from "./kanban-types.ts";
 import type { ServerMessage, SocketSubscribe } from "./use-socket.ts";
+import { randomUuid } from "./random-id.ts";
 
 const STORAGE_PREFIX = "kanban-";
 const MIGRATION_PREFIX = "kanban-server-migrated-";
@@ -73,7 +74,7 @@ export function useServerKanban(input: {
       pendingBindingAttach.current.delete(message.requestId);
       const attached = message.result as { workItem?: WorkItemSnapshot } | undefined;
       if (message.success && attached?.workItem?.id === binding.workItemId) {
-        const updateRequestId = crypto.randomUUID();
+        const updateRequestId = randomUuid();
         pendingBindingUpdate.current.set(updateRequestId, { ...binding,
           lifecycleRevision: attached.workItem.lifecycle.lifecycleRevision,
           currentRunKey: attached.workItem.currentRunKey });
@@ -90,7 +91,7 @@ export function useServerKanban(input: {
     if (completionId) {
       pendingCompletion.current.delete(message.requestId);
       if (message.success && result?.workItem?.id === completionId)
-        input.send({ type: "move_work_item_card", requestId: crypto.randomUUID(), workItemId: completionId,
+        input.send({ type: "move_work_item_card", requestId: randomUuid(), workItemId: completionId,
           expectedWorkflowRevision: result.workItem.workflowRevision,
           columnId: "history", targetIndex: 0 });
     }
@@ -99,7 +100,7 @@ export function useServerKanban(input: {
       pendingBindingUpdate.current.delete(message.requestId);
       const latest = message.latest as { workItem?: WorkItemSnapshot } | undefined;
       if (!message.success) input.send({ type: "detach_work_item_surface",
-        requestId: crypto.randomUUID(), workItemId: binding.workItemId,
+        requestId: randomUuid(), workItemId: binding.workItemId,
         expectedLifecycleRevision: latest?.workItem?.lifecycle.lifecycleRevision
           ?? binding.lifecycleRevision,
         expectedCurrentRunKey: latest?.workItem
@@ -107,7 +108,7 @@ export function useServerKanban(input: {
         surface: "canvas", bindingId: binding.bindingId });
       if (message.success && result?.workItem?.id === binding.workItemId
         && binding.priorBindingId && binding.priorBindingId !== binding.bindingId)
-        input.send({ type: "detach_work_item_surface", requestId: crypto.randomUUID(),
+        input.send({ type: "detach_work_item_surface", requestId: randomUuid(),
           workItemId: binding.workItemId,
           expectedLifecycleRevision: result.workItem.lifecycle.lifecycleRevision,
           expectedCurrentRunKey: result.workItem.currentRunKey,
@@ -119,7 +120,7 @@ export function useServerKanban(input: {
     if (pendingImport.current?.projectId === input.projectId) return;
     const board = readLegacyKanbanBoard(input.projectId);
     if (!board?.cards.length) return;
-    const requestId = crypto.randomUUID(); pendingImport.current = { projectId: input.projectId, requestId };
+    const requestId = randomUuid(); pendingImport.current = { projectId: input.projectId, requestId };
     input.send({ type: "import_kanban_board", requestId, projectId: input.projectId,
       projectPath: input.projectPath, migrationKey: MIGRATION_KEY,
       cards: boardToKanbanImport(board, input.existingByLeaderNodeId) });
@@ -130,7 +131,7 @@ export function useServerKanban(input: {
   const dispatch = useCallback((action: KanbanAction) => {
     if (action.type === "ADD_CARD") {
       const { id: _id, title, columnId, createdAt: _created, ...cardPatch } = action.card;
-      input.send({ type: "create_work_item", requestId: crypto.randomUUID(),
+      input.send({ type: "create_work_item", requestId: randomUuid(),
         projectId: input.projectId, projectPath: input.projectPath, title,
         changeMode: action.card.worktreeIsolation ? "worktree" : "live",
         workflowColumnId: columnId, workflowRank: String(Date.now()), cardPatch }); return;
@@ -140,14 +141,14 @@ export function useServerKanban(input: {
       if (item && ["draft", "inactive"].includes(item.lifecycle.runtimeState)
         && item.lifecycle.resolution !== "archived")
         input.send({ type: "archive_work_item",
-        requestId: crypto.randomUUID(), workItemId: item.id,
+        requestId: randomUuid(), workItemId: item.id,
         expectedLifecycleRevision: item.lifecycle.lifecycleRevision,
         expectedCurrentRunKey: item.currentRunKey }); return;
     }
     if (action.type === "CLEAR_ARCHIVE") {
       for (const item of projectItems.filter((entry) => entry.workflowColumnId === "history"
         && entry.lifecycle.runtimeState === "inactive" && entry.lifecycle.resolution !== "archived"))
-        input.send({ type: "archive_work_item", requestId: crypto.randomUUID(), workItemId: item.id,
+        input.send({ type: "archive_work_item", requestId: randomUuid(), workItemId: item.id,
           expectedLifecycleRevision: item.lifecycle.lifecycleRevision,
           expectedCurrentRunKey: item.currentRunKey }); return;
     }
@@ -158,13 +159,13 @@ export function useServerKanban(input: {
         ? item.card.subtasks.map((task) => task.id === action.subtaskId ? { ...task, done: !task.done } : task)
         : action.type === "ADD_SUBTASK" ? [...item.card.subtasks, action.subtask]
           : item.card.subtasks.filter((task) => task.id !== action.subtaskId);
-      input.send({ type: "update_work_item_card", requestId: crypto.randomUUID(),
+      input.send({ type: "update_work_item_card", requestId: randomUuid(),
         workItemId: item.id, expectedWorkflowRevision: item.workflowRevision,
         cardPatch: { subtasks } }); return;
     }
     if (action.type === "BIND_LEADER") {
       const item = byId.get(action.cardId); if (!item) return;
-      const requestId = crypto.randomUUID(); pendingBindingAttach.current.set(requestId,
+      const requestId = randomUuid(); pendingBindingAttach.current.set(requestId,
         { workItemId: item.id, bindingId: action.leaderNodeId,
           ...(item.card.leaderNodeId ? { priorBindingId: item.card.leaderNodeId } : {}) });
       input.send({ type: "attach_work_item_surface", requestId, workItemId: item.id,
@@ -174,14 +175,14 @@ export function useServerKanban(input: {
     }
     if (action.type === "COMPLETE_CARD") {
       const item = byId.get(action.cardId); if (!item) return;
-      const requestId = crypto.randomUUID(); pendingCompletion.current.set(requestId, item.id);
+      const requestId = randomUuid(); pendingCompletion.current.set(requestId, item.id);
       input.send({ type: "update_work_item_card", requestId,
         workItemId: item.id, expectedWorkflowRevision: item.workflowRevision,
         cardPatch: { ...(action.summary !== undefined ? { agentSummary: action.summary } : {}),
           ...(action.cost !== undefined ? { agentCost: action.cost } : {}) } });
       if (item.lifecycle.runtimeState === "inactive" && item.lifecycle.outcome !== "none"
         && item.lifecycle.resolution === "open")
-        input.send({ type: "review_work_item", requestId: crypto.randomUUID(), workItemId: item.id,
+        input.send({ type: "review_work_item", requestId: randomUuid(), workItemId: item.id,
           expectedLifecycleRevision: item.lifecycle.lifecycleRevision,
           expectedCurrentRunKey: item.currentRunKey });
       return;
@@ -190,7 +191,7 @@ export function useServerKanban(input: {
       || action.type === "HALT_CARD" || action.type === "RESUME_HALTED_CARD") return;
     if (action.type !== "UPDATE_CARD" && action.type !== "MOVE_CARD") return;
     const item = byId.get(action.cardId); if (!item) return;
-    const requestId = crypto.randomUUID();
+    const requestId = randomUuid();
     if (action.type === "MOVE_CARD") input.send({ type: "move_work_item_card", requestId,
       workItemId: item.id, expectedWorkflowRevision: item.workflowRevision,
       columnId: action.targetColumnId, targetIndex: action.targetIndex ?? 0 });

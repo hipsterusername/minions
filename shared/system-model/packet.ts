@@ -38,6 +38,14 @@ export const workPacketSchema = z.object({
     constraints: z.array(z.string()),
     decisions: z.array(z.string()),
     risks: z.array(z.string()),
+    surfaces: z.array(z.string()).default([]),
+    entryPoints: z.array(z.object({
+      capabilityId: z.string(),
+      surfaceId: z.string(),
+      files: z.array(z.string()).default([]),
+      tests: z.array(z.string()).default([]),
+      flows: z.array(z.string()).default([]),
+    })).default([]),
     suggestedFiles: z.array(z.string()),
     suggestedTests: z.array(z.string()),
   }),
@@ -61,4 +69,12 @@ export const workPacketSchema = z.object({
 export type RequiredVerification = z.infer<typeof requiredVerificationSchema>;
 export type ReviewGateRequirement = z.infer<typeof reviewGateRequirementSchema>;
 export type WorkPacketStatus = z.infer<typeof workPacketStatusSchema>;
-export type WorkPacket = z.infer<typeof workPacketSchema>;
+type ParsedWorkPacket = z.infer<typeof workPacketSchema>;
+type ParsedScope = ParsedWorkPacket["scope"];
+/** Optional additions keep source compatibility while schema parsing fills defaults. */
+export type WorkPacket = Omit<ParsedWorkPacket, "scope"> & {
+  scope: Omit<ParsedScope, "surfaces" | "entryPoints"> & {
+    surfaces?: ParsedScope["surfaces"];
+    entryPoints?: ParsedScope["entryPoints"];
+  };
+};

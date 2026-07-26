@@ -1,0 +1,43 @@
+id: capability.skill_library
+type: capability
+name: Skill library and arming
+summary: Users can maintain reusable project skills, configure them at launch, freeze their compiled instructions for a run, and grant exact skill-gated authoring tools.
+constraints:
+  - constraint.skill_freezing_and_role_gate
+decisions: [ decision.role_gated_agent_tools ]
+risks:
+  - risk.agent_tool_allowlist_drift
+suggested_files: [ src/SkillsBrowser.tsx, src/SkillEditor.tsx, src/SkillImportModal.tsx, src/mobile/LaunchSkillsPanel.tsx, server/skills.ts, server/skill-authoring-tools.ts ]
+suggested_tests: [ src/SkillsBrowser.test.tsx, src/SkillEditor.test.tsx, src/SkillImportModal.test.tsx, src/mobile/LaunchSkillsPanel.test.tsx, server/skills.test.ts, server/skill-authoring-tools.test.ts ]
+keywords: [ skill, subskill, library, arm, variable, prompt, freeze, skill_builder, import, edit, duplicate, authoring ]
+entry_points:
+  - surface: surface.canvas
+    summary: Browse and edit the project library and arm skills from the Leader configuration UI.
+    files: [ src/SkillsBrowser.tsx, src/SkillEditor.tsx, src/SkillImportModal.tsx, src/nodes/leader/skills/SkillFlyout.tsx ]
+    tests: [ src/SkillsBrowser.test.tsx, src/SkillEditor.test.tsx, src/SkillImportModal.test.tsx ]
+    flows: [ flow.arm_and_author_skills, flow.launch_leader ]
+  - surface: surface.kanban
+    summary: Persist armed skill selections and variables in card launch configuration.
+    files: [ src/KanbanBoard.tsx ]
+    tests: [ src/KanbanBoard.test.tsx ]
+    flows: [ flow.arm_and_author_skills, flow.launch_or_resume_card ]
+  - surface: surface.mobile
+    summary: Select skills and provide variables from the remote launch experience.
+    files: [ src/mobile/LaunchSkillsPanel.tsx, src/mobile/LaunchScreen.tsx ]
+    tests: [ src/mobile/LaunchSkillsPanel.test.tsx, src/mobile/LaunchScreen.test.tsx ]
+    flows: [ flow.arm_and_author_skills, flow.launch_leader ]
+  - surface: surface.agent_tools
+    summary: Compile frozen prompts, load armed subskills, and conditionally expose skill-authoring MCP tools.
+    files: [ server/task-tools/task-prompt.ts, server/subskill-tools.ts, server/skill-authoring-tools.ts ]
+    tests: [ server/task-tools/task-prompt.test.ts, server/subskills.test.ts, server/skill-authoring-tools.test.ts ]
+    flows: [ flow.arm_and_author_skills, flow.delegate_and_steer_minions ]
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.delegation
+depends_on: []
+bridges:
+  - to: flow.launch_leader
+    reason: Armed skills are frozen when the execution-lifecycle leader launch flow spawns the host.
+  - to: flow.launch_or_resume_card
+    reason: Card-selected skills are consumed by the execution-lifecycle canonical launch flow.

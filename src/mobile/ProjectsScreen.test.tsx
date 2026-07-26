@@ -40,8 +40,8 @@ describe("ProjectsScreen", () => {
       <ProjectsScreen
         sessions={[
           // Two sessions scoped to Alpha (one a worktree subpath, one in error).
-          session({ sessionKey: "a1", cwd: "/work/alpha", status: "error" }),
-          session({ sessionKey: "a2", cwd: "/work/alpha/.minions/worktrees/leader-1", status: "running" }),
+          session({ sessionKey: "a1", cwd: "/work/alpha", status: "error", totalCost: 0.12 }),
+          session({ sessionKey: "a2", cwd: "/work/alpha/.minions/worktrees/leader-1", status: "running", totalCost: 0.3 }),
           // Minions are excluded from the count.
           session({ sessionKey: "m1", cwd: "/work/alpha", role: "minion", status: "running" }),
           // A Beta session.
@@ -55,8 +55,8 @@ describe("ProjectsScreen", () => {
       expect(screen.getByText("Alpha")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("2 sessions · needs attention")).toBeInTheDocument();
-    expect(screen.getByText("1 session")).toBeInTheDocument();
+    expect(screen.getByText("▶ 1 running · $0.42 · ⚠ 1 needs you")).toBeInTheDocument();
+    expect(screen.getByText("1 session · $0.00")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Alpha"));
     expect(onSelectProject).toHaveBeenCalledWith(

@@ -45,7 +45,10 @@ afterEach(() => {
   diffShouldThrow = false;
 });
 
-function makeCtx(opts?: { worktreeInfo?: WorktreeInfo | null }) {
+function makeCtx(opts?: {
+  worktreeInfo?: WorktreeInfo | null;
+  workItemId?: string | null;
+}) {
   const sent: Record<string, unknown>[] = [];
   const client = {
     readyState: 1,
@@ -79,6 +82,29 @@ function makeCtx(opts?: { worktreeInfo?: WorktreeInfo | null }) {
     onStateChange: vi.fn(),
     sent,
     worktreeInfo,
+    getSessionRuntime: opts?.workItemId
+      ? () => ({
+          sessionKey: "leader-1",
+          workItemId: opts.workItemId,
+          runKey: "leader-1",
+          runKind: "primary",
+          sessionId: null,
+          status: "running",
+          role: "leader",
+          cwd: "/p",
+          model: null,
+          harness: "claude",
+          totalCost: 0,
+          turns: 0,
+          isLive: true,
+          lastActivityAt: null,
+          lastActivityAgeMs: null,
+          lastEventType: null,
+          lastSdkEventKind: null,
+          lastError: null,
+          lastErrorFull: null,
+        })
+      : undefined,
   };
   return ctx;
 }
@@ -86,8 +112,11 @@ function makeCtx(opts?: { worktreeInfo?: WorktreeInfo | null }) {
 async function call(
   def: NormalizedToolDef,
   args: unknown,
-): Promise<{ content: { type: "text"; text: string }[] }> {
-  return (await def.handler(args)) as { content: { type: "text"; text: string }[] };
+): Promise<{ content: { type: "text"; text: string }[]; isError?: boolean }> {
+  return (await def.handler(args)) as {
+    content: { type: "text"; text: string }[];
+    isError?: boolean;
+  };
 }
 
 describe("request_approval", () => {
@@ -144,6 +173,20 @@ describe("request_approval", () => {
     expect(ctx.taskState.approval).toBeNull();
     expect(ctx.sent).toEqual([]);
     expect(out.content[0]!.text.toLowerCase()).toContain("worktree");
+  });
+
+  it("rejects canonical work-item approval without changing decision state", async () => {
+    const ctx = makeCtx({ workItemId: "work-1" });
+    const tool = createRequestApprovalToolDef(ctx);
+
+    const out = await call(tool, { summary: "x" });
+
+    expect(out.isError).toBe(true);
+    expect(out.content[0]!.text).toMatch(/canonical.*lineage/i);
+    expect(diffMock).not.toHaveBeenCalled();
+    expect(ctx.taskState.approval).toBeNull();
+    expect(ctx.onStateChange).not.toHaveBeenCalled();
+    expect(ctx.sent).toEqual([]);
   });
 
   it("surfaces a typed error message when getDetailedDiff throws", async () => {

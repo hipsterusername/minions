@@ -8,7 +8,13 @@
  *     panel subscribes globally, not per-session)
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { useEffect } from "react";
 import { SessionPanel } from "./SessionPanel.tsx";
 import { DockProvider, useDock } from "./BottomRightDock.tsx";
@@ -112,7 +118,7 @@ describe("SessionPanel attached / unattached grouping", () => {
     // Unattached row is hidden by default — only the collapsed toggle is shown.
     expect(screen.queryByTestId("session-row-unattached")).toBeNull();
     const toggle = screen.getByTestId("unattached-toggle");
-    expect(toggle).toHaveTextContent(/not on canvas \(1\)/i);
+    expect(toggle).toHaveTextContent(/not on canvas\s*1/i);
     expect(toggle).toHaveAttribute("aria-expanded", "false");
 
     // Clicking Focus invokes onFocusSession with the attached session key.
@@ -205,7 +211,87 @@ describe("SessionPanel attached / unattached grouping", () => {
     expect(screen.getByTestId("session-row-attached")).toHaveTextContent("$0.1234");
   });
 
-  it("clears all visible idle and stopped sessions without touching active or hidden sessions", () => {
+  it("keeps the usage summary scoped to sessions represented by the panel", () => {
+    renderOpen({
+      socketSubscribe: subscribe,
+      onAttachSession: () => {},
+      attachedSessionKeys: new Set(["leader-1"]),
+    });
+
+    emitSessions([
+      session({
+        sessionKey: "leader-1",
+        role: "leader",
+        totalCost: 1,
+        turns: 2,
+      }),
+      session({
+        sessionKey: "minion-1",
+        role: "minion",
+        totalCost: 9,
+        turns: 20,
+      }),
+    ]);
+
+    const summary = within(screen.getByTestId("usage-section"));
+    expect(summary.getByTitle("$1.0000")).toBeInTheDocument();
+    expect(summary.queryByTitle("$10.0000")).toBeNull();
+    expect(summary.getByTitle("2")).toBeInTheDocument();
+  });
+
+  it("hides unattached sessions that belong to a different project", () => {
+    const socketSend = vi.fn();
+    renderOpen({
+      socketSend,
+      socketSubscribe: subscribe,
+      projectPath: "/repos/current",
+      onAttachSession: () => {},
+      attachedSessionKeys: new Set(["attached-from-worktree"]),
+    });
+
+    emitSessions([
+      session({
+        sessionKey: "current-unattached",
+        cwd: "/repos/current/packages/app",
+        taskName: "Current project",
+      }),
+      session({
+        sessionKey: "other-unattached",
+        cwd: "/repos/other",
+        taskName: "Other project",
+      }),
+      session({
+        sessionKey: "attached-from-worktree",
+        cwd: "/tmp/external-worktree",
+        taskName: "Attached elsewhere",
+      }),
+    ]);
+
+    expect(screen.getByTestId("session-row-attached")).toHaveTextContent(
+      "Attached elsewhere",
+    );
+    expect(screen.getByTestId("unattached-toggle")).toHaveTextContent("1");
+    fireEvent.click(screen.getByTestId("unattached-toggle"));
+    expect(screen.getByTestId("session-row-unattached")).toHaveTextContent(
+      "Current project",
+    );
+    expect(screen.queryByText("Other project")).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Clear inactive sessions" }),
+    );
+    expect(socketSend).toHaveBeenCalledTimes(2);
+    expect(socketSend).toHaveBeenCalledWith({
+      type: "remove_session",
+      sessionKey: "current-unattached",
+    });
+    expect(socketSend).toHaveBeenCalledWith({
+      type: "remove_session",
+      sessionKey: "attached-from-worktree",
+    });
+  });
+
+  it("clears all visible inactive sessions without touching active or hidden sessions", () => {
     const socketSend = vi.fn();
     renderOpen({
       socketSend,
@@ -231,9 +317,11 @@ describe("SessionPanel attached / unattached grouping", () => {
       session({ sessionKey: "composer-1", status: "stopped", role: "card-composer" }),
     ]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Session Clear All" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Clear inactive sessions" }),
+    );
 
-    expect(socketSend).toHaveBeenCalledTimes(2);
+    expect(socketSend).toHaveBeenCalledTimes(3);
     expect(socketSend).toHaveBeenNthCalledWith(1, {
       type: "remove_session",
       sessionKey: "idle-1",
@@ -242,9 +330,13 @@ describe("SessionPanel attached / unattached grouping", () => {
       type: "remove_session",
       sessionKey: "stopped-1",
     });
+    expect(socketSend).toHaveBeenNthCalledWith(3, {
+      type: "remove_session",
+      sessionKey: "error-1",
+    });
   });
 
-  it("disables Session Clear All when there are no idle or stopped sessions", () => {
+  it("disables Clear inactive when only running sessions exist", () => {
     renderOpen({
       socketSend: vi.fn(),
       socketSubscribe: subscribe,
@@ -257,6 +349,25 @@ describe("SessionPanel attached / unattached grouping", () => {
       session({ sessionKey: "running-1", status: "running", taskName: "Running" }),
     ]);
 
-    expect(screen.getByRole("button", { name: "Session Clear All" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Clear inactive sessions" }),
+    ).toBeDisabled();
+  });
+
+  it("disables destructive controls when there is no socket connection", () => {
+    renderOpen({
+      socketSubscribe: subscribe,
+      onAttachSession: () => {},
+      onFocusSession: () => {},
+      attachedSessionKeys: new Set(["running-1", "idle-1"]),
+    });
+
+    emitSessions([
+      session({ sessionKey: "running-1", status: "running", taskName: "Running" }),
+      session({ sessionKey: "idle-1", status: "idle", taskName: "Idle" }),
+    ]);
+
+    expect(screen.getByRole("button", { name: "Stop" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Remove Idle" })).toBeDisabled();
   });
 });

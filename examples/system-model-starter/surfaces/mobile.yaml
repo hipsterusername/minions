@@ -1,0 +1,7 @@
+id: surface.mobile
+type: surface
+name: Mobile
+summary: The mobile workspace experience.
+keywords: [mobile]
+suggested_files: [src/mobile/workspace.ts]
+suggested_tests: [src/mobile/workspace.test.ts]

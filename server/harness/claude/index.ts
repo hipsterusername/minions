@@ -9,8 +9,7 @@
  * architecture test enforces that boundary.
  */
 
-import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { registerHarness } from "../index.ts";
 
 function compareNames(a: string, b: string): number {
@@ -44,6 +43,13 @@ import { resolveModelAlias, supportsAdaptiveThinking } from "./models.ts";
 import { buildClaudePrompt } from "./prompt.ts";
 import { checkClaudeReadiness, resolveClaudeRuntime } from "./runtime.ts";
 import { createClaudeMutationHooks } from "./mutation-hooks.ts";
+import {
+  HARNESS_DRAIN,
+  persistAbortedHarnessTerminal,
+  tagTerminalProvenance,
+  trackHarnessDrain,
+  type DrainableHarnessControl,
+} from "../terminal-provenance.ts";
 
 // ── Capability declaration ────────────────────────────────────────────────────
 
@@ -81,6 +87,7 @@ const CLAUDE_BUILT_IN_TOOLS = [
  * models.ts — update both when new model IDs are released.
  */
 const CLAUDE_STATIC_MODELS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: "claude-opus-5", label: "Opus 5" },
   { id: "claude-fable-5", label: "Fable 5" },
   { id: "claude-opus-4-8", label: "Opus 4.8" },
   { id: "claude-opus-4-7", label: "Opus 4.7" },
@@ -185,8 +192,7 @@ class ClaudeHarness implements AgentHarness {
       ]),
     );
 
-    // Shared mutable reference populated when the generator starts iterating.
-    // Control methods guard on null so they are safe to call at any time.
+    // Populated when the generator starts; controls remain safe before then.
     let handle: SdkQueryHandle | null = null;
 
     async function* makeEvents(): AsyncGenerator<NormalizedEvent> {
@@ -250,8 +256,6 @@ class ClaudeHarness implements AgentHarness {
         }) as unknown as SdkQueryHandle;
 
         for await (const msg of handle) {
-          if (abortController.signal.aborted) break;
-
           // Intercept Claude Agent-tool sub-agent system events before the
           // generic translator so they become NormalizedEvent variants.
           const raw = msg as { type?: string; subtype?: string } & Record<string, unknown>;
@@ -299,6 +303,14 @@ class ClaudeHarness implements AgentHarness {
           }
 
           const events = sdkToNormalized(msg);
+          if (abortController.signal.aborted) {
+            for (const evt of events) {
+              if (evt.kind === "done") {
+                persistAbortedHarnessTerminal(opts.sessionKey, evt);
+              }
+            }
+            continue;
+          }
           for (const evt of events) {
             yield evt;
           }
@@ -306,10 +318,24 @@ class ClaudeHarness implements AgentHarness {
       } catch (err: unknown) {
         const error = err instanceof Error ? err.message : String(err);
         if (isClaudeToolUseDiagnostic(error)) {
-          yield { kind: "done", reason: "completed" };
+          const done = tagTerminalProvenance(
+            { kind: "done", reason: "completed" },
+            "adapter",
+          );
+          if (abortController.signal.aborted) {
+            persistAbortedHarnessTerminal(opts.sessionKey, done);
+          }
+          yield done;
           return;
         }
-        yield { kind: "done", reason: "error", error };
+        const done = tagTerminalProvenance(
+          { kind: "done", reason: "error", error },
+          "adapter",
+        );
+        if (abortController.signal.aborted) {
+          persistAbortedHarnessTerminal(opts.sessionKey, done);
+        }
+        yield done;
         return;
       } finally {
         opts.mutationCoordination?.disconnect();
@@ -318,11 +344,17 @@ class ClaudeHarness implements AgentHarness {
       // Ensure `done` is always emitted, even when the loop exits cleanly
       // without a result message (e.g. abort before result arrives).
       if (abortController.signal.aborted) {
-        yield { kind: "done", reason: "abort" };
+        const done = tagTerminalProvenance(
+          { kind: "done", reason: "abort" },
+          "adapter",
+        );
+        persistAbortedHarnessTerminal(opts.sessionKey, done);
+        yield done;
       }
     }
 
-    const control: HarnessRunControl = {
+    const tracked = trackHarnessDrain(makeEvents());
+    const control: DrainableHarnessControl = {
       abort(): void {
         // Signal the SDK first. The generator's `finally` releases mutation
         // leases only after the SDK stream has actually unwound, preventing a
@@ -352,9 +384,9 @@ class ClaudeHarness implements AgentHarness {
         handle?.reconnectMcpServer?.(serverName) ?? Promise.resolve(undefined),
       toggleMcpServer: (serverName: string, enabled: boolean) =>
         handle?.toggleMcpServer?.(serverName, enabled) ?? Promise.resolve(undefined),
+      [HARNESS_DRAIN]: tracked.drain,
     };
-
-    return { events: makeEvents(), control };
+    return { events: tracked.events, control };
   }
 }
 

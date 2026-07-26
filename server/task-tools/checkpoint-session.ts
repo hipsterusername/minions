@@ -2,7 +2,10 @@ import { z } from "zod/v4";
 import type { NormalizedToolDef } from "../harness/types.ts";
 import { textResult } from "../harness/tool-result.ts";
 import type { TaskToolContext } from "./types.ts";
-import type { RenderComponent } from "../../shared/render-dsl.ts";
+import {
+  findUnansweredForms,
+  type RenderComponent,
+} from "../../shared/render-dsl.ts";
 
 const checkpointInputSchema = z.object({});
 const pendingHandoff = new Map<string, string>();
@@ -32,7 +35,10 @@ export function validateCheckpointBoundary(ctx: {
   if (ctx.taskState.pendingWait?.wakeOn === "any_terminal") {
     return { safe: false, reason: "any-terminal child steering wait is pending" };
   }
-  if (ctx.renderComponents && hasPendingForm(ctx.renderComponents)) {
+  if (
+    ctx.renderComponents &&
+    findUnansweredForms(ctx.renderComponents).length > 0
+  ) {
     return { safe: false, reason: "form input is pending" };
   }
   return { safe: true };
@@ -68,19 +74,4 @@ export function createCheckpointSessionToolDef(
       );
     },
   };
-}
-
-function hasPendingForm(components: RenderComponent[]): boolean {
-  for (const component of components) {
-    if (component.type === "form" && !component.submittedAnswers) return true;
-    if (component.type === "section" && hasPendingForm(component.components)) {
-      return true;
-    }
-    if (component.type === "tabs") {
-      for (const tab of component.tabs) {
-        if (hasPendingForm(tab.components)) return true;
-      }
-    }
-  }
-  return false;
 }

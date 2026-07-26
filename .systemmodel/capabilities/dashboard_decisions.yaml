@@ -1,0 +1,48 @@
+id: capability.dashboard_decisions
+type: capability
+name: Dashboards and structured decisions
+summary: Agents can publish persistent structured dashboards and forms that users inspect and answer consistently across canvas, kanban, activity, and mobile.
+constraints: []
+decisions: [ decision.typed_event_bus, decision.role_gated_agent_tools ]
+suggested_files: [ shared/render-dsl.ts, server/render-tools.ts, src/nodes/RenderNode.tsx, src/nodes/render/DashboardSurface.tsx, server/commands/submit-form.ts ]
+suggested_tests: [ shared/render-dsl.test.ts, server/render-tools.test.ts, src/nodes/render/DashboardSurface.test.tsx, server/commands/submit-form.test.ts ]
+keywords: [ dashboard, render, form, decision, submit_form, component, artifact, html, patch, append, sync ]
+entry_points:
+  - surface: surface.canvas
+    summary: Render dashboards in Leader and Render nodes and submit pending forms.
+    files: [ src/nodes/LeaderNode.tsx, src/nodes/RenderNode.tsx, src/nodes/render/DashboardSurface.tsx ]
+    tests: [ src/nodes/LeaderNode.test.tsx, src/nodes/RenderNode.layout.test.tsx, src/nodes/render/DashboardSurface.test.tsx ]
+    flows: [ flow.monitor_execution, flow.answer_structured_decision ]
+  - surface: surface.kanban
+    summary: Inspect card-associated dashboard state and answer its forms.
+    files: [ src/KanbanBoard.tsx, src/nodes/render/DashboardSurface.tsx ]
+    tests: [ src/KanbanBoard.test.tsx, src/nodes/render/DashboardSurface.test.tsx ]
+    flows: [ flow.monitor_execution, flow.answer_structured_decision ]
+  - surface: surface.activity
+    summary: Inspect server-owned dashboard state in triage and submit decisions.
+    files: [ src/ActivityView.tsx, src/nodes/render/DashboardSurface.tsx ]
+    tests: [ src/ActivityView.test.tsx, src/nodes/render/DashboardSurface.test.tsx ]
+    flows: [ flow.monitor_execution, flow.answer_structured_decision ]
+  - surface: surface.mobile
+    summary: Display dashboards in remote chat and submit pending forms.
+    files: [ src/mobile/SessionChatScreen.tsx ]
+    tests: [ src/mobile/SessionChatScreen.test.tsx ]
+    flows: [ flow.monitor_execution, flow.answer_structured_decision ]
+  - surface: surface.agent_tools
+    summary: Create, patch, append, remove, and optionally publish sanitized HTML dashboard components.
+    files: [ server/render-tools.ts, server/render-html-tool.ts ]
+    tests: [ server/render-tools.test.ts, server/html-sanitize.test.ts ]
+    flows: [ flow.monitor_execution, flow.answer_structured_decision ]
+  - surface: surface.ws_api
+    summary: Validate form answers and resume the owning session.
+    files: [ server/commands/submit-form.ts, server/commands/sync-session.ts ]
+    tests: [ server/commands/submit-form.test.ts, server/commands/sync-session.test.ts ]
+    flows: [ flow.answer_structured_decision, flow.recover_after_disconnect ]
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.observability
+depends_on:
+  - capability.execution_observability
+bridges: []
+risks: []

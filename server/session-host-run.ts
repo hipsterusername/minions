@@ -1,16 +1,5 @@
-/**
- * Lifecycle helpers for `SessionHost`.
- *
- *   - `ensureWorktree`       — resolves the effective cwd/worktree for this run
- *   - `buildHarnessStartOpts` — assembles the HarnessStartOptions for harness.start()
- *   - `processNormalizedEvent` — the per-event body of the `for await` loop
- */
-
-import type {
-  AgentType,
-  AgentTypeContext,
-  AgentToolResult,
-} from "./agents/index.ts";
+/** Lifecycle helpers for SessionHost worktrees, harness starts, and events. */
+import type { AgentType, AgentTypeContext, AgentToolResult } from "./agents/index.ts";
 import type {
   AgentHarness,
   HarnessStartOptions,
@@ -34,17 +23,15 @@ import { commitReviewLifecycle, finishRun } from "./session-review-lifecycle.ts"
 import { emitMutationToolObservation } from "./mutation-observability.ts";
 import { normalizedEventEnvelope, notifyRuntimeTerminal, sessionHostLogFields } from "./session-host-identity.ts";
 import type { SessionHostDeps, WorkItemRuntimeLifecycle } from "./session-host-types.ts";
+import { enrichInvocationProviderIdentity, persistInvocationBeforeHarnessOpen,
+  persistInvocationTerminalWitness } from "./work-item-run-start.ts";
+import { getRunInvocation, projectRunInvocationSeal, type CleanTerminalSealPolicy } from "./work-item-invocations.ts";
+import { persistenceDb } from "./session-persist.ts";
 export { buildAgentContext } from "./session-host-agent-context.ts";
 export { sessionHostLogFields } from "./session-host-identity.ts";
 
 const log = serverLogger.child("session-host");
-
-/**
- * Ensure the host has the correct cwd + worktree wiring before the SDK
- * query opens. Mutates `host` in place and emits bus events on failure.
- *
- * Returns the effective cwd the SDK should use.
- */
+/** Resolve the effective cwd/worktree before opening the SDK query. */
 export async function ensureWorktree(
   host: SessionHost,
   opts: StartSessionOptions,
@@ -148,7 +135,7 @@ export function buildHarnessStartOpts(
   const basePrompt = agentType.buildSystemPrompt(agentCtx, opts.systemPrompt, harness.builtInTools);
   const systemPrompt = basePrompt
     ? host.worktree
-      ? enrichSystemPromptForWorktree(basePrompt, host.worktree, agentType.id === "minion")
+      ? enrichSystemPromptForWorktree(basePrompt, host.worktree, { role: host.role === "minion" ? "minion" : "leader", canonical: host.workItemId != null, sharedWorktree: host.role === "minion" && opts.parentWorktree != null })
       : basePrompt
     : "";
   const effectiveSystemPrompt = opts.plannedContribution?.resolutionTargetRef
@@ -183,35 +170,43 @@ export function buildHarnessStartOpts(
     startOpts.permissionMode = persistedPermissionMode;
   }
 
-  if (
-    harness.capabilities.thinking &&
-    host.thinkingConfig?.enabled &&
-    modelSupportsThinkingForHarness(harness.name, host.model)
-  ) {
+  if (harness.capabilities.thinking && host.thinkingConfig?.enabled
+    && modelSupportsThinkingForHarness(harness.name, host.model)) {
     startOpts.thinking = {
       effort: host.thinkingConfig.effort,
       display: host.thinkingConfig.display,
     };
   }
 
+  persistInvocationBeforeHarnessOpen(host);
   return { startOpts, allowedTools };
 }
 
-function modelSupportsThinkingForHarness(
-  harnessName: string,
-  model: string | null,
-): boolean {
+function modelSupportsThinkingForHarness(harnessName: string, model: string | null): boolean {
   if (harnessName === "claude") return modelSupportsAdaptive(model);
   return true;
 }
 
-/**
- * Handle a single NormalizedEvent from `harness.start()`:
- *   - Capture session metadata from `init`.
- *   - Fan every event out to the bus as an `sdk_event` envelope.
- *   - Rebroadcast sub-agent events as canvas-aware bus events.
- *   - Update session status and trigger `onComplete` on `done`.
- */
+function projectHostInvocation(
+  host: SessionHost,
+  event: Extract<NormalizedEvent, { kind: "done" }>,
+  cleanTerminalPolicy: CleanTerminalSealPolicy,
+) {
+  const db = persistenceDb();
+  const invocation = db && host.providerInvocationGeneration > 0
+    ? getRunInvocation(db, host.runKey, host.providerInvocationGeneration)
+    : null;
+  return projectRunInvocationSeal({
+    terminalKind: invocation?.terminal_kind
+      ?? (event.reason === "error" ? "error"
+        : event.reason === "abort" ? "cancelled" : "clean"),
+    terminalSource: invocation?.terminal_source ?? "adapter",
+    terminationIntent: invocation?.termination_intent ?? null,
+    cleanTerminalPolicy,
+  });
+}
+
+/** Fold and publish one normalized harness event. */
 export function processNormalizedEvent(
   host: SessionHost,
   bus: Bus,
@@ -238,6 +233,7 @@ export function processNormalizedEvent(
     if (event.meta) host.initData = event.meta;
     host.persist();
     if (host.workItemId) {
+      enrichInvocationProviderIdentity(host, event.sessionId);
       const identity = { workItemId: host.workItemId, runKey: host.runKey, runKind: host.runKind, parentRunKey: host.parentRunKey, taskId: host.taskId };
       runtimeLifecycle?.providerInitialized({ ...identity, providerSessionId: event.sessionId,
         providerGeneration: host.providerInvocationGeneration, at: now });
@@ -293,6 +289,7 @@ export function processNormalizedEvent(
 
   // ── Session completion ──────────────────────────────────────────────────
   if (event.kind === "done") {
+    const claimed = persistInvocationTerminalWitness(host, event, now, () => {
     if (event.turns != null) host.turns = event.turns;
     if (event.costUSD != null) host.totalCost = event.costUSD;
 
@@ -306,6 +303,7 @@ export function processNormalizedEvent(
       void agentType.onComplete(agentCtx, {
         is_error: event.reason === "error",
         result: event.result ?? null,
+        error: event.reason === "error" ? (event.error ?? null) : null,
       });
     }
     let blocked = false;
@@ -322,7 +320,8 @@ export function processNormalizedEvent(
       : host.taskState?.pendingWait ? "timer"
       : blocked ? "blocked"
       : (host.status as string) === "running" ? "continuation" : null;
-    if (waitKind) {
+    const projection = projectHostInvocation(host, event, waitKind ? "continue" : "seal");
+    if (projection.action === "continue") {
       if (host.workItemId && (waitKind === "blocked" || waitKind === "continuation")) runtimeLifecycle?.runWaiting({
         workItemId: host.workItemId, runKey: host.runKey, runKind: host.runKind,
         parentRunKey: host.parentRunKey, taskId: host.taskId, waitKind, at: now,
@@ -335,39 +334,40 @@ export function processNormalizedEvent(
       }
     } else {
       agentCtx.cleanupLiveEditRun?.(host.runKey);
-      const normalizedReason = event.reason !== "error" && event.reason !== "abort"
-        && Boolean(event.result?.trim()) ? "completed" : event.reason;
-      commitReviewLifecycle(host, bus, finishRun(host.reviewLifecycle, { reason: normalizedReason, report: event.reason === "error" ? event.error : event.result, at: now }), now);
-      const payload: BufferedEvent = event.reason === "error"
+      const normalizedReason = !host.workItemId ? event.reason
+        : projection.outcome === "completed" ? "completed"
+          : projection.outcome === "error" ? "error"
+            : projection.outcome === "stopped" ? "stop" : "abort";
+      commitReviewLifecycle(host, bus, finishRun(host.reviewLifecycle, {
+        reason: normalizedReason,
+        report: event.reason === "error" ? event.error : event.result,
+        at: now,
+      }), now);
+      const payload: BufferedEvent = projection.outcome === "error"
         ? { type: "session_error", sessionKey: host.id, error: host.lastError ?? "unknown", fullError: host.lastErrorFull ?? undefined, timestamp: now }
         : { type: "session_status", sessionKey: host.id, status: "idle", sessionId: host.sessionId ?? undefined, timestamp: now };
       host.bufferEvent(payload);
       bus.emitToSession(host.id, payload);
       if (host.workItemId) {
         const durable = durableTask as { status: string; result: string | null; taskId: string } | null;
-        const taskStatus = durable?.status;
         const taskReport = durable?.result?.trim() || null;
         const eventReport = event.result?.trim() || null;
-        const completed = host.runKind === "child" && taskStatus === "completed"
-          ? Boolean(taskReport)
-          : event.reason !== "error" && event.reason !== "abort" && Boolean(eventReport);
-        const failed = host.runKind === "child" && taskStatus === "failed";
-        const finalReport = host.runKind === "child" && (completed || failed)
-          ? taskReport : completed ? eventReport : null;
-        const finalReportId = finalReport && host.runKind === "child" && durableLeaderKey
+        // Reports annotate but never determine the ledger projection.
+        const durableReport = host.runKind === "child" ? taskReport : null;
+        const finalReport = durableReport ?? eventReport;
+        const finalReportId = durableReport && durableLeaderKey
           ? `task:${durableLeaderKey}:${durable!.taskId}:report`
           : finalReport ? `${host.runKey}:final-report` : null;
         notifyRuntimeTerminal(host, runtimeLifecycle, {
-          outcome: event.reason === "error" || failed ? "error" : completed ? "completed" : "interrupted",
+          outcome: projection.outcome,
           finalReportId, finalReport, at: now,
         });
       }
     }
-    log.info("run_finished", {
-      ...sessionHostLogFields(host),
-      outcome: event.reason,
+    log.info("run_finished", { ...sessionHostLogFields(host), outcome: event.reason });
     });
-    return; // `done` is not emitted as sdk_event (signalled via session_status or session_error)
+    if (!claimed) log.debug("stale_terminal_ignored", sessionHostLogFields(host));
+    return; // `done` is signalled via session_status/session_error, never sdk_event
   }
 
   // ── Fan all remaining events to the bus as sdk_events ──────────────────

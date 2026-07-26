@@ -1,0 +1,23 @@
+id: constraint.minion_lifecycle_semantics
+type: constraint
+statement: Blocked minions remain resumable; terminal reports are idempotent; Leader stop preserves children while close or remove cancels them.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces:
+    - surface.canvas
+    - surface.mobile
+    - surface.agent_tools
+  files:
+    - server/agents/minion.ts
+    - server/minion-tools.ts
+    - server/agents/leader-teardown.ts
+severity: high
+agent_instruction: Keep report_blocked nonterminal, allow message-based resume, deduplicate terminal reports, and use the correct Leader teardown boundary.
+suggested_tests: [ server/agents/minion.test.ts, server/minion-tools.test.ts, server/agents/leader.test.ts ]
+evidence: [ decision.role_gated_agent_tools ]
+domain: domain.delegation
+scope: targeted
+guards:
+  - capability.task_orchestration
+  - flow.control_execution

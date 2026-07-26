@@ -19,6 +19,7 @@
 
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { NormalizedEvent } from "../types.ts";
+import { tagTerminalProvenance } from "../terminal-provenance.ts";
 
 // ── Internal content-block shape ──────────────────────────────────────────────
 // We only inspect the fields Minions cares about. A narrower local type avoids
@@ -205,7 +206,10 @@ function translateResult(msg: ResultLike): NormalizedEvent[] {
     if (isClaudeToolUseDiagnostic(error)) {
       return translateSuccessfulResult(msg, events);
     }
-    events.push({ kind: "done", reason: "error", error });
+    events.push(tagTerminalProvenance(
+      { kind: "done", reason: "error", error },
+      "provider",
+    ));
     return events;
   }
 
@@ -229,7 +233,7 @@ function translateSuccessfulResult(
     events.push({ kind: "permission_denial", tool: denial.tool_name, reason: "denied" });
   }
 
-  events.push({
+  events.push(tagTerminalProvenance({
     kind: "done",
     reason: "completed",
     ...(msg.result != null && { result: msg.result }),
@@ -237,7 +241,7 @@ function translateSuccessfulResult(
     // Include total cost on done so processNormalizedEvent can capture it even
     // when result carries total_cost_usd but no usage breakdown.
     ...(msg.total_cost_usd != null && { costUSD: msg.total_cost_usd }),
-  });
+  }, "provider"));
   return events;
 }
 

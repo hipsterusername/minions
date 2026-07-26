@@ -9,6 +9,7 @@ import type { WorktreeInfo } from "../worktree-types.ts";
 import type { WorkItemService } from "../work-item-service.ts";
 import { initialWorkItemLifecycle } from "../../shared/work-item-lifecycle.ts";
 import { setup, cmd } from "../../tests/support/server-command-harness.ts";
+import { encodeLeaderPromptCustomization } from "../../shared/leader-prompt.ts";
 
 interface StartCall {
   sessionKey: string;
@@ -96,6 +97,39 @@ describe("send_message", () => {
     });
     // No worktree creation when isolation is off.
     expect(createWorktreeCalls).toHaveLength(0);
+  });
+
+  it("forwards only a trimmed Leader prompt prefix while preserving non-leader behavior", () => {
+    const h = setup();
+    h.host.role = "leader";
+    const { calls } = captureRegistryStart(h);
+
+    sendMessage(h.ctx, cmd({
+      type: "send_message",
+      sessionKey: "leader-1",
+      prompt: "continue",
+      systemPrompt: encodeLeaderPromptCustomization({
+        promptPrefix: "  Focus on accessibility.  ",
+      }),
+    }), h.ws);
+
+    expect(calls[0]?.systemPrompt).toContain("Focus on accessibility.");
+  });
+
+  it("rejects a malformed structured customization for a Leader session", () => {
+    const h = setup();
+    h.host.role = "leader";
+    const { calls } = captureRegistryStart(h);
+
+    sendMessage(h.ctx, cmd({
+      type: "send_message",
+      sessionKey: "leader-1",
+      prompt: "continue",
+      systemPrompt: '{"version":1,"promptPrefix":"missing skills"}',
+    }), h.ws);
+
+    expect(calls).toEqual([]);
+    expect(h.wsSent[0]?.message).toContain("malformed customization envelope");
   });
 
   it("rejects with a global error when sessionKey or prompt is missing", () => {

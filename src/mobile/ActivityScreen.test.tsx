@@ -33,10 +33,25 @@ describe("ActivityScreen", () => {
         providerSessionId: null, outcome: "completed", startedAt: 1, endedAt: 2,
         finalReport: "Shipped safely" }] }} />);
     fireEvent.click(screen.getByText("Run history"));
-    expect(screen.getByText(/Iteration 1 · completed/)).toBeInTheDocument();
+    const history = screen.getByText("Run history").closest("details");
+    expect(history).toHaveClass("mob-run-history");
+    expect(within(history!).getByText("Iteration 1")).toBeInTheDocument();
+    expect(within(history!).getByText("completed")).toBeInTheDocument();
     expect(screen.getByText("Shipped safely")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Load more" }));
     expect(load).toHaveBeenCalledWith("work-1", "next");
+  });
+
+  it("gives an empty run-history disclosure a settled empty state", () => {
+    const load = vi.fn();
+    render(<ActivityScreen sessions={[session({ sessionKey: "run-1", workItemId: "work-1" })]}
+      onOpenSession={() => {}} onLoadRuns={load} />);
+
+    const history = screen.getByText("Run history").closest("details")!;
+    history.open = true;
+    fireEvent(history, new Event("toggle", { bubbles: true }));
+    expect(screen.getByText("No prior runs loaded.")).toBeInTheDocument();
+    expect(load).toHaveBeenCalledWith("work-1");
   });
 
   it("keeps non-dismissed completions visible and hides dismissed history", () => {
@@ -60,7 +75,7 @@ describe("ActivityScreen", () => {
     expect(screen.getByText("complete · read report")).toBeInTheDocument();
     expect(screen.queryByText("Hidden history")).not.toBeInTheDocument();
   });
-  it("groups sessions into activity sections in Active → Idle → Stopped order", () => {
+  it("pins attention sessions to a Needs-you lane above the status sections", () => {
     render(
       <ActivityScreen
         sessions={[
@@ -72,23 +87,22 @@ describe("ActivityScreen", () => {
       />,
     );
 
-    // Section headers render in the fixed order.
+    // The attention session floats out of Idle into the pinned triage lane,
+    // which renders first; the calm sessions stay in their status buckets.
     const sections = screen.getAllByRole("region");
     expect(sections.map((s) => s.getAttribute("aria-label"))).toEqual([
+      "Needs you",
       "Active",
-      "Idle",
       "Stopped / Cleared",
     ]);
 
-    // Active is the first section, so the running session's card precedes the
-    // idle/attention one — attention no longer floats above active work.
-    const cards = screen.getAllByRole("button");
-    expect(within(cards[0]!).getByText("Working session")).toBeInTheDocument();
-    expect(within(cards[1]!).getByText("Needs answer")).toBeInTheDocument();
-    expect(within(cards[2]!).getByText("Finished job")).toBeInTheDocument();
+    const triage = screen.getByRole("region", { name: "Needs you" });
+    expect(within(triage).getByText("Needs answer")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Active" })).getByText("Working session")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Stopped / Cleared" })).getByText("Finished job")).toBeInTheDocument();
   });
 
-  it("places an errored session in the Idle section with the attention highlight", () => {
+  it("surfaces an errored session in the Needs-you lane with its reason", () => {
     render(
       <ActivityScreen
         sessions={[session({ sessionKey: "err", status: "error", taskName: "Crashed run" })]}
@@ -96,10 +110,10 @@ describe("ActivityScreen", () => {
       />,
     );
 
-    const idle = screen.getByRole("region", { name: "Idle" });
-    const card = within(idle).getByRole("button");
-    expect(card).toHaveClass("mob-session-card--attention");
-    expect(within(card).getByText("Crashed run")).toBeInTheDocument();
+    const triage = screen.getByRole("region", { name: "Needs you" });
+    const row = within(triage).getByText("Crashed run").closest(".mob-triage-row");
+    expect(row).toHaveClass("mob-triage-row--error");
+    expect(within(triage).getByText("errored")).toBeInTheDocument();
   });
 
   it("does not display minion sessions and excludes them from the count", () => {
@@ -209,5 +223,232 @@ describe("ActivityScreen", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Dismiss notice" }));
     expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  const waitingLifecycle = {
+    reviewState: "decision_needed" as const,
+    reviewReason: "Needs a decision",
+    finalReport: null,
+    finalDashboardRevision: 0,
+    dashboardRevision: 0,
+    terminalReason: null,
+    terminalAt: null,
+    acknowledgedAt: null,
+    dismissedAt: null,
+    lifecycleRevision: 3,
+  };
+
+  it("summarizes needs-you, active, and waiting counts", () => {
+    const { container } = render(
+      <ActivityScreen
+        sessions={[
+          session({ sessionKey: "wait", status: "waiting", taskName: "Blocked", reviewLifecycle: waitingLifecycle }),
+          session({ sessionKey: "run", status: "running", taskName: "Busy" }),
+        ]}
+        onOpenSession={() => {}}
+      />,
+    );
+    const summary = container.querySelector(".mob-activity-summary")!;
+    expect(within(summary as HTMLElement).getByText("needs you").previousSibling).toHaveTextContent("1");
+    expect(within(summary as HTMLElement).getByText("active").previousSibling).toHaveTextContent("1");
+    expect(within(summary as HTMLElement).getByText("waiting").previousSibling).toHaveTextContent("1");
+  });
+
+  it("filters from the summary counts and clears the filter on a second tap", () => {
+    render(
+      <ActivityScreen
+        sessions={[
+          session({ sessionKey: "wait", status: "waiting", taskName: "Needs answer", reviewLifecycle: waitingLifecycle }),
+          session({ sessionKey: "run", status: "running", taskName: "In progress" }),
+          session({ sessionKey: "idle", status: "idle", taskName: "Taking a break" }),
+        ]}
+        onOpenSession={() => {}}
+      />,
+    );
+
+    const activeFilter = screen.getByRole("button", { name: /active: 1\. filter activity/i });
+    fireEvent.click(activeFilter);
+    expect(activeFilter).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("In progress")).toBeInTheDocument();
+    expect(screen.queryByText("Needs answer")).not.toBeInTheDocument();
+    expect(screen.queryByText("Taking a break")).not.toBeInTheDocument();
+
+    fireEvent.click(activeFilter);
+    expect(activeFilter).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText("Needs answer")).toBeInTheDocument();
+    expect(screen.getByText("Taking a break")).toBeInTheDocument();
+  });
+
+  it("keeps the summary controls available when a selected filter has no matches", () => {
+    render(
+      <ActivityScreen
+        sessions={[session({ sessionKey: "idle", status: "idle", taskName: "Taking a break" })]}
+        onOpenSession={() => {}}
+      />,
+    );
+
+    const waitingFilter = screen.getByRole("button", { name: /waiting: 0\. filter activity/i });
+    fireEvent.click(waitingFilter);
+    expect(screen.getByText("No sessions match this activity filter.")).toBeInTheDocument();
+    expect(waitingFilter).toBeInTheDocument();
+    fireEvent.click(waitingFilter);
+    expect(screen.getByText("Taking a break")).toBeInTheDocument();
+  });
+
+  it("clears the summary filter when visibility changes", () => {
+    render(
+      <ActivityScreen
+        sessions={[
+          session({ sessionKey: "open", status: "running", taskName: "Open active" }),
+          session({ sessionKey: "gone", status: "idle", taskName: "Dismissed idle",
+            reviewLifecycle: { ...waitingLifecycle, dismissedAt: 5 } }),
+        ]}
+        onOpenSession={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /active: 1\. filter activity/i }));
+    fireEvent.click(screen.getByRole("tab", { name: "Dismissed" }));
+    expect(screen.getByText("Dismissed idle")).toBeInTheDocument();
+  });
+
+  it("filters to dismissed sessions when the Dismissed tab is selected", () => {
+    render(
+      <ActivityScreen
+        sessions={[
+          session({ sessionKey: "open", taskName: "Open one", reviewLifecycle: waitingLifecycle }),
+          session({ sessionKey: "gone", taskName: "Dismissed one",
+            reviewLifecycle: { ...waitingLifecycle, dismissedAt: 5 } }),
+        ]}
+        onOpenSession={() => {}}
+      />,
+    );
+    // Default (Open) hides the dismissed session.
+    expect(screen.queryByText("Dismissed one")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Dismissed" }));
+    expect(screen.getByText("Dismissed one")).toBeInTheDocument();
+    expect(screen.queryByText("Open one")).not.toBeInTheDocument();
+  });
+
+  it("opens the session from a triage row's primary action", () => {
+    const onOpenSession = vi.fn();
+    render(
+      <ActivityScreen
+        sessions={[session({ sessionKey: "wait", taskName: "Answer me", status: "waiting", reviewLifecycle: waitingLifecycle })]}
+        onOpenSession={onOpenSession}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Reply" }));
+    expect(onOpenSession).toHaveBeenCalledWith("wait");
+  });
+
+  it("sends acknowledge and dismiss commands from the triage lane", () => {
+    const send = vi.fn();
+    render(
+      <ActivityScreen
+        sessions={[session({ sessionKey: "wait", taskName: "Answer me", status: "waiting", reviewLifecycle: waitingLifecycle })]}
+        onOpenSession={() => {}}
+        send={send}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      type: "acknowledge_session",
+      sessionKey: "wait",
+      expectedLifecycleRevision: 3,
+    }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      type: "dismiss_session",
+      sessionKey: "wait",
+    }));
+  });
+
+  it("omits triage lifecycle actions when no send handler is provided", () => {
+    render(
+      <ActivityScreen
+        sessions={[session({ sessionKey: "wait", taskName: "Answer me", status: "waiting", reviewLifecycle: waitingLifecycle })]}
+        onOpenSession={() => {}}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Mark reviewed" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Dismiss" })).not.toBeInTheDocument();
+  });
+
+  it("resolves a core-list card inline via its dismiss action", () => {
+    const send = vi.fn();
+    render(
+      <ActivityScreen
+        sessions={[session({ sessionKey: "run", status: "running", taskName: "Busy card" })]}
+        onOpenSession={() => {}}
+        send={send}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      type: "dismiss_session",
+      sessionKey: "run",
+    }));
+  });
+
+  it("restores a dismissed session from the core list", () => {
+    const send = vi.fn();
+    render(
+      <ActivityScreen
+        sessions={[session({ sessionKey: "gone", taskName: "Dismissed one",
+          reviewLifecycle: { ...waitingLifecycle, dismissedAt: 5 } })]}
+        onOpenSession={() => {}}
+        send={send}
+      />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Dismissed" }));
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      type: "reopen_session",
+      sessionKey: "gone",
+    }));
+  });
+
+  it("dismisses multiple selected sessions from the bulk action bar", () => {
+    const send = vi.fn();
+    render(
+      <ActivityScreen
+        sessions={[
+          session({ sessionKey: "a", status: "running", taskName: "One" }),
+          session({ sessionKey: "b", status: "running", taskName: "Two" }),
+        ]}
+        onOpenSession={() => {}}
+        send={send}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText("Select One"));
+    fireEvent.click(screen.getByLabelText("Select Two"));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss 2" }));
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "dismiss_session", sessionKey: "a" }));
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "dismiss_session", sessionKey: "b" }));
+  });
+
+  it("selects all visible sessions and marks only the reviewable ones", () => {
+    const send = vi.fn();
+    render(
+      <ActivityScreen
+        sessions={[
+          session({ sessionKey: "wait", status: "waiting", taskName: "Answer me", reviewLifecycle: waitingLifecycle }),
+          session({ sessionKey: "run", status: "running", taskName: "Busy" }),
+        ]}
+        onOpenSession={() => {}}
+        send={send}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText("Select Answer me"));
+    fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark 1 reviewed" }));
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      type: "acknowledge_session",
+      sessionKey: "wait",
+      expectedLifecycleRevision: 3,
+    }));
   });
 });

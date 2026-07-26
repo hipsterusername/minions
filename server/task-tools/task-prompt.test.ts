@@ -17,12 +17,16 @@ describe("buildTaskSpawnPrompt canvas context", () => {
       priority: "high",
       description: "details",
       armedSkillIds: [],
-      contextPack: "Suggested files are hints, not truth.",
+      contextPack: [
+        "Suggested files are hints, not truth.",
+        "Freshness instruction: inspect current code before editing.",
+      ].join("\n"),
     });
 
     expect(prompt).toContain("## System Model Context");
     expect(prompt.indexOf("## System Model Context")).toBeLessThan(prompt.indexOf("## Description"));
     expect(prompt).toContain("Suggested files are hints, not truth.");
+    expect(prompt).toContain("Freshness instruction: inspect current code before editing.");
   });
 
   it("appends the labeled canvas context section", () => {
@@ -57,5 +61,24 @@ describe("buildTaskSpawnPrompt canvas context", () => {
     expect(truncated).not.toContain("Third");
     expect(truncated).toContain(CANVAS_CONTEXT_TRUNCATED_MARKER);
     expect(truncated).not.toContain("cccccccccc");
+  });
+});
+
+describe("buildTaskSpawnPrompt worktree policy", () => {
+  it("uses the shared-worktree minion policy without commit guidance", () => {
+    const prompt = buildTaskSpawnPrompt({
+      taskId: "t1",
+      title: "Shared work",
+      priority: "high",
+      description: "details",
+      armedSkillIds: [],
+      worktreeBranch: "minions/leader/shared",
+    });
+
+    expect(prompt).toContain("Leader's shared worktree");
+    expect(prompt).toContain("assigned files");
+    expect(prompt).toMatch(/do not run `git commit`/i);
+    expect(prompt).toContain("orchestrator owns");
+    expect(prompt).not.toMatch(/commit your work|git add -A/i);
   });
 });

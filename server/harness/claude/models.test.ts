@@ -11,6 +11,15 @@ describe("Claude model metadata", () => {
     expect(supportsAdaptiveThinking("claude-fable-5")).toBe(true);
   });
 
+  it("resolves the Opus 5 alias to the concrete SDK model id", () => {
+    expect(resolveModelAlias("opus-5")).toBe("claude-opus-5");
+  });
+
+  it("marks Opus 5 as adaptive-thinking capable", () => {
+    expect(supportsAdaptiveThinking("opus-5")).toBe(true);
+    expect(supportsAdaptiveThinking("claude-opus-5")).toBe(true);
+  });
+
   it("resolves the sonnet alias to the Sonnet 5 concrete model id", () => {
     expect(resolveModelAlias("sonnet")).toBe("claude-sonnet-5");
   });

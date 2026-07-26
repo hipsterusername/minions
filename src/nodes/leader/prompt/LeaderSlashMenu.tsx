@@ -1,30 +1,7 @@
-import { type ComponentType, Fragment } from "react";
-import {
-  Sparkles,
-  Play,
-  Microscope,
-  Slash,
-  CornerDownLeft,
-  ArrowDownUp,
-  type LucideProps,
-} from "lucide-react";
-import type { DashboardLeaderAction } from "../../../dashboard-leader-actions.ts";
+import { Fragment } from "react";
+import { Slash, CornerDownLeft, ArrowDownUp } from "lucide-react";
+import { dashboardActionIcon } from "../../../dashboard-leader-actions.ts";
 import type { SlashCommand } from "./slash-commands.ts";
-
-/**
- * Icon per built-in leader action. Keyed on the stable command `id` so it
- * survives user relabelling; unknown ids fall back to a generic slash glyph.
- */
-const COMMAND_ICONS: Record<DashboardLeaderAction, ComponentType<LucideProps>> =
-  {
-    improve: Sparkles,
-    execute: Play,
-    analyze: Microscope,
-  };
-
-function commandIcon(id: string): ComponentType<LucideProps> {
-  return COMMAND_ICONS[id as DashboardLeaderAction] ?? Slash;
-}
 
 /**
  * Split `text` around the first case-insensitive occurrence of `query` and
@@ -143,7 +120,7 @@ export function LeaderSlashMenu({
       >
         {commands.map((command, index) => {
           const selected = index === selectedIndex;
-          const Icon = commandIcon(command.id);
+          const Icon = dashboardActionIcon(command.icon);
           return (
             <button
               key={command.id}

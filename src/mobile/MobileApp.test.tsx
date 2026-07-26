@@ -175,6 +175,58 @@ describe("MobileApp", () => {
     expect(screen.getByRole("button", { name: "Back to activity" })).toBeInTheDocument();
   });
 
+  it("keeps the current conversation available after returning to Activity", async () => {
+    installPushGlobals();
+    vi.mocked(listProjects).mockResolvedValue([
+      { id: "alpha", name: "Alpha", path: "/work/alpha", lastOpened: "2026-06-01T00:00:00.000Z", hasSidecar: true },
+    ]);
+
+    render(<MobileApp />);
+    fireEvent.click(await screen.findByText("Alpha"));
+    emitSocketMessage({
+      type: "session_list",
+      sessions: [{
+        sessionKey: "leader-1",
+        sessionId: null,
+        status: "running",
+        cwd: "/work/alpha",
+        taskName: "Mobile audit",
+        role: "leader",
+      }],
+    });
+
+    fireEvent.click(await screen.findByText("Mobile audit"));
+    fireEvent.click(screen.getByRole("button", { name: "Back to activity" }));
+
+    const chatTab = screen.getByRole("button", { name: "Chat" });
+    expect(chatTab).toBeEnabled();
+    fireEvent.click(chatTab);
+    expect(await screen.findByRole("heading", { name: "Mobile audit" })).toBeInTheDocument();
+  });
+
+  it("keeps needs-you work visible in the persistent navigation", async () => {
+    installPushGlobals();
+    vi.mocked(listProjects).mockResolvedValue([
+      { id: "alpha", name: "Alpha", path: "/work/alpha", lastOpened: "2026-06-01T00:00:00.000Z", hasSidecar: true },
+    ]);
+
+    render(<MobileApp />);
+    fireEvent.click(await screen.findByText("Alpha"));
+    emitSocketMessage({
+      type: "session_list",
+      sessions: [{
+        sessionKey: "leader-error",
+        sessionId: null,
+        status: "error",
+        cwd: "/work/alpha",
+        taskName: "Needs recovery",
+        role: "leader",
+      }],
+    });
+
+    expect(await screen.findByRole("button", { name: "Activity, 1 need you" })).toHaveTextContent("1");
+  });
+
   it("manages default Minion settings from the mobile settings tab", async () => {
     installPushGlobals();
     vi.mocked(listProjects).mockResolvedValue([
@@ -305,6 +357,12 @@ describe("MobileApp", () => {
       expect(screen.getByRole("main", { name: "Session chat" })).toBeInTheDocument();
     });
     expect(screen.getByRole("heading", { name: "Old idle work" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    const stopButton = screen.getByRole("button", { name: "Stop" });
+    expect(stopButton).toBeEnabled();
+    fireEvent.click(stopButton);
+    expect(send).toHaveBeenCalledWith({
+      type: "stop_session",
+      sessionKey: "leader-old",
+    });
   });
 });

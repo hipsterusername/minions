@@ -6,8 +6,11 @@ export const systemGraphNodeSchema = z.object({
   type: systemModelObjectTypeSchema,
   label: z.string(),
   summary: z.string().optional(),
+  domain: z.string().optional(),
   risk: riskLevelSchema.optional(),
   freshness: z.enum(["fresh", "stale", "unknown"]).default("unknown"),
+  suggestedFiles: z.array(z.string()).optional(),
+  suggestedTests: z.array(z.string()).optional(),
 });
 
 export const systemGraphEdgeSchema = z.object({
@@ -15,13 +18,18 @@ export const systemGraphEdgeSchema = z.object({
   source: z.string(),
   target: z.string(),
   relation: z.enum([
-    "linked_flow",
-    "capability",
-    "constraint",
+    "implements",
+    "depends_on",
+    "guards",
+    "bridge",
     "decision",
     "risk",
     "evidence",
+    "entry_point",
   ]),
+  files: z.array(z.string()).optional(),
+  tests: z.array(z.string()).optional(),
+  summary: z.string().optional(),
 });
 
 export const systemGraphSchema = z.object({

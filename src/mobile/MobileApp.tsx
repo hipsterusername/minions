@@ -19,7 +19,7 @@ import {
   reduceApprovalMessage,
   type PendingApprovalsMap,
 } from "./mobile-approvals.ts";
-import { sessionBelongsToProject } from "./mobile-selectors.ts";
+import { needsAttention, sessionBelongsToProject } from "./mobile-selectors.ts";
 import {
   disablePush,
   enablePush,
@@ -294,6 +294,9 @@ export default function MobileApp() {
     ? canonicalSessions.find((session) => session.sessionKey === selectedReviewSessionKey)
     : undefined;
   const approvalCount = scopedApprovalRows.length;
+  const attentionCount = scopedSessions.filter(
+    (session) => session.role !== "minion" && needsAttention(session),
+  ).length;
 
   const selectProject = useCallback((project: ProjectSummary) => {
     setSelectedProject({ id: project.id, path: project.path, name: project.name });
@@ -337,7 +340,6 @@ export default function MobileApp() {
   }, []);
 
   const openActivity = useCallback(() => {
-    setSelectedSessionKey(null);
     setSelectedReviewSessionKey(null);
     setActiveTab("activity");
   }, []);
@@ -485,9 +487,11 @@ export default function MobileApp() {
         <SessionChatScreen
           sessionKey={selectedSessionKey}
           session={selectedSession}
+          sessionOptions={scopedSessions}
           subscribe={subscribe}
           send={send}
           onBack={openActivity}
+          onSelectSession={openSession}
         />
       ) : !selectedProject ? (
         <ProjectsScreen sessions={mobileSessions} onSelectProject={selectProject} />
@@ -507,6 +511,7 @@ export default function MobileApp() {
           sessions={scopedSessions}
           onOpenSession={openSession}
           notice={activityNotice}
+          send={send}
           workItemRuns={workItemState.runs}
           runNextCursor={workItemState.runNextCursor}
           onLoadRuns={(workItemId, cursor) => {
@@ -522,14 +527,18 @@ export default function MobileApp() {
           type="button"
           className={activeTab === "activity" ? "mob-tabbar-button mob-tabbar-button--active" : "mob-tabbar-button"}
           onClick={openActivity}
+          aria-current={activeTab === "activity" ? "page" : undefined}
+          aria-label={attentionCount > 0 ? `Activity, ${attentionCount} need you` : "Activity"}
         >
-          Activity
+          <span>Activity</span>
+          {attentionCount > 0 ? <span className="mob-tab-badge">{attentionCount}</span> : null}
         </button>
         <button
           type="button"
           className={activeTab === "chat" && selectedSessionKey ? "mob-tabbar-button mob-tabbar-button--active" : "mob-tabbar-button"}
           disabled={!selectedSessionKey}
           onClick={() => setActiveTab("chat")}
+          aria-current={activeTab === "chat" && selectedSessionKey ? "page" : undefined}
         >
           Chat
         </button>
@@ -537,6 +546,7 @@ export default function MobileApp() {
           type="button"
           className={activeTab === "approvals" ? "mob-tabbar-button mob-tabbar-button--active" : "mob-tabbar-button"}
           onClick={openApprovals}
+          aria-current={activeTab === "approvals" ? "page" : undefined}
           aria-label={approvalCount > 0 ? `Approvals, ${approvalCount} pending` : "Approvals"}
         >
           <span>Review</span>
@@ -546,6 +556,7 @@ export default function MobileApp() {
           type="button"
           className={activeTab === "launch" ? "mob-tabbar-button mob-tabbar-button--active" : "mob-tabbar-button"}
           onClick={openLaunch}
+          aria-current={activeTab === "launch" ? "page" : undefined}
         >
           Launch
         </button>
@@ -553,6 +564,7 @@ export default function MobileApp() {
           type="button"
           className={activeTab === "settings" ? "mob-tabbar-button mob-tabbar-button--active" : "mob-tabbar-button"}
           onClick={openSettings}
+          aria-current={activeTab === "settings" ? "page" : undefined}
         >
           Settings
         </button>

@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   FEATURE_FLAGS,
+  FLAG_DIALECTIC,
   FLAG_MCP_SERVERS,
   featureFlagStore,
   getAllFeatureFlags,
@@ -89,7 +90,10 @@ describe("storage robustness", () => {
     );
     // Non-boolean overrides are dropped, so every registered flag falls
     // back to its default value.
-    expect(getAllFeatureFlags()).toEqual({ [FLAG_MCP_SERVERS]: false });
+    expect(getAllFeatureFlags()).toEqual({
+      [FLAG_MCP_SERVERS]: false,
+      [FLAG_DIALECTIC]: false,
+    });
   });
 
   it("ignores unknown ids in the persisted blob", () => {

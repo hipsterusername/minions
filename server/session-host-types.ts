@@ -50,7 +50,7 @@ export interface WorkItemRuntimeLifecycle {
   runStarted(input: WorkItemRuntimeIdentity & { at: number }): void;
   runWaiting(input: WorkItemRuntimeIdentity & { waitKind: "decision" | "file_conflict" | "timer" | "blocked" | "continuation"; at: number }): void;
   runTerminal(input: WorkItemRuntimeIdentity & {
-    outcome: "completed" | "error" | "interrupted";
+    outcome: "completed" | "error" | "stopped" | "interrupted";
     finalReportId: string | null;
     finalReport: string | null;
     at: number;

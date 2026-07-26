@@ -10,6 +10,10 @@ import { disablePersistence } from "../session-persist.ts";
 import { writeSettings, writeSkills } from "../project-store.ts";
 import { copyValidFixture } from "../system-model/load.test.ts";
 import type { TaskManagerState } from "../task-tools.ts";
+import {
+  LEADER_PROMPT_CORE,
+  encodeLeaderPromptCustomization,
+} from "../../shared/leader-prompt.ts";
 import "./leader.ts";
 
 beforeEach(() => disablePersistence());
@@ -64,6 +68,77 @@ describe("leader agent wiring", () => {
     expect(result.toolGroups["skills"]).toBeUndefined();
   });
 
+  it("documents every registered Leader tool and keeps the allowlist exact", () => {
+    const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+    const ctx = {
+      sessionKey: "leader-tools",
+      cwd: "/tmp/project",
+      bus,
+      worktreeInfo: null,
+      worktreeIsolation: false,
+      startMinionSession: vi.fn(),
+      scheduleWaitContinue: vi.fn(),
+    };
+    const leader = getAgentType("leader");
+    const result = leader.getToolGroups(ctx);
+    const prompt = leader.buildSystemPrompt(ctx);
+    const exactRegistered = Object.entries(result.toolGroups).flatMap(([group, defs]) =>
+      defs.map((def) => `mcp__${group}__${def.name}`)
+    );
+
+    expect(result.mcpToolNames).toEqual(exactRegistered);
+    for (const defs of Object.values(result.toolGroups)) {
+      for (const def of defs) expect(prompt).toContain(def.name);
+    }
+    for (const required of [
+      "message_task",
+      "cancel_task",
+      "checkpoint_session",
+      "load_subskill",
+      "publish_html",
+    ]) {
+      expect(prompt).toContain(required);
+    }
+    expect(prompt).toContain('wake_on: "any_terminal"');
+  });
+
+  it("assembles the canonical core before server skills and the user prefix", () => {
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), "leader-prompt-test-"));
+    try {
+      writeSkills(project, [{
+        id: "review", name: "Review", description: "Review code",
+        category: "code", icon: "*", accentColor: "#fff",
+        template: "Review {{target}} carefully.", variables: [],
+      }]);
+      const customization = encodeLeaderPromptCustomization({
+        promptPrefix: "CLIENT CUSTOMIZATION",
+        skillsAddendum: "# Active Skills\n\nReview the API carefully.",
+      });
+      const prompt = getAgentType("leader").buildSystemPrompt({
+        sessionKey: "leader-prompt",
+        cwd: project,
+        bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
+        worktreeInfo: null,
+        worktreeIsolation: false,
+        skillIds: ["review"],
+        skillValues: { review: { target: "the API" } },
+      }, customization);
+
+      expect(prompt?.startsWith(LEADER_PROMPT_CORE)).toBe(true);
+      expect(prompt).not.toBe("CLIENT CUSTOMIZATION");
+      expect(prompt!.indexOf("## Your Capabilities")).toBeLessThan(
+        prompt!.indexOf("# Active Skills"),
+      );
+      expect(prompt).toContain("Review the API carefully.");
+      expect(prompt).toContain("`review` — **Review**: Review code");
+      expect(prompt!.indexOf("# Active Skills")).toBeLessThan(
+        prompt!.indexOf("CLIENT CUSTOMIZATION"),
+      );
+    } finally {
+      fs.rmSync(project, { recursive: true, force: true });
+    }
+  });
+
   it("exposes the skill-authoring tools when skill-builder is tagged", () => {
     const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
     const result = getAgentType("leader").getToolGroups({
@@ -91,6 +166,43 @@ describe("leader agent wiring", () => {
       "update_skill",
       "delete_skill",
     ]);
+  });
+
+  it("documents the exact registered tool set when every conditional surface is active", () => {
+    const project = copyValidFixture();
+    writeSettings(project, { systemModel: "advisory" });
+    const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+    const ctx = {
+      sessionKey: "leader-all-tools",
+      cwd: project,
+      bus,
+      worktreeInfo: {
+        path: project,
+        branch: "canvas/leader-all-tools",
+        leaderSessionKey: "leader-all-tools",
+        createdAt: 0,
+        projectPath: project,
+        lifecycle: "active" as const,
+      },
+      worktreeIsolation: true,
+      skillIds: ["skill-builder"],
+      startMinionSession: vi.fn(),
+      scheduleWaitContinue: vi.fn(),
+    };
+    const leader = getAgentType("leader");
+    const result = leader.getToolGroups(ctx);
+    const prompt = leader.buildSystemPrompt(ctx);
+    const exactRegistered = Object.entries(result.toolGroups).flatMap(([group, defs]) =>
+      defs.map((def) => `mcp__${group}__${def.name}`)
+    );
+
+    expect(result.mcpToolNames).toEqual(exactRegistered);
+    for (const defs of Object.values(result.toolGroups)) {
+      for (const def of defs) expect(prompt).toContain(def.name);
+    }
+    expect(prompt).toContain("request_approval");
+    expect(prompt).toContain("create_skill");
+    expect(prompt).toContain("query_system_model");
   });
 
   it("omits the skill-authoring tools when only other skills are tagged", () => {
@@ -240,6 +352,28 @@ describe("leader agent wiring", () => {
     // … and no longer mandates querying the model for general planning.
     expect(prompt).not.toContain("planning context");
     expect(prompt).toContain("available, not mandated");
+  });
+
+  it("ends a truncated system-model addendum with a query recovery pointer", () => {
+    const project = copyValidFixture();
+    writeSettings(project, { systemModel: "advisory" });
+    fs.writeFileSync(
+      path.join(project, ".systemmodel/policies/context-budgets.yaml"),
+      "leaderPromptAddendum: 20\nminionContextPack: 2000\nperObjectSummary: 250\n",
+    );
+    const prompt = getAgentType("leader").buildSystemPrompt({
+      sessionKey: "leader-truncated",
+      cwd: project,
+      bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
+      worktreeInfo: null,
+      worktreeIsolation: false,
+    });
+
+    expect(prompt).toContain("system-model addendum truncated");
+    expect(prompt).toContain("use `query_system_model` to fetch omitted objects");
+    expect(prompt?.endsWith(
+      "[system-model addendum truncated — use `query_system_model` to fetch omitted objects]",
+    )).toBe(true);
   });
 
   // Regression (2026-06): the child-task sweep used to live in `onComplete`,

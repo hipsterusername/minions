@@ -4,8 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { WebSocketServer } from "ws";
 import { createBus } from "../bus.ts";
 import { writeSettings } from "../project-store.ts";
-import { resolveSystemModelRuntime } from "./runtime.ts";
-import { copyValidFixture } from "./load.test.ts";
+import { resolveSystemModelRuntime, systemModelStatus } from "./runtime.ts";
+import { copyValidFixture, copyValidFixtureWithSurfaces } from "./load.test.ts";
 
 describe("resolveSystemModelRuntime", () => {
   it("stays off when the project setting is off", () => {
@@ -58,5 +58,15 @@ describe("resolveSystemModelRuntime", () => {
     expect(runtime.model).toBeNull();
     expect(runtime.loadErrors.length).toBeGreaterThan(0);
     expect(emitted.some((event) => (event as { type?: string }).type === "system_model_error")).toBe(true);
+  });
+
+  it("reports surface counts", () => {
+    const project = copyValidFixtureWithSurfaces();
+    writeSettings(project, { systemModel: "advisory" });
+    const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+    const runtime = resolveSystemModelRuntime({
+      cwd: project, worktreeInfo: null, sessionKey: "leader-1", bus,
+    });
+    expect(systemModelStatus(runtime).counts.surfaces).toBe(2);
   });
 });

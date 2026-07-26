@@ -130,4 +130,24 @@ describe("work-item runtime lifecycle disposition", () => {
       finalReportId: "task:leader:t:report",
     }));
   });
+
+  it("seals a child that ends with a provider final response but no durable report as completed", () => {
+    const f = fixture();
+    f.host.runKind = "child"; f.host.parentRunKey = "leader"; f.host.taskId = "t";
+    // The leader task is still running — the minion never called report_done —
+    // yet the agent produced a final response. This must seal as completed with
+    // a real final-report id so the seal reducer does not downgrade it to
+    // interrupted.
+    f.ctx.forEachLeaderTaskState = (fn) => fn("leader", {
+      tasks: new Map([["t", { taskId: "t", minionSessionKey: "run-1",
+        status: "running", result: null } as never]]),
+      pendingWait: null, approval: null,
+    });
+    processNormalizedEvent(f.host, f.bus, f.agent, f.ctx,
+      { kind: "done", reason: "completed", result: "Final answer" }, f.hooks);
+    expect(f.hooks.runTerminal).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: "completed", finalReport: "Final answer",
+      finalReportId: "run-1:final-report",
+    }));
+  });
 });

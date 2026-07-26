@@ -34,6 +34,15 @@ describe("Canvas canonical work-item projection", () => {
       .toBe("Decision needed");
   });
 
+  it("maps both deliberate stops and interruptions onto the legacy stopped status", () => {
+    const stopped = selectCanvasWorkItem(item({ lifecycle: { ...item().lifecycle,
+      outcome: "stopped" } }));
+    expect(stopped?.status).toBe("stopped");
+    expect(stopped?.presentation.label).toBe("Stopped");
+    expect(selectCanvasWorkItem(item({ lifecycle: { ...item().lifecycle,
+      outcome: "interrupted" } }))?.status).toBe("stopped");
+  });
+
   it("keeps one work item across distinct repeated iteration keys", () => {
     const first = applyCanvasWorkItemSnapshot({ workItemId: null }, item());
     const secondItem = item({ currentRunKey: "run-2", iteration: 2,

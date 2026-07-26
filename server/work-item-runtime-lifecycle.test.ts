@@ -53,4 +53,31 @@ describe("concrete work-item runtime lifecycle", () => {
     expect(run.session_id).toBeNull();
     expect(run.ended_at).toBe(11);
   });
+
+  it("resumes a waiting primary when checkpoint rollover opens a fresh provider thread", async () => {
+    const db = initDb(":memory:"); ensureWorkItemSchema(db);
+    const bus = createBus({ clients: new Set() } as never);
+    const service = createSqliteWorkItemService({ db, bus,
+      generateKey: (kind, id) => `${kind}-${id}`, launchRun: vi.fn(),
+      continueRun: vi.fn(), now: () => 10 });
+    const lifecycle = createWorkItemRuntimeLifecycle({ db, bus, service });
+    const draft = await service.create({ requestId: "create-resume", projectId: "p",
+      projectPath: "/repo", title: "T", changeMode: "live" });
+    await service.startRun({ requestId: "start-resume", workItemId: draft.workItem.id,
+      prompt: "go", expectedLifecycleRevision: 0, expectedCurrentRunKey: null });
+    const identity = { workItemId: draft.workItem.id, runKey: "run-start-resume",
+      runKind: "primary" as const, parentRunKey: null, taskId: null };
+    lifecycle.runStarted({ ...identity, at: 11 });
+    lifecycle.runWaiting({ ...identity, waitKind: "timer", at: 12 });
+
+    lifecycle.providerInitialized({ ...identity, providerSessionId: "fresh-thread",
+      providerGeneration: 2, at: 13 });
+    expect(() => lifecycle.runStarted({ ...identity, at: 14 })).not.toThrow();
+    expect((await service.get(draft.workItem.id))?.workItem).toMatchObject({
+      waitKind: null,
+      lifecycle: { runtimeState: "working" },
+    });
+    expect(db.prepare("SELECT session_id FROM sessions WHERE session_key = ?")
+      .get(identity.runKey)).toEqual({ session_id: "fresh-thread" });
+  });
 });

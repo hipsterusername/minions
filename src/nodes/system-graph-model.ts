@@ -12,6 +12,10 @@ import type {
 } from "../../shared/system-model/graph.ts";
 
 export type GraphNode = BaseSystemGraphNode & {
+  /** Forward-compatible until constraint scope is included in the graph wire. */
+  scope?: "global" | "domain" | "targeted";
+  suggestedFiles?: string[];
+  suggestedTests?: string[];
   constraints?: string[];
   gates?: string[];
   reviewGate?: string;
@@ -39,23 +43,64 @@ export interface RelationMeta {
 }
 
 export const RELATIONS: RelationMeta[] = [
-  { id: "linked_flow", label: "Flow link", description: "Capability ↔ Flow" },
-  { id: "capability", label: "Capability", description: "Object → Capability it serves" },
-  { id: "constraint", label: "Constraint", description: "Constraint applies to a target" },
-  { id: "decision", label: "Decision", description: "Decision governs a target" },
-  { id: "risk", label: "Risk", description: "Risk applies to a target" },
-  { id: "evidence", label: "Evidence", description: "Evidence supports a constraint" },
+  { id: "implements", label: "implements", description: "Flow → primary capability" },
+  { id: "depends_on", label: "depends on", description: "Capability → capability dependency" },
+  { id: "guards", label: "guards", description: "Targeted constraint → capability or flow" },
+  { id: "bridge", label: "bridge", description: "Reasoned cross-domain connection" },
+  { id: "entry_point", label: "entry point", description: "Capability → surface entry point" },
+  { id: "decision", label: "decision", description: "Decision governs a target" },
+  { id: "risk", label: "risk", description: "Risk applies to a target" },
+  { id: "evidence", label: "evidence", description: "Evidence supports a constraint" },
 ];
 
 export const ALL_RELATIONS: RelationType[] = RELATIONS.map((relation) => relation.id);
 
 // ── Primary axis (the top row) ────────────────────────────────────────────
-export type PrimaryType = "capability" | "flow";
+export type PrimaryType = Exclude<GraphNode["type"], "domain">;
 
 export const PRIMARY_TYPES: { id: PrimaryType; label: string }[] = [
   { id: "capability", label: "Capabilities" },
   { id: "flow", label: "Flows" },
+  { id: "constraint", label: "Constraints" },
+  { id: "decision", label: "Decisions" },
+  { id: "risk", label: "Risks" },
+  { id: "surface", label: "Surfaces" },
 ];
+
+export const CROSS_CUTTING_DOMAIN = "cross-cutting";
+
+export interface DomainGroup {
+  id: string;
+  label: string;
+  nodes: GraphNode[];
+}
+
+/** Browseable objects grouped in declared-domain order, then Cross-cutting. */
+export function domainGroups(graph: SystemGraph, lens: LensId = "structure"): DomainGroup[] {
+  const nodes = graph.nodes as GraphNode[];
+  const domains = nodes.filter((item) => item.type === "domain");
+  const labels = new Map(domains.map((item) => [item.id, item.label]));
+  const buckets = new Map<string, GraphNode[]>();
+
+  for (const item of nodes) {
+    if (item.type === "domain" || !lensAttention(item, lens)) continue;
+    const domainId = item.domain ?? CROSS_CUTTING_DOMAIN;
+    const bucket = buckets.get(domainId) ?? [];
+    bucket.push(item);
+    buckets.set(domainId, bucket);
+  }
+
+  const order = [
+    ...domains.map((item) => item.id),
+    ...[...buckets.keys()].filter((id) => id !== CROSS_CUTTING_DOMAIN && !labels.has(id)),
+    CROSS_CUTTING_DOMAIN,
+  ];
+  return [...new Set(order)].flatMap((id) => {
+    const grouped = buckets.get(id) ?? [];
+    if (grouped.length === 0 && id === CROSS_CUTTING_DOMAIN) return [];
+    return [{ id, label: id === CROSS_CUTTING_DOMAIN ? "Cross-cutting" : labels.get(id) ?? id, nodes: grouped }];
+  });
+}
 
 // ── Lenses (filter the primary row by a concern) ──────────────────────────
 export type LensId = "structure" | "risk" | "freshness" | "usage" | "work";
@@ -159,6 +204,12 @@ export interface RelatedGroup {
   relation: RelationType;
   meta: RelationMeta;
   nodes: GraphNode[];
+  items: RelatedItem[];
+}
+
+export interface RelatedItem {
+  node: GraphNode;
+  summaries: string[];
 }
 
 /**
@@ -173,7 +224,7 @@ export function relatedGroups(
 ): RelatedGroup[] {
   if (!selectedId) return [];
   const byId = new Map((graph.nodes as GraphNode[]).map((n) => [n.id, n]));
-  const buckets = new Map<RelationType, Map<string, GraphNode>>();
+  const buckets = new Map<RelationType, Map<string, RelatedItem>>();
 
   for (const edge of graph.edges) {
     if (edge.source !== selectedId && edge.target !== selectedId) continue;
@@ -181,16 +232,64 @@ export function relatedGroups(
     const otherId = edge.source === selectedId ? edge.target : edge.source;
     const other = byId.get(otherId);
     if (!other || other.id === selectedId) continue;
-    const bucket = buckets.get(edge.relation) ?? new Map<string, GraphNode>();
-    bucket.set(other.id, other);
+    const bucket = buckets.get(edge.relation) ?? new Map<string, RelatedItem>();
+    const existing = bucket.get(other.id) ?? { node: other, summaries: [] };
+    if (edge.summary && !existing.summaries.includes(edge.summary)) existing.summaries.push(edge.summary);
+    bucket.set(other.id, existing);
     buckets.set(edge.relation, bucket);
   }
 
   return RELATIONS.flatMap((meta) => {
     const bucket = buckets.get(meta.id);
     if (!bucket || bucket.size === 0) return [];
-    return [{ relation: meta.id, meta, nodes: [...bucket.values()] }];
+    const items = [...bucket.values()];
+    return [{ relation: meta.id, meta, items, nodes: items.map((item) => item.node) }];
   });
+}
+
+export interface AppliedConstraint {
+  node: GraphNode;
+  scope: "global" | "domain";
+  inferred: boolean;
+}
+
+/**
+ * Non-edge constraints applicable to an object. Explicit wire scope wins. Until
+ * scope lands on the wire, an unconnected same-domain constraint can only be
+ * inferred as domain-scoped; global constraints cannot be inferred safely.
+ */
+export function scopeAppliedConstraints(
+  selectedId: string | null,
+  graph: SystemGraph,
+): AppliedConstraint[] {
+  if (!selectedId) return [];
+  const nodes = graph.nodes as GraphNode[];
+  const selected = nodes.find((item) => item.id === selectedId);
+  if (!selected || selected.type === "constraint" || selected.type === "domain") return [];
+  const edgedConstraintIds = new Set(graph.edges.flatMap((edge) => {
+    if (edge.relation !== "guards") return [];
+    return [edge.source, edge.target].filter((id) => nodes.find((item) => item.id === id)?.type === "constraint");
+  }));
+
+  return nodes.flatMap((item): AppliedConstraint[] => {
+    if (item.type !== "constraint" || item.scope === "targeted" || edgedConstraintIds.has(item.id)) return [];
+    if (item.scope === "global") return [{ node: item, scope: "global", inferred: false }];
+    if (item.scope === "domain" && item.domain === selected.domain) {
+      return [{ node: item, scope: "domain", inferred: false }];
+    }
+    if (!item.scope && selected.domain && item.domain === selected.domain) {
+      return [{ node: item, scope: "domain", inferred: true }];
+    }
+    return [];
+  });
+}
+
+export function bridgeReasonsFor(selectedId: string | null, graph: SystemGraph): string[] {
+  if (!selectedId) return [];
+  return [...new Set(graph.edges
+    .filter((edge) => edge.relation === "bridge" && (edge.source === selectedId || edge.target === selectedId))
+    .map((edge) => edge.summary)
+    .filter((summary): summary is string => !!summary))];
 }
 
 /** Count of distinct related objects for a node (across enabled relations). */
@@ -218,4 +317,70 @@ export function connectedNodes(
   return ids
     .map((id) => nodes.get(id))
     .filter((n): n is GraphNode => !!n && (!type || n.type === type));
+}
+
+// ── Capability ↔ surface entry-point lanes ────────────────────────────────
+export interface SurfaceLane {
+  edge: SystemGraphEdge;
+  surface: GraphNode;
+  capability: GraphNode;
+  files: string[];
+  tests: string[];
+}
+
+function entryPointLanes(graph: SystemGraph): SurfaceLane[] {
+  const byId = new Map((graph.nodes as GraphNode[]).map((item) => [item.id, item]));
+  return graph.edges.flatMap((edge) => {
+    if (edge.relation !== "entry_point") return [];
+    const capability = byId.get(edge.source);
+    const surface = byId.get(edge.target);
+    if (capability?.type !== "capability" || surface?.type !== "surface") return [];
+    return [{
+      edge,
+      capability,
+      surface,
+      files: [...new Set(edge.files ?? [])],
+      tests: [...new Set(edge.tests ?? [])],
+    }];
+  });
+}
+
+/** Entry points grouped as sibling surface lanes for one capability. */
+export function surfaceLanesForCapability(
+  capabilityId: string | null,
+  graph: SystemGraph,
+): SurfaceLane[] {
+  if (!capabilityId) return [];
+  return entryPointLanes(graph).filter((lane) => lane.capability.id === capabilityId);
+}
+
+/** Every capability entering through one surface, with its per-entry-point files. */
+export function capabilityLanesForSurface(
+  surfaceId: string | null,
+  graph: SystemGraph,
+): SurfaceLane[] {
+  if (!surfaceId) return [];
+  return entryPointLanes(graph).filter((lane) => lane.surface.id === surfaceId);
+}
+
+export interface EntryPointDetails {
+  files: string[];
+  tests: string[];
+}
+
+/** File/test traceability for all entry-point edges touching an object. */
+export function entryPointDetailsFor(
+  selectedId: string | null,
+  graph: SystemGraph,
+): EntryPointDetails {
+  if (!selectedId) return { files: [], tests: [] };
+  const edges = graph.edges.filter(
+    (edge) =>
+      edge.relation === "entry_point" &&
+      (edge.source === selectedId || edge.target === selectedId),
+  );
+  return {
+    files: [...new Set(edges.flatMap((edge) => edge.files ?? []))],
+    tests: [...new Set(edges.flatMap((edge) => edge.tests ?? []))],
+  };
 }

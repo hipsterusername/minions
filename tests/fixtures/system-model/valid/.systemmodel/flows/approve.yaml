@@ -1,8 +1,10 @@
 id: flow.approve_changes
 type: flow
+domain: domain.workspace
 name: Approve Changes
 summary: Review and merge isolated worktree changes.
-capabilities: [capability.workspace_management]
+primary_capability: capability.workspace_management
+bridges: []
 constraints: [constraint.bus_only]
 decisions: [decision.bus_architecture]
 risks: [risk.merge_bypass]

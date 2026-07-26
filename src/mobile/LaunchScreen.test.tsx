@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getProjectSkills, listProjects } from "../api.ts";
+import { getProjectSettings, getProjectSkills, listProjects } from "../api.ts";
 import { HarnessListProvider } from "../use-harness-list.tsx";
 import type { HarnessListEntry } from "../use-socket.ts";
 import type { SkillTemplate } from "../skills/types.ts";
@@ -54,12 +54,15 @@ const CODEX_HARNESS: HarnessListEntry = {
 
 vi.mock("../api.ts", () => ({
   listProjects: vi.fn(),
+  getProjectSettings: vi.fn().mockResolvedValue({}),
   getProjectSkills: vi.fn().mockResolvedValue([]),
   saveProjectSkills: vi.fn().mockResolvedValue(undefined),
 }));
 
 afterEach(() => {
   vi.mocked(listProjects).mockReset();
+  vi.mocked(getProjectSettings).mockReset();
+  vi.mocked(getProjectSettings).mockResolvedValue({});
   vi.mocked(getProjectSkills).mockReset();
   vi.mocked(getProjectSkills).mockResolvedValue([]);
   clearSkills();
@@ -67,6 +70,56 @@ afterEach(() => {
 });
 
 describe("LaunchScreen", () => {
+  it("inherits the desktop leader defaults for the selected project", async () => {
+    vi.mocked(getProjectSettings).mockResolvedValue({
+      defaultLeaderHarness: "codex",
+      defaultLeaderModel: "gpt-5.5-codex",
+      defaultLeaderThinkingConfig: { enabled: true, effort: "high", display: "summarized" },
+      defaultPermissionMode: "default",
+      defaultWorktreeIsolation: true,
+    });
+    const send = vi.fn();
+    let subscriber: ((msg: unknown) => void) | undefined;
+    const subscribe = vi.fn((fn: (msg: unknown) => void) => {
+      subscriber = fn;
+      return () => {};
+    });
+
+    render(
+      <HarnessListProvider send={vi.fn()} subscribe={subscribe} connected>
+        <LaunchScreen
+          send={send}
+          onLaunched={vi.fn()}
+          lockedProject={{ id: "alpha", path: "/work/alpha", name: "Alpha" }}
+        />
+      </HarnessListProvider>,
+    );
+
+    act(() => {
+      subscriber?.({ type: "harness_list", harnesses: [CLAUDE_HARNESS, CODEX_HARNESS] });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Model")).toHaveValue("codex::gpt-5.5-codex");
+    });
+    expect(screen.getByLabelText("Worktree isolation")).toBeChecked();
+
+    fireEvent.change(screen.getByLabelText("Prompt"), {
+      target: { value: "Use the project defaults" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Launch leader" }));
+
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      type: "create_session",
+      cwd: "/work/alpha",
+      harness: "codex",
+      model: "gpt-5.5-codex",
+      thinkingConfig: { enabled: true, effort: "high", display: "summarized" },
+      permissionMode: "default",
+      worktreeIsolation: true,
+    }));
+  });
+
   it("renders projects, validates required input, and launches a leader", async () => {
     vi.mocked(listProjects).mockResolvedValue([
       {

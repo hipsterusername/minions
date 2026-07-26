@@ -61,11 +61,13 @@ export function systemModelStatus(runtime: SystemModelRuntime) {
     mode: runtime.mode,
     manifestFound: runtime.manifestFound,
     counts: {
+      domains: model?.domains.length ?? 0,
       capabilities: model?.capabilities.length ?? 0,
       flows: model?.flows.length ?? 0,
       constraints: model?.constraints.length ?? 0,
       decisions: model?.decisions.length ?? 0,
       risks: model?.risks.length ?? 0,
+      surfaces: model?.surfaces.length ?? 0,
     },
     loadErrors: runtime.loadErrors,
   };

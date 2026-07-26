@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { loadSystemModel } from "../system-model/load.ts";
 import { getWorkPacket } from "../system-model/store.ts";
-import { copyValidFixture } from "../system-model/load.test.ts";
+import { copyValidFixture, copyValidFixtureWithSurfaces } from "../system-model/load.test.ts";
 import type { BusPayload } from "../bus.ts";
 import { createCreateWorkPacketToolDef } from "./create-work-packet.ts";
 
@@ -65,6 +65,37 @@ describe("create_work_packet", () => {
     expect(payload.packet.freshness.status).toBe("stale_blocked");
     expect(payload.packet.status).toBe("draft");
     expect(getWorkPacket(project, payload.packet.id)?.packet.status).toBe("draft");
+  });
+
+  it("passes a confirmed surface id through as a compile seed", async () => {
+    const project = copyValidFixtureWithSurfaces();
+    const result = await createCreateWorkPacketToolDef(makeCtx(project)).handler({
+      userRequest: "mobile workspace",
+      objectIds: ["surface.mobile"],
+    });
+    const payload = JSON.parse(result.content[0]!.text) as {
+      packet: { scope: { surfaces: string[]; capabilities: string[] } };
+    };
+    expect(payload.packet.scope.surfaces).toEqual(["surface.mobile"]);
+    expect(payload.packet.scope.capabilities).toEqual(["capability.workspace_management"]);
+  });
+
+  it("accepts a confirmed capability and surface entry-point pair", async () => {
+    const project = copyValidFixtureWithSurfaces();
+    const result = await createCreateWorkPacketToolDef(makeCtx(project)).handler({
+      userRequest: "update this entry point",
+      entryPoints: [{
+        capabilityId: "capability.workspace_management",
+        surfaceId: "surface.mobile",
+      }],
+    });
+    const payload = JSON.parse(result.content[0]!.text) as {
+      packet: { scope: { capabilities: string[]; entryPoints: Array<{ surfaceId: string }> } };
+    };
+    expect(payload.packet.scope.capabilities).toEqual(["capability.workspace_management"]);
+    expect(payload.packet.scope.entryPoints.map((entryPoint) => entryPoint.surfaceId)).toEqual([
+      "surface.canvas", "surface.mobile",
+    ]);
   });
 });
 

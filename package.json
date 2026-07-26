@@ -27,8 +27,7 @@
   "scripts": {
     "dev": "node scripts/run.mjs dev",
     "server": "tsx server/index.ts",
-    "start": "node scripts/run.mjs dev",
-    "serve": "node scripts/start.mjs start",
+    "start": "node scripts/start.mjs start",
     "stop": "node scripts/start.mjs stop",
     "restart": "node scripts/start.mjs restart",
     "status": "node scripts/start.mjs status",
@@ -92,6 +91,9 @@
     "vitest": "4.1.6"
   },
   "pnpm": {
+    "overrides": {
+      "fast-uri": "3.1.4"
+    },
     "onlyBuiltDependencies": [
       "esbuild",
       "better-sqlite3"

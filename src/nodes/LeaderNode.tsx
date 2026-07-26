@@ -14,6 +14,7 @@ import type { SkillTemplate } from "../skills/types.ts";
 import { ResizeHandle } from "../components/ResizeHandle.tsx";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { debugFlagStore } from "../debug.ts";
+import { randomUuid } from "../random-id.ts";
 import { useLeaderFullscreenRequest } from "../use-leader-fullscreen-request.ts";
 import { ConfirmModal } from "../components/ConfirmModal.tsx";
 import { canvasScale } from "../canvas-scale.ts";
@@ -38,7 +39,7 @@ import {
 import { diffContextDelivery, buildContextUpdateBlock } from "../context-delivery.ts";
 import { buildFrozenLeaderFollowUpPrompt, freezeLeaderSystemPrompt, type FrozenLeaderPrompt } from "./leader/frozen-prompt.ts";
 import { consumeLeaderInputFocus } from "../leader-focus-request.ts";
-import { applyCanvasWorkItemSnapshot, canonicalPromptCommand,
+import { applyCanvasWorkItemSnapshot,
   formatCanvasWorkItemStatus, selectCanvasChangeMode, selectCanvasPrompt } from "./leader/work-item.ts";
 import { useCanvasWorkItem } from "./leader/use-canvas-work-item.ts";
 import { buildInitialLeaderRun, claimLeaderAutoStart } from "./leader/initial-run.ts";
@@ -79,6 +80,7 @@ import { LeaderPromptOverlay } from "./leader/prompt/LeaderPromptOverlay.tsx";
 import { LeaderFullscreen } from "./leader/fullscreen/LeaderFullscreen.tsx";
 import { buildSlashCommands } from "./leader/prompt/slash-commands.ts";
 import { MinionsSurface } from "./leader/MinionsSurface.tsx";
+import { ActivityLaunchForm } from "./leader/ActivityLaunchForm.tsx";
 
 /* ── Main component ───────────────────────────────────────────────────── */
 
@@ -296,7 +298,7 @@ export function LeaderNodeRenderer({
     emitUpdate({ ...dataRef.current, activeBodyView: "minions" });
   }, [emitUpdate]);
 
-  const { requestWorkItem, beginCanonicalRun } = useCanvasWorkItem({ nodeId: node.id,
+  const { requestWorkItem, beginCanonicalRun, sendCanonicalPrompt } = useCanvasWorkItem({ nodeId: node.id,
     projectId, projectPath, socketSend, socketSubscribe, dataRef, emitUpdate,
     publishCanvasContext });
 
@@ -837,14 +839,15 @@ export function LeaderNodeRenderer({
       setInput("");
       void (async () => {
         const snapshot = canonical ?? (await requestWorkItem({ type: "get_work_item",
-          requestId: crypto.randomUUID(), workItemId: current.workItemId })).workItem;
+          requestId: randomUuid(), workItemId: current.workItemId })).workItem;
         if (!(snapshot.lifecycle.runtimeState === "waiting"
           || snapshot.lifecycle.runtimeState === "inactive"
           || snapshot.lifecycle.runtimeState === "draft")) {
           throw new Error("This work-item run is already active and cannot be restarted.");
         }
-        return requestWorkItem(canonicalPromptCommand(snapshot, followUp.prompt));
-      })().then((detail) => {
+        return sendCanonicalPrompt(snapshot, followUp.prompt);
+      })().then(({ detail, outcome }) => {
+        if (outcome === "converged") setInput(rawPrompt);
         const next = applyCanvasWorkItemSnapshot(dataRef.current, detail.workItem);
         emitUpdate({ ...next, sessionKey: detail.workItem.currentRunKey,
           currentRunKey: detail.workItem.currentRunKey });
@@ -852,7 +855,6 @@ export function LeaderNodeRenderer({
         error: error instanceof Error ? error.message : String(error) }));
       return;
     }
-
     socketSend({
       type: "send_message",
       sessionKey: current.sessionKey,
@@ -876,7 +878,7 @@ export function LeaderNodeRenderer({
       ],
     });
     setInput("");
-  }, [socketSend, input, onUpdateData, getContextForNode, requestWorkItem, emitUpdate]);
+  }, [socketSend, input, onUpdateData, getContextForNode, requestWorkItem, sendCanonicalPrompt, emitUpdate]);
 
   const handleStop = useCallback(() => {
     const current = dataRef.current;
@@ -1059,76 +1061,10 @@ export function LeaderNodeRenderer({
   if (launchMode) {
     return (
       <LeaderSlashCommandsProvider commands={slashCommands}>
-        <div className="leader-launch-form">
-          <div className="leader-launch-goal">
-            <label htmlFor={`leader-launch-title-${node.id}`}>Name</label>
-            <input
-              id={`leader-launch-title-${node.id}`}
-              value={data.taskName ?? ""}
-              placeholder="Untitled leader"
-              onChange={(event) => onUpdateData({ ...dataRef.current, taskName: event.target.value || null })}
-            />
-            <label>Goal</label>
-            <LeaderPromptBar
-              input={input}
-              slashCommands={slashCommands}
-              onInputChange={setInput}
-              onKeyDown={handleKeyDown}
-              onSubmit={handlePromptSubmit}
-              placeholder={promptPlaceholder}
-              submitLabel={promptSubmitLabel}
-              disabled={promptSubmitDisabled}
-              active={promptSubmitActive}
-              variant="overlay"
-              autoFocus
-              textareaRef={promptTextareaRef}
-            />
-          </div>
-
-          <details className="leader-launch-options">
-            <summary>
-              <span>Advanced setup</span>
-              <span className="leader-launch-options-summary">
-                {data.harness ?? "claude"} · {data.model ?? "opus"}
-                {taggedSkillCount > 0 ? ` · ${taggedSkillCount} skill${taggedSkillCount === 1 ? "" : "s"}` : ""}
-              </span>
-            </summary>
-            <div className="leader-launch-toolbar">
-              <SessionToolbar
-                sessionKey={data.sessionKey}
-                status={displayStatus}
-                model={data.model ?? "opus"}
-                permissionMode={data.permissionMode ?? "auto"}
-                onModelChange={handleModelChange}
-                onPermissionModeChange={handlePermissionModeChange}
-                thinkingConfig={data.thinkingConfig ?? DEFAULT_THINKING_CONFIG}
-                onThinkingConfigChange={handleThinkingConfigChange}
-                harness={data.harness ?? "claude"}
-                onHarnessChange={handleHarnessChange}
-                accent="var(--accent)"
-                skillsContent={
-                  <div ref={skillAnchorRef}>
-                    <button className="leader-launch-skills" type="button" onClick={() => setSkillFlyoutOpen(true)}>
-                      Skills{taggedSkillCount > 0 ? ` (${taggedSkillCount})` : ""}
-                    </button>
-                  </div>
-                }
-              />
-            </div>
-          </details>
-
-          <SkillFlyout
-            skillIds={data.skillIds ?? []}
-            skillValues={data.skillValues ?? {}}
-            open={skillFlyoutOpen}
-            readOnly={false}
-            anchorRef={skillAnchorRef}
-            onUpdate={(patch) => onUpdateData({ ...dataRef.current, ...patch })}
-            onClose={() => setSkillFlyoutOpen(false)}
-          />
-          {launchNotice ? <div className="leader-launch-notice" role="status">{launchNotice}</div> : null}
-          {data.error ? <div className="leader-launch-error" role="alert">{data.error}</div> : null}
-        </div>
+        <ActivityLaunchForm nodeId={node.id} data={data} input={input} slashCommands={slashCommands}
+          promptPlaceholder={promptPlaceholder} submitDisabled={promptSubmitDisabled} submitActive={promptSubmitActive} textareaRef={promptTextareaRef} {...(projectPath ? { projectPath } : {})}
+          onInputChange={setInput} onKeyDown={handleKeyDown} onSubmit={handlePromptSubmit} onUpdate={(patch) => onUpdateData({ ...dataRef.current, ...patch })} />
+        {launchNotice ? <div className="leader-launch-notice" role="status">{launchNotice}</div> : null}
       </LeaderSlashCommandsProvider>
     );
   }

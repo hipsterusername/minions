@@ -1,0 +1,26 @@
+id: constraint.skill_freezing_and_role_gate
+type: constraint
+statement: Armed skill instructions and values freeze at spawn from the original project sidecar; only exact skill-builder arming grants authoring tools.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces:
+    - surface.canvas
+    - surface.kanban
+    - surface.mobile
+    - surface.agent_tools
+  files:
+    - server/task-tools/assign-task.ts
+    - server/task-tools/task-prompt.ts
+    - server/skill-authoring-tools.ts
+    - server/agents/minion.ts
+severity: high
+agent_instruction: Compile and persist armed skill content at launch, resolve the library from project root, drop unknown IDs, and gate authoring by exact skill ID.
+suggested_tests: [ server/task-tools/assign-task.test.ts, server/task-tools/task-prompt.test.ts, server/skill-authoring-tools.test.ts, server/agents/minion.test.ts ]
+evidence: [ decision.role_gated_agent_tools ]
+domain: domain.delegation
+scope: targeted
+guards:
+  - capability.skill_library
+  - capability.task_orchestration
+  - flow.launch_leader

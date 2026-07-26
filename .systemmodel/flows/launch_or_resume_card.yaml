@@ -1,0 +1,21 @@
+id: flow.launch_or_resume_card
+type: flow
+name: Launch or resume a card run
+summary: A durable card attaches to canvas if needed and starts a new run or replies to its current decision wait using canonical fences.
+constraints: []
+decisions: [ decision.canonical_work_item_lifecycle ]
+risks:
+  - risk.kanban_bound_without_run
+suggested_files: [ src/KanbanBoard.tsx, src/nodes/LeaderNode.tsx, src/nodes/leader/work-item.ts, server/commands/work-items.ts ]
+suggested_tests: [ src/KanbanBoard.test.tsx, src/nodes/LeaderNode.session-init.test.tsx, src/nodes/leader/work-item.test.ts, server/commands/work-items.test.ts ]
+steps:
+  - Select a backlog, halted, waiting, or historical card and ensure the intended surface binding exists.
+  - Load the latest WorkItem snapshot rather than inferring run state from node presence.
+  - Start a revision-fenced iteration or reply only when the current run is waiting for a decision.
+  - Project resulting WorkItem events back into card and session views.
+freshness:
+  class: code_coupled
+risk: critical
+domain: domain.execution_lifecycle
+primary_capability: capability.durable_work_items
+bridges: []

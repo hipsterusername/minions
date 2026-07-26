@@ -1,0 +1,24 @@
+id: constraint.integration_revision_authority
+type: constraint
+statement: Every canonical lineage mutation is expectedIntegrationRevision-fenced and the server derives the run identity.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces:
+    - surface.canvas
+    - surface.activity
+    - surface.mobile
+    - surface.ws_api
+  files:
+    - server/commands/worktree-integration.ts
+    - server/worktree-integration-service.ts
+    - shared/worktree-integration.ts
+severity: critical
+agent_instruction: Use the latest integration snapshot revision, never trust a client-supplied run identity, and preserve conflict details on stale mutations.
+review_gate: gate.worktree_integration
+suggested_tests: [ server/commands/worktree-integration.test.ts, server/worktree-integration-sqlite.test.ts, src/use-worktree-integration.test.tsx ]
+evidence: [ decision.worktree_isolation_and_approval ]
+domain: domain.integration
+scope: targeted
+guards:
+  - capability.canonical_lineage_integration

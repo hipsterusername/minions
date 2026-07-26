@@ -2,6 +2,7 @@ import type { WorkItemDetailSnapshot, WorkItemSnapshot } from "../../../shared/w
 import { selectWorkItemPresentation } from "../../../shared/work-item-lifecycle.ts";
 import { formatCoordinatedLabel, type LiveEditAwareness } from "../../../shared/live-edit-coordination.ts";
 import { mergeWorkItemSnapshot } from "../../work-item-snapshot-merge.ts";
+import { randomUuid } from "../../random-id.ts";
 
 export interface CanvasWorkItemFields {
   workItemId?: string | null;
@@ -29,6 +30,31 @@ export function detailFromWorkItemResponse(message: unknown): WorkItemDetailSnap
   return detail.workItem?.id ? detail as WorkItemDetailSnapshot : null;
 }
 
+export class WorkItemCommandError extends Error {
+  override readonly name = "WorkItemCommandError";
+  readonly code: string | null;
+  readonly latest: WorkItemDetailSnapshot | null;
+  constructor(
+    message: string,
+    code: string | null,
+    latest: WorkItemDetailSnapshot | null,
+  ) {
+    super(message);
+    this.code = code;
+    this.latest = latest;
+  }
+}
+
+export function errorFromWorkItemResponse(message: unknown): WorkItemCommandError {
+  const msg = message as { error?: string; code?: string; latest?: unknown };
+  const latest = msg.latest as Partial<WorkItemDetailSnapshot> | null | undefined;
+  return new WorkItemCommandError(
+    msg.error ?? "Work-item command failed",
+    msg.code ?? null,
+    latest?.workItem?.id ? latest as WorkItemDetailSnapshot : null,
+  );
+}
+
 export function applyCanvasWorkItemSnapshot<T extends CanvasWorkItemFields>(
   data: T, snapshot: WorkItemSnapshot,
 ): Omit<T, keyof CanvasWorkItemFields> & { workItemId: string; currentRunKey: string | null; workItemSnapshot: WorkItemSnapshot } {
@@ -50,7 +76,8 @@ export function selectCanvasWorkItem(snapshot: WorkItemSnapshot | null | undefin
     : snapshot.lifecycle.runtimeState === "working" ? "running"
     : snapshot.lifecycle.outcome === "completed" ? "completed"
     : snapshot.lifecycle.outcome === "error" ? "error"
-    : snapshot.lifecycle.outcome === "interrupted" ? "stopped" : "idle";
+    : snapshot.lifecycle.outcome === "interrupted" || snapshot.lifecycle.outcome === "stopped"
+      ? "stopped" : "idle";
   const worktreeStatus = snapshot.lifecycle.integrationState === "worktree_integrating"
     || snapshot.lifecycle.integrationState === "worktree_queued" ? "merging"
     : snapshot.lifecycle.integrationState === "worktree_integrated" ? "merged"
@@ -62,7 +89,7 @@ export function selectCanvasWorkItem(snapshot: WorkItemSnapshot | null | undefin
 }
 
 export function canonicalPromptCommand(item: WorkItemSnapshot, prompt: string) {
-  const base = { requestId: crypto.randomUUID(), workItemId: item.id,
+  const base = { requestId: randomUuid(), workItemId: item.id,
     expectedLifecycleRevision: item.lifecycle.lifecycleRevision,
     expectedCurrentRunKey: item.currentRunKey, prompt };
   return item.lifecycle.runtimeState === "waiting" && item.waitKind === "decision" && item.currentRunKey
@@ -95,7 +122,7 @@ export function selectCanvasPrompt(data: CanvasWorkItemFields & {
 export function canvasDetachCommand(data: CanvasWorkItemFields, bindingId: string) {
   const item = data.workItemSnapshot;
   if (!data.workItemId || !item) return null;
-  return { type: "detach_work_item_surface", requestId: crypto.randomUUID(),
+  return { type: "detach_work_item_surface", requestId: randomUuid(),
     workItemId: data.workItemId, surface: "canvas", bindingId,
     expectedLifecycleRevision: item.lifecycle.lifecycleRevision,
     expectedCurrentRunKey: item.currentRunKey };

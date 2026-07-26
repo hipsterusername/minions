@@ -3,7 +3,7 @@ import path from "path";
 import { describe, expect, it } from "vitest";
 import { loadSystemModel } from "../system-model/load.ts";
 import { createQuerySystemModelToolDef } from "./query-system-model.ts";
-import { copyValidFixture } from "../system-model/load.test.ts";
+import { copyValidFixture, copyValidFixtureWithSurfaces } from "../system-model/load.test.ts";
 import type { LoadedSystemModel } from "../system-model/types.ts";
 
 describe("query_system_model", () => {
@@ -25,9 +25,10 @@ describe("query_system_model", () => {
       model!.objectsById.set(`risk.extra_${index}`, {
         id: `risk.extra_${index}`,
         type: "risk",
+        domain: "domain.workspace",
         summary: `needle risk ${index}`,
         severity: "medium",
-        appliesTo: { capabilities: ["capability.workspace_management"], flows: [], files: [] },
+        appliesTo: { capabilities: ["capability.workspace_management"], flows: [], surfaces: [], files: [] },
       });
     }
     const result = await makeTool(project, model!).handler({ query: "needle", topK: 99 });
@@ -46,6 +47,7 @@ describe("query_system_model", () => {
       id: "capability.workspace_management",
       type: "capability",
       label: "Workspace Management",
+      why: "risk (inverse)",
     });
   });
 
@@ -88,6 +90,9 @@ describe("query_system_model", () => {
 
     expect(payload.matches.map((item) => item.id)).toEqual(["capability.workspace_management"]);
     expect(payload.linked.map((item) => item.id)).toContain("constraint.bus_only");
+    expect(payload.linked).toContainEqual(expect.objectContaining({
+      id: "constraint.bus_only", why: "guards (inverse)",
+    }));
     const db = new Database(path.join(project, ".minions/canvas.db"));
     const rows = db.prepare("SELECT object_id, source, session_key FROM system_model_usage").all() as Array<{
       object_id: string;
@@ -99,6 +104,21 @@ describe("query_system_model", () => {
     ]);
   });
 
+  it("labels constraints injected by scope", async () => {
+    const project = copyValidFixture();
+    const { model } = loadSystemModel(project);
+    const base = model!.constraints[0]!;
+    const global = { ...base, id: "constraint.global", scope: "global" as const, guards: [], appliesTo: { capabilities: [], flows: [], surfaces: [], files: [] } };
+    model!.constraints.push(global);
+    model!.objectsById.set(global.id, global);
+
+    const result = await makeTool(project, model!).handler({ ids: ["capability.workspace_management"] });
+    const payload = JSON.parse(result.content[0]!.text) as { linked: Array<{ id: string; why: string }> };
+    expect(payload.linked).toContainEqual({
+      id: "constraint.global", type: "constraint", label: global.statement, why: "scope: global",
+    });
+  });
+
   it("includes the low-confidence fallback instruction", async () => {
     const project = copyValidFixture();
     const { model } = loadSystemModel(project);
@@ -107,6 +127,35 @@ describe("query_system_model", () => {
 
     expect(payload.matchConfidence).toBe("low");
     expect(payload.fallbackInstruction).toBe("inspect repo; ask only if required");
+  });
+
+  it("supports exact surface ids and entry-point linked stubs", async () => {
+    const project = copyValidFixtureWithSurfaces();
+    const { model } = loadSystemModel(project);
+    const surfaceResult = await makeTool(project, model!).handler({
+      ids: ["surface.mobile"], objectTypes: ["surface"],
+    });
+    const surfacePayload = JSON.parse(surfaceResult.content[0]!.text) as {
+      matches: Array<{ id: string; type: string }>;
+      linked: Array<{ id: string; type: string }>;
+    };
+    expect(surfacePayload.matches).toEqual([
+      expect.objectContaining({ id: "surface.mobile", type: "surface" }),
+    ]);
+    expect(surfacePayload.linked).toContainEqual(
+      expect.objectContaining({ id: "capability.workspace_management", type: "capability" }),
+    );
+
+    const capabilityResult = await makeTool(project, model!).handler({
+      ids: ["capability.workspace_management"],
+    });
+    const capabilityPayload = JSON.parse(capabilityResult.content[0]!.text) as {
+      linked: Array<{ id: string; type: string }>;
+    };
+    expect(capabilityPayload.linked).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "surface.canvas", type: "surface" }),
+      expect.objectContaining({ id: "surface.mobile", type: "surface" }),
+    ]));
   });
 });
 

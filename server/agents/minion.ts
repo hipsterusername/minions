@@ -7,7 +7,10 @@ import type { AgentType, AgentTypeContext, AgentToolResult } from "./types.ts";
 import { createMinionToolsForSession } from "../minion-tools.ts";
 import { createSubskillToolsForSession } from "../subskill-tools.ts";
 import { createSkillAuthoringTools } from "../skill-authoring-tools.ts";
-import { persistTaskState } from "../session-persist.ts";
+import {
+  loadArmedSystemPrompt,
+  persistTaskState,
+} from "../session-persist.ts";
 import type { TaskManagerState, TaskRecord } from "../task-tools.ts";
 import { MINION_SYSTEM_PROMPT } from "../../shared/prompts/minion-system.ts";
 import { applyLifecycleEvent } from "../task-lifecycle.ts";
@@ -185,19 +188,19 @@ const minionAgent: AgentType = {
           invocationKind: "resume_open_run",
           prompt: REPORT_NUDGE_PROMPT,
           cwd: ctx.cwd,
-          systemPrompt: MINION_SYSTEM_PROMPT,
+          systemPrompt:
+            loadArmedSystemPrompt(ctx.sessionKey) ?? MINION_SYSTEM_PROMPT,
         });
       }
       return;
     }
 
-    applyParentLifecycleEvent(ctx, parent.leaderKey, parent.taskState, parent.task.taskId, {
-      type: "session_ended",
-      reason: isError ? "error" : "clean",
-      result:
-        (result["result"] as string | null | undefined) ??
-        (isError ? "Task failed" : null),
-    });
+    const terminalResult = (result["result"] as string | null | undefined)
+      ?? (isError ? "Task failed" : "Session completed without a final report.");
+    applyParentLifecycleEvent(ctx, parent.leaderKey, parent.taskState, parent.task.taskId,
+      isError
+        ? { type: "session_ended", reason: "error", result: terminalResult }
+        : { type: "reported_done", result: terminalResult });
   },
 };
 

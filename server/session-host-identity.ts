@@ -23,7 +23,7 @@ interface RuntimeTerminalHost extends SessionHostIdentity {
 export function notifyRuntimeTerminal(
   host: RuntimeTerminalHost,
   lifecycle: WorkItemRuntimeLifecycle | undefined,
-  terminal: { outcome: "completed" | "error" | "interrupted"; finalReportId: string | null; finalReport: string | null; at: number },
+  terminal: { outcome: "completed" | "error" | "stopped" | "interrupted"; finalReportId: string | null; finalReport: string | null; at: number },
 ): boolean {
   if (!host.workItemId || !lifecycle || host.runtimeTerminalNotified
     || host.runtimeTerminalInFlight) return false;

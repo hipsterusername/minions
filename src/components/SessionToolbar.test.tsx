@@ -9,7 +9,7 @@
  *     fixed session harness selectable (mid-session swap is intentionally
  *     unsupported).
  *   - Permission selector is hidden for harnesses with no permission concept.
- *   - "plan" permission mode is dropped for the Codex harness.
+ *   - "plan" permission mode is offered for the Codex harness (read-only sandbox).
  *   - Thinking controls disappear when the harness disables thinking.
  *   - Codex models surface only when the active harness is Codex.
  */
@@ -291,14 +291,15 @@ describe("SessionToolbar — capability gating", () => {
     expect(screen.queryByText("Bypass")).not.toBeInTheDocument();
   });
 
-  it("hides the 'plan' permission option for the Codex harness", () => {
+  it("offers the 'plan' permission option for the Codex harness", () => {
+    // Codex honors plan mode via a read-only sandbox, so it is a valid choice.
     renderWithHarnesses(
       [CLAUDE_ENTRY, CODEX_ENTRY],
       { harness: "codex", model: "gpt-5.5", permissionMode: "auto" },
     );
     const trigger = screen.getByText("Auto");
     fireEvent.click(trigger);
-    expect(screen.queryByText("Plan")).not.toBeInTheDocument();
+    expect(screen.getByText("Plan")).toBeInTheDocument();
     expect(screen.getByText("Default")).toBeInTheDocument();
     expect(screen.getByText("Bypass")).toBeInTheDocument();
   });

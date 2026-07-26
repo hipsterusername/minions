@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WebSocketServer } from "ws";
 import { createBus } from "../bus.ts";
-import { disablePersistence } from "../session-persist.ts";
+import {
+  disablePersistence,
+  persistArmedSystemPrompt,
+} from "../session-persist.ts";
 import type { TaskManagerState } from "../task-tools.ts";
 import { applyLifecycleEvent, applySessionEndedForMinion } from "../task-lifecycle.ts";
 import { getAgentType } from "./registry.ts";
@@ -36,6 +39,8 @@ function parentTaskState(): TaskManagerState {
 
 describe("minion task lifecycle", () => {
   it("nudges once on clean minion completion without report_done", async () => {
+    const armedPrompt = "Base minion prompt\n\n## Skill: Sentinel Resume Skill";
+    persistArmedSystemPrompt("minion-1", armedPrompt);
     const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
     const taskState = parentTaskState();
     const minion = getAgentType("minion");
@@ -64,11 +69,11 @@ describe("minion task lifecycle", () => {
       prompt:
         "Your task is still open. Call mcp__minion-status__report_done with a one-line summary of what you completed, or report_fail with what blocked you. Do not start new work.",
       cwd: "/tmp/project",
-      systemPrompt: expect.any(String),
+      systemPrompt: armedPrompt,
     });
   });
 
-  it("marks the second silent clean completion after a nudge as ended_without_report", async () => {
+  it("completes the second silent clean completion after a nudge — the clean terminal, not the report, decides", async () => {
     const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
     const taskState = parentTaskState();
     taskState.tasks.get("t1")!.nudgedAt = 123;
@@ -88,7 +93,8 @@ describe("minion task lifecycle", () => {
 
     await minion.onComplete?.(ctx, { is_error: false, result: "quiet again" });
 
-    expect(taskState.tasks.get("t1")?.status).toBe("ended_without_report");
+    expect(taskState.tasks.get("t1")?.status).toBe("completed");
+    expect(taskState.tasks.get("t1")?.result).toBe("quiet again");
     expect(startMinionSession).not.toHaveBeenCalled();
   });
 

@@ -1,7 +1,15 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { SessionChatScreen } from "./SessionChatScreen.tsx";
+import {
+  ActiveThinkingIndicator,
+  ActivityMessageGroup,
+  MessageBubble,
+  SessionChatScreen,
+  groupMobileMessages,
+  mobileDashboardColumns,
+} from "./SessionChatScreen.tsx";
+import type { DisplayMessage } from "../sdk-messages.ts";
 import type { ServerMessage, SocketSubscribe } from "../use-socket.ts";
 import type { MobileSessionInfo } from "./mobile-selectors.ts";
 
@@ -29,6 +37,97 @@ function leaderSession(overrides: Partial<MobileSessionInfo> = {}): MobileSessio
 }
 
 describe("SessionChatScreen", () => {
+  it("shows an accessible pulsing affordance while the agent is thinking", () => {
+    render(<ActiveThinkingIndicator />);
+
+    const indicator = screen.getByRole("status");
+    expect(indicator).toHaveTextContent("Thinking…");
+    expect(indicator.querySelector(".mob-thinking-indicator-dot")).toBeInTheDocument();
+  });
+
+  it("collapses auxiliary messages by default and expands their full body", () => {
+    const message: DisplayMessage = {
+      id: "thinking-1",
+      role: "thinking",
+      content: "First part followed by the complete and much longer body",
+      timestamp: 1,
+    };
+
+    render(<MessageBubble message={message} />);
+
+    const row = screen.getByRole("button", { name: "Expand thinking" });
+    expect(row).toHaveAttribute("aria-expanded", "false");
+    expect(row.closest("article")).toHaveAttribute("data-expanded", "false");
+
+    fireEvent.click(row);
+
+    expect(screen.getByRole("button", { name: "Collapse thinking" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
+  it("reveals complete tool input when a compact tool row is expanded", () => {
+    const message: DisplayMessage = {
+      id: "tool-1",
+      role: "tool",
+      content: "Bash",
+      timestamp: 1,
+      toolName: "Bash",
+      toolInput: { command: "pnpm test -- --runInBand", timeout: 120_000 },
+    };
+
+    render(<MessageBubble message={message} />);
+
+    expect(screen.getByText("pnpm test -- --runInBand")).toBeInTheDocument();
+    expect(screen.queryByText(/timeout: 120000/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand Run command" }));
+
+    expect(screen.getByText(/command: pnpm test -- --runInBand/)).toBeInTheDocument();
+    expect(screen.getByText(/timeout: 120000/)).toBeInTheDocument();
+  });
+
+  it("consolidates consecutive auxiliary events into one activity affordance", () => {
+    const messages: DisplayMessage[] = [
+      { id: "tool-1", role: "tool", content: "Read", timestamp: 1, toolName: "Read", toolInput: { file_path: "src/app.ts" } },
+      { id: "thinking-1", role: "thinking", content: "Checking how the pieces fit together", timestamp: 2 },
+      { id: "tool-2", role: "tool", content: "Grep", timestamp: 3, toolName: "Grep", toolInput: { pattern: "render" } },
+    ];
+
+    expect(groupMobileMessages(messages)).toHaveLength(1);
+    render(<ActivityMessageGroup messages={messages} />);
+
+    const toggle = screen.getByRole("button", { name: /Agent activity/ });
+    expect(toggle).toHaveTextContent("2 tool calls · 1 progress update");
+    expect(toggle).toHaveTextContent("Show details");
+    expect(screen.queryByText(/file_path: src\/app.ts/)).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+
+    expect(screen.getByRole("button", { name: /Agent activity/ })).toHaveTextContent("Hide details");
+    expect(screen.getByText(/file_path: src\/app.ts/)).toBeInTheDocument();
+    expect(screen.getByText("Checking how the pieces fit together")).toBeInTheDocument();
+  });
+
+  it("shows launch activity while connecting, then while the leader is thinking", () => {
+    const props = {
+      sessionKey: "leader-launching",
+      subscribe: fakeSubscribe(),
+      send: vi.fn(),
+      onBack: () => {},
+    };
+    const { rerender } = render(<SessionChatScreen {...props} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Connecting to leader…");
+    expect(screen.queryByText("No messages yet.")).not.toBeInTheDocument();
+
+    rerender(<SessionChatScreen {...props} session={leaderSession({ status: "running" })} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Leader is thinking…");
+    expect(screen.getByRole("status").querySelectorAll(".mob-chat-activity-dots i")).toHaveLength(3);
+  });
+
   it("syncs the session on mount", async () => {
     const send = vi.fn();
     render(
@@ -43,6 +142,57 @@ describe("SessionChatScreen", () => {
     await waitFor(() => {
       expect(send).toHaveBeenCalledWith({ type: "sync_session", sessionKey: "s-1" });
     });
+  });
+
+  it("switches between project conversations, including minions", () => {
+    const onSelectSession = vi.fn();
+    const leader = leaderSession();
+    const minion = leaderSession({
+      sessionKey: "minion-1",
+      role: "minion",
+      taskName: "Audit touch targets",
+    });
+
+    render(
+      <SessionChatScreen
+        sessionKey={leader.sessionKey}
+        session={leader}
+        sessionOptions={[leader, minion]}
+        subscribe={fakeSubscribe()}
+        send={vi.fn()}
+        onBack={() => {}}
+        onSelectSession={onSelectSession}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Switch session" }), {
+      target: { value: "minion-1" },
+    });
+
+    expect(onSelectSession).toHaveBeenCalledWith("minion-1");
+  });
+
+  it("enables Stop for every retained session until it is stopped", () => {
+    const props = {
+      sessionKey: "leader-1",
+      subscribe: fakeSubscribe(),
+      send: vi.fn(),
+      onBack: () => {},
+    };
+    const { rerender } = render(
+      <SessionChatScreen {...props} session={leaderSession({ status: "idle" })} />,
+    );
+
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+
+    rerender(<SessionChatScreen {...props} session={leaderSession({ status: "error" })} />);
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+
+    rerender(<SessionChatScreen {...props} session={leaderSession({ status: "completed" })} />);
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+
+    rerender(<SessionChatScreen {...props} session={leaderSession({ status: "stopped" })} />);
+    expect(screen.getByRole("button", { name: "Stop" })).toBeDisabled();
   });
 
   it("sends the typed prompt through the composer", async () => {
@@ -393,7 +543,7 @@ describe("SessionChatScreen", () => {
         sessionKey="leader-1"
         session={leaderSession({
           renderState: {
-            layout: { title: "Build status", columns: 1 },
+            layout: { title: "Build status", columns: 3 },
             components: [{ id: "status", type: "text", content: "Dashboard online" }],
           },
         })}
@@ -407,5 +557,45 @@ describe("SessionChatScreen", () => {
 
     expect(screen.getByText("Build status")).toBeInTheDocument();
     expect(screen.getByText("Dashboard online")).toBeInTheDocument();
+    expect(mobileDashboardColumns()).toBe(1);
+  });
+
+  it("submits a dashboard form with the server's wire keys", () => {
+    // Regression: the mobile onSubmitForm callback previously sent
+    // `componentId`/`answers`, but server/commands/submit-form.ts reads
+    // `formComponentId`/`formAnswers`, so submissions silently no-opped and the
+    // agent never resumed.
+    const send = vi.fn();
+    render(
+      <SessionChatScreen
+        sessionKey="leader-1"
+        session={leaderSession({
+          renderState: {
+            layout: { title: "Deploy", columns: 1 },
+            components: [{
+              id: "deploy-form",
+              type: "form",
+              fields: [{ id: "note", kind: "text", label: "Note" }],
+            }],
+          },
+        })}
+        subscribe={fakeSubscribe()}
+        send={send}
+        onBack={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /dashboard/i }));
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      type: "submit_form",
+      sessionKey: "leader-1",
+      formComponentId: "deploy-form",
+    }));
+    const payload = send.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(payload).toHaveProperty("formAnswers");
+    expect(payload).not.toHaveProperty("componentId");
+    expect(payload).not.toHaveProperty("answers");
   });
 });

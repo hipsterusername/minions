@@ -1,0 +1,7 @@
+id: surface.kanban
+type: surface
+name: Kanban
+summary: Durable work-item board for composing, configuring, launching, moving, and inspecting cards and runs.
+keywords: [kanban, board, card, backlog, workflow, launch, inspector, work_item]
+suggested_files: [src/KanbanBoard.tsx, src/use-server-kanban.ts, src/kanban-work-item-status.ts]
+suggested_tests: [src/KanbanBoard.test.tsx, src/use-server-kanban.dom.test.ts, server/commands/work-items.test.ts]

@@ -107,6 +107,8 @@ export function orphanedObjects(model: LoadedSystemModel): UsageObject[] {
   const graph = systemModelToGraph(model);
   const inbound = new Set(graph.edges.map((edge) => edge.target));
   return sortedObjects(model)
+    .filter((object) => object.type !== "domain")
+    .filter((object) => object.type !== "constraint" || (object.scope === "targeted" && object.guards.length === 0))
     .filter((object) => !inbound.has(object.id))
     .map((object) => describeObject(object, "No inbound links in the system graph"));
 }
@@ -125,7 +127,7 @@ function describeObject(object: SystemModelObject, reason: string): UsageObject 
 }
 
 function labelFor(object: SystemModelObject): string {
-  if (object.type === "capability" || object.type === "flow") return object.name;
+  if (object.type === "domain" || object.type === "capability" || object.type === "flow" || object.type === "surface") return object.name;
   if (object.type === "constraint") return object.statement;
   if (object.type === "decision") return object.title;
   return object.summary;

@@ -40,13 +40,30 @@ export function matchSystemModel(input: {
 }
 
 function scoreObject(object: SystemModelObject, terms: Set<string>, files: string[]): MatchCandidate {
-  if (object.type === "capability") {
+  if (object.type === "domain") {
     return scoreFields(object, terms, files, {
+      name: object.name,
+      aux: { label: "keyword", terms: new Set(object.keywords.map(normalize)) },
+      summary: object.summary,
+    });
+  }
+  if (object.type === "capability") {
+    const candidate = scoreFields(object, terms, files, {
       name: object.name,
       aux: { label: "keyword", terms: new Set(object.keywords.map(normalize)) },
       summary: object.summary,
       fileGlobs: object.suggestedFiles,
     });
+    const matchedFiles = new Set<string>();
+    for (const entryPoint of object.entryPoints ?? []) {
+      const hits = files.filter((file) => entryPoint.files.some((glob) => globMatches(glob, file)));
+      if (hits.length > 0) {
+        hits.forEach((file) => matchedFiles.add(file));
+        candidate.reasons.push(`file matches entry point ${entryPoint.surface}`);
+      }
+    }
+    candidate.score += matchedFiles.size * 4;
+    return candidate;
   }
   if (object.type === "flow") {
     return scoreFields(object, terms, files, {
@@ -67,6 +84,14 @@ function scoreObject(object: SystemModelObject, terms: Set<string>, files: strin
     return scoreFields(object, terms, files, {
       name: object.title,
       summary: object.summary,
+    });
+  }
+  if (object.type === "surface") {
+    return scoreFields(object, terms, files, {
+      name: object.name,
+      aux: { label: "keyword", terms: new Set(object.keywords.map(normalize)) },
+      summary: object.summary,
+      fileGlobs: object.suggestedFiles,
     });
   }
   return scoreFields(object, terms, files, {

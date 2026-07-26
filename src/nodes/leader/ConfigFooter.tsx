@@ -49,6 +49,12 @@ export function ConfigFooter({
   const changeMode = selectCanvasChangeMode(data);
   const isWorktreeMode = changeMode === "worktree";
   const changeModeLocked = hasSession || !!data.workItemSnapshot;
+  // Distinct glyphs per mode so the badge/toggle read at a glance:
+  // ⚡ Live = edits hit the working tree directly · 🌿 Worktree = isolated.
+  const LIVE_ICON = "\u{26A1}";
+  const WORKTREE_ICON = "\u{1F33F}";
+  const modeIcon = isWorktreeMode ? WORKTREE_ICON : LIVE_ICON;
+  const modeLabel = isWorktreeMode ? "Worktree" : "Live";
   const integration = useWorktreeIntegration({
     workItemId: isWorktreeMode ? data.workItemId ?? null : null,
     runKey: isWorktreeMode ? data.sessionKey ?? null : null,
@@ -182,8 +188,13 @@ export function ConfigFooter({
                 : "var(--state-hover)",
               color: isWorktreeMode ? "var(--accent)" : "var(--text-muted)",
             }}
+            title={
+              isWorktreeMode
+                ? "Worktree: edits are isolated for review before merging"
+                : "Live: edits apply directly to your working tree"
+            }
           >
-            {"\u{1F33F}"} {isWorktreeMode ? "Worktree" : "Live"}
+            {modeIcon} {modeLabel}
           </span>
 
           {/* Context count — locked after session starts */}
@@ -250,59 +261,123 @@ export function ConfigFooter({
             onMouseDown={(e) => e.stopPropagation()}
             style={{ padding: "4px 10px 8px" }}
           >
-            {/* Worktree isolation toggle */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                marginBottom: 6,
-              }}
-            >
-              <button
-                onClick={() => {
-                  if (!changeModeLocked) {
-                    onUpdateData({
-                      ...data,
-                      worktreeIsolation: !data.worktreeIsolation,
-                    });
-                  }
-                }}
-                disabled={changeModeLocked}
-                title={changeModeLocked ? "Change mode is fixed when the work item is created" : undefined}
+            {/* Change-mode selector — segmented Live / Worktree toggle */}
+            <div style={{ marginBottom: 8 }}>
+              <div
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  gap: 4,
-                  fontSize: 11,
-                  fontFamily: "var(--font-mono)",
-                  padding: "4px 10px",
-                  borderRadius: 4,
-                  border: "none",
-                  cursor: changeModeLocked ? "default" : "pointer",
-                  opacity: changeModeLocked ? 0.7 : 1,
-                  background: isWorktreeMode
-                    ? "var(--state-active)"
-                    : "var(--state-hover)",
-                  color: isWorktreeMode
-                    ? "var(--accent)"
-                    : "var(--text-muted)",
+                  gap: 6,
+                  marginBottom: 4,
                 }}
               >
-                {"\u{1F33F}"} Worktree Isolation
                 <span
                   style={{
-                    display: "inline-block",
-                    width: 8,
-                    height: 8,
-                    borderRadius: "50%",
-                    background: isWorktreeMode
-                      ? "var(--accent)"
-                      : "var(--text-muted)",
-                    marginLeft: 2,
+                    fontSize: 10,
+                    color: "var(--text-muted)",
+                    fontFamily: "var(--font-mono)",
                   }}
-                />
-              </button>
+                >
+                  Changes go to
+                </span>
+                <div
+                  role="group"
+                  aria-label="Change mode"
+                  style={{
+                    display: "inline-flex",
+                    borderRadius: 6,
+                    border: "1px solid var(--border-default)",
+                    overflow: "hidden",
+                    opacity: changeModeLocked ? 0.75 : 1,
+                  }}
+                >
+                  {(
+                    [
+                      {
+                        mode: "live",
+                        icon: LIVE_ICON,
+                        label: "Live",
+                        hint: "Edits apply directly to your working tree",
+                      },
+                      {
+                        mode: "worktree",
+                        icon: WORKTREE_ICON,
+                        label: "Worktree",
+                        hint: "Edits are isolated in a separate worktree for review before merging",
+                      },
+                    ] as const
+                  ).map((opt, i) => {
+                    const selected =
+                      (opt.mode === "worktree") === isWorktreeMode;
+                    return (
+                      <button
+                        key={opt.mode}
+                        onClick={() => {
+                          if (changeModeLocked) return;
+                          const nextIsolation = opt.mode === "worktree";
+                          if (nextIsolation !== data.worktreeIsolation) {
+                            onUpdateData({
+                              ...data,
+                              worktreeIsolation: nextIsolation,
+                            });
+                          }
+                        }}
+                        disabled={changeModeLocked}
+                        aria-pressed={selected}
+                        title={
+                          changeModeLocked
+                            ? "Change mode is fixed once the work item is created"
+                            : opt.hint
+                        }
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 4,
+                          fontSize: 11,
+                          fontFamily: "var(--font-mono)",
+                          padding: "4px 12px",
+                          border: "none",
+                          borderLeft:
+                            i > 0
+                              ? "1px solid var(--border-default)"
+                              : "none",
+                          cursor: changeModeLocked ? "default" : "pointer",
+                          background: selected
+                            ? "var(--state-active)"
+                            : "transparent",
+                          color: selected
+                            ? "var(--accent)"
+                            : "var(--text-muted)",
+                          fontWeight: selected ? 600 : 400,
+                        }}
+                      >
+                        {opt.icon} {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {changeModeLocked && (
+                  <span
+                    title="Change mode is fixed once the work item is created"
+                    style={{ fontSize: 10, color: "var(--text-muted)" }}
+                  >
+                    {"\u{1F512}"} fixed
+                  </span>
+                )}
+              </div>
+              {/* Plain-language explanation of the active mode */}
+              <div
+                style={{
+                  fontSize: 10,
+                  color: "var(--text-muted)",
+                  fontFamily: "var(--font-mono)",
+                  lineHeight: 1.4,
+                }}
+              >
+                {isWorktreeMode
+                  ? "Isolated in a worktree — review & merge before changes touch your tree."
+                  : "Applied directly to your working tree as the agent works."}
+              </div>
             </div>
 
             {/* Context sources — locked after session starts */}

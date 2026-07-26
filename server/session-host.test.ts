@@ -163,38 +163,39 @@ describe("SessionHost.start — happy-path lifecycle", () => {
     }));
   });
 
-  it("rejects an unsupported legacy live run with actionable relaunch guidance", async () => {
+  it("allows an observe-only legacy live run and discloses it as direct-to-main", async () => {
+    // Worktree OFF = direct-to-main: there is no contribution lifecycle to
+    // protect, so an observe-only harness (e.g. Codex "Sol") is allowed to run.
     harnessRef.mutationInterception = "observe_only";
-    const { host, deps, envelopes } = makeHarness("legacy-unsafe");
+    const { host, deps, envelopes } = makeHarness("legacy-observe-only");
     await host.start({ sessionKey: host.id, prompt: "change files", cwd: host.cwd,
       role: "default", worktreeIsolation: false }, deps);
-    expect(harnessRef.starts).toHaveLength(0);
-    expect(host.lastError).toContain("relaunch with worktree isolation");
+    expect(harnessRef.starts).toHaveLength(1);
+    expect(host.lastError).toBeFalsy();
     expect(envelopes.some((event) => event.type === "mutation_enforcement_fallback")).toBe(true);
   });
 
-  it("rejects a canonical live run when the harness has no interception", async () => {
+  it("allows a canonical live run when the harness has no interception", async () => {
     harnessRef.mutationInterception = "none";
-    const { host, deps, envelopes } = makeHarness("unsafe-none");
+    const { host, deps, envelopes } = makeHarness("live-none");
     host.workItemId = "work-1";
     await host.start({ sessionKey: host.id, workItemId: "work-1",
       prompt: "change files", cwd: host.cwd, role: "leader",
       worktreeIsolation: false }, deps);
-    expect(harnessRef.starts).toHaveLength(0);
-    expect(host.lastError).toContain("start this work item in worktree mode");
+    expect(harnessRef.starts).toHaveLength(1);
+    expect(host.lastError).toBeFalsy();
     expect(envelopes.some((event) => event.type === "mutation_enforcement_fallback")).toBe(true);
   });
 
-  it("rejects a canonical live run when the harness is only observe-only", async () => {
+  it("allows a canonical live run when the harness is only observe-only", async () => {
     harnessRef.mutationInterception = "observe_only";
-    const { host, deps, envelopes } = makeHarness("unsafe-live");
+    const { host, deps, envelopes } = makeHarness("live-observe-only");
     host.workItemId = "work-1";
     await host.start({ sessionKey: host.id, workItemId: "work-1",
       prompt: "change files", cwd: host.cwd, role: "leader",
       worktreeIsolation: false }, deps);
-    expect(harnessRef.starts).toHaveLength(0);
-    expect(host).toMatchObject({ status: "error",
-      lastError: expect.stringContaining("start this work item in worktree mode") });
+    expect(harnessRef.starts).toHaveLength(1);
+    expect(host.status).not.toBe("error");
     expect(envelopes.some((event) => event.type === "mutation_enforcement_fallback")).toBe(true);
   });
 
@@ -582,7 +583,8 @@ describe("SessionHost.start — error path", () => {
       prompt?: string;
     };
     expect(secondStart.resumeId).toBeUndefined();
-    expect(secondStart.prompt).toContain("<context-window-recovery>");
+    expect(secondStart.prompt).toContain("<previous-session-context>");
+    expect(secondStart.prompt).not.toContain("<context-window-recovery>");
     expect(secondStart.prompt).toContain("I finished step one.");
     expect(secondStart.prompt).toContain("Continue the work.");
   });
@@ -666,7 +668,8 @@ describe("SessionHost.start — error path", () => {
     expect(host.sessionId).toBe("new-thread");
     const secondStart = harnessRef.starts[1] as { resumeId?: string; prompt: string };
     expect(secondStart.resumeId).toBeUndefined();
-    expect(secondStart.prompt).toContain("<previous-session-context>");
+    expect(secondStart.prompt).toContain("<session-continuation>");
+    expect(secondStart.prompt).not.toContain("<previous-session-context>");
     expect(secondStart.prompt).toContain("Goal: finish compaction");
     expect(envelopes.some((e) => e.type === "session_compacted")).toBe(true);
   });

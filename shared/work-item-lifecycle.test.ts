@@ -32,17 +32,27 @@ describe("work-item lifecycle transitions", () => {
     expect(completed).toMatchObject({ runtimeState: "inactive", outcome: "completed", resolution: "open", lifecycleRevision: 5 });
   });
 
-  it("classifies completion without a persisted report as interrupted", () => {
+  it("seals every declared outcome verbatim when a completed run carries its report", () => {
+    for (const outcome of ["completed", "error", "stopped", "interrupted"] as const) {
+      const starting = transitionWorkItemLifecycle(initialWorkItemLifecycle(), { type: "start_iteration" });
+      expect(transitionWorkItemLifecycle(starting, { type: "seal", outcome, hasFinalReport: true }).outcome)
+        .toBe(outcome);
+    }
+  });
+
+  it("downgrades a nominal completion without its persisted report to interrupted", () => {
     const starting = transitionWorkItemLifecycle(initialWorkItemLifecycle(), { type: "start_iteration" });
     expect(transitionWorkItemLifecycle(starting, { type: "seal", outcome: "completed" }).outcome)
+      .toBe("interrupted");
+    expect(transitionWorkItemLifecycle(starting, { type: "seal", outcome: "completed", hasFinalReport: false }).outcome)
       .toBe("interrupted");
   });
 
   it("atomically reopens every terminal outcome for another iteration", () => {
-    for (const outcome of ["completed", "error", "interrupted"] as const) {
+    for (const outcome of ["completed", "error", "stopped", "interrupted"] as const) {
       const starting = transitionWorkItemLifecycle(initialWorkItemLifecycle(), { type: "start_iteration" });
       const terminal = transitionWorkItemLifecycle(starting, {
-        type: "seal", outcome, hasFinalReport: outcome === "completed",
+        type: "seal", outcome,
       });
       const reviewed = transitionWorkItemLifecycle(terminal, { type: "review" });
       expect(transitionWorkItemLifecycle(reviewed, { type: "start_iteration" })).toMatchObject({

@@ -1,0 +1,49 @@
+id: capability.execution_observability
+type: capability
+name: Execution observability
+summary: Users can monitor authoritative status, transcript, plan, dashboard, usage, reviews, and child activity across reconnects and product surfaces.
+constraints: []
+decisions: [ decision.typed_event_bus ]
+suggested_files: [ src/session-stream.ts, src/SessionPanel.tsx, src/ActivityView.tsx, src/mobile/ActivityScreen.tsx, server/commands/sync-session.ts, server/bus.ts ]
+suggested_tests: [ src/session-stream.test.ts, src/SessionPanel.test.tsx, src/ActivityView.test.tsx, src/mobile/ActivityScreen.test.tsx, server/commands/sync-session.test.ts ]
+keywords: [ observe, monitor, transcript, stream, status, activity, usage, cost, plan, dashboard, minion, sync, replay ]
+entry_points:
+  - surface: surface.canvas
+    summary: Observe live Leader, minion, and default-session nodes plus the SessionPanel.
+    files: [ src/nodes/LeaderNode.tsx, src/nodes/MinionNode.tsx, src/nodes/ClaudeSessionNode.tsx, src/SessionPanel.tsx ]
+    tests: [ src/nodes/LeaderNode.test.tsx, src/SessionPanel.test.tsx, src/session-stream.test.ts ]
+    flows: [ flow.monitor_execution, flow.recover_after_disconnect ]
+  - surface: surface.kanban
+    summary: Inspect card-projected run status, dashboard, transcript, and coordination state.
+    files: [ src/KanbanBoard.tsx, src/use-server-kanban.ts ]
+    tests: [ src/KanbanBoard.test.tsx, src/use-server-kanban.dom.test.ts ]
+    flows: [ flow.monitor_execution, flow.triage_attention ]
+  - surface: surface.activity
+    summary: Triage top-level Leader and session state while nesting minions under their Leader.
+    files: [ src/ActivityView.tsx, src/use-session-activity.ts ]
+    tests: [ src/ActivityView.test.tsx, src/use-session-activity.test.ts ]
+    flows: [ flow.monitor_execution, flow.triage_attention ]
+  - surface: surface.mobile
+    summary: Observe remote Activity, plan, transcript, dashboard, and approval state.
+    files: [ src/mobile/ActivityScreen.tsx, src/mobile/SessionChatScreen.tsx, src/mobile/mobile-selectors.ts ]
+    tests: [ src/mobile/ActivityScreen.test.tsx, src/mobile/SessionChatScreen.test.tsx, src/mobile/mobile-selectors.test.ts ]
+    flows: [ flow.monitor_execution, flow.triage_attention, flow.recover_after_disconnect ]
+  - surface: surface.agent_tools
+    summary: Publish task reports and structured render state onto routed topics.
+    files: [ server/minion-tools.ts, server/render-tools.ts ]
+    tests: [ server/minion-tools.test.ts, server/render-tools.test.ts ]
+    flows: [ flow.monitor_execution, flow.delegate_and_steer_minions ]
+  - surface: surface.ws_api
+    summary: List and sync host snapshots and fan out typed incremental events.
+    files: [ server/commands/list-sessions.ts, server/commands/sync-session.ts, server/bus.ts ]
+    tests: [ server/commands/list-sessions.test.ts, server/commands/sync-session.test.ts, tests/architecture/no-direct-broadcast.test.ts ]
+    flows: [ flow.monitor_execution, flow.recover_after_disconnect ]
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.observability
+depends_on: []
+bridges:
+  - to: flow.delegate_and_steer_minions
+    reason: Execution views expose delegated child activity while delegation retains ownership of the orchestration flow.
+risks: []

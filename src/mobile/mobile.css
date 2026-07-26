@@ -139,6 +139,40 @@
   opacity: 0.7;
 }
 
+.mob-session-switcher {
+  min-width: 0;
+  padding: 8px 12px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.mob-session-switcher select {
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 34px 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font: 600 13px var(--font-sans);
+  text-transform: none;
+  text-overflow: ellipsis;
+}
+
+.mob-stop-button:disabled {
+  color: var(--text-dim);
+  opacity: 0.55;
+}
+
 .mob-screen,
 .mob-chat,
 .mob-review {
@@ -211,6 +245,419 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 10px;
+}
+
+/* Activity summary strip: tappable needs-you / active / waiting filters. */
+.mob-activity-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: var(--border-default);
+  overflow: hidden;
+}
+
+.mob-summary-item {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 0;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  text-align: left;
+  touch-action: manipulation;
+  cursor: pointer;
+}
+
+.mob-summary-item:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.mob-summary-item--active {
+  background: var(--bg-surface);
+  box-shadow: inset 0 -2px var(--accent);
+}
+
+.mob-summary-item strong {
+  display: block;
+  font: 700 18px var(--font-mono);
+}
+
+.mob-summary-item span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.mob-summary-item--attention strong {
+  color: var(--status-warning);
+}
+
+/* Open / All / Dismissed visibility tabs. */
+.mob-filters {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.mob-filter {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  touch-action: manipulation;
+}
+
+.mob-filter--active {
+  color: var(--text-primary);
+  border-color: var(--border-default);
+  background: var(--bg-surface);
+}
+
+/* "Needs you" triage lane. */
+.mob-activity-section--triage .mob-section-header {
+  color: var(--status-warning);
+}
+
+.mob-triage-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.mob-triage-row {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-default);
+  border-left-width: 3px;
+  border-radius: 10px;
+  background: var(--bg-surface);
+}
+
+.mob-triage-row--error {
+  border-left-color: var(--status-error);
+}
+
+.mob-triage-row--waiting {
+  border-left-color: var(--status-warning);
+}
+
+.mob-triage-row--changes {
+  border-left-color: var(--status-success);
+}
+
+.mob-triage-main {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  touch-action: manipulation;
+}
+
+.mob-triage-main:active {
+  background: var(--state-active);
+  border-radius: 8px;
+}
+
+.mob-triage-icon {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  font-weight: 800;
+  font-size: 16px;
+  font-family: var(--font-mono);
+}
+
+.mob-triage-icon--error {
+  color: var(--status-error);
+  background: color-mix(in srgb, var(--status-error) 18%, transparent);
+}
+
+.mob-triage-icon--waiting {
+  color: var(--status-warning);
+  background: color-mix(in srgb, var(--status-warning) 18%, transparent);
+}
+
+.mob-triage-icon--changes {
+  color: var(--status-success);
+  background: color-mix(in srgb, var(--status-success) 18%, transparent);
+}
+
+.mob-triage-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mob-triage-line {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.mob-triage-title {
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.mob-triage-reason {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.mob-triage-reason--error {
+  color: var(--status-error);
+}
+
+.mob-triage-reason--waiting {
+  color: var(--status-warning);
+}
+
+.mob-triage-reason--changes {
+  color: var(--status-success);
+}
+
+.mob-triage-sub {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.mob-triage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mob-mini-btn {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  touch-action: manipulation;
+}
+
+.mob-mini-btn:active {
+  background: var(--state-active);
+}
+
+.mob-mini-btn--primary {
+  color: var(--status-success);
+  border-color: color-mix(in srgb, var(--status-success) 45%, transparent);
+  background: color-mix(in srgb, var(--status-success) 16%, var(--bg-elevated));
+}
+
+.mob-mini-btn--ghost {
+  color: var(--text-muted);
+  background: transparent;
+}
+
+/* Bulk selection: per-row checkbox + shared inline lifecycle actions. */
+.mob-select {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  justify-content: center;
+  min-height: 40px;
+  min-width: 40px;
+  touch-action: manipulation;
+}
+
+.mob-select input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+}
+
+.mob-life-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mob-session-card-wrap {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mob-session-card-wrap--selected .mob-session-card,
+.mob-triage-row--selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Canonical work-item runs live inline on mobile (the desktop surface puts
+ * them in its inspector). Keep the disclosure visually attached to its card
+ * instead of leaving a raw browser <details> control between activity rows. */
+.mob-run-history {
+  min-width: 0;
+  margin-top: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-secondary) 82%, var(--bg-primary));
+}
+
+.mob-run-history > summary {
+  min-height: 44px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  touch-action: manipulation;
+  list-style: none;
+}
+
+.mob-run-history > summary::-webkit-details-marker {
+  display: none;
+}
+
+.mob-run-history > summary::before {
+  content: "›";
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  transition: transform 120ms ease;
+}
+
+.mob-run-history[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.mob-run-history-count {
+  min-width: 22px;
+  height: 22px;
+  margin-left: auto;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--muted-bg);
+  color: var(--text-muted);
+  font: 700 11px var(--font-mono);
+}
+
+.mob-run-history-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--border-default);
+}
+
+.mob-run-history ol {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mob-run-history li {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 11px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-default) 72%, transparent);
+}
+
+.mob-run-history li:last-child {
+  border-bottom: 0;
+}
+
+.mob-run-history-line {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.mob-run-history-line span,
+.mob-run-history time {
+  color: var(--text-muted);
+  font: 11px var(--font-mono);
+  text-transform: capitalize;
+}
+
+.mob-run-history li p,
+.mob-run-history-empty {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.mob-run-history-empty {
+  padding-top: 11px;
+}
+
+/* Sticky bulk action bar: contextual Mark/Dismiss/Restore for the selection. */
+.mob-bulk {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border-default));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-elevated));
+}
+
+.mob-bulk-count {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.mob-bulk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .mob-session-card {
@@ -1131,8 +1578,147 @@ article.mob-plan-row {
 .mob-message--system,
 .mob-message--thinking {
   max-width: 100%;
+  padding: 0;
+  overflow: hidden;
   border-style: dashed;
+  border-radius: 6px;
   background: color-mix(in srgb, var(--muted-bg) 78%, var(--bg-primary));
+  font-size: 11px;
+  line-height: 1.3;
+  box-shadow: none;
+}
+
+.mob-message-toggle {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 7px;
+  padding: 5px 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mob-message-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.mob-activity-group {
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--muted-bg) 82%, var(--bg-primary));
+}
+
+.mob-activity-group-toggle {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mob-activity-group-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.mob-activity-group-icon {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-elevated));
+  color: var(--accent);
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.mob-activity-group-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.mob-activity-group-copy strong {
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.mob-activity-group-copy small,
+.mob-activity-group-action {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.mob-activity-group-action {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.mob-activity-group-details {
+  display: grid;
+  gap: 5px;
+  padding: 0 8px 8px 42px;
+}
+
+.mob-activity-group-details .mob-message {
+  width: 100%;
+  padding: 6px 8px;
+}
+
+.mob-activity-group-details .mob-message-content {
+  margin-top: 3px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.mob-message--tool .mob-message-label,
+.mob-message--system .mob-message-label,
+.mob-message--thinking .mob-message-label {
+  justify-content: flex-start;
+  gap: 5px;
+  margin-bottom: 0;
+}
+
+.mob-message--tool .mob-message-label-text,
+.mob-message--system .mob-message-label-text,
+.mob-message--thinking .mob-message-label-text {
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
+.mob-message--tool .mob-message-content,
+.mob-message--system .mob-message-content,
+.mob-message--thinking .mob-message-content {
+  min-width: 0;
+}
+
+.mob-message[data-expanded="false"] .mob-message-content {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mob-message--tool .mob-message-suffix,
+.mob-message--system .mob-message-suffix,
+.mob-message--thinking .mob-message-suffix {
+  grid-column: 2;
+  margin-top: 2px;
 }
 
 .mob-message[data-tone="tool"],
@@ -1147,14 +1733,14 @@ article.mob-plan-row {
 
 .mob-tool-icon {
   flex: none;
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   display: inline-grid;
   place-items: center;
-  border-radius: 7px;
+  border-radius: 5px;
   background: var(--bg-elevated);
   color: var(--tool-accent);
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 800;
 }
 
@@ -2225,6 +2811,60 @@ article.mob-plan-row {
 
 .mob-empty--chat {
   min-height: 160px;
+}
+
+.mob-chat-activity {
+  justify-items: center;
+}
+
+.mob-chat-activity-dots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  color: var(--accent);
+}
+
+.mob-chat-activity-dots i {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: mob-stream-dot 900ms ease-in-out infinite;
+}
+
+.mob-chat-activity-dots i:nth-child(2) {
+  animation-delay: 120ms;
+}
+
+.mob-chat-activity-dots i:nth-child(3) {
+  animation-delay: 240ms;
+}
+
+.mob-chat-activity h2 {
+  color: var(--text-primary);
+}
+
+.mob-thinking-indicator {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border-default));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-secondary));
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.mob-thinking-indicator-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: mob-stream-dot 900ms ease-in-out infinite;
 }
 
 .mob-tabbar {

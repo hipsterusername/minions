@@ -1,0 +1,19 @@
+id: constraint.schema_and_project_authorization
+type: constraint
+statement: Commands and REST writes validate input schemas and independently verify registered project ownership and guarded paths.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces: []
+  files:
+    - server/commands/schemas.ts
+    - server/commands/work-items.ts
+    - server/path-guard.ts
+    - src/api.ts
+severity: critical
+agent_instruction: Treat typed envelopes as untrusted input, resolve project paths server-side, and test traversal, mismatched project IDs, and authorization failures.
+suggested_tests: [ server/commands/schemas.test.ts, server/commands/work-items.test.ts, server/path-guard.test.ts, src/api.test.ts ]
+evidence: [ decision.canonical_work_item_lifecycle ]
+domain: domain.platform
+scope: global
+guards: []

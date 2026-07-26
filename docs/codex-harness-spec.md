@@ -295,8 +295,9 @@ Update:
   decide which controls render. Model dropdown becomes harness-scoped. **Done.**
   The toolbar now hides the permission selector when the harness lacks
   `permissionPrompts`, hides the thinking effort + display toggle when the
-  harness lacks `thinking`, drops the `plan` permission option for Codex
-  specifically (no capability flag covers it), and renders the harness pill
+  harness lacks `thinking`, offers the `plan` permission option for every
+  permission-prompt harness (Codex honors it via a read-only sandbox), and
+  renders the harness pill
   display-only once `sessionKey` is set so mid-session swap stays deferred
   (Open Questions §1).
 - Phase E: harness inventory is exposed through a new global
@@ -692,7 +693,8 @@ Implemented:
      selectable before `sessionKey` is set, display-only afterwards.
    - Model dropdown uses the active harness's `staticInfo().models`.
    - Permission selector hidden when `capabilities.permissionPrompts`
-     is false; `plan` mode dropped for the Codex harness specifically.
+     is false; `plan` mode offered for every permission-prompt harness
+     (Codex realizes it as a read-only sandbox).
    - Thinking effort + show/hide toggle hidden when the harness or
      model lacks adaptive thinking.
    - Interrupt button hidden when `capabilities.partialMessages` is
@@ -706,7 +708,7 @@ Implemented:
    Minions inherit display-only — leaders own the picker.
 6. Toolbar tests: `src/components/SessionToolbar.test.tsx` covers
    selector visibility, mid-session display-only, capability gating,
-   Codex `plan` filtering, and harness-scoped model lists.
+   Codex `plan` support, and harness-scoped model lists.
 
 Still deferred (intentionally out of Phase E scope):
 
@@ -780,4 +782,4 @@ Explicitly **not** required for MVP (Phase E):
    | `bypassPermissions` | `never` | `danger-full-access` |
    | `auto` (default) | `on-failure` | `danger-full-access` |
    | `default` | `on-request` | `danger-full-access` |
-   | `plan` | unsupported (UI disables for Codex in Phase E) | n/a |
+   | `plan` | `on-request` | `read-only` (sandbox enforces no mutations) |

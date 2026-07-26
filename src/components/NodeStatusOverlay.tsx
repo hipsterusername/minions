@@ -8,6 +8,7 @@ import {
 import type { CanvasNode, CanvasTransform } from "../types.ts";
 import type { MinionData } from "../nodes/MinionNode.tsx";
 import type { LeaderData } from "../nodes/leader/types.ts";
+import { selectCanvasWorkItem } from "../nodes/leader/work-item.ts";
 import { STATUS_COLORS as SESSION_STATUS_COLORS, COLORS } from "../palette.ts";
 
 interface NodeStatusOverlayProps {
@@ -51,10 +52,23 @@ export function resolveLeaderTitle(
 }
 
 function readNodeStatus(node: CanvasNode): string {
-  const status = (node.data as Partial<LeaderData | MinionData>).status;
-  return typeof status === "string" && status.length > 0
-    ? status
-    : "disconnected";
+  const data = node.data as Partial<LeaderData | MinionData>;
+  const rawStatus =
+    typeof data.status === "string" && data.status.length > 0
+      ? data.status
+      : "disconnected";
+  // Leaders display a work-item-snapshot-derived status in their node header
+  // (LeaderNode's `displayStatus`). The zoomed-out overlay must show the exact
+  // same value — read it through the same projection instead of the raw
+  // `data.status` field, so the two surfaces stay in sync 1:1. Minions have no
+  // work-item snapshot and keep their raw status.
+  if (node.type === "leader") {
+    return (
+      selectCanvasWorkItem((data as Partial<LeaderData>).workItemSnapshot)
+        ?.status ?? rawStatus
+    );
+  }
+  return rawStatus;
 }
 
 export function NodeStatusOverlay({

@@ -1,13 +1,25 @@
 id: capability.workspace
 type: capability
+domain: domain.workspace
 name: Workspace
 summary: Users can open an existing workspace, change it, and save their work.
-linked_flows: [flow.open_workspace, flow.save_workspace]
+depends_on: []
+bridges: []
 constraints: [constraint.workspace_changes_are_reviewed]
 suggested_files: [src/workspace.ts]
 suggested_tests: [src/workspace.test.ts]
 keywords: [workspace, open, save]
+entry_points:
+  - surface: surface.canvas
+    summary: Open and save workspaces from the main canvas.
+    files: [src/workspace.ts]
+    tests: [src/workspace.test.ts]
+    flows: [flow.open_workspace]
+  - surface: surface.mobile
+    summary: Open and save workspaces from the mobile experience.
+    files: [src/mobile/workspace.ts]
+    tests: [src/mobile/workspace.test.ts]
+    flows: [flow.save_workspace]
 freshness:
   class: code_coupled
 risk: medium
-

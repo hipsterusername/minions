@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { matchSystemModel } from "./match.ts";
 import { loadSystemModel } from "./load.ts";
+import { copyValidFixtureWithSurfaces } from "./load.test.ts";
 
 describe("matchSystemModel", () => {
   it("scores deterministic top-K candidates with reason strings", () => {
@@ -15,7 +16,7 @@ describe("matchSystemModel", () => {
     expect(result.matchConfidence).toBe("high");
     expect(result.candidates.map((candidate) => candidate.id)).toEqual([
       "flow.approve_changes",
-      "capability.workspace_management",
+      "domain.workspace",
     ]);
     expect(result.candidates[0]?.reasons).toContain("file matched 1 suggested path");
   });
@@ -25,6 +26,7 @@ describe("matchSystemModel", () => {
 
     expect(matchSystemModel({ model, request: "workspace" }).candidates[0]).toMatchObject({
       id: "capability.workspace_management",
+      type: "capability",
       score: 5,
       reasons: expect.arrayContaining(["name matched 1 term", "keyword matched 1 term"]),
     });
@@ -69,5 +71,23 @@ describe("matchSystemModel", () => {
     expect(result.candidates).toEqual([]);
     expect(result.matchConfidence).toBe("low");
     expect(result.fallbackInstruction).toBe("inspect repo; ask only if required");
+  });
+
+  it("ranks surfaces and attributes capability entry-point file matches", () => {
+    const model = loadSystemModel(copyValidFixtureWithSurfaces()).model!;
+    expect(matchSystemModel({ model, request: "mobile" }).candidates[0]).toMatchObject({
+      id: "surface.mobile",
+      type: "surface",
+      score: 6,
+    });
+    const capability = matchSystemModel({
+      model,
+      request: "unrelated",
+      files: ["src/mobile/App.tsx"],
+    }).candidates.find((candidate) => candidate.id === "capability.workspace_management");
+    expect(capability).toMatchObject({
+      score: 4,
+      reasons: ["file matches entry point surface.mobile"],
+    });
   });
 });

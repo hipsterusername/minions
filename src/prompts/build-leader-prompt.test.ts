@@ -13,7 +13,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { buildLeaderSystemPrompt } from "./build-leader-prompt.ts";
+import {
+  buildLeaderSystemPrompt,
+  buildLeaderSystemPromptPreview,
+} from "./build-leader-prompt.ts";
 import { LEADER_SYSTEM_PROMPT } from "./leader-system.ts";
 import {
   clearSkills,
@@ -45,7 +48,7 @@ describe("buildLeaderSystemPrompt", () => {
   });
 
   it("surfaces built-in presets in the inventory even when the registry is empty", () => {
-    const out = buildLeaderSystemPrompt({ skillIds: [], skillValues: {} });
+    const out = buildLeaderSystemPromptPreview({ skillIds: [], skillValues: {} });
     // Base prompt is present, plus the always-available built-in inventory.
     expect(out).toContain(LEADER_SYSTEM_PROMPT);
     expect(out).toContain("# Available Skills (for arming Minions)");
@@ -58,7 +61,7 @@ describe("buildLeaderSystemPrompt", () => {
     registerSkill(makeSkill({ id: "a", name: "Alpha", description: "First" }));
     registerSkill(makeSkill({ id: "b", name: "Beta", description: "Second" }));
 
-    const out = buildLeaderSystemPrompt({ skillIds: [], skillValues: {} });
+    const out = buildLeaderSystemPromptPreview({ skillIds: [], skillValues: {} });
     expect(out).toContain(LEADER_SYSTEM_PROMPT);
     expect(out).toContain("# Available Skills (for arming Minions)");
     expect(out).toContain("`a` — **Alpha**: First");
@@ -78,7 +81,7 @@ describe("buildLeaderSystemPrompt", () => {
     );
     registerSkill(makeSkill({ id: "review", name: "Review", description: "Read code" }));
 
-    const out = buildLeaderSystemPrompt({
+    const out = buildLeaderSystemPromptPreview({
       skillIds: ["lint"],
       skillValues: {},
     });
@@ -115,7 +118,7 @@ describe("buildLeaderSystemPrompt", () => {
       }),
     );
 
-    const out = buildLeaderSystemPrompt({ skillIds: ["design"], skillValues: {} });
+    const out = buildLeaderSystemPromptPreview({ skillIds: ["design"], skillValues: {} });
     expect(out).toContain("### Sub-skills of Design");
     expect(out).toContain("- `layout` — **Layout**: layout rules.");
     expect(out).toContain("load_subskill");
@@ -127,4 +130,25 @@ describe("buildLeaderSystemPrompt", () => {
   // Removed: '(no description)' substring assertion — implementation-coupled
   // copy pinning of buildArmingInventory output. See
   // docs/testing-strategy.md §5.
+});
+
+describe("buildLeaderSystemPrompt wire customization", () => {
+  it("returns only the trimmed user prefix instead of a client-assembled prompt", () => {
+    expect(buildLeaderSystemPrompt({
+      skillIds: ["review"],
+      skillValues: {},
+      systemPromptPrefix: "  Focus on accessibility.  ",
+    })).toContain("Focus on accessibility.");
+    expect(buildLeaderSystemPrompt({
+      skillIds: ["review"],
+      skillValues: {},
+      systemPromptPrefix: "Focus on accessibility.",
+    })).not.toContain("You are the Lead Developer");
+  });
+
+  it("returns an empty customization when no prefix is configured", () => {
+    const wire = buildLeaderSystemPrompt({ skillIds: [], skillValues: {} });
+    expect(wire).toContain('"promptPrefix":""');
+    expect(wire).not.toContain("You are the Lead Developer");
+  });
 });

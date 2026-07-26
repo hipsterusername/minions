@@ -6,7 +6,7 @@ import type { ConnectionDeps } from "../../server/ws-connection.ts";
 import { dispatchCommand } from "../../server/commands/index.ts";
 import { cmd, setup } from "../support/server-command-harness.ts";
 import { writeSettings } from "../../server/project-store.ts";
-import { copyValidFixture } from "../../server/system-model/load.test.ts";
+import { copyValidFixture, copyValidFixtureWithSurfaces } from "../../server/system-model/load.test.ts";
 
 class FakeWs extends EventEmitter {
   readyState = 1;
@@ -60,21 +60,34 @@ describe("contract: system-model WS commands", () => {
 
     dispatchCommand(h.ctx, cmd({ type: "get_system_model_status" }), h.ws);
 
-    const response = h.wsSent[0] as { status?: { counts?: { capabilities: number } } };
+    const response = h.wsSent[0] as { status?: { counts?: { domains: number; capabilities: number } } };
+    expect(response.status?.counts?.domains).toBe(1);
     expect(response.status?.counts?.capabilities).toBe(1);
   });
 
   it("get_system_graph returns graph nodes and edges", () => {
-    const project = copyValidFixture();
+    const project = copyValidFixtureWithSurfaces();
     writeSettings(project, { systemModel: "advisory" });
     const h = setup({ cwd: project });
 
     dispatchCommand(h.ctx, cmd({ type: "get_system_graph" }), h.ws);
 
     const response = h.wsSent[0] as {
-      graph?: { nodes: Array<{ id: string }>; edges: Array<{ id: string }> };
+      graph?: {
+        nodes: Array<{ id: string; type: string }>;
+        edges: Array<{ id: string; relation: string; files?: string[] }>;
+      };
     };
     expect(response.graph?.nodes.some((node) => node.id === "capability.workspace_management")).toBe(true);
+    expect(response.graph?.nodes).toContainEqual(expect.objectContaining({ id: "domain.workspace", type: "domain" }));
+    expect(response.graph?.edges).toContainEqual(expect.objectContaining({ relation: "implements" }));
+    expect(response.graph?.edges).toContainEqual(expect.objectContaining({ relation: "guards" }));
     expect(response.graph?.edges.length).toBeGreaterThan(0);
+    expect(response.graph?.nodes).toContainEqual(expect.objectContaining({
+      id: "surface.mobile", type: "surface",
+    }));
+    expect(response.graph?.edges).toContainEqual(expect.objectContaining({
+      relation: "entry_point", files: ["src/mobile/**"],
+    }));
   });
 });

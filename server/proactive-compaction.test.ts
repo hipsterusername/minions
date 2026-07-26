@@ -49,7 +49,8 @@ describe("proactive compaction seed builder", () => {
 
     const seed = buildProactiveCompactionSeed(host, "Next: verify and report.");
 
-    expect(seed).toContain("<previous-session-context>");
+    expect(seed).toContain("<session-continuation>");
+    expect(seed).not.toContain("<previous-session-context>");
     expect(seed).toContain("Prior session id: old-thread");
     expect(seed).toContain("- t1 [completed] Implement");
     expect(seed).toContain("truncated");
@@ -120,4 +121,3 @@ describe("proactive compaction setting resolution", () => {
     expect(host.proactiveCompaction.setting).toBe("auto");
   });
 });
-

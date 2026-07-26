@@ -16,6 +16,10 @@ const amendWorkPacketInputSchema = z.object({
   scopeDelta: z.object({
     addObjectIds: z.array(z.string()).default([]),
     removeObjectIds: z.array(z.string()).default([]),
+    entryPoints: z.array(z.object({
+      capabilityId: z.string().regex(/^capability\.[a-z0-9_]+$/),
+      surfaceId: z.string().regex(/^surface\.[a-z0-9_]+$/),
+    })).default([]).describe("Leader-confirmed entry-point pairs to add to scope."),
     files: z.array(z.string()).optional(),
     ownedPaths: z.array(z.string()).optional(),
     note: z.string().optional(),
@@ -37,7 +41,12 @@ export function createAmendWorkPacketToolDef(ctx: SystemModelToolContext): Norma
       const ids = unique([
         ...stored.packet.scope.capabilities,
         ...stored.packet.scope.flows,
+        ...stored.packet.scope.constraints,
+        ...stored.packet.scope.decisions,
+        ...stored.packet.scope.risks,
+        ...(stored.packet.scope.surfaces ?? []),
         ...args.scopeDelta.addObjectIds,
+        ...confirmedEntryPointCapabilityIds(args.scopeDelta.entryPoints, model),
       ].filter((id) => !remove.has(id)));
       const now = ctx.now?.() ?? Date.now();
       const compiled = await compileWorkPacket({
@@ -47,12 +56,10 @@ export function createAmendWorkPacketToolDef(ctx: SystemModelToolContext): Norma
         mode: modeForCompile(ctx.runtime),
         userRequest: stored.packet.userRequest,
         normalizedGoal: stored.packet.normalizedGoal,
-        matchedCandidates: ids.map((id) => ({
-          id,
-          type: id.startsWith("flow.") ? "flow" : "capability",
-          score: 0,
-          reasons: ["amended scope"],
-        })),
+        matchedCandidates: ids.flatMap((id) => {
+          const object = model.objectsById.get(id);
+          return object ? [{ id, type: object.type, score: 0, reasons: ["amended scope"] }] : [];
+        }),
         matchConfidence: stored.packet.matchConfidence,
         taskFiles: args.scopeDelta.files ?? stored.packet.scope.suggestedFiles,
         ownedPaths: args.scopeDelta.ownedPaths,
@@ -70,6 +77,18 @@ export function createAmendWorkPacketToolDef(ctx: SystemModelToolContext): Norma
       return jsonResult({ packet: compiled.packet, contextPack: compiled.contextPack, freshness: compiled.freshnessReport });
     },
   };
+}
+
+function confirmedEntryPointCapabilityIds(
+  selections: Array<{ capabilityId: string; surfaceId: string }>,
+  model: NonNullable<SystemModelToolContext["runtime"]["model"]>,
+): string[] {
+  return selections.flatMap((selection) => {
+    const capability = model.capabilities.find((item) => item.id === selection.capabilityId);
+    return capability?.entryPoints.some((entryPoint) => entryPoint.surface === selection.surfaceId)
+      ? [capability.id]
+      : [];
+  });
 }
 
 function unique(values: string[]): string[] {

@@ -12,14 +12,9 @@ import { act, render, screen, fireEvent } from "@testing-library/react";
 import { SettingsMenu } from "./SettingsMenu.tsx";
 import { HarnessListProvider } from "./use-harness-list.tsx";
 import type { HarnessListEntry, ServerMessage, SocketSubscribe } from "./use-socket.ts";
-import { restartServer } from "./api.ts";
 // The main Vitest project intentionally scans src/server/shared only. Import the
 // colocated example contract so the copyable starter remains part of `pnpm verify`.
 import "../examples/system-model-starter/starter.test.ts";
-
-vi.mock("./api.ts", () => ({
-  restartServer: vi.fn(),
-}));
 
 const CLAUDE_ENTRY: HarnessListEntry = {
   name: "claude",
@@ -91,6 +86,10 @@ function renderWithHarnesses(
   });
 }
 
+function openCategory(name: string) {
+  fireEvent.click(screen.getByRole("button", { name: new RegExp(name, "i") }));
+}
+
 describe("SettingsMenu", () => {
   it("starts closed and opens on trigger click", () => {
     render(<SettingsMenu settings={{}} onSettingsChange={() => {}} />);
@@ -106,6 +105,32 @@ describe("SettingsMenu", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
   });
 
+  it("organizes settings into focused categories", () => {
+    render(<SettingsMenu settings={{}} onSettingsChange={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+
+    const navigation = screen.getByRole("navigation", { name: /settings categories/i });
+    expect(navigation).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /general/i })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
+    expect(screen.getByText("Labs")).toBeInTheDocument();
+    expect(screen.getAllByText("Beta")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: /operations/i })).toBeNull();
+    expect(screen.queryByText("Session policy")).toBeNull();
+
+    openCategory("Agent defaults");
+
+    expect(screen.getByRole("heading", { name: "Agent defaults" })).toBeInTheDocument();
+    expect(screen.getByText("Session policy")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Leader defaults" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Minion defaults" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "General" })).toBeNull();
+  });
+
   it("emits merged settings when permission mode changes", () => {
     const onChange = vi.fn();
     render(
@@ -116,6 +141,7 @@ describe("SettingsMenu", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    openCategory("Agent defaults");
 
     const dialog = screen.getByRole("dialog", { name: /settings/i });
     const selects = dialog.querySelectorAll("select");
@@ -139,13 +165,11 @@ describe("SettingsMenu", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    openCategory("Governance");
 
-    const dialog = screen.getByRole("dialog", { name: /settings/i });
-    const selects = dialog.querySelectorAll("select");
-    // Order in the popover: permission mode, leader model, minion model, system model.
-    const systemModelSelect = selects[3]!;
-    expect(systemModelSelect.value).toBe("off");
-    fireEvent.change(systemModelSelect, { target: { value: "advisory" } });
+    const advisoryMode = screen.getByRole("radio", { name: /advisory/i });
+    expect(screen.getByRole("radio", { name: /^off/i })).toBeChecked();
+    fireEvent.click(advisoryMode);
 
     expect(onChange).toHaveBeenCalledWith({
       defaultLeaderModel: "opus",
@@ -177,6 +201,7 @@ describe("SettingsMenu", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    openCategory("Governance");
     expect(socketSend).toHaveBeenCalledWith({ type: "list_sessions" });
 
     act(() => {
@@ -220,6 +245,7 @@ describe("SettingsMenu", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    openCategory("Workspace");
 
     const toggle = screen.getByRole("checkbox", { name: /tidy layout/i });
     // Absent setting → treated as on.
@@ -240,6 +266,7 @@ describe("SettingsMenu", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    openCategory("Agent defaults");
 
     const dialog = screen.getByRole("dialog", { name: /settings/i });
     const selects = dialog.querySelectorAll("select");
@@ -281,6 +308,7 @@ describe("SettingsMenu", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    openCategory("Agent defaults");
 
     fireEvent.click(screen.getAllByRole("button", { name: "XHigh" })[0]!);
     expect(onChange).toHaveBeenCalledWith(
@@ -305,27 +333,30 @@ describe("SettingsMenu", () => {
     );
   });
 
-  it("stores dashboard context action names and prompt defaults", () => {
+  it("edits a context action and emits the full action array", () => {
     const onChange = vi.fn();
     render(
       <SettingsMenu
         settings={{
-          dashboardLeaderActionNames: { improve: "Improve label" },
-          dashboardLeaderActionPrompts: { improve: "Improve old" },
+          dashboardLeaderActions: [
+            { id: "a1", name: "Improve label", prompt: "Improve old", icon: "sparkles" },
+          ],
         }}
         onSettingsChange={onChange}
       />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    openCategory("Context actions");
 
     fireEvent.change(screen.getByDisplayValue("Improve label"), {
       target: { value: "Polish" },
     });
 
     expect(onChange).toHaveBeenCalledWith({
-      dashboardLeaderActionNames: { improve: "Polish" },
-      dashboardLeaderActionPrompts: { improve: "Improve old" },
+      dashboardLeaderActions: [
+        { id: "a1", name: "Polish", prompt: "Improve old", icon: "sparkles" },
+      ],
     });
 
     fireEvent.change(screen.getByDisplayValue("Improve old"), {
@@ -333,147 +364,89 @@ describe("SettingsMenu", () => {
     });
 
     expect(onChange).toHaveBeenCalledWith({
-      dashboardLeaderActionNames: { improve: "Improve label" },
-      dashboardLeaderActionPrompts: { improve: "Improve new" },
+      dashboardLeaderActions: [
+        { id: "a1", name: "Improve label", prompt: "Improve new", icon: "sparkles" },
+      ],
     });
   });
 
-  it("queries and renders provider usage reports", async () => {
-    const socketSend = vi.fn();
-    const subscribers: Array<(msg: ServerMessage) => void> = [];
-    const socketSubscribe = vi.fn(
-      (
-        topicOrFn: string | ((msg: ServerMessage) => void),
-        maybeFn?: (msg: ServerMessage) => void,
-      ) => {
-        const fn = typeof topicOrFn === "function" ? topicOrFn : maybeFn;
-        if (fn) subscribers.push(fn);
-        return () => {};
-      },
-    ) as unknown as SocketSubscribe;
-
+  it("adds a new context action to the end of the list", () => {
+    const onChange = vi.fn();
     render(
       <SettingsMenu
-        settings={{}}
-        onSettingsChange={() => {}}
-        socketSend={socketSend}
-        socketSubscribe={socketSubscribe}
+        settings={{
+          dashboardLeaderActions: [
+            { id: "a1", name: "Only", prompt: "Just one", icon: "play" },
+          ],
+        }}
+        onSettingsChange={onChange}
       />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    openCategory("Context actions");
 
-    expect(socketSend).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "get_provider_usage_report", harness: "claude" }),
-    );
-    expect(socketSend).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "get_provider_usage_report", harness: "codex" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /add action/i }));
 
-    const claudeRequest = socketSend.mock.calls.find(
-      ([payload]) => (payload as { harness?: string }).harness === "claude",
-    )?.[0] as { requestId: string };
-    const openaiRequest = socketSend.mock.calls.find(
-      ([payload]) => (payload as { harness?: string }).harness === "codex",
-    )?.[0] as { requestId: string };
-
-    act(() => {
-      subscribers.forEach((fn) =>
-        fn({
-          type: "control_response",
-          command: "get_provider_usage_report",
-          sessionKey: "leader-1",
-          requestId: claudeRequest.requestId,
-          success: true,
-          usage: {
-            rate_limits_available: true,
-            rate_limits: {
-              five_hour: {
-                utilization: 41.8,
-                resets_at: "2026-07-03T16:05:00.000Z",
-              },
-            },
-          },
-        }),
-      );
-      subscribers.forEach((fn) =>
-        fn({
-          type: "control_response",
-          command: "get_provider_usage_report",
-          sessionKey: null,
-          requestId: openaiRequest.requestId,
-          success: true,
-          provider: "codex",
-          usage: {
-            rate_limits_available: false,
-            rate_limits: null,
-            unavailable_reason: "OpenAI/Codex rate-limit reset windows are not exposed.",
-          },
-        }),
-      );
-    });
-
-    expect(await screen.findByText("42%")).toBeInTheDocument();
-    expect(screen.getByText("OpenAI/Codex rate-limit reset windows are not exposed.")).toBeInTheDocument();
+    const next = onChange.mock.calls.at(-1)?.[0].dashboardLeaderActions;
+    expect(next).toHaveLength(2);
+    expect(next[0]).toMatchObject({ id: "a1", name: "Only" });
+    expect(next[1]).toMatchObject({ name: "New action", prompt: "" });
+    expect(typeof next[1].id).toBe("string");
+    expect(next[1].id.length).toBeGreaterThan(0);
   });
 
-  it("shows command errors instead of leaving usage refresh pending", async () => {
-    const socketSend = vi.fn();
-    const subscribers: Array<(msg: ServerMessage) => void> = [];
-    const socketSubscribe = vi.fn(
-      (
-        topicOrFn: string | ((msg: ServerMessage) => void),
-        maybeFn?: (msg: ServerMessage) => void,
-      ) => {
-        const fn = typeof topicOrFn === "function" ? topicOrFn : maybeFn;
-        if (fn) subscribers.push(fn);
-        return () => {};
-      },
-    ) as unknown as SocketSubscribe;
-
+  it("removes a context action", () => {
+    const onChange = vi.fn();
     render(
       <SettingsMenu
-        settings={{}}
-        onSettingsChange={() => {}}
-        socketSend={socketSend}
-        socketSubscribe={socketSubscribe}
+        settings={{
+          dashboardLeaderActions: [
+            { id: "a1", name: "Keep", prompt: "p1", icon: "play" },
+            { id: "a2", name: "Drop", prompt: "p2", icon: "bug" },
+          ],
+        }}
+        onSettingsChange={onChange}
       />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    openCategory("Context actions");
 
-    act(() => {
-      subscribers.forEach((fn) =>
-        fn({
-          type: "error",
-          message: "Unknown command type: get_provider_usage_report",
-        }),
-      );
+    fireEvent.click(screen.getByRole("button", { name: /remove drop/i }));
+
+    expect(onChange).toHaveBeenCalledWith({
+      dashboardLeaderActions: [
+        { id: "a1", name: "Keep", prompt: "p1", icon: "play" },
+      ],
     });
-
-    expect(
-      await screen.findAllByText("Unknown command type: get_provider_usage_report"),
-    ).toHaveLength(2);
-    expect(screen.queryByText("Querying provider...")).toBeNull();
   });
 
-  it("confirms before restarting the server", async () => {
-    vi.mocked(restartServer).mockResolvedValue({ ok: true, restarting: true });
-    render(<SettingsMenu settings={{}} onSettingsChange={() => {}} />);
+  it("reorders context actions with the move controls", () => {
+    const onChange = vi.fn();
+    render(
+      <SettingsMenu
+        settings={{
+          dashboardLeaderActions: [
+            { id: "a1", name: "First", prompt: "p1", icon: "play" },
+            { id: "a2", name: "Second", prompt: "p2", icon: "bug" },
+          ],
+        }}
+        onSettingsChange={onChange}
+      />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Restart Server" }));
+    openCategory("Context actions");
 
-    expect(screen.getByRole("dialog", { name: /restart minions server/i })).toBeInTheDocument();
-    expect(screen.getByText(/active sessions will disconnect/i)).toBeInTheDocument();
-    expect(restartServer).not.toHaveBeenCalled();
+    fireEvent.click(screen.getAllByRole("button", { name: /move action down/i })[0]!);
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Restart Server" })[1]!);
-
-    await screen.findByText(/restart requested/i);
-    expect(restartServer).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith({
+      dashboardLeaderActions: [
+        { id: "a2", name: "Second", prompt: "p2", icon: "bug" },
+        { id: "a1", name: "First", prompt: "p1", icon: "play" },
+      ],
+    });
   });
 
   it("closes on Escape", () => {

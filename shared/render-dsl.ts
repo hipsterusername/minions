@@ -533,3 +533,45 @@ export function applyRenderMessage(
 export function emptyRenderState(): RenderState {
   return { layout: { columns: 2, gap: 12 }, components: [] };
 }
+
+/**
+ * Return every unanswered form in display order, including forms nested in
+ * sections or tabs. A present `submittedAnswers` object — including `{}` —
+ * means the server has accepted the form and it is no longer pending.
+ */
+export function findUnansweredForms(
+  components: readonly RenderComponent[],
+): FormComponent[] {
+  const forms: FormComponent[] = [];
+  visitForms(components, (form) => {
+    if (form.submittedAnswers == null) forms.push(form);
+  });
+  return forms;
+}
+
+/** Find a form by stable component id at any nesting depth. */
+export function findFormById(
+  components: readonly RenderComponent[],
+  formId: string,
+): FormComponent | undefined {
+  let match: FormComponent | undefined;
+  visitForms(components, (form) => {
+    if (!match && form.id === formId) match = form;
+  });
+  return match;
+}
+
+function visitForms(
+  components: readonly RenderComponent[],
+  visit: (form: FormComponent) => void,
+): void {
+  for (const component of components) {
+    if (component.type === "form") {
+      visit(component);
+    } else if (component.type === "section") {
+      visitForms(component.components, visit);
+    } else if (component.type === "tabs") {
+      for (const tab of component.tabs) visitForms(tab.components, visit);
+    }
+  }
+}

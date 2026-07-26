@@ -1,8 +1,10 @@
 id: capability.workspace_management
 type: capability
+domain: domain.workspace
 name: Workspace Management
 summary: Manage sessions, worktrees, and project state.
-linked_flows: [flow.approve_changes]
+depends_on: []
+bridges: []
 constraints: [constraint.bus_only]
 decisions: [decision.bus_architecture]
 risks: [risk.merge_bypass]

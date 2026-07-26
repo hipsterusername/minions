@@ -172,7 +172,7 @@ describe("context / settings / skills / mcp-servers round-trip", () => {
     expect(readSettings(project)).toMatchObject(next);
   });
 
-  it("upgrades untouched legacy dashboard shortcuts but preserves custom ones", () => {
+  it("migrates untouched legacy dashboard shortcuts to the array, preserving custom ones", () => {
     writeSettings(project, {
       dashboardLeaderActionNames: {
         improve: "Improve",
@@ -184,19 +184,26 @@ describe("context / settings / skills / mcp-servers round-trip", () => {
         execute: "Use my custom implementation workflow.",
         analyze: "Analyze the connected dashboard context. Summarize the key findings, risks, and recommended next steps.",
       },
-    });
+    } as never);
 
     const settings = readSettings(project);
-    expect(settings.dashboardLeaderActionNames).toEqual({
-      improve: "Fix",
-      execute: "Ship it",
-      analyze: "Review",
-    });
-    expect(settings.dashboardLeaderActionPrompts?.execute).toBe(
-      "Use my custom implementation workflow.",
-    );
-    expect(settings.dashboardLeaderActionPrompts?.improve).toContain("root cause");
-    expect(settings.dashboardLeaderActionPrompts?.analyze).toContain("Do not make changes");
+    // Legacy records are dropped in favour of the ordered array.
+    expect(settings["dashboardLeaderActionNames"]).toBeUndefined();
+    expect(settings["dashboardLeaderActionPrompts"]).toBeUndefined();
+
+    const actions = settings.dashboardLeaderActions ?? [];
+    const byId = Object.fromEntries(actions.map((a) => [a.id, a]));
+
+    // `execute` name is customized ("Ship it") so it is preserved, but its
+    // untouched-default prompt was replaced by a custom one → kept verbatim.
+    expect(byId.execute?.name).toBe("Ship it");
+    expect(byId.execute?.prompt).toBe("Use my custom implementation workflow.");
+
+    // `improve` and `analyze` matched the untouched legacy defaults → upgraded.
+    expect(byId.improve?.name).toBe("Fix");
+    expect(byId.improve?.prompt).toContain("root cause");
+    expect(byId.analyze?.name).toBe("Review");
+    expect(byId.analyze?.prompt).toContain("Do not make changes");
   });
 
   it("uses medium leader thinking for fable when no explicit setting is stored", () => {

@@ -53,9 +53,13 @@ pnpm preflight
 pnpm start
 ```
 
-`pnpm start` launches the backend and Vite together in the foreground, streams
-their logs, opens the browser, and stops both on `Ctrl-C`. It never configures
-Tailscale.
+`pnpm start` launches the backend and Vite together as a background service and
+returns the terminal to you immediately. It opens the browser, writes logs to
+`.run/minions.log`, and keeps running until you `pnpm stop`. Use `pnpm status`
+to check on it. It never configures Tailscale unless you pass `-- --tailscale`.
+
+If you'd rather run in the foreground and stream logs (stopping both on
+`Ctrl-C`), use `pnpm dev` instead.
 
 - Local URL: **http://localhost:6173**
 
@@ -130,7 +134,7 @@ secure context, so the notifications button shows **"Notifications Unsupported"*
 Start the optional background service with tailnet HTTPS:
 
 ```bash
-pnpm serve -- --tailscale
+pnpm start -- --tailscale
 ```
 
 Then open `https://<machine>.<tailnet>.ts.net:6173/m` on your phone (small screens
@@ -148,11 +152,10 @@ or claim the bare `https://<machine>.<tailnet>.ts.net/` origin.
 
 | Command | What it does |
 |---|---|
-| `pnpm start` | Foreground backend + frontend development server on loopback |
-| `pnpm dev` | Exact alias of `pnpm start` |
+| `pnpm start` | Start the full stack as a background service on loopback (non-blocking) |
+| `pnpm start -- --tailscale` | Start the background service and opt into tailnet HTTPS |
+| `pnpm dev` | Foreground backend + frontend development server on loopback (streams logs, `Ctrl-C` to stop) |
 | `pnpm preview` | Foreground backend + built frontend preview on loopback |
-| `pnpm serve` | Start the full stack as a background service |
-| `pnpm serve -- --tailscale` | Start the background service and opt into tailnet HTTPS |
 | `pnpm stop` | Stop the background service |
 | `pnpm restart` | Restart the background service |
 | `pnpm status` | Report whether the background app is running |

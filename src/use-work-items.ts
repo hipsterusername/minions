@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useMemo, useReducer } from "react";
-import type { WorkItemListSnapshot, WorkItemRunSnapshot, WorkItemSnapshot } from "../shared/work-item-contracts.ts";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import type { WorkItemDetailSnapshot, WorkItemListSnapshot, WorkItemRunSnapshot,
+  WorkItemSnapshot } from "../shared/work-item-contracts.ts";
 import { selectWorkItemPresentation } from "../shared/work-item-lifecycle.ts";
 import type { MobileSessionInfo } from "./mobile/mobile-selectors.ts";
 import type { ServerMessage, SocketSubscribe } from "./use-socket.ts";
 import { mergeWorkItemSnapshot } from "./work-item-snapshot-merge.ts";
+import { randomUuid } from "./random-id.ts";
 import { formatCoordinatedLabel, reduceLiveEditAwareness,
   type LiveEditAwareness } from "../shared/live-edit-coordination.ts";
+import { decideConflictRecovery } from "./work-item-retry-policy.ts";
 export { mergeWorkItemSnapshot } from "./work-item-snapshot-merge.ts";
 
 export interface WorkItemClientState {
@@ -37,6 +40,19 @@ export function reduceWorkItems(state: WorkItemClientState, msg: ServerMessage):
     const merged = mergeWorkItemSnapshot(prior, msg.workItem);
     if (merged === prior) return state;
     return { ...state, items: { ...state.items, [msg.workItem.id]: merged } };
+  }
+  if (msg.type === "work_item_response" && !msg.success) {
+    // A failed mutation carries the authoritative snapshot in `latest`.
+    // Fold it in so the store self-heals from stale revision fences and the
+    // user's next click carries fences the server will accept.
+    const latest = (msg as { latest?: { workItem?: WorkItemSnapshot } | null }).latest;
+    const workItem = latest?.workItem;
+    if (!workItem?.id) return state;
+    const prior = state.items[workItem.id];
+    if (!prior) return state; // only heal items this project's store already tracks
+    const merged = mergeWorkItemSnapshot(prior, workItem);
+    if (merged === prior) return state;
+    return { ...state, items: { ...state.items, [workItem.id]: merged } };
   }
   if (msg.type === "work_item_run_created" || msg.type === "work_item_run_sealed") {
     const prior = state.runs[msg.workItemId] ?? [];
@@ -72,6 +88,7 @@ export function mergeCanonicalActivity(
       sessionKey: item.currentRunKey ?? `work-item:${item.id}`,
       sessionId: base?.sessionId ?? null,
       workItemId: item.id,
+      canonicalWorkItem: true,
       status: item.lifecycle.runtimeState === "working" ? "running" : item.lifecycle.runtimeState,
       cwd: item.projectPath,
       role: "leader",
@@ -100,10 +117,27 @@ export function mergeCanonicalActivity(
   return [...canonical, ...fallback];
 }
 
+export interface PromptFailure {
+  prompt: string;
+  error: string;
+}
+
 export function useWorkItems(input: {
   projectId: string | null; connected: boolean; subscribe: SocketSubscribe; send: (data: unknown) => void;
 }) {
   const [state, dispatch] = useReducer(reduceWorkItems, initialWorkItemClientState);
+  const [promptFailures, setPromptFailures] = useState<Record<string, PromptFailure>>({});
+  const pendingPrompts = useRef(new Map<string, {
+    prompt: string; attempts: number; projectId: string; workItemId: string;
+  }>());
+  const clearPromptFailure = useCallback((workItemId: string) => {
+    setPromptFailures((current) => {
+      if (!(workItemId in current)) return current;
+      const next = { ...current };
+      delete next[workItemId];
+      return next;
+    });
+  }, []);
   const receive = useCallback((message: ServerMessage) => {
     if ((message.type === "work_item_changed" || message.type === "work_item_created")
       && message.workItem.projectId !== input.projectId) return;
@@ -113,19 +147,66 @@ export function useWorkItems(input: {
       if (result?.projectId !== input.projectId) return;
     }
     dispatch(message);
-  }, [input.projectId]);
+    if (message.type !== "work_item_response" || !message.requestId) return;
+    const pending = pendingPrompts.current.get(message.requestId);
+    if (!pending) return;
+    pendingPrompts.current.delete(message.requestId);
+    if (message.success) return;
+    const recovery = decideConflictRecovery({
+      code: message.code,
+      latest: message.latest as WorkItemDetailSnapshot | null | undefined,
+      attempt: pending.attempts,
+      projectId: input.projectId,
+      workItemId: pending.workItemId,
+      prompt: pending.prompt,
+      requestId: randomUuid(),
+    });
+    if (recovery.kind === "retry") {
+      pendingPrompts.current.set(recovery.command.requestId, {
+        ...pending, attempts: pending.attempts + 1,
+      });
+      input.send(recovery.command);
+      return;
+    }
+    if (recovery.kind === "give-up" && pending.projectId === input.projectId) {
+      setPromptFailures((current) => ({
+        ...current,
+        [pending.workItemId]: {
+          prompt: pending.prompt,
+          error: message.error ?? "Work-item command failed",
+        },
+      }));
+    }
+  }, [input.projectId, input.send]);
   useEffect(() => input.subscribe("*", receive), [input.subscribe, receive]);
   useEffect(() => input.projectId
     ? input.subscribe(`project:${input.projectId}`, receive)
     : undefined, [input.projectId, input.subscribe, receive]);
   useEffect(() => {
+    pendingPrompts.current.clear();
+    setPromptFailures({});
+    return () => pendingPrompts.current.clear();
+  }, [input.connected, input.projectId]);
+  useEffect(() => {
     if (input.connected && input.projectId) input.send({ type: "list_work_items", projectId: input.projectId, includeArchived: true });
   }, [input.connected, input.projectId, input.send]);
-  const mutate = useCallback((type: string, item: WorkItemSnapshot, extra: Record<string, unknown> = {}) =>
-    input.send({ type, requestId: crypto.randomUUID(), workItemId: item.id,
+  const mutate = useCallback((type: string, item: WorkItemSnapshot,
+    extra: Record<string, unknown> = {}) => {
+    const requestId = randomUuid();
+    if ((type === "start_work_item_run" || type === "reply_to_waiting_run")
+      && typeof extra["prompt"] === "string") {
+      clearPromptFailure(item.id);
+      pendingPrompts.current.set(requestId, {
+        prompt: extra["prompt"], attempts: 1,
+        projectId: item.projectId, workItemId: item.id,
+      });
+    }
+    input.send({ type, requestId, workItemId: item.id,
       expectedLifecycleRevision: item.lifecycle.lifecycleRevision,
-      expectedCurrentRunKey: item.currentRunKey, ...extra }), [input.send]);
+      expectedCurrentRunKey: item.currentRunKey, ...extra });
+  }, [clearPromptFailure, input.send]);
   return useMemo(() => ({ ...state,
+    promptFailures, clearPromptFailure,
     orderedItems: state.projectId === input.projectId
       ? Object.values(state.items).sort((a, b) => b.updatedAt - a.updatedAt) : [],
     loadRuns: (item: WorkItemSnapshot, cursor?: string) => input.send({ type: "get_work_item_runs", workItemId: item.id, cursor, limit: 25 }),
@@ -134,5 +215,5 @@ export function useWorkItems(input: {
     restore: (item: WorkItemSnapshot) => mutate("restore_work_item", item),
     start: (item: WorkItemSnapshot, prompt: string) => mutate("start_work_item_run", item, { prompt }),
     reply: (item: WorkItemSnapshot, prompt: string) => mutate("reply_to_waiting_run", item, { runKey: item.currentRunKey, prompt }),
-  }), [state, input.send, mutate]);
+  }), [state, promptFailures, clearPromptFailure, input.projectId, input.send, mutate]);
 }

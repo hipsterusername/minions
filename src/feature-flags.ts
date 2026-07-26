@@ -44,6 +44,12 @@ export interface FeatureFlagDefinition {
 export const FLAG_MCP_SERVERS = "mcp-servers";
 
 /**
+ * Stable id for the experimental Dialectic node feature flag. Gates the
+ * Dialectic node's visibility in the create palette/context menu.
+ */
+export const FLAG_DIALECTIC = "dialectic";
+
+/**
  * Registry of every flag the app knows about.
  *
  * Keep this short. A flag is a temporary tool — when a feature is either
@@ -56,6 +62,13 @@ export const FEATURE_FLAGS: ReadonlyArray<FeatureFlagDefinition> = [
     label: "MCP servers",
     description:
       "Project-owned MCP server management (the MCP dock panel). Still evolving — off by default.",
+    defaultValue: false,
+  },
+  {
+    id: FLAG_DIALECTIC,
+    label: "Dialectic node",
+    description:
+      "Experimental dual-planner node: two agents debate a plan in a structured, cache-optimized back-and-forth. Off by default.",
     defaultValue: false,
   },
 ];

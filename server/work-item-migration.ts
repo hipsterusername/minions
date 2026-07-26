@@ -9,6 +9,11 @@ import {
   type LegacySessionStatus,
   type Resolution,
 } from "../shared/work-item-lifecycle.ts";
+import {
+  inspectRunRecoveryWitness,
+  recordBootRecoveryWitness,
+  type RunRecoveryWitness,
+} from "./work-item-recovery.ts";
 
 interface LegacySessionRow {
   session_key: string;
@@ -260,6 +265,12 @@ export interface BootRecoveryResult {
   repairedCompletedRunKeys?: string[];
 }
 
+function recoveryOutcome(
+  witness: RunRecoveryWitness,
+): "interrupted" | "stopped" {
+  return witness.action === "stop" ? "stopped" : "interrupted";
+}
+
 export { repairCompletedRunsWithoutReports } from "./work-item-report-repair.ts";
 
 /** Seal orphaned active primary runs once; live run keys are left untouched. */
@@ -282,25 +293,35 @@ export function recoverOrphanedWorkItemRuns(
 
     for (const row of rows) {
       if (liveRunKeys.has(row.current_run_key)) continue;
+      const witness = inspectRunRecoveryWitness(db, row.current_run_key);
+      if (witness.action === "resume") continue;
+      const outcome = recoveryOutcome(witness);
+      const terminalReason = witness.action === "stop"
+        && witness.terminationIntent === "stop" ? "stop" : "abort";
+      const reviewReason = witness.action === "stop"
+        ? "Session termination was requested before shutdown completed"
+        : "Session became inactive without a final report";
+      recordBootRecoveryWitness(db, row.current_run_key, witness, at);
       const sealed = db.prepare(`
-        UPDATE sessions SET ended_at = ?, run_outcome = 'interrupted', status = 'stopped',
+        UPDATE sessions SET ended_at = ?, run_outcome = ?, status = 'stopped',
           review_state = 'interrupted_to_review',
-          review_reason = 'Session became inactive without a final report',
-          terminal_reason = 'abort', terminal_at = ?,
+          review_reason = ?,
+          terminal_reason = ?, terminal_at = ?,
           acknowledged_at = NULL, dismissed_at = NULL,
           lifecycle_revision = lifecycle_revision + 1, updated_at = ?
         WHERE session_key = ? AND run_kind = 'primary'
           AND ended_at IS NULL AND run_outcome = 'none'
-      `).run(at, at, new Date(at).toISOString(), row.current_run_key);
+      `).run(at, outcome, reviewReason, terminalReason, at,
+        new Date(at).toISOString(), row.current_run_key);
       if (sealed.changes !== 1) continue;
       const projected = db.prepare(`
-        UPDATE work_items SET runtime_state = 'inactive', outcome = 'interrupted',
+        UPDATE work_items SET runtime_state = 'inactive', outcome = ?,
           resolution = 'open', wait_kind = NULL,
           lifecycle_revision = lifecycle_revision + 1,
           last_transition_at = ?, updated_at = ?
         WHERE id = ? AND current_run_key = ? AND lifecycle_revision = ?
           AND runtime_state IN ('starting', 'working', 'waiting') AND outcome = 'none'
-      `).run(at, at, row.id, row.current_run_key, row.lifecycle_revision);
+      `).run(outcome, at, at, row.id, row.current_run_key, row.lifecycle_revision);
       if (projected.changes !== 1) throw new Error(`failed to recover work item ${row.id}`);
       recoveredRunKeys.push(row.current_run_key);
     }
@@ -318,23 +339,39 @@ export function recoverOrphanedWorkItemRuns(
     }>;
     for (const child of children) {
       if (liveRunKeys.has(child.session_key)) continue;
+      const witness = inspectRunRecoveryWitness(db, child.session_key);
+      if (witness.action === "resume") continue;
+      const outcome = recoveryOutcome(witness);
+      const terminalReason = witness.action === "stop"
+        && witness.terminationIntent === "stop" ? "stop" : "abort";
+      const reviewReason = witness.action === "stop"
+        ? "Session termination was requested before shutdown completed"
+        : "Session became inactive without a final report";
+      recordBootRecoveryWitness(db, child.session_key, witness, at);
       const sealed = db.prepare(`
-        UPDATE sessions SET ended_at = ?, run_outcome = 'interrupted', status = 'stopped',
+        UPDATE sessions SET ended_at = ?, run_outcome = ?, status = 'stopped',
           review_state = 'interrupted_to_review',
-          review_reason = 'Session became inactive without a final report',
-          terminal_reason = 'abort', terminal_at = ?,
+          review_reason = ?,
+          terminal_reason = ?, terminal_at = ?,
           acknowledged_at = NULL, dismissed_at = NULL,
           lifecycle_revision = lifecycle_revision + 1, updated_at = ?
         WHERE session_key = ? AND run_kind = 'child'
           AND ended_at IS NULL AND run_outcome = 'none'
-      `).run(at, at, new Date(at).toISOString(), child.session_key);
+      `).run(at, outcome, reviewReason, terminalReason, at,
+        new Date(at).toISOString(), child.session_key);
       if (sealed.changes !== 1) continue;
       db.prepare(`
-        UPDATE task_records SET status = 'orphaned',
-          result = 'Delegated run was orphaned during server restart.', completed_at = ?
+        UPDATE task_records SET status = ?,
+          result = ?, completed_at = ?
         WHERE leader_session_key = ? AND task_id = ?
           AND minion_session_key = ? AND status IN ('starting', 'running', 'blocked')
-      `).run(at, child.parent_run_key, child.task_id, child.session_key);
+      `).run(
+        witness.action === "stop" ? "cancelled" : "orphaned",
+        witness.action === "stop"
+          ? "Delegated run termination was recovered during server restart."
+          : "Delegated run was orphaned during server restart.",
+        at, child.parent_run_key, child.task_id, child.session_key,
+      );
       recoveredRunKeys.push(child.session_key);
     }
     return { recoveredRunKeys };

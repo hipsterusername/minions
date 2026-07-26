@@ -48,7 +48,15 @@ async function handleBound(
     return;
   }
   try {
-    if (cmd.expectedLifecycleRevision !== host.reviewLifecycle.lifecycleRevision) {
+    // Acknowledge and dismiss are monotonic (same policy as the unbound path
+    // below): applying them to a newer snapshot is safe, and the canonical
+    // mutation is CAS-fenced with the freshly read work-item revision anyway.
+    // The host clock mixes session and work-item counters across restarts, so
+    // hard-fencing user clicks against it rejects perfectly valid requests
+    // (e.g. after boot recovery seals interrupted runs). Reopen reverses user
+    // intent and therefore retains strict compare-and-set ordering.
+    if (action === "reopen"
+      && cmd.expectedLifecycleRevision !== host.reviewLifecycle.lifecycleRevision) {
       sendControlError(ws, command, host.id, cmd.requestId, "Lifecycle revision conflict", {
         code: "LIFECYCLE_REVISION_CONFLICT", lifecycle: host.reviewLifecycle,
       });

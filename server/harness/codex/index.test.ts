@@ -38,6 +38,7 @@ import type {
   NormalizedToolDef,
   NormalizedEvent,
 } from "../types.ts";
+import { terminalProvenance } from "../terminal-provenance.ts";
 
 // ── SDK mocks (hoisted) ───────────────────────────────────────────────────────
 
@@ -227,13 +228,21 @@ describe("CodexHarness.start()", () => {
     expect(out[1]).toMatchObject({ kind: "text", role: "assistant", text: "hi" });
     expect(out[2]).toMatchObject({ kind: "usage", input: 7, output: 11, cacheRead: 3 });
     expect(out[3]).toMatchObject({ kind: "done", reason: "stop" });
+    expect(terminalProvenance(out[3] as Extract<NormalizedEvent, { kind: "done" }>))
+      .toBe("adapter");
   });
 
   it("uses startThread when resumeId is absent", async () => {
-    const out = await collect(codexHarness.start(baseOpts()).events);
+    const systemPrompt = "SYSTEM_PROMPT_SENTINEL_START";
+    const out = await collect(codexHarness.start(baseOpts({ systemPrompt })).events);
     expect(out[0]?.kind).toBe("init");
     expect(sdkMock.calls.startThread).toHaveLength(1);
     expect(sdkMock.calls.resumeThread).toHaveLength(0);
+    expect(
+      (sdkMock.calls.constructor[0] as {
+        config?: Record<string, unknown>;
+      }).config?.["developer_instructions"],
+    ).toBe(systemPrompt);
   });
 
   it("skips Codex's git repo trust check for Minions-selected projects", async () => {
@@ -247,7 +256,10 @@ describe("CodexHarness.start()", () => {
   });
 
   it("uses resumeThread when resumeId is provided", async () => {
-    await collect(codexHarness.start(baseOpts({ resumeId: "th-prev" })).events);
+    const systemPrompt = "SYSTEM_PROMPT_SENTINEL_RESUME";
+    await collect(
+      codexHarness.start(baseOpts({ resumeId: "th-prev", systemPrompt })).events,
+    );
     expect(sdkMock.calls.startThread).toHaveLength(0);
     expect(sdkMock.calls.resumeThread).toHaveLength(1);
     expect(sdkMock.calls.resumeThread[0]?.id).toBe("th-prev");
@@ -255,6 +267,21 @@ describe("CodexHarness.start()", () => {
       (sdkMock.calls.resumeThread[0]?.opts as { skipGitRepoCheck?: boolean })
         .skipGitRepoCheck,
     ).toBe(true);
+    expect(
+      (sdkMock.calls.constructor[0] as {
+        config?: Record<string, unknown>;
+      }).config?.["developer_instructions"],
+    ).toBe(systemPrompt);
+  });
+
+  it("omits developer_instructions when systemPrompt is undefined", async () => {
+    await collect(
+      codexHarness.start(baseOpts({ systemPrompt: undefined })).events,
+    );
+    const constructorOpts = sdkMock.calls.constructor[0] as {
+      config?: Record<string, unknown>;
+    };
+    expect(constructorOpts).not.toHaveProperty("config");
   });
 
   it("emits done(reason: error) when runStreamed throws synchronously", async () => {
@@ -268,6 +295,8 @@ describe("CodexHarness.start()", () => {
     const out = await collect(codexHarness.start(baseOpts()).events);
     const last = out[out.length - 1];
     expect(last).toMatchObject({ kind: "done", reason: "error", error: "boom" });
+    expect(terminalProvenance(last as Extract<NormalizedEvent, { kind: "done" }>))
+      .toBe("adapter");
   });
 
   it("attaches prior stream errors to fullError when the stream later throws", async () => {
@@ -472,21 +501,21 @@ describe("CodexHarness permission mode", () => {
     expect(startThreadOpts.sandboxMode).toBe("danger-full-access");
   });
 
-  it("rejects plan mode with a single done(error) and never opens a thread", async () => {
+  it("maps plan mode to a read-only sandbox and opens a thread", async () => {
     codexHarness.registerTools({});
     const out = await collect(
       codexHarness.start(baseOpts({ permissionMode: "plan" })).events,
     );
-    expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({
-      kind: "done",
-      reason: "error",
-    });
-    expect((out[0] as { error?: string }).error ?? "").toMatch(
-      /not supported by harness "codex"/,
-    );
-    expect(sdkMock.calls.startThread).toHaveLength(0);
-    expect(sdkMock.calls.resumeThread).toHaveLength(0);
+    // Plan mode is honored, not rejected: no terminal error is emitted.
+    expect(out.some((e) => e.kind === "done" && e.reason === "error")).toBe(false);
+    expect(sdkMock.calls.startThread).toHaveLength(1);
+    const startThreadOpts = sdkMock.calls.startThread[0] as {
+      approvalPolicy?: string;
+      sandboxMode?: string;
+    };
+    // Read-only sandbox faithfully enforces plan mode's no-mutation contract.
+    expect(startThreadOpts.approvalPolicy).toBe("on-request");
+    expect(startThreadOpts.sandboxMode).toBe("read-only");
   });
 });
 

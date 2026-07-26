@@ -1,0 +1,20 @@
+id: constraint.bus_only_broadcast
+type: constraint
+statement: All server-originated fan-out uses the typed event bus; direct WebSocket broadcast outside server/bus.ts is forbidden.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces: []
+  files:
+    - server/bus.ts
+    - server/commands/**
+    - server/task-tools/**
+    - server/minion-tools.ts
+severity: critical
+agent_instruction: Publish through server/bus.ts with the correct topic and typed envelope; run the no-direct-broadcast architecture test and affected contract tests.
+review_gate: gate.event_bus_architecture
+suggested_tests: [ tests/architecture/no-direct-broadcast.test.ts, tests/contracts/normalized-event-envelope-context.test.ts ]
+evidence: [ decision.typed_event_bus ]
+domain: domain.platform
+scope: global
+guards: []

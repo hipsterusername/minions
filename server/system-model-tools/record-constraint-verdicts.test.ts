@@ -89,6 +89,8 @@ const report: ReconciliationReport = {
     changedFiles: ["server/session-host.ts"],
     affectedCapabilities: [],
     affectedFlows: [],
+    affectedEntryPoints: [],
+    siblingSurfaces: [],
     constraintsInScope: ["constraint.bus_only"],
     testsMissing: [],
     outOfScopeFiles: [],

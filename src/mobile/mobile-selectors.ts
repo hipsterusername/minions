@@ -6,6 +6,17 @@ export type MobileSessionInfo = SessionInfo & {
   lastActivityAt?: number | null;
   pendingAttention?: boolean;
   reviewableChanges?: boolean;
+  /**
+   * True only for entries synthesized from a canonical work-item snapshot, where
+   * `reviewLifecycle.lifecycleRevision` is the WORK ITEM's revision counter.
+   * Sessions that merely reference a work item (`workItemId` set) but were not
+   * merged from the canonical list carry the SESSION's own revision counter —
+   * a different clock — so work-item mutations built from them would be
+   * rejected as "stale work-item lifecycle". Route those through the
+   * session-scoped commands instead, which resolve fresh work-item state
+   * server-side.
+   */
+  canonicalWorkItem?: boolean;
 };
 
 /** Statuses where the agent is doing work right now. */
@@ -90,6 +101,57 @@ export function needsAttention(session: MobileSessionInfo): boolean {
     session.pendingAttention === true ||
     session.reviewableChanges === true
   );
+}
+
+/**
+ * The three attention "flavours" that colour the Activity triage lane. `error`
+ * covers crashes/interruptions, `waiting` covers decisions the agent is blocked
+ * on, and `changes` covers a run whose diff is ready to review.
+ */
+export type AttentionKind = "error" | "waiting" | "changes";
+
+/** Classify why a session needs the user, driving its triage icon/accent. */
+export function attentionKind(session: MobileSessionInfo): AttentionKind {
+  const reviewState = session.reviewLifecycle?.reviewState;
+  if (reviewState === "error_to_review" || reviewState === "interrupted_to_review") return "error";
+  if (reviewState === "decision_needed") return "waiting";
+  if (session.status === "error") return "error";
+  if (session.status === "waiting" || session.pendingAttention === true) return "waiting";
+  return "changes";
+}
+
+/** Short human reason shown beside a triage row's title. */
+export function attentionReason(session: MobileSessionInfo): string {
+  const lifecycle = session.reviewLifecycle;
+  if (lifecycle?.acknowledgedAt) return "acknowledged";
+  if (lifecycle?.reviewState === "completion_to_review") return "complete · read report";
+  if (lifecycle?.reviewState === "interrupted_to_review") return "interrupted";
+  if (lifecycle?.reviewState === "decision_needed") return "decision needed";
+  if (lifecycle?.reviewState === "error_to_review") return "error";
+  switch (attentionKind(session)) {
+    case "error":
+      return "errored";
+    case "waiting":
+      return "waiting for you";
+    case "changes":
+      return "changes ready";
+  }
+}
+
+/** The verb for a triage row's primary action button. */
+export function attentionAction(session: MobileSessionInfo): string {
+  const reviewState = session.reviewLifecycle?.reviewState;
+  if (reviewState === "completion_to_review") return "Read";
+  if (reviewState === "interrupted_to_review") return "Inspect";
+  if (reviewState === "decision_needed") return "Reply";
+  switch (attentionKind(session)) {
+    case "error":
+      return "Open";
+    case "waiting":
+      return "Reply";
+    case "changes":
+      return "Review";
+  }
 }
 
 export type ActivityVisibility = "open" | "all" | "dismissed";

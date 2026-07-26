@@ -78,7 +78,7 @@ function makeLeaderFixture() {
 }
 
 describe("terminateSessionHost — leader child cleanup", () => {
-  it("notifies interrupted exactly once for a genuinely open bound run", async () => {
+  it("notifies stopped exactly once for a genuinely open bound run", async () => {
     const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
     const host = new SessionHost("run-1", "/tmp");
     host.workItemId = "work-1";
@@ -90,7 +90,7 @@ describe("terminateSessionHost — leader child cleanup", () => {
     await terminateSessionHost(host, { bus, workItemLifecycle: lifecycle }, "stop");
     await terminateSessionHost(host, { bus, workItemLifecycle: lifecycle }, "abort");
     expect(runTerminal).toHaveBeenCalledOnce();
-    expect(runTerminal).toHaveBeenCalledWith(expect.objectContaining({ outcome: "interrupted" }));
+    expect(runTerminal).toHaveBeenCalledWith(expect.objectContaining({ outcome: "stopped" }));
   });
 
   it("cleans volatile live-edit claims after orderly close acknowledges", async () => {
@@ -112,7 +112,7 @@ describe("terminateSessionHost — leader child cleanup", () => {
   });
 
   it.each(["decision", "timer", "blocked"] as const)(
-    "interrupts an idle bound run with open %s evidence",
+    "seals an idle bound run with open %s evidence as stopped on deliberate stop",
     async (kind) => {
       const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
       const host = new SessionHost(`idle-${kind}`, "/tmp");
@@ -130,7 +130,7 @@ describe("terminateSessionHost — leader child cleanup", () => {
         forEachLeaderTaskState: (fn) => fn("leader", taskState),
         workItemLifecycle: { providerInitialized: vi.fn(), runStarted: vi.fn(),
           runWaiting: vi.fn(), runTerminal } }, "stop");
-      expect(runTerminal).toHaveBeenCalledWith(expect.objectContaining({ outcome: "interrupted" }));
+      expect(runTerminal).toHaveBeenCalledWith(expect.objectContaining({ outcome: "stopped" }));
     },
   );
 

@@ -19,6 +19,7 @@ import { EventEmitter } from "node:events";
 import type { WebSocket } from "ws";
 import { attachConnectionListeners } from "../../server/ws-connection.ts";
 import type { ConnectionDeps } from "../../server/ws-connection.ts";
+import { encodeLeaderPromptCustomization } from "../../shared/leader-prompt.ts";
 
 class FakeWs extends EventEmitter {
   readyState = 1; // OPEN
@@ -81,6 +82,12 @@ describe("contract: inbound WS command validation", () => {
       worktreeIsolation: true,
       model: "claude-opus-4-5",
       prompt: "Hello",
+      systemPrompt: encodeLeaderPromptCustomization({
+        promptPrefix: "Focus on accessibility.",
+        skillsAddendum: "# Active Skills\n\nReview the API.",
+      }),
+      skillIds: ["review"],
+      skillValues: { review: { target: "API" } },
     };
     send(ws, payload);
 
@@ -88,6 +95,44 @@ describe("contract: inbound WS command validation", () => {
     const [cmd] = dispatch.mock.calls[0]!;
     expect(cmd).toMatchObject(payload);
     expect(ws.sent).toHaveLength(0);
+  });
+
+  it("dispatches structured Leader customization without a full client prompt", () => {
+    const ws = new FakeWs();
+    const dispatch = vi.fn();
+    attachConnectionListeners(ws as unknown as WebSocket, makeDeps({ dispatch }));
+    clearInitialMessages(ws);
+
+    const payload = {
+      type: "send_message",
+      sessionKey: "leader-1",
+      prompt: "Continue.",
+      systemPrompt: encodeLeaderPromptCustomization({
+        promptPrefix: "Use terse explanations.",
+      }),
+    };
+    send(ws, payload);
+
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining(payload), expect.anything());
+    expect(ws.sent).toHaveLength(0);
+  });
+
+  it("rejects create_session when a Leader customization envelope is malformed", () => {
+    const ws = new FakeWs();
+    const dispatch = vi.fn();
+    attachConnectionListeners(ws as unknown as WebSocket, makeDeps({ dispatch }));
+    clearInitialMessages(ws);
+
+    send(ws, {
+      type: "create_session",
+      role: "leader",
+      prompt: "Start.",
+      systemPrompt: '{"version":1,"promptPrefix":"missing skills"}',
+    });
+
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(ws.sent).toHaveLength(1);
+    expect(JSON.parse(ws.sent[0]!).message).toContain("malformed customization envelope");
   });
 
   it("dispatches a valid send_message command with attachments", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadSystemModel } from "./load.ts";
-import { copyValidFixture } from "./load.test.ts";
+import { copyValidFixture, copyValidFixtureWithSurfaces } from "./load.test.ts";
 import { recordSystemModelUsage, saveWorkPacket } from "./store.ts";
 import { orphanedObjects, staleObjects, unusedInLastNPackets } from "./usage.ts";
 import type { WorkPacket } from "../../shared/system-model/index.ts";
@@ -26,7 +26,7 @@ describe("system-model usage queries", () => {
 
     const unused = await unusedInLastNPackets({ projectPath: project, model: model!, n: 1 });
 
-    expect(unused.map((item) => item.id)).toEqual(["capability.workspace_management"]);
+    expect(unused.map((item) => item.id)).toEqual(["capability.workspace_management", "domain.workspace"]);
     expect(unused[0]?.reason).toBe("No packet usage in last 1 Work Packets and no query usage since 2");
   });
 
@@ -109,6 +109,12 @@ describe("system-model usage queries", () => {
     const orphaned = orphanedObjects(model!);
 
     expect(orphaned.map((item) => item.id)).toEqual([]);
+  });
+
+  it("does not classify entry-point surfaces as orphaned", () => {
+    const project = copyValidFixtureWithSurfaces();
+    const { model } = loadSystemModel(project);
+    expect(orphanedObjects(model!).map((item) => item.id)).not.toContain("surface.mobile");
   });
 });
 

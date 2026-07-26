@@ -4,7 +4,7 @@
 
 import { z } from "zod/v4";
 import type { NormalizedToolDef } from "../harness/types.ts";
-import { textResult } from "../harness/tool-result.ts";
+import { errorResult, textResult } from "../harness/tool-result.ts";
 import type { DetailedDiff } from "../worktree.js";
 import { getDetailedDiff } from "../worktree.js";
 import type { TaskToolContext } from "./types.ts";
@@ -29,6 +29,12 @@ export function createRequestApprovalToolDef(ctx: TaskToolContext): NormalizedTo
     inputSchema: requestApprovalInputSchema,
     handler: async (input: unknown) => {
       const args = requestApprovalInputSchema.parse(input);
+      const runtime = ctx.getSessionRuntime?.(ctx.leaderSessionKey);
+      if (runtime?.workItemId) {
+        return errorResult(
+          "Canonical work-item contributions do not use legacy approval. Finish with a final summary report; contribution collection, gates, review, and lineage integration are handled by the canonical workflow.",
+        );
+      }
       if (!ctx.worktreeInfo) {
         return textResult(
           "No worktree is active — approval workflow is only available with worktree isolation enabled.",

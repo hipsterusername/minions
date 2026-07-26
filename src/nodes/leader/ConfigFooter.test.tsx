@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { WorkItemSnapshot } from "../../../shared/work-item-contracts.ts";
 import { ConfigFooter } from "./ConfigFooter.tsx";
@@ -37,5 +37,44 @@ describe("ConfigFooter change mode", () => {
     view.rerender(<ConfigFooter data={{ ...LEADER_DEFAULT_DATA, worktreeIsolation: false,
       workItemSnapshot: snapshot("worktree") }} onUpdateData={vi.fn()} />);
     expect(screen.getByText(/Worktree/)).toBeInTheDocument();
+  });
+});
+
+describe("ConfigFooter change-mode selector", () => {
+  function expandFooter() {
+    // The collapsed summary row toggles the expanded config on click.
+    fireEvent.click(screen.getByText(/Live/));
+  }
+
+  it("shows both options as a segmented toggle with the active one pressed", () => {
+    renderFooter({ worktreeIsolation: false });
+    expandFooter();
+    const live = screen.getByRole("button", { name: /Live/ });
+    const worktree = screen.getByRole("button", { name: /Worktree/ });
+    expect(live).toHaveAttribute("aria-pressed", "true");
+    expect(worktree).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("switches to Worktree mode when the Worktree segment is clicked", () => {
+    const onUpdateData = vi.fn();
+    render(<ConfigFooter data={{ ...LEADER_DEFAULT_DATA, worktreeIsolation: false }}
+      onUpdateData={onUpdateData} />);
+    fireEvent.click(screen.getByText(/Live/));
+    fireEvent.click(screen.getByRole("button", { name: /Worktree/ }));
+    expect(onUpdateData).toHaveBeenCalledWith(
+      expect.objectContaining({ worktreeIsolation: true }),
+    );
+  });
+
+  it("locks the selector and shows a fixed indicator once a session starts", () => {
+    const onUpdateData = vi.fn();
+    render(<ConfigFooter data={{ ...LEADER_DEFAULT_DATA, worktreeIsolation: false,
+      sessionKey: "run-1" }} onUpdateData={onUpdateData} />);
+    fireEvent.click(screen.getByText(/Live/));
+    const worktree = screen.getByRole("button", { name: /Worktree/ });
+    expect(worktree).toBeDisabled();
+    fireEvent.click(worktree);
+    expect(onUpdateData).not.toHaveBeenCalled();
+    expect(screen.getByText(/fixed/)).toBeInTheDocument();
   });
 });

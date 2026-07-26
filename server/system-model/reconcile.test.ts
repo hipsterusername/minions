@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { WorkPacket } from "../../shared/system-model/index.ts";
 import type { DetailedDiff } from "../worktree-types.ts";
 import { loadSystemModel } from "./load.ts";
+import { copyValidFixtureWithSurfaces } from "./load.test.ts";
 import { reconcileDeterministic } from "./reconcile.ts";
 
 describe("reconcileDeterministic", () => {
@@ -34,6 +35,37 @@ describe("reconcileDeterministic", () => {
     expect(serialized).not.toContain("violated");
     expect(serialized).not.toContain("not_checked");
     expect(serialized).not.toContain("minion_judged");
+  });
+
+  it("reports entry-point matches and sibling surface impact", () => {
+    const model = loadSystemModel(copyValidFixtureWithSurfaces()).model!;
+    const mobileConstraint = {
+      ...model.constraints[0]!,
+      id: "constraint.mobile_only",
+      statement: "Mobile changes preserve navigation",
+      appliesTo: { capabilities: [], flows: [], surfaces: ["surface.mobile"], files: [] },
+    };
+    model.constraints.push(mobileConstraint);
+    model.objectsById.set(mobileConstraint.id, mobileConstraint);
+    const report = reconcileDeterministic({
+      model,
+      packet,
+      diff: {
+        ...diff,
+        filesChanged: 1,
+        files: [{ file: "src/mobile/App.tsx", insertions: 1, deletions: 0, status: "modified" }],
+      },
+    });
+    expect(report.affectedEntryPoints).toEqual([{
+      capabilityId: "capability.workspace_management", surfaceId: "surface.mobile",
+    }]);
+    expect(report.siblingSurfaces).toEqual([{
+      capabilityId: "capability.workspace_management",
+      surfaceIds: ["surface.canvas", "surface.mobile"],
+    }]);
+    expect(report.affectedCapabilities).toEqual(["capability.workspace_management"]);
+    expect(report.constraintsInScope).toContain("constraint.bus_only");
+    expect(report.constraintsInScope).toContain("constraint.mobile_only");
   });
 });
 

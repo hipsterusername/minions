@@ -1,4 +1,5 @@
 import type { ContextAttachment, NodeTypeDefinition } from "./types.ts";
+import { getFeatureFlag } from "./feature-flags.ts";
 import "./nodes/SystemGraphNode.tsx";
 
 var registry: Map<string, NodeTypeDefinition> | undefined;
@@ -21,7 +22,9 @@ export function getAllNodeTypes(): NodeTypeDefinition[] {
 }
 
 export function getUserCreatableNodeTypes(): NodeTypeDefinition[] {
-  return Array.from(nodeRegistry().values()).filter((def) => def.userCreatable !== false);
+  return Array.from(nodeRegistry().values()).filter(
+    (def) => def.userCreatable !== false && (!def.flag || getFeatureFlag(def.flag)),
+  );
 }
 
 /** Returns true if parentType owns/manages childType as a child node. */

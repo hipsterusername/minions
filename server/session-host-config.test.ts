@@ -19,7 +19,11 @@ const BASE_LEADER = "Leader base prompt content.";
 const BASE_MINION = "Minion base prompt content.";
 
 describe("enrichSystemPromptForWorktree — leader", () => {
-  const enriched = enrichSystemPromptForWorktree(BASE_LEADER, FAKE_WORKTREE, false);
+  const enriched = enrichSystemPromptForWorktree(BASE_LEADER, FAKE_WORKTREE, {
+    role: "leader",
+    canonical: false,
+    sharedWorktree: false,
+  });
 
   it("preserves the base prompt as a prefix", () => {
     expect(enriched.startsWith(BASE_LEADER)).toBe(true);
@@ -57,8 +61,33 @@ describe("enrichSystemPromptForWorktree — leader", () => {
   });
 });
 
-describe("enrichSystemPromptForWorktree — minion", () => {
-  const enriched = enrichSystemPromptForWorktree(BASE_MINION, FAKE_WORKTREE, true);
+describe("enrichSystemPromptForWorktree — canonical leader", () => {
+  const enriched = enrichSystemPromptForWorktree(BASE_LEADER, FAKE_WORKTREE, {
+    role: "leader",
+    canonical: true,
+    sharedWorktree: false,
+  });
+
+  it("finishes with a report and leaves canonical integration to the orchestrator", () => {
+    expect(enriched).toContain("final summary report");
+    expect(enriched).toContain("lineage integration");
+    expect(enriched).toContain("automatic");
+  });
+
+  it("forbids the legacy approval path", () => {
+    expect(enriched).toContain("do not call `request_approval`");
+    expect(enriched).not.toContain("Approval Workflow");
+    expect(enriched).not.toContain("Approve & Merge");
+    expect(enriched).not.toContain("Waiting for review");
+  });
+});
+
+describe("enrichSystemPromptForWorktree — isolated minion", () => {
+  const enriched = enrichSystemPromptForWorktree(BASE_MINION, FAKE_WORKTREE, {
+    role: "minion",
+    canonical: false,
+    sharedWorktree: false,
+  });
 
   it("preserves the base prompt as a prefix", () => {
     expect(enriched.startsWith(BASE_MINION)).toBe(true);
@@ -85,14 +114,42 @@ describe("enrichSystemPromptForWorktree — minion", () => {
   });
 });
 
+describe("enrichSystemPromptForWorktree — shared-worktree minion", () => {
+  const enriched = enrichSystemPromptForWorktree(BASE_MINION, FAKE_WORKTREE, {
+    role: "minion",
+    canonical: true,
+    sharedWorktree: true,
+  });
+
+  it("keeps edits scoped and leaves commits and integration to the orchestrator", () => {
+    expect(enriched).toContain("assigned files");
+    expect(enriched).toMatch(/do not run `git commit`/i);
+    expect(enriched).toContain("orchestrator owns");
+    expect(enriched).not.toMatch(/commit your work|git add -A/i);
+  });
+
+  it("does not include leader approval guidance", () => {
+    expect(enriched).not.toContain("Approval Workflow");
+    expect(enriched).not.toContain("request_approval");
+  });
+});
+
 describe("enrichSystemPromptForWorktree — appends, does not replace", () => {
   it("leader result is strictly longer than base", () => {
-    const enriched = enrichSystemPromptForWorktree(BASE_LEADER, FAKE_WORKTREE, false);
+    const enriched = enrichSystemPromptForWorktree(BASE_LEADER, FAKE_WORKTREE, {
+      role: "leader",
+      canonical: false,
+      sharedWorktree: false,
+    });
     expect(enriched.length).toBeGreaterThan(BASE_LEADER.length);
   });
 
   it("minion result is strictly longer than base", () => {
-    const enriched = enrichSystemPromptForWorktree(BASE_MINION, FAKE_WORKTREE, true);
+    const enriched = enrichSystemPromptForWorktree(BASE_MINION, FAKE_WORKTREE, {
+      role: "minion",
+      canonical: false,
+      sharedWorktree: false,
+    });
     expect(enriched.length).toBeGreaterThan(BASE_MINION.length);
   });
 });

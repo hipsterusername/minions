@@ -58,6 +58,7 @@ describe("buildSlashCommands", () => {
       label: "Polish",
       description: "Make the result sharper.",
       insertText: "Make the result sharper.",
+      icon: "sparkles",
     });
   });
 

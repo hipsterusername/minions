@@ -20,6 +20,7 @@ import { persistTaskState } from "../session-persist.ts";
 import { dirname, basename } from "node:path";
 import { randomUUID } from "node:crypto";
 import { serverLogger } from "../logging.ts";
+import { isLeaderPromptCustomizationEnvelope } from "../../shared/leader-prompt.ts";
 
 const log = serverLogger.child("send-message");
 
@@ -44,6 +45,15 @@ export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
     });
     return;
   }
+  if (host.role === "leader" && cmd.systemPrompt !== undefined
+    && cmd.systemPrompt.trimStart().startsWith("{")
+    && !isLeaderPromptCustomizationEnvelope(cmd.systemPrompt)) {
+    unicastToSession(ws, cmd.sessionKey, {
+      type: "error",
+      message: "Leader systemPrompt contains a malformed customization envelope",
+    });
+    return;
+  }
   if (host.workItemId) {
     const service = ctx.workItems;
     try {
@@ -61,7 +71,9 @@ export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
       } else if (["inactive", "draft"].includes(item.lifecycle.runtimeState)) {
         await service.startRun({ ...mutation,
           ...(cmd.model ? { model: cmd.model } : {}),
-          ...(cmd.systemPrompt ? { systemPrompt: cmd.systemPrompt } : {}),
+          ...(cmd.systemPrompt
+            ? { systemPrompt: host.role === "leader" ? cmd.systemPrompt.trim() : cmd.systemPrompt }
+            : {}),
           ...(cmd.thinkingConfig ? { thinkingConfig: cmd.thinkingConfig } : {}),
           ...(cmd.skillIds ? { skillIds: cmd.skillIds } : {}),
           ...(cmd.attachments ? { attachments: cmd.attachments } : {}),
@@ -107,6 +119,9 @@ export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
   // Follow-up turns may also carry image attachments (e.g. the user
   // connects a new image node and sends another prompt mid-conversation).
   const attachments = sanitizeAttachments(cmd.attachments);
+  const turnSystemPrompt = host.role === "leader"
+    ? cmd.systemPrompt?.trim() || undefined
+    : cmd.systemPrompt;
 
   const resumeLeader = (cwd: string): void => {
     // Mid-thread harness switching is intentionally not supported. Even if
@@ -123,7 +138,9 @@ export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
       prompt,
       cwd,
       resumeId: host.sessionId ?? undefined,
-      systemPrompt: cmd.systemPrompt ?? undefined,
+      // Leader customization is prefix-only. Non-leader roles retain their
+      // existing customPrompt behavior unchanged.
+      systemPrompt: turnSystemPrompt,
       role: host.role,
       thinkingConfig: turnThinking,
       harness: host.harnessName,

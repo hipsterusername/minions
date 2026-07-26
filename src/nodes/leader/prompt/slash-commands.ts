@@ -1,18 +1,15 @@
 import type { ProjectSettings } from "../../../api.ts";
-import {
-  DASHBOARD_LEADER_ACTIONS,
-  resolveDashboardLeaderActionName,
-  resolveDashboardLeaderPrompt,
-  type DashboardLeaderAction,
-} from "../../../dashboard-leader-actions.ts";
+import { normalizeDashboardLeaderActions } from "../../../dashboard-leader-actions.ts";
 
 const DESCRIPTION_MAX_LENGTH = 60;
 
 export type SlashCommand = {
-  id: DashboardLeaderAction;
+  id: string;
   label: string;
   description: string;
   insertText: string;
+  /** Icon key from the action config; the menu falls back if unknown. */
+  icon?: string;
 };
 
 export function parseSlashQuery(input: string): string | null {
@@ -26,18 +23,16 @@ export function parseSlashQuery(input: string): string | null {
 export function buildSlashCommands(
   settings: ProjectSettings | undefined,
 ): SlashCommand[] {
-  return DASHBOARD_LEADER_ACTIONS.map(({ action }) => {
-    const prompt = resolveDashboardLeaderPrompt(settings, action);
-    return {
-      id: action,
-      label: resolveDashboardLeaderActionName(settings, action),
-      description:
-        prompt.length > DESCRIPTION_MAX_LENGTH
-          ? `${prompt.slice(0, DESCRIPTION_MAX_LENGTH)}…`
-          : prompt,
-      insertText: prompt,
-    };
-  });
+  return normalizeDashboardLeaderActions(settings).map((action) => ({
+    id: action.id,
+    label: action.name,
+    description:
+      action.prompt.length > DESCRIPTION_MAX_LENGTH
+        ? `${action.prompt.slice(0, DESCRIPTION_MAX_LENGTH)}…`
+        : action.prompt,
+    insertText: action.prompt,
+    icon: action.icon,
+  }));
 }
 
 export function filterSlashCommands(

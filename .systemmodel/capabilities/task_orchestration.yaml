@@ -1,0 +1,40 @@
+id: capability.task_orchestration
+type: capability
+name: Task orchestration
+summary: Leaders can plan, assign, monitor, message, retry, cancel, and synthesize bounded minion tasks while users observe their progress and ownership.
+constraints:
+  - constraint.minion_lifecycle_semantics
+  - constraint.skill_freezing_and_role_gate
+decisions: [ decision.role_gated_agent_tools, decision.typed_event_bus ]
+risks:
+  - risk.agent_tool_allowlist_drift
+suggested_files: [ server/agents/leader.ts, server/agents/minion.ts, server/task-tools.ts, server/task-tools/assign-task.ts, server/minion-tools.ts ]
+suggested_tests: [ server/agents/leader.test.ts, server/agents/minion.test.ts, server/task-tools/assign-task.test.ts, server/minion-tools.test.ts ]
+keywords: [ task, plan, assign, delegate, minion, child, report_step, report_done, report_fail, report_blocked, message, cancel, retry, owned_paths ]
+entry_points:
+  - surface: surface.agent_tools
+    summary: Role-gated Leader and minion tools create and drive the task lifecycle.
+    files: [ server/agents/leader.ts, server/agents/minion.ts, server/task-tools.ts, server/task-tools/assign-task.ts, server/minion-tools.ts ]
+    tests: [ server/agents/leader.test.ts, server/agents/minion.test.ts, server/task-tools/assign-task.test.ts, server/minion-tools.test.ts ]
+    flows: [ flow.delegate_and_steer_minions, flow.control_execution ]
+  - surface: surface.canvas
+    summary: Leader and Minion nodes expose plan rows, progress, status, and child sessions.
+    files: [ src/nodes/LeaderNode.tsx, src/nodes/MinionNode.tsx, src/SessionPanel.tsx ]
+    tests: [ src/nodes/LeaderNode.test.tsx, src/SessionPanel.test.tsx ]
+    flows: [ flow.delegate_and_steer_minions, flow.monitor_execution ]
+  - surface: surface.mobile
+    summary: Remote session views expose Leader plan and child progress.
+    files: [ src/mobile/SessionChatScreen.tsx, src/mobile/mobile-selectors.ts ]
+    tests: [ src/mobile/SessionChatScreen.test.tsx, src/mobile/mobile-selectors.test.ts ]
+    flows: [ flow.delegate_and_steer_minions, flow.monitor_execution ]
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.delegation
+depends_on:
+  - capability.skill_library
+bridges:
+  - to: flow.control_execution
+    reason: Delegated child controls share the execution-lifecycle session control flow.
+  - to: flow.monitor_execution
+    reason: Delegated child status is presented through the observability-owned monitoring flow.

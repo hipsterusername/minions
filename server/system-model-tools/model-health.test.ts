@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadSystemModel } from "../system-model/load.ts";
-import { copyValidFixture } from "../system-model/load.test.ts";
+import { copyValidFixture, copyValidFixtureWithSurfaces } from "../system-model/load.test.ts";
 import { createModelHealthToolDef } from "./model-health.ts";
 import type { BusPayload } from "../bus.ts";
 
@@ -10,7 +10,7 @@ describe("model_health", () => {
     const { model } = loadSystemModel(project);
     model!.capabilities[0]!.risks = [];
     model!.flows[0]!.risks = [];
-    model!.risks[0]!.appliesTo = { capabilities: [], flows: [], files: [] };
+    model!.risks[0]!.appliesTo = { capabilities: [], flows: [], surfaces: [], files: [] };
     let trackedFilesSeen: string[] = [];
     const def = createModelHealthToolDef({
       leaderSessionKey: "leader-1",
@@ -67,6 +67,31 @@ describe("model_health", () => {
       id: "risk.merge_bypass",
       recommendation: "prune_or_link",
     }));
+  });
+
+  it("recognizes entry-point surfaces as linked model objects", async () => {
+    const project = copyValidFixtureWithSurfaces();
+    const { model } = loadSystemModel(project);
+    const result = await createModelHealthToolDef({
+      leaderSessionKey: "leader-1",
+      projectPath: project,
+      cwd: project,
+      runtime: { mode: "advisory", manifestFound: true, model, loadErrors: [] },
+      bus: bus(),
+      getHeadSha: async () => "head",
+      timestampFn: async () => ({ modelTouchedAt: 20, codeTouchedAt: 10 }),
+      trackedFiles: async () => [],
+    }).handler({});
+    const payload = JSON.parse(result.content[0]!.text) as {
+      counts: { surfaces: number };
+      unused: Array<{ id: string; type: string; label: string }>;
+      orphaned: Array<{ id: string }>;
+    };
+    expect(payload.counts.surfaces).toBe(2);
+    expect(payload.unused).toContainEqual(expect.objectContaining({
+      id: "surface.mobile", type: "surface", label: "mobile",
+    }));
+    expect(payload.orphaned.map((item) => item.id)).not.toContain("surface.mobile");
   });
 });
 

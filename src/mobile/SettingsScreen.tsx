@@ -20,6 +20,7 @@ import { findHarness } from "../harness-list.ts";
 import { MINION_THINKING_CONFIG } from "../types.ts";
 import { useHarnessList } from "../use-harness-list.tsx";
 import type { MobileSessionInfo } from "./mobile-selectors.ts";
+import { randomUuid } from "../random-id.ts";
 
 interface SettingsScreenProps {
   project: {
@@ -55,11 +56,7 @@ const USAGE_PROVIDERS: ReadonlyArray<{
 const USAGE_QUERY_TIMEOUT_MS = 10_000;
 
 function makeRequestId(provider: UsageProvider): string {
-  const suffix =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  return `mobile-usage-${provider}-${suffix}`;
+  return `mobile-usage-${provider}-${randomUuid()}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

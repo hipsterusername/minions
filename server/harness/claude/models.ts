@@ -12,6 +12,7 @@
  */
 const MODEL_ALIAS_MAP: Record<string, string> = {
   fable: "claude-fable-5",
+  "opus-5": "claude-opus-5",
   opus: "claude-opus-4-8",
   "opus-old": "claude-opus-4-7",
   sonnet: "claude-sonnet-5",
@@ -19,11 +20,11 @@ const MODEL_ALIAS_MAP: Record<string, string> = {
 };
 
 export const CLAUDE_MODEL_POLICY = {
-  leader: ["claude-opus-4-8", "claude-fable-5", "claude-sonnet-5", "claude-opus-4-7", "claude-haiku-4-5"],
+  leader: ["claude-opus-5", "claude-opus-4-8", "claude-fable-5", "claude-sonnet-5", "claude-opus-4-7", "claude-haiku-4-5"],
   minion: {
-    mechanical: ["claude-haiku-4-5", "claude-sonnet-5", "claude-fable-5", "claude-opus-4-8", "claude-opus-4-7"],
-    standard: ["claude-sonnet-5", "claude-fable-5", "claude-haiku-4-5", "claude-opus-4-8", "claude-opus-4-7"],
-    reasoning: ["claude-opus-4-8", "claude-fable-5", "claude-sonnet-5", "claude-opus-4-7", "claude-haiku-4-5"],
+    mechanical: ["claude-haiku-4-5", "claude-sonnet-5", "claude-fable-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7"],
+    standard: ["claude-sonnet-5", "claude-fable-5", "claude-haiku-4-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7"],
+    reasoning: ["claude-opus-5", "claude-opus-4-8", "claude-fable-5", "claude-sonnet-5", "claude-opus-4-7", "claude-haiku-4-5"],
   },
 } as const;
 
@@ -47,8 +48,10 @@ const ADAPTIVE_THINKING_MODELS: ReadonlySet<string> = new Set([
   "sonnet",
   "fable",
   "opus",
+  "opus-5",
   "opus-old",
   "claude-fable-5",
+  "claude-opus-5",
   "claude-opus-4-8",
   "claude-opus-4-7",
   "claude-opus-4-6",

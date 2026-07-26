@@ -42,17 +42,22 @@ export interface ProjectSettings {
   proactiveCompaction?: "off" | "recommend" | "auto";
   /** System-model layer mode; see docs/system-model-implementation-plan.md. */
   systemModel?: "off" | "advisory" | "enforced";
-  dashboardLeaderActionPrompts?: {
-    improve?: string;
-    execute?: string;
-    analyze?: string;
-  };
-  dashboardLeaderActionNames?: {
-    improve?: string;
-    execute?: string;
-    analyze?: string;
-  };
+  /**
+   * User-configurable Context Actions (Leader slash commands). Ordered and
+   * freely extensible. Absent = built-in defaults. Legacy installs stored two
+   * parallel records (dashboardLeaderActionNames/Prompts); those are migrated
+   * to this array on read — see migrateDashboardActions().
+   */
+  dashboardLeaderActions?: DashboardLeaderActionConfig[];
   [key: string]: unknown;
+}
+
+/** Mirror of src/api.ts DashboardLeaderActionConfig (no cross-tree imports). */
+export interface DashboardLeaderActionConfig {
+  id: string;
+  name: string;
+  prompt: string;
+  icon: string;
 }
 
 export type ExecutorClass = "mechanical" | "standard" | "reasoning";
@@ -149,8 +154,7 @@ export function initSidecar(projectPath: string, initialSettings: ProjectSetting
   if (!fs.existsSync(settingsPath)) {
     fs.writeFileSync(settingsPath, JSON.stringify({
       ...initialSettings,
-      dashboardLeaderActionNames: defaultDashboardLeaderActionNames(),
-      dashboardLeaderActionPrompts: defaultDashboardLeaderActionPrompts(),
+      dashboardLeaderActions: defaultDashboardLeaderActions(),
     }, null, 2));
   }
 
@@ -193,14 +197,19 @@ export function readSettings(projectPath: string): ProjectSettings {
   }
   try {
     const raw = fs.readFileSync(settingsPath, "utf-8");
-    const parsed = migrateLegacyDashboardActions(JSON.parse(raw) as ProjectSettings);
+    const parsed = migrateDashboardActions(JSON.parse(raw) as ProjectSettings);
     return withLeaderThinkingDefaults({ ...defaultProjectSettings(), ...parsed }, parsed);
   } catch {
     return defaultProjectSettings();
   }
 }
 
-const LEGACY_DASHBOARD_ACTIONS = {
+/**
+ * Prompts that older builds shipped as untouched defaults. When a stored name
+ * AND prompt still match one of these, we treat the row as unmodified and swap
+ * in the current default copy during migration; any customization wins.
+ */
+const LEGACY_DEFAULT_ACTIONS: Record<string, { name: string; prompt: string }> = {
   improve: {
     name: "Improve",
     prompt: "Improve the connected dashboard context. Identify the highest-impact changes, then implement or produce the improved result.",
@@ -213,28 +222,48 @@ const LEGACY_DASHBOARD_ACTIONS = {
     name: "Analyze",
     prompt: "Analyze the connected dashboard context. Summarize the key findings, risks, and recommended next steps.",
   },
-} as const;
+};
 
-/** Upgrade only untouched defaults; any customized name or prompt wins. */
-function migrateLegacyDashboardActions(settings: ProjectSettings): ProjectSettings {
-  const names = { ...settings.dashboardLeaderActionNames };
-  const prompts = { ...settings.dashboardLeaderActionPrompts };
-  const nextNames = defaultDashboardLeaderActionNames();
-  const nextPrompts = defaultDashboardLeaderActionPrompts();
-  let changed = false;
+/**
+ * Migrate the legacy two-record shape (dashboardLeaderActionNames/Prompts) to
+ * the ordered `dashboardLeaderActions` array. A valid stored array wins and is
+ * left untouched; otherwise legacy records are merged over the built-ins and
+ * the legacy keys are dropped so no compat shape survives the read.
+ */
+function migrateDashboardActions(settings: ProjectSettings): ProjectSettings {
+  const names = asRecord(settings["dashboardLeaderActionNames"]);
+  const prompts = asRecord(settings["dashboardLeaderActionPrompts"]);
+  const rest = { ...settings };
+  delete rest["dashboardLeaderActionNames"];
+  delete rest["dashboardLeaderActionPrompts"];
 
-  for (const action of Object.keys(LEGACY_DASHBOARD_ACTIONS) as Array<keyof typeof LEGACY_DASHBOARD_ACTIONS>) {
-    const legacy = LEGACY_DASHBOARD_ACTIONS[action];
-    if (names[action] === legacy.name && prompts[action] === legacy.prompt) {
-      names[action] = nextNames[action];
-      prompts[action] = nextPrompts[action];
-      changed = true;
-    }
+  // A valid array already wins; just make sure no legacy keys survive alongside.
+  if (Array.isArray(settings.dashboardLeaderActions)) return rest;
+
+  if (!names && !prompts) {
+    return { ...rest, dashboardLeaderActions: defaultDashboardLeaderActions() };
   }
 
-  return changed
-    ? { ...settings, dashboardLeaderActionNames: names, dashboardLeaderActionPrompts: prompts }
-    : settings;
+  const dashboardLeaderActions = defaultDashboardLeaderActions().map((base) => {
+    let name = typeof names?.[base.id] === "string" ? (names[base.id] as string) : base.name;
+    let prompt =
+      typeof prompts?.[base.id] === "string" ? (prompts[base.id] as string) : base.prompt;
+    // Untouched legacy defaults upgrade to the current default copy.
+    const legacy = LEGACY_DEFAULT_ACTIONS[base.id];
+    if (legacy && name === legacy.name && prompt === legacy.prompt) {
+      name = base.name;
+      prompt = base.prompt;
+    }
+    return { ...base, name, prompt };
+  });
+
+  return { ...rest, dashboardLeaderActions };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 
 function defaultProjectSettings(): ProjectSettings {
@@ -251,8 +280,7 @@ function defaultProjectSettings(): ProjectSettings {
     defaultPermissionMode: "auto",
     defaultWorktreeIsolation: false,
     systemModel: "off",
-    dashboardLeaderActionNames: defaultDashboardLeaderActionNames(),
-    dashboardLeaderActionPrompts: defaultDashboardLeaderActionPrompts(),
+    dashboardLeaderActions: defaultDashboardLeaderActions(),
   };
 }
 
@@ -277,27 +305,35 @@ function isFableModel(model: unknown): boolean {
   return model === "claude-fable-5" || model === "fable";
 }
 
-function defaultDashboardLeaderActionNames(): NonNullable<
-  ProjectSettings["dashboardLeaderActionNames"]
-> {
-  return {
-    improve: "Fix",
-    execute: "Implement",
-    analyze: "Review",
-  };
-}
-
-function defaultDashboardLeaderActionPrompts(): NonNullable<
-  ProjectSettings["dashboardLeaderActionPrompts"]
-> {
-  return {
-    improve:
-      "Investigate the problem in the connected context. Trace the root cause, implement the smallest robust fix, add or update regression coverage, and verify the result.",
-    execute:
-      "Implement the change described by the connected context. Inspect the relevant code, make a complete production-ready change, run focused tests, and summarize what changed.",
-    analyze:
-      "Review the connected context and relevant code. Identify concrete bugs, risks, and missing cases, then report prioritized findings with file references. Do not make changes unless asked.",
-  };
+/**
+ * Built-in Context Actions written on sidecar init and used by "Reset to
+ * defaults". Kept in sync with src/dashboard-leader-actions.ts (no cross-tree
+ * imports allowed between server/ and src/).
+ */
+function defaultDashboardLeaderActions(): DashboardLeaderActionConfig[] {
+  return [
+    {
+      id: "execute",
+      name: "Implement",
+      icon: "play",
+      prompt:
+        "Implement the change described by the connected context. Inspect the relevant code, make a complete production-ready change, run focused tests, and summarize what changed.",
+    },
+    {
+      id: "improve",
+      name: "Fix",
+      icon: "sparkles",
+      prompt:
+        "Investigate the problem in the connected context. Trace the root cause, implement the smallest robust fix, add or update regression coverage, and verify the result.",
+    },
+    {
+      id: "analyze",
+      name: "Review",
+      icon: "microscope",
+      prompt:
+        "Review the connected context and relevant code. Identify concrete bugs, risks, and missing cases, then report prioritized findings with file references. Do not make changes unless asked.",
+    },
+  ];
 }
 
 export function writeSettings(projectPath: string, settings: ProjectSettings): void {

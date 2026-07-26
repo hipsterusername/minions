@@ -7,6 +7,7 @@ import "./nodes/FolderNode.tsx";
 import "./nodes/ContextGroupNode.tsx";
 import "./nodes/RenderNode.tsx";
 import "./nodes/ImageNode.tsx";
+import "./nodes/DialecticNode.tsx";
 import { loadProjectSkillsFromData, saveUserSkill, deleteUserSkill as removeUserSkill, exportUserSkills, importSkillList } from "./skills/user-skills.ts";
 import { parseSkillTransfer } from "./skills/skill-transfer.ts";
 import { Suspense, lazy, useState, useEffect, useReducer, useCallback, useMemo, useSyncExternalStore } from "react";
@@ -877,6 +878,7 @@ function ProjectView({
                   sessions={activitySessions}
                   nodes={nodes}
                   onLaunchLeader={handleLaunchActivityLeader}
+                  onCancelLaunchLeader={(nodeId) => dispatch({ type: "REMOVE_NODE", id: nodeId })}
                   onOpenInCanvas={handleFocusNode}
                   onExpandFullscreen={handleExpandFullscreen}
                   onStopSession={handleStopSession}
@@ -891,6 +893,19 @@ function ProjectView({
                     const item = workItemState.items[workItemId];
                     if (item) workItemState.loadRuns(item, cursor);
                   }}
+                  onPromptWorkItem={(workItemId, prompt) => {
+                    const item = workItemState.items[workItemId];
+                    if (!item) return false;
+                    if (item.lifecycle.runtimeState === "waiting"
+                      && item.waitKind === "decision" && item.currentRunKey) {
+                      workItemState.reply(item, prompt);
+                    } else {
+                      workItemState.start(item, prompt);
+                    }
+                    return true;
+                  }}
+                  promptFailures={workItemState.promptFailures}
+                  onClearPromptFailure={workItemState.clearPromptFailure}
                 />
               </div>
             ) : activeView === "kanban" ? (

@@ -1,0 +1,37 @@
+id: capability.mobile_remote_control
+type: capability
+name: Mobile remote control and push
+summary: Users can select projects, launch and steer sessions, triage Activity, review changes, configure defaults, and revalidate push-driven deep links from mobile.
+constraints: []
+risks: []
+suggested_files: [ src/mobile/MobileApp.tsx, src/mobile/LaunchScreen.tsx, src/mobile/ActivityScreen.tsx, src/mobile/SessionChatScreen.tsx, src/mobile/ReviewChangesScreen.tsx, src/mobile/push.ts ]
+suggested_tests: [ src/mobile/MobileApp.test.tsx, src/mobile/LaunchScreen.test.tsx, src/mobile/ActivityScreen.test.tsx, src/mobile/SessionChatScreen.test.tsx, src/mobile/ReviewChangesScreen.test.tsx, src/mobile/push.test.ts ]
+keywords: [ mobile, remote, push, notification, project, launch, chat, activity, approval, review, settings, reconnect, deep_link ]
+entry_points:
+  - surface: surface.mobile
+    summary: The complete remote project, launch, chat, triage, approval, settings, and push experience.
+    files: [ src/mobile/MobileApp.tsx, src/mobile/LaunchScreen.tsx, src/mobile/ActivityScreen.tsx, src/mobile/SessionChatScreen.tsx, src/mobile/ReviewChangesScreen.tsx, src/mobile/push.ts ]
+    tests: [ src/mobile/MobileApp.test.tsx, src/mobile/LaunchScreen.test.tsx, src/mobile/ActivityScreen.test.tsx, src/mobile/SessionChatScreen.test.tsx, src/mobile/ReviewChangesScreen.test.tsx, src/mobile/push.test.ts ]
+    flows: [ flow.open_project_workspace, flow.launch_leader, flow.steer_session, flow.monitor_execution, flow.triage_attention, flow.review_legacy_changes, flow.control_execution, flow.recover_after_disconnect ]
+  - surface: surface.ws_api
+    summary: Typed session, WorkItem, approval, sync, usage, and form commands back the remote client.
+    files: [ server/commands/create-session.ts, server/commands/send-message.ts, server/commands/session-review.ts, server/commands/sync-session.ts, server/commands/submit-form.ts ]
+    tests: [ server/commands/create-session.test.ts, server/commands/send-message.test.ts, server/commands/session-review.test.ts, server/commands/sync-session.test.ts, server/commands/submit-form.test.ts ]
+    flows: [ flow.launch_leader, flow.steer_session, flow.triage_attention, flow.recover_after_disconnect ]
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.observability
+depends_on:
+  - capability.execution_observability
+bridges:
+  - to: flow.open_project_workspace
+    reason: Mobile bootstrap enters the workspace-owned project opening flow.
+  - to: flow.launch_leader
+    reason: Remote launch delegates run creation to the execution-lifecycle flow.
+  - to: flow.steer_session
+    reason: Remote chat delegates message continuity to the execution-lifecycle steering flow.
+  - to: flow.review_legacy_changes
+    reason: Mobile approvals delegate legacy review transitions to the integration-owned flow.
+  - to: flow.control_execution
+    reason: Remote controls invoke the execution-lifecycle session control flow.

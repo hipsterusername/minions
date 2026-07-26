@@ -45,7 +45,11 @@ import type { McpBridgeRegistration } from "../../mcp-bridge/registry.ts";
 
 import { createCodexTranslator } from "./translate.ts";
 import { resolveCodexCredentials } from "./auth.ts";
-import { mapPermission, mapReasoningEffort } from "./options.ts";
+import {
+  buildCodexConfig,
+  mapPermission,
+  mapReasoningEffort,
+} from "./options.ts";
 import { CODEX_STATIC_MODELS, resolveCodexModel } from "./models.ts";
 import {
   buildCodexInput,
@@ -55,6 +59,7 @@ import {
 import { buildCodexEnv } from "./env.ts";
 import { renderBridgeServers, type CodexConfigObject } from "./mcp-config.ts";
 import { checkCodexReadiness, resolveCodexRuntime } from "./runtime.ts";
+import { tagTerminalProvenance } from "../terminal-provenance.ts";
 
 // ── Capability declaration ────────────────────────────────────────────────────
 
@@ -145,30 +150,14 @@ class CodexHarness implements AgentHarness {
       let bridgeReg: McpBridgeRegistration | null = null;
       let scratch: CodexAttachmentScratch | null = null;
       try {
-        // Reject permission modes Codex cannot honor before any I/O. Surface a
-        // clean terminal error instead of silently mapping `plan` to a
-        // half-correct approvalPolicy/sandboxMode pair; the UI also removes
-        // that option for Codex sessions.
-      const permissionMapping = mapPermission(opts.permissionMode);
-        if (permissionMapping.unsupported) {
-          yield {
-            kind: "done",
-            reason: "error",
-            error:
-              `Permission mode "${opts.permissionMode ?? "default"}" is not ` +
-              `supported by harness "codex".`,
-          };
-          return;
-        }
-
         if (Object.keys(opts.externalMcpServers ?? {}).length > 0) {
-          yield {
+          yield tagTerminalProvenance({
             kind: "done",
             reason: "error",
             error:
               "External project MCP servers are not supported by harness \"codex\" yet. " +
               "Use the Claude harness or remove the external MCP configuration.",
-          };
+          }, "adapter");
           return;
         }
 
@@ -178,7 +167,8 @@ class CodexHarness implements AgentHarness {
         // (observed: every minion spawn dying with "Session abort.").
         const runtime = resolveCodexRuntime();
         if (!runtime) {
-          yield { kind: "done", reason: "error", error: "Codex runtime is unavailable. Reinstall dependencies or set CODEX_PATH." };
+          yield tagTerminalProvenance({ kind: "done", reason: "error",
+            error: "Codex runtime is unavailable. Reinstall dependencies or set CODEX_PATH." }, "adapter");
           return;
         }
         const creds = resolveCodexCredentials();
@@ -212,11 +202,12 @@ class CodexHarness implements AgentHarness {
         const codexOpts: CodexOptions = { ...creds, codexPathOverride: runtime.executable };
         const env = buildCodexEnv(bridgeEnv, opts.cwd);
         if (env) codexOpts.env = env;
-        if (Object.keys(bridgeConfig).length > 0) {
+        const codexConfig = buildCodexConfig(bridgeConfig, opts.systemPrompt);
+        if (Object.keys(codexConfig).length > 0) {
           // Local CodexConfigObject is Record<string, unknown>; values produced
-          // by renderBridgeServers are JSON-serializable so the SDK's stricter
-          // CodexConfigValue typing is satisfied at runtime.
-          codexOpts.config = bridgeConfig as CodexOptions["config"];
+          // here are JSON-serializable so the SDK's stricter CodexConfigValue
+          // typing is satisfied at runtime.
+          codexOpts.config = codexConfig as CodexOptions["config"];
         }
         const codex = new Codex(codexOpts);
 
@@ -242,11 +233,11 @@ class CodexHarness implements AgentHarness {
           // path itself — surface as `abort`, not `error`, so command
           // handlers don't show a phantom failure message.
           if (ac.signal.aborted) {
-            yield { kind: "done", reason: "abort" };
+            yield tagTerminalProvenance({ kind: "done", reason: "abort" }, "adapter");
             return;
           }
           if (isBenignWindowsTaskkillParseError(errorMessage(err))) {
-            yield { kind: "done", reason: "stop" };
+            yield tagTerminalProvenance({ kind: "done", reason: "stop" }, "adapter");
             return;
           }
           yield codexDoneError(errorMessage(err), streamErrors);
@@ -260,16 +251,10 @@ class CodexHarness implements AgentHarness {
           for await (const evt of runResult.events as AsyncIterable<ThreadEvent>) {
             if (ac.signal.aborted) break;
             if (evt.type === "error") streamErrors.push(evt.message);
-            const normalized = translator
-              .translate(evt)
-              .map((e) =>
-                e.kind === "done" && e.reason === "error"
-                  ? {
-                      ...e,
-                      fullError: fullCodexError(e.error ?? "unknown", streamErrors),
-                    }
-                  : e,
-              );
+            const normalized = translator.translate(evt).map((e) => e.kind === "done"
+              ? tagTerminalProvenance(e.reason === "error" ? { ...e,
+                fullError: fullCodexError(e.error ?? "unknown", streamErrors) } : e, "adapter")
+              : e);
             for (const e of normalized) {
               if (e.kind === "done") terminalEmitted = true;
               yield e;
@@ -280,11 +265,13 @@ class CodexHarness implements AgentHarness {
           // cancels in-flight `await for` iteration commonly bubbles as a
           // rejection. Treat it as an abort, not an error.
           if (ac.signal.aborted) {
-            yield { kind: "done", reason: "abort" };
+            yield tagTerminalProvenance({ kind: "done", reason: "abort" }, "adapter");
             return;
           }
           if (isBenignWindowsTaskkillParseError(errorMessage(err))) {
-            if (!terminalEmitted) yield { kind: "done", reason: "stop" };
+            if (!terminalEmitted) {
+              yield tagTerminalProvenance({ kind: "done", reason: "stop" }, "adapter");
+            }
             return;
           }
           yield codexDoneError(errorMessage(err), streamErrors);
@@ -292,9 +279,9 @@ class CodexHarness implements AgentHarness {
         }
 
         if (terminalEmitted) return;
-        yield ac.signal.aborted
+        yield tagTerminalProvenance(ac.signal.aborted
           ? { kind: "done", reason: "abort" }
-          : { kind: "done", reason: "stop" };
+          : { kind: "done", reason: "stop" }, "adapter");
       } finally {
         bridgeReg?.dispose();
         if (scratch !== null) {
@@ -369,12 +356,12 @@ function codexDoneError(
   message: string,
   streamErrors: readonly string[],
 ): NormalizedEvent {
-  return {
+  return tagTerminalProvenance({
     kind: "done",
     reason: "error",
     error: message,
     fullError: fullCodexError(message, streamErrors),
-  };
+  }, "adapter");
 }
 
 function fullCodexError(message: string, streamErrors: readonly string[]): string {

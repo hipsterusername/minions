@@ -86,6 +86,13 @@ describe("contract: get_work_packets", () => {
     };
     expect(response.packets?.map((item) => item.packet.id)).toEqual(["wp_2"]);
     expect(response.packets?.[0]?.contextPack).toBe("context two");
+    expect(response.packets?.[0]?.packet.scope.entryPoints).toEqual([{
+      capabilityId: "capability.workspace",
+      surfaceId: "surface.mobile",
+      files: ["src/mobile/workspace.ts"],
+      tests: ["src/mobile/workspace.test.ts"],
+      flows: ["flow.save_workspace"],
+    }]);
   });
 });
 
@@ -103,6 +110,14 @@ function packet(id: string, leaderSessionKey: string): WorkPacket {
       constraints: [],
       decisions: [],
       risks: [],
+      surfaces: ["surface.mobile"],
+      entryPoints: [{
+        capabilityId: "capability.workspace",
+        surfaceId: "surface.mobile",
+        files: ["src/mobile/workspace.ts"],
+        tests: ["src/mobile/workspace.test.ts"],
+        flows: ["flow.save_workspace"],
+      }],
       suggestedFiles: [],
       suggestedTests: [],
     },

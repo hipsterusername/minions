@@ -1,0 +1,19 @@
+id: constraint.command_table_complete
+type: constraint
+statement: Every WsCommandType member maps exactly once through COMMAND_TABLE and has aligned schema and handler behavior.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces: []
+  files:
+    - server/commands/types.ts
+    - server/commands/index.ts
+    - server/commands/schemas.ts
+severity: critical
+agent_instruction: Update the command union, input schema, handler table, and contract coverage together; run typecheck and command schema tests.
+review_gate: gate.command_contracts
+suggested_tests: [ server/commands/schemas.test.ts, tests/contracts/work-item-contracts.test.ts ]
+evidence: [ decision.typed_event_bus ]
+domain: domain.platform
+scope: global
+guards: []

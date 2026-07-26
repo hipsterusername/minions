@@ -1,0 +1,30 @@
+id: capability.spatial_canvas
+type: capability
+name: Spatial canvas authoring
+summary: Users can create, arrange, group, connect, annotate, search, navigate, resize, and safely delete a persistent graph of work and context nodes.
+constraints: []
+decisions: [ decision.canonical_work_item_lifecycle ]
+suggested_files: [ src/Canvas.tsx, src/CanvasNode.tsx, src/CanvasMiniMap.tsx, src/use-canvas-keyboard.ts, src/auto-layout.ts, src/components/AnnotationLayer.tsx ]
+suggested_tests: [ src/canvas-state.dom.test.tsx, src/CanvasNode.test.tsx, src/CanvasMiniMap.test.ts, src/use-canvas-keyboard.test.tsx, src/auto-layout.test.ts, src/components/AnnotationLayer.test.tsx ]
+keywords: [ canvas, spatial, node, edge, graph, group, arrange, layout, annotation, zoom, pan, minimap, keyboard, palette, autosave ]
+entry_points:
+  - surface: surface.canvas
+    summary: Direct manipulation of nodes, edges, layout, annotations, and viewport.
+    files: [ src/Canvas.tsx, src/CanvasNode.tsx, src/CanvasMiniMap.tsx, src/use-canvas-keyboard.ts, src/components/AnnotationLayer.tsx ]
+    tests: [ src/canvas-state.dom.test.tsx, src/CanvasNode.test.tsx, src/CanvasMiniMap.test.ts, src/use-canvas-keyboard.test.tsx, src/components/AnnotationLayer.test.tsx ]
+    flows: [ flow.navigate_spatial_workspace, flow.route_canvas_context ]
+  - surface: surface.kanban
+    summary: Cards attach to and focus spatial Leader nodes for execution.
+    files: [ src/KanbanBoard.tsx, src/use-server-kanban.ts ]
+    tests: [ src/KanbanBoard.test.tsx, src/use-server-kanban.dom.test.ts ]
+    flows: [ flow.launch_or_resume_card ]
+freshness:
+  class: code_coupled
+risk: medium
+domain: domain.workspace
+depends_on:
+  - capability.project_workspace
+bridges:
+  - to: flow.launch_or_resume_card
+    reason: Canvas binding participates in the execution-lifecycle canonical card launch flow.
+risks: []

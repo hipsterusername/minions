@@ -27,6 +27,12 @@ import {
 import { createBus } from "./bus.ts";
 import type { WebSocketServer } from "ws";
 import { drainQueuedWaitResume, getQueuedWaitResume } from "./wait-resume.ts";
+import { registerHarness } from "./harness/index.ts";
+import type {
+  AgentHarness,
+  HarnessStartOptions,
+  NormalizedEvent,
+} from "./harness/types.ts";
 
 function tmpDb(): string {
   return path.join(
@@ -87,6 +93,92 @@ describe("SessionRegistry.activeCount", () => {
       map.set(key, h);
     }
     expect(r.activeCount()).toBe(4);
+  });
+});
+
+describe("SessionRegistry armed minion prompt resumes", () => {
+  beforeEach(() => disablePersistence());
+
+  it("reuses the frozen skills addendum when a minion resumes", async () => {
+    const starts: HarnessStartOptions[] = [];
+    const harness: AgentHarness = {
+      name: "registry-armed-prompt-test",
+      exposure: "test",
+      capabilities: {
+        mutationInterception: "none",
+        thinking: false,
+        promptCaching: false,
+        mcp: true,
+        permissionPrompts: false,
+        resume: true,
+        partialMessages: false,
+        builtInFilesystem: false,
+      },
+      builtInTools: [],
+      checkReadiness: async () => ({
+        state: "ready",
+        runtime: { available: true, source: "sdk_bundled" },
+        auth: { authenticated: true, source: "unknown" },
+      }),
+      staticInfo: () => ({
+        models: [],
+        commands: [],
+        agents: [],
+        account: { provider: "test" },
+      }),
+      registerTools: () => {},
+      resolveModel: () => null,
+      start: (opts) => {
+        starts.push(opts);
+        return {
+          events: (async function* () {
+            yield {
+              kind: "init",
+              sessionId: "provider-minion-1",
+              model: "",
+            } as NormalizedEvent;
+            yield { kind: "done", reason: "stop" } as NormalizedEvent;
+          })(),
+          control: { abort: () => {} },
+        };
+      },
+    };
+    registerHarness(harness);
+
+    const registry = new SessionRegistry();
+    registry.setDeps({
+      bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
+      startChildSession: (opts) => registry.start(opts),
+      forEachLeaderTaskState: registry.forEachLeaderTaskState,
+    });
+    const armedPrompt =
+      "Base minion prompt\n\n## Skill: Sentinel Registry Resume Skill";
+    registry.start({
+      sessionKey: "minion-registry",
+      invocationKind: "new_run",
+      prompt: "First turn",
+      cwd: "/tmp/work",
+      systemPrompt: armedPrompt,
+      role: "minion",
+      harness: harness.name,
+    });
+    await vi.waitFor(() => expect(starts).toHaveLength(1));
+    await vi.waitFor(() =>
+      expect(registry.get("minion-registry")?.status).toBe("idle")
+    );
+
+    registry.start({
+      sessionKey: "minion-registry",
+      invocationKind: "resume_open_run",
+      prompt: "Resume turn",
+      cwd: "/tmp/work",
+      resumeId: "provider-minion-1",
+    });
+    await vi.waitFor(() => expect(starts).toHaveLength(2));
+
+    expect(starts[1]?.systemPrompt).toContain(
+      "## Skill: Sentinel Registry Resume Skill",
+    );
   });
 });
 

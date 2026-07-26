@@ -1,6 +1,7 @@
 id: capability.workspace_management
 type: capability
+domain: domain.workspace
 name: Workspace Management
 summary: Manage sessions.
-linked_flows: [flow.missing]
+depends_on: [capability.missing]
 risk: medium

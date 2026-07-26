@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 
-import { listProjects, type ProjectSummary } from "../api.ts";
+import {
+  getProjectSettings,
+  listProjects,
+  type ProjectSettings,
+  type ProjectSummary,
+} from "../api.ts";
 import { randomUuid } from "../random-id.ts";
 import { useHarnessList } from "../use-harness-list.tsx";
 import { freezeLeaderSystemPrompt } from "../nodes/leader/frozen-prompt.ts";
@@ -48,6 +53,7 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [skillValues, setSkillValues] = useState<Record<string, Record<string, string>>>({});
   const [skillsPanelOpen, setSkillsPanelOpen] = useState(false);
+  const [projectSettings, setProjectSettings] = useState<ProjectSettings>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Enumerated models for the launch dropdown, across every registered harness
@@ -86,6 +92,38 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
     [projects, selectedProjectId],
   );
   const targetProjectId = lockedProject?.id ?? selectedProject?.id ?? null;
+
+  // Match desktop leader creation: initialize each project's launch controls
+  // from its saved defaults. The controls remain editable for this launch.
+  useEffect(() => {
+    if (!targetProjectId) {
+      setProjectSettings({});
+      setModelValue("");
+      setWorktreeIsolation(false);
+      return;
+    }
+
+    let cancelled = false;
+    void getProjectSettings(targetProjectId)
+      .then((settings) => {
+        if (cancelled) return;
+        setProjectSettings(settings);
+        const harness = settings.defaultLeaderHarness;
+        const model = settings.defaultLeaderModel ?? settings.defaultModel;
+        setModelValue(harness && model ? `${harness}::${model}` : "");
+        setWorktreeIsolation(settings.defaultWorktreeIsolation === true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setProjectSettings({});
+        setModelValue("");
+        setWorktreeIsolation(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [targetProjectId]);
 
   // Load the target project's skill library into the shared registry (which
   // `freezeLeaderSystemPrompt` reads at launch) and expose it for the panel.
@@ -181,6 +219,12 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
       // Empty value = let the server/harness pick its default model. A chosen
       // model carries its harness so cross-provider models (e.g. OpenAI) resolve.
       ...(selectedModel ? { model: selectedModel.model, harness: selectedModel.harness } : {}),
+      ...(projectSettings.defaultPermissionMode
+        ? { permissionMode: projectSettings.defaultPermissionMode }
+        : {}),
+      ...(projectSettings.defaultLeaderThinkingConfig
+        ? { thinkingConfig: projectSettings.defaultLeaderThinkingConfig }
+        : {}),
       ...skillPayload,
     });
     onLaunched(sessionKey);

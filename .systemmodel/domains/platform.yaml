@@ -1,0 +1,5 @@
+id: domain.platform
+type: domain
+name: Platform governance
+summary: Owns runtime configuration and system-level guidance that keep the agent platform configurable, inspectable, and architecturally coherent.
+keywords: [platform, runtime, configuration, system_model, governance, architecture, contract]

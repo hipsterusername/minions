@@ -52,6 +52,11 @@ describe("frozen leader prompts", () => {
     expect(followUp.systemPrompt).toBe(frozen.systemPrompt);
     expect(followUp.systemPrompt).toContain("Initial prefix");
     expect(followUp.systemPrompt).not.toContain("Edited prefix");
+    expect(frozen.systemPrompt).toContain("Initial prefix");
+    expect(frozen.systemPrompt).toContain("Review API.");
+    expect(frozen.systemPrompt).not.toContain("You are the Lead Developer");
+    expect(frozen.preview).toContain("Initial prefix");
+    expect(frozen.preview).toContain("Review API.");
   });
 
   it("delivers mid-session skill changes as user-turn reminder context", () => {

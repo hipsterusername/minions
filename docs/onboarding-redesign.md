@@ -62,6 +62,12 @@ different test from the runtime a session uses.
 
 ## 3. Target command surface
 
+> **Superseded (2026-07):** `pnpm start` is now the non-blocking **background**
+> launcher (`scripts/start.mjs`), and the foreground streaming supervisor moved
+> to `pnpm dev` (`scripts/run.mjs`); the `pnpm serve` alias was removed. The
+> table below records the original proposal for context. See `README.md` →
+> *Scripts* and `tests/architecture/package-scripts.test.ts` for current behavior.
+
 | Command | Required behavior |
 |---|---|
 | `pnpm preflight` | Run host checks and the shared harness-readiness service. Exit 0 when host blockers pass and at least one harness is ready. Print remediation for every non-ready harness. |

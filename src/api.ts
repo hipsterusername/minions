@@ -54,6 +54,18 @@ export interface ProjectContext {
   exists: boolean;
 }
 
+/**
+ * A single user-configurable Context Action (Leader slash command). `id` is a
+ * stable opaque identifier; `icon` keys into the icon palette in
+ * src/dashboard-leader-actions.ts.
+ */
+export interface DashboardLeaderActionConfig {
+  id: string;
+  name: string;
+  prompt: string;
+  icon: string;
+}
+
 export interface ProjectSettings {
   defaultModel?: string;
   defaultLeaderHarness?: string;
@@ -73,16 +85,12 @@ export interface ProjectSettings {
   tidyLayout?: boolean;
   /** System-model layer mode; see docs/system-model-implementation-plan.md. */
   systemModel?: "off" | "advisory" | "enforced";
-  dashboardLeaderActionPrompts?: {
-    improve?: string;
-    execute?: string;
-    analyze?: string;
-  };
-  dashboardLeaderActionNames?: {
-    improve?: string;
-    execute?: string;
-    analyze?: string;
-  };
+  /**
+   * User-configurable Context Actions shown in the Leader slash menu. An
+   * ordered, freely extensible list — add, remove, rename, re-prompt, or
+   * reorder. Absent = built-in defaults; see src/dashboard-leader-actions.ts.
+   */
+  dashboardLeaderActions?: DashboardLeaderActionConfig[];
   /** Saved Leader configuration presets available across this project. */
   leaderPresets?: LeaderPreset[];
   [key: string]: unknown;

@@ -62,10 +62,7 @@ export interface WorkItemBindingRow {
 }
 
 export class WorkItemConflictError extends Error {
-  constructor(
-    message: string,
-    readonly latest: WorkItemRow | null,
-  ) {
+  constructor(message: string, readonly latest: WorkItemRow | null) {
     super(message);
     this.name = "WorkItemConflictError";
   }
@@ -73,13 +70,15 @@ export class WorkItemConflictError extends Error {
 
 function lifecycle(row: WorkItemRow): WorkItemLifecycle {
   return workItemLifecycleSchema.parse({
-    runtimeState: row.runtime_state,
-    outcome: row.outcome,
-    resolution: row.resolution,
-    changeMode: row.change_mode,
-    integrationState: row.integration_state,
+    runtimeState: row.runtime_state, outcome: row.outcome, resolution: row.resolution,
+    changeMode: row.change_mode, integrationState: row.integration_state,
     lifecycleRevision: row.lifecycle_revision,
   });
+}
+
+/** A mutation whose intent is already satisfied returns the row untouched. */
+function idempotentResult(db: Database.Database, row: WorkItemRow): WorkItemMutationResult {
+  return { workItem: row, run: row.current_run_key ? getRun(db, row.current_run_key) : null, idempotent: true };
 }
 
 function getRun(db: Database.Database, runKey: string): WorkItemRunRow | null {
@@ -135,11 +134,8 @@ export function createWorkItem(db: Database.Database, input: {
   return getWorkItem(db, input.id)!;
 }
 
-function assertExpected(
-  row: WorkItemRow | null,
-  expectedRevision: number,
-  expectedCurrentRunKey: string | null,
-): asserts row is WorkItemRow {
+function assertExpected(row: WorkItemRow | null, expectedRevision: number,
+  expectedCurrentRunKey: string | null): asserts row is WorkItemRow {
   if (!row) throw new WorkItemConflictError("work item not found", null);
   if (row.lifecycle_revision !== expectedRevision || row.current_run_key !== expectedCurrentRunKey) {
     throw new WorkItemConflictError("stale work-item lifecycle", row);
@@ -294,15 +290,18 @@ export function sealWorkItemRun(db: Database.Database, input: {
   if (input.outcome === "completed" && (!input.finalReportEventId?.trim() || !input.finalReport?.trim()))
     throw new Error("completed runs require a durable final report event and content");
   return db.transaction(() => {
-    if (input.outcome === "completed") persistRunReport(db, { id: input.finalReportEventId!,
-      workItemId: input.workItemId, runKey: input.runKey, text: input.finalReport!, at: input.at });
+    if (input.finalReportEventId && input.finalReport !== null
+      && input.finalReport !== undefined) {
+      persistRunReport(db, { id: input.finalReportEventId,
+        workItemId: input.workItemId, runKey: input.runKey,
+        text: input.finalReport, at: input.at });
+    }
     const existingRun = getRun(db, input.runKey);
     if (!existingRun || existingRun.work_item_id !== input.workItemId) {
       throw new WorkItemConflictError("run does not belong to work item", getWorkItem(db, input.workItemId));
     }
-    const effectiveOutcome = input.outcome === "completed" && !input.finalReportEventId
-      ? "interrupted"
-      : input.outcome;
+    // Idempotency compares against the seal reducer's own downgrade so a retry matches.
+    const effectiveOutcome = input.outcome === "completed" && !input.finalReportEventId ? "interrupted" : input.outcome;
     if (existingRun.ended_at !== null) {
       if (existingRun.run_outcome !== effectiveOutcome
         || existingRun.final_report_event_id !== (input.finalReportEventId ?? null)
@@ -341,6 +340,9 @@ function resolveWorkItem(db: Database.Database, input: {
     const row = getWorkItem(db, input.workItemId);
     assertExpected(row, input.expectedLifecycleRevision, input.expectedCurrentRunKey);
     const next = transitionWorkItemLifecycle(lifecycle(row), { type: event });
+    // Reducer no-op (already in the requested resolution): writing anyway would
+    // persist archived_from_resolution='archived' and violate its CHECK.
+    if (next.lifecycleRevision === row.lifecycle_revision) return idempotentResult(db, row);
     writeLifecycle(db, row, next, input.at, {
       waitKind: row.wait_kind,
       ...(event === "archive"
@@ -354,15 +356,11 @@ function resolveWorkItem(db: Database.Database, input: {
   }).immediate();
 }
 
-export const reviewWorkItem = (
-  db: Database.Database,
-  input: Parameters<typeof resolveWorkItem>[1],
-): WorkItemMutationResult => resolveWorkItem(db, input, "review");
+export const reviewWorkItem = (db: Database.Database, input: Parameters<typeof resolveWorkItem>[1]):
+  WorkItemMutationResult => resolveWorkItem(db, input, "review");
 
-export const archiveWorkItem = (
-  db: Database.Database,
-  input: Parameters<typeof resolveWorkItem>[1],
-): WorkItemMutationResult => resolveWorkItem(db, input, "archive");
+export const archiveWorkItem = (db: Database.Database, input: Parameters<typeof resolveWorkItem>[1]):
+  WorkItemMutationResult => resolveWorkItem(db, input, "archive");
 
 export function restoreWorkItem(db: Database.Database, input: {
   workItemId: string;
@@ -373,7 +371,8 @@ export function restoreWorkItem(db: Database.Database, input: {
   return db.transaction(() => {
     const row = getWorkItem(db, input.workItemId);
     assertExpected(row, input.expectedLifecycleRevision, input.expectedCurrentRunKey);
-    if (row.resolution !== "archived") throw new WorkItemConflictError("work item is not archived", row);
+    // Restore intent already satisfied (e.g. a double-clicked reopen).
+    if (row.resolution !== "archived") return idempotentResult(db, row);
     if (row.archived_from_resolution === null) {
       throw new WorkItemConflictError("archived work item is missing prior resolution", row);
     }

@@ -7,7 +7,39 @@
 
 import { describe, expect, it } from "vitest";
 import { CODEX_STATIC_MODELS, resolveCodexModel } from "./models.ts";
-import { mapPermission, mapReasoningEffort, mapSandboxMode } from "./options.ts";
+import {
+  buildCodexConfig,
+  mapPermission,
+  mapReasoningEffort,
+  mapSandboxMode,
+} from "./options.ts";
+
+// ── buildCodexConfig ─────────────────────────────────────────────────────────
+
+describe("buildCodexConfig", () => {
+  it("adds systemPrompt as additive developer instructions", () => {
+    const bridgeConfig = {
+      "mcp_servers.task-manager": {
+        url: "http://127.0.0.1/mcp",
+        bearer_token_env_var: "MINIONS_BRIDGE_TOKEN_TASK_MANAGER",
+      },
+    };
+
+    expect(buildCodexConfig(bridgeConfig, "SYSTEM_PROMPT_SENTINEL")).toEqual({
+      ...bridgeConfig,
+      developer_instructions: "SYSTEM_PROMPT_SENTINEL",
+    });
+  });
+
+  it.each([undefined, ""])(
+    "omits developer_instructions when systemPrompt is %s",
+    (systemPrompt) => {
+      expect(buildCodexConfig({}, systemPrompt)).not.toHaveProperty(
+        "developer_instructions",
+      );
+    },
+  );
+});
 
 // ── resolveCodexModel ─────────────────────────────────────────────────────────
 
@@ -97,29 +129,36 @@ describe("mapPermission", () => {
   it.each([
     [
       "bypassPermissions" as const,
-      { approvalPolicy: "never", sandboxMode: "danger-full-access", unsupported: false },
+      { approvalPolicy: "never", sandboxMode: "danger-full-access" },
     ],
     [
       "auto" as const,
-      { approvalPolicy: "on-failure", sandboxMode: "danger-full-access", unsupported: false },
+      { approvalPolicy: "on-failure", sandboxMode: "danger-full-access" },
     ],
     [
       "default" as const,
-      { approvalPolicy: "on-request", sandboxMode: "danger-full-access", unsupported: false },
+      { approvalPolicy: "on-request", sandboxMode: "danger-full-access" },
     ],
     [
       "plan" as const,
-      { approvalPolicy: "on-request", sandboxMode: "read-only", unsupported: true },
+      { approvalPolicy: "on-request", sandboxMode: "read-only" },
     ],
   ])("maps permissionMode '%s' to the correct Codex options", (mode, expected) => {
     expect(mapPermission(mode)).toEqual(expected);
+  });
+
+  it("maps plan mode to a read-only sandbox rather than rejecting it", () => {
+    // Read-only sandbox is a faithful, enforced realization of plan mode.
+    expect(mapPermission("plan")).toEqual({
+      approvalPolicy: "on-request",
+      sandboxMode: "read-only",
+    });
   });
 
   it("treats undefined as auto with Claude-equivalent filesystem access", () => {
     expect(mapPermission(undefined)).toEqual({
       approvalPolicy: "on-failure",
       sandboxMode: "danger-full-access",
-      unsupported: false,
     });
   });
 });

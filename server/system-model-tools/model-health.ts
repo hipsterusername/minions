@@ -49,6 +49,7 @@ export function createModelHealthToolDef(ctx: ModelHealthToolContext): Normalize
       const model = ctx.runtime.model;
       if (!model) {
         return jsonResult({
+          counts: emptyCounts(),
           unused: [],
           stale: [],
           orphaned: [],
@@ -74,6 +75,7 @@ export function createModelHealthToolDef(ctx: ModelHealthToolContext): Normalize
         overbroadApplicability(ctx, model),
       ]);
       return jsonResult({
+        counts: modelCounts(model),
         unused,
         stale,
         orphaned,
@@ -81,6 +83,30 @@ export function createModelHealthToolDef(ctx: ModelHealthToolContext): Normalize
         pruneRecommendations: recommendations(unused, stale, orphaned),
       });
     },
+  };
+}
+
+function modelCounts(model: LoadedSystemModel) {
+  return {
+    domains: model.domains.length,
+    capabilities: model.capabilities.length,
+    flows: model.flows.length,
+    constraints: model.constraints.length,
+    decisions: model.decisions.length,
+    risks: model.risks.length,
+    surfaces: model.surfaces.length,
+  };
+}
+
+function emptyCounts(): ReturnType<typeof modelCounts> {
+  return {
+    domains: 0,
+    capabilities: 0,
+    flows: 0,
+    constraints: 0,
+    decisions: 0,
+    risks: 0,
+    surfaces: 0,
   };
 }
 

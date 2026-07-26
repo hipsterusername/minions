@@ -67,13 +67,12 @@ describe("buildBaseLeaderPrompt", () => {
     expect(LEADER_SYSTEM_PROMPT).toMatch(/no `AskUserQuestion` tool/i);
   });
 
-  it("surfaces the ask-user guidance from the capabilities list too", () => {
-    // A reader skimming only the capabilities section should still learn the
-    // form is how you ask the user — the guidance must not be buried.
-    const capabilitiesIdx = LEADER_SYSTEM_PROMPT.indexOf("## Your Capabilities");
-    const renderIdx = LEADER_SYSTEM_PROMPT.indexOf("## Render Dashboard");
-    const capabilitiesBlock = LEADER_SYSTEM_PROMPT.slice(capabilitiesIdx, renderIdx);
-    expect(capabilitiesBlock).toMatch(/ask the \*user\* a question/i);
+  it("keeps ask-user guidance in the stable core before generated capabilities", () => {
+    expect(LEADER_SYSTEM_PROMPT).toMatch(/## Asking the User a Question/i);
+    expect(LEADER_SYSTEM_PROMPT).toMatch(/render a `form`/i);
+    expect(LEADER_SYSTEM_PROMPT.indexOf("## Asking the User a Question")).toBeLessThan(
+      LEADER_SYSTEM_PROMPT.indexOf("## Your Capabilities"),
+    );
   });
 
   it("Wait & Continue section explains early auto-wake and recommends generous durations", () => {

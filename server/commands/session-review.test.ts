@@ -63,7 +63,12 @@ describe("session review commands", () => {
       });
     });
 
-  it("returns a canonical conflict for a stale bound session request without mutating either snapshot", async () => {
+  it("applies a bound dismiss with a stale host clock because dismissal is monotonic", async () => {
+    // Regression: after a server restart, boot recovery bumps the session and
+    // work-item revision counters independently, so the host clock no longer
+    // matches what any client saw. Dismiss/acknowledge are monotonic and the
+    // canonical mutation is fenced with the freshly read work-item revision,
+    // so a mismatched host clock must not reject the request.
     const h = setup();
     h.host.workItemId = "work-1";
     h.host.reviewLifecycle = { ...h.host.reviewLifecycle, lifecycleRevision: 4 };
@@ -71,8 +76,21 @@ describe("session review commands", () => {
     h.ctx.workItems = workItems;
     dismissSession(h.ctx, cmd({ type: "dismiss_session", expectedLifecycleRevision: 3 }), h.ws);
     await vi.waitFor(() => expect(h.wsSent).toHaveLength(1));
-    expect(workItems.archive).not.toHaveBeenCalled();
-    expect(h.host.reviewLifecycle.dismissedAt).toBeNull();
+    expect(workItems.archive).toHaveBeenCalledWith(expect.objectContaining({
+      workItemId: "work-1", expectedLifecycleRevision: 4, expectedCurrentRunKey: "leader-1",
+    }));
+    expect(h.wsSent[0]).toMatchObject({ topic: "session:leader-1", success: true });
+  });
+
+  it("still fences a bound reopen strictly because it reverses user intent", async () => {
+    const h = setup();
+    h.host.workItemId = "work-1";
+    h.host.reviewLifecycle = { ...h.host.reviewLifecycle, lifecycleRevision: 4, dismissedAt: 2 };
+    const workItems = boundService();
+    h.ctx.workItems = workItems;
+    reopenSession(h.ctx, cmd({ type: "reopen_session", expectedLifecycleRevision: 3 }), h.ws);
+    await vi.waitFor(() => expect(h.wsSent).toHaveLength(1));
+    expect(workItems.restore).not.toHaveBeenCalled();
     expect(h.wsSent[0]).toMatchObject({
       topic: "session:leader-1", success: false, code: "LIFECYCLE_REVISION_CONFLICT",
       lifecycle: { lifecycleRevision: 4 },

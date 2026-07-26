@@ -1,3 +1,5 @@
+import { compileWorktreeCompletionPolicy } from "../session-host-config.ts";
+
 interface TaskSpawnPromptArgs {
   taskId: string;
   title: string;
@@ -69,8 +71,15 @@ export function buildTaskSpawnPrompt(args: TaskSpawnPromptArgs): string {
   ];
 
   if (args.worktreeBranch) {
+    const sharedWorktreePolicy = compileWorktreeCompletionPolicy({
+      role: "minion",
+      canonical: false,
+      sharedWorktree: true,
+    })
+      .map((line) => line.replace(/^- /, ""))
+      .join(" ");
     lines.push(
-      `**Worktree branch:** \`${args.worktreeBranch}\` - your cwd is inside the Leader's shared worktree. Keep edits within your assigned files, do not run git commit, and avoid reverting changes you did not make; the orchestrator handles committing and merging.`,
+      `**Worktree branch:** \`${args.worktreeBranch}\` - your cwd is inside the Leader's shared worktree. ${sharedWorktreePolicy}`,
     );
   }
   if (args.armedSkillIds.length > 0) {

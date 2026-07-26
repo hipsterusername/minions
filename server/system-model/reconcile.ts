@@ -18,13 +18,33 @@ export function reconcileDeterministic(input: ReconcileInput): DeterministicReco
   const affectedFlows = input.model.flows
     .filter((flow) => changedFiles.some((file) => matchesAny(file, flow.suggestedFiles)))
     .map((flow) => flow.id);
-  const scopeCapabilities = unique([...input.packet.scope.capabilities, ...affectedCapabilities]);
+  const affectedEntryPoints = input.model.capabilities.flatMap((capability) =>
+    (capability.entryPoints ?? [])
+      .filter((entryPoint) => changedFiles.some((file) => matchesAny(file, entryPoint.files)))
+      .map((entryPoint) => ({ capabilityId: capability.id, surfaceId: entryPoint.surface })));
+  const affectedEntryPointCapabilities = unique(affectedEntryPoints.map((item) => item.capabilityId));
+  const siblingSurfaces = affectedEntryPointCapabilities.map((capabilityId) => ({
+    capabilityId,
+    surfaceIds: unique(input.model.capabilities.find((item) => item.id === capabilityId)
+      ?.entryPoints.map((entryPoint) => entryPoint.surface) ?? []),
+  }));
+  const scopeCapabilities = unique([
+    ...input.packet.scope.capabilities,
+    ...affectedCapabilities,
+    ...affectedEntryPointCapabilities,
+  ]);
   const scopeFlows = unique([...input.packet.scope.flows, ...affectedFlows]);
+  const scopeSurfaces = unique([
+    ...(input.packet.scope.surfaces ?? []),
+    ...affectedEntryPoints.map((item) => item.surfaceId),
+    ...siblingSurfaces.flatMap((item) => item.surfaceIds),
+  ]);
   const constraintsInScope = input.model.constraints
     .filter((constraint) =>
       input.packet.scope.constraints.includes(constraint.id)
       || intersects(constraint.appliesTo.capabilities, scopeCapabilities)
       || intersects(constraint.appliesTo.flows, scopeFlows)
+      || intersects(constraint.appliesTo.surfaces, scopeSurfaces)
       || changedFiles.some((file) => matchesAny(file, constraint.appliesTo.files)))
     .map((constraint) => constraint.id);
   const changedTests = new Set(changedFiles.filter(isLikelyTestFile));
@@ -43,8 +63,11 @@ export function reconcileDeterministic(input: ReconcileInput): DeterministicReco
   return {
     provenance: "deterministic",
     changedFiles,
-    affectedCapabilities: affectedCapabilities.sort(),
+    affectedCapabilities: unique([...affectedCapabilities, ...affectedEntryPointCapabilities]),
     affectedFlows: affectedFlows.sort(),
+    affectedEntryPoints: affectedEntryPoints.sort((a, b) =>
+      a.capabilityId.localeCompare(b.capabilityId) || a.surfaceId.localeCompare(b.surfaceId)),
+    siblingSurfaces,
     constraintsInScope: constraintsInScope.sort(),
     testsMissing,
     outOfScopeFiles,

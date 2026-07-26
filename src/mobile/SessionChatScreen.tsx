@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 
 import type { DisplayMessage } from "../sdk-messages.ts";
-import { toolDisplayInfo } from "../nodes/leader-message-helpers.ts";
+import { formatToolInputDetail, toolDisplayInfo } from "../nodes/leader-message-helpers.ts";
 import {
   RenderComponentView,
   gridColumnFor,
@@ -45,9 +45,11 @@ const LEADER_LIVE_STATUSES = new Set(["running", "creating", "waiting"]);
 interface SessionChatScreenProps {
   sessionKey: string;
   session?: MobileSessionInfo | undefined;
+  sessionOptions?: MobileSessionInfo[] | undefined;
   subscribe: SocketSubscribe;
   send: (data: unknown) => void;
   onBack: () => void;
+  onSelectSession?: ((sessionKey: string) => void) | undefined;
 }
 
 type ChatTab = "chat" | "plan" | "dashboard";
@@ -58,17 +60,17 @@ function messageTone(message: DisplayMessage): string {
   return message.role;
 }
 
-function MessageBubble({ message }: { message: DisplayMessage }) {
+export function MessageBubble({ message, detail = false }: { message: DisplayMessage; detail?: boolean }) {
+  const [expanded, setExpanded] = useState(false);
   const toolInfo = message.role === "tool" ? toolDisplayInfo(message.toolName, message.toolInput) : null;
   const label = toolInfo?.label ?? message.toolName ?? message.role;
-  const body = toolInfo?.summary ?? (message.content || message.toolName || "Tool activity");
-  return (
-    <article
-      className={`mob-message mob-message--${message.role}`}
-      data-tone={messageTone(message)}
-      data-tool-kind={toolInfo?.kind}
-      aria-label={message.role === "user" ? "You" : undefined}
-    >
+  const previewBody = toolInfo?.summary ?? (message.content || message.toolName || "Tool activity");
+  const body = toolInfo && (expanded || detail)
+    ? formatToolInputDetail(message.toolInput)
+    : previewBody;
+  const compact = !detail && (message.role === "tool" || message.role === "system" || message.role === "thinking");
+  const contents = (
+    <>
       <div className="mob-message-label">
         {toolInfo ? <span className="mob-tool-icon" aria-hidden="true">{toolInfo.icon}</span> : null}
         <span className="mob-message-label-text">{label}</span>
@@ -77,7 +79,89 @@ function MessageBubble({ message }: { message: DisplayMessage }) {
         {body}
       </div>
       {message.suffix ? <div className="mob-message-suffix">{message.suffix}</div> : null}
+    </>
+  );
+  return (
+    <article
+      className={`mob-message mob-message--${message.role}`}
+      data-tone={messageTone(message)}
+      data-tool-kind={toolInfo?.kind}
+      data-expanded={compact ? String(expanded) : undefined}
+      aria-label={message.role === "user" ? "You" : undefined}
+    >
+      {compact ? (
+        <button
+          type="button"
+          className="mob-message-toggle"
+          aria-expanded={expanded}
+          aria-label={`${expanded ? "Collapse" : "Expand"} ${label}`}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {contents}
+        </button>
+      ) : contents}
     </article>
+  );
+}
+
+type MobileMessageGroup =
+  | { kind: "message"; message: DisplayMessage }
+  | { kind: "activity"; messages: DisplayMessage[] };
+
+function isAuxiliaryMessage(message: DisplayMessage): boolean {
+  return message.role === "tool" || message.role === "system" || message.role === "thinking";
+}
+
+export function groupMobileMessages(messages: DisplayMessage[]): MobileMessageGroup[] {
+  const groups: MobileMessageGroup[] = [];
+  let activity: DisplayMessage[] = [];
+  const flush = () => {
+    if (activity.length === 1) groups.push({ kind: "message", message: activity[0]! });
+    else if (activity.length > 1) groups.push({ kind: "activity", messages: activity });
+    activity = [];
+  };
+
+  for (const message of messages) {
+    if (isAuxiliaryMessage(message)) activity.push(message);
+    else {
+      flush();
+      groups.push({ kind: "message", message });
+    }
+  }
+  flush();
+  return groups;
+}
+
+export function ActivityMessageGroup({ messages }: { messages: DisplayMessage[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const tools = messages.filter((message) => message.role === "tool").length;
+  const thoughts = messages.length - tools;
+  const parts = [
+    tools ? `${tools} tool ${tools === 1 ? "call" : "calls"}` : null,
+    thoughts ? `${thoughts} progress ${thoughts === 1 ? "update" : "updates"}` : null,
+  ].filter(Boolean).join(" · ");
+
+  return (
+    <section className="mob-activity-group" data-expanded={String(expanded)}>
+      <button
+        type="button"
+        className="mob-activity-group-toggle"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <span className="mob-activity-group-icon" aria-hidden="true">{expanded ? "−" : "+"}</span>
+        <span className="mob-activity-group-copy">
+          <strong>Agent activity</strong>
+          <small>{parts}</small>
+        </span>
+        <span className="mob-activity-group-action">{expanded ? "Hide details" : "Show details"}</span>
+      </button>
+      {expanded ? (
+        <div className="mob-activity-group-details">
+          {messages.map((message) => <MessageBubble key={message.id} message={message} detail />)}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -102,6 +186,41 @@ function SessionCallout({ session }: { session?: MobileSessionInfo | undefined }
       <strong>{cost} · {metric}</strong>
       {session.lastActivity ? <p>{session.lastActivity}</p> : null}
     </section>
+  );
+}
+
+function EmptyChatState({ session }: { session?: MobileSessionInfo | undefined }) {
+  const active = !session || LEADER_LIVE_STATUSES.has(session.status);
+
+  if (active) {
+    const connecting = !session;
+    return (
+      <div className="mob-empty mob-empty--chat mob-chat-activity" role="status" aria-live="polite">
+        <span className="mob-chat-activity-dots" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </span>
+        <h2>{connecting ? "Connecting to leader…" : "Leader is thinking…"}</h2>
+        <p>{connecting ? "Starting the session and waiting for a connection." : "Work is in progress. Updates will appear here."}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mob-empty mob-empty--chat">
+      <h2>Ready</h2>
+      <p>No messages yet.</p>
+    </div>
+  );
+}
+
+export function ActiveThinkingIndicator() {
+  return (
+    <div className="mob-thinking-indicator" role="status" aria-live="polite">
+      <span className="mob-thinking-indicator-dot" aria-hidden="true" />
+      <span>Thinking…</span>
+    </div>
   );
 }
 
@@ -431,7 +550,7 @@ function MobileDashboardPanel({
     );
   }
 
-  const columns = renderState.layout.columns ?? 2;
+  const columns = mobileDashboardColumns();
   const gap = renderState.layout.gap ?? 12;
 
   return (
@@ -468,7 +587,12 @@ function MobileDashboardPanel({
                 component={component}
                 context={{
                   onSubmitForm: (componentId, answers) =>
-                    send({ type: "submit_form", sessionKey, componentId, answers }),
+                    send({
+                      type: "submit_form",
+                      sessionKey,
+                      formComponentId: componentId,
+                      formAnswers: answers,
+                    }),
                 }}
               />
             </div>
@@ -479,12 +603,19 @@ function MobileDashboardPanel({
   );
 }
 
+/** Mobile intentionally overrides the desktop/agent-authored grid width. */
+export function mobileDashboardColumns(): number {
+  return 1;
+}
+
 export function SessionChatScreen({
   sessionKey,
   session,
+  sessionOptions = [],
   subscribe,
   send,
   onBack,
+  onSelectSession,
 }: SessionChatScreenProps) {
   const [state, setState] = useState<SessionStreamState>(() =>
     emptySessionStreamState(sessionKey),
@@ -495,6 +626,7 @@ export function SessionChatScreen({
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [composerFocused, setComposerFocused] = useState(false);
   const [activeTab, setActiveTab] = useState<ChatTab>("chat");
+  const groupedMessages = useMemo(() => groupMobileMessages(state.messages), [state.messages]);
   const feedRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const renderState = session?.renderState ?? emptyRenderState();
@@ -599,6 +731,14 @@ export function SessionChatScreen({
   const liveWork =
     activeMinions.filter((minion) => isCurrentTask(minion.status)).length
     + taskPlan.filter((task) => isCurrentTask(task.status)).length;
+  // Stopping is also the mobile recovery path when the server's retained
+  // session limit is reached. Idle, completed, errored, and waiting sessions
+  // still occupy a slot until they are explicitly stopped, so keep this
+  // action available for every real session that is not already stopped.
+  const canStop = session !== undefined && session.status !== "stopped";
+  const switchableSessions = sessionOptions.filter(
+    (option) => !option.sessionKey.startsWith("work-item:"),
+  );
 
   return (
     <main className="mob-chat" aria-label="Session chat">
@@ -613,16 +753,35 @@ export function SessionChatScreen({
         <button
           className="mob-stop-button"
           type="button"
+          disabled={!canStop}
           onClick={() => send({ type: "stop_session", sessionKey })}
         >
           Stop
         </button>
       </header>
 
+      {onSelectSession && switchableSessions.length > 1 ? (
+        <label className="mob-session-switcher">
+          <span>Conversation</span>
+          <select
+            aria-label="Switch session"
+            value={sessionKey}
+            onChange={(event) => onSelectSession(event.currentTarget.value)}
+          >
+            {switchableSessions.map((option) => (
+              <option value={option.sessionKey} key={option.sessionKey}>
+                {sessionRoleLabel(option)} · {sessionDisplayTitle(option)}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+
       {isLeader ? (
         <nav className="mob-chat-tabs" aria-label="Leader session views">
           <button
             type="button"
+            aria-pressed={activeTab === "chat"}
             className="mob-chat-tab"
             data-active={activeTab === "chat" ? "true" : "false"}
             onClick={() => setActiveTab("chat")}
@@ -631,6 +790,7 @@ export function SessionChatScreen({
           </button>
           <button
             type="button"
+            aria-pressed={activeTab === "plan"}
             className="mob-chat-tab"
             data-active={activeTab === "plan" ? "true" : "false"}
             onClick={() => setActiveTab("plan")}
@@ -642,6 +802,7 @@ export function SessionChatScreen({
           </button>
           <button
             type="button"
+            aria-pressed={activeTab === "dashboard"}
             className="mob-chat-tab"
             data-active={activeTab === "dashboard" ? "true" : "false"}
             onClick={() => setActiveTab("dashboard")}
@@ -659,13 +820,12 @@ export function SessionChatScreen({
           <div className="mob-chat-feed" ref={feedRef}>
             {isLeader ? null : <SessionCallout session={session} />}
             {state.messages.length === 0 && !state.streamingText ? (
-              <div className="mob-empty mob-empty--chat">
-                <h2>Ready</h2>
-                <p>No messages yet.</p>
-              </div>
+              <EmptyChatState session={session} />
             ) : null}
-            {state.messages.map((message) => (
-              <MessageBubble key={message.id} message={message} />
+            {groupedMessages.map((group) => group.kind === "activity" ? (
+              <ActivityMessageGroup key={`activity-${group.messages[0]!.id}`} messages={group.messages} />
+            ) : (
+              <MessageBubble key={group.message.id} message={group.message} />
             ))}
             {state.streamingText ? (
               <article
@@ -679,6 +839,10 @@ export function SessionChatScreen({
                 </div>
                 <div className="mob-message-content">{state.streamingText}</div>
               </article>
+            ) : null}
+            {session && LEADER_LIVE_STATUSES.has(session.status) &&
+            (state.messages.length > 0 || Boolean(state.streamingText)) ? (
+              <ActiveThinkingIndicator />
             ) : null}
           </div>
 

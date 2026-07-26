@@ -1,7 +1,7 @@
 import { z } from "zod/v4";
 
 export const runtimeStateSchema = z.enum(["draft", "starting", "working", "waiting", "inactive"]);
-export const outcomeSchema = z.enum(["none", "completed", "error", "interrupted"]);
+export const outcomeSchema = z.enum(["none", "completed", "error", "stopped", "interrupted"]);
 export const resolutionSchema = z.enum(["open", "reviewed", "archived"]);
 export const changeModeSchema = z.enum(["live", "worktree"]);
 export const integrationStateSchema = z.enum([
@@ -256,6 +256,10 @@ export function selectWorkItemPresentation(
   if (state.outcome === "interrupted" && state.resolution === "open") {
     actions.push("review", "start_iteration");
     return { label: "Interrupted", badge: "error", attentionRank: 2, needsAttention: true, availableActions: actions };
+  }
+  if (state.outcome === "stopped" && state.resolution === "open") {
+    actions.push("review", "start_iteration");
+    return { label: "Stopped", badge: "neutral", attentionRank: 2, needsAttention: true, availableActions: actions };
   }
   if (state.outcome === "completed" && state.resolution === "open") {
     actions.push("review", "start_iteration");

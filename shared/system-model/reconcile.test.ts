@@ -22,6 +22,8 @@ describe("reconciliationReportSchema", () => {
     expect(report.provenance).toEqual({ deterministic: "deterministic" });
     expect(report.changedFiles).toEqual([]);
     expect(report.constraintVerdicts).toEqual([]);
+    expect(report.deterministic.affectedEntryPoints).toEqual([]);
+    expect(report.deterministic.siblingSurfaces).toEqual([]);
   });
 
   it("labels reviewer verdicts separately from deterministic fields", () => {

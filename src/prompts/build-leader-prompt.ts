@@ -1,13 +1,9 @@
 /**
- * Helper that assembles the full Leader system prompt:
+ * Client preview helpers for the server-owned Leader prompt.
  *
- *   LEADER_SYSTEM_PROMPT
- *   + Active Skills addendum (the skills tagged onto this leader node)
- *   + Available Skills inventory (the catalog of skills the leader can
- *     hand to minions via assign_task's `skillIds`)
- *
- * Centralised here so every call site (LeaderNode handlers, KanbanBoard
- * chat send) builds the prompt the same way.
+ * Wire callers use `buildLeaderSystemPrompt` to send only structured
+ * customization (the user prefix and frozen selected-skill instructions).
+ * `buildLeaderSystemPromptPreview` is for UI/tests and is never authoritative.
  */
 
 import {
@@ -21,6 +17,7 @@ import {
   type SkillTemplate,
 } from "../skills/types.ts";
 import { builtInSkillPresets } from "../../shared/skill-presets.ts";
+import { encodeLeaderPromptCustomization } from "../../shared/leader-prompt.ts";
 
 /**
  * The catalog the leader can arm minions from: every project skill in the
@@ -51,6 +48,16 @@ export interface BuildLeaderPromptInput {
 }
 
 export function buildLeaderSystemPrompt(input: BuildLeaderPromptInput): string {
+  const taggedSkills = input.skillIds
+    .map((id) => getSkill(id))
+    .filter((s): s is SkillTemplate => s !== undefined);
+  return encodeLeaderPromptCustomization({
+    promptPrefix: input.systemPromptPrefix,
+    skillsAddendum: compileSkills(taggedSkills, input.skillValues),
+  });
+}
+
+export function buildLeaderSystemPromptPreview(input: BuildLeaderPromptInput): string {
   const tools = input.tools ?? CLAUDE_BUILT_IN_TOOLS;
   const taggedSkills = input.skillIds
     .map((id) => getSkill(id))
@@ -58,5 +65,6 @@ export function buildLeaderSystemPrompt(input: BuildLeaderPromptInput): string {
   const activeAddendum = compileSkills(taggedSkills, input.skillValues);
   const inventory = buildArmingInventory(armableSkills());
   const prefix = input.systemPromptPrefix?.trim();
-  return (prefix ? `${prefix}\n\n` : "") + buildBaseLeaderPrompt(tools) + activeAddendum + inventory;
+  return buildBaseLeaderPrompt(tools) + activeAddendum + inventory
+    + (prefix ? `\n\n${prefix}` : "");
 }

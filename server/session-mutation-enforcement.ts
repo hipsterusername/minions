@@ -6,14 +6,21 @@ import type { SessionHost } from "./session-host.ts";
 
 export function assertSafeHarnessMutationMode(host: SessionHost, harness: AgentHarness, bus: Bus,
   inheritsWorktree = false): void {
+  // Worktree isolation ON (or inherited from a parent worktree): the
+  // contribution/approval lifecycle owns change safety — it tracks mutations
+  // inside the worktree and merges them into git deliberately. Nothing to
+  // enforce here.
   if (host.worktreeIsolation || inheritsWorktree) return;
+
+  // Worktree isolation OFF = live "direct-to-main" mode. There is no
+  // contribution lifecycle to protect: every change applies straight to the
+  // working tree. Any harness may therefore run regardless of its mutation-
+  // interception capability. We still emit a disclosure event so the effective
+  // mutation posture stays observable.
   if (harness.capabilities.mutationInterception === "complete") {
-    // Phase 5 removal gate: once every launch is durably work-item-bound,
-    // delete this compatibility branch and reject any remaining legacy live
-    // launch. Observe-only is disclosure, never an enforced-safety claim.
-    // Legacy sessions have no durable work identity through which to attach
-    // the coordinator. Preserve compatibility, but advertise observe-only
-    // truthfully until they are migrated/backfilled.
+    // A "complete" harness with no canonical work item is a legacy live run.
+    // Disclose it as observe-only (the coordinator has no work identity to
+    // attach to) rather than claiming enforced safety.
     if (!host.workItemId) bus.emitToSession(host.id, {
       type: "mutation_enforcement_compatibility", sessionKey: host.id,
       harness: harness.name, mode: "live", observeOnly: true,
@@ -22,11 +29,14 @@ export function assertSafeHarnessMutationMode(host: SessionHost, harness: AgentH
     });
     return;
   }
+
+  // observe_only | none: live mode applies changes directly to the working
+  // tree, so there is no interception to enforce and no reason to block. Emit
+  // a fallback disclosure and allow the run to proceed.
   bus.emitToSession(host.id, { type: "mutation_enforcement_fallback",
-    sessionKey: host.id, harness: harness.name, mode: "worktree",
-    reason: "live mutation interception is unavailable", timestamp: Date.now() });
-  if (!host.workItemId) throw new Error(`Harness "${harness.name}" cannot safely run a legacy live session; relaunch with worktree isolation`);
-  throw new Error(`Harness "${harness.name}" cannot enforce live mutations; start this work item in worktree mode`);
+    sessionKey: host.id, harness: harness.name, mode: "live",
+    reason: "live mutation interception is unavailable; changes apply directly to the working tree",
+    timestamp: Date.now() });
 }
 
 export function installChangeIntentTools(context: AgentTypeContext, result: AgentToolResult): void {

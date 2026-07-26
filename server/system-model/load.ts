@@ -6,10 +6,12 @@ import {
   constraintSchema,
   contextBudgetSchema,
   decisionMetaSchema,
+  domainSchema,
   flowSchema,
   freshnessPolicySchema,
   reviewGateSchema,
   riskSchema,
+  surfaceSchema,
   systemModelPoliciesSchema,
   type SystemModelObject,
 } from "../../shared/system-model/index.ts";
@@ -40,23 +42,27 @@ export function loadSystemModel(cwd: string): {
 
   const manifest = readYamlFile(manifestPath, z.record(z.string(), z.unknown()), errors) ?? {};
   const capabilities = readYamlDir(root, "capabilities", capabilitySchema, errors);
+  const domains = readYamlDir(root, "domains", domainSchema, errors);
   const flows = readYamlDir(root, "flows", flowSchema, errors);
   const constraints = readYamlDir(root, "constraints", constraintSchema, errors);
   const decisions = readDecisionDir(root, errors);
   const risks = readRisks(root, errors);
+  const surfaces = readYamlDir(root, "surfaces", surfaceSchema, errors);
   const policies = readPolicies(root, errors);
-  const objects = [...capabilities, ...flows, ...constraints, ...decisions, ...risks];
+  const objects = [...domains, ...capabilities, ...flows, ...constraints, ...decisions, ...risks, ...surfaces];
   const duplicateErrors = findDuplicateIds(objects);
 
   const model: LoadedSystemModel = {
     root,
     manifestPath,
     manifest,
+    domains,
     capabilities,
     flows,
     constraints,
     decisions,
     risks,
+    surfaces,
     policies,
     objectsById: new Map(objects.map((object) => [object.id, object])),
     reviewGatesById: new Map(policies.reviewGates.map((gate) => [gate.id, gate])),

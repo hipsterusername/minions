@@ -87,7 +87,7 @@ export class SqliteWorktreeIntegrationService implements WorktreeIntegrationServ
       expectedRevision: row.revision, outcome, actor: "runtime", ...(error ? { error } : {}), at: this.now() });
     this.publish(this.state(changed.lineage_id), `contribution_${outcome}`);
   }
-  async collectRun(runKey: string, outcome: "completed" | "error" | "interrupted"): Promise<void> {
+  async collectRun(runKey: string, outcome: "completed" | "error" | "stopped" | "interrupted"): Promise<void> {
     const resolution = getLineageResolutionRun(this.db, runKey);
     if (resolution) {
       if (outcome === "error") { failLineageResolutionRun(this.db, { runKey,
@@ -115,11 +115,11 @@ export class SqliteWorktreeIntegrationService implements WorktreeIntegrationServ
     const rows = this.db.prepare(`SELECT r.run_key,s.run_outcome FROM worktree_contribution_runs r
       JOIN worktree_contributions c ON c.id=r.contribution_id JOIN sessions s ON s.session_key=r.run_key
       WHERE c.state='active' AND s.ended_at IS NOT NULL
-      AND s.run_outcome IN ('completed','interrupted') UNION SELECT r.run_key,s.run_outcome
+      AND s.run_outcome IN ('completed','stopped','interrupted') UNION SELECT r.run_key,s.run_outcome
       FROM worktree_lineage_resolution_runs r JOIN sessions s ON s.session_key=r.run_key
       WHERE r.state='active' AND s.ended_at IS NOT NULL
-      AND s.run_outcome IN ('completed','interrupted','error')`).all() as
-      Array<{ run_key: string; run_outcome: "completed" | "interrupted" | "error" }>;
+      AND s.run_outcome IN ('completed','stopped','interrupted','error')`).all() as
+      Array<{ run_key: string; run_outcome: "completed" | "stopped" | "interrupted" | "error" }>;
     for (const row of rows) await this.collectRun(row.run_key, row.run_outcome);
     return rows.map((row) => row.run_key);
   }

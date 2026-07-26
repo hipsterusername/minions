@@ -23,6 +23,14 @@ export const deterministicReconciliationSchema = z.object({
   changedFiles: z.array(z.string()).default([]),
   affectedCapabilities: z.array(z.string()).default([]),
   affectedFlows: z.array(z.string()).default([]),
+  affectedEntryPoints: z.array(z.object({
+    capabilityId: z.string(),
+    surfaceId: z.string(),
+  })).default([]),
+  siblingSurfaces: z.array(z.object({
+    capabilityId: z.string(),
+    surfaceIds: z.array(z.string()),
+  })).default([]),
   constraintsInScope: z.array(z.string()).default([]),
   testsMissing: z.array(z.string()).default([]),
   outOfScopeFiles: z.array(z.string()).default([]),

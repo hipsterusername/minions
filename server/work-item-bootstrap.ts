@@ -46,7 +46,7 @@ export interface WorkItemBootstrapOptions {
     void | import("./worktree-create.ts").PlannedWorktree |
     Promise<void | import("./worktree-create.ts").PlannedWorktree>;
   collectWorktreeRun?: (runKey: string,
-    outcome: "completed" | "error" | "interrupted") => Promise<void>;
+    outcome: "completed" | "error" | "stopped" | "interrupted") => Promise<void>;
 }
 
 export interface WorkItemBootstrapResult {

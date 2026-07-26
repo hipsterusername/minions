@@ -9,6 +9,7 @@ import { matchSystemModel, type MatchCandidate } from "./match.ts";
 import type { LoadedSystemModel } from "./types.ts";
 
 const OBJECTS = [
+  { id: "domain.runtime", type: "domain", name: "Runtime subsystems", summary: "Focused categorical ownership.", keywords: ["architecture"] },
   capability("ws_command_bus", "WS command bus", ["flow.command_table_dispatch"], ["constraint.bus_only_broadcasts"], ["ws", "command", "handler"], ["server/commands/*.ts"]),
   capability("worktree_approval", "Worktree approval", ["flow.evaluate_merge_gates"], ["constraint.review_gated_merges"], ["merge", "approval", "gating"], ["server/commands/*merge*.ts"]),
   capability("render_dashboard", "Render dashboard", [], ["constraint.render_schema_gate"], ["render", "dsl", "schema"], ["shared/render-dsl.ts"]),
@@ -159,29 +160,31 @@ async function query(projectPath: string, request: string, topK: number): Promis
 
 interface QueryPayload {
   matches: Array<{ id: string; summary: string }>;
-  linked: Array<{ id: string; type: string; label: string }>;
+  linked: Array<{ id: string; type: string; label: string; why: string }>;
   matchConfidence: string;
   fallbackInstruction?: string;
 }
 
-function capability(id: string, name: string, linkedFlows: string[], constraints: string[], keywords: string[], suggestedFiles: string[]): SystemModelObject {
-  return { id: `capability.${id}`, type: "capability", name, summary: `${name} owns focused runtime behavior`, linkedFlows, constraints, decisions: [], risks: [], suggestedFiles, suggestedTests: [], keywords, freshness: { class: "code_coupled" }, risk: "medium" };
+function capability(id: string, name: string, _flows: string[], constraints: string[], keywords: string[], suggestedFiles: string[]): SystemModelObject {
+  return { id: `capability.${id}`, type: "capability", domain: "domain.runtime", name, summary: `${name} owns focused runtime behavior`, dependsOn: [], bridges: [], constraints, decisions: [], risks: [], suggestedFiles, suggestedTests: [], keywords, entryPoints: [], freshness: { class: "code_coupled" }, risk: "medium" };
 }
 
 function flow(id: string, name: string, steps: string, capabilityId: string, constraints: string[], suggestedFiles: string[]): SystemModelObject {
-  return { id: `flow.${id}`, type: "flow", name, summary: `${name} coordinates focused runtime behavior`, capabilities: [capabilityId], constraints, decisions: [], risks: [], suggestedFiles, suggestedTests: [], steps: [steps], freshness: { class: "code_coupled" }, risk: "medium" };
+  return { id: `flow.${id}`, type: "flow", domain: "domain.runtime", name, summary: `${name} coordinates focused runtime behavior`, primaryCapability: capabilityId, bridges: [], constraints, decisions: [], risks: [], suggestedFiles, suggestedTests: [], steps: [steps], freshness: { class: "code_coupled" }, risk: "medium" };
 }
 
 function constraint(id: string, statement: string, agentInstruction: string, capabilityId: string, flowId: string | undefined, files: string[], severity: "high" | "critical" = "critical"): SystemModelObject {
-  return { id: `constraint.${id}`, type: "constraint", statement, appliesTo: { capabilities: [capabilityId], flows: flowId ? [flowId] : [], files }, severity, agentInstruction, suggestedTests: [], evidence: [] };
+  return { id: `constraint.${id}`, type: "constraint", domain: "domain.runtime", scope: "targeted", guards: [capabilityId, ...(flowId ? [flowId] : [])], statement, appliesTo: { capabilities: [capabilityId], flows: flowId ? [flowId] : [], surfaces: [], files }, severity, agentInstruction, suggestedTests: [], evidence: [] };
 }
 
 function makeModel(objects: SystemModelObject[]): LoadedSystemModel {
+  const domains = objects.filter((object) => object.type === "domain");
   const capabilities = objects.filter((object) => object.type === "capability");
   const flows = objects.filter((object) => object.type === "flow");
   const constraints = objects.filter((object) => object.type === "constraint");
   const decisions = objects.filter((object) => object.type === "decision");
   const risks = objects.filter((object) => object.type === "risk");
+  const surfaces = objects.filter((object) => object.type === "surface");
   const reviewGates = [
     { id: "gate.merge_review", name: "Merge review", blocksMerge: true, requiredWhen: { files: ["server/commands/*merge*.ts"], capabilities: [], flows: [], risk: [] } },
     { id: "gate.render_schema", name: "Render schema review", blocksMerge: true, requiredWhen: { files: ["shared/render-dsl.ts"], capabilities: [], flows: [], risk: [] } },
@@ -190,11 +193,13 @@ function makeModel(objects: SystemModelObject[]): LoadedSystemModel {
     root: "/frozen-fixture",
     manifestPath: "/frozen-fixture/.systemmodel/manifest.yaml",
     manifest: { fixture: "retrieval-quality-v1" },
+    domains,
     capabilities,
     flows,
     constraints,
     decisions,
     risks,
+    surfaces,
     policies: { freshness: [], reviewGates, contextBudgets: { leaderPromptAddendum: 120, minionContextPack: 220, perObjectSummary: 24 } },
     objectsById: new Map(objects.map((object) => [object.id, object])),
     reviewGatesById: new Map(reviewGates.map((gate) => [gate.id, gate])),

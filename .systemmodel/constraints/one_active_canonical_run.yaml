@@ -1,0 +1,18 @@
+id: constraint.one_active_canonical_run
+type: constraint
+statement: A WorkItem has one current canonical run; only decision waits accept replies and every start or reply fences currentRunKey.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces: []
+  files:
+    - src/nodes/leader/work-item.ts
+    - server/work-item-run-start.ts
+    - server/work-item-service.ts
+severity: critical
+agent_instruction: Load the latest WorkItem snapshot before start or reply, reject non-decision waits, and make duplicate start keys idempotent.
+suggested_tests: [ src/nodes/leader/work-item.test.ts, server/commands/work-items.test.ts, server/work-item-runtime-lifecycle.test.ts ]
+evidence: [ decision.canonical_work_item_lifecycle ]
+domain: domain.execution_lifecycle
+scope: domain
+guards: []

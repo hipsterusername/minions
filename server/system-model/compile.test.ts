@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FreshnessTimestampFn } from "./freshness.ts";
 import { compileWorkPacket, CONTEXT_PACK_PREAMBLE } from "./compile.ts";
 import { loadSystemModel } from "./load.ts";
+import { copyValidFixtureWithSurfaces } from "./load.test.ts";
 
 const freshTimestamps: FreshnessTimestampFn = async () => ({ modelTouchedAt: 20, codeTouchedAt: 10 });
 
@@ -98,5 +99,44 @@ describe("compileWorkPacket", () => {
     expect(amended.packet.id).toBe("packet.1");
     expect(amended.packet.status).toBe("amended");
     expect(amended.packet.amendments).toEqual([{ at: 200, reason: "scope changed", delta: "include workspace capability" }]);
+  });
+
+  it("keeps surface closure to one hop while preserving capability entry-point provenance", async () => {
+    const model = loadSystemModel(copyValidFixtureWithSurfaces()).model!;
+    const result = await compileWorkPacket({
+      model,
+      cwd: "/repo",
+      headSha: "abc",
+      mode: "advisory",
+      userRequest: "update mobile approval",
+      normalizedGoal: "Update mobile approval",
+      matchedCandidates: [{ id: "surface.mobile", type: "surface", score: 8, reasons: [] }],
+      matchConfidence: "high",
+      timestampFn: async () => ({ modelTouchedAt: 10, codeTouchedAt: 20 }),
+      now: 100,
+    });
+
+    expect(result.packet.scope.capabilities).toEqual(["capability.workspace_management"]);
+    expect(result.packet.scope.flows).toEqual([]);
+    expect(result.packet.scope.surfaces).toEqual(["surface.mobile"]);
+    expect(result.packet.scope.entryPoints).toEqual([
+      {
+        capabilityId: "capability.workspace_management",
+        surfaceId: "surface.canvas",
+        files: ["src/Canvas.tsx"],
+        tests: ["src/Canvas.test.tsx"],
+        flows: ["flow.approve_changes"],
+      },
+      {
+        capabilityId: "capability.workspace_management",
+        surfaceId: "surface.mobile",
+        files: ["src/mobile/**"],
+        tests: ["src/mobile/app.test.ts"],
+        flows: ["flow.approve_changes"],
+      },
+    ]);
+    expect(result.contextPack).toContain("Entry point surface.mobile for capability.workspace_management");
+    expect(result.contextPack).toContain("Freshness instruction: inspect current code");
+    expect(result.packet.agentInstructions).toEqual(["inspect current code"]);
   });
 });

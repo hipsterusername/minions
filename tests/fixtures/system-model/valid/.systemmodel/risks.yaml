@@ -1,6 +1,7 @@
 risks:
   - id: risk.merge_bypass
     type: risk
+    domain: domain.workspace
     summary: Merge commands can bypass review if not centrally guarded.
     severity: high
     applies_to:
