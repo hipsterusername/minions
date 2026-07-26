@@ -11,8 +11,13 @@ import { timeAgo } from "./nodes/leader-message-helpers.ts";
 const MAX_RELEVANT_SESSIONS = 4;
 const SUMMARY_LIMIT = 220;
 
+function pendingReviewState(session: MobileSessionInfo): string {
+  if (session.reviewLifecycle?.acknowledgedAt != null) return "none";
+  return session.reviewLifecycle?.reviewState ?? "none";
+}
+
 function relevanceBucket(session: MobileSessionInfo): number {
-  const reviewState = session.reviewLifecycle?.reviewState;
+  const reviewState = pendingReviewState(session);
   if (reviewState === "decision_needed") return 0;
   if (
     reviewState === "error_to_review" ||
@@ -52,7 +57,7 @@ export function selectRelevantSessions(
 }
 
 export function sessionRelevanceLabel(session: MobileSessionInfo): string {
-  const reviewState = session.reviewLifecycle?.reviewState;
+  const reviewState = pendingReviewState(session);
   if (reviewState === "decision_needed") return "Decision needed";
   if (reviewState === "error_to_review" || session.status === "error") return "Needs recovery";
   if (reviewState === "interrupted_to_review") return "Interrupted";
@@ -88,8 +93,9 @@ function sessionMeta(session: MobileSessionInfo): string {
 }
 
 function relevanceTone(session: MobileSessionInfo): string {
+  const reviewState = pendingReviewState(session);
   if (
-    session.reviewLifecycle?.reviewState !== "none" ||
+    reviewState !== "none" ||
     session.reviewableChanges === true ||
     session.status === "waiting" ||
     session.status === "error"
@@ -131,7 +137,7 @@ export function ActivitySessionHome({
           </button>
         </header>
 
-        <section
+        <div
           className={`act-session-feature act-session-feature--${relevanceTone(primary)}`}
           aria-labelledby="act-session-feature-title"
         >
@@ -155,10 +161,10 @@ export function ActivitySessionHome({
               <ArrowRight size={14} strokeWidth={2.25} aria-hidden />
             </button>
           </footer>
-        </section>
+        </div>
 
         {relevant.length > 1 && (
-          <section className="act-session-more" aria-labelledby="act-session-more-title">
+          <div className="act-session-more" aria-labelledby="act-session-more-title">
             <div className="act-session-more__heading">
               <div>
                 <h3 id="act-session-more-title">Also relevant</h3>
@@ -197,7 +203,7 @@ export function ActivitySessionHome({
                 </button>
               ))}
             </div>
-          </section>
+          </div>
         )}
       </div>
     </main>

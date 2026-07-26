@@ -66,7 +66,42 @@ const noop = {
   onUpdateNodeData: () => {},
 };
 
+function activityList(): HTMLElement {
+  const list = document.querySelector<HTMLElement>(".act-main");
+  if (!list) throw new Error("Activity list did not render");
+  return list;
+}
+
 describe("ActivityView", () => {
+  it("opens on a relevance-first session dashboard instead of an instruction", () => {
+    const onLaunchLeader = vi.fn();
+    render(
+      <ActivityView
+        sessions={[
+          session({
+            sessionKey: "current",
+            taskName: "Continue the release",
+            status: "running",
+            lastActivity: "The build is green and the release checklist is ready.",
+          }),
+        ]}
+        nodes={[]}
+        {...noop}
+        onLaunchLeader={onLaunchLeader}
+      />,
+    );
+
+    const dashboard = screen.getByRole("main", { name: /session dashboard/i });
+    expect(within(dashboard).getByText("Best next step")).toBeInTheDocument();
+    expect(within(dashboard).getByRole("heading", { name: "Continue the release" }))
+      .toBeInTheDocument();
+    expect(within(dashboard).queryByText(/select a session/i)).not.toBeInTheDocument();
+
+    fireEvent.click(within(dashboard).getByRole("button", { name: /open session/i }));
+    expect(screen.getByRole("complementary", { name: /session details/i }))
+      .toHaveTextContent("Continue the release");
+  });
+
   it("shows all non-dismissed sessions by default and exposes history filters", () => {
     render(
       <ActivityView
@@ -108,7 +143,7 @@ describe("ActivityView", () => {
         socketSend={socketSend}
       />,
     );
-    const row = screen.getByText("hi").closest(".act-triage-row") as HTMLElement;
+    const row = within(activityList()).getByText("hi").closest(".act-triage-row") as HTMLElement;
     fireEvent.click(within(row).getByRole("button", { name: /^dismiss$/i }));
     expect(socketSend).toHaveBeenCalledWith({
       type: "dismiss_session",
@@ -183,7 +218,8 @@ describe("ActivityView", () => {
 
     // No inspector is open — the session sits in the Needs you triage lane.
     expect(screen.queryByRole("complementary", { name: /session details/i })).not.toBeInTheDocument();
-    const row = screen.getByText("Finished task").closest(".act-triage-row") as HTMLElement;
+    const row = within(activityList()).getByText("Finished task")
+      .closest(".act-triage-row") as HTMLElement;
     const primaryAction = within(row).getByRole("button", { name: /^read$/i });
     const reviewAction = within(row).getByRole("button", { name: /mark reviewed/i });
     const dismissAction = within(row).getByRole("button", { name: /^dismiss$/i });
@@ -263,7 +299,8 @@ describe("ActivityView", () => {
         />,
       );
 
-      const row = screen.getByText("Canonical done").closest(".act-triage-row") as HTMLElement;
+      const row = within(activityList()).getByText("Canonical done")
+        .closest(".act-triage-row") as HTMLElement;
       fireEvent.click(within(row).getByRole("button", { name: /mark reviewed/i }));
       expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
         type: "review_work_item",
@@ -484,7 +521,7 @@ describe("ActivityView", () => {
         socketSend={socketSend}
       />,
     );
-    fireEvent.click(screen.getByText("Working").closest("button")!);
+    fireEvent.click(within(activityList()).getByText("Working").closest("button")!);
     fireEvent.change(screen.getByRole("textbox", { name: /reply or steer/i }), {
       target: { value: "Use the safer migration." },
     });
@@ -832,14 +869,14 @@ describe("ActivityView", () => {
     const workingFilter = screen.getByRole("button", { name: /working: 1\. filter activity/i });
     fireEvent.click(workingFilter);
     expect(workingFilter).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText("In progress")).toBeInTheDocument();
-    expect(screen.queryByText("Needs reply")).not.toBeInTheDocument();
-    expect(screen.queryByText("Taking a break")).not.toBeInTheDocument();
+    expect(within(activityList()).getByText("In progress")).toBeInTheDocument();
+    expect(within(activityList()).queryByText("Needs reply")).not.toBeInTheDocument();
+    expect(within(activityList()).queryByText("Taking a break")).not.toBeInTheDocument();
 
     fireEvent.click(workingFilter);
     expect(workingFilter).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByText("Needs reply")).toBeInTheDocument();
-    expect(screen.getByText("Taking a break")).toBeInTheDocument();
+    expect(within(activityList()).getByText("Needs reply")).toBeInTheDocument();
+    expect(within(activityList()).getByText("Taking a break")).toBeInTheDocument();
   });
 
   it("supports needs-you and waiting summary filters and keeps zero-result controls available", () => {
@@ -856,13 +893,13 @@ describe("ActivityView", () => {
 
     const reviewFilter = screen.getByRole("button", { name: /to review: 1\. filter activity/i });
     fireEvent.click(reviewFilter);
-    expect(screen.getByText("Needs reply")).toBeInTheDocument();
-    expect(screen.queryByText("Taking a break")).not.toBeInTheDocument();
+    expect(within(activityList()).getByText("Needs reply")).toBeInTheDocument();
+    expect(within(activityList()).queryByText("Taking a break")).not.toBeInTheDocument();
 
     const waitingFilter = screen.getByRole("button", { name: /waiting: 1\. filter activity/i });
     fireEvent.click(waitingFilter);
     expect(waitingFilter).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText("Needs reply")).toBeInTheDocument();
+    expect(within(activityList()).getByText("Needs reply")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /^all$/i }));
     expect(waitingFilter).toHaveAttribute("aria-pressed", "false");
