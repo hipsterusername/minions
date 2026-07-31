@@ -19,6 +19,7 @@ import {
   dispatchMessage,
   createEdge,
 } from "./graph-runtime.ts";
+import { registerContract } from "./graph.ts";
 import { makeEdge, taskAssignment } from "../tests/fixtures/builders.ts";
 
 function emptyGraph(): GraphDocument {
@@ -540,22 +541,44 @@ describe("createEdge — branch coverage for null-return paths", () => {
   });
 
   it("skips the lifecycle guard when targetNodeData is undefined (returns a valid edge)", () => {
-    // Without targetNodeData the lifecycle short-circuit on line 136
-    // is taken and createEdge proceeds to construct the edge. The
-    // resulting object has the documented shape.
+    registerContract({
+      nodeType: "guard-test-source",
+      label: "Guard test source",
+      description: "Source contract for lifecycle behavior",
+      ports: [{
+        id: "out",
+        label: "Output",
+        direction: "output",
+        protocol: "context",
+        maxConnections: 1,
+      }],
+    });
+    registerContract({
+      nodeType: "guard-test-target",
+      label: "Guard test target",
+      description: "Target contract for lifecycle behavior",
+      ports: [{
+        id: "in",
+        label: "Input",
+        direction: "input",
+        protocol: "context",
+        maxConnections: 1,
+        lifecycle: () => {
+          throw new Error("lifecycle must not run without target node data");
+        },
+      }],
+    });
+
     const edge = createEdge(
-      "leader",
-      "task-out",
-      "leader",
-      "minion",
-      "task-in",
-      "minion",
-      // targetNodeData omitted → undefined
+      "source",
+      "out",
+      "guard-test-source",
+      "target",
+      "in",
+      "guard-test-target",
     );
     expect(edge).not.toBeNull();
-    expect(edge!.sourceNodeId).toBe("leader");
-    expect(edge!.targetNodeId).toBe("minion");
-    expect(edge!.protocol).toBe("task-assignment");
+    expect(edge?.protocol).toBe("context");
   });
 
   it("emits positive, strictly increasing counter ids (kills `+= 1` ⇒ `-= 1` mutation)", () => {

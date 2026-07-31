@@ -11,7 +11,8 @@ import { LeaderNodeRenderer } from "./nodes/LeaderNode.tsx";
  *
  * Layout, top to bottom:
  * 1. "Recent agent work" — up to three previews of the most recently active
- *    agents; clicking one reveals it on the canvas (or attaches it first).
+ *    agents; clicking a live session opens it in Activity. Canvas-only history
+ *    still opens on the canvas because it has no server session to inspect.
  *    Conditional: hidden when there is genuinely nothing to preview.
  * 2. The variant's headline (and Clear-filter escape hatch when filtering).
  * 3. "Add an agent" — the full launch composer (prompt bar, starter chips,
@@ -25,7 +26,7 @@ export function ActivityEmptyState({
   onClearFilter,
   recent,
   onOpenInCanvas,
-  onAttachToCanvas,
+  onOpenSession,
   launchNode,
   onLaunch,
   onUpdateNodeData,
@@ -39,7 +40,7 @@ export function ActivityEmptyState({
   onClearFilter?: (() => void) | undefined;
   recent: RecentAgentWork[];
   onOpenInCanvas: (nodeId: string) => void;
-  onAttachToCanvas: (sessionKey: string) => void;
+  onOpenSession: (sessionKey: string) => void;
   /** Draft leader node backing the inline composer, once created. */
   launchNode: CanvasNode | undefined;
   /** Fallback CTA when the draft could not be auto-created. */
@@ -50,8 +51,8 @@ export function ActivityEmptyState({
   projectPath?: string | undefined;
 }) {
   const openRecent = (entry: RecentAgentWork) => {
-    if (entry.nodeId) onOpenInCanvas(entry.nodeId);
-    else if (entry.sessionKey) onAttachToCanvas(entry.sessionKey);
+    if (entry.sessionKey) onOpenSession(entry.sessionKey);
+    else if (entry.nodeId) onOpenInCanvas(entry.nodeId);
   };
 
   return (
@@ -78,7 +79,7 @@ export function ActivityEmptyState({
                 )}
                 <span className="act-empty-recent-foot">
                   {entry.lastActivityAt ? `${timeAgo(entry.lastActivityAt)} · ` : ""}
-                  {entry.nodeId ? "Open in canvas" : "Attach to canvas"}
+                  {entry.sessionKey ? "Open in Activity" : "Open in canvas"}
                 </span>
               </button>
             ))}

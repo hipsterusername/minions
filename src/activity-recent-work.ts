@@ -21,9 +21,9 @@ export interface RecentAgentWork {
   /** Session status when a live session backs this entry. */
   status: string | null;
   lastActivityAt: number | null;
-  /** Canvas node to reveal on click, when the agent is on the canvas. */
+  /** Canvas node to reveal only when no live server session exists. */
   nodeId: string | null;
-  /** Session to attach on click, when no canvas node exists yet. */
+  /** Server session to open directly in Activity, independent of canvas state. */
   sessionKey: string | null;
 }
 
@@ -106,7 +106,9 @@ export function selectRecentAgentWork(
       status: null,
       lastActivityAt: at,
       nodeId: node.id,
-      sessionKey: data.sessionKey ?? null,
+      // This node is absent from the server session list. A persisted key is
+      // historical identity, not proof that Activity can sync the session.
+      sessionKey: null,
     });
   }
 

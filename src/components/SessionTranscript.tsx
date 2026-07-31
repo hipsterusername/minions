@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { DisplayMessage } from "../sdk-messages.ts";
+import { MessageTimestamp } from "./MessageTimestamp.tsx";
 import {
   groupMessages,
   isHiddenTool,
@@ -133,6 +134,10 @@ export function SessionTranscript({
             <div className="act-tx-msg-head">
               <span className="act-tx-msg-role">{roleLabel(msg.role)}</span>
               {msg.suffix && <span className="act-tx-msg-suffix">{msg.suffix}</span>}
+              <MessageTimestamp
+                timestamp={msg.timestamp}
+                className="act-tx-msg-time"
+              />
             </div>
             <div className="act-tx-msg-body">{msg.content}</div>
           </div>

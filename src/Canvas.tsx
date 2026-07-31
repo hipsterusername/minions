@@ -605,11 +605,6 @@ interface CanvasProps {
   /** When set, auto-selects this node (then clear it) */
   focusNodeId?: string | null;
   onFocusNodeHandled?: () => void;
-  onCreateKanbanCardFromMarkdown?: ((source: {
-    nodeId: string;
-    title: string;
-    content: string;
-  }) => void) | undefined;
   viewportTopOffset?: number;
 }
 
@@ -631,7 +626,6 @@ export function Canvas({
   redo,
   focusNodeId,
   onFocusNodeHandled,
-  onCreateKanbanCardFromMarkdown,
   viewportTopOffset = 0,
 }: CanvasProps) {
   // Keep the module-level scale ref in sync so CanvasNode / ResizeHandle
@@ -1190,7 +1184,7 @@ export function Canvas({
 
   // Attach a backend session to the canvas by creating the right node type for its role
   const handleAttachSession = useCallback(
-    (sessionKey: string, role?: "leader" | "minion" | "default" | "card-composer") => {
+    (sessionKey: string, role?: "leader" | "minion" | "default") => {
       const nodeType = role === "leader" ? "leader" : role === "minion" ? "minion" : "claude-session";
       const typeDef = getAllNodeTypes().find((t) => t.type === nodeType);
       if (!typeDef) return;
@@ -3938,7 +3932,6 @@ export function Canvas({
             onUpdateData={handleUpdateNodeData}
             onResize={handleResizeNode}
             onAddContentNode={addContentNode}
-            onCreateKanbanCardFromMarkdown={onCreateKanbanCardFromMarkdown}
             onRevealMinion={revealMinion}
             onDuplicateLeaderSetup={
               node.type === "leader" ? () => duplicateLeaderSetup(node.id) : undefined

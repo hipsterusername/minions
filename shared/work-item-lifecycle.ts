@@ -81,7 +81,7 @@ export type WorkItemLifecycleEvent =
   | { type: "harness_started" }
   | { type: "wait" }
   | { type: "resume" }
-  | { type: "seal"; outcome: Exclude<Outcome, "none">; hasFinalReport?: boolean }
+  | { type: "seal"; outcome: Exclude<Outcome, "none"> }
   | { type: "review" }
   | { type: "archive" }
   | { type: "restore"; priorResolution: Exclude<Resolution, "archived"> }
@@ -154,11 +154,7 @@ export function transitionWorkItemLifecycle(
       if (!["starting", "working", "waiting"].includes(state.runtimeState)) {
         throw new Error("only an open run can be sealed");
       }
-      // A nominal successful completion without its persisted report is interruption.
-      const outcome = event.outcome === "completed" && event.hasFinalReport !== true
-        ? "interrupted"
-        : event.outcome;
-      patch = { runtimeState: "inactive", outcome, resolution: "open" };
+      patch = { runtimeState: "inactive", outcome: event.outcome, resolution: "open" };
       break;
     }
     case "review":
@@ -169,10 +165,7 @@ export function transitionWorkItemLifecycle(
       break;
     case "archive":
       if (!["draft", "inactive"].includes(state.runtimeState)) {
-        throw new Error("only a draft or inactive work item can be archived");
-      }
-      if (UNSAFE_INTEGRATION_STATES.has(state.integrationState)) {
-        throw new Error(`cannot archive while integration is ${state.integrationState}`);
+        throw new Error("an active work item must be stopped before it can be archived");
       }
       if (state.resolution === "archived") return state;
       patch = { resolution: "archived" };
@@ -339,8 +332,7 @@ export function projectLegacySessionLifecycle(input: {
   } else if (hasTerminalEvidence) {
     outcome = review.terminalReason === "error" || status === "error"
       ? "error"
-      : (review.terminalReason === "completed" || review.reviewState === "completion_to_review")
-          && Boolean(review.finalReport?.trim())
+      : review.terminalReason === "completed" || review.reviewState === "completion_to_review"
         ? "completed"
         : "interrupted";
   }

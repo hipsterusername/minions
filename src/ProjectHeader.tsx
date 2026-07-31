@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect } from "react";
-import { Activity, LayoutGrid, Columns3 } from "lucide-react";
+import { Activity, LayoutGrid } from "lucide-react";
 import type { SaveStatus } from "./use-autosave.ts";
 import type { ProjectSettings } from "./api.ts";
 import { SettingsMenu } from "./SettingsMenu.tsx";
 import type { SocketSubscribe } from "./use-socket.ts";
 
-export type ActiveView = "activity" | "canvas" | "kanban";
+export type ActiveView = "activity" | "canvas";
 
 interface ProjectHeaderProps {
   name: string;
@@ -17,8 +17,6 @@ interface ProjectHeaderProps {
   retry?: () => void;
   activeView: ActiveView;
   onViewChange: (view: ActiveView) => void;
-  /** Number of cards blocked/needing attention — shows a badge on the Kanban tab */
-  kanbanBlockedCount?: number;
   /**
    * Number of sessions needing attention (includes sessions with pending
    * worktree changes) — shows a badge on the Activity tab.
@@ -40,7 +38,6 @@ export function ProjectHeader({
   retry,
   activeView,
   onViewChange,
-  kanbanBlockedCount = 0,
   activityAttentionCount = 0,
   settings,
   onSettingsChange,
@@ -228,13 +225,6 @@ export function ProjectHeader({
           active={activeView === "canvas"}
           onClick={() => onViewChange("canvas")}
           icon={<LayoutGrid size={12} strokeWidth={1.75} aria-hidden />}
-        />
-        <ViewTab
-          label="Kanban"
-          active={activeView === "kanban"}
-          onClick={() => onViewChange("kanban")}
-          badge={kanbanBlockedCount > 0 ? kanbanBlockedCount : undefined}
-          icon={<Columns3 size={12} strokeWidth={1.75} aria-hidden />}
         />
       </div>
 

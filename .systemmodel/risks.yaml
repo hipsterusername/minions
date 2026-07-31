@@ -1,26 +1,7 @@
 risks:
-  - id: risk.kanban_bound_without_run
-    type: risk
-    summary: Kanban launch can create and bind a canvas node before renderer initialization creates the backend run.
-    severity: high
-    applies_to:
-      capabilities:
-        - capability.leader_creation
-        - capability.durable_work_items
-      flows:
-        - flow.launch_leader
-        - flow.launch_or_resume_card
-      surfaces:
-        - surface.kanban
-        - surface.canvas
-      files:
-        - src/KanbanBoard.tsx
-        - src/nodes/LeaderNode.tsx
-    mitigation: Treat binding and run creation as distinct states, surface initialization failure, and reconcile from the server snapshot.
-    domain: domain.execution_lifecycle
   - id: risk.dual_ingress_divergence
     type: risk
-    summary: Mobile and transient actors still create bare sessions while canvas and kanban increasingly use canonical WorkItems.
+    summary: Mobile and transient actors still create bare sessions while canvas uses canonical WorkItems.
     severity: high
     applies_to:
       capabilities:
@@ -30,7 +11,6 @@ risks:
         - flow.launch_leader
       surfaces:
         - surface.canvas
-        - surface.kanban
         - surface.mobile
         - surface.activity
         - surface.ws_api

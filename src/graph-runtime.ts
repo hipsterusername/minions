@@ -139,7 +139,11 @@ export function createEdge(
   /** Optional — pass target node data to enable state-aware guards (e.g. context port lock) */
   targetNodeData?: unknown,
 ): GraphEdge | null {
-  if (!canConnect(sourceNodeType, sourcePortId, targetNodeType, targetPortId)) {
+  const srcPort = getPortDef(sourceNodeType, sourcePortId);
+  if (
+    !srcPort ||
+    !canConnect(sourceNodeType, sourcePortId, targetNodeType, targetPortId)
+  ) {
     return null;
   }
   // Lifecycle guard: consult the target port's lifecycle callback
@@ -149,9 +153,6 @@ export function createEdge(
   ) {
     return null;
   }
-  const srcPort = getPortDef(sourceNodeType, sourcePortId);
-  if (!srcPort) return null;
-
   edgeCounter += 1;
   return {
     id: `edge-${Date.now().toString(36)}-${edgeCounter}`,

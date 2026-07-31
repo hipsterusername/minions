@@ -6,7 +6,6 @@ applies_to:
   flows: []
   surfaces:
     - surface.canvas
-    - surface.kanban
     - surface.mobile
     - surface.agent_tools
   files:

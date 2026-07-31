@@ -2,7 +2,7 @@
  * Type definitions and defaults for the Leader node.
  *
  * Extracted from `src/nodes/LeaderNode.tsx` so other modules that only need
- * the shape (Canvas, KanbanBoard, leader-preset, etc.) can import without
+ * the shape (Canvas, leader-preset, etc.) can import without
  * pulling the full renderer.
  */
 
@@ -132,7 +132,7 @@ export interface LeaderData {
    * dashboard) — this replaces the retired standalone `render` node.
    *
    * Optional so the many `LeaderData` construction sites (clone, presets,
-   * Kanban) don't all need to seed it; read sites fall back to
+   * persistence) don't all need to seed it; read sites fall back to
    * `emptyRenderState()`.
    */
   renderState?: RenderState | undefined;

@@ -70,29 +70,21 @@ export function useCanvasHistory(): CanvasHistoryState {
   const nodesRef = useRef<CanvasNode[]>(nodes);
   nodesRef.current = nodes;
 
-  // Force re-render when past/future lengths change (for canUndo/canRedo)
-  const [, setTick] = useState(0);
-  const tick = useCallback(() => setTick((t) => t + 1), []);
+  const dispatch = useCallback((action: CanvasAction) => {
+    const prev = nodesRef.current;
+    const next = canvasReducer(prev, action);
 
-  const dispatch = useCallback(
-    (action: CanvasAction) => {
-      const prev = nodesRef.current;
-      const next = canvasReducer(prev, action);
-
-      if (HISTORY_ACTIONS.has(action.type)) {
-        const past = pastRef.current;
-        past.push(prev);
-        if (past.length > MAX_HISTORY) {
-          past.splice(0, past.length - MAX_HISTORY);
-        }
-        futureRef.current = [];
-        tick();
+    if (HISTORY_ACTIONS.has(action.type)) {
+      const past = pastRef.current;
+      past.push(prev);
+      if (past.length > MAX_HISTORY) {
+        past.splice(0, past.length - MAX_HISTORY);
       }
+      futureRef.current = [];
+    }
 
-      setNodes(next);
-    },
-    [tick],
-  );
+    setNodes(next);
+  }, []);
 
   const undo = useCallback(() => {
     const past = pastRef.current;
@@ -100,8 +92,7 @@ export function useCanvasHistory(): CanvasHistoryState {
     const previous = past.pop()!;
     futureRef.current.push(nodesRef.current);
     setNodes(previous);
-    tick();
-  }, [tick]);
+  }, []);
 
   const redo = useCallback(() => {
     const future = futureRef.current;
@@ -109,8 +100,7 @@ export function useCanvasHistory(): CanvasHistoryState {
     const next = future.pop()!;
     pastRef.current.push(nodesRef.current);
     setNodes(next);
-    tick();
-  }, [tick]);
+  }, []);
 
   return {
     nodes,

@@ -20,10 +20,6 @@ import {
 const workItem = {
   id: "work-1", projectId: "project-1", projectPath: "/repo", title: "Ship lifecycle",
   lifecycle: initialWorkItemLifecycle(), waitKind: null, currentRunKey: null, iteration: 0,
-  workflowColumnId: "backlog", workflowRank: "a", workflowRevision: 0,
-  card: { description: "", subtasks: [], context: "", priority: "medium" as const,
-    model: "", permissionMode: "auto", worktreeIsolation: false,
-    skillIds: [], skillValues: {}, linkedContextNodeIds: [] },
   lastTransitionAt: 1,
   createdAt: 1, updatedAt: 1,
 };
@@ -63,7 +59,7 @@ describe("work-item snapshot contracts", () => {
     }).success).toBe(true);
     expect(workItemRunSnapshotSchema.safeParse({
       ...run, outcome: "completed", endedAt: 5, finalReport: null,
-    }).success).toBe(false);
+    }).success).toBe(true);
     expect(workItemRunSnapshotSchema.safeParse({
       ...run, outcome: "error", endedAt: null,
     }).success).toBe(false);

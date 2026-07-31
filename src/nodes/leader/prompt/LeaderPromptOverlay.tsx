@@ -6,6 +6,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { SimpleMarkdown } from "../../../components/SimpleMarkdown.tsx";
+import { LeaderStatusIcon } from "../LeaderStatusIcon.tsx";
 import type { LeaderData, LeaderMessage } from "../types.ts";
 import { LeaderPromptBar } from "./LeaderPromptBar.tsx";
 
@@ -41,7 +42,7 @@ export function LeaderPromptOverlay({
   title: string;
   messages: LeaderMessage[];
   streamingText: string;
-  status: LeaderData["status"];
+  status: LeaderData["status"] | "inactive";
   onClose: () => void;
   onInputChange: (value: string) => void;
   onKeyDown: (e: KeyboardEvent) => void;
@@ -133,19 +134,9 @@ export function LeaderPromptOverlay({
             fontSize: 10,
           }}
         >
-          <img
-            src={
-              status === "running" || status === "creating"
-                ? "/icons/leader-active.svg"
-                : "/icons/leader-idle.svg"
-            }
-            alt={
-              status === "running" || status === "creating" ? "Active" : "Idle"
-            }
-            width={18}
-            height={18}
-            className="leader-status-icon"
-            style={{ display: "block", flexShrink: 0 }}
+          <LeaderStatusIcon
+            active={status === "running" || status === "creating"}
+            size={18}
           />
           <span
             title={title}

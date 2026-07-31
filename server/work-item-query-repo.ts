@@ -50,7 +50,9 @@ export function listWorkItemRunsPage(db: Database.Database, input: {
 
 export function listWorkItemBindings(db: Database.Database, workItemId: string): WorkItemBindingRow[] {
   return db.prepare(`
-    SELECT * FROM work_item_bindings WHERE work_item_id = ? ORDER BY surface, binding_id
+    SELECT * FROM work_item_bindings
+    WHERE work_item_id = ? AND surface = 'canvas'
+    ORDER BY binding_id
   `).all(workItemId) as WorkItemBindingRow[];
 }
 

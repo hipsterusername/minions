@@ -83,7 +83,7 @@ export interface ProjectSettings {
    * only `false` disables it.
    */
   tidyLayout?: boolean;
-  /** System-model layer mode; see docs/system-model-implementation-plan.md. */
+  /** System-model layer mode; see docs/system-model.md. */
   systemModel?: "off" | "advisory" | "enforced";
   /**
    * User-configurable Context Actions shown in the Leader slash menu. An

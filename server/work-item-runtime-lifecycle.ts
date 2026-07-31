@@ -104,35 +104,26 @@ export function createWorkItemRuntimeLifecycle(input: {
     },
     runTerminal(value) {
       const { item, run } = latest(value);
-      // A nominal successful completion without its persisted report is
-      // interruption, not an unrecoverable error: normalize before the write
-      // ever reaches the repo-layer guard, instead of letting it throw.
-      const hasReport = Boolean(value.finalReportId?.trim() && value.finalReport?.trim());
-      const outcome = value.outcome === "completed" && !hasReport ? "interrupted" : value.outcome;
-      const finalReportId = outcome === "completed" ? value.finalReportId : null;
-      const finalReport = outcome === "completed" ? value.finalReport : null;
-      if (outcome !== value.outcome) {
-        log.warn("completed_run_missing_final_report", { workItemId: item.id, runKey: value.runKey });
-      }
       try { if (value.runKind === "child") {
         input.service.sealChildRun({ workItemId: item.id, runKey: value.runKey,
-          outcome, finalReportEventId: finalReportId,
-          finalReport, at: value.at });
+          outcome: value.outcome, finalReportEventId: value.finalReportId,
+          finalReport: value.finalReport, at: value.at });
         return;
       }
       input.service.sealPrimaryRun({ workItemId: item.id, runKey: value.runKey,
-        outcome, finalReportEventId: finalReportId,
-        finalReport, expectedLifecycleRevision: item.lifecycle_revision,
+        outcome: value.outcome, finalReportEventId: value.finalReportId,
+        finalReport: value.finalReport, expectedLifecycleRevision: item.lifecycle_revision,
         expectedCurrentRunKey: value.runKey, at: value.at });
       if (item.change_mode === "worktree" && input.collectWorktreeRun) {
-        void input.collectWorktreeRun(value.runKey, outcome).catch((error) =>
+        void input.collectWorktreeRun(value.runKey, value.outcome).catch((error) =>
           log.warn("contribution_collection_failed", { workItemId: item.id,
             runKey: value.runKey, error }));
       } }
       catch (error) {
         const after = getWorkItemRun(input.db, value.runKey);
-        if (after?.ended_at !== null && after?.run_outcome === outcome
-          && after.final_report_event_id === finalReportId && after.final_report === finalReport)
+        if (after?.ended_at !== null && after?.run_outcome === value.outcome
+          && (value.finalReportId == null || after.final_report_event_id === value.finalReportId)
+          && (value.finalReport == null || after.final_report === value.finalReport))
           log.warn("publication_failed", { workItemId: item.id, cause: "run_terminal", error });
         else throw error;
       }

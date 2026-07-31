@@ -1,4 +1,13 @@
 import { useMemo, type KeyboardEvent, type RefObject } from "react";
+import {
+  Bot,
+  Brain,
+  FolderGit2,
+  GitBranch,
+  Settings2,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react";
 import { DEFAULT_THINKING_CONFIG, type ThinkingConfig } from "../../types.ts";
 import { findHarness } from "../../harness-list.ts";
 import { getModelCapability } from "../../model-meta.ts";
@@ -125,6 +134,13 @@ export function ActivityLaunchForm({
     if (activeHarness && !activeHarness.capabilities.permissionPrompts) return false;
     return !(activeHarnessName === "codex" && permission.value === "plan");
   });
+  const selectedPermission = permissionOptions.find(
+    (permission) => permission.value === (data.permissionMode ?? "auto"),
+  );
+  const selectedModel = modelGroups
+    .flatMap((group) => group.options)
+    .find((option) => option.value === modelValue);
+  const reasoningEffort = (data.thinkingConfig ?? DEFAULT_THINKING_CONFIG).effort;
 
   function updateSkill(id: string, checked: boolean) {
     const skillIds = checked
@@ -148,187 +164,228 @@ export function ActivityLaunchForm({
     <div className="leader-launch-form">
       <div className="leader-launch-layout">
         <section className="leader-launch-primary" aria-label="Define the work">
-          <div className="leader-launch-section-head">
-            <span className="leader-launch-step">01</span>
-            <div>
-              <h3>Define the work</h3>
-              <p>Give the leader a clear outcome. You can steer it from Activity after launch.</p>
+          <div className="leader-launch-work">
+            <div className="leader-launch-section-head">
+              <div>
+                <h3>Define the work</h3>
+                <p>Describe the outcome. You can steer the leader from Activity after launch.</p>
+              </div>
+              <span className="leader-launch-ready">Ready to launch</span>
             </div>
-          </div>
 
-          <label className="leader-launch-field" htmlFor={`leader-launch-title-${nodeId}`}>
-            <span>Name <small>Optional</small></span>
-            <input
-              id={`leader-launch-title-${nodeId}`}
-              value={data.taskName ?? ""}
-              placeholder="e.g. Repair the release workflow"
-              onChange={(event) => onUpdate({ taskName: event.target.value || null })}
-            />
-          </label>
-
-          <div className="leader-launch-prompt-label">
-            <span>Goal</span>
-            <small>Type / for commands</small>
-          </div>
-          <div className="leader-launch-starters" aria-label="Prompt starters">
-            {PROMPT_STARTERS.map((starter) => (
-              <button key={starter.label} type="button" onClick={() => onInputChange(starter.value)}>
-                {starter.label}
-              </button>
-            ))}
-          </div>
-          <div className="leader-launch-prompt">
-            <LeaderPromptBar
-              input={input}
-              slashCommands={slashCommands}
-              onInputChange={onInputChange}
-              onKeyDown={onKeyDown}
-              onSubmit={onSubmit}
-              placeholder={promptPlaceholder}
-              submitLabel="Launch leader"
-              disabled={submitDisabled}
-              active={submitActive}
-              variant="overlay"
-              autoFocus
-              textareaRef={textareaRef}
-            />
-          </div>
-
-          {data.error ? <div className="leader-launch-error" role="alert">{data.error}</div> : null}
-        </section>
-
-        <aside className="leader-launch-config" aria-label="Run setup">
-          <div className="leader-launch-section-head">
-            <span className="leader-launch-step">02</span>
-            <div>
-              <h3>Run setup</h3>
-              <p>Defaults are ready to go. Adjust only what this task needs.</p>
-            </div>
-          </div>
-
-          {projectPath ? (
-            <div className="leader-launch-project">
-              <span>Project</span>
-              <strong title={projectPath}>{projectPath.split(/[\\/]/).filter(Boolean).at(-1) ?? projectPath}</strong>
-              <small title={projectPath}>{projectPath}</small>
-            </div>
-          ) : null}
-
-          <div className="leader-launch-config-grid">
-            <label className="leader-launch-field">
-              <span>Model</span>
-              <select
-                aria-label="Model"
-                value={modelValue}
-                onChange={(event) => {
-                  const selection = parseLaunchModelValue(event.target.value);
-                  if (selection) onUpdate({ harness: selection.harness, model: selection.model });
-                }}
-              >
-                {modelGroups.length === 0 ? <option value={modelValue}>{activeModel}</option> : null}
-                {modelGroups.map((group) => (
-                  <optgroup key={group.harness} label={group.label}>
-                    {group.options.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
+            <label className="leader-launch-field" htmlFor={`leader-launch-title-${nodeId}`}>
+              <span>Name <small>Optional</small></span>
+              <input
+                id={`leader-launch-title-${nodeId}`}
+                value={data.taskName ?? ""}
+                placeholder="e.g. Repair the release workflow"
+                onChange={(event) => onUpdate({ taskName: event.target.value || null })}
+              />
             </label>
 
-            {permissionOptions.length > 0 ? (
-              <label className="leader-launch-field">
-                <span>Permissions</span>
-                <select
-                  aria-label="Permissions"
-                  value={data.permissionMode ?? "auto"}
-                  onChange={(event) => onUpdate({ permissionMode: event.target.value as PermissionMode })}
-                >
-                  {permissionOptions.map((permission) => (
-                    <option key={permission.value} value={permission.value}>
-                      {permission.label} — {permission.description}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
+            <div className="leader-launch-prompt-meta">
+              <div className="leader-launch-prompt-label">
+                <span>Goal</span>
+                <small>Type / for commands</small>
+              </div>
+              <div className="leader-launch-starters" aria-label="Prompt starters">
+                {PROMPT_STARTERS.map((starter) => (
+                  <button key={starter.label} type="button" onClick={() => onInputChange(starter.value)}>
+                    {starter.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="leader-launch-prompt">
+              <LeaderPromptBar
+                input={input}
+                slashCommands={slashCommands}
+                onInputChange={onInputChange}
+                onKeyDown={onKeyDown}
+                onSubmit={onSubmit}
+                placeholder={promptPlaceholder}
+                submitLabel="Launch leader"
+                disabled={submitDisabled}
+                active={submitActive}
+                variant="overlay"
+                autoFocus
+                textareaRef={textareaRef}
+              />
+            </div>
 
-            {capability.supportsAdaptiveThinking ? (
-              <label className="leader-launch-field">
-                <span>Reasoning</span>
-                <select
-                  aria-label="Reasoning effort"
-                  value={(data.thinkingConfig ?? DEFAULT_THINKING_CONFIG).effort}
-                  onChange={(event) => onUpdate({
-                    thinkingConfig: {
-                      ...(data.thinkingConfig ?? DEFAULT_THINKING_CONFIG),
-                      enabled: true,
-                      effort: event.target.value as ThinkingConfig["effort"],
-                    },
-                  })}
-                >
-                  {capability.supportedEffortLevels.map((effort) => (
-                    <option key={effort} value={effort}>{effort === "xhigh" ? "Extra high" : effort[0]?.toUpperCase() + effort.slice(1)}</option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
+            {data.error ? <div className="leader-launch-error" role="alert">{data.error}</div> : null}
           </div>
 
-          <label className="leader-launch-toggle">
-            <input
-              type="checkbox"
-              checked={data.worktreeIsolation ?? false}
-              onChange={(event) => onUpdate({ worktreeIsolation: event.target.checked })}
-            />
-            <span>
-              <strong>Isolated worktree</strong>
-              <small>Keep this task's edits separate until review.</small>
-            </span>
-          </label>
-
-          <section className="leader-launch-skills" aria-labelledby={`leader-launch-skills-${nodeId}`}>
-            <div className="leader-launch-skills-head">
-              <div>
-                <h4 id={`leader-launch-skills-${nodeId}`}>Skills</h4>
-                <p>Arm this leader with focused instructions.</p>
-              </div>
-              <span>{selectedSkills.length} selected</span>
+          <aside className="leader-launch-config" aria-label="Run setup">
+            <div className="leader-launch-settings-head">
+              <span className="leader-launch-settings-title">
+                <span className="leader-launch-settings-icon" aria-hidden>
+                  <Settings2 size={15} strokeWidth={2} />
+                </span>
+                <span>
+                  <strong>Run configuration</strong>
+                  <small>Adjust each setting in place</small>
+                </span>
+              </span>
+              {projectPath ? (
+                <div className="leader-launch-project">
+                  <FolderGit2 size={14} aria-hidden />
+                  <span>
+                    <strong title={projectPath}>
+                      {projectPath.split(/[\\/]/).filter(Boolean).at(-1) ?? projectPath}
+                    </strong>
+                    <small title={projectPath}>{projectPath}</small>
+                  </span>
+                </div>
+              ) : null}
             </div>
-            {availableSkills.length === 0 ? (
-              <p className="leader-launch-empty-skills">No project skills available.</p>
-            ) : (
-              <div className="leader-launch-skill-list">
-                {availableSkills.map((skill) => {
-                  const selected = (data.skillIds ?? []).includes(skill.id);
-                  return (
-                    <div className="leader-launch-skill" data-selected={selected} key={skill.id}>
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={selected}
-                          onChange={(event) => updateSkill(skill.id, event.target.checked)}
-                        />
-                        <span className="leader-launch-skill-icon" aria-hidden>{skill.icon}</span>
-                        <span>
-                          <strong>{skill.name}</strong>
-                          <small>{skill.description}</small>
-                        </span>
-                      </label>
-                      {selected ? (
-                        <SkillVariables
-                          skill={skill}
-                          values={data.skillValues?.[skill.id] ?? {}}
-                          onChange={(name, value) => updateSkillValue(skill.id, name, value)}
-                        />
-                      ) : null}
-                    </div>
-                  );
-                })}
+
+            <div className="leader-launch-summary" aria-label="Configured settings">
+              <span title={`Model: ${selectedModel?.label ?? activeModel}`}>
+                <Bot size={12} aria-hidden />
+                {selectedModel?.label ?? activeModel}
+              </span>
+              {selectedPermission ? (
+                <span title={`Permissions: ${selectedPermission.label}`}>
+                  <ShieldCheck size={12} aria-hidden />
+                  {selectedPermission.label}
+                </span>
+              ) : null}
+              {capability.supportsAdaptiveThinking ? (
+                <span title={`Reasoning: ${reasoningEffort}`}>
+                  <Brain size={12} aria-hidden />
+                  {reasoningEffort === "xhigh" ? "Extra high" : reasoningEffort}
+                </span>
+              ) : null}
+              <span title={data.worktreeIsolation ? "Isolated worktree" : "Shared project checkout"}>
+                <GitBranch size={12} aria-hidden />
+                {data.worktreeIsolation ? "Isolated" : "Shared"}
+              </span>
+              <span title={`${selectedSkills.length} selected skills`}>
+                <Sparkles size={12} aria-hidden />
+                {selectedSkills.length} {selectedSkills.length === 1 ? "skill" : "skills"}
+              </span>
+            </div>
+
+            <div className="leader-launch-config-grid">
+              <label className="leader-launch-field">
+                <span>Model</span>
+                <select
+                  aria-label="Model"
+                  value={modelValue}
+                  onChange={(event) => {
+                    const selection = parseLaunchModelValue(event.target.value);
+                    if (selection) onUpdate({ harness: selection.harness, model: selection.model });
+                  }}
+                >
+                  {!selectedModel ? <option value={modelValue}>{activeModel}</option> : null}
+                  {modelGroups.map((group) => (
+                    <optgroup key={group.harness} label={group.label}>
+                      {group.options.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </label>
+
+              {permissionOptions.length > 0 ? (
+                <label className="leader-launch-field">
+                  <span>Permissions</span>
+                  <select
+                    aria-label="Permissions"
+                    value={data.permissionMode ?? "auto"}
+                    onChange={(event) => onUpdate({ permissionMode: event.target.value as PermissionMode })}
+                  >
+                    {permissionOptions.map((permission) => (
+                      <option key={permission.value} value={permission.value}>
+                        {permission.label} — {permission.description}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+
+              {capability.supportsAdaptiveThinking ? (
+                <label className="leader-launch-field">
+                  <span>Reasoning</span>
+                  <select
+                    aria-label="Reasoning effort"
+                    value={reasoningEffort}
+                    onChange={(event) => onUpdate({
+                      thinkingConfig: {
+                        ...(data.thinkingConfig ?? DEFAULT_THINKING_CONFIG),
+                        enabled: true,
+                        effort: event.target.value as ThinkingConfig["effort"],
+                      },
+                    })}
+                  >
+                    {capability.supportedEffortLevels.map((effort) => (
+                      <option key={effort} value={effort}>{effort === "xhigh" ? "Extra high" : effort[0]?.toUpperCase() + effort.slice(1)}</option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+            </div>
+
+            <label className="leader-launch-toggle">
+              <input
+                type="checkbox"
+                checked={data.worktreeIsolation ?? false}
+                onChange={(event) => onUpdate({ worktreeIsolation: event.target.checked })}
+              />
+              <span>
+                <strong>Isolated worktree</strong>
+                <small>Keep this task's edits separate until review.</small>
+              </span>
+            </label>
+
+            <section className="leader-launch-skills" aria-labelledby={`leader-launch-skills-${nodeId}`}>
+              <div className="leader-launch-skills-head">
+                <span>
+                  <Sparkles size={14} aria-hidden />
+                  <span>
+                    <strong id={`leader-launch-skills-${nodeId}`}>Skills</strong>
+                    <small>Arm this leader with focused instructions.</small>
+                  </span>
+                </span>
+                <span className="leader-launch-skills-count">{selectedSkills.length} selected</span>
               </div>
-            )}
-          </section>
-        </aside>
+              {availableSkills.length === 0 ? (
+                <p className="leader-launch-empty-skills">No project skills available.</p>
+              ) : (
+                <div className="leader-launch-skill-list">
+                  {availableSkills.map((skill) => {
+                    const selected = (data.skillIds ?? []).includes(skill.id);
+                    return (
+                      <div className="leader-launch-skill" data-selected={selected} key={skill.id}>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={(event) => updateSkill(skill.id, event.target.checked)}
+                          />
+                          <span className="leader-launch-skill-icon" aria-hidden>{skill.icon}</span>
+                          <span>
+                            <strong>{skill.name}</strong>
+                            <small>{skill.description}</small>
+                          </span>
+                        </label>
+                        {selected ? (
+                          <SkillVariables
+                            skill={skill}
+                            values={data.skillValues?.[skill.id] ?? {}}
+                            onChange={(name, value) => updateSkillValue(skill.id, name, value)}
+                          />
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          </aside>
+        </section>
       </div>
     </div>
   );

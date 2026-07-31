@@ -18,12 +18,12 @@ export interface ThemeDefinition {
   id: string;
   name: string;
   description: string;
+  /** Controls the theme picker's left (dark) / right (light) pairing. */
+  tone: "dark" | "light";
   fonts: {
     sans: string;
     mono: string;
   };
-  /** Google Fonts import URL fragment (families only, no base URL) */
-  googleFontsQuery?: string;
   vars: Record<string, string>;
   /** Accent color for the theme selector swatch */
   swatch: { bg: string; accent: string; text: string };
@@ -117,18 +117,13 @@ const darkSemanticVars = {
   // Code inline background
   "--code-bg": "rgba(129, 140, 248, 0.12)",
 
-  // Kanban gradients (gradient-primary is overridden per-theme to use accent)
-  "--gradient-primary": "linear-gradient(135deg, #f59e3b, #d97a1c)",
-  "--gradient-success": "linear-gradient(135deg, #34d399, #10b981)",
-  "--gradient-danger": "linear-gradient(135deg, #f87171, #ef4444)",
-
-  // Kanban text & shadow helpers
   "--text-on-accent": "#0a0e1a",
-  "--kb-text-on-gradient": "var(--text-on-accent)",
-  "--kb-shadow-color": "0 0 0",
 
   // Streaming
   "--streaming-color": "#60a5fa",
+
+  // Leader SVG silhouettes use the current theme's primary accent.
+  "--leader-icon-color": "var(--accent)",
 };
 
 const lightSemanticVars: Record<string, string> = {
@@ -214,18 +209,13 @@ const lightSemanticVars: Record<string, string> = {
   // Code inline background
   "--code-bg": "rgba(67, 56, 202, 0.09)",
 
-  // Kanban gradients — darkened for AA contrast
-  "--gradient-primary": "linear-gradient(135deg, #b8451f, #8a3216)",
-  "--gradient-success": "linear-gradient(135deg, #15803d, #14532d)",
-  "--gradient-danger": "linear-gradient(135deg, #b91c1c, #7f1d1d)",
-
-  // Kanban text & shadow helpers (inverted for light theme)
   "--text-on-accent": "#ffffff",
-  "--kb-text-on-gradient": "var(--text-on-accent)",
-  "--kb-shadow-color": "0 0 0",
 
   // Streaming
   "--streaming-color": "#1d4ed8",
+
+  // Leader SVG silhouettes use the current theme's primary accent.
+  "--leader-icon-color": "var(--accent)",
 };
 
 // ── 1. Midnight ───────────────────────────────────────────
@@ -236,11 +226,11 @@ const midnight: ThemeDefinition = {
   id: "midnight",
   name: "Midnight",
   description: "Deep navy canvas warmed by a saffron accent",
+  tone: "dark",
   fonts: {
-    sans: '"DM Sans", "Segoe UI", system-ui, sans-serif',
-    mono: '"JetBrains Mono", "Fira Code", monospace',
+    sans: '"DM Sans Variable", "Segoe UI", system-ui, sans-serif',
+    mono: '"JetBrains Mono Variable", "Fira Code", monospace',
   },
-  googleFontsQuery: "family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600",
   swatch: { bg: "#0a0e1a", accent: "#f59e3b", text: "#e6ecf5" },
   vars: {
     "--bg-primary": "#0a0e1a",
@@ -258,7 +248,6 @@ const midnight: ThemeDefinition = {
     "--dot-grid": "#1a2036",
     "--selection-bg": "rgba(245, 158, 59, 0.28)",
     ...darkSemanticVars,
-    "--gradient-primary": "linear-gradient(135deg, #f59e3b, #d97a1c)",
   },
 };
 
@@ -269,12 +258,11 @@ const alpine: ThemeDefinition = {
   id: "alpine",
   name: "Alpine Workshop",
   description: "Cream paper, deep ink, a rust accent — editorial warmth",
+  tone: "light",
   fonts: {
-    sans: '"Space Grotesk", "Segoe UI", system-ui, sans-serif',
+    sans: '"Space Grotesk Variable", "Segoe UI", system-ui, sans-serif',
     mono: '"IBM Plex Mono", "Fira Code", monospace',
   },
-  googleFontsQuery:
-    "family=Space+Grotesk:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600",
   swatch: { bg: "#f4f1e8", accent: "#b8451f", text: "#1a1614" },
   vars: {
     "--bg-primary": "#ede9dd",
@@ -304,12 +292,11 @@ const deepCurrent: ThemeDefinition = {
   id: "deep-current",
   name: "Deep Current",
   description: "Abyssal navy, teal phosphorescence, amber lantern light",
+  tone: "dark",
   fonts: {
-    sans: '"Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif',
+    sans: '"Plus Jakarta Sans Variable", "Segoe UI", system-ui, sans-serif',
     mono: '"IBM Plex Mono", "Fira Code", monospace',
   },
-  googleFontsQuery:
-    "family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600",
   swatch: { bg: "#08111e", accent: "#2dd4bf", text: "#d4e4f0" },
   vars: {
     "--bg-primary": "#08111e",
@@ -353,8 +340,6 @@ const deepCurrent: ThemeDefinition = {
     "--note-slate-border": "#243650",
     "--markdown-bg": "#0c2018",
     "--markdown-border": "#1a3528",
-    "--gradient-primary": "linear-gradient(135deg, #2dd4bf, #0d9488)",
-    "--gradient-success": "linear-gradient(135deg, #2dd4bf, #14b8a6)",
   },
 };
 
@@ -366,12 +351,11 @@ const proofSheet: ThemeDefinition = {
   id: "proof-sheet",
   name: "Signal Slate",
   description: "Graphite neutrals with crisp sky-blue action",
+  tone: "dark",
   fonts: {
-    sans: '"Instrument Sans", "Segoe UI", system-ui, sans-serif',
+    sans: '"Instrument Sans Variable", "Segoe UI", system-ui, sans-serif',
     mono: '"IBM Plex Mono", "Fira Code", monospace',
   },
-  googleFontsQuery:
-    "family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600",
   swatch: { bg: "#0b1020", accent: "#7dd3fc", text: "#eef4ff" },
   vars: {
     "--bg-primary": "#0b1020",
@@ -413,7 +397,6 @@ const proofSheet: ThemeDefinition = {
     "--note-slate-border": "#2c3a50",
     "--markdown-bg": "#122519",
     "--markdown-border": "#21402d",
-    "--gradient-primary": "linear-gradient(135deg, #7dd3fc, #2563eb)",
   },
 };
 
@@ -425,12 +408,11 @@ const studioWarm: ThemeDefinition = {
   id: "studio-warm",
   name: "Sage Ledger",
   description: "Sage paper, evergreen ink, blue-green action",
+  tone: "light",
   fonts: {
-    sans: '"Source Sans 3", "Segoe UI", system-ui, sans-serif',
+    sans: '"Source Sans 3 Variable", "Segoe UI", system-ui, sans-serif',
     mono: '"IBM Plex Mono", "Fira Code", monospace',
   },
-  googleFontsQuery:
-    "family=Source+Sans+3:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600",
   swatch: { bg: "#eef2ea", accent: "#256d85", text: "#17201b" },
   vars: {
     "--bg-primary": "#eef2ea",
@@ -472,8 +454,6 @@ const studioWarm: ThemeDefinition = {
     "--note-slate-border": "#bdc7b8",
     "--markdown-bg": "#edf5e9",
     "--markdown-border": "#c2d4bc",
-    "--gradient-primary": "linear-gradient(135deg, #256d85, #194e60)",
-    "--gradient-success": "linear-gradient(135deg, #2f6f4e, #1f5138)",
   },
 };
 
@@ -485,12 +465,11 @@ const cathode: ThemeDefinition = {
   id: "cathode",
   name: "Aurora Console",
   description: "Dark teal console with mint, violet, and amber signals",
+  tone: "dark",
   fonts: {
-    sans: '"Recursive", "JetBrains Mono", "Segoe UI", system-ui, sans-serif',
-    mono: '"JetBrains Mono", "Fira Code", monospace',
+    sans: '"Recursive Variable", "JetBrains Mono Variable", "Segoe UI", system-ui, sans-serif',
+    mono: '"JetBrains Mono Variable", "Fira Code", monospace',
   },
-  googleFontsQuery:
-    "family=Recursive:wght@400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600;700",
   swatch: { bg: "#061014", accent: "#5eead4", text: "#d6ece8" },
   vars: {
     "--bg-primary": "#061014",
@@ -533,9 +512,6 @@ const cathode: ThemeDefinition = {
     "--note-slate-border": "#243b45",
     "--markdown-bg": "#0c221a",
     "--markdown-border": "#1a3c2e",
-    "--gradient-primary": "linear-gradient(135deg, #5eead4, #0891b2)",
-    "--gradient-success": "linear-gradient(135deg, #34d399, #059669)",
-    "--gradient-danger": "linear-gradient(135deg, #ef4444, #b91c1c)",
   },
 };
 
@@ -587,60 +563,71 @@ function statusPalette(c: {
   };
 }
 
-// ── Skin 1. Aurora Glass ──────────────────────────────────
-// Premium glassmorphism: deep violet-black, luminous violet accent,
-// frosted translucent surfaces, generous radii and soft glow.
-const auroraGlass: ThemeDefinition = {
-  id: "glass",
-  name: "Aurora Glass",
-  description: "Frosted glassmorphism — violet-black with a luminous accent",
+// ── Skin 1. Daybook ───────────────────────────────────────
+// Crisp daylight: cool white paper, navy ink and a disciplined cobalt
+// accent. Thin rules and compact radii keep it precise without feeling cold.
+const daybook: ThemeDefinition = {
+  id: "daybook",
+  name: "Daybook",
+  description: "Cool daylight paper with navy ink and a cobalt accent",
+  tone: "light",
   fonts: {
-    sans: '"Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif',
-    mono: '"JetBrains Mono", "Fira Code", monospace',
+    sans: '"Instrument Sans Variable", "Segoe UI", system-ui, sans-serif',
+    mono: '"JetBrains Mono Variable", "Fira Code", monospace',
   },
-  googleFontsQuery:
-    "family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600",
-  swatch: { bg: "#0c0a1e", accent: "#a78bfa", text: "#ece9ff" },
+  swatch: { bg: "#eef2f8", accent: "#3156a3", text: "#172033" },
   vars: {
-    "--bg-primary": "#0b0918",
-    "--bg-secondary": "#141029",
-    "--bg-surface": "#1a1638",
-    "--bg-elevated": "#221c48",
-    "--border-default": "#2e2758",
-    "--border-hover": "#463b80",
-    "--text-primary": "#ece9ff",
-    "--text-secondary": "#bcb4e2",
-    "--text-muted": "#8981ab",
-    "--text-dim": "#615a86",
-    "--accent": "#a78bfa",
-    "--accent-dark": "#7c5cf0",
-    "--dot-grid": "#1d1742",
-    "--selection-bg": "rgba(167, 139, 250, 0.30)",
-    ...darkSemanticVars,
-    // Cool, luminous status set to sit on the violet canvas.
-    // running = electric cyan (pops hard vs the violet accent); idle = faded indigo-grey.
+    "--bg-primary": "#eef2f8",
+    "--bg-secondary": "#f5f7fb",
+    "--bg-surface": "#fbfcfe",
+    "--bg-elevated": "#ffffff",
+    "--border-default": "#d5dceb",
+    "--border-hover": "#aab7cf",
+    "--text-primary": "#172033",
+    "--text-secondary": "#3e4a60",
+    "--text-muted": "#657188",
+    "--text-dim": "#8c96a8",
+    "--accent": "#3156a3",
+    "--accent-dark": "#203d7a",
+    "--dot-grid": "#d8e0ed",
+    "--selection-bg": "rgba(49, 86, 163, 0.16)",
+    ...lightSemanticVars,
     ...statusPalette({
-      success: "#4ade80",
-      running: "#22d3ee",
-      warning: "#fbbf24",
-      error: "#fb7185",
-      waiting: "#c084fc",
-      idle: "#6b7294",
-      info: "#60a5fa",
+      success: "#28724f",
+      running: "#1769aa",
+      warning: "#9a5b13",
+      error: "#b13a4a",
+      waiting: "#6847a7",
+      idle: "#778299",
+      info: "#3156a3",
     }),
-    "--tool-accent": "#818cf8",
-    "--thinking-accent": "#c084fc",
-    "--tool-bg": "rgba(129, 140, 248, 0.10)",
-    "--tool-bg-hover": "rgba(129, 140, 248, 0.16)",
-    "--thinking-bg": "rgba(192, 132, 252, 0.08)",
-    "--thinking-bg-hover": "rgba(192, 132, 252, 0.13)",
-    "--edge-task": "#a78bfa",
-    "--edge-context": "#67e8f9",
-    "--streaming-color": "#a78bfa",
-    "--code-bg": "rgba(167, 139, 250, 0.13)",
-    "--shadow-md": "0 8px 32px rgba(76, 29, 149, 0.35)",
-    "--shadow-lg": "0 16px 48px rgba(76, 29, 149, 0.45)",
-    "--gradient-primary": "linear-gradient(135deg, #a78bfa, #6366f1)",
+    "--tool-accent": "#3156a3",
+    "--thinking-accent": "#76538f",
+    "--tool-bg": "rgba(49, 86, 163, 0.07)",
+    "--tool-bg-hover": "rgba(49, 86, 163, 0.12)",
+    "--thinking-bg": "rgba(118, 83, 143, 0.06)",
+    "--thinking-bg-hover": "rgba(118, 83, 143, 0.10)",
+    "--edge-task": "#3156a3",
+    "--edge-context": "#28724f",
+    "--streaming-color": "#3156a3",
+    "--code-bg": "rgba(49, 86, 163, 0.09)",
+    "--note-blue-bg": "#e1e9f5",
+    "--note-blue-border": "#b4c5df",
+    "--note-green-bg": "#e0ece5",
+    "--note-green-border": "#adcab9",
+    "--note-orange-bg": "#f4e8d9",
+    "--note-orange-border": "#ddbf99",
+    "--note-purple-bg": "#ebe4f0",
+    "--note-purple-border": "#c8b6d3",
+    "--note-pink-bg": "#f2e3e8",
+    "--note-pink-border": "#d6b5c0",
+    "--note-slate-bg": "#e8edf4",
+    "--note-slate-border": "#c3ccda",
+    "--markdown-bg": "#edf2f8",
+    "--markdown-border": "#cad5e4",
+    "--shadow-sm": "0 1px 3px rgba(28, 43, 72, 0.06)",
+    "--shadow-md": "0 6px 18px rgba(28, 43, 72, 0.09)",
+    "--shadow-lg": "0 12px 28px rgba(28, 43, 72, 0.12)",
   },
 };
 
@@ -651,12 +638,11 @@ const broadsheetInk: ThemeDefinition = {
   id: "ink",
   name: "Broadsheet Ink",
   description: "Editorial print — warm paper, oxblood ink, serif display",
+  tone: "light",
   fonts: {
-    sans: '"Nunito Sans", "Segoe UI", system-ui, sans-serif',
+    sans: '"Nunito Sans Variable", "Segoe UI", system-ui, sans-serif',
     mono: '"IBM Plex Mono", "Fira Code", monospace',
   },
-  googleFontsQuery:
-    "family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Nunito+Sans:wght@300;400;500;600;700",
   swatch: { bg: "#f4efe6", accent: "#8a2b2b", text: "#1c1a17" },
   vars: {
     "--bg-primary": "#f1ebe0",
@@ -706,7 +692,6 @@ const broadsheetInk: ThemeDefinition = {
     "--markdown-bg": "#f4f0e6",
     "--markdown-border": "#d8cdb8",
     "--text-on-accent": "#fdfbf6",
-    "--gradient-primary": "linear-gradient(135deg, #8a2b2b, #6d1f1f)",
   },
 };
 
@@ -717,12 +702,11 @@ const blueprint: ThemeDefinition = {
   id: "blueprint",
   name: "Blueprint",
   description: "Technical brutalist — blueprint navy, cyan signal, drafting grid",
+  tone: "dark",
   fonts: {
-    sans: '"Space Grotesk", "Segoe UI", system-ui, sans-serif',
-    mono: '"JetBrains Mono", "Fira Code", monospace',
+    sans: '"Space Grotesk Variable", "Segoe UI", system-ui, sans-serif',
+    mono: '"JetBrains Mono Variable", "Fira Code", monospace',
   },
-  googleFontsQuery:
-    "family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700",
   swatch: { bg: "#0a1626", accent: "#38bdf8", text: "#dfeaf5" },
   vars: {
     "--bg-primary": "#0a1626",
@@ -771,7 +755,6 @@ const blueprint: ThemeDefinition = {
     "--note-slate-border": "#264056",
     "--markdown-bg": "#0c2233",
     "--markdown-border": "#1c3f57",
-    "--gradient-primary": "linear-gradient(135deg, #38bdf8, #0ea5e9)",
   },
 };
 
@@ -782,12 +765,11 @@ const porcelain: ThemeDefinition = {
   id: "porcelain",
   name: "Porcelain",
   description: "Soft-UI neumorphism — warm off-white with tactile, extruded surfaces",
+  tone: "light",
   fonts: {
-    sans: '"Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif',
+    sans: '"Plus Jakarta Sans Variable", "Segoe UI", system-ui, sans-serif',
     mono: '"IBM Plex Mono", "Fira Code", monospace',
   },
-  googleFontsQuery:
-    "family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600",
   swatch: { bg: "#e8ebf1", accent: "#6d7cf0", text: "#2b3040" },
   vars: {
     "--bg-primary": "#e6e9f0",
@@ -840,7 +822,6 @@ const porcelain: ThemeDefinition = {
     "--markdown-bg": "#e9edf4",
     "--markdown-border": "#ccd3e3",
     "--text-on-accent": "#f4f6fa",
-    "--gradient-primary": "linear-gradient(135deg, #6d7cf0, #4f5fd6)",
   },
 };
 
@@ -851,12 +832,11 @@ const obsidian: ThemeDefinition = {
   id: "obsidian",
   name: "Obsidian",
   description: "OLED luxe minimal — true black with a champagne-gold accent",
+  tone: "dark",
   fonts: {
-    sans: '"Instrument Sans", "Segoe UI", system-ui, sans-serif',
-    mono: '"Space Mono", "JetBrains Mono", monospace',
+    sans: '"Instrument Sans Variable", "Segoe UI", system-ui, sans-serif',
+    mono: '"Space Mono", "JetBrains Mono Variable", monospace',
   },
-  googleFontsQuery:
-    "family=Instrument+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700",
   swatch: { bg: "#000000", accent: "#e3b866", text: "#f2f2f0" },
   vars: {
     "--bg-primary": "#000000",
@@ -908,103 +888,108 @@ const obsidian: ThemeDefinition = {
     "--note-slate-border": "#26262a",
     "--markdown-bg": "#0c130e",
     "--markdown-border": "#1d2a20",
-    "--gradient-primary": "linear-gradient(135deg, #e3b866, #b8863c)",
-    "--gradient-success": "linear-gradient(135deg, #8fb7a3, #4f8f6f)",
   },
 };
 
-// ── Skin 6. Nocturne ──────────────────────────────────────
-// Gradient luxe dark: deep plum-to-indigo surfaces, rose-gold accent and
-// a warm ambient glow — richer and more chromatic than the OLED minimal.
-const nocturne: ThemeDefinition = {
-  id: "nocturne",
-  name: "Nocturne",
-  description: "Gradient luxe dark — plum-to-indigo surfaces with a rose-gold accent",
+// ── Skin 6. Lavender Field ────────────────────────────────
+// A genuinely coloured light theme: low-chroma lavender surfaces,
+// aubergine ink and indigo action. Calm and soft without relying on white.
+const lavenderField: ThemeDefinition = {
+  id: "lavender-field",
+  name: "Lavender Field",
+  description: "Restful lavender surfaces with aubergine ink and indigo action",
+  tone: "light",
   fonts: {
-    sans: '"Space Grotesk", "Segoe UI", system-ui, sans-serif',
-    mono: '"JetBrains Mono", "Fira Code", monospace',
+    sans: '"DM Sans Variable", "Segoe UI", system-ui, sans-serif',
+    mono: '"IBM Plex Mono", "Fira Code", monospace',
   },
-  googleFontsQuery:
-    "family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600",
-  swatch: { bg: "#160f24", accent: "#f0a58f", text: "#f0e9f5" },
+  swatch: { bg: "#d9d9e8", accent: "#4d509e", text: "#242437" },
   vars: {
-    "--bg-primary": "#140d20",
-    "--bg-secondary": "#1c142e",
-    "--bg-surface": "#241a3a",
-    "--bg-elevated": "#2d2148",
-    "--border-default": "#3a2c5c",
-    "--border-hover": "#52407e",
-    "--text-primary": "#f0e9f5",
-    "--text-secondary": "#c5b6d6",
-    "--text-muted": "#93839f", // muted plum-grey
-    "--text-dim": "#685a78",
-    "--accent": "#f0a58f",
-    "--accent-dark": "#dd7d63",
-    "--dot-grid": "#241a3c",
-    "--selection-bg": "rgba(240, 165, 143, 0.26)",
-    ...darkSemanticVars,
-    // Warm luxe set. running = bright cyan (pops against the plum bg and the
-    // rose-gold accent); idle = faded plum-grey.
+    "--bg-primary": "#d9d9e8",
+    "--bg-secondary": "#e3e2ee",
+    "--bg-surface": "#ebeaf3",
+    "--bg-elevated": "#f4f2f8",
+    "--border-default": "#c2c2d7",
+    "--border-hover": "#9d9ebd",
+    "--text-primary": "#242437",
+    "--text-secondary": "#4c4b63",
+    "--text-muted": "#6e6c84",
+    "--text-dim": "#908ea3",
+    "--accent": "#4d509e",
+    "--accent-dark": "#393b7d",
+    "--dot-grid": "#c9c9dc",
+    "--selection-bg": "rgba(77, 80, 158, 0.17)",
+    ...lightSemanticVars,
     ...statusPalette({
-      success: "#7fd6b0",
-      running: "#3ec8f0",
-      warning: "#f0c05a",
-      error: "#f0748f",
-      waiting: "#c4a5f0",
-      idle: "#7a7088",
-      info: "#a5b4fc",
+      success: "#2f7359",
+      running: "#285f9f",
+      warning: "#935b16",
+      error: "#a93b52",
+      waiting: "#69479d",
+      idle: "#77758d",
+      info: "#4d509e",
     }),
-    "--tool-accent": "#c4a5f0",
-    "--thinking-accent": "#e0a5d6",
-    "--edge-task": "#f0a58f",
-    "--edge-context": "#c4a5f0",
-    "--streaming-color": "#f0a58f",
-    "--code-bg": "rgba(240, 165, 143, 0.12)",
-    "--shadow-md": "0 8px 28px rgba(40, 12, 45, 0.5)",
-    "--shadow-lg": "0 16px 44px rgba(40, 12, 45, 0.6)",
-    "--note-blue-bg": "#171d33",
-    "--note-blue-border": "#28345a",
-    "--note-green-bg": "#152a26",
-    "--note-green-border": "#254a42",
-    "--note-orange-bg": "#2e1e1a",
-    "--note-orange-border": "#4c322a",
-    "--note-purple-bg": "#241a3a",
-    "--note-purple-border": "#3d2d60",
-    "--note-pink-bg": "#2e1a2c",
-    "--note-pink-border": "#4c2c48",
-    "--note-slate-bg": "#1d1830",
-    "--note-slate-border": "#332a4e",
-    "--markdown-bg": "#1a1330",
-    "--markdown-border": "#2f2350",
-    "--text-on-accent": "#2a1420",
-    "--gradient-primary": "linear-gradient(135deg, #f0a58f, #b06ab3)",
-    "--gradient-success": "linear-gradient(135deg, #7fd6b0, #3f9e7f)",
+    "--tool-accent": "#356b5c",
+    "--thinking-accent": "#75517e",
+    "--tool-bg": "rgba(53, 107, 92, 0.08)",
+    "--tool-bg-hover": "rgba(53, 107, 92, 0.13)",
+    "--thinking-bg": "rgba(117, 81, 126, 0.07)",
+    "--thinking-bg-hover": "rgba(117, 81, 126, 0.11)",
+    "--edge-task": "#4d509e",
+    "--edge-context": "#356b5c",
+    "--streaming-color": "#4d509e",
+    "--code-bg": "rgba(77, 80, 158, 0.10)",
+    "--note-blue-bg": "#d9dfed",
+    "--note-blue-border": "#aebbd5",
+    "--note-green-bg": "#dce7e2",
+    "--note-green-border": "#adc8bd",
+    "--note-orange-bg": "#eae0d5",
+    "--note-orange-border": "#cfb59b",
+    "--note-purple-bg": "#ded9eb",
+    "--note-purple-border": "#b9add2",
+    "--note-pink-bg": "#e8dbe3",
+    "--note-pink-border": "#ceb0c0",
+    "--note-slate-bg": "#dedee8",
+    "--note-slate-border": "#babacc",
+    "--markdown-bg": "#e4e4ef",
+    "--markdown-border": "#c3c3d7",
+    "--shadow-sm": "0 2px 6px rgba(56, 50, 86, 0.07)",
+    "--shadow-md": "0 7px 18px rgba(56, 50, 86, 0.10)",
+    "--shadow-lg": "0 12px 26px rgba(56, 50, 86, 0.13)",
   },
 };
 
 // ── Exports ───────────────────────────────────────────────
 
 /**
- * Skins, in picker order — full look-and-feel themes (palette + a scoped
- * `src/theme-skins/<id>.css` stylesheet). Appended to {@link themes}.
+ * Full look-and-feel themes with a palette and scoped
+ * `src/theme-skins/<id>.css` stylesheet. The picker interleaves these with
+ * base themes to maintain its dark-left / light-right rows.
  */
 export const skinThemes: ThemeDefinition[] = [
-  auroraGlass,
+  daybook,
   broadsheetInk,
   blueprint,
   porcelain,
   obsidian,
-  nocturne,
+  lavenderField,
 ];
 
+// Picker rows are intentional pairs: every dark theme occupies the left
+// column and every light theme occupies the right column.
 export const themes: ThemeDefinition[] = [
   midnight,
-  alpine,
+  daybook,
   deepCurrent,
+  alpine,
   proofSheet,
   studioWarm,
   cathode,
-  ...skinThemes,
+  lavenderField,
+  blueprint,
+  broadsheetInk,
+  obsidian,
+  porcelain,
 ];
 
 export const themeMap = Object.fromEntries(themes.map((t) => [t.id, t])) as Record<
@@ -1032,17 +1017,4 @@ export function applyTheme(themeId: string): void {
 
   // Apply selection color
   root.dataset["theme"] = theme.id;
-}
-
-/**
- * Build the full Google Fonts URL for all themes (preload all).
- */
-export function buildGoogleFontsUrl(): string {
-  const families = themes
-    .map((t) => t.googleFontsQuery)
-    .filter(Boolean)
-    // Deduplicate identical family queries
-    .filter((q, i, arr) => arr.indexOf(q) === i);
-
-  return `https://fonts.googleapis.com/css2?${families.join("&")}&display=swap`;
 }

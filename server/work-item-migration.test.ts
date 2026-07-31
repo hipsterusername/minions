@@ -120,7 +120,6 @@ describe("legacy session work-item backfill", () => {
   it.each([
     ["idle-no-report", "idle", null, "abort"],
     ["stopped-no-report", "stopped", "stop", "stop"],
-    ["completed-no-report", "completed", "completed", "abort"],
   ])("classifies ambiguous legacy row %s as interrupted", (key, status, terminalReason, normalizedReason) => {
     insertLegacy(db, { key, status, terminalReason });
     backfillLegacyWorkItems(db, 100);
@@ -131,8 +130,25 @@ describe("legacy session work-item backfill", () => {
              terminal_at, lifecycle_revision FROM sessions WHERE session_key = ?
     `).get(key)).toMatchObject({
       run_outcome: "interrupted", review_state: "interrupted_to_review",
-      review_reason: "Session became inactive without a final report",
+      review_reason: "Session ended before clean completion was recorded",
       terminal_reason: normalizedReason, lifecycle_revision: 1,
+    });
+  });
+
+  it("preserves explicit legacy completion without requiring report text", () => {
+    insertLegacy(db, {
+      key: "completed-no-report", status: "completed",
+      terminalReason: "completed",
+    });
+    backfillLegacyWorkItems(db, 100);
+    expect(db.prepare("SELECT outcome FROM work_items WHERE id = ?")
+      .get(legacyWorkItemId("completed-no-report"))).toEqual({ outcome: "completed" });
+    expect(db.prepare(`SELECT run_outcome, review_state, review_reason, terminal_reason
+      FROM sessions WHERE session_key = 'completed-no-report'`).get()).toEqual({
+      run_outcome: "completed",
+      review_state: "completion_to_review",
+      review_reason: "Review the completed session",
+      terminal_reason: "completed",
     });
   });
 
@@ -240,7 +256,7 @@ describe("boot recovery", () => {
       .toEqual({ ended_at: null, run_outcome: "none" });
   });
 
-  it("repairs completed rows without finalReport before snapshot validation", () => {
+  it("restores durable reports while preserving reportless completion", () => {
     for (const id of ["restore", "downgrade"]) {
       insertLegacy(db, { key: id, status: "running" });
     }
@@ -258,7 +274,7 @@ describe("boot recovery", () => {
 
     expect(repairInvalidCompletedWorkItemRuns(db, 130)).toEqual({
       restoredRunKeys: ["restore"],
-      interruptedRunKeys: ["downgrade"],
+      interruptedRunKeys: [],
     });
     expect(db.prepare(`SELECT run_outcome, final_report FROM sessions
       WHERE session_key = 'restore'`).get()).toEqual({
@@ -266,10 +282,10 @@ describe("boot recovery", () => {
     });
     expect(db.prepare(`SELECT run_outcome, final_report FROM sessions
       WHERE session_key = 'downgrade'`).get()).toEqual({
-      run_outcome: "interrupted", final_report: null,
+      run_outcome: "completed", final_report: null,
     });
     expect(db.prepare(`SELECT outcome FROM work_items WHERE id = ?`)
-      .get(legacyWorkItemId("downgrade"))).toEqual({ outcome: "interrupted" });
+      .get(legacyWorkItemId("downgrade"))).toEqual({ outcome: "completed" });
   });
 
   it("recovers orphaned children and tasks without changing the item projection", () => {

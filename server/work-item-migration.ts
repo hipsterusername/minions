@@ -89,7 +89,7 @@ function reliableTerminalSnapshot(row: LegacySessionRow, outcome: "completed" | 
   if (row.terminal_at === null) return false;
   if (outcome === "completed") {
     return row.review_state === "completion_to_review"
-      && row.terminal_reason === "completed" && Boolean(row.final_report?.trim());
+      && row.terminal_reason === "completed";
   }
   if (outcome === "error") {
     return row.review_state === "error_to_review" && row.terminal_reason === "error";
@@ -111,7 +111,9 @@ function normalizedTerminalFields(
   if (outcome === "completed") {
     return {
       reviewState: "completion_to_review",
-      reviewReason: "Read the final report and review the dashboard",
+      reviewReason: row.final_report?.trim()
+        ? "Read the final report and review the dashboard"
+        : "Review the completed session",
       terminalReason: "completed",
       terminalAt,
     };
@@ -126,7 +128,7 @@ function normalizedTerminalFields(
   }
   return {
     reviewState: "interrupted_to_review",
-    reviewReason: "Session became inactive without a final report",
+    reviewReason: "Session ended before clean completion was recorded",
     terminalReason: row.status === "stopped" || row.terminal_reason === "stop" ? "stop" : "abort",
     terminalAt,
   };
@@ -222,16 +224,15 @@ export function backfillLegacyWorkItems(
         INSERT INTO work_items (
           id, project_id, project_path, title, runtime_state, outcome, resolution,
           change_mode, integration_state, wait_kind, archived_from_resolution,
-          current_run_key, iteration, workflow_column_id, workflow_rank,
-          lifecycle_revision, last_transition_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'backlog', ?, ?, ?, ?, ?)
+          current_run_key, iteration, lifecycle_revision,
+          last_transition_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
       `).run(
         itemId, project.projectId, project.projectPath,
         row.task_name?.trim() || "Recovered session",
         canonicalLifecycle.runtimeState, canonicalLifecycle.outcome, canonicalLifecycle.resolution,
         changeMode, canonicalLifecycle.integrationState, projected.waitKind,
         archivedFrom, row.session_key,
-        `${String(createdAt).padStart(16, "0")}:${row.session_key}`,
         canonicalLifecycle.lifecycleRevision, normalized?.terminalAt ?? row.terminal_at ?? updatedAt,
         createdAt, updatedAt,
       );
@@ -300,7 +301,7 @@ export function recoverOrphanedWorkItemRuns(
         && witness.terminationIntent === "stop" ? "stop" : "abort";
       const reviewReason = witness.action === "stop"
         ? "Session termination was requested before shutdown completed"
-        : "Session became inactive without a final report";
+        : "Session ended before clean completion was recorded";
       recordBootRecoveryWitness(db, row.current_run_key, witness, at);
       const sealed = db.prepare(`
         UPDATE sessions SET ended_at = ?, run_outcome = ?, status = 'stopped',
@@ -346,7 +347,7 @@ export function recoverOrphanedWorkItemRuns(
         && witness.terminationIntent === "stop" ? "stop" : "abort";
       const reviewReason = witness.action === "stop"
         ? "Session termination was requested before shutdown completed"
-        : "Session became inactive without a final report";
+        : "Session ended before clean completion was recorded";
       recordBootRecoveryWitness(db, child.session_key, witness, at);
       const sealed = db.prepare(`
         UPDATE sessions SET ended_at = ?, run_outcome = ?, status = 'stopped',

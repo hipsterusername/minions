@@ -81,7 +81,7 @@ describe("concrete work-item runtime lifecycle", () => {
       .get(identity.runKey)).toEqual({ session_id: "fresh-thread" });
   });
 
-  it("normalizes a completion signal without a final report to interrupted", async () => {
+  it("persists a clean completion without optional report metadata", async () => {
     const db = initDb(":memory:"); ensureWorkItemSchema(db);
     const bus = createBus({ clients: new Set() } as never);
     const service = createSqliteWorkItemService({ db, bus,
@@ -98,7 +98,7 @@ describe("concrete work-item runtime lifecycle", () => {
       parentRunKey: null, taskId: null, outcome: "completed",
       finalReportId: null, finalReport: null, at: 11 });
     expect((await service.get(draft.workItem.id))?.currentRun).toMatchObject({
-      outcome: "interrupted", finalReport: null,
+      outcome: "completed", finalReport: null,
     });
   });
 });

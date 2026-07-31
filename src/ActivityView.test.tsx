@@ -3,7 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { act } from "react";
 
-import { ActivityView, lifecycleActionError } from "./ActivityView.tsx";
+import {
+  ActivityView,
+  lifecycleActionError,
+  selectActivityMinions,
+} from "./ActivityView.tsx";
 import type { SocketSubscribe } from "./use-socket.ts";
 import type { CanvasNode } from "./types.ts";
 import type { LeaderData } from "./nodes/leader/types.ts";
@@ -73,6 +77,82 @@ function activityList(): HTMLElement {
 }
 
 describe("ActivityView", () => {
+  it("uses the canvas task plan as the canonical 1:1 minion roster", () => {
+    const leader = session({
+      sessionKey: "leader-with-stale-roster",
+      role: "leader",
+      activeMinions: [{
+        taskId: "running-only",
+        title: "Running only",
+        status: "running",
+        sessionKey: "minion-running",
+      }],
+    });
+    const canvasPlan: LeaderData["taskPlan"] = [
+      {
+        taskId: "running-only",
+        title: "Running only",
+        description: "",
+        priority: "high",
+        status: "running",
+        executor: "minion",
+        minionSessionKey: "minion-running",
+        result: null,
+        cost: 0,
+        createdAt: 1,
+        completedAt: null,
+        sessionSummary: "",
+      },
+      {
+        taskId: "completed-minion",
+        title: "Completed minion",
+        description: "",
+        priority: "medium",
+        status: "completed",
+        executor: "minion",
+        minionSessionKey: "minion-completed",
+        result: "done",
+        cost: 0,
+        createdAt: 2,
+        completedAt: 3,
+        sessionSummary: "",
+      },
+      {
+        taskId: "leader-work",
+        title: "Leader work",
+        description: "",
+        priority: "low",
+        status: "planned",
+        executor: "leader",
+        minionSessionKey: null,
+        result: null,
+        cost: 0,
+        createdAt: 4,
+        completedAt: null,
+        sessionSummary: "",
+      },
+    ];
+
+    expect(selectActivityMinions(leader, canvasPlan).map((minion) => minion.taskId))
+      .toEqual(["running-only", "completed-minion"]);
+
+    render(
+      <ActivityView
+        sessions={[leader]}
+        nodes={[leaderNode(leader.sessionKey, [], { taskPlan: canvasPlan })]}
+        {...noop}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /leader-with-stale-roster/i }));
+    const inspector = screen.getByRole("complementary", { name: /session details/i });
+    expect(within(inspector).getByRole("tab", { name: /minions2/i }))
+      .toHaveAttribute("aria-selected", "true");
+    expect(within(inspector).getByText("Running only")).toBeInTheDocument();
+    expect(within(inspector).getByText("Completed minion")).toBeInTheDocument();
+    expect(within(inspector).queryByText("Leader work")).not.toBeInTheDocument();
+  });
+
   it("opens on a relevance-first session dashboard instead of an instruction", () => {
     const onLaunchLeader = vi.fn();
     render(
@@ -121,6 +201,75 @@ describe("ActivityView", () => {
     expect(screen.queryByRole("button", { name: /dismissed work/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^dismissed$/i }));
     expect(screen.getByRole("button", { name: /dismissed work/i })).toBeInTheDocument();
+  });
+
+  it("shows an interrupted inactive work item as inactive", () => {
+    const socketSend = vi.fn();
+    const onDetachFromCanvas = vi.fn();
+    render(
+      <ActivityView
+        sessions={[session({
+          sessionKey: "inactive-run",
+          taskName: "Inactive work",
+          status: "inactive",
+          lastActivity: "Inactive",
+          reviewLifecycle: {
+            ...completeLifecycle,
+            reviewState: "interrupted_to_review",
+            reviewReason: "Inactive",
+            finalReport: null,
+            terminalReason: "abort",
+          },
+        })]}
+        nodes={[]}
+        {...noop}
+        socketSend={socketSend}
+        onDetachFromCanvas={onDetachFromCanvas}
+      />,
+    );
+
+    const list = activityList();
+    const row = within(list).getByText("Inactive work").closest(".act-triage-row") as HTMLElement;
+    expect(row).toHaveClass("act-triage-row--inactive");
+    expect(row).not.toHaveClass("act-triage-row--error");
+    expect(within(list).getAllByText(/inactive/i).length).toBeGreaterThan(0);
+    expect(within(list).queryByText(/interrupted/i)).not.toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: "View" })).not.toBeInTheDocument();
+
+    fireEvent.click(within(row).getByText("Inactive work").closest("button")!);
+    const inspector = screen.getByRole("complementary", { name: /session details/i });
+    expect(within(inspector).getByText(
+      "Review keeps this work in Activity. Review & remove clears it from Activity and detaches it from Canvas.",
+    )).toBeInTheDocument();
+    const inspectorReview = within(inspector).getByRole("button", { name: "Review" });
+    const inspectorRemove = within(inspector).getByRole("button", {
+      name: "Review and remove from Activity",
+    });
+    expect(inspectorReview).toHaveTextContent("");
+    expect(inspectorReview.querySelector("svg")).toBeInTheDocument();
+    expect(inspectorRemove).toHaveTextContent("");
+    expect(inspectorRemove.querySelector(".lucide-list-x")).toBeInTheDocument();
+
+    const rowReview = within(row).getByRole("button", { name: "Review" });
+    const rowRemove = within(row).getByRole("button", {
+      name: "Review and remove from Activity",
+    });
+    expect(rowReview).toHaveTextContent("");
+    expect(rowRemove).toHaveTextContent("");
+
+    fireEvent.click(rowReview);
+    expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
+      type: "acknowledge_session",
+      sessionKey: "inactive-run",
+    }));
+    expect(onDetachFromCanvas).not.toHaveBeenCalled();
+
+    fireEvent.click(rowRemove);
+    expect(onDetachFromCanvas).toHaveBeenCalledWith("inactive-run");
+    expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
+      type: "dismiss_session",
+      sessionKey: "inactive-run",
+    }));
   });
 
   it("dismisses a non-canonical work-item session via the session envelope", () => {
@@ -422,6 +571,60 @@ describe("ActivityView", () => {
     });
   });
 
+  it("presents count-free bulk actions side by side with the individual-card icons", () => {
+    render(
+      <ActivityView
+        sessions={[
+          session({
+            sessionKey: "retained",
+            taskName: "Interrupted work",
+            status: "inactive",
+            reviewLifecycle: {
+              ...completeLifecycle,
+              reviewState: "interrupted_to_review",
+              acknowledgedAt: null,
+              dismissedAt: null,
+            },
+          }),
+          session({ sessionKey: "open", taskName: "Open work" }),
+          session({
+            sessionKey: "dismissed",
+            taskName: "Dismissed work",
+            reviewLifecycle: { ...completeLifecycle, dismissedAt: 20 },
+          }),
+        ]}
+        nodes={[]}
+        {...noop}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^all$/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /select interrupted work/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /select open work/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /select dismissed work/i }));
+
+    const bulk = screen.getByRole("toolbar", { name: /bulk actions/i });
+    const actions = within(bulk).getByRole("group", { name: /selected activity actions/i });
+    const review = within(actions).getByRole("button", { name: /^review 1$/i });
+    const remove = within(actions).getByRole("button", {
+      name: /review and remove 1 from activity/i,
+    });
+    const dismiss = within(actions).getByRole("button", { name: /^dismiss 1$/i });
+    const restore = within(actions).getByRole("button", { name: /^restore 1$/i });
+
+    expect(review).toHaveTextContent("Review and keep in Activity");
+    expect(review.querySelector(".lucide-check")).toBeInTheDocument();
+    expect(remove).toHaveTextContent("Review and remove");
+    expect(remove.querySelector(".lucide-list-x")).toBeInTheDocument();
+    expect(dismiss).toHaveTextContent("Dismiss");
+    expect(dismiss.querySelector(".lucide-x")).toBeInTheDocument();
+    expect(restore).toHaveTextContent("Restore");
+    expect(restore.querySelector(".lucide-rotate-ccw")).toBeInTheDocument();
+    expect(actions.querySelector("strong")).not.toBeInTheDocument();
+    expect(actions).toHaveClass("act-bulk-actions");
+    expect(within(bulk).getByRole("button", { name: /clear selection/i })).toBeInTheDocument();
+  });
+
   describe("lifecycle action failures", () => {
     function makeSubscribe() {
       const handlers: Array<(msg: unknown) => void> = [];
@@ -533,6 +736,62 @@ describe("ActivityView", () => {
     });
   });
 
+  it("starts a new iteration for a non-canonical work-item session via send_message", () => {
+    const socketSend = vi.fn();
+    const onPromptWorkItem = vi.fn();
+    const props = {
+      nodes: [],
+      ...noop,
+      socketSend,
+      onPromptWorkItem,
+    };
+    const { rerender } = render(
+      <ActivityView
+        sessions={[session({
+          sessionKey: "existing-agent",
+          workItemId: "unloaded-work-item",
+          canonicalWorkItem: false,
+          status: "inactive",
+          taskName: "Existing agent",
+        })]}
+        {...props}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /existing agent/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: /reply or steer/i }), {
+      target: { value: "Start another iteration." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+
+    expect(socketSend).toHaveBeenCalledWith({
+      type: "send_message",
+      sessionKey: "existing-agent",
+      prompt: "Start another iteration.",
+    });
+    expect(onPromptWorkItem).not.toHaveBeenCalled();
+
+    rerender(
+      <ActivityView
+        sessions={[session({
+          sessionKey: "next-iteration",
+          workItemId: "unloaded-work-item",
+          canonicalWorkItem: true,
+          status: "running",
+          taskName: "Existing agent",
+        })]}
+        {...props}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /existing agent/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("complementary", { name: /session details/i }))
+      .toHaveTextContent("Existing agent");
+  });
+
   it("routes canonical initiation through the conflict-recovering work-item client", () => {
     const socketSend = vi.fn();
     const onPromptWorkItem = vi.fn();
@@ -603,7 +862,7 @@ describe("ActivityView", () => {
     expect(onLaunchLeader).toHaveBeenCalledTimes(1);
   });
 
-  it("auto-opens a responsive, modal-free launch composer in the empty state", () => {
+  it("auto-opens a compact launch composer with settings available in one panel", () => {
     const draft = leaderNode("", [], { sessionKey: null, status: "disconnected" });
     const onUpdateNodeData = vi.fn();
     render(
@@ -620,13 +879,21 @@ describe("ActivityView", () => {
     // The empty state embeds the full composer with zero extra clicks.
     expect(screen.getByRole("region", { name: /add an agent/i })).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Describe your project goal...")).toBeInTheDocument();
-    expect(screen.getByRole("complementary", { name: /run setup/i })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: /model/i })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: /permissions/i })).toBeInTheDocument();
+    const setup = screen.getByRole("complementary", { name: /run setup/i });
+    expect(setup.querySelector("details")).toBeNull();
+    expect(within(setup).getByText("Run configuration")).toBeVisible();
+    expect(within(setup).getByLabelText("Configured settings")).toHaveTextContent(/opus/i);
+    expect(within(setup).getByLabelText("Configured settings")).toHaveTextContent(/auto/i);
+    expect(within(setup).getByLabelText("Configured settings")).toHaveTextContent(/shared/i);
+    expect(within(setup).getByLabelText("Configured settings")).toHaveTextContent(/0 skills/i);
+    expect(within(setup).getByRole("combobox", { name: /model/i })).toBeVisible();
+    expect(within(setup).getByRole("combobox", { name: /permissions/i })).toBeVisible();
+    expect(within(setup).getByRole("checkbox", { name: /isolated worktree/i })).toBeVisible();
+    expect(within(setup).getByText("Skills")).toBeVisible();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /launch workspace open/i })).toBeDisabled();
 
-    fireEvent.click(screen.getByRole("checkbox", { name: /isolated worktree/i }));
+    fireEvent.click(within(setup).getByRole("checkbox", { name: /isolated worktree/i }));
     expect(onUpdateNodeData).toHaveBeenLastCalledWith(
       draft.id,
       expect.objectContaining({ worktreeIsolation: true }),
@@ -758,7 +1025,7 @@ describe("ActivityView", () => {
     expect(onOpenInCanvas).toHaveBeenCalledWith("node-prior");
   });
 
-  it("previews recent work in the filtered-empty state and attaches node-less sessions", () => {
+  it("opens node-less recent work in Activity without attaching it to the canvas", () => {
     const onAttachToCanvas = vi.fn();
     render(
       <ActivityView
@@ -778,7 +1045,9 @@ describe("ActivityView", () => {
 
     const recent = screen.getByRole("region", { name: /recent agent work/i });
     fireEvent.click(within(recent).getByRole("button", { name: /quiet agent/i }));
-    expect(onAttachToCanvas).toHaveBeenCalledWith("idle-1");
+    expect(screen.getByRole("complementary", { name: /session details/i }))
+      .toHaveTextContent("Quiet agent");
+    expect(onAttachToCanvas).not.toHaveBeenCalled();
   });
 
   it("groups sessions Active → Idle → Stopped and excludes minions from the count", () => {
@@ -803,6 +1072,96 @@ describe("ActivityView", () => {
     ]);
     expect(screen.queryByText("Minion")).not.toBeInTheDocument();
     expect(container.querySelector(".act-header-count")?.textContent).toBe("3");
+  });
+
+  it("makes running and idle cards state-led instead of telemetry-led", () => {
+    render(
+      <ActivityView
+        sessions={[
+          session({
+            sessionKey: "run",
+            role: "leader",
+            status: "running",
+            taskName: "Dependency audit",
+            lastActivity: "Checking production licenses and release constraints.",
+            lastActivityAt: Date.now() - 60_000,
+            totalCost: 7.25,
+            turns: 18,
+            model: "internal-debug-model",
+            activeMinions: [
+              {
+                taskId: "licenses",
+                title: "Check licenses",
+                status: "running",
+                sessionKey: "minion-licenses",
+              },
+              {
+                taskId: "docs",
+                title: "Read docs",
+                status: "planned",
+                sessionKey: "minion-docs",
+              },
+            ],
+          }),
+          session({
+            sessionKey: "idle",
+            status: "idle",
+            taskName: "Release notes",
+          }),
+        ]}
+        nodes={[]}
+        {...noop}
+      />,
+    );
+
+    const activeCard = within(screen.getByRole("region", { name: /^active$/i }))
+      .getByRole("button", { name: /dependency audit/i });
+    expect(activeCard).toHaveTextContent("Working now");
+    expect(activeCard).toHaveTextContent("Checking production licenses");
+    expect(activeCard).toHaveTextContent("Updated 1m ago");
+    expect(activeCard).toHaveTextContent("1 minion working");
+    expect(activeCard).not.toHaveTextContent("$7.25");
+    expect(activeCard).not.toHaveTextContent("18 turns");
+    expect(activeCard).not.toHaveTextContent("internal-debug-model");
+
+    const idleCard = within(screen.getByRole("region", { name: /^idle$/i }))
+      .getByRole("button", { name: /release notes/i });
+    expect(idleCard).toHaveTextContent("Ready for input");
+    expect(idleCard).toHaveTextContent("No recent activity");
+    expect(idleCard).not.toHaveTextContent("/tmp/project");
+    expect(idleCard).not.toHaveTextContent("idle");
+  });
+
+  it("removes generic activity echoes and labels paused work clearly", () => {
+    render(
+      <ActivityView
+        sessions={[
+          session({
+            sessionKey: "run",
+            status: "running",
+            taskName: "Live work",
+            lastActivity: "Working",
+          }),
+          session({
+            sessionKey: "paused",
+            status: "inactive",
+            taskName: "Paused work",
+            lastActivity: "Inactive",
+          }),
+        ]}
+        nodes={[]}
+        {...noop}
+      />,
+    );
+
+    const runningCard = within(screen.getByRole("region", { name: /^active$/i }))
+      .getByRole("button", { name: /live work/i });
+    expect(runningCard.querySelector(".act-card-activity")).toBeNull();
+
+    const pausedCard = within(screen.getByRole("region", { name: /^idle$/i }))
+      .getByRole("button", { name: /paused work/i });
+    expect(pausedCard).toHaveTextContent("Paused");
+    expect(pausedCard.querySelector(".act-card-activity")).toBeNull();
   });
 
   it("pins errors, waiting sessions, and reviewable changes in Needs you", () => {
@@ -927,6 +1286,57 @@ describe("ActivityView", () => {
     expect(within(inspector).getByText("claude-opus-4-8")).toBeInTheDocument();
   });
 
+  it("keeps conversation visible while switching the supporting context tabs", () => {
+    const messages: DisplayMessage[] = [
+      { id: "u1", role: "user", content: "Keep the migration safe.", timestamp: 1 },
+      { id: "a1", role: "assistant", content: "I am verifying each step.", timestamp: 2 },
+    ];
+    render(
+      <ActivityView
+        sessions={[session({
+          sessionKey: "done",
+          status: "idle",
+          role: "leader",
+          taskName: "Review the release",
+          reviewLifecycle: completeLifecycle,
+          activeMinions: [{
+            taskId: "verify-release",
+            title: "Verify release",
+            status: "running",
+            sessionKey: "minion-1",
+          }],
+          renderState: {
+            layout: { title: "Release status", columns: 1 },
+            components: [{ id: "status", type: "text", content: "Dashboard online" }],
+          },
+        })]}
+        nodes={[leaderNode("done", messages)]}
+        {...noop}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /review the release/i }));
+    const inspector = screen.getByRole("complementary", { name: /session details/i });
+    const conversation = within(inspector).getByRole("main", { name: /^conversation$/i });
+    const tabs = within(inspector).getByRole("tablist", { name: /leader context views/i });
+    expect(within(inspector).queryByText("History and steering")).not.toBeInTheDocument();
+    expect(within(inspector).queryByText(/complete transcript stays in view/i))
+      .not.toBeInTheDocument();
+    expect(within(tabs).getByRole("tab", { name: /dashboard/i }))
+      .toHaveAttribute("aria-selected", "true");
+    expect(within(inspector).getByText("Dashboard online")).toBeInTheDocument();
+    expect(within(conversation).getByText("Keep the migration safe.")).toBeInTheDocument();
+
+    fireEvent.click(within(tabs).getByRole("tab", { name: /minions/i }));
+    expect(within(inspector).getByText("Verify release")).toBeInTheDocument();
+    expect(within(conversation).getByText("I am verifying each step.")).toBeInTheDocument();
+
+    fireEvent.click(within(tabs).getByRole("tab", { name: /session/i }));
+    expect(within(inspector).getByText(/implemented the migration/i)).toBeInTheDocument();
+    expect(within(conversation).getByRole("textbox", { name: /reply or steer/i }))
+      .toBeInTheDocument();
+  });
+
   it("enables node actions and fires them with the node id when a canvas node exists", () => {
     const onOpenInCanvas = vi.fn();
     const onExpandFullscreen = vi.fn();
@@ -956,7 +1366,7 @@ describe("ActivityView", () => {
     expect(onOpenInCanvas).toHaveBeenCalledWith("node-run");
   });
 
-  it("offers Attach to canvas (not disabled node actions) when the session has no canvas node", () => {
+  it("offers optional canvas placement when the session has no canvas node", () => {
     const onAttachToCanvas = vi.fn();
     render(
       <ActivityView
@@ -968,17 +1378,85 @@ describe("ActivityView", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /from phone/i }));
-    // The canvas-node actions are absent; an enabled Attach action stands in.
+    // The canvas-node actions are absent; placement remains an optional action.
     expect(screen.queryByRole("button", { name: /expand fullscreen/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /open in canvas/i })).not.toBeInTheDocument();
 
-    const attachBtn = screen.getByRole("button", { name: /attach to canvas/i });
+    const attachBtn = screen.getByRole("button", { name: /add to canvas/i });
     expect(attachBtn).toBeEnabled();
     fireEvent.click(attachBtn);
     expect(onAttachToCanvas).toHaveBeenCalledWith("mobile-run");
   });
 
-  it("hides Attach to canvas once the session has a canvas node", () => {
+  it("loads and follows a node-less session transcript by session key", async () => {
+    const socketSend = vi.fn();
+    const listeners = new Set<(message: unknown) => void>();
+    const socketSubscribe = ((
+      topicOrListener: string | ((message: unknown) => void),
+      maybeListener?: (message: unknown) => void,
+    ) => {
+      const listener = typeof topicOrListener === "function"
+        ? topicOrListener
+        : maybeListener!;
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }) as SocketSubscribe;
+    Object.defineProperty(socketSubscribe, "supportsTopics", { value: true });
+
+    render(
+      <ActivityView
+        sessions={[session({
+          sessionKey: "server-only",
+          status: "running",
+          taskName: "Server-owned session",
+        })]}
+        nodes={[]}
+        {...noop}
+        socketSend={socketSend}
+        socketSubscribe={socketSubscribe}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /server-owned session/i }));
+    await waitFor(() => {
+      expect(socketSend).toHaveBeenCalledWith({
+        type: "sync_session",
+        sessionKey: "server-only",
+      });
+    });
+
+    act(() => {
+      for (const listener of listeners) {
+        listener({
+          type: "sync_response",
+          sessionKey: "server-only",
+          found: true,
+          status: "running",
+          events: [{
+            type: "sdk_event",
+            sessionKey: "server-only",
+            timestamp: 1,
+            event: { kind: "text", role: "assistant", text: "Loaded from the server." },
+          }],
+        });
+      }
+    });
+    expect(screen.getByText("Loaded from the server.")).toBeInTheDocument();
+
+    act(() => {
+      for (const listener of listeners) {
+        listener({
+          type: "sdk_event",
+          sessionKey: "server-only",
+          event: { kind: "text", role: "assistant", text: "Still updating live." },
+        });
+      }
+    });
+    expect(screen.getByText("Still updating live.")).toBeInTheDocument();
+    expect(screen.queryByText(/attach this session/i)).not.toBeInTheDocument();
+  });
+
+  it("hides Add to canvas once the session has a canvas node", () => {
     render(
       <ActivityView
         sessions={[session({ sessionKey: "run", status: "running", taskName: "Has node" })]}
@@ -988,7 +1466,7 @@ describe("ActivityView", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /has node/i }));
-    expect(screen.queryByRole("button", { name: /attach to canvas/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /add to canvas/i })).not.toBeInTheDocument();
   });
 
   it("only enables Stop for a running session and reports its session key", () => {

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
 import { initDb } from "./db.ts";
 import { ensureWorkItemSchema } from "./work-item-schema.ts";
-import { createWorkItem, getWorkItem, startWorkItemIteration } from "./work-item-repo.ts";
+import { createWorkItem, startWorkItemIteration } from "./work-item-repo.ts";
 import { attachWorkItemBinding } from "./work-item-binding-repo.ts";
 import { auditAndRepairCanvasBindings } from "./work-item-repair.ts";
 import { auditAndRepairContributionWorktrees } from "./work-item-repair.ts";
@@ -15,11 +15,9 @@ describe("work-item repair tooling", () => {
 
   it("dry-runs, repairs only definitive orphans, and is idempotent", () => {
     createWorkItem(db, { id: "work-1", projectId: "project-1", projectPath: "/repo",
-      title: "Task", changeMode: "live", workflowRank: "a", at: 1 });
+      title: "Task", changeMode: "live", at: 1 });
     attachWorkItemBinding(db, { workItemId: "work-1", surface: "canvas",
       bindingId: "missing-node", at: 2 });
-    db.prepare("UPDATE work_items SET kanban_json=? WHERE id='work-1'")
-      .run(JSON.stringify({ leaderNodeId: "missing-node" }));
     const inspect = () => false;
 
     expect(auditAndRepairCanvasBindings({ db, inspect })).toEqual([expect.objectContaining({
@@ -28,12 +26,11 @@ describe("work-item repair tooling", () => {
     expect(auditAndRepairCanvasBindings({ db, inspect, repair: true, at: 3 }))
       .toEqual([expect.objectContaining({ repaired: true })]);
     expect(auditAndRepairCanvasBindings({ db, inspect, repair: true, at: 4 })).toEqual([]);
-    expect(JSON.parse(getWorkItem(db, "work-1")!.kanban_json).leaderNodeId).toBeNull();
   });
 
   it("reports an unavailable project without guessing or detaching", () => {
     createWorkItem(db, { id: "work-1", projectId: "project-1", projectPath: "/offline",
-      title: "Task", changeMode: "live", workflowRank: "a", at: 1 });
+      title: "Task", changeMode: "live", at: 1 });
     attachWorkItemBinding(db, { workItemId: "work-1", surface: "canvas", bindingId: "node", at: 2 });
     expect(auditAndRepairCanvasBindings({ db, inspect: () => null, repair: true }))
       .toEqual([expect.objectContaining({ code: "unverifiable_canvas_binding", repaired: false })]);
@@ -41,7 +38,7 @@ describe("work-item repair tooling", () => {
 
   it("reports missing active paths and safely closes missing eligible cleanup records", () => {
     createWorkItem(db, { id: "work-1", projectId: "project-1", projectPath: "/repo",
-      title: "Task", changeMode: "worktree", workflowRank: "a", at: 1 });
+      title: "Task", changeMode: "worktree", at: 1 });
     db.prepare(`INSERT INTO worktree_lineages (id,project_id,repository_path,target_ref,base_sha,
       integration_ref,integration_worktree_path,created_at,updated_at)
       VALUES ('lineage','project-1','/repo','refs/heads/main','base','refs/heads/integration','/wt/i',1,1)`).run();
@@ -61,7 +58,7 @@ describe("work-item repair tooling", () => {
   it("dry-runs and seals orphaned canonical runs while preserving live runs", () => {
     for (const id of ["orphan", "live"]) {
       createWorkItem(db, { id, projectId: "project-1", projectPath: "/repo",
-        title: id, changeMode: "live", workflowRank: id, at: 1 });
+        title: id, changeMode: "live", at: 1 });
       startWorkItemIteration(db, { workItemId: id, runKey: `run-${id}`,
         idempotencyKey: `start-${id}`, expectedLifecycleRevision: 0,
         expectedCurrentRunKey: null, at: 2 });

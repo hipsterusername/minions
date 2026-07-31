@@ -6,7 +6,7 @@
    structural look-and-feel. */
 
 :root[data-theme="blueprint"] {
-  --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Space Grotesk Variable", "Segoe UI", system-ui, sans-serif;
   --radius-node: 0px;
   --radius-panel: 0px;
   --radius-control: 0px;

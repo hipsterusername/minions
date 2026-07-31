@@ -1,6 +1,9 @@
 import type Database from "better-sqlite3";
 import type { Outcome } from "../shared/work-item-lifecycle.ts";
-import { persistRunReport } from "./work-item-report-repo.ts";
+import {
+  mergeSealedRunReport,
+  persistOptionalRunReport,
+} from "./work-item-terminal-report.ts";
 import {
   WorkItemConflictError,
   getWorkItem,
@@ -42,29 +45,23 @@ export function sealChildWorkItemRun(db: Database.Database, input: {
   workItemId: string; runKey: string; outcome: Exclude<Outcome, "none">;
   finalReportEventId?: string | null; finalReport?: string | null; at: number;
 }): { run: WorkItemRunRow; idempotent: boolean } {
-  if (input.outcome === "completed"
-    && (!input.finalReportEventId?.trim() || !input.finalReport?.trim())) {
-    throw new Error("completed child runs require a durable final report event and content");
-  }
   return db.transaction(() => {
-    if (input.outcome === "completed") persistRunReport(db, { id: input.finalReportEventId!,
-      workItemId: input.workItemId, runKey: input.runKey, text: input.finalReport!, at: input.at });
     const run = getWorkItemRun(db, input.runKey);
     if (!run || run.work_item_id !== input.workItemId || run.run_kind !== "child") {
       throw new WorkItemConflictError("child run does not belong to work item", getWorkItem(db, input.workItemId));
     }
-    const effective = input.outcome === "completed" && !input.finalReportEventId ? "interrupted" : input.outcome;
     if (run.ended_at !== null) {
-      if (run.run_outcome !== effective || run.final_report_event_id !== (input.finalReportEventId ?? null)
-        || run.final_report !== (input.finalReport ?? null)) {
-        throw new Error("terminal child run outcome and report are immutable");
+      const merge = mergeSealedRunReport(db, { existingRun: run, ...input });
+      if (merge.changed) {
+        return { run: getWorkItemRun(db, input.runKey)!, idempotent: false };
       }
       return { run, idempotent: true };
     }
+    persistOptionalRunReport(db, input);
     const changed = db.prepare(`UPDATE sessions SET ended_at = ?, run_outcome = ?,
       final_report_event_id = ?, final_report = ?, updated_at = ?
       WHERE session_key = ? AND ended_at IS NULL AND run_kind = 'child'`)
-      .run(input.at, effective, input.finalReportEventId ?? null, input.finalReport ?? null,
+      .run(input.at, input.outcome, input.finalReportEventId ?? null, input.finalReport ?? null,
         new Date(input.at).toISOString(), input.runKey);
     if (changed.changes !== 1) throw new Error("child run was concurrently sealed");
     return { run: getWorkItemRun(db, input.runKey)!, idempotent: false };

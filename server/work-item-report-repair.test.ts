@@ -48,7 +48,7 @@ describe("repairCompletedRunsWithoutReports", () => {
     ensureWorkItemSchema(db);
   });
 
-  it("downgrades previously persisted completion without a final report", () => {
+  it("preserves a completed run when no report was produced", () => {
     insertLegacy(db, {
       key: "broken-complete", status: "idle",
       reviewState: "completion_to_review", finalReport: "Was present",
@@ -58,16 +58,15 @@ describe("repairCompletedRunsWithoutReports", () => {
     db.prepare("UPDATE sessions SET final_report = NULL WHERE session_key = ?")
       .run("broken-complete");
 
-    expect(repairCompletedRunsWithoutReports(db, 200))
-      .toEqual(["broken-complete"]);
+    expect(repairCompletedRunsWithoutReports(db, 200)).toEqual([]);
     expect(db.prepare(`SELECT run_outcome, final_report, review_state
       FROM sessions WHERE session_key = ?`).get("broken-complete")).toEqual({
-      run_outcome: "interrupted", final_report: null,
-      review_state: "interrupted_to_review",
+      run_outcome: "completed", final_report: null,
+      review_state: "completion_to_review",
     });
     expect(db.prepare(`SELECT runtime_state, outcome FROM work_items
       WHERE id = ?`).get(legacyWorkItemId("broken-complete"))).toEqual({
-      runtime_state: "inactive", outcome: "interrupted",
+      runtime_state: "inactive", outcome: "completed",
     });
     expect(repairCompletedRunsWithoutReports(db, 300)).toEqual([]);
   });
@@ -93,6 +92,66 @@ describe("repairCompletedRunsWithoutReports", () => {
       FROM sessions WHERE session_key = 'recoverable-complete'`).get()).toEqual({
       run_outcome: "completed", final_report_event_id: "report-1",
       final_report: "Durable result",
+    });
+    expect(db.prepare("SELECT outcome FROM work_items WHERE id = ?")
+      .get(workItemId)).toEqual({ outcome: "completed" });
+  });
+
+  it("upgrades the former downgrade when clean terminal evidence is already persisted", () => {
+    insertLegacy(db, {
+      key: "clean-no-report", status: "idle",
+      reviewState: "completion_to_review", finalReport: "Initially present",
+      terminalReason: "completed", terminalAt: 50,
+    });
+    backfillLegacyWorkItems(db, 100);
+    const workItemId = legacyWorkItemId("clean-no-report");
+    db.prepare(`UPDATE sessions SET run_outcome = 'interrupted',
+      review_state = 'interrupted_to_review',
+      review_reason = 'Session became inactive without a final report',
+      final_report = NULL, final_report_event_id = NULL
+      WHERE session_key = 'clean-no-report'`).run();
+    db.prepare(`UPDATE work_items SET outcome = 'interrupted'
+      WHERE id = ?`).run(workItemId);
+
+    expect(repairCompletedRunsWithoutReports(db, 200)).toEqual(["clean-no-report"]);
+    expect(db.prepare(`SELECT run_outcome, final_report, review_state, review_reason
+      FROM sessions WHERE session_key = 'clean-no-report'`).get()).toEqual({
+      run_outcome: "completed",
+      final_report: null,
+      review_state: "completion_to_review",
+      review_reason: "Review the completed session",
+    });
+    expect(db.prepare("SELECT outcome FROM work_items WHERE id = ?")
+      .get(workItemId)).toEqual({ outcome: "completed" });
+  });
+
+  it("upgrades a former missing-report interruption when its report becomes durable", () => {
+    insertLegacy(db, {
+      key: "late-report", status: "idle",
+      reviewState: "completion_to_review", finalReport: "Initially present",
+      terminalReason: "completed", terminalAt: 50,
+    });
+    backfillLegacyWorkItems(db, 100);
+    const workItemId = legacyWorkItemId("late-report");
+    db.prepare(`UPDATE sessions SET run_outcome = 'interrupted',
+      review_state = 'interrupted_to_review',
+      review_reason = 'Session became inactive without a final report',
+      final_report = NULL, final_report_event_id = NULL
+      WHERE session_key = 'late-report'`).run();
+    db.prepare(`UPDATE work_items SET outcome = 'interrupted'
+      WHERE id = ?`).run(workItemId);
+    db.prepare(`INSERT INTO work_item_run_reports
+      (id, work_item_id, run_key, report_text, created_at)
+      VALUES ('late-report-event', ?, 'late-report', 'Durable later report', 150)`)
+      .run(workItemId);
+
+    expect(repairCompletedRunsWithoutReports(db, 200)).toEqual(["late-report"]);
+    expect(db.prepare(`SELECT run_outcome, final_report, review_state, terminal_reason
+      FROM sessions WHERE session_key = 'late-report'`).get()).toEqual({
+      run_outcome: "completed",
+      final_report: "Durable later report",
+      review_state: "completion_to_review",
+      terminal_reason: "completed",
     });
     expect(db.prepare("SELECT outcome FROM work_items WHERE id = ?")
       .get(workItemId)).toEqual({ outcome: "completed" });

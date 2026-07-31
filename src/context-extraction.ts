@@ -18,7 +18,7 @@ import { getAttachmentExtractor, getContentExtractor } from "./node-registry.ts"
  *     declares `providesContext: true` in the registry ships one and
  *     the canvas stays oblivious to per-type data shapes. ImageNode
  *     relies on this path to flatten its image + annotations into
- *     context text (Phase 3 of docs/archive/visual-context-plan.md).
+ *     context text.
  *  2. Legacy per-type branches below for the earliest node types
  *     (markdown / file-viewer / note). These will move into the
  *     registry over time.

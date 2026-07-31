@@ -20,7 +20,6 @@
  */
 
 import { z } from "zod/v4";
-import { kanbanCardMetadataSchema, kanbanImportCardSchema } from "../../shared/work-item-kanban.ts";
 import type { SessionRole } from "../session-host.ts";
 import type { WsCommand, WsCommandType } from "./types.ts";
 import { changeModeSchema } from "../../shared/work-item-lifecycle.ts";
@@ -33,7 +32,6 @@ const SESSION_ROLES = [
   "leader",
   "minion",
   "default",
-  "card-composer",
   "dialectic-planner",
 ] as const satisfies readonly SessionRole[];
 
@@ -151,9 +149,6 @@ export const COMMAND_SCHEMAS = {
     projectPath: requiredId,
     title: requiredId,
     changeMode: changeModeSchema,
-    workflowColumnId: requiredId.optional(),
-    workflowRank: requiredId.optional(),
-    cardPatch: kanbanCardMetadataSchema.optional(),
   }),
   continue_work_item: command("continue_work_item", {
     ...mutationFields, workItemId: requiredId, prompt: z.string().min(1),
@@ -202,20 +197,6 @@ export const COMMAND_SCHEMAS = {
   get_work_item_runs: command("get_work_item_runs", {
     workItemId: requiredId, cursor: requiredId.optional(),
     limit: z.number().int().positive().max(100).optional(),
-  }),
-  update_work_item_card: command("update_work_item_card", {
-    requestId: workItemRequestId, workItemId: requiredId,
-    expectedWorkflowRevision: z.number().int().nonnegative(), title: requiredId.optional(),
-    cardPatch: kanbanCardMetadataSchema.partial(),
-  }),
-  move_work_item_card: command("move_work_item_card", {
-    requestId: workItemRequestId, workItemId: requiredId,
-    expectedWorkflowRevision: z.number().int().nonnegative(),
-    columnId: requiredId, targetIndex: z.number().int().nonnegative(),
-  }),
-  import_kanban_board: command("import_kanban_board", {
-    requestId: workItemRequestId, projectId: requiredId, projectPath: requiredId,
-    migrationKey: requiredId, cards: z.array(kanbanImportCardSchema).max(5000),
   }),
   create_worktree_lineage: command("create_worktree_lineage", {
     requestId: workItemRequestId, workItemId: requiredId, targetBranch: requiredId.optional(),

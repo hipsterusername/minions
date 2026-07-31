@@ -1,7 +1,7 @@
 id: capability.runtime_configuration
 type: capability
 name: Runtime configuration
-summary: Users can choose compatible harness, model, thinking, permission, and isolation settings at project, card, launch, or live-session scope.
+summary: Users can choose compatible harness, model, thinking, permission, and isolation settings at project, launch, or live-session scope.
 constraints: []
 decisions: [ decision.role_gated_agent_tools ]
 suggested_files: [ src/SettingsMenu.tsx, src/components/SessionToolbar.tsx, src/mobile/SettingsScreen.tsx, src/mobile/LaunchScreen.tsx, server/commands/list-harnesses.ts ]
@@ -13,11 +13,6 @@ entry_points:
     files: [ src/SettingsMenu.tsx, src/components/SessionToolbar.tsx, src/nodes/LeaderNode.tsx ]
     tests: [ src/SettingsMenu.test.tsx, src/components/SessionToolbar.test.tsx, src/nodes/LeaderNode.test.tsx ]
     flows: [ flow.configure_runtime, flow.launch_leader, flow.steer_session ]
-  - surface: surface.kanban
-    summary: Store per-card launch configuration and change mode.
-    files: [ src/KanbanBoard.tsx ]
-    tests: [ src/KanbanBoard.test.tsx ]
-    flows: [ flow.configure_runtime, flow.launch_or_resume_card ]
   - surface: surface.mobile
     summary: Set mobile defaults and per-launch harness, model, permission, and isolation choices.
     files: [ src/mobile/SettingsScreen.tsx, src/mobile/LaunchScreen.tsx, src/mobile/launch-models.ts ]
@@ -38,6 +33,4 @@ bridges:
     reason: Runtime settings are applied when the execution-lifecycle leader launch flow creates a host.
   - to: flow.steer_session
     reason: Runtime controls affect follow-up behavior owned by the execution-lifecycle steering flow.
-  - to: flow.launch_or_resume_card
-    reason: Kanban runtime settings feed the execution-lifecycle canonical card launch flow.
 risks: []

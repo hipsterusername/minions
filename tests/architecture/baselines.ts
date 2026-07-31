@@ -6,8 +6,6 @@
  * targets to grow. Each entry should *shrink* over the course of the
  * refactor; when a phase finishes, ratchet the corresponding number
  * downward.
- *
- * Refactor outcomes are summarized in `docs/archive/phase-5-complete.md`.
  */
 
 /**

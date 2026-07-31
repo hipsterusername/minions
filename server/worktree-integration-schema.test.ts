@@ -8,7 +8,7 @@ describe("worktree integration additive migration", () => {
   it("upgrades an earlier Phase4 shape idempotently", () => {
     const db = initDb(":memory:"); ensureWorkItemSchema(db);
     createWorkItem(db, { id: "work", projectId: "project", projectPath: "/repo",
-      title: "Legacy", changeMode: "worktree", workflowRank: "a", at: 1 });
+      title: "Legacy", changeMode: "worktree", at: 1 });
     db.exec(`
       CREATE TABLE worktree_lineages (id TEXT PRIMARY KEY,repository_path TEXT NOT NULL,
         target_ref TEXT NOT NULL,base_sha TEXT NOT NULL,status TEXT NOT NULL,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);

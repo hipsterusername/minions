@@ -6,9 +6,7 @@
  * should land on, so the choice is unit-testable and the composition root
  * (`main.tsx`) stays a thin boundary that just reads `window` and acts.
  *
- * Policy (matches docs/mobile-concept.md §"Shell strategy" and
- * docs/mobile-experience-spec.md §9.1 — "device-detected auto-redirect to
- * `/m`, with a manual escape hatch"):
+ * Policy: device-detected auto-redirect to `/m`, with a manual escape hatch.
  *   - An explicit `/m*` path is always the mobile app.
  *   - An explicit user preference (`?view=mobile|desktop`, persisted) wins next.
  *   - Otherwise small viewports (≤ breakpoint) default to mobile, large ones

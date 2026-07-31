@@ -304,7 +304,6 @@ describe("SessionPanel attached / unattached grouping", () => {
         "running-1",
         "error-1",
         "minion-1",
-        "composer-1",
       ]),
     });
 
@@ -314,7 +313,6 @@ describe("SessionPanel attached / unattached grouping", () => {
       session({ sessionKey: "running-1", status: "running", taskName: "Running" }),
       session({ sessionKey: "error-1", status: "error", taskName: "Error" }),
       session({ sessionKey: "minion-1", status: "idle", role: "minion" }),
-      session({ sessionKey: "composer-1", status: "stopped", role: "card-composer" }),
     ]);
 
     fireEvent.click(

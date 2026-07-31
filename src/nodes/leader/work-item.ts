@@ -76,8 +76,9 @@ export function selectCanvasWorkItem(snapshot: WorkItemSnapshot | null | undefin
     : snapshot.lifecycle.runtimeState === "working" ? "running"
     : snapshot.lifecycle.outcome === "completed" ? "completed"
     : snapshot.lifecycle.outcome === "error" ? "error"
-    : snapshot.lifecycle.outcome === "interrupted" || snapshot.lifecycle.outcome === "stopped"
-      ? "stopped" : "idle";
+    : snapshot.lifecycle.outcome === "interrupted" ? "inactive"
+    : snapshot.lifecycle.outcome === "stopped" ? "stopped"
+    : "idle";
   const worktreeStatus = snapshot.lifecycle.integrationState === "worktree_integrating"
     || snapshot.lifecycle.integrationState === "worktree_queued" ? "merging"
     : snapshot.lifecycle.integrationState === "worktree_integrated" ? "merged"
@@ -126,5 +127,6 @@ export function canvasDetachCommand(data: CanvasWorkItemFields, bindingId: strin
 export function formatCanvasWorkItemStatus(snapshot: WorkItemSnapshot | null | undefined,
   awareness: LiveEditAwareness | undefined): string | null {
   const view = selectCanvasWorkItem(snapshot); if (!view) return null;
-  return formatCoordinatedLabel(view.presentation.label, awareness);
+  const label = view.status === "inactive" ? "Inactive" : view.presentation.label;
+  return formatCoordinatedLabel(label, awareness);
 }

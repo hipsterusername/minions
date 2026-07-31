@@ -105,6 +105,40 @@ describe("selectRecentAgentWork", () => {
     expect(result[0]?.snippet).toBe("Shipped the fix.");
   });
 
+  it("uses the latest non-blank user or assistant message from a node transcript", () => {
+    const result = selectRecentAgentWork(
+      [],
+      [
+        leaderNode("node-1", {
+          taskName: "Transcript",
+          messages: [
+            msg("assistant", "Earlier response", 1),
+            msg("user", "  Latest   useful\nrequest  ", 2),
+            msg("assistant", "   ", 3),
+            msg("tool", "internal tool output", 4),
+          ],
+        }),
+      ],
+    );
+
+    expect(result[0]).toMatchObject({
+      snippet: "Latest useful request",
+      lastActivityAt: 2,
+    });
+  });
+
+  it("ignores non-leader canvas nodes even when their data resembles prior work", () => {
+    const minion = {
+      ...leaderNode("minion-1", {
+        taskName: "Should not surface",
+        messages: [msg("assistant", "Finished", 2)],
+      }),
+      type: "minion",
+    };
+
+    expect(selectRecentAgentWork([], [minion])).toEqual([]);
+  });
+
   it("surfaces canvas leader nodes when no live session backs them", () => {
     const result = selectRecentAgentWork(
       [],
@@ -118,12 +152,29 @@ describe("selectRecentAgentWork", () => {
     );
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
+      key: "gone",
       title: "Prior work",
       snippet: "Done: migrated the schema.",
       nodeId: "node-1",
-      sessionKey: "gone",
+      sessionKey: null,
       status: null,
       lastActivityAt: 2,
+    });
+  });
+
+  it("labels transcript-only nodes without a task name and keeps them clickable", () => {
+    const result = selectRecentAgentWork(
+      [],
+      [leaderNode("node-untitled", {
+        messages: [msg("assistant", "Recovered work", 3)],
+      })],
+    );
+
+    expect(result[0]).toMatchObject({
+      key: "node-untitled",
+      title: "Untitled agent",
+      snippet: "Recovered work",
+      nodeId: "node-untitled",
     });
   });
 
@@ -158,5 +209,31 @@ describe("selectRecentAgentWork", () => {
     );
     expect(result[0]?.snippet.length).toBeLessThanOrEqual(160);
     expect(result[0]?.snippet.endsWith("…")).toBe(true);
+  });
+
+  it("falls through blank report and activity fields to the session path", () => {
+    const result = selectRecentAgentWork(
+      [
+        session({
+          cwd: "/tmp/fallback",
+          lastActivity: "  ",
+          reviewLifecycle: {
+            reviewState: "completion_to_review",
+            reviewReason: "review",
+            finalReport: "  ",
+            finalDashboardRevision: 1,
+            dashboardRevision: 1,
+            terminalReason: "completed",
+            terminalAt: 1,
+            acknowledgedAt: null,
+            dismissedAt: null,
+            lifecycleRevision: 1,
+          },
+        }),
+      ],
+      [],
+    );
+
+    expect(result[0]?.snippet).toBe("/tmp/fallback");
   });
 });

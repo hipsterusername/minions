@@ -25,7 +25,6 @@ function seedRun(db: Database.Database, runKey = "run-1"): void {
     projectPath: "/tmp",
     title: "Recovery",
     changeMode: "live",
-    workflowRank: "a",
     at: 10,
   });
   startWorkItemIteration(db, {

@@ -4,6 +4,7 @@ import type {
   SessionHostDeps,
   StartSessionOptions,
 } from "./session-host.ts";
+import { serverLogger } from "./logging.ts";
 import type { TaskRecord } from "./task-tools.ts";
 import { isTerminalTaskStatus } from "./task-lifecycle.ts";
 
@@ -12,6 +13,7 @@ export const MIN_WAKE_RESUME_INTERVAL_MS = 15_000;
 export const WAKE_DIGEST_EXCERPT_CHARS = 300;
 
 const TRUNCATION_MARKER = "…[truncated]";
+const log = serverLogger.child("wake-coalescer");
 
 export interface CoalescedWakeRequest {
   opts: StartSessionOptions;
@@ -152,8 +154,26 @@ function deliverWake(
         ].join("\n").trim();
 
   if (host.workItemId && host.runKind === "primary" && deps.resumeWorkItemRun) {
-    void deps.resumeWorkItemRun({ workItemId: host.workItemId, runKey: host.runKey,
-      prompt, requestId: `wake:${host.runKey}:${randomUUID()}` });
+    const workItemId = host.workItemId;
+    try {
+      const resume = deps.resumeWorkItemRun({ workItemId, runKey: host.runKey,
+        prompt, requestId: `wake:${host.runKey}:${randomUUID()}` });
+      void Promise.resolve(resume).catch((error: unknown) => {
+        log.warn("work_item_resume_failed", {
+          sessionKey: host.id,
+          workItemId,
+          runKey: host.runKey,
+          error,
+        });
+      });
+    } catch (error) {
+      log.warn("work_item_resume_failed", {
+        sessionKey: host.id,
+        workItemId,
+        runKey: host.runKey,
+        error,
+      });
+    }
     return;
   }
   deps.startChildSession({

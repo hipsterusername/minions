@@ -5,10 +5,9 @@ import {
   workItemLifecycleSchema,
 } from "./work-item-lifecycle.ts";
 import { liveEditAwarenessSchema } from "./live-edit-coordination.ts";
-import { kanbanCardMetadataSchema } from "./work-item-kanban.ts";
 import { worktreeLineageSnapshotSchema } from "./worktree-integration.ts";
 
-export const workItemBindingSurfaceSchema = z.enum(["canvas", "kanban"]);
+export const workItemBindingSurfaceSchema = z.literal("canvas");
 export const workItemWaitKindSchema = z.enum(["decision", "file_conflict", "other"]);
 
 export const workItemSnapshotSchema = z.object({
@@ -20,10 +19,6 @@ export const workItemSnapshotSchema = z.object({
   waitKind: workItemWaitKindSchema.nullable(),
   currentRunKey: z.string().min(1).nullable(),
   iteration: z.number().int().nonnegative(),
-  workflowColumnId: z.string().min(1),
-  workflowRank: z.string().min(1),
-  workflowRevision: z.number().int().nonnegative(),
-  card: kanbanCardMetadataSchema,
   lastTransitionAt: z.number().int().nonnegative(),
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
@@ -61,9 +56,6 @@ export const workItemRunSnapshotSchema = z.object({
     }
   } else {
     if (run.endedAt === null) ctx.addIssue({ code: "custom", message: "terminal runs require endedAt" });
-    if (run.outcome === "completed" && run.finalReport === null) {
-      ctx.addIssue({ code: "custom", message: "completed runs require finalReport" });
-    }
   }
   if (run.endedAt !== null && run.endedAt < run.startedAt) {
     ctx.addIssue({ code: "custom", message: "endedAt cannot precede startedAt" });
@@ -116,8 +108,6 @@ export const createWorkItemInputSchema = z.object({
   projectPath: z.string().min(1),
   title: z.string().min(1),
   changeMode: changeModeSchema,
-  workflowColumnId: z.string().min(1).optional(),
-  workflowRank: z.string().min(1).optional(),
 });
 
 export type WorkItemSnapshot = z.infer<typeof workItemSnapshotSchema>;

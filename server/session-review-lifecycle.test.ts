@@ -10,15 +10,19 @@ import {
 } from "./session-review-lifecycle.ts";
 
 describe("session review lifecycle", () => {
-  it("requires a final report before classifying a run complete", () => {
+  it("classifies clean completion independently of optional report metadata", () => {
     const initial = { ...initialSessionReviewLifecycle(), dashboardRevision: 4 };
     expect(finishRun(initial, { reason: "completed", report: "Done", at: 10 })).toMatchObject({
       reviewState: "completion_to_review",
       finalReport: "Done",
       finalDashboardRevision: 4,
     });
-    expect(finishRun(initial, { reason: "completed", report: "", at: 10 }).reviewState)
-      .toBe("interrupted_to_review");
+    expect(finishRun(initial, { reason: "completed", report: "", at: 10 })).toMatchObject({
+      reviewState: "completion_to_review",
+      reviewReason: "Review the completed session",
+      finalReport: null,
+      finalDashboardRevision: 4,
+    });
   });
 
   it("models decision, acknowledge, dismiss, and reopen deterministically", () => {

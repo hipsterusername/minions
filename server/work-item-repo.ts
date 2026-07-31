@@ -1,6 +1,9 @@
 import type Database from "better-sqlite3";
-import { persistRunReport } from "./work-item-report-repo.ts";
 import { syncResolutionToCurrentSession } from "./work-item-compat-repo.ts";
+import {
+  mergeSealedRunReport,
+  persistOptionalRunReport,
+} from "./work-item-terminal-report.ts";
 import {
   transitionWorkItemLifecycle,
   workItemLifecycleSchema,
@@ -25,9 +28,6 @@ export interface WorkItemRow {
   wait_kind: WorkItemWaitKind | null;
   current_run_key: string | null;
   iteration: number;
-  workflow_column_id: string;
-  workflow_rank: string;
-  workflow_revision: number; kanban_json: string;
   lifecycle_revision: number;
   archived_from_resolution: Exclude<Resolution, "archived"> | null;
   last_transition_at: number;
@@ -55,7 +55,7 @@ export interface WorkItemRunRow {
 }
 export interface WorkItemBindingRow {
   work_item_id: string;
-  surface: "canvas" | "kanban";
+  surface: "canvas";
   binding_id: string;
   attached_at: number;
   detached_at: number | null;
@@ -112,9 +112,6 @@ export function createWorkItem(db: Database.Database, input: {
   projectPath: string;
   title: string;
   changeMode: ChangeMode;
-  workflowRank: string;
-  workflowColumnId?: string;
-  kanbanJson?: string;
   at: number;
   runConfigJson?: string | null;
 }): WorkItemRow {
@@ -123,13 +120,11 @@ export function createWorkItem(db: Database.Database, input: {
     INSERT INTO work_items (
       id, project_id, project_path, title, runtime_state, outcome, resolution,
       change_mode, integration_state, wait_kind, current_run_key, iteration,
-      workflow_column_id, workflow_rank, workflow_revision, kanban_json, lifecycle_revision,
-      last_transition_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, 'draft', 'none', 'open', ?, ?, NULL, NULL, 0, ?, ?, 0, ?, 0, ?, ?, ?)
+      lifecycle_revision, last_transition_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, 'draft', 'none', 'open', ?, ?, NULL, NULL, 0, 0, ?, ?, ?)
   `).run(
     input.id, input.projectId, input.projectPath, input.title,
-    input.changeMode, integrationState, input.workflowColumnId ?? "backlog",
-    input.workflowRank, input.kanbanJson ?? "{}", input.at, input.at, input.at,
+    input.changeMode, integrationState, input.at, input.at, input.at,
   );
   return getWorkItem(db, input.id)!;
 }
@@ -287,37 +282,34 @@ export function sealWorkItemRun(db: Database.Database, input: {
   expectedCurrentRunKey: string;
   at: number;
 }): WorkItemMutationResult {
-  if (input.outcome === "completed" && (!input.finalReportEventId?.trim() || !input.finalReport?.trim()))
-    throw new Error("completed runs require a durable final report event and content");
   return db.transaction(() => {
-    if (input.finalReportEventId && input.finalReport !== null
-      && input.finalReport !== undefined) {
-      persistRunReport(db, { id: input.finalReportEventId,
-        workItemId: input.workItemId, runKey: input.runKey,
-        text: input.finalReport, at: input.at });
-    }
     const existingRun = getRun(db, input.runKey);
     if (!existingRun || existingRun.work_item_id !== input.workItemId) {
       throw new WorkItemConflictError("run does not belong to work item", getWorkItem(db, input.workItemId));
     }
-    // Idempotency compares against the seal reducer's own downgrade so a retry matches.
-    const effectiveOutcome = input.outcome === "completed" && !input.finalReportEventId ? "interrupted" : input.outcome;
     if (existingRun.ended_at !== null) {
-      if (existingRun.run_outcome !== effectiveOutcome
-        || existingRun.final_report_event_id !== (input.finalReportEventId ?? null)
-        || existingRun.final_report !== (input.finalReport ?? null)) {
-        throw new Error("terminal run outcome and report are immutable");
+      const merge = mergeSealedRunReport(db, { existingRun, ...input });
+      if (merge.casConflict) {
+        throw new WorkItemConflictError("completion report upgrade CAS conflict",
+          getWorkItem(db, input.workItemId));
+      }
+      if (merge.changed) {
+        return {
+          workItem: getWorkItem(db, input.workItemId)!,
+          run: getRun(db, input.runKey),
+          idempotent: false,
+        };
       }
       return { workItem: getWorkItem(db, input.workItemId)!, run: existingRun, idempotent: true };
     }
 
+    persistOptionalRunReport(db, input);
     const row = getWorkItem(db, input.workItemId);
     assertExpected(row, input.expectedLifecycleRevision, input.expectedCurrentRunKey);
     if (row.current_run_key !== input.runKey) throw new WorkItemConflictError("run is not current", row);
     const next = transitionWorkItemLifecycle(lifecycle(row), {
       type: "seal",
       outcome: input.outcome,
-      hasFinalReport: Boolean(input.finalReportEventId),
     });
     const sealed = db.prepare(`
       UPDATE sessions SET ended_at = ?, run_outcome = ?, final_report_event_id = ?, final_report = ?, updated_at = ?

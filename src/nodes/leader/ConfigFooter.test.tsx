@@ -11,10 +11,6 @@ function snapshot(changeMode: "live" | "worktree"): WorkItemSnapshot {
       changeMode, integrationState: changeMode === "live" ? "live_clean" : "worktree_active",
       lifecycleRevision: 1 },
     waitKind: null, currentRunKey: "run-1", iteration: 1,
-    workflowColumnId: "in-progress", workflowRank: "a", workflowRevision: 1,
-    card: { description: "", subtasks: [], context: "", priority: "medium", model: "",
-      permissionMode: "auto", worktreeIsolation: changeMode === "worktree", skillIds: [],
-      skillValues: {}, linkedContextNodeIds: [] },
     lastTransitionAt: 1, createdAt: 1, updatedAt: 1,
   };
 }

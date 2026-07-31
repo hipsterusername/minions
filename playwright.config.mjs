@@ -3,7 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import { defineConfig } from "@playwright/test";
 
-const e2eHome = fs.mkdtempSync(path.join(os.tmpdir(), "minions-playwright-"));
+// Playwright evaluates the config in both the runner and worker processes.
+// Reuse the runner-created directory in workers so the test project remains
+// inside the same HOME enforced by the server's path guard.
+const e2eHome =
+  process.env.MINIONS_E2E_HOME ??
+  fs.mkdtempSync(path.join(os.tmpdir(), "minions-playwright-"));
 const projectPath = path.join(e2eHome, "smoke-project");
 process.env.MINIONS_E2E_HOME = e2eHome;
 process.env.MINIONS_E2E_PROJECT = projectPath;

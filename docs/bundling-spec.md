@@ -403,15 +403,14 @@ tag in `index.html`:
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'self';
                connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:*;
-               style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-               font-src 'self' https://fonts.gstatic.com;
+               style-src 'self' 'unsafe-inline';
+               font-src 'self';
                img-src 'self' data: blob:;
                script-src 'self'">
 ```
 
-The Google Fonts `<link>` in `index.html` is the only outbound request today.
-Self-hosting via `@fontsource/*` is preferable long-term but not blocking — drop
-when convenient.
+Fonts are self-hosted through `@fontsource/*` packages and emitted as local
+Vite assets, so the CSP does not need to permit an external font origin.
 
 ### 8.2 PATH semantics
 

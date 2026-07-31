@@ -10,6 +10,7 @@ import { chatRoleStyle } from "../../../chat-bubble-style.ts";
 import { joinSelectedChunks, parseMessageChunks } from "../../../message-chunks.ts";
 import type { LeaderMessage, MessageContextSelection } from "../types.ts";
 import { copyText as copyToClipboard } from "../../../components/CopyButton.tsx";
+import { MessageTimestamp } from "../../../components/MessageTimestamp.tsx";
 import { LeaderMessageActions } from "./MessageActions.tsx";
 import { MessageChunkView } from "./MessageChunkView.tsx";
 import {
@@ -309,26 +310,18 @@ export const SelectableMessageBubble = memo(
             />
           ))}
         </div>
-        {msg.suffix && (
-          <span
-            style={{
-              display: "inline-block",
-              marginLeft: 6,
-              fontSize: 10,
-              fontFamily: "var(--font-mono)",
-              color: "var(--text-muted)",
-              opacity: 0.7,
-            }}
-          >
-            {msg.suffix}
-          </span>
-        )}
+        <div className="leader-message-meta">
+          {msg.suffix && (
+            <span className="leader-message-meta__suffix">{msg.suffix}</span>
+          )}
+          <MessageTimestamp timestamp={msg.timestamp} />
+        </div>
         {copied && (
           <span
             role="status"
             style={{
               position: "absolute",
-              right: 10,
+              left: 10,
               bottom: 2,
               color: "var(--status-success)",
               fontFamily: "var(--font-mono)",
@@ -345,6 +338,7 @@ export const SelectableMessageBubble = memo(
     prev.msg.id === next.msg.id &&
     prev.msg.role === next.msg.role &&
     prev.msg.content === next.msg.content &&
+    prev.msg.timestamp === next.msg.timestamp &&
     prev.msg.suffix === next.msg.suffix &&
     prev.onActivate === next.onActivate &&
     prev.onSelectionChange === next.onSelectionChange &&

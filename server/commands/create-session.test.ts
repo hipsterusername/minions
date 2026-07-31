@@ -92,7 +92,7 @@ function canonicalService(runKey: string, input: {
           integrationState: input.changeMode === "worktree" ? "worktree_clean" : "live_clean", lifecycleRevision: 1,
         },
         waitKind: null, currentRunKey: runKey, iteration: 1,
-        workflowColumnId: "backlog", workflowRank: "a", lastTransitionAt: 1,
+        lastTransitionAt: 1,
         createdAt: 1, updatedAt: 1,
       },
       bindings: [],

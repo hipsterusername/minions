@@ -12,13 +12,10 @@ import type { Outcome, WorkItemWaitKind } from "../shared/work-item-lifecycle.ts
 import type { ThinkingConfig } from "./session-host-config.ts";
 import {
   WorkItemConflictError,
-  archiveWorkItem,
   createWorkItem,
   getWorkItem,
   getWorkItemRun,
-  restoreWorkItem,
   resumeWaitingWorkItemRun,
-  reviewWorkItem,
   sealWorkItemRun,
   startWorkItemIteration,
   waitWorkItemRun,
@@ -31,10 +28,9 @@ import { WorkItemServiceError, type WorkItemService } from "./work-item-service.
 import { executeWorkItemCommand, findCommandResult } from "./work-item-command-ledger.ts";
 import { emitBindingChanged, emitItemChanged, emitRunChanged } from "./work-item-service-events.ts";
 import { compatibleResumeId, resolvePrimaryRunConfig } from "./work-item-run-config.ts";
+import { resolveWorkItemMutation } from "./work-item-archive.ts";
 import { continueChildWorkItemRun, continueWorkItemIntent, type RunContinuationInput } from "./work-item-continuation.ts";
 import { bindingSnapshot, itemSnapshot, runSnapshot } from "./work-item-snapshots.ts";
-import { importKanbanBoard, moveWorkItemCard, updateWorkItemCard } from "./work-item-workflow-repo.ts";
-import { kanbanCardMetadataSchema } from "../shared/work-item-kanban.ts";
 
 export interface WorkItemInvocation {
   requestId?: string; workItemId: string; runKey: string; prompt: string; resumeId?: string;
@@ -53,6 +49,7 @@ export interface SqliteWorkItemServiceOptions {
   ensureRunLaunched?: (input: WorkItemInvocation) => void | Promise<void>;
   ensureRunContinued?: (input: WorkItemInvocation & { requestId: string }) => void | Promise<void>;
   isRunLive?: (runKey: string) => boolean;
+  stopRun?: (input: { workItemId: string; runKey: string }) => void | Promise<void>;
   queueRunGuidance?: (input: RunContinuationInput) => void | Promise<void>;
   continueRun: (input: WorkItemInvocation) => void | Promise<void>;
   bindWorktreeRun?: (input: { workItemId: string; runKey: string }) => void |
@@ -110,9 +107,6 @@ export class SqliteWorkItemService implements WorkItemService {
         createWorkItem(this.options.db, {
           id, projectId: input.projectId, projectPath: input.projectPath,
           title: input.title, changeMode: input.changeMode,
-          workflowColumnId: input.workflowColumnId,
-          workflowRank: input.workflowRank ?? input.requestId,
-          ...(input.card ? { kanbanJson: JSON.stringify(kanbanCardMetadataSchema.parse(input.card)) } : {}),
           at: this.now(),
         }));
       const detail = this.latestOrThrow(id);
@@ -249,49 +243,17 @@ export class SqliteWorkItemService implements WorkItemService {
 
   private async resolve(input: Parameters<WorkItemService["review"]>[0], kind: "review" | "archive" | "restore") {
     try {
-      const mutation = kind === "review" ? reviewWorkItem : kind === "archive" ? archiveWorkItem : restoreWorkItem;
-      const ledger = executeWorkItemCommand(this.options.db, { requestId: input.requestId,
-        workItemId: input.workItemId, command: kind, payload: input, at: this.now() }, () =>
-        mutation(this.options.db, { workItemId: input.workItemId,
-          expectedLifecycleRevision: input.expectedLifecycleRevision,
-          expectedCurrentRunKey: input.expectedCurrentRunKey, at: this.now() }));
-      const detail = this.latestOrThrow(input.workItemId);
-      this.emit(detail, ledger.idempotent ? `${kind}_replayed` : kind, this.now());
-      return detail;
+      return await resolveWorkItemMutation(input, kind, {
+        db: this.options.db, now: this.now, stopRun: this.options.stopRun,
+        latest: (id) => this.latestOrThrow(id),
+        sealStopped: (stop) => this.sealPrimaryRun({ ...stop, outcome: "stopped" }),
+        emit: (detail, cause, at) => this.emit(detail, cause, at),
+      });
     } catch (error) { return this.translate(error, input.workItemId); }
   }
 
   async attach(input: Parameters<WorkItemService["attach"]>[0]) { return this.binding(input, false); }
   async detach(input: Parameters<WorkItemService["detach"]>[0]) { return this.binding(input, true); }
-
-  async updateCard(input: Parameters<WorkItemService["updateCard"]>[0]) {
-    try { const ledger = executeWorkItemCommand(this.options.db, { requestId: input.requestId,
-      workItemId: input.workItemId, command: "update_card", payload: input, at: this.now() }, () =>
-      updateWorkItemCard(this.options.db, { ...input, at: this.now() }));
-      const detail = this.latestOrThrow(input.workItemId);
-      this.emit(detail, ledger.idempotent ? "card_update_replayed" : "card_updated", this.now()); return detail;
-    } catch (error) { return this.translate(error, input.workItemId); }
-  }
-
-  async moveCard(input: Parameters<WorkItemService["moveCard"]>[0]) {
-    try { const ledger = executeWorkItemCommand(this.options.db, { requestId: input.requestId,
-      workItemId: input.workItemId, command: "move_card", payload: input, at: this.now() }, () =>
-      moveWorkItemCard(this.options.db, { ...input, at: this.now() }));
-      const detail = this.latestOrThrow(input.workItemId);
-      if (ledger.idempotent) this.emit(detail, "card_move_replayed", this.now());
-      else for (const row of ledger.value!.changed) this.emit(this.latestOrThrow(row.id), "card_moved", this.now());
-      return detail;
-    } catch (error) { return this.translate(error, input.workItemId); }
-  }
-
-  async importKanban(input: Parameters<WorkItemService["importKanban"]>[0]) {
-    try { const imported = importKanbanBoard(this.options.db, { ...input, at: this.now() });
-      for (const row of imported.rows) this.emit(this.latestOrThrow(row.id),
-        imported.idempotent ? "kanban_import_replayed" : "kanban_imported", this.now());
-      return workItemListSnapshotSchema.parse({ projectId: input.projectId,
-        items: imported.rows.map(itemSnapshot), nextCursor: null });
-    } catch (error) { return this.translate(error, ""); }
-  }
 
   private async binding(input: Parameters<WorkItemService["attach"]>[0], detach: boolean) {
     try {

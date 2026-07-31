@@ -11,7 +11,7 @@ import { addContribution, createLineage, enqueueContribution,
 function fixture() {
   const db = initDb(":memory:"); ensureWorkItemSchema(db); ensureWorktreeIntegrationSchema(db);
   createWorkItem(db, { id: "work", projectId: "project", projectPath: "/repo",
-    title: "Task", changeMode: "worktree", workflowRank: "a", at: 1 });
+    title: "Task", changeMode: "worktree", at: 1 });
   createLineage(db, { id: "lineage", projectId: "project", repositoryPath: "/repo",
     targetRef: "refs/heads/main", baseSha: "base",
     integrationRef: "refs/heads/integration/lineage",

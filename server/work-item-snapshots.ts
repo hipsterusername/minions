@@ -6,7 +6,6 @@ import {
   type WorkItemSnapshot,
 } from "../shared/work-item-contracts.ts";
 import type { WorkItemBindingRow, WorkItemRow, WorkItemRunRow } from "./work-item-repo.ts";
-import { kanbanCardMetadataSchema } from "../shared/work-item-kanban.ts";
 
 export function itemSnapshot(row: WorkItemRow): WorkItemSnapshot {
   return workItemSnapshotSchema.parse({
@@ -16,10 +15,7 @@ export function itemSnapshot(row: WorkItemRow): WorkItemSnapshot {
       resolution: row.resolution, changeMode: row.change_mode,
       integrationState: row.integration_state, lifecycleRevision: row.lifecycle_revision },
     waitKind: row.wait_kind, currentRunKey: row.current_run_key,
-    iteration: row.iteration, workflowColumnId: row.workflow_column_id,
-    workflowRank: row.workflow_rank, lastTransitionAt: row.last_transition_at,
-    workflowRevision: row.workflow_revision,
-    card: kanbanCardMetadataSchema.parse(JSON.parse(row.kanban_json)),
+    iteration: row.iteration, lastTransitionAt: row.last_transition_at,
     createdAt: row.created_at, updatedAt: row.updated_at,
   });
 }

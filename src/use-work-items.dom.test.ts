@@ -3,7 +3,7 @@ import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { WorkItemSnapshot } from "../shared/work-item-contracts.ts";
 import { initialWorkItemLifecycle } from "../shared/work-item-lifecycle.ts";
-import { useWorkItems } from "./use-work-items.ts";
+import { mergeCanonicalActivity, useWorkItems } from "./use-work-items.ts";
 import type { ServerMessage, SocketSubscribe } from "./use-socket.ts";
 
 function terminalItem(revision: number): WorkItemSnapshot {
@@ -12,10 +12,6 @@ function terminalItem(revision: number): WorkItemSnapshot {
     lifecycle: { ...initialWorkItemLifecycle(), runtimeState: "inactive",
       outcome: "completed", lifecycleRevision: revision },
     waitKind: null, currentRunKey: "run-1", iteration: 1,
-    workflowColumnId: "backlog", workflowRank: "a", workflowRevision: 0,
-    card: { description: "", subtasks: [], context: "", priority: "medium",
-      model: "", permissionMode: "auto", worktreeIsolation: false, skillIds: [],
-      skillValues: {}, linkedContextNodeIds: [] },
     lastTransitionAt: revision, createdAt: 1, updatedAt: revision,
   };
 }
@@ -42,6 +38,61 @@ function setup() {
 }
 
 describe("useWorkItems lifecycle recovery", () => {
+  it("loads every work-item page so archived rows cannot reappear as legacy sessions", () => {
+    const send = vi.fn();
+    let listener: ((message: ServerMessage) => void) | undefined;
+    const subscribe = ((topic: string, next: (message: ServerMessage) => void) => {
+      if (topic === "*") listener = next;
+      return () => {};
+    }) as SocketSubscribe;
+    const { result } = renderHook(() => useWorkItems({
+      projectId: "project-1", connected: true, subscribe, send,
+    }));
+    const firstRequest = send.mock.calls.find(([command]) =>
+      (command as { type?: string }).type === "list_work_items")?.[0] as {
+        requestId: string; limit: number; cursor?: string;
+      };
+    expect(firstRequest).toMatchObject({ limit: 100 });
+    expect(firstRequest.cursor).toBeUndefined();
+
+    act(() => listener?.({
+      type: "work_item_response", command: "list_work_items",
+      requestId: firstRequest.requestId, success: true,
+      result: { projectId: "project-1", items: [terminalItem(3)],
+        nextCursor: "page-2" },
+    }));
+    const secondRequest = send.mock.calls.at(-1)?.[0] as {
+      requestId: string; limit: number; cursor?: string;
+    };
+    expect(secondRequest).toMatchObject({ limit: 100, cursor: "page-2" });
+    expect(secondRequest.requestId).not.toBe(firstRequest.requestId);
+
+    const archived = {
+      ...terminalItem(4),
+      id: "work-archived",
+      title: "Archived task",
+      currentRunKey: "run-archived",
+      lifecycle: {
+        ...terminalItem(4).lifecycle,
+        resolution: "archived" as const,
+      },
+    };
+    act(() => listener?.({
+      type: "work_item_response", command: "list_work_items",
+      requestId: secondRequest.requestId, success: true,
+      result: { projectId: "project-1", items: [archived], nextCursor: null },
+    }));
+
+    expect(Object.keys(result.current.items).sort()).toEqual(["work-1", "work-archived"]);
+    const activity = mergeCanonicalActivity([
+      { sessionKey: "run-archived", sessionId: null, workItemId: "work-archived",
+        status: "stopped", cwd: "/repo" },
+    ], result.current.orderedItems);
+    expect(activity).toHaveLength(2);
+    expect(activity.find((row) => row.workItemId === "work-archived")
+      ?.reviewLifecycle?.dismissedAt).not.toBeNull();
+  });
+
   it("automatically retries an initiation conflict against the authoritative snapshot", () => {
     const { result, send, publish } = setup();
     act(() => result.current.start(result.current.items["work-1"]!, "Continue"));

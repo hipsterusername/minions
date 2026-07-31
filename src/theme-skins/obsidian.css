@@ -4,7 +4,7 @@
    uppercase micro-labels. Palette lives in src/themes.ts (id "obsidian"). */
 
 :root[data-theme="obsidian"] {
-  --font-display: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Instrument Sans Variable", "Segoe UI", system-ui, sans-serif;
   --radius-node: 6px;
   --radius-panel: 6px;
   --radius-control: 5px;

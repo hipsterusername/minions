@@ -4,6 +4,12 @@ test("creates, launches, persists, and reloads an echo-backed project", async ({
   const projectPath = process.env.MINIONS_E2E_PROJECT;
   if (!projectPath) throw new Error("MINIONS_E2E_PROJECT is required");
 
+  // Keep the credential-free smoke lane independent of external font
+  // delivery; late font swaps can prevent Playwright's stability check from
+  // settling even though the control is already visible.
+  await page.route(/https:\/\/fonts\.(?:googleapis|gstatic)\.com\/.*/, (route) =>
+    route.abort(),
+  );
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Projects", exact: true })).toBeVisible();
 
@@ -36,7 +42,7 @@ test("creates, launches, persists, and reloads an echo-backed project", async ({
   );
   await page.getByRole("button", { name: "Start Leader" }).click();
   await expect(page.getByLabel("Enter fullscreen")).toBeVisible();
-  await expect(page.getByAltText("Idle")).toBeVisible();
+  await expect(page.getByText("Inactive", { exact: true })).toBeVisible();
   await autosaved;
 
   await page.reload();

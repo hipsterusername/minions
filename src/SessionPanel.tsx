@@ -38,7 +38,7 @@ interface SessionPanelProps {
   projectPath?: string | undefined;
   onAttachSession: (
     sessionKey: string,
-    role?: "leader" | "minion" | "default" | "card-composer",
+    role?: "leader" | "minion" | "default",
   ) => void;
   onFocusSession?: (sessionKey: string) => void;
   attachedSessionKeys: Set<string>;
@@ -264,7 +264,7 @@ export function SessionPanel({
     (session) => session.status === "running",
   ).length;
 
-  // The panel intentionally excludes minion and card-composer sessions, so
+  // The panel intentionally excludes minion sessions, so
   // its summary must use that same scope.
   const usageView = useMemo(
     () =>
@@ -618,7 +618,7 @@ function usageFromSessionInfo(session: SessionInfo): SessionUsage {
 }
 
 function isVisibleSession(session: SessionInfo): boolean {
-  return session.role !== "minion" && session.role !== "card-composer";
+  return session.role !== "minion";
 }
 
 function isSessionInProject(

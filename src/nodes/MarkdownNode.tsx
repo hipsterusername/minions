@@ -357,17 +357,12 @@ export function MarkdownNodeRenderer({
   onResizeStart,
   onResizeEnd,
   projectPath,
-  onCreateKanbanCardFromMarkdown,
 }: NodeRenderProps) {
   const data = node.data as MarkdownData;
   const collapsed = data.collapsed ?? false;
-  const cardTitleInputRef = useRef<HTMLInputElement>(null);
   const clickStartRef = useRef<{ x: number; y: number } | null>(null);
   const [wordCount, setWordCount] = useState(0);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
-  const [showCardPrompt, setShowCardPrompt] = useState(false);
-  const [cardTitleDraft, setCardTitleDraft] = useState("");
-  const [cardSaved, setCardSaved] = useState(false);
   const [lineCount, setLineCount] = useState(1);
 
   const update = (patch: Partial<MarkdownData>) =>
@@ -402,27 +397,6 @@ export function MarkdownNodeRenderer({
     }
   };
 
-  const openCardPrompt = () => {
-    if (!onCreateKanbanCardFromMarkdown) return;
-    setCardTitleDraft(data.title.trim());
-    setShowSaveDialog(false);
-    setShowCardPrompt(true);
-  };
-
-  const handleSaveAsKanbanCard = () => {
-    if (!onCreateKanbanCardFromMarkdown) return;
-    const trimmedTitle = cardTitleDraft.trim();
-    if (!trimmedTitle) return;
-    onCreateKanbanCardFromMarkdown({
-      nodeId: node.id,
-      title: trimmedTitle,
-      content: data.content,
-    });
-    setShowCardPrompt(false);
-    setCardSaved(true);
-    window.setTimeout(() => setCardSaved(false), 1800);
-  };
-
   const toggleCollapse = () => {
     if (!collapsed) {
       update({ collapsed: true, expandedHeight: node.size.height });
@@ -443,13 +417,6 @@ export function MarkdownNodeRenderer({
   // Focus into the editor is handled inside MarkdownEditor on mount.
   // The editor mounts/unmounts based on `viewMode`, so switching from
   // Read → Write naturally gives it focus.
-
-  useEffect(() => {
-    if (showCardPrompt) {
-      cardTitleInputRef.current?.focus();
-      cardTitleInputRef.current?.select();
-    }
-  }, [showCardPrompt]);
 
   // Cmd+S handler — delegated from CodeMirror's keymap into the existing
   // save flow (quick-save if we already know a path, otherwise open the
@@ -1687,7 +1654,6 @@ export function MarkdownNodeRenderer({
               {projectPath && (
                 <button
                   onClick={() => {
-                    setShowCardPrompt(false);
                     setShowSaveDialog(true);
                   }}
                   onMouseDown={(e) => e.stopPropagation()}
@@ -1701,63 +1667,8 @@ export function MarkdownNodeRenderer({
                 </button>
               )}
 
-              {onCreateKanbanCardFromMarkdown && (
-                cardSaved ? (
-                  <span className="md-card-saved">Card added</span>
-                ) : (
-                  <button
-                    onClick={openCardPrompt}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    title="Save as Kanban card"
-                    className="md-card-btn"
-                  >
-                    <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-                      <rect x="2" y="3" width="12" height="10" rx="1.5" />
-                      <line x1="5" y1="6" x2="11" y2="6" />
-                      <line x1="5" y1="9" x2="9" y2="9" />
-                    </svg>
-                    Card
-                  </button>
-                )
-              )}
-
               <span className="md-lang-label">md</span>
             </div>
-
-            {showCardPrompt && (
-              <div className="md-card-prompt" onMouseDown={(e) => e.stopPropagation()}>
-                <label className="md-card-prompt__label" htmlFor={`md-card-title-${node.id}`}>
-                  Card title
-                </label>
-                <div className="md-card-prompt__row">
-                  <input
-                    id={`md-card-title-${node.id}`}
-                    ref={cardTitleInputRef}
-                    className="md-card-prompt__input"
-                    value={cardTitleDraft}
-                    onChange={(e) => setCardTitleDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleSaveAsKanbanCard();
-                      if (e.key === "Escape") setShowCardPrompt(false);
-                    }}
-                    placeholder="Task title"
-                  />
-                  <button
-                    className="md-card-prompt__cancel"
-                    onClick={() => setShowCardPrompt(false)}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    className="md-card-prompt__confirm"
-                    onClick={handleSaveAsKanbanCard}
-                    disabled={!cardTitleDraft.trim()}
-                  >
-                    Add
-                  </button>
-                </div>
-              </div>
-            )}
 
             {showSaveDialog && projectPath && (
               <SaveDialog

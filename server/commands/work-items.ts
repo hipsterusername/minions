@@ -44,7 +44,7 @@ function existingMutationContext(cmd: WsCommand): {
 }
 
 function resultSchema(cmd: WsCommand): z.ZodType {
-  if (cmd.type === "list_work_items" || cmd.type === "import_kanban_board") return workItemListSnapshotSchema;
+  if (cmd.type === "list_work_items") return workItemListSnapshotSchema;
   if (cmd.type === "get_work_item_runs") return workItemRunListSnapshotSchema;
   if (cmd.type === "get_work_item") return workItemDetailSnapshotSchema.nullable();
   return workItemDetailSnapshotSchema;
@@ -109,9 +109,6 @@ export const workItemCommand: CommandHandler = async (ctx, cmd, ws) => {
         requestId: cmd.requestId!,
         projectId: cmd.projectId!, projectPath, title: cmd.title!,
         changeMode: cmd.changeMode!,
-        ...(cmd.workflowColumnId ? { workflowColumnId: cmd.workflowColumnId } : {}),
-        ...(cmd.workflowRank ? { workflowRank: cmd.workflowRank } : {}),
-        ...(cmd.cardPatch ? { card: cmd.cardPatch } : {}),
       });
       break;
     }
@@ -157,24 +154,6 @@ export const workItemCommand: CommandHandler = async (ctx, cmd, ws) => {
     case "detach_work_item_surface":
       result = await service.detach({ ...existingMutationContext(cmd), workItemId: cmd.workItemId!, surface: cmd.surface!, bindingId: cmd.bindingId! });
       break;
-    case "update_work_item_card":
-      result = await service.updateCard({ requestId: cmd.requestId!, workItemId: cmd.workItemId!,
-        expectedWorkflowRevision: cmd.expectedWorkflowRevision!, patch: cmd.cardPatch!,
-        ...(cmd.title !== undefined ? { title: cmd.title } : {}) });
-      break;
-    case "move_work_item_card":
-      result = await service.moveCard({ requestId: cmd.requestId!, workItemId: cmd.workItemId!,
-        expectedWorkflowRevision: cmd.expectedWorkflowRevision!, columnId: cmd.columnId!,
-        targetIndex: cmd.targetIndex! });
-      break;
-    case "import_kanban_board": {
-      const projectPath = ctx.resolveWorkItemProject?.(cmd.projectId!, cmd.projectPath!);
-      if (!projectPath) throw new WorkItemServiceError("validation_failed",
-        "Project path is not registered or does not own projectId");
-      result = await service.importKanban({ requestId: cmd.requestId!, projectId: cmd.projectId!,
-        projectPath, migrationKey: cmd.migrationKey!, cards: cmd.cards! });
-      break;
-    }
     case "get_work_item":
       result = await service.get(cmd.workItemId!, cmd.cursor, cmd.limit);
       break;

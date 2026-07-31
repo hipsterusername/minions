@@ -11,7 +11,7 @@ function setup(gates: () => Promise<MergeGateVerdict> = async () =>
   ({ allowed: true, mode: "off", gates: [] })) {
   const db = initDb(":memory:"); ensureWorkItemSchema(db); ensureWorktreeIntegrationSchema(db);
   createWorkItem(db, { id: "work", projectId: "project", projectPath: "/repo", title: "Task",
-    changeMode: "worktree", workflowRank: "a", at: 1 });
+    changeMode: "worktree", at: 1 });
   let tick = 10; const service = new SqliteWorktreeIntegrationService(db, () => tick++,
     async () => ({ targetRef: "refs/heads/main", baseSha: "abc123" }),
     async () => "head456", undefined, gates);
@@ -22,7 +22,7 @@ describe("SQLite worktree integration runtime", () => {
   it("rejects lineage creation, membership, and run binding for live work items", async () => {
     const { db, service } = setup();
     createWorkItem(db, { id: "live-work", projectId: "project", projectPath: "/repo",
-      title: "Live", changeMode: "live", workflowRank: "b", at: 2 });
+      title: "Live", changeMode: "live", at: 2 });
     await expect(service.createLineage({ requestId: "live-create", workItemId: "live-work" }))
       .rejects.toMatchObject({ code: "invalid_state" });
     const lineage = await service.createLineage({ requestId: "worktree-create", workItemId: "work" });
@@ -180,7 +180,7 @@ describe("SQLite worktree integration runtime", () => {
 
   it("binds and orders two work items in one shared lineage", async () => {
     const { db, service } = setup(); createWorkItem(db, { id: "work-2", projectId: "project",
-      projectPath: "/repo", title: "Second", changeMode: "worktree", workflowRank: "b", at: 2 });
+      projectPath: "/repo", title: "Second", changeMode: "worktree", at: 2 });
     const created = await service.createLineage({ requestId: "shared", workItemId: "work" });
     const joined = await service.joinLineage({ requestId: "join-second", workItemId: "work-2",
       lineageId: created.id, expectedRevision: created.revision, actor: "user" });
@@ -219,7 +219,7 @@ describe("SQLite worktree integration runtime", () => {
     const { db, service } = setup(async () => ({ allowed: false, mode: "enforced" as const,
       gates: [{ id: "tests", name: "Tests", status: "required_pending" as const, reason: "combined diff" }] }));
     createWorkItem(db, { id: "work-2", projectId: "project", projectPath: "/repo", title: "Second",
-      changeMode: "worktree", workflowRank: "b", at: 2 });
+      changeMode: "worktree", at: 2 });
     const created = await service.createLineage({ requestId: "aggregate", workItemId: "work" });
     await service.joinLineage({ requestId: "aggregate-join", workItemId: "work-2", lineageId: created.id,
       expectedRevision: created.revision, actor: "user" });

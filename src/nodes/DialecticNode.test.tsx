@@ -157,6 +157,13 @@ describe("DialecticNode component", () => {
     expect(screen.getByText("Synthesized plan")).toBeInTheDocument();
   });
 
+  it("captures canvas scrolling and accepts keyboard focus", () => {
+    renderNode(makeNode());
+    const workspace = screen.getByTestId("dialectic-node");
+    expect(workspace).toHaveAttribute("data-scroll-capture");
+    expect(workspace).toHaveAttribute("tabindex", "0");
+  });
+
   it("shows the exact context communicated to the critic", () => {
     const node = makeNode({
       topic: "Cache design",
@@ -183,15 +190,17 @@ describe("DialecticNode component", () => {
     });
     renderNode(node);
 
-    const criticContext = screen.getByText("Context sent to Critic").closest("details");
+    const criticContext = screen.getByText("Inspect exact input to Critic").closest("details");
     expect(criticContext).toBeInTheDocument();
+    expect(criticContext).not.toHaveAttribute("open");
+    fireEvent.click(screen.getByText("Inspect exact input to Critic"));
     expect(criticContext).toHaveAttribute("open");
     expect(screen.getByText("Your role: CRITIC. Stress-test the plan.")).toBeInTheDocument();
     expect(screen.getByText(/The proposer's latest plan:/)).toHaveTextContent(
       "Use a two-tier cache.",
     );
     expect(screen.getByText(/Private hidden chain-of-thought is not available/i)).toBeInTheDocument();
-    expect(screen.getByText(/Proposer output forwarded as Critic input/i)).toBeInTheDocument();
+    expect(screen.getByText(/Proposer output becomes new input for Critic/i)).toBeInTheDocument();
   });
 
   it("labels resumed context without pretending to resend the full thread", () => {
@@ -211,9 +220,43 @@ describe("DialecticNode component", () => {
     });
     renderNode(node);
     expect(
-      screen.getByText("Existing thread retained · one new message appended"),
+      screen.getByText("Continuing session · 1 earlier Planner A turn retained"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Only the new message is shown; earlier session history remains retained/i),
     ).toBeInTheDocument();
     expect(screen.queryByText("Role instructions")).not.toBeInTheDocument();
+  });
+
+  it("shows one round at a time and lets the user inspect earlier exchanges", () => {
+    const node = makeNode({
+      status: "completed",
+      config: { ...createDialecticDefaultData().config, rounds: 2 },
+      turns: [
+        { speaker: "A", round: 0, text: "Round one proposal" },
+        { speaker: "B", round: 0, text: "Round one critique" },
+        {
+          speaker: "A",
+          round: 1,
+          text: "Round two revision",
+          context: {
+            prompt: "Apply the prior critique.",
+            retainedThread: true,
+          },
+        },
+        { speaker: "B", round: 1, text: "Round two approval" },
+      ],
+    });
+    renderNode(node);
+
+    expect(screen.getByRole("tabpanel")).toHaveAccessibleName("Round 2 of 2");
+    expect(screen.getByText("Round two revision")).toBeInTheDocument();
+    expect(screen.queryByText("Round one proposal")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: /R1/i }));
+    expect(screen.getByRole("tabpanel")).toHaveAccessibleName("Round 1 of 2");
+    expect(screen.getByText("Round one proposal")).toBeInTheDocument();
+    expect(screen.queryByText("Round two revision")).not.toBeInTheDocument();
   });
 
   it("shows a Stop button while running and sends stop_dialectic", () => {

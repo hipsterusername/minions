@@ -201,6 +201,25 @@ describe("useCanvasHistory — undo / redo", () => {
 });
 
 describe("useCanvasHistory — MAX_HISTORY cap", () => {
+  it("retains all 50 entries at the exact limit", () => {
+    const h = mount();
+    for (let i = 0; i < 50; i++) {
+      act(() => {
+        h.state.dispatch({ type: "ADD_NODE", node: makeNode(`n${i}`) });
+      });
+    }
+
+    let undoCount = 0;
+    while (h.state.canUndo) {
+      act(() => h.state.undo());
+      undoCount += 1;
+      if (undoCount > 50) throw new Error("undo loop exceeded the history limit");
+    }
+
+    expect(undoCount).toBe(50);
+    expect(h.state.nodes).toEqual([]);
+  });
+
   it("trims past to the most recent 50 entries when the limit is exceeded", () => {
     const h = mount();
     // 60 dispatches → past should cap at 50; the oldest 10 fall off.

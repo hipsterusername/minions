@@ -29,7 +29,6 @@ const TOOL_MODULE_DIRS = [join(REPO_ROOT, "server", "task-tools")];
 const TOOL_MODULE_FILES = [
   join(REPO_ROOT, "server", "minion-tools.ts"),
   join(REPO_ROOT, "server", "render-tools.ts"),
-  join(REPO_ROOT, "server", "agents", "card-composer.ts"),
 ];
 
 /** The helper module itself is the one place allowed to build raw results. */

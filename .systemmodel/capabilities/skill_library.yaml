@@ -16,11 +16,6 @@ entry_points:
     files: [ src/SkillsBrowser.tsx, src/SkillEditor.tsx, src/SkillImportModal.tsx, src/nodes/leader/skills/SkillFlyout.tsx ]
     tests: [ src/SkillsBrowser.test.tsx, src/SkillEditor.test.tsx, src/SkillImportModal.test.tsx ]
     flows: [ flow.arm_and_author_skills, flow.launch_leader ]
-  - surface: surface.kanban
-    summary: Persist armed skill selections and variables in card launch configuration.
-    files: [ src/KanbanBoard.tsx ]
-    tests: [ src/KanbanBoard.test.tsx ]
-    flows: [ flow.arm_and_author_skills, flow.launch_or_resume_card ]
   - surface: surface.mobile
     summary: Select skills and provide variables from the remote launch experience.
     files: [ src/mobile/LaunchSkillsPanel.tsx, src/mobile/LaunchScreen.tsx ]
@@ -39,5 +34,3 @@ depends_on: []
 bridges:
   - to: flow.launch_leader
     reason: Armed skills are frozen when the execution-lifecycle leader launch flow spawns the host.
-  - to: flow.launch_or_resume_card
-    reason: Card-selected skills are consumed by the execution-lifecycle canonical launch flow.

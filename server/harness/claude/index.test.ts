@@ -166,7 +166,7 @@ describe("ClaudeHarness.start()", () => {
     const db = persistence.openPersistDb(":memory:");
     createWorkItem(db, {
       id: "work-drain", projectId: "p", projectPath: "/repo", title: "Drain",
-      changeMode: "live", workflowRank: "a", at: 1,
+      changeMode: "live", at: 1,
     });
     startWorkItemIteration(db, {
       workItemId: "work-drain", runKey: "run-drain", idempotencyKey: "start",

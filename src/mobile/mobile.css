@@ -352,6 +352,10 @@
   border-left-color: var(--status-error);
 }
 
+.mob-triage-row--inactive {
+  border-left-color: var(--status-idle);
+}
+
 .mob-triage-row--waiting {
   border-left-color: var(--status-warning);
 }
@@ -395,6 +399,11 @@
   background: color-mix(in srgb, var(--status-error) 18%, transparent);
 }
 
+.mob-triage-icon--inactive {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--status-idle) 14%, transparent);
+}
+
 .mob-triage-icon--waiting {
   color: var(--status-warning);
   background: color-mix(in srgb, var(--status-warning) 18%, transparent);
@@ -436,6 +445,10 @@
   color: var(--status-error);
 }
 
+.mob-triage-reason--inactive {
+  color: var(--text-secondary);
+}
+
 .mob-triage-reason--waiting {
   color: var(--status-warning);
 }
@@ -467,6 +480,14 @@
   touch-action: manipulation;
 }
 
+.mob-mini-btn--icon {
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+}
+
 .mob-mini-btn:active {
   background: var(--state-active);
 }
@@ -475,6 +496,15 @@
   color: var(--status-success);
   border-color: color-mix(in srgb, var(--status-success) 45%, transparent);
   background: color-mix(in srgb, var(--status-success) 16%, var(--bg-elevated));
+}
+
+.mob-mini-btn--dismiss {
+  color: var(--text-muted);
+}
+
+.mob-mini-btn--dismiss:active {
+  color: var(--status-error);
+  border-color: color-mix(in srgb, var(--status-error) 45%, transparent);
 }
 
 .mob-mini-btn--ghost {
@@ -501,8 +531,8 @@
 
 .mob-life-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 .mob-session-card-wrap {

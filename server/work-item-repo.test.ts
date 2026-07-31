@@ -30,7 +30,6 @@ function seed(db: Database.Database, id = "work-1") {
     projectPath: "/repo",
     title: "Implement lifecycle",
     changeMode: "live",
-    workflowRank: "a0",
     at: 10,
   });
 }
@@ -135,16 +134,83 @@ describe("work-item repository", () => {
     });
   });
 
-  it("rejects sealing a completion without a durable final report", () => {
+  it("seals a clean completion without report metadata and attaches a later report", () => {
     seed(db);
-    startWorkItemIteration(db, {
+    const started = startWorkItemIteration(db, {
       workItemId: "work-1", runKey: "run-1", idempotencyKey: "one",
       expectedLifecycleRevision: 0, expectedCurrentRunKey: null, at: 20,
     });
-    expect(() => sealWorkItemRun(db, {
+    const sealed = sealWorkItemRun(db, {
       workItemId: "work-1", runKey: "run-1", outcome: "completed",
-      expectedLifecycleRevision: 1, expectedCurrentRunKey: "run-1", at: 30,
-    })).toThrow("completed runs require a durable final report event and content");
+      expectedLifecycleRevision: started.workItem.lifecycle_revision,
+      expectedCurrentRunKey: "run-1", at: 30,
+    });
+    expect(sealed.run).toMatchObject({
+      run_outcome: "completed", final_report_event_id: null, final_report: null,
+    });
+    expect(sealed.workItem).toMatchObject({ outcome: "completed", runtime_state: "inactive" });
+
+    const enriched = sealWorkItemRun(db, {
+      workItemId: "work-1", runKey: "run-1", outcome: "completed",
+      finalReportEventId: "late-report", finalReport: "Completed after all",
+      expectedLifecycleRevision: sealed.workItem.lifecycle_revision,
+      expectedCurrentRunKey: "run-1", at: 40,
+    });
+    expect(enriched).toMatchObject({
+      idempotent: false,
+      run: {
+        run_outcome: "completed",
+        final_report_event_id: "late-report",
+        final_report: "Completed after all",
+      },
+    });
+  });
+
+  it("upgrades an interrupted run when a completed seal adds its durable report", () => {
+    seed(db);
+    const started = startWorkItemIteration(db, {
+      workItemId: "work-1", runKey: "run-1", idempotencyKey: "one",
+      expectedLifecycleRevision: 0, expectedCurrentRunKey: null, at: 20,
+    });
+    const interrupted = sealWorkItemRun(db, {
+      workItemId: "work-1", runKey: "run-1", outcome: "interrupted",
+      expectedLifecycleRevision: started.workItem.lifecycle_revision,
+      expectedCurrentRunKey: "run-1", at: 30,
+    });
+    const upgraded = sealWorkItemRun(db, {
+      workItemId: "work-1", runKey: "run-1", outcome: "completed",
+      finalReportEventId: "late-report", finalReport: "Durable completion",
+      expectedLifecycleRevision: interrupted.workItem.lifecycle_revision,
+      expectedCurrentRunKey: "run-1", at: 40,
+    });
+    expect(upgraded).toMatchObject({
+      idempotent: false,
+      workItem: { outcome: "completed", runtime_state: "inactive" },
+      run: { run_outcome: "completed", final_report: "Durable completion" },
+    });
+  });
+
+  it("does not upgrade an interruption when report metadata preserves that outcome", () => {
+    seed(db);
+    const started = startWorkItemIteration(db, {
+      workItemId: "work-1", runKey: "run-1", idempotencyKey: "one",
+      expectedLifecycleRevision: 0, expectedCurrentRunKey: null, at: 20,
+    });
+    const interrupted = sealWorkItemRun(db, {
+      workItemId: "work-1", runKey: "run-1", outcome: "interrupted",
+      expectedLifecycleRevision: started.workItem.lifecycle_revision,
+      expectedCurrentRunKey: "run-1", at: 30,
+    });
+    const annotated = sealWorkItemRun(db, {
+      workItemId: "work-1", runKey: "run-1", outcome: "interrupted",
+      finalReportEventId: "diagnostic", finalReport: "Partial work only",
+      expectedLifecycleRevision: interrupted.workItem.lifecycle_revision,
+      expectedCurrentRunKey: "run-1", at: 40,
+    });
+    expect(annotated).toMatchObject({
+      workItem: { outcome: "interrupted" },
+      run: { run_outcome: "interrupted", final_report: "Partial work only" },
+    });
   });
 
   it("seals a deliberate stop as the stopped outcome", () => {
@@ -333,17 +399,23 @@ describe("work-item repository", () => {
       taskId: "task", idempotencyKey: "child", at: 21,
     });
     expect(sealChildWorkItemRun(db, {
+      workItemId: "work-1", runKey: "child", outcome: "completed", at: 22,
+    }).run).toMatchObject({ run_outcome: "completed", final_report: null });
+    expect(sealChildWorkItemRun(db, {
       workItemId: "work-1", runKey: "child", outcome: "completed",
-      finalReportEventId: "event", finalReport: "done", at: 22,
-    }).run).toMatchObject({ run_outcome: "completed", final_report: "done" });
+      finalReportEventId: "event", finalReport: "done", at: 23,
+    })).toMatchObject({
+      idempotent: false,
+      run: { run_outcome: "completed", final_report: "done" },
+    });
     sealWorkItemRun(db, {
       workItemId: "work-1", runKey: "leader-run", outcome: "error",
       expectedLifecycleRevision: primary.workItem.lifecycle_revision,
-      expectedCurrentRunKey: "leader-run", at: 23,
+      expectedCurrentRunKey: "leader-run", at: 24,
     });
     expect(() => createChildWorkItemRun(db, {
       workItemId: "work-1", runKey: "late", parentRunKey: "leader-run",
-      taskId: "late", idempotencyKey: "late", at: 24,
+      taskId: "late", idempotencyKey: "late", at: 25,
     })).toThrow("invalid child-run parent");
     expect(child.run.run_kind).toBe("child");
   });

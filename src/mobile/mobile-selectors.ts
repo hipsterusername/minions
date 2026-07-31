@@ -104,15 +104,16 @@ export function needsAttention(session: MobileSessionInfo): boolean {
 }
 
 /**
- * The three attention "flavours" that colour the Activity triage lane. `error`
- * covers crashes/interruptions, `waiting` covers decisions the agent is blocked
- * on, and `changes` covers a run whose diff is ready to review.
+ * The attention "flavours" that colour the Activity triage lane. `inactive`
+ * is deliberately neutral: the work is okay, but the user still needs to
+ * choose whether to keep it in Activity or remove it from Open.
  */
-export type AttentionKind = "error" | "waiting" | "changes";
+export type AttentionKind = "inactive" | "error" | "waiting" | "changes";
 
 /** Classify why a session needs the user, driving its triage icon/accent. */
 export function attentionKind(session: MobileSessionInfo): AttentionKind {
   const reviewState = session.reviewLifecycle?.reviewState;
+  if (reviewState === "interrupted_to_review" && session.status === "inactive") return "inactive";
   if (reviewState === "error_to_review" || reviewState === "interrupted_to_review") return "error";
   if (reviewState === "decision_needed") return "waiting";
   if (session.status === "error") return "error";
@@ -125,10 +126,14 @@ export function attentionReason(session: MobileSessionInfo): string {
   const lifecycle = session.reviewLifecycle;
   if (lifecycle?.acknowledgedAt) return "acknowledged";
   if (lifecycle?.reviewState === "completion_to_review") return "complete · read report";
-  if (lifecycle?.reviewState === "interrupted_to_review") return "interrupted";
+  if (lifecycle?.reviewState === "interrupted_to_review") {
+    return session.status === "inactive" ? "inactive" : "interrupted";
+  }
   if (lifecycle?.reviewState === "decision_needed") return "decision needed";
   if (lifecycle?.reviewState === "error_to_review") return "error";
   switch (attentionKind(session)) {
+    case "inactive":
+      return "inactive";
     case "error":
       return "errored";
     case "waiting":
@@ -142,9 +147,13 @@ export function attentionReason(session: MobileSessionInfo): string {
 export function attentionAction(session: MobileSessionInfo): string {
   const reviewState = session.reviewLifecycle?.reviewState;
   if (reviewState === "completion_to_review") return "Read";
-  if (reviewState === "interrupted_to_review") return "Inspect";
+  if (reviewState === "interrupted_to_review") {
+    return session.status === "inactive" ? "View" : "Inspect";
+  }
   if (reviewState === "decision_needed") return "Reply";
   switch (attentionKind(session)) {
+    case "inactive":
+      return "View";
     case "error":
       return "Open";
     case "waiting":
@@ -226,8 +235,6 @@ export function sessionRoleLabel(session: SessionInfo): string {
       return "Leader";
     case "minion":
       return "Minion";
-    case "card-composer":
-      return "Card Composer";
     case "default":
     case undefined:
       return "Session";

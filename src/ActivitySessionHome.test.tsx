@@ -90,6 +90,39 @@ describe("selectRelevantSessions", () => {
 });
 
 describe("ActivitySessionHome", () => {
+  it("labels an interrupted inactive work item by its current status", () => {
+    render(
+      <ActivitySessionHome
+        sessions={[session({
+          sessionKey: "inactive",
+          taskName: "Paused work",
+          status: "inactive",
+          lastActivity: "Inactive",
+          reviewLifecycle: {
+            reviewState: "interrupted_to_review",
+            reviewReason: "Inactive",
+            finalReport: null,
+            finalDashboardRevision: null,
+            dashboardRevision: 0,
+            terminalReason: "abort",
+            terminalAt: 10,
+            acknowledgedAt: null,
+            dismissedAt: null,
+            lifecycleRevision: 1,
+          },
+        })]}
+        onOpenSession={() => {}}
+        onLaunch={() => {}}
+      />,
+    );
+
+    const feature = document.querySelector(".act-session-feature");
+    expect(feature).toHaveClass("act-session-feature--inactive");
+    expect(feature).not.toHaveClass("act-session-feature--error");
+    expect(screen.getAllByText("Inactive")).not.toHaveLength(0);
+    expect(screen.queryByText("Interrupted")).not.toBeInTheDocument();
+  });
+
   it("opens the best next session and keeps new work available", () => {
     const onOpenSession = vi.fn();
     const onLaunch = vi.fn();

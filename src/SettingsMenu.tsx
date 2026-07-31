@@ -330,7 +330,13 @@ function SettingsPopover({
                 title="Appearance"
                 description="Theme applies immediately across the application."
               >
-                <div className="settings-theme-grid">
+                <div
+                  className="settings-theme-grid"
+                  role="group"
+                  aria-label="Application themes, dark themes left and light themes right"
+                >
+                  <span className="settings-theme-grid__heading">Dark</span>
+                  <span className="settings-theme-grid__heading">Light</span>
                   {allThemes.map((theme) => {
                     const isActive = theme.id === themeId;
                     return (
@@ -339,6 +345,7 @@ function SettingsPopover({
                         type="button"
                         aria-pressed={isActive}
                         className="settings-theme"
+                        data-tone={theme.tone}
                         onClick={() => setTheme(theme.id)}
                         title={theme.description}
                       >

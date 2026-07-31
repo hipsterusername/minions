@@ -178,10 +178,8 @@ describe("send_message", () => {
     const detail = { workItem: { id: "work-1", projectId: "project-1", projectPath: "/proj",
       title: "Task", lifecycle: { ...initialWorkItemLifecycle(), runtimeState: "inactive" as const,
         outcome: "interrupted" as const, lifecycleRevision: 4 }, waitKind: null,
-      currentRunKey: h.host.runKey, iteration: 1, workflowColumnId: "todo", workflowRank: "a",
-      workflowRevision: 0, card: { description: "", subtasks: [], context: "", priority: "medium" as const,
-        model: "", permissionMode: "auto", worktreeIsolation: false, skillIds: [], skillValues: {},
-        linkedContextNodeIds: [] }, lastTransitionAt: 1, createdAt: 1, updatedAt: 1 },
+      currentRunKey: h.host.runKey, iteration: 1,
+      lastTransitionAt: 1, createdAt: 1, updatedAt: 1 },
       bindings: [], currentRun: null, runs: [], nextCursor: null };
     const continueWorkItem = vi.fn(async () => detail);
     h.ctx.workItems = { get: vi.fn(async () => detail),

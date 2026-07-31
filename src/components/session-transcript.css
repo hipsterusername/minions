@@ -60,6 +60,10 @@
   font-family: var(--font-mono);
 }
 
+.act-tx-msg-time {
+  margin-left: auto;
+}
+
 .act-tx-msg-dot {
   width: 6px;
   height: 6px;

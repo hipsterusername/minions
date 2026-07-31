@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+} from "react";
 
 import type { CanvasNode } from "./types.ts";
 import type { LeaderData } from "./nodes/leader/types.ts";
@@ -12,6 +19,7 @@ import {
   attentionKind,
   attentionReason,
   attentionAction,
+  activeMinionSummary,
   sessionDisplayTitle,
   sessionRoleLabel,
 } from "./mobile/mobile-selectors.ts";
@@ -23,12 +31,29 @@ import {
 } from "./mobile/mobile-activity-actions.ts";
 import { timeAgo } from "./nodes/leader-message-helpers.ts";
 import { SessionTranscript } from "./components/SessionTranscript.tsx";
-import { Check, GitCompare, RotateCcw, X } from "lucide-react";
+import {
+  Activity as ActivityIcon,
+  Check,
+  ChevronRight,
+  FileText,
+  GitCompare,
+  LayoutDashboard,
+  ListX,
+  Maximize2,
+  MessageSquareText,
+  Monitor,
+  Paperclip,
+  Pause,
+  RotateCcw,
+  Square,
+  UsersRound,
+  X,
+} from "lucide-react";
 import {
   SessionChangesPanel,
   leaderHasReviewableChanges,
 } from "./ChangesView.tsx";
-import type { SocketSubscribe } from "./use-socket.ts";
+import type { ActiveMinion, SocketSubscribe, SyncTaskRecord } from "./use-socket.ts";
 import type { WorkItemRunSnapshot } from "../shared/work-item-contracts.ts";
 import { DashboardSurface } from "./nodes/render/DashboardSurface.tsx";
 import { LeaderNodeRenderer } from "./nodes/LeaderNode.tsx";
@@ -37,6 +62,11 @@ import { ActivitySessionHome } from "./ActivitySessionHome.tsx";
 import { selectRecentAgentWork } from "./activity-recent-work.ts";
 import { randomUuid } from "./random-id.ts";
 import type { PromptFailure } from "./use-work-items.ts";
+import {
+  emptySessionStreamState,
+  preserveOptimisticUserMessages,
+} from "./session-stream.ts";
+import { useSessionStream } from "./use-session-stream.ts";
 import "./activity.css";
 
 /**
@@ -44,7 +74,7 @@ import "./activity.css";
  * Activity screen on a wider canvas.
  *
  * Left: the live session list, grouped Active → Idle → Stopped (the same
- * `groupSessionsByActivity` selector mobile uses). Right: a kanban-style
+ * `groupSessionsByActivity` selector mobile uses). Right: a structured
  * inspector for the selected session showing its metadata, a live transcript,
  * and the actions to reveal it on the canvas or expand it into the existing
  * fullscreen cockpit.
@@ -74,6 +104,8 @@ export interface ActivityViewProps {
    * revealing it on the canvas.
    */
   onAttachToCanvas: (sessionKey: string) => void;
+  /** Remove every canvas node attached to this session. */
+  onDetachFromCanvas?: (sessionKey: string) => void;
   /** WS send — used by the inline worktree review panel. */
   socketSend?: ((data: unknown) => void) | undefined;
   /** WS subscribe — used by the inline worktree review panel. */
@@ -101,6 +133,7 @@ type ActivitySession = MobileSessionInfo & {
 };
 
 type ActivitySummaryFilter = "needs-you" | "working" | "waiting";
+type InspectorSideTab = "dashboard" | "minions" | "details";
 
 /**
  * The command names whose server responses the Activity view surfaces inline.
@@ -174,6 +207,13 @@ function StatusPill({ status }: { status: string }) {
   return <span className={`act-pill act-pill--${status}`}>{status}</span>;
 }
 
+function isRetainedInactive(session: MobileSessionInfo): boolean {
+  return session.status === "inactive"
+    && session.reviewLifecycle?.reviewState === "interrupted_to_review"
+    && session.reviewLifecycle.acknowledgedAt == null
+    && session.reviewLifecycle.dismissedAt == null;
+}
+
 /** A checkbox that toggles a session's membership in the bulk-selection set. */
 function SelectBox({
   checked,
@@ -211,19 +251,24 @@ function LifecycleActions({
   className?: string;
 }) {
   const dismissed = isDismissed(session);
+  const retainedInactive = isRetainedInactive(session);
   const act = (action: LifecycleAction) => (event: MouseEvent) => {
     event.stopPropagation();
     onAction(action, session);
   };
   return (
-    <span className={className ?? "act-life-actions"}>
+    <span
+      className={className ?? "act-life-actions"}
+      role="group"
+      aria-label={`${sessionDisplayTitle(session)} actions`}
+    >
       {canAcknowledge(session) && (
         <button
           className="act-icon-action act-icon-action--review"
           type="button"
           onClick={act("acknowledge")}
-          aria-label="Mark reviewed"
-          title="Mark reviewed"
+          aria-label={retainedInactive ? "Review" : "Mark reviewed"}
+          title={retainedInactive ? "Review and keep in Activity" : "Mark reviewed"}
         >
           <Check size={14} strokeWidth={2.5} aria-hidden />
         </button>
@@ -243,10 +288,14 @@ function LifecycleActions({
           className="act-icon-action act-icon-action--dismiss"
           type="button"
           onClick={act("dismiss")}
-          aria-label="Dismiss"
-          title="Dismiss"
+          aria-label={retainedInactive ? "Review and remove from Activity" : "Dismiss"}
+          title={retainedInactive
+            ? "Review, remove from Activity, and detach from Canvas"
+            : "Dismiss"}
         >
-          <X size={14} strokeWidth={2.25} aria-hidden />
+          {retainedInactive
+            ? <ListX size={14} strokeWidth={2.25} aria-hidden />
+            : <X size={14} strokeWidth={2.25} aria-hidden />}
         </button>
       )}
     </span>
@@ -269,6 +318,7 @@ function SessionTriageRow({
   onAction: (action: LifecycleAction, session: ActivitySession) => void;
 }) {
   const kind = attentionKind(session);
+  const retainedInactive = isRetainedInactive(session);
   const classes = [
     "act-triage-row",
     `act-triage-row--${kind}`,
@@ -292,7 +342,13 @@ function SessionTriageRow({
         aria-pressed={selected}
       >
         <span className={`act-triage-icon act-triage-icon--${kind}`} aria-hidden>
-          {kind === "error" ? "!" : kind === "waiting" ? "?" : <GitCompare size={15} />}
+          {kind === "inactive"
+            ? <Pause size={15} />
+            : kind === "error"
+              ? "!"
+              : kind === "waiting"
+                ? "?"
+                : <GitCompare size={15} />}
         </span>
         <span className="act-triage-body">
           <span className="act-triage-line">
@@ -311,13 +367,15 @@ function SessionTriageRow({
         </span>
       </button>
       <span className="act-triage-actions">
-        <button
-          className="act-mini-btn act-mini-btn--primary act-mini-btn--open"
-          type="button"
-          onClick={onSelect}
-        >
-          {attentionAction(session)}
-        </button>
+        {!retainedInactive && (
+          <button
+            className="act-mini-btn act-mini-btn--primary act-mini-btn--open"
+            type="button"
+            onClick={onSelect}
+          >
+            {attentionAction(session)}
+          </button>
+        )}
         <LifecycleActions session={session} onAction={onAction} />
       </span>
     </div>
@@ -328,7 +386,6 @@ function SessionCard({
   session,
   selected,
   checked,
-  onCanvas,
   hasChanges,
   onSelect,
   onToggleSelect,
@@ -337,14 +394,45 @@ function SessionCard({
   session: ActivitySession;
   selected: boolean;
   checked: boolean;
-  onCanvas: boolean;
   hasChanges: boolean;
   onSelect: () => void;
   onToggleSelect: () => void;
   onAction: (action: LifecycleAction, session: ActivitySession) => void;
 }) {
+  const tone = session.status === "running" || session.status === "creating"
+    ? "running"
+    : session.status === "idle" || session.status === "inactive"
+      ? "idle"
+      : "other";
+  const stateLabel = session.status === "creating"
+    ? "Starting"
+    : session.status === "inactive"
+      ? "Paused"
+    : tone === "running"
+      ? "Working now"
+      : tone === "idle"
+        ? "Ready for input"
+        : readableStatus(session.status);
+  const reportedActivity = session.lastActivity?.trim();
+  const genericActivity = reportedActivity && new Set([
+    "active",
+    "idle",
+    "inactive",
+    "running",
+    "working",
+  ]).has(reportedActivity.toLocaleLowerCase());
+  const activitySummary = !genericActivity && reportedActivity ? reportedActivity : null;
+  const activityTime = session.lastActivityAt
+    ? `${tone === "idle" ? "Last active" : "Updated"} ${timeAgo(session.lastActivityAt)}`
+    : tone === "running"
+      ? "Live now"
+      : tone === "idle"
+        ? "No recent activity"
+        : "No update time";
+  const activeMinionCount = activeMinionSummary(session).running;
   const classes = [
     "act-card",
+    `act-card--${tone}`,
     selected && "act-card--selected",
     checked && "act-card--checked",
     needsAttention(session) && "act-card--attention",
@@ -361,32 +449,79 @@ function SessionCard({
       />
       <button className="act-card-main" type="button" onClick={onSelect} aria-pressed={selected}>
         <span className="act-card-top">
-          <span className="act-card-role">{sessionRoleLabel(session)}</span>
-          <StatusPill status={session.status} />
+          <span className="act-card-state">
+            <span className="act-card-state-dot" aria-hidden />
+            <span>{stateLabel}</span>
+          </span>
         </span>
         <span className="act-card-title">{sessionDisplayTitle(session)}</span>
-        <span className="act-card-meta">
-          {formatCost(session.totalCost)} · {session.turns ?? 0} turns
-          {session.model ? ` · ${session.model}` : ""}
-        </span>
-        <span className="act-card-activity">
-          {session.lastActivity || session.cwd || session.sessionKey}
-        </span>
+        {activitySummary && <span className="act-card-activity">{activitySummary}</span>}
         <span className="act-card-foot">
-          {session.lastActivityAt ? <span>{timeAgo(session.lastActivityAt)}</span> : <span />}
+          <span className="act-card-time">{activityTime}</span>
           <span className="act-card-foot-tags">
+            {activeMinionCount > 0 && (
+              <span className="act-card-minions">
+                <UsersRound size={10} strokeWidth={2.25} aria-hidden />
+                {activeMinionCount} {activeMinionCount === 1 ? "minion" : "minions"} working
+              </span>
+            )}
             {hasChanges && (
               <span className="act-card-changes">
                 <GitCompare size={9} strokeWidth={2.5} aria-hidden /> changes
               </span>
             )}
-            {onCanvas && <span className="act-card-oncanvas">on canvas</span>}
           </span>
         </span>
       </button>
       <LifecycleActions session={session} onAction={onAction} className="act-card-actions" />
     </div>
   );
+}
+
+function initialInspectorSideTab(
+  session: MobileSessionInfo,
+  minionCount: number,
+): InspectorSideTab {
+  if (session.renderState && session.renderState.components.length > 0) return "dashboard";
+  if (session.role === "leader" && minionCount > 0) return "minions";
+  return "details";
+}
+
+function minionRosterFromPlan(tasks: ReadonlyArray<SyncTaskRecord>): ActiveMinion[] {
+  return tasks
+    .filter((task) => task.executor === "minion")
+    .map((task) => ({
+      taskId: task.taskId,
+      title: task.title,
+      status: task.status,
+      sessionKey: task.minionSessionKey,
+    }));
+}
+
+/**
+ * Keep Activity's roster identical to the minion list rendered by the matching
+ * canvas leader. Session snapshots remain the fallback for leaders that are
+ * not attached to this canvas.
+ */
+export function selectActivityMinions(
+  session: MobileSessionInfo,
+  canvasTaskPlan?: ReadonlyArray<SyncTaskRecord>,
+): ActiveMinion[] {
+  if (session.role !== "leader") return [];
+  if (canvasTaskPlan !== undefined) return minionRosterFromPlan(canvasTaskPlan);
+  if (session.taskPlan !== undefined) return minionRosterFromPlan(session.taskPlan);
+  return session.activeMinions ?? [];
+}
+
+function minionStatusTone(status: string): "running" | "blocked" | "planned" | "idle" {
+  if (status === "running" || status === "starting") return "running";
+  if (status === "blocked") return "blocked";
+  if (status === "planned") return "planned";
+  return "idle";
+}
+
+function readableStatus(status: string): string {
+  return status.replace(/[-_]/g, " ");
 }
 
 function Inspector({
@@ -430,7 +565,29 @@ function Inspector({
 }) {
   const isRunning = session.status === "running" || session.status === "creating";
   const showChanges = !!leader && leaderHasReviewableChanges(leader.data);
+  const minions = selectActivityMinions(session, leader?.data.taskPlan);
   const [reply, setReply] = useState("");
+  const [conversation, setConversation] = useState(
+    () => emptySessionStreamState(session.sessionKey),
+  );
+  const [activeSideTab, setActiveSideTab] = useState<InspectorSideTab>(
+    () => initialInspectorSideTab(session, minions.length),
+  );
+  useEffect(() => {
+    setActiveSideTab(initialInspectorSideTab(session, minions.length));
+  }, [session.sessionKey]);
+  useEffect(() => {
+    setConversation(emptySessionStreamState(session.sessionKey));
+    if (!session.sessionKey.startsWith("work-item:")) {
+      socketSend?.({ type: "sync_session", sessionKey: session.sessionKey });
+    }
+  }, [session.sessionKey, socketSend]);
+  useSessionStream({
+    socketSubscribe,
+    state: conversation,
+    onChange: setConversation,
+    prefix: "activity",
+  });
   useEffect(() => {
     if (promptFailure) setReply(promptFailure.prompt);
   }, [promptFailure]);
@@ -443,7 +600,7 @@ function Inspector({
     const blockedCanonicalWait = Boolean(canonical && session.status === "waiting"
       && session.reviewLifecycle?.reviewState !== "decision_needed");
     if (!prompt || !socketSend || blockedCanonicalWait) return;
-    if (session.workItemId && onPromptWorkItem) {
+    if (canonical && session.workItemId && onPromptWorkItem) {
       if (onPromptWorkItem(session.workItemId, prompt) !== false) setReply("");
       return;
     }
@@ -456,196 +613,461 @@ function Inspector({
     setReply("");
   };
 
+  const hasDashboard = Boolean(
+    session.renderState && session.renderState.components.length > 0,
+  );
+  const conversationMatches = conversation.sessionKey === session.sessionKey;
+  const transcriptMessages = conversationMatches && conversation.messages.length > 0
+    ? preserveOptimisticUserMessages(leader?.data.messages ?? [], conversation.messages)
+    : leader?.data.messages ?? [];
+  const streamingText = conversationMatches && conversation.streamingText
+    ? conversation.streamingText
+    : leader?.data.streamingText ?? "";
+  const isSyntheticWorkItem = session.sessionKey.startsWith("work-item:");
+  const sideTabs: Array<{
+    id: InspectorSideTab;
+    label: string;
+    icon: typeof ActivityIcon;
+  }> = [
+    {
+      id: "dashboard",
+      label: "Dashboard",
+      icon: LayoutDashboard,
+    },
+    {
+      id: "minions",
+      label: "Minions",
+      icon: UsersRound,
+    },
+    {
+      id: "details",
+      label: "Session details",
+      icon: ActivityIcon,
+    },
+  ];
+  const chooseSideTab = (tab: InspectorSideTab) => {
+    setActiveSideTab(tab);
+    if (tab === "details" && session.workItemId && runs.length === 0) {
+      onLoadRuns?.();
+    }
+  };
+  const handleSideTabKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    currentTab: InspectorSideTab,
+  ) => {
+    const currentIndex = sideTabs.findIndex((tab) => tab.id === currentTab);
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % sideTabs.length;
+    if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + sideTabs.length) % sideTabs.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = sideTabs.length - 1;
+    if (nextIndex == null) return;
+    event.preventDefault();
+    const nextTab = sideTabs[nextIndex]!.id;
+    chooseSideTab(nextTab);
+    requestAnimationFrame(() => {
+      document.getElementById(`act-context-tab-${nextTab}`)?.focus();
+    });
+  };
+
   return (
     <aside className="act-inspector" aria-label="Session details">
-      {session.reviewLifecycle && session.reviewLifecycle.reviewState !== "none" &&
-        session.reviewLifecycle.acknowledgedAt == null && (
-          <div className={`act-review-banner act-review-banner--${attentionKind(session)}`}>
-            <span className="act-review-banner-label">{attentionReason(session)}</span>
-            <span>{session.reviewLifecycle.reviewReason}</span>
+      <header className="act-inspector-topbar">
+        <div className="act-inspector-identity">
+          <span className="act-inspector-avatar" aria-hidden>
+            <ActivityIcon size={16} strokeWidth={2.2} />
+          </span>
+          <div>
+            <div className="act-inspector-meta">
+              <span className="act-inspector-kicker">{sessionRoleLabel(session)} session</span>
+              <StatusPill status={session.status} />
+            </div>
+            <h2>{sessionDisplayTitle(session)}</h2>
           </div>
-        )}
-      <div className="act-inspector-head">
-        <span className="act-inspector-title">{sessionDisplayTitle(session)}</span>
-        <button className="act-icon-btn" type="button" onClick={onClose} aria-label="Close inspector">
-          ×
-        </button>
-      </div>
-
-      <div className="act-inspector-statusrow">
-        <span className="act-card-role">{sessionRoleLabel(session)}</span>
-        <StatusPill status={session.status} />
-      </div>
-
-      <dl className="act-metrics">
-        <div className="act-metric">
-          <dt>Cost</dt>
-          <dd>{formatCost(session.totalCost)}</dd>
         </div>
-        <div className="act-metric">
-          <dt>Turns</dt>
-          <dd>{session.turns ?? 0}</dd>
-        </div>
-        <div className="act-metric">
-          <dt>Model</dt>
-          <dd title={session.model ?? ""}>{session.model ?? "—"}</dd>
-        </div>
-        <div className="act-metric">
-          <dt>Harness</dt>
-          <dd>{session.harness ?? "—"}</dd>
-        </div>
-      </dl>
-
-      <div className="act-actions">
-        {session.reviewLifecycle && session.reviewLifecycle.reviewState !== "none" &&
-          session.reviewLifecycle.acknowledgedAt == null &&
-          session.reviewLifecycle.dismissedAt == null && (
-            <button className="act-btn act-btn--primary" type="button" onClick={onAcknowledge}>
-              Mark reviewed
+        <div className="act-inspector-topactions">
+          {leader ? (
+            <>
+              <button
+                className="act-toolbar-btn"
+                type="button"
+                onClick={() => onOpenInCanvas(leader.nodeId)}
+                aria-label="Open in Canvas"
+              >
+                <Monitor size={14} aria-hidden />
+                <span>Open in Canvas</span>
+              </button>
+              <button
+                className="act-toolbar-btn act-toolbar-btn--primary"
+                type="button"
+                onClick={() => onExpandFullscreen(leader.nodeId)}
+                aria-label="Expand fullscreen"
+              >
+                <Maximize2 size={14} aria-hidden />
+                <span>Expand fullscreen</span>
+              </button>
+            </>
+          ) : (
+            <button
+              className="act-toolbar-btn"
+              type="button"
+              onClick={() => onAttachToCanvas(session.sessionKey)}
+              aria-label="Add to canvas"
+            >
+              <Paperclip size={14} aria-hidden />
+              <span>Add to canvas</span>
             </button>
           )}
-        {session.reviewLifecycle?.dismissedAt == null ? (
-          <button className="act-btn" type="button" onClick={onDismiss}>Dismiss</button>
-        ) : (
-          <button className="act-btn" type="button" onClick={onReopen}>Restore</button>
-        )}
-        {leader ? (
-          <>
-            <button
-              className="act-btn"
-              type="button"
-              onClick={() => onOpenInCanvas(leader.nodeId)}
-            >
-              Open in Canvas
-            </button>
-            <button
-              className="act-btn act-btn--primary"
-              type="button"
-              onClick={() => onExpandFullscreen(leader.nodeId)}
-            >
-              Expand fullscreen
-            </button>
-          </>
-        ) : (
           <button
-            className="act-btn act-btn--primary"
+            className="act-inspector-close"
             type="button"
-            onClick={() => onAttachToCanvas(session.sessionKey)}
+            onClick={onClose}
+            aria-label="Close inspector"
           >
-            Attach to canvas
+            <X size={17} aria-hidden />
           </button>
-        )}
-        <button
-          className="act-btn act-btn--danger"
-          type="button"
-          disabled={!isRunning}
-          onClick={() => onStopSession(session.sessionKey)}
-        >
-          Stop
-        </button>
-      </div>
+        </div>
+      </header>
 
-      {showChanges && leader && (
-        <div className="act-inspector-section">
-          <div className="act-inspector-label">
-            <GitCompare size={12} strokeWidth={2} aria-hidden /> Changes
+      <div className="act-inspector-layout">
+        <main className="act-conversation-pane" aria-label="Conversation">
+          {session.reviewLifecycle && session.reviewLifecycle.reviewState !== "none" &&
+            session.reviewLifecycle.acknowledgedAt == null && (
+              <div className={`act-review-banner act-review-banner--${attentionKind(session)}`}>
+                <span className="act-review-banner-icon" aria-hidden>
+                  {attentionKind(session) === "inactive"
+                    ? <Pause size={15} />
+                    : attentionKind(session) === "error"
+                      ? "!"
+                      : attentionKind(session) === "waiting"
+                        ? "?"
+                        : <GitCompare size={15} />}
+                </span>
+                <span>
+                  <strong>{attentionReason(session)}</strong>
+                  <small>
+                    {isRetainedInactive(session)
+                      ? "Review keeps this work in Activity. Review & remove clears it from Activity and detaches it from Canvas."
+                      : session.reviewLifecycle.reviewReason}
+                  </small>
+                </span>
+              </div>
+            )}
+          <div className="act-conversation-scroll">
+            <section className="act-conversation" aria-label="Conversation history">
+              {transcriptMessages.length > 0 || streamingText ? (
+                <SessionTranscript
+                  messages={transcriptMessages}
+                  streamingText={streamingText}
+                />
+              ) : (
+                <div className="act-inspector-fallback">
+                  <span className="act-fallback-icon" aria-hidden>
+                    <MessageSquareText size={18} />
+                  </span>
+                  <h4>{isSyntheticWorkItem ? "No session run yet" : "No conversation yet"}</h4>
+                  <p>
+                    {isSyntheticWorkItem
+                      ? "Send a message below to start this work item’s first session."
+                      : "Messages from this session will appear here as soon as they are available."}
+                  </p>
+                  {session.lastActivity && (
+                    <p className="act-inspector-lastactivity">{session.lastActivity}</p>
+                  )}
+                </div>
+              )}
+            </section>
           </div>
-          <SessionChangesPanel
-            nodeId={leader.nodeId}
-            sessionKey={session.sessionKey}
-            data={leader.data}
-            socketSend={socketSend}
-            socketSubscribe={socketSubscribe}
-            onUpdateNodeData={onUpdateNodeData}
-            onOpenInCanvas={onOpenInCanvas}
-          />
-        </div>
-      )}
-
-      {session.reviewLifecycle?.finalReport && (
-        <div className="act-inspector-section">
-          <div className="act-inspector-label">Final report</div>
-          <div className="act-final-report">{session.reviewLifecycle.finalReport}</div>
-        </div>
-      )}
-
-      {session.workItemId && (
-        <details className="act-inspector-section" onToggle={(event) => {
-          if (event.currentTarget.open && runs.length === 0) onLoadRuns?.();
-        }}>
-          <summary className="act-inspector-label">Run history</summary>
-          {runs.length === 0 ? <p>No prior runs loaded.</p> : (
-            <ol aria-label="Run history">
-              {runs.map((run) => <li key={run.runKey}>
-                <strong>Iteration {run.runNumber ?? "child"}</strong> · {run.outcome}
-                {run.endedAt ? ` · ${new Date(run.endedAt).toLocaleString()}` : " · active"}
-                {run.finalReport ? <p>{run.finalReport}</p> : null}
-              </li>)}
-            </ol>
+          {promptFailure && (
+            <div className="act-action-error" role="alert">
+              <span>{promptFailure.error}</span>
+              <button className="act-icon-btn" type="button" onClick={onClearPromptFailure}
+                aria-label="Dismiss prompt error">×</button>
+            </div>
           )}
-          {runNextCursor ? <button type="button" onClick={() => onLoadRuns?.(runNextCursor)}>Load more</button> : null}
-        </details>
-      )}
-
-      {session.renderState && session.renderState.components.length > 0 && (
-        <div className="act-inspector-section act-dashboard-section">
-          <div className="act-inspector-label">Dashboard</div>
-          <div className="act-dashboard-frame">
-            <DashboardSurface
-              renderState={session.renderState}
-              onSubmitForm={(formComponentId, formAnswers) => socketSend?.({
-                type: "submit_form",
-                sessionKey: session.sessionKey,
-                formComponentId,
-                formAnswers,
-              })}
+          <div className="act-composer">
+            <textarea
+              value={reply}
+              onChange={(event) => setReply(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  submitReply();
+                }
+              }}
+              placeholder="Reply or steer this agent…"
+              aria-label="Reply or steer this agent"
             />
+            <button type="button" onClick={submitReply} disabled={!reply.trim() || !socketSend
+              || Boolean(session.workItemId && session.status === "waiting"
+                && session.reviewLifecycle?.reviewState !== "decision_needed")}>
+              Send
+            </button>
           </div>
-        </div>
-      )}
+        </main>
 
-      <div className="act-inspector-section">
-        <div className="act-inspector-label">Conversation</div>
-        {leader ? (
-          <SessionTranscript
-            messages={leader.data.messages}
-            streamingText={leader.data.streamingText ?? ""}
-          />
-        ) : (
-          <div className="act-inspector-fallback">
-            <p>
-              This session isn't on the canvas yet. Use <strong>Attach to canvas</strong> to
-              place it on the board and load its live transcript.
-            </p>
-            {session.lastActivity && <p className="act-inspector-lastactivity">{session.lastActivity}</p>}
+        <section className="act-context-panel" aria-label="Leader context">
+          <div className="act-context-tabs" role="tablist" aria-label="Leader context views">
+            {sideTabs.map((tab) => {
+              const Icon = tab.icon;
+              const selected = activeSideTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  id={`act-context-tab-${tab.id}`}
+                  className="act-context-tab"
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  aria-controls="act-context-tabpanel"
+                  tabIndex={selected ? 0 : -1}
+                  onClick={() => chooseSideTab(tab.id)}
+                  onKeyDown={(event) => handleSideTabKeyDown(event, tab.id)}
+                >
+                  <Icon size={14} aria-hidden />
+                  <span>{tab.label}</span>
+                  {tab.id === "minions" && minions.length > 0 && (
+                    <small>{minions.length}</small>
+                  )}
+                </button>
+              );
+            })}
           </div>
-        )}
-      </div>
-      {promptFailure && (
-        <div className="act-action-error" role="alert">
-          <span>{promptFailure.error}</span>
-          <button className="act-icon-btn" type="button" onClick={onClearPromptFailure}
-            aria-label="Dismiss prompt error">×</button>
-        </div>
-      )}
-      <div className="act-composer">
-        <textarea
-          value={reply}
-          onChange={(event) => setReply(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              submitReply();
-            }
-          }}
-          placeholder="Reply or steer this agent…"
-          aria-label="Reply or steer this agent"
-        />
-        <button type="button" onClick={submitReply} disabled={!reply.trim() || !socketSend
-          || Boolean(session.workItemId && session.status === "waiting"
-            && session.reviewLifecycle?.reviewState !== "decision_needed")}>
-          Send
-        </button>
+
+          <div
+            id="act-context-tabpanel"
+            className="act-context-scroll"
+            role="tabpanel"
+            aria-labelledby={`act-context-tab-${activeSideTab}`}
+          >
+            {activeSideTab === "dashboard" && (
+              <section className="act-side-stack" aria-label="Leader dashboard">
+                <header className="act-side-heading">
+                  <span>Live dashboard</span>
+                  <h3>Progress and decisions</h3>
+                  <p>Structured updates published by this leader.</p>
+                </header>
+                {hasDashboard && session.renderState ? (
+                  <div className="act-dashboard-frame">
+                    <DashboardSurface
+                      renderState={session.renderState}
+                      onSubmitForm={(formComponentId, formAnswers) => socketSend?.({
+                        type: "submit_form",
+                        sessionKey: session.sessionKey,
+                        formComponentId,
+                        formAnswers,
+                      })}
+                    />
+                  </div>
+                ) : (
+                  <div className="act-side-empty">
+                    <LayoutDashboard size={19} aria-hidden />
+                    <strong>No dashboard published</strong>
+                    <p>Structured progress updates will appear here without hiding the conversation.</p>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {activeSideTab === "minions" && (
+              <section className="act-side-stack" aria-label="Minion roster">
+                <header className="act-side-heading">
+                  <span>Delegated work</span>
+                  <h3>Minions</h3>
+                  <p>Follow the supporting agents this leader is coordinating.</p>
+                </header>
+                {minions.length > 0 ? (
+                  <div className="act-minion-list">
+                    {minions.map((minion) => {
+                      const tone = minionStatusTone(minion.status);
+                      return (
+                        <article
+                          className="act-minion-row"
+                          data-tone={tone}
+                          key={minion.sessionKey ?? minion.taskId}
+                        >
+                          <span className="act-minion-dot" aria-hidden />
+                          <div>
+                            <strong>{minion.title || minion.taskId}</strong>
+                            <small>{minion.taskId}</small>
+                          </div>
+                          <span className="act-minion-status">{readableStatus(minion.status)}</span>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="act-side-empty">
+                    <UsersRound size={19} aria-hidden />
+                    <strong>No minions yet</strong>
+                    <p>Delegated tasks will appear here as soon as this leader assigns them.</p>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {activeSideTab === "details" && (
+              <section className="act-side-stack" aria-label="Session details panel">
+                <header className="act-side-heading">
+                  <span>Session details</span>
+                  <h3>Context and output</h3>
+                  <p>Execution metadata, recent activity, and reviewable work.</p>
+                </header>
+                <article className="act-content-card">
+                  <dl className="act-detail-list">
+                    <div><dt>Status</dt><dd><StatusPill status={session.status} /></dd></div>
+                    <div><dt>Role</dt><dd>{sessionRoleLabel(session)}</dd></div>
+                    <div><dt>Model</dt><dd>{session.model ?? "Not reported"}</dd></div>
+                    <div><dt>Harness</dt><dd>{session.harness ?? "Not reported"}</dd></div>
+                    <div><dt>Turns</dt><dd>{session.turns ?? 0}</dd></div>
+                    <div><dt>Total cost</dt><dd>{formatCost(session.totalCost)}</dd></div>
+                  </dl>
+                </article>
+                <article className="act-content-card">
+                  <header className="act-content-card__head">
+                    <div>
+                      <h4>Latest activity</h4>
+                      <p>{session.lastActivityAt
+                        ? `Updated ${timeAgo(session.lastActivityAt)}`
+                        : "No timestamp was reported for this session."}</p>
+                    </div>
+                  </header>
+                  <div className="act-latest-activity">
+                    {session.lastActivity || "This leader has not published an activity summary yet."}
+                  </div>
+                </article>
+                {showChanges && leader && (
+                  <article className="act-content-card">
+                    <header className="act-content-card__head">
+                      <GitCompare size={16} aria-hidden />
+                      <div>
+                        <h4>Changes</h4>
+                        <p>Review the leader’s working tree and integration options.</p>
+                      </div>
+                    </header>
+                    <div className="act-content-card__body">
+                      <SessionChangesPanel
+                        nodeId={leader.nodeId}
+                        sessionKey={session.sessionKey}
+                        data={leader.data}
+                        socketSend={socketSend}
+                        socketSubscribe={socketSubscribe}
+                        onUpdateNodeData={onUpdateNodeData}
+                        onOpenInCanvas={onOpenInCanvas}
+                      />
+                    </div>
+                  </article>
+                )}
+                {session.reviewLifecycle?.finalReport && (
+                  <article className="act-content-card act-content-card--report">
+                    <header className="act-content-card__head">
+                      <FileText size={16} aria-hidden />
+                      <div>
+                        <h4>Final report</h4>
+                        <p>The leader’s completed handoff and verification summary.</p>
+                      </div>
+                    </header>
+                    <div className="act-final-report">{session.reviewLifecycle.finalReport}</div>
+                  </article>
+                )}
+                {session.workItemId && (
+                  <details
+                    className="act-content-card act-run-history"
+                    onToggle={(event) => {
+                      if (event.currentTarget.open && runs.length === 0) onLoadRuns?.();
+                    }}
+                  >
+                    <summary className="act-content-card__head">
+                      <div>
+                        <h4>Run history</h4>
+                        <p>Review prior iterations and outcomes for this work item.</p>
+                      </div>
+                      <ChevronRight size={15} aria-hidden />
+                    </summary>
+                    <div className="act-content-card__body">
+                      {runs.length === 0 ? <p className="act-empty-copy">No prior runs loaded.</p> : (
+                        <ol aria-label="Run history">
+                          {runs.map((run) => <li key={run.runKey}>
+                            <strong>Iteration {run.runNumber ?? "child"}</strong>
+                            <span>{run.outcome}</span>
+                            <small>{run.endedAt
+                              ? new Date(run.endedAt).toLocaleString()
+                              : "Active now"}</small>
+                            {run.finalReport ? <p>{run.finalReport}</p> : null}
+                          </li>)}
+                        </ol>
+                      )}
+                      {runNextCursor ? (
+                        <button
+                          className="act-btn"
+                          type="button"
+                          onClick={() => onLoadRuns?.(runNextCursor)}
+                        >
+                          Load more
+                        </button>
+                      ) : null}
+                    </div>
+                  </details>
+                )}
+              </section>
+            )}
+          </div>
+
+          <div className="act-context-controls" aria-label="Session controls">
+            {session.reviewLifecycle && session.reviewLifecycle.reviewState !== "none" &&
+              session.reviewLifecycle.acknowledgedAt == null &&
+              session.reviewLifecycle.dismissedAt == null && (
+                <button
+                  className="act-icon-action act-icon-action--review"
+                  type="button"
+                  onClick={onAcknowledge}
+                  aria-label={isRetainedInactive(session) ? "Review" : "Mark reviewed"}
+                  title={isRetainedInactive(session)
+                    ? "Review and keep in Activity"
+                    : "Mark reviewed"}
+                >
+                  <Check size={15} strokeWidth={2.5} aria-hidden />
+                </button>
+              )}
+            {session.reviewLifecycle?.dismissedAt == null ? (
+              <button
+                className="act-icon-action act-icon-action--dismiss"
+                type="button"
+                onClick={onDismiss}
+                aria-label={isRetainedInactive(session)
+                  ? "Review and remove from Activity"
+                  : "Dismiss"}
+                title={isRetainedInactive(session)
+                  ? "Review, remove from Activity, and detach from Canvas"
+                  : "Dismiss"}
+              >
+                {isRetainedInactive(session)
+                  ? <ListX size={15} strokeWidth={2.25} aria-hidden />
+                  : <X size={15} strokeWidth={2.25} aria-hidden />}
+              </button>
+            ) : (
+              <button
+                className="act-icon-action"
+                type="button"
+                onClick={onReopen}
+                aria-label="Restore"
+                title="Restore"
+              >
+                <RotateCcw size={14} strokeWidth={2.25} aria-hidden />
+              </button>
+            )}
+            <button
+              className="act-icon-action act-icon-action--danger"
+              type="button"
+              disabled={!isRunning}
+              onClick={() => onStopSession(session.sessionKey)}
+              aria-label="Stop"
+              title="Stop"
+            >
+              <Square size={12} fill="currentColor" aria-hidden />
+            </button>
+          </div>
+        </section>
       </div>
     </aside>
   );
@@ -660,6 +1082,7 @@ export function ActivityView({
   onExpandFullscreen,
   onStopSession,
   onAttachToCanvas,
+  onDetachFromCanvas,
   socketSend,
   socketSubscribe,
   projectPath,
@@ -668,6 +1091,7 @@ export function ActivityView({
   promptFailures = {}, onClearPromptFailure,
 }: ActivityViewProps) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const selectedWorkItemIdRef = useRef<string | null>(null);
   const [visibility, setVisibility] = useState<ActivityVisibility>("open");
   const [summaryFilter, setSummaryFilter] = useState<ActivitySummaryFilter | null>(null);
   const [launchNodeId, setLaunchNodeId] = useState<string | null>(null);
@@ -694,6 +1118,9 @@ export function ActivityView({
     });
 
   const sendLifecycle = (action: LifecycleAction, session: MobileSessionInfo) => {
+    if (action === "dismiss" && isRetainedInactive(session)) {
+      onDetachFromCanvas?.(session.sessionKey);
+    }
     socketSend?.(buildLifecycleCommand(action, session, randomUuid()));
   };
 
@@ -774,6 +1201,13 @@ export function ActivityView({
     () => activitySessions.find((s) => s.sessionKey === selectedKey) ?? null,
     [activitySessions, selectedKey],
   );
+  useEffect(() => {
+    if (selectedSession) {
+      selectedWorkItemIdRef.current = selectedSession.workItemId ?? null;
+    } else if (!selectedKey) {
+      selectedWorkItemIdRef.current = null;
+    }
+  }, [selectedKey, selectedSession]);
 
   // ── Empty-state launchpad ────────────────────────────────────────────────
   // Both empty states embed the full launch composer inline plus a preview of
@@ -833,9 +1267,15 @@ export function ActivityView({
   );
   const bulkCounts = useMemo(
     () => ({
-      reviewable: checkedSessions.filter((s) => canAcknowledge(s)).length,
+      reviewable: checkedSessions.filter((s) => canAcknowledge(s) && !isRetainedInactive(s)).length,
+      retainedReviewable: checkedSessions.filter(
+        (s) => canAcknowledge(s) && isRetainedInactive(s),
+      ).length,
+      dismissible: checkedSessions.filter(
+        (s) => !isDismissed(s) && !isRetainedInactive(s),
+      ).length,
+      removable: checkedSessions.filter((s) => isRetainedInactive(s)).length,
       dismissed: checkedSessions.filter((s) => isDismissed(s)).length,
-      open: checkedSessions.filter((s) => !isDismissed(s)).length,
     }),
     [checkedSessions],
   );
@@ -843,11 +1283,12 @@ export function ActivityView({
   const clearSelection = () => setCheckedKeys(new Set());
   const selectAllVisible = () =>
     setCheckedKeys(new Set(activitySessions.map((session) => session.sessionKey)));
-  const applyBulk = (action: LifecycleAction) => {
+  const applyBulk = (
+    action: LifecycleAction,
+    isEligible: (session: ActivitySession) => boolean,
+  ) => {
     for (const session of checkedSessions) {
-      if (action === "acknowledge" && !canAcknowledge(session)) continue;
-      if (action === "dismiss" && isDismissed(session)) continue;
-      if (action === "reopen" && !isDismissed(session)) continue;
+      if (!isEligible(session)) continue;
       sendLifecycle(action, session);
     }
     clearSelection();
@@ -864,11 +1305,16 @@ export function ActivityView({
     setLaunchNodeId(null);
   }, [activitySessions, launchNode]);
 
-  // If the selected session disappears (cleared/ended off the list), drop the
-  // inspector rather than leaving a dangling selection.
+  // A new work-item iteration replaces the prior run's session key. Follow
+  // that stable work-item identity so sending from Activity keeps the card
+  // selected; genuinely removed sessions still clear the inspector.
   useEffect(() => {
     if (selectedKey && !activitySessions.some((s) => s.sessionKey === selectedKey)) {
-      setSelectedKey(null);
+      const selectedWorkItemId = selectedWorkItemIdRef.current;
+      const nextIteration = selectedWorkItemId
+        ? activitySessions.find((session) => session.workItemId === selectedWorkItemId)
+        : undefined;
+      setSelectedKey(nextIteration?.sessionKey ?? null);
     }
   }, [activitySessions, selectedKey]);
 
@@ -972,38 +1418,97 @@ export function ActivityView({
 
         {checkedSessions.length > 0 && (
           <div className="act-bulk" role="toolbar" aria-label="Bulk actions">
-            <span className="act-bulk-count">{checkedSessions.length} selected</span>
-            <div className="act-bulk-actions">
+            <div className="act-bulk-head">
+              <span className="act-bulk-count">{checkedSessions.length} selected</span>
+              <div className="act-bulk-selection-actions">
+                {checkedSessions.length < activitySessions.length && (
+                  <button
+                    className="act-bulk-select-all"
+                    type="button"
+                    onClick={selectAllVisible}
+                  >
+                    Select all {activitySessions.length}
+                  </button>
+                )}
+                <button
+                  className="act-bulk-clear"
+                  type="button"
+                  onClick={clearSelection}
+                  aria-label="Clear selection"
+                  title="Clear selection"
+                >
+                  <X size={14} strokeWidth={2.25} aria-hidden />
+                </button>
+              </div>
+            </div>
+            <div className="act-bulk-actions" role="group" aria-label="Selected activity actions">
               {bulkCounts.reviewable > 0 && (
                 <button
-                  className="act-btn act-btn--primary"
+                  className="act-bulk-action act-bulk-action--review"
                   type="button"
-                  onClick={() => applyBulk("acknowledge")}
+                  onClick={() => applyBulk(
+                    "acknowledge",
+                    (session) => canAcknowledge(session) && !isRetainedInactive(session),
+                  )}
+                  aria-label={`Mark ${bulkCounts.reviewable} reviewed`}
                 >
-                  Mark {bulkCounts.reviewable} reviewed
+                  <Check size={14} strokeWidth={2.5} aria-hidden />
+                  <span>Mark reviewed</span>
                 </button>
               )}
-              {bulkCounts.open > 0 && (
-                <button className="act-btn" type="button" onClick={() => applyBulk("dismiss")}>
-                  Dismiss {bulkCounts.open}
+              {bulkCounts.retainedReviewable > 0 && (
+                <button
+                  className="act-bulk-action act-bulk-action--review"
+                  type="button"
+                  onClick={() => applyBulk(
+                    "acknowledge",
+                    (session) => canAcknowledge(session) && isRetainedInactive(session),
+                  )}
+                  aria-label={`Review ${bulkCounts.retainedReviewable}`}
+                >
+                  <Check size={14} strokeWidth={2.5} aria-hidden />
+                  <span>Review and keep in Activity</span>
+                </button>
+              )}
+              {bulkCounts.removable > 0 && (
+                <button
+                  className="act-bulk-action act-bulk-action--dismiss"
+                  type="button"
+                  onClick={() => applyBulk(
+                    "dismiss",
+                    (session) => isRetainedInactive(session),
+                  )}
+                  aria-label={`Review and remove ${bulkCounts.removable} from Activity`}
+                >
+                  <ListX size={14} strokeWidth={2.25} aria-hidden />
+                  <span>Review and remove</span>
+                </button>
+              )}
+              {bulkCounts.dismissible > 0 && (
+                <button
+                  className="act-bulk-action act-bulk-action--dismiss"
+                  type="button"
+                  onClick={() => applyBulk(
+                    "dismiss",
+                    (session) => !isDismissed(session) && !isRetainedInactive(session),
+                  )}
+                  aria-label={`Dismiss ${bulkCounts.dismissible}`}
+                >
+                  <X size={14} strokeWidth={2.25} aria-hidden />
+                  <span>Dismiss</span>
                 </button>
               )}
               {bulkCounts.dismissed > 0 && (
-                <button className="act-btn" type="button" onClick={() => applyBulk("reopen")}>
-                  Restore {bulkCounts.dismissed}
+                <button
+                  className="act-bulk-action"
+                  type="button"
+                  onClick={() => applyBulk("reopen", (session) => isDismissed(session))}
+                  aria-label={`Restore ${bulkCounts.dismissed}`}
+                >
+                  <RotateCcw size={13} strokeWidth={2.25} aria-hidden />
+                  <span>Restore</span>
                 </button>
               )}
-              <button
-                className="act-btn act-btn--ghost"
-                type="button"
-                onClick={selectAllVisible}
-                disabled={checkedSessions.length === activitySessions.length}
-              >
-                Select all
-              </button>
-              <button className="act-btn act-btn--ghost" type="button" onClick={clearSelection}>
-                Clear
-              </button>
             </div>
           </div>
         )}
@@ -1014,7 +1519,10 @@ export function ActivityView({
             subtitle="Launch a leader and follow its work here."
             recent={recentWork}
             onOpenInCanvas={onOpenInCanvas}
-            onAttachToCanvas={onAttachToCanvas}
+            onOpenSession={(sessionKey) => {
+              setSummaryFilter(null);
+              setSelectedKey(sessionKey);
+            }}
             launchNode={launchNode}
             onLaunch={openLaunchExperience}
             onUpdateNodeData={onUpdateNodeData}
@@ -1030,7 +1538,10 @@ export function ActivityView({
             onClearFilter={summaryFilter ? () => setSummaryFilter(null) : undefined}
             recent={recentWork}
             onOpenInCanvas={onOpenInCanvas}
-            onAttachToCanvas={onAttachToCanvas}
+            onOpenSession={(sessionKey) => {
+              setSummaryFilter(null);
+              setSelectedKey(sessionKey);
+            }}
             launchNode={launchNode}
             onLaunch={openLaunchExperience}
             onUpdateNodeData={onUpdateNodeData}
@@ -1075,7 +1586,6 @@ export function ActivityView({
                       session={session}
                       selected={session.sessionKey === selectedKey}
                       checked={checkedKeys.has(session.sessionKey)}
-                      onCanvas={leaderIndex.has(session.sessionKey)}
                       hasChanges={session.reviewableChanges === true}
                       onSelect={() => setSelectedKey(session.sessionKey)}
                       onToggleSelect={() => toggleChecked(session.sessionKey)}

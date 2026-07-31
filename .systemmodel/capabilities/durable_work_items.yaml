@@ -1,27 +1,20 @@
 id: capability.durable_work_items
 type: capability
 name: Durable work items
-summary: Users can create a durable intention once, bind it to multiple surfaces, revision-fence its workflow and lifecycle, and retain run history beyond any node or session.
-constraints:
-  - constraint.workflow_revision_authority
+summary: Users can create a durable intention once, bind it to a canvas node, revision-fence its lifecycle, and retain run history beyond any node or session.
+constraints: []
 decisions: [ decision.canonical_work_item_lifecycle ]
 risks:
-  - risk.kanban_bound_without_run
   - risk.dual_ingress_divergence
-suggested_files: [ shared/work-item-contracts.ts, server/work-item-service.ts, server/commands/work-items.ts, src/use-work-items.ts, src/use-server-kanban.ts ]
-suggested_tests: [ tests/contracts/work-item-contracts.test.ts, server/commands/work-items.test.ts, server/work-item-service-sqlite.test.ts, src/use-work-items.test.ts, src/use-server-kanban.dom.test.ts ]
-keywords: [ work_item, durable, lifecycle, workflow, revision, cas, binding, run_history, current_run_key, archive, restore, card ]
+suggested_files: [ shared/work-item-contracts.ts, server/work-item-service.ts, server/commands/work-items.ts, src/use-work-items.ts ]
+suggested_tests: [ tests/contracts/work-item-contracts.test.ts, server/commands/work-items.test.ts, server/work-item-service-sqlite.test.ts, src/use-work-items.test.ts ]
+keywords: [ work_item, durable, lifecycle, revision, cas, binding, run_history, current_run_key, archive, restore ]
 entry_points:
   - surface: surface.canvas
     summary: Bind and reconcile Leader nodes without making spatial deletion erase durable identity.
     files: [ src/nodes/leader/use-canvas-work-item.ts, src/nodes/leader/work-item.ts, src/canvas-work-item-reconcile.ts ]
     tests: [ src/nodes/leader/work-item.test.ts, src/canvas-work-item-reconcile.test.ts ]
-    flows: [ flow.launch_leader, flow.launch_or_resume_card, flow.recover_after_disconnect ]
-  - surface: surface.kanban
-    summary: Create, configure, move, archive, restore, and launch server-projected WorkItem cards.
-    files: [ src/KanbanBoard.tsx, src/use-server-kanban.ts, src/kanban-work-item-status.ts ]
-    tests: [ src/KanbanBoard.test.tsx, src/use-server-kanban.dom.test.ts ]
-    flows: [ flow.compose_durable_cards, flow.launch_or_resume_card ]
+    flows: [ flow.launch_leader, flow.recover_after_disconnect ]
   - surface: surface.activity
     summary: Review, archive, restore, reply to, and inspect canonical work and run history.
     files: [ src/ActivityView.tsx, src/use-work-items.ts ]
@@ -36,7 +29,7 @@ entry_points:
     summary: Validate and dispatch the WorkItem command family into the durable service.
     files: [ server/commands/work-items.ts, server/work-item-service.ts, shared/work-item-contracts.ts ]
     tests: [ server/commands/work-items.test.ts, server/work-item-service-sqlite.test.ts, tests/contracts/work-item-contracts.test.ts ]
-    flows: [ flow.compose_durable_cards, flow.launch_or_resume_card, flow.steer_session ]
+    flows: [ flow.steer_session ]
 freshness:
   class: code_coupled
 risk: critical

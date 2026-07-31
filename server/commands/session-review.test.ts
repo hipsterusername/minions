@@ -14,7 +14,7 @@ function boundDetail(resolution: Resolution, revision: number) {
         resolution, changeMode: "live" as const, integrationState: "live_clean" as const,
         lifecycleRevision: revision },
       waitKind: null, currentRunKey: "leader-1", iteration: 1,
-      workflowColumnId: "backlog", workflowRank: "a", lastTransitionAt: 10,
+      lastTransitionAt: 10,
       createdAt: 1, updatedAt: 10 + revision,
     },
     bindings: [], currentRun: null, runs: [], nextCursor: null,

@@ -13,10 +13,6 @@ const detail: WorkItemDetailSnapshot = {
   workItem: {
     id: "work-1", projectId: "project-1", projectPath: "/repo", title: "Task",
     lifecycle: initialWorkItemLifecycle(), waitKind: null, currentRunKey: null, iteration: 0,
-    workflowColumnId: "backlog", workflowRank: "a", workflowRevision: 0,
-    card: { description: "", subtasks: [], context: "", priority: "medium",
-      model: "", permissionMode: "auto", worktreeIsolation: false, skillIds: [],
-      skillValues: {}, linkedContextNodeIds: [] },
     lastTransitionAt: 1, createdAt: 1, updatedAt: 1,
   },
   bindings: [], currentRun: null, runs: [], nextCursor: null,

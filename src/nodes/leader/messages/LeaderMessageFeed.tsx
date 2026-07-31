@@ -9,6 +9,7 @@
 
 import type { RefObject } from "react";
 import { StreamingBubble, StreamingIndicator } from "../../../components/StreamingBubble.tsx";
+import { MessageTimestamp } from "../../../components/MessageTimestamp.tsx";
 import { chatRoleStyle } from "../../../chat-bubble-style.ts";
 import { DebugInspector } from "../../../components/DebugInspector.tsx";
 import { WaitCountdown } from "../WaitCountdown.tsx";
@@ -118,12 +119,13 @@ export function LeaderMessageFeed({
         // System messages — compact
         return (
           <div key={msg.id} style={chatRoleStyle("system")}>
-            {msg.content}
-            {msg.suffix && (
-              <span style={{ display: "inline-block", marginLeft: 6, fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", opacity: 0.7 }}>
-                {msg.suffix}
-              </span>
-            )}
+            <div>{msg.content}</div>
+            <div className="leader-message-meta">
+              {msg.suffix && (
+                <span className="leader-message-meta__suffix">{msg.suffix}</span>
+              )}
+              <MessageTimestamp timestamp={msg.timestamp} />
+            </div>
           </div>
         );
       })}

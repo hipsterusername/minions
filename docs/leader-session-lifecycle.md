@@ -93,7 +93,5 @@ mirrors this.
 
 ## Related docs
 
-- `docs/handoff/2026-07-12-leader-continuity.md` — session handoff that
-  established/verified this behavior and lists open follow-on work.
 - `docs/codex-harness-spec.md` §3 — thread resume semantics per harness.
 - `docs/testing-strategy.md` — where lifecycle behavior is tested.

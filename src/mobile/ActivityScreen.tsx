@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Check, ListX, RotateCcw, X } from "lucide-react";
 
 import type { MobileSessionInfo, ActivityVisibility } from "./mobile-selectors.ts";
 import type { WorkItemRunSnapshot } from "../../shared/work-item-contracts.ts";
@@ -29,7 +30,7 @@ interface ActivityScreenProps {
   workItemRuns?: Record<string, WorkItemRunSnapshot[]>;
   runNextCursor?: Record<string, string | null>;
   onLoadRuns?: (workItemId: string, cursor?: string) => void;
-  /** WS send — drives the triage lane's Mark reviewed / Dismiss / Restore actions. */
+  /** WS send — drives the triage lane's keep/review, remove, and restore actions. */
   send?: (data: unknown) => void;
 }
 
@@ -131,32 +132,46 @@ function LifecycleActions({
   onAction: (action: LifecycleAction, session: MobileSessionInfo) => void;
 }) {
   const dismissed = isDismissed(session);
+  const retainedInactive = session.status === "inactive"
+    && session.reviewLifecycle?.reviewState === "interrupted_to_review"
+    && session.reviewLifecycle.acknowledgedAt == null
+    && session.reviewLifecycle.dismissedAt == null;
   return (
     <span className="mob-life-actions">
       {canAcknowledge(session) ? (
         <button
-          className="mob-mini-btn"
+          className="mob-mini-btn mob-mini-btn--icon mob-mini-btn--primary"
           type="button"
           onClick={() => onAction("acknowledge", session)}
+          aria-label={retainedInactive ? "Review" : "Mark reviewed"}
+          title={retainedInactive ? "Review and keep in Activity" : "Mark reviewed"}
         >
-          Mark reviewed
+          <Check size={18} strokeWidth={2.5} aria-hidden />
         </button>
       ) : null}
       {dismissed ? (
         <button
-          className="mob-mini-btn"
+          className="mob-mini-btn mob-mini-btn--icon"
           type="button"
           onClick={() => onAction("reopen", session)}
+          aria-label="Restore"
+          title="Restore"
         >
-          Restore
+          <RotateCcw size={17} strokeWidth={2.25} aria-hidden />
         </button>
       ) : (
         <button
-          className="mob-mini-btn"
+          className="mob-mini-btn mob-mini-btn--icon mob-mini-btn--dismiss"
           type="button"
           onClick={() => onAction("dismiss", session)}
+          aria-label={retainedInactive ? "Review and remove from Activity" : "Dismiss"}
+          title={retainedInactive
+            ? "Review, remove from Activity, and detach from Canvas"
+            : "Dismiss"}
         >
-          Dismiss
+          {retainedInactive
+            ? <ListX size={18} strokeWidth={2.25} aria-hidden />
+            : <X size={18} strokeWidth={2.25} aria-hidden />}
         </button>
       )}
     </span>
@@ -181,6 +196,10 @@ function TriageRow({
   onToggleSelect?: (() => void) | undefined;
 }) {
   const kind = attentionKind(session);
+  const retainedInactive = session.status === "inactive"
+    && session.reviewLifecycle?.reviewState === "interrupted_to_review"
+    && session.reviewLifecycle.acknowledgedAt == null
+    && session.reviewLifecycle.dismissedAt == null;
   return (
     <div
       className={`mob-triage-row mob-triage-row--${kind}${checked ? " mob-triage-row--selected" : ""}`}
@@ -198,7 +217,7 @@ function TriageRow({
         onClick={() => onOpenSession(session.sessionKey)}
       >
         <span className={`mob-triage-icon mob-triage-icon--${kind}`} aria-hidden="true">
-          {kind === "error" ? "!" : kind === "waiting" ? "?" : "±"}
+          {kind === "inactive" ? "Ⅱ" : kind === "error" ? "!" : kind === "waiting" ? "?" : "±"}
         </span>
         <span className="mob-triage-body">
           <span className="mob-triage-line">
@@ -214,13 +233,15 @@ function TriageRow({
         </span>
       </button>
       <span className="mob-triage-actions">
-        <button
-          className="mob-mini-btn mob-mini-btn--primary"
-          type="button"
-          onClick={() => onOpenSession(session.sessionKey)}
-        >
-          {attentionAction(session)}
-        </button>
+        {(!retainedInactive || !onAction) ? (
+          <button
+            className="mob-mini-btn mob-mini-btn--primary"
+            type="button"
+            onClick={() => onOpenSession(session.sessionKey)}
+          >
+            {attentionAction(session)}
+          </button>
+        ) : null}
         {onAction ? <LifecycleActions session={session} onAction={onAction} /> : null}
       </span>
     </div>

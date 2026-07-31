@@ -15,7 +15,6 @@ Minions gives you a spatial interface for orchestrating coding agents:
 
 - **Infinite canvas** — drag, zoom, arrange nodes visually
 - **Leader/Minion orchestration** — give a Leader a complex task, and it spawns Minion agents, wires them up, and tracks progress through a live task board
-- **Kanban board** — plan work as cards with priorities, models, and skills, then launch Leaders directly from the board
 - **Git worktree isolation** — each Minion works in its own worktree so parallel agents don't conflict, and changes route through an explicit approval flow before merging
 - **Skills browser** — browse, create, and launch pre-configured skill templates
 - **Project management** — persistent projects with SQLite storage, session history, cost tracking
@@ -76,13 +75,6 @@ That's it. No environment variables, no database setup, no Docker — SQLite han
 5. The Leader tracks progress, integrates results, and routes the shared worktree through approval
 
 > Minion nodes are created and wired automatically — you never need to add or connect them manually.
-
-### Kanban Board
-
-1. Switch to the **Kanban** view from the project header
-2. Create cards in the **Backlog** column with descriptions, priority, model, and skills
-3. Click **Launch Leader** on a card to spawn a Leader on the canvas
-4. Cards move through columns automatically as work progresses (In Progress → Ready for Review → Agent History)
 
 ### Other Node Types
 
@@ -203,6 +195,27 @@ pull-request expectations. Report suspected vulnerabilities privately as
 described in [SECURITY.md](./SECURITY.md); do not include credentials, private
 repository content, or local transcripts in public issues.
 
+### Harness terms and assumption of risk
+
+Minions is an independent orchestration layer. It operates through locally
+installed and authenticated Claude Code and/or OpenAI Codex harnesses; it does
+not provide, resell, or grant access to either service. You are responsible for
+ensuring that how you install, authenticate, configure, and use each harness
+complies with the provider's then-current terms, policies, plan or billing
+conditions, and any rules imposed by your organization. Review the
+[Anthropic legal terms](https://www.anthropic.com/legal) and
+[OpenAI policies](https://openai.com/policies/) that apply to your account and
+use case. Minions does not alter or supersede those terms, and references to
+provider products do not imply provider endorsement.
+
+Minions is provided on an "AS IS" basis, without warranties or conditions of
+any kind, as set out in the [Apache License 2.0](./LICENSE). You use Minions at
+your own risk. Coding agents can read and modify files, run commands, create
+worktrees, contact configured services, and consume paid provider capacity with
+the permissions and credentials you give them. Review permission settings,
+protect credentials, keep recoverable backups, and supervise consequential
+actions.
+
 Run Minions only on a trusted local machine or private tailnet. Worktrees are
 coordination boundaries, not sandboxes: agents, local MCP commands, and enabled
 tools run with the permissions of the account that started Minions. Review
@@ -264,6 +277,10 @@ Another instance may be running. Kill it or use a different port: `PORT=3142 pnp
 
 **Native module build errors during `pnpm install`**
 `better-sqlite3` requires a C++ compiler. On macOS run `xcode-select --install`. On Ubuntu/Debian: `sudo apt install build-essential`.
+
+## License
+
+Minions is licensed under the [Apache License 2.0](./LICENSE).
 
 ---
 

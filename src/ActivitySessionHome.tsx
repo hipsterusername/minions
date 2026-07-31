@@ -60,7 +60,9 @@ export function sessionRelevanceLabel(session: MobileSessionInfo): string {
   const reviewState = pendingReviewState(session);
   if (reviewState === "decision_needed") return "Decision needed";
   if (reviewState === "error_to_review" || session.status === "error") return "Needs recovery";
-  if (reviewState === "interrupted_to_review") return "Interrupted";
+  if (reviewState === "interrupted_to_review") {
+    return session.status === "inactive" ? "Inactive" : "Interrupted";
+  }
   if (reviewState === "completion_to_review") return "Ready to review";
   if (session.reviewableChanges === true) return "Changes ready";
   if (session.status === "waiting" || session.pendingAttention === true) return "Waiting for you";

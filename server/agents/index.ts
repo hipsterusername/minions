@@ -6,7 +6,6 @@
 import "./leader.ts";
 import "./minion.ts";
 import "./default.ts";
-import "./card-composer.ts";
 import "./dialectic-planner.ts";
 
 export { getAgentType, getAgentTypeOrDefault, registerAgentType } from "./registry.ts";

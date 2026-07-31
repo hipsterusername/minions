@@ -373,9 +373,9 @@ export class SessionHost {
       drainQueuedWorkItemGuidance(this, deps);
     }
   }
-  terminate(reason: SessionTerminateReason, deps?: SessionTerminateDeps): void {
+  terminate(reason: SessionTerminateReason, deps?: SessionTerminateDeps): Promise<void> {
     const base = this.terminateDeps;
     const effective = deps ? { ...base, ...deps, workItemLifecycle: deps.workItemLifecycle ?? base?.workItemLifecycle } : base;
-    void terminateSessionHost(this, effective, reason);
+    return terminateSessionHost(this, effective, reason);
   }
 }

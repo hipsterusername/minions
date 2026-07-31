@@ -69,6 +69,7 @@ describe("wake coalescer", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
@@ -124,6 +125,36 @@ describe("wake coalescer", () => {
       workItemId: "work-1", runKey: "leader-1", prompt: "canonical",
     }));
     expect(startChildSession).not.toHaveBeenCalled();
+  });
+
+  it("handles a rejected primary wake resume without an unhandled rejection", async () => {
+    const error = new Error("run is not the current open primary");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const deps = makeDeps();
+    deps.resumeWorkItemRun = vi.fn().mockRejectedValue(error);
+    const host = makeLeader(); host.workItemId = "work-1"; host.runKind = "primary";
+
+    wake(host, deps, "stale wake", true);
+    await Promise.resolve();
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("work_item_resume_failed"),
+      expect.objectContaining({ workItemId: "work-1", runKey: "leader-1" }),
+    );
+  });
+
+  it("handles a synchronous primary wake resume failure", () => {
+    const error = new Error("resume adapter failed");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const deps = makeDeps();
+    deps.resumeWorkItemRun = vi.fn(() => { throw error; });
+    const host = makeLeader(); host.workItemId = "work-1"; host.runKind = "primary";
+
+    expect(() => wake(host, deps, "failed wake", true)).not.toThrow();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("work_item_resume_failed"),
+      expect.objectContaining({ workItemId: "work-1", runKey: "leader-1" }),
+    );
   });
 
   it("cleans up a deferred wake through the termination cleanup path", async () => {

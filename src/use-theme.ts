@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 import type { ThemeDefinition } from "./themes.ts";
-import { themes, DEFAULT_THEME_ID } from "./themes.ts";
+import { themes, themeMap, DEFAULT_THEME_ID } from "./themes.ts";
 
 // ── Context ───────────────────────────────────────────────
 
@@ -30,7 +30,8 @@ const STORAGE_KEY = "canvas-theme";
 
 export function loadPersistedThemeId(): string {
   try {
-    return localStorage.getItem(STORAGE_KEY) ?? DEFAULT_THEME_ID;
+    const storedThemeId = localStorage.getItem(STORAGE_KEY);
+    return storedThemeId && themeMap[storedThemeId] ? storedThemeId : DEFAULT_THEME_ID;
   } catch {
     return DEFAULT_THEME_ID;
   }

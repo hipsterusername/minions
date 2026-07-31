@@ -1,3 +1,18 @@
+@import "@fontsource-variable/dm-sans/wght.css";
+@import "@fontsource-variable/fraunces/opsz.css";
+@import "@fontsource-variable/instrument-sans/wght.css";
+@import "@fontsource-variable/jetbrains-mono/wght.css";
+@import "@fontsource-variable/nunito-sans/wght.css";
+@import "@fontsource-variable/plus-jakarta-sans/wght.css";
+@import "@fontsource-variable/recursive/wght.css";
+@import "@fontsource-variable/source-sans-3/wght.css";
+@import "@fontsource-variable/space-grotesk/wght.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+@import "@fontsource/space-mono/400.css";
+@import "@fontsource/space-mono/700.css";
+
 :root {
   /* ── Core palette (fallbacks — overridden by theme system) ──
      Mirrors the Midnight theme. Keep in sync with src/themes.ts. */
@@ -15,8 +30,8 @@
   --accent-dark: #d97a1c;
   --dot-grid: #1a2036;
   --selection-bg: rgba(245, 158, 59, 0.28);
-  --font-sans: "DM Sans", "Segoe UI", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+  --font-sans: "DM Sans Variable", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "Fira Code", monospace;
 
   /* ── Design-language tokens ──
      Shape / elevation / display type. Base values match the default
@@ -64,6 +79,7 @@
   --warning-color: #facc15;
   --info-color: #60a5fa;
   --streaming-color: #60a5fa;
+  --leader-icon-color: var(--accent);
 
   /* ── Shadows ── */
   --shadow-sm: 0 2px 8px rgba(0,0,0,0.2);
@@ -110,10 +126,6 @@
   --markdown-bg: #1a2a1a;
   --markdown-border: #2a3a2a;
 
-  /* ── Gradients ── */
-  --gradient-primary: linear-gradient(135deg, #f59e3b, #d97a1c);
-  --gradient-success: linear-gradient(135deg, #34d399, #10b981);
-  --gradient-danger: linear-gradient(135deg, #f87171, #ef4444);
 }
 
 *,
@@ -328,9 +340,27 @@ input, textarea, select,
   -webkit-user-select: text;
 }
 
-/* ── Leader node status icon (theme-aware inversion) ── */
-[data-theme="alpine"] .leader-status-icon {
-  filter: invert(1);
+/* ── Leader node status icon (theme-colored SVG mask) ── */
+.leader-status-icon {
+  display: block;
+  flex-shrink: 0;
+  background-color: var(--leader-icon-color, var(--accent));
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+}
+
+.leader-status-icon[data-state="active"] {
+  mask-image: url("/icons/leader-active.svg");
+  -webkit-mask-image: url("/icons/leader-active.svg");
+}
+
+.leader-status-icon[data-state="idle"] {
+  mask-image: url("/icons/leader-idle.svg");
+  -webkit-mask-image: url("/icons/leader-idle.svg");
 }
 
 /* ── Leader scroll-capture zone ── */

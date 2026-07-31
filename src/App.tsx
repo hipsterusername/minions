@@ -25,25 +25,21 @@ import { canvasReducer, generateId } from "./canvas-state.ts";
 import { viewportCenter, findNonOverlappingPosition } from "./canvas-utils.ts";
 import { createImageNodeFromProjectPath } from "./nodes/image-node-factory.ts";
 import { isImagePath } from "./nodes/image-loader-from-path.ts";
-import { graphReducer, createEdge } from "./graph-runtime.ts";
+import { graphReducer } from "./graph-runtime.ts";
 import type { GraphDocument } from "./graph.ts";
 import type { CanvasTransform, CanvasNode } from "./types.ts";
 import { DEFAULT_THINKING_CONFIG } from "./types.ts";
 import { CONTEXT_EXPLORER_PROMPT } from "./prompts/context-explorer.ts";
 import { getAllNodeTypes } from "./node-registry.ts";
 import { createDefaultNodeData } from "./node-defaults.ts";
-import type { LeaderData } from "./nodes/LeaderNode.tsx";
-import { useServerKanban } from "./use-server-kanban.ts";
-import { KanbanBoard } from "./KanbanBoard.tsx";
 import { ActivityView } from "./ActivityView.tsx";
 import { countReviewableLeaders } from "./ChangesView.tsx";
 import { useSessionActivity } from "./use-session-activity.ts";
 import { mergeCanonicalActivity, useWorkItems } from "./use-work-items.ts";
 import { reconcileLegacyCanvasLeaders } from "./canvas-work-item-reconcile.ts";
-import { projectKanbanWorkItemStatus } from "./kanban-work-item-status.ts";
+import { detachSessionCanvasNodes } from "./activity-canvas-detach.ts";
 import { sessionBelongsToProject, needsAttention } from "./mobile/mobile-selectors.ts";
 import { requestLeaderFullscreen } from "./leader-fullscreen-request.ts";
-import type { KanbanCard } from "./kanban-types.ts";
 import { McpServersBrowser } from "./McpServersBrowser.tsx";
 import { SkillsBrowser } from "./SkillsBrowser.tsx";
 import { DockProvider, DockBar } from "./BottomRightDock.tsx";
@@ -147,19 +143,6 @@ function sanitizePersistedNodes(nodes: CanvasNode[]): CanvasNode[] {
     }
     return node;
   });
-}
-
-function buildLeaderPrompt(card: KanbanCard): string {
-  let prompt = `# Task: ${card.title}\n\n`;
-  if (card.description) prompt += `${card.description}\n\n`;
-  if (card.context) prompt += `## Context\n${card.context}\n\n`;
-  if (card.subtasks.length > 0) {
-    prompt += `## Subtasks\n`;
-    for (const st of card.subtasks) {
-      prompt += `- [${st.done ? "x" : " "}] ${st.title}\n`;
-    }
-  }
-  return prompt.trim();
 }
 
 function ProjectView({
@@ -354,7 +337,7 @@ function ProjectView({
     [positionInViewport, projectPath, transform, nodes],
   );
 
-  // Focus-node state for Kanban → Canvas navigation
+  // Focus-node state for cross-surface Canvas navigation
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
 
   const handleFocusNode = useCallback(
@@ -421,6 +404,17 @@ function ProjectView({
       setActiveView("canvas");
     },
     [nodes, handleFocusNode, positionInViewport, projectSettings, setTransform],
+  );
+
+  const handleDetachSessionFromCanvas = useCallback(
+    (sessionKey: string) => {
+      detachSessionCanvasNodes(nodes, sessionKey, {
+        send: socket.send,
+        dispatch,
+        graphDispatch,
+      });
+    },
+    [nodes, socket.send],
   );
 
   const handleLaunchActivityLeader = useCallback(() => {
@@ -495,21 +489,6 @@ function ProjectView({
     },
     [socket],
   );
-
-  const existingWorkItemsByLeader = useMemo(() => new Map(nodes.flatMap((node) => {
-    if (node.type !== "leader") return [];
-    const data = node.data as LeaderData;
-    const workItemId = data.workItemId
-      ?? workItemState.orderedItems.find((item) => item.currentRunKey === data.sessionKey)?.id
-      ?? mobileSessions.find((session) => session.sessionKey === data.sessionKey)?.workItemId;
-    return workItemId ? [[node.id, workItemId] as const] : [];
-  })), [nodes, workItemState.orderedItems, mobileSessions]);
-  const { board: kanbanBoard, dispatch: kanbanDispatch } = useServerKanban({
-    projectId, projectPath,
-    connected: socket.connected && workItemState.projectId === projectId,
-    items: workItemState.orderedItems, send: socket.send, subscribe: socket.subscribe,
-    existingByLeaderNodeId: existingWorkItemsByLeader,
-  });
 
   // Launch a Leader node pre-tagged with a skill from the SkillsBrowser
   const handleLaunchSkill = useCallback((skillId: string) => {
@@ -651,161 +630,6 @@ function ProjectView({
     setSkillEditorOpen(true);
   }, []);
 
-  // Launch a Leader node from a Kanban card
-  const handleLaunchLeader = useCallback(
-    (card: KanbanCard) => {
-      const typeDef = getAllNodeTypes().find((t) => t.type === "leader");
-      if (!typeDef) return;
-
-      const prompt = buildLeaderPrompt(card);
-      const nodeId = generateId();
-
-      const node: CanvasNode = {
-        id: nodeId,
-        type: "leader",
-        position: positionInViewport(typeDef.defaultSize.width, typeDef.defaultSize.height),
-        size: { ...typeDef.defaultSize },
-        data: {
-          workItemId: card.id,
-          currentRunKey: workItemState.items[card.id]?.currentRunKey ?? null,
-          workItemSnapshot: workItemState.items[card.id] ?? null,
-          sessionKey: null,
-          status: "disconnected",
-          messages: [],
-          streamingText: "",
-          totalCost: 0,
-          turns: 0,
-          error: null,
-          model: card.model ?? "sonnet",
-          ...(card.harness ? { harness: card.harness } : {}),
-          permissionMode: card.permissionMode ?? "auto",
-          taskPlan: [],
-          autoStartPrompt: prompt,
-          worktreeIsolation: card.worktreeIsolation ?? false,
-          worktreePath: null,
-          worktreeBranch: null,
-          worktreeStatus: "none",
-          skillIds: card.skillIds ?? [],
-          skillValues: card.skillValues ?? {},
-          skillPanelOpen: false,
-        },
-      };
-      dispatch({ type: "ADD_NODE", node });
-
-      // Create edges from linked context nodes → leader's context-in port
-      for (const contextNodeId of card.linkedContextNodeIds ?? []) {
-        const contextNode = nodes.find((n) => n.id === contextNodeId);
-        if (!contextNode) continue;
-        const edge = createEdge(
-          contextNodeId,
-          "context-out",
-          contextNode.type,
-          nodeId,
-          "context-in",
-          "leader",
-          node.data, // pass node data so guard can verify session not started
-        );
-        if (edge) {
-          graphDispatch({ type: "ADD_EDGE", edge });
-        }
-      }
-
-      // Bind the kanban card to this leader node and move to in-progress
-      kanbanDispatch({ type: "BIND_LEADER", cardId: card.id, leaderNodeId: nodeId });
-    },
-    [kanbanDispatch, nodes, graphDispatch, positionInViewport, workItemState.items],
-  );
-
-  const handleCreateKanbanCardFromMarkdown = useCallback(
-    (source: { nodeId: string; title: string; content: string }) => {
-      const card: KanbanCard = {
-        id: `kb-${generateId()}`,
-        title: source.title.trim(),
-        description: source.content.trim(),
-        context: "",
-        subtasks: [],
-        priority: "medium",
-        columnId: "backlog",
-        createdAt: Date.now(),
-        model: "sonnet",
-        permissionMode: "auto",
-        worktreeIsolation: projectSettings.defaultWorktreeIsolation === true,
-        skillIds: [],
-        skillValues: {},
-        linkedContextNodeIds: [],
-      };
-      kanbanDispatch({ type: "ADD_CARD", card });
-    },
-    [kanbanDispatch, projectSettings.defaultWorktreeIsolation],
-  );
-
-  // Close a card from "Ready for Review" → "Agent History"
-  const handleCloseCard = useCallback(
-    (card: KanbanCard) => {
-      // Find the leader node to get cost info
-      const leaderNode = card.leaderNodeId
-        ? nodes.find((n) => n.id === card.leaderNodeId)
-        : undefined;
-      const leaderData = leaderNode?.data as LeaderData | undefined;
-      kanbanDispatch({
-        type: "COMPLETE_CARD",
-        cardId: card.id,
-        summary: leaderData?.messages?.length
-          ? `Completed in ${leaderData.turns} turns`
-          : undefined,
-        cost: leaderData?.totalCost,
-      });
-
-    },
-    [nodes, kanbanDispatch],
-  );
-
-  const handleResumeCard = useCallback(
-    (card: KanbanCard) => {
-      if (card.columnId === "halted") {
-        kanbanDispatch({ type: "RESUME_HALTED_CARD", cardId: card.id });
-      } else {
-        kanbanDispatch({ type: "UNBLOCK_CARD", cardId: card.id });
-      }
-      if (card.leaderNodeId) {
-        setFocusNodeId(card.leaderNodeId);
-        setActiveView("canvas");
-      }
-    },
-    [kanbanDispatch],
-  );
-
-  // Project canonical lifecycle state for Kanban without making column placement
-  // or the persisted Canvas compatibility cache authoritative.
-  const leaderStatuses = useMemo(() => {
-    const map = new Map<string, { status: string; worktreeStatus: string; cost: number;
-      turns: number; presentationLabel?: string; presentationBadge?: string }>();
-    const leaders = new Map(nodes.filter((node) => node.type === "leader")
-      .map((node) => [node.id, node] as const));
-    for (const item of workItemState.orderedItems) {
-      const awareness = workItemState.coordination[item.id];
-      const leaderId = item.card.leaderNodeId;
-      const leader = leaderId ? leaders.get(leaderId) : undefined;
-      const data = leader?.data as LeaderData | undefined;
-      const projected = projectKanbanWorkItemStatus(item, awareness,
-        data ? { cost: data.totalCost, turns: data.turns } : undefined);
-      map.set(item.id, projected);
-      if (leaderId) map.set(leaderId, projected);
-    }
-    for (const node of nodes) {
-      if (node.type === "leader" && !map.has(node.id)) {
-        const data = node.data as LeaderData;
-        map.set(node.id, {
-          status: data.status,
-          worktreeStatus: data.worktreeStatus ?? "none",
-          cost: data.totalCost,
-          turns: data.turns,
-        });
-      }
-    }
-    return map;
-  }, [nodes, workItemState.orderedItems, workItemState.coordination]);
-
   // The loader overlay sits on top of the project until both data is
   // ready AND the one-shot animation + hold are done. Then it fades
   // out (350ms) and unmounts. The overlay stays mounted across the
@@ -814,12 +638,6 @@ function ProjectView({
   const handleLoaderComplete = useCallback(() => {
     setLoaderAnimDone(true);
   }, []);
-
-  const kanbanBlockedCount = !loaded
-    ? 0
-    : activeView === "kanban"
-      ? 0
-      : kanbanBoard.cards.filter((c) => c.columnId === "halted").length;
 
   const loaderOverlay = !loaderUnmounted ? (
     <div
@@ -865,7 +683,6 @@ function ProjectView({
               retry={retry}
               activeView={activeView}
               onViewChange={setActiveView}
-              kanbanBlockedCount={kanbanBlockedCount}
               activityAttentionCount={activityAttentionCount + changesCount}
               settings={projectSettings}
               onSettingsChange={handleSettingsChange}
@@ -883,6 +700,7 @@ function ProjectView({
                   onExpandFullscreen={handleExpandFullscreen}
                   onStopSession={handleStopSession}
                   onAttachToCanvas={handleAttachSessionToCanvas}
+                  onDetachFromCanvas={handleDetachSessionFromCanvas}
                   socketSend={socket.send}
                   socketSubscribe={socket.subscribe}
                   projectPath={projectPath}
@@ -908,25 +726,6 @@ function ProjectView({
                   onClearPromptFailure={workItemState.clearPromptFailure}
                 />
               </div>
-            ) : activeView === "kanban" ? (
-              <div style={{ position: "absolute", top: PROJECT_HEADER_HEIGHT, left: 0, right: 0, bottom: 0 }}>
-                <KanbanBoard
-                  board={kanbanBoard}
-                  dispatch={kanbanDispatch}
-                  onLaunchLeader={handleLaunchLeader}
-                  leaderStatuses={leaderStatuses}
-                  onCloseCard={handleCloseCard}
-                  onResume={handleResumeCard}
-                  onFocusNode={handleFocusNode}
-                  socketSend={socket.send}
-                  socketSubscribe={socket.subscribe}
-                  projectPath={projectPath}
-                  nodes={nodes}
-                  onUpdateNodeData={(nodeId, data) => dispatch({ type: "UPDATE_NODE_DATA", id: nodeId, data })}
-                  projectSettings={projectSettings}
-                  onOpenCanvas={() => setActiveView("canvas")}
-                />
-              </div>
             ) : (
               <DockProvider>
                 <div style={{ position: "absolute", top: PROJECT_HEADER_HEIGHT, left: 0, right: 0, bottom: 0 }}>
@@ -944,7 +743,6 @@ function ProjectView({
                     projectId={projectId}
                     projectSettings={projectSettings}
                     onProjectSettingsChange={handleSettingsChange}
-                    onCreateKanbanCardFromMarkdown={handleCreateKanbanCardFromMarkdown}
                     focusNodeId={focusNodeId}
                     onFocusNodeHandled={handleFocusNodeHandled}
                     viewportTopOffset={PROJECT_HEADER_HEIGHT}

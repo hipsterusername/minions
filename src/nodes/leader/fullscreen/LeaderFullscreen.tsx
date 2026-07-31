@@ -18,6 +18,7 @@ import {
 import { DEFAULT_THINKING_CONFIG } from "../../../types.ts";
 import { groupMessages } from "../../leader-message-helpers.ts";
 import { EditableTitle } from "../EditableTitle.tsx";
+import { LeaderStatusIcon } from "../LeaderStatusIcon.tsx";
 import { WaitCountdown } from "../WaitCountdown.tsx";
 import { LeaderToolGroup } from "../messages/ToolItem.tsx";
 import { LeaderThinkingGroup } from "../messages/ThinkingGroup.tsx";
@@ -216,21 +217,9 @@ export function LeaderFullscreen(props: LeaderFullscreenProps) {
           borderBottom: "1px solid var(--border-default)",
         }}
       >
-        <img
-          src={
-            data.status === "running" || data.status === "creating"
-              ? "/icons/leader-active.svg"
-              : "/icons/leader-idle.svg"
-          }
-          alt={
-            data.status === "running" || data.status === "creating"
-              ? "Active"
-              : "Idle"
-          }
-          width={22}
-          height={22}
-          className="leader-status-icon"
-          style={{ display: "block", flexShrink: 0 }}
+        <LeaderStatusIcon
+          active={data.status === "running" || data.status === "creating"}
+          size={22}
         />
         <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
           <div

@@ -44,7 +44,7 @@ not general related-object lists.
 
 Capabilities can expose `entry_points` on first-class `surface.*` objects. Each
 entry point names its own files, tests, and flows, so a shared capability can
-span canvas, kanban, mobile, or activity surfaces without losing provenance.
+span canvas, mobile, or activity surfaces without losing provenance.
 Retrieval is deliberately bounded. From directly matched objects it follows
 typed adjacency (`primary_capability`/inverse `implements`, `depends_on`,
 `guards`, `entry_point`, decision, risk, and evidence) for one hop within the

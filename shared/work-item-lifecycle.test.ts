@@ -27,25 +27,23 @@ describe("work-item lifecycle transitions", () => {
     const waiting = transitionWorkItemLifecycle(working, { type: "wait" });
     const resumed = transitionWorkItemLifecycle(waiting, { type: "resume" });
     const completed = transitionWorkItemLifecycle(resumed, {
-      type: "seal", outcome: "completed", hasFinalReport: true,
+      type: "seal", outcome: "completed",
     });
     expect(completed).toMatchObject({ runtimeState: "inactive", outcome: "completed", resolution: "open", lifecycleRevision: 5 });
   });
 
-  it("seals every declared outcome verbatim when a completed run carries its report", () => {
+  it("seals every declared outcome verbatim", () => {
     for (const outcome of ["completed", "error", "stopped", "interrupted"] as const) {
       const starting = transitionWorkItemLifecycle(initialWorkItemLifecycle(), { type: "start_iteration" });
-      expect(transitionWorkItemLifecycle(starting, { type: "seal", outcome, hasFinalReport: true }).outcome)
+      expect(transitionWorkItemLifecycle(starting, { type: "seal", outcome }).outcome)
         .toBe(outcome);
     }
   });
 
-  it("downgrades a nominal completion without its persisted report to interrupted", () => {
+  it("classifies a clean completion independently of report metadata", () => {
     const starting = transitionWorkItemLifecycle(initialWorkItemLifecycle(), { type: "start_iteration" });
     expect(transitionWorkItemLifecycle(starting, { type: "seal", outcome: "completed" }).outcome)
-      .toBe("interrupted");
-    expect(transitionWorkItemLifecycle(starting, { type: "seal", outcome: "completed", hasFinalReport: false }).outcome)
-      .toBe("interrupted");
+      .toBe("completed");
   });
 
   it("atomically reopens every terminal outcome for another iteration", () => {
@@ -91,6 +89,19 @@ describe("work-item lifecycle transitions", () => {
       .toMatchObject({ runtimeState: "draft", outcome: "none", resolution: "open" });
   });
 
+  it.each(["starting", "working", "waiting"] as const)(
+    "requires an active %s work item to stop before archive",
+    (runtimeState) => {
+      const active = workItemLifecycleSchema.parse({
+        ...initialWorkItemLifecycle(),
+        runtimeState,
+      });
+
+      expect(() => transitionWorkItemLifecycle(active, { type: "archive" }))
+        .toThrow("must be stopped");
+    },
+  );
+
   it.each(["open", "reviewed"] as const)("restores the resolution captured before archive: %s", (priorResolution) => {
     const terminal = workItemLifecycleSchema.parse({
       ...initialWorkItemLifecycle(), runtimeState: "inactive", outcome: "completed",
@@ -104,7 +115,7 @@ describe("work-item lifecycle transitions", () => {
   });
 
   it.each(["worktree_queued", "worktree_integrating"] as const)(
-    "blocks iteration start and archive while integration is %s",
+    "blocks iteration start but allows archive while integration is %s",
     (integrationState) => {
       const state = workItemLifecycleSchema.parse({
         ...initialWorkItemLifecycle("worktree"),
@@ -113,8 +124,8 @@ describe("work-item lifecycle transitions", () => {
       });
       expect(() => transitionWorkItemLifecycle(state, { type: "start_iteration" }))
         .toThrow("cannot start an iteration");
-      expect(() => transitionWorkItemLifecycle(state, { type: "archive" }))
-        .toThrow("cannot archive");
+      expect(transitionWorkItemLifecycle(state, { type: "archive" }))
+        .toMatchObject({ resolution: "archived", integrationState });
     },
   );
 
@@ -127,8 +138,8 @@ describe("work-item lifecycle transitions", () => {
       runtimeState: "starting", outcome: "none", resolution: "open",
       integrationState: "worktree_active",
     });
-    expect(() => transitionWorkItemLifecycle(conflicted, { type: "archive" }))
-      .toThrow("cannot archive");
+    expect(transitionWorkItemLifecycle(conflicted, { type: "archive" }))
+      .toMatchObject({ resolution: "archived", integrationState: "worktree_conflicted" });
   });
 
   it("allows only adjacent integration transitions and treats terminal states as final", () => {
@@ -261,7 +272,7 @@ describe("legacy session lifecycle compatibility", () => {
     ["running", legacy(), "working", "none", "open", "Working"],
     ["waiting", legacy({ reviewState: "decision_needed" }), "waiting", "none", "open", "Decision needed"],
     ["idle", legacy({ reviewState: "completion_to_review", terminalReason: "completed", finalReport: "Done" }), "inactive", "completed", "open", "Ready for review"],
-    ["idle", legacy({ reviewState: "completion_to_review", terminalReason: "completed" }), "inactive", "interrupted", "open", "Interrupted"],
+    ["idle", legacy({ reviewState: "completion_to_review", terminalReason: "completed" }), "inactive", "completed", "open", "Ready for review"],
     ["error", legacy({ reviewState: "error_to_review", terminalReason: "error" }), "inactive", "error", "open", "Error"],
     ["stopped", legacy({ reviewState: "interrupted_to_review", terminalReason: "abort" }), "inactive", "interrupted", "open", "Interrupted"],
     ["idle", legacy({ reviewState: "completion_to_review", terminalReason: "completed", finalReport: "Done", acknowledgedAt: 5 }), "inactive", "completed", "reviewed", "Reviewed"],
@@ -272,9 +283,12 @@ describe("legacy session lifecycle compatibility", () => {
     expect(selectWorkItemPresentation(projected.lifecycle, { waitKind: projected.waitKind }).label).toBe(label);
   });
 
-  it("never infers completion from idle or a completed status without a report", () => {
+  it("does not infer completion from idle but trusts explicit completion evidence", () => {
     expect(projectLegacySessionLifecycle({ status: "idle", reviewLifecycle: legacy() }).lifecycle.outcome).toBe("none");
     expect(projectLegacySessionLifecycle({ status: "completed", reviewLifecycle: legacy() }).lifecycle.outcome).toBe("interrupted");
+    expect(projectLegacySessionLifecycle({
+      status: "idle", reviewLifecycle: legacy({ terminalReason: "completed" }),
+    }).lifecycle.outcome).toBe("completed");
   });
 
   it.each([

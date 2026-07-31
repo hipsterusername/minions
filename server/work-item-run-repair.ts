@@ -5,7 +5,7 @@ export interface CompletedRunRepairResult {
   interruptedRunKeys: string[];
 }
 
-/** Repair old completed rows that violate the public final-report invariant. */
+/** Restore optional report content for completed rows when a durable record exists. */
 export function repairInvalidCompletedWorkItemRuns(
   db: Database.Database,
   at: number = Date.now(),
@@ -31,22 +31,7 @@ export function repairInvalidCompletedWorkItemRuns(
         restoredRunKeys.push(row.session_key);
         continue;
       }
-      db.prepare(`UPDATE sessions SET run_outcome = 'interrupted',
-        final_report_event_id = NULL, final_report = NULL, status = 'stopped',
-        review_state = 'interrupted_to_review',
-        review_reason = 'Completed state was missing its durable final report',
-        terminal_reason = 'abort', terminal_at = COALESCE(terminal_at, ended_at, ?),
-        lifecycle_revision = lifecycle_revision + 1, updated_at = ?
-        WHERE session_key = ? AND run_outcome = 'completed'
-          AND (final_report IS NULL OR trim(final_report) = '')`).run(at, iso, row.session_key);
-      if (row.run_kind === "primary") {
-        db.prepare(`UPDATE work_items SET runtime_state = 'inactive',
-          outcome = 'interrupted', resolution = 'open', wait_kind = NULL,
-          lifecycle_revision = lifecycle_revision + 1, last_transition_at = ?, updated_at = ?
-          WHERE id = ? AND current_run_key = ? AND outcome = 'completed'`)
-          .run(at, at, row.work_item_id, row.session_key);
-      }
-      interruptedRunKeys.push(row.session_key);
+      // Reports are optional. A completed row without one is already valid.
     }
     return { restoredRunKeys, interruptedRunKeys };
   }).immediate();
@@ -66,7 +51,7 @@ export function recoverOrphanedWorkItemRun(
     if (!item) return false;
     const sealed = db.prepare(`UPDATE sessions SET ended_at = ?, run_outcome = 'interrupted',
       status = 'stopped', review_state = 'interrupted_to_review',
-      review_reason = 'Session became inactive without a final report',
+      review_reason = 'Session ended before clean completion was recorded',
       terminal_reason = 'abort', terminal_at = ?, acknowledged_at = NULL,
       dismissed_at = NULL, lifecycle_revision = lifecycle_revision + 1, updated_at = ?
       WHERE session_key = ? AND work_item_id = ? AND run_kind = 'primary'

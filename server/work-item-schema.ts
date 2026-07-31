@@ -77,10 +77,6 @@ export function ensureWorkItemSchema(db: Database.Database): void {
       archived_from_resolution TEXT CHECK (archived_from_resolution IN ('open', 'reviewed')),
       current_run_key       TEXT,
       iteration             INTEGER NOT NULL DEFAULT 0,
-      workflow_column_id    TEXT NOT NULL DEFAULT 'backlog',
-      workflow_rank         TEXT NOT NULL,
-      workflow_revision     INTEGER NOT NULL DEFAULT 0,
-      kanban_json           TEXT NOT NULL DEFAULT '{}',
       lifecycle_revision    INTEGER NOT NULL DEFAULT 0,
       last_transition_at    INTEGER NOT NULL,
       created_at            INTEGER NOT NULL,
@@ -89,7 +85,7 @@ export function ensureWorkItemSchema(db: Database.Database): void {
 
     CREATE TABLE IF NOT EXISTS work_item_bindings (
       work_item_id  TEXT NOT NULL REFERENCES work_items(id) ON DELETE CASCADE,
-      surface       TEXT NOT NULL CHECK (surface IN ('canvas', 'kanban')),
+      surface       TEXT NOT NULL CHECK (surface = 'canvas'),
       binding_id    TEXT NOT NULL,
       attached_at   INTEGER NOT NULL,
       detached_at   INTEGER,
@@ -112,24 +108,6 @@ export function ensureWorkItemSchema(db: Database.Database): void {
       report_text TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       UNIQUE(run_key)
-    );
-
-    CREATE TABLE IF NOT EXISTS work_item_imports (
-      project_id TEXT NOT NULL,
-      migration_key TEXT NOT NULL,
-      input_hash TEXT NOT NULL,
-      imported_count INTEGER NOT NULL,
-      created_at INTEGER NOT NULL,
-      PRIMARY KEY (project_id, migration_key)
-    );
-
-    CREATE TABLE IF NOT EXISTS work_item_import_entries (
-      project_id TEXT NOT NULL,
-      migration_key TEXT NOT NULL,
-      legacy_card_id TEXT NOT NULL,
-      work_item_id TEXT NOT NULL REFERENCES work_items(id),
-      PRIMARY KEY (project_id, migration_key, legacy_card_id),
-      UNIQUE (project_id, migration_key, work_item_id)
     );
 
     CREATE TABLE IF NOT EXISTS run_invocations (
@@ -166,8 +144,6 @@ export function ensureWorkItemSchema(db: Database.Database): void {
   `);
 
   ensureColumn(db, "work_items", "archived_from_resolution", "TEXT CHECK (archived_from_resolution IN ('open', 'reviewed'))");
-  ensureColumn(db, "work_items", "workflow_revision", "INTEGER NOT NULL DEFAULT 0");
-  ensureColumn(db, "work_items", "kanban_json", "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, "work_item_commands", "result_key", "TEXT");
 
   ensureColumn(db, "sessions", "work_item_id", "TEXT REFERENCES work_items(id)");

@@ -87,7 +87,10 @@ export function LeaderPromptBar({
       : filterSlashCommands(availableSlashCommands, query);
   const menuOpen = query !== null && matches.length > 0 && !menuDismissed;
   const isOverlay = variant === "overlay";
-  const overlayMenuSpace = menuOpen ? Math.min(220, matches.length * 52 + 12) : 0;
+  // Reserve the menu's rows plus its header, footer, and anchor gap inside
+  // overlay composers. This keeps the absolutely positioned menu from being
+  // clipped by surfaces that correctly contain their own overflow.
+  const overlayMenuSpace = menuOpen ? Math.min(340, matches.length * 52 + 88) : 0;
   const buttonHeight = isOverlay ? 52 : 38;
   const buttonMinWidth = isOverlay ? 124 : 88;
   const buttonIsPrimary = active && !disabled;

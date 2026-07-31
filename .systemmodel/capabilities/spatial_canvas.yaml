@@ -13,18 +13,11 @@ entry_points:
     files: [ src/Canvas.tsx, src/CanvasNode.tsx, src/CanvasMiniMap.tsx, src/use-canvas-keyboard.ts, src/components/AnnotationLayer.tsx ]
     tests: [ src/canvas-state.dom.test.tsx, src/CanvasNode.test.tsx, src/CanvasMiniMap.test.ts, src/use-canvas-keyboard.test.tsx, src/components/AnnotationLayer.test.tsx ]
     flows: [ flow.navigate_spatial_workspace, flow.route_canvas_context ]
-  - surface: surface.kanban
-    summary: Cards attach to and focus spatial Leader nodes for execution.
-    files: [ src/KanbanBoard.tsx, src/use-server-kanban.ts ]
-    tests: [ src/KanbanBoard.test.tsx, src/use-server-kanban.dom.test.ts ]
-    flows: [ flow.launch_or_resume_card ]
 freshness:
   class: code_coupled
 risk: medium
 domain: domain.workspace
 depends_on:
   - capability.project_workspace
-bridges:
-  - to: flow.launch_or_resume_card
-    reason: Canvas binding participates in the execution-lifecycle canonical card launch flow.
+bridges: []
 risks: []

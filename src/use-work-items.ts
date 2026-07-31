@@ -21,18 +21,42 @@ export interface WorkItemClientState {
 
 export const initialWorkItemClientState: WorkItemClientState = { projectId: null, items: {}, runs: {}, runNextCursor: {}, coordination: {} };
 
-export function reduceWorkItems(state: WorkItemClientState, msg: ServerMessage): WorkItemClientState {
+type WorkItemClientAction = ServerMessage | {
+  type: "work_item_list_page";
+  result: WorkItemListSnapshot;
+  replace: boolean;
+};
+
+export function mergeWorkItemListPage(
+  state: WorkItemClientState,
+  result: WorkItemListSnapshot,
+  replace: boolean,
+): WorkItemClientState {
+  const items: Record<string, WorkItemSnapshot> = replace ? {} : { ...state.items };
+  for (const item of result.items) {
+    const prior = items[item.id];
+    items[item.id] = prior ? mergeWorkItemSnapshot(prior, item) : item;
+  }
+  const ids = new Set(Object.keys(items));
+  const coordination = {
+    ...Object.fromEntries(Object.entries(state.coordination)
+      .filter(([workItemId]) => ids.has(workItemId))),
+    ...(result.coordination ?? {}),
+  };
+  return { ...state, projectId: result.projectId, items, coordination };
+}
+
+export function reduceWorkItems(state: WorkItemClientState, msg: WorkItemClientAction): WorkItemClientState {
+  if (msg.type === "work_item_list_page") {
+    return mergeWorkItemListPage(state, msg.result, msg.replace);
+  }
   if (msg.type === "live_edit_coordination") return { ...state, coordination: {
     ...state.coordination, [msg.workItemId]: reduceLiveEditAwareness(
       state.coordination[msg.workItemId], msg.event) } };
   if (msg.type === "work_item_response" && msg.success && msg.command === "list_work_items") {
     const result = msg.result as WorkItemListSnapshot;
     if (!result?.items) return state;
-    const items = Object.fromEntries(result.items.map((item) => [item.id, item]));
-    const ids = new Set(result.items.map((item) => item.id));
-    const coordination = result.coordination ?? Object.fromEntries(Object.entries(state.coordination)
-      .filter(([workItemId]) => ids.has(workItemId)));
-    return { ...state, projectId: result.projectId, items, coordination };
+    return mergeWorkItemListPage(state, result, true);
   }
   if (msg.type === "work_item_changed" || msg.type === "work_item_created") {
     const prior = state.items[msg.workItem.id];
@@ -127,9 +151,22 @@ export function useWorkItems(input: {
 }) {
   const [state, dispatch] = useReducer(reduceWorkItems, initialWorkItemClientState);
   const [promptFailures, setPromptFailures] = useState<Record<string, PromptFailure>>({});
+  const listRequests = useRef(new Map<string, { projectId: string; replace: boolean }>());
   const pendingPrompts = useRef(new Map<string, {
     prompt: string; attempts: number; projectId: string; workItemId: string;
   }>());
+  const requestListPage = useCallback((projectId: string, cursor?: string, replace = false) => {
+    const requestId = randomUuid();
+    listRequests.current.set(requestId, { projectId, replace });
+    input.send({
+      type: "list_work_items",
+      requestId,
+      projectId,
+      includeArchived: true,
+      limit: 100,
+      ...(cursor ? { cursor } : {}),
+    });
+  }, [input.send]);
   const clearPromptFailure = useCallback((workItemId: string) => {
     setPromptFailures((current) => {
       if (!(workItemId in current)) return current;
@@ -145,6 +182,23 @@ export function useWorkItems(input: {
       && message.command === "list_work_items") {
       const result = message.result as Partial<WorkItemListSnapshot> | undefined;
       if (result?.projectId !== input.projectId) return;
+      const requestId = message.requestId;
+      const request = requestId ? listRequests.current.get(requestId) : undefined;
+      if (requestId) {
+        // Ignore a page from an obsolete refresh generation (for example,
+        // after a reconnect or project switch) instead of replacing the
+        // current aggregate with that one stale page.
+        if (!request || !result.items) return;
+        listRequests.current.delete(requestId);
+        if (request.projectId !== input.projectId) return;
+        dispatch({
+          type: "work_item_list_page",
+          result: result as WorkItemListSnapshot,
+          replace: request.replace,
+        });
+        if (result.nextCursor) requestListPage(request.projectId, result.nextCursor);
+        return;
+      }
     }
     dispatch(message);
     if (message.type !== "work_item_response" || !message.requestId) return;
@@ -177,19 +231,23 @@ export function useWorkItems(input: {
         },
       }));
     }
-  }, [input.projectId, input.send]);
+  }, [input.projectId, input.send, requestListPage]);
   useEffect(() => input.subscribe("*", receive), [input.subscribe, receive]);
   useEffect(() => input.projectId
     ? input.subscribe(`project:${input.projectId}`, receive)
     : undefined, [input.projectId, input.subscribe, receive]);
   useEffect(() => {
+    listRequests.current.clear();
     pendingPrompts.current.clear();
     setPromptFailures({});
-    return () => pendingPrompts.current.clear();
+    return () => {
+      listRequests.current.clear();
+      pendingPrompts.current.clear();
+    };
   }, [input.connected, input.projectId]);
   useEffect(() => {
-    if (input.connected && input.projectId) input.send({ type: "list_work_items", projectId: input.projectId, includeArchived: true });
-  }, [input.connected, input.projectId, input.send]);
+    if (input.connected && input.projectId) requestListPage(input.projectId, undefined, true);
+  }, [input.connected, input.projectId, requestListPage]);
   const mutate = useCallback((type: string, item: WorkItemSnapshot,
     extra: Record<string, unknown> = {}) => {
     const requestId = randomUuid();

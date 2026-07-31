@@ -14,7 +14,6 @@ import type { StartSessionOptions } from "../session-host.ts";
 import type { WorkItemService } from "../work-item-service.ts";
 import type { ChangeMode } from "../../shared/work-item-lifecycle.ts";
 import type { WorkItemBindingSurface } from "../../shared/work-item-contracts.ts";
-import type { KanbanCardMetadata, KanbanImportCard } from "../../shared/work-item-kanban.ts";
 import type { LiveEditAwareness } from "../../shared/live-edit-coordination.ts";
 import type { WorktreeIntegrationService } from "../worktree-integration-service.ts";
 
@@ -44,9 +43,6 @@ export type WsCommandType =
   | "get_work_item"
   | "list_work_items"
   | "get_work_item_runs"
-  | "update_work_item_card"
-  | "move_work_item_card"
-  | "import_kanban_board"
   | "create_worktree_lineage" | "join_worktree_lineage"
   | "review_worktree_contribution" | "enqueue_worktree_contribution"
   | "retry_worktree_contribution" | "discard_worktree_contribution"
@@ -153,15 +149,6 @@ export interface WsCommand {
   projectId?: string;
   title?: string;
   changeMode?: ChangeMode;
-  workflowColumnId?: string;
-  workflowRank?: string;
-  expectedWorkflowRevision?: number;
-  columnId?: string;
-  rank?: string;
-  targetIndex?: number;
-  migrationKey?: string;
-  cardPatch?: Partial<KanbanCardMetadata>;
-  cards?: KanbanImportCard[];
   surface?: WorkItemBindingSurface;
   bindingId?: string;
   includeArchived?: boolean;

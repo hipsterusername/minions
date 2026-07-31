@@ -1,46 +1,31 @@
 import { describe, expect, it } from "vitest";
 import { initialWorkItemLifecycle, selectWorkItemPresentation } from "../shared/work-item-lifecycle.ts";
 import type { WorkItemSnapshot } from "../shared/work-item-contracts.ts";
-import { initialWorkItemClientState, mergeCanonicalActivity, mergeWorkItemSnapshot, reduceWorkItems } from "./use-work-items.ts";
+import { initialWorkItemClientState, mergeCanonicalActivity, mergeWorkItemListPage,
+  mergeWorkItemSnapshot, reduceWorkItems } from "./use-work-items.ts";
 
 function item(id: string, revision: number, updatedAt = revision): WorkItemSnapshot {
   return { id, projectId: "p1", projectPath: "/repo", title: `Task ${id}`,
     lifecycle: { ...initialWorkItemLifecycle(), runtimeState: "working", lifecycleRevision: revision },
     waitKind: null, currentRunKey: `run-${id}`, iteration: 1,
-    workflowColumnId: "backlog", workflowRank: id, workflowRevision: 0,
-    card: { description: "", subtasks: [], context: "", priority: "medium", model: "",
-      permissionMode: "auto", worktreeIsolation: false, skillIds: [], skillValues: {},
-      linkedContextNodeIds: [] }, lastTransitionAt: updatedAt,
+    lastTransitionAt: updatedAt,
     createdAt: 1, updatedAt };
 }
 
 describe("canonical client work-item state", () => {
-  it("keeps newer lifecycle state when a newer workflow event arrives second", () => {
-    const lifecycle: WorkItemSnapshot = { ...item("a", 5, 50), title: "Old title", workflowRevision: 2 };
-    lifecycle.lifecycle = { ...lifecycle.lifecycle, runtimeState: "waiting" };
-    lifecycle.waitKind = "decision";
-    lifecycle.currentRunKey = "run-new";
-    lifecycle.iteration = 5;
-    const workflow: WorkItemSnapshot = { ...item("a", 4, 60), title: "New title", workflowRevision: 3,
-      workflowColumnId: "done", workflowRank: "z", card: { ...lifecycle.card, description: "new" } };
-    const merged = mergeWorkItemSnapshot(lifecycle, workflow);
-    expect(merged).toMatchObject({ title: "New title", workflowRevision: 3,
-      workflowColumnId: "done", lifecycle: { lifecycleRevision: 5, runtimeState: "waiting" },
-      waitKind: "decision", currentRunKey: "run-new", iteration: 5, updatedAt: 60 });
-  });
-
-  it("keeps newer workflow state when a newer lifecycle event arrives second", () => {
-    const workflow: WorkItemSnapshot = { ...item("a", 4, 70), title: "New title", workflowRevision: 8,
-      workflowColumnId: "review", workflowRank: "zz", card: { ...item("a", 1).card, priority: "critical" as const } };
-    const lifecycle: WorkItemSnapshot = { ...item("a", 5, 65), title: "Stale title", workflowRevision: 7 };
-    lifecycle.lifecycle = { ...lifecycle.lifecycle, outcome: "completed", runtimeState: "inactive" };
-    lifecycle.currentRunKey = "run-5";
-    lifecycle.iteration = 5;
-    const merged = mergeWorkItemSnapshot(workflow, lifecycle);
-    expect(merged).toMatchObject({ title: "New title", workflowRevision: 8,
-      workflowColumnId: "review", workflowRank: "zz", card: { priority: "critical" },
-      lifecycle: { lifecycleRevision: 5, outcome: "completed" }, currentRunKey: "run-5",
-      iteration: 5, updatedAt: 70 });
+  it("accepts a newer lifecycle snapshot and ignores an older one", () => {
+    const current = item("a", 4, 40);
+    const incoming = item("a", 5, 50);
+    incoming.title = "Updated title";
+    incoming.lifecycle = { ...incoming.lifecycle, runtimeState: "waiting" };
+    incoming.waitKind = "decision";
+    expect(mergeWorkItemSnapshot(current, incoming)).toMatchObject({
+      title: "Updated title",
+      lifecycle: { lifecycleRevision: 5, runtimeState: "waiting" },
+      waitKind: "decision",
+      updatedAt: 50,
+    });
+    expect(mergeWorkItemSnapshot(incoming, current)).toBe(incoming);
   });
 
   it("replaces state on reconnect list and ignores out-of-order events", () => {
@@ -57,6 +42,22 @@ describe("canonical client work-item state", () => {
       success: true, result: { projectId: "p1", items: [item("b", 1)], nextCursor: null },
     });
     expect(Object.keys(reconnected.items)).toEqual(["b"]);
+  });
+
+  it("accumulates paged refresh results without losing newer live state", () => {
+    const first = mergeWorkItemListPage(initialWorkItemClientState, {
+      projectId: "p1", items: [item("newest", 3, 30)], nextCursor: "page-2",
+    }, true);
+    const live = reduceWorkItems(first, {
+      type: "work_item_changed", workItem: item("newest", 4, 40),
+      revision: 4, cause: "live", timestamp: 40,
+    });
+    const complete = mergeWorkItemListPage(live, {
+      projectId: "p1", items: [item("older", 2, 20), item("newest", 3, 30)],
+      nextCursor: null,
+    }, false);
+    expect(Object.keys(complete.items).sort()).toEqual(["newest", "older"]);
+    expect(complete.items["newest"]?.lifecycle.lifecycleRevision).toBe(4);
   });
 
   it("hydrates stationary volatile queue awareness from reconnect list", () => {
@@ -92,17 +93,6 @@ describe("canonical client work-item state", () => {
       latest: { workItem: item("other", 2), bindings: [], currentRun: null, runs: [], nextCursor: null },
     } as never);
     expect(untracked.items["other"]).toBeUndefined();
-  });
-
-  it("accepts workflow-only events without requiring a lifecycle revision bump", () => {
-    const listed = reduceWorkItems(initialWorkItemClientState, {
-      type: "work_item_response", command: "list_work_items", requestId: null,
-      success: true, result: { projectId: "p1", items: [item("a", 3)], nextCursor: null },
-    });
-    const moved = item("a", 3); moved.workflowRevision = 1; moved.workflowColumnId = "history";
-    const next = reduceWorkItems(listed, { type: "work_item_changed", workItem: moved,
-      revision: 3, cause: "card_moved", timestamp: 4 });
-    expect(next.items["a"]?.workflowColumnId).toBe("history");
   });
 
   it("adds a newly created work item without waiting for a list refresh", () => {
@@ -141,6 +131,24 @@ describe("canonical client work-item state", () => {
     const [row] = mergeCanonicalActivity([], [archived]);
     expect(row?.lastActivity).toBe(selectWorkItemPresentation(archived.lifecycle).label);
     expect(row?.reviewLifecycle?.dismissedAt).not.toBeNull();
+  });
+
+  it("preserves a genuine interrupted outcome in Activity", () => {
+    const inactive = item("inactive", 3);
+    inactive.lifecycle = {
+      ...inactive.lifecycle,
+      runtimeState: "inactive",
+      outcome: "interrupted",
+    };
+    const [row] = mergeCanonicalActivity([], [inactive]);
+    expect(row).toMatchObject({
+      status: "inactive",
+      lastActivity: "Interrupted",
+      reviewLifecycle: {
+        reviewState: "interrupted_to_review",
+        reviewReason: "Interrupted",
+      },
+    });
   });
 
   it("does not project generic or file waits as decision-needed", () => {

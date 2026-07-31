@@ -41,25 +41,47 @@ describe("theme accent text tokens", () => {
     }
   });
 
-  it("uses the accent text token for kanban gradient labels", () => {
+});
+
+describe("leader icon contrast", () => {
+  it("uses each theme's accent with strong contrast on leader surfaces", () => {
     for (const theme of themes) {
-      expect(theme.vars["--kb-text-on-gradient"], theme.id).toBe("var(--text-on-accent)");
+      const accent = theme.vars["--accent"];
+      const surface = theme.vars["--bg-surface"];
+      const elevated = theme.vars["--bg-elevated"];
+      if (!accent || !surface || !elevated) {
+        throw new Error(`${theme.id} is missing leader icon palette tokens`);
+      }
+
+      expect(theme.vars["--leader-icon-color"], theme.id).toBe("var(--accent)");
+      expect(contrastRatio(accent, surface), `${theme.id} surface contrast`)
+        .toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(accent, elevated), `${theme.id} elevated contrast`)
+        .toBeGreaterThanOrEqual(4.5);
     }
   });
 });
 
 describe("permanent skins", () => {
-  it("appends the six skins after the base themes, in order", () => {
+  it("replaces the glow-heavy skins with two restrained light skins", () => {
     expect(skinThemes.map((s) => s.id)).toEqual([
-      "glass",
+      "daybook",
       "ink",
       "blueprint",
       "porcelain",
       "obsidian",
-      "nocturne",
+      "lavender-field",
     ]);
-    // Skins are the tail of the full list, preserving base-theme order.
-    expect(themes.slice(-skinThemes.length)).toEqual(skinThemes);
+    expect(themeMap["glass"]).toBeUndefined();
+    expect(themeMap["nocturne"]).toBeUndefined();
+  });
+
+  it("pairs every dark theme on the left with a light theme on the right", () => {
+    expect(themes).toHaveLength(12);
+    for (let index = 0; index < themes.length; index += 2) {
+      expect(themes[index]?.tone, `row ${index / 2 + 1} left`).toBe("dark");
+      expect(themes[index + 1]?.tone, `row ${index / 2 + 1} right`).toBe("light");
+    }
   });
 
   it("exposes every skin permanently in the picker list", () => {

@@ -5,7 +5,7 @@
    are supplied there as --shadow-sm/md/lg. */
 
 :root[data-theme="porcelain"] {
-  --font-display: "Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Plus Jakarta Sans Variable", "Segoe UI", system-ui, sans-serif;
   --radius-node: 20px;
   --radius-panel: 20px;
   --radius-control: 14px;

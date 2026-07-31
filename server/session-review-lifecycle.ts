@@ -96,12 +96,14 @@ export function finishRun(
   if (input.reason === "error") {
     reviewState = "error_to_review";
     reviewReason = report ?? "Session ended with an error";
-  } else if (input.reason === "completed" && report) {
+  } else if (input.reason === "completed") {
     reviewState = "completion_to_review";
-    reviewReason = "Read the final report and review the dashboard";
+    reviewReason = report
+      ? "Read the final report and review the dashboard"
+      : "Review the completed session";
   } else {
     reviewState = "interrupted_to_review";
-    reviewReason = "Session became inactive without a final report";
+    reviewReason = "Session ended before clean completion was recorded";
   }
   return {
     ...state,
@@ -109,7 +111,7 @@ export function finishRun(
     reviewReason,
     finalReport: input.reason === "completed" ? report : null,
     finalDashboardRevision:
-      input.reason === "completed" && report ? state.dashboardRevision : null,
+      input.reason === "completed" ? state.dashboardRevision : null,
     terminalReason: input.reason,
     terminalAt: input.at,
     acknowledgedAt: null,

@@ -13,10 +13,7 @@ function workItem(over: Partial<WorkItemSnapshot> = {}): WorkItemSnapshot {
     lifecycle: { runtimeState: "inactive", outcome: "completed", resolution: "open",
       changeMode: "live", integrationState: "live_clean", lifecycleRevision: 2 },
     waitKind: null, currentRunKey: "run-1", iteration: 1,
-    workflowColumnId: "todo", workflowRank: "a", workflowRevision: 0,
-    card: { description: "", subtasks: [], context: "", priority: "medium",
-      model: "", permissionMode: "auto", worktreeIsolation: false, skillIds: [],
-      skillValues: {}, linkedContextNodeIds: [] }, lastTransitionAt: 2,
+    lastTransitionAt: 2,
     createdAt: 1, updatedAt: 2, ...over,
   };
 }

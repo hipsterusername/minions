@@ -82,10 +82,6 @@
   box-shadow: 0 1px 3px color-mix(in srgb, var(--overlay-bg) 32%, transparent);
 }
 
-.leader-node__avatar img {
-  display: block;
-}
-
 .leader-node__presence {
   position: absolute;
   right: -2px;
@@ -104,6 +100,10 @@
 
 .leader-node[data-status="creating"] .leader-node__presence {
   background: var(--status-creating);
+}
+
+.leader-node[data-status="inactive"] .leader-node__presence {
+  background: var(--status-idle);
 }
 
 .leader-node[data-status="error"] .leader-node__presence,
@@ -217,6 +217,21 @@
   margin-right: 2px;
   color: var(--text-muted);
   font: 500 9px/1 var(--font-mono);
+}
+
+.leader-message-meta {
+  display: flex;
+  min-height: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 6px;
+}
+
+.leader-message-meta__suffix {
+  color: var(--text-muted);
+  font: 500 9px/1 var(--font-mono);
+  opacity: 0.72;
 }
 
 .leader-node__icon-button {

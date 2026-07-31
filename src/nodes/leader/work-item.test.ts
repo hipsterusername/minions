@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { WorkItemSnapshot } from "../../../shared/work-item-contracts.ts";
 import { applyCanvasWorkItemSnapshot, canonicalPromptCommand, selectCanvasChangeMode,
-  selectCanvasWorkItem } from "./work-item.ts";
+  formatCanvasWorkItemStatus, selectCanvasWorkItem } from "./work-item.ts";
 
 function item(over: Partial<WorkItemSnapshot> = {}): WorkItemSnapshot {
   return {
@@ -9,10 +9,7 @@ function item(over: Partial<WorkItemSnapshot> = {}): WorkItemSnapshot {
     lifecycle: { runtimeState: "inactive", outcome: "completed", resolution: "open",
       changeMode: "live", integrationState: "live_clean", lifecycleRevision: 2 },
     waitKind: null, currentRunKey: "run-1", iteration: 1,
-    workflowColumnId: "todo", workflowRank: "a", workflowRevision: 0,
-    card: { description: "", subtasks: [], context: "", priority: "medium",
-      model: "", permissionMode: "auto", worktreeIsolation: false, skillIds: [],
-      skillValues: {}, linkedContextNodeIds: [] }, lastTransitionAt: 2,
+    lastTransitionAt: 2,
     createdAt: 1, updatedAt: 2, ...over,
   };
 }
@@ -34,13 +31,15 @@ describe("Canvas canonical work-item projection", () => {
       .toBe("Decision needed");
   });
 
-  it("maps both deliberate stops and interruptions onto the legacy stopped status", () => {
+  it("distinguishes inactive interruptions from deliberate stops on canvas", () => {
     const stopped = selectCanvasWorkItem(item({ lifecycle: { ...item().lifecycle,
       outcome: "stopped" } }));
     expect(stopped?.status).toBe("stopped");
     expect(stopped?.presentation.label).toBe("Stopped");
-    expect(selectCanvasWorkItem(item({ lifecycle: { ...item().lifecycle,
-      outcome: "interrupted" } }))?.status).toBe("stopped");
+    const inactive = item({ lifecycle: { ...item().lifecycle,
+      outcome: "interrupted" } });
+    expect(selectCanvasWorkItem(inactive)?.status).toBe("inactive");
+    expect(formatCanvasWorkItemStatus(inactive, undefined)).toBe("Inactive");
   });
 
   it("keeps one work item across distinct repeated iteration keys", () => {
@@ -76,16 +75,4 @@ describe("Canvas canonical work-item projection", () => {
   });
 
 
-  it("merges independent workflow and lifecycle revisions without rolling either back", () => {
-    const lifecycle = item({ title: "old", workflowRevision: 2, currentRunKey: "run-5",
-      lifecycle: { ...item().lifecycle, lifecycleRevision: 5, runtimeState: "waiting", outcome: "none" },
-      waitKind: "decision" });
-    const workflow = item({ title: "new", workflowRevision: 3, workflowColumnId: "done",
-      lifecycle: { ...item().lifecycle, lifecycleRevision: 4 } });
-    const merged = applyCanvasWorkItemSnapshot({ workItemId: "work-1", currentRunKey: "run-5",
-      workItemSnapshot: lifecycle }, workflow).workItemSnapshot;
-    expect(merged).toMatchObject({ title: "new", workflowRevision: 3, workflowColumnId: "done",
-      currentRunKey: "run-5", waitKind: "decision",
-      lifecycle: { lifecycleRevision: 5, runtimeState: "waiting" } });
-  });
 });

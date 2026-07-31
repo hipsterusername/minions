@@ -5,7 +5,7 @@
    "ink"); this file owns the structural look-and-feel. */
 
 :root[data-theme="ink"] {
-  --font-display: "Fraunces", "Iowan Old Style", "Georgia", serif;
+  --font-display: "Fraunces Variable", "Iowan Old Style", "Georgia", serif;
   --radius-node: 3px;
   --radius-panel: 3px;
   --radius-control: 2px;

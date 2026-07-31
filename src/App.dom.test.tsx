@@ -66,9 +66,6 @@ vi.mock("./ProjectHeader.tsx", () => ({
   ),
 }));
 
-vi.mock("./KanbanBoard.tsx", () => ({
-  KanbanBoard: () => <div>Kanban</div>,
-}));
 
 vi.mock("./Canvas.tsx", () => ({
   Canvas: () => <div>Canvas</div>,

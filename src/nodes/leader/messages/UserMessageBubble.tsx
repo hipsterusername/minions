@@ -1,6 +1,7 @@
 import { memo, useCallback, useState } from "react";
 import { chatRoleStyle } from "../../../chat-bubble-style.ts";
 import { CopyButton } from "../../../components/CopyButton.tsx";
+import { MessageTimestamp } from "../../../components/MessageTimestamp.tsx";
 import { UserContextHeader } from "../../../components/UserContextHeader.tsx";
 import type { LeaderMessage } from "../types.ts";
 
@@ -54,6 +55,9 @@ export const UserMessageBubble = memo(function UserMessageBubble({
           {collapsed ? "show more" : "show less"}
         </button>
       )}
+      <div className="leader-message-meta">
+        <MessageTimestamp timestamp={msg.timestamp} />
+      </div>
     </div>
   );
 });

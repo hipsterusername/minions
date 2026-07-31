@@ -13,11 +13,6 @@ entry_points:
     files: [ src/nodes/LeaderNode.tsx, src/nodes/MinionNode.tsx, src/nodes/ClaudeSessionNode.tsx, src/SessionPanel.tsx ]
     tests: [ src/nodes/LeaderNode.test.tsx, src/SessionPanel.test.tsx, src/session-stream.test.ts ]
     flows: [ flow.monitor_execution, flow.recover_after_disconnect ]
-  - surface: surface.kanban
-    summary: Inspect card-projected run status, dashboard, transcript, and coordination state.
-    files: [ src/KanbanBoard.tsx, src/use-server-kanban.ts ]
-    tests: [ src/KanbanBoard.test.tsx, src/use-server-kanban.dom.test.ts ]
-    flows: [ flow.monitor_execution, flow.triage_attention ]
   - surface: surface.activity
     summary: Triage top-level Leader and session state while nesting minions under their Leader.
     files: [ src/ActivityView.tsx, src/use-session-activity.ts ]

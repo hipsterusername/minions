@@ -103,6 +103,65 @@ describe("work-item production bootstrap", () => {
     });
   });
 
+  it("awaits live host termination before archiving an active work item", async () => {
+    const db = initDb(":memory:");
+    const hosts = new Map<string, SessionHost>();
+    let runtime!: ReturnType<typeof bootstrapWorkItemRuntime>;
+    runtime = bootstrapWorkItemRuntime({
+      db,
+      bus: bus(),
+      registry: { get: (key) => hosts.get(key) },
+      now: (() => { let tick = 10; return () => tick++; })(),
+      launch: (options) => {
+        const host = new SessionHost(options.sessionKey, options.cwd);
+        host.workItemId = options.workItemId ?? null;
+        host.status = "running";
+        host.terminate = vi.fn(async () => {
+          const latest = await runtime.workItems.get(host.workItemId!);
+          runtime.workItems.sealPrimaryRun({
+            workItemId: host.workItemId!,
+            runKey: host.id,
+            outcome: "stopped",
+            expectedLifecycleRevision: latest!.workItem.lifecycle.lifecycleRevision,
+            expectedCurrentRunKey: host.id,
+          });
+        });
+        hosts.set(host.id, host);
+      },
+    });
+    const created = await runtime.workItems.create({
+      requestId: "active-create",
+      projectId: "project",
+      projectPath: "/repo",
+      title: "Active",
+      changeMode: "live",
+    });
+    const started = await runtime.workItems.startRun({
+      requestId: "active-start",
+      workItemId: created.workItem.id,
+      prompt: "Work",
+      expectedLifecycleRevision: 0,
+      expectedCurrentRunKey: null,
+    });
+    const host = hosts.get(started.workItem.currentRunKey!)!;
+
+    const archived = await runtime.workItems.archive({
+      requestId: "active-dismiss",
+      workItemId: created.workItem.id,
+      expectedLifecycleRevision: started.workItem.lifecycle.lifecycleRevision,
+      expectedCurrentRunKey: started.workItem.currentRunKey,
+    });
+
+    expect(host.terminate).toHaveBeenCalledWith("stop", expect.objectContaining({
+      workItemLifecycle: runtime.runtimeLifecycle,
+    }));
+    expect(archived.workItem.lifecycle).toMatchObject({
+      runtimeState: "inactive",
+      outcome: "stopped",
+      resolution: "archived",
+    });
+  });
+
   it("continues the exact hydrated host and provider thread", async () => {
     const db = initDb(":memory:");
     const launched: StartSessionOptions[] = [];

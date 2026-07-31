@@ -26,12 +26,25 @@ export interface CanvasPromptResult {
 export function useCanvasWorkItem(input: Input) {
   const pending = useRef(new Map<string, { resolve: (detail: WorkItemDetailSnapshot) => void;
     reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>());
-  useEffect(() => () => {
-    for (const request of pending.current.values()) {
-      clearTimeout(request.timer);
-      request.reject(new Error("Canvas work-item requester unmounted"));
+  const teardownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (teardownTimer.current) {
+      clearTimeout(teardownTimer.current);
+      teardownTimer.current = null;
     }
-    pending.current.clear();
+    return () => {
+      // React StrictMode replays effect cleanup/setup during development while
+      // preserving the mounted component. Defer rejection by one task so the
+      // replayed setup can cancel it; a real unmount still drains requests.
+      teardownTimer.current = setTimeout(() => {
+        for (const request of pending.current.values()) {
+          clearTimeout(request.timer);
+          request.reject(new Error("Canvas work-item requester unmounted"));
+        }
+        pending.current.clear();
+        teardownTimer.current = null;
+      }, 0);
+    };
   }, []);
   const request = useCallback((command: Record<string, unknown>) => {
     const requestId = command["requestId"] as string;
@@ -163,14 +176,7 @@ export function useCanvasWorkItem(input: Input) {
         projectId: input.projectId, projectPath: input.projectPath,
         title: input.dataRef.current.taskName?.trim() || run.userPrompt.split("\n")[0]!.slice(0, 120),
         changeMode: input.dataRef.current.worktreeIsolation ? "worktree" : "live",
-        workflowColumnId: "in-progress",
-        cardPatch: { leaderNodeId: input.nodeId, autoSynced: true,
-          model: input.dataRef.current.model,
-          ...(input.dataRef.current.harness ? { harness: input.dataRef.current.harness } : {}),
-          permissionMode: input.dataRef.current.permissionMode,
-          worktreeIsolation: input.dataRef.current.worktreeIsolation ?? false,
-          skillIds: input.dataRef.current.skillIds ?? [],
-          skillValues: input.dataRef.current.skillValues ?? {} } });
+      });
       item = created.workItem;
       input.emitUpdate(applyCanvasWorkItemSnapshot(input.dataRef.current, item));
       const attached = await requestMutation({ type: "attach_work_item_surface", requestId: randomUuid(),

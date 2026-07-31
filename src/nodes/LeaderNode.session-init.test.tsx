@@ -85,10 +85,7 @@ function canonicalItem(runKey: string | null, revision: number,
     lifecycle: { runtimeState, outcome, resolution: "open", changeMode: "live",
       integrationState: "live_clean", lifecycleRevision: revision }, waitKind: null,
     currentRunKey: runKey, iteration: runKey ? (runKey === "run-1" ? 1 : 2) : 0,
-    workflowColumnId: "todo", workflowRank: "a", workflowRevision: 0,
-    card: { description: "", subtasks: [], context: "", priority: "medium", model: "",
-      permissionMode: "auto", worktreeIsolation: false, skillIds: [], skillValues: {},
-      linkedContextNodeIds: [] }, lastTransitionAt: revision, createdAt: 1, updatedAt: revision };
+    lastTransitionAt: revision, createdAt: 1, updatedAt: revision };
 }
 
 /**
@@ -413,10 +410,8 @@ describe("LeaderNode: new-session initiation", () => {
     fireEvent.change(screen.getByTestId("leader-prompt-input-inline"),
       { target: { value: "First iteration" } });
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    const create = latestCommand("create_work_item") as { requestId: string; workflowColumnId: string;
-      cardPatch: { leaderNodeId: string; harness?: string } };
-    expect(create).toMatchObject({ workflowColumnId: "in-progress",
-      cardPatch: { leaderNodeId: "canvas-leader", harness: "codex" } });
+    const create = latestCommand("create_work_item") as { requestId: string };
+    expect(create).toMatchObject({ type: "create_work_item", title: "First iteration" });
     await act(() => replay([{ message: { type: "work_item_response", command: "create_work_item",
       requestId: create.requestId, success: true,
       result: { workItem: canonicalItem(null, 0, "draft", "none"), bindings: [], currentRun: null, runs: [], nextCursor: null } } }]));
@@ -478,6 +473,8 @@ describe("LeaderNode: new-session initiation", () => {
         currentRun: null, runs: [], nextCursor: null,
       } } }))));
     await waitFor(() => expect(latest.workItemSnapshot?.lifecycle.lifecycleRevision).toBe(5));
+    expect(screen.getByText("Inactive")).toBeInTheDocument();
+    expect(screen.queryByText("interrupted")).not.toBeInTheDocument();
     fireEvent.change(screen.getByTestId("leader-prompt-input-inline"),
       { target: { value: "Pick it back up" } });
     fireEvent.click(screen.getByRole("button", { name: "New iteration" }));

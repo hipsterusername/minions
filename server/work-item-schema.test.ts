@@ -25,6 +25,9 @@ describe("global work-item schema migration", () => {
       "integration_state", "wait_kind", "archived_from_resolution",
       "current_run_key", "lifecycle_revision",
     ]));
+    expect(columns(db, "work_items")).not.toEqual(expect.arrayContaining([
+      "workflow_column_id", "workflow_rank", "workflow_revision", "kanban_json",
+    ]));
     expect(columns(db, "work_item_bindings")).toContain("detached_at");
     expect(columns(db, "sessions")).toEqual(expect.arrayContaining([
       "work_item_id", "run_number", "run_kind", "previous_run_key",
@@ -65,8 +68,8 @@ describe("global work-item schema migration", () => {
     db.prepare(`
       INSERT INTO work_items (
         id, project_id, project_path, title, runtime_state, outcome, resolution,
-        change_mode, integration_state, workflow_rank, last_transition_at, created_at, updated_at
-      ) VALUES ('work-1', 'p', '/repo', 'T', 'working', 'none', 'open', 'live', 'live_clean', 'a', 1, 1, 1)
+        change_mode, integration_state, last_transition_at, created_at, updated_at
+      ) VALUES ('work-1', 'p', '/repo', 'T', 'working', 'none', 'open', 'live', 'live_clean', 1, 1, 1)
     `).run();
     expect(() => db.prepare(`
       INSERT INTO sessions (session_key, work_item_id, run_kind, run_number, run_outcome)
@@ -93,8 +96,8 @@ describe("global work-item schema migration", () => {
     const insertItem = db.prepare(`
       INSERT INTO work_items (
         id, project_id, project_path, title, runtime_state, outcome, resolution,
-        change_mode, integration_state, workflow_rank, last_transition_at, created_at, updated_at
-      ) VALUES (?, 'p', '/repo', 'T', 'draft', 'none', 'open', 'live', 'live_clean', 'a', 1, 1, 1)
+        change_mode, integration_state, last_transition_at, created_at, updated_at
+      ) VALUES (?, 'p', '/repo', 'T', 'draft', 'none', 'open', 'live', 'live_clean', 1, 1, 1)
     `);
     insertItem.run("work-1");
     insertItem.run("work-2");

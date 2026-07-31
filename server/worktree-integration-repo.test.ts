@@ -18,7 +18,7 @@ describe("worktree lineage persistence", () => {
   let db: Database.Database; const files: string[] = [];
   beforeEach(() => { db = initDb(":memory:"); ensureWorkItemSchema(db); ensureWorktreeIntegrationSchema(db);
     createWorkItem(db, { id: "work", projectId: "project", projectPath: "/repo",
-      title: "Task", changeMode: "worktree", workflowRank: "a", at: 1 }); });
+      title: "Task", changeMode: "worktree", at: 1 }); });
   afterEach(() => { db.close(); for (const file of files.splice(0)) fs.rmSync(file, { force: true }); });
   function lineage(at = 2) { const created = repo.createLineage(db, { id: "lineage", projectId: "project",
     repositoryPath: "/repo", targetRef: "refs/heads/main", baseSha: "base",
@@ -116,7 +116,7 @@ describe("worktree lineage persistence", () => {
 
   it("supports multiple work items in one lineage and retires terminal memberships", () => {
     createWorkItem(db, { id: "work-2", projectId: "project", projectPath: "/repo",
-      title: "Second", changeMode: "worktree", workflowRank: "b", at: 1 });
+      title: "Second", changeMode: "worktree", at: 1 });
     const first = lineage(); const joined = joinWorkItemLineage(db, { lineageId: first.id,
       workItemId: "work-2", expectedLineageRevision: first.revision, actor: "owner", at: 3 });
     expect(joined.status).toBe("active");
@@ -130,7 +130,7 @@ describe("worktree lineage persistence", () => {
 
   it("rejects membership across project/repository ownership", () => {
     createWorkItem(db, { id: "foreign", projectId: "other", projectPath: "/other",
-      title: "Foreign", changeMode: "worktree", workflowRank: "c", at: 1 });
+      title: "Foreign", changeMode: "worktree", at: 1 });
     const created = lineage();
     expect(() => joinWorkItemLineage(db, { lineageId: created.id, workItemId: "foreign",
       expectedLineageRevision: created.revision, actor: "owner", at: 3 })).toThrow(/ownership/);
@@ -300,7 +300,7 @@ describe("worktree lineage persistence", () => {
     db.close(); const file = path.join(os.tmpdir(), `integration-${crypto.randomUUID()}.db`); files.push(file);
     db = initDb(file); ensureWorkItemSchema(db); ensureWorktreeIntegrationSchema(db);
     createWorkItem(db, { id: "work", projectId: "project", projectPath: "/repo", title: "Task",
-      changeMode: "worktree", workflowRank: "a", at: 1 }); lineage(); contribution(); db.close();
+      changeMode: "worktree", at: 1 }); lineage(); contribution(); db.close();
     db = initDb(file); ensureWorkItemSchema(db); ensureWorktreeIntegrationSchema(db);
     expect(repo.getLineage(db, "lineage")?.integration_ref).toBe("refs/heads/integration/lineage");
     expect(repo.getContribution(db, "contribution")?.branch_name).toBe("refs/heads/work/run-1");

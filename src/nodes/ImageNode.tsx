@@ -3,10 +3,10 @@
  * user mark it up with pins and rectangles. The resulting
  * image-plus-annotations flows as context to a connected Leader.
  *
- * Phase scope — see `docs/archive/visual-context-plan.md`:
- *   • Phase 3 UI: this node, the AnnotationLayer, the AnnotationSidebar,
+ * Implementation scope:
+ *   • UI: this node, the AnnotationLayer, the AnnotationSidebar,
  *     and the paste/drop plumbing in Canvas.tsx.
- *   • Phase 2 ships in this file: image bytes ride the multimodal
+ *   • Image bytes ride the multimodal
  *     attachment channel as a real `image` block, and any pin/rect
  *     annotations are RASTERIZED into those bytes before they leave
  *     the renderer (see `./rasterize-annotations.ts`). The complementary

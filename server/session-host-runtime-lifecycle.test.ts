@@ -136,8 +136,7 @@ describe("work-item runtime lifecycle disposition", () => {
     f.host.runKind = "child"; f.host.parentRunKey = "leader"; f.host.taskId = "t";
     // The leader task is still running — the minion never called report_done —
     // yet the agent produced a final response. This must seal as completed with
-    // a real final-report id so the seal reducer does not downgrade it to
-    // interrupted.
+    // a real final-report id so the completed run retains its final response.
     f.ctx.forEachLeaderTaskState = (fn) => fn("leader", {
       tasks: new Map([["t", { taskId: "t", minionSessionKey: "run-1",
         status: "running", result: null } as never]]),

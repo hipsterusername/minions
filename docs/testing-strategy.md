@@ -1,11 +1,7 @@
 # Testing Strategy — Minions Canvas
 
-**Status:** Active. Supersedes the prior draft (2026-04-16) wholesale — see
-`docs/archive/testing-gaps-2026-04-28-closed.md` for the audit findings
-that drove the rewrite.
-**Companion document (archived):** `docs/archive/testing-gaps-2026-04-28-closed.md`
-— the punch list that came out of the audit. Every item is closed and
-the doc is now historical record. This file is the working agreement.
+**Status:** Active. Supersedes the prior draft (2026-04-16) wholesale.
+This file is the working agreement.
 
 ---
 
@@ -174,7 +170,7 @@ and consumer** of the contract:
 
 **Target.** React components whose behaviour is non-trivial: the
 `ClaudeSessionNode` collapsible tool feed, `LeaderNode`'s task plan view,
-`MinionNode`'s queue/active/log split, `KanbanBoard` interactions,
+`MinionNode`'s queue/active/log split,
 `AnnotationLayer` pointer events, `ApprovalBar` confirmation flow.
 
 **Tool.** vitest + jsdom + `@testing-library/react`.
@@ -401,10 +397,8 @@ greps the test tree for the patterns §5.5 forbids:
 - `\.toMatchInlineSnapshot\(`  (warn — must come with §5.6 justification)
 - `style.*toMatch\(.*flex|^.*toContain\("--`  (CSS coupling)
 
-The original list of offenders lived in
-`docs/archive/testing-gaps-2026-04-28-closed.md`; they were all fixed
-before the fitness test was enabled. The fitness test is now the gate — any new offender
-fails CI.
+The original offenders were fixed before the fitness test was enabled.
+The fitness test is now the gate — any new offender fails CI.
 
 ### 6.4 Mutation-testing chore (new)
 
@@ -497,8 +491,6 @@ matrix.
 | `src/mcp-paste-parser.ts` | L1 | exists | Drop `String#toLowerCase` test per §5.7. |
 | `src/model-meta.ts` | L1 | exists | Rewrite — see §5.2. |
 | `src/context-extraction.ts` | L1 | exists | Audit found this acceptable. |
-| `src/kanban-types.ts` | L1 | exists | Trim trivials. |
-| `src/use-kanban.ts` | L1 | exists (`use-kanban.dom.test.ts`) | Keep. |
 | `src/use-socket.ts` | L1 | exists (`src/use-socket.test.tsx`) | Reconnect logic, sync handling, and routing. |
 | `src/use-autosave.ts` | L1 | exists (`src/use-autosave.test.tsx`) | Debounce and flush behavior. |
 | `src/use-canvas-keyboard.ts` | L1 | exists (`src/use-canvas-keyboard.test.tsx`) | Keyboard mapping. |
@@ -520,7 +512,6 @@ matrix.
 | `src/SessionPanel.tsx` | L3 | exists | Drop `getByText.toBeDefined()` patterns per §5.5. |
 | `src/UsagePopover.tsx` | L3 | missing after obsolete test removal | Add only focused behavioral coverage. |
 | `src/BottomRightDock.tsx` | L3 | exists | Trim per §5.5. |
-| `src/KanbanBoard.tsx` | L3 | exists | Audit found this acceptable. |
 | `src/components/AnnotationLayer.tsx` | L3 | exists | Keep. |
 | `src/components/AnnotationList.tsx` | L3 | exists | Keep. |
 | `src/components/AnnotationSidebar.tsx` | L3 | exists | Drop CSS-flex assertions per §5.5. |
@@ -798,9 +789,6 @@ Update this document when:
 Drift between this document and reality is itself a bug — flag it in
 the PR that introduces it.
 
-When the next audit runs, the working pattern is: produce a new
-`docs/testing-gaps-YYYY-MM-DD.md` punch list, work through it, and once
-every entry is closed, archive it under `docs/archive/` with a
-`-closed.md` suffix. The 2026-04-28 cycle is preserved at
-`docs/archive/testing-gaps-2026-04-28-closed.md` as the canonical
-example.
+When the next audit runs, track its punch list in the issue or pull
+request, work through it, and close it without adding a temporary audit
+document to the repository.

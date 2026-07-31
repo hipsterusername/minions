@@ -43,6 +43,6 @@ Describe:
 - Tests run and any checks that could not be run.
 - Security, migration, or persistence implications.
 
-By contributing, you agree that your contribution will be distributed under
-the repository's license once one is added. Until then, maintainers should not
-accept external contributions.
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in Minions is provided under the Apache License 2.0, as described
+in [LICENSE](./LICENSE).

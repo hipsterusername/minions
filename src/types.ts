@@ -173,12 +173,6 @@ export interface NodeRenderProps {
   onResizeEnd?: (() => void) | undefined;
   /** Callback to add a text response as a new markdown node on the canvas */
   onAddContentNode?: ((content: string) => void) | undefined;
-  /** Callback to save a markdown node as a Kanban backlog card */
-  onCreateKanbanCardFromMarkdown?: ((source: {
-    nodeId: string;
-    title: string;
-    content: string;
-  }) => void) | undefined;
   /** Callback to reveal (create or scroll-to) a minion node for a given session key */
   onRevealMinion?: ((minionSessionKey: string) => void) | undefined;
   /** Duplicate a Leader node's setup without prompt or chat history. */

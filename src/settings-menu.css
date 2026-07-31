@@ -218,6 +218,14 @@
   gap: 8px;
 }
 
+.settings-theme-grid__heading {
+  padding: 0 2px 2px;
+  color: var(--text-dim);
+  font: 650 9px/1.2 var(--font-sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .settings-theme {
   display: grid;
   grid-template-columns: 30px minmax(0, 1fr);
@@ -823,6 +831,10 @@
   .settings-theme-grid,
   .settings-mode-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-theme-grid__heading {
+    display: none;
   }
 
   .settings-agent,

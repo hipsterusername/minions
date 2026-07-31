@@ -148,17 +148,10 @@ describe("validateWsCommand – accept", () => {
     accept({ type: "archive_work_item", requestId: id(5), workItemId: "w1", expectedLifecycleRevision: 3, expectedCurrentRunKey: "r1" });
     accept({ type: "restore_work_item", requestId: id(6), workItemId: "w1", expectedLifecycleRevision: 4, expectedCurrentRunKey: "r1" });
     accept({ type: "attach_work_item_surface", requestId: id(7), workItemId: "w1", surface: "canvas", bindingId: "n1", expectedLifecycleRevision: 5, expectedCurrentRunKey: "r1" });
-    accept({ type: "detach_work_item_surface", requestId: id(8), workItemId: "w1", surface: "kanban", bindingId: "c1", expectedLifecycleRevision: 6, expectedCurrentRunKey: "r1" });
+    accept({ type: "detach_work_item_surface", requestId: id(8), workItemId: "w1", surface: "canvas", bindingId: "n1", expectedLifecycleRevision: 6, expectedCurrentRunKey: "r1" });
     accept({ type: "get_work_item", workItemId: "w1", limit: 25 });
     accept({ type: "list_work_items", projectId: "p1", includeArchived: true, limit: 50 });
     accept({ type: "get_work_item_runs", workItemId: "w1", cursor: "next" });
-    accept({ type: "update_work_item_card", requestId: id(9), workItemId: "w1",
-      expectedWorkflowRevision: 0, title: "Updated", cardPatch: { priority: "critical" } });
-    accept({ type: "move_work_item_card", requestId: id(10), workItemId: "w1",
-      expectedWorkflowRevision: 1, columnId: "in-progress", targetIndex: 0 });
-    accept({ type: "import_kanban_board", requestId: id(11), projectId: "p1",
-      projectPath: "/repo", migrationKey: "local-storage-v1", cards: [{ id: "legacy",
-        title: "Legacy", columnId: "history", rank: "1", createdAt: 1 }] });
   });
 });
 

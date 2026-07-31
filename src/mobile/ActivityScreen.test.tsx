@@ -238,6 +238,55 @@ describe("ActivityScreen", () => {
     lifecycleRevision: 3,
   };
 
+  it("presents retained inactive work as a neutral keep-or-remove choice", () => {
+    const send = vi.fn();
+    const inactiveLifecycle = {
+      ...waitingLifecycle,
+      reviewState: "interrupted_to_review" as const,
+      reviewReason: "Inactive",
+      terminalReason: "abort" as const,
+      terminalAt: 10,
+    };
+    const { container } = render(
+      <ActivityScreen
+        sessions={[session({
+          sessionKey: "inactive",
+          status: "inactive",
+          taskName: "Paused work",
+          reviewLifecycle: inactiveLifecycle,
+        })]}
+        onOpenSession={() => {}}
+        send={send}
+      />,
+    );
+
+    const row = container.querySelector(".mob-triage-row") as HTMLElement;
+    expect(row).toHaveClass("mob-triage-row--inactive");
+    expect(row).not.toHaveClass("mob-triage-row--error");
+    expect(within(row).queryByRole("button", { name: "View" })).not.toBeInTheDocument();
+
+    const review = within(row).getByRole("button", { name: "Review" });
+    const remove = within(row).getByRole("button", {
+      name: "Review and remove from Activity",
+    });
+    expect(review).toHaveTextContent("");
+    expect(review.querySelector("svg")).toBeInTheDocument();
+    expect(remove).toHaveTextContent("");
+    expect(remove.querySelector(".lucide-list-x")).toBeInTheDocument();
+
+    fireEvent.click(review);
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      type: "acknowledge_session",
+      sessionKey: "inactive",
+    }));
+
+    fireEvent.click(remove);
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      type: "dismiss_session",
+      sessionKey: "inactive",
+    }));
+  });
+
   it("summarizes needs-you, active, and waiting counts", () => {
     const { container } = render(
       <ActivityScreen

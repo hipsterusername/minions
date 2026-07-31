@@ -9,7 +9,7 @@
  * the `license` / `licenses` field, and reports anything unknown.
  *
  * The allowlist is intentionally permissive (MIT, BSD, Apache-2.0, ISC,
- * 0BSD, CC0-1.0, Unlicense, Python-2.0, BlueOak-1.0.0). Anything copyleft
+ * 0BSD, CC0-1.0, OFL-1.1, Unlicense, Python-2.0, BlueOak-1.0.0). Anything copyleft
  * (GPL, LGPL, AGPL, MPL, EPL, CDDL) or source-available (SSPL, BUSL,
  * Commons Clause, Elastic) trips the gate.
  *
@@ -34,6 +34,7 @@ const ALLOWED = new Set([
   "Apache-2.0",
   "CC0-1.0",
   "CC-BY-4.0",
+  "OFL-1.1",
   "Unlicense",
   "Python-2.0",
   "BlueOak-1.0.0",

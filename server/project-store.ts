@@ -40,7 +40,7 @@ export interface ProjectSettings {
   tidyLayout?: boolean;
   /** Leader proactive compaction mode; see server/compaction-advisor.ts. */
   proactiveCompaction?: "off" | "recommend" | "auto";
-  /** System-model layer mode; see docs/system-model-implementation-plan.md. */
+  /** System-model layer mode; see docs/system-model.md. */
   systemModel?: "off" | "advisory" | "enforced";
   /**
    * User-configurable Context Actions (Leader slash commands). Ordered and

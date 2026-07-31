@@ -11,9 +11,18 @@
  * Gated behind the `dialectic` feature flag (off by default).
  */
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactElement } from "react";
-import { ArrowDown, Check, Eye, MessageSquareText, Scale } from "lucide-react";
+import {
+  ArrowDown,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  History,
+  MessageSquareText,
+  Scale,
+} from "lucide-react";
 import { registerNodeType } from "../node-registry.ts";
 import type { NodeRenderProps } from "../types.ts";
 import { subscribeSocketTopic } from "../use-socket.ts";
@@ -160,6 +169,13 @@ function DialecticNodeRenderer(props: NodeRenderProps): ReactElement {
 
   const keys = useMemo(() => dialecticSessionKeys(node.id), [node.id]);
   const running = data.status === "running";
+  const dialogueTurns = data.turns.filter((t) => t.speaker === "A" || t.speaker === "B");
+  const hasRun = dialogueTurns.length > 0 || running || Boolean(data.synthesis);
+  const [setupOpen, setSetupOpen] = useState(!hasRun);
+
+  useEffect(() => {
+    if (running) setSetupOpen(false);
+  }, [running]);
 
   const patch = useCallback(
     (partial: Partial<DialecticData>) => {
@@ -216,11 +232,14 @@ function DialecticNodeRenderer(props: NodeRenderProps): ReactElement {
     patch({ status: "stopped", activeSpeaker: null });
   }, [socketSend, node.id, patch]);
 
-  const dialogueTurns = data.turns.filter((t) => t.speaker === "A" || t.speaker === "B");
-  const hasRun = dialogueTurns.length > 0 || running || Boolean(data.synthesis);
-
   return (
-    <div style={S.root} data-testid="dialectic-node">
+    <div
+      style={S.root}
+      data-testid="dialectic-node"
+      data-scroll-capture
+      tabIndex={0}
+      aria-label="Dialectic workspace"
+    >
       <header style={S.header}>
         <div style={S.titleGroup}>
           <span style={S.titleIcon} aria-hidden="true">
@@ -235,60 +254,76 @@ function DialecticNodeRenderer(props: NodeRenderProps): ReactElement {
       </header>
 
       {!running && (
-        <div style={S.config}>
-          <label style={S.field}>
-            <span style={S.label}>Topic</span>
-            <textarea
-              style={S.textarea}
-              value={data.topic}
-              placeholder="What should the two planners work through?"
-              onChange={(e) => patch({ topic: e.target.value })}
-            />
-          </label>
-
-          <div style={S.row}>
+        <details
+          style={S.configDisclosure}
+          open={setupOpen}
+          onToggle={(event) => setSetupOpen(event.currentTarget.open)}
+          data-no-drag
+        >
+          <summary style={S.configSummary}>
+            <span>{hasRun ? "Run setup" : "Configure dialectic"}</span>
+            {hasRun && (
+              <span style={S.configSummaryMeta}>
+                {DIALECTIC_MODES.find((m) => m.id === data.config.mode)?.label} ·{" "}
+                {data.config.rounds} {data.config.rounds === 1 ? "round" : "rounds"}
+              </span>
+            )}
+          </summary>
+          <div style={S.config}>
             <label style={S.field}>
-              <span style={S.label}>Structure</span>
-              <select
-                style={S.select}
-                value={data.config.mode}
-                onChange={(e) => patchConfig({ mode: e.target.value as DialecticMode })}
-              >
-                {DIALECTIC_MODES.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={{ ...S.field, maxWidth: 90 }}>
-              <span style={S.label}>Rounds</span>
-              <input
-                style={S.select}
-                type="number"
-                min={MIN_DIALECTIC_ROUNDS}
-                max={MAX_DIALECTIC_ROUNDS}
-                value={data.config.rounds}
-                onChange={(e) => patchConfig({ rounds: normalizeRounds(Number(e.target.value)) })}
+              <span style={S.label}>Topic</span>
+              <textarea
+                style={S.textarea}
+                value={data.topic}
+                placeholder="What should the two planners work through?"
+                onChange={(e) => patch({ topic: e.target.value })}
               />
             </label>
-          </div>
 
-          <div style={S.hint}>{DIALECTIC_MODES.find((m) => m.id === data.config.mode)?.description}</div>
+            <div style={S.row}>
+              <label style={S.field}>
+                <span style={S.label}>Structure</span>
+                <select
+                  style={S.select}
+                  value={data.config.mode}
+                  onChange={(e) => patchConfig({ mode: e.target.value as DialecticMode })}
+                >
+                  {DIALECTIC_MODES.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ ...S.field, maxWidth: 90 }}>
+                <span style={S.label}>Rounds</span>
+                <input
+                  style={S.select}
+                  type="number"
+                  min={MIN_DIALECTIC_ROUNDS}
+                  max={MAX_DIALECTIC_ROUNDS}
+                  value={data.config.rounds}
+                  onChange={(e) => patchConfig({ rounds: normalizeRounds(Number(e.target.value)) })}
+                />
+              </label>
+            </div>
 
-          <div style={S.row}>
-            <PlannerPicker
-              label="Planner A"
-              value={data.config.plannerA}
-              onChange={(planner) => patchConfig({ plannerA: planner })}
-            />
-            <PlannerPicker
-              label="Planner B"
-              value={data.config.plannerB}
-              onChange={(planner) => patchConfig({ plannerB: planner })}
-            />
+            <div style={S.hint}>{DIALECTIC_MODES.find((m) => m.id === data.config.mode)?.description}</div>
+
+            <div style={S.row}>
+              <PlannerPicker
+                label="Planner A"
+                value={data.config.plannerA}
+                onChange={(planner) => patchConfig({ plannerA: planner })}
+              />
+              <PlannerPicker
+                label="Planner B"
+                value={data.config.plannerB}
+                onChange={(planner) => patchConfig({ plannerB: planner })}
+              />
+            </div>
           </div>
-        </div>
+        </details>
       )}
 
       <div style={S.actions}>
@@ -456,56 +491,162 @@ function ExchangeTimeline(props: {
   activeSpeaker: DialecticSpeaker | null;
   activeRound: number | null;
 }): ReactElement {
-  const rounds = Array.from(new Set(props.turns.map((turn) => turn.round))).sort((a, b) => a - b);
+  const latestTurnRound = props.turns.reduce((latest, turn) => Math.max(latest, turn.round), 0);
+  const roundCount = Math.max(props.config.rounds, latestTurnRound + 1);
+  const [selectedRound, setSelectedRound] = useState(
+    props.activeRound ?? latestTurnRound,
+  );
+
+  useEffect(() => {
+    if (props.activeRound !== null) setSelectedRound(props.activeRound);
+  }, [props.activeRound]);
+
+  useEffect(() => {
+    setSelectedRound((current) => Math.min(current, roundCount - 1));
+  }, [roundCount]);
+
+  const turnA = props.turns.find(
+    (turn) => turn.speaker === "A" && turn.round === selectedRound,
+  );
+  const turnB = props.turns.find(
+    (turn) => turn.speaker === "B" && turn.round === selectedRound,
+  );
+  const roleA = speakerName(props.config.mode, "A");
+  const roleB = speakerName(props.config.mode, "B");
+  const hasAnyTurn = props.turns.length > 0;
 
   return (
     <section style={S.timeline} aria-label="Model exchange">
       <div style={S.timelineHeading}>
-        <MessageSquareText size={13} aria-hidden="true" />
-        <span>Model exchange</span>
+        <span style={S.timelineTitle}>
+          <MessageSquareText size={13} aria-hidden="true" />
+          <span>Round-by-round exchange</span>
+        </span>
+        <span style={S.timelineHint}>Choose a round to inspect what each model saw.</span>
       </div>
-      {rounds.length === 0 && (
-        <div style={S.placeholder}>The first model exchange will appear here.</div>
-      )}
-      {rounds.map((round) => {
-        const turnA = props.turns.find((turn) => turn.speaker === "A" && turn.round === round);
-        const turnB = props.turns.find((turn) => turn.speaker === "B" && turn.round === round);
-        return (
-          <div key={round} style={S.round}>
-            <div style={S.roundHeader}>
-              <span>Round {round + 1}</span>
-              <span style={S.roundRule} />
-            </div>
-            {turnA && (
-              <TurnCard
-                turn={turnA}
-                role={speakerName(props.config.mode, "A")}
-                planner={props.config.plannerA}
-                isActive={props.activeSpeaker === "A" && props.activeRound === round}
-              />
-            )}
-            {(turnA || turnB) && (
-              <div style={S.transfer}>
-                <ArrowDown size={12} aria-hidden="true" />
-                <span>
-                  {turnA?.text
-                    ? `${speakerName(props.config.mode, "A")} output forwarded as ${speakerName(props.config.mode, "B")} input`
-                    : `Waiting to send context to ${speakerName(props.config.mode, "B")}`}
+
+      <div style={S.roundNavigator}>
+        <button
+          type="button"
+          style={S.roundArrow}
+          onClick={() => setSelectedRound((round) => Math.max(0, round - 1))}
+          disabled={selectedRound === 0}
+          aria-label="Previous round"
+        >
+          <ChevronLeft size={14} />
+        </button>
+        <div style={S.roundTabs} role="tablist" aria-label="Dialectic rounds">
+          {Array.from({ length: roundCount }, (_, round) => {
+            const turns = props.turns.filter((turn) => turn.round === round);
+            const isComplete = turns.filter((turn) => Boolean(turn.text)).length === 2;
+            const isActive = props.activeRound === round;
+            const isSelected = selectedRound === round;
+            return (
+              <button
+                key={round}
+                type="button"
+                role="tab"
+                aria-selected={isSelected}
+                aria-controls="dialectic-round-panel"
+                style={
+                  isSelected
+                    ? S.roundTabSelected
+                    : isActive
+                      ? S.roundTabActive
+                      : S.roundTab
+                }
+                onClick={() => setSelectedRound(round)}
+              >
+                <span
+                  style={
+                    isComplete
+                      ? S.roundTabDotComplete
+                      : isActive
+                        ? S.roundTabDotActive
+                        : S.roundTabDot
+                  }
+                >
+                  {isComplete && <Check size={8} aria-hidden="true" />}
                 </span>
-              </div>
-            )}
-            {turnB && (
-              <TurnCard
-                turn={turnB}
-                role={speakerName(props.config.mode, "B")}
-                planner={props.config.plannerB}
-                isActive={props.activeSpeaker === "B" && props.activeRound === round}
-                emphasizeContext
-              />
-            )}
+                <span>R{round + 1}</span>
+              </button>
+            );
+          })}
+        </div>
+        <button
+          type="button"
+          style={S.roundArrow}
+          onClick={() => setSelectedRound((round) => Math.min(roundCount - 1, round + 1))}
+          disabled={selectedRound === roundCount - 1}
+          aria-label="Next round"
+        >
+          <ChevronRight size={14} />
+        </button>
+      </div>
+
+      <div
+        id="dialectic-round-panel"
+        role="tabpanel"
+        style={S.round}
+        data-no-drag
+        aria-label={`Round ${selectedRound + 1} of ${roundCount}`}
+      >
+        <div style={S.roundHeader}>
+          <span>Round {selectedRound + 1} of {roundCount}</span>
+          <span style={S.roundRule} />
+          <span style={S.roundStatus}>
+            {turnA?.text && turnB?.text
+              ? "Complete"
+              : props.activeRound === selectedRound
+                ? "In progress"
+                : turnA || turnB
+                  ? "Partial"
+                  : "Not started"}
+          </span>
+        </div>
+
+        {!turnA && !turnB && (
+          <div style={S.placeholder}>
+            {hasAnyTurn
+              ? "This round has not started yet. Choose an earlier round to inspect the exchange."
+              : "The first model exchange will appear here."}
           </div>
-        );
-      })}
+        )}
+
+        {turnA && (
+          <TurnCard
+            turn={turnA}
+            role={roleA}
+            planner={props.config.plannerA}
+            isActive={props.activeSpeaker === "A" && props.activeRound === selectedRound}
+            sourceLabel={
+              selectedRound === 0 ? "Task brief" : `${roleB} · round ${selectedRound}`
+            }
+            priorSelfTurns={selectedRound}
+          />
+        )}
+        {(turnA || turnB) && (
+          <div style={S.transfer}>
+            <ArrowDown size={12} aria-hidden="true" />
+            <span>
+              {turnA?.text
+                ? `${roleA} output becomes new input for ${roleB}`
+                : `Waiting to send ${roleA} output to ${roleB}`}
+            </span>
+          </div>
+        )}
+        {turnB && (
+          <TurnCard
+            turn={turnB}
+            role={roleB}
+            planner={props.config.plannerB}
+            isActive={props.activeSpeaker === "B" && props.activeRound === selectedRound}
+            sourceLabel={`${roleA} · round ${selectedRound + 1}`}
+            priorSelfTurns={selectedRound}
+            emphasizeContext
+          />
+        )}
+      </div>
     </section>
   );
 }
@@ -515,14 +656,18 @@ function TurnCard(props: {
   role: string;
   planner: PlannerConfig;
   isActive: boolean;
+  sourceLabel: string;
+  priorSelfTurns: number;
   emphasizeContext?: boolean;
 }): ReactElement {
   const { turn } = props;
   const hasResponse = Boolean(turn.text);
   const contextSummary = turn.context
     ? turn.context.retainedThread
-      ? "Existing thread retained · one new message appended"
-      : "New session · role instructions and message supplied"
+      ? `Continuing session · ${props.priorSelfTurns} earlier ${props.role} ${
+          props.priorSelfTurns === 1 ? "turn" : "turns"
+        } retained`
+      : "New session · role instructions establish the model's perspective"
     : "Context details unavailable for this earlier turn";
 
   return (
@@ -554,17 +699,35 @@ function TurnCard(props: {
         </span>
       </div>
 
+      <div style={S.contextMap}>
+        <div style={S.contextMapIcon} aria-hidden="true">
+          <History size={13} />
+        </div>
+        <div style={S.contextMapBody}>
+          <span style={S.contextMapTitle}>{contextSummary}</span>
+          <span style={S.contextRoute}>
+            <span style={S.contextSource}>{props.sourceLabel}</span>
+            <span aria-hidden="true">→</span>
+            <span style={S.contextTarget}>new input to {props.role}</span>
+          </span>
+        </div>
+      </div>
+
       <div style={S.outputLabel}>Shared model output</div>
       <div style={hasResponse ? S.turnText : S.pendingText}>
         {turn.text || (turn.isError ? "(turn failed)" : "Preparing a response that can be shared…")}
       </div>
 
-      <details style={S.contextDetails} open={props.emphasizeContext || undefined}>
+      <details style={S.contextDetails}>
         <summary style={S.contextSummary}>
           <span>
-            {props.emphasizeContext ? `Context sent to ${props.role}` : `Context received by ${props.role}`}
+            Inspect exact input to {props.role}
           </span>
-          <span style={S.contextScope}>{contextSummary}</span>
+          <span style={S.contextScope}>
+            {turn.context?.retainedThread
+              ? "Only the new message is shown; earlier session history remains retained."
+              : "This is the complete starting context for the new session."}
+          </span>
         </summary>
         <div style={S.contextBody}>
           {turn.context ? (
@@ -644,7 +807,10 @@ const S = {
     gap: 10,
     padding: 12,
     height: "100%",
+    minHeight: 0,
     overflow: "auto",
+    overscrollBehavior: "contain",
+    scrollbarGutter: "stable",
     fontSize: 12,
     background: "var(--bg-surface)",
     border: "1px solid var(--border-default)",
@@ -657,8 +823,13 @@ const S = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingBottom: 8,
+    position: "sticky",
+    top: -12,
+    zIndex: 2,
+    margin: "-12px -12px 0",
+    padding: "12px 12px 8px",
     borderBottom: "1px solid var(--border-default)",
+    background: "var(--bg-surface)",
     flexShrink: 0,
   },
   titleGroup: { display: "flex", alignItems: "center", gap: 8 },
@@ -674,7 +845,38 @@ const S = {
   },
   title: { display: "block", fontWeight: 650, fontSize: 13, color: "var(--text-primary)" },
   subtitle: { display: "block", marginTop: 1, fontSize: 9, color: "var(--text-muted)" },
-  config: { display: "flex", flexDirection: "column", gap: 8 },
+  configDisclosure: {
+    border: "1px solid var(--border-default)",
+    borderRadius: "var(--radius-panel)",
+    background: "var(--bg-primary)",
+    flexShrink: 0,
+  },
+  configSummary: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    padding: "8px 10px",
+    color: "var(--text-secondary)",
+    cursor: "pointer",
+    fontSize: 10,
+    fontWeight: 650,
+  },
+  configSummaryMeta: {
+    color: "var(--text-muted)",
+    fontFamily: "var(--font-mono)",
+    fontSize: 8,
+    fontWeight: 400,
+    textAlign: "right",
+  },
+  config: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    padding: 10,
+    borderTop: "1px solid var(--border-default)",
+    flexShrink: 0,
+  },
   field: { display: "flex", flexDirection: "column", gap: 3, flex: 1, minWidth: 0 },
   label: LABEL,
   textarea: {
@@ -687,7 +889,7 @@ const S = {
   select: CONTROL,
   row: { display: "flex", gap: 8 },
   hint: { fontSize: 11, color: "var(--text-muted)", lineHeight: 1.35 },
-  actions: { display: "flex", alignItems: "center", gap: 10 },
+  actions: { display: "flex", alignItems: "center", gap: 10, flexShrink: 0 },
   startBtn: {
     padding: "6px 14px",
     borderRadius: "var(--radius-control)",
@@ -736,6 +938,7 @@ const S = {
     color: "var(--status-error)",
     fontSize: 11,
     fontFamily: "var(--font-mono)",
+    flexShrink: 0,
   },
   overview: {
     display: "flex",
@@ -745,6 +948,7 @@ const S = {
     borderRadius: "var(--radius-panel)",
     border: "1px solid var(--border-default)",
     background: "var(--bg-primary)",
+    flexShrink: 0,
   },
   overviewTop: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
   eyebrow: LABEL,
@@ -845,15 +1049,147 @@ const S = {
     border: "1px solid color-mix(in srgb, var(--info-color) 20%, transparent)",
     fontSize: 10,
     lineHeight: 1.4,
+    flexShrink: 0,
   },
-  timeline: { display: "flex", flexDirection: "column", gap: 8 },
+  timeline: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    minHeight: 0,
+    padding: 10,
+    border: "1px solid var(--border-default)",
+    borderRadius: "var(--radius-panel)",
+    background: "var(--bg-primary)",
+    flexShrink: 0,
+  },
   timelineHeading: {
+    display: "flex",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  timelineTitle: {
     display: "flex",
     alignItems: "center",
     gap: 6,
     ...LABEL,
     color: "var(--text-secondary)",
     fontSize: 10,
+  },
+  timelineHint: {
+    color: "var(--text-muted)",
+    fontSize: 9,
+    lineHeight: 1.3,
+    textAlign: "right",
+  },
+  roundNavigator: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    padding: 4,
+    borderRadius: "var(--radius-control)",
+    background: "var(--bg-secondary)",
+    border: "1px solid var(--border-default)",
+  },
+  roundTabs: {
+    display: "flex",
+    alignItems: "center",
+    gap: 3,
+    minWidth: 0,
+    flex: 1,
+    overflowX: "auto",
+    scrollbarWidth: "none",
+  },
+  roundArrow: {
+    display: "grid",
+    placeItems: "center",
+    width: 24,
+    height: 24,
+    flexShrink: 0,
+    border: "none",
+    borderRadius: 5,
+    color: "var(--text-secondary)",
+    background: "transparent",
+    cursor: "pointer",
+  },
+  roundTab: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    minWidth: 46,
+    height: 26,
+    padding: "0 7px",
+    border: "1px solid transparent",
+    borderRadius: 5,
+    background: "transparent",
+    color: "var(--text-muted)",
+    cursor: "pointer",
+    fontFamily: "var(--font-mono)",
+    fontSize: 9,
+  },
+  roundTabActive: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    minWidth: 46,
+    height: 26,
+    padding: "0 7px",
+    border: "1px solid color-mix(in srgb, var(--status-running) 30%, transparent)",
+    borderRadius: 5,
+    background: "color-mix(in srgb, var(--status-running) 7%, transparent)",
+    color: "var(--status-running)",
+    cursor: "pointer",
+    fontFamily: "var(--font-mono)",
+    fontSize: 9,
+  },
+  roundTabSelected: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    minWidth: 46,
+    height: 26,
+    padding: "0 7px",
+    border: "1px solid color-mix(in srgb, var(--accent) 35%, transparent)",
+    borderRadius: 5,
+    background: "color-mix(in srgb, var(--accent) 11%, var(--bg-elevated))",
+    color: "var(--text-primary)",
+    cursor: "pointer",
+    fontFamily: "var(--font-mono)",
+    fontSize: 9,
+    fontWeight: 650,
+  },
+  roundTabDot: {
+    width: 9,
+    height: 9,
+    display: "grid",
+    placeItems: "center",
+    flexShrink: 0,
+    borderRadius: "50%",
+    border: "1px solid var(--border-hover)",
+  },
+  roundTabDotActive: {
+    width: 9,
+    height: 9,
+    display: "grid",
+    placeItems: "center",
+    flexShrink: 0,
+    borderRadius: "50%",
+    border: "1px solid var(--status-running)",
+    background: "var(--status-running)",
+  },
+  roundTabDotComplete: {
+    width: 9,
+    height: 9,
+    display: "grid",
+    placeItems: "center",
+    flexShrink: 0,
+    borderRadius: "50%",
+    border: "1px solid var(--status-success)",
+    background: "var(--status-success)",
+    color: "var(--bg-primary)",
   },
   round: { display: "flex", flexDirection: "column", gap: 6 },
   roundHeader: {
@@ -867,6 +1203,12 @@ const S = {
     letterSpacing: 0.5,
   },
   roundRule: { height: 1, background: "var(--border-default)", flex: 1 },
+  roundStatus: {
+    color: "var(--text-muted)",
+    fontSize: 8,
+    letterSpacing: 0,
+    textTransform: "none",
+  },
   placeholder: { fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" },
   turn: {
     padding: 10,
@@ -966,6 +1308,54 @@ const S = {
     fontStyle: "italic",
     lineHeight: 1.4,
   },
+  contextMap: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 7,
+    marginTop: 9,
+    padding: "7px 8px",
+    borderRadius: "var(--radius-control)",
+    background: "var(--bg-primary)",
+    border: "1px solid var(--border-default)",
+  },
+  contextMapIcon: {
+    display: "grid",
+    placeItems: "center",
+    width: 22,
+    height: 22,
+    flexShrink: 0,
+    borderRadius: 5,
+    color: "var(--info-color)",
+    background: "var(--info-bg)",
+  },
+  contextMapBody: { display: "flex", flexDirection: "column", gap: 5, minWidth: 0 },
+  contextMapTitle: {
+    color: "var(--text-secondary)",
+    fontSize: 9,
+    lineHeight: 1.35,
+  },
+  contextRoute: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    minWidth: 0,
+    color: "var(--text-dim)",
+    fontFamily: "var(--font-mono)",
+    fontSize: 8,
+  },
+  contextSource: {
+    padding: "2px 5px",
+    borderRadius: "var(--radius-pill)",
+    color: "var(--accent)",
+    background: "color-mix(in srgb, var(--accent) 9%, transparent)",
+    whiteSpace: "nowrap",
+  },
+  contextTarget: {
+    color: "var(--text-muted)",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
   transfer: {
     display: "flex",
     alignItems: "center",
@@ -1025,6 +1415,7 @@ const S = {
     borderRadius: "var(--radius-panel)",
     background: "var(--success-bg)",
     padding: 10,
+    flexShrink: 0,
   },
   synthesisTitle: {
     ...LABEL,

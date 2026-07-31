@@ -13,11 +13,6 @@ entry_points:
     files: [ src/nodes/LeaderNode.tsx, src/nodes/MinionNode.tsx, src/nodes/ClaudeSessionNode.tsx, src/SessionPanel.tsx ]
     tests: [ src/nodes/LeaderNode.test.tsx, src/nodes/ClaudeSessionNode.test.tsx, src/SessionPanel.test.tsx ]
     flows: [ flow.control_execution, flow.monitor_execution ]
-  - surface: surface.kanban
-    summary: Stop a card-associated run or close transient card-composer execution.
-    files: [ src/KanbanBoard.tsx ]
-    tests: [ src/KanbanBoard.test.tsx ]
-    flows: [ flow.control_execution ]
   - surface: surface.activity
     summary: Stop active work from the selected session inspector.
     files: [ src/ActivityView.tsx ]

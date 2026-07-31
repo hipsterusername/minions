@@ -67,8 +67,8 @@ export function bootstrapWorkItemRuntime(
   ensureWorkItemSchema(options.db);
   const at = (options.now ?? Date.now)();
   const backfill = backfillLegacyWorkItems(options.db, at);
-  // Pre-existing rows can predate the finalReport write-path guard; repair
-  // them before anything tries to read/serialize a work-item snapshot.
+  // Reconcile any report record that became durable after its terminal row
+  // before snapshots are published.
   const repairedCompletedRunKeys = repairCompletedRunsWithoutReports(options.db, at);
   const orphanRecovery = recoverOrphanedWorkItemRuns(
     options.db,
@@ -164,6 +164,7 @@ export function bootstrapWorkItemRuntime(
   };
 
   let workItems!: SqliteWorkItemService;
+  let runtimeLifecycle!: WorkItemRuntimeLifecycle;
   workItems = createSqliteWorkItemService({
     db: options.db,
     bus: options.bus,
@@ -173,6 +174,17 @@ export function bootstrapWorkItemRuntime(
     continueRun,
     ensureRunContinued,
     isRunLive,
+    stopRun: async ({ workItemId, runKey }) => {
+      const host = options.registry.get(runKey);
+      if (!host) return;
+      if (host.workItemId !== workItemId) {
+        throw new Error(`Run ${runKey} identity mismatch`);
+      }
+      await host.terminate("stop", {
+        bus: options.bus,
+        workItemLifecycle: runtimeLifecycle,
+      });
+    },
     queueRunGuidance: (input) => {
       const host = options.registry.get(input.runKey);
       if (!host || host.workItemId !== input.workItemId) {
@@ -192,7 +204,7 @@ export function bootstrapWorkItemRuntime(
     now: options.now,
     ...(options.bindWorktreeRun ? { bindWorktreeRun: options.bindWorktreeRun } : {}),
   });
-  const runtimeLifecycle = options.runtimeLifecycle ?? createWorkItemRuntimeLifecycle({
+  runtimeLifecycle = options.runtimeLifecycle ?? createWorkItemRuntimeLifecycle({
     db: options.db, bus: options.bus, service: workItems,
     ...(options.collectWorktreeRun ? { collectWorktreeRun: options.collectWorktreeRun } : {}),
   });

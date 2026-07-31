@@ -14,6 +14,7 @@ describe("SqliteWorkItemService", () => {
   let events: Array<Record<string, unknown>>;
   let launches: WorkItemInvocation[];
   let continuations: WorkItemInvocation[];
+  let stoppedRuns: Array<{ workItemId: string; runKey: string }>;
   let tick: number;
   let service: ReturnType<typeof createSqliteWorkItemService>;
 
@@ -23,6 +24,7 @@ describe("SqliteWorkItemService", () => {
     events = [];
     launches = [];
     continuations = [];
+    stoppedRuns = [];
     tick = 10;
     const bus = createBus({ clients: new Set() } as never);
     bus.subscribe((event) => events.push(event as Record<string, unknown>));
@@ -36,6 +38,7 @@ describe("SqliteWorkItemService", () => {
         launches.push(input);
       },
       continueRun: async (input) => { continuations.push(input); },
+      stopRun: async (input) => { stoppedRuns.push(input); },
       now: () => tick++,
     });
   });
@@ -75,6 +78,39 @@ describe("SqliteWorkItemService", () => {
     })).rejects.toMatchObject({ code: "idempotency_mismatch" });
   });
 
+  it("stops an active run before archiving and ignores the pre-stop lifecycle fence", async () => {
+    const created = await draft();
+    const started = await service.startRun({
+      requestId: "active-start",
+      workItemId: created.workItem.id,
+      prompt: "Keep working",
+      expectedLifecycleRevision: created.workItem.lifecycle.lifecycleRevision,
+      expectedCurrentRunKey: null,
+    });
+
+    const archived = await service.archive({
+      requestId: "dismiss-active",
+      workItemId: created.workItem.id,
+      expectedLifecycleRevision: started.workItem.lifecycle.lifecycleRevision,
+      expectedCurrentRunKey: started.workItem.currentRunKey,
+    });
+
+    expect(stoppedRuns).toEqual([{
+      workItemId: created.workItem.id,
+      runKey: "run-active-start",
+    }]);
+    expect(archived.workItem.lifecycle).toMatchObject({
+      runtimeState: "inactive",
+      outcome: "stopped",
+      resolution: "archived",
+    });
+    expect(archived.currentRun).toMatchObject({
+      runKey: "run-active-start",
+      outcome: "stopped",
+      endedAt: expect.any(Number),
+    });
+  });
+
   it("inherits primary settings and only resumes a provider on the same harness", async () => {
     const created = await draft();
     let current = await service.startRun({ requestId: "configured", workItemId: created.workItem.id,
@@ -111,8 +147,6 @@ describe("SqliteWorkItemService", () => {
       expectedLifecycleRevision: 0, expectedCurrentRunKey: null });
     expect(started.workItem.lifecycle).toMatchObject({ changeMode: "live",
       integrationState: "live_clean" });
-    expect(started.workItem).toMatchObject({ workflowRevision: 0,
-      card: { worktreeIsolation: false } });
     expect(launches.at(-1)).toMatchObject({ harness: "codex" });
 
     const claude = await draft("claude-live");
@@ -130,15 +164,15 @@ describe("SqliteWorkItemService", () => {
       integrationState: "live_clean" });
   });
 
-  it("durably replays create independent of a random key generator and hashes workflow input", async () => {
+  it("durably replays create independent of a random key generator and hashes input", async () => {
     let keys = 0;
     service = createSqliteWorkItemService({ db, bus: createBus({ clients: new Set() } as never),
       generateKey: (kind) => `${kind}-${++keys}`, launchRun: vi.fn(), continueRun: vi.fn(), now: () => tick++ });
     const input = { requestId: "create-random", projectId: "project-1", projectPath: "/repo",
-      title: "Task", changeMode: "live" as const, workflowColumnId: "todo", workflowRank: "a" };
+      title: "Task", changeMode: "live" as const };
     const first = await service.create(input);
     expect((await service.create(input)).workItem.id).toBe(first.workItem.id);
-    await expect(service.create({ ...input, workflowRank: "b" }))
+    await expect(service.create({ ...input, title: "Changed" }))
       .rejects.toMatchObject({ code: "idempotency_mismatch" });
     expect(db.prepare("SELECT COUNT(*) AS n FROM work_items").get()).toEqual({ n: 1 });
   });
@@ -367,6 +401,44 @@ describe("SqliteWorkItemService", () => {
     ]));
   });
 
+  it("publishes a late-report upgrade from interrupted to completed", async () => {
+    const created = await draft();
+    const started = await service.startRun({
+      requestId: "late-start", workItemId: created.workItem.id, prompt: "Go",
+      expectedLifecycleRevision: 0, expectedCurrentRunKey: null,
+    });
+    const interrupted = service.sealPrimaryRun({
+      workItemId: created.workItem.id, runKey: "run-late-start",
+      outcome: "interrupted",
+      expectedLifecycleRevision: started.workItem.lifecycle.lifecycleRevision,
+      expectedCurrentRunKey: "run-late-start",
+    });
+    events = [];
+
+    const upgraded = service.sealPrimaryRun({
+      workItemId: created.workItem.id, runKey: "run-late-start",
+      outcome: "completed",
+      finalReportEventId: "late-report", finalReport: "Completed later",
+      expectedLifecycleRevision: interrupted.workItem.lifecycle.lifecycleRevision,
+      expectedCurrentRunKey: "run-late-start",
+    });
+
+    expect(upgraded).toMatchObject({
+      workItem: { lifecycle: { runtimeState: "inactive", outcome: "completed" } },
+      currentRun: { outcome: "completed", finalReport: "Completed later" },
+    });
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        topic: `work-item:${created.workItem.id}`,
+        type: "work_item_run_sealed",
+      }),
+      expect.objectContaining({
+        topic: "project:project-1",
+        type: "work_item_run_sealed",
+      }),
+    ]));
+  });
+
   it("paginates items and preserves archived resolution through restore", async () => {
     const first = await draft("a");
     await draft("b");
@@ -386,6 +458,10 @@ describe("SqliteWorkItemService", () => {
     const restored = await service.restore({ requestId: "restore", workItemId: first.workItem.id,
       expectedLifecycleRevision: archived.workItem.lifecycle.lifecycleRevision, expectedCurrentRunKey: "run-start-a" });
     expect(restored.workItem.lifecycle.resolution).toBe("reviewed");
+    expect(events.filter((event) => event["type"] === "work_item_changed")
+      .map((event) => event["cause"])).toEqual(expect.arrayContaining([
+        "review", "archive", "restore",
+      ]));
   });
 
   it("returns typed conflicts with the latest valid snapshot", async () => {
@@ -410,6 +486,9 @@ describe("SqliteWorkItemService", () => {
     const reviewed = await service.review(request);
     expect((await service.review(request)).workItem.lifecycle.lifecycleRevision)
       .toBe(reviewed.workItem.lifecycle.lifecycleRevision);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "work_item_changed", cause: "review_replayed" }),
+    ]));
     await expect(service.review({ ...request, expectedLifecycleRevision: 999 }))
       .rejects.toMatchObject({ code: "idempotency_mismatch" });
 
@@ -422,124 +501,4 @@ describe("SqliteWorkItemService", () => {
     expect(started.currentRun?.runKey).toBe("run-start");
   });
 
-  it("moves cards without changing canonical lifecycle state", async () => {
-    const created = await draft();
-    const lifecycle = created.workItem.lifecycle;
-    const moved = await service.moveCard({ requestId: "move-card",
-      workItemId: created.workItem.id, expectedWorkflowRevision: 0,
-      columnId: "history", targetIndex: 0 });
-    expect(moved.workItem.lifecycle).toEqual(lifecycle);
-    expect(moved.workItem).toMatchObject({ workflowColumnId: "history",
-      workflowRank: "00000000", workflowRevision: 1 });
-    expect(events.at(-2)).toMatchObject({ type: "work_item_changed", cause: "card_moved" });
-  });
-
-  it("transactionally re-ranks a column across repeated indexed moves", async () => {
-    const a = await draft("rank-a"); const b = await draft("rank-b"); const c = await draft("rank-c");
-    await service.moveCard({ requestId: "move-b", workItemId: b.workItem.id,
-      expectedWorkflowRevision: 0, columnId: "backlog", targetIndex: 0 });
-    const cAfterShift = (await service.get(c.workItem.id))!.workItem;
-    await service.moveCard({ requestId: "move-c", workItemId: c.workItem.id,
-      expectedWorkflowRevision: cAfterShift.workflowRevision, columnId: "backlog", targetIndex: 0 });
-    const bAfterShift = (await service.get(b.workItem.id))!.workItem;
-    await service.moveCard({ requestId: "move-b-again", workItemId: b.workItem.id,
-      expectedWorkflowRevision: bAfterShift.workflowRevision,
-      columnId: "backlog", targetIndex: 0 });
-    const ordered = db.prepare(`SELECT id, workflow_rank FROM work_items
-      WHERE project_id = 'project-1' ORDER BY workflow_rank, id`).all();
-    expect(ordered).toEqual([
-      { id: b.workItem.id, workflow_rank: "00000000" },
-      { id: c.workItem.id, workflow_rank: "00000001" },
-      { id: a.workItem.id, workflow_rank: "00000002" },
-    ]);
-  });
-
-  it("persists full card metadata on canonical creation", async () => {
-    const created = await service.create({ requestId: "create-card", projectId: "project-1",
-      projectPath: "/repo", title: "Configured", changeMode: "worktree",
-      workflowColumnId: "backlog", workflowRank: "1", card: { description: "Details",
-        subtasks: [], context: "Context", priority: "critical", model: "gpt-5",
-        harness: "codex", permissionMode: "auto", worktreeIsolation: true,
-        skillIds: ["review"], skillValues: {}, linkedContextNodeIds: ["node"] } });
-    expect(created.workItem).toMatchObject({ workflowRank: "1",
-      lifecycle: { changeMode: "worktree" }, card: { description: "Details",
-        harness: "codex", worktreeIsolation: true, linkedContextNodeIds: ["node"] } });
-  });
-
-  it("preserves durable card metadata when a canvas binding is removed", async () => {
-    const created = await draft();
-    const updated = await service.updateCard({ requestId: "card-details",
-      workItemId: created.workItem.id, expectedWorkflowRevision: 0,
-      title: "Durable card", patch: { description: "Keep me", leaderNodeId: "node-1",
-        subtasks: [{ id: "sub-1", title: "Test", done: true }] } });
-    const attached = await service.attach({ requestId: "attach-card", workItemId: created.workItem.id,
-      surface: "canvas", bindingId: "node-1",
-      expectedLifecycleRevision: updated.workItem.lifecycle.lifecycleRevision,
-      expectedCurrentRunKey: null });
-    await service.detach({ requestId: "detach-card", workItemId: created.workItem.id,
-      surface: "canvas", bindingId: "node-1",
-      expectedLifecycleRevision: attached.workItem.lifecycle.lifecycleRevision,
-      expectedCurrentRunKey: null });
-    const detail = await service.get(created.workItem.id);
-    expect(detail?.workItem).toMatchObject({ title: "Durable card",
-      card: { description: "Keep me", leaderNodeId: null,
-        subtasks: [{ id: "sub-1", done: true }] } });
-    expect(detail?.workItem.lifecycle).toEqual(created.workItem.lifecycle);
-    expect(detail?.workItem.workflowRevision).toBe(2);
-    expect(detail?.bindings[0]).toMatchObject({ bindingId: "node-1", detachedAt: expect.any(Number) });
-  });
-
-  it("imports a local board once with stable IDs without duplicating run history", async () => {
-    const card = { id: "legacy-history", title: "Finished before migration",
-      columnId: "history", rank: "0001", createdAt: 5,
-      description: "Original", subtasks: [{ id: "s", title: "Done", done: true }],
-      context: "context", priority: "high" as const, model: "gpt-5", harness: "codex",
-      permissionMode: "auto", worktreeIsolation: true, skillIds: ["review"],
-      skillValues: { review: { depth: "high" } }, linkedContextNodeIds: ["context-1"],
-      agentSummary: "Shipped", archivedMessages: [{ role: "assistant", content: "done" }],
-      archivedTaskPlan: [{ id: "task", status: "completed" }], archivedTurns: 3,
-      autoSynced: true };
-    const input = { requestId: "00000000-0000-4000-8000-000000000090",
-      projectId: "project-1", projectPath: "/repo", migrationKey: "local-storage-v1",
-      cards: [card, card] };
-    const first = await service.importKanban(input);
-    const replay = await service.importKanban(input);
-    expect(first.items).toHaveLength(1);
-    expect(replay.items).toHaveLength(1);
-    expect(replay.items[0]?.id).toBe(first.items[0]?.id);
-    const remappedReplay = await service.importKanban({ ...input,
-      cards: input.cards.map((entry) => ({ ...entry, existingWorkItemId: "later-canvas-choice" })) });
-    expect(remappedReplay.items).toHaveLength(1);
-    expect(remappedReplay.items[0]?.id).toBe(first.items[0]?.id);
-    expect(first.items[0]).toMatchObject({ workflowColumnId: "history",
-      lifecycle: { runtimeState: "draft", outcome: "none", resolution: "open" },
-      card: { legacyCardId: "legacy-history", agentSummary: "Shipped", autoSynced: true } });
-    expect(first.items[0]?.card).not.toHaveProperty("archivedMessages");
-    expect(db.prepare("SELECT COUNT(*) AS count FROM work_items WHERE project_id = 'project-1'").get())
-      .toEqual({ count: 1 });
-    expect(db.prepare("SELECT COUNT(*) AS count FROM work_item_import_entries").get())
-      .toEqual({ count: 1 });
-    await expect(service.importKanban({ ...input, cards: [{ ...card, title: "Changed" }] }))
-      .rejects.toMatchObject({ code: "idempotency_mismatch" });
-  });
-
-  it("reconciles an imported legacy card onto an existing canvas work item", async () => {
-    const existing = await draft("existing-canvas");
-    const imported = await service.importKanban({
-      requestId: "00000000-0000-4000-8000-000000000091", projectId: "project-1",
-      projectPath: "/repo", migrationKey: "canvas-reconcile-v1", cards: [{
-        id: "legacy-card", existingWorkItemId: existing.workItem.id,
-        title: "Canvas-backed card", columnId: "in-progress", rank: "00000000", createdAt: 1,
-        description: "Preserved", subtasks: [], context: "", priority: "medium",
-        model: "", permissionMode: "auto", worktreeIsolation: false,
-        skillIds: [], skillValues: {}, linkedContextNodeIds: [], leaderNodeId: "node-1",
-      }],
-    });
-    expect(imported.items).toHaveLength(1);
-    expect(imported.items[0]).toMatchObject({ id: existing.workItem.id,
-      workflowColumnId: "in-progress", card: { legacyCardId: "legacy-card",
-        leaderNodeId: "node-1", description: "Preserved" } });
-    expect(db.prepare("SELECT COUNT(*) AS count FROM work_items WHERE project_id = 'project-1'").get())
-      .toEqual({ count: 1 });
-  });
 });

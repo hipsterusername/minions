@@ -163,8 +163,8 @@ describe("session-persist integration", () => {
     db.prepare(`
       INSERT INTO work_items (
         id, project_id, project_path, title, runtime_state, outcome, resolution,
-        change_mode, integration_state, workflow_rank, last_transition_at, created_at, updated_at
-      ) VALUES ('work-1', 'project-1', '/repo', 'T', 'inactive', 'completed', 'open', 'live', 'live_clean', 'a', 1, 1, 1)
+        change_mode, integration_state, last_transition_at, created_at, updated_at
+      ) VALUES ('work-1', 'project-1', '/repo', 'T', 'inactive', 'completed', 'open', 'live', 'live_clean', 1, 1, 1)
     `).run();
     db.prepare(`
       UPDATE sessions SET work_item_id = 'work-1', run_number = 1, run_kind = 'primary',
@@ -264,8 +264,8 @@ describe("session-persist integration", () => {
     db.prepare(`
       INSERT INTO work_items (
         id, project_id, project_path, title, runtime_state, outcome, resolution,
-        change_mode, integration_state, workflow_rank, last_transition_at, created_at, updated_at
-      ) VALUES ('work-1', 'project-1', '/repo', 'T', 'working', 'none', 'open', 'live', 'live_clean', 'a', 1, 1, 1)
+        change_mode, integration_state, last_transition_at, created_at, updated_at
+      ) VALUES ('work-1', 'project-1', '/repo', 'T', 'working', 'none', 'open', 'live', 'live_clean', 1, 1, 1)
     `).run();
     db.prepare(`
       UPDATE sessions SET work_item_id = 'work-1', run_number = 1,

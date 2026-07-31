@@ -538,7 +538,7 @@ export function ProjectPanel({
                       borderRadius: 6,
                       color: "var(--text-on-accent)",
                       boxShadow:
-                        "inset 0 1px 0 color-mix(in srgb, var(--text-on-accent) 22%, transparent), 0 1px 2px rgba(var(--kb-shadow-color), 0.18), 0 8px 18px color-mix(in srgb, var(--accent) 14%, transparent)",
+                        "inset 0 1px 0 color-mix(in srgb, var(--text-on-accent) 22%, transparent), 0 1px 2px rgba(0, 0, 0, 0.18), 0 8px 18px color-mix(in srgb, var(--accent) 14%, transparent)",
                       cursor: "pointer",
                       fontFamily: "var(--font-sans)",
                     }}
@@ -875,7 +875,7 @@ function DashboardView({
           No active agents.
           <br />
           <span style={{ fontSize: 11, opacity: 0.7 }}>
-            Launch a task from the Kanban board or add a Leader node on the canvas.
+            Launch a task from Activity or add a Leader node on the canvas.
           </span>
         </div>
       </div>

@@ -24,7 +24,6 @@ export type SessionRole =
   | "leader"
   | "minion"
   | "default"
-  | "card-composer"
   | "dialectic-planner";
 
 export type SessionStatus =

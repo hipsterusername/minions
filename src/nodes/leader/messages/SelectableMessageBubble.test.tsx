@@ -69,3 +69,21 @@ it("copies selected chunks via the fallback when navigator.clipboard is undefine
   expect(exec).toHaveBeenCalledWith("copy");
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Copied"));
 });
+
+it("shows the message timestamp on the canvas bubble", () => {
+  const timestamp = new Date("2026-07-29T15:42:00.000Z").getTime();
+  const { container } = render(
+    <SelectableMessageBubble
+      msg={{ ...msg, timestamp }}
+      selection={null}
+      onActivate={() => {}}
+      onSelectionChange={() => {}}
+      onExit={() => {}}
+    />,
+  );
+
+  expect(container.querySelector("time")).toHaveAttribute(
+    "datetime",
+    "2026-07-29T15:42:00.000Z",
+  );
+});

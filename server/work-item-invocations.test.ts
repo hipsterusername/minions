@@ -35,7 +35,7 @@ import "./agents/index.ts";
 function seedRun(db: Database.Database, runKey = "run-1"): void {
   createWorkItem(db, {
     id: "work-1", projectId: "project-1", projectPath: "/tmp",
-    title: "Evidence", changeMode: "live", workflowRank: "a", at: 10,
+    title: "Evidence", changeMode: "live", at: 10,
   });
   startWorkItemIteration(db, {
     workItemId: "work-1", runKey, idempotencyKey: `start-${runKey}`,

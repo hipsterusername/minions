@@ -51,7 +51,7 @@ registerContract(LEADER_CONTRACT);
 const LEADER_DASHBOARD_EXPANDED_WIDTH = 1040;
 const LEADER_DASHBOARD_EXPANDED_HEIGHT = 620;
 
-// Re-exports preserved so external consumers (Canvas, KanbanBoard, leader-preset,
+// Re-exports preserved so external consumers (Canvas, leader-preset,
 // tests, etc.) keep importing types from "./LeaderNode.tsx" without churn while
 // the file is drained into focused modules under ./leader/.
 export {
@@ -76,6 +76,7 @@ import { ConfigFooter } from "./leader/ConfigFooter.tsx";
 
 // Header menu + prompt components extracted to ./leader/
 import { HeaderMenu } from "./leader/HeaderMenu.tsx";
+import { LeaderStatusIcon } from "./leader/LeaderStatusIcon.tsx";
 import { LeaderPromptBar, LeaderSlashCommandsProvider } from "./leader/prompt/LeaderPromptBar.tsx";
 import { LeaderPromptOverlay } from "./leader/prompt/LeaderPromptOverlay.tsx";
 import { LeaderFullscreen } from "./leader/fullscreen/LeaderFullscreen.tsx";
@@ -1060,6 +1061,7 @@ export function LeaderNodeRenderer({
     creating: "var(--status-creating)",
     running: "var(--success-color)",
     idle: "var(--status-idle)",
+    inactive: "var(--status-idle)",
     stopped: "var(--status-error)",
     error: "var(--danger-color)",
     completed: "var(--success-color)",
@@ -1104,16 +1106,10 @@ export function LeaderNodeRenderer({
       <header className="leader-node__header">
         <div className="leader-node__identity">
           <div className="leader-node__avatar" aria-hidden="true">
-            <img
-              src={
-                displayStatus === "running" || displayStatus === "creating"
-                  ? "/icons/leader-active.svg"
-                  : "/icons/leader-idle.svg"
-              }
-              alt=""
-              width={20}
-              height={20}
-              className="leader-status-icon"
+            <LeaderStatusIcon
+              active={displayStatus === "running" || displayStatus === "creating"}
+              size={20}
+              decorative
             />
             <span className="leader-node__presence" />
           </div>

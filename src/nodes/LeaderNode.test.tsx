@@ -267,7 +267,7 @@ describe("LeaderNode: message actions", () => {
     const overlay = screen.getByTestId("leader-prompt-overlay");
     expect(overlay).toBeInTheDocument();
     expect(within(overlay).getByText("Import workflow")).toBeInTheDocument();
-    expect(within(overlay).getByAltText("Idle")).toBeInTheDocument();
+    expect(within(overlay).getByRole("img", { name: "Idle" })).toBeInTheDocument();
     expect(within(overlay).queryByText("Leader prompt")).not.toBeInTheDocument();
     const context = within(overlay).getByTestId("leader-prompt-context");
     expect(context).toHaveTextContent("Build the import workflow");
