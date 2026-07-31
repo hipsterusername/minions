@@ -42,7 +42,7 @@ test("creates, launches, persists, and reloads an echo-backed project", async ({
   );
   await page.getByRole("button", { name: "Start Leader" }).click();
   await expect(page.getByLabel("Enter fullscreen")).toBeVisible();
-  await expect(page.getByText("Inactive", { exact: true })).toBeVisible();
+  await expect(page.getByText("Ready for review", { exact: true })).toBeVisible();
   await autosaved;
 
   await page.reload();
