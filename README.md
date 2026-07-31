@@ -1,8 +1,12 @@
-# Minions
+<p align="center">
+  <img src="./assets/minions-logo.png" alt="Minions" width="720">
+</p>
 
+<p align="center">
 A spatial workspace for coordinating coding agents through supported Claude
 Code and OpenAI Codex harnesses. Give a Leader a complex task, and it spawns
 parallel Minion agents that collaborate in real time.
+</p>
 
 > **Status:** Early-stage open-source software. Interfaces and data formats may
 > change, and rough edges should be expected.
