@@ -1,0 +1,61 @@
+/* ── Obsidian skin ────────────────────────────────────────
+   OLED luxe minimal: true black, platinum text, a single restrained
+   champagne-gold accent, hairline borders, tight radii and letterspaced
+   uppercase micro-labels. Palette lives in src/themes.ts (id "obsidian"). */
+
+:root[data-theme="obsidian"] {
+  --font-display: "Instrument Sans Variable", "Segoe UI", system-ui, sans-serif;
+  --radius-node: 6px;
+  --radius-panel: 6px;
+  --radius-control: 5px;
+  --radius-pill: 4px;
+  --border-width: 1px;
+  --surface-blur: none;
+  --letter-spacing-label: 0.14em;
+  --label-transform: uppercase;
+}
+
+/* A whisper of gold at the top edge of the black canvas. */
+:root[data-theme="obsidian"] body,
+:root[data-theme="obsidian"] .canvas-root {
+  background-image:
+    radial-gradient(72% 55% at 50% -12%, rgba(227, 184, 102, 0.06), transparent 70%);
+}
+
+/* Minimal, near-flat cards. */
+:root[data-theme="obsidian"] .canvas-node-card {
+  box-shadow: var(--shadow-md);
+}
+
+/* Tight, refined controls. */
+:root[data-theme="obsidian"] button,
+:root[data-theme="obsidian"] input,
+:root[data-theme="obsidian"] textarea,
+:root[data-theme="obsidian"] select {
+  border-radius: var(--radius-control) !important;
+  font-family: var(--font-display);
+}
+
+/* Letterspaced uppercase headings for a luxe editorial feel. */
+:root[data-theme="obsidian"] h1,
+:root[data-theme="obsidian"] h2,
+:root[data-theme="obsidian"] h3 {
+  font-family: var(--font-display);
+  letter-spacing: 0.04em;
+}
+
+/* Slim scrollbars that warm to gold on hover. */
+:root[data-theme="obsidian"] ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+:root[data-theme="obsidian"] ::-webkit-scrollbar-thumb {
+  background: #2a2a2e;
+  border-radius: 4px;
+}
+:root[data-theme="obsidian"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-dark);
+}
+:root[data-theme="obsidian"] ::-webkit-scrollbar-track {
+  background: transparent;
+}

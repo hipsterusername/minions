@@ -1,0 +1,45 @@
+# Local pre-commit gate. Compatible with `prek` (preferred per global
+# CLAUDE.md) and the original `pre-commit`. Install once per clone:
+#
+#   prek install         # or: pre-commit install
+#
+# After install, every `git commit` runs the hooks below. Hooks must stay fast.
+# If a hook fails, fix the cause; never bypass with --no-verify.
+
+repos:
+  # ── Universal hygiene ────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        args: ["--maxkb=512"]
+
+  # ── Project gate ─────────────────────────────────────────────────
+  # Local hooks call the same scripts CI calls. Keeping them as `pnpm`
+  # invocations (not raw tsc/vitest) means the hook follows whatever
+  # `pnpm verify` does in package.json — single source of truth.
+  - repo: local
+    hooks:
+      # Typecheck the whole project. Walks tsconfig project references
+      # via `tsc -b --noEmit` and is cheap with the TS incremental cache.
+      - id: typecheck
+        name: pnpm typecheck
+        entry: pnpm typecheck
+        language: system
+        pass_filenames: false
+        files: '\.(ts|tsx|mts|cts|json)$'
+
+      # Run the vitest suite once. Architecture-fitness tests run as
+      # part of this — drift past the documented allowlists fails here
+      # before it reaches CI.
+      - id: tests
+        name: pnpm test:run
+        entry: pnpm test:run
+        language: system
+        pass_filenames: false
+        files: '\.(ts|tsx|mts|cts|js|mjs|cjs)$'

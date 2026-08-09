@@ -1,0 +1,19 @@
+id: constraint.persistence_and_bounded_replay
+type: constraint
+statement: Recovery-critical host state is persisted and sync reports actual host truth while replay buffers remain bounded.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces: []
+  files:
+    - server/session-host.ts
+    - server/session-persist.ts
+    - server/commands/sync-session.ts
+    - src/session-stream.ts
+severity: critical
+agent_instruction: Persist harness, model, permissions, skills, task, render, approval, review, and worktree state; keep event buffers capped and sync full state before incremental folding.
+suggested_tests: [ server/session-persist.test.ts, server/commands/sync-session.test.ts, server/session-host.test.ts, src/session-stream.test.ts ]
+evidence: [ decision.typed_event_bus ]
+domain: domain.observability
+scope: global
+guards: []

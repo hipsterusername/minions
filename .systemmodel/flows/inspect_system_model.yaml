@@ -1,0 +1,20 @@
+id: flow.inspect_system_model
+type: flow
+name: Inspect the system model and gate evidence
+summary: Users and agents query model status and graph context, create work packets, record verification, reconcile scope, and apply valid gate waivers.
+constraints: []
+decisions: [ decision.role_gated_agent_tools, decision.worktree_isolation_and_approval ]
+suggested_files: [ src/SettingsMenu.tsx, src/nodes/SystemGraphNode.tsx, src/nodes/leader/GateStrip.tsx, server/system-model-tools/query-system-model.ts, server/system-model/reconcile.ts, server/commands/get-system-model-status.ts ]
+suggested_tests: [ src/SettingsMenu.test.tsx, src/nodes/SystemGraphNode.test.tsx, src/nodes/leader/GateStrip.test.tsx, server/system-model-tools/query-system-model.test.ts, server/system-model/reconcile.test.ts, tests/contracts/system-model-commands.test.ts ]
+steps:
+  - Load repository model status and inspect capability, flow, surface, constraint, risk, and decision relations.
+  - Query relevant objects and create or amend a scoped work packet with provenance.
+  - Check freshness, record verification and constraint verdicts, and reconcile against the actual worktree diff.
+  - Re-evaluate gates and permit a reasoned human waiver only in a mode that allows it.
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.platform
+primary_capability: capability.system_model_guidance
+bridges: []
+risks: []

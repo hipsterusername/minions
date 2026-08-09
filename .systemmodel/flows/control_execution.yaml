@@ -1,0 +1,23 @@
+id: flow.control_execution
+type: flow
+name: Stop, interrupt, close, clear, or remove execution
+summary: Users choose the lifecycle control appropriate to active compute, transient composers, idle history, or removable sessions without erasing canonical identity.
+constraints:
+  - constraint.minion_lifecycle_semantics
+decisions: [ decision.canonical_work_item_lifecycle, decision.role_gated_agent_tools ]
+suggested_files: [ src/SessionPanel.tsx, src/nodes/LeaderNode.tsx, src/mobile/SessionChatScreen.tsx, server/commands/stop-session.ts, server/commands/interrupt.ts, server/commands/close-session.ts, server/commands/clear-session.ts, server/commands/remove-session.ts ]
+suggested_tests: [ src/SessionPanel.test.tsx, src/nodes/LeaderNode.test.tsx, src/mobile/SessionChatScreen.test.tsx, server/commands/stop-session.test.ts, server/commands/interrupt.test.ts, server/commands/close-session.test.ts, server/commands/clear-session.test.ts, server/commands/remove-session.test.ts ]
+steps:
+  - Determine whether the intent is to stop active compute, interrupt a turn, close a transient actor, clear idle history, or remove an eligible session.
+  - Route through terminate, runControl, or persistence cleanup while enforcing harness and canonical-host protections.
+  - Apply Leader-child teardown semantics at close or removal rather than ordinary stop.
+  - Broadcast updated status and session lists and recalculate active-session capacity.
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.execution_lifecycle
+primary_capability: capability.session_control
+bridges:
+  - to: constraint.minion_lifecycle_semantics
+    reason: Session control crosses into delegation semantics when Leader teardown determines child preservation or cancellation.
+risks: []

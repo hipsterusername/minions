@@ -1,0 +1,11 @@
+review_gates:
+  - id: gate.workspace_review
+    name: Workspace Review
+    description: Review changes to workspace loading, validation, and persistence.
+    blocks_merge: true
+    required_when:
+      files: [src/workspace.ts]
+      capabilities: [capability.workspace]
+      flows: [flow.open_workspace, flow.save_workspace]
+      risk: [high, critical]
+

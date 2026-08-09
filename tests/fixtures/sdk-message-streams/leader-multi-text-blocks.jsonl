@@ -1,0 +1,44 @@
+# Synthetic SDK stream — one assistant message with content [text, tool_use, text].
+# Streaming events use NormalizedEvent kinds.
+#
+# Content-block_stop, tool_use streaming, and message_delta have no direct
+# NormalizedEvent equivalent; they map to usage events without costUSD so the
+# reducer treats them as no-ops (same-reference return, buffer preserved).
+#
+# Entry layout (0-indexed):
+#  [0]  init
+#  [1]  text_delta ""    blockIndex=0  (content_block_start text, empty initial)
+#  [2]  text_delta "Let me check "  blockIndex=0
+#  [3]  text_delta "the file."  blockIndex=0
+#  [4]  text_delta " SUBAGENT-LEAK"  blockIndex=0  parentId=toolu_subagent (filtered)
+#  [5]  usage no-costUSD  (content_block_stop — no-op)
+#  [6]  usage no-costUSD  (tool_use content_block_start — no-op)
+#  [7]  usage no-costUSD  (input_json_delta — no-op)
+#  [8]  usage no-costUSD  (content_block_stop — no-op)
+#  [9]  text_delta ""    blockIndex=2  (content_block_start — resets buffer!)
+#  [10] text_delta "Now I'll edit "  blockIndex=2
+#  [11] text_delta "the file."  blockIndex=2
+#  [12] usage no-costUSD  (content_block_stop — no-op)
+#  [13] usage no-costUSD  (message_delta — buffer survives)
+#  [14] stream_end  (message_stop — clears buffer)
+#  [15] text "Let me check the file."  (first complete text block)
+#  [16] tool_call "Read"  (tool block)
+#  [17] text "Now I'll edit the file."  (second complete text block)
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"init","sessionId":"leader-sess-multi","model":"claude-opus-4-5","permissionMode":"default"}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"text_delta","text":"","blockIndex":0}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"text_delta","text":"Let me check ","blockIndex":0}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"text_delta","text":"the file.","blockIndex":0}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"text_delta","text":" SUBAGENT-LEAK","blockIndex":0,"parentId":"toolu_subagent_xyz"}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"usage","input":0,"output":0}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"usage","input":0,"output":0}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"usage","input":0,"output":0}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"usage","input":0,"output":0}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"text_delta","text":"","blockIndex":2}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"text_delta","text":"Now I'll edit ","blockIndex":2}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"text_delta","text":"the file.","blockIndex":2}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"usage","input":0,"output":0}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"usage","input":120,"output":42}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"stream_end"}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"text","text":"Let me check the file.","role":"assistant"}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"tool_call","id":"toolu_read_1","name":"Read","input":{"file_path":"/repo/x.ts"}}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"text","text":"Now I'll edit the file.","role":"assistant"}}}

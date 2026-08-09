@@ -1,0 +1,20 @@
+id: flow.triage_attention
+type: flow
+name: Triage work needing attention
+summary: Desktop and mobile Activity prioritize errors, decision waits, reviews, and changes and let users inspect, reply, review, dismiss, or restore.
+constraints: []
+decisions: [ decision.canonical_work_item_lifecycle ]
+risks: []
+suggested_files: [ src/ActivityView.tsx, src/use-session-activity.ts, src/mobile/ActivityScreen.tsx, src/mobile/mobile-activity-actions.ts, server/commands/session-review.ts ]
+suggested_tests: [ src/ActivityView.test.tsx, src/use-session-activity.test.ts, src/mobile/ActivityScreen.test.tsx, src/mobile/mobile-activity-actions.test.ts, server/commands/session-review.test.ts ]
+steps:
+  - Derive needs-you, working, and waiting projections from server-owned session and WorkItem state.
+  - Inspect reason, report, transcript, dashboard, run history, and change state.
+  - Route review, dismiss, restore, or reply through the matching bare-session or canonical command.
+  - Apply revisioned lifecycle results without erasing acknowledged outcomes or exposing nested minions as top-level work.
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.observability
+primary_capability: capability.execution_observability
+bridges: []

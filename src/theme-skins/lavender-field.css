@@ -1,0 +1,54 @@
+/* ── Lavender Field skin ──────────────────────────────────
+   Low-chroma lavender surfaces with soft structure and no white canvas
+   or ambient glow. Palette lives in src/themes.ts (id "lavender-field"). */
+
+:root[data-theme="lavender-field"] {
+  --font-display: "DM Sans Variable", "Segoe UI", system-ui, sans-serif;
+  --radius-node: 15px;
+  --radius-panel: 15px;
+  --radius-control: 10px;
+  --radius-pill: 999px;
+  --border-width: 1px;
+  --surface-blur: none;
+}
+
+:root[data-theme="lavender-field"] body,
+:root[data-theme="lavender-field"] .canvas-root {
+  background-image: none;
+}
+
+/* A quiet inset edge carries the indigo identity without bloom or glow. */
+:root[data-theme="lavender-field"] .canvas-node-card {
+  border-color: color-mix(in srgb, var(--accent) 20%, var(--border-default));
+  box-shadow:
+    inset 3px 0 0 color-mix(in srgb, var(--accent) 42%, transparent),
+    var(--shadow-sm);
+}
+
+:root[data-theme="lavender-field"] button,
+:root[data-theme="lavender-field"] input,
+:root[data-theme="lavender-field"] textarea,
+:root[data-theme="lavender-field"] select {
+  border-radius: var(--radius-control) !important;
+  font-family: var(--font-display);
+}
+
+:root[data-theme="lavender-field"] h1,
+:root[data-theme="lavender-field"] h2,
+:root[data-theme="lavender-field"] h3 {
+  font-family: var(--font-display);
+  letter-spacing: -0.012em;
+}
+
+:root[data-theme="lavender-field"] ::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+:root[data-theme="lavender-field"] ::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--accent) 38%, var(--bg-secondary));
+  border: 3px solid var(--bg-primary);
+  border-radius: 999px;
+}
+:root[data-theme="lavender-field"] ::-webkit-scrollbar-track {
+  background: transparent;
+}

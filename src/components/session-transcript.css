@@ -1,0 +1,224 @@
+/* Read-only conversation transcript used by the Activity inspector. */
+
+.act-tx {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  padding: 4px 2px;
+  min-height: 0;
+}
+
+.act-tx-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: italic;
+  padding: 12px 4px;
+}
+
+.act-tx-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+}
+
+.act-tx-msg--user {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border-default));
+}
+
+.act-tx-msg--result {
+  background: var(--bg-primary);
+}
+
+.act-tx-msg--streaming {
+  border-color: color-mix(in srgb, var(--status-running) 45%, var(--border-default));
+}
+
+.act-tx-msg-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.act-tx-msg-role {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.act-tx-msg-suffix {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.act-tx-msg-time {
+  margin-left: auto;
+}
+
+.act-tx-msg-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-running);
+  animation: act-tx-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes act-tx-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.act-tx-msg-body {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.act-tx-thinking {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  font-style: italic;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 4px 10px;
+  border-left: 2px solid var(--border-default);
+}
+
+/* Tool chip */
+.act-tx-toolchip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.act-tx-toolchip-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--tool-bg) 28%, var(--bg-primary));
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+
+.act-tx-toolchip-btn:hover {
+  border-color: var(--border-hover);
+  background: color-mix(in srgb, var(--tool-bg) 45%, var(--bg-primary));
+}
+
+.act-tx-toolchip-btn:active {
+  transform: translateY(1px);
+}
+
+.act-tx-chevron {
+  display: inline-block;
+  transition: transform 120ms ease;
+  color: var(--text-muted);
+}
+
+.act-tx-chevron--open {
+  transform: rotate(90deg);
+}
+
+.act-tx-toolchip-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--tool-accent);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.act-tx-toolchip-summary {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.act-tx-toolchip-count {
+  min-width: 18px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border-radius: 8px;
+}
+
+.act-tx-toollist {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.act-tx-toollist-item {
+  display: grid;
+  gap: 1px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  padding: 4px 6px;
+  border-left: 2px solid color-mix(in srgb, var(--tool-accent) 28%, var(--border-default));
+}
+
+.act-tx-toollist-label {
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.act-tx-toollist-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.act-tx-toolchip[data-kind="delegate"] .act-tx-toolchip-icon,
+.act-tx-toolchip[data-kind="delegate"] .act-tx-toollist-item {
+  color: var(--status-running);
+}
+
+.act-tx-toolchip[data-kind="review"] .act-tx-toolchip-icon,
+.act-tx-toolchip[data-kind="review"] .act-tx-toollist-item {
+  color: var(--status-success);
+}
+
+.act-tx-toolchip[data-kind="shell"] .act-tx-toolchip-icon,
+.act-tx-toolchip[data-kind="shell"] .act-tx-toollist-item {
+  color: var(--status-warning);
+}

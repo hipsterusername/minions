@@ -1,0 +1,19 @@
+id: constraint.harness_continuity_and_honesty
+type: constraint
+statement: Harness is selected at creation and remains continuous; unsupported runtime controls return typed control_error and are not presented as successful.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces: []
+  files:
+    - server/commands/send-message.ts
+    - server/commands/set-model.ts
+    - server/commands/set-permission-mode.ts
+    - src/components/SessionToolbar.tsx
+severity: high
+agent_instruction: Resolve harness once, use host.harnessName on follow-up, inherit it for minions unless explicitly supported, and gate controls by synced capabilities.
+suggested_tests: [ server/commands/send-message.test.ts, server/commands/set-model.test.ts, server/commands/set-permission-mode.test.ts, src/components/SessionToolbar.test.tsx ]
+evidence: [ decision.role_gated_agent_tools ]
+domain: domain.execution_lifecycle
+scope: global
+guards: []

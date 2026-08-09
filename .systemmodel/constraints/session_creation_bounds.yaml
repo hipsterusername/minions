@@ -1,0 +1,18 @@
+id: constraint.session_creation_bounds
+type: constraint
+statement: maxSessions limits active compute rather than hydrated terminal records and creation failures remain visible to the user.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces: []
+  files:
+    - server/commands/create-session.ts
+    - server/session-registry.ts
+    - src/mobile/MobileApp.tsx
+severity: high
+agent_instruction: Count only active execution, return a typed limit error, and provide navigation to stop or remove eligible sessions.
+suggested_tests: [ server/commands/create-session.test.ts, server/session-registry.test.ts, src/mobile/MobileApp.test.tsx ]
+evidence: [ decision.canonical_work_item_lifecycle ]
+domain: domain.execution_lifecycle
+scope: domain
+guards: []

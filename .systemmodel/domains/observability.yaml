@@ -1,0 +1,5 @@
+id: domain.observability
+type: domain
+name: Observability and decisions
+summary: Owns authoritative cross-surface visibility into execution and the structured dashboards, decisions, and remote controls users act through.
+keywords: [observability, status, dashboard, decision, activity, mobile, sync]

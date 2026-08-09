@@ -1,0 +1,52 @@
+/* ── Daybook skin ─────────────────────────────────────────
+   Crisp daylight paper, disciplined blue rules, compact radii and
+   restrained elevation. Palette lives in src/themes.ts (id "daybook"). */
+
+:root[data-theme="daybook"] {
+  --font-display: "Instrument Sans Variable", "Segoe UI", system-ui, sans-serif;
+  --radius-node: 9px;
+  --radius-panel: 10px;
+  --radius-control: 7px;
+  --radius-pill: 999px;
+  --border-width: 1px;
+  --surface-blur: none;
+}
+
+:root[data-theme="daybook"] body,
+:root[data-theme="daybook"] .canvas-root {
+  background-image: none;
+}
+
+/* A slim blue rule gives cards a notebook-like edge without decoration. */
+:root[data-theme="daybook"] .canvas-node-card {
+  border-top-color: color-mix(in srgb, var(--accent) 58%, var(--border-default));
+  box-shadow: var(--shadow-md);
+}
+
+:root[data-theme="daybook"] button,
+:root[data-theme="daybook"] input,
+:root[data-theme="daybook"] textarea,
+:root[data-theme="daybook"] select {
+  border-radius: var(--radius-control) !important;
+  font-family: var(--font-display);
+}
+
+:root[data-theme="daybook"] h1,
+:root[data-theme="daybook"] h2,
+:root[data-theme="daybook"] h3 {
+  font-family: var(--font-display);
+  letter-spacing: -0.014em;
+}
+
+:root[data-theme="daybook"] ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+:root[data-theme="daybook"] ::-webkit-scrollbar-thumb {
+  background: var(--border-hover);
+  border: 3px solid var(--bg-primary);
+  border-radius: 6px;
+}
+:root[data-theme="daybook"] ::-webkit-scrollbar-track {
+  background: transparent;
+}

@@ -1,0 +1,18 @@
+id: constraint.canonical_lifecycle_cas
+type: constraint
+statement: Canonical lifecycle mutations are fenced by expectedLifecycleRevision and expectedCurrentRunKey and never partially apply when stale.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces: []
+  files:
+    - shared/work-item-contracts.ts
+    - server/work-item-service.ts
+    - server/commands/work-items.ts
+severity: critical
+agent_instruction: Carry both lifecycle fences from the latest server snapshot and return that snapshot on conflict without applying side effects.
+suggested_tests: [ server/commands/work-items.test.ts, server/work-item-service-sqlite.test.ts, src/nodes/leader/work-item.test.ts ]
+evidence: [ decision.canonical_work_item_lifecycle ]
+domain: domain.execution_lifecycle
+scope: domain
+guards: []

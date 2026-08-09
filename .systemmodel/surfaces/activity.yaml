@@ -1,0 +1,7 @@
+id: surface.activity
+type: surface
+name: Activity
+summary: Desktop triage and inspection surface for sessions, decisions, dashboards, run history, and change review.
+keywords: [activity, triage, inspector, needs_you, waiting, working, review, history]
+suggested_files: [src/ActivityView.tsx, src/ChangesView.tsx, src/use-session-activity.ts]
+suggested_tests: [src/ActivityView.test.tsx, src/ChangesView.test.tsx, src/use-session-activity.test.ts]

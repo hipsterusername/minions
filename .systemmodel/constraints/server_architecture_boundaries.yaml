@@ -1,0 +1,18 @@
+id: constraint.server_architecture_boundaries
+type: constraint
+statement: New server files stay at or below 400 lines, server and src trees do not import across their boundary, and oversized core UI files do not grow.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces: []
+  files:
+    - server/*.ts
+    - src/Canvas.tsx
+    - src/nodes/LeaderNode.tsx
+severity: high
+agent_instruction: Split new server responsibilities before 400 lines, use shared contracts rather than cross-tree imports, and hold or reduce the designated oversized UI files.
+suggested_tests: [ tests/architecture/file-size.test.ts, tests/architecture/no-cross-tree-imports.test.ts ]
+evidence: [ decision.typed_event_bus ]
+domain: domain.platform
+scope: global
+guards: []

@@ -1,0 +1,35 @@
+id: capability.project_workspace
+type: capability
+name: Project workspace lifecycle
+summary: Users can open a registered project, recover its persisted spatial and execution state, save project knowledge, and reconnect without duplicating work.
+constraints: []
+decisions: [ decision.typed_event_bus, decision.canonical_work_item_lifecycle ]
+risks:
+  - risk.project_worktree_content_split
+suggested_files: [ src/ProjectList.tsx, src/App.tsx, src/ProjectHeader.tsx, src/ProjectPanel.tsx, src/api.ts, src/use-autosave.ts ]
+suggested_tests: [ src/ProjectList.test.tsx, src/App.dom.test.tsx, src/api.test.ts, src/use-autosave.test.tsx, src/canvas-work-item-reconcile.test.ts ]
+keywords: [ project, workspace, folder, open, create, recent, recover, reconnect, autosave, persistence, sidecar, readiness ]
+entry_points:
+  - surface: surface.canvas
+    summary: Open, load, save, and recover the desktop spatial project shell.
+    files: [ src/ProjectList.tsx, src/App.tsx, src/ProjectHeader.tsx, src/ProjectPanel.tsx ]
+    tests: [ src/ProjectList.test.tsx, src/App.dom.test.tsx, src/ProjectPanel.test.ts, src/use-autosave.test.tsx ]
+    flows: [ flow.open_project_workspace, flow.save_project_knowledge, flow.recover_after_disconnect ]
+  - surface: surface.mobile
+    summary: Select a project and reconnect its remote session views.
+    files: [ src/mobile/ProjectsScreen.tsx, src/mobile/MobileApp.tsx ]
+    tests: [ src/mobile/ProjectsScreen.test.tsx, src/mobile/MobileApp.test.tsx ]
+    flows: [ flow.open_project_workspace, flow.recover_after_disconnect ]
+  - surface: surface.ws_api
+    summary: List and synchronize registered project sessions, WorkItems, and lineages.
+    files: [ server/commands/list-sessions.ts, server/commands/work-items.ts, server/commands/list-worktree-lineages.ts, server/commands/sync-session.ts ]
+    tests: [ server/commands/list-sessions.test.ts, server/commands/work-items.test.ts, server/commands/sync-session.test.ts ]
+    flows: [ flow.open_project_workspace, flow.recover_after_disconnect ]
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.workspace
+depends_on: []
+bridges:
+  - to: flow.recover_after_disconnect
+    reason: Project reopening restores session truth through the observability-owned reconnect flow.

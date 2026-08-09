@@ -1,0 +1,423 @@
+@import "@fontsource-variable/dm-sans/wght.css";
+@import "@fontsource-variable/fraunces/opsz.css";
+@import "@fontsource-variable/instrument-sans/wght.css";
+@import "@fontsource-variable/jetbrains-mono/wght.css";
+@import "@fontsource-variable/nunito-sans/wght.css";
+@import "@fontsource-variable/plus-jakarta-sans/wght.css";
+@import "@fontsource-variable/recursive/wght.css";
+@import "@fontsource-variable/source-sans-3/wght.css";
+@import "@fontsource-variable/space-grotesk/wght.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+@import "@fontsource/space-mono/400.css";
+@import "@fontsource/space-mono/700.css";
+
+:root {
+  /* ── Core palette (fallbacks — overridden by theme system) ──
+     Mirrors the Midnight theme. Keep in sync with src/themes.ts. */
+  --bg-primary: #0a0e1a;
+  --bg-secondary: #10131f;
+  --bg-surface: #161a26;
+  --bg-elevated: #1c2030;
+  --border-default: #232940;
+  --border-hover: #313a5a;
+  --text-primary: #e6ecf5;
+  --text-secondary: #aab3c5;
+  --text-muted: #7c849a;
+  --text-dim: #5c637a;
+  --accent: #f59e3b;
+  --accent-dark: #d97a1c;
+  --dot-grid: #1a2036;
+  --selection-bg: rgba(245, 158, 59, 0.28);
+  --font-sans: "DM Sans Variable", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "Fira Code", monospace;
+
+  /* ── Design-language tokens ──
+     Shape / elevation / display type. Base values match the default
+     look; flag-gated skins (src/theme-skins/*.css) override these to
+     change look-and-feel beyond the palette. Consume rather than
+     hard-coding radii/borders in new shared surfaces. */
+  --font-display: var(--font-sans);
+  --radius-node: 10px;
+  --radius-panel: 12px;
+  --radius-control: 6px;
+  --radius-pill: 8px;
+  --border-width: 1px;
+  --surface-blur: none;
+  --letter-spacing-label: 0;
+  --label-transform: none;
+
+  /* ── Semantic colors ── */
+  --status-success: #34d399;
+  --status-running: #38bdf8;
+  --status-idle: #60a5fa;
+  --status-warning: #fbbf24;
+  --status-error: #f87171;
+  --status-stopped: #78716c;
+  --status-waiting: #a78bfa;
+  --status-creating: #fbbf24;
+
+  --priority-critical: #ef4444;
+  --priority-high: #f97316;
+  --priority-medium: #3b82f6;
+  --priority-low: #6b7280;
+
+  --status-disconnected: #64748b;
+
+  --model-sonnet: #f59e0b;
+  --model-fable: #f472b6;
+  --model-opus: #a78bfa;
+  --model-opus-old: #8b7ab8;
+  --model-haiku: #34d399;
+
+  --tool-accent: #818cf8;
+  --thinking-accent: #a855f7;
+  --success-color: #4ade80;
+  --danger-color: #dc2626;
+  --danger-color-text: #f87171;
+  --warning-color: #facc15;
+  --info-color: #60a5fa;
+  --streaming-color: #60a5fa;
+  --leader-icon-color: var(--accent);
+
+  /* ── Shadows ── */
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.2);
+  --shadow-md: 0 8px 24px rgba(0,0,0,0.3);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.4);
+  --overlay-bg: rgba(0,0,0,0.6);
+
+  /* ── Interactive states ── */
+  --state-hover: rgba(255,255,255,0.07);
+  --state-active: rgba(255,255,255,0.13);
+
+  /* ── Component accents ── */
+  --tool-bg: rgba(129, 140, 248, 0.08);
+  --tool-bg-hover: rgba(129, 140, 248, 0.12);
+  --thinking-bg: rgba(168, 85, 247, 0.06);
+  --thinking-bg-hover: rgba(168, 85, 247, 0.10);
+  --success-bg: rgba(74, 222, 128, 0.08);
+  --danger-bg: rgba(239, 68, 68, 0.08);
+  --error-bg: rgba(239, 68, 68, 0.08);
+  --warning-bg: rgba(250, 204, 21, 0.06);
+  --info-bg: rgba(96, 165, 250, 0.08);
+  --muted-bg: rgba(136, 144, 176, 0.06);
+  --code-bg: rgba(129, 140, 248, 0.12);
+
+  /* ── Edges ── */
+  --edge-task: #818cf8;
+  --edge-context: #4ade80;
+
+  /* ── Note palette ── */
+  --note-blue-bg: #1a2744;
+  --note-blue-border: #1e3a5f;
+  --note-green-bg: #1a3329;
+  --note-green-border: #1e4d3d;
+  --note-orange-bg: #362014;
+  --note-orange-border: #4a2c1a;
+  --note-purple-bg: #2d1a3a;
+  --note-purple-border: #3b1f52;
+  --note-pink-bg: #3a1a2e;
+  --note-pink-border: #4a1f3a;
+  --note-slate-bg: #1e293b;
+  --note-slate-border: #334155;
+
+  /* ── Markdown ── */
+  --markdown-bg: #1a2a1a;
+  --markdown-border: #2a3a2a;
+
+}
+
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100vw;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--selection-bg);
+}
+
+@keyframes nodeEnter {
+  from {
+    opacity: 0;
+    /* Use the individual `scale` property so it doesn't conflict with
+       the `transform: translate3d()` used for node positioning. */
+    scale: 0.92;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+/* ── Edge flow animation ──
+   Replaces SVG <animate> elements which trigger continuous main-thread
+   repaints. CSS animations run on the compositor and respect
+   prefers-reduced-motion automatically. */
+@keyframes edgeFlow {
+  from { stroke-dashoffset: 20; }
+  to   { stroke-dashoffset: 0; }
+}
+
+.edge-flow {
+  animation: edgeFlow 1s linear infinite;
+}
+
+@keyframes dashboardDropAttention {
+  0% {
+    opacity: 0.85;
+    r: 7;
+  }
+  100% {
+    opacity: 0;
+    r: 18;
+  }
+}
+
+.dashboard-drop-attention {
+  animation: dashboardDropAttention 1.1s ease-out infinite;
+}
+
+.render-node-shell::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 25;
+  width: var(--render-node-scoop-width, 6px);
+  height: 100%;
+  background: var(--bg-primary);
+  border-right: 1px solid var(--border-default);
+  border-radius: 0 50% 50% 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edge-flow,
+  .dashboard-drop-attention { animation: none; }
+}
+
+@keyframes bannerSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Copy button: visible on hover of parent .copyable wrapper */
+.copyable:hover .copy-btn {
+  opacity: 1 !important;
+}
+.copy-btn:hover {
+  background: var(--bg-elevated) !important;
+  color: var(--text-primary) !important;
+}
+
+.message-selectable {
+  border-left: 2px solid transparent;
+  outline: 1px solid transparent;
+  outline-offset: -1px;
+}
+
+.message-selectable--active {
+  border-left-color: var(--accent);
+  outline-color: color-mix(in srgb, var(--accent) 28%, transparent);
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+.message-chunk {
+  position: relative;
+  border-radius: 4px;
+  padding: 1px 4px;
+  margin: 1px 0;
+}
+
+.message-selectable--active .message-chunk {
+  padding-left: 24px;
+  cursor: pointer;
+}
+
+.message-selectable--active .message-chunk:hover,
+.message-chunk--selected {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.message-chunk__marker {
+  position: absolute;
+  left: 5px;
+  top: 5px;
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.render-context-selectable {
+  position: relative;
+  border-radius: 6px;
+  outline: 1px solid transparent;
+  outline-offset: 2px;
+}
+
+.render-context-selectable--active {
+  cursor: pointer;
+}
+
+.render-context-selectable--active,
+.render-context-selectable:hover {
+  outline-color: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.render-context-selectable--selected {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  outline-color: color-mix(in srgb, var(--accent) 48%, transparent);
+}
+
+.render-context-selectable__marker {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 10;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 150ms ease, background 150ms ease;
+}
+
+.render-context-selectable:hover .render-context-selectable__marker,
+.render-context-selectable--active .render-context-selectable__marker,
+.render-context-selectable--selected .render-context-selectable__marker {
+  opacity: 1;
+}
+
+/* ── Canvas text-selection: disabled at the container level,
+   re-enabled for interactive elements inside nodes so users
+   can still select/copy text in inputs, textareas, etc. ── */
+input, textarea, select,
+[contenteditable="true"],
+[data-no-drag] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* ── Leader node status icon (theme-colored SVG mask) ── */
+.leader-status-icon {
+  display: block;
+  flex-shrink: 0;
+  background-color: var(--leader-icon-color, var(--accent));
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+}
+
+.leader-status-icon[data-state="active"] {
+  mask-image: url("/icons/leader-active.svg");
+  -webkit-mask-image: url("/icons/leader-active.svg");
+}
+
+.leader-status-icon[data-state="idle"] {
+  mask-image: url("/icons/leader-idle.svg");
+  -webkit-mask-image: url("/icons/leader-idle.svg");
+}
+
+/* ── Leader scroll-capture zone ── */
+.leader-scroll-zone {
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  border-radius: 4px;
+  transition: outline-color 0.15s;
+  /* Prevent scroll chaining: when the chat area reaches its scroll
+     boundary, don't let the scroll propagate to the canvas/page. */
+  overscroll-behavior: contain;
+}
+
+.leader-scroll-zone:hover {
+  outline-color: var(--border-hover);
+}
+
+.leader-scroll-zone--locked {
+  outline-color: var(--accent) !important;
+}
+
+:where(button, [role="button"], input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ── Scrollbars ──
+   Thin, theme-aware, and always visible so scrollable feeds/panels
+   (leader chat, activity, side panels) advertise their overflow instead
+   of relying on the OS overlay scrollbar that hides until you scroll.
+   More specific rules (e.g. .kb-columns) still override per-surface. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-hover) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-hover);
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+  background-clip: padding-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,41 @@
+id: capability.canonical_lineage_integration
+type: capability
+name: Canonical lineage integration
+summary: Users can organize WorkItem contributions into lineages, review and enqueue them separately, recover conflicts, and promote a gate-cleared target with revision fencing.
+constraints:
+  - constraint.integration_revision_authority
+  - constraint.gates_and_review_separation
+decisions: [ decision.worktree_isolation_and_approval, decision.canonical_work_item_lifecycle ]
+risks:
+  - risk.legacy_canonical_review_split
+  - risk.canonical_conflict_controls_latent
+suggested_files: [ src/LineageModal.tsx, src/LineageNodeStrip.tsx, src/WorktreeIntegrationControls.tsx, src/use-worktree-integration.ts, server/worktree-integration-service.ts ]
+suggested_tests: [ src/LineageModal.test.tsx, src/LineageNodeStrip.test.tsx, src/WorktreeIntegrationControls.test.tsx, src/use-worktree-integration.test.tsx, server/commands/worktree-integration.test.ts ]
+keywords: [ lineage, contribution, review, enqueue, promote, integration, revision, conflict, preserved_paths, canonical, gate ]
+entry_points:
+  - surface: surface.canvas
+    summary: Create, join, inspect, review, enqueue, and promote lineages through shared controls.
+    files: [ src/LineageModal.tsx, src/LineageNodeStrip.tsx, src/WorktreeIntegrationControls.tsx, src/use-worktree-integration.ts ]
+    tests: [ src/LineageModal.test.tsx, src/LineageNodeStrip.test.tsx, src/WorktreeIntegrationControls.test.tsx, src/use-worktree-integration.test.tsx ]
+    flows: [ flow.promote_lineage, flow.recover_integration_conflict ]
+  - surface: surface.activity
+    summary: Reach shared lineage and contribution review controls from execution triage.
+    files: [ src/ActivityView.tsx, src/WorktreeIntegrationControls.tsx ]
+    tests: [ src/ActivityView.test.tsx, src/WorktreeIntegrationControls.test.tsx ]
+    flows: [ flow.promote_lineage, flow.recover_integration_conflict ]
+  - surface: surface.mobile
+    summary: Inspect canonical change state through shared remote review hooks.
+    files: [ src/mobile/ReviewChangesScreen.tsx, src/use-worktree-integration.ts ]
+    tests: [ src/mobile/ReviewChangesScreen.test.tsx, src/use-worktree-integration.test.tsx ]
+    flows: [ flow.promote_lineage, flow.recover_integration_conflict ]
+  - surface: surface.ws_api
+    summary: Dispatch revision-fenced lineage mutations and status queries into the integration service.
+    files: [ server/commands/worktree-integration.ts, server/commands/list-worktree-lineages.ts, server/worktree-integration-service.ts ]
+    tests: [ server/commands/worktree-integration.test.ts, server/worktree-integration-sqlite.test.ts, tests/contracts/worktree-lineages-list.test.ts ]
+    flows: [ flow.promote_lineage, flow.recover_integration_conflict ]
+freshness:
+  class: code_coupled
+risk: critical
+domain: domain.integration
+depends_on: []
+bridges: []

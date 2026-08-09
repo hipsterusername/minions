@@ -1,0 +1,40 @@
+id: capability.session_control
+type: capability
+name: Session control and cleanup
+summary: Users can stop active compute, interrupt supported turns, close transient actors, clear idle history, or remove eligible sessions while canonical work remains durable.
+constraints: []
+decisions: [ decision.canonical_work_item_lifecycle, decision.role_gated_agent_tools ]
+suggested_files: [ src/SessionPanel.tsx, server/commands/stop-session.ts, server/commands/interrupt.ts, server/commands/close-session.ts, server/commands/clear-session.ts, server/commands/remove-session.ts ]
+suggested_tests: [ src/SessionPanel.test.tsx, server/commands/stop-session.test.ts, server/commands/interrupt.test.ts, server/commands/close-session.test.ts, server/commands/clear-session.test.ts, server/commands/remove-session.test.ts ]
+keywords: [ session, stop, interrupt, close, clear, remove, terminate, cleanup, active, idle, capacity, canonical ]
+entry_points:
+  - surface: surface.canvas
+    summary: Control Leader, minion, default-session, and SessionPanel execution where supported.
+    files: [ src/nodes/LeaderNode.tsx, src/nodes/MinionNode.tsx, src/nodes/ClaudeSessionNode.tsx, src/SessionPanel.tsx ]
+    tests: [ src/nodes/LeaderNode.test.tsx, src/nodes/ClaudeSessionNode.test.tsx, src/SessionPanel.test.tsx ]
+    flows: [ flow.control_execution, flow.monitor_execution ]
+  - surface: surface.activity
+    summary: Stop active work from the selected session inspector.
+    files: [ src/ActivityView.tsx ]
+    tests: [ src/ActivityView.test.tsx ]
+    flows: [ flow.control_execution ]
+  - surface: surface.mobile
+    summary: Stop remote sessions and resolve active-session limit pressure.
+    files: [ src/mobile/SessionChatScreen.tsx, src/mobile/MobileApp.tsx ]
+    tests: [ src/mobile/SessionChatScreen.test.tsx, src/mobile/MobileApp.test.tsx ]
+    flows: [ flow.control_execution ]
+  - surface: surface.ws_api
+    summary: Enforce distinct stop, interrupt, close, clear, and remove handler semantics.
+    files: [ server/commands/stop-session.ts, server/commands/interrupt.ts, server/commands/close-session.ts, server/commands/clear-session.ts, server/commands/remove-session.ts ]
+    tests: [ server/commands/stop-session.test.ts, server/commands/interrupt.test.ts, server/commands/close-session.test.ts, server/commands/clear-session.test.ts, server/commands/remove-session.test.ts ]
+    flows: [ flow.control_execution ]
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.execution_lifecycle
+depends_on:
+  - capability.leader_creation
+bridges:
+  - to: flow.monitor_execution
+    reason: Control surfaces display results through the observability-owned monitoring flow.
+risks: []

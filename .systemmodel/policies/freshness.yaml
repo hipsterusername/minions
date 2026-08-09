@@ -1,0 +1,10 @@
+freshness:
+  - policy_class: code_coupled
+    consequence: verify_before_task
+    required_actions: [Inspect referenced implementation and tests, Reconcile sibling surface entry points, Run suggested tests after behavior changes]
+  - policy_class: policy
+    consequence: required_agent_actions
+    required_actions: [Read the policy and linked decision before editing gated files, Record verification or explain an explicit waiver]
+  - policy_class: informational
+    consequence: verify_before_task
+    required_actions: [Confirm the description still matches current behavior]

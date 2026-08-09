@@ -1,0 +1,5 @@
+id: domain.execution_lifecycle
+type: domain
+name: Execution lifecycle
+summary: Owns the durable creation, continuation, control, and completion of user-directed work from canonical intent through running sessions.
+keywords: [execution, lifecycle, leader, session, conversation, work_item, run]

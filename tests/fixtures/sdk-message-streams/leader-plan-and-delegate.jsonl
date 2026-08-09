@@ -1,0 +1,28 @@
+# Synthetic SDK message stream — Leader: plan-and-delegate scenario.
+# sdk_event carries `event: NormalizedEvent`.
+#
+# Sequence:
+#   1. init              — session boots
+#   2. thinking          — leader plans
+#   3. text              — leader narrates the plan
+#   4. tool_call         — set_task_name (MCP)
+#   5. session_task_name — server echoes the new name back over WS
+#   6. tool_call         — plan_task (task-a)
+#   7. tool_call         — plan_task (task-b)
+#   8. tool_call         — assign_task
+#   9. session_status    — minion session boots
+#  10. text              — leader confirms delegation
+#  11. usage             — cost accounting
+#  12. done              — turn completes
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"init","sessionId":"leader-sess-001","model":"claude-opus-4-5","permissionMode":"default"}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"thinking","text":"Two independent tasks. I'll plan both, then delegate the first to a minion."}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"text","text":"<!--task-name:Plan and delegate-->\nI'll plan the two tasks and delegate the first.","role":"assistant"}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"tool_call","id":"toolu_01","name":"mcp__task-manager__set_task_name","input":{"name":"Plan and delegate"}}}}
+{"message":{"type":"session_task_name","sessionKey":"leader-1","taskName":"Plan and delegate"}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"tool_call","id":"toolu_02","name":"mcp__task-manager__plan_task","input":{"taskId":"task-a","title":"First task","description":"Do the first thing","priority":"high"}}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"tool_call","id":"toolu_03","name":"mcp__task-manager__plan_task","input":{"taskId":"task-b","title":"Second task","description":"Do the second thing","priority":"medium"}}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"tool_call","id":"toolu_04","name":"mcp__task-manager__assign_task","input":{"taskId":"task-a","prompt":"Do the first thing"}}}}
+{"message":{"type":"session_status","sessionKey":"minion-task-a","status":"running","sessionId":"minion-sess-001"}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"text","text":"Delegated `task-a` to a minion. I'll handle `task-b` myself next.","role":"assistant"}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"usage","input":1340,"output":36,"costUSD":0.0288}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"done","reason":"completed","result":"Planned 2 tasks and delegated 1.","turns":1}}}

@@ -1,0 +1,22 @@
+id: flow.recover_integration_conflict
+type: flow
+name: Recover from integration conflict
+summary: Users inspect preserved paths and failure state, select a valid legacy or canonical recovery action, and wait for locked server completion.
+constraints: []
+decisions: [ decision.worktree_isolation_and_approval ]
+risks:
+  - risk.legacy_canonical_review_split
+  - risk.canonical_conflict_controls_latent
+suggested_files: [ src/ChangesView.tsx, src/LineageModal.tsx, src/mobile/ReviewChangesScreen.tsx, server/commands/approve-changes.ts, server/worktree-merge.ts, server/commands/worktree-integration.ts ]
+suggested_tests: [ src/ChangesView.test.tsx, src/LineageModal.test.tsx, src/mobile/ReviewChangesScreen.test.tsx, server/commands/merge-flow.test.ts, server/commands/worktree-integration.test.ts ]
+steps:
+  - Display server-reported conflicts, gates, and preserved paths without optimistic completion.
+  - Select ours, theirs, or retry for legacy work, or an exposed retry, discard, or promotion path for canonical lineage.
+  - Acquire the corresponding operation lock and re-run gates and revision checks.
+  - Clear worktree or contribution state only after successful service completion.
+freshness:
+  class: code_coupled
+risk: critical
+domain: domain.integration
+primary_capability: capability.canonical_lineage_integration
+bridges: []

@@ -1,0 +1,102 @@
+risks:
+  - id: risk.dual_ingress_divergence
+    type: risk
+    summary: Mobile and transient actors still create bare sessions while canvas uses canonical WorkItems.
+    severity: high
+    applies_to:
+      capabilities:
+        - capability.leader_creation
+        - capability.durable_work_items
+      flows:
+        - flow.launch_leader
+      surfaces:
+        - surface.canvas
+        - surface.mobile
+        - surface.activity
+        - surface.ws_api
+      files:
+        - src/mobile/LaunchScreen.tsx
+        - server/commands/create-session.ts
+        - server/commands/work-items.ts
+    mitigation: Keep routing explicit, test equivalent intentions across both families, and avoid synthesizing canonical state for bare sessions.
+    domain: domain.execution_lifecycle
+  - id: risk.legacy_canonical_review_split
+    type: risk
+    summary: Legacy approval and canonical lineage integration coexist with different commands, gates, conflict recovery, and cleanup.
+    severity: critical
+    applies_to:
+      capabilities:
+        - capability.approval_and_legacy_integration
+        - capability.canonical_lineage_integration
+      flows:
+        - flow.review_legacy_changes
+        - flow.promote_lineage
+        - flow.recover_integration_conflict
+      surfaces:
+        - surface.canvas
+        - surface.activity
+        - surface.mobile
+        - surface.ws_api
+      files:
+        - src/ChangesView.tsx
+        - src/LineageModal.tsx
+        - server/commands/approve-changes.ts
+        - server/commands/worktree-integration.ts
+    mitigation: Hide inapplicable controls, reject cross-family commands server-side, and test both success and conflict states.
+    domain: domain.integration
+  - id: risk.agent_tool_allowlist_drift
+    type: risk
+    summary: Tool factories, role allowlists, conditional registration, and prompt documentation can drift and make tools unavailable or overexposed.
+    severity: high
+    applies_to:
+      capabilities:
+        - capability.task_orchestration
+        - capability.skill_library
+      flows:
+        - flow.delegate_and_steer_minions
+        - flow.arm_and_author_skills
+      surfaces:
+        - surface.agent_tools
+      files:
+        - server/agents/leader.ts
+        - server/task-tools.ts
+        - server/minion-tools.ts
+    mitigation: Assert filtered factory definitions and role allowlists agree and update prompts with callable tool changes.
+    domain: domain.delegation
+  - id: risk.canonical_conflict_controls_latent
+    type: risk
+    summary: Canonical conflict-resolution and gate-waiver commands exist in the WS contract without direct UI producers.
+    severity: medium
+    applies_to:
+      capabilities:
+        - capability.canonical_lineage_integration
+      flows:
+        - flow.recover_integration_conflict
+      surfaces:
+        - surface.ws_api
+        - surface.canvas
+        - surface.mobile
+      files:
+        - server/commands/worktree-integration.ts
+        - src/LineageModal.tsx
+    mitigation: Preserve the external contract, expose only supported recovery choices, and never imply unavailable resolution completed.
+    domain: domain.integration
+  - id: risk.project_worktree_content_split
+    type: risk
+    summary: REST-backed project artifacts and skill libraries use the project root while agents may edit a separate isolated worktree.
+    severity: high
+    applies_to:
+      capabilities:
+        - capability.project_workspace
+        - capability.context_routing
+      flows:
+        - flow.save_project_knowledge
+      surfaces:
+        - surface.canvas
+        - surface.agent_tools
+      files:
+        - src/api.ts
+        - server/skills.ts
+        - server/path-guard.ts
+    mitigation: Label content provenance, preserve owned-path guards, and deliberately resolve project-root versus worktree reads.
+    domain: domain.workspace

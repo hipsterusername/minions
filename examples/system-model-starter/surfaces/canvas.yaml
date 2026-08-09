@@ -1,0 +1,7 @@
+id: surface.canvas
+type: surface
+name: Canvas
+summary: The primary canvas experience.
+keywords: [canvas, desktop]
+suggested_files: [src/workspace.ts]
+suggested_tests: [src/workspace.test.ts]

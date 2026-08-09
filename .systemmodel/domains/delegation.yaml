@@ -1,0 +1,5 @@
+id: domain.delegation
+type: domain
+name: Delegation
+summary: Owns how leaders distribute work to specialized minions and freeze reusable skills into role-appropriate delegated execution.
+keywords: [delegation, orchestration, minion, skill, role, task, authoring]

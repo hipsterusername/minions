@@ -1,0 +1,21 @@
+id: constraint.canonical_legacy_segregation
+type: constraint
+statement: Work-item-bound hosts reject legacy merge, discard, clear, remove, and unrestricted raw-send paths; canonical services own their mutations.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces: []
+  files:
+    - server/commands/approve-changes.ts
+    - server/commands/discard-worktree.ts
+    - server/commands/remove-session.ts
+    - server/commands/clear-session.ts
+    - server/commands/send-message.ts
+severity: critical
+agent_instruction: Determine whether the host is canonical before choosing a command family; keep server rejection tests and hide invalid UI controls.
+review_gate: gate.worktree_integration
+suggested_tests: [ server/commands/send-message.test.ts, server/commands/discard-worktree.test.ts, server/commands/remove-session.test.ts, server/commands/clear-session.test.ts ]
+evidence: [ decision.canonical_work_item_lifecycle, decision.worktree_isolation_and_approval ]
+domain: domain.integration
+scope: global
+guards: []

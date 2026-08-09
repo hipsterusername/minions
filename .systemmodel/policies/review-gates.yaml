@@ -1,0 +1,37 @@
+review_gates:
+  - id: gate.event_bus_architecture
+    name: Event bus architecture
+    description: Preserve typed bus routing and prohibit direct server broadcast.
+    blocks_merge: true
+    required_when:
+      files: [server/bus.ts, server/commands/**, tests/architecture/no-direct-broadcast.test.ts]
+      capabilities: [capability.execution_observability]
+      flows: [flow.monitor_execution, flow.recover_after_disconnect]
+      risk: [high, critical]
+  - id: gate.command_contracts
+    name: Command contracts
+    description: Keep command schemas, command union, handlers, and contract tests complete and aligned.
+    blocks_merge: true
+    required_when:
+      files: [server/commands/index.ts, server/commands/types.ts, server/commands/schemas.ts]
+      capabilities: [capability.runtime_configuration, capability.session_control]
+      flows: [flow.configure_runtime, flow.control_execution]
+      risk: [high, critical]
+  - id: gate.worktree_integration
+    name: Worktree integration
+    description: Review locking, gates, merge segregation, conflict handling, and cleanup for worktree changes.
+    blocks_merge: true
+    required_when:
+      files: [server/worktree-*.ts, server/commands/approve-changes.ts, server/commands/discard-worktree.ts, server/commands/merge-*.ts]
+      capabilities: [capability.approval_and_legacy_integration, capability.canonical_lineage_integration]
+      flows: [flow.review_legacy_changes, flow.promote_lineage, flow.recover_integration_conflict]
+      risk: [high, critical]
+  - id: gate.system_model_core
+    name: System model core
+    description: Validate schema, parsing, retrieval, gates, reconciliation, and repository model changes.
+    blocks_merge: true
+    required_when:
+      files: [shared/system-model/**, server/system-model/**, server/system-model-tools/**, .systemmodel/**]
+      capabilities: [capability.system_model_guidance]
+      flows: [flow.inspect_system_model]
+      risk: [high, critical]

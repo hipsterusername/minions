@@ -1,0 +1,20 @@
+# Synthetic SDK stream — generic ClaudeSessionNode shape:
+# assistant text → tool_call → tool_progress → assistant wrap-up → done.
+#
+# Streaming events use NormalizedEvent kinds.
+#
+# Entry layout (0-indexed):
+#  [0] init
+#  [1] text "I'll run ls."  (assistant)
+#  [2] tool_call Bash
+#  [3] tool_progress Bash (0.4s)
+#  [4] text "Three top-level entries..."  (assistant wrap-up)
+#  [5] usage (costUSD:0.0061)
+#  [6] done  (result matches wrap-up → collapses assistant)
+{"message":{"type":"sdk_event","sessionKey":"session-1","event":{"kind":"init","sessionId":"sess-001","model":"claude-opus-4-5","permissionMode":"default"}}}
+{"message":{"type":"sdk_event","sessionKey":"session-1","event":{"kind":"text","text":"I'll run ls.","role":"assistant"}}}
+{"message":{"type":"sdk_event","sessionKey":"session-1","event":{"kind":"tool_call","id":"toolu_01","name":"Bash","input":{"command":"ls /repo"}}}}
+{"message":{"type":"sdk_event","sessionKey":"session-1","event":{"kind":"tool_progress","id":"toolu_01","name":"Bash","elapsedSeconds":0.4}}}
+{"message":{"type":"sdk_event","sessionKey":"session-1","event":{"kind":"text","text":"Three top-level entries: src, README.md, package.json.","role":"assistant"}}}
+{"message":{"type":"sdk_event","sessionKey":"session-1","event":{"kind":"usage","input":340,"output":18,"costUSD":0.0061}}}
+{"message":{"type":"sdk_event","sessionKey":"session-1","event":{"kind":"done","reason":"completed","result":"Three top-level entries: src, README.md, package.json.","turns":1}}}
