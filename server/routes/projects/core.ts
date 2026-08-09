@@ -37,7 +37,10 @@ import {
   canonicalizeSourceRoot,
   findWorkspaceBySource,
   registerWorkspace,
+  resolveWorkspace,
+  updateWorkspaceNickname,
 } from "../../workspace-registry.ts";
+import { mountWorkspaceLifecycleRoutes } from "./workspace-lifecycle.ts";
 
 interface StateEdge {
   id: string;
@@ -64,20 +67,26 @@ export function mountCoreRoutes(
   // Restore the path allowlist from durable storage so projects remain
   // accessible across server restarts without requiring re-open.
   for (const recent of listRecentProjects()) {
-    const workspace = registerWorkspace(recent.path);
+    const workspace = (recent.id ? resolveWorkspace(recent.id) : null)
+      ?? registerWorkspace(recent.path, { nickname: recent.name });
     if (workspace) registerProjectPath(workspace.sourceRoot);
   }
 
   router.get("/", (_req: Request, res: Response) => {
     const recents = listRecentProjects();
     res.json(
-      recents.map((r) => ({
-        id: findWorkspaceBySource(r.path)?.id ?? encodePath(r.path),
-        path: r.path,
-        name: r.name,
+      recents.map((r) => {
+        const workspace = (r.id ? resolveWorkspace(r.id) : null) ?? findWorkspaceBySource(r.path);
+        return {
+        id: workspace?.id ?? encodePath(r.path),
+        workspaceId: workspace?.id,
+        path: workspace?.sourceRoot ?? r.path,
+        sourceRoot: workspace?.sourceRoot ?? r.path,
+        name: workspace?.nickname ?? r.name,
+        nickname: workspace?.nickname ?? r.name,
         lastOpened: r.lastOpened,
-        hasSidecar: hasSidecar(r.path),
-      })),
+        hasSidecar: hasSidecar(workspace?.sourceRoot ?? r.path),
+      }; }),
     );
   });
 
@@ -102,7 +111,8 @@ export function mountCoreRoutes(
       return;
     }
 
-    const workspace = registerWorkspace(canonicalPath);
+    const projectName = name ?? path.basename(canonicalPath);
+    const workspace = registerWorkspace(canonicalPath, { nickname: projectName });
     const absPath = workspace && registerProjectPath(workspace.sourceRoot);
     if (!workspace || !absPath) {
       res.status(403).json({ error: "Project path could not be registered" });
@@ -114,8 +124,6 @@ export function mountCoreRoutes(
     }
 
     const db = initSidecar(absPath, initialSettings);
-    const projectName = name ?? path.basename(absPath);
-
     const id = crypto.randomUUID();
     db.prepare("INSERT INTO projects (id, name) VALUES (?, ?)").run(id, projectName);
 
@@ -164,11 +172,8 @@ export function mountCoreRoutes(
     }
     const db = getDb(absPath);
     const projectId = ensureProjectRow(db, absPath);
-    const projectName = path.basename(absPath);
-
-    addRecentProject(absPath, projectName);
-
     const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId) as ProjectRow;
+    addRecentProject(absPath, row.name);
     const nodeRows = db
       .prepare("SELECT * FROM nodes WHERE project_id = ? ORDER BY z_index ASC, created_at ASC")
       .all(projectId) as NodeRow[];
@@ -182,6 +187,8 @@ export function mountCoreRoutes(
       skills: readSkills(absPath),
     });
   });
+
+  mountWorkspaceLifecycleRoutes(router);
 
   router.get("/:encodedPath", async (req: Request, res: Response) => {
     const projectPath = resolveProjectReference(param(req, "encodedPath"));
@@ -243,6 +250,8 @@ export function mountCoreRoutes(
         "UPDATE projects SET name = ?, updated_at = datetime('now') WHERE id = ?",
       ).run(name, projectId);
       addRecentProject(projectPath, name);
+      const workspace = findWorkspaceBySource(projectPath);
+      if (workspace) updateWorkspaceNickname(workspace.id, name);
     }
 
     if (transform) {

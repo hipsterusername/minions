@@ -40,6 +40,18 @@ export const startDialectic: CommandHandler = (ctx, cmd) => {
       event,
     });
   };
+  const workspace = cmd.workspaceId
+    ? (ctx.resolveWorkspace ?? (() => null))(cmd.workspaceId)
+    : null;
+  if (cmd.workspaceId && !workspace) {
+    emit({ kind: "run_status", status: "error", error: "Workspace is not registered" });
+    return;
+  }
+  if (workspace && cmd.cwd !== undefined) {
+    emit({ kind: "run_status", status: "error",
+      error: "Workspace launches cannot include cwd" });
+    return;
+  }
 
   const existing = orchestrators.get(nodeId);
   if (existing?.isRunning()) {
@@ -57,7 +69,7 @@ export const startDialectic: CommandHandler = (ctx, cmd) => {
   }
 
   const config = normalizeDialecticConfig(cmd.dialecticConfig);
-  const cwd = cmd.cwd ?? process.cwd();
+  const cwd = workspace?.sourceRoot ?? cmd.cwd ?? process.cwd();
 
   const orch = new DialecticOrchestrator(nodeId, cwd, config, {
     startSession: (opts) => ctx.registry.start(opts),

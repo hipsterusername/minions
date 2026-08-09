@@ -147,11 +147,22 @@ export const COMMAND_SCHEMAS = {
   // Durable work items
   create_work_item: command("create_work_item", {
     requestId: workItemRequestId,
-    projectId: requiredId,
-    projectPath: requiredId,
+    projectId: requiredId.optional(),
+    projectPath: requiredId.optional(),
     workspaceId: workspaceIdSchema.optional(),
     title: requiredId,
     changeMode: changeModeSchema,
+  }).superRefine((value, ctx) => {
+    const identity = value as { workspaceId?: string; projectId?: string; projectPath?: string };
+    const modern = identity.workspaceId !== undefined;
+    const legacy = identity.projectId !== undefined || identity.projectPath !== undefined;
+    if (modern && legacy) {
+      ctx.addIssue({ code: "custom", path: ["workspaceId"],
+        message: "workspaceId cannot be combined with legacy project identity fields" });
+    } else if (!modern && (identity.projectId === undefined || identity.projectPath === undefined)) {
+      ctx.addIssue({ code: "custom", path: ["workspaceId"],
+        message: "workspaceId is required unless both legacy project identity fields are supplied" });
+    }
   }),
   continue_work_item: command("continue_work_item", {
     ...mutationFields, workItemId: requiredId, prompt: z.string().min(1),

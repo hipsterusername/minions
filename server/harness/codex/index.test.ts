@@ -614,14 +614,15 @@ describe("buildCodexEnv", () => {
     });
   });
 
-  it("uses a project-local CODEX_HOME fallback when the default path is not a directory", async () => {
+  it("uses a MINIONS_HOME CODEX_HOME fallback when the default path is not a directory", async () => {
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "codex-home-file-"));
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "codex-cwd-"));
+    const minionsHome = path.join(home, "central-minions");
     await fs.writeFile(path.join(home, ".codex"), "not a directory");
 
-    await withEnv({ HOME: home, CODEX_HOME: undefined }, async () => {
+    await withEnv({ HOME: home, CODEX_HOME: undefined, MINIONS_HOME: minionsHome }, async () => {
       const env = buildCodexEnv({}, cwd);
-      expect(env?.["CODEX_HOME"]).toBe(path.join(cwd, ".minions", "codex-home"));
+      expect(env?.["CODEX_HOME"]).toBe(path.join(minionsHome, "runtime", "codex-home"));
       const stat = await fs.stat(env!["CODEX_HOME"]!);
       expect(stat.isDirectory()).toBe(true);
     });

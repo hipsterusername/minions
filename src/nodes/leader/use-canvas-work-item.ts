@@ -169,11 +169,11 @@ export function useCanvasWorkItem(input: Input) {
 
   const begin = useCallback(async (run: { userPrompt: string; prompt: string;
     systemPrompt: string; attachments: unknown[]; contextItems: ContextItem[] }) => {
-    if (!input.projectId || !input.projectPath) throw new Error("Canonical project identity is unavailable");
+    if (!input.projectId) throw new Error("Canonical workspace identity is unavailable");
     let item = input.dataRef.current.workItemSnapshot ?? null;
     if (!item) {
       const created = await request({ type: "create_work_item", requestId: randomUuid(),
-        projectId: input.projectId, projectPath: input.projectPath,
+        workspaceId: input.projectId,
         title: input.dataRef.current.taskName?.trim() || run.userPrompt.split("\n")[0]!.slice(0, 120),
         changeMode: input.dataRef.current.worktreeIsolation ? "worktree" : "live",
       });
@@ -202,7 +202,7 @@ export function useCanvasWorkItem(input: Input) {
     if (started.workItem.currentRunKey) input.publishCanvasContext(
       started.workItem.currentRunKey, run.contextItems, null);
     return started;
-  }, [input.projectId, input.projectPath, input.nodeId, input.emitUpdate,
+  }, [input.projectId, input.nodeId, input.emitUpdate,
     input.publishCanvasContext, input.dataRef, request, requestMutation, sendCanonicalPrompt]);
   return { requestWorkItem: request, beginCanonicalRun: begin, sendCanonicalPrompt };
 }

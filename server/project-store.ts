@@ -3,7 +3,7 @@ import path from "path";
 import os from "os";
 import { initDb } from "./db.ts";
 import type Database from "better-sqlite3";
-import { findWorkspaceBySource, getMinionsHome } from "./workspace-registry.ts";
+import { findWorkspaceBySource, getMinionsHome, registerWorkspace } from "./workspace-registry.ts";
 export { resolveMinionModelForHarness } from "./project-model-settings.ts";
 
 const SIDECAR_DIR = ".minions";
@@ -111,11 +111,12 @@ export function listRecentProjects(): RecentProject[] {
 
 export function addRecentProject(projectPath: string, name: string): void {
   ensureGlobalDir();
-  const recents = listRecentProjects().filter((r) => r.path !== projectPath);
-  const workspace = findWorkspaceBySource(projectPath);
+  const workspace = findWorkspaceBySource(projectPath) ?? registerWorkspace(projectPath, { nickname: name });
+  if (!workspace) throw new Error("Recent projects require a registered workspace");
+  const recents = listRecentProjects().filter((r) => r.id !== workspace.id && r.path !== projectPath);
   recents.unshift({
-    ...(workspace ? { id: workspace.id } : {}),
-    path: projectPath,
+    id: workspace.id,
+    path: workspace.sourceRoot,
     name,
     lastOpened: new Date().toISOString(),
   });
@@ -130,15 +131,17 @@ export function removeRecentProject(projectPath: string): void {
 }
 
 function sidecarPath(projectPath: string): string {
-  return findWorkspaceBySource(projectPath)?.stateRoot ?? path.join(projectPath, SIDECAR_DIR);
+  const workspace = findWorkspaceBySource(projectPath) ?? registerWorkspace(projectPath);
+  if (!workspace) throw new Error("Project storage requires a registered workspace");
+  return workspace.stateRoot;
 }
 
 export function hasSidecar(projectPath: string): boolean {
-  return fs.existsSync(sidecarPath(projectPath));
+  return fs.existsSync(path.join(sidecarPath(projectPath), "canvas.db"));
 }
 
 /**
- * Initialize a `.minions` sidecar in the given project directory.
+ * Initialize central workspace state below MINIONS_HOME.
  * Creates the directory, SQLite DB, empty context.md, and default settings.
  * Returns the initialized database handle.
  */

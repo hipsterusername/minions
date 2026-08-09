@@ -115,10 +115,12 @@ risks:
         - surface.ws_api
       files:
         - server/workspace-registry.ts
+        - server/workspace-legacy-identity.ts
         - server/project-store.ts
+        - server/mcp-server-store.ts
         - server/worktree-owned-root.ts
         - server/worktree-create.ts
-    mitigation: Copy legacy sidecars without overwrite or symlink following, create new artifacts centrally, accept only known owned roots, and leave legacy deletion to an explicit user decision.
+    mitigation: Copy legacy sidecars once without overwrite or symlink following, never read them as a persistence fallback, create new artifacts centrally, accept only known owned roots, and leave legacy deletion to an explicit user decision.
     domain: domain.workspace
   - id: risk.sandbox_policy_overclaim
     type: risk

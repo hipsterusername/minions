@@ -221,6 +221,13 @@ export interface CommandContext {
   getLiveEditAwareness?: (projectPath: string, workItemIds: readonly string[]) => Record<string, LiveEditAwareness>;
   /** Canonical registered-path/project ownership seam. */
   resolveWorkItemProject?: (projectId: string, projectPath: string) => string | null;
+  /** Resolve an opaque workspace UUID to the canonical internal work-item identity. */
+  resolveWorkItemWorkspace?: (workspaceId: string) => {
+    projectId: string;
+    projectPath: string;
+  } | null;
+  /** Resolve an opaque workspace UUID to its current canonical source root. */
+  resolveWorkspace?: (workspaceId: string) => { id: string; sourceRoot: string } | null;
 }
 
 /** A command handler takes context + command + the originating socket. */

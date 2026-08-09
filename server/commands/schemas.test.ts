@@ -129,6 +129,12 @@ describe("validateWsCommand – accept", () => {
   it("accepts work-item mutation and query contracts", () => {
     const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
     accept({ type: "create_work_item", requestId: id(1), projectId: "p1", projectPath: "/repo", title: "Task", changeMode: "live" });
+    accept({ type: "create_work_item", requestId: id(10),
+      workspaceId: "44444444-4444-4444-8444-444444444444",
+      title: "Task", changeMode: "live" });
+    reject({ type: "create_work_item", requestId: id(12),
+      workspaceId: "44444444-4444-4444-8444-444444444444",
+      projectId: "p1", projectPath: "/repo", title: "Task", changeMode: "live" }, "workspaceId");
     accept({ type: "continue_work_item", requestId: id(11), workItemId: "w1", prompt: "Continue",
       displayPrompt: "Continue",
       expectedLifecycleRevision: 0, expectedCurrentRunKey: null });

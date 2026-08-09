@@ -1,13 +1,13 @@
 id: capability.project_workspace
 type: capability
 name: Project workspace lifecycle
-summary: Users can register a source folder by stable workspace identity, keep Minions state and worktrees centrally, recover persisted state, and reconnect without duplicating work.
+summary: Users can register, rebind, or explicitly attach a source folder by stable workspace identity, keep all Minions state and worktrees centrally, recover persisted state, and reconnect without duplicating work.
 constraints: []
 decisions: [ decision.typed_event_bus, decision.canonical_work_item_lifecycle, decision.portable_workspace_roots ]
 risks:
   - risk.project_worktree_content_split
   - risk.legacy_workspace_root_overlap
-suggested_files: [ src/ProjectList.tsx, src/App.tsx, src/ProjectHeader.tsx, src/ProjectPanel.tsx, src/api.ts, src/use-autosave.ts, server/workspace-registry.ts, server/project-store.ts ]
+suggested_files: [ src/ProjectList.tsx, src/App.tsx, src/ProjectHeader.tsx, src/ProjectPanel.tsx, src/api.ts, src/use-autosave.ts, server/workspace-registry.ts, server/project-store.ts, server/routes/projects/workspace-lifecycle.ts ]
 suggested_tests: [ src/ProjectList.test.tsx, src/App.dom.test.tsx, src/api.test.ts, src/use-autosave.test.tsx, src/canvas-work-item-reconcile.test.ts, server/workspace-registry.test.ts, server/project-store.test.ts ]
 keywords: [ project, workspace, uuid, source_root, state_root, MINIONS_HOME, mounted_volume, open, create, recover, migration, sidecar, readiness ]
 entry_points:
@@ -22,9 +22,9 @@ entry_points:
     tests: [ src/mobile/ProjectsScreen.test.tsx, src/mobile/MobileApp.test.tsx ]
     flows: [ flow.open_project_workspace, flow.recover_after_disconnect ]
   - surface: surface.ws_api
-    summary: Resolve registered workspace UUIDs and synchronize project sessions, WorkItems, and lineages.
-    files: [ server/workspace-registry.ts, server/routes/projects/core.ts, server/commands/list-sessions.ts, server/commands/work-items.ts, server/commands/list-worktree-lineages.ts, server/commands/sync-session.ts ]
-    tests: [ server/workspace-registry.test.ts, tests/contracts/projects-core-routes.test.ts, server/commands/list-sessions.test.ts, server/commands/work-items.test.ts, server/commands/sync-session.test.ts ]
+    summary: Resolve registered workspace UUIDs, explicitly rebind or attach source roots, and synchronize project sessions, WorkItems, and lineages.
+    files: [ server/workspace-registry.ts, server/routes/projects/core.ts, server/routes/projects/workspace-lifecycle.ts, server/commands/create-session.ts, server/commands/work-items.ts, server/commands/list-sessions.ts, server/commands/list-worktree-lineages.ts, server/commands/sync-session.ts ]
+    tests: [ server/workspace-registry.test.ts, tests/contracts/projects-core-routes.test.ts, server/commands/create-session.test.ts, server/commands/list-sessions.test.ts, server/commands/work-items.test.ts, server/commands/sync-session.test.ts ]
     flows: [ flow.open_project_workspace, flow.recover_after_disconnect ]
 freshness:
   class: code_coupled

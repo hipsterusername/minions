@@ -19,6 +19,11 @@ import {
 } from "./store.ts";
 import { copyValidFixture } from "./load.test.ts";
 import type { ReconciliationReport, WorkPacket } from "../../shared/system-model/index.ts";
+import { findWorkspaceBySource } from "../workspace-registry.ts";
+
+function centralDb(project: string): Database.Database {
+  return new Database(path.join(findWorkspaceBySource(project)!.stateRoot, "canvas.db"));
+}
 
 describe("system-model persistence", () => {
   it("initDb creates system-model tables", () => {
@@ -40,7 +45,7 @@ describe("system-model persistence", () => {
       workPacketId: "wp-1",
       usedAt: 1,
     }]);
-    const db = new Database(path.join(project, ".minions/canvas.db"));
+    const db = centralDb(project);
     const row = db.prepare(
       "SELECT object_id, work_packet_id, source, session_key FROM system_model_usage",
     ).get() as { object_id: string; work_packet_id: string; source: string; session_key: string };
@@ -68,7 +73,7 @@ describe("system-model persistence", () => {
         usedAt: 2,
       },
     ]);
-    const db = new Database(path.join(project, ".minions/canvas.db"));
+    const db = centralDb(project);
     const rows = db.prepare(
       `SELECT object_id, work_packet_id, source, session_key, used_at
        FROM system_model_usage
@@ -160,7 +165,7 @@ describe("system-model persistence", () => {
     expect(listWorkPacketVerifications(project, packet.id)).toEqual([
       expect.objectContaining({ target: "capability.workspace_management", result: "passed" }),
     ]);
-    const db = new Database(path.join(project, ".minions/canvas.db"));
+    const db = centralDb(project);
     const usage = db.prepare(
       "SELECT object_id, work_packet_id, source, session_key FROM system_model_usage",
     ).all() as Array<{ object_id: string; work_packet_id: string; source: string; session_key: string }>;

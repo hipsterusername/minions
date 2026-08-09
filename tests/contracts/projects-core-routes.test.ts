@@ -72,6 +72,7 @@ import {
 } from "../../server/routes/projects/helpers.ts";
 import { addRecentProject, hasSidecar, initSidecar } from "../../server/project-store.ts";
 import { resolveWorkspace } from "../../server/workspace-registry.ts";
+import { initDb } from "../../server/db.ts";
 import { createExpressFetch } from "../harness/in-process-http.ts";
 
 function encodePath(p: string): string {
@@ -204,16 +205,20 @@ describe("POST /  — create project", () => {
 
 describe("POST /open — open existing project", () => {
   it("migrates a legacy recent and sidecar non-destructively", async () => {
-    const legacyDb = initSidecar(project, {});
+    const legacyRoot = path.join(project, ".minions");
+    fs.mkdirSync(legacyRoot);
+    const legacyDb = initDb(path.join(legacyRoot, "canvas.db"));
+    const legacyId = "11111111-1111-4111-8111-111111111111";
+    legacyDb.prepare("INSERT INTO projects (id, name) VALUES (?, ?)").run(legacyId, "Legacy");
     legacyDb.close();
-    fs.writeFileSync(path.join(project, ".minions", "context.md"), "legacy");
+    fs.writeFileSync(path.join(legacyRoot, "context.md"), "legacy");
     addRecentProject(project, "Legacy");
 
     const restartedFetch = createExpressFetch(buildApp(), baseUrl);
     const listRes = await restartedFetch(`${baseUrl}/`);
     const rows = (await listRes.json()) as Array<{ id: string; path: string }>;
     const migrated = rows.find((row) => row.path === project)!;
-    expect(migrated.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(migrated.id).toBe(legacyId);
 
     const openRes = await restartedFetch(`${baseUrl}/${migrated.id}`);
     expect(openRes.status).toBe(200);
@@ -244,6 +249,63 @@ describe("POST /open — open existing project", () => {
       body: JSON.stringify({ path: ghost }),
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("workspace identity lifecycle", () => {
+  it("rebinds a moved repository while preserving UUID and central state", async () => {
+    teardownProject();
+    const openRes = await fetch(`${baseUrl}/open`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: project }),
+    });
+    const opened = (await openRes.json()) as { id: string };
+    const before = resolveWorkspace(opened.id)!;
+    fs.writeFileSync(path.join(before.stateRoot, "identity-marker.txt"), "preserved");
+    const moved = `${project}-moved`;
+    fs.renameSync(project, moved);
+
+    const rebindRes = await fetch(`${baseUrl}/rebind`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceId: opened.id, path: moved }),
+    });
+    expect(rebindRes.status).toBe(200);
+    const rebound = (await rebindRes.json()) as { id: string; sourceRoot: string };
+    expect(rebound).toMatchObject({ id: opened.id, sourceRoot: fs.realpathSync(moved) });
+    expect(fs.readFileSync(path.join(resolveWorkspace(opened.id)!.stateRoot,
+      "identity-marker.txt"), "utf8")).toBe("preserved");
+    project = moved;
+  });
+
+  it("attaches an already-opened copy to the chosen existing UUID", async () => {
+    teardownProject();
+    const originalRes = await fetch(`${baseUrl}/open`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: project }),
+    });
+    const original = (await originalRes.json()) as { id: string };
+    const copy = fs.mkdtempSync(path.join(parentDir, "copy-"));
+    const copyRes = await fetch(`${baseUrl}/open`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: copy }),
+    });
+    const copied = (await copyRes.json()) as { id: string };
+    expect(copied.id).not.toBe(original.id);
+
+    const attachRes = await fetch(`${baseUrl}/attach`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceId: original.id, path: copy }),
+    });
+    expect(attachRes.status).toBe(200);
+    expect(await attachRes.json()).toMatchObject({
+      id: original.id, workspaceId: original.id, sourceRoot: fs.realpathSync(copy),
+    });
+    expect(resolveWorkspace(copied.id)).toBeNull();
+    expect((await fetch(`${baseUrl}/${copied.id}`)).status).toBe(403);
+    const attachedGet = await fetch(`${baseUrl}/${original.id}`);
+    expect(attachedGet.status).toBe(200);
+    expect(await attachedGet.json()).toMatchObject({ id: original.id, path: fs.realpathSync(copy) });
+    project = copy;
   });
 });
 
@@ -297,6 +359,13 @@ describe("PUT /:encodedPath — update project", () => {
     const fresh = (await getRes.json()) as Record<string, unknown>;
     expect(fresh["name"]).toBe("renamed");
     expect(fresh["transform"]).toEqual({ x: 100, y: 200, scale: 1.5 });
+
+    const listRes = await fetch(`${baseUrl}/`);
+    const listed = (await listRes.json()) as Array<Record<string, unknown>>;
+    expect(listed.find((row) => row["path"] === project)).toMatchObject({
+      workspaceId: expect.any(String), nickname: "renamed", name: "renamed",
+      sourceRoot: project,
+    });
   });
 });
 

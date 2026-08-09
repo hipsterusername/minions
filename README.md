@@ -127,7 +127,7 @@ $MINIONS_HOME/
 ├── artifacts/                          # session-scoped generated artifacts
 ├── recent-projects.json
 └── workspaces/
-    ├── registry.json                 # UUID → canonical sourceRoot
+    ├── registry.json                 # UUID → canonical sourceRoot + nickname
     └── <workspace-uuid>/             # stateRoot
         ├── canvas.db
         ├── context.md
@@ -146,7 +146,8 @@ Existing projects migrate non-destructively:
 
 1. Back up the repository and its existing `.minions/` and
    `.canvas-worktrees/` directories if they contain work you need.
-2. Open the existing source folder in Minions. On first registration, regular
+2. Open the existing source folder in Minions. On first registration, a single
+   valid legacy project UUID is preserved; otherwise a UUID is assigned. Regular
    files from `.minions/` are copied into the new UUID state root without
    overwriting destination files or following symlinks.
 3. Verify project settings, skills, session history, and pending work. New state
@@ -158,6 +159,12 @@ Existing projects migrate non-destructively:
 
 Changing `MINIONS_HOME` selects a different registry and state collection. Move
 that directory as a unit while Minions is stopped if you need to relocate it.
+
+Moving a repository does not create new state: explicitly rebind its workspace
+UUID to the new source folder (`POST /api/projects/rebind`). A copied repository
+gets a new UUID by default. To intentionally make a copy the source for an
+existing workspace, use `POST /api/projects/attach`; the replaced binding's
+central state is retained and is never deleted implicitly.
 
 ### Git change mode and execution sandbox
 

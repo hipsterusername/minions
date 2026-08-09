@@ -24,14 +24,9 @@ const MCP_SERVERS_FILE = "mcp-servers.json";
 
 /** Absolute path to the mcp-servers.json file for a project. */
 export function mcpServersFilePath(projectPath: string): string {
-  const workspace = findWorkspaceBySource(projectPath);
-  return workspace
-    ? path.join(workspace.stateRoot, MCP_SERVERS_FILE)
-    : legacyMcpServersFilePath(projectPath);
-}
-
-function legacyMcpServersFilePath(projectPath: string): string {
-  return path.join(projectPath, ".minions", MCP_SERVERS_FILE);
+  const workspace = findWorkspaceBySource(projectPath) ?? registerWorkspace(projectPath);
+  if (!workspace) throw new Error("MCP server storage requires a registered workspace");
+  return path.join(workspace.stateRoot, MCP_SERVERS_FILE);
 }
 
 function writableMcpServersFilePath(projectPath: string): string {
@@ -47,14 +42,7 @@ function ensureDir(filePath: string): void {
 }
 
 function readRawEntries(projectPath: string): unknown[] {
-  const centralPath = mcpServersFilePath(projectPath);
-  // A registered workspace is authoritative once its central file exists.
-  // Falling back only when absent keeps legacy sidecars readable without ever
-  // directing a new write back into the source tree.
-  const legacyPath = legacyMcpServersFilePath(projectPath);
-  const filePath = fs.existsSync(centralPath)
-    ? centralPath
-    : legacyPath;
+  const filePath = mcpServersFilePath(projectPath);
   if (!fs.existsSync(filePath)) return [];
   let raw: string;
   try {

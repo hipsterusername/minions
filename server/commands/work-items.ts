@@ -101,13 +101,21 @@ export const workItemCommand: CommandHandler = async (ctx, cmd, ws) => {
     let result: unknown;
     switch (cmd.type) {
     case "create_work_item": {
-      const projectPath = ctx.resolveWorkItemProject?.(cmd.projectId!, cmd.projectPath!);
-      if (!projectPath) {
-        throw new WorkItemServiceError("validation_failed", "Project path is not registered or does not own projectId");
-      }
+      const modern = cmd.workspaceId
+        ? ctx.resolveWorkItemWorkspace?.(cmd.workspaceId)
+        : null;
+      const projectPath = modern?.projectPath
+        ?? ctx.resolveWorkItemProject?.(cmd.projectId!, cmd.projectPath!);
+      const projectId = modern?.projectId ?? cmd.projectId;
+      if (!projectPath || !projectId) throw new WorkItemServiceError(
+        "validation_failed",
+        cmd.workspaceId
+          ? "Workspace is not registered"
+          : "Project path is not registered or does not own projectId",
+      );
       result = await service.create({
         requestId: cmd.requestId!,
-        projectId: cmd.projectId!, projectPath, title: cmd.title!,
+        projectId, projectPath, title: cmd.title!,
         changeMode: cmd.changeMode!,
       });
       break;

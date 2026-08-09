@@ -70,8 +70,11 @@ export function rowToProject(row: ProjectRow, projectPath: string) {
   const workspace = findWorkspaceBySource(projectPath);
   return {
     id: workspace?.id ?? encodePath(projectPath),
+    workspaceId: workspace?.id,
     path: projectPath,
+    sourceRoot: projectPath,
     name: row.name,
+    nickname: workspace?.nickname ?? row.name,
     transform: {
       x: row.transform_x,
       y: row.transform_y,

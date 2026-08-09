@@ -4,10 +4,15 @@ import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import {
+  attachWorkspace,
   findWorkspaceBySource,
+  rebindWorkspace,
   registerWorkspace,
   resolveWorkspace,
+  updateWorkspaceNickname,
+  workspaceStateRoot,
 } from "./workspace-registry.ts";
+import { initDb } from "./db.ts";
 
 let minionsHome: string;
 let sourceRoot: string;
@@ -67,6 +72,67 @@ describe("workspace registry", () => {
     expect(fs.readFileSync(path.join(legacy, "context.md"), "utf8")).toBe("legacy context");
     expect(fs.existsSync(path.join(workspace.stateRoot, "linked.txt"))).toBe(false);
     expect(fs.existsSync(legacy)).toBe(true);
+  });
+
+  it("preserves an unambiguous legacy project UUID during migration", () => {
+    const legacyRoot = path.join(sourceRoot, ".minions");
+    fs.mkdirSync(legacyRoot);
+    const legacyId = "22222222-2222-4222-8222-222222222222";
+    const db = initDb(path.join(legacyRoot, "canvas.db"));
+    db.prepare("INSERT INTO projects (id, name) VALUES (?, ?)").run(legacyId, "Legacy");
+    db.close();
+
+    const workspace = registerWorkspace(sourceRoot)!;
+
+    expect(workspace.id).toBe(legacyId);
+    expect(fs.existsSync(path.join(workspace.stateRoot, "canvas.db"))).toBe(true);
+    expect(fs.existsSync(path.join(legacyRoot, "canvas.db"))).toBe(true);
+  });
+
+  it("rebinds a moved repository without changing its UUID, nickname, or state root", () => {
+    const workspace = registerWorkspace(sourceRoot, { nickname: "Portable" })!;
+    fs.writeFileSync(path.join(workspace.stateRoot, "marker.txt"), "durable");
+    const movedRoot = `${sourceRoot}-moved`;
+    fs.renameSync(sourceRoot, movedRoot);
+    sourceRoot = movedRoot;
+
+    const rebound = rebindWorkspace(workspace.id, movedRoot)!;
+
+    expect(rebound).toMatchObject({ id: workspace.id, nickname: "Portable",
+      sourceRoot: fs.realpathSync(movedRoot), stateRoot: workspace.stateRoot });
+    expect(fs.readFileSync(path.join(rebound.stateRoot, "marker.txt"), "utf8")).toBe("durable");
+  });
+
+  it("gives a copied repository a new UUID unless explicitly attached", () => {
+    const original = registerWorkspace(sourceRoot, { nickname: "Original" })!;
+    fs.writeFileSync(path.join(original.stateRoot, "marker.txt"), "original state");
+    const copiedRoot = fs.mkdtempSync(path.join(os.tmpdir(), "copied-source-"));
+    try {
+      const copied = registerWorkspace(copiedRoot)!;
+      expect(copied.id).not.toBe(original.id);
+
+      const attached = attachWorkspace(original.id, copiedRoot)!;
+      expect(attached.id).toBe(original.id);
+      expect(attached.sourceRoot).toBe(fs.realpathSync(copiedRoot));
+      expect(resolveWorkspace(copied.id)).toBeNull();
+      expect(fs.existsSync(copied.stateRoot)).toBe(true);
+      expect(fs.readFileSync(path.join(attached.stateRoot, "marker.txt"), "utf8"))
+        .toBe("original state");
+    } finally {
+      fs.rmSync(copiedRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("persists an editable registry nickname", () => {
+    const workspace = registerWorkspace(sourceRoot)!;
+    expect(updateWorkspaceNickname(workspace.id, "Renamed")?.nickname).toBe("Renamed");
+    expect(resolveWorkspace(workspace.id)?.nickname).toBe("Renamed");
+  });
+
+  it("derives Windows state paths with Windows separators", () => {
+    const id = "33333333-3333-4333-8333-333333333333";
+    expect(workspaceStateRoot("C:\\Users\\Ada\\.minions", id, path.win32))
+      .toBe(`C:\\Users\\Ada\\.minions\\workspaces\\${id}`);
   });
 
   it("fails closed when a workspace state root is replaced by a symlink", () => {

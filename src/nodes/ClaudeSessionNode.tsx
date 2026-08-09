@@ -667,6 +667,7 @@ export function ClaudeSessionRenderer({
   socketSubscribe,
   onAddContentNode,
   projectPath,
+  projectId,
 }: NodeRenderProps) {
   const data = node.data as ClaudeSessionData;
   const dataRef = useRef(data);
@@ -966,7 +967,7 @@ export function ClaudeSessionRenderer({
       model: current.model,
       thinkingConfig: current.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
       ...(current.harness ? { harness: current.harness } : {}),
-      ...(projectPath ? { cwd: projectPath } : {}),
+      ...(projectId ? { workspaceId: projectId } : projectPath ? { cwd: projectPath } : {}),
     });
     syncedRef.current = true;
     onUpdateData({

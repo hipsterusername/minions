@@ -22,6 +22,7 @@ import type { CommandContext, CommandHandler } from "./types.ts";
 import type { WebSocket } from "ws";
 import { SessionLaunchError } from "../session-launch.ts";
 import { listMcpServers, resolveClaudeMcpServers } from "../mcp-server-store.ts";
+import { resolveWorkspace } from "../workspace-registry.ts";
 
 const SAFE_SESSION_KEY = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
@@ -51,7 +52,21 @@ export const createSession: CommandHandler = async (
   ws,
 ) => {
   const key = cmd.sessionKey ?? ctx.generateKey();
-  let canonicalConfig: { projectPath: string; changeMode: "live" | "worktree" } | null = null;
+  let canonicalConfig: { workspaceId: string; projectPath: string;
+    changeMode: "live" | "worktree" } | null = null;
+  const resolveRegisteredWorkspace = ctx.resolveWorkspace ?? resolveWorkspace;
+  const requestedWorkspace = cmd.workspaceId ? resolveRegisteredWorkspace(cmd.workspaceId) : null;
+  if (cmd.workspaceId && !requestedWorkspace) {
+    rejectCreate(ws, key, "Workspace is not registered", { code: "WORKSPACE_NOT_REGISTERED" });
+    return;
+  }
+  if (requestedWorkspace && cmd.cwd !== undefined) {
+    rejectCreate(ws, key, "Workspace launches cannot include cwd", {
+      code: "WORKSPACE_CONFIGURATION_MISMATCH",
+      guidance: "Omit cwd; it is resolved from workspaceId.",
+    });
+    return;
+  }
 
   // Session keys become worktree directory and branch-name components. Keep
   // them to one bounded, traversal-free segment before they reach lifecycle
@@ -92,17 +107,26 @@ export const createSession: CommandHandler = async (
         });
         return;
       }
+      const workItemWorkspace = resolveRegisteredWorkspace(detail!.workItem.projectId);
+      if (!workItemWorkspace) {
+        rejectCreate(ws, key, "Work item workspace is not registered", {
+          code: "WORKSPACE_NOT_REGISTERED", workItemId: cmd.workItemId,
+        });
+        return;
+      }
       canonicalConfig = {
-        projectPath: detail!.workItem.projectPath,
+        workspaceId: workItemWorkspace.id,
+        projectPath: workItemWorkspace.sourceRoot,
         changeMode: detail!.workItem.lifecycle.changeMode,
       };
-      if ((cmd.cwd !== undefined && cmd.cwd !== canonicalConfig.projectPath)
+      if (cmd.cwd !== undefined
+        || (cmd.workspaceId !== undefined && cmd.workspaceId !== canonicalConfig.workspaceId)
         || (cmd.role !== undefined && cmd.role !== "leader")
         || (cmd.worktreeIsolation !== undefined
           && cmd.worktreeIsolation !== (canonicalConfig.changeMode === "worktree"))) {
         rejectCreate(ws, key, "Session configuration does not match its canonical work item", {
           code: "WORK_ITEM_CONFIGURATION_MISMATCH", workItemId: cmd.workItemId,
-          guidance: "Omit cwd, role, and worktreeIsolation; they are derived from the work item.",
+          guidance: "Omit cwd, workspaceId, role, and worktreeIsolation; they are derived from the work item.",
         });
         return;
       }
@@ -131,7 +155,10 @@ export const createSession: CommandHandler = async (
     );
     return;
   }
-  const rawCwd = canonicalConfig?.projectPath ?? cmd.cwd ?? process.cwd();
+  const rawCwd = canonicalConfig?.projectPath
+    ?? requestedWorkspace?.sourceRoot
+    ?? cmd.cwd
+    ?? process.cwd();
   const activeWorktreePaths = Array.from(ctx.registry.values())
     .map((host) => host.worktree)
     .filter((worktree) => worktree?.lifecycle === "active")
@@ -164,7 +191,9 @@ export const createSession: CommandHandler = async (
       return;
     }
   }
-  const persistedMcp = listMcpServers(cwd).entries;
+  const persistedMcp = listMcpServers(
+    canonicalConfig?.projectPath ?? requestedWorkspace?.sourceRoot ?? cwd,
+  ).entries;
   const claudeMcp =
     persistedMcp.length > 0 && (cmd.harness === undefined || cmd.harness === "claude")
       ? resolveClaudeMcpServers(persistedMcp)

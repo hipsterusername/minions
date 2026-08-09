@@ -71,6 +71,26 @@ describe("work-item command dispatcher", () => {
     expect(workItems.create).toHaveBeenCalledWith(expect.objectContaining({ projectPath: "/canonical/repo" }));
   });
 
+  it("resolves modern create requests from workspaceId without client paths", async () => {
+    const h = setup();
+    const workItems = service();
+    h.ctx.workItems = workItems;
+    h.ctx.resolveWorkItemWorkspace = vi.fn(() => ({
+      projectId: "44444444-4444-4444-8444-444444444444",
+      projectPath: "/canonical/repo",
+    }));
+    dispatchCommand(h.ctx, {
+      type: "create_work_item", requestId: "00000000-0000-4000-8000-000000000004",
+      workspaceId: "44444444-4444-4444-8444-444444444444",
+      title: "Task", changeMode: "live",
+    }, h.ws);
+    await vi.waitFor(() => expect(workItems.create).toHaveBeenCalledOnce());
+    expect(workItems.create).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "44444444-4444-4444-8444-444444444444",
+      projectPath: "/canonical/repo",
+    }));
+  });
+
   it("delegates mutation input through the narrow service and replies on the item topic", async () => {
     const h = setup();
     const workItems = service();

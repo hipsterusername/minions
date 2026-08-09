@@ -162,7 +162,7 @@ export function reduce(data: DialecticData, event: DialecticEvent): DialecticDat
 // ── Component ────────────────────────────────────────────────────────────────
 
 function DialecticNodeRenderer(props: NodeRenderProps): ReactElement {
-  const { node, onUpdateData, socketSend, socketSubscribe, projectPath } = props;
+  const { node, onUpdateData, socketSend, socketSubscribe, projectPath, projectId } = props;
   const data = useMemo(() => normalizeData(node.data), [node.data]);
   const dataRef = useRef(data);
   dataRef.current = data;
@@ -221,11 +221,11 @@ function DialecticNodeRenderer(props: NodeRenderProps): ReactElement {
     socketSend({
       type: "start_dialectic",
       sessionKey: node.id,
-      cwd: projectPath,
+      ...(projectId ? { workspaceId: projectId } : { cwd: projectPath }),
       prompt: topic,
       dialecticConfig: dataRef.current.config,
     });
-  }, [socketSend, onUpdateData, node.id, projectPath]);
+  }, [socketSend, onUpdateData, node.id, projectPath, projectId]);
 
   const stop = useCallback(() => {
     socketSend?.({ type: "stop_dialectic", sessionKey: node.id });

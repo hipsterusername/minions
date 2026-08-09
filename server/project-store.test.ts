@@ -56,7 +56,7 @@ import {
   writeSettings,
   writeSkills,
 } from "./project-store.ts";
-import { registerWorkspace } from "./workspace-registry.ts";
+import { findWorkspaceBySource, registerWorkspace } from "./workspace-registry.ts";
 
 let project: string;
 const cleanup: (() => void)[] = [];
@@ -157,7 +157,7 @@ describe("context / settings / skills / mcp-servers round-trip", () => {
   });
 
   it("readContext returns the default for a missing file (does not throw)", () => {
-    rmSync(join(project, ".minions", "context.md"));
+    rmSync(join(findWorkspaceBySource(project)!.stateRoot, "context.md"));
     const ctx = readContext(project);
     expect(ctx).toEqual({ content: "", exists: false });
   });

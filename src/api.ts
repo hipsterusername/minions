@@ -43,8 +43,11 @@ function encodePath(p: string): string {
 
 export interface ProjectSummary {
   id: string;           // stable workspace UUID (legacy responses may use an encoded path)
+  workspaceId?: string;
   path: string;         // absolute filesystem path
+  sourceRoot?: string;
   name: string;
+  nickname?: string;
   lastOpened: string;
   hasSidecar: boolean;
 }
@@ -103,8 +106,11 @@ export type { LeaderPreset };
 
 export interface ProjectWithNodes {
   id: string;
+  workspaceId?: string;
   path: string;
+  sourceRoot?: string;
   name: string;
+  nickname?: string;
   transform: CanvasTransform;
   createdAt: string;
   updatedAt: string;
@@ -180,6 +186,22 @@ export function openProject(projectPath: string): Promise<ProjectWithNodes> {
   return apiFetch("/projects/open", {
     method: "POST",
     body: JSON.stringify({ path: projectPath }),
+  });
+}
+
+/** Explicitly attach a moved or copied repository to an existing workspace UUID. */
+export function attachProject(workspaceId: string, projectPath: string): Promise<ProjectSummary> {
+  return apiFetch("/projects/attach", {
+    method: "POST",
+    body: JSON.stringify({ workspaceId, path: projectPath }),
+  });
+}
+
+/** Rebind a moved repository to its existing workspace UUID. */
+export function rebindProject(workspaceId: string, projectPath: string): Promise<ProjectSummary> {
+  return apiFetch("/projects/rebind", {
+    method: "POST",
+    body: JSON.stringify({ workspaceId, path: projectPath }),
   });
 }
 

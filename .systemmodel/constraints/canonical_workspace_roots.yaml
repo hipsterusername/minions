@@ -1,19 +1,23 @@
 id: constraint.canonical_workspace_roots
 type: constraint
-statement: A stable workspace UUID resolves server-side to one canonical source root and one MINIONS_HOME state root; execution worktrees stay in the owned state root while legacy roots remain read-compatible during migration.
+statement: A stable workspace UUID resolves server-side to one canonical source root and one MINIONS_HOME state root; all new persistence and execution worktrees stay central while legacy sidecars are import-only and legacy worktree roots remain transition-compatible.
 applies_to:
   capabilities: []
   flows: []
   surfaces: []
   files:
     - server/workspace-registry.ts
+    - server/workspace-legacy-identity.ts
     - server/project-store.ts
+    - server/mcp-server-store.ts
+    - server/harness/codex/env.ts
+    - server/routes/projects/workspace-lifecycle.ts
     - server/path-guard.ts
     - server/worktree-owned-root.ts
     - server/worktree-create.ts
     - server/worktree-integration-sqlite.ts
 severity: critical
-agent_instruction: Never derive a source path from a UUID or authorize by location alone; canonicalize explicitly registered sources, reject traversal and symlink escape, create new state and worktrees centrally, and preserve legacy sidecars and worktree roots non-destructively.
+agent_instruction: Never derive a source path from a UUID or authorize by location alone; canonicalize explicitly registered sources, require explicit rebind or attachment, reject traversal and symlink escape, create all state and worktrees centrally, and preserve legacy sidecars and worktree roots non-destructively.
 review_gate: gate.workspace_boundaries
 suggested_tests: [ server/workspace-registry.test.ts, server/project-store.test.ts, server/path-guard.test.ts, server/worktree-owned-root.test.ts, server/worktree-create.test.ts ]
 evidence: [ decision.portable_workspace_roots ]

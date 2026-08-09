@@ -257,6 +257,7 @@ export function MinionNodeRenderer({
   onResize,
   onAddContentNode,
   projectPath,
+  projectId,
 }: NodeRenderProps) {
   const data = node.data as MinionData;
   const dataRef = useRef(data);
@@ -685,7 +686,7 @@ export function MinionNodeRenderer({
         // Pass cwd so the session runs in the project dir (not the server's cwd).
         worktreeIsolation: false,
         ...(current.harness && !current.sessionKey ? { harness: current.harness } : {}),
-        ...(projectPath ? { cwd: projectPath } : {}),
+        ...(projectId ? { workspaceId: projectId } : projectPath ? { cwd: projectPath } : {}),
       });
 
       onUpdateData({

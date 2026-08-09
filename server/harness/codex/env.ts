@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { getMinionsHome } from "../../workspace-registry.ts";
 
 /**
  * Build the environment passed to the Codex CLI.
@@ -14,7 +15,7 @@ export function buildCodexEnv(
   bridgeEnv: Record<string, string>,
   cwd: string,
 ): Record<string, string> {
-  const fallbackHome = codexHomeFallback(cwd);
+  const fallbackHome = codexHomeFallback();
 
   const env = allowedProcessEnv();
   Object.assign(env, bridgeEnv);
@@ -24,7 +25,7 @@ export function buildCodexEnv(
   return env;
 }
 
-function codexHomeFallback(cwd: string): string | null {
+function codexHomeFallback(): string | null {
   if (process.env["CODEX_HOME"]) return null;
 
   const home = process.env["HOME"] || os.homedir();
@@ -36,7 +37,7 @@ function codexHomeFallback(cwd: string): string | null {
     return null;
   }
 
-  const fallback = path.join(cwd, ".minions", "codex-home");
+  const fallback = path.join(getMinionsHome(), "runtime", "codex-home");
   try {
     fs.mkdirSync(fallback, { recursive: true });
   } catch (err) {

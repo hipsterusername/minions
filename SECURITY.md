@@ -53,6 +53,10 @@ transcripts, and personal filesystem paths.
   mounted volumes, but Minions rejects unregistered roots, traversal, and
   symlink escapes. A workspace UUID is opaque and must not be used to derive or
   accept a client-supplied source path.
+- Modern launch and work-item commands carry only `workspaceId`; the server
+  resolves the current source root. Rebind and attachment are explicit REST
+  operations. Attachment may retire a copy's automatically assigned binding,
+  but it does not delete either workspace's central state directory.
 - Legacy `<source>/.minions/` content is copied into central state on first
   registration without overwriting destination files or following symlinks.
   Legacy `<source>/.canvas-worktrees/` remains recognized during migration.
@@ -66,6 +70,8 @@ transcripts, and personal filesystem paths.
 - Codex launches receive a restricted environment allowlist. Claude and MCP
   permissions remain provider-controlled capabilities; verify effective policy
   and use the narrowest mode that can complete the task.
+- If the normal Codex home is unusable, its fallback is created below
+  `MINIONS_HOME/runtime/`; Minions does not create runtime state in a repository.
 - HTTP MCP endpoints are accepted without TLS only on loopback. Remote MCP
   endpoints must use HTTPS, but Minions does not attest to or sandbox the
   remote server's behavior.

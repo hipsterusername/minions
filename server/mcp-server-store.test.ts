@@ -53,7 +53,6 @@ describe("mcp-server-store", () => {
     projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-store-"));
     minionsHome = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-home-"));
     vi.stubEnv("MINIONS_HOME", minionsHome);
-    expect(registerWorkspace(projectDir)).not.toBeNull();
   });
 
   afterEach(() => {
@@ -76,12 +75,15 @@ describe("mcp-server-store", () => {
       expect(invalid).toEqual([]);
     });
 
-    it("reads a legacy source sidecar when central MCP state is absent", () => {
+    it("imports a legacy source sidecar into central MCP state before reading", () => {
       const legacyPath = path.join(projectDir, ".minions", "mcp-servers.json");
       fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
       fs.writeFileSync(legacyPath, JSON.stringify([makeStdio({ id: "legacy" })]));
 
       expect(listMcpServers(projectDir).entries.map((entry) => entry.id)).toEqual(["legacy"]);
+      const central = mcpServersFilePath(projectDir);
+      expect(central.startsWith(path.join(minionsHome, "workspaces"))).toBe(true);
+      expect(fs.existsSync(central)).toBe(true);
     });
 
     it("skips malformed entries and reports them in invalid", () => {

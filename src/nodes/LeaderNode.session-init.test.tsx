@@ -349,7 +349,9 @@ describe("LeaderNode: new-session initiation", () => {
       { target: { value: "First iteration" } });
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     const create = latestCommand("create_work_item") as { requestId: string };
-    expect(create).toMatchObject({ type: "create_work_item", title: "First iteration" });
+    expect(create).toMatchObject({ type: "create_work_item", workspaceId: "project-1",
+      title: "First iteration" });
+    expect(create).not.toHaveProperty("projectPath");
     await act(() => replay([{ message: { type: "work_item_response", command: "create_work_item",
       requestId: create.requestId, success: true,
       result: { workItem: canonicalItem(null, 0, "draft", "none"), bindings: [], currentRun: null, runs: [], nextCursor: null } } }]));

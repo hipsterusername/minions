@@ -711,7 +711,7 @@ export function LeaderNodeRenderer({
       sandboxPolicy: data.sandboxPolicy ?? DEFAULT_SANDBOX_POLICY,
       ...(data.harness ? { harness: data.harness } : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
-      ...(projectPath ? { cwd: projectPath } : {}),
+      ...(projectId ? { workspaceId: projectId } : projectPath ? { cwd: projectPath } : {}),
     });
     publishCanvasContext(key, contextItems, null);
     syncedRef.current = true;
@@ -782,7 +782,7 @@ export function LeaderNodeRenderer({
       sandboxPolicy: dataRef.current.sandboxPolicy ?? DEFAULT_SANDBOX_POLICY,
       ...(dataRef.current.harness ? { harness: dataRef.current.harness } : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
-      ...(projectPath ? { cwd: projectPath } : {}),
+      ...(projectId ? { workspaceId: projectId } : projectPath ? { cwd: projectPath } : {}),
     });
     publishCanvasContext(key, contextItems, null);
     syncedRef.current = true;
