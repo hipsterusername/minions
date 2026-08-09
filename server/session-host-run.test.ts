@@ -121,6 +121,50 @@ describe("ensureWorktree safety boundary", () => {
 });
 
 describe("buildHarnessStartOpts — capability gating", () => {
+  it("passes the effective worktree policy into harness.start options", () => {
+    const harness = fakeHarness("codex", {
+      sandboxEnforcement: {
+        filesystem: ["read-only", "workspace-write", "unrestricted"],
+        network: true,
+        approval: true,
+      },
+    });
+    const host = fakeHost() as SessionHost & { worktreeIsolation: boolean };
+    host.worktreeIsolation = true;
+    const { startOpts } = buildHarnessStartOpts({
+      host,
+      opts: fakeOpts({ worktreeIsolation: true }),
+      agentType: fakeAgentType,
+      agentCtx: fakeCtx,
+      toolResult: fakeToolResult,
+      abortController: new AbortController(),
+      harness,
+      prompt: "hello",
+    });
+    expect(startOpts.sandboxPolicy).toEqual({
+      requested: { filesystemScope: "workspace-write", networkAccess: "disabled", approvalPolicy: "on-failure" },
+      effective: { filesystemScope: "workspace-write", networkAccess: "disabled", approvalPolicy: "on-failure" },
+      unsupported: [],
+    });
+  });
+
+  it("surfaces unsupported enforcement instead of claiming it", () => {
+    const { startOpts } = buildHarnessStartOpts({
+      host: fakeHost(),
+      opts: fakeOpts(),
+      agentType: fakeAgentType,
+      agentCtx: fakeCtx,
+      toolResult: fakeToolResult,
+      abortController: new AbortController(),
+      harness: fakeHarness("legacy", {}),
+      prompt: "hello",
+    });
+    expect(startOpts.sandboxPolicy?.effective).toEqual({
+      filesystemScope: "unmanaged", networkAccess: "unmanaged", approvalPolicy: "unmanaged",
+    });
+    expect(startOpts.sandboxPolicy?.unsupported).toEqual(["filesystem:workspace-write", "network", "approval"]);
+  });
+
   it("retains resumeId for open-run resumes and clears it for provider continuations", () => {
     const input = {
       host: fakeHost(),

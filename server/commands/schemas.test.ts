@@ -34,6 +34,12 @@ describe("validateWsCommand – accept", () => {
       sessionKey: "s1",
       workItemId: "work-1",
       cwd: "/home/user",
+      workspaceId: "8dcf241e-52b8-4d50-a2f3-9b12fdab7a1c",
+      sandboxPolicy: {
+        filesystemScope: "workspace-write",
+        approvalPolicy: "on-request",
+        networkAccess: "disabled",
+      },
       role: "leader",
       skillIds: ["review"],
       skillValues: { review: { target: "api" } },
@@ -48,6 +54,10 @@ describe("validateWsCommand – accept", () => {
 
   it("accepts create_session with no optional fields", () => {
     accept({ type: "create_session" });
+  });
+
+  it("keeps path-addressed create_session ingress compatible", () => {
+    accept({ type: "create_session", cwd: "/legacy/project" });
   });
 
   it("accepts send_message with a prompt and attachment", () => {
@@ -227,6 +237,28 @@ describe("validateWsCommand – reject", () => {
       { type: "create_session", worktreeIsolation: "yes" },
       "create_session",
     );
+  });
+
+  it("rejects invalid workspace identity and sandbox policy values", () => {
+    reject({ type: "create_session", workspaceId: "/projects/not-opaque" }, "workspaceId");
+    reject({
+      type: "create_session",
+      sandboxPolicy: {
+        filesystemScope: "workspace-write",
+        approvalPolicy: "sometimes",
+        networkAccess: "enabled",
+      },
+    }, "approvalPolicy");
+  });
+
+  it("rejects incomplete sandbox policies", () => {
+    reject({
+      type: "create_session",
+      sandboxPolicy: {
+        filesystemScope: "read-only",
+        approvalPolicy: "always",
+      },
+    }, "networkAccess");
   });
 
   it("requires idempotency keys on work-item mutations", () => {

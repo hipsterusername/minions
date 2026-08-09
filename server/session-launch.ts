@@ -56,8 +56,7 @@ export async function launchSession(input: {
   if (!modelResolution) throw new SessionLaunchError("NO_COMPATIBLE_MODEL", readiness);
   if (modelResolution.incompatible) reasons.push("model_incompatible");
   const requestedPermission = options.permissionMode || "auto";
-  const supported = ["default", "auto", "bypassPermissions", "plan"].includes(requestedPermission)
-    && !(effectiveHarness === "codex" && requestedPermission === "plan");
+  const supported = ["default", "auto", "bypassPermissions", "plan"].includes(requestedPermission);
   const permissionMode = supported ? requestedPermission : "auto";
   if (!supported) reasons.push("permission_unsupported");
   const result = { sessionKey: options.sessionKey, harness: effectiveHarness, model: modelResolution.model, permissionMode, reasons };

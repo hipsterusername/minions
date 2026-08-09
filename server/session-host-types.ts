@@ -4,6 +4,7 @@ import type { PlannedWorktree } from "./worktree-create.ts";
 import type { RuntimeSessionInfo, TaskManagerState } from "./task-tools.ts";
 import type { SessionRole, ThinkingConfig } from "./session-host-config.ts";
 import type { SessionTerminateReason } from "./session-host-terminate.ts";
+import type { SandboxPolicy } from "../shared/workspace-contracts.ts";
 
 export interface SessionHostDeps {
   bus: Bus;
@@ -112,6 +113,8 @@ export interface StartSessionOptions {
   harness?: string | undefined;
   /** Initial permission mode; only honoured on the first start. */
   permissionMode?: string | undefined;
+  /** Explicit provider-neutral execution boundary; resolved against harness support at launch. */
+  sandboxPolicy?: SandboxPolicy | undefined;
   executorClass?: "mechanical" | "standard" | "reasoning" | undefined;
   /** Guard for one automatic context-window recovery attempt. */
   contextRecoveryAttempt?: number | undefined;

@@ -190,6 +190,7 @@ export const createSession: CommandHandler = async (
     ...(attachments ? { attachments } : {}),
     ...(cmd.harness ? { harness: cmd.harness } : {}),
     ...(cmd.permissionMode ? { permissionMode: cmd.permissionMode } : {}),
+    ...(cmd.sandboxPolicy ? { sandboxPolicy: cmd.sandboxPolicy } : {}),
     ...(claudeMcp && Object.keys(claudeMcp.servers).length > 0
       ? {
           externalMcpServers: claudeMcp.servers,

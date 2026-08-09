@@ -26,6 +26,7 @@ import {
   type SessionReviewState,
   type SessionTerminalReason,
 } from "./session-review-lifecycle.ts";
+import { sandboxResolutionSchema } from "../shared/workspace-contracts.ts";
 import { inspectRunRecoveryWitness } from "./work-item-recovery.ts";
 
 const log = serverLogger.child("session-registry");
@@ -348,6 +349,14 @@ export class SessionRegistry {
         // harness it started with. Pre-migration rows return "claude"
         // via the schema default — no behaviour change for old DBs.
         host.harnessName = row.harness_name || "claude";
+        if (row.sandbox_policy_json) {
+          try {
+            const parsed = sandboxResolutionSchema.safeParse(JSON.parse(row.sandbox_policy_json));
+            host.sandboxPolicy = parsed.success ? parsed.data : null;
+          } catch {
+            host.sandboxPolicy = null;
+          }
+        }
         host.taskState = tasks;
         if (host.taskState && this.deps) {
           for (const task of host.taskState.tasks.values()) {

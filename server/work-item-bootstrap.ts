@@ -113,6 +113,7 @@ export function bootstrapWorkItemRuntime(
       ...(input.thinkingConfig ? { thinkingConfig: input.thinkingConfig } : {}),
       ...(input.harness ? { harness: input.harness } : {}),
       ...(input.permissionMode ? { permissionMode: input.permissionMode } : {}),
+      ...(input.sandboxPolicy ? { sandboxPolicy: input.sandboxPolicy } : {}),
       ...(input.executorClass ? { executorClass: input.executorClass } : {}),
       ...(input.skillIds ? { skillIds: input.skillIds } : {}),
       ...(input.skillValues ? { skillValues: input.skillValues } : {}),
@@ -142,6 +143,7 @@ export function bootstrapWorkItemRuntime(
       harness: host.harnessName,
       initialModel: host.model,
       permissionMode: host.permissionMode ?? undefined,
+      sandboxPolicy: host.sandboxPolicy?.requested,
       thinkingConfig: host.thinkingConfig,
     });
   };

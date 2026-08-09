@@ -27,6 +27,7 @@ import { enrichInvocationProviderIdentity, persistInvocationBeforeHarnessOpen,
   persistInvocationTerminalWitness } from "./work-item-run-start.ts";
 import { getRunInvocation, projectRunInvocationSeal, type CleanTerminalSealPolicy } from "./work-item-invocations.ts";
 import { persistenceDb } from "./session-persist.ts";
+import { resolveHarnessSandboxPolicy, type HarnessSandboxPolicyInput } from "./harness/sandbox-policy.ts";
 export { buildAgentContext } from "./session-host-agent-context.ts";
 export { sessionHostLogFields } from "./session-host-identity.ts";
 
@@ -167,6 +168,14 @@ export function buildHarnessStartOpts(
   if (isNormalizedPermissionMode(persistedPermissionMode)) {
     startOpts.permissionMode = persistedPermissionMode;
   }
+  const requestedPolicy: HarnessSandboxPolicyInput | undefined = opts.sandboxPolicy;
+  startOpts.sandboxPolicy = resolveHarnessSandboxPolicy({
+    requested: requestedPolicy,
+    permissionMode: startOpts.permissionMode,
+    worktreeScoped: host.worktreeIsolation || host.worktree !== null,
+    support: harness.capabilities.sandboxEnforcement,
+  });
+  host.sandboxPolicy = startOpts.sandboxPolicy;
 
   if (harness.capabilities.thinking && host.thinkingConfig?.enabled
     && modelSupportsThinkingForHarness(harness.name, host.model)) {

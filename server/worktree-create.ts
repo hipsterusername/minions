@@ -1,8 +1,9 @@
 import { mkdir, readdir, rmdir } from "node:fs/promises";
-import { join, basename, resolve, relative } from "node:path";
+import { join, basename, resolve, relative, isAbsolute } from "node:path";
 
 import type { WorktreeInfo, WorktreeLifecycle } from "./worktree-types.js";
-import { exec, WORKTREE_DIR } from "./worktree-exec.js";
+import { exec } from "./worktree-exec.js";
+import { allowedWorktreeRoots, isOwnedWorktreePath, ownedWorktreeRoot } from "./worktree-owned-root.ts";
 
 /**
  * Create a new git worktree + branch for a leader session.
@@ -11,7 +12,7 @@ export async function createWorktree(
   projectPath: string,
   leaderSessionKey: string,
 ): Promise<WorktreeInfo> {
-  const worktreeBase = join(projectPath, WORKTREE_DIR);
+  const worktreeBase = ownedWorktreeRoot(projectPath);
   await mkdir(worktreeBase, { recursive: true });
   const worktreePath = join(worktreeBase, leaderSessionKey);
   const branch = `canvas/${leaderSessionKey}`;
@@ -36,9 +37,12 @@ export async function resolveWorktreeBase(projectPath: string,
 export async function provisionPlannedWorktree(plan: PlannedWorktree,
   startPoint = "HEAD"): Promise<WorktreeInfo> {
   const projectPath = resolve(plan.projectPath); const worktreePath = resolve(plan.path);
-  const base = resolve(projectPath, WORKTREE_DIR); const rel = relative(base, worktreePath);
-  if (!rel || rel.startsWith("..") || resolve(base, rel) !== worktreePath) {
-    throw new Error("planned worktree path must be a child of the repository worktree directory");
+  const base = allowedWorktreeRoots(projectPath).find((root) => {
+    const rel = relative(resolve(root), worktreePath);
+    return !!rel && !rel.startsWith("..") && !isAbsolute(rel) && resolve(root, rel) === worktreePath;
+  });
+  if (!base) {
+    throw new Error("planned worktree path must be a child of a Minions-owned worktree root");
   }
   const branch = plan.branch.startsWith("refs/heads/")
     ? plan.branch.slice("refs/heads/".length) : plan.branch;
@@ -76,6 +80,9 @@ export async function removeWorktree(worktreePath: string, projectPath?: string,
 
   // Use explicit projectPath if provided, otherwise fall back to derivation.
   const resolvedProjectPath = projectPath ?? join(worktreePath, "..", "..");
+  if (projectPath && !isOwnedWorktreePath(resolvedProjectPath, worktreePath)) {
+    throw new Error("refusing to remove a worktree outside Minions-owned roots");
+  }
 
   await exec(["worktree", "remove", "--force", worktreePath], resolvedProjectPath);
   await exec(["branch", "-D", branch], resolvedProjectPath);
@@ -89,7 +96,7 @@ export async function listWorktrees(
 ): Promise<WorktreeInfo[]> {
   const { stdout } = await exec(["worktree", "list", "--porcelain"], projectPath);
   const results: WorktreeInfo[] = [];
-  const worktreeBase = join(projectPath, WORKTREE_DIR);
+  const worktreeBases = allowedWorktreeRoots(projectPath).map((root) => resolve(root));
 
   // Porcelain output is blocks separated by blank lines.
   // Each block has lines like:
@@ -111,8 +118,11 @@ export async function listWorktrees(
       }
     }
 
-    // Only include worktrees under .canvas-worktrees
-    if (path && path.startsWith(worktreeBase)) {
+    // Include central registry-owned worktrees and legacy in-repository ones.
+    if (path && worktreeBases.some((base) => {
+      const rel = relative(base, resolve(path));
+      return !!rel && !rel.startsWith("..") && !isAbsolute(rel);
+    })) {
       const key = basename(path);
       results.push({
         path,
@@ -149,22 +159,21 @@ export async function cleanupStaleWorktrees(
 ): Promise<void> {
   await exec(["worktree", "prune"], projectPath);
 
-  const worktreeBase = join(projectPath, WORKTREE_DIR);
-  let entries: string[];
-  try {
-    entries = await readdir(worktreeBase);
-  } catch {
-    // Directory doesn't exist — nothing to clean.
-    return;
-  }
-
-  for (const entry of entries) {
-    const entryPath = join(worktreeBase, entry);
+  for (const worktreeBase of allowedWorktreeRoots(projectPath)) {
+    let entries: string[];
     try {
-      // rmdir only succeeds on empty directories.
-      await rmdir(entryPath);
+      entries = await readdir(worktreeBase);
     } catch {
-      // Not empty or not a directory — skip.
+      continue;
+    }
+    for (const entry of entries) {
+      const entryPath = join(worktreeBase, entry);
+      try {
+        // rmdir only succeeds on empty directories.
+        await rmdir(entryPath);
+      } catch {
+        // Not empty or not a directory — skip.
+      }
     }
   }
 }

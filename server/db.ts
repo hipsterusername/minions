@@ -79,6 +79,7 @@ export function initDb(dbPath?: string): Database.Database {
       total_cost    REAL NOT NULL DEFAULT 0,
       turns         INTEGER NOT NULL DEFAULT 0,
       harness_name  TEXT NOT NULL DEFAULT 'claude',
+      sandbox_policy_json TEXT,
       created_at    TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -221,6 +222,7 @@ export function initDb(dbPath?: string): Database.Database {
 
   // Persist the harness identity across restarts; existing rows default to Claude.
   ensureColumn(db, "sessions", "harness_name", "TEXT NOT NULL DEFAULT 'claude'");
+  ensureColumn(db, "sessions", "sandbox_policy_json", "TEXT");
   ensureColumn(db, "sessions", "review_state", "TEXT NOT NULL DEFAULT 'none'");
   ensureColumn(db, "sessions", "review_reason", "TEXT");
   ensureColumn(db, "sessions", "final_report", "TEXT");

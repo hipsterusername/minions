@@ -3,13 +3,16 @@ import path from "path";
 import os from "os";
 import { initDb } from "./db.ts";
 import type Database from "better-sqlite3";
+import { findWorkspaceBySource, getMinionsHome } from "./workspace-registry.ts";
 export { resolveMinionModelForHarness } from "./project-model-settings.ts";
 
 const SIDECAR_DIR = ".minions";
-const GLOBAL_DIR = path.join(os.homedir(), ".minions");
+const GLOBAL_DIR = getMinionsHome();
 const RECENT_PROJECTS_FILE = path.join(GLOBAL_DIR, "recent-projects.json");
+const LEGACY_RECENT_PROJECTS_FILE = path.join(os.homedir(), SIDECAR_DIR, "recent-projects.json");
 
 export interface RecentProject {
+  id?: string;           // stable workspace UUID (absent in legacy indexes)
   path: string;          // absolute path to the project working directory
   name: string;          // display name
   lastOpened: string;    // ISO date
@@ -87,6 +90,12 @@ const DEFAULT_MINION_THINKING_CONFIG: ThinkingConfig = {
 
 function ensureGlobalDir(): void {
   fs.mkdirSync(GLOBAL_DIR, { recursive: true });
+  if (RECENT_PROJECTS_FILE !== LEGACY_RECENT_PROJECTS_FILE
+    && !fs.existsSync(RECENT_PROJECTS_FILE)
+    && fs.existsSync(LEGACY_RECENT_PROJECTS_FILE)
+    && fs.lstatSync(LEGACY_RECENT_PROJECTS_FILE).isFile()) {
+    fs.copyFileSync(LEGACY_RECENT_PROJECTS_FILE, RECENT_PROJECTS_FILE, fs.constants.COPYFILE_EXCL);
+  }
 }
 
 export function listRecentProjects(): RecentProject[] {
@@ -103,7 +112,9 @@ export function listRecentProjects(): RecentProject[] {
 export function addRecentProject(projectPath: string, name: string): void {
   ensureGlobalDir();
   const recents = listRecentProjects().filter((r) => r.path !== projectPath);
+  const workspace = findWorkspaceBySource(projectPath);
   recents.unshift({
+    ...(workspace ? { id: workspace.id } : {}),
     path: projectPath,
     name,
     lastOpened: new Date().toISOString(),
@@ -119,7 +130,7 @@ export function removeRecentProject(projectPath: string): void {
 }
 
 function sidecarPath(projectPath: string): string {
-  return path.join(projectPath, SIDECAR_DIR);
+  return findWorkspaceBySource(projectPath)?.stateRoot ?? path.join(projectPath, SIDECAR_DIR);
 }
 
 export function hasSidecar(projectPath: string): boolean {

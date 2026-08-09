@@ -50,17 +50,23 @@ import {
   listWorktrees,
   removeWorktree,
 } from "./worktree-create.ts";
+import { registerWorkspace } from "./workspace-registry.ts";
 
 let projectDir: string;
+let minionsHome: string;
 
 beforeEach(() => {
   queue.length = 0;
   observed.length = 0;
   projectDir = mkdtempSync(join(tmpdir(), "wt-create-test-"));
+  minionsHome = mkdtempSync(join(tmpdir(), "wt-state-test-"));
+  vi.stubEnv("MINIONS_HOME", minionsHome);
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   rmSync(projectDir, { recursive: true, force: true });
+  rmSync(minionsHome, { recursive: true, force: true });
 });
 
 describe("createWorktree", () => {
@@ -105,6 +111,17 @@ describe("createWorktree", () => {
       /git worktree:.*invalid reference/,
     );
   });
+
+  it("creates registered workspace worktrees beneath central Minions state", async () => {
+    const workspace = registerWorkspace(projectDir)!;
+    queue.push({ expected: null, result: { ok: true } });
+
+    const info = await createWorktree(projectDir, "central-run");
+
+    expect(info.path).toBe(join(workspace.stateRoot, "worktrees", "central-run"));
+    expect(observed[0]!.args.slice(0, 3)).toEqual(["worktree", "add", info.path]);
+    expect(existsSync(join(projectDir, ".canvas-worktrees"))).toBe(false);
+  });
 });
 
 describe("removeWorktree", () => {
@@ -148,6 +165,13 @@ describe("removeWorktree", () => {
     // Both calls run in `<wt>/../..` which is `projectDir`.
     expect(observed[0]!.cwd).toBe(join(wtPath, "..", ".."));
     expect(observed[1]!.cwd).toBe(join(wtPath, "..", ".."));
+  });
+
+  it("rejects explicit removal outside central and legacy owned roots", async () => {
+    const outside = join(projectDir, "ordinary-folder");
+    mkdirSync(outside);
+    await expect(removeWorktree(outside, projectDir)).rejects.toThrow(/outside Minions-owned roots/);
+    expect(observed).toHaveLength(0);
   });
 });
 

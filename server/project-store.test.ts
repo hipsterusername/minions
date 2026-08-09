@@ -56,6 +56,7 @@ import {
   writeSettings,
   writeSkills,
 } from "./project-store.ts";
+import { registerWorkspace } from "./workspace-registry.ts";
 
 let project: string;
 const cleanup: (() => void)[] = [];
@@ -83,6 +84,16 @@ afterEach(() => {
 });
 
 describe("initSidecar / openProjectDb", () => {
+  it("stores newly registered workspace state centrally and keeps the source clean", () => {
+    const workspace = registerWorkspace(project)!;
+    const db = initSidecar(project, {});
+    cleanup.push(() => db.close());
+
+    expect(existsSync(join(project, ".minions"))).toBe(false);
+    expect(existsSync(join(workspace.stateRoot, "canvas.db"))).toBe(true);
+    expect(existsSync(join(workspace.stateRoot, "context.md"))).toBe(true);
+  });
+
   it("creates the sidecar directory, default context.md, and settings.json", () => {
     expect(hasSidecar(project)).toBe(false);
     const db = initSidecar(project, {

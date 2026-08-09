@@ -48,6 +48,7 @@ import { setSessionCanvasContext } from "./canvas-context-store.ts";
 import { drainQueuedWaitResume } from "./wait-resume.ts";
 import { drainQueuedWorkItemGuidance } from "./work-item-continuation.ts";
 import type { ContextCheckpoint } from "./context-checkpoint.ts";
+import type { SandboxResolution } from "../shared/workspace-contracts.ts";
 import { failUninitializedCheckpoint } from "./session-host-checkpoint.ts";
 import { beginRun, commitReviewLifecycle, finishRun, initialSessionReviewLifecycle, type SessionReviewLifecycle } from "./session-review-lifecycle.ts";
 import { serverLogger } from "./logging.ts";
@@ -125,6 +126,7 @@ export class SessionHost {
   lastErrorFull: string | null = null;
   model: string | null = null;
   permissionMode: string | null = null;
+  sandboxPolicy: SandboxResolution | null = null;
   thinkingConfig: ThinkingConfig | null = null;
   initData: Record<string, unknown> | null = null;
   taskState: TaskManagerState | null = null;
@@ -180,6 +182,7 @@ export class SessionHost {
       totalCost: this.totalCost,
       turns: this.turns,
       harnessName: this.harnessName,
+      sandboxPolicy: this.sandboxPolicy,
       reviewLifecycle: this.reviewLifecycle,
     };
     persistSessionToDb(snap);

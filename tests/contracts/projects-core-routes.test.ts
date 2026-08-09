@@ -70,6 +70,8 @@ import {
   getDb,
   deleteDbCache,
 } from "../../server/routes/projects/helpers.ts";
+import { addRecentProject, hasSidecar, initSidecar } from "../../server/project-store.ts";
+import { resolveWorkspace } from "../../server/workspace-registry.ts";
 import { createExpressFetch } from "../harness/in-process-http.ts";
 
 function encodePath(p: string): string {
@@ -126,7 +128,7 @@ beforeEach(() => {
 // Only close when the sidecar was actually initialised (db file present).
 afterEach(() => {
   try {
-    if (fs.existsSync(path.join(project, ".minions", "canvas.db"))) {
+    if (hasSidecar(project)) {
       getDb(project).close();
       deleteDbCache(project);
     }
@@ -139,7 +141,7 @@ function teardownProject() {
 }
 
 describe("POST /  — create project", () => {
-  it("creates the directory + sidecar and returns the project shape", async () => {
+  it("creates a clean source with UUID-addressed central state", async () => {
     teardownProject(); // we'll re-register through POST.
     const newPath = path.join(parentDir, "fresh-create");
 
@@ -153,15 +155,17 @@ describe("POST /  — create project", () => {
 
     expect(body["name"]).toBe("Fresh");
     expect(body["path"]).toBe(newPath);
-    expect(body["id"]).toBe(encodePath(newPath));
+    expect(body["id"]).toMatch(/^[0-9a-f-]{36}$/);
     expect(body["transform"]).toEqual({ x: 0, y: 0, scale: 1 });
     expect(typeof body["createdAt"]).toBe("string");
 
-    // Sidecar materialised on disk.
-    expect(fs.existsSync(path.join(newPath, ".minions"))).toBe(true);
-    expect(
-      fs.existsSync(path.join(newPath, ".minions", "context.md")),
-    ).toBe(true);
+    const workspace = resolveWorkspace(body["id"] as string)!;
+    expect(workspace.sourceRoot).toBe(fs.realpathSync(newPath));
+    expect(fs.existsSync(path.join(newPath, ".minions"))).toBe(false);
+    expect(fs.existsSync(path.join(workspace.stateRoot, "context.md"))).toBe(true);
+
+    const uuidRes = await fetch(`${baseUrl}/${body["id"] as string}`);
+    expect(uuidRes.status).toBe(200);
 
     // On Windows, SQLite holds a file lock until the connection is explicitly
     // closed. The POST handler cached the db via setDbCache; close it before
@@ -181,17 +185,43 @@ describe("POST /  — create project", () => {
     expect(body.error).toContain("path");
   });
 
-  it("returns 403 for a path outside home directory", async () => {
+  it("registers an absolute source root outside the home directory", async () => {
+    const mountedParent = fs.mkdtempSync(path.join(os.tmpdir(), "mounted-projects-core-"));
+    const mountedProject = path.join(mountedParent, "project");
     const res = await fetch(`${baseUrl}/`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: "/etc/something" }),
+      body: JSON.stringify({ path: mountedProject }),
     });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string; path: string };
+    expect(body.path).toBe(mountedProject);
+    expect(resolveWorkspace(body.id)?.sourceRoot).toBe(fs.realpathSync(mountedProject));
+    try { getDb(mountedProject).close(); deleteDbCache(mountedProject); } catch { /* ignore */ }
+    fs.rmSync(mountedParent, { recursive: true, force: true });
   });
 });
 
 describe("POST /open — open existing project", () => {
+  it("migrates a legacy recent and sidecar non-destructively", async () => {
+    const legacyDb = initSidecar(project, {});
+    legacyDb.close();
+    fs.writeFileSync(path.join(project, ".minions", "context.md"), "legacy");
+    addRecentProject(project, "Legacy");
+
+    const restartedFetch = createExpressFetch(buildApp(), baseUrl);
+    const listRes = await restartedFetch(`${baseUrl}/`);
+    const rows = (await listRes.json()) as Array<{ id: string; path: string }>;
+    const migrated = rows.find((row) => row.path === project)!;
+    expect(migrated.id).toMatch(/^[0-9a-f-]{36}$/);
+
+    const openRes = await restartedFetch(`${baseUrl}/${migrated.id}`);
+    expect(openRes.status).toBe(200);
+    const workspace = resolveWorkspace(migrated.id)!;
+    expect(fs.readFileSync(path.join(workspace.stateRoot, "context.md"), "utf8")).toBe("legacy");
+    expect(fs.readFileSync(path.join(project, ".minions", "context.md"), "utf8")).toBe("legacy");
+  });
+
   it("returns the project + nodes when the directory exists", async () => {
     teardownProject();
     const res = await fetch(`${baseUrl}/open`, {
@@ -231,6 +261,11 @@ describe("GET /:encodedPath — load project", () => {
   it("returns 403 for an unregistered project", async () => {
     teardownProject();
     const res = await fetch(`${baseUrl}/${encoded}`);
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 403 for an unknown workspace UUID", async () => {
+    const res = await fetch(`${baseUrl}/00000000-0000-4000-8000-000000000000`);
     expect(res.status).toBe(403);
   });
 });

@@ -136,6 +136,7 @@ export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
       role: host.role,
       thinkingConfig: turnThinking,
       harness: host.harnessName,
+      sandboxPolicy: host.sandboxPolicy?.requested,
       ...(attachments ? { attachments } : {}),
     });
   };

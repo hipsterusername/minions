@@ -114,37 +114,44 @@ describe("CODEX_STATIC_MODELS", () => {
 describe("mapPermission", () => {
   it.each([
     [
-      "bypassPermissions" as const,
-      { approvalPolicy: "never", sandboxMode: "danger-full-access" },
+      { filesystemScope: "read-only", approvalPolicy: "always", networkAccess: "disabled" } as const,
+      { approvalPolicy: "untrusted", sandboxMode: "read-only", networkAccessEnabled: false },
     ],
     [
-      "auto" as const,
-      { approvalPolicy: "on-failure", sandboxMode: "danger-full-access" },
+      { filesystemScope: "workspace-write", approvalPolicy: "on-failure", networkAccess: "enabled" } as const,
+      { approvalPolicy: "on-failure", sandboxMode: "workspace-write", networkAccessEnabled: true },
     ],
     [
-      "default" as const,
-      { approvalPolicy: "on-request", sandboxMode: "danger-full-access" },
+      { filesystemScope: "unrestricted", approvalPolicy: "never", networkAccess: "disabled" } as const,
+      { approvalPolicy: "never", sandboxMode: "danger-full-access", networkAccessEnabled: false },
     ],
-    [
-      "plan" as const,
-      { approvalPolicy: "on-request", sandboxMode: "read-only" },
-    ],
-  ])("maps permissionMode '%s' to the correct Codex options", (mode, expected) => {
-    expect(mapPermission(mode)).toEqual(expected);
+  ])("maps explicit policy %# to Codex options", (policy, expected) => {
+    expect(mapPermission(policy)).toEqual(expected);
   });
 
-  it("maps plan mode to a read-only sandbox rather than rejecting it", () => {
-    // Read-only sandbox is a faithful, enforced realization of plan mode.
-    expect(mapPermission("plan")).toEqual({
-      approvalPolicy: "on-request",
+  it("keeps plan mode read-only even if a conflicting policy reaches the adapter", () => {
+    expect(mapPermission({
+      filesystemScope: "unrestricted", approvalPolicy: "never", networkAccess: "enabled",
+    }, "plan")).toEqual({
+      approvalPolicy: "never",
       sandboxMode: "read-only",
+      networkAccessEnabled: true,
     });
   });
 
-  it("treats undefined as auto with Claude-equivalent filesystem access", () => {
+  it("fails closed when no explicit policy reaches the adapter", () => {
     expect(mapPermission(undefined)).toEqual({
       approvalPolicy: "on-failure",
-      sandboxMode: "danger-full-access",
+      sandboxMode: "read-only",
+      networkAccessEnabled: false,
+    });
+  });
+
+  it("keeps legacy approval fallback independent from sandbox access", () => {
+    expect(mapPermission(undefined, "plan")).toEqual({
+      approvalPolicy: "on-request",
+      sandboxMode: "read-only",
+      networkAccessEnabled: false,
     });
   });
 });
@@ -171,17 +178,17 @@ describe("mapSandboxMode", () => {
     ["bypassPermissions" as const],
     ["auto" as const],
     ["default" as const],
-  ])("returns 'danger-full-access' when permissionMode is '%s'", (mode) => {
+  ])("does not let permissionMode '%s' imply full-host access", (mode) => {
     expect(mapSandboxMode({ worktreeIsolation: false, permissionMode: mode })).toBe(
-      "danger-full-access",
+      "workspace-write",
     );
     expect(mapSandboxMode({ worktreeIsolation: true, permissionMode: mode })).toBe(
-      "danger-full-access",
+      "workspace-write",
     );
   });
 
-  it("returns 'danger-full-access' when permissionMode is undefined", () => {
-    expect(mapSandboxMode({ worktreeIsolation: false })).toBe("danger-full-access");
-    expect(mapSandboxMode({ worktreeIsolation: true })).toBe("danger-full-access");
+  it("uses workspace-write for every authorized execution root", () => {
+    expect(mapSandboxMode({ worktreeIsolation: false })).toBe("workspace-write");
+    expect(mapSandboxMode({ worktreeIsolation: true })).toBe("workspace-write");
   });
 });

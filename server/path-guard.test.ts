@@ -93,9 +93,10 @@ describe("isUnderHomeDir", () => {
 });
 
 describe("registerProjectPath", () => {
-  it("rejects a path outside the home directory", () => {
-    const result = registerProjectPath("/etc/outside-home");
-    expect(result).toBeNull();
+  it("accepts a canonical path outside the home directory", () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "path-guard-mounted-root-"));
+    expect(registerProjectPath(outside)).toBe(fs.realpathSync(outside));
+    fs.rmSync(outside, { recursive: true, force: true });
   });
 
   it("accepts a valid path under home and returns its resolved form", () => {
@@ -111,7 +112,7 @@ describe("registerProjectPath", () => {
     expect(isRegisteredProject(p)).toBe(true);
   });
 
-  it("rejects a project path whose realpath escapes the home directory", () => {
+  it("canonicalizes a project path whose symlink targets another volume", () => {
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), "path-guard-outside-root-"));
     const linkedProject = uniqueHomePath("linked-project");
     fs.mkdirSync(path.dirname(linkedProject), { recursive: true });
@@ -119,7 +120,7 @@ describe("registerProjectPath", () => {
     // 'dir' on Linux/macOS. realpath() follows both correctly.
     fs.symlinkSync(outside, linkedProject, "junction");
 
-    expect(registerProjectPath(linkedProject)).toBeNull();
+    expect(registerProjectPath(linkedProject)).toBe(fs.realpathSync(outside));
 
     fs.rmSync(outside, { recursive: true, force: true });
   });
@@ -158,11 +159,14 @@ describe("rehydrateFromPaths", () => {
     expect(isRegisteredProject(p2)).toBe(true);
   });
 
-  it("silently skips paths outside the home directory", () => {
+  it("silently skips invalid paths while accepting mounted roots", () => {
     const valid = uniqueHomePath("rehydrate-mixed");
-    expect(() => rehydrateFromPaths(["/etc/passwd", "/var/run/bad", valid])).not.toThrow();
+    const mounted = fs.mkdtempSync(path.join(os.tmpdir(), "rehydrate-mounted-"));
+    expect(() => rehydrateFromPaths(["/etc/passwd/child", mounted, valid])).not.toThrow();
     expect(isRegisteredProject(valid)).toBe(true);
-    expect(isRegisteredProject("/etc/passwd")).toBe(false);
+    expect(isRegisteredProject(mounted)).toBe(true);
+    expect(isRegisteredProject("/etc/passwd/child")).toBe(false);
+    fs.rmSync(mounted, { recursive: true, force: true });
   });
 
   it("is idempotent — re-registering an already-registered path is a no-op", () => {
@@ -187,8 +191,11 @@ describe("validateSessionCwd", () => {
     expect(validateSessionCwd(arbitrary)).toBeNull();
   });
 
-  it("rejects a path outside the home directory", () => {
-    expect(validateSessionCwd("/var/run/something")).toBeNull();
+  it("accepts an explicitly registered root outside the home directory", () => {
+    const mounted = fs.mkdtempSync(path.join(os.tmpdir(), "session-mounted-"));
+    registerProjectPath(mounted);
+    expect(validateSessionCwd(mounted)).toBe(fs.realpathSync(mounted));
+    fs.rmSync(mounted, { recursive: true, force: true });
   });
 
   it("accepts only an explicitly supplied active worktree path", () => {

@@ -65,6 +65,7 @@ export const syncSession: CommandHandler = (ctx, cmd, ws) => {
     lastErrorFull: host.lastErrorFull,
     model: host.model,
     permissionMode: host.permissionMode,
+    sandboxPolicy: host.sandboxPolicy,
     initData: host.initData,
     worktree: host.worktree,
     approval: host.taskState?.approval ?? null,

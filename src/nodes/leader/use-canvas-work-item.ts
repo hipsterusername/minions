@@ -192,6 +192,7 @@ export function useCanvasWorkItem(input: Input) {
       model: input.dataRef.current.model,
       thinkingConfig: input.dataRef.current.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
       permissionMode: input.dataRef.current.permissionMode,
+      sandboxPolicy: input.dataRef.current.sandboxPolicy,
       ...(input.dataRef.current.harness ? { harness: input.dataRef.current.harness } : {}),
       ...(run.attachments.length > 0 ? { attachments: run.attachments } : {}) });
     const started = promptResult.detail;

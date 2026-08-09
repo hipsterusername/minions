@@ -25,6 +25,11 @@ describe("sync_session", () => {
     h.host.turns = 3;
     h.host.model = "sonnet";
     h.host.permissionMode = "auto";
+    h.host.sandboxPolicy = {
+      requested: { filesystemScope: "workspace-write", approvalPolicy: "on-failure", networkAccess: "disabled" },
+      effective: { filesystemScope: "workspace-write", approvalPolicy: "on-failure", networkAccess: "disabled" },
+      unsupported: [],
+    };
     h.host.taskName = "Audit";
     h.host.role = "leader";
     h.host.workItemId = "work-1";
@@ -48,6 +53,7 @@ describe("sync_session", () => {
     expect(env["turns"]).toBe(3);
     expect(env["model"]).toBe("sonnet");
     expect(env["permissionMode"]).toBe("auto");
+    expect(env["sandboxPolicy"]).toEqual(h.host.sandboxPolicy);
     expect(env["taskName"]).toBe("Audit");
     expect(env["role"]).toBe("leader");
     expect(env).toMatchObject({

@@ -16,6 +16,7 @@ import type { HarnessReadinessContext, HarnessReadinessProbe } from "./readiness
 // Re-export the canonical type so server-internal code that was importing
 // NormalizedEvent from here continues to work unchanged.
 import type { NormalizedEvent } from "../../shared/normalized-event.ts";
+import type { SandboxResolution, FilesystemScope } from "../../shared/workspace-contracts.ts";
 export type { NormalizedEvent } from "../../shared/normalized-event.ts";
 
 /**
@@ -46,6 +47,8 @@ export interface HarnessCapabilities {
    * so callers branch on capability, not identity.
    */
   builtInFilesystem: boolean;
+  /** Omitted by legacy harnesses that cannot truthfully promise enforcement. */
+  sandboxEnforcement?: HarnessSandboxSupport;
 }
 
 /** Provider-neutral reasoning levels accepted at the harness boundary. */
@@ -87,6 +90,15 @@ export type NormalizedPermissionMode =
   | "auto"
   | "bypassPermissions"
   | "plan";
+
+export interface HarnessSandboxSupport {
+  filesystem: ReadonlyArray<FilesystemScope>;
+  network: boolean;
+  approval: boolean;
+}
+
+/** Truthful result: `unmanaged` means the harness cannot enforce that axis. */
+export type HarnessSandboxResolution = SandboxResolution;
 
 /** Options passed to AgentHarness.start(). */
 export interface HarnessStartOptions {
@@ -138,6 +150,8 @@ export interface HarnessStartOptions {
    * Harnesses that lack a permission concept ignore the field.
    */
   permissionMode?: NormalizedPermissionMode;
+  /** Resolved policy and enforcement diagnostics for this exact invocation. */
+  sandboxPolicy?: HarnessSandboxResolution;
   /** Present only for canonical live runs on a completely intercepting harness. */
   mutationCoordination?: RunMutationCoordination;
 }

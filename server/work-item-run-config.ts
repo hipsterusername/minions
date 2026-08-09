@@ -1,10 +1,12 @@
 import type { ThinkingConfig } from "./session-host-config.ts";
 import type { ImageAttachment } from "./session-host-types.ts";
+import type { SandboxPolicy } from "../shared/workspace-contracts.ts";
 
 export interface PrimaryRunConfig {
   harness?: string;
   model?: string;
   permissionMode?: string;
+  sandboxPolicy?: SandboxPolicy;
   thinkingConfig?: ThinkingConfig;
   skillIds?: string[];
   skillValues?: Record<string, Record<string, string>>;
@@ -13,7 +15,7 @@ export interface PrimaryRunConfig {
 }
 
 interface ConfigInput {
-  harness?: string; model?: string; permissionMode?: string;
+  harness?: string; model?: string; permissionMode?: string; sandboxPolicy?: SandboxPolicy;
   thinkingConfig?: unknown; skillIds?: string[]; skillValues?: Record<string, Record<string, string>>;
   systemPrompt?: string; attachments?: unknown[];
 }
@@ -24,6 +26,7 @@ export function resolvePrimaryRunConfig(previousJson: string | null, input: Conf
   if (input.harness !== undefined) config.harness = input.harness;
   if (input.model !== undefined) config.model = input.model;
   if (input.permissionMode !== undefined) config.permissionMode = input.permissionMode;
+  if (input.sandboxPolicy !== undefined) config.sandboxPolicy = input.sandboxPolicy;
   if (input.thinkingConfig !== undefined) config.thinkingConfig = input.thinkingConfig as ThinkingConfig;
   if (input.skillIds !== undefined) config.skillIds = input.skillIds;
   if (input.skillValues !== undefined) config.skillValues = input.skillValues;

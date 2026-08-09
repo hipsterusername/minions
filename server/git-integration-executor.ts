@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { exec, WORKTREE_DIR } from "./worktree-exec.ts";
+import { exec } from "./worktree-exec.ts";
 import { provisionPlannedWorktree } from "./worktree-create.ts";
+import { ownedWorktreeRoot } from "./worktree-owned-root.ts";
 import type { GitGateContext, GitIntegrationExecutorOptions,
   GitIntegrationOperation, GitIntegrationResult } from "./git-integration-types.ts";
 
@@ -44,7 +45,7 @@ async function dirty(pathname: string): Promise<boolean> {
   return Boolean((await exec(["status", "--porcelain"], pathname)).stdout.trim());
 }
 function integrationPath(repo: string, id: string): string {
-  return path.join(repo, WORKTREE_DIR, `.integration-${id.replace(/[^a-zA-Z0-9._-]/g, "-")}`);
+  return path.join(ownedWorktreeRoot(repo), `.integration-${id.replace(/[^a-zA-Z0-9._-]/g, "-")}`);
 }
 async function removeIntegration(repo: string, pathname: string): Promise<void> {
   try { await exec(["worktree", "remove", "--force", pathname], repo); } catch { /* crash residue */ }

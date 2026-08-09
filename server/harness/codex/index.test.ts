@@ -442,7 +442,7 @@ describe("CodexHarness attachments", () => {
 });
 
 describe("CodexHarness permission mode", () => {
-  it("forwards opts.permissionMode to startThread via mapPermission", async () => {
+  it("does not let bypassPermissions silently broaden filesystem access", async () => {
     codexHarness.registerTools({});
     await collect(
       codexHarness.start(baseOpts({ permissionMode: "bypassPermissions" })).events,
@@ -451,9 +451,8 @@ describe("CodexHarness permission mode", () => {
       approvalPolicy?: string;
       sandboxMode?: string;
     };
-    // bypassPermissions mirrors Claude: no approval prompts or filesystem jail.
     expect(startThreadOpts.approvalPolicy).toBe("never");
-    expect(startThreadOpts.sandboxMode).toBe("danger-full-access");
+    expect(startThreadOpts.sandboxMode).toBe("read-only");
   });
 
   it("uses the auto fallback when permissionMode is omitted", async () => {
@@ -464,7 +463,7 @@ describe("CodexHarness permission mode", () => {
       sandboxMode?: string;
     };
     expect(startThreadOpts.approvalPolicy).toBe("on-failure");
-    expect(startThreadOpts.sandboxMode).toBe("danger-full-access");
+    expect(startThreadOpts.sandboxMode).toBe("read-only");
   });
 
   it("maps plan mode to a read-only sandbox and opens a thread", async () => {
@@ -482,6 +481,27 @@ describe("CodexHarness permission mode", () => {
     // Read-only sandbox faithfully enforces plan mode's no-mutation contract.
     expect(startThreadOpts.approvalPolicy).toBe("on-request");
     expect(startThreadOpts.sandboxMode).toBe("read-only");
+  });
+
+  it.each([
+    ["read-only", "read-only"],
+    ["workspace-write", "workspace-write"],
+    ["unrestricted", "danger-full-access"],
+  ] as const)("maps explicit filesystem scope %s to %s", async (filesystemScope, sandboxMode) => {
+    codexHarness.registerTools({});
+    await collect(codexHarness.start(baseOpts({
+      sandboxPolicy: {
+        requested: { filesystemScope, approvalPolicy: "on-request", networkAccess: "enabled" },
+        effective: { filesystemScope, approvalPolicy: "on-request", networkAccess: "enabled" },
+        unsupported: [],
+      },
+    })).events);
+    const opts = sdkMock.calls.startThread[0] as {
+      approvalPolicy?: string; sandboxMode?: string; networkAccessEnabled?: boolean;
+    };
+    expect(opts).toMatchObject({
+      approvalPolicy: "on-request", sandboxMode, networkAccessEnabled: true,
+    });
   });
 });
 

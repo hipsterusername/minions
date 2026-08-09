@@ -10,6 +10,7 @@ import { randomUuid } from "../../random-id.ts";
 import { useWorktreeIntegration } from "../../use-worktree-integration.ts";
 import { WorktreeIntegrationControls } from "../../WorktreeIntegrationControls.tsx";
 import { selectCanvasChangeMode } from "./work-item.ts";
+import { SandboxPolicyControls } from "./SandboxPolicyControls.tsx";
 
 /**
  * Compact status bar at the bottom of the leader card that surfaces:
@@ -196,6 +197,11 @@ export function ConfigFooter({
             {modeIcon} {modeLabel}
           </span>
 
+          <span title="Agent process filesystem boundary; separate from Git change mode">
+            Sandbox: {data.effectiveSandboxPolicy?.effective.filesystemScope
+              ?? data.sandboxPolicy?.filesystemScope ?? "workspace-write"}
+          </span>
+
           {contextCount > 0 && (
             <span
               className="leader-config-footer__context"
@@ -376,6 +382,13 @@ export function ConfigFooter({
                   : "Applied directly to your working tree as the agent works."}
               </div>
             </div>
+
+            <SandboxPolicyControls
+              policy={data.sandboxPolicy}
+              effective={data.effectiveSandboxPolicy}
+              disabled={hasSession}
+              onChange={(sandboxPolicy) => onUpdateData({ ...data, sandboxPolicy })}
+            />
 
             {contextCount > 0 && (
               <div

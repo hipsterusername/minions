@@ -24,6 +24,7 @@ import type { StartSessionOptions } from "../session-host.ts";
 import { registerProjectPath, unregisterProjectPath } from "../path-guard.ts";
 import { saveMcpServer } from "../mcp-server-store.ts";
 import type { WorkItemService } from "../work-item-service.ts";
+import type { SandboxPolicy } from "../../shared/workspace-contracts.ts";
 // Side-effect: registers EchoHarness so the harness-validation branch can
 // look it up via `registeredHarnessNames()`.
 import "../harness/echo/index.ts";
@@ -522,6 +523,30 @@ describe("createSession — rejection routing", () => {
 
     expect(starts).toHaveLength(1);
     expect(starts[0]?.permissionMode).toBe("bypassPermissions");
+  });
+
+  it("forwards the explicit sandbox policy without coupling its axes", async () => {
+    const registry = new SessionRegistry();
+    const starts: StartSessionOptions[] = [];
+    const ctx = makeCtx(registry, 50);
+    ctx.launchSession = async (options) => {
+      starts.push(options);
+      return { sessionKey: options.sessionKey, harness: "codex", model: "", permissionMode: "auto", reasons: [] };
+    };
+    const { ws } = makeFakeWs();
+    const sandboxPolicy: SandboxPolicy = {
+      filesystemScope: "workspace-write",
+      approvalPolicy: "never",
+      networkAccess: "enabled",
+    };
+
+    await createSession(ctx, {
+      type: "create_session", sessionKey: "leader-sandbox", prompt: "hi",
+      cwd: process.cwd(), harness: "codex", sandboxPolicy,
+    }, ws as unknown as Parameters<typeof createSession>[2]);
+
+    expect((starts[0] as StartSessionOptions & { sandboxPolicy?: SandboxPolicy }).sandboxPolicy)
+      .toEqual(sandboxPolicy);
   });
 
   it("omits permissionMode from the registry.start payload when the command lacks it", () => {

@@ -17,6 +17,7 @@ import { collectGitContribution } from "./git-integration-executor.ts";
 import { joinWorkItemLineage } from "./worktree-lineage-membership-repo.ts";
 import { evaluateMergeGatesForContext, type MergeGateVerdict } from "./system-model/gates.ts";
 import { snapshotWorktreeLineage as snapshot } from "./worktree-integration-snapshot.ts";
+import { ownedWorktreeRoot } from "./worktree-owned-root.ts";
 
 const id = (kind: string, seed: string) => `${kind}-${crypto.createHash("sha256")
   .update(`${kind}\0${seed}`).digest("hex").slice(0, 24)}`;
@@ -133,7 +134,7 @@ export class SqliteWorktreeIntegrationService implements WorktreeIntegrationServ
       { id: lineageId, projectId: item.project_id, repositoryPath: item.project_path,
         targetRef: base.targetRef, baseSha: base.baseSha,
         integrationRef: `refs/heads/minions/integration/${lineageId}`,
-        integrationWorktreePath: path.join(item.project_path, ".canvas-worktrees", `integration-${lineageId}`),
+        integrationWorktreePath: path.join(ownedWorktreeRoot(item.project_path), `integration-${lineageId}`),
         at: this.now(), actor: "user" });
       joinWorkItemLineage(this.db, { lineageId, workItemId: item.id,
         expectedLineageRevision: 0, actor: "user", at: this.now() });
@@ -187,7 +188,7 @@ export class SqliteWorktreeIntegrationService implements WorktreeIntegrationServ
           repositoryPath: legacy.worktree_project_path ?? item.project_path,
           targetRef: base.targetRef, baseSha: base.baseSha,
           integrationRef: `refs/heads/minions/integration/${lineageId}`,
-          integrationWorktreePath: path.join(item.project_path, ".canvas-worktrees", `integration-${lineageId}`),
+          integrationWorktreePath: path.join(ownedWorktreeRoot(item.project_path), `integration-${lineageId}`),
           at: this.now(), actor: "migration" });
         joinWorkItemLineage(this.db, { lineageId, workItemId: item.id,
           expectedLineageRevision: 0, actor: "migration", at: this.now() });
@@ -225,7 +226,7 @@ export class SqliteWorktreeIntegrationService implements WorktreeIntegrationServ
       lineage = repo.getLineage(this.db, created.id); }
     if (!lineage) throw new Error("open lineage allocation failed");
     const contributionId = id("contribution", input.runKey); const branch = `minions/contribution/${contributionId}`;
-    const worktreePath = path.join(lineage.repository_path, ".canvas-worktrees", contributionId);
+    const worktreePath = path.join(ownedWorktreeRoot(lineage.repository_path), contributionId);
     const row = repo.addContribution(this.db, { id: contributionId, lineageId: lineage.id,
       workItemId: item.id, runKey: input.runKey, branchName: branch, worktreePath,
       baseSha: lineage.integration_head_sha ?? lineage.base_sha,

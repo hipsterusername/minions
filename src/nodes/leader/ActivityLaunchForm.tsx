@@ -19,6 +19,7 @@ import type { PermissionMode } from "../../components/SessionToolbar.tsx";
 import { LeaderPromptBar } from "./prompt/LeaderPromptBar.tsx";
 import type { SlashCommand } from "./prompt/slash-commands.ts";
 import type { LeaderData } from "./types.ts";
+import { SandboxPolicyControls } from "./SandboxPolicyControls.tsx";
 
 const PERMISSIONS: Array<{ value: PermissionMode; label: string; description: string }> = [
   { value: "auto", label: "Auto", description: "Approve safe operations" },
@@ -262,6 +263,10 @@ export function ActivityLaunchForm({
                 <GitBranch size={12} aria-hidden />
                 {data.worktreeIsolation ? "Isolated" : "Shared"}
               </span>
+              <span title="Agent process filesystem boundary">
+                <ShieldCheck size={12} aria-hidden />
+                {data.sandboxPolicy?.filesystemScope ?? "workspace-write"}
+              </span>
               <span title={`${selectedSkills.length} selected skills`}>
                 <Sparkles size={12} aria-hidden />
                 {selectedSkills.length} {selectedSkills.length === 1 ? "skill" : "skills"}
@@ -340,6 +345,12 @@ export function ActivityLaunchForm({
                 <small>Keep this task's edits separate until review.</small>
               </span>
             </label>
+
+            <SandboxPolicyControls
+              policy={data.sandboxPolicy}
+              effective={data.effectiveSandboxPolicy}
+              onChange={(sandboxPolicy) => onUpdate({ sandboxPolicy })}
+            />
 
             <section className="leader-launch-skills" aria-labelledby={`leader-launch-skills-${nodeId}`}>
               <div className="leader-launch-skills-head">

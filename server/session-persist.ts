@@ -9,6 +9,7 @@ import * as repo from "./session-repo.ts";
 import type { ApprovalState, TaskManagerState } from "./task-tools.ts";
 import type { RenderState } from "../shared/render-dsl.ts";
 import type { WorktreeInfo } from "./worktree-types.ts";
+import type { SandboxResolution } from "../shared/workspace-contracts.ts";
 import {
   MAX_BUFFERED_EVENTS,
   type BufferedEvent,
@@ -168,6 +169,7 @@ export interface PersistableSession {
   turns: number;
   /** Registered harness; legacy rows default to "claude". */
   harnessName: string;
+  sandboxPolicy?: SandboxResolution | null;
   reviewLifecycle?: SessionReviewLifecycle;
 }
 
@@ -198,6 +200,7 @@ function sessionToRow(
     total_cost: s.totalCost,
     turns: s.turns,
     harness_name: s.harnessName,
+    sandbox_policy_json: s.sandboxPolicy ? JSON.stringify(s.sandboxPolicy) : null,
     ...reviewLifecycleToColumns(s.reviewLifecycle),
     // Upsert preserves the original created_at.
     created_at: nowIso,
