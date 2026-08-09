@@ -1,0 +1,22 @@
+id: flow.promote_lineage
+type: flow
+name: Review and promote canonical lineage contributions
+summary: Users review, enqueue, retry, discard, finally review, and promote revision-fenced contributions through the canonical lineage service.
+constraints: []
+decisions: [ decision.worktree_isolation_and_approval, decision.canonical_work_item_lifecycle ]
+risks:
+  - risk.legacy_canonical_review_split
+  - risk.canonical_conflict_controls_latent
+suggested_files: [ src/LineageModal.tsx, src/LineageNodeStrip.tsx, src/WorktreeIntegrationControls.tsx, src/use-worktree-integration.ts, server/commands/worktree-integration.ts, server/worktree-integration-service.ts ]
+suggested_tests: [ src/LineageModal.test.tsx, src/LineageNodeStrip.test.tsx, src/WorktreeIntegrationControls.test.tsx, src/use-worktree-integration.test.tsx, server/commands/worktree-integration.test.ts ]
+steps:
+  - Create or join a lineage and load its latest integration snapshot.
+  - Review a contribution separately from enqueueing it for integration.
+  - Retry or discard failed contributions with expectedIntegrationRevision while preserving conflict evidence.
+  - Complete final lineage review and promote only after queue, gates, and target conditions permit.
+freshness:
+  class: code_coupled
+risk: critical
+domain: domain.integration
+primary_capability: capability.canonical_lineage_integration
+bridges: []

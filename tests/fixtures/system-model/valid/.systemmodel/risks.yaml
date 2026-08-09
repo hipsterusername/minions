@@ -1,0 +1,11 @@
+risks:
+  - id: risk.merge_bypass
+    type: risk
+    domain: domain.workspace
+    summary: Merge commands can bypass review if not centrally guarded.
+    severity: high
+    applies_to:
+      capabilities: [capability.workspace_management]
+      flows: [flow.approve_changes]
+      files: [server/commands/*.ts]
+    mitigation: Keep merge checks centralized.

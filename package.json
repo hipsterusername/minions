@@ -1,0 +1,115 @@
+{
+  "name": "minions",
+  "private": true,
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "description": "A spatial workspace for orchestrating coding agents and parallel workflows",
+  "keywords": [
+    "ai-agents",
+    "coding-agents",
+    "claude-code",
+    "codex",
+    "developer-tools",
+    "orchestration"
+  ],
+  "homepage": "https://github.com/hipsterusername/minions#readme",
+  "bugs": {
+    "url": "https://github.com/hipsterusername/minions/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hipsterusername/minions.git"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.15.1",
+  "scripts": {
+    "dev": "node scripts/run.mjs dev",
+    "server": "tsx server/index.ts",
+    "start": "node scripts/start.mjs start",
+    "stop": "node scripts/start.mjs stop",
+    "restart": "node scripts/start.mjs restart",
+    "status": "node scripts/start.mjs status",
+    "build": "tsc -b && vite build",
+    "preview": "node scripts/run.mjs preview",
+    "serve:tailscale": "node scripts/tailscale-serve.mjs --port 4173",
+    "serve:tailscale:dev": "node scripts/tailscale-serve.mjs --port 6173",
+    "typecheck": "tsc -b --noEmit",
+    "typecheck:server": "tsc -p server/tsconfig.json --noEmit",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:smoke": "playwright test",
+    "test:mutation": "stryker run",
+    "coverage:report": "node scripts/coverage-report.mjs",
+    "audit:prod": "pnpm audit --prod --audit-level high",
+    "check:licenses": "node scripts/check-licenses.mjs",
+    "system-model:validate": "node --import tsx scripts/system-model-validate.mjs",
+    "verify": "pnpm typecheck && pnpm typecheck:server && pnpm test:run && pnpm check:licenses && pnpm system-model:validate -- --strict && pnpm build",
+    "agent:preflight": "node scripts/agent-workflow-preflight.mjs",
+    "preflight": "node --import tsx scripts/preflight.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.177",
+    "@codemirror/commands": "6.10.3",
+    "@codemirror/lang-markdown": "6.5.0",
+    "@codemirror/language": "6.12.3",
+    "@codemirror/search": "6.7.0",
+    "@codemirror/state": "6.6.0",
+    "@codemirror/view": "6.43.1",
+    "@fontsource-variable/dm-sans": "5.3.0",
+    "@fontsource-variable/fraunces": "5.3.0",
+    "@fontsource-variable/instrument-sans": "5.3.0",
+    "@fontsource-variable/jetbrains-mono": "5.3.0",
+    "@fontsource-variable/nunito-sans": "5.3.0",
+    "@fontsource-variable/plus-jakarta-sans": "5.3.0",
+    "@fontsource-variable/recursive": "5.3.0",
+    "@fontsource-variable/source-sans-3": "5.3.0",
+    "@fontsource-variable/space-grotesk": "5.3.0",
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "@fontsource/space-mono": "5.3.0",
+    "@lezer/highlight": "1.2.3",
+    "@openai/codex-sdk": "^0.144.1",
+    "better-sqlite3": "^12.10.1",
+    "express": "^5.2.1",
+    "lucide-react": "1.23.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "ws": "^8.21.0",
+    "yaml": "^2.8.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
+    "@testing-library/dom": "10.4.1",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.6.2",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "6.0.2",
+    "@vitest/coverage-v8": "4.1.6",
+    "jsdom": "29.1.1",
+    "tsx": "^4.22.1",
+    "typescript": "6.0.3",
+    "vite": "8.0.13",
+    "vitest": "4.1.6"
+  },
+  "pnpm": {
+    "overrides": {
+      "fast-uri": "3.1.5",
+      "ip-address": "10.3.1"
+    },
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "better-sqlite3"
+    ]
+  }
+}

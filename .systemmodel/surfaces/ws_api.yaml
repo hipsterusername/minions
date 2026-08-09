@@ -1,0 +1,7 @@
+id: surface.ws_api
+type: surface
+name: WebSocket API
+summary: Typed command and event boundary connecting product surfaces to session, work-item, integration, and system-model services.
+keywords: [websocket, ws, command, event, contract, handler, schema, bus, sync]
+suggested_files: [server/commands/types.ts, server/commands/schemas.ts, server/commands/index.ts, server/bus.ts]
+suggested_tests: [server/commands/schemas.test.ts, tests/contracts/work-item-contracts.test.ts, tests/contracts/system-model-commands.test.ts, tests/architecture/no-direct-broadcast.test.ts]

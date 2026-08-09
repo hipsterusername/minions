@@ -1,0 +1,70 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Local documentation work
+/docs/
+
+# Vite
+.vite/
+
+# Local env files
+*.local
+.env
+.env.*
+!.env.example
+
+# SQLite databases (per-project data, not portable)
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Minions runtime data
+.canvas-worktrees/
+.minions/
+.run/
+
+# Claude Code local settings (user-specific)
+.claude/settings.local.json
+.claude/worktrees/
+
+# Local working notes / context (per-machine, not portable)
+context.md
+.context/
+
+# Smoke-test / dev-server scratch logs
+*.log
+vite-smoke.log
+vite-smoke.err.log
+vite-*.log
+*.smoke.log
+
+# Agent recovery scratch
+.recovery/
+*.rej
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Stryker mutation testing sandbox + reports
+.stryker-tmp/
+reports/
+
+# Test coverage output
+coverage/
+playwright-report/
+test-results/

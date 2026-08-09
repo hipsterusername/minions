@@ -1,0 +1,16 @@
+id: flow.open_workspace
+type: flow
+domain: domain.workspace
+name: Open a workspace
+summary: A user selects a saved workspace and sees its current contents.
+primary_capability: capability.workspace
+bridges: []
+constraints: [constraint.workspace_changes_are_reviewed]
+suggested_files: [src/workspace.ts]
+suggested_tests: [src/workspace.test.ts]
+steps:
+  - Read the selected workspace from durable storage.
+  - Validate it before presenting it to the user.
+freshness:
+  class: code_coupled
+risk: medium

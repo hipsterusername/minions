@@ -1,0 +1,19 @@
+id: constraint.dashboard_state_convergence
+type: constraint
+statement: Server and client share the render DSL, component IDs are stable, append collisions replace, sync restores full state, and pending forms remain server-owned decisions.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces: []
+  files:
+    - shared/render-dsl.ts
+    - server/render-tools.ts
+    - src/nodes/render/DashboardSurface.tsx
+    - server/commands/submit-form.ts
+severity: high
+agent_instruction: Validate against the shared DSL, retain stable IDs and reducer semantics, sync the complete dashboard, and accept answers only for pending form IDs.
+suggested_tests: [ shared/render-dsl.test.ts, server/render-tools.test.ts, src/nodes/render/DashboardSurface.test.tsx, server/commands/submit-form.test.ts ]
+evidence: [ decision.typed_event_bus, decision.role_gated_agent_tools ]
+domain: domain.observability
+scope: domain
+guards: []

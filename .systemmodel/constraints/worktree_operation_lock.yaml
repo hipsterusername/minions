@@ -1,0 +1,19 @@
+id: constraint.worktree_operation_lock
+type: constraint
+statement: Only one merge, discard, or integration mutation may operate on a host or contribution at a time, and state clears only after success.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces: []
+  files:
+    - server/commands/worktree-operation-lock.ts
+    - server/worktree-integration-operations.ts
+    - server/worktree-merge.ts
+severity: critical
+agent_instruction: Acquire the operation lock around the complete mutation, report conflicts without optimistic success, and retain worktree and preserved-path state on failure.
+review_gate: gate.worktree_integration
+suggested_tests: [ server/commands/merge-flow.test.ts, server/worktree-merge.test.ts, server/worktree-integration-sqlite.test.ts ]
+evidence: [ decision.worktree_isolation_and_approval ]
+domain: domain.integration
+scope: domain
+guards: []

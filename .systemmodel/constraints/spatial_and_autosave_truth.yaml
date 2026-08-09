@@ -1,0 +1,19 @@
+id: constraint.spatial_and_autosave_truth
+type: constraint
+statement: Spatial changes persist nodes, graph, and transform together; failures remain retryable; Leader deletion detaches bindings without erasing canonical identity.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces: []
+  files:
+    - src/Canvas.tsx
+    - src/canvas-state.ts
+    - src/use-autosave.ts
+    - src/nodes/leader/use-canvas-work-item.ts
+severity: high
+agent_instruction: Keep graph and layout persistence atomic, expose save failure, confirm group deletion, detach the surface binding, and cascade only owned local minion nodes and edges.
+suggested_tests: [ src/canvas-state.test.ts, src/use-autosave.test.tsx, src/use-canvas-keyboard.test.tsx, src/nodes/leader/work-item.test.ts ]
+evidence: [ decision.canonical_work_item_lifecycle ]
+domain: domain.workspace
+scope: domain
+guards: []

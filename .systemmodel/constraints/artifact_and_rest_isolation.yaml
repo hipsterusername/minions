@@ -1,0 +1,19 @@
+id: constraint.artifact_and_rest_isolation
+type: constraint
+statement: Project REST writes are authenticated and path-guarded; published HTML is sanitized, sandboxed, temp-scoped, and cleaned on session cleanup.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces: []
+  files:
+    - src/api.ts
+    - server/path-guard.ts
+    - server/render-html-tool.ts
+    - server/html-sanitize.ts
+severity: critical
+agent_instruction: Preserve bearer authentication and owned-root checks; strip executable or navigating HTML behavior and remove temporary artifacts on clear or remove.
+suggested_tests: [ src/api.test.ts, server/path-guard.test.ts, server/html-sanitize.test.ts, shared/render-artifacts.test.ts ]
+evidence: [ decision.role_gated_agent_tools ]
+domain: domain.workspace
+scope: global
+guards: []

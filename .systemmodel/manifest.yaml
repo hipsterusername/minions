@@ -1,0 +1,3 @@
+version: 1
+name: Minions system model
+summary: Dense cross-surface model of Minions work orchestration, durable work items, session execution, context routing, review, and recovery.

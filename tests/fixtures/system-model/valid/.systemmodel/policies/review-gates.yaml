@@ -1,0 +1,10 @@
+review_gates:
+  - id: gate.review
+    name: Human Review
+    description: Require review before merge.
+    blocks_merge: true
+    required_when:
+      files: [server/**/*.ts]
+      capabilities: [capability.workspace_management]
+      flows: [flow.approve_changes]
+      risk: [high, critical]

@@ -1,0 +1,44 @@
+id: capability.approval_and_legacy_integration
+type: capability
+name: Approval and legacy worktree integration
+summary: Users can inspect isolated legacy-session changes and gates, then approve, request revisions, discard, or resolve merge conflicts through a durable approval state machine.
+constraints:
+  - constraint.gates_and_review_separation
+decisions: [ decision.worktree_isolation_and_approval ]
+risks:
+  - risk.legacy_canonical_review_split
+suggested_files: [ src/ChangesView.tsx, src/nodes/leader/GateStrip.tsx, src/mobile/ApprovalsScreen.tsx, server/task-tools/request-approval.ts, server/commands/approve-changes.ts ]
+suggested_tests: [ src/ChangesView.test.tsx, src/nodes/leader/GateStrip.test.tsx, src/mobile/ApprovalsScreen.test.tsx, server/task-tools/request-approval.test.ts, server/commands/merge-flow.test.ts ]
+keywords: [ approval, review, diff, changes, gate, merge, discard, request_changes, conflict, force, theirs, retry, legacy, worktree ]
+entry_points:
+  - surface: surface.canvas
+    summary: Inspect changes and gates, approve, request revisions, discard, or recover conflicts.
+    files: [ src/ChangesView.tsx, src/nodes/leader/GateStrip.tsx ]
+    tests: [ src/ChangesView.test.tsx, src/nodes/leader/GateStrip.test.tsx ]
+    flows: [ flow.review_legacy_changes, flow.recover_integration_conflict ]
+  - surface: surface.activity
+    summary: Review a selected session's changes from the Activity inspector.
+    files: [ src/ActivityView.tsx, src/ChangesView.tsx ]
+    tests: [ src/ActivityView.test.tsx, src/ChangesView.test.tsx ]
+    flows: [ flow.review_legacy_changes, flow.recover_integration_conflict ]
+  - surface: surface.mobile
+    summary: Triage approval requests, inspect diff and gates, and perform supported review actions.
+    files: [ src/mobile/ApprovalsScreen.tsx, src/mobile/ReviewChangesScreen.tsx, src/mobile/mobile-approvals.ts ]
+    tests: [ src/mobile/ApprovalsScreen.test.tsx, src/mobile/ReviewChangesScreen.test.tsx, src/mobile/mobile-approvals.test.ts ]
+    flows: [ flow.review_legacy_changes, flow.recover_integration_conflict ]
+  - surface: surface.agent_tools
+    summary: A worktree-enabled Leader computes and persists an approval request.
+    files: [ server/task-tools/request-approval.ts ]
+    tests: [ server/task-tools/request-approval.test.ts ]
+    flows: [ flow.review_legacy_changes ]
+  - surface: surface.ws_api
+    summary: Fetch diff and execute locked legacy approve, discard, and conflict commands.
+    files: [ server/commands/get-worktree-diff.ts, server/commands/approve-changes.ts, server/commands/discard-worktree.ts, server/worktree-merge.ts ]
+    tests: [ server/commands/get-worktree-diff.test.ts, server/commands/discard-worktree.test.ts, server/commands/merge-flow.test.ts ]
+    flows: [ flow.review_legacy_changes, flow.recover_integration_conflict ]
+freshness:
+  class: code_coupled
+risk: critical
+domain: domain.integration
+depends_on: []
+bridges: []

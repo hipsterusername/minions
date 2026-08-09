@@ -1,0 +1,20 @@
+id: flow.recover_after_disconnect
+type: flow
+name: Recover after disconnect or server restart
+summary: Reconnection restores sessions, WorkItems, bindings, approvals, tasks, dashboards, and harness continuity without replaying completed work.
+constraints: []
+decisions: [ decision.typed_event_bus, decision.canonical_work_item_lifecycle ]
+suggested_files: [ src/use-socket.ts, src/App.tsx, src/use-work-items.ts, src/mobile/MobileApp.tsx, server/session-host.ts, server/commands/sync-session.ts ]
+suggested_tests: [ src/use-socket.test.tsx, src/App.dom.test.tsx, src/use-work-items.test.ts, src/mobile/MobileApp.test.tsx, server/session-persist.test.ts, server/commands/sync-session.test.ts ]
+steps:
+  - Reconnect the WebSocket and safely flush queued outbound commands.
+  - Relist sessions and WorkItems, then sync each mounted session from persisted host truth.
+  - Restore harness, event buffer, task plan, dashboard, approval, worktree, and review state before folding new events.
+  - Reattach UI bindings and resume incomplete continuity without redoing terminal tasks or duplicating keyed creation.
+freshness:
+  class: code_coupled
+risk: critical
+domain: domain.observability
+primary_capability: capability.execution_observability
+bridges: []
+risks: []

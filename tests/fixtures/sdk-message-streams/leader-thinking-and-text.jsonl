@@ -1,0 +1,10 @@
+# Synthetic SDK message stream — assistant emits thinking + text + tool_call.
+# Each content block becomes a separate NormalizedEvent.
+# Exercises the per-event split that normalizedToDisplayMessages produces:
+# one thinking → one text → one tool → one usage → one done.
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"init","sessionId":"leader-sess-002","model":"claude-opus-4-5","permissionMode":"default"}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"thinking","text":"I should read the file before deciding."}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"text","text":"<!--task-name:Read and decide-->\nLooking at the source now.","role":"assistant"}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"tool_call","id":"toolu_01","name":"Read","input":{"file_path":"/repo/src/index.ts"}}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"usage","input":512,"output":80,"costUSD":0.0042}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"done","reason":"completed","result":"Read complete.","turns":1}}}

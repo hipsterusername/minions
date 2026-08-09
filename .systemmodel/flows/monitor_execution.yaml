@@ -1,0 +1,20 @@
+id: flow.monitor_execution
+type: flow
+name: Monitor execution and outputs
+summary: Session lists, sync snapshots, and typed topic events converge transcript, plan, dashboard, usage, status, and active-minion views.
+constraints: []
+decisions: [ decision.typed_event_bus ]
+suggested_files: [ src/session-stream.ts, src/SessionPanel.tsx, src/ActivityView.tsx, src/mobile/SessionChatScreen.tsx, server/commands/sync-session.ts, server/bus.ts ]
+suggested_tests: [ src/session-stream.test.ts, src/SessionPanel.test.tsx, src/ActivityView.test.tsx, src/mobile/SessionChatScreen.test.tsx, server/commands/sync-session.test.ts ]
+steps:
+  - List and sync sessions from the server-owned registry and persisted host state.
+  - Fold typed streaming, tool, usage, task, lifecycle, and render events by topic.
+  - Preserve authoritative task and dashboard snapshots while disclosure controls reduce visual noise.
+  - Nest minions beneath their Leader in Activity while retaining direct canvas and SessionPanel access.
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.observability
+primary_capability: capability.execution_observability
+bridges: []
+risks: []

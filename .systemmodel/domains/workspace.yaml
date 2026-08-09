@@ -1,0 +1,5 @@
+id: domain.workspace
+type: domain
+name: Workspace
+summary: Owns the persistent project environment where users arrange spatial work, manage project knowledge, and route connected context into agents.
+keywords: [workspace, project, canvas, spatial, context, artifact, persistence]

@@ -1,0 +1,21 @@
+id: flow.review_legacy_changes
+type: flow
+name: Review and merge isolated legacy-session changes
+summary: A worktree-enabled agent requests approval and the user reviews diff and gates before merge, feedback, discard, or legacy conflict recovery.
+constraints: []
+decisions: [ decision.worktree_isolation_and_approval ]
+risks:
+  - risk.legacy_canonical_review_split
+suggested_files: [ server/task-tools/request-approval.ts, src/ChangesView.tsx, src/nodes/leader/GateStrip.tsx, src/mobile/ApprovalsScreen.tsx, src/mobile/ReviewChangesScreen.tsx, server/commands/approve-changes.ts ]
+suggested_tests: [ server/task-tools/request-approval.test.ts, src/ChangesView.test.tsx, src/nodes/leader/GateStrip.test.tsx, src/mobile/ApprovalsScreen.test.tsx, src/mobile/ReviewChangesScreen.test.tsx, server/commands/merge-flow.test.ts ]
+steps:
+  - Persist the requested approval with current diff, gate findings, grace, and worktree identity.
+  - Fetch and inspect changes on canvas, Activity, or mobile and re-evaluate gate status.
+  - Approve through the locked legacy merge flow, or send feedback that clears approval and resumes work in a fresh worktree.
+  - Discard or choose explicit legacy conflict recovery without applying canonical lineage commands.
+freshness:
+  class: code_coupled
+risk: critical
+domain: domain.integration
+primary_capability: capability.approval_and_legacy_integration
+bridges: []

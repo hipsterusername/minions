@@ -1,0 +1,16 @@
+id: capability.workspace_management
+type: capability
+domain: domain.workspace
+name: Workspace Management
+summary: Manage sessions, worktrees, and project state.
+depends_on: []
+bridges: []
+constraints: [constraint.bus_only]
+decisions: [decision.bus_architecture]
+risks: [risk.merge_bypass]
+suggested_files: [server/session-host.ts, server/worktree.ts]
+suggested_tests: [server/session-host.test.ts]
+keywords: [workspace, worktree, session]
+freshness:
+  class: code_coupled
+risk: high

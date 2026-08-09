@@ -1,0 +1,16 @@
+id: flow.save_workspace
+type: flow
+domain: domain.workspace
+name: Save a workspace
+summary: A user's validated workspace changes are written to durable storage.
+primary_capability: capability.workspace
+bridges: []
+constraints: [constraint.workspace_changes_are_reviewed]
+suggested_files: [src/workspace.ts]
+suggested_tests: [src/workspace.test.ts]
+steps:
+  - Validate the changed workspace.
+  - Persist it and report the result to the user.
+freshness:
+  class: code_coupled
+risk: high

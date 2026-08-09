@@ -1,0 +1,21 @@
+id: flow.delegate_and_steer_minions
+type: flow
+name: Delegate, monitor, and steer minions
+summary: A Leader plans and assigns bounded child work, receives resumable progress and terminal reports, and can message, cancel, retry, or wait.
+constraints: []
+decisions: [ decision.role_gated_agent_tools, decision.typed_event_bus ]
+risks:
+  - risk.agent_tool_allowlist_drift
+suggested_files: [ server/agents/leader.ts, server/agents/minion.ts, server/task-tools/assign-task.ts, server/minion-tools.ts, server/agents/leader-teardown.ts ]
+suggested_tests: [ server/agents/leader.test.ts, server/agents/minion.test.ts, server/task-tools/assign-task.test.ts, server/minion-tools.test.ts ]
+steps:
+  - Plan a stable task ID before assignment and freeze executor, harness, owned paths, skills, and work packet into the child prompt.
+  - Start the child session and publish progress to both child and Leader topics.
+  - Keep report_blocked resumable and make done, fail, and cancellation terminal transitions idempotent.
+  - Message, retry, cancel, or wait for early wake while preserving declared write-set visibility.
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.delegation
+primary_capability: capability.task_orchestration
+bridges: []

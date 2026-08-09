@@ -1,0 +1,4 @@
+context_budgets:
+  leader_prompt_addendum: 1200
+  minion_context_pack: 2000
+  per_object_summary: 250

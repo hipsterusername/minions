@@ -1,0 +1,15 @@
+id: constraint.bus_only
+type: constraint
+domain: domain.workspace
+scope: targeted
+guards: [capability.workspace_management, flow.approve_changes]
+statement: Outbound events must flow through the Bus.
+applies_to:
+  capabilities: [capability.workspace_management]
+  flows: [flow.approve_changes]
+  files: [server/**/*.ts]
+severity: critical
+agent_instruction: Use Bus helpers, never direct broadcast.
+review_gate: gate.review
+suggested_tests: [tests/architecture/no-direct-broadcast.test.ts]
+evidence: [decision.bus_architecture]

@@ -1,0 +1,21 @@
+id: flow.arm_and_author_skills
+type: flow
+name: Arm work and author the skill library
+summary: Users maintain project skills, select and configure them at launch, and give agents frozen instructions plus lazy subskills.
+constraints: []
+decisions: [ decision.role_gated_agent_tools ]
+risks:
+  - risk.agent_tool_allowlist_drift
+suggested_files: [ src/SkillsBrowser.tsx, src/SkillEditor.tsx, src/SkillImportModal.tsx, src/mobile/LaunchSkillsPanel.tsx, server/skill-authoring-tools.ts, server/task-tools/task-prompt.ts ]
+suggested_tests: [ src/SkillsBrowser.test.tsx, src/SkillEditor.test.tsx, src/SkillImportModal.test.tsx, src/mobile/LaunchSkillsPanel.test.tsx, server/skill-authoring-tools.test.ts, server/task-tools/task-prompt.test.ts ]
+steps:
+  - Create, import, edit, duplicate, or delete project-root skill definitions and subskills.
+  - Select known skill IDs and provide required values on a launch surface.
+  - Compile and freeze instructions and values into the Leader or minion prompt at spawn.
+  - Permit lazy subskill loading and grant mutation tools only when skill-builder is armed.
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.delegation
+primary_capability: capability.skill_library
+bridges: []

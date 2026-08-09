@@ -1,0 +1,7 @@
+id: surface.agent_tools
+type: surface
+name: Agent tools
+summary: Role-gated MCP tools used by Leaders, minions, and the card composer to plan, delegate, render, report, and manage model evidence.
+keywords: [agent, mcp, leader, minion, tools, delegate, report_done, render, work_packet, skills]
+suggested_files: [server/agents/leader.ts, server/agents/minion.ts, server/task-tools.ts, server/minion-tools.ts, server/render-tools.ts]
+suggested_tests: [server/agents/leader.test.ts, server/agents/minion.test.ts, server/minion-tools.test.ts, server/render-tools.test.ts]

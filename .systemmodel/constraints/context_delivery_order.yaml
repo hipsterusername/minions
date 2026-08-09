@@ -1,0 +1,19 @@
+id: constraint.context_delivery_order
+type: constraint
+statement: Connected context is graph-derived, sanitized, bounded, staleness-aware, and fully delivered before the prompt or run; an empty snapshot clears prior context.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces: []
+  files:
+    - src/connected-context.ts
+    - src/context-extraction.ts
+    - src/context-delivery.ts
+    - server/commands/canvas-context.ts
+severity: high
+agent_instruction: Preserve graph ordering and provider eligibility, sanitize attachments, publish the complete snapshot before start/send, and explicitly mark stale or cleared context.
+suggested_tests: [ src/connected-context.test.ts, src/context-extraction.test.ts, src/context-delivery.test.ts, src/context-staleness.test.ts ]
+evidence: [ decision.typed_event_bus ]
+domain: domain.workspace
+scope: domain
+guards: []

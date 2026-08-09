@@ -1,0 +1,20 @@
+# Synthetic SDK message stream — streaming deltas followed by the final
+# assistant message and result.
+# Stream deltas are text_delta events. A pre-stop usage update without costUSD
+# does not clear the streaming buffer. Completion uses usage + done events.
+#
+# Entry layout (0-indexed):
+#  [0] init
+#  [1] text_delta "Hello"
+#  [2] text_delta " world"
+#  [3] usage (no costUSD — pre-stop, does not clear buffer)
+#  [4] text "Hello world" (complete assistant — clears buffer)
+#  [5] usage (costUSD:0.0009 — session cost)
+#  [6] done "Hello world" (collapses the matching assistant)
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"init","sessionId":"leader-sess-003","model":"claude-opus-4-5","permissionMode":"default"}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"text_delta","text":"Hello","blockIndex":0}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"text_delta","text":" world","blockIndex":0}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"usage","input":120,"output":4}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"text","text":"Hello world","role":"assistant"}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"usage","input":120,"output":4,"costUSD":0.0009}}}
+{"message":{"type":"sdk_event","sessionKey":"leader-1","event":{"kind":"done","reason":"completed","result":"Hello world","turns":1}}}

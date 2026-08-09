@@ -1,0 +1,27 @@
+# Synthetic SDK stream — minion-side: receives a task, narrates a step,
+# then reports done.
+#
+# Streaming events use NormalizedEvent kinds.
+#
+# Minion contract (server/minion-tools.ts) exposes:
+#   • mcp__minion__report_step  — progress narration
+#   • mcp__minion__report_done  — final result
+#   • mcp__minion__report_fail  — failure path
+#
+# This fixture covers the success path.
+#
+# Entry layout (0-indexed):
+#  [0] init
+#  [1] text "Starting task-a..."  (assistant narration)
+#  [2] tool_call mcp__minion__report_step
+#  [3] tool_progress Read (tool executing)
+#  [4] tool_call mcp__minion__report_done
+#  [5] usage (costUSD:0.0114)
+#  [6] done  (result:"Patched 1 file", turns:3)
+{"message":{"type":"sdk_event","sessionKey":"minion-task-a","event":{"kind":"init","sessionId":"minion-sess-001","model":"claude-sonnet-4-5","permissionMode":"acceptEdits"}}}
+{"message":{"type":"sdk_event","sessionKey":"minion-task-a","event":{"kind":"text","text":"Starting task-a. I'll read the file then patch it.","role":"assistant"}}}
+{"message":{"type":"sdk_event","sessionKey":"minion-task-a","event":{"kind":"tool_call","id":"toolu_01","name":"mcp__minion__report_step","input":{"summary":"Reading source file"}}}}
+{"message":{"type":"sdk_event","sessionKey":"minion-task-a","event":{"kind":"tool_progress","id":"toolu_99","name":"Read","elapsedSeconds":0.3}}}
+{"message":{"type":"sdk_event","sessionKey":"minion-task-a","event":{"kind":"tool_call","id":"toolu_02","name":"mcp__minion__report_done","input":{"summary":"Patched 1 file","details":"Updated header copy in src/index.ts"}}}}
+{"message":{"type":"sdk_event","sessionKey":"minion-task-a","event":{"kind":"usage","input":380,"output":40,"costUSD":0.0114}}}
+{"message":{"type":"sdk_event","sessionKey":"minion-task-a","event":{"kind":"done","reason":"completed","result":"Patched 1 file","turns":3}}}

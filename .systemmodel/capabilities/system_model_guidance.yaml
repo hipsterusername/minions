@@ -1,0 +1,34 @@
+id: capability.system_model_guidance
+type: capability
+name: System model guidance and gates
+summary: Users and agents can retrieve architecture context, scope work packets, evaluate freshness and constraints, reconcile changes, and verify or waive merge gates with provenance.
+constraints: []
+decisions: [ decision.role_gated_agent_tools, decision.worktree_isolation_and_approval ]
+suggested_files: [ src/SettingsMenu.tsx, src/nodes/SystemGraphNode.tsx, src/nodes/leader/GateStrip.tsx, server/system-model-tools/query-system-model.ts, server/system-model/reconcile.ts ]
+suggested_tests: [ src/SettingsMenu.test.tsx, src/nodes/SystemGraphNode.test.tsx, src/nodes/leader/GateStrip.test.tsx, server/system-model-tools/query-system-model.test.ts, server/system-model/reconcile.test.ts ]
+keywords: [ system_model, architecture, graph, query, work_packet, context_pack, freshness, reconciliation, verification, constraint, gate, waiver, provenance ]
+entry_points:
+  - surface: surface.canvas
+    summary: Inspect status and graph relations and review gate evidence or waivers.
+    files: [ src/SettingsMenu.tsx, src/nodes/SystemGraphNode.tsx, src/nodes/leader/GateStrip.tsx ]
+    tests: [ src/SettingsMenu.test.tsx, src/nodes/SystemGraphNode.test.tsx, src/nodes/leader/GateStrip.test.tsx ]
+    flows: [ flow.inspect_system_model, flow.review_legacy_changes ]
+  - surface: surface.agent_tools
+    summary: Query the model and create, amend, verify, reconcile, and assess scoped work packets.
+    files: [ server/system-model-tools/query-system-model.ts, server/system-model-tools/create-work-packet.ts, server/system-model-tools/reconcile-run.ts, server/system-model-tools/record-verification.ts ]
+    tests: [ server/system-model-tools/query-system-model.test.ts, server/system-model-tools/create-work-packet.test.ts, server/system-model-tools/reconcile-run.test.ts, server/system-model-tools/record-verification.test.ts ]
+    flows: [ flow.inspect_system_model ]
+  - surface: surface.ws_api
+    summary: Report model status and graph data and process explicit gate-waiver commands.
+    files: [ server/commands/get-system-model-status.ts, server/commands/get-system-graph.ts, server/commands/waive-review-gate.ts ]
+    tests: [ tests/contracts/system-model-commands.test.ts, server/system-model/graph.test.ts, server/system-model/gates.test.ts ]
+    flows: [ flow.inspect_system_model ]
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.platform
+depends_on: []
+bridges:
+  - to: flow.review_legacy_changes
+    reason: Seed changes use the integration-owned legacy approval flow for human review.
+risks: []

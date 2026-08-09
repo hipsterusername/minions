@@ -1,0 +1,27 @@
+id: constraint.gates_and_review_separation
+type: constraint
+statement: Enforced gates block integration absent verification or reasoned human waiver, and review, enqueue, final review, and promotion remain separate transitions.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces:
+    - surface.canvas
+    - surface.activity
+    - surface.mobile
+    - surface.agent_tools
+    - surface.ws_api
+  files:
+    - src/nodes/leader/GateStrip.tsx
+    - src/LineageModal.tsx
+    - server/system-model/gates.ts
+    - server/worktree-integration-service.ts
+severity: critical
+agent_instruction: Recompute gates from the actual diff, require a waiver reason only where allowed, and do not collapse review or queue actions into promotion.
+review_gate: gate.worktree_integration
+suggested_tests: [ src/nodes/leader/GateStrip.test.tsx, src/LineageModal.test.tsx, server/system-model/gates.test.ts, server/commands/worktree-integration.test.ts ]
+evidence: [ decision.worktree_isolation_and_approval ]
+domain: domain.integration
+scope: targeted
+guards:
+  - capability.approval_and_legacy_integration
+  - capability.canonical_lineage_integration

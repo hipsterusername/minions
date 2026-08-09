@@ -1,0 +1,20 @@
+id: flow.answer_structured_decision
+type: flow
+name: Ask and answer a structured decision
+summary: A Leader renders a pending form, Activity marks the decision, and any dashboard surface submits validated answers to resume the same session.
+constraints: []
+decisions: [ decision.typed_event_bus ]
+suggested_files: [ server/render-tools.ts, shared/render-dsl.ts, src/nodes/render/FormComponent.tsx, src/ActivityView.tsx, src/mobile/SessionChatScreen.tsx, server/commands/submit-form.ts ]
+suggested_tests: [ server/render-tools.test.ts, shared/render-form.test.ts, src/nodes/render/FormComponent.test.tsx, src/ActivityView.test.tsx, src/mobile/SessionChatScreen.test.tsx, server/commands/submit-form.test.ts ]
+steps:
+  - Render a form with stable component and field IDs into server-owned dashboard state.
+  - Derive decision-needed status from the pending form rather than client heuristics.
+  - Validate submit_form answers against the pending component and same session identity.
+  - Resume execution and sync the completed answer state across every dashboard surface.
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.observability
+primary_capability: capability.dashboard_decisions
+bridges: []
+risks: []

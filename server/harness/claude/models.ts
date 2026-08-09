@@ -1,0 +1,66 @@
+/**
+ * Claude model alias resolution.
+ *
+ * Maps short UI aliases ("opus", "sonnet") to concrete Anthropic model IDs.
+ * Single source of truth — session-host-run.ts delegates to harness.resolveModel(),
+ * which calls resolveModelAlias() here. No duplicate table elsewhere.
+ */
+
+/**
+ * Short aliases the UI accepts, mapped to their full Anthropic model IDs.
+ * Update this table when a new model ID is released.
+ */
+const MODEL_ALIAS_MAP: Record<string, string> = {
+  fable: "claude-fable-5",
+  "opus-5": "claude-opus-5",
+  opus: "claude-opus-4-8",
+  "opus-old": "claude-opus-4-7",
+  sonnet: "claude-sonnet-5",
+  haiku: "claude-haiku-4-5",
+};
+
+export const CLAUDE_MODEL_POLICY = {
+  leader: ["claude-opus-5", "claude-opus-4-8", "claude-fable-5", "claude-sonnet-5", "claude-opus-4-7", "claude-haiku-4-5"],
+  minion: {
+    mechanical: ["claude-haiku-4-5", "claude-sonnet-5", "claude-fable-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7"],
+    standard: ["claude-sonnet-5", "claude-fable-5", "claude-haiku-4-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7"],
+    reasoning: ["claude-opus-5", "claude-opus-4-8", "claude-fable-5", "claude-sonnet-5", "claude-opus-4-7", "claude-haiku-4-5"],
+  },
+} as const;
+
+/**
+ * Resolve a user-supplied alias or concrete model ID to a canonical model ID.
+ *
+ * - Known aliases are expanded to their full ID.
+ * - Strings not in the alias map are returned as-is (treated as concrete IDs).
+ * - Null / empty input returns null.
+ */
+export function resolveModelAlias(alias: string | null | undefined): string | null {
+  if (!alias) return null;
+  return MODEL_ALIAS_MAP[alias] ?? alias;
+}
+
+/**
+ * Return true if `model` is known to support adaptive thinking.
+ * Keep this aligned with the adaptive-thinking validation in
+ * session-host-config.ts.
+ */
+const ADAPTIVE_THINKING_MODELS: ReadonlySet<string> = new Set([
+  "sonnet",
+  "fable",
+  "opus",
+  "opus-5",
+  "opus-old",
+  "claude-fable-5",
+  "claude-opus-5",
+  "claude-opus-4-8",
+  "claude-opus-4-7",
+  "claude-opus-4-6",
+  "claude-sonnet-5",
+  "claude-mythos-preview",
+]);
+
+export function supportsAdaptiveThinking(model: string | null | undefined): boolean {
+  if (!model) return false;
+  return ADAPTIVE_THINKING_MODELS.has(model);
+}

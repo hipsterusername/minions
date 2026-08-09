@@ -1,0 +1,323 @@
+import type { CanvasNode, CanvasTransform, ThinkingConfig } from "./types.ts";
+import type { GraphDocument } from "./graph.ts";
+import type { LeaderPreset } from "./leader-preset.ts";
+
+const BASE = "/api";
+
+// ── Auth token ──────────────────────────────────────────
+// Fetched once from the server at startup, then cached.
+let _authToken: string | null = null;
+let _tokenPromise: Promise<string> | null = null;
+
+export function clearAuthToken(): void {
+  _authToken = null;
+  _tokenPromise = null;
+}
+
+export function getAuthToken(): Promise<string> {
+  if (_authToken) return Promise.resolve(_authToken);
+  if (!_tokenPromise) {
+    _tokenPromise = fetch(`${BASE}/auth/token`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`Failed to fetch auth token: ${res.status}`);
+        return res.json() as Promise<{ token: string }>;
+      })
+      .then(({ token }) => {
+        _authToken = token;
+        return token;
+      });
+  }
+  return _tokenPromise;
+}
+
+// ── Encoding helper ─────────────────────────────────────
+// Project paths are base64url-encoded for use in URL segments
+function encodePath(p: string): string {
+  // TextEncoder → btoa → make URL-safe
+  const bytes = new TextEncoder().encode(p);
+  const binary = Array.from(bytes, (b) => String.fromCharCode(b)).join("");
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// ── Types ────────────────────────────────────────────────
+
+export interface ProjectSummary {
+  id: string;           // base64url-encoded path
+  path: string;         // absolute filesystem path
+  name: string;
+  lastOpened: string;
+  hasSidecar: boolean;
+}
+
+export interface ProjectContext {
+  content: string;
+  exists: boolean;
+}
+
+/**
+ * A single user-configurable Context Action (Leader slash command). `id` is a
+ * stable opaque identifier; `icon` keys into the icon palette in
+ * src/dashboard-leader-actions.ts.
+ */
+export interface DashboardLeaderActionConfig {
+  id: string;
+  name: string;
+  prompt: string;
+  icon: string;
+}
+
+export interface ProjectSettings {
+  defaultModel?: string;
+  defaultLeaderHarness?: string;
+  defaultLeaderModel?: string;
+  defaultLeaderThinkingConfig?: ThinkingConfig;
+  defaultMinionHarness?: string;
+  defaultMinionModel?: string;
+  defaultMinionThinkingConfig?: ThinkingConfig;
+  defaultPermissionMode?: string;
+  defaultWorktreeIsolation?: boolean;
+  /**
+   * Keep the canvas tidy: overlapping nodes snap flush against their nearest
+   * neighbour (on the side closest to where they're dropped), free drops snap
+   * to the grid, and dashboards stay affixed to their leader. Absent = on;
+   * only `false` disables it.
+   */
+  tidyLayout?: boolean;
+  /** System-model layer mode. */
+  systemModel?: "off" | "advisory" | "enforced";
+  /** Beta: add decision-oriented role contracts to Leader and Minion prompts. */
+  roleSystemBeta?: boolean;
+  /**
+   * User-configurable Context Actions shown in the Leader slash menu. An
+   * ordered, freely extensible list — add, remove, rename, re-prompt, or
+   * reorder. Absent = built-in defaults; see src/dashboard-leader-actions.ts.
+   */
+  dashboardLeaderActions?: DashboardLeaderActionConfig[];
+  /** Saved Leader configuration presets available across this project. */
+  leaderPresets?: LeaderPreset[];
+  [key: string]: unknown;
+}
+
+// Re-export LeaderPreset so consumers can import it from api.ts
+export type { LeaderPreset };
+
+export interface ProjectWithNodes {
+  id: string;
+  path: string;
+  name: string;
+  transform: CanvasTransform;
+  createdAt: string;
+  updatedAt: string;
+  nodes: CanvasNode[];
+  graph?: GraphDocument;
+  context?: ProjectContext;
+  settings?: ProjectSettings;
+  skills?: import("./skills/types.ts").SkillTemplate[];
+}
+
+export interface HarnessReadiness {
+  name: string;
+  ready: boolean;
+  state: "ready" | "runtime_missing" | "unauthenticated" | "probe_timeout" | "probe_failed";
+  runtime: { available: boolean; source: "env_override" | "sdk_bundled" | "path"; version?: string };
+  auth: { authenticated: boolean; source: "api_key" | "oauth" | "cli_login" | "unknown" };
+  checkedAt: string;
+  expiresAt: string;
+  durationMs: number;
+  remediation?: { label: string; command?: string };
+}
+
+export interface HarnessReadinessSnapshot {
+  schemaVersion: 1;
+  checkedAt: string;
+  expiresAt: string;
+  ready: boolean;
+  readyHarnesses: string[];
+  harnesses: HarnessReadiness[];
+}
+
+// ── Fetch helper ─────────────────────────────────────────
+
+async function apiFetch<T>(
+  path: string,
+  options?: RequestInit,
+): Promise<T> {
+  const token = await getAuthToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
+    ...((options?.headers as Record<string, string>) ?? {}),
+  };
+  const res = await fetch(`${BASE}${path}`, {
+    ...options,
+    headers,
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`API error ${res.status}: ${body}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+// ── Project CRUD ─────────────────────────────────────────
+
+export function listProjects(): Promise<ProjectSummary[]> {
+  return apiFetch("/projects");
+}
+
+export function getHarnessReadiness(refresh = false): Promise<HarnessReadinessSnapshot> {
+  return apiFetch(`/readiness${refresh ? "?refresh=1" : ""}`);
+}
+
+export function createProject(name: string, projectPath: string): Promise<ProjectWithNodes> {
+  return apiFetch("/projects", {
+    method: "POST",
+    body: JSON.stringify({ name, path: projectPath }),
+  });
+}
+
+export function openProject(projectPath: string): Promise<ProjectWithNodes> {
+  return apiFetch("/projects/open", {
+    method: "POST",
+    body: JSON.stringify({ path: projectPath }),
+  });
+}
+
+export function getProject(id: string): Promise<ProjectWithNodes> {
+  return apiFetch(`/projects/${id}`);
+}
+
+export function updateProject(
+  id: string,
+  data: { name?: string; transform?: CanvasTransform },
+): Promise<unknown> {
+  return apiFetch(`/projects/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteProject(id: string): Promise<unknown> {
+  return apiFetch(`/projects/${id}`, { method: "DELETE" });
+}
+
+export function saveProjectState(
+  id: string,
+  state: { transform: CanvasTransform; nodes: CanvasNode[]; graph?: GraphDocument },
+): Promise<unknown> {
+  return apiFetch(`/projects/${id}/state`, {
+    method: "PUT",
+    body: JSON.stringify(state),
+  });
+}
+
+// ── Context.md ───────────────────────────────────────────
+
+export function getProjectContext(id: string): Promise<ProjectContext> {
+  return apiFetch(`/projects/${id}/context`);
+}
+
+export function updateProjectContext(id: string, content: string): Promise<unknown> {
+  return apiFetch(`/projects/${id}/context`, {
+    method: "PUT",
+    body: JSON.stringify({ content }),
+  });
+}
+
+// ── Settings ─────────────────────────────────────────────
+
+export function getProjectSettings(id: string): Promise<ProjectSettings> {
+  return apiFetch(`/projects/${id}/settings`);
+}
+
+export function updateProjectSettings(id: string, settings: ProjectSettings): Promise<unknown> {
+  return apiFetch(`/projects/${id}/settings`, {
+    method: "PUT",
+    body: JSON.stringify(settings),
+  });
+}
+
+// ── Server control ───────────────────────────────────────
+
+export function restartServer(): Promise<{ ok: true; restarting: true }> {
+  return apiFetch<{ ok: true; restarting: true }>("/server/restart", {
+    method: "POST",
+  }).catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("API error 404")) {
+      throw new Error(
+        "Server restart is not available on the running backend yet. Restart Minions once manually, then this settings action will work.",
+      );
+    }
+    throw err;
+  });
+}
+
+// ── Skills (per-project) ─────────────────────────────────
+
+export function getProjectSkills(id: string): Promise<import("./skills/types.ts").SkillTemplate[]> {
+  return apiFetch(`/projects/${id}/skills`);
+}
+
+export function saveProjectSkills(
+  id: string,
+  skills: import("./skills/types.ts").SkillTemplate[],
+): Promise<unknown> {
+  return apiFetch(`/projects/${id}/skills`, {
+    method: "PUT",
+    body: JSON.stringify(skills),
+  });
+}
+
+// ── MCP servers (per-project) ────────────────────────────
+
+import type { McpServerEntry } from "../shared/mcp-servers/types.ts";
+
+export interface ListMcpServersResult {
+  entries: McpServerEntry[];
+  invalid: { index: number; errors: { path: string; message: string }[] }[];
+}
+
+export function listProjectMcpServers(id: string): Promise<ListMcpServersResult> {
+  return apiFetch(`/projects/${id}/mcp-servers`);
+}
+
+export function saveProjectMcpServer(
+  id: string,
+  entry: McpServerEntry,
+): Promise<McpServerEntry> {
+  return apiFetch(`/projects/${id}/mcp-servers/${entry.id}`, {
+    method: "PUT",
+    body: JSON.stringify(entry),
+  });
+}
+
+export function deleteProjectMcpServer(
+  id: string,
+  serverId: string,
+): Promise<{ ok: true }> {
+  return apiFetch(`/projects/${id}/mcp-servers/${serverId}`, {
+    method: "DELETE",
+  });
+}
+
+// ── Directory tree ──────────────────────────────────────
+
+export interface TreeNode {
+  name: string;
+  path: string;       // relative to project root
+  type: "dir" | "file";
+  children?: TreeNode[];
+}
+
+export interface ProjectTree {
+  root: string;
+  tree: TreeNode[];
+}
+
+export function getProjectTree(id: string, depth = 2): Promise<ProjectTree> {
+  return apiFetch(`/projects/${id}/tree?depth=${depth}`);
+}
+
+// Re-export encodePath for consumers that need to convert raw paths to IDs
+export { encodePath };

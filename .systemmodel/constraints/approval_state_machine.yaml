@@ -1,0 +1,20 @@
+id: constraint.approval_state_machine
+type: constraint
+statement: Approval persists diff, gates, grace, and status; feedback, merge, discard, and reload each perform explicit state transitions.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces: []
+  files:
+    - server/task-tools/request-approval.ts
+    - server/commands/approve-changes.ts
+    - server/commands/discard-worktree.ts
+    - src/ChangesView.tsx
+severity: critical
+agent_instruction: Preserve pending approval through sync, distinguish feedback from merge, run gates before integration, and align cleanup with terminal approval state.
+review_gate: gate.worktree_integration
+suggested_tests: [ server/task-tools/request-approval.test.ts, server/commands/discard-worktree.test.ts, src/ChangesView.test.tsx, src/mobile/ReviewChangesScreen.test.tsx ]
+evidence: [ decision.worktree_isolation_and_approval ]
+domain: domain.integration
+scope: domain
+guards: []

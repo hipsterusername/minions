@@ -1,0 +1,20 @@
+id: flow.save_project_knowledge
+type: flow
+name: Save and reuse project knowledge
+summary: Users persist project files, markdown, images, annotations, presets, skills, and MCP definitions and reuse them in later context or launches.
+constraints: []
+risks:
+  - risk.project_worktree_content_split
+suggested_files: [ src/ProjectPanel.tsx, src/components/ProjectTree.tsx, src/nodes/MarkdownNode.tsx, src/SkillsBrowser.tsx, src/McpServersBrowser.tsx, src/api.ts ]
+suggested_tests: [ src/ProjectPanel.test.ts, src/components/ProjectTree.test.tsx, src/nodes/MarkdownNode.test.tsx, src/SkillsBrowser.test.tsx, src/McpServersBrowser.test.tsx, src/api.test.ts ]
+steps:
+  - Edit a supported project artifact through authenticated REST or spatial autosave.
+  - Enforce project ownership, path guards, artifact sanitation, and honest error reporting.
+  - Persist the project-root sidecar or canvas state as the durable source.
+  - Reuse the artifact deliberately as graph context, card context, preset, skill, or future MCP configuration.
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.workspace
+primary_capability: capability.project_workspace
+bridges: []

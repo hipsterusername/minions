@@ -1,0 +1,5 @@
+id: domain.integration
+type: domain
+name: Integration
+summary: Owns the review, gating, conflict recovery, and controlled incorporation of isolated changes into legacy and canonical project lineages.
+keywords: [integration, approval, lineage, review, gate, merge, conflict]
