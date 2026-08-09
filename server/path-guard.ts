@@ -1,6 +1,7 @@
 import path from "path";
 import os from "os";
 import fs from "fs";
+import { canonicalizeSourceRoot } from "./workspace-registry.ts";
 
 /**
  * Path validation module to prevent arbitrary filesystem access.
@@ -16,18 +17,17 @@ import fs from "fs";
  * to restore the allowlist across server restarts. The route layer in
  * `server/routes/projects/core.ts` does this as part of `mountCoreRoutes`.
  *
- * Invariant: every path in `openedProjects` was validated against `isUnderHomeDir`
- * at registration time, so the Set is always a subset of paths under $HOME.
+ * Invariant: every path in `openedProjects` is an absolute canonical source
+ * root. Registration is the authorization act; mounted-volume location is not.
  *
  * ## Threat model
  *
  * This module guards against API callers supplying arbitrary filesystem paths
- * (e.g. `/etc/passwd`, path-traversal tricks) to read or write outside the
- * user's home directory. It is NOT a multi-user or remote-network security
+ * (e.g. unregistered roots and path-traversal tricks) to read or write outside
+ * an opened project. It is NOT a multi-user or remote-network security
  * boundary — the server is local-only and single-user. A persistent ACL in a
- * database would add write-ordering complexity with no meaningful security gain
- * for this threat model; the JSON-backed recent-projects list is sufficient
- * durable storage.
+ * The durable UUID workspace registry and recent-project index are restored by
+ * the route layer; this module keeps only the active process allowlist.
  */
 
 const openedProjects = new Set<string>();
@@ -86,38 +86,18 @@ export function isUnderHomeDir(absPath: string): boolean {
  * Call this when creating/opening a project.
  */
 export function registerProjectPath(projectPath: string): string | null {
-  const resolved = path.resolve(projectPath);
-
-  // Must be under home directory
-  if (!isUnderHomeDir(resolved)) {
-    return null;
-  }
-
-  try {
-    const real = fs.realpathSync(resolved);
-    if (!isUnderHomeDir(real)) {
-      return null;
-    }
-  } catch {
-    // Projects can be registered before their directories exist; callers that
-    // perform filesystem operations validate the real project root later.
-  }
-
-  // Reject paths with .. components after resolution (already resolved, but extra safety)
-  if (resolved.includes("..")) {
-    return null;
-  }
-
-  openedProjects.add(resolved);
-  return resolved;
+  const canonical = canonicalizeSourceRoot(path.resolve(projectPath));
+  if (!canonical) return null;
+  openedProjects.add(canonical);
+  return canonical;
 }
 
 /**
  * Check if a path is a registered (opened) project path.
  */
 export function isRegisteredProject(projectPath: string): boolean {
-  const resolved = path.resolve(projectPath);
-  return openedProjects.has(resolved);
+  const canonical = canonicalizeSourceRoot(path.resolve(projectPath));
+  return canonical !== null && openedProjects.has(canonical);
 }
 
 /**
@@ -125,27 +105,27 @@ export function isRegisteredProject(projectPath: string): boolean {
  * Returns resolved path or null.
  */
 export function validateProjectPath(projectPath: string): string | null {
-  const resolved = path.resolve(projectPath);
-  if (!openedProjects.has(resolved)) {
+  const canonical = canonicalizeSourceRoot(path.resolve(projectPath));
+  if (!canonical || !openedProjects.has(canonical)) {
     return null;
   }
-  return resolved;
+  return canonical;
 }
 
 /**
  * Remove a project from the registered set.
  */
 export function unregisterProjectPath(projectPath: string): void {
-  openedProjects.delete(path.resolve(projectPath));
+  const canonical = canonicalizeSourceRoot(path.resolve(projectPath));
+  if (canonical) openedProjects.delete(canonical);
 }
 
 /**
  * Bulk-register project paths from durable storage (e.g. the recent-projects list).
  * Call once at startup to restore the allowlist across server restarts.
  *
- * Invalid paths (outside home directory) are silently skipped — the durable
- * store may contain stale entries for paths that have since been moved or
- * deleted. Those paths will simply remain inaccessible until re-opened.
+ * Invalid or unresolvable paths are silently skipped. Stale entries remain
+ * inaccessible until explicitly opened again.
  */
 export function rehydrateFromPaths(paths: readonly string[]): void {
   for (const p of paths) {
@@ -155,12 +135,10 @@ export function rehydrateFromPaths(paths: readonly string[]): void {
 
 /**
  * Validate a CWD for session creation.
- * Must be under home directory.
+ * Must be an explicitly registered canonical source root.
  */
 export function validateSessionCwd(cwd: string): string | null {
   const resolved = path.resolve(cwd);
-  if (!isUnderHomeDir(resolved)) return null;
-
   const real = (() => {
     try {
       return fs.realpathSync(resolved);
@@ -168,7 +146,7 @@ export function validateSessionCwd(cwd: string): string | null {
       return null;
     }
   })();
-  if (!real || !isUnderHomeDir(real)) return null;
+  if (!real) return null;
 
   for (const project of openedProjects) {
     let projectReal: string;
@@ -196,8 +174,6 @@ export function validateOwnedSessionCwd(
   } catch {
     return null;
   }
-  if (!isUnderHomeDir(real)) return null;
-
   for (const worktreePath of activeWorktreePaths) {
     try {
       if (fs.realpathSync(path.resolve(worktreePath)) === real) return real;
@@ -227,7 +203,7 @@ export async function resolveExistingProjectPath(
     realpathOrNull(root),
     realpathOrNull(candidate),
   ]);
-  if (!rootReal || !isUnderHomeDir(rootReal)) {
+  if (!rootReal) {
     return null;
   }
   if (!targetReal) {
@@ -256,7 +232,7 @@ export async function resolveCreatableProjectPath(
   }
 
   const rootReal = await realpathOrNull(root);
-  if (!rootReal || !isUnderHomeDir(rootReal)) {
+  if (!rootReal) {
     return null;
   }
 

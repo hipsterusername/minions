@@ -412,11 +412,10 @@ describe("render-tools", () => {
       const envelope = sent[sent.length - 1] as Record<string, unknown>;
       expect(envelope["action"]).toBe("append");
 
-      // A temp file was written under the session-scoped dir, sanitized.
-      const sessionDir = join(dir, "sess-pub");
-      const files = readdirSync(sessionDir).filter((f) => f.endsWith(".html"));
+      // A flat, session-prefixed temp file was written under the canonical root.
+      const files = readdirSync(dir).filter((f) => f.endsWith(".html"));
       expect(files).toHaveLength(1);
-      const onDisk = readFileSync(join(sessionDir, files[0]!), "utf8");
+      const onDisk = readFileSync(join(dir, files[0]!), "utf8");
       expect(onDisk).not.toContain("<script");
       expect(onDisk).toContain("Content-Security-Policy");
     });

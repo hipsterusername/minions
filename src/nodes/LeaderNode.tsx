@@ -80,6 +80,7 @@ import { buildSlashCommands } from "./leader/prompt/slash-commands.ts";
 import "./leader/leader-node.css";
 import { MinionsSurface } from "./leader/MinionsSurface.tsx";
 import { ActivityLaunchForm } from "./leader/ActivityLaunchForm.tsx";
+import { DEFAULT_SANDBOX_POLICY } from "./leader/SandboxPolicyControls.tsx";
 
 /* ── Main component ───────────────────────────────────────────────────── */
 
@@ -411,8 +412,10 @@ export function LeaderNodeRenderer({
         if (serverMsg.lastErrorFull !== undefined) {
           syncData.fullError = serverMsg.lastErrorFull ?? null;
         }
-        if (serverMsg.harness) {
-          syncData.harness = serverMsg.harness;
+        if (serverMsg.harness) syncData.harness = serverMsg.harness;
+        if (serverMsg.sandboxPolicy) {
+          syncData.sandboxPolicy = serverMsg.sandboxPolicy.requested;
+          syncData.effectiveSandboxPolicy = serverMsg.sandboxPolicy;
         }
         if (Array.isArray(serverMsg.taskPlan)) {
           const existingMap = new Map(
@@ -703,10 +706,12 @@ export function LeaderNodeRenderer({
       skillIds: data.skillIds ?? [], skillValues: data.skillValues ?? {},
       model: data.model,
       thinkingConfig: data.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
+      permissionMode: data.permissionMode,
       worktreeIsolation: data.worktreeIsolation,
+      sandboxPolicy: data.sandboxPolicy ?? DEFAULT_SANDBOX_POLICY,
       ...(data.harness ? { harness: data.harness } : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
-      ...(projectPath ? { cwd: projectPath } : {}),
+      ...(projectId ? { workspaceId: projectId } : projectPath ? { cwd: projectPath } : {}),
     });
     publishCanvasContext(key, contextItems, null);
     syncedRef.current = true;
@@ -727,7 +732,7 @@ export function LeaderNodeRenderer({
     });
     setInput("");
   }, [socketSend, input, getContextForNode, getIncomingContextModes, publishCanvasContext,
-    data.skillIds, data.skillValues, data.model, data.thinkingConfig, projectId,
+    data.skillIds, data.skillValues, data.model, data.thinkingConfig, data.sandboxPolicy, projectId,
     projectPath, emitUpdate, beginCanonicalRun]);
   const autoStartFired = useRef(false);
   useEffect(() => {
@@ -772,10 +777,12 @@ export function LeaderNodeRenderer({
       skillIds: dataRef.current.skillIds ?? [], skillValues: dataRef.current.skillValues ?? {},
       model: dataRef.current.model,
       thinkingConfig: dataRef.current.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
+      permissionMode: dataRef.current.permissionMode,
       worktreeIsolation: dataRef.current.worktreeIsolation,
+      sandboxPolicy: dataRef.current.sandboxPolicy ?? DEFAULT_SANDBOX_POLICY,
       ...(dataRef.current.harness ? { harness: dataRef.current.harness } : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
-      ...(projectPath ? { cwd: projectPath } : {}),
+      ...(projectId ? { workspaceId: projectId } : projectPath ? { cwd: projectPath } : {}),
     });
     publishCanvasContext(key, contextItems, null);
     syncedRef.current = true;
@@ -963,6 +970,7 @@ export function LeaderNodeRenderer({
       skillValues: data.skillValues,
       model: data.model,
       permissionMode: data.permissionMode,
+      sandboxPolicy: data.sandboxPolicy ?? DEFAULT_SANDBOX_POLICY,
       thinkingConfig: data.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
       worktreeIsolation: data.worktreeIsolation,
     });
@@ -996,6 +1004,7 @@ export function LeaderNodeRenderer({
       skillValues: current.skillValues,
       model: current.model,
       permissionMode: current.permissionMode,
+      sandboxPolicy: current.sandboxPolicy ?? DEFAULT_SANDBOX_POLICY,
       worktreeIsolation: false, // worktree isolation off by default
       ...(pendingPrompt ? { autoStartPrompt: pendingPrompt } : {}),
     });

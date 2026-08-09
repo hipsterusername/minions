@@ -16,6 +16,7 @@ const CLAUDE_ENTRY: HarnessListEntry = {
     resume: true,
     partialMessages: true,
     builtInFilesystem: true,
+    sandboxEnforcement: { filesystem: [], network: false, approval: false },
   },
   builtInTools: ["Read", "Bash"],
   models: [
@@ -40,6 +41,11 @@ const CODEX_ENTRY: HarnessListEntry = {
     resume: true,
     partialMessages: false,
     builtInFilesystem: true,
+    sandboxEnforcement: {
+      filesystem: ["read-only", "workspace-write", "unrestricted"],
+      network: true,
+      approval: true,
+    },
   },
   builtInTools: [],
   models: [
@@ -273,17 +279,23 @@ describe("SessionToolbar — capability gating", () => {
     expect(screen.queryByText("Bypass")).not.toBeInTheDocument();
   });
 
-  it("offers the 'plan' permission option for the Codex harness", () => {
-    // Codex honors plan mode via a read-only sandbox, so it is a valid choice.
+  it("hides legacy permission modes when Codex sandbox policy is authoritative", () => {
     renderWithHarnesses(
       [CLAUDE_ENTRY, CODEX_ENTRY],
       { harness: "codex", model: "gpt-5.5", permissionMode: "auto" },
     );
-    const trigger = screen.getByText("Auto");
-    fireEvent.click(trigger);
+    expect(screen.queryByText("Auto")).not.toBeInTheDocument();
+    expect(screen.queryByText("Bypass")).not.toBeInTheDocument();
+  });
+
+  it("keeps Claude runtime permission modes when sandbox axes are unmanaged", () => {
+    renderWithHarnesses(
+      [CLAUDE_ENTRY, CODEX_ENTRY],
+      { harness: "claude", model: "opus", permissionMode: "auto" },
+    );
+    fireEvent.click(screen.getByText("Auto"));
+    expect(screen.getByText("Auto-edit")).toBeInTheDocument();
     expect(screen.getByText("Plan")).toBeInTheDocument();
-    expect(screen.getByText("Default")).toBeInTheDocument();
-    expect(screen.getByText("Bypass")).toBeInTheDocument();
   });
 
   it("hides thinking controls when the harness disables thinking", () => {

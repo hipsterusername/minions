@@ -70,6 +70,11 @@ const CODEX_CAPABILITIES: HarnessCapabilities = {
   partialMessages: false,
   // Codex ships built-in shell + filesystem capabilities through its CLI.
   builtInFilesystem: true,
+  sandboxEnforcement: {
+    filesystem: ["read-only", "workspace-write", "unrestricted"],
+    network: true,
+    approval: true,
+  },
 };
 
 const CODEX_BUILT_IN_TOOLS: ReadonlyArray<string> = [];
@@ -316,9 +321,10 @@ function buildThreadOptions(opts: HarnessStartOptions): ThreadOptions {
   };
   if (opts.model) out.model = opts.model;
 
-  const perm = mapPermission(opts.permissionMode);
+  const perm = mapPermission(opts.sandboxPolicy?.requested, opts.permissionMode);
   out.approvalPolicy = perm.approvalPolicy;
   out.sandboxMode = perm.sandboxMode;
+  out.networkAccessEnabled = perm.networkAccessEnabled;
 
   if (opts.thinking && CODEX_CAPABILITIES.thinking) {
     out.modelReasoningEffort = mapReasoningEffort(opts.thinking.effort);

@@ -23,7 +23,8 @@ import { createBus } from "./bus.ts";
 import { attachConnectionListeners } from "./ws-connection.ts";
 import { cleanupStaleWorktrees } from "./worktree.ts";
 import { listRecentProjects } from "./project-store.ts";
-import { resolveWorkItemProject } from "./work-item-project.ts";
+import { resolveWorkItemProject, resolveWorkItemProjectIdentity } from "./work-item-project.ts";
+import { resolveWorkspace } from "./workspace-registry.ts";
 import { sweepOrphanHtmlArtifacts } from "./html-artifact-store.ts";
 import type { SessionHostDeps, StartSessionOptions } from "./session-host.ts";
 import { SessionRegistry } from "./session-registry.ts";
@@ -290,6 +291,8 @@ const commandContext: CommandContext = {
   workItems,
   worktreeIntegrations,
   resolveWorkItemProject,
+  resolveWorkItemWorkspace: resolveWorkItemProjectIdentity,
+  resolveWorkspace,
 };
 
 // Server-level errors (handshake failures, listener errors). Without this

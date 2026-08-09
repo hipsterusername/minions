@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearAuthToken,
+  attachProject,
   createProject,
   encodePath,
   getAuthToken,
   getHarnessReadiness,
   getProjectTree,
   listProjects,
+  rebindProject,
   updateProjectContext,
 } from "./api.ts";
 
@@ -48,6 +50,22 @@ describe("API client boundary", () => {
         Authorization: "Bearer secret",
       },
     });
+  });
+
+  it("sends explicit workspace attachment and rebind operations", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({ token: "secret" }))
+      .mockImplementation(async () => jsonResponse({ id: "workspace-1", path: "/repo" }));
+
+    await attachProject("workspace-1", "/repo-copy");
+    await rebindProject("workspace-1", "/repo-moved");
+
+    expect(fetchMock.mock.calls.slice(1)).toEqual([
+      ["/api/projects/attach", expect.objectContaining({ method: "POST",
+        body: JSON.stringify({ workspaceId: "workspace-1", path: "/repo-copy" }) })],
+      ["/api/projects/rebind", expect.objectContaining({ method: "POST",
+        body: JSON.stringify({ workspaceId: "workspace-1", path: "/repo-moved" }) })],
+    ]);
   });
 
   it("uses the readiness refresh query only when explicitly requested", async () => {

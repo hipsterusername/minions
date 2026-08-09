@@ -19,7 +19,7 @@ describe("contract: dialectic commands", () => {
     const result = validateWsCommand({
       type: "start_dialectic",
       sessionKey: "node-123",
-      cwd: "/repo",
+      workspaceId: "66666666-6666-4666-8666-666666666666",
       prompt: "Design the caching layer",
       dialecticConfig: {
         mode: "proposer-critic",

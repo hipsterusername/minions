@@ -1,5 +1,5 @@
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -13,6 +13,7 @@ import {
   saveMcpServer,
 } from "./mcp-server-store.ts";
 import type { McpServerEntry } from "../shared/mcp-servers/types.ts";
+import { registerWorkspace } from "./workspace-registry.ts";
 
 function makeStdio(over: Partial<McpServerEntry> = {}): McpServerEntry {
   return {
@@ -46,13 +47,18 @@ function makeHttp(over: Partial<McpServerEntry> = {}): McpServerEntry {
 
 describe("mcp-server-store", () => {
   let projectDir: string;
+  let minionsHome: string;
 
   beforeEach(() => {
     projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-store-"));
+    minionsHome = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-home-"));
+    vi.stubEnv("MINIONS_HOME", minionsHome);
   });
 
   afterEach(() => {
     fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(minionsHome, { recursive: true, force: true });
+    vi.unstubAllEnvs();
   });
 
   describe("listMcpServers", () => {
@@ -67,6 +73,17 @@ describe("mcp-server-store", () => {
       const { entries, invalid } = listMcpServers(projectDir);
       expect(entries.map((e) => e.id)).toEqual(["alpha", "mike", "zulu"]);
       expect(invalid).toEqual([]);
+    });
+
+    it("imports a legacy source sidecar into central MCP state before reading", () => {
+      const legacyPath = path.join(projectDir, ".minions", "mcp-servers.json");
+      fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
+      fs.writeFileSync(legacyPath, JSON.stringify([makeStdio({ id: "legacy" })]));
+
+      expect(listMcpServers(projectDir).entries.map((entry) => entry.id)).toEqual(["legacy"]);
+      const central = mcpServersFilePath(projectDir);
+      expect(central.startsWith(path.join(minionsHome, "workspaces"))).toBe(true);
+      expect(fs.existsSync(central)).toBe(true);
     });
 
     it("skips malformed entries and reports them in invalid", () => {
@@ -167,6 +184,17 @@ describe("mcp-server-store", () => {
       }
     });
 
+    it("writes to the registered workspace state root and leaves the source clean", () => {
+      const workspace = registerWorkspace(projectDir)!;
+
+      saveMcpServer(projectDir, makeStdio());
+
+      expect(mcpServersFilePath(projectDir)).toBe(
+        path.join(workspace.stateRoot, "mcp-servers.json"),
+      );
+      expect(fs.existsSync(path.join(projectDir, ".minions"))).toBe(false);
+    });
+
     it("round-trips a fully-populated entry unchanged", () => {
       const entry: McpServerEntry = {
         id: "full-entry",
@@ -215,7 +243,7 @@ describe("mcp-server-store", () => {
     it("warns about command execution and plaintext sidecar secrets without echoing them", () => {
       const messages = mcpServerSecurityWarnings(makeStdio({ env: { TOKEN: "super-secret" } }));
       expect(messages.join(" ")).toMatch(/executes a local command/);
-      expect(messages.join(" ")).toMatch(/stored in the project sidecar/);
+      expect(messages.join(" ")).toMatch(/stored in the private Minions workspace state/);
       expect(messages.join(" ")).not.toContain("super-secret");
     });
   });

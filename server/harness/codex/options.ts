@@ -10,6 +10,7 @@ import type {
   HarnessReasoningEffort,
   NormalizedPermissionMode,
 } from "../types.ts";
+import type { SandboxPolicy } from "../../../shared/workspace-contracts.ts";
 import type { CodexConfigObject } from "./mcp-config.ts";
 
 /**
@@ -36,36 +37,35 @@ export function buildCodexConfig(
 export interface MappedPermission {
   approvalPolicy: ApprovalMode;
   sandboxMode: SandboxMode;
+  networkAccessEnabled: boolean;
 }
 
 /**
- * Map a Minions NormalizedPermissionMode to Codex ApprovalMode / SandboxMode.
+ * Map the resolved provider-neutral policy to Codex thread options.
  *
  * `plan` maps to a read-only sandbox: the agent may read and reason but the
  * sandbox blocks any mutation, which is the strongest possible enforcement of
  * plan mode's "don't change anything" contract (stronger than a model that
  * merely promises not to write). Dialectic planners rely on this.
  *
- * | permissionMode    | approvalPolicy | sandboxMode        |
- * |-------------------|----------------|--------------------|
- * | bypassPermissions | never          | danger-full-access |
- * | auto              | on-failure     | danger-full-access |
- * | default           | on-request     | danger-full-access |
- * | plan              | on-request     | read-only          |
- * | undefined         | on-failure     | danger-full-access |
+ * `permissionMode` is only a fallback for legacy payloads that do not carry a
+ * provider-neutral policy. Once an explicit policy exists it is authoritative
+ * for every Codex sandbox axis.
  */
-export function mapPermission(mode: NormalizedPermissionMode | undefined): MappedPermission {
-  switch (mode) {
-    case "bypassPermissions":
-      return { approvalPolicy: "never", sandboxMode: "danger-full-access" };
-    case "default":
-      return { approvalPolicy: "on-request", sandboxMode: "danger-full-access" };
-    case "plan":
-      return { approvalPolicy: "on-request", sandboxMode: "read-only" };
-    case "auto":
-    case undefined:
-      return { approvalPolicy: "on-failure", sandboxMode: "danger-full-access" };
-  }
+export function mapPermission(
+  policy: SandboxPolicy | undefined,
+  legacyMode?: NormalizedPermissionMode | undefined,
+): MappedPermission {
+  const fallbackApproval = legacyMode === "bypassPermissions" ? "never"
+    : legacyMode === "default" || legacyMode === "plan" ? "on-request" : "on-failure";
+  const filesystem = policy?.filesystemScope ?? "read-only";
+  const approvalPolicy = policy?.approvalPolicy === "always" ? "untrusted"
+    : policy?.approvalPolicy ?? fallbackApproval;
+  return {
+    approvalPolicy,
+    sandboxMode: filesystem === "unrestricted" ? "danger-full-access" : filesystem,
+    networkAccessEnabled: policy?.networkAccess === "enabled",
+  };
 }
 
 /**
@@ -86,13 +86,7 @@ export function mapReasoningEffort(
  * Determine the Codex SandboxMode for a given set of session options.
  *
  * - plan mode → "read-only" (agent may read only, not write)
- * - all other modes → "danger-full-access", matching Claude's filesystem
- *   reach while preserving Codex's approval policy for command execution
- *
- * The worktreeIsolation parameter is a forward-compatibility hook. Isolation
- * still selects the session cwd and branch, but—like Claude—it does not impose
- * an additional OS-level filesystem boundary. The value is therefore not
- * consulted by the current mapping.
+ * - authorized execution roots → "workspace-write"
  */
 export function mapSandboxMode(opts: {
   worktreeIsolation: boolean;
@@ -101,5 +95,5 @@ export function mapSandboxMode(opts: {
   if (opts.permissionMode === "plan") {
     return "read-only";
   }
-  return "danger-full-access";
+  return "workspace-write";
 }

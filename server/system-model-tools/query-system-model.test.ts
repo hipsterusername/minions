@@ -5,6 +5,7 @@ import { loadSystemModel } from "../system-model/load.ts";
 import { createQuerySystemModelToolDef } from "./query-system-model.ts";
 import { copyValidFixture, copyValidFixtureWithSurfaces } from "../system-model/load.test.ts";
 import type { LoadedSystemModel } from "../system-model/types.ts";
+import { findWorkspaceBySource } from "../workspace-registry.ts";
 
 describe("query_system_model", () => {
   it("rejects an empty query when ids are not provided", async () => {
@@ -93,7 +94,7 @@ describe("query_system_model", () => {
     expect(payload.linked).toContainEqual(expect.objectContaining({
       id: "constraint.bus_only", why: "guards (inverse)",
     }));
-    const db = new Database(path.join(project, ".minions/canvas.db"));
+    const db = new Database(path.join(findWorkspaceBySource(project)!.stateRoot, "canvas.db"));
     const rows = db.prepare("SELECT object_id, source, session_key FROM system_model_usage").all() as Array<{
       object_id: string;
       source: string;

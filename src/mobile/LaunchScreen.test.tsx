@@ -111,7 +111,7 @@ describe("LaunchScreen", () => {
 
     expect(send).toHaveBeenCalledWith(expect.objectContaining({
       type: "create_session",
-      cwd: "/work/alpha",
+      workspaceId: "alpha",
       harness: "codex",
       model: "gpt-5.5-codex",
       thinkingConfig: { enabled: true, effort: "high", display: "summarized" },
@@ -167,7 +167,7 @@ describe("LaunchScreen", () => {
         sessionKey: "leader-00000000-0000-4000-8000-000000000001",
         prompt: "Build the mobile launch flow",
         role: "leader",
-        cwd: "/work/alpha",
+        workspaceId: "alpha",
         worktreeIsolation: false,
       });
     });

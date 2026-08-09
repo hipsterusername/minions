@@ -5,7 +5,7 @@
  * rather than importing from `src/` because the architecture suite forbids
  * cross-tree imports (see tests/architecture/no-cross-tree-imports.test.ts).
  *
- * Skills live in each project's sidecar at `.minions/skills.json`
+ * Skills live in each registered workspace state root as `skills.json`
  * and are written by the frontend via `writeSkills()` in `project-store.ts`.
  * The Leader's `assign_task` tool uses these helpers to "arm" a Minion
  * with one or more skills, appending the compiled markdown to that
@@ -42,7 +42,7 @@ export interface SubSkill {
   alwaysInclude?: boolean;
 }
 
-/** A skill template loaded from `.minions/skills.json`. */
+/** A skill template loaded from central workspace `skills.json`. */
 export interface SkillTemplate {
   id: string;
   name: string;

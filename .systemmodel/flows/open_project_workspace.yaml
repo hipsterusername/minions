@@ -1,14 +1,17 @@
 id: flow.open_project_workspace
 type: flow
 name: Open or recover a project workspace
-summary: A user selects a registered project, loads persisted spatial state, connects live services, and reconciles sessions and work items without duplicate execution.
+summary: A user explicitly registers a source folder, receives a stable workspace UUID, and loads central state before reconciling sessions and work items.
 constraints: []
-decisions: [ decision.typed_event_bus, decision.canonical_work_item_lifecycle ]
-suggested_files: [ src/ProjectList.tsx, src/App.tsx, src/ProjectHeader.tsx, src/mobile/ProjectsScreen.tsx, src/use-work-items.ts ]
-suggested_tests: [ src/ProjectList.test.tsx, src/App.dom.test.tsx, src/api.test.ts, src/use-autosave.test.tsx, src/canvas-work-item-reconcile.test.ts ]
+decisions: [ decision.typed_event_bus, decision.canonical_work_item_lifecycle, decision.portable_workspace_roots ]
+suggested_files: [ src/ProjectList.tsx, src/App.tsx, src/ProjectHeader.tsx, src/mobile/ProjectsScreen.tsx, src/use-work-items.ts, server/workspace-registry.ts, server/routes/projects/core.ts ]
+suggested_tests: [ src/ProjectList.test.tsx, src/App.dom.test.tsx, src/api.test.ts, src/use-autosave.test.tsx, src/canvas-work-item-reconcile.test.ts, server/workspace-registry.test.ts, tests/contracts/projects-core-routes.test.ts ]
 steps:
-  - Resolve a registered project and load its nodes, graph, transform, settings, skills, and sidecar state.
-  - Connect WebSocket services and issue list_sessions, list_work_items, and list_worktree_lineages.
+  - Canonicalize an explicitly opened source root, including mounted-volume paths, and bind it to a stable UUID.
+  - Preserve one unambiguous legacy UUID and non-destructively import a legacy .minions sidecar into MINIONS_HOME/workspaces/<uuid> on first registration.
+  - Rebind a moved source to its existing UUID, or explicitly attach a copied source; copies otherwise receive a new UUID.
+  - Load nodes, graph, transform, settings, skills, and project knowledge from the bound state root.
+  - Connect WebSocket services using the opaque workspace UUID and issue list_sessions, list_work_items, and list_worktree_lineages.
   - Reconcile persisted surface bindings and sync mounted sessions from authoritative host snapshots.
   - Expose readiness or autosave failures for explicit retry without launching duplicate runs.
 freshness:
@@ -17,4 +20,4 @@ risk: high
 domain: domain.workspace
 primary_capability: capability.project_workspace
 bridges: []
-risks: []
+risks: [ risk.legacy_workspace_root_overlap ]

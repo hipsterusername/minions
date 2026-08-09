@@ -1,7 +1,7 @@
 /**
  * MCP server catalog types — shared between server and client.
  *
- * Entries live at `<projectPath>/.minions/mcp-servers.json`.
+ * Entries live in the registered workspace state root below MINIONS_HOME.
  * The transport field is the discriminant; the remaining fields match
  * the SDK's McpStdioServerConfig / McpSSEServerConfig / McpHttpServerConfig
  * exactly so the store can pass them straight through to `query()`.

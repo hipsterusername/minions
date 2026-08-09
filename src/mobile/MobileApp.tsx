@@ -250,13 +250,14 @@ export default function MobileApp() {
   const selectedSession = canonicalSessions.find((session) => session.sessionKey === selectedSessionKey);
 
   // Once a project is chosen, every list screen is scoped to it. Sessions are
-  // matched by working directory (see sessionBelongsToProject), which also
-  // keeps worktree-isolated leaders grouped under their originating project.
+  // matched by stable workspace identity plus source/worktree location (see
+  // sessionBelongsToProject), keeping centrally isolated leaders grouped with
+  // their originating project.
   const scopedSessions = useMemo(
     () =>
       selectedProject
         ? canonicalSessions.filter((session) =>
-            sessionBelongsToProject(session, selectedProject.path),
+            sessionBelongsToProject(session, selectedProject.path, selectedProject.id),
           )
         : canonicalSessions,
     [canonicalSessions, selectedProject],

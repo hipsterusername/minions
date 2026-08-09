@@ -24,6 +24,7 @@ import type { StartSessionOptions } from "../session-host.ts";
 import { registerProjectPath, unregisterProjectPath } from "../path-guard.ts";
 import { saveMcpServer } from "../mcp-server-store.ts";
 import type { WorkItemService } from "../work-item-service.ts";
+import type { SandboxPolicy } from "../../shared/workspace-contracts.ts";
 // Side-effect: registers EchoHarness so the harness-validation branch can
 // look it up via `registeredHarnessNames()`.
 import "../harness/echo/index.ts";
@@ -70,6 +71,9 @@ function makeCtx(
     bus,
     generateKey: () => "auto-key",
     maxSessions,
+    resolveWorkspace: (id) => id === "project-1"
+      ? { id, sourceRoot: process.cwd() }
+      : null,
     launchSession: async (options) => {
       registry.start(options);
       return { sessionKey: options.sessionKey, harness: options.harness ?? "claude", model: options.initialModel ?? "", permissionMode: options.permissionMode ?? "auto", reasons: [] };
@@ -281,6 +285,44 @@ describe("createSession — MAX_SESSIONS cap", () => {
 });
 
 describe("createSession — rejection routing", () => {
+  it("resolves a bare workspace launch from workspaceId and ignores no client path", async () => {
+    const registry = new SessionRegistry();
+    const starts: StartSessionOptions[] = [];
+    const ctx = makeCtx(registry, 50);
+    const workspaceId = "55555555-5555-4555-8555-555555555555";
+    ctx.resolveWorkspace = (id) => id === workspaceId
+      ? { id, sourceRoot: process.cwd() }
+      : null;
+    ctx.launchSession = async (options) => {
+      starts.push(options);
+      return { sessionKey: options.sessionKey, harness: "claude", model: "",
+        permissionMode: "auto", reasons: [] };
+    };
+    const { ws } = makeFakeWs();
+
+    await createSession(ctx, { type: "create_session", sessionKey: "opaque-run",
+      workspaceId }, ws as unknown as Parameters<typeof createSession>[2]);
+
+    expect(starts[0]?.cwd).toBe(process.cwd());
+  });
+
+  it("rejects cwd when workspaceId is authoritative", async () => {
+    const registry = new SessionRegistry();
+    const ctx = makeCtx(registry, 50);
+    const workspaceId = "55555555-5555-4555-8555-555555555555";
+    ctx.resolveWorkspace = (id) => id === workspaceId
+      ? { id, sourceRoot: process.cwd() }
+      : null;
+    const { ws, sent } = makeFakeWs();
+
+    await createSession(ctx, { type: "create_session", sessionKey: "opaque-mismatch",
+      workspaceId, cwd: process.cwd() }, ws as unknown as Parameters<typeof createSession>[2]);
+
+    expect(sent[0]?.payload).toMatchObject({
+      topic: "session:opaque-mismatch", code: "WORKSPACE_CONFIGURATION_MISMATCH",
+    });
+  });
+
   it("derives canonical cwd, leader role, and worktree isolation from the work item", async () => {
     const registry = new SessionRegistry();
     const starts: StartSessionOptions[] = [];
@@ -334,7 +376,6 @@ describe("createSession — rejection routing", () => {
       type: "create_session",
       sessionKey: "run-ingress",
       workItemId: "work-ingress",
-      cwd: process.cwd(),
     }, ws as unknown as Parameters<typeof createSession>[2]);
 
     expect(starts).toHaveLength(1);
@@ -522,6 +563,30 @@ describe("createSession — rejection routing", () => {
 
     expect(starts).toHaveLength(1);
     expect(starts[0]?.permissionMode).toBe("bypassPermissions");
+  });
+
+  it("forwards the explicit sandbox policy without coupling its axes", async () => {
+    const registry = new SessionRegistry();
+    const starts: StartSessionOptions[] = [];
+    const ctx = makeCtx(registry, 50);
+    ctx.launchSession = async (options) => {
+      starts.push(options);
+      return { sessionKey: options.sessionKey, harness: "codex", model: "", permissionMode: "auto", reasons: [] };
+    };
+    const { ws } = makeFakeWs();
+    const sandboxPolicy: SandboxPolicy = {
+      filesystemScope: "workspace-write",
+      approvalPolicy: "never",
+      networkAccess: "enabled",
+    };
+
+    await createSession(ctx, {
+      type: "create_session", sessionKey: "leader-sandbox", prompt: "hi",
+      cwd: process.cwd(), harness: "codex", sandboxPolicy,
+    }, ws as unknown as Parameters<typeof createSession>[2]);
+
+    expect((starts[0] as StartSessionOptions & { sandboxPolicy?: SandboxPolicy }).sandboxPolicy)
+      .toEqual(sandboxPolicy);
   });
 
   it("omits permissionMode from the registry.start payload when the command lacks it", () => {

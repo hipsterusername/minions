@@ -4,9 +4,8 @@ import fs from "fs";
 import path from "path";
 import {
   resolveExistingProjectPath,
-  validateProjectPath,
 } from "../../path-guard.ts";
-import { decodePath, param } from "./helpers.ts";
+import { param, resolveProjectReference } from "./helpers.ts";
 
 /** Directories/files to always skip in listings */
 const SKIP = new Set([
@@ -31,9 +30,9 @@ const BLOB_MIME_TYPES: Record<string, string> = {
 
 export function mountFileRoutes(router: Router): void {
   router.get("/:encodedPath/file", async (req: Request, res: Response) => {
-    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    const projectPath = resolveProjectReference(param(req, "encodedPath"));
     if (!projectPath) {
-      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      res.status(403).json({ error: "Project path not registered" });
       return;
     }
     const relFile = req.query["path"];
@@ -85,9 +84,9 @@ export function mountFileRoutes(router: Router): void {
   // Content-Type so the client can wrap the response in a Blob/File and
   // hand it to the image-loader pipeline (downscale, decode, annotate).
   router.get("/:encodedPath/blob", async (req: Request, res: Response) => {
-    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    const projectPath = resolveProjectReference(param(req, "encodedPath"));
     if (!projectPath) {
-      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      res.status(403).json({ error: "Project path not registered" });
       return;
     }
     const relFile = req.query["path"];
@@ -142,9 +141,9 @@ export function mountFileRoutes(router: Router): void {
   });
 
   router.get("/:encodedPath/ls", async (req: Request, res: Response) => {
-    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    const projectPath = resolveProjectReference(param(req, "encodedPath"));
     if (!projectPath) {
-      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      res.status(403).json({ error: "Project path not registered" });
       return;
     }
     const relDir = (req.query["path"] as string) || "";
@@ -180,9 +179,9 @@ export function mountFileRoutes(router: Router): void {
   });
 
   router.get("/:encodedPath/tree", async (req: Request, res: Response) => {
-    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    const projectPath = resolveProjectReference(param(req, "encodedPath"));
     if (!projectPath) {
-      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      res.status(403).json({ error: "Project path not registered" });
       return;
     }
     const depthParam = req.query["depth"];

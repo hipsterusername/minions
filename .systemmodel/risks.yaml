@@ -83,7 +83,7 @@ risks:
     domain: domain.integration
   - id: risk.project_worktree_content_split
     type: risk
-    summary: REST-backed project artifacts and skill libraries use the project root while agents may edit a separate isolated worktree.
+    summary: REST-backed project artifacts and skill libraries use the workspace state root while agents may read or edit the source root or a separate execution worktree.
     severity: high
     applies_to:
       capabilities:
@@ -97,6 +97,46 @@ risks:
       files:
         - src/api.ts
         - server/skills.ts
+        - server/project-store.ts
         - server/path-guard.ts
-    mitigation: Label content provenance, preserve owned-path guards, and deliberately resolve project-root versus worktree reads.
+    mitigation: Label content provenance, preserve owned-path guards, and deliberately resolve state-root, source-root, and execution-worktree reads.
     domain: domain.workspace
+  - id: risk.legacy_workspace_root_overlap
+    type: risk
+    summary: Central workspace state can coexist with legacy in-repository sidecars and worktrees, creating ambiguity or unsafe cleanup during migration.
+    severity: high
+    applies_to:
+      capabilities:
+        - capability.project_workspace
+      flows:
+        - flow.open_project_workspace
+      surfaces:
+        - surface.canvas
+        - surface.ws_api
+      files:
+        - server/workspace-registry.ts
+        - server/workspace-legacy-identity.ts
+        - server/project-store.ts
+        - server/mcp-server-store.ts
+        - server/worktree-owned-root.ts
+        - server/worktree-create.ts
+    mitigation: Copy legacy sidecars once without overwrite or symlink following, never read them as a persistence fallback, create new artifacts centrally, accept only known owned roots, and leave legacy deletion to an explicit user decision.
+    domain: domain.workspace
+  - id: risk.sandbox_policy_overclaim
+    type: risk
+    summary: A requested sandbox policy may be mistaken for an enforced boundary when the selected harness cannot manage one or more axes.
+    severity: critical
+    applies_to:
+      capabilities:
+        - capability.runtime_configuration
+      flows:
+        - flow.configure_runtime
+      surfaces:
+        - surface.canvas
+        - surface.ws_api
+      files:
+        - server/harness/sandbox-policy.ts
+        - server/harness/types.ts
+        - src/nodes/leader/SandboxPolicyControls.tsx
+    mitigation: Persist requested and effective policies separately, mark unsupported axes unmanaged, and only claim complete enforcement for Codex.
+    domain: domain.platform

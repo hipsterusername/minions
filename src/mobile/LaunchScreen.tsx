@@ -213,7 +213,7 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
       sessionKey,
       prompt: appendTextAttachmentsToPrompt(trimmedPrompt, textAttachments),
       role: "leader",
-      cwd: targetPath,
+      ...(targetProjectId ? { workspaceId: targetProjectId } : { cwd: targetPath }),
       worktreeIsolation,
       ...(imageAttachments.length > 0 ? { attachments: imageAttachments } : {}),
       // Empty value = let the server/harness pick its default model. A chosen

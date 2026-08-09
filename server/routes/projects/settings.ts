@@ -14,24 +14,23 @@ import {
   saveMcpServer,
   deleteMcpServer,
 } from "../../mcp-server-store.ts";
-import { validateProjectPath } from "../../path-guard.ts";
-import { decodePath, param } from "./helpers.ts";
+import { param, resolveProjectReference } from "./helpers.ts";
 
 export function mountSettingsRoutes(router: Router): void {
 
   router.get("/:encodedPath/context", (req: Request, res: Response) => {
-    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    const projectPath = resolveProjectReference(param(req, "encodedPath"));
     if (!projectPath) {
-      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      res.status(403).json({ error: "Project path not registered" });
       return;
     }
     res.json(readContext(projectPath));
   });
 
   router.put("/:encodedPath/context", (req: Request, res: Response) => {
-    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    const projectPath = resolveProjectReference(param(req, "encodedPath"));
     if (!projectPath) {
-      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      res.status(403).json({ error: "Project path not registered" });
       return;
     }
     const { content } = req.body as { content: string };
@@ -40,18 +39,18 @@ export function mountSettingsRoutes(router: Router): void {
   });
 
   router.get("/:encodedPath/settings", (req: Request, res: Response) => {
-    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    const projectPath = resolveProjectReference(param(req, "encodedPath"));
     if (!projectPath) {
-      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      res.status(403).json({ error: "Project path not registered" });
       return;
     }
     res.json(readSettings(projectPath));
   });
 
   router.put("/:encodedPath/settings", (req: Request, res: Response) => {
-    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    const projectPath = resolveProjectReference(param(req, "encodedPath"));
     if (!projectPath) {
-      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      res.status(403).json({ error: "Project path not registered" });
       return;
     }
     const settings = req.body as ProjectSettings;
@@ -60,18 +59,18 @@ export function mountSettingsRoutes(router: Router): void {
   });
 
   router.get("/:encodedPath/skills", (req: Request, res: Response) => {
-    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    const projectPath = resolveProjectReference(param(req, "encodedPath"));
     if (!projectPath) {
-      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      res.status(403).json({ error: "Project path not registered" });
       return;
     }
     res.json(readSkills(projectPath));
   });
 
   router.put("/:encodedPath/skills", (req: Request, res: Response) => {
-    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    const projectPath = resolveProjectReference(param(req, "encodedPath"));
     if (!projectPath) {
-      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      res.status(403).json({ error: "Project path not registered" });
       return;
     }
     const skills = req.body as unknown[];
@@ -84,9 +83,9 @@ export function mountSettingsRoutes(router: Router): void {
   });
 
   router.get("/:encodedPath/mcp-servers", (req: Request, res: Response) => {
-    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    const projectPath = resolveProjectReference(param(req, "encodedPath"));
     if (!projectPath) {
-      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      res.status(403).json({ error: "Project path not registered" });
       return;
     }
     res.json(listMcpServers(projectPath));
@@ -95,9 +94,9 @@ export function mountSettingsRoutes(router: Router): void {
   router.put(
     "/:encodedPath/mcp-servers/:serverId",
     (req: Request, res: Response) => {
-      const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+      const projectPath = resolveProjectReference(param(req, "encodedPath"));
       if (!projectPath) {
-        res.status(403).json({ error: "Project path not registered or outside home directory" });
+        res.status(403).json({ error: "Project path not registered" });
         return;
       }
       try {
@@ -113,9 +112,9 @@ export function mountSettingsRoutes(router: Router): void {
   router.delete(
     "/:encodedPath/mcp-servers/:serverId",
     (req: Request, res: Response) => {
-      const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+      const projectPath = resolveProjectReference(param(req, "encodedPath"));
       if (!projectPath) {
-        res.status(403).json({ error: "Project path not registered or outside home directory" });
+        res.status(403).json({ error: "Project path not registered" });
         return;
       }
       const serverId = param(req, "serverId");

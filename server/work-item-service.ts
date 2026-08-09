@@ -6,6 +6,7 @@ import type {
   WorkItemServiceErrorCode,
 } from "../shared/work-item-contracts.ts";
 import type { ChangeMode } from "../shared/work-item-lifecycle.ts";
+import type { SandboxPolicy } from "../shared/workspace-contracts.ts";
 
 export interface WorkItemMutationContext {
   requestId: string;
@@ -33,12 +34,12 @@ export interface WorkItemService {
   }): Promise<WorkItemDetailSnapshot>;
   continue(input: ExistingWorkItemMutationContext & { workItemId: string; prompt: string;
     displayPrompt?: string;
-    harness?: string; model?: string; permissionMode?: string; thinkingConfig?: unknown; skillIds?: string[];
+    harness?: string; model?: string; permissionMode?: string; sandboxPolicy?: SandboxPolicy; thinkingConfig?: unknown; skillIds?: string[];
     skillValues?: Record<string, Record<string, string>>;
     systemPrompt?: string; attachments?: unknown[] }): Promise<WorkItemDetailSnapshot>;
   startRun(input: ExistingWorkItemMutationContext & { workItemId: string; prompt: string;
     displayPrompt?: string;
-    harness?: string; model?: string; permissionMode?: string; thinkingConfig?: unknown; skillIds?: string[];
+    harness?: string; model?: string; permissionMode?: string; sandboxPolicy?: SandboxPolicy; thinkingConfig?: unknown; skillIds?: string[];
     skillValues?: Record<string, Record<string, string>>;
     systemPrompt?: string; attachments?: unknown[] }): Promise<WorkItemDetailSnapshot>;
   replyToWaitingRun(input: ExistingWorkItemMutationContext & { workItemId: string; runKey: string;

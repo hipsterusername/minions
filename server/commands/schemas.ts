@@ -23,6 +23,7 @@ import type { WsCommand, WsCommandType } from "./types.ts";
 import { changeModeSchema } from "../../shared/work-item-lifecycle.ts";
 import { workItemBindingSurfaceSchema } from "../../shared/work-item-contracts.ts";
 import { isLeaderPromptCustomizationEnvelope } from "../../shared/leader-prompt.ts";
+import { sandboxPolicySchema, workspaceIdSchema } from "../../shared/workspace-contracts.ts";
 
 const SESSION_ROLES = [
   "leader",
@@ -80,6 +81,11 @@ const sessionConfigFields = {
   harness: z.string().optional(),
 };
 
+const workspaceLaunchFields = {
+  workspaceId: workspaceIdSchema.optional(),
+  sandboxPolicy: sandboxPolicySchema.optional(),
+};
+
 /** Build a command schema: `type` literal + requestId + per-command fields. */
 function command<T extends WsCommandType>(type: T, fields: z.ZodRawShape) {
   return z.object({ type: z.literal(type), requestId, ...fields });
@@ -93,6 +99,7 @@ export const COMMAND_SCHEMAS = {
     sessionKey,
     workItemId: z.string().min(1).optional(),
     cwd,
+    ...workspaceLaunchFields,
     role: z.enum(SESSION_ROLES).optional(),
     skillIds: z.array(z.string()).optional(),
     skillValues: z.record(z.string(), z.record(z.string(), z.string())).optional(),
@@ -140,10 +147,22 @@ export const COMMAND_SCHEMAS = {
   // Durable work items
   create_work_item: command("create_work_item", {
     requestId: workItemRequestId,
-    projectId: requiredId,
-    projectPath: requiredId,
+    projectId: requiredId.optional(),
+    projectPath: requiredId.optional(),
+    workspaceId: workspaceIdSchema.optional(),
     title: requiredId,
     changeMode: changeModeSchema,
+  }).superRefine((value, ctx) => {
+    const identity = value as { workspaceId?: string; projectId?: string; projectPath?: string };
+    const modern = identity.workspaceId !== undefined;
+    const legacy = identity.projectId !== undefined || identity.projectPath !== undefined;
+    if (modern && legacy) {
+      ctx.addIssue({ code: "custom", path: ["workspaceId"],
+        message: "workspaceId cannot be combined with legacy project identity fields" });
+    } else if (!modern && (identity.projectId === undefined || identity.projectPath === undefined)) {
+      ctx.addIssue({ code: "custom", path: ["workspaceId"],
+        message: "workspaceId is required unless both legacy project identity fields are supplied" });
+    }
   }),
   continue_work_item: command("continue_work_item", {
     ...mutationFields, workItemId: requiredId, prompt: z.string().min(1),
@@ -153,6 +172,7 @@ export const COMMAND_SCHEMAS = {
     skillIds: z.array(requiredId).optional(), systemPrompt: requiredId.optional(),
     skillValues: z.record(z.string(), z.record(z.string(), z.string())).optional(),
     attachments: z.array(z.unknown()).optional(),
+    ...workspaceLaunchFields,
   }),
   start_work_item_run: command("start_work_item_run", {
     ...mutationFields, workItemId: requiredId, prompt: z.string().min(1),
@@ -162,6 +182,7 @@ export const COMMAND_SCHEMAS = {
     skillIds: z.array(requiredId).optional(), systemPrompt: requiredId.optional(),
     skillValues: z.record(z.string(), z.record(z.string(), z.string())).optional(),
     attachments: z.array(z.unknown()).optional(),
+    ...workspaceLaunchFields,
   }),
   reply_to_waiting_run: command("reply_to_waiting_run", {
     ...mutationFields, workItemId: requiredId, runKey: requiredId, prompt: z.string().min(1),
@@ -328,6 +349,7 @@ export const COMMAND_SCHEMAS = {
   start_dialectic: command("start_dialectic", {
     sessionKey,
     cwd,
+    ...workspaceLaunchFields,
     prompt,
     dialecticConfig: z.unknown().optional(),
   }),

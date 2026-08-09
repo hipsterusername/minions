@@ -78,6 +78,12 @@ describe("contract: inbound WS command validation", () => {
       type: "create_session",
       sessionKey: "sk-1",
       cwd: "/projects/foo",
+      workspaceId: "8dcf241e-52b8-4d50-a2f3-9b12fdab7a1c",
+      sandboxPolicy: {
+        filesystemScope: "workspace-write",
+        approvalPolicy: "on-request",
+        networkAccess: "disabled",
+      },
       role: "leader",
       worktreeIsolation: true,
       model: "claude-opus-4-5",
@@ -115,6 +121,27 @@ describe("contract: inbound WS command validation", () => {
 
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining(payload), expect.anything());
     expect(ws.sent).toHaveLength(0);
+  });
+
+  it("rejects invalid sandbox posture before dispatch", () => {
+    const ws = new FakeWs();
+    const dispatch = vi.fn();
+    attachConnectionListeners(ws as unknown as WebSocket, makeDeps({ dispatch }));
+    clearInitialMessages(ws);
+
+    send(ws, {
+      type: "create_session",
+      workspaceId: "8dcf241e-52b8-4d50-a2f3-9b12fdab7a1c",
+      sandboxPolicy: {
+        filesystemScope: "host-write",
+        approvalPolicy: "on-request",
+        networkAccess: "enabled",
+      },
+    });
+
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(ws.sent).toHaveLength(1);
+    expect(JSON.parse(ws.sent[0]!).message).toContain("filesystemScope");
   });
 
   it("rejects create_session when a Leader customization envelope is malformed", () => {

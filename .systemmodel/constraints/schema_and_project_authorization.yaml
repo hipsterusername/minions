@@ -1,6 +1,6 @@
 id: constraint.schema_and_project_authorization
 type: constraint
-statement: Commands and REST writes validate input schemas and independently verify registered project ownership and guarded paths.
+statement: Commands and REST writes validate input schemas and independently resolve a stable workspace UUID to its registered canonical source root before applying guarded paths.
 applies_to:
   capabilities: []
   flows: []
@@ -8,12 +8,19 @@ applies_to:
   files:
     - server/commands/schemas.ts
     - server/commands/work-items.ts
+    - server/commands/create-session.ts
+    - server/commands/dialectic.ts
     - server/path-guard.ts
+    - server/workspace-registry.ts
+    - server/routes/projects/helpers.ts
+    - server/routes/projects/workspace-lifecycle.ts
+    - src/nodes/LeaderNode.tsx
+    - src/nodes/leader/use-canvas-work-item.ts
     - src/api.ts
 severity: critical
-agent_instruction: Treat typed envelopes as untrusted input, resolve project paths server-side, and test traversal, mismatched project IDs, and authorization failures.
-suggested_tests: [ server/commands/schemas.test.ts, server/commands/work-items.test.ts, server/path-guard.test.ts, src/api.test.ts ]
-evidence: [ decision.canonical_work_item_lifecycle ]
+agent_instruction: Treat typed envelopes as untrusted input, require modern clients to send only workspace UUIDs for launches and work-item creation, resolve source paths server-side, isolate path pairs to legacy compatibility, require explicit registration, and test traversal, symlink escape, mismatched workspace IDs, and authorization failures.
+suggested_tests: [ server/commands/schemas.test.ts, server/commands/work-items.test.ts, server/path-guard.test.ts, server/workspace-registry.test.ts, tests/contracts/projects-core-routes.test.ts, src/api.test.ts ]
+evidence: [ decision.canonical_work_item_lifecycle, decision.portable_workspace_roots ]
 domain: domain.platform
 scope: global
 guards: []

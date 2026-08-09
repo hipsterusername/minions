@@ -152,10 +152,10 @@ export interface TaskToolContext {
   }) => void | Promise<{ sessionKey: string; harness: string; model: string; permissionMode: string }>;
   cwd: string;
   /**
-   * The canonical project path (sidecar root). When the leader is running
+   * The canonical project source path. When the leader is running
    * inside a git worktree, `cwd` points at the worktree but `projectPath`
-   * still points at the original checkout where `.minions/skills.json`
-   * lives. Falls back to `cwd` when no worktree is in use.
+   * still identifies the registered source whose central state contains
+   * `skills.json`. Falls back to `cwd` when no worktree is in use.
    */
   projectPath: string;
   minionSystemPrompt: string;

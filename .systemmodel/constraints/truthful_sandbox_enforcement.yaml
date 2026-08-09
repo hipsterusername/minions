@@ -1,0 +1,22 @@
+id: constraint.truthful_sandbox_enforcement
+type: constraint
+statement: Filesystem scope, approval policy, and network access are independent requested axes, and effective guarantees report unsupported harness axes as unmanaged.
+applies_to:
+  capabilities: []
+  flows: []
+  surfaces: []
+  files:
+    - shared/workspace-contracts.ts
+    - server/harness/types.ts
+    - server/harness/sandbox-policy.ts
+    - server/harness/codex/index.ts
+    - server/harness/codex/options.ts
+    - src/nodes/leader/SandboxPolicyControls.tsx
+severity: critical
+agent_instruction: Keep Git change mode separate from process sandbox policy; force plan to read-only, default authorized roots to workspace-write, require explicit unrestricted access, enforce every axis in Codex, and label unsupported axes unmanaged without claiming enforcement by other harnesses.
+review_gate: gate.sandbox_guarantees
+suggested_tests: [ shared/workspace-contracts.test.ts, server/harness/sandbox-policy.test.ts, server/harness/codex/index.test.ts, server/harness/codex/options.test.ts, src/nodes/leader/SandboxPolicyControls.test.tsx ]
+evidence: [ decision.portable_workspace_roots ]
+domain: domain.platform
+scope: domain
+guards: []

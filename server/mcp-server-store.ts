@@ -1,8 +1,8 @@
 /**
  * MCP server file storage.
  *
- * Server configs live in one JSON file at
- * `<projectPath>/.minions/mcp-servers.json`. This mirrors the flat
+ * Server configs live in one JSON file in the registered workspace state
+ * root under MINIONS_HOME. This mirrors the flat
  * array format used by `skills.json` in `project-store.ts`: one file for
  * all entries, parsed as an array, each entry validated independently.
  *
@@ -18,13 +18,21 @@ import {
   parseMcpServerEntry,
   type McpServerEntry,
 } from "../shared/mcp-servers/types.ts";
+import { findWorkspaceBySource, registerWorkspace } from "./workspace-registry.ts";
 
-const SIDECAR_DIR = ".minions";
 const MCP_SERVERS_FILE = "mcp-servers.json";
 
 /** Absolute path to the mcp-servers.json file for a project. */
 export function mcpServersFilePath(projectPath: string): string {
-  return path.join(projectPath, SIDECAR_DIR, MCP_SERVERS_FILE);
+  const workspace = findWorkspaceBySource(projectPath) ?? registerWorkspace(projectPath);
+  if (!workspace) throw new Error("MCP server storage requires a registered workspace");
+  return path.join(workspace.stateRoot, MCP_SERVERS_FILE);
+}
+
+function writableMcpServersFilePath(projectPath: string): string {
+  const workspace = findWorkspaceBySource(projectPath) ?? registerWorkspace(projectPath);
+  if (!workspace) throw new Error("MCP server storage requires a registered workspace");
+  return path.join(workspace.stateRoot, MCP_SERVERS_FILE);
 }
 
 function ensureDir(filePath: string): void {
@@ -51,7 +59,7 @@ function readRawEntries(projectPath: string): unknown[] {
 }
 
 function writeRawEntries(projectPath: string, entries: McpServerEntry[]): void {
-  const filePath = mcpServersFilePath(projectPath);
+  const filePath = writableMcpServersFilePath(projectPath);
   ensureDir(filePath);
   fs.writeFileSync(filePath, JSON.stringify(entries, null, 2), { mode: 0o600 });
   fs.chmodSync(filePath, 0o600);
@@ -92,7 +100,7 @@ export interface ListMcpServersResult {
 }
 
 /**
- * List every MCP server in the project's sidecar. Missing file = empty
+ * List every MCP server in the workspace store. Missing file = empty
  * result. Each entry is parsed independently so one bad entry cannot
  * poison the rest.
  */
@@ -129,19 +137,19 @@ export function mcpServerSecurityWarnings(entry: McpServerEntry): string[] {
     );
     if (entry.env && Object.keys(entry.env).length > 0) {
       messages.push(
-        "Environment values are stored in the project sidecar; do not commit the .minions directory.",
+        "Environment values are stored in the private Minions workspace state; protect access to MINIONS_HOME.",
       );
     }
   } else if (entry.headers && Object.keys(entry.headers).length > 0) {
     messages.push(
-      "HTTP header values are stored in the project sidecar; do not commit the .minions directory.",
+      "HTTP header values are stored in the private Minions workspace state; protect access to MINIONS_HOME.",
     );
   }
   return messages;
 }
 
 /**
- * Load MCP servers by ID from the project's sidecar. Unknown IDs are
+ * Load MCP servers by ID from the workspace store. Unknown IDs are
  * silently dropped — the caller (step runner) may reference a server that
  * was deleted since a saved reference was authored. Returns entries in the order
  * of the requested ids.

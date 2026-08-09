@@ -1,7 +1,6 @@
 /** Server-side write-through persistence and boot hydration glue. */
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type Database from "better-sqlite3";
 import { initDb } from "./db.ts";
@@ -9,6 +8,7 @@ import * as repo from "./session-repo.ts";
 import type { ApprovalState, TaskManagerState } from "./task-tools.ts";
 import type { RenderState } from "../shared/render-dsl.ts";
 import type { WorktreeInfo } from "./worktree-types.ts";
+import type { SandboxResolution } from "../shared/workspace-contracts.ts";
 import {
   MAX_BUFFERED_EVENTS,
   type BufferedEvent,
@@ -24,6 +24,7 @@ import { serverLogger } from "./logging.ts";
 import { reviewLifecycleToColumns, type SessionReviewLifecycle } from "./session-review-lifecycle.ts";
 import { ensureWorkItemSchema } from "./work-item-schema.ts";
 import { removeSessionPersistence } from "./session-persist-remove.ts";
+import { getMinionsHome } from "./workspace-registry.ts";
 
 const log = serverLogger.child("session-persist");
 
@@ -36,7 +37,7 @@ function defaultDbPath(): string {
   if (process.env["MINIONS_SERVER_DB"]) {
     return process.env["MINIONS_SERVER_DB"]!;
   }
-  const dir = path.join(os.homedir(), ".minions");
+  const dir = getMinionsHome();
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   try {
     fs.chmodSync(dir, 0o700);
@@ -51,6 +52,9 @@ export function openPersistDb(dbPath?: string): Database.Database {
   if (dbHandle) return dbHandle;
   const resolvedPath = dbPath ?? defaultDbPath();
   dbHandle = initDb(resolvedPath);
+  const sessionColumns = dbHandle.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
+  if (!sessionColumns.some((column) => column.name === "permission_mode"))
+    dbHandle.exec("ALTER TABLE sessions ADD COLUMN permission_mode TEXT");
   ensureWorkItemSchema(dbHandle);
   dbHandle.exec(`
     CREATE TABLE IF NOT EXISTS session_armed_prompts (
@@ -168,6 +172,8 @@ export interface PersistableSession {
   turns: number;
   /** Registered harness; legacy rows default to "claude". */
   harnessName: string;
+  permissionMode?: string | null;
+  sandboxPolicy?: SandboxResolution | null;
   reviewLifecycle?: SessionReviewLifecycle;
 }
 
@@ -198,6 +204,7 @@ function sessionToRow(
     total_cost: s.totalCost,
     turns: s.turns,
     harness_name: s.harnessName,
+    sandbox_policy_json: s.sandboxPolicy ? JSON.stringify(s.sandboxPolicy) : null,
     ...reviewLifecycleToColumns(s.reviewLifecycle),
     // Upsert preserves the original created_at.
     created_at: nowIso,
@@ -211,6 +218,7 @@ export function persistSession(s: PersistableSession): void {
   try {
     const nowIso = new Date().toISOString();
     repo.upsertSession(db, sessionToRow(s, nowIso, repo.getSession(db, s.id)));
+    db.prepare("UPDATE sessions SET permission_mode = ? WHERE session_key = ?").run(s.permissionMode ?? null, s.id);
   } catch (err) {
     log.warn("session_upsert_failed", { error: err });
   }
@@ -336,7 +344,7 @@ export function persistRenderState(
 
 /** Durable pieces used to rematerialize a host with fresh volatile handles. */
 export interface HydratedSession {
-  row: repo.SessionRow;
+  row: repo.SessionRow & { permission_mode?: string | null };
   armedSystemPrompt: string | null;
   tasks: TaskManagerState | null;
   render: RenderState | null;
@@ -348,7 +356,7 @@ export function hydrateSessionsFromDb(): HydratedSession[] {
   const db = ensureDb();
   if (!db) return [];
 
-  let rows: repo.SessionRow[];
+  let rows: Array<repo.SessionRow & { permission_mode?: string | null }>;
   try {
     rows = repo.getAllSessions(db);
   } catch (err) {

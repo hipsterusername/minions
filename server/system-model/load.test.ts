@@ -47,6 +47,7 @@ describe("loadSystemModel", () => {
 
 export function copyValidFixture(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "system-model-"));
+  process.env["MINIONS_HOME"] = fs.mkdtempSync(path.join(os.tmpdir(), "system-model-home-"));
   fs.cpSync(path.join(fixtures, "valid"), dir, { recursive: true });
   return dir;
 }

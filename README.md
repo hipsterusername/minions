@@ -104,12 +104,85 @@ All optional — sane defaults are provided:
 | `CLAUDE_CODE_PATH` | SDK discovery | Optional Claude executable override |
 | `CODEX_PATH` | SDK discovery | Optional Codex executable override |
 | `CODEX_API_KEY` / `OPENAI_API_KEY` | Codex CLI login | Optional Codex API credentials |
+| `MINIONS_HOME` | `~/.minions` | Central registry, project state, and Minions-owned worktrees |
 
 Set them as environment variables:
 
 ```bash
 PORT=8080 pnpm start
 ```
+
+### Workspace storage and migration
+
+Opening or creating a project explicitly registers its canonical source folder
+and assigns it a stable workspace UUID. The UUID is the public identity; the
+server owns the mapping to the source folder, so projects on mounted volumes are
+supported without treating every path on the host as authorized.
+
+New Minions state is kept outside the repository:
+
+```text
+$MINIONS_HOME/
+├── server.db                           # global sessions and orchestration state
+├── artifacts/                          # session-scoped generated artifacts
+├── recent-projects.json
+└── workspaces/
+    ├── registry.json                 # UUID → canonical sourceRoot + nickname
+    └── <workspace-uuid>/             # stateRoot
+        ├── canvas.db
+        ├── context.md
+        ├── settings.json
+        ├── skills.json
+        ├── mcp-servers.json
+        └── worktrees/                # execution worktrees
+```
+
+`MINIONS_HOME` defaults to `~/.minions`. Do not hand-edit `registry.json` or
+derive a source path from a UUID. Registration canonicalizes paths and the file
+APIs continue to reject traversal and symlink escapes outside the registered
+source root.
+
+Existing projects migrate non-destructively:
+
+1. Back up the repository and its existing `.minions/` and
+   `.canvas-worktrees/` directories if they contain work you need.
+2. Open the existing source folder in Minions. On first registration, a single
+   valid legacy project UUID is preserved; otherwise a UUID is assigned. Regular
+   files from `.minions/` are copied into the new UUID state root without
+   overwriting destination files or following symlinks.
+3. Verify project settings, skills, session history, and pending work. New state
+   and new worktrees are created under `$MINIONS_HOME/workspaces/<uuid>/`.
+4. Keep the legacy directories until you have completed or discarded old
+   worktrees and verified the migrated state. Minions recognizes legacy
+   in-repository worktree paths during the transition and does not
+   automatically delete either legacy directory.
+
+Changing `MINIONS_HOME` selects a different registry and state collection. Move
+that directory as a unit while Minions is stopped if you need to relocate it.
+
+Moving a repository does not create new state: explicitly rebind its workspace
+UUID to the new source folder (`POST /api/projects/rebind`). A copied repository
+gets a new UUID by default. To intentionally make a copy the source for an
+existing workspace, use `POST /api/projects/attach`; the replaced binding's
+central state is retained and is never deleted implicitly.
+
+### Git change mode and execution sandbox
+
+Leader configuration exposes two independent boundaries:
+
+- **Git change mode** chooses whether edits land in a shared checkout or an
+  isolated worktree. It is a coordination and review boundary, not an
+  operating-system sandbox.
+- **Execution sandbox** requests filesystem access (`read-only`,
+  `workspace-write`, or explicit `unrestricted`), approval behavior, and
+  network access independently. Plan mode always forces read-only, and the
+  normal default is workspace-write with network disabled.
+
+Codex enforces all three sandbox axes. Harnesses that cannot enforce an axis
+report it as `unmanaged`; Minions does not claim that Claude, OpenCode, or Pi
+enforce these provider-neutral sandbox guarantees. Treat requested policy and
+effective policy as different values, and use OS-level isolation when an
+unmanaged axis is unacceptable.
 
 Remote browser access is limited to loopback and Tailscale-style hosts
 (`100.64.0.0/10`, Tailscale IPv6, and MagicDNS `*.ts.net`). The browser talks to
@@ -218,10 +291,11 @@ protect credentials, keep recoverable backups, and supervise consequential
 actions.
 
 Run Minions only on a trusted local machine or private tailnet. Worktrees are
-coordination boundaries, not sandboxes: agents, local MCP commands, and enabled
-tools run with the permissions of the account that started Minions. Review
-provider permissions and project-owned `.minions/mcp-servers.json` entries
-before launching unattended sessions.
+coordination boundaries, not process sandboxes. Codex can enforce the displayed
+filesystem, approval, and network policy; unsupported axes on other harnesses
+are explicitly `unmanaged`, and local MCP processes may retain the permissions
+of the account that started Minions. Review the effective policy and the
+workspace-owned `mcp-servers.json` before launching unattended sessions.
 
 ## Architecture
 

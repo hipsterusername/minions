@@ -1,5 +1,5 @@
 /**
- * Pure logic for authoring skills into a project's `.minions/skills.json`.
+ * Pure logic for authoring skills into central workspace `skills.json`.
  *
  * The `skill-builder` built-in skill teaches an agent HOW to design skills;
  * this module is the WHAT — the validation, id-generation, variable

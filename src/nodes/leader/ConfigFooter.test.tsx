@@ -34,6 +34,14 @@ describe("ConfigFooter change mode", () => {
       workItemSnapshot: snapshot("worktree") }} onUpdateData={vi.fn()} />);
     expect(screen.getByText(/Worktree/)).toBeInTheDocument();
   });
+
+  it("labels the process sandbox separately from Git change mode", () => {
+    renderFooter({ worktreeIsolation: true, sandboxPolicy: {
+      filesystemScope: "read-only", approvalPolicy: "always", networkAccess: "disabled",
+    } });
+    expect(screen.getByText("Sandbox: read-only")).toBeInTheDocument();
+    expect(screen.getByText(/Worktree/)).toBeInTheDocument();
+  });
 });
 
 describe("ConfigFooter change-mode selector", () => {

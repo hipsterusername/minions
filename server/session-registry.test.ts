@@ -662,6 +662,37 @@ describe("SessionRegistry.hydrateFromDb — sessionId round-trip", () => {
     expect(host?.taskState?.approval?.summary).toBe("ready");
   });
 
+  it("hydrates the requested and effective sandbox posture", () => {
+    persistSession(makePersisted({
+      id: "sandboxed-leader",
+      sandboxPolicy: {
+        requested: { filesystemScope: "workspace-write", approvalPolicy: "on-request", networkAccess: "disabled" },
+        effective: { filesystemScope: "workspace-write", approvalPolicy: "on-request", networkAccess: "disabled" },
+        unsupported: [],
+      },
+    }));
+
+    const r = new SessionRegistry();
+    r.hydrateFromDb();
+    expect(r.get("sandboxed-leader")?.sandboxPolicy).toEqual({
+      requested: { filesystemScope: "workspace-write", approvalPolicy: "on-request", networkAccess: "disabled" },
+      effective: { filesystemScope: "workspace-write", approvalPolicy: "on-request", networkAccess: "disabled" },
+      unsupported: [],
+    });
+  });
+
+  it("restores runtime permission changes for Claude sessions", () => {
+    persistSession(makePersisted({
+      id: "claude-permission",
+      harnessName: "claude",
+      permissionMode: "bypassPermissions",
+    }));
+
+    const r = new SessionRegistry();
+    r.hydrateFromDb();
+    expect(r.get("claude-permission")?.permissionMode).toBe("bypassPermissions");
+  });
+
   it("preserves null sessionId for pre-migration rows", () => {
     persistSession(makePersisted({ id: "old-leader", sessionId: null }));
     const r = new SessionRegistry();

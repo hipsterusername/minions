@@ -686,3 +686,44 @@
     transition: none;
   }
 }
+.leader-sandbox-policy {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+  padding: 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font: 10px/1.35 var(--font-mono);
+}
+
+.leader-sandbox-policy legend {
+  padding: 0 4px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.leader-sandbox-policy label {
+  display: grid;
+  gap: 3px;
+}
+
+.leader-sandbox-policy select {
+  min-width: 0;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  padding: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.leader-sandbox-policy small,
+.leader-sandbox-effective {
+  grid-column: 1 / -1;
+}
+
+.leader-sandbox-effective {
+  color: var(--accent);
+}

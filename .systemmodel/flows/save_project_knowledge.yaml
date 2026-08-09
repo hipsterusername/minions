@@ -10,7 +10,7 @@ suggested_tests: [ src/ProjectPanel.test.ts, src/components/ProjectTree.test.tsx
 steps:
   - Edit a supported project artifact through authenticated REST or spatial autosave.
   - Enforce project ownership, path guards, artifact sanitation, and honest error reporting.
-  - Persist the project-root sidecar or canvas state as the durable source.
+  - Persist workspace knowledge and canvas state beneath the registered UUID state root.
   - Reuse the artifact deliberately as graph context, card context, preset, skill, or future MCP configuration.
 freshness:
   class: code_coupled

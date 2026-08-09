@@ -15,14 +15,12 @@ import {
 } from "../../project-store.ts";
 import {
   registerProjectPath,
-  validateProjectPath,
   unregisterProjectPath,
-  rehydrateFromPaths,
 } from "../../path-guard.ts";
 import {
   encodePath,
-  decodePath,
   param,
+  resolveProjectReference,
   getDb,
   setDbCache,
   deleteDbCache,
@@ -35,6 +33,14 @@ import type { ProjectRow, NodeRow, EdgeRow } from "./helpers.ts";
 import { getHarnessReadiness } from "../../harness/readiness.ts";
 import type { HarnessReadinessSnapshot } from "../../harness/readiness-types.ts";
 import { resolveNewProjectDefaults } from "../../project-defaults.ts";
+import {
+  canonicalizeSourceRoot,
+  findWorkspaceBySource,
+  registerWorkspace,
+  resolveWorkspace,
+  updateWorkspaceNickname,
+} from "../../workspace-registry.ts";
+import { mountWorkspaceLifecycleRoutes } from "./workspace-lifecycle.ts";
 
 interface StateEdge {
   id: string;
@@ -60,18 +66,27 @@ export function mountCoreRoutes(
   const readiness = deps.getReadiness ?? getHarnessReadiness;
   // Restore the path allowlist from durable storage so projects remain
   // accessible across server restarts without requiring re-open.
-  rehydrateFromPaths(listRecentProjects().map((p) => p.path));
+  for (const recent of listRecentProjects()) {
+    const workspace = (recent.id ? resolveWorkspace(recent.id) : null)
+      ?? registerWorkspace(recent.path, { nickname: recent.name });
+    if (workspace) registerProjectPath(workspace.sourceRoot);
+  }
 
   router.get("/", (_req: Request, res: Response) => {
     const recents = listRecentProjects();
     res.json(
-      recents.map((r) => ({
-        id: encodePath(r.path),
-        path: r.path,
-        name: r.name,
+      recents.map((r) => {
+        const workspace = (r.id ? resolveWorkspace(r.id) : null) ?? findWorkspaceBySource(r.path);
+        return {
+        id: workspace?.id ?? encodePath(r.path),
+        workspaceId: workspace?.id,
+        path: workspace?.sourceRoot ?? r.path,
+        sourceRoot: workspace?.sourceRoot ?? r.path,
+        name: workspace?.nickname ?? r.name,
+        nickname: workspace?.nickname ?? r.name,
         lastOpened: r.lastOpened,
-        hasSidecar: hasSidecar(r.path),
-      })),
+        hasSidecar: hasSidecar(workspace?.sourceRoot ?? r.path),
+      }; }),
     );
   });
 
@@ -83,17 +98,24 @@ export function mountCoreRoutes(
       return;
     }
 
-    const absPath = registerProjectPath(projectPath);
-    if (!absPath) {
-      res.status(403).json({ error: "Project path must be under the home directory" });
+    const canonicalPath = canonicalizeSourceRoot(projectPath);
+    if (!canonicalPath) {
+      res.status(403).json({ error: "Project path must be an absolute canonical source root" });
       return;
     }
 
     const snapshot = await readiness({ fresh: true });
     const initialSettings = resolveNewProjectDefaults(snapshot);
     if (!initialSettings) {
-      unregisterProjectPath(absPath);
       res.status(409).json({ code: "HARNESS_NOT_READY", readiness: snapshot });
+      return;
+    }
+
+    const projectName = name ?? path.basename(canonicalPath);
+    const workspace = registerWorkspace(canonicalPath, { nickname: projectName });
+    const absPath = workspace && registerProjectPath(workspace.sourceRoot);
+    if (!workspace || !absPath) {
+      res.status(403).json({ error: "Project path could not be registered" });
       return;
     }
 
@@ -102,8 +124,6 @@ export function mountCoreRoutes(
     }
 
     const db = initSidecar(absPath, initialSettings);
-    const projectName = name ?? path.basename(absPath);
-
     const id = crypto.randomUUID();
     db.prepare("INSERT INTO projects (id, name) VALUES (?, ?)").run(id, projectName);
 
@@ -130,14 +150,14 @@ export function mountCoreRoutes(
       return;
     }
 
-    const absPath = registerProjectPath(projectPath);
-    if (!absPath) {
-      res.status(403).json({ error: "Project path must be under the home directory" });
+    if (!path.isAbsolute(projectPath) || !fs.existsSync(projectPath)) {
+      res.status(404).json({ error: "Directory does not exist" });
       return;
     }
-
-    if (!fs.existsSync(absPath)) {
-      res.status(404).json({ error: "Directory does not exist" });
+    const workspace = registerWorkspace(projectPath);
+    const absPath = workspace && registerProjectPath(workspace.sourceRoot);
+    if (!workspace || !absPath) {
+      res.status(403).json({ error: "Project path must be an absolute canonical source root" });
       return;
     }
 
@@ -152,11 +172,8 @@ export function mountCoreRoutes(
     }
     const db = getDb(absPath);
     const projectId = ensureProjectRow(db, absPath);
-    const projectName = path.basename(absPath);
-
-    addRecentProject(absPath, projectName);
-
     const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId) as ProjectRow;
+    addRecentProject(absPath, row.name);
     const nodeRows = db
       .prepare("SELECT * FROM nodes WHERE project_id = ? ORDER BY z_index ASC, created_at ASC")
       .all(projectId) as NodeRow[];
@@ -171,10 +188,12 @@ export function mountCoreRoutes(
     });
   });
 
+  mountWorkspaceLifecycleRoutes(router);
+
   router.get("/:encodedPath", async (req: Request, res: Response) => {
-    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    const projectPath = resolveProjectReference(param(req, "encodedPath"));
     if (!projectPath) {
-      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      res.status(403).json({ error: "Project path not registered" });
       return;
     }
 
@@ -213,9 +232,9 @@ export function mountCoreRoutes(
   });
 
   router.put("/:encodedPath", (req: Request, res: Response) => {
-    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    const projectPath = resolveProjectReference(param(req, "encodedPath"));
     if (!projectPath) {
-      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      res.status(403).json({ error: "Project path not registered" });
       return;
     }
     const { name, transform } = req.body as {
@@ -231,6 +250,8 @@ export function mountCoreRoutes(
         "UPDATE projects SET name = ?, updated_at = datetime('now') WHERE id = ?",
       ).run(name, projectId);
       addRecentProject(projectPath, name);
+      const workspace = findWorkspaceBySource(projectPath);
+      if (workspace) updateWorkspaceNickname(workspace.id, name);
     }
 
     if (transform) {
@@ -248,9 +269,9 @@ export function mountCoreRoutes(
 
   // Delete a project from recent list (does NOT delete the folder)
   router.delete("/:encodedPath", (req: Request, res: Response) => {
-    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    const projectPath = resolveProjectReference(param(req, "encodedPath"));
     if (!projectPath) {
-      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      res.status(403).json({ error: "Project path not registered" });
       return;
     }
     removeRecentProject(projectPath);
@@ -260,9 +281,9 @@ export function mountCoreRoutes(
   });
 
   router.put("/:encodedPath/state", (req: Request, res: Response) => {
-    const projectPath = validateProjectPath(decodePath(param(req, "encodedPath")));
+    const projectPath = resolveProjectReference(param(req, "encodedPath"));
     if (!projectPath) {
-      res.status(403).json({ error: "Project path not registered or outside home directory" });
+      res.status(403).json({ error: "Project path not registered" });
       return;
     }
     const { transform, nodes, graph } = req.body as {

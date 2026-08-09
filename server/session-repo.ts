@@ -40,6 +40,7 @@ export interface SessionRow {
    * started on. Defaults to "claude" via the schema for pre-migration rows.
    */
   harness_name: string;
+  sandbox_policy_json?: string | null;
   review_state?: string;
   review_reason?: string | null;
   final_report?: string | null;
@@ -79,6 +80,7 @@ export function upsertSession(db: Database.Database, row: SessionRow): void {
       task_name, session_id, worktree_isolation, worktree_path,
       worktree_branch, worktree_project_path, worktree_created_at,
       worktree_lifecycle, approval_json, total_cost, turns, harness_name,
+      sandbox_policy_json,
       review_state, review_reason, final_report, final_dashboard_revision,
       dashboard_revision, terminal_reason, terminal_at, acknowledged_at,
       dismissed_at, lifecycle_revision, created_at, updated_at
@@ -87,7 +89,7 @@ export function upsertSession(db: Database.Database, row: SessionRow): void {
       @task_name, @session_id, @worktree_isolation, @worktree_path,
       @worktree_branch, @worktree_project_path, @worktree_created_at,
       @worktree_lifecycle, @approval_json, @total_cost, @turns,
-      @harness_name, @review_state, @review_reason, @final_report,
+      @harness_name, @sandbox_policy_json, @review_state, @review_reason, @final_report,
       @final_dashboard_revision, @dashboard_revision, @terminal_reason,
       @terminal_at, @acknowledged_at, @dismissed_at, @lifecycle_revision,
       @created_at, @updated_at
@@ -111,6 +113,7 @@ export function upsertSession(db: Database.Database, row: SessionRow): void {
       total_cost = excluded.total_cost,
       turns = excluded.turns,
       harness_name = excluded.harness_name,
+      sandbox_policy_json = excluded.sandbox_policy_json,
       review_state = excluded.review_state,
       review_reason = excluded.review_reason,
       final_report = excluded.final_report,
@@ -134,6 +137,7 @@ export function upsertSession(db: Database.Database, row: SessionRow): void {
     acknowledged_at: null,
     dismissed_at: null,
     lifecycle_revision: 0,
+    sandbox_policy_json: null,
     ...row,
   });
 }

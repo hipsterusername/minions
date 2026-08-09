@@ -56,6 +56,7 @@ import {
   writeSettings,
   writeSkills,
 } from "./project-store.ts";
+import { findWorkspaceBySource, registerWorkspace } from "./workspace-registry.ts";
 
 let project: string;
 const cleanup: (() => void)[] = [];
@@ -83,6 +84,16 @@ afterEach(() => {
 });
 
 describe("initSidecar / openProjectDb", () => {
+  it("stores newly registered workspace state centrally and keeps the source clean", () => {
+    const workspace = registerWorkspace(project)!;
+    const db = initSidecar(project, {});
+    cleanup.push(() => db.close());
+
+    expect(existsSync(join(project, ".minions"))).toBe(false);
+    expect(existsSync(join(workspace.stateRoot, "canvas.db"))).toBe(true);
+    expect(existsSync(join(workspace.stateRoot, "context.md"))).toBe(true);
+  });
+
   it("creates the sidecar directory, default context.md, and settings.json", () => {
     expect(hasSidecar(project)).toBe(false);
     const db = initSidecar(project, {
@@ -146,7 +157,7 @@ describe("context / settings / skills / mcp-servers round-trip", () => {
   });
 
   it("readContext returns the default for a missing file (does not throw)", () => {
-    rmSync(join(project, ".minions", "context.md"));
+    rmSync(join(findWorkspaceBySource(project)!.stateRoot, "context.md"));
     const ctx = readContext(project);
     expect(ctx).toEqual({ content: "", exists: false });
   });

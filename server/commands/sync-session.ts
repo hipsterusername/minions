@@ -10,6 +10,7 @@ import { unicastToSession } from "../bus.ts";
 import { getHarness } from "../harness/index.ts";
 import type { HarnessCapabilities } from "../harness/types.ts";
 import type { CommandHandler } from "./types.ts";
+import { findWorkspaceBySource } from "../workspace-registry.ts";
 
 /**
  * Look up the host's current harness so the client can render
@@ -45,6 +46,12 @@ export const syncSession: CommandHandler = (ctx, cmd, ws) => {
   }
 
   const { harness, harnessCapabilities } = harnessSnapshot(host.harnessName);
+  let projectId: string | undefined;
+  try {
+    projectId = findWorkspaceBySource(host.worktree?.projectPath ?? host.cwd)?.id;
+  } catch {
+    // Keep session recovery available even when workspace registry repair is required.
+  }
 
   unicastToSession(ws, cmd.sessionKey, {
     type: "sync_response",
@@ -58,6 +65,7 @@ export const syncSession: CommandHandler = (ctx, cmd, ws) => {
     status: host.status,
     sessionId: host.sessionId,
     cwd: host.cwd,
+    ...(projectId ? { projectId } : {}),
     totalCost: host.totalCost,
     turns: host.turns,
     usageTotals: host.usageTotals,
@@ -65,6 +73,7 @@ export const syncSession: CommandHandler = (ctx, cmd, ws) => {
     lastErrorFull: host.lastErrorFull,
     model: host.model,
     permissionMode: host.permissionMode,
+    sandboxPolicy: host.sandboxPolicy,
     initData: host.initData,
     worktree: host.worktree,
     approval: host.taskState?.approval ?? null,

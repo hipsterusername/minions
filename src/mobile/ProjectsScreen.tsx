@@ -19,6 +19,7 @@ interface ProjectStats {
 function statsForProject(
   sessions: MobileSessionInfo[],
   projectPath: string,
+  projectId: string,
 ): ProjectStats {
   let count = 0;
   let running = 0;
@@ -26,7 +27,7 @@ function statsForProject(
   let cost = 0;
   for (const session of sessions) {
     if (session.role === "minion") continue;
-    if (!sessionBelongsToProject(session, projectPath)) continue;
+    if (!sessionBelongsToProject(session, projectPath, projectId)) continue;
     count += 1;
     if (session.status === "running" || session.status === "creating") running += 1;
     if (needsAttention(session)) attention += 1;
@@ -84,7 +85,7 @@ export function ProjectsScreen({ sessions, onSelectProject }: ProjectsScreenProp
   const stats = useMemo(() => {
     const map = new Map<string, ProjectStats>();
     for (const project of projects) {
-      map.set(project.id, statsForProject(sessions, project.path));
+      map.set(project.id, statsForProject(sessions, project.path, project.id));
     }
     return map;
   }, [projects, sessions]);

@@ -2,6 +2,8 @@ import type { Request } from "express";
 import crypto from "crypto";
 import path from "path";
 import { openProjectDb } from "../../project-store.ts";
+import { validateProjectPath } from "../../path-guard.ts";
+import { findWorkspaceBySource, resolveWorkspace } from "../../workspace-registry.ts";
 
 /** Encode a project path for use in URLs */
 export function encodePath(p: string): string {
@@ -17,6 +19,13 @@ export function decodePath(encoded: string): string {
 export function param(req: Request, name: string): string {
   const v = req.params[name];
   return Array.isArray(v) ? v[0]! : v ?? "";
+}
+
+/** Resolve either a stable workspace UUID or the temporary encoded-path route key. */
+export function resolveProjectReference(reference: string): string | null {
+  const workspace = resolveWorkspace(reference);
+  if (workspace) return validateProjectPath(workspace.sourceRoot);
+  return validateProjectPath(decodePath(reference));
 }
 
 export interface ProjectRow {
@@ -58,10 +67,14 @@ export interface EdgeRow {
 }
 
 export function rowToProject(row: ProjectRow, projectPath: string) {
+  const workspace = findWorkspaceBySource(projectPath);
   return {
-    id: encodePath(projectPath),
+    id: workspace?.id ?? encodePath(projectPath),
+    workspaceId: workspace?.id,
     path: projectPath,
+    sourceRoot: projectPath,
     name: row.name,
+    nickname: workspace?.nickname ?? row.name,
     transform: {
       x: row.transform_x,
       y: row.transform_y,

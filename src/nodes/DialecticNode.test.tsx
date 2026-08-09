@@ -68,6 +68,7 @@ function renderNode(
     socketSend,
     socketSubscribe: undefined,
     projectPath: "/repo",
+    projectId: "66666666-6666-4666-8666-666666666666",
     ...overrides,
   };
   let subscriber: ((m: unknown) => void) | null = null;
@@ -120,13 +121,14 @@ describe("DialecticNode component", () => {
     const payload = socketSend.mock.calls[0]![0] as {
       type: string;
       sessionKey: string;
-      cwd: string;
+      workspaceId: string;
       prompt: string;
       dialecticConfig: unknown;
     };
     expect(payload.type).toBe("start_dialectic");
     expect(payload.sessionKey).toBe("node-x");
-    expect(payload.cwd).toBe("/repo");
+    expect(payload.workspaceId).toBe("66666666-6666-4666-8666-666666666666");
+    expect(payload).not.toHaveProperty("cwd");
     expect(payload.prompt).toBe("Cache design");
     expect(payload.dialecticConfig).toMatchObject({ mode: "ping-pong", rounds: 3 });
     // Optimistically flips to running.

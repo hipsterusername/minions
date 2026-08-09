@@ -121,6 +121,88 @@ describe("ensureWorktree safety boundary", () => {
 });
 
 describe("buildHarnessStartOpts — capability gating", () => {
+  it("passes the effective worktree policy into harness.start options", () => {
+    const harness = fakeHarness("codex", {
+      sandboxEnforcement: {
+        filesystem: ["read-only", "workspace-write", "unrestricted"],
+        network: true,
+        approval: true,
+      },
+    });
+    const host = fakeHost() as SessionHost & { worktreeIsolation: boolean };
+    host.worktreeIsolation = true;
+    const { startOpts } = buildHarnessStartOpts({
+      host,
+      opts: fakeOpts({ worktreeIsolation: true }),
+      agentType: fakeAgentType,
+      agentCtx: fakeCtx,
+      toolResult: fakeToolResult,
+      abortController: new AbortController(),
+      harness,
+      prompt: "hello",
+    });
+    expect(startOpts.sandboxPolicy).toEqual({
+      requested: { filesystemScope: "workspace-write", networkAccess: "disabled", approvalPolicy: "on-failure" },
+      effective: { filesystemScope: "workspace-write", networkAccess: "disabled", approvalPolicy: "on-failure" },
+      unsupported: [],
+    });
+  });
+
+  it("surfaces unsupported enforcement instead of claiming it", () => {
+    const { startOpts } = buildHarnessStartOpts({
+      host: fakeHost(),
+      opts: fakeOpts(),
+      agentType: fakeAgentType,
+      agentCtx: fakeCtx,
+      toolResult: fakeToolResult,
+      abortController: new AbortController(),
+      harness: fakeHarness("legacy", {}),
+      prompt: "hello",
+    });
+    expect(startOpts.sandboxPolicy?.effective).toEqual({
+      filesystemScope: "unmanaged", networkAccess: "unmanaged", approvalPolicy: "unmanaged",
+    });
+    expect(startOpts.sandboxPolicy?.unsupported).toEqual(["filesystem:workspace-write", "network", "approval"]);
+  });
+
+  it("retains the requested sandbox policy when a follow-up omits it", () => {
+    const host = fakeHost() as SessionHost;
+    host.sandboxPolicy = {
+      requested: { filesystemScope: "read-only", approvalPolicy: "always", networkAccess: "disabled" },
+      effective: { filesystemScope: "read-only", approvalPolicy: "always", networkAccess: "disabled" },
+      unsupported: [],
+    };
+    const { startOpts } = buildHarnessStartOpts({
+      host,
+      opts: fakeOpts({ invocationKind: "resume_open_run" }),
+      agentType: fakeAgentType,
+      agentCtx: fakeCtx,
+      toolResult: fakeToolResult,
+      abortController: new AbortController(),
+      harness: fakeHarness("codex", { sandboxEnforcement: {
+        filesystem: ["read-only", "workspace-write", "unrestricted"], network: true, approval: true,
+      } }),
+      prompt: "follow up",
+    });
+    expect(startOpts.sandboxPolicy?.requested).toEqual(host.sandboxPolicy.requested);
+  });
+
+  it("retains Claude acceptEdits as a normalized restart permission", () => {
+    const host = fakeHost();
+    host.permissionMode = "acceptEdits";
+    const { startOpts } = buildHarnessStartOpts({
+      host,
+      opts: fakeOpts(),
+      agentType: fakeAgentType,
+      agentCtx: fakeCtx,
+      toolResult: fakeToolResult,
+      abortController: new AbortController(),
+      harness: fakeHarness("claude", {}),
+      prompt: "continue",
+    });
+    expect(startOpts.permissionMode).toBe("acceptEdits");
+  });
+
   it("retains resumeId for open-run resumes and clears it for provider continuations", () => {
     const input = {
       host: fakeHost(),

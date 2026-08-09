@@ -16,6 +16,7 @@ import type { ChangeMode } from "../../shared/work-item-lifecycle.ts";
 import type { WorkItemBindingSurface } from "../../shared/work-item-contracts.ts";
 import type { LiveEditAwareness } from "../../shared/live-edit-coordination.ts";
 import type { WorktreeIntegrationService } from "../worktree-integration-service.ts";
+import type { SandboxPolicy, WorkspaceId } from "../../shared/workspace-contracts.ts";
 
 /** Every WebSocket command recognised by the server. */
 export type WsCommandType =
@@ -130,6 +131,10 @@ export interface WsCommand {
   /** Full connected-canvas context snapshot for `canvas_context`. */
   items?: WsCanvasContextItem[];
   cwd?: string;
+  /** Opaque, path-independent workspace identity for registry-aware clients. */
+  workspaceId?: WorkspaceId;
+  /** Explicit provider-neutral execution boundary for new launches. */
+  sandboxPolicy?: SandboxPolicy;
   permissionMode?: string;
   systemPrompt?: string;
   role?: SessionRole;
@@ -216,6 +221,13 @@ export interface CommandContext {
   getLiveEditAwareness?: (projectPath: string, workItemIds: readonly string[]) => Record<string, LiveEditAwareness>;
   /** Canonical registered-path/project ownership seam. */
   resolveWorkItemProject?: (projectId: string, projectPath: string) => string | null;
+  /** Resolve an opaque workspace UUID to the canonical internal work-item identity. */
+  resolveWorkItemWorkspace?: (workspaceId: string) => {
+    projectId: string;
+    projectPath: string;
+  } | null;
+  /** Resolve an opaque workspace UUID to its current canonical source root. */
+  resolveWorkspace?: (workspaceId: string) => { id: string; sourceRoot: string } | null;
 }
 
 /** A command handler takes context + command + the originating socket. */

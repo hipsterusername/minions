@@ -2,11 +2,11 @@
  * Skill-authoring MCP tools.
  *
  * These back the built-in `skill-builder` skill: an agent armed with it uses
- * them to design and persist reusable skills into the project's sidecar
- * `.minions/skills.json`. Exposed to both the leader and minions under the
+ * them to design and persist reusable skills into central workspace
+ * `skills.json`. Exposed to both the leader and minions under the
  * `skills` tool group, so tool calls follow the `mcp__skills__*` pattern.
  *
- * Persistence goes through `readSkills`/`writeSkills` (the same sidecar the
+ * Persistence goes through `readSkills`/`writeSkills` (the same central state the
  * frontend SkillsBrowser reads/writes); the pure validation and array helpers
  * live in `./skill-authoring.ts`. Built-in presets are merged in for reads but
  * cannot be mutated on disk — editing one writes a project override.
