@@ -6,7 +6,6 @@ import { formatToolInputDetail, toolDisplayInfo } from "../nodes/leader-message-
 import {
   RenderComponentView,
   gridColumnFor,
-  injectStyles as injectRenderStyles,
 } from "../nodes/RenderNode.tsx";
 import {
   emptySessionStreamState,
@@ -630,10 +629,6 @@ export function SessionChatScreen({
   const feedRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const renderState = session?.renderState ?? emptyRenderState();
-
-  useEffect(() => {
-    injectRenderStyles();
-  }, []);
 
   useEffect(() => {
     setState(emptySessionStreamState(sessionKey));

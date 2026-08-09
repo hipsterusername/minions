@@ -15,7 +15,11 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
-import { RenderComponentView } from "./RenderNode.tsx";
+import {
+  RENDER_STYLE_ELEMENT_ID,
+  RenderComponentView,
+  injectStyles,
+} from "./RenderNode.tsx";
 import type {
   StatusComponent,
   TimelineComponent,
@@ -29,6 +33,29 @@ const PUPIL_VARIANT_CLASSES = [
 ];
 
 describe("StatusBadge running pupil", () => {
+  it("installs the saccade keyframes before the first running indicator paints", () => {
+    document.getElementById(RENDER_STYLE_ELEMENT_ID)?.remove();
+
+    const running: StatusComponent = {
+      id: "first-running-status",
+      type: "status",
+      label: "In progress",
+      state: "running",
+    };
+    render(<RenderComponentView component={running} />);
+
+    const styles = document.getElementById(RENDER_STYLE_ELEMENT_ID);
+    expect(styles).not.toBeNull();
+    expect(styles?.textContent).toContain("@keyframes render-eye-a");
+    expect(styles?.textContent).toContain("animation: render-eye-a 6.4s infinite both");
+  });
+
+  it("keeps dashboard style injection idempotent", () => {
+    injectStyles();
+    injectStyles();
+    expect(document.querySelectorAll(`#${RENDER_STYLE_ELEMENT_ID}`)).toHaveLength(1);
+  });
+
   it("renders a pupil element only when state is running", () => {
     const running: StatusComponent = {
       id: "s-run",

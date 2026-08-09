@@ -6,7 +6,7 @@
  * `isFullWidth`), selection UI, and injected styles that the surface consumes.
  */
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useInsertionEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import {
   Check,
   X as XIcon,
@@ -1551,6 +1551,12 @@ export function RenderComponentView({
   component: RenderComponent;
   context?: RenderViewContext | undefined;
 }) {
+  // The dashboard can be hosted by both the canvas and mobile surfaces. Keep
+  // its CSS lifecycle with the rendered primitives so a new host cannot omit
+  // the saccade keyframes (and useInsertionEffect puts them in place before
+  // the browser paints an animated pupil for the first time).
+  useRenderStyles();
+
   switch (component.type) {
     case "metric":
       return <MetricCard c={component} />;
@@ -1933,11 +1939,23 @@ export function gridColumnFor(c: RenderComponent, columns: number): string | und
 
 // ── CSS injection ────────────────────────────────────────
 
-let styleInjected = false;
+export const RENDER_STYLE_ELEMENT_ID = "render-node-styles";
+
+function useRenderStyles() {
+  useInsertionEffect(() => {
+    injectStyles();
+  }, []);
+}
+
 export function injectStyles() {
-  if (styleInjected) return;
-  styleInjected = true;
+  if (
+    typeof document === "undefined" ||
+    document.getElementById(RENDER_STYLE_ELEMENT_ID)
+  ) {
+    return;
+  }
   const style = document.createElement("style");
+  style.id = RENDER_STYLE_ELEMENT_ID;
   style.textContent = `
     /* ── Dashboard component base card ── */
     .${CLS.card} {
