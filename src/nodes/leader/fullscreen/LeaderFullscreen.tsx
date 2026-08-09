@@ -13,7 +13,6 @@ import { chatRoleStyle } from "../../../chat-bubble-style.ts";
 import { CopyButton } from "../../../components/CopyButton.tsx";
 import {
   StreamingBubble,
-  StreamingIndicator,
 } from "../../../components/StreamingBubble.tsx";
 import { DEFAULT_THINKING_CONFIG } from "../../../types.ts";
 import { groupMessages } from "../../leader-message-helpers.ts";
@@ -24,6 +23,7 @@ import { LeaderToolGroup } from "../messages/ToolItem.tsx";
 import { LeaderThinkingGroup } from "../messages/ThinkingGroup.tsx";
 import { UserMessageBubble } from "../messages/UserMessageBubble.tsx";
 import { SelectableMessageBubble } from "../messages/SelectableMessageBubble.tsx";
+import { LeaderWorkingIndicator } from "../messages/LeaderWorkingIndicator.tsx";
 import { LeaderPromptBar } from "../prompt/LeaderPromptBar.tsx";
 import type { LeaderData, MessageContextSelection } from "../types.ts";
 import { ActivityRail } from "./ActivityRail.tsx";
@@ -53,6 +53,7 @@ const RIGHT_PANE_MAX = 560;
 
 export interface LeaderFullscreenProps {
   data: LeaderData;
+  isWorking: boolean;
   onUpdateData: (next: LeaderData) => void;
   onExit: () => void;
 
@@ -104,6 +105,7 @@ const STATUS_COLOR: Record<LeaderData["status"], string> = {
 export function LeaderFullscreen(props: LeaderFullscreenProps) {
   const {
     data,
+    isWorking,
     onUpdateData,
     onExit,
     input,
@@ -454,9 +456,8 @@ export function LeaderFullscreen(props: LeaderFullscreenProps) {
                 )}
                 role="assistant"
               />
-            ) : data.status === "running" && data.messages.length > 0 ? (
-              <StreamingIndicator label="Leader is thinking..." />
             ) : null}
+            {isWorking && <LeaderWorkingIndicator />}
             {data.waitUntil && data.waitUntil > Date.now() && (
               <WaitCountdown
                 waitUntil={data.waitUntil}

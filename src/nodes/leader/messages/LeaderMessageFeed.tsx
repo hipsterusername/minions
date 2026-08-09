@@ -5,7 +5,7 @@
  */
 
 import type { RefObject } from "react";
-import { StreamingBubble, StreamingIndicator } from "../../../components/StreamingBubble.tsx";
+import { StreamingBubble } from "../../../components/StreamingBubble.tsx";
 import { MessageTimestamp } from "../../../components/MessageTimestamp.tsx";
 import { chatRoleStyle } from "../../../chat-bubble-style.ts";
 import { DebugInspector } from "../../../components/DebugInspector.tsx";
@@ -14,6 +14,7 @@ import { LeaderToolGroup } from "./ToolItem.tsx";
 import { LeaderThinkingGroup } from "./ThinkingGroup.tsx";
 import { UserMessageBubble } from "./UserMessageBubble.tsx";
 import { SelectableMessageBubble } from "./SelectableMessageBubble.tsx";
+import { LeaderWorkingIndicator } from "./LeaderWorkingIndicator.tsx";
 import type { LeaderData, MessageContextSelection } from "../types.ts";
 import type { LeaderMessageGroup } from "../../leader-message-helpers.ts";
 
@@ -27,6 +28,7 @@ export interface LeaderMessageFeedProps {
   onExitMessageSelection: () => void;
   onAddContentNode?: ((content: string) => void) | undefined;
   debugEnabled: boolean;
+  isWorking: boolean;
 }
 
 export function LeaderMessageFeed({
@@ -39,6 +41,7 @@ export function LeaderMessageFeed({
   onExitMessageSelection,
   onAddContentNode,
   debugEnabled,
+  isWorking,
 }: LeaderMessageFeedProps) {
   return (
     <div
@@ -128,9 +131,8 @@ export function LeaderMessageFeed({
       })}
       {data.streamingText ? (
         <StreamingBubble text={data.streamingText.replace(/<!--task-name:.+?-->\s*/g, "")} role="assistant" />
-      ) : data.status === "running" && data.messages.length > 0 ? (
-        <StreamingIndicator label="Leader is thinking..." />
       ) : null}
+      {isWorking && <LeaderWorkingIndicator />}
       {debugEnabled && data.sessionKey && (
         <DebugInspector
           sessionKey={data.sessionKey}

@@ -136,6 +136,72 @@ function pupilVariantFor(seed: string): string {
   return PUPIL_VARIANTS[h % PUPIL_VARIANTS.length] ?? CLS.pupilA;
 }
 
+export interface SaccadeEyeProps {
+  seed: string;
+  size: number;
+  pupilSize: number;
+  amplitude: number;
+  color: string;
+  borderWidth?: number;
+  glow?: boolean;
+  testId?: string;
+}
+
+/**
+ * Reusable running-state eye. The expanding pulse ring used by dashboard
+ * status cards deliberately lives outside this component, so compact hosts
+ * can reuse the saccade on its own.
+ */
+export function SaccadeEye({
+  seed,
+  size,
+  pupilSize,
+  amplitude,
+  color,
+  borderWidth = 1.5,
+  glow = true,
+  testId,
+}: SaccadeEyeProps) {
+  useRenderStyles();
+
+  return (
+    <span
+      className={CLS.eye}
+      aria-hidden="true"
+      style={{
+        width: size,
+        height: size,
+        borderRadius: "50%",
+        background: `color-mix(in srgb, ${color} 18%, transparent)`,
+        border: `${borderWidth}px solid ${color}`,
+        boxSizing: "border-box",
+        color,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        position: "relative",
+        overflow: "hidden",
+        flexShrink: 0,
+      }}
+    >
+      <span
+        {...(testId ? { "data-testid": testId } : {})}
+        className={`${CLS.pupil} ${pupilVariantFor(seed)}`}
+        style={{
+          width: pupilSize,
+          height: pupilSize,
+          borderRadius: "50%",
+          background: color,
+          boxShadow: glow
+            ? `0 0 ${Math.max(4, pupilSize)}px color-mix(in srgb, ${color} 60%, transparent)`
+            : "none",
+          ["--rd-pupil-amp" as string]: amplitude,
+        }}
+      />
+    </span>
+  );
+}
+
 // ── Individual component renderers ────────────────────────
 
 function MetricCard({ c }: { c: MetricComponent }) {

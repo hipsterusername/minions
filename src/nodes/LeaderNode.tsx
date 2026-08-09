@@ -1311,6 +1311,7 @@ export function LeaderNodeRenderer({
         onExitMessageSelection={exitMessageSelection}
         onAddContentNode={onAddContentNode}
         debugEnabled={debugEnabled}
+        isWorking={displayStatus === "running"}
       />
 
       <ConfigFooter
@@ -1360,6 +1361,7 @@ export function LeaderNodeRenderer({
       {isFullscreen && (
         <LeaderFullscreen
           data={data}
+          isWorking={displayStatus === "running"}
           onUpdateData={(next) => emitUpdate(next)}
           onExit={() => setIsFullscreen(false)}
           input={input}
