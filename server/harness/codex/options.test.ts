@@ -129,12 +129,12 @@ describe("mapPermission", () => {
     expect(mapPermission(policy)).toEqual(expected);
   });
 
-  it("keeps plan mode read-only even if a conflicting policy reaches the adapter", () => {
+  it("lets an explicit policy override a conflicting legacy plan mode", () => {
     expect(mapPermission({
       filesystemScope: "unrestricted", approvalPolicy: "never", networkAccess: "enabled",
     }, "plan")).toEqual({
       approvalPolicy: "never",
-      sandboxMode: "read-only",
+      sandboxMode: "danger-full-access",
       networkAccessEnabled: true,
     });
   });

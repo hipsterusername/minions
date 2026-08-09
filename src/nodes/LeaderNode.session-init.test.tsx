@@ -316,6 +316,7 @@ describe("LeaderNode: new-session initiation", () => {
       captured.filter((m) => (m as { type?: string }).type === "create_session");
 
     expect(creates()).toHaveLength(1);
+    expect(creates()[0]).toMatchObject({ permissionMode: "bypassPermissions" });
 
     await act(async () => {
       fireEvent.change(screen.getByTestId("leader-prompt-input-inline"), {

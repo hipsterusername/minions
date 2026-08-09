@@ -452,8 +452,8 @@ function ProjectView({
     [mobileSessions, workItemState.orderedItems, workItemState.coordination],
   );
   const activitySessions = useMemo(
-    () => canonicalActivitySessions.filter((s) => sessionBelongsToProject(s, projectPath)),
-    [canonicalActivitySessions, projectPath],
+    () => canonicalActivitySessions.filter((s) => sessionBelongsToProject(s, projectPath, projectId)),
+    [canonicalActivitySessions, projectPath, projectId],
   );
   useEffect(() => {
     if (activeView !== "activity" || !socket.connected) return;

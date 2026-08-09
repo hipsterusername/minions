@@ -349,6 +349,7 @@ export class SessionRegistry {
         // harness it started with. Pre-migration rows return "claude"
         // via the schema default — no behaviour change for old DBs.
         host.harnessName = row.harness_name || "claude";
+        host.permissionMode = row.permission_mode ?? null;
         if (row.sandbox_policy_json) {
           try {
             const parsed = sandboxResolutionSchema.safeParse(JSON.parse(row.sandbox_policy_json));

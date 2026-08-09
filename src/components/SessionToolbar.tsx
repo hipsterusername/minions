@@ -756,9 +756,9 @@ export function SessionToolbar({
   // first, then by the model entry.
   const capability = getModelCapability(model, activeHarness);
 
-  // Permission options — hidden entirely when the harness has no permission
-  // concept. Codex honors "plan" via a read-only sandbox, so it is offered for
-  // every harness that supports permission prompts.
+  // Provider-neutral sandbox controls are the sole permission authority for
+  // harnesses that enforce them. Legacy permission modes remain available for
+  // harnesses such as Claude that expose their own runtime permission model.
   const permissionOptions = useMemo<PermissionMode[]>(() => {
     const all: PermissionMode[] = [
       "auto",
@@ -768,6 +768,7 @@ export function SessionToolbar({
       "acceptEdits",
     ];
     if (!harnessCapabilities) return all;
+    if (harnessCapabilities.sandboxEnforcement?.approval === true) return [];
     if (!harnessCapabilities.permissionPrompts) return [];
     return all;
   }, [harnessCapabilities]);

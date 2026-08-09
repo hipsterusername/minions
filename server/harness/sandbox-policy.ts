@@ -15,14 +15,16 @@ export function approvalPolicyForPermission(
     case "bypassPermissions": return "never";
     case "default":
     case "plan": return "on-request";
+    case "acceptEdits":
     case "auto":
     case undefined: return "on-failure";
   }
 }
 
 /**
- * Resolve a run policy without ever inferring full-host access. Plan mode is
- * an invariant and therefore wins over an inconsistent requested policy.
+ * Resolve a run policy without ever inferring full-host access. An explicit
+ * provider-neutral policy is authoritative; legacy permission mode is used
+ * only when no policy was supplied.
  */
 export function resolveHarnessSandboxPolicy(input: {
   requested?: HarnessSandboxPolicyInput | undefined;
@@ -30,7 +32,7 @@ export function resolveHarnessSandboxPolicy(input: {
   worktreeScoped: boolean;
   support?: HarnessSandboxSupport | undefined;
 }): HarnessSandboxResolution {
-  const filesystemScope = input.permissionMode === "plan"
+  const filesystemScope = input.requested === undefined && input.permissionMode === "plan"
     ? "read-only"
     : input.requested?.filesystemScope ?? "workspace-write";
   const requested: SandboxPolicy = {

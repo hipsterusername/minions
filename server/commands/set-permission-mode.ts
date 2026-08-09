@@ -32,6 +32,7 @@ export const setPermissionMode: CommandHandler = (ctx, cmd, ws) => {
   fn.call(host.runControl, cmd.permissionMode)
     .then(() => {
       host.permissionMode = cmd.permissionMode!;
+      host.persist();
       sendControlResponse(ws, "set_permission_mode", host.id, cmd.requestId, {
         permissionMode: cmd.permissionMode,
       });

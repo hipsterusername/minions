@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { mkdir } from "node:fs/promises";
+import { realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -53,24 +62,63 @@ describe("writeHtmlArtifact", () => {
     const meta = await writeHtmlArtifact("session_2", { id: "published.page", html });
 
     expect(meta.id).toBe("published.page");
-    expect(meta.path).toBe(path.join(htmlArtifactsRoot(), "session_2", "published.page.html"));
+    expect(meta.path).toBe(path.join(await realpath(htmlArtifactsRoot()), "c2Vzc2lvbl8y--published.page.html"));
     expect(readFileSync(meta.path, "utf8")).toBe(html);
     expect(meta.bytes).toBe(Buffer.byteLength(html, "utf8"));
+  });
+
+  it("ignores a legacy symlinked session directory without writing outside", async () => {
+    const outside = mkdtempSync(path.join(os.tmpdir(), "artifact-outside-"));
+    symlinkSync(outside, path.join(htmlArtifactsRoot(), "linked-session"), "junction");
+    try {
+      await expect(writeHtmlArtifact("linked-session", { id: "escape", html: "bad" }))
+        .resolves.toMatchObject({ sessionKey: "linked-session" });
+      expect(existsSync(path.join(outside, "escape.html"))).toBe(false);
+    } finally {
+      rmSync(path.join(htmlArtifactsRoot(), "linked-session"), { force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a pre-existing flat artifact symlink without changing its target", async () => {
+    const outsideDir = mkdtempSync(path.join(os.tmpdir(), "artifact-file-outside-"));
+    const outside = path.join(outsideDir, "outside.html");
+    writeFileSync(outside, "keep me");
+    const artifactPath = path.join(htmlArtifactsRoot(), "c2FmZS1zZXNzaW9u--linked.html");
+    symlinkSync(outside, artifactPath);
+    try {
+      await expect(writeHtmlArtifact("safe-session", { id: "linked", html: "overwrite" }))
+        .rejects.toThrow();
+      expect(readFileSync(outside, "utf8")).toBe("keep me");
+    } finally {
+      rmSync(artifactPath, { force: true });
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
   });
 });
 
 describe("deleteHtmlArtifactsForSession", () => {
-  it("removes the whole session dir", async () => {
+  it("removes all flat artifacts for the session", async () => {
     const meta = await writeHtmlArtifact("to-delete", { id: "one", html: "<p>Bye</p>" });
-    const sessionDir = path.dirname(meta.path);
-
     await deleteHtmlArtifactsForSession("to-delete");
-
-    expect(existsSync(sessionDir)).toBe(false);
+    expect(existsSync(meta.path)).toBe(false);
   });
 
   it("does not throw when the session dir does not exist", async () => {
     await expect(deleteHtmlArtifactsForSession("missing-session")).resolves.toBeUndefined();
+  });
+
+  it("rejects a symlinked session directory instead of deleting its target", async () => {
+    const outside = mkdtempSync(path.join(os.tmpdir(), "artifact-delete-outside-"));
+    writeFileSync(path.join(outside, "keep.txt"), "keep");
+    symlinkSync(outside, path.join(htmlArtifactsRoot(), "linked-delete"), "junction");
+    try {
+      await expect(deleteHtmlArtifactsForSession("linked-delete")).rejects.toThrow(/real contained/);
+      expect(readFileSync(path.join(outside, "keep.txt"), "utf8")).toBe("keep");
+    } finally {
+      rmSync(path.join(htmlArtifactsRoot(), "linked-delete"), { force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 });
 

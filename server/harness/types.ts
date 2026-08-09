@@ -88,6 +88,7 @@ export interface NormalizedAttachment {
 export type NormalizedPermissionMode =
   | "default"
   | "auto"
+  | "acceptEdits"
   | "bypassPermissions"
   | "plan";
 

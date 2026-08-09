@@ -41,4 +41,31 @@ describe("workspace-owned worktree roots", () => {
     expect(isOwnedWorktreePath(sourceRoot, path.join(workspace.stateRoot, "canvas.db"))).toBe(false);
     expect(isOwnedWorktreePath(sourceRoot, path.join(sourceRoot, "src"))).toBe(false);
   });
+
+  it("rejects symlinked legacy roots and descendants", () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "owned-root-outside-"));
+    const legacy = path.join(sourceRoot, ".canvas-worktrees");
+    fs.symlinkSync(outside, legacy, "junction");
+    try {
+      expect(isOwnedWorktreePath(sourceRoot, path.join(legacy, "escaped"))).toBe(false);
+    } finally {
+      fs.rmSync(legacy, { force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects symlinked central roots and nested candidate links", () => {
+    const workspace = registerWorkspace(sourceRoot)!;
+    const central = path.join(workspace.stateRoot, "worktrees");
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "owned-root-outside-"));
+    fs.symlinkSync(outside, central, "junction");
+    expect(isOwnedWorktreePath(sourceRoot, path.join(central, "escaped"))).toBe(false);
+
+    fs.rmSync(central, { force: true });
+    fs.mkdirSync(central);
+    fs.symlinkSync(outside, path.join(central, "linked"), "junction");
+    expect(isOwnedWorktreePath(sourceRoot, path.join(central, "linked", "escaped"))).toBe(false);
+
+    fs.rmSync(outside, { recursive: true, force: true });
+  });
 });

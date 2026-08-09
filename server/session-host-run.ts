@@ -168,7 +168,8 @@ export function buildHarnessStartOpts(
   if (isNormalizedPermissionMode(persistedPermissionMode)) {
     startOpts.permissionMode = persistedPermissionMode;
   }
-  const requestedPolicy: HarnessSandboxPolicyInput | undefined = opts.sandboxPolicy;
+  // Follow-ups reuse the last requested policy instead of reverting to defaults.
+  const requestedPolicy: HarnessSandboxPolicyInput | undefined = opts.sandboxPolicy ?? host.sandboxPolicy?.requested;
   startOpts.sandboxPolicy = resolveHarnessSandboxPolicy({
     requested: requestedPolicy,
     permissionMode: startOpts.permissionMode,
@@ -386,10 +387,7 @@ export {
 export type { WorktreeInfo };
 
 const VALID_PERMISSION_MODES: ReadonlySet<NormalizedPermissionMode> = new Set([
-  "default",
-  "auto",
-  "bypassPermissions",
-  "plan",
+  "default", "auto", "acceptEdits", "bypassPermissions", "plan",
 ]);
 
 function isNormalizedPermissionMode(

@@ -10,6 +10,7 @@ import { getHarness } from "./harness/index.ts";
 import type { HarnessCapabilities } from "./harness/types.ts";
 import type { SessionUsageTotals } from "./usage-telemetry.ts";
 import type { SessionReviewLifecycle } from "./session-review-lifecycle.ts";
+import { findWorkspaceBySource } from "./workspace-registry.ts";
 
 /** Compact shape broadcast to clients in `session_list` messages. */
 export interface SessionListItem {
@@ -22,6 +23,8 @@ export interface SessionListItem {
   sessionId: string | null;
   status: SessionStatus;
   cwd: string;
+  /** Stable workspace UUID when the session can be associated with one. */
+  projectId?: string;
   totalCost: number;
   turns: number;
   usageTotals: SessionUsageTotals;
@@ -100,6 +103,13 @@ function harnessMeta(name: string): {
 export function buildSessionListItem(key: string, s: SessionHost): SessionListItem {
   const { harness, harnessCapabilities } = harnessMeta(s.harnessName);
   const lastActivityAt = lastResponseOrActivityAt(s.eventBuffer);
+  let projectId: string | undefined;
+  try {
+    projectId = findWorkspaceBySource(s.worktree?.projectPath ?? s.cwd)?.id;
+  } catch {
+    // A malformed registry blocks workspace mutation, but must not make the
+    // global session list unavailable while the user repairs it.
+  }
   return {
     sessionKey: key,
     runKey: s.runKey,
@@ -110,6 +120,7 @@ export function buildSessionListItem(key: string, s: SessionHost): SessionListIt
     sessionId: s.sessionId,
     status: s.status,
     cwd: s.cwd,
+    ...(projectId ? { projectId } : {}),
     totalCost: s.totalCost,
     turns: s.turns,
     usageTotals: s.usageTotals,

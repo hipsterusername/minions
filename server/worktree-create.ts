@@ -1,9 +1,14 @@
 import { mkdir, readdir, rmdir } from "node:fs/promises";
-import { join, basename, resolve, relative, isAbsolute } from "node:path";
+import { join, basename, resolve, sep } from "node:path";
 
 import type { WorktreeInfo, WorktreeLifecycle } from "./worktree-types.js";
 import { exec } from "./worktree-exec.js";
-import { allowedWorktreeRoots, isOwnedWorktreePath, ownedWorktreeRoot } from "./worktree-owned-root.ts";
+import {
+  allowedWorktreeRoots,
+  isOwnedWorktreePath,
+  isSafeOwnedWorktreeRoot,
+  ownedWorktreeRoot,
+} from "./worktree-owned-root.ts";
 
 /**
  * Create a new git worktree + branch for a leader session.
@@ -13,8 +18,15 @@ export async function createWorktree(
   leaderSessionKey: string,
 ): Promise<WorktreeInfo> {
   const worktreeBase = ownedWorktreeRoot(projectPath);
-  await mkdir(worktreeBase, { recursive: true });
   const worktreePath = join(worktreeBase, leaderSessionKey);
+  if (!isOwnedWorktreePath(projectPath, worktreePath)) {
+    throw new Error("refusing to create a worktree outside a real Minions-owned root");
+  }
+  await mkdir(worktreeBase, { recursive: true });
+  if (!isSafeOwnedWorktreeRoot(worktreeBase)
+    || !isOwnedWorktreePath(projectPath, worktreePath)) {
+    throw new Error("refusing to create a worktree beneath a symlinked root");
+  }
   const branch = `canvas/${leaderSessionKey}`;
   await exec(["worktree", "add", worktreePath, "-b", branch], projectPath);
   return { path: worktreePath, branch, leaderSessionKey, createdAt: Date.now(),
@@ -37,10 +49,9 @@ export async function resolveWorktreeBase(projectPath: string,
 export async function provisionPlannedWorktree(plan: PlannedWorktree,
   startPoint = "HEAD"): Promise<WorktreeInfo> {
   const projectPath = resolve(plan.projectPath); const worktreePath = resolve(plan.path);
-  const base = allowedWorktreeRoots(projectPath).find((root) => {
-    const rel = relative(resolve(root), worktreePath);
-    return !!rel && !rel.startsWith("..") && !isAbsolute(rel) && resolve(root, rel) === worktreePath;
-  });
+  const base = allowedWorktreeRoots(projectPath)
+    .find((root) => isOwnedWorktreePath(projectPath, worktreePath)
+      && worktreePath.startsWith(`${resolve(root)}${sep}`));
   if (!base) {
     throw new Error("planned worktree path must be a child of a Minions-owned worktree root");
   }
@@ -48,6 +59,9 @@ export async function provisionPlannedWorktree(plan: PlannedWorktree,
     ? plan.branch.slice("refs/heads/".length) : plan.branch;
   await exec(["check-ref-format", "--branch", branch], projectPath);
   await mkdir(base, { recursive: true });
+  if (!isSafeOwnedWorktreeRoot(base) || !isOwnedWorktreePath(projectPath, worktreePath)) {
+    throw new Error("planned worktree root became unsafe during provisioning");
+  }
   try {
     const { stdout } = await exec(["rev-parse", "--abbrev-ref", "HEAD"], worktreePath);
     if (stdout.trim() !== branch) throw new Error(
@@ -80,7 +94,7 @@ export async function removeWorktree(worktreePath: string, projectPath?: string,
 
   // Use explicit projectPath if provided, otherwise fall back to derivation.
   const resolvedProjectPath = projectPath ?? join(worktreePath, "..", "..");
-  if (projectPath && !isOwnedWorktreePath(resolvedProjectPath, worktreePath)) {
+  if (!isOwnedWorktreePath(resolvedProjectPath, worktreePath)) {
     throw new Error("refusing to remove a worktree outside Minions-owned roots");
   }
 
@@ -96,7 +110,6 @@ export async function listWorktrees(
 ): Promise<WorktreeInfo[]> {
   const { stdout } = await exec(["worktree", "list", "--porcelain"], projectPath);
   const results: WorktreeInfo[] = [];
-  const worktreeBases = allowedWorktreeRoots(projectPath).map((root) => resolve(root));
 
   // Porcelain output is blocks separated by blank lines.
   // Each block has lines like:
@@ -119,10 +132,7 @@ export async function listWorktrees(
     }
 
     // Include central registry-owned worktrees and legacy in-repository ones.
-    if (path && worktreeBases.some((base) => {
-      const rel = relative(base, resolve(path));
-      return !!rel && !rel.startsWith("..") && !isAbsolute(rel);
-    })) {
+    if (path && isOwnedWorktreePath(projectPath, path)) {
       const key = basename(path);
       results.push({
         path,
@@ -160,6 +170,7 @@ export async function cleanupStaleWorktrees(
   await exec(["worktree", "prune"], projectPath);
 
   for (const worktreeBase of allowedWorktreeRoots(projectPath)) {
+    if (!isSafeOwnedWorktreeRoot(worktreeBase)) continue;
     let entries: string[];
     try {
       entries = await readdir(worktreeBase);
@@ -168,6 +179,7 @@ export async function cleanupStaleWorktrees(
     }
     for (const entry of entries) {
       const entryPath = join(worktreeBase, entry);
+      if (!isOwnedWorktreePath(projectPath, entryPath)) continue;
       try {
         // rmdir only succeeds on empty directories.
         await rmdir(entryPath);

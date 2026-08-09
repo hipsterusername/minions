@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type Database from "better-sqlite3";
 import { initDb } from "./db.ts";
 import { ensureWorkItemSchema } from "./work-item-schema.ts";
@@ -8,6 +11,9 @@ import { WorkItemServiceError } from "./work-item-service.ts";
 import { startWorkItemIteration } from "./work-item-repo.ts";
 import { createChildWorkItemRun } from "./work-item-child-repo.ts";
 import type { RunContinuationInput } from "./work-item-continuation.ts";
+import { encodePath } from "./routes/projects/helpers.ts";
+import { registerWorkspace } from "./workspace-registry.ts";
+import { ensureWorktreeIntegrationSchema } from "./worktree-integration-schema.ts";
 
 describe("SqliteWorkItemService", () => {
   let db: Database.Database;
@@ -49,6 +55,44 @@ describe("SqliteWorkItemService", () => {
       title: `Task ${requestId}`, changeMode: "live",
     });
   }
+
+  it("lazily migrates encoded project identities when listing by workspace UUID", async () => {
+    const minionsHome = fs.mkdtempSync(path.join(os.tmpdir(), "work-item-alias-home-"));
+    const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), "work-item-alias-source-"));
+    vi.stubEnv("MINIONS_HOME", minionsHome);
+    try {
+      const workspace = registerWorkspace(projectPath)!;
+      const legacy = await service.create({
+        requestId: "legacy-create",
+        projectId: encodePath(workspace.sourceRoot),
+        projectPath: workspace.sourceRoot,
+        title: "Existing item",
+        changeMode: "live",
+      });
+      ensureWorktreeIntegrationSchema(db);
+      db.prepare(`INSERT INTO worktree_lineages (
+        id, project_id, repository_path, target_ref, base_sha,
+        integration_ref, integration_worktree_path, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        "legacy-lineage", encodePath(workspace.sourceRoot), workspace.sourceRoot,
+        "main", "base", "refs/heads/legacy", "/tmp/legacy-integration", 1, 1,
+      );
+
+      const listed = await service.list({ projectId: workspace.id, includeArchived: true });
+      expect(listed.items).toEqual([expect.objectContaining({
+        id: legacy.workItem.id,
+        projectId: workspace.id,
+      })]);
+      expect((db.prepare("SELECT project_id FROM work_items WHERE id = ?")
+        .get(legacy.workItem.id) as { project_id: string }).project_id).toBe(workspace.id);
+      expect((db.prepare("SELECT project_id FROM worktree_lineages WHERE id = ?")
+        .get("legacy-lineage") as { project_id: string }).project_id).toBe(workspace.id);
+    } finally {
+      vi.unstubAllEnvs();
+      fs.rmSync(minionsHome, { recursive: true, force: true });
+      fs.rmSync(projectPath, { recursive: true, force: true });
+    }
+  });
 
   it("commits a server-keyed run before launch and publishes item/project snapshots", async () => {
     const created = await draft();

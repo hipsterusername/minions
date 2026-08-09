@@ -6,6 +6,7 @@ describe("set_permission_mode", () => {
   it("invokes setPermissionMode and mirrors the value onto host.permissionMode", async () => {
     const h = setup();
     const setMode = vi.fn(async () => undefined);
+    const persist = vi.spyOn(h.host, "persist").mockImplementation(() => undefined);
     h.setRunControl(fakeRunControl({ setPermissionMode: setMode }));
 
     setPermissionMode(
@@ -18,6 +19,7 @@ describe("set_permission_mode", () => {
 
     expect(setMode).toHaveBeenCalledWith("review");
     expect(h.host.permissionMode).toBe("review");
+    expect(persist).toHaveBeenCalledOnce();
     expect(h.wsSent[0]!["success"]).toBe(true);
     expect(h.wsSent[0]!["permissionMode"]).toBe("review");
   });

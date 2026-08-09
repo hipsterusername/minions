@@ -681,6 +681,18 @@ describe("SessionRegistry.hydrateFromDb — sessionId round-trip", () => {
     });
   });
 
+  it("restores runtime permission changes for Claude sessions", () => {
+    persistSession(makePersisted({
+      id: "claude-permission",
+      harnessName: "claude",
+      permissionMode: "bypassPermissions",
+    }));
+
+    const r = new SessionRegistry();
+    r.hydrateFromDb();
+    expect(r.get("claude-permission")?.permissionMode).toBe("bypassPermissions");
+  });
+
   it("preserves null sessionId for pre-migration rows", () => {
     persistSession(makePersisted({ id: "old-leader", sessionId: null }));
     const r = new SessionRegistry();

@@ -48,8 +48,9 @@ export interface MappedPermission {
  * plan mode's "don't change anything" contract (stronger than a model that
  * merely promises not to write). Dialectic planners rely on this.
  *
- * `permissionMode` is only a legacy approval fallback and plan-mode safety
- * fence. It never grants filesystem or network access.
+ * `permissionMode` is only a fallback for legacy payloads that do not carry a
+ * provider-neutral policy. Once an explicit policy exists it is authoritative
+ * for every Codex sandbox axis.
  */
 export function mapPermission(
   policy: SandboxPolicy | undefined,
@@ -57,7 +58,7 @@ export function mapPermission(
 ): MappedPermission {
   const fallbackApproval = legacyMode === "bypassPermissions" ? "never"
     : legacyMode === "default" || legacyMode === "plan" ? "on-request" : "on-failure";
-  const filesystem = legacyMode === "plan" ? "read-only" : policy?.filesystemScope ?? "read-only";
+  const filesystem = policy?.filesystemScope ?? "read-only";
   const approvalPolicy = policy?.approvalPolicy === "always" ? "untrusted"
     : policy?.approvalPolicy ?? fallbackApproval;
   return {

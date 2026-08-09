@@ -120,7 +120,7 @@ export function ActivityLaunchForm({
   onSubmit: () => void;
   onUpdate: (patch: Partial<LeaderData>) => void;
 }) {
-  const { harnesses } = useHarnessList();
+  const { harnesses, loaded: harnessesLoaded } = useHarnessList();
   const modelGroups = useMemo(() => buildLaunchModelGroups(harnesses), [harnesses]);
   const activeHarnessName = data.harness ?? "claude";
   const activeModel = data.model ?? "opus";
@@ -131,10 +131,12 @@ export function ActivityLaunchForm({
   const selectedSkills = (data.skillIds ?? [])
     .map((id) => getSkill(id))
     .filter((skill): skill is SkillTemplate => skill !== undefined);
-  const permissionOptions = PERMISSIONS.filter((permission) => {
-    if (activeHarness && !activeHarness.capabilities.permissionPrompts) return false;
-    return !(activeHarnessName === "codex" && permission.value === "plan");
-  });
+  // Codex's provider-neutral sandbox policy is its sole launch authority.
+  // Keep legacy permissionMode in stored payloads for compatibility, but do
+  // not present a second approval control that can disagree with it.
+  const permissionOptions = activeHarnessName === "codex"
+    || (activeHarness !== undefined && !activeHarness.capabilities.permissionPrompts)
+    ? [] : PERMISSIONS;
   const selectedPermission = permissionOptions.find(
     (permission) => permission.value === (data.permissionMode ?? "auto"),
   );
@@ -142,6 +144,11 @@ export function ActivityLaunchForm({
     .flatMap((group) => group.options)
     .find((option) => option.value === modelValue);
   const reasoningEffort = (data.thinkingConfig ?? DEFAULT_THINKING_CONFIG).effort;
+  const requestedFilesystem = data.sandboxPolicy?.filesystemScope ?? "workspace-write";
+  const displayedFilesystem = data.effectiveSandboxPolicy?.effective.filesystemScope
+    ?? (harnessesLoaded && (activeHarness?.capabilities.sandboxEnforcement === undefined
+      || !activeHarness.capabilities.sandboxEnforcement.filesystem.includes(requestedFilesystem))
+      ? "unmanaged" : requestedFilesystem);
 
   function updateSkill(id: string, checked: boolean) {
     const skillIds = checked
@@ -265,7 +272,7 @@ export function ActivityLaunchForm({
               </span>
               <span title="Agent process filesystem boundary">
                 <ShieldCheck size={12} aria-hidden />
-                {data.sandboxPolicy?.filesystemScope ?? "workspace-write"}
+                {displayedFilesystem}
               </span>
               <span title={`${selectedSkills.length} selected skills`}>
                 <Sparkles size={12} aria-hidden />
@@ -349,6 +356,9 @@ export function ActivityLaunchForm({
             <SandboxPolicyControls
               policy={data.sandboxPolicy}
               effective={data.effectiveSandboxPolicy}
+              support={harnessesLoaded
+                ? activeHarness?.capabilities.sandboxEnforcement ?? null
+                : undefined}
               onChange={(sandboxPolicy) => onUpdate({ sandboxPolicy })}
             />
 

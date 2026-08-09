@@ -24,4 +24,15 @@ describe("SandboxPolicyControls", () => {
     }} />);
     expect(screen.getByText(/Effective: unmanaged/)).toHaveTextContent("unmanaged: filesystem:workspace-write, network, approval");
   });
+
+  it("labels unsupported harness axes as unmanaged instead of editable", () => {
+    render(<SandboxPolicyControls onChange={vi.fn()} support={{
+      filesystem: [], network: false, approval: false,
+    }} />);
+
+    expect(screen.getByLabelText("Sandbox file access")).toHaveTextContent("Unmanaged by harness");
+    expect(screen.getByLabelText("Sandbox approval policy")).toHaveTextContent("Unmanaged by harness");
+    expect(screen.getByLabelText("Sandbox network access")).toHaveTextContent("Unmanaged by harness");
+    expect(screen.queryAllByRole("combobox")).toHaveLength(0);
+  });
 });

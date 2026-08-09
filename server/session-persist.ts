@@ -52,6 +52,9 @@ export function openPersistDb(dbPath?: string): Database.Database {
   if (dbHandle) return dbHandle;
   const resolvedPath = dbPath ?? defaultDbPath();
   dbHandle = initDb(resolvedPath);
+  const sessionColumns = dbHandle.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
+  if (!sessionColumns.some((column) => column.name === "permission_mode"))
+    dbHandle.exec("ALTER TABLE sessions ADD COLUMN permission_mode TEXT");
   ensureWorkItemSchema(dbHandle);
   dbHandle.exec(`
     CREATE TABLE IF NOT EXISTS session_armed_prompts (
@@ -169,6 +172,7 @@ export interface PersistableSession {
   turns: number;
   /** Registered harness; legacy rows default to "claude". */
   harnessName: string;
+  permissionMode?: string | null;
   sandboxPolicy?: SandboxResolution | null;
   reviewLifecycle?: SessionReviewLifecycle;
 }
@@ -214,6 +218,7 @@ export function persistSession(s: PersistableSession): void {
   try {
     const nowIso = new Date().toISOString();
     repo.upsertSession(db, sessionToRow(s, nowIso, repo.getSession(db, s.id)));
+    db.prepare("UPDATE sessions SET permission_mode = ? WHERE session_key = ?").run(s.permissionMode ?? null, s.id);
   } catch (err) {
     log.warn("session_upsert_failed", { error: err });
   }
@@ -339,7 +344,7 @@ export function persistRenderState(
 
 /** Durable pieces used to rematerialize a host with fresh volatile handles. */
 export interface HydratedSession {
-  row: repo.SessionRow;
+  row: repo.SessionRow & { permission_mode?: string | null };
   armedSystemPrompt: string | null;
   tasks: TaskManagerState | null;
   render: RenderState | null;
@@ -351,7 +356,7 @@ export function hydrateSessionsFromDb(): HydratedSession[] {
   const db = ensureDb();
   if (!db) return [];
 
-  let rows: repo.SessionRow[];
+  let rows: Array<repo.SessionRow & { permission_mode?: string | null }>;
   try {
     rows = repo.getAllSessions(db);
   } catch (err) {

@@ -122,6 +122,8 @@ export interface SessionInfo {
   sessionId: string | null;
   status: string;
   cwd: string;
+  /** Stable workspace UUID supplied by the server when known. */
+  projectId?: string | null;
   totalCost?: number;
   turns?: number;
   usageTotals?: SessionUsageTotals;

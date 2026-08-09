@@ -33,7 +33,7 @@ describe("resolveHarnessSandboxPolicy", () => {
     });
   });
 
-  it("forces plan mode read-only without coupling network or approvals", () => {
+  it("lets an explicit sandbox policy override a stale legacy plan mode", () => {
     const result = resolveHarnessSandboxPolicy({
       permissionMode: "plan",
       worktreeScoped: true,
@@ -41,8 +41,13 @@ describe("resolveHarnessSandboxPolicy", () => {
       support: complete,
     });
     expect(result.requested).toEqual({
-      filesystemScope: "read-only", networkAccess: "enabled", approvalPolicy: "never",
+      filesystemScope: "unrestricted", networkAccess: "enabled", approvalPolicy: "never",
     });
+  });
+
+  it("keeps legacy plan launches read-only when no explicit policy exists", () => {
+    expect(resolveHarnessSandboxPolicy({ permissionMode: "plan", worktreeScoped: true, support: complete })
+      .requested.filesystemScope).toBe("read-only");
   });
 
   it("reports every guarantee an unsupported harness cannot enforce", () => {

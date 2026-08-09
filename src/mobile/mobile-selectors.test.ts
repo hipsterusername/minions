@@ -154,6 +154,34 @@ describe("mobile selectors", () => {
     expect(sessionBelongsToProject(root, "")).toBe(false);
   });
 
+  it("scopes central owned worktrees by stable workspace identity", () => {
+    const workspaceId = "123e4567-e89b-42d3-a456-426614174000";
+    const centralWorktree = session({
+      sessionKey: "central-wt",
+      cwd: `/var/lib/minions/workspaces/${workspaceId}/worktrees/leader-1`,
+    });
+
+    expect(sessionBelongsToProject(centralWorktree, "/work/alpha", workspaceId)).toBe(true);
+    expect(sessionBelongsToProject(
+      centralWorktree,
+      "/work/alpha",
+      "223e4567-e89b-42d3-a456-426614174000",
+    )).toBe(false);
+  });
+
+  it("recognizes legacy Windows source and worktree paths", () => {
+    expect(sessionBelongsToProject(
+      session({ sessionKey: "windows-wt", cwd: "C:\\Repos\\Alpha\\.canvas-worktrees\\leader-1" }),
+      "c:\\repos\\alpha",
+      "8ddab5e7-7c44-4ae7-87fe-e82eead3cd54",
+    )).toBe(true);
+    expect(sessionBelongsToProject(
+      session({ sessionKey: "windows-sibling", cwd: "C:\\Repos\\Alphabet\\leader-1" }),
+      "c:\\repos\\alpha",
+      "8ddab5e7-7c44-4ae7-87fe-e82eead3cd54",
+    )).toBe(false);
+  });
+
   it("breaks ties within a section by attention then title", () => {
     const plain = session({ sessionKey: "plain", status: "idle", taskName: "Zeta", lastActivityAt: 0 });
     const flagged = session({ sessionKey: "flagged", status: "idle", taskName: "Alpha", pendingAttention: true, lastActivityAt: 0 });

@@ -121,6 +121,15 @@ describe("session-persist integration", () => {
     expect(hydrateSessionsFromDb()).toEqual([]);
   });
 
+  it("persists the live permission mode in the restart snapshot", () => {
+    persistSession(makeSession({ permissionMode: "bypassPermissions" }));
+
+    closePersistDb();
+    openPersistDb();
+
+    expect(hydrateSessionsFromDb()[0]?.row.permission_mode).toBe("bypassPermissions");
+  });
+
   it("places the default global session database under MINIONS_HOME", () => {
     const minionsHome = fs.mkdtempSync(path.join(os.tmpdir(), "minions-global-state-"));
     closePersistDb();

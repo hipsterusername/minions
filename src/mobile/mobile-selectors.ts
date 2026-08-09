@@ -198,22 +198,35 @@ export function compareActivityPriority<T extends MobileSessionInfo>(a: T, b: T)
 /**
  * Whether a session belongs to the project rooted at `projectPath`.
  *
- * A session is owned by a project when its working directory is the project
- * root itself, or lives underneath it. Worktree-isolated leaders run from
- * `<projectPath>/.minions/worktrees/<key>`, so the subpath check keeps them
- * grouped under their originating project without needing a server-side
- * project id on each session.
+ * A session is owned by a project when it carries the same stable project ID,
+ * its working directory is inside the source root, or its working directory is
+ * inside that workspace's central `worktrees` directory under MINIONS_HOME.
+ * The source-root check remains for legacy in-repository worktrees.
  */
 export function sessionBelongsToProject(
-  session: Pick<SessionInfo, "cwd">,
+  session: Pick<SessionInfo, "cwd" | "projectId">,
   projectPath: string,
+  projectId?: string,
 ): boolean {
   if (!projectPath) return false;
+  if (projectId && session.projectId === projectId) return true;
   const cwd = session.cwd;
   if (!cwd) return false;
-  if (cwd === projectPath) return true;
-  const prefix = projectPath.endsWith("/") ? projectPath : `${projectPath}/`;
-  return cwd.startsWith(prefix);
+  const portable = (value: string) => {
+    const normalized = value.replaceAll("\\", "/").replace(/\/+$/, "");
+    return /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized;
+  };
+  const portableCwd = portable(cwd);
+  const portableProject = portable(projectPath);
+  if (portableCwd === portableProject) return true;
+  if (portableCwd.startsWith(`${portableProject}/`)) return true;
+  if (!projectId) return false;
+  const parts = portableCwd.split("/");
+  return parts.some((part, index) =>
+    part === "workspaces" &&
+    parts[index + 1] === projectId &&
+    parts[index + 2] === "worktrees"
+  );
 }
 
 /** Classify a session status into its activity section. */

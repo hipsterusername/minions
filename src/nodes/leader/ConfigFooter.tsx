@@ -11,6 +11,8 @@ import { useWorktreeIntegration } from "../../use-worktree-integration.ts";
 import { WorktreeIntegrationControls } from "../../WorktreeIntegrationControls.tsx";
 import { selectCanvasChangeMode } from "./work-item.ts";
 import { SandboxPolicyControls } from "./SandboxPolicyControls.tsx";
+import { findHarness } from "../../harness-list.ts";
+import { useHarnessList } from "../../use-harness-list.tsx";
 
 /**
  * Compact status bar at the bottom of the leader card that surfaces:
@@ -42,6 +44,13 @@ export function ConfigFooter({
   onNewSession?: (() => void) | undefined;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const { harnesses, loaded: harnessesLoaded } = useHarnessList();
+  const activeHarness = findHarness(harnesses, data.harness ?? "claude");
+  const requestedFilesystem = data.sandboxPolicy?.filesystemScope ?? "workspace-write";
+  const displayedFilesystem = data.effectiveSandboxPolicy?.effective.filesystemScope
+    ?? (harnessesLoaded && (activeHarness?.capabilities.sandboxEnforcement === undefined
+      || !activeHarness.capabilities.sandboxEnforcement.filesystem.includes(requestedFilesystem))
+      ? "unmanaged" : requestedFilesystem);
   const contextCount = getContextForNode?.().length ?? 0;
   const hasSession = !!data.sessionKey;
   const changeMode = selectCanvasChangeMode(data);
@@ -198,8 +207,7 @@ export function ConfigFooter({
           </span>
 
           <span title="Agent process filesystem boundary; separate from Git change mode">
-            Sandbox: {data.effectiveSandboxPolicy?.effective.filesystemScope
-              ?? data.sandboxPolicy?.filesystemScope ?? "workspace-write"}
+            Sandbox: {displayedFilesystem}
           </span>
 
           {contextCount > 0 && (
@@ -386,6 +394,9 @@ export function ConfigFooter({
             <SandboxPolicyControls
               policy={data.sandboxPolicy}
               effective={data.effectiveSandboxPolicy}
+              support={harnessesLoaded
+                ? activeHarness?.capabilities.sandboxEnforcement ?? null
+                : undefined}
               disabled={hasSession}
               onChange={(sandboxPolicy) => onUpdateData({ ...data, sandboxPolicy })}
             />

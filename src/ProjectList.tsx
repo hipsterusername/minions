@@ -26,11 +26,15 @@ import "./project-list.css";
 const log = browserLogger.child("project-list");
 const WS_URL = buildWsUrl();
 
-function countRunningSessions(sessions: SessionInfo[], projectPath: string): number {
+function countRunningSessions(
+  sessions: SessionInfo[],
+  projectPath: string,
+  projectId: string,
+): number {
   return sessions.filter(
     (session) =>
       session.role !== "minion" &&
-      sessionBelongsToProject(session, projectPath) &&
+      sessionBelongsToProject(session, projectPath, projectId) &&
       (session.status === "running" || session.status === "creating"),
   ).length;
 }
@@ -89,7 +93,7 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
       new Map(
         projects.map((project) => [
           project.id,
-          countRunningSessions(sessions, project.path),
+          countRunningSessions(sessions, project.path, project.id),
         ]),
       ),
     [projects, sessions],
@@ -285,7 +289,7 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
                 <strong>No recent projects</strong>
                 <p>Open a folder to get started.</p>
                 <small>
-                  Worktree isolation is optional, merges require approval, and project data lives under <code>.minions/</code>.
+                  Worktree isolation is optional, merges require approval, and Minions keeps project state in its private workspace home.
                   A safe first task is: “Summarize this repository’s structure without changing files.”
                 </small>
               </div>

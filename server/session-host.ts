@@ -182,6 +182,7 @@ export class SessionHost {
       totalCost: this.totalCost,
       turns: this.turns,
       harnessName: this.harnessName,
+      permissionMode: this.permissionMode,
       sandboxPolicy: this.sandboxPolicy,
       reviewLifecycle: this.reviewLifecycle,
     };

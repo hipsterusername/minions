@@ -35,6 +35,16 @@ function registryPath(): string {
   return path.join(workspacesRoot(), "registry.json");
 }
 
+function ensureWorkspacesRoot(): string {
+  const root = workspacesRoot();
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  const stat = fs.lstatSync(root);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new Error("Minions workspaces root must be a real directory");
+  }
+  return root;
+}
+
 function binding(stored: StoredWorkspace): WorkspaceBinding {
   return { ...stored, stateRoot: path.join(workspacesRoot(), stored.id) };
 }
@@ -43,9 +53,11 @@ function safeBinding(stored: StoredWorkspace, create: boolean): WorkspaceBinding
   const result = binding(stored);
   try {
     if (create) {
-      fs.mkdirSync(workspacesRoot(), { recursive: true, mode: 0o700 });
+      ensureWorkspacesRoot();
       fs.mkdirSync(result.stateRoot, { recursive: true, mode: 0o700 });
     }
+    const rootStat = fs.lstatSync(workspacesRoot());
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) return null;
     const stateStat = fs.lstatSync(result.stateRoot);
     if (!stateStat.isDirectory() || stateStat.isSymbolicLink()) return null;
     const rootReal = fs.realpathSync(workspacesRoot());
@@ -69,20 +81,107 @@ function isStoredWorkspace(value: unknown): value is StoredWorkspace {
 function readRegistry(): StoredWorkspace[] {
   try {
     const parsed = JSON.parse(fs.readFileSync(registryPath(), "utf8")) as Partial<RegistryFile>;
-    if (parsed.version !== 1 || !Array.isArray(parsed.workspaces)) return [];
-    return parsed.workspaces.filter(isStoredWorkspace);
-  } catch {
-    return [];
+    if (parsed.version !== 1 || !Array.isArray(parsed.workspaces)
+      || !parsed.workspaces.every(isStoredWorkspace)) {
+      throw new Error("invalid registry schema");
+    }
+    return parsed.workspaces;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw new Error(`Workspace registry is unreadable or malformed: ${registryPath()}`, { cause: error });
   }
 }
 
 function writeRegistry(workspaces: StoredWorkspace[]): void {
-  const root = workspacesRoot();
-  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  ensureWorkspacesRoot();
   const target = registryPath();
   const temporary = `${target}.${process.pid}.${crypto.randomUUID()}.tmp`;
-  fs.writeFileSync(temporary, JSON.stringify({ version: 1, workspaces }, null, 2), { mode: 0o600 });
-  fs.renameSync(temporary, target);
+  try {
+    fs.writeFileSync(temporary, JSON.stringify({ version: 1, workspaces }, null, 2), {
+      mode: 0o600,
+      flag: "wx",
+    });
+    fs.renameSync(temporary, target);
+  } finally {
+    try { fs.unlinkSync(temporary); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+}
+
+interface RegistryLockOwner { token: string; pid: number; createdAt: number }
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+function recoverStaleRegistryLock(lockPath: string): boolean {
+  const stat = fs.lstatSync(lockPath);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new Error("Workspace registry lock must be a real directory");
+  }
+  try {
+    const owner = JSON.parse(fs.readFileSync(path.join(lockPath, "owner.json"), "utf8")) as
+      Partial<RegistryLockOwner>;
+    if (typeof owner.pid === "number" && Number.isSafeInteger(owner.pid) && owner.pid > 0) {
+      if (processIsAlive(owner.pid)) return false;
+      fs.rmSync(lockPath, { recursive: true });
+      return true;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT" && error instanceof SyntaxError === false) {
+      throw error;
+    }
+  }
+  // A creator can briefly exist before owner.json is installed. Only recover
+  // ownerless/corrupt locks once they are old enough that this cannot be that
+  // acquisition window.
+  if (Date.now() - stat.mtimeMs < 30_000) return false;
+  fs.rmSync(lockPath, { recursive: true });
+  return true;
+}
+
+function withRegistrationLock<T>(operation: () => T): T {
+  const root = ensureWorkspacesRoot();
+  const lockPath = path.join(root, ".registry.lock");
+  const owner: RegistryLockOwner = { token: crypto.randomUUID(), pid: process.pid, createdAt: Date.now() };
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      fs.mkdirSync(lockPath, { mode: 0o700 });
+      try {
+        fs.writeFileSync(path.join(lockPath, "owner.json"), JSON.stringify(owner), {
+          mode: 0o600,
+          flag: "wx",
+        });
+      } catch (error) {
+        fs.rmSync(lockPath, { recursive: true, force: true });
+        throw error;
+      }
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST" || attempt >= 500) {
+        throw new Error("Unable to acquire workspace registry lock", { cause: error });
+      }
+      if (recoverStaleRegistryLock(lockPath)) continue;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  }
+  try {
+    return operation();
+  } finally {
+    try {
+      const current = JSON.parse(fs.readFileSync(path.join(lockPath, "owner.json"), "utf8")) as
+        Partial<RegistryLockOwner>;
+      if (current.token === owner.token) fs.rmSync(lockPath, { recursive: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
 }
 
 /** Resolve an absolute source path through existing ancestors and symlinks. */
@@ -131,22 +230,22 @@ function importLegacySidecar(sourceRoot: string, stateRoot: string): void {
 export function registerWorkspace(sourcePath: string): WorkspaceBinding | null {
   const sourceRoot = canonicalizeSourceRoot(sourcePath);
   if (!sourceRoot) return null;
-  const records = readRegistry();
-  const existing = records.find((row) => row.sourceRoot === sourceRoot);
-  if (existing) {
-    return safeBinding(existing, true);
-  }
+  return withRegistrationLock(() => {
+    const records = readRegistry();
+    const existing = records.find((row) => row.sourceRoot === sourceRoot);
+    if (existing) return safeBinding(existing, true);
 
-  const stored: StoredWorkspace = {
-    id: crypto.randomUUID(),
-    sourceRoot,
-    createdAt: new Date().toISOString(),
-  };
-  const result = safeBinding(stored, true);
-  if (!result) return null;
-  importLegacySidecar(sourceRoot, result.stateRoot);
-  writeRegistry([...records, stored]);
-  return result;
+    const stored: StoredWorkspace = {
+      id: crypto.randomUUID(),
+      sourceRoot,
+      createdAt: new Date().toISOString(),
+    };
+    const result = safeBinding(stored, true);
+    if (!result) return null;
+    importLegacySidecar(sourceRoot, result.stateRoot);
+    writeRegistry([...records, stored]);
+    return result;
+  });
 }
 
 export function resolveWorkspace(id: string, expectedSourceRoot?: string): WorkspaceBinding | null {

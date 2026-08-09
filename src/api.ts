@@ -42,7 +42,7 @@ function encodePath(p: string): string {
 // ── Types ────────────────────────────────────────────────
 
 export interface ProjectSummary {
-  id: string;           // base64url-encoded path
+  id: string;           // stable workspace UUID (legacy responses may use an encoded path)
   path: string;         // absolute filesystem path
   name: string;
   lastOpened: string;

@@ -31,6 +31,7 @@ import { compatibleResumeId, resolvePrimaryRunConfig } from "./work-item-run-con
 import { resolveWorkItemMutation } from "./work-item-archive.ts";
 import { continueChildWorkItemRun, continueWorkItemIntent, type RunContinuationInput } from "./work-item-continuation.ts";
 import { bindingSnapshot, itemSnapshot, runSnapshot } from "./work-item-snapshots.ts";
+import { resolveWorkItemProjectIdentity } from "./work-item-project.ts";
 
 export interface WorkItemInvocation {
   requestId?: string; workItemId: string; runKey: string; prompt: string; resumeId?: string;
@@ -283,6 +284,26 @@ export class SqliteWorkItemService implements WorkItemService {
   async get(id: string, cursor?: string, limit?: number) { return this.detail(id, cursor, limit); }
 
   async list(input: Parameters<WorkItemService["list"]>[0]) {
+    const identity = resolveWorkItemProjectIdentity(input.projectId);
+    if (identity && identity.aliases.length > 0) {
+      const placeholders = identity.aliases.map(() => "?").join(", ");
+      this.options.db.transaction(() => {
+        this.options.db.prepare(`UPDATE work_items SET project_id = ?
+          WHERE project_path = ? AND project_id IN (${placeholders})`)
+          .run(identity.projectId, identity.projectPath, ...identity.aliases);
+        this.options.db.prepare(`UPDATE sessions SET project_id = ?
+          WHERE project_id IN (${placeholders})`)
+          .run(identity.projectId, ...identity.aliases);
+        const hasLineages = this.options.db.prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'worktree_lineages'",
+        ).get();
+        if (hasLineages) {
+          this.options.db.prepare(`UPDATE worktree_lineages SET project_id = ?
+            WHERE repository_path = ? AND project_id IN (${placeholders})`)
+            .run(identity.projectId, identity.projectPath, ...identity.aliases);
+        }
+      }).immediate();
+    }
     const page = listWorkItemsPage(this.options.db, { ...input, limit: Math.max(1, Math.min(input.limit ?? 50, 100)) });
     return workItemListSnapshotSchema.parse({ projectId: input.projectId, items: page.rows.map(itemSnapshot), nextCursor: page.nextCursor });
   }
