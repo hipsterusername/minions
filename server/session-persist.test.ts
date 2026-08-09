@@ -121,6 +121,22 @@ describe("session-persist integration", () => {
     expect(hydrateSessionsFromDb()).toEqual([]);
   });
 
+  it("places the default global session database under MINIONS_HOME", () => {
+    const minionsHome = fs.mkdtempSync(path.join(os.tmpdir(), "minions-global-state-"));
+    closePersistDb();
+    delete process.env["MINIONS_SERVER_DB"];
+    process.env["MINIONS_HOME"] = minionsHome;
+    try {
+      openPersistDb();
+      expect(fs.existsSync(path.join(minionsHome, "server.db"))).toBe(true);
+    } finally {
+      closePersistDb();
+      delete process.env["MINIONS_HOME"];
+      process.env["MINIONS_SERVER_DB"] = dbPath;
+      fs.rmSync(minionsHome, { recursive: true, force: true });
+    }
+  });
+
   it("persistSession round-trips via hydrate", () => {
     persistSession(makeSession());
     const hydrated = hydrateSessionsFromDb();

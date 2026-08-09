@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { getMinionsHome } from "./workspace-registry.ts";
 
 export interface HtmlArtifactMeta {
   id: string;
@@ -35,7 +35,7 @@ function assertUnderRoot(targetPath: string): string {
 }
 
 export function htmlArtifactsRoot(): string {
-  return process.env.MINIONS_ARTIFACTS_DIR ?? path.join(os.homedir(), ".minions", "artifacts", "html");
+  return process.env.MINIONS_ARTIFACTS_DIR ?? path.join(getMinionsHome(), "artifacts", "html");
 }
 
 export async function writeHtmlArtifact(

@@ -24,6 +24,17 @@ afterEach(() => {
 });
 
 describe("writeHtmlArtifact", () => {
+  it("defaults to the MINIONS_HOME state collection", () => {
+    delete process.env.MINIONS_ARTIFACTS_DIR;
+    process.env.MINIONS_HOME = tmpRoot;
+    try {
+      expect(htmlArtifactsRoot()).toBe(path.join(tmpRoot, "artifacts", "html"));
+    } finally {
+      delete process.env.MINIONS_HOME;
+      process.env.MINIONS_ARTIFACTS_DIR = tmpRoot;
+    }
+  });
+
   it("creates the file with metadata when an id is omitted", async () => {
     const html = "<!doctype html><p>Hello</p>";
     const meta = await writeHtmlArtifact("session-1", { html, title: "Greeting" });

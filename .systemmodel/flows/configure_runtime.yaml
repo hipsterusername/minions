@@ -1,14 +1,17 @@
 id: flow.configure_runtime
 type: flow
 name: Configure harness and runtime controls
-summary: Project defaults and per-launch overrides resolve a valid harness, model, permission mode, thinking configuration, and isolation behavior.
+summary: Project defaults and launch overrides resolve a harness, model, Git change mode, and independent filesystem, approval, and network sandbox policy.
 constraints: []
-decisions: [ decision.role_gated_agent_tools ]
-suggested_files: [ src/SettingsMenu.tsx, src/components/SessionToolbar.tsx, src/mobile/SettingsScreen.tsx, src/mobile/LaunchScreen.tsx, server/commands/set-model.ts ]
-suggested_tests: [ src/SettingsMenu.test.tsx, src/components/SessionToolbar.test.tsx, src/mobile/SettingsScreen.test.tsx, src/mobile/LaunchScreen.test.tsx, server/commands/set-model.test.ts ]
+decisions: [ decision.role_gated_agent_tools, decision.portable_workspace_roots ]
+suggested_files: [ src/SettingsMenu.tsx, src/components/SessionToolbar.tsx, src/nodes/leader/SandboxPolicyControls.tsx, server/harness/sandbox-policy.ts, server/harness/codex/options.ts ]
+suggested_tests: [ src/SettingsMenu.test.tsx, src/components/SessionToolbar.test.tsx, src/nodes/leader/SandboxPolicyControls.test.tsx, server/harness/sandbox-policy.test.ts, server/harness/codex/options.test.ts ]
 steps:
   - Load harness inventory and readiness before presenting compatible choices.
-  - Resolve project defaults and per-launch overrides at session creation.
+  - Choose shared versus isolated Git change placement independently from the process sandbox.
+  - Resolve filesystem, approval, and network requests at session creation; plan mode always forces read-only.
+  - Default authorized execution roots to workspace-write and require an explicit unrestricted request.
+  - Apply all three axes to Codex and mark unsupported axes unmanaged for harnesses that cannot enforce them.
   - Render live controls only for synced runControl capabilities.
   - Apply model or permission changes through typed handlers and carry thinking configuration on the next turn without swapping harness.
 freshness:
@@ -17,4 +20,4 @@ risk: high
 domain: domain.platform
 primary_capability: capability.runtime_configuration
 bridges: []
-risks: []
+risks: [ risk.sandbox_policy_overclaim ]

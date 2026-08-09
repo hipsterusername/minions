@@ -24,27 +24,48 @@ transcripts, and personal filesystem paths.
 - The browser token bootstrap accepts only loopback or private Tailscale-style
   requests whose host, peer address, and origin agree. It is not a public-web
   authentication system.
-- Agent and MCP permissions determine what model sessions can do. Review
-  permission changes before enabling unattended orchestration.
-- Worktree isolation reduces parallel-edit conflicts; it is not a sandbox or a
-  substitute for operating-system isolation. Agents and stdio MCP servers run
-  with the operating-system privileges of the account that starts Minions.
+- Git change mode controls where changes land and how they enter review.
+  Worktree isolation reduces parallel-edit conflicts, but it does not by itself
+  restrict process filesystem or network access.
+- Execution sandbox policy independently requests filesystem scope, approval
+  behavior, and network access. Plan mode forces read-only; workspace-write is
+  the normal authorized-root default; unrestricted filesystem access requires
+  an explicit request.
+- Codex enforces all three displayed sandbox axes. An axis the selected harness
+  cannot enforce is reported as `unmanaged`; do not interpret the requested
+  policy as a guarantee. Minions does not claim equivalent enforcement for
+  Claude, OpenCode, or Pi. Use a dedicated OS account, VM, or container when an
+  unmanaged axis is unacceptable.
+- Local MCP processes and tools can have privileges outside a harness sandbox.
+  Review their definitions and credentials before unattended orchestration.
 - Generated HTML, attachments, project paths, WebSocket messages, and external
   MCP configuration should be treated as untrusted input.
 
 ## Credentials and local data
 
-- Project state and transcripts are stored in per-project SQLite data under
-  `.minions/`; worktrees normally live under `.canvas-worktrees/`. These files
-  persist until the project or worktrees are removed. Back up, retain, and
-  delete them according to the sensitivity of the repository.
-- MCP definitions are stored in `.minions/mcp-servers.json` with owner-only
+- A stable workspace UUID maps server-side to a canonical source root and to
+  `$MINIONS_HOME/workspaces/<uuid>/` (default `MINIONS_HOME=~/.minions`) as its
+  state root. Project SQLite data, settings, skills, MCP definitions, and new
+  worktrees persist there. Global session history and temporary artifacts live
+  elsewhere under `MINIONS_HOME`. Protect and back up the complete central
+  state separately from the source repository.
+- Opening a source folder is the authorization act. Sources may reside on
+  mounted volumes, but Minions rejects unregistered roots, traversal, and
+  symlink escapes. A workspace UUID is opaque and must not be used to derive or
+  accept a client-supplied source path.
+- Legacy `<source>/.minions/` content is copied into central state on first
+  registration without overwriting destination files or following symlinks.
+  Legacy `<source>/.canvas-worktrees/` remains recognized during migration.
+  Neither legacy directory is automatically deleted; retain it until migrated
+  state and pending work are verified.
+- MCP definitions are stored in the workspace state root as
+  `mcp-servers.json`, with owner-only
   permissions where the platform supports POSIX modes. Environment variables
   and HTTP headers in that file are plaintext local secrets: do not commit,
-  sync, or paste the sidecar into reports.
+  sync, or paste the state directory into reports.
 - Codex launches receive a restricted environment allowlist. Claude and MCP
-  permissions remain provider-controlled capabilities; use the narrowest mode
-  that can complete the task.
+  permissions remain provider-controlled capabilities; verify effective policy
+  and use the narrowest mode that can complete the task.
 - HTTP MCP endpoints are accepted without TLS only on loopback. Remote MCP
   endpoints must use HTTPS, but Minions does not attest to or sandbox the
   remote server's behavior.

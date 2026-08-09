@@ -1,7 +1,6 @@
 /** Server-side write-through persistence and boot hydration glue. */
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type Database from "better-sqlite3";
 import { initDb } from "./db.ts";
@@ -25,6 +24,7 @@ import { serverLogger } from "./logging.ts";
 import { reviewLifecycleToColumns, type SessionReviewLifecycle } from "./session-review-lifecycle.ts";
 import { ensureWorkItemSchema } from "./work-item-schema.ts";
 import { removeSessionPersistence } from "./session-persist-remove.ts";
+import { getMinionsHome } from "./workspace-registry.ts";
 
 const log = serverLogger.child("session-persist");
 
@@ -37,7 +37,7 @@ function defaultDbPath(): string {
   if (process.env["MINIONS_SERVER_DB"]) {
     return process.env["MINIONS_SERVER_DB"]!;
   }
-  const dir = path.join(os.homedir(), ".minions");
+  const dir = getMinionsHome();
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   try {
     fs.chmodSync(dir, 0o700);

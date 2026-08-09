@@ -35,3 +35,21 @@ review_gates:
       capabilities: [capability.system_model_guidance]
       flows: [flow.inspect_system_model]
       risk: [high, critical]
+  - id: gate.workspace_boundaries
+    name: Workspace root authorization
+    description: Verify UUID binding, canonical source authorization, central owned roots, and non-destructive legacy migration.
+    blocks_merge: true
+    required_when:
+      files: [server/workspace-registry.ts, server/project-store.ts, server/path-guard.ts, server/worktree-owned-root.ts, server/worktree-*.ts]
+      capabilities: [capability.project_workspace, capability.approval_and_legacy_integration, capability.canonical_lineage_integration]
+      flows: [flow.open_project_workspace, flow.review_legacy_changes, flow.promote_lineage]
+      risk: [high, critical]
+  - id: gate.sandbox_guarantees
+    name: Sandbox guarantee honesty
+    description: Verify independent policy axes, Codex enforcement, safe defaults, plan read-only, and unmanaged reporting for unsupported harnesses.
+    blocks_merge: true
+    required_when:
+      files: [shared/workspace-contracts.ts, server/harness/**, src/nodes/leader/SandboxPolicyControls.tsx]
+      capabilities: [capability.runtime_configuration, capability.leader_creation]
+      flows: [flow.configure_runtime, flow.launch_leader]
+      risk: [high, critical]

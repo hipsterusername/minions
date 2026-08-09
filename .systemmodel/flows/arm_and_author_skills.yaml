@@ -9,7 +9,7 @@ risks:
 suggested_files: [ src/SkillsBrowser.tsx, src/SkillEditor.tsx, src/SkillImportModal.tsx, src/mobile/LaunchSkillsPanel.tsx, server/skill-authoring-tools.ts, server/task-tools/task-prompt.ts ]
 suggested_tests: [ src/SkillsBrowser.test.tsx, src/SkillEditor.test.tsx, src/SkillImportModal.test.tsx, src/mobile/LaunchSkillsPanel.test.tsx, server/skill-authoring-tools.test.ts, server/task-tools/task-prompt.test.ts ]
 steps:
-  - Create, import, edit, duplicate, or delete project-root skill definitions and subskills.
+  - Create, import, edit, duplicate, or delete skill definitions and subskills in the registered workspace state root.
   - Select known skill IDs and provide required values on a launch surface.
   - Compile and freeze instructions and values into the Leader or minion prompt at spawn.
   - Permit lazy subskill loading and grant mutation tools only when skill-builder is armed.
