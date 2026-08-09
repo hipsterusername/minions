@@ -3,6 +3,7 @@ import type { DisplayMessage } from "../../sdk-messages.ts";
 import type { SessionStreamState, SessionStreamStatus } from "../../session-stream.ts";
 import { useSessionStream } from "../../use-session-stream.ts";
 import type { SocketSubscribe } from "../../use-socket.ts";
+import { CopyButton } from "../../components/CopyButton.tsx";
 import { SimpleMarkdown } from "../../components/SimpleMarkdown.tsx";
 import type { TaskPlanItem } from "./types.ts";
 
@@ -262,7 +263,13 @@ function MinionDetail({ task, index, stream }: { task: TaskPlanItem; index: numb
         {stream.totalCost > 0 && <span style={{ flexShrink: 0, fontSize: 9, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>${stream.totalCost.toFixed(4)}</span>}
       </header>
 
-      <div ref={outputRef} data-scroll-capture style={{ flex: 1, minHeight: 0, overflow: "auto", overscrollBehavior: "contain", padding: 12 }}>
+      <div
+        ref={outputRef}
+        data-scroll-capture
+        data-no-drag
+        data-testid="minion-log-output"
+        style={{ flex: 1, minHeight: 0, overflow: "auto", overscrollBehavior: "contain", padding: 12 }}
+      >
         <div style={{ padding: "9px 10px", borderRadius: 6, background: "var(--bg-secondary)", border: "1px solid var(--border-subtle, var(--border-default))" }}>
           <div style={{ fontSize: 9, fontWeight: 650, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>Task brief</div>
           <div style={{ marginTop: 5, fontSize: 11, lineHeight: 1.45, color: "var(--text-secondary)" }}>{task.description || task.title}</div>
@@ -297,7 +304,11 @@ function MinionDetail({ task, index, stream }: { task: TaskPlanItem; index: numb
 function ActivityEntry({ message }: { message: DisplayMessage }) {
   const isMarkdown = message.role === "assistant" || message.role === "result";
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "52px minmax(0, 1fr)", gap: 8, padding: "7px 8px", borderRadius: 6, background: message.role === "result" ? "var(--success-bg)" : "var(--bg-primary)", border: "1px solid var(--border-subtle, var(--border-default))" }}>
+    <div
+      className="copyable"
+      style={{ position: "relative", display: "grid", gridTemplateColumns: "52px minmax(0, 1fr)", gap: 8, padding: "7px 36px 7px 8px", borderRadius: 6, background: message.role === "result" ? "var(--success-bg)" : "var(--bg-primary)", border: "1px solid var(--border-subtle, var(--border-default))" }}
+    >
+      <CopyButton text={message.content} title={`Copy ${ROLE_LABEL[message.role]} message to clipboard`} />
       <span style={{ fontSize: 9, color: message.role === "result" ? "var(--success-color)" : "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{ROLE_LABEL[message.role]}</span>
       <div style={{ minWidth: 0, fontSize: 11, lineHeight: 1.45, color: "var(--text-secondary)", whiteSpace: isMarkdown ? "normal" : "pre-wrap", overflowWrap: "anywhere" }}>
         {isMarkdown ? <SimpleMarkdown text={message.content} /> : message.content}

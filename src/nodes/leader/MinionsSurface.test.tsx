@@ -1,8 +1,23 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TaskPlanItem } from "./types.ts";
 import { MinionsSurface } from "./MinionsSurface.tsx";
 import type { SocketSubscribe } from "../../use-socket.ts";
+
+const originalClipboard = Object.getOwnPropertyDescriptor(globalThis.navigator, "clipboard");
+
+afterEach(() => {
+  if (originalClipboard) {
+    Object.defineProperty(globalThis.navigator, "clipboard", originalClipboard);
+  } else {
+    Object.defineProperty(globalThis.navigator, "clipboard", {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+  }
+  vi.restoreAllMocks();
+});
 
 function task(overrides: Partial<TaskPlanItem> = {}): TaskPlanItem {
   return {
@@ -55,6 +70,12 @@ describe("MinionsSurface", () => {
   });
 
   it("syncs and renders the selected minion session log", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(globalThis.navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+      writable: true,
+    });
     const socketSend = vi.fn();
     let listener: ((message: unknown) => void) | undefined;
     const socketSubscribe = Object.assign(
@@ -92,5 +113,9 @@ describe("MinionsSurface", () => {
     });
 
     await waitFor(() => expect(screen.getByText("Updated the tab behavior.")).toBeInTheDocument());
+    expect(screen.getByTestId("minion-log-output")).toHaveAttribute("data-no-drag");
+
+    fireEvent.click(screen.getByTitle("Copy Minion message to clipboard"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Updated the tab behavior."));
   });
 });
