@@ -16,6 +16,8 @@ export interface WaitResumeRequest {
   opts: StartSessionOptions;
   completedReason: string;
   immediate?: boolean;
+  onDelivered?: () => void;
+  idempotencyKey?: string;
 }
 
 const queuedWaitResumes = new WeakMap<SessionHost, WaitResumeRequest>();
@@ -84,19 +86,26 @@ function completeWaitAndResume(
   request: WaitResumeRequest,
 ): boolean {
   host.clearWaitTimer();
-  if (host.taskState?.pendingWait) {
-    host.taskState.pendingWait = null;
-    persistTaskState(host.id, host.taskState);
-  }
-  deps.bus.emitToSession(host.id, {
-    type: "wait_state",
-    sessionKey: host.id,
-    action: "completed",
-    reason: request.completedReason,
-    timestamp: Date.now(),
-  });
+  const pendingWait = host.taskState?.pendingWait ?? null;
   return requestCoalescedWake(host, deps, {
     opts: request.opts,
     ...(request.immediate === undefined ? {} : { immediate: request.immediate }),
+    allowStopped: true,
+    idempotencyKey: request.idempotencyKey
+      ?? (pendingWait ? `wait:${host.id}:${pendingWait.scheduledAt}` : undefined),
+    onDelivered: () => {
+      if (host.taskState?.pendingWait) {
+        host.taskState.pendingWait = null;
+        persistTaskState(host.id, host.taskState);
+      }
+      deps.bus.emitToSession(host.id, {
+        type: "wait_state",
+        sessionKey: host.id,
+        action: "completed",
+        reason: request.completedReason,
+        timestamp: Date.now(),
+      });
+      request.onDelivered?.();
+    },
   });
 }

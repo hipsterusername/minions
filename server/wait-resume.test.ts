@@ -79,11 +79,12 @@ describe("wait resume coordination", () => {
     });
 
     expect(resumed).toBe(false);
-    expect(host.taskState?.pendingWait).toBeNull();
+    expect(host.taskState?.pendingWait).not.toBeNull();
     expect(startChildSession).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(15_000);
     expect(startChildSession).toHaveBeenCalledOnce();
+    expect(host.taskState?.pendingWait).toBeNull();
     expect(startChildSession).toHaveBeenCalledWith(expect.objectContaining({
       invocationKind: "resume_open_run",
       resumeId: "sdk-1",

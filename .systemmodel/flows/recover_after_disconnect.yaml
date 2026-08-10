@@ -1,15 +1,16 @@
 id: flow.recover_after_disconnect
 type: flow
 name: Recover after disconnect or server restart
-summary: Reconnection restores sessions, WorkItems, bindings, approvals, tasks, dashboards, and harness continuity without replaying completed work.
-constraints: []
+summary: Reconnection restores the complete session graph, WorkItems, bindings, transcripts, waits, tasks, dashboards, approvals, and harness continuity, then replays only undelivered workflow attention.
+constraints: [ constraint.minion_lifecycle_semantics ]
 decisions: [ decision.typed_event_bus, decision.canonical_work_item_lifecycle ]
-suggested_files: [ src/use-socket.ts, src/App.tsx, src/use-work-items.ts, src/mobile/MobileApp.tsx, server/session-host.ts, server/commands/sync-session.ts ]
-suggested_tests: [ src/use-socket.test.tsx, src/App.dom.test.tsx, src/use-work-items.test.ts, src/mobile/MobileApp.test.tsx, server/session-persist.test.ts, server/commands/sync-session.test.ts ]
+suggested_files: [ src/use-socket.ts, src/App.tsx, src/use-work-items.ts, src/mobile/MobileApp.tsx, server/session-host.ts, server/session-registry.ts, server/session-registry-recovery.ts, server/session-persist.ts, server/session-task-state-persist.ts, server/commands/sync-session.ts ]
+suggested_tests: [ src/use-socket.test.tsx, src/App.dom.test.tsx, src/use-work-items.test.ts, src/mobile/MobileApp.test.tsx, server/session-persist.test.ts, server/session-registry.test.ts, server/commands/sync-session.test.ts ]
 steps:
   - Reconnect the WebSocket and safely flush queued outbound commands.
   - Relist sessions and WorkItems, then sync each mounted session from persisted host truth.
-  - Restore harness, event buffer, task plan, dashboard, approval, worktree, and review state before folding new events.
+  - Restore every session and transcript before reconciling parent tasks against child terminal evidence.
+  - Preserve blocked children, rebuild durable wait timers, and replay only unacknowledged attention.
   - Reattach UI bindings and resume incomplete continuity without redoing terminal tasks or duplicating keyed creation.
 freshness:
   class: code_coupled

@@ -53,6 +53,10 @@ export interface TaskRecord {
     result: string | null;
     completedAt: number | null;
   }>;
+  /** Durable attention intent created by a blocked or terminal transition. */
+  attentionRequestedAt?: number | null;
+  /** Set only after the leader continuation has actually been dispatched. */
+  attentionDeliveredAt?: number | null;
 }
 
 export type TaskStatus =

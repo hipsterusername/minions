@@ -45,25 +45,18 @@ export type TaskLifecycleEvent =
   | { type: "discarded"; timestamp?: number }
   | { type: "cancelled"; result?: string; timestamp?: number };
 
-export const TERMINAL_TASK_STATUSES = new Set<TaskStatus>([
-  "completed",
-  "failed",
-  "ended_without_report",
-  "cancelled",
-  "orphaned",
-]);
+export const TERMINAL_TASK_STATUSES = new Set<TaskStatus>(
+  ["completed", "failed", "ended_without_report", "cancelled", "orphaned"],
+);
 
 export function isTerminalTaskStatus(status: TaskStatus): boolean {
   return TERMINAL_TASK_STATUSES.has(status);
 }
 
 /** Statuses from which a task may be retried via a new "assigned" event. */
-export const RETRYABLE_TASK_STATUSES = new Set<TaskStatus>([
-  "failed",
-  "ended_without_report",
-  "orphaned",
-  "cancelled",
-]);
+export const RETRYABLE_TASK_STATUSES = new Set<TaskStatus>(
+  ["failed", "ended_without_report", "orphaned", "cancelled"],
+);
 
 export function isRetryableTaskStatus(status: TaskStatus): boolean {
   return RETRYABLE_TASK_STATUSES.has(status);
@@ -148,6 +141,8 @@ export function reduceTaskLifecycle(
             completedAt: task.completedAt,
           },
         ],
+        attentionRequestedAt: null,
+        attentionDeliveredAt: null,
       };
     }
     return task;
@@ -160,6 +155,8 @@ export function reduceTaskLifecycle(
         executor: "minion",
         minionSessionKey: event.minionSessionKey,
         status: "starting",
+        attentionRequestedAt: null,
+        attentionDeliveredAt: null,
       };
 
     case "session_starting":
@@ -168,11 +165,18 @@ export function reduceTaskLifecycle(
         executor: "minion",
         minionSessionKey: event.minionSessionKey ?? task.minionSessionKey,
         status: "starting",
+        attentionRequestedAt: null,
+        attentionDeliveredAt: null,
       };
 
     case "session_running":
       if (task.status === "running") return task;
-      return { ...task, status: "running" };
+      return {
+        ...task,
+        status: "running",
+        attentionRequestedAt: null,
+        attentionDeliveredAt: null,
+      };
 
     case "reported_step":
       // Always return a new record so lastStep and stepCount are updated.
@@ -181,6 +185,8 @@ export function reduceTaskLifecycle(
         status: "running",
         lastStep: event.message ?? task.lastStep,
         stepCount: (task.stepCount ?? 0) + 1,
+        attentionRequestedAt: null,
+        attentionDeliveredAt: null,
       };
 
     case "report_nudged":
@@ -208,6 +214,8 @@ export function reduceTaskLifecycle(
         ...task,
         status: "blocked",
         lastStep: event.question,
+        attentionRequestedAt: event.timestamp ?? now,
+        attentionDeliveredAt: null,
       };
 
     case "session_ended": {
@@ -350,15 +358,19 @@ export function applySessionEndedForMinion(opts: {
   opts.forEachLeaderTaskState?.((leaderKey, taskState) => {
     for (const task of taskState.tasks.values()) {
       if (task.minionSessionKey !== opts.minionSessionKey) continue;
-      applyLifecycleEvent({
+      const next = applyLifecycleEvent({
         bus: opts.bus,
         leaderSessionKey: leaderKey,
         taskState,
         taskId: task.taskId,
         event: { type: "session_ended", reason: opts.reason, result: opts.result },
-        onStateChange: (state) => persistTaskState(leaderKey, state),
       });
-      opts.onAfterLifecycle?.(leaderKey);
+      // A wake must never outrun its recovery state. If persistence is
+      // unavailable, leave the task unacknowledged in memory and do not
+      // dispatch a continuation that cannot be reconstructed after a crash.
+      if (next && persistTaskState(leaderKey, taskState)) {
+        opts.onAfterLifecycle?.(leaderKey);
+      }
       return;
     }
   });
@@ -373,10 +385,13 @@ function closeTask(
   result: string,
   completedAt: number,
 ): TaskRecord {
+  const requestsAttention = status !== "cancelled";
   return {
     ...task,
     status,
     result,
     completedAt,
+    attentionRequestedAt: requestsAttention ? completedAt : null,
+    attentionDeliveredAt: null,
   };
 }

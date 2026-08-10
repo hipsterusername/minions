@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import type {
   SessionHost,
   SessionHostDeps,
@@ -19,6 +19,12 @@ export interface CoalescedWakeRequest {
   opts: StartSessionOptions;
   /** Skip the coalescing window, but still obey the minimum resume interval. */
   immediate?: boolean;
+  /** A recovered durable wait is authorized to resume a stopped host. */
+  allowStopped?: boolean;
+  /** Runs only after the continuation dispatch succeeds. */
+  onDelivered?: () => void;
+  /** Stable identity used to deduplicate canonical dispatch across recovery. */
+  idempotencyKey?: string;
 }
 
 interface PendingWake {
@@ -118,7 +124,8 @@ function flushWake(host: SessionHost, deps: SessionHostDeps): void {
   if (!pending) return;
   pendingWakes.delete(host);
 
-  if (host.status === "stopped" || host.abortController.signal.aborted) return;
+  if (host.abortController.signal.aborted) return;
+  if (host.status === "stopped" && !pending.requests.some((request) => request.allowStopped)) return;
   if (host.status === "running" || host.runControl !== null || host.eventStream !== null) {
     const now = Date.now();
     pendingWakes.set(host, {
@@ -156,15 +163,21 @@ function deliverWake(
   if (host.workItemId && host.runKind === "primary" && deps.resumeWorkItemRun) {
     const workItemId = host.workItemId;
     try {
+      const stableKeys = [...new Set(
+        requests.map((request) => request.idempotencyKey).filter((key): key is string => !!key),
+      )].sort();
+      const identity = stableKeys.length > 0 ? stableKeys.join("\n") : prompt;
+      const digest = createHash("sha256").update(identity).digest("hex").slice(0, 24);
       const resume = deps.resumeWorkItemRun({ workItemId, runKey: host.runKey,
-        prompt, requestId: `wake:${host.runKey}:${randomUUID()}` });
-      void Promise.resolve(resume).catch((error: unknown) => {
+        prompt, requestId: `wake:${host.runKey}:${digest}` });
+      void Promise.resolve(resume).then(() => markDelivered(requests), (error: unknown) => {
         log.warn("work_item_resume_failed", {
           sessionKey: host.id,
           workItemId,
           runKey: host.runKey,
           error,
         });
+        retryDelivery(host, deps, requests);
       });
     } catch (error) {
       log.warn("work_item_resume_failed", {
@@ -173,12 +186,40 @@ function deliverWake(
         runKey: host.runKey,
         error,
       });
+      retryDelivery(host, deps, requests);
     }
     return;
   }
-  deps.startChildSession({
-    ...first.opts,
-    invocationKind: "resume_open_run",
-    prompt,
-  });
+  try {
+    deps.startChildSession({
+      ...first.opts,
+      invocationKind: "resume_open_run",
+      prompt,
+    });
+    markDelivered(requests);
+  } catch (error) {
+    log.warn("leader_resume_failed", { sessionKey: host.id, error });
+    retryDelivery(host, deps, requests);
+  }
+}
+
+function retryDelivery(
+  host: SessionHost,
+  deps: SessionHostDeps,
+  requests: CoalescedWakeRequest[],
+): void {
+  if (host.abortController.signal.aborted) return;
+  for (const request of requests) {
+    requestCoalescedWake(host, deps, { ...request, immediate: false });
+  }
+}
+
+function markDelivered(requests: CoalescedWakeRequest[]): void {
+  for (const request of requests) {
+    try {
+      request.onDelivered?.();
+    } catch (error) {
+      log.warn("wake_delivery_checkpoint_failed", { error });
+    }
+  }
 }

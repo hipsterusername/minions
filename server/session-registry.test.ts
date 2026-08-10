@@ -10,6 +10,7 @@ import {
   closePersistDb,
   disablePersistence,
   openPersistDb,
+  persistEvent,
   persistTaskState,
   persistSession,
   type PersistableSession,
@@ -350,9 +351,12 @@ describe("SessionRegistry.wakeWaitingLeaderIfAllChildrenTerminal — wake polici
     r.wakeWaitingLeaderIfAllChildrenTerminal("leader-1");
 
     expect(startChildSession).not.toHaveBeenCalled();
-    expect(h.taskState.pendingWait).toBeNull();
+    // The wait remains a durable outbox entry until dispatch, so a crash in
+    // the coalescing window cannot lose the wake.
+    expect(h.taskState.pendingWait).not.toBeNull();
     vi.advanceTimersByTime(15_000);
     expect(startChildSession).toHaveBeenCalledOnce();
+    expect(h.taskState.pendingWait).toBeNull();
   });
 
   it("queues the wake when children finish before the leader run is idle", () => {
@@ -541,6 +545,29 @@ describe("SessionRegistry.wakeWaitingLeaderIfAllChildrenTerminal — wake polici
 
     expect(startChildSession).not.toHaveBeenCalled();
   });
+
+  it("retains a child wake that arrives before an active leader becomes idle", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const { r, map, startChildSession } = makeRegistry();
+    const h = makeLeader();
+    h.status = "running";
+    h.runControl = { abort: () => {} } as unknown as NonNullable<typeof h.runControl>;
+    h.taskState = {
+      tasks: new Map([["t1", makeTask({ taskId: "t1", status: "completed" })]]),
+      pendingWait: null,
+      approval: null,
+    };
+    map.set("leader-1", h);
+
+    r.wakeWaitingLeaderIfAllChildrenTerminal("leader-1");
+    h.status = "idle";
+    h.runControl = null;
+    vi.advanceTimersByTime(15_000);
+
+    expect(startChildSession).toHaveBeenCalledOnce();
+    expect(h.taskState.tasks.get("t1")?.attentionDeliveredAt).toBe(15_000);
+  });
 });
 
 describe("SessionRegistry.hydrateFromDb — sessionId round-trip", () => {
@@ -666,8 +693,8 @@ describe("SessionRegistry.hydrateFromDb — sessionId round-trip", () => {
     persistSession(makePersisted({
       id: "sandboxed-leader",
       sandboxPolicy: {
-        requested: { filesystemScope: "workspace-write", approvalPolicy: "on-request", networkAccess: "disabled" },
-        effective: { filesystemScope: "workspace-write", approvalPolicy: "on-request", networkAccess: "disabled" },
+        requested: { filesystemScope: "workspace-write", approvalPolicy: "on-request" },
+        effective: { filesystemScope: "workspace-write", approvalPolicy: "on-request" },
         unsupported: [],
       },
     }));
@@ -675,8 +702,8 @@ describe("SessionRegistry.hydrateFromDb — sessionId round-trip", () => {
     const r = new SessionRegistry();
     r.hydrateFromDb();
     expect(r.get("sandboxed-leader")?.sandboxPolicy).toEqual({
-      requested: { filesystemScope: "workspace-write", approvalPolicy: "on-request", networkAccess: "disabled" },
-      effective: { filesystemScope: "workspace-write", approvalPolicy: "on-request", networkAccess: "disabled" },
+      requested: { filesystemScope: "workspace-write", approvalPolicy: "on-request" },
+      effective: { filesystemScope: "workspace-write", approvalPolicy: "on-request" },
       unsupported: [],
     });
   });
@@ -736,7 +763,80 @@ describe("SessionRegistry.hydrateFromDb — sessionId round-trip", () => {
     expect(r.get("leader-orphan")?.taskState?.tasks.get("t1")?.status).toBe("orphaned");
   });
 
-  it("marks persisted blocked tasks as orphaned during hydration", () => {
+  it("recovers a durable wait, terminal child evidence, and minion transcript together", () => {
+    persistSession(makePersisted({ id: "leader-recover", role: "leader", status: "idle" }));
+    persistSession(makePersisted({
+      id: "minion-recover",
+      role: "minion",
+      status: "idle",
+      reviewLifecycle: {
+        reviewState: "completion_to_review",
+        reviewReason: "Review completion",
+        finalReport: "child finished",
+        finalDashboardRevision: null,
+        dashboardRevision: 0,
+        terminalReason: "completed",
+        terminalAt: 200,
+        acknowledgedAt: null,
+        dismissedAt: null,
+        lifecycleRevision: 1,
+      },
+    }));
+    persistEvent("minion-recover", {
+      type: "sdk_event",
+      sessionKey: "minion-recover",
+      message: { role: "assistant", content: "durable child history" },
+      timestamp: 150,
+    });
+    persistTaskState("leader-recover", {
+      tasks: new Map([["t1", {
+        taskId: "t1",
+        title: "T1",
+        description: "",
+        priority: "critical",
+        executor: "minion",
+        minionSessionKey: "minion-recover",
+        leaderSessionKey: "leader-recover",
+        status: "running",
+        createdAt: 100,
+        completedAt: null,
+        result: null,
+      }]]),
+      pendingWait: {
+        durationMs: 30_000,
+        reason: "await child",
+        scheduledAt: 100,
+        timerId: null,
+        wakeOn: "all_terminal",
+      },
+      approval: null,
+    });
+
+    const startChildSession = vi.fn();
+    const r = new SessionRegistry();
+    r.setDeps({
+      bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
+      startChildSession,
+      forEachLeaderTaskState: r.forEachLeaderTaskState,
+    });
+    r.hydrateFromDb();
+
+    const task = r.get("leader-recover")?.taskState?.tasks.get("t1");
+    expect(task).toMatchObject({
+      status: "ended_without_report",
+      result: "child finished",
+    });
+    expect(r.get("leader-recover")?.taskState?.pendingWait).toBeNull();
+    expect(startChildSession).toHaveBeenCalledOnce();
+    expect(r.get("minion-recover")?.eventBuffer).toContainEqual(
+      expect.objectContaining({
+        sessionKey: "minion-recover",
+        message: { role: "assistant", content: "durable child history" },
+      }),
+    );
+  });
+
+  it("preserves persisted blocked tasks as resumable during hydration", () => {
     persistSession(makePersisted({ id: "leader-blocked-orphan", role: "leader" }));
     persistTaskState("leader-blocked-orphan", {
       tasks: new Map([
@@ -769,6 +869,6 @@ describe("SessionRegistry.hydrateFromDb — sessionId round-trip", () => {
     });
     r.hydrateFromDb();
 
-    expect(r.get("leader-blocked-orphan")?.taskState?.tasks.get("t1")?.status).toBe("orphaned");
+    expect(r.get("leader-blocked-orphan")?.taskState?.tasks.get("t1")?.status).toBe("blocked");
   });
 });

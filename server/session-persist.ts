@@ -25,6 +25,10 @@ import { reviewLifecycleToColumns, type SessionReviewLifecycle } from "./session
 import { ensureWorkItemSchema } from "./work-item-schema.ts";
 import { removeSessionPersistence } from "./session-persist-remove.ts";
 import { getMinionsHome } from "./workspace-registry.ts";
+import {
+  hydrateLeaderTaskState,
+  persistLeaderTaskState,
+} from "./session-task-state-persist.ts";
 
 const log = serverLogger.child("session-persist");
 
@@ -32,6 +36,7 @@ let dbHandle: Database.Database | null = null;
 const armedSystemPrompts = new Map<string, string>();
 /** Set to `true` to silently no-op all writes/reads (used by tests). */
 let disabled = false;
+let persistenceUnavailable = false;
 
 function defaultDbPath(): string {
   if (process.env["MINIONS_SERVER_DB"]) {
@@ -68,6 +73,7 @@ export function openPersistDb(dbPath?: string): Database.Database {
     // Best effort on platforms without POSIX permissions.
   }
   disabled = false;
+  persistenceUnavailable = false;
   return dbHandle;
 }
 
@@ -88,6 +94,7 @@ export function closePersistDb(): void {
 export function disablePersistence(): void {
   closePersistDb();
   disabled = true;
+  persistenceUnavailable = false;
 }
 
 function ensureDb(): Database.Database | null {
@@ -98,6 +105,7 @@ function ensureDb(): Database.Database | null {
     } catch (err) {
       log.warn("database_open_failed", { error: err });
       disabled = true;
+      persistenceUnavailable = true;
       return null;
     }
   }
@@ -201,6 +209,9 @@ function sessionToRow(
     worktree_created_at: s.worktree?.createdAt ?? null,
     worktree_lifecycle: s.worktree?.lifecycle ?? null,
     approval_json: s.approval ? JSON.stringify(s.approval) : null,
+    // SessionHost.persist() must never erase the independently persisted
+    // leader workflow snapshot.
+    task_state_json: existing?.task_state_json ?? null,
     total_cost: s.totalCost,
     turns: s.turns,
     harness_name: s.harnessName,
@@ -296,25 +307,15 @@ export function loadRecentEvents(
 export function persistTaskState(
   leaderSessionKey: string,
   state: TaskManagerState,
-): void {
+): boolean {
   const db = ensureDb();
-  if (!db) return;
+  if (!db) return disabled && !persistenceUnavailable;
   try {
-    db.transaction(() => {
-      const currentIds = new Set(state.tasks.keys());
-      const existing = repo.getTaskRecordsForLeader(db, leaderSessionKey);
-      for (const row of existing) {
-        if (!currentIds.has(row.taskId)) {
-          repo.deleteTaskRecord(db, leaderSessionKey, row.taskId);
-        }
-      }
-      for (const rec of state.tasks.values()) {
-        repo.upsertTaskRecord(db, rec);
-      }
-      repo.updateSessionApproval(db, leaderSessionKey, state.approval);
-    })();
+    persistLeaderTaskState(db, leaderSessionKey, state);
+    return true;
   } catch (err) {
     log.warn("task_state_persist_failed", { error: err });
+    return false;
   }
 }
 
@@ -368,21 +369,7 @@ export function hydrateSessionsFromDb(): HydratedSession[] {
   for (const row of rows) {
     let tasks: TaskManagerState | null = null;
     if (row.role === "leader") {
-      let approval: ApprovalState | null = null;
-      if (row.approval_json) {
-        try {
-          approval = JSON.parse(row.approval_json) as ApprovalState;
-        } catch {
-          approval = null;
-        }
-      }
-      const records = repo.getTaskRecordsForLeader(db, row.session_key);
-      if (records.length > 0) {
-        const map = new Map(records.map((r) => [r.taskId, r]));
-        tasks = { tasks: map, pendingWait: null, approval };
-      } else {
-        tasks = { tasks: new Map(), pendingWait: null, approval };
-      }
+      tasks = hydrateLeaderTaskState(db, row);
     }
     const render = repo.getRenderState(db, row.session_key);
     const events = loadRecentEvents(row.session_key);

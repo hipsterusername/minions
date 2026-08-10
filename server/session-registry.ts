@@ -12,12 +12,8 @@ import {
   persistenceDb,
   persistArmedSystemPrompt,
 } from "./session-persist.ts";
-import type { RuntimeSessionInfo, TaskManagerState, TaskRecord } from "./task-tools.ts";
+import type { RuntimeSessionInfo, TaskManagerState } from "./task-tools.ts";
 import type { WorktreeLifecycle } from "./worktree-types.ts";
-import { applyLifecycleEvent } from "./task-lifecycle.ts";
-import { persistTaskState } from "./session-persist.ts";
-import { requestWaitResume } from "./wait-resume.ts";
-import { buildWakeTaskDigest, isWakeWorthyStatus, requestCoalescedWake } from "./wake-coalescer.ts";
 import { buildSessionListItem, type SessionListItem } from "./session-list-item.ts";
 import { serverLogger } from "./logging.ts";
 import { loadLatestContextCheckpoint } from "./context-checkpoint-store.ts";
@@ -28,6 +24,8 @@ import {
 } from "./session-review-lifecycle.ts";
 import { sandboxResolutionSchema } from "../shared/workspace-contracts.ts";
 import { inspectRunRecoveryWitness } from "./work-item-recovery.ts";
+import { recoverDurableWorkflowState } from "./session-registry-recovery.ts";
+import { wakeLeaderFromDurableTaskState } from "./leader-wake.ts";
 
 const log = serverLogger.child("session-registry");
 
@@ -42,6 +40,7 @@ export class SessionRegistry {
   /** Supply the execution dependencies. Must be called before `start()`. */
   setDeps(deps: SessionHostDeps): void {
     this.deps = deps;
+    this.recoverDurableWorkflowState();
   }
 
   get(key: string): SessionHost | undefined {
@@ -186,74 +185,19 @@ export class SessionRegistry {
   wakeWaitingLeaderIfAllChildrenTerminal = (leaderKey: string): void => {
     const host = this.map.get(leaderKey);
     if (!host || !this.deps) return;
-
-    const minionTasks = host.taskState
-      ? Array.from(host.taskState.tasks.values()).filter((t) => t.executor === "minion")
-      : [];
-    const pendingWait = host.taskState?.pendingWait ?? null;
-
-    if (pendingWait) {
-      const wakeOn = pendingWait.wakeOn ?? "all_terminal";
-      // Wake-worthy = terminal OR blocked. A blocked child has ended its turn
-      // awaiting a leader decision, so the leader must be roused to answer it
-      // even though the task is not terminal.
-      // any_terminal: wake on first wake-worthy child; all_terminal: wait for all.
-      if (wakeOn === "any_terminal") {
-        if (!minionTasks.some((t) => isWakeWorthyStatus(t.status))) return;
-      } else if (minionTasks.some((t) => !isWakeWorthyStatus(t.status))) return;
-
-      const digest = buildWakeTaskDigest(minionTasks, pendingWait.scheduledAt);
-      requestWaitResume(host, this.deps, {
-        completedReason: "All delegated child tasks reached a wake-worthy state (terminal or blocked).",
-        immediate: wakeOn === "all_terminal",
-        opts: {
-          sessionKey: host.id,
-          invocationKind: "resume_open_run",
-          prompt:
-            `Continue. All delegated child tasks reached a wake-worthy state (terminal or blocked) while waiting (${pendingWait.reason}). Pick up where you left off.` +
-            (digest ? `\n\nTask results:\n${digest}` : ""),
-          cwd: host.cwd,
-          resumeId: host.sessionId ?? undefined,
-          role: host.role,
-          harness: host.harnessName,
-        },
-      });
-      return;
-    }
-
-    // Only fire when the host is genuinely idle (mirrors the isLive guard).
-    if (
-      !host.taskState ||
-      host.status !== "idle" ||
-      host.runControl !== null ||
-      host.eventStream !== null ||
-      host.abortController.signal.aborted
-    ) return;
-
-    // cancelled/orphaned come from teardown paths; must not resurrect a leader.
-    // blocked is included: an idle leader must be roused to answer a stuck minion.
-    const meaningfulTasks = minionTasks.filter(
-      (t) =>
-        t.status === "completed" ||
-        t.status === "failed" ||
-        t.status === "ended_without_report" ||
-        t.status === "blocked",
-    );
-    if (meaningfulTasks.length === 0) return;
-
-    const digest = buildWakeTaskDigest(meaningfulTasks);
-    requestCoalescedWake(host, this.deps, {
-      opts: {
-        sessionKey: host.id,
-        invocationKind: "resume_open_run",
-        prompt: `A delegated task reached a state needing your attention while you were idle:\n${digest}\nReview it (answer a blocked task with message_task) and continue orchestrating.`,
-        cwd: host.cwd,
-        resumeId: host.sessionId ?? undefined,
-        role: host.role,
-        harness: host.harnessName,
-      },
-    });
+    wakeLeaderFromDurableTaskState(host, this.deps);
   };
+
+  /** Rebuild volatile timers and notifications from the durable snapshot. */
+  private recoverDurableWorkflowState(): void {
+    if (!this.deps) return;
+    recoverDurableWorkflowState({
+      sessions: this.map,
+      getSession: (key) => this.map.get(key),
+      deps: this.deps,
+      wakeLeader: this.wakeWaitingLeaderIfAllChildrenTerminal,
+    });
+  }
 
   /** Flatten the current registry into the `session_list` broadcast shape. */
   snapshot(): SessionListItem[] {
@@ -359,19 +303,6 @@ export class SessionRegistry {
           }
         }
         host.taskState = tasks;
-        if (host.taskState && this.deps) {
-          for (const task of host.taskState.tasks.values()) {
-            if (task.status !== "running" && task.status !== "starting" && task.status !== "blocked") continue;
-            applyLifecycleEvent({
-              bus: this.deps.bus,
-              leaderSessionKey: row.session_key,
-              taskState: host.taskState,
-              taskId: task.taskId,
-              event: { type: "rehydrated_orphan" },
-              onStateChange: (state) => persistTaskState(row.session_key, state),
-            });
-          }
-        }
         host.renderState = render;
         // Restore the event buffer in place — using bufferEvent() here
         // would re-persist every event we just loaded.
@@ -379,6 +310,10 @@ export class SessionRegistry {
         if (wasActive) host.persist();
         this.map.set(row.session_key, host);
       }
+      // Only reconcile after every leader and minion host is present. This
+      // preserves blocked children and lets terminal child evidence inform
+      // the parent transition instead of blindly orphaning the task.
+      this.recoverDurableWorkflowState();
       if (hydrated.length > 0) {
         log.info("sessions_hydrated", { count: hydrated.length });
       }

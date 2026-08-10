@@ -237,6 +237,61 @@ describe("session-persist integration", () => {
     expect(Array.from(tasks?.keys() ?? []).sort()).toEqual(["t2", "t3"]);
   });
 
+  it("round-trips the complete task workflow snapshot and pending wait", () => {
+    persistSession(makeSession());
+    const task = makeTaskRecord({
+      files: ["server/a.ts"],
+      constraints: ["preserve history"],
+      acceptanceCriteria: ["leader wakes"],
+      ownedPaths: ["server/a.ts"],
+      skillIds: ["system-model-authoring"],
+      lastStep: "persisting",
+      stepCount: 3,
+      attempt: 2,
+      previousAttempts: [{
+        attempt: 1,
+        status: "failed",
+        result: "retry",
+        completedAt: 10,
+      }],
+      attentionRequestedAt: 20,
+      attentionDeliveredAt: null,
+    });
+    const state = makeTaskState([task]);
+    state.pendingWait = {
+      durationMs: 30_000,
+      reason: "await children",
+      scheduledAt: 100,
+      timerId: setTimeout(() => {}, 30_000),
+      wakeOn: "any_terminal",
+    };
+
+    persistTaskState("sess-1", state);
+    const restored = hydrateSessionsFromDb()[0]!.tasks!;
+    clearTimeout(state.pendingWait.timerId!);
+
+    expect(restored.tasks.get("t1")).toMatchObject({
+      files: ["server/a.ts"],
+      constraints: ["preserve history"],
+      acceptanceCriteria: ["leader wakes"],
+      ownedPaths: ["server/a.ts"],
+      skillIds: ["system-model-authoring"],
+      lastStep: "persisting",
+      stepCount: 3,
+      attempt: 2,
+      attentionRequestedAt: 20,
+      attentionDeliveredAt: null,
+    });
+    expect(restored.tasks.get("t1")?.previousAttempts).toHaveLength(1);
+    expect(restored.pendingWait).toEqual({
+      durationMs: 30_000,
+      reason: "await children",
+      scheduledAt: 100,
+      timerId: null,
+      wakeOn: "any_terminal",
+    });
+  });
+
   it("persistRenderState round-trips dashboard shape", () => {
     persistSession(makeSession());
     persistRenderState(

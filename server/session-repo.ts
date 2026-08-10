@@ -32,6 +32,7 @@ export interface SessionRow {
   worktree_created_at: number | null;
   worktree_lifecycle: string | null;
   approval_json: string | null;
+  task_state_json?: string | null;
   total_cost: number;
   turns: number;
   /**
@@ -80,7 +81,7 @@ export function upsertSession(db: Database.Database, row: SessionRow): void {
       task_name, session_id, worktree_isolation, worktree_path,
       worktree_branch, worktree_project_path, worktree_created_at,
       worktree_lifecycle, approval_json, total_cost, turns, harness_name,
-      sandbox_policy_json,
+      sandbox_policy_json, task_state_json,
       review_state, review_reason, final_report, final_dashboard_revision,
       dashboard_revision, terminal_reason, terminal_at, acknowledged_at,
       dismissed_at, lifecycle_revision, created_at, updated_at
@@ -89,7 +90,7 @@ export function upsertSession(db: Database.Database, row: SessionRow): void {
       @task_name, @session_id, @worktree_isolation, @worktree_path,
       @worktree_branch, @worktree_project_path, @worktree_created_at,
       @worktree_lifecycle, @approval_json, @total_cost, @turns,
-      @harness_name, @sandbox_policy_json, @review_state, @review_reason, @final_report,
+      @harness_name, @sandbox_policy_json, @task_state_json, @review_state, @review_reason, @final_report,
       @final_dashboard_revision, @dashboard_revision, @terminal_reason,
       @terminal_at, @acknowledged_at, @dismissed_at, @lifecycle_revision,
       @created_at, @updated_at
@@ -114,6 +115,7 @@ export function upsertSession(db: Database.Database, row: SessionRow): void {
       turns = excluded.turns,
       harness_name = excluded.harness_name,
       sandbox_policy_json = excluded.sandbox_policy_json,
+      task_state_json = excluded.task_state_json,
       review_state = excluded.review_state,
       review_reason = excluded.review_reason,
       final_report = excluded.final_report,
@@ -138,6 +140,7 @@ export function upsertSession(db: Database.Database, row: SessionRow): void {
     dismissed_at: null,
     lifecycle_revision: 0,
     sandbox_policy_json: null,
+    task_state_json: null,
     ...row,
   });
 }

@@ -76,6 +76,7 @@ export function initDb(dbPath?: string): Database.Database {
       worktree_created_at INTEGER,
       worktree_lifecycle TEXT,
       approval_json TEXT,
+      task_state_json TEXT,
       total_cost    REAL NOT NULL DEFAULT 0,
       turns         INTEGER NOT NULL DEFAULT 0,
       harness_name  TEXT NOT NULL DEFAULT 'claude',
@@ -219,6 +220,11 @@ export function initDb(dbPath?: string): Database.Database {
   ensureColumn(db, "sessions", "worktree_created_at", "INTEGER");
   ensureColumn(db, "sessions", "worktree_lifecycle", "TEXT");
   ensureColumn(db, "sessions", "approval_json", "TEXT");
+  // The task_records table remains queryable, but this snapshot is the
+  // canonical recovery image for the complete leader workflow state. It
+  // preserves pending waits and task metadata that do not fit the legacy
+  // projection.
+  ensureColumn(db, "sessions", "task_state_json", "TEXT");
 
   // Persist the harness identity across restarts; existing rows default to Claude.
   ensureColumn(db, "sessions", "harness_name", "TEXT NOT NULL DEFAULT 'claude'");

@@ -72,15 +72,16 @@ function applyParentLifecycleEvent(
   taskId: string,
   event: Parameters<typeof applyLifecycleEvent>[0]["event"],
 ): void {
-  applyLifecycleEvent({
+  const next = applyLifecycleEvent({
     bus: ctx.bus,
     leaderSessionKey: leaderKey,
     taskState,
     taskId,
     event,
-    onStateChange: (state) => persistTaskState(leaderKey, state),
   });
-  ctx.wakeWaitingLeaderIfAllChildrenTerminal?.(leaderKey);
+  if (next && persistTaskState(leaderKey, taskState)) {
+    ctx.wakeWaitingLeaderIfAllChildrenTerminal?.(leaderKey);
+  }
 }
 
 const minionAgent: AgentType = {
