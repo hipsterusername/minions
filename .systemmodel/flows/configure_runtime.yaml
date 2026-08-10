@@ -1,7 +1,7 @@
 id: flow.configure_runtime
 type: flow
 name: Configure harness and runtime controls
-summary: Project defaults and launch overrides resolve a harness, model, Git change mode, and independent filesystem, approval, and network sandbox policy.
+summary: Project defaults and launch overrides resolve a harness, model, Git change mode, and independent filesystem and approval sandbox policy.
 constraints: []
 decisions: [ decision.role_gated_agent_tools, decision.portable_workspace_roots ]
 suggested_files: [ src/SettingsMenu.tsx, src/components/SessionToolbar.tsx, src/nodes/leader/SandboxPolicyControls.tsx, server/harness/sandbox-policy.ts, server/harness/codex/options.ts ]
@@ -9,9 +9,9 @@ suggested_tests: [ src/SettingsMenu.test.tsx, src/components/SessionToolbar.test
 steps:
   - Load harness inventory and readiness before presenting compatible choices.
   - Choose shared versus isolated Git change placement independently from the process sandbox.
-  - Resolve filesystem, approval, and network requests at session creation; plan mode always forces read-only.
+  - Resolve filesystem and approval requests at session creation; plan mode always forces read-only.
   - Default authorized execution roots to workspace-write and require an explicit unrestricted request.
-  - Apply all three axes to Codex and mark unsupported axes unmanaged for harnesses that cannot enforce them.
+  - Apply both axes to Codex and mark unsupported axes unmanaged for harnesses that cannot enforce them.
   - Render live controls only for synced runControl capabilities.
   - Apply model or permission changes through typed handlers and carry thinking configuration on the next turn without swapping harness.
 freshness:

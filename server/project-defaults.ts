@@ -1,5 +1,9 @@
 import type { HarnessReadinessSnapshot } from "./harness/readiness-types.ts";
 import type { ProjectSettings } from "./project-store.ts";
+import {
+  DEFAULT_SANDBOX_POLICY,
+  sandboxPolicySchema,
+} from "../shared/workspace-contracts.ts";
 
 const leaderThinking = { enabled: true, effort: "high" as const, display: "summarized" as const };
 const minionThinking = { enabled: true, effort: "medium" as const, display: "summarized" as const };
@@ -21,6 +25,7 @@ export function resolveNewProjectDefaults(snapshot: HarnessReadinessSnapshot): P
       reasoningMinionModel: "echo",
       defaultMinionThinkingConfig: minionThinking,
       defaultPermissionMode: "auto",
+      defaultSandboxPolicy: DEFAULT_SANDBOX_POLICY,
       defaultWorktreeIsolation: false,
       systemModel: "off",
     };
@@ -40,7 +45,16 @@ export function resolveNewProjectDefaults(snapshot: HarnessReadinessSnapshot): P
     reasoningMinionModel: claude ? "claude-opus-4-8" : "gpt-5.6-sol",
     defaultMinionThinkingConfig: minionThinking,
     defaultPermissionMode: "auto",
+    defaultSandboxPolicy: DEFAULT_SANDBOX_POLICY,
     defaultWorktreeIsolation: false,
     systemModel: "off",
+  };
+}
+
+export function normalizeProjectSandboxPolicy(settings: ProjectSettings): ProjectSettings {
+  const parsed = sandboxPolicySchema.safeParse(settings.defaultSandboxPolicy);
+  return {
+    ...settings,
+    defaultSandboxPolicy: parsed.success ? parsed.data : DEFAULT_SANDBOX_POLICY,
   };
 }

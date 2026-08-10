@@ -182,7 +182,6 @@ export const LEADER_DEFAULT_DATA: LeaderData = {
   sandboxPolicy: {
     filesystemScope: "workspace-write",
     approvalPolicy: "on-failure",
-    networkAccess: "disabled",
   },
   effectiveSandboxPolicy: null,
   thinkingConfig: { ...DEFAULT_THINKING_CONFIG },

@@ -4,8 +4,9 @@ import os from "os";
 import { initDb } from "./db.ts";
 import type Database from "better-sqlite3";
 import { findWorkspaceBySource, getMinionsHome, registerWorkspace } from "./workspace-registry.ts";
+import { DEFAULT_SANDBOX_POLICY, type SandboxPolicy } from "../shared/workspace-contracts.ts";
+import { normalizeProjectSandboxPolicy } from "./project-defaults.ts";
 export { resolveMinionModelForHarness } from "./project-model-settings.ts";
-
 const SIDECAR_DIR = ".minions";
 const GLOBAL_DIR = getMinionsHome();
 const RECENT_PROJECTS_FILE = path.join(GLOBAL_DIR, "recent-projects.json");
@@ -17,7 +18,6 @@ export interface RecentProject {
   name: string;          // display name
   lastOpened: string;    // ISO date
 }
-
 export interface ProjectContext {
   content: string;       // raw markdown
   exists: boolean;       // whether context.md existed on disk
@@ -30,10 +30,12 @@ export interface ProjectSettings {
   defaultLeaderThinkingConfig?: ThinkingConfig;
   defaultMinionHarness?: string;
   defaultMinionModel?: string;
+  adaptiveMinionModelRouting?: boolean;
   mechanicalMinionModel?: string;
   reasoningMinionModel?: string;
   defaultMinionThinkingConfig?: ThinkingConfig;
   defaultPermissionMode?: string;
+  defaultSandboxPolicy?: SandboxPolicy;
   defaultWorktreeIsolation?: boolean;
   /**
    * Keep the canvas tidy: dropped nodes snap to the grid and shift to the
@@ -202,7 +204,9 @@ export function readSettings(projectPath: string): ProjectSettings {
   try {
     const raw = fs.readFileSync(settingsPath, "utf-8");
     const parsed = migrateDashboardActions(JSON.parse(raw) as ProjectSettings);
-    return withLeaderThinkingDefaults({ ...defaultProjectSettings(), ...parsed }, parsed);
+    return normalizeProjectSandboxPolicy(
+      withLeaderThinkingDefaults({ ...defaultProjectSettings(), ...parsed }, parsed),
+    );
   } catch {
     return defaultProjectSettings();
   }
@@ -278,10 +282,12 @@ function defaultProjectSettings(): ProjectSettings {
     defaultLeaderThinkingConfig: DEFAULT_LEADER_THINKING_CONFIG,
     defaultMinionHarness: "claude",
     defaultMinionModel: "claude-sonnet-5",
+    adaptiveMinionModelRouting: false,
     mechanicalMinionModel: "claude-haiku-4-5",
     reasoningMinionModel: "claude-opus-4-8",
     defaultMinionThinkingConfig: DEFAULT_MINION_THINKING_CONFIG,
     defaultPermissionMode: "auto",
+    defaultSandboxPolicy: DEFAULT_SANDBOX_POLICY,
     defaultWorktreeIsolation: false,
     systemModel: "off",
     roleSystemBeta: false,
@@ -344,7 +350,7 @@ function defaultDashboardLeaderActions(): DashboardLeaderActionConfig[] {
 export function writeSettings(projectPath: string, settings: ProjectSettings): void {
   const settingsPath = path.join(sidecarPath(projectPath), "settings.json");
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+  fs.writeFileSync(settingsPath, JSON.stringify(normalizeProjectSandboxPolicy(settings), null, 2));
 }
 
 export function readSkills(projectPath: string): unknown[] {

@@ -315,7 +315,7 @@ function Dropdown<T extends string>({
   );
 }
 
-function ModelSelectionPicker({
+export function ModelSelectionMenu({
   model,
   activeHarnessName,
   activeHarness,
@@ -327,10 +327,15 @@ function ModelSelectionPicker({
   onModelChange,
   onHarnessChange,
   onThinkingConfigChange,
-  onSelectComplete,
+  onSelectComplete = () => {},
   hasSession,
-  open,
-  onToggle,
+  open = false,
+  onToggle = () => {},
+  layout = "popover",
+  fullWidth = false,
+  triggerLabel = "Model selection",
+  showThinkingToggle = false,
+  expanded = false,
 }: {
   model: string;
   activeHarnessName: string;
@@ -343,10 +348,16 @@ function ModelSelectionPicker({
   onModelChange: (model: string) => void;
   onHarnessChange: ((harness: string, defaultModel?: string) => void) | undefined;
   onThinkingConfigChange: ((config: ThinkingConfig) => void) | undefined;
-  onSelectComplete: () => void;
+  onSelectComplete?: () => void;
   hasSession: boolean;
-  open: boolean;
-  onToggle: () => void;
+  open?: boolean;
+  onToggle?: () => void;
+  layout?: "popover" | "inline";
+  fullWidth?: boolean;
+  triggerLabel?: string;
+  showThinkingToggle?: boolean;
+  /** Render the complete menu inline without a disclosure trigger. */
+  expanded?: boolean;
 }) {
   const groups = (
     harnesses.length > 0
@@ -380,25 +391,43 @@ function ModelSelectionPicker({
   const activeModelLabel = modelLabels[model] ?? model;
   const effortLabel =
     thinkingConfig && capability.supportsAdaptiveThinking
-      ? EFFORT_LABELS[thinkingConfig.effort]
+      ? thinkingConfig.enabled
+        ? EFFORT_LABELS[thinkingConfig.effort]
+        : "Off"
       : null;
   const showThinkingControls =
     capability.supportsAdaptiveThinking &&
     !!thinkingConfig &&
     !!onThinkingConfigChange;
+  const isOpen = expanded || open;
+  const isInline = expanded || layout === "inline";
 
   return (
-    <div style={{ position: "relative" }}>
-      <button
+    <div
+      style={{ position: "relative", minWidth: 0 }}
+      onKeyDown={(event) => {
+        if (expanded || event.key !== "Escape" || !isOpen) return;
+        event.stopPropagation();
+        onToggle();
+      }}
+    >
+      {!expanded && <button
+        type="button"
         onClick={onToggle}
         onMouseDown={(e) => e.stopPropagation()}
+        aria-expanded={isOpen}
+        aria-haspopup="dialog"
+        aria-label={triggerLabel}
         style={{
           ...pillStyle,
           minHeight: 24,
           gap: 6,
-          borderColor: open ? "var(--accent)" : "var(--border-default)",
+          width: fullWidth ? "100%" : undefined,
+          justifyContent: "flex-start",
+          textAlign: "left",
+          borderColor: isOpen ? "var(--accent)" : "var(--border-default)",
         }}
-        title="Model selection"
+        title={triggerLabel}
       >
         <span
           style={{
@@ -420,7 +449,16 @@ function ModelSelectionPicker({
         </span>
         <span>{activeHarnessLabel}</span>
         <span style={{ color: "var(--text-muted)" }}>·</span>
-        <span style={{ color: "var(--text-primary)" }}>{activeModelLabel}</span>
+        <span
+          style={{
+            color: "var(--text-primary)",
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {activeModelLabel}
+        </span>
         {effortLabel && (
           <>
             <span style={{ color: "var(--text-muted)" }}>·</span>
@@ -431,35 +469,39 @@ function ModelSelectionPicker({
           style={{
             fontSize: 7,
             opacity: 0.5,
-            marginLeft: 2,
-            transform: open ? "rotate(180deg)" : "rotate(0deg)",
+            marginLeft: fullWidth ? "auto" : 2,
+            flexShrink: 0,
+            transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
             transition: "transform 0.15s",
           }}
         >
           ▼
         </span>
-      </button>
+      </button>}
 
-      {open && (
+      {isOpen && (
         <div
+          role={expanded ? "group" : "dialog"}
+          aria-label={expanded ? triggerLabel : `${triggerLabel} menu`}
           onMouseDown={(e) => e.stopPropagation()}
           style={{
-            position: "absolute",
-            top: "calc(100% + 4px)",
+            position: isInline ? "relative" : "absolute",
+            top: isInline ? "auto" : "calc(100% + 4px)",
             left: 0,
             zIndex: 100,
-            width: 300,
-            maxWidth: "calc(100vw - 24px)",
-            maxHeight: "min(60vh, 420px)",
+            width: isInline ? "100%" : 300,
+            maxWidth: isInline ? "100%" : "calc(100vw - 24px)",
+            maxHeight: isInline ? "none" : "min(60vh, 420px)",
             overflowY: "auto",
             background: "var(--bg-elevated)",
             border: "1px solid var(--border-default)",
             borderRadius: 6,
-            boxShadow: "var(--shadow-lg)",
             padding: 8,
             display: "flex",
             flexDirection: "column",
             gap: 8,
+            marginTop: expanded ? 0 : isInline ? 6 : 0,
+            boxShadow: isInline ? "none" : "var(--shadow-lg)",
           }}
         >
           {/* Level 1 — Provider. Selecting a provider commits its harness and
@@ -576,7 +618,7 @@ function ModelSelectionPicker({
                     key={`${activeGroup.harness}:${option.id}`}
                     onClick={() => {
                       onModelChange(option.id);
-                      onSelectComplete();
+                      if (!expanded) onSelectComplete();
                     }}
                     onMouseDown={(e) => e.stopPropagation()}
                     style={{
@@ -653,12 +695,56 @@ function ModelSelectionPicker({
               >
                 Reasoning
               </div>
+              {showThinkingToggle && (
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    minHeight: 28,
+                    color: "var(--text-secondary)",
+                    fontFamily: "var(--font-sans)",
+                    fontSize: 10,
+                    cursor: "pointer",
+                  }}
+                >
+                  <span>
+                    <strong
+                      style={{
+                        display: "block",
+                        color: "var(--text-primary)",
+                        fontSize: 10,
+                      }}
+                    >
+                      Adaptive reasoning
+                    </strong>
+                    <span style={{ color: "var(--text-muted)", fontSize: 9 }}>
+                      Let this role reason before responding.
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={thinkingConfig.enabled}
+                    onChange={(event) =>
+                      onThinkingConfigChange({
+                        ...thinkingConfig,
+                        enabled: event.target.checked,
+                      })
+                    }
+                    style={{ accentColor: "var(--accent)" }}
+                  />
+                </label>
+              )}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                 {capability.supportedEffortLevels.map((effort) => {
                   const active = thinkingConfig.effort === effort;
+                  const disabled = showThinkingToggle && !thinkingConfig.enabled;
                   return (
                     <button
                       key={effort}
+                      type="button"
+                      disabled={disabled}
                       onClick={() =>
                         onThinkingConfigChange({ ...thinkingConfig, effort })
                       }
@@ -669,6 +755,8 @@ function ModelSelectionPicker({
                         borderColor: active ? "var(--accent)" : "var(--border-default)",
                         background: active ? "var(--state-active)" : "var(--bg-primary)",
                         color: active ? "var(--text-primary)" : "var(--text-secondary)",
+                        opacity: disabled ? 0.45 : 1,
+                        cursor: disabled ? "default" : "pointer",
                       }}
                     >
                       {EFFORT_LABELS[effort]}
@@ -679,9 +767,12 @@ function ModelSelectionPicker({
               <div style={{ display: "flex", gap: 4 }}>
                 {(["summarized", "omitted"] as const).map((display) => {
                   const active = thinkingConfig.display === display;
+                  const disabled = showThinkingToggle && !thinkingConfig.enabled;
                   return (
                     <button
                       key={display}
+                      type="button"
+                      disabled={disabled}
                       onClick={() =>
                         onThinkingConfigChange({ ...thinkingConfig, display })
                       }
@@ -691,6 +782,8 @@ function ModelSelectionPicker({
                         borderColor: active ? "var(--accent)" : "var(--border-default)",
                         background: active ? "var(--state-active)" : "var(--bg-primary)",
                         color: active ? "var(--text-primary)" : "var(--text-secondary)",
+                        opacity: disabled ? 0.45 : 1,
+                        cursor: disabled ? "default" : "pointer",
                       }}
                     >
                       {display === "summarized" ? "Summaries" : "Hidden"}
@@ -833,7 +926,7 @@ export function SessionToolbar({
         minHeight: 30,
       }}
     >
-      <ModelSelectionPicker
+      <ModelSelectionMenu
         model={model}
         activeHarnessName={activeHarnessName}
         activeHarness={activeHarness}

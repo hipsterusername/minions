@@ -92,7 +92,6 @@ export interface HarnessCapabilities {
   builtInFilesystem: boolean;
   sandboxEnforcement?: {
     filesystem: ReadonlyArray<"read-only" | "workspace-write" | "unrestricted">;
-    network: boolean;
     approval: boolean;
   };
 }

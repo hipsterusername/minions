@@ -687,6 +687,7 @@ describe("assign_task", () => {
 
   it("explicit model arg wins over executorClass mapping", async () => {
     writeSettings(projectDir, {
+      adaptiveMinionModelRouting: true,
       mechanicalMinionModel: "claude-mechanical",
       defaultMinionModel: "claude-standard",
     });
@@ -705,6 +706,7 @@ describe("assign_task", () => {
 
   it("maps mechanical executorClass to a Codex-valid model under the Codex harness", async () => {
     writeSettings(projectDir, {
+      adaptiveMinionModelRouting: true,
       defaultMinionHarness: "codex",
       defaultMinionModel: "gpt-5.5",
       mechanicalMinionModel: "claude-haiku-4-5",
@@ -729,6 +731,7 @@ describe("assign_task", () => {
     ["reasoning", "claude-reasoning"],
   ] as const)("maps executorClass %s to the configured tier model", async (executorClass, expected) => {
     writeSettings(projectDir, {
+      adaptiveMinionModelRouting: true,
       defaultMinionModel: "claude-standard",
       mechanicalMinionModel: "claude-mechanical",
       reasoningMinionModel: "claude-reasoning",
@@ -744,6 +747,28 @@ describe("assign_task", () => {
 
     expect(harness.spawns.at(-1)?.model).toBe(expected);
   });
+
+  it.each(["mechanical", "standard", "reasoning"] as const)(
+    "keeps the fixed default model for %s work when adaptive routing is off",
+    async (executorClass) => {
+      writeSettings(projectDir, {
+        adaptiveMinionModelRouting: false,
+        defaultMinionModel: "claude-fixed",
+        mechanicalMinionModel: "claude-mechanical",
+        reasoningMinionModel: "claude-reasoning",
+      });
+
+      await callAssign(harness.ctx, {
+        taskId: `t-fixed-${executorClass}`,
+        title: `Fixed ${executorClass}`,
+        description: "details",
+        priority: "medium",
+        executorClass,
+      });
+
+      expect(harness.spawns.at(-1)?.model).toBe("claude-fixed");
+    },
+  );
 
   it("falls back to the existing default chain when executorClass is absent", async () => {
     writeSettings(projectDir, {

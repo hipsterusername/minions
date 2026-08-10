@@ -52,6 +52,7 @@ import { ThemeContext, loadPersistedThemeId, persistThemeId } from "./use-theme.
 import { usePreventBrowserZoom } from "./use-prevent-browser-zoom.ts";
 import { buildWsUrl } from "./ws-url.ts";
 import { browserLogger } from "./logging.ts";
+import { DEFAULT_SANDBOX_POLICY } from "../shared/workspace-contracts.ts";
 
 const WS_URL = buildWsUrl();
 const log = browserLogger.child("app");
@@ -285,6 +286,7 @@ function ProjectView({
         error: null,
         model: projectSettings.defaultLeaderModel ?? projectSettings.defaultModel ?? "claude-opus-4-8",
         permissionMode: projectSettings.defaultPermissionMode ?? "auto",
+        sandboxPolicy: projectSettings.defaultSandboxPolicy ?? DEFAULT_SANDBOX_POLICY,
         harness: projectSettings.defaultLeaderHarness ?? "claude",
         thinkingConfig: {
           ...(projectSettings.defaultLeaderThinkingConfig ?? DEFAULT_THINKING_CONFIG),
@@ -507,6 +509,7 @@ function ProjectView({
         error: null,
         model: projectSettings.defaultLeaderModel ?? projectSettings.defaultModel ?? "claude-opus-4-8",
         permissionMode: projectSettings.defaultPermissionMode ?? "auto",
+        sandboxPolicy: projectSettings.defaultSandboxPolicy ?? DEFAULT_SANDBOX_POLICY,
         harness: projectSettings.defaultLeaderHarness ?? "claude",
         thinkingConfig: {
           ...(projectSettings.defaultLeaderThinkingConfig ?? DEFAULT_THINKING_CONFIG),

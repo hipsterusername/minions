@@ -3,7 +3,6 @@ import { resolveHarnessSandboxPolicy } from "./sandbox-policy.ts";
 
 const complete = {
   filesystem: ["read-only", "workspace-write", "unrestricted"] as const,
-  network: true,
   approval: true,
 };
 
@@ -11,8 +10,8 @@ describe("resolveHarnessSandboxPolicy", () => {
   it("defaults worktree runs to workspace-write rooted at their execution cwd", () => {
     expect(resolveHarnessSandboxPolicy({ worktreeScoped: true, support: complete }))
       .toEqual({
-        requested: { filesystemScope: "workspace-write", networkAccess: "disabled", approvalPolicy: "on-failure" },
-        effective: { filesystemScope: "workspace-write", networkAccess: "disabled", approvalPolicy: "on-failure" },
+        requested: { filesystemScope: "workspace-write", approvalPolicy: "on-failure" },
+        effective: { filesystemScope: "workspace-write", approvalPolicy: "on-failure" },
         unsupported: [],
       });
   });
@@ -25,11 +24,11 @@ describe("resolveHarnessSandboxPolicy", () => {
   it("requires an explicit unrestricted policy for full host access", () => {
     const result = resolveHarnessSandboxPolicy({
       worktreeScoped: false,
-      requested: { filesystemScope: "unrestricted", networkAccess: "enabled", approvalPolicy: "never" },
+      requested: { filesystemScope: "unrestricted", approvalPolicy: "never" },
       support: complete,
     });
     expect(result.requested).toEqual({
-      filesystemScope: "unrestricted", networkAccess: "enabled", approvalPolicy: "never",
+      filesystemScope: "unrestricted", approvalPolicy: "never",
     });
   });
 
@@ -37,11 +36,11 @@ describe("resolveHarnessSandboxPolicy", () => {
     const result = resolveHarnessSandboxPolicy({
       permissionMode: "plan",
       worktreeScoped: true,
-      requested: { filesystemScope: "unrestricted", networkAccess: "enabled", approvalPolicy: "never" },
+      requested: { filesystemScope: "unrestricted", approvalPolicy: "never" },
       support: complete,
     });
     expect(result.requested).toEqual({
-      filesystemScope: "unrestricted", networkAccess: "enabled", approvalPolicy: "never",
+      filesystemScope: "unrestricted", approvalPolicy: "never",
     });
   });
 
@@ -53,11 +52,11 @@ describe("resolveHarnessSandboxPolicy", () => {
   it("reports every guarantee an unsupported harness cannot enforce", () => {
     const result = resolveHarnessSandboxPolicy({
       worktreeScoped: true,
-      support: { filesystem: ["read-only"], network: false, approval: false },
+      support: { filesystem: ["read-only"], approval: false },
     });
     expect(result.effective).toEqual({
-      filesystemScope: "unmanaged", networkAccess: "unmanaged", approvalPolicy: "unmanaged",
+      filesystemScope: "unmanaged", approvalPolicy: "unmanaged",
     });
-    expect(result.unsupported).toEqual(["filesystem:workspace-write", "network", "approval"]);
+    expect(result.unsupported).toEqual(["filesystem:workspace-write", "approval"]);
   });
 });

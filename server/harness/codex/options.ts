@@ -37,7 +37,6 @@ export function buildCodexConfig(
 export interface MappedPermission {
   approvalPolicy: ApprovalMode;
   sandboxMode: SandboxMode;
-  networkAccessEnabled: boolean;
 }
 
 /**
@@ -50,7 +49,7 @@ export interface MappedPermission {
  *
  * `permissionMode` is only a fallback for legacy payloads that do not carry a
  * provider-neutral policy. Once an explicit policy exists it is authoritative
- * for every Codex sandbox axis.
+ * for the filesystem and approval axes.
  */
 export function mapPermission(
   policy: SandboxPolicy | undefined,
@@ -64,7 +63,6 @@ export function mapPermission(
   return {
     approvalPolicy,
     sandboxMode: filesystem === "unrestricted" ? "danger-full-access" : filesystem,
-    networkAccessEnabled: policy?.networkAccess === "enabled",
   };
 }
 

@@ -62,10 +62,9 @@ const CLAUDE_CAPABILITIES: HarnessCapabilities = {
   builtInFilesystem: true,
   sandboxEnforcement: {
     // Claude still consumes its legacy permissionMode below. It does not
-    // expose independent filesystem/network/approval controls matching the
+    // expose independent filesystem/approval controls matching the
     // provider-neutral policy, so do not claim those guarantees here.
     filesystem: [],
-    network: false,
     approval: false,
   },
 };

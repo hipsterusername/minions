@@ -39,7 +39,6 @@ describe("ActivityLaunchForm permission authority", () => {
           builtInFilesystem: true,
           sandboxEnforcement: {
             filesystem: ["read-only", "workspace-write", "unrestricted"],
-            network: true,
             approval: true,
           },
         },

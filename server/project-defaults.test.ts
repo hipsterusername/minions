@@ -14,7 +14,16 @@ describe("resolveNewProjectDefaults", () => {
     [["echo"], "echo", "echo", "echo"],
   ] as const)("derives defaults for %j", (ready, leader, minion, model) => {
     const result = resolveNewProjectDefaults(snapshot([...ready]));
-    expect(result).toMatchObject({ defaultLeaderHarness: leader, defaultMinionHarness: minion, defaultMinionModel: model, defaultModel: model });
+    expect(result).toMatchObject({
+      defaultLeaderHarness: leader,
+      defaultMinionHarness: minion,
+      defaultMinionModel: model,
+      defaultModel: model,
+      defaultSandboxPolicy: {
+        filesystemScope: "workspace-write",
+        approvalPolicy: "on-failure",
+      },
+    });
   });
   it("returns null when neither harness is ready", () => expect(resolveNewProjectDefaults(snapshot([]))).toBeNull());
 });

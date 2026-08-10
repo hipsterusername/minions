@@ -82,7 +82,6 @@ describe("contract: inbound WS command validation", () => {
       sandboxPolicy: {
         filesystemScope: "workspace-write",
         approvalPolicy: "on-request",
-        networkAccess: "disabled",
       },
       role: "leader",
       worktreeIsolation: true,
@@ -135,7 +134,6 @@ describe("contract: inbound WS command validation", () => {
       sandboxPolicy: {
         filesystemScope: "host-write",
         approvalPolicy: "on-request",
-        networkAccess: "enabled",
       },
     });
 

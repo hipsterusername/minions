@@ -125,7 +125,6 @@ describe("buildHarnessStartOpts — capability gating", () => {
     const harness = fakeHarness("codex", {
       sandboxEnforcement: {
         filesystem: ["read-only", "workspace-write", "unrestricted"],
-        network: true,
         approval: true,
       },
     });
@@ -142,8 +141,8 @@ describe("buildHarnessStartOpts — capability gating", () => {
       prompt: "hello",
     });
     expect(startOpts.sandboxPolicy).toEqual({
-      requested: { filesystemScope: "workspace-write", networkAccess: "disabled", approvalPolicy: "on-failure" },
-      effective: { filesystemScope: "workspace-write", networkAccess: "disabled", approvalPolicy: "on-failure" },
+      requested: { filesystemScope: "workspace-write", approvalPolicy: "on-failure" },
+      effective: { filesystemScope: "workspace-write", approvalPolicy: "on-failure" },
       unsupported: [],
     });
   });
@@ -160,16 +159,16 @@ describe("buildHarnessStartOpts — capability gating", () => {
       prompt: "hello",
     });
     expect(startOpts.sandboxPolicy?.effective).toEqual({
-      filesystemScope: "unmanaged", networkAccess: "unmanaged", approvalPolicy: "unmanaged",
+      filesystemScope: "unmanaged", approvalPolicy: "unmanaged",
     });
-    expect(startOpts.sandboxPolicy?.unsupported).toEqual(["filesystem:workspace-write", "network", "approval"]);
+    expect(startOpts.sandboxPolicy?.unsupported).toEqual(["filesystem:workspace-write", "approval"]);
   });
 
   it("retains the requested sandbox policy when a follow-up omits it", () => {
     const host = fakeHost() as SessionHost;
     host.sandboxPolicy = {
-      requested: { filesystemScope: "read-only", approvalPolicy: "always", networkAccess: "disabled" },
-      effective: { filesystemScope: "read-only", approvalPolicy: "always", networkAccess: "disabled" },
+      requested: { filesystemScope: "read-only", approvalPolicy: "always" },
+      effective: { filesystemScope: "read-only", approvalPolicy: "always" },
       unsupported: [],
     };
     const { startOpts } = buildHarnessStartOpts({
@@ -180,7 +179,7 @@ describe("buildHarnessStartOpts — capability gating", () => {
       toolResult: fakeToolResult,
       abortController: new AbortController(),
       harness: fakeHarness("codex", { sandboxEnforcement: {
-        filesystem: ["read-only", "workspace-write", "unrestricted"], network: true, approval: true,
+        filesystem: ["read-only", "workspace-write", "unrestricted"], approval: true,
       } }),
       prompt: "follow up",
     });

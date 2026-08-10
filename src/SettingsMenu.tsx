@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ProjectSettings } from "./api.ts";
 import { useTheme } from "./use-theme.ts";
 import { useHarnessList } from "./use-harness-list.tsx";
@@ -16,6 +16,16 @@ import {
 } from "./dashboard-leader-actions.ts";
 import { randomUuid } from "./random-id.ts";
 import type { ServerMessage, SocketSubscribe } from "./use-socket.ts";
+import {
+  DEFAULT_SANDBOX_POLICY,
+  SandboxPolicyControls,
+} from "./nodes/leader/SandboxPolicyControls.tsx";
+import { ModelSelectionMenu } from "./components/SessionToolbar.tsx";
+import {
+  MinionModelRoutingSettings,
+  type MinionTier,
+} from "./MinionModelRoutingSettings.tsx";
+import { AgentRoleSettings, ToggleRow } from "./SettingsControls.tsx";
 import {
   Bot,
   ChevronRight,
@@ -196,6 +206,21 @@ function SettingsPopover({
     () => buildModelGroups(harnesses, harnessesLoaded),
     [harnesses, harnessesLoaded],
   );
+  const modelMenuHarnesses = useMemo(
+    () => harnesses.filter((harness) => harness.models.length > 0),
+    [harnesses],
+  );
+  const modelLabels = useMemo(
+    () => Object.fromEntries(
+      modelGroups.flatMap((group) =>
+        group.options.map((option) => [
+          option.model,
+          option.label.replace(` (${group.label})`, ""),
+        ]),
+      ),
+    ),
+    [modelGroups],
+  );
   const leaderSelection = resolveModelSelection(
     settings.defaultLeaderHarness ?? "claude",
     settings.defaultLeaderModel ?? settings.defaultModel ?? "claude-opus-4-8",
@@ -206,6 +231,22 @@ function SettingsPopover({
     settings.defaultMinionModel ?? settings.defaultModel ?? "claude-sonnet-5",
     modelGroups,
   );
+  const minionTierGroups = modelGroups.filter(
+    (group) => group.harness === minionSelection.harness,
+  );
+  const minionTierSelections = {
+    mechanical: resolveModelSelection(
+      minionSelection.harness,
+      settings.mechanicalMinionModel ?? minionSelection.model,
+      minionTierGroups,
+    ),
+    standard: minionSelection,
+    reasoning: resolveModelSelection(
+      minionSelection.harness,
+      settings.reasoningMinionModel ?? minionSelection.model,
+      minionTierGroups,
+    ),
+  };
   const leaderHarness = findHarness(harnesses, leaderSelection.harness);
   const minionHarness = findHarness(harnesses, minionSelection.harness);
   const leaderThinking = normalizeThinkingConfig(
@@ -217,7 +258,35 @@ function SettingsPopover({
     MINION_THINKING_CONFIG,
   );
   const leaderCapability = getModelCapability(leaderSelection.model, leaderHarness);
-  const minionCapability = getModelCapability(minionSelection.model, minionHarness);
+
+  const changeMinionTierModel = (tier: MinionTier, model: string) => {
+    const next: ProjectSettings = { ...settings };
+    if (tier === "mechanical") next.mechanicalMinionModel = model;
+    if (tier === "standard") {
+      next.defaultMinionModel = model;
+      next.defaultMinionThinkingConfig = normalizeThinkingForCapability(
+        minionThinking,
+        getModelCapability(model, minionHarness),
+      );
+    }
+    if (tier === "reasoning") next.reasoningMinionModel = model;
+    onSettingsChange(next);
+  };
+
+  const changeMinionHarness = (harness: string, model?: string) => {
+    if (!model) return;
+    onSettingsChange({
+      ...settings,
+      defaultMinionHarness: harness,
+      defaultMinionModel: model,
+      mechanicalMinionModel: model,
+      reasoningMinionModel: model,
+      defaultMinionThinkingConfig: normalizeThinkingForCapability(
+        minionThinking,
+        getModelCapability(model, findHarness(harnesses, harness)),
+      ),
+    });
+  };
 
   useEffect(() => {
     if (settings.systemModel === undefined || settings.systemModel === "off") {
@@ -394,89 +463,121 @@ function SettingsPopover({
 
               <SettingsCard
                 title="Role defaults"
-                description="Give each role the model and reasoning profile that fits its work."
+                description="Set how each role starts. Changes apply to new sessions."
               >
                 <div className="settings-agent-list">
                   <AgentRoleSettings
                     role="Leader"
-                    description="Plans work and coordinates outcomes."
-                    modelControl={
-                      <ModelSelect
-                        value={leaderSelection.value}
-                        groups={modelGroups}
-                        onChange={(selection) =>
-                          onSettingsChange({
-                            ...settings,
-                            defaultModel: selection.model,
-                            defaultLeaderHarness: selection.harness,
-                            defaultLeaderModel: selection.model,
-                            defaultLeaderThinkingConfig: normalizeThinkingForCapability(
-                              leaderThinking,
-                              getModelCapability(
-                                selection.model,
-                                findHarness(harnesses, selection.harness),
-                              ),
-                            ),
-                          })
-                        }
-                      />
-                    }
-                    reasoningControl={
-                      <ThinkingControls
-                        config={leaderThinking}
-                        capability={leaderCapability}
-                        onChange={(config) =>
-                          onSettingsChange({
-                            ...settings,
-                            defaultLeaderThinkingConfig: normalizeThinkingForCapability(
-                              config,
-                              leaderCapability,
-                            ),
-                          })
-                        }
-                      />
-                    }
-                  />
+                    description="Plans work, delegates tasks, and owns the outcome."
+                  >
+                    <ModelSelectionMenu
+                      model={leaderSelection.model}
+                      activeHarnessName={leaderSelection.harness}
+                      activeHarness={leaderHarness}
+                      harnesses={modelMenuHarnesses}
+                      modelOptions={modelGroups
+                        .find((group) => group.harness === leaderSelection.harness)
+                        ?.options.map((option) => option.model) ?? []}
+                      modelLabels={modelLabels}
+                      capability={leaderCapability}
+                      thinkingConfig={leaderThinking}
+                      onModelChange={(model) =>
+                        onSettingsChange({
+                          ...settings,
+                          defaultModel: model,
+                          defaultLeaderHarness: leaderSelection.harness,
+                          defaultLeaderModel: model,
+                          defaultLeaderThinkingConfig: normalizeThinkingForCapability(
+                            leaderThinking,
+                            getModelCapability(model, leaderHarness),
+                          ),
+                        })
+                      }
+                      onHarnessChange={(harness, model) => {
+                        if (!model) return;
+                        onSettingsChange({
+                          ...settings,
+                          defaultModel: model,
+                          defaultLeaderHarness: harness,
+                          defaultLeaderModel: model,
+                          defaultLeaderThinkingConfig: normalizeThinkingForCapability(
+                            leaderThinking,
+                            getModelCapability(model, findHarness(harnesses, harness)),
+                          ),
+                        });
+                      }}
+                      onThinkingConfigChange={(config) =>
+                        onSettingsChange({
+                          ...settings,
+                          defaultLeaderThinkingConfig: normalizeThinkingForCapability(
+                            config,
+                            leaderCapability,
+                          ),
+                        })
+                      }
+                      hasSession={false}
+                      expanded
+                      triggerLabel="Leader model and reasoning"
+                      showThinkingToggle
+                    />
+                  </AgentRoleSettings>
                   <AgentRoleSettings
                     role="Minion"
-                    description="Executes focused delegated tasks."
-                    modelControl={
-                      <ModelSelect
-                        value={minionSelection.value}
-                        groups={modelGroups}
-                        onChange={(selection) =>
-                          onSettingsChange({
-                            ...settings,
-                            defaultMinionHarness: selection.harness,
-                            defaultMinionModel: selection.model,
-                            defaultMinionThinkingConfig: normalizeThinkingForCapability(
-                              minionThinking,
-                              getModelCapability(
-                                selection.model,
-                                findHarness(harnesses, selection.harness),
-                              ),
-                            ),
-                          })
-                        }
-                      />
-                    }
-                    reasoningControl={
-                      <ThinkingControls
-                        config={minionThinking}
-                        capability={minionCapability}
-                        onChange={(config) =>
-                          onSettingsChange({
-                            ...settings,
-                            defaultMinionThinkingConfig: normalizeThinkingForCapability(
-                              config,
-                              minionCapability,
-                            ),
-                          })
-                        }
-                      />
-                    }
-                  />
+                    description="Executes focused tasks within the Leader's plan."
+                  >
+                    <MinionModelRoutingSettings
+                      adaptive={settings.adaptiveMinionModelRouting === true}
+                      activeHarnessName={minionSelection.harness}
+                      activeHarness={minionHarness}
+                      harnesses={modelMenuHarnesses}
+                      modelOptions={modelGroups
+                        .find((group) => group.harness === minionSelection.harness)
+                        ?.options.map((option) => option.model) ?? []}
+                      modelLabels={modelLabels}
+                      selections={minionTierSelections}
+                      thinkingConfig={minionThinking}
+                      onAdaptiveChange={(adaptiveMinionModelRouting) =>
+                        onSettingsChange({
+                          ...settings,
+                          adaptiveMinionModelRouting,
+                          ...(adaptiveMinionModelRouting
+                            ? {
+                                defaultMinionModel: minionTierSelections.standard.model,
+                                mechanicalMinionModel: minionTierSelections.mechanical.model,
+                                reasoningMinionModel: minionTierSelections.reasoning.model,
+                              }
+                            : {}),
+                        })
+                      }
+                      onTierModelChange={changeMinionTierModel}
+                      onHarnessChange={changeMinionHarness}
+                      onThinkingConfigChange={(config) =>
+                        onSettingsChange({
+                          ...settings,
+                          defaultMinionThinkingConfig: normalizeThinkingForCapability(
+                            config,
+                            getModelCapability(minionSelection.model, minionHarness),
+                          ),
+                        })
+                      }
+                    />
+                  </AgentRoleSettings>
                 </div>
+              </SettingsCard>
+
+              <SettingsCard
+                title="Execution sandbox"
+                description="Filesystem and approval defaults for new Leader sessions. Unsupported controls are shown as unmanaged."
+              >
+                <SandboxPolicyControls
+                  policy={settings.defaultSandboxPolicy ?? DEFAULT_SANDBOX_POLICY}
+                  support={harnessesLoaded
+                    ? leaderHarness?.capabilities.sandboxEnforcement ?? null
+                    : undefined}
+                  onChange={(defaultSandboxPolicy) =>
+                    onSettingsChange({ ...settings, defaultSandboxPolicy })
+                  }
+                />
               </SettingsCard>
 
               <SettingsCard
@@ -832,71 +933,6 @@ function BetaBadge() {
   return <span className="settings-beta-badge">Beta</span>;
 }
 
-function AgentRoleSettings({
-  role,
-  description,
-  modelControl,
-  reasoningControl,
-}: {
-  role: "Leader" | "Minion";
-  description: string;
-  modelControl: React.ReactNode;
-  reasoningControl: React.ReactNode;
-}) {
-  return (
-    <section className="settings-agent" aria-label={`${role} defaults`}>
-      <div className="settings-agent__identity">
-        <span className="settings-agent__icon">
-          <Bot size={15} aria-hidden="true" />
-        </span>
-        <span>
-          <strong>{role}</strong>
-          <small>{description}</small>
-        </span>
-      </div>
-      <div className="settings-agent__controls">
-        <div className="settings-agent__field">
-          <FieldLabel>Model</FieldLabel>
-          {modelControl}
-        </div>
-        <div className="settings-agent__field">
-          <FieldLabel>Reasoning</FieldLabel>
-          {reasoningControl}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function ToggleRow({
-  label,
-  description,
-  checked,
-  onChange,
-}: {
-  label: string;
-  description: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <label className="settings-toggle">
-      <span>
-        <strong>{label}</strong>
-        <small>{description}</small>
-      </span>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-      <span className="settings-toggle__track" aria-hidden="true">
-        <span />
-      </span>
-    </label>
-  );
-}
-
 function FieldLabel({ children, id }: { children: React.ReactNode; id?: string }) {
   return (
     <label
@@ -1143,8 +1179,48 @@ function IconPicker({
   onChange: (icon: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const ActiveIcon = dashboardActionIcon(value);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+
+    const updatePosition = () => {
+      const trigger = ref.current;
+      const menu = menuRef.current;
+      const dialog = trigger?.closest<HTMLElement>(".settings-dialog");
+      if (!trigger || !menu || !dialog) return;
+
+      const triggerRect = trigger.getBoundingClientRect();
+      const menuRect = menu.getBoundingClientRect();
+      const dialogRect = dialog.getBoundingClientRect();
+      const inset = 8;
+      const gap = 6;
+      const minLeft = dialogRect.left + inset;
+      const maxLeft = Math.max(minLeft, dialogRect.right - menuRect.width - inset);
+      const minTop = dialogRect.top + inset;
+      const maxTop = Math.max(minTop, dialogRect.bottom - menuRect.height - inset);
+      const below = triggerRect.bottom + gap;
+      const preferredTop = below + menuRect.height <= dialogRect.bottom - inset
+        ? below
+        : triggerRect.top - menuRect.height - gap;
+
+      setMenuPosition({
+        left: Math.min(Math.max(triggerRect.left, minLeft), maxLeft),
+        top: Math.min(Math.max(preferredTop, minTop), maxTop),
+      });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    document.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      document.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -1168,7 +1244,12 @@ function IconPicker({
         <ActiveIcon size={15} aria-hidden="true" />
       </button>
       {open && (
-        <div className="settings-icon-picker__menu" role="menu">
+        <div
+          ref={menuRef}
+          className="settings-icon-picker__menu"
+          role="menu"
+          style={menuPosition ?? { visibility: "hidden" }}
+        >
           {DASHBOARD_ACTION_ICONS.map(({ key, label: iconLabel, Icon }) => (
             <button
               key={key}

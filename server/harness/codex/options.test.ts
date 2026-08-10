@@ -114,16 +114,16 @@ describe("CODEX_STATIC_MODELS", () => {
 describe("mapPermission", () => {
   it.each([
     [
-      { filesystemScope: "read-only", approvalPolicy: "always", networkAccess: "disabled" } as const,
-      { approvalPolicy: "untrusted", sandboxMode: "read-only", networkAccessEnabled: false },
+      { filesystemScope: "read-only", approvalPolicy: "always" } as const,
+      { approvalPolicy: "untrusted", sandboxMode: "read-only" },
     ],
     [
-      { filesystemScope: "workspace-write", approvalPolicy: "on-failure", networkAccess: "enabled" } as const,
-      { approvalPolicy: "on-failure", sandboxMode: "workspace-write", networkAccessEnabled: true },
+      { filesystemScope: "workspace-write", approvalPolicy: "on-failure" } as const,
+      { approvalPolicy: "on-failure", sandboxMode: "workspace-write" },
     ],
     [
-      { filesystemScope: "unrestricted", approvalPolicy: "never", networkAccess: "disabled" } as const,
-      { approvalPolicy: "never", sandboxMode: "danger-full-access", networkAccessEnabled: false },
+      { filesystemScope: "unrestricted", approvalPolicy: "never" } as const,
+      { approvalPolicy: "never", sandboxMode: "danger-full-access" },
     ],
   ])("maps explicit policy %# to Codex options", (policy, expected) => {
     expect(mapPermission(policy)).toEqual(expected);
@@ -131,11 +131,10 @@ describe("mapPermission", () => {
 
   it("lets an explicit policy override a conflicting legacy plan mode", () => {
     expect(mapPermission({
-      filesystemScope: "unrestricted", approvalPolicy: "never", networkAccess: "enabled",
+      filesystemScope: "unrestricted", approvalPolicy: "never",
     }, "plan")).toEqual({
       approvalPolicy: "never",
       sandboxMode: "danger-full-access",
-      networkAccessEnabled: true,
     });
   });
 
@@ -143,7 +142,6 @@ describe("mapPermission", () => {
     expect(mapPermission(undefined)).toEqual({
       approvalPolicy: "on-failure",
       sandboxMode: "read-only",
-      networkAccessEnabled: false,
     });
   });
 
@@ -151,7 +149,6 @@ describe("mapPermission", () => {
     expect(mapPermission(undefined, "plan")).toEqual({
       approvalPolicy: "on-request",
       sandboxMode: "read-only",
-      networkAccessEnabled: false,
     });
   });
 });

@@ -138,5 +138,5 @@ risks:
         - server/harness/sandbox-policy.ts
         - server/harness/types.ts
         - src/nodes/leader/SandboxPolicyControls.tsx
-    mitigation: Persist requested and effective policies separately, mark unsupported axes unmanaged, and only claim complete enforcement for Codex.
+    mitigation: Persist requested and effective policies separately, mark unsupported filesystem or approval axes unmanaged, and only claim complete enforcement for Codex.
     domain: domain.platform

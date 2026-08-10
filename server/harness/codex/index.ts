@@ -72,7 +72,6 @@ const CODEX_CAPABILITIES: HarnessCapabilities = {
   builtInFilesystem: true,
   sandboxEnforcement: {
     filesystem: ["read-only", "workspace-write", "unrestricted"],
-    network: true,
     approval: true,
   },
 };
@@ -324,7 +323,6 @@ function buildThreadOptions(opts: HarnessStartOptions): ThreadOptions {
   const perm = mapPermission(opts.sandboxPolicy?.requested, opts.permissionMode);
   out.approvalPolicy = perm.approvalPolicy;
   out.sandboxMode = perm.sandboxMode;
-  out.networkAccessEnabled = perm.networkAccessEnabled;
 
   if (opts.thinking && CODEX_CAPABILITIES.thinking) {
     out.modelReasoningEffort = mapReasoningEffort(opts.thinking.effort);

@@ -6,21 +6,12 @@ import {
   updateProjectSettings,
   type ProjectSettings,
 } from "../api.ts";
-import { getModelCapability } from "../model-meta.ts";
 import type { ServerMessage, SocketSubscribe } from "../use-socket.ts";
-import {
-  buildModelGroups,
-  ModelSelect,
-  normalizeThinkingConfig,
-  normalizeThinkingForCapability,
-  resolveModelSelection,
-  ThinkingControls,
-} from "../SettingsMenu.tsx";
-import { findHarness } from "../harness-list.ts";
-import { MINION_THINKING_CONFIG } from "../types.ts";
+import { buildModelGroups } from "../SettingsMenu.tsx";
 import { useHarnessList } from "../use-harness-list.tsx";
 import type { MobileSessionInfo } from "./mobile-selectors.ts";
 import { randomUuid } from "../random-id.ts";
+import { MobileMinionModelSettings } from "./MobileMinionModelSettings.tsx";
 
 interface SettingsScreenProps {
   project: {
@@ -251,18 +242,6 @@ export function SettingsScreen({ project, send, subscribe }: SettingsScreenProps
     }
   }, [send, subscribe]);
 
-  const minionSelection = resolveModelSelection(
-    settings.defaultMinionHarness ?? "claude",
-    settings.defaultMinionModel ?? settings.defaultModel ?? "claude-sonnet-5",
-    modelGroups,
-  );
-  const minionHarness = findHarness(harnesses, minionSelection.harness);
-  const minionThinking = normalizeThinkingConfig(
-    settings.defaultMinionThinkingConfig,
-    MINION_THINKING_CONFIG,
-  );
-  const minionCapability = getModelCapability(minionSelection.model, minionHarness);
-
   return (
     <main className="mob-screen mob-settings" aria-label="Settings">
       <header className="mob-screen-header">
@@ -286,48 +265,12 @@ export function SettingsScreen({ project, send, subscribe }: SettingsScreenProps
 
       {!loading && !loadError ? (
         <>
-          <section className="mob-settings-section" aria-labelledby="mob-default-minion-heading">
-            <div className="mob-settings-section-heading">
-              <h2 id="mob-default-minion-heading">Default Minion</h2>
-              <p>Used when leaders delegate new Minion sessions in this project.</p>
-            </div>
-
-            <label className="mob-launch-field">
-              <span>Model</span>
-              <ModelSelect
-                value={minionSelection.value}
-                groups={modelGroups}
-                onChange={(selection) =>
-                  saveSettings({
-                    ...settings,
-                    defaultMinionHarness: selection.harness,
-                    defaultMinionModel: selection.model,
-                    defaultMinionThinkingConfig: normalizeThinkingForCapability(
-                      minionThinking,
-                      getModelCapability(selection.model, findHarness(harnesses, selection.harness)),
-                    ),
-                  })
-                }
-              />
-            </label>
-
-            <div className="mob-settings-control">
-              <span>Reasoning</span>
-              <ThinkingControls
-                config={minionThinking}
-                capability={minionCapability}
-                onChange={(config) =>
-                  saveSettings({
-                    ...settings,
-                    defaultMinionThinkingConfig: normalizeThinkingForCapability(
-                      config,
-                      minionCapability,
-                    ),
-                  })
-                }
-              />
-            </div>
-          </section>
+          <MobileMinionModelSettings
+            settings={settings}
+            harnesses={harnesses}
+            modelGroups={modelGroups}
+            saveSettings={saveSettings}
+          />
 
           <section className="mob-settings-section" aria-labelledby="mob-role-system-heading">
             <div className="mob-settings-section-heading">

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -41,6 +41,54 @@ afterEach(() => {
 });
 
 describe("SettingsScreen", () => {
+  it("keeps Minion routing fixed by default", async () => {
+    vi.mocked(getProjectSettings).mockResolvedValue({
+      defaultMinionModel: "claude-sonnet-5",
+    });
+    vi.mocked(updateProjectSettings).mockResolvedValue(undefined);
+
+    render(
+      <HarnessListProvider send={vi.fn()} subscribe={vi.fn()} connected={true}>
+        <SettingsScreen project={{ id: "proj", name: "Project", path: "/work/app" }} />
+      </HarnessListProvider>,
+    );
+
+    const toggle = await screen.findByRole("checkbox", { name: /adaptive tier routing/i });
+    expect(toggle).not.toBeChecked();
+    expect(screen.queryByRole("tablist", { name: /minion assignment tiers/i })).toBeNull();
+    expect(screen.getByText(/one model is used unless a task specifies/i)).toBeInTheDocument();
+  });
+
+  it("uses tabs to edit adaptive Minion tier models", async () => {
+    vi.mocked(getProjectSettings).mockResolvedValue({
+      adaptiveMinionModelRouting: true,
+      defaultMinionHarness: "claude",
+      defaultMinionModel: "claude-sonnet-5",
+      mechanicalMinionModel: "claude-fable-5",
+      reasoningMinionModel: "claude-opus-4-8",
+    });
+    vi.mocked(updateProjectSettings).mockResolvedValue(undefined);
+
+    render(
+      <HarnessListProvider send={vi.fn()} subscribe={vi.fn()} connected={true}>
+        <SettingsScreen project={{ id: "proj", name: "Project", path: "/work/app" }} />
+      </HarnessListProvider>,
+    );
+
+    const tabs = await screen.findByRole("tablist", { name: /minion assignment tiers/i });
+    fireEvent.click(within(tabs).getByRole("tab", { name: "Mechanical" }));
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "claude::claude-opus-4-8" },
+    });
+
+    expect(updateProjectSettings).toHaveBeenCalledWith("proj", expect.objectContaining({
+      adaptiveMinionModelRouting: true,
+      mechanicalMinionModel: "claude-opus-4-8",
+      defaultMinionModel: "claude-sonnet-5",
+      reasoningMinionModel: "claude-opus-4-8",
+    }));
+  });
+
   it("persists the beta role-system opt-in", async () => {
     vi.mocked(getProjectSettings).mockResolvedValue({ roleSystemBeta: false });
     vi.mocked(updateProjectSettings).mockResolvedValue(undefined);

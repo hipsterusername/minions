@@ -94,7 +94,6 @@ export type NormalizedPermissionMode =
 
 export interface HarnessSandboxSupport {
   filesystem: ReadonlyArray<FilesystemScope>;
-  network: boolean;
   approval: boolean;
 }
 

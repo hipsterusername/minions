@@ -37,7 +37,6 @@ export function resolveHarnessSandboxPolicy(input: {
     : input.requested?.filesystemScope ?? "workspace-write";
   const requested: SandboxPolicy = {
     filesystemScope,
-    networkAccess: input.requested?.networkAccess ?? "disabled",
     approvalPolicy: input.requested?.approvalPolicy
       ?? approvalPolicyForPermission(input.permissionMode),
   };
@@ -46,11 +45,9 @@ export function resolveHarnessSandboxPolicy(input: {
   const effective: HarnessSandboxResolution["effective"] = {
     filesystemScope: support?.filesystem.includes(requested.filesystemScope)
       ? requested.filesystemScope : "unmanaged",
-    networkAccess: support?.network === true ? requested.networkAccess : "unmanaged",
     approvalPolicy: support?.approval === true ? requested.approvalPolicy : "unmanaged",
   };
   if (effective.filesystemScope === "unmanaged") unsupported.push(`filesystem:${requested.filesystemScope}`);
-  if (effective.networkAccess === "unmanaged") unsupported.push("network");
   if (effective.approvalPolicy === "unmanaged") unsupported.push("approval");
   return { requested, effective, unsupported };
 }

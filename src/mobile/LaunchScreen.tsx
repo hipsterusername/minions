@@ -222,6 +222,9 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
       ...(projectSettings.defaultPermissionMode
         ? { permissionMode: projectSettings.defaultPermissionMode }
         : {}),
+      ...(projectSettings.defaultSandboxPolicy
+        ? { sandboxPolicy: projectSettings.defaultSandboxPolicy }
+        : {}),
       ...(projectSettings.defaultLeaderThinkingConfig
         ? { thinkingConfig: projectSettings.defaultLeaderThinkingConfig }
         : {}),

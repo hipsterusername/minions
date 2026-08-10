@@ -688,7 +688,7 @@
 }
 .leader-sandbox-policy {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin: 8px 0;
   padding: 8px;
@@ -707,6 +707,31 @@
 .leader-sandbox-policy label {
   display: grid;
   gap: 3px;
+}
+
+.leader-sandbox-label {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.leader-sandbox-help {
+  display: inline-grid;
+  width: 13px;
+  height: 13px;
+  place-items: center;
+  color: var(--text-dim);
+  font: 600 9px/1 var(--font-mono);
+  border: 1px solid var(--border-default);
+  border-radius: 50%;
+  cursor: help;
+}
+
+.leader-sandbox-help:hover,
+.leader-sandbox-help:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: none;
 }
 
 .leader-sandbox-policy select {

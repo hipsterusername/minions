@@ -8,6 +8,7 @@ import type { ThinkingConfig } from "./types.ts";
 import { DEFAULT_THINKING_CONFIG, MINION_THINKING_CONFIG } from "./types.ts";
 import { createImageNodeDefaultData } from "./nodes/ImageNode.tsx";
 import { createDialecticDefaultData } from "./nodes/DialecticNode.tsx";
+import { DEFAULT_SANDBOX_POLICY } from "../shared/workspace-contracts.ts";
 
 export function createDefaultNodeData(
   type: string,
@@ -47,6 +48,9 @@ export function createDefaultNodeData(
         model: projectSettings?.defaultLeaderModel ?? "claude-opus-4-8",
         harness: projectSettings?.defaultLeaderHarness ?? "claude",
         permissionMode: projectSettings?.defaultPermissionMode ?? "auto",
+        sandboxPolicy: {
+          ...(projectSettings?.defaultSandboxPolicy ?? DEFAULT_SANDBOX_POLICY),
+        },
         taskPlan: [],
         worktreeIsolation: projectSettings?.defaultWorktreeIsolation === true,
         worktreePath: null,

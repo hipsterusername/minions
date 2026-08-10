@@ -8,13 +8,14 @@ export function resolveMinionModelForHarness(
   harnessName: string | undefined,
   executorClass: ExecutorClass | undefined,
 ): string | undefined {
+  const adaptive = settings.adaptiveMinionModelRouting === true;
   const configured =
-    executorClass === "mechanical"
+    adaptive && executorClass === "mechanical"
       ? settings.mechanicalMinionModel
-      : executorClass === "reasoning"
+      : adaptive && executorClass === "reasoning"
         ? settings.reasoningMinionModel
         : settings.defaultMinionModel;
-  const fallback = executorClass
+  const fallback = adaptive && executorClass
     ? modelPolicy(harnessName ?? "claude")?.minion[executorClass][0]
     : firstString(settings.defaultMinionModel, settings.defaultModel);
   return compatibleOrFallback(configured, harnessName, fallback);

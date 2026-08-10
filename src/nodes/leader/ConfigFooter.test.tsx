@@ -37,7 +37,7 @@ describe("ConfigFooter change mode", () => {
 
   it("labels the process sandbox separately from Git change mode", () => {
     renderFooter({ worktreeIsolation: true, sandboxPolicy: {
-      filesystemScope: "read-only", approvalPolicy: "always", networkAccess: "disabled",
+      filesystemScope: "read-only", approvalPolicy: "always",
     } });
     expect(screen.getByText("Sandbox: read-only")).toBeInTheDocument();
     expect(screen.getByText(/Worktree/)).toBeInTheDocument();

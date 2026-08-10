@@ -577,7 +577,6 @@ describe("createSession — rejection routing", () => {
     const sandboxPolicy: SandboxPolicy = {
       filesystemScope: "workspace-write",
       approvalPolicy: "never",
-      networkAccess: "enabled",
     };
 
     await createSession(ctx, {

@@ -16,7 +16,7 @@ const CLAUDE_ENTRY: HarnessListEntry = {
     resume: true,
     partialMessages: true,
     builtInFilesystem: true,
-    sandboxEnforcement: { filesystem: [], network: false, approval: false },
+    sandboxEnforcement: { filesystem: [], approval: false },
   },
   builtInTools: ["Read", "Bash"],
   models: [
@@ -43,7 +43,6 @@ const CODEX_ENTRY: HarnessListEntry = {
     builtInFilesystem: true,
     sandboxEnforcement: {
       filesystem: ["read-only", "workspace-write", "unrestricted"],
-      network: true,
       approval: true,
     },
   },

@@ -26,8 +26,8 @@ describe("sync_session", () => {
     h.host.model = "sonnet";
     h.host.permissionMode = "auto";
     h.host.sandboxPolicy = {
-      requested: { filesystemScope: "workspace-write", approvalPolicy: "on-failure", networkAccess: "disabled" },
-      effective: { filesystemScope: "workspace-write", approvalPolicy: "on-failure", networkAccess: "disabled" },
+      requested: { filesystemScope: "workspace-write", approvalPolicy: "on-failure" },
+      effective: { filesystemScope: "workspace-write", approvalPolicy: "on-failure" },
       unsupported: [],
     };
     h.host.taskName = "Audit";

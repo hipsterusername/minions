@@ -8,7 +8,7 @@
  *   - Pressing Escape closes the popover.
  */
 import { describe, it, expect, vi } from "vitest";
-import { act, render, screen, fireEvent } from "@testing-library/react";
+import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import { SettingsMenu } from "./SettingsMenu.tsx";
 import { HarnessListProvider } from "./use-harness-list.tsx";
 import type { HarnessListEntry, ServerMessage, SocketSubscribe } from "./use-socket.ts";
@@ -27,6 +27,7 @@ const CLAUDE_ENTRY: HarnessListEntry = {
     resume: true,
     partialMessages: true,
     builtInFilesystem: true,
+    sandboxEnforcement: { filesystem: [], approval: false },
   },
   builtInTools: [],
   models: [
@@ -51,6 +52,10 @@ const CODEX_ENTRY: HarnessListEntry = {
     resume: true,
     partialMessages: false,
     builtInFilesystem: true,
+    sandboxEnforcement: {
+      filesystem: ["read-only", "workspace-write", "unrestricted"],
+      approval: true,
+    },
   },
   builtInTools: [],
   models: [
@@ -153,6 +158,40 @@ describe("SettingsMenu", () => {
       defaultLeaderModel: "opus",
       defaultPermissionMode: "bypassPermissions",
     });
+  });
+
+  it("saves execution sandbox defaults", () => {
+    const onChange = vi.fn();
+    render(<SettingsMenu settings={{}} onSettingsChange={onChange} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    openCategory("Agent defaults");
+    fireEvent.change(screen.getByLabelText("Sandbox file access"), {
+      target: { value: "read-only" },
+    });
+
+    expect(onChange).toHaveBeenCalledWith({
+      defaultSandboxPolicy: {
+        filesystemScope: "read-only",
+        approvalPolicy: "on-failure",
+      },
+    });
+  });
+
+  it("shows unsupported defaults as unmanaged for the selected harness", () => {
+    renderWithHarnesses([CLAUDE_ENTRY, CODEX_ENTRY], {
+      settings: {
+        defaultLeaderHarness: "claude",
+        defaultLeaderModel: "claude-opus-4-8",
+      },
+      onSettingsChange: vi.fn(),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    openCategory("Agent defaults");
+
+    expect(screen.getByLabelText("Sandbox file access")).toHaveTextContent("Unmanaged by harness");
+    expect(screen.getByLabelText("Sandbox approval policy")).toHaveTextContent("Unmanaged by harness");
   });
 
   it("emits merged settings when the system model mode changes", () => {
@@ -277,6 +316,68 @@ describe("SettingsMenu", () => {
     });
   });
 
+  it("uses a fixed Minion definition by default and reveals tier tabs only after opt-in", () => {
+    const onChange = vi.fn();
+    renderWithHarnesses([CLAUDE_ENTRY], {
+      settings: {
+        defaultMinionHarness: "claude",
+        defaultMinionModel: "claude-sonnet-5",
+        mechanicalMinionModel: "claude-fable-5",
+        reasoningMinionModel: "claude-opus-4-8",
+      },
+      onSettingsChange: onChange,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    openCategory("Agent defaults");
+
+    const toggle = screen.getByRole("checkbox", { name: /adaptive tier routing/i });
+    expect(toggle).not.toBeChecked();
+    expect(screen.queryByRole("tablist", { name: /minion assignment tiers/i })).toBeNull();
+    expect(screen.getByRole("group", { name: "Fixed Minion model and reasoning" })).toBeVisible();
+
+    fireEvent.click(toggle);
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      adaptiveMinionModelRouting: true,
+      defaultMinionModel: "claude-sonnet-5",
+      mechanicalMinionModel: "claude-fable-5",
+      reasoningMinionModel: "claude-opus-4-8",
+    }));
+  });
+
+  it("edits each adaptive Minion tier from a tabbed control", () => {
+    const onChange = vi.fn();
+    renderWithHarnesses([CLAUDE_ENTRY], {
+      settings: {
+        adaptiveMinionModelRouting: true,
+        defaultMinionHarness: "claude",
+        defaultMinionModel: "claude-sonnet-5",
+        mechanicalMinionModel: "claude-fable-5",
+        reasoningMinionModel: "claude-opus-4-8",
+      },
+      onSettingsChange: onChange,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    openCategory("Agent defaults");
+
+    const tabs = screen.getByRole("tablist", { name: /minion assignment tiers/i });
+    expect(within(tabs).getByRole("tab", { name: "Standard" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    fireEvent.click(within(tabs).getByRole("tab", { name: "Mechanical" }));
+    const mechanicalControls = screen.getByRole("group", { name: "Mechanical Minion model" });
+    fireEvent.click(within(mechanicalControls).getByRole("button", { name: "Opus 4.8" }));
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      adaptiveMinionModelRouting: true,
+      mechanicalMinionModel: "claude-opus-4-8",
+      defaultMinionModel: "claude-sonnet-5",
+      reasoningMinionModel: "claude-opus-4-8",
+    }));
+  });
+
   it("stores harness and concrete model when leader model changes", () => {
     const onChange = vi.fn();
     renderWithHarnesses([CLAUDE_ENTRY, CODEX_ENTRY], {
@@ -287,10 +388,8 @@ describe("SettingsMenu", () => {
     fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
     openCategory("Agent defaults");
 
-    const dialog = screen.getByRole("dialog", { name: /settings/i });
-    const selects = dialog.querySelectorAll("select");
-    const leaderModelSelect = selects[1]!;
-    fireEvent.change(leaderModelSelect, { target: { value: "codex::gpt-5.5" } });
+    const leaderControls = screen.getByRole("group", { name: "Leader model and reasoning" });
+    fireEvent.click(within(leaderControls).getByRole("tab", { name: /OpenAI/ }));
 
     expect(onChange).toHaveBeenCalledWith({
       defaultLeaderHarness: "codex",
@@ -329,7 +428,8 @@ describe("SettingsMenu", () => {
     fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
     openCategory("Agent defaults");
 
-    fireEvent.click(screen.getAllByRole("button", { name: "XHigh" })[0]!);
+    const leaderControls = screen.getByRole("group", { name: "Leader model and reasoning" });
+    fireEvent.click(within(leaderControls).getByRole("button", { name: "XHigh" }));
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({
         defaultLeaderThinkingConfig: {
@@ -340,7 +440,8 @@ describe("SettingsMenu", () => {
       }),
     );
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Hidden" })[1]!);
+    const minionControls = screen.getByRole("group", { name: "Fixed Minion model and reasoning" });
+    fireEvent.click(within(minionControls).getByRole("button", { name: "Hidden" }));
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({
         defaultMinionThinkingConfig: {
@@ -350,6 +451,62 @@ describe("SettingsMenu", () => {
         },
       }),
     );
+  });
+
+  it("keeps adaptive reasoning reachable inside each role's model menu", () => {
+    const onChange = vi.fn();
+    renderWithHarnesses([CLAUDE_ENTRY], {
+      settings: {
+        defaultLeaderHarness: "claude",
+        defaultLeaderModel: "claude-opus-4-8",
+        defaultLeaderThinkingConfig: {
+          enabled: true,
+          effort: "high",
+          display: "summarized",
+        },
+      },
+      onSettingsChange: onChange,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    openCategory("Agent defaults");
+    const leaderControls = screen.getByRole("group", { name: "Leader model and reasoning" });
+    const adaptiveReasoning = within(leaderControls).getByRole("checkbox", {
+      name: /adaptive reasoning/i,
+    });
+    expect(adaptiveReasoning).toBeChecked();
+    fireEvent.click(adaptiveReasoning);
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultLeaderThinkingConfig: {
+          enabled: false,
+          effort: "high",
+          display: "summarized",
+        },
+      }),
+    );
+  });
+
+  it("keeps both role model menus expanded without disclosure controls", () => {
+    renderWithHarnesses([CLAUDE_ENTRY], {
+      settings: {
+        defaultLeaderHarness: "claude",
+        defaultLeaderModel: "claude-opus-4-8",
+      },
+      onSettingsChange: vi.fn(),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    openCategory("Agent defaults");
+    const leaderControls = screen.getByRole("group", { name: "Leader model and reasoning" });
+    const minionControls = screen.getByRole("group", { name: "Fixed Minion model and reasoning" });
+    expect(leaderControls).toBeVisible();
+    expect(minionControls).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: /Configure (Leader|Minion) model and reasoning/ }),
+    ).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeInTheDocument();
   });
 
   it("edits a context action and emits the full action array", () => {
@@ -387,6 +544,43 @@ describe("SettingsMenu", () => {
         { id: "a1", name: "Improve label", prompt: "Improve new", icon: "sparkles" },
       ],
     });
+  });
+
+  it("keeps the icon picker menu inside the settings dialog", () => {
+    const bounds = vi
+      .spyOn(Element.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: Element) {
+        if (this.classList.contains("settings-dialog")) {
+          return DOMRect.fromRect({ x: 400, y: 52, width: 380, height: 448 });
+        }
+        if (this.classList.contains("settings-icon-picker")) {
+          return DOMRect.fromRect({ x: 700, y: 460, width: 32, height: 32 });
+        }
+        if (this.classList.contains("settings-icon-picker__menu")) {
+          return DOMRect.fromRect({ width: 150, height: 120 });
+        }
+        return DOMRect.fromRect();
+      });
+
+    render(
+      <SettingsMenu
+        settings={{
+          dashboardLeaderActions: [
+            { id: "a1", name: "Improve label", prompt: "Improve old", icon: "sparkles" },
+          ],
+        }}
+        onSettingsChange={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    openCategory("Context actions");
+    fireEvent.click(screen.getByRole("button", { name: /icon for improve label/i }));
+
+    const menu = screen.getByRole("menu");
+    expect(menu).toHaveStyle({ left: "622px", top: "334px" }); // BANNED_ASSERTION_OK: bounded coordinates are the behavior under test.
+    expect(menu).not.toHaveStyle({ visibility: "hidden" }); // BANNED_ASSERTION_OK: visibility proves positioning completed before display.
+    bounds.mockRestore();
   });
 
   it("adds a new context action to the end of the list", () => {

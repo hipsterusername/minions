@@ -121,9 +121,14 @@ describe("initSidecar / openProjectDb", () => {
     expect(settings.defaultLeaderHarness).toBe("codex");
     expect(settings.defaultLeaderModel).toBe("gpt-5.6-sol");
     expect(settings.defaultMinionModel).toBe("claude-sonnet-5");
+    expect(settings.adaptiveMinionModelRouting).toBe(false);
     expect(settings.mechanicalMinionModel).toBe("claude-haiku-4-5");
     expect(settings.reasoningMinionModel).toBe("claude-opus-4-8");
     expect(settings.defaultPermissionMode).toBeTruthy();
+    expect(settings.defaultSandboxPolicy).toEqual({
+      filesystemScope: "workspace-write",
+      approvalPolicy: "on-failure",
+    });
     expect(typeof settings.defaultWorktreeIsolation).toBe("boolean");
   });
 
@@ -178,6 +183,21 @@ describe("context / settings / skills / mcp-servers round-trip", () => {
     writeSettings(project, next);
     // readSettings merges in defaults for new harness fields; assert written values are preserved
     expect(readSettings(project)).toMatchObject(next);
+  });
+
+  it("drops the removed network axis from legacy sandbox defaults", () => {
+    writeSettings(project, {
+      defaultSandboxPolicy: {
+        filesystemScope: "workspace-write",
+        approvalPolicy: "on-request",
+        networkAccess: "disabled",
+      },
+    } as never);
+
+    expect(readSettings(project).defaultSandboxPolicy).toEqual({
+      filesystemScope: "workspace-write",
+      approvalPolicy: "on-request",
+    });
   });
 
   it("migrates untouched legacy dashboard shortcuts to the array, preserving custom ones", () => {

@@ -30,29 +30,40 @@ export const approvalPolicySchema = z.enum([
 ]);
 export type ApprovalPolicy = z.infer<typeof approvalPolicySchema>;
 
-/** Network availability is independent from filesystem and approval posture. */
-export const networkAccessSchema = z.enum([
-  "disabled",
-  "enabled",
-]);
-export type NetworkAccess = z.infer<typeof networkAccessSchema>;
-
 /**
- * Provider-neutral execution boundary. All axes are required so a partial
+ * Provider-neutral execution boundary. Both axes are required so a partial
  * policy can never silently inherit a provider-specific default.
  */
-export const sandboxPolicySchema = z.object({
+const sandboxPolicyAxesSchema = z.object({
   filesystemScope: filesystemScopeSchema,
   approvalPolicy: approvalPolicySchema,
-  networkAccess: networkAccessSchema,
 }).strict();
+
+/**
+ * Older persisted policies included a networkAccess axis. Network isolation
+ * is not consistently enforceable across harnesses, so accept and discard
+ * that known legacy field while retaining strict validation for other keys.
+ */
+export const sandboxPolicySchema = z.preprocess(
+  stripLegacyNetworkAccess,
+  sandboxPolicyAxesSchema,
+);
 export type SandboxPolicy = z.infer<typeof sandboxPolicySchema>;
 
-export const effectiveSandboxPolicySchema = z.object({
+/** Safe, provider-neutral posture used when a project has no saved override. */
+export const DEFAULT_SANDBOX_POLICY: SandboxPolicy = {
+  filesystemScope: "workspace-write",
+  approvalPolicy: "on-failure",
+};
+
+const effectiveSandboxPolicyAxesSchema = z.object({
   filesystemScope: filesystemScopeSchema.or(z.literal("unmanaged")),
   approvalPolicy: approvalPolicySchema.or(z.literal("unmanaged")),
-  networkAccess: networkAccessSchema.or(z.literal("unmanaged")),
 }).strict();
+export const effectiveSandboxPolicySchema = z.preprocess(
+  stripLegacyNetworkAccess,
+  effectiveSandboxPolicyAxesSchema,
+);
 export type EffectiveSandboxPolicy = z.infer<typeof effectiveSandboxPolicySchema>;
 
 /** Requested policy plus the guarantees the selected harness can actually enforce. */
@@ -60,5 +71,18 @@ export const sandboxResolutionSchema = z.object({
   requested: sandboxPolicySchema,
   effective: effectiveSandboxPolicySchema,
   unsupported: z.array(z.string()),
-}).strict();
+}).strict().transform((resolution) => ({
+  ...resolution,
+  unsupported: resolution.unsupported.filter((axis) => axis !== "network"),
+}));
 export type SandboxResolution = z.infer<typeof sandboxResolutionSchema>;
+
+function stripLegacyNetworkAccess(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  if (record["networkAccess"] !== "disabled"
+    && record["networkAccess"] !== "enabled"
+    && record["networkAccess"] !== "unmanaged") return value;
+  const { networkAccess: _legacyNetworkAccess, ...remaining } = record;
+  return remaining;
+}

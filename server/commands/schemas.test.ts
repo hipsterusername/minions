@@ -38,7 +38,6 @@ describe("validateWsCommand – accept", () => {
       sandboxPolicy: {
         filesystemScope: "workspace-write",
         approvalPolicy: "on-request",
-        networkAccess: "disabled",
       },
       role: "leader",
       skillIds: ["review"],
@@ -252,7 +251,6 @@ describe("validateWsCommand – reject", () => {
       sandboxPolicy: {
         filesystemScope: "workspace-write",
         approvalPolicy: "sometimes",
-        networkAccess: "enabled",
       },
     }, "approvalPolicy");
   });
@@ -262,9 +260,8 @@ describe("validateWsCommand – reject", () => {
       type: "create_session",
       sandboxPolicy: {
         filesystemScope: "read-only",
-        approvalPolicy: "always",
       },
-    }, "networkAccess");
+    }, "approvalPolicy");
   });
 
   it("requires idempotency keys on work-item mutations", () => {

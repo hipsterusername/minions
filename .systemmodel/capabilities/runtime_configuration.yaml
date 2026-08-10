@@ -6,10 +6,10 @@ constraints: []
 decisions: [ decision.role_gated_agent_tools, decision.portable_workspace_roots ]
 suggested_files: [ src/SettingsMenu.tsx, src/components/SessionToolbar.tsx, src/nodes/leader/SandboxPolicyControls.tsx, server/harness/sandbox-policy.ts, server/harness/codex/options.ts, server/commands/list-harnesses.ts ]
 suggested_tests: [ src/SettingsMenu.test.tsx, src/components/SessionToolbar.test.tsx, src/nodes/leader/SandboxPolicyControls.test.tsx, server/harness/sandbox-policy.test.ts, server/harness/codex/options.test.ts, server/commands/list-harnesses.test.ts ]
-keywords: [ runtime, harness, model, sandbox, filesystem, network, approval, unmanaged, worktree, change_mode, control_error ]
+keywords: [ runtime, harness, model, sandbox, filesystem, approval, unmanaged, worktree, change_mode, control_error ]
 entry_points:
   - surface: surface.canvas
-    summary: Configure Git change mode separately from the requested filesystem, approval, and network sandbox axes.
+    summary: Configure Git change mode separately from the requested filesystem and approval sandbox axes.
     files: [ src/SettingsMenu.tsx, src/components/SessionToolbar.tsx, src/nodes/LeaderNode.tsx, src/nodes/leader/SandboxPolicyControls.tsx, src/nodes/leader/ConfigFooter.tsx ]
     tests: [ src/SettingsMenu.test.tsx, src/components/SessionToolbar.test.tsx, src/nodes/LeaderNode.test.tsx, src/nodes/leader/SandboxPolicyControls.test.tsx, src/nodes/leader/ConfigFooter.test.tsx ]
     flows: [ flow.configure_runtime, flow.launch_leader, flow.steer_session ]

@@ -491,16 +491,16 @@ describe("CodexHarness permission mode", () => {
     codexHarness.registerTools({});
     await collect(codexHarness.start(baseOpts({
       sandboxPolicy: {
-        requested: { filesystemScope, approvalPolicy: "on-request", networkAccess: "enabled" },
-        effective: { filesystemScope, approvalPolicy: "on-request", networkAccess: "enabled" },
+        requested: { filesystemScope, approvalPolicy: "on-request" },
+        effective: { filesystemScope, approvalPolicy: "on-request" },
         unsupported: [],
       },
     })).events);
     const opts = sdkMock.calls.startThread[0] as {
-      approvalPolicy?: string; sandboxMode?: string; networkAccessEnabled?: boolean;
+      approvalPolicy?: string; sandboxMode?: string;
     };
     expect(opts).toMatchObject({
-      approvalPolicy: "on-request", sandboxMode, networkAccessEnabled: true,
+      approvalPolicy: "on-request", sandboxMode,
     });
   });
 });

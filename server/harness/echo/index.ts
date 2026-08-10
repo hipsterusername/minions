@@ -36,7 +36,7 @@ const ECHO_CAPABILITIES: HarnessCapabilities = {
   resume: false,
   partialMessages: false,
   builtInFilesystem: false,
-  sandboxEnforcement: { filesystem: [], network: false, approval: false },
+  sandboxEnforcement: { filesystem: [], approval: false },
 };
 
 class EchoHarness implements AgentHarness {

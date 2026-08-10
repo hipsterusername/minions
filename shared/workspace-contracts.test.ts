@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   approvalPolicySchema,
   filesystemScopeSchema,
-  networkAccessSchema,
   sandboxPolicySchema,
   sandboxResolutionSchema,
   workspaceIdSchema,
@@ -24,15 +23,13 @@ describe("workspace identity contracts", () => {
       requested: {
         filesystemScope: "workspace-write",
         approvalPolicy: "on-request",
-        networkAccess: "disabled",
       },
       effective: {
         filesystemScope: "unmanaged",
         approvalPolicy: "unmanaged",
-        networkAccess: "unmanaged",
       },
-      unsupported: ["filesystem:workspace-write", "network", "approval"],
-    }).unsupported).toHaveLength(3);
+      unsupported: ["filesystem:workspace-write", "approval"],
+    }).unsupported).toHaveLength(2);
   });
 
   it.each([
@@ -53,7 +50,32 @@ describe("workspace identity contracts", () => {
 });
 
 describe("sandbox policy contracts", () => {
-  it("represents filesystem, approval, and network posture independently", () => {
+  it("represents filesystem and approval posture independently", () => {
+    expect(sandboxPolicySchema.parse({
+      filesystemScope: "workspace-write",
+      approvalPolicy: "on-request",
+    })).toEqual({
+      filesystemScope: "workspace-write",
+      approvalPolicy: "on-request",
+    });
+  });
+
+  it("requires both policy axes", () => {
+    expect(sandboxPolicySchema.safeParse({
+      filesystemScope: "read-only",
+    }).success).toBe(false);
+  });
+
+  it("rejects invalid enum values", () => {
+    expect(filesystemScopeSchema.safeParse("repository-write").success).toBe(false);
+    expect(approvalPolicySchema.safeParse("sometimes").success).toBe(false);
+    expect(sandboxPolicySchema.safeParse({
+      filesystemScope: "workspace-write",
+      approvalPolicy: "sometimes",
+    }).success).toBe(false);
+  });
+
+  it("normalizes the removed network axis from persisted policies", () => {
     expect(sandboxPolicySchema.parse({
       filesystemScope: "workspace-write",
       approvalPolicy: "on-request",
@@ -61,33 +83,26 @@ describe("sandbox policy contracts", () => {
     })).toEqual({
       filesystemScope: "workspace-write",
       approvalPolicy: "on-request",
-      networkAccess: "disabled",
     });
-  });
-
-  it("requires all three policy axes", () => {
-    expect(sandboxPolicySchema.safeParse({
-      filesystemScope: "read-only",
-      approvalPolicy: "always",
-    }).success).toBe(false);
-  });
-
-  it("rejects invalid enum values", () => {
-    expect(filesystemScopeSchema.safeParse("repository-write").success).toBe(false);
-    expect(approvalPolicySchema.safeParse("sometimes").success).toBe(false);
-    expect(networkAccessSchema.safeParse("localhost-only").success).toBe(false);
-    expect(sandboxPolicySchema.safeParse({
-      filesystemScope: "workspace-write",
-      approvalPolicy: "on-request",
-      networkAccess: "localhost-only",
-    }).success).toBe(false);
+    expect(sandboxResolutionSchema.parse({
+      requested: {
+        filesystemScope: "workspace-write",
+        approvalPolicy: "on-request",
+        networkAccess: "disabled",
+      },
+      effective: {
+        filesystemScope: "workspace-write",
+        approvalPolicy: "on-request",
+        networkAccess: "disabled",
+      },
+      unsupported: ["network"],
+    }).unsupported).toEqual([]);
   });
 
   it("rejects provider-specific extension fields", () => {
     expect(sandboxPolicySchema.safeParse({
       filesystemScope: "unrestricted",
       approvalPolicy: "never",
-      networkAccess: "enabled",
       providerMode: "custom",
     }).success).toBe(false);
   });

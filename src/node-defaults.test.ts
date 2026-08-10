@@ -3,6 +3,19 @@ import { applyPromptSeed, createDefaultNodeData } from "./node-defaults.ts";
 import type { ThinkingConfig } from "./types.ts";
 
 describe("createDefaultNodeData leader thinking defaults", () => {
+  it("applies the project sandbox default to new leaders", () => {
+    const sandboxPolicy = {
+      filesystemScope: "read-only" as const,
+      approvalPolicy: "always" as const,
+    };
+    const data = createDefaultNodeData("leader", {
+      defaultSandboxPolicy: sandboxPolicy,
+    }) as { sandboxPolicy: typeof sandboxPolicy };
+
+    expect(data.sandboxPolicy).toEqual(sandboxPolicy);
+    expect(data.sandboxPolicy).not.toBe(sandboxPolicy);
+  });
+
   it("defaults fable leaders to medium thinking effort", () => {
     const data = createDefaultNodeData("leader", {
       defaultLeaderModel: "claude-fable-5",

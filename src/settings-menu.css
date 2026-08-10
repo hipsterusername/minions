@@ -1,12 +1,15 @@
 .settings-dialog {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
+  position: fixed;
+  top: 52px;
+  right: 12px;
   z-index: 250;
   display: grid;
   grid-template-columns: 190px minmax(0, 1fr);
   width: min(780px, calc(100vw - 24px));
-  height: min(680px, calc(100vh - 80px));
+  height: min(680px, calc(100vh - 64px));
+  height: min(680px, calc(100dvh - 64px));
+  max-height: calc(100vh - 64px);
+  max-height: calc(100dvh - 64px);
   overflow: hidden;
   color: var(--text-primary);
   background: var(--bg-secondary);
@@ -18,8 +21,11 @@
 .settings-sidebar {
   display: flex;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
   padding: 18px 12px 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: color-mix(in srgb, var(--bg-primary) 78%, var(--bg-secondary));
   border-right: 1px solid var(--border-default);
 }
@@ -153,6 +159,8 @@
 
 .settings-content {
   min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 28px 30px 34px;
@@ -182,6 +190,7 @@
 
 .settings-card {
   margin-bottom: 14px;
+  min-width: 0;
   overflow: hidden;
   background: color-mix(in srgb, var(--bg-surface) 72%, var(--bg-secondary));
   border: 1px solid var(--border-default);
@@ -292,26 +301,20 @@
 
 .settings-agent-list {
   display: grid;
-  gap: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
 }
 
 .settings-agent {
-  display: grid;
-  grid-template-columns: 150px minmax(0, 1fr);
-  gap: 18px;
-  padding: 15px 0;
-}
-
-.settings-agent:first-child {
-  padding-top: 0;
-}
-
-.settings-agent:last-child {
-  padding-bottom: 0;
-}
-
-.settings-agent + .settings-agent {
-  border-top: 1px solid var(--border-default);
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+  padding: 13px;
+  background: color-mix(in srgb, var(--bg-primary) 64%, transparent);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
 }
 
 .settings-agent__identity {
@@ -348,19 +351,112 @@
   border-radius: 7px;
 }
 
-.settings-agent__controls {
+.settings-agent__configuration {
   display: grid;
-  grid-template-columns: minmax(160px, 0.9fr) minmax(230px, 1.25fr);
-  gap: 14px;
+  gap: 6px;
   min-width: 0;
 }
 
-.settings-agent__field {
+.settings-agent__configuration > div {
   min-width: 0;
+}
+
+.settings-field-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font: 400 11px/1.2 var(--font-mono);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.settings-minion-routing {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.settings-minion-routing__toggle {
+  gap: 10px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--bg-surface) 72%, transparent);
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+}
+
+.settings-tier-routing,
+.settings-tier-panel {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+}
+
+.settings-tier-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+}
+
+.settings-tier-tabs button {
+  min-width: 0;
+  min-height: 30px;
+  padding: 5px 4px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font: 600 9px/1.2 var(--font-mono);
+  text-overflow: ellipsis;
+  background: var(--bg-primary);
+  border: 0;
+  border-left: 1px solid var(--border-default);
+  cursor: pointer;
+}
+
+.settings-tier-tabs button:first-child {
+  border-left: 0;
+}
+
+.settings-tier-tabs button[data-active="true"] {
+  color: var(--text-primary);
+  background: var(--state-active);
+  box-shadow: inset 0 -2px var(--accent);
+}
+
+.settings-tier-tabs button:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.settings-tier-panel {
+  padding: 10px;
+  background: color-mix(in srgb, var(--bg-primary) 54%, transparent);
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+}
+
+.settings-tier-panel > p {
+  margin: 0;
+  color: var(--text-muted);
+  font: 400 10px/1.4 var(--font-sans);
+}
+
+.settings-tier-panel > p strong {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.settings-tier-panel--fixed {
+  padding: 0;
+  background: transparent;
+  border: 0;
 }
 
 .settings-reasoning {
   display: flex;
+  min-width: 0;
   flex-wrap: wrap;
   gap: 5px;
   align-items: center;
@@ -390,7 +486,10 @@
 
 .settings-reasoning__segment {
   display: inline-flex;
-  overflow: hidden;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
   border: 1px solid var(--border-default);
   border-radius: 5px;
 }
@@ -634,8 +733,8 @@
 }
 
 .settings-icon-picker__menu {
-  position: absolute;
-  top: calc(100% + 6px);
+  position: fixed;
+  top: 0;
   left: 0;
   z-index: 20;
   display: grid;
@@ -646,6 +745,11 @@
   border: 1px solid var(--border-hover);
   border-radius: var(--radius-panel, 10px);
   box-shadow: var(--shadow-lg);
+}
+
+.settings-action-card:focus-within {
+  position: relative;
+  z-index: 1;
 }
 
 .settings-icon-picker__menu button {
@@ -775,11 +879,18 @@
   border-left-color: var(--warning-color);
 }
 
+@media (max-width: 860px) {
+  .settings-agent-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @media (max-width: 700px) {
   .settings-dialog {
     grid-template-columns: 1fr;
     grid-template-rows: auto minmax(0, 1fr);
-    height: min(720px, calc(100vh - 72px));
+    height: min(720px, calc(100vh - 64px));
+    height: min(720px, calc(100dvh - 64px));
   }
 
   .settings-sidebar {
@@ -822,12 +933,19 @@
     padding: 22px 18px 28px;
   }
 
-  .settings-agent__controls {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 520px) {
+  .settings-dialog {
+    top: 48px;
+    right: 8px;
+    width: calc(100vw - 16px);
+    height: calc(100vh - 56px);
+    height: calc(100dvh - 56px);
+    max-height: calc(100vh - 56px);
+    max-height: calc(100dvh - 56px);
+  }
+
   .settings-theme-grid,
   .settings-mode-grid {
     grid-template-columns: 1fr;
@@ -837,8 +955,4 @@
     display: none;
   }
 
-  .settings-agent,
-  .settings-agent__controls {
-    grid-template-columns: 1fr;
-  }
 }

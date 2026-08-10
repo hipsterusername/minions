@@ -1,6 +1,7 @@
 import type { CanvasNode, CanvasTransform, ThinkingConfig } from "./types.ts";
 import type { GraphDocument } from "./graph.ts";
 import type { LeaderPreset } from "./leader-preset.ts";
+import type { SandboxPolicy } from "../shared/workspace-contracts.ts";
 
 const BASE = "/api";
 
@@ -76,8 +77,14 @@ export interface ProjectSettings {
   defaultLeaderThinkingConfig?: ThinkingConfig;
   defaultMinionHarness?: string;
   defaultMinionModel?: string;
+  /** Opt into executor-class routing; absent/false uses one fixed Minion model. */
+  adaptiveMinionModelRouting?: boolean;
+  mechanicalMinionModel?: string;
+  reasoningMinionModel?: string;
   defaultMinionThinkingConfig?: ThinkingConfig;
   defaultPermissionMode?: string;
+  /** Execution sandbox posture applied to newly created Leader sessions. */
+  defaultSandboxPolicy?: SandboxPolicy;
   defaultWorktreeIsolation?: boolean;
   /**
    * Keep the canvas tidy: overlapping nodes snap flush against their nearest

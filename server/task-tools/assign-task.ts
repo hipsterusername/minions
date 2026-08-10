@@ -51,7 +51,7 @@ const assignTaskInputSchema = z.object({
     .enum(["mechanical", "standard", "reasoning"])
     .optional()
     .describe(
-      "Model tier for this minion: mechanical for low-ambiguity lint/rename/docs/format work, standard for normal implementation or investigation, reasoning for architecturally tricky or ambiguous work. Explicit model overrides this.",
+      "Capability tier for this minion. It selects a tier model only when adaptive Minion routing is enabled in project settings; otherwise the fixed default model is used. Explicit model overrides both.",
     ),
   model: z
     .string()
@@ -99,7 +99,7 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
   return {
     name: "assign_task",
     description:
-      "Delegate a task to a new Minion agent. Creates a minion session that will execute the task autonomously. Use executorClass to choose mechanical, standard, or reasoning model tiers; pass model only for exact override. If the task was registered with plan_task, it will transition from planned to running. Skills selected on the Leader are inherited automatically; `skillIds` adds task-specific skills. Tasks that ended in failed/ended_without_report/orphaned may be re-assigned with the same taskId to retry.",
+      "Delegate a task to a new Minion agent. Creates a minion session that will execute the task autonomously. executorClass describes the capability tier and selects its configured model only when adaptive Minion routing is enabled; pass model for an exact override. If the task was registered with plan_task, it will transition from planned to running. Skills selected on the Leader are inherited automatically; `skillIds` adds task-specific skills. Tasks that ended in failed/ended_without_report/orphaned may be re-assigned with the same taskId to retry.",
     inputSchema: assignTaskInputSchema,
     handler: async (input: unknown) => {
       const args = assignTaskInputSchema.parse(input);

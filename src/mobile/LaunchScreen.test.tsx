@@ -76,6 +76,10 @@ describe("LaunchScreen", () => {
       defaultLeaderModel: "gpt-5.5-codex",
       defaultLeaderThinkingConfig: { enabled: true, effort: "high", display: "summarized" },
       defaultPermissionMode: "default",
+      defaultSandboxPolicy: {
+        filesystemScope: "read-only",
+        approvalPolicy: "always",
+      },
       defaultWorktreeIsolation: true,
     });
     const send = vi.fn();
@@ -116,6 +120,10 @@ describe("LaunchScreen", () => {
       model: "gpt-5.5-codex",
       thinkingConfig: { enabled: true, effort: "high", display: "summarized" },
       permissionMode: "default",
+      sandboxPolicy: {
+        filesystemScope: "read-only",
+        approvalPolicy: "always",
+      },
       worktreeIsolation: true,
     }));
   });
