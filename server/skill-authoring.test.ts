@@ -101,6 +101,23 @@ describe("buildSkillDraft", () => {
     const ids = r.skill.subskills?.map((s) => s.id);
     expect(ids).toEqual(["sub-one", "sub-one-2"]);
   });
+  it("preserves supported attachments and drops unsupported ones", () => {
+    const r = buildSkillDraft({
+      name: "Attached",
+      template: "b",
+      attachments: [
+        { kind: "text", filename: "rules.md", mediaType: "text/markdown", text: "rules", truncated: false },
+        { kind: "text", filename: "bad.zip", mediaType: "application/zip", text: "bad", truncated: false },
+      ],
+      subskills: [{
+        name: "Sub", description: "d", body: "b",
+        attachments: [{ kind: "text", filename: "data.json", mediaType: "application/json", text: "{}", truncated: false }],
+      }],
+    });
+    if (!r.ok) throw new Error("expected ok");
+    expect(r.skill.attachments?.map((item) => item.filename)).toEqual(["rules.md"]);
+    expect(r.skill.subskills?.[0]?.attachments?.[0]?.filename).toBe("data.json");
+  });
   it("inherits unspecified fields from base on update", () => {
     const r = buildSkillDraft({ description: "new desc" }, sampleSkill);
     if (!r.ok) throw new Error("expected ok");
@@ -147,6 +164,7 @@ describe("summarizeSkillLibrary", () => {
     const summaries = summarizeSkillLibrary([sampleSkill]);
     const project = summaries.find((s) => s.id === "lint-cleanup");
     expect(project?.source).toBe("project");
+    expect(project?.attachments).toBe(0);
     // At least one built-in preset should be present.
     expect(summaries.some((s) => s.source === "built-in")).toBe(true);
   });

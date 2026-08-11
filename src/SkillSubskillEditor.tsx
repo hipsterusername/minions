@@ -9,6 +9,7 @@
 
 import { useCallback } from "react";
 import type { SubSkill } from "./skills/types.ts";
+import { SkillAttachmentEditor } from "./SkillAttachmentEditor.tsx";
 
 /** Slugify a name into a stable-ish id (mirrors SkillEditor.generateId). */
 export function generateSubskillId(name: string): string {
@@ -147,6 +148,13 @@ export function SkillSubskillEditor({
               onChange={(e) => update(idx, { body: e.target.value })}
             />
           </div>
+
+          <SkillAttachmentEditor
+            attachments={sub.attachments ?? []}
+            onChange={(attachments) => update(idx, { attachments })}
+            label="Sub-skill context"
+            inputLabel={`Sub-skill ${idx + 1} context files`}
+          />
 
           <div
             style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}

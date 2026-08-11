@@ -10,6 +10,7 @@
  */
 
 import { loadAllSkills, type SkillTemplate, type SubSkill } from "./skills.ts";
+import { formatSkillAttachments } from "../shared/skill-attachments.ts";
 
 /**
  * Build the always-injected *map* of a skill's sub-skills. Mirrors the pure
@@ -31,7 +32,14 @@ export function buildSubskillMap(skill: SkillTemplate): string {
 
   const eager = subskills
     .filter((sub) => sub.alwaysInclude)
-    .map((sub) => `#### ${sub.name}\n\n${sub.body.trim()}`);
+    .map((sub) => {
+      const attachments = formatSkillAttachments(
+        sub.attachments,
+        `Attached context for ${sub.name}`,
+      );
+      return `#### ${sub.name}\n\n${sub.body.trim()}`
+        + (attachments ? `\n\n${attachments}` : "");
+    });
 
   const parts = [
     `### Sub-skills of ${skill.name}`,
@@ -103,7 +111,12 @@ export function formatSubskillLoad(
   result: ResolveSubskillResult,
 ): string {
   if (result.ok) {
-    return `# Sub-skill: ${result.skillName} › ${result.subskill.name}\n\n${result.subskill.body}`;
+    const attachments = formatSkillAttachments(
+      result.subskill.attachments,
+      `Attached context for ${result.subskill.name}`,
+    );
+    return `# Sub-skill: ${result.skillName} › ${result.subskill.name}\n\n${result.subskill.body}`
+      + (attachments ? `\n\n${attachments}` : "");
   }
   const list = (ids: string[]) =>
     ids.length > 0 ? ids.map((id) => `\`${id}\``).join(", ") : "(none)";

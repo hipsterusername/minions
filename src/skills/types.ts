@@ -6,6 +6,13 @@
  * compiled markdown gets injected into the system prompt.
  */
 
+import {
+  formatSkillAttachments,
+  type SkillAttachment,
+} from "../../shared/skill-attachments.ts";
+
+export type { SkillAttachment } from "../../shared/skill-attachments.ts";
+
 /** A variable extracted from {{name}} patterns in the template */
 export interface SkillVariable {
   /** Variable name (extracted from {{name}} in the template) */
@@ -45,6 +52,8 @@ export interface SubSkill {
   whenToUse?: string;
   /** Eager-inline the body into the parent prompt instead of on-demand */
   alwaysInclude?: boolean;
+  /** Frozen text files/context loaded with this sub-skill. */
+  attachments?: SkillAttachment[];
 }
 
 export interface SkillTemplate {
@@ -73,6 +82,8 @@ export interface SkillTemplate {
    * get a default text input.
    */
   variables: SkillVariable[];
+  /** Frozen text files/context included whenever this skill is active. */
+  attachments?: SkillAttachment[];
   /**
    * Optional nested sub-skills. Stored inline (one level only). The parent's
    * compiled prompt injects a map of these; bodies are pulled on demand.
@@ -108,7 +119,14 @@ export function buildSubskillMap(skill: SkillTemplate): string {
 
   const eager = subskills
     .filter((sub) => sub.alwaysInclude)
-    .map((sub) => `#### ${sub.name}\n\n${sub.body.trim()}`);
+    .map((sub) => {
+      const attachments = formatSkillAttachments(
+        sub.attachments,
+        `Attached context for ${sub.name}`,
+      );
+      return `#### ${sub.name}\n\n${sub.body.trim()}`
+        + (attachments ? `\n\n${attachments}` : "");
+    });
 
   const parts = [
     `### Sub-skills of ${skill.name}`,
@@ -166,8 +184,14 @@ export function compileSkills(
   const sections = skills.map((skill) => {
     const values = allValues[skill.id] ?? {};
     const compiled = compileSkillTemplate(skill, values);
+    const attachments = formatSkillAttachments(
+      skill.attachments,
+      `Attached context for ${skill.name}`,
+    );
     const map = buildSubskillMap(skill);
-    return `## Skill: ${skill.name}\n\n${compiled}${map ? `\n\n${map}` : ""}`;
+    return `## Skill: ${skill.name}\n\n${compiled}`
+      + (attachments ? `\n\n${attachments}` : "")
+      + (map ? `\n\n${map}` : "");
   });
 
   return `\n\n# Active Skills\n\nThe following skills are active for this session. Follow their instructions.\n\n${sections.join("\n\n---\n\n")}`;

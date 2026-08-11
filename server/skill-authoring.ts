@@ -14,6 +14,10 @@
 
 import { builtInSkillPresets } from "../shared/skill-presets.ts";
 import type { SkillTemplate, SkillVariable, SubSkill } from "./skills.ts";
+import {
+  sanitizeSkillAttachments,
+  type SkillAttachment,
+} from "../shared/skill-attachments.ts";
 
 /** Categories a skill may declare — mirror of the `SkillTemplate` union. */
 export const SKILL_CATEGORIES = [
@@ -83,6 +87,7 @@ export interface SkillDraftInput {
   accentColor?: string;
   template?: string;
   variables?: SkillVariable[];
+  attachments?: SkillAttachment[];
   subskills?: Array<Omit<SubSkill, "id"> & { id?: string }>;
 }
 
@@ -113,6 +118,7 @@ function normalizeSubskills(
     const base = id;
     while (used.has(id)) id = `${base}-${n++}`;
     used.add(id);
+    const attachments = sanitizeSkillAttachments(draft.attachments);
     return {
       id,
       name: draft.name,
@@ -120,6 +126,7 @@ function normalizeSubskills(
       body: draft.body,
       ...(draft.whenToUse ? { whenToUse: draft.whenToUse } : {}),
       ...(draft.alwaysInclude ? { alwaysInclude: true } : {}),
+      ...(attachments.length > 0 ? { attachments } : {}),
     } satisfies SubSkill;
   });
 }
@@ -156,6 +163,9 @@ export function buildSkillDraft(
 
   const subskills =
     normalizeSubskills(input.subskills) ?? base?.subskills;
+  const attachments = input.attachments !== undefined
+    ? sanitizeSkillAttachments(input.attachments)
+    : base?.attachments;
 
   return {
     ok: true,
@@ -168,6 +178,7 @@ export function buildSkillDraft(
       accentColor: input.accentColor ?? base?.accentColor ?? DEFAULT_ACCENT,
       template,
       variables: [...declared, ...implicit],
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
       ...(subskills ? { subskills } : {}),
     },
   };
@@ -216,6 +227,7 @@ export interface SkillSummary {
   category: string;
   source: "built-in" | "project";
   variables: number;
+  attachments: number;
   subskills: number;
 }
 
@@ -238,6 +250,7 @@ export function summarizeSkillLibrary(projectSkills: unknown[]): SkillSummary[] 
     category: s.category,
     source,
     variables: s.variables?.length ?? 0,
+    attachments: s.attachments?.length ?? 0,
     subskills: s.subskills?.length ?? 0,
   });
   const builtIns = builtInSkillPresets

@@ -191,6 +191,10 @@ describe("assign_task", () => {
         accentColor: "#000",
         template: "Run the linter and fix every warning.",
         variables: [],
+        attachments: [{
+          kind: "text", filename: "lint-policy.md", mediaType: "text/markdown",
+          text: "Warnings are release blockers.", truncated: false,
+        }],
       },
     ]);
 
@@ -207,6 +211,7 @@ describe("assign_task", () => {
     expect(sent).toContain("# Active Skills");
     expect(sent).toContain("## Skill: Lint Cleanup");
     expect(sent).toContain("Run the linter and fix every warning.");
+    expect(sent).toContain("Warnings are release blockers.");
     expect(sent.startsWith(BASE_MINION_PROMPT)).toBe(true);
   });
 

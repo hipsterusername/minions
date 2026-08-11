@@ -122,6 +122,18 @@ describe("compileSkills", () => {
     expect(out).toContain("#### Eager");
     expect(out).toContain("EAGER BODY");
   });
+
+  it("injects frozen skill attachments into the active skill context", () => {
+    const out = compileSkills([makeSkill({
+      name: "Reviewer",
+      attachments: [{
+        kind: "text", filename: "policy.md", mediaType: "text/markdown",
+        text: "Never skip review.", truncated: false,
+      }],
+    })], {});
+    expect(out).toContain("### Attached context for Reviewer");
+    expect(out).toContain("Never skip review.");
+  });
 });
 
 describe("loadAllSkills + loadSkillsByIds", () => {
@@ -200,6 +212,21 @@ describe("loadAllSkills + loadSkillsByIds", () => {
     expect(got[0]!.subskills).toEqual([
       { id: "s1", name: "S1", description: "d", body: "b", alwaysInclude: true },
     ]);
+  });
+
+  it("drops malformed attachment data during load without poisoning the skill", () => {
+    writeSkills(projectDir, [{
+      ...makeSkill({ id: "safe" }),
+      attachments: [null, { kind: "text", filename: "bad.zip", mediaType: "application/zip", text: "x" }],
+      subskills: [{
+        id: "sub", name: "Sub", description: "d", body: "b",
+        attachments: [{ kind: "binary", data: "nope" }],
+      }],
+    }]);
+    const got = loadSkillsByIds(projectDir, ["safe"])[0]!;
+    expect(got.attachments).toBeUndefined();
+    expect(got.subskills?.[0]?.attachments).toBeUndefined();
+    expect(() => compileSkills([got], {})).not.toThrow();
   });
 
   it("silently skips unknown ids", () => {

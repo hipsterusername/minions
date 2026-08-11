@@ -77,6 +77,10 @@ describe("buildLeaderSystemPrompt", () => {
         name: "Lint",
         description: "Cleanup",
         template: "Lint hard.",
+        attachments: [{
+          kind: "text", filename: "lint-policy.md", mediaType: "text/markdown",
+          text: "Warnings block release.", truncated: false,
+        }],
       }),
     );
     registerSkill(makeSkill({ id: "review", name: "Review", description: "Read code" }));
@@ -88,6 +92,7 @@ describe("buildLeaderSystemPrompt", () => {
     expect(out).toContain("# Active Skills");
     expect(out).toContain("## Skill: Lint");
     expect(out).toContain("Lint hard.");
+    expect(out).toContain("Warnings block release.");
     expect(out).toContain("# Available Skills (for arming Minions)");
     // Both armed and unarmed skills appear in the inventory
     expect(out).toContain("`lint` — **Lint**: Cleanup");

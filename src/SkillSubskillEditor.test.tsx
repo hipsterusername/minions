@@ -65,4 +65,19 @@ describe("SkillSubskillEditor", () => {
       expect.objectContaining({ id: "b" }),
     ]);
   });
+
+  it("removes context attached to a sub-skill", () => {
+    const onChange = vi.fn();
+    render(<SkillSubskillEditor subskills={[{
+      id: "s", name: "S", description: "d", body: "b",
+      attachments: [{
+        kind: "text", filename: "rules.md", mediaType: "text/markdown",
+        text: "rules", truncated: false,
+      }],
+    }]} onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Remove rules.md" }));
+    expect(onChange).toHaveBeenCalledWith([
+      expect.objectContaining({ id: "s", attachments: [] }),
+    ]);
+  });
 });

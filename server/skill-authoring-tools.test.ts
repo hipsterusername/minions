@@ -60,6 +60,44 @@ describe("createSkillAuthoringTools", () => {
     expect(skill.variables).toHaveLength(1);
   });
 
+  it("create_skill persists supported attachments", async () => {
+    const res = await tools["create_skill"]!.handler({
+      name: "Contextual",
+      template: "Use the context.",
+      attachments: [{
+        kind: "text", filename: "rules.md", mediaType: "text/markdown",
+        text: "The rules", truncated: false,
+      }],
+      subskills: [{
+        name: "Examples", description: "examples", body: "Use examples",
+        attachments: [{
+          kind: "text", filename: "sample.json", mediaType: "application/json",
+          text: "{}", truncated: false,
+        }],
+      }],
+    });
+    expect(res.isError).toBeFalsy();
+    const saved = readSkills(projectDir)[0] as {
+      attachments?: Array<{ filename: string }>;
+      subskills?: Array<{ attachments?: Array<{ filename: string }> }>;
+    };
+    expect(saved.attachments?.[0]?.filename).toBe("rules.md");
+    expect(saved.subskills?.[0]?.attachments?.[0]?.filename).toBe("sample.json");
+  });
+
+  it("create_skill reports unsupported attachments without failing", async () => {
+    const res = await tools["create_skill"]!.handler({
+      name: "Safe Context",
+      template: "Use context.",
+      attachments: [{
+        kind: "text", filename: "archive.zip", mediaType: "application/zip",
+        text: "not supported", truncated: false,
+      }],
+    });
+    expect(res.isError).toBeFalsy();
+    expect(textOf(res)).toContain("Skipped 1 unsupported or invalid attachment");
+  });
+
   it("create_skill rejects a duplicate project id", async () => {
     await tools["create_skill"]!.handler({ name: "Dup", template: "b" });
     const res = await tools["create_skill"]!.handler({ name: "Dup", template: "b2" });

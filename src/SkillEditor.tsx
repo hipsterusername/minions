@@ -1,11 +1,12 @@
 import { useState, useMemo, useCallback } from "react";
-import type { SkillTemplate, SkillVariable, SubSkill } from "./skills/types.ts";
+import type { SkillAttachment, SkillTemplate, SkillVariable, SubSkill } from "./skills/types.ts";
 import {
   extractVariableNames,
   compileSkillTemplate,
   buildSubskillMap,
 } from "./skills/types.ts";
 import { SkillSubskillEditor } from "./SkillSubskillEditor.tsx";
+import { SkillAttachmentEditor } from "./SkillAttachmentEditor.tsx";
 
 interface SkillEditorProps {
   /** Existing skill to edit, or null for creating a new one */
@@ -545,6 +546,9 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
   const [variables, setVariables] = useState<SkillVariable[]>(
     skill?.variables ?? [],
   );
+  const [attachments, setAttachments] = useState<SkillAttachment[]>(
+    skill?.attachments ?? [],
+  );
   const [subskills, setSubskills] = useState<SubSkill[]>(
     skill?.subskills ?? [],
   );
@@ -668,6 +672,7 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
       accentColor,
       template,
       variables: finalVars,
+      ...(attachments.length > 0 ? { attachments } : {}),
       // Persist only sub-skills that have a name (drops empty scaffolds).
       ...(subskills.some((s) => s.name.trim())
         ? { subskills: subskills.filter((s) => s.name.trim()) }
@@ -683,6 +688,7 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
     icon,
     accentColor,
     template,
+    attachments,
     subskills,
   ]);
 
@@ -909,6 +915,10 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
                   </div>
                 )}
               </div>
+              <SkillAttachmentEditor
+                attachments={attachments}
+                onChange={setAttachments}
+              />
             </div>
 
             <div style={panelStyle("appearance")}>

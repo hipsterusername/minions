@@ -8,6 +8,7 @@
  */
 
 import type { SkillTemplate, SkillVariable } from "./types.ts";
+import { sanitizeSkillAttachments } from "../../shared/skill-attachments.ts";
 
 /** Marker identifying a Minions skills bundle. */
 export const SKILL_TRANSFER_FORMAT = "minions-skills";
@@ -104,18 +105,24 @@ export function coerceSkill(raw: unknown): SkillTemplate | null {
     template: raw["template"],
     variables: sanitizeVariables(raw["variables"]),
   };
+  const attachments = sanitizeSkillAttachments(raw["attachments"]);
+  if (attachments.length > 0) skill.attachments = attachments;
 
   if (Array.isArray(raw["subskills"])) {
     const subs = (raw["subskills"] as unknown[])
       .filter((s): s is Record<string, unknown> => isRecord(s) && isString(s["name"]))
-      .map((s) => ({
-        id: isString(s["id"]) ? s["id"] : String(s["name"]).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
-        name: String(s["name"]),
-        description: isString(s["description"]) ? s["description"] : "",
-        body: isString(s["body"]) ? s["body"] : "",
-        ...(isString(s["whenToUse"]) ? { whenToUse: s["whenToUse"] } : {}),
-        ...(typeof s["alwaysInclude"] === "boolean" ? { alwaysInclude: s["alwaysInclude"] } : {}),
-      }));
+      .map((s) => {
+        const attachments = sanitizeSkillAttachments(s["attachments"]);
+        return {
+          id: isString(s["id"]) ? s["id"] : String(s["name"]).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+          name: String(s["name"]),
+          description: isString(s["description"]) ? s["description"] : "",
+          body: isString(s["body"]) ? s["body"] : "",
+          ...(isString(s["whenToUse"]) ? { whenToUse: s["whenToUse"] } : {}),
+          ...(typeof s["alwaysInclude"] === "boolean" ? { alwaysInclude: s["alwaysInclude"] } : {}),
+          ...(attachments.length > 0 ? { attachments } : {}),
+        };
+      });
     if (subs.length > 0) skill.subskills = subs;
   }
 

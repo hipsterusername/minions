@@ -26,6 +26,10 @@ import {
   upsertSkillInArray,
   type SkillDraftInput,
 } from "./skill-authoring.ts";
+import {
+  MAX_SKILL_ATTACHMENT_CHARS,
+  inspectSkillAttachments,
+} from "../shared/skill-attachments.ts";
 
 const variableSchema = z.object({
   name: z.string().describe("Placeholder name as it appears in {{name}}."),
@@ -41,6 +45,16 @@ const variableSchema = z.object({
   description: z.string().optional().describe("Help text shown below the input."),
 });
 
+const attachmentSchema = z.object({
+  kind: z.literal("text").default("text"),
+  filename: z.string().min(1).describe("Original text/code document name."),
+  mediaType: z.string().default("text/plain"),
+  text: z.string().describe(
+    `Frozen document content; content beyond ${MAX_SKILL_ATTACHMENT_CHARS} characters is truncated safely.`,
+  ),
+  truncated: z.boolean().default(false),
+});
+
 const subskillSchema = z.object({
   id: z.string().optional().describe("Stable id; derived from name when omitted."),
   name: z.string(),
@@ -51,6 +65,8 @@ const subskillSchema = z.object({
     .boolean()
     .optional()
     .describe("Eager-inline the body into the parent prompt instead of on demand."),
+  attachments: z.array(attachmentSchema).optional()
+    .describe("Supported text/code documents loaded with this sub-skill."),
 });
 
 const createInputSchema = z.object({
@@ -70,6 +86,8 @@ const createInputSchema = z.object({
     .optional()
     .describe("Explicit id; derived from the name when omitted."),
   variables: z.array(variableSchema).optional(),
+  attachments: z.array(attachmentSchema).optional()
+    .describe("Supported text/code documents included whenever this skill is active."),
   subskills: z.array(subskillSchema).optional(),
 });
 
@@ -94,7 +112,7 @@ export function createSkillAuthoringTools(opts: {
     name: "list_skills",
     description:
       "List every skill in the project's library (built-in + project), with id, " +
-      "name, description, category, source, and variable/sub-skill counts. Call " +
+      "name, description, category, source, and variable/attachment/sub-skill counts. Call " +
       "this before authoring so you extend or edit rather than duplicate.",
     inputSchema: z.object({}),
     handler: async () => jsonResult(summarizeSkillLibrary(readSkills(projectPath))),
@@ -130,11 +148,21 @@ export function createSkillAuthoringTools(opts: {
     );
     writeSkills(projectPath, next);
     const verb = created ? "Created" : "Updated";
+    const skippedAttachments = inspectSkillAttachments(input.attachments).skipped
+      + (input.subskills ?? []).reduce(
+        (total, subskill) => total + inspectSkillAttachments(subskill.attachments).skipped,
+        0,
+      );
+    const skippedNote = skippedAttachments > 0
+      ? ` Skipped ${skippedAttachments} unsupported or invalid attachment(s).`
+      : "";
     return textResult(
       `${verb} skill "${built.skill.name}" (id: ${built.skill.id}) with ` +
         `${built.skill.variables.length} variable(s)` +
+        `${built.skill.attachments ? `, ${built.skill.attachments.length} attachment(s)` : ""}` +
         `${built.skill.subskills ? ` and ${built.skill.subskills.length} sub-skill(s)` : ""}. ` +
-        `Arm a Minion with it via assign_task skillIds: ["${built.skill.id}"].`,
+        `Arm a Minion with it via assign_task skillIds: ["${built.skill.id}"].` +
+        skippedNote,
     );
   };
 

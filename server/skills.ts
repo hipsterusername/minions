@@ -15,6 +15,11 @@
 import { readSkills } from "./project-store.ts";
 import { builtInSkillPresets } from "../shared/skill-presets.ts";
 import { buildSubskillMap } from "./subskills.ts";
+import {
+  formatSkillAttachments,
+  sanitizeSkillAttachments,
+  type SkillAttachment,
+} from "../shared/skill-attachments.ts";
 
 /** Variable definition extracted from {{name}} patterns in a template. */
 export interface SkillVariable {
@@ -40,6 +45,7 @@ export interface SubSkill {
   body: string;
   whenToUse?: string;
   alwaysInclude?: boolean;
+  attachments?: SkillAttachment[];
 }
 
 /** A skill template loaded from central workspace `skills.json`. */
@@ -59,6 +65,7 @@ export interface SkillTemplate {
   accentColor: string;
   template: string;
   variables: SkillVariable[];
+  attachments?: SkillAttachment[];
   subskills?: SubSkill[];
 }
 
@@ -91,8 +98,14 @@ export function compileSkills(
   const sections = skills.map((skill) => {
     const values = allValues[skill.id] ?? {};
     const compiled = compileSkillTemplate(skill, values);
+    const attachments = formatSkillAttachments(
+      skill.attachments,
+      `Attached context for ${skill.name}`,
+    );
     const map = buildSubskillMap(skill);
-    return `## Skill: ${skill.name}\n\n${compiled}${map ? `\n\n${map}` : ""}`;
+    return `## Skill: ${skill.name}\n\n${compiled}`
+      + (attachments ? `\n\n${attachments}` : "")
+      + (map ? `\n\n${map}` : "");
   });
   return (
     `\n\n# Active Skills\n\n` +
@@ -117,13 +130,37 @@ function isSkillTemplate(value: unknown): value is SkillTemplate {
   );
 }
 
+function normalizeSkillTemplate(skill: SkillTemplate): SkillTemplate {
+  const attachments = sanitizeSkillAttachments(skill.attachments);
+  const subskills = Array.isArray(skill.subskills)
+    ? skill.subskills
+      .filter((sub): sub is SubSkill => typeof sub === "object" && sub !== null
+        && typeof sub.id === "string" && typeof sub.name === "string"
+        && typeof sub.description === "string" && typeof sub.body === "string")
+      .map((sub) => {
+        const subAttachments = sanitizeSkillAttachments(sub.attachments);
+        const { attachments: _attachments, ...rest } = sub;
+        return {
+          ...rest,
+          ...(subAttachments.length > 0 ? { attachments: subAttachments } : {}),
+        };
+      })
+    : undefined;
+  const { attachments: _attachments, subskills: _subskills, ...rest } = skill;
+  return {
+    ...rest,
+    ...(attachments.length > 0 ? { attachments } : {}),
+    ...(subskills ? { subskills } : {}),
+  };
+}
+
 /**
  * Load every skill defined in the project's sidecar `skills.json`.
  * Returns an empty array when the file is missing or malformed.
  */
 export function loadAllSkills(projectPath: string): SkillTemplate[] {
   const raw = readSkills(projectPath);
-  const projectSkills = raw.filter(isSkillTemplate);
+  const projectSkills = raw.filter(isSkillTemplate).map(normalizeSkillTemplate);
   const projectSkillIds = new Set(projectSkills.map((skill) => skill.id));
   const builtIns = builtInSkillPresets.filter(
     (skill) => !projectSkillIds.has(skill.id),

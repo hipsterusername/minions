@@ -99,4 +99,23 @@ describe("compileSkills with sub-skills", () => {
     expect(out).toContain("#### Eager");
     expect(out).toContain("EAGER BODY");
   });
+
+  it("includes skill and eager sub-skill attachments", () => {
+    const attachment = {
+      kind: "text" as const, filename: "guide.md", mediaType: "text/markdown",
+      text: "Follow this guide.", truncated: false,
+    };
+    const out = compileSkills([makeSkill({
+      attachments: [attachment],
+      subskills: [{
+        id: "eager", name: "Eager", description: "always", body: "BODY",
+        alwaysInclude: true,
+        attachments: [{ ...attachment, filename: "example.json", mediaType: "application/json", text: "{}" }],
+      }],
+    })], {});
+    expect(out).toContain("### Attached context for Parent");
+    expect(out).toContain("Follow this guide.");
+    expect(out).toContain("### Attached context for Eager");
+    expect(out).toContain("#### example.json");
+  });
 });

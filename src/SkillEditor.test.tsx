@@ -12,6 +12,10 @@ const baseSkill: SkillTemplate = {
   accentColor: "#0f766e",
   template: "Base body",
   variables: [],
+  attachments: [{
+    kind: "text", filename: "rules.md", mediaType: "text/markdown",
+    text: "Use the rules.", truncated: false,
+  }],
   subskills: [
     { id: "layout", name: "Layout", description: "layout rules", body: "BODY" },
   ],
@@ -29,6 +33,7 @@ describe("SkillEditor sub-skills", () => {
     expect(saved.subskills).toEqual([
       { id: "layout", name: "Layout", description: "layout rules", body: "BODY" },
     ]);
+    expect(saved.attachments?.[0]?.filename).toBe("rules.md");
   });
 
   it("omits sub-skills entirely when none have a name", () => {

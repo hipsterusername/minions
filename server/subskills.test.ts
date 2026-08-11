@@ -169,6 +169,23 @@ describe("formatSubskillLoad", () => {
     expect(out).toBe("# Sub-skill: Parent › Sub\n\nTHE BODY");
   });
 
+  it("returns a sub-skill's attached context with its body", () => {
+    const out = formatSubskillLoad("p", "s", {
+      ok: true,
+      skillName: "Parent",
+      subskill: makeSub({
+        name: "Sub",
+        body: "THE BODY",
+        attachments: [{
+          kind: "text", filename: "example.json", mediaType: "application/json",
+          text: '{"safe":true}', truncated: false,
+        }],
+      }),
+    });
+    expect(out).toContain("### Attached context for Sub");
+    expect(out).toContain('{"safe":true}');
+  });
+
   it("lists valid skill ids on unknown_skill", () => {
     const out = formatSubskillLoad("ghost", "x", {
       ok: false,

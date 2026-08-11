@@ -127,4 +127,17 @@ describe("coerceSkill", () => {
     expect(skill!.subskills).toHaveLength(1);
     expect(skill!.subskills![0]!.id).toBe("deep-dive");
   });
+
+  it("preserves supported skill and sub-skill attachments", () => {
+    const item = {
+      kind: "text", filename: "rules.md", mediaType: "text/markdown",
+      text: "rules", truncated: false,
+    };
+    const skill = coerceSkill({
+      id: "x", name: "X", template: "b", attachments: [item],
+      subskills: [{ name: "Deep", body: "...", attachments: [{ ...item, filename: "deep.txt" }] }],
+    });
+    expect(skill?.attachments?.[0]?.filename).toBe("rules.md");
+    expect(skill?.subskills?.[0]?.attachments?.[0]?.filename).toBe("deep.txt");
+  });
 });

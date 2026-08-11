@@ -72,7 +72,7 @@ const TEXT_ATTACHMENT_MEDIA_TYPES = new Set([
 ]);
 
 export const TEXT_ATTACHMENT_ACCEPT =
-  ".txt,.md,.markdown,.mdx,.html,.htm,.css,.js,.jsx,.ts,.tsx,.json,.csv,.xml,.yaml,.yml,.toml,.log,.env,.sh,.py,text/*,application/json,application/xml";
+  ".txt,.md,.markdown,.mdx,.html,.htm,.css,.js,.jsx,.mjs,.ts,.tsx,.json,.csv,.xml,.yaml,.yml,.toml,.log,.env,.conf,.sh,.py,.rb,.c,.cc,.cpp,.cs,.h,.hpp,.go,.java,.rs,.sql,text/*,application/json,application/xml,application/sql,application/typescript";
 
 export const MAX_TEXT_ATTACHMENT_CHARS = 200_000;
 

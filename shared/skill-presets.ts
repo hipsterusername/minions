@@ -20,6 +20,7 @@ export interface SubSkillPreset {
   body: string;
   whenToUse?: string;
   alwaysInclude?: boolean;
+  attachments?: import("./skill-attachments.ts").SkillAttachment[];
 }
 
 export interface SkillPreset {
@@ -38,6 +39,7 @@ export interface SkillPreset {
   accentColor: string;
   template: string;
   variables: SkillPresetVariable[];
+  attachments?: import("./skill-attachments.ts").SkillAttachment[];
   subskills?: SubSkillPreset[];
 }
 
@@ -155,6 +157,7 @@ You have a dedicated set of skill-authoring tools (MCP prefix \`mcp__skills__\`)
 - **category** — one of: code, docs, testing, devops, analysis, design, general.
 - **template** — the instruction body in Markdown. Write it as a direct playbook: what to read first, the step-by-step process, the invariants to hold, and the definition of done. Prefer imperative, checkable steps over prose.
 - **variables** — declare a \`{{placeholder}}\` for anything that changes per use (target path, ticket id, style guide). Any \`{{placeholder}}\` you leave undeclared is auto-added as a plain text variable, so only declare the ones that need a label, select options, or help text.
+- **attachments** (optional) — frozen text, Markdown, source, or structured-data documents that provide reference context every time the skill runs. Attach them to a sub-skill instead when they are only needed with that branch. Unsupported or oversized content is skipped or truncated safely.
 - **sub-skills** (optional) — when a skill is large, split rarely-needed detail into sub-skills. The parent injects only a compact *map*; the agent pulls a body on demand with \`load_subskill\`. Use \`alwaysInclude\` only for content every run needs.
 
 ## Authoring process
@@ -163,7 +166,7 @@ You have a dedicated set of skill-authoring tools (MCP prefix \`mcp__skills__\`)
 3. Draft the template: read-first pointers → numbered process → constraints → definition of done. Keep it tight; every line costs the armed agent context budget.
 4. Factor variables. Name them in \`snake_case\`. Give required inputs a clear label and, where the choice is closed, \`select\` options.
 5. If the body exceeds a few hundred words, move optional depth into sub-skills and leave a map.
-6. Persist with \`create_skill\` (or \`update_skill\`). Then \`get_skill\` the result to confirm the id, variables, and body compiled as intended.
+6. Persist with \`create_skill\` (or \`update_skill\`). Then \`get_skill\` the result to confirm the id, variables, attachments, and body compiled as intended.
 7. Report the new skill's id so the Leader can arm a Minion with it via \`assign_task\`'s \`skillIds\`.
 
 ## Quality bar
