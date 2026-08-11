@@ -359,6 +359,755 @@
   font: 500 9px/1 var(--font-mono);
 }
 
+/* Leader skill picker ----------------------------------------------------- */
+
+.skill-flyout__backdrop {
+  position: fixed;
+  z-index: 9998;
+  inset: 0;
+  background: color-mix(in srgb, var(--overlay-bg) 18%, transparent);
+}
+
+.skill-flyout {
+  position: fixed;
+  z-index: 9999;
+  display: flex;
+  overflow: hidden;
+  box-sizing: border-box;
+  flex-direction: column;
+  border: 1px solid color-mix(in srgb, var(--border-default) 88%, transparent);
+  border-radius: 12px;
+  background: var(--bg-secondary);
+  box-shadow: var(--shadow-lg);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+}
+
+.skill-flyout__header {
+  display: flex;
+  min-height: 64px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-default);
+  background: color-mix(in srgb, var(--bg-primary) 82%, var(--bg-secondary));
+}
+
+.skill-flyout__heading-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border-default));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--accent) 11%, var(--bg-elevated));
+  color: var(--accent);
+}
+
+.skill-flyout__heading-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.skill-flyout__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.skill-flyout__title-row h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.skill-flyout__selected-count,
+.skill-flyout__section-heading > span {
+  display: inline-grid;
+  min-width: 20px;
+  height: 18px;
+  box-sizing: border-box;
+  padding: 0 6px;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-elevated));
+  color: var(--accent);
+  font: 650 9px/1 var(--font-mono);
+  white-space: nowrap;
+}
+
+.skill-flyout__heading-copy p {
+  overflow: hidden;
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-flyout__icon-button {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.skill-flyout__icon-button:hover {
+  border-color: var(--border-default);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.skill-flyout__tabs {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 6px;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-primary);
+}
+
+.skill-flyout__tabs button {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: 650 11px/1 var(--font-sans);
+}
+
+.skill-flyout__tabs button:hover {
+  background: var(--state-hover);
+  color: var(--text-secondary);
+}
+
+.skill-flyout__tabs button[aria-selected="true"] {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border-default));
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-elevated));
+  color: var(--accent);
+}
+
+.skill-flyout__tabs button > span {
+  display: inline-grid;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  font: 650 8px/1 var(--font-mono);
+}
+
+.skill-flyout__body {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: minmax(240px, 0.82fr) minmax(0, 1.35fr);
+}
+
+.skill-flyout__browser,
+.skill-flyout__configuration {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.skill-flyout__browser {
+  border-right: 1px solid var(--border-default);
+  background: var(--bg-primary);
+}
+
+.skill-flyout__browser-header,
+.skill-flyout__configuration-header {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.skill-flyout__configuration-header {
+  background: color-mix(in srgb, var(--bg-primary) 62%, var(--bg-secondary));
+}
+
+.skill-flyout__section-heading {
+  display: flex;
+  min-height: 18px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.skill-flyout__section-heading strong {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.skill-flyout__section-heading > span {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+.skill-flyout__search {
+  display: flex;
+  min-height: 34px;
+  box-sizing: border-box;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-control);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.skill-flyout__search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+}
+
+.skill-flyout__search input {
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: 11px/1.2 var(--font-sans);
+}
+
+.skill-flyout__search input::placeholder {
+  color: var(--text-muted);
+}
+
+.skill-flyout__search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.skill-flyout__search button {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.skill-flyout__search button:hover {
+  background: var(--state-hover);
+  color: var(--text-primary);
+}
+
+.skill-flyout__skill-list,
+.skill-flyout__configuration-list {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.skill-flyout__skill-list {
+  padding: 5px 7px 10px;
+}
+
+.skill-flyout__category h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  padding: 9px 5px 4px;
+  color: var(--text-muted);
+  font: 650 9px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.skill-flyout__category h3 span {
+  color: color-mix(in srgb, var(--text-muted) 72%, transparent);
+  font-size: 8px;
+}
+
+.skill-flyout__category > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.skill-flyout__skill-row {
+  display: grid;
+  min-width: 0;
+  min-height: 58px;
+  box-sizing: border-box;
+  align-items: center;
+  gap: 8px;
+  padding: 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.skill-flyout__skill-row:hover {
+  border-color: color-mix(in srgb, var(--border-default) 78%, transparent);
+  background: var(--state-hover);
+}
+
+.skill-flyout__skill-row[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--skill-color) 27%, var(--border-default));
+  background: color-mix(in srgb, var(--skill-color) 7%, var(--bg-elevated));
+}
+
+.skill-flyout__skill-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--skill-color) 25%, var(--border-default));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--skill-color) 9%, var(--bg-elevated));
+  font-size: 14px;
+}
+
+.skill-flyout__skill-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.skill-flyout__skill-copy strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-flyout__skill-copy > span {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.3;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.skill-flyout__select-button,
+.skill-flyout__readonly-state {
+  display: inline-flex;
+  min-width: 56px;
+  min-height: 27px;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-control);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font: 650 9px/1 var(--font-sans);
+}
+
+.skill-flyout__select-button {
+  cursor: pointer;
+}
+
+.skill-flyout__select-button:hover {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border-default));
+  color: var(--accent);
+}
+
+.skill-flyout__select-button[data-selected="true"] {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.skill-flyout__select-button[data-selected="true"]:hover {
+  border-color: color-mix(in srgb, var(--danger-color) 34%, var(--border-default));
+  background: color-mix(in srgb, var(--danger-color) 7%, transparent);
+  color: var(--danger-color);
+}
+
+.skill-flyout__readonly-state {
+  border-color: transparent;
+  background: transparent;
+  color: var(--status-success);
+}
+
+.skill-flyout__chips {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  padding-bottom: 1px;
+  scrollbar-width: thin;
+}
+
+.skill-tag-chip {
+  display: inline-flex;
+  min-height: 24px;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 5px 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--skill-color) 34%, var(--border-default));
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--skill-color) 9%, var(--bg-elevated));
+  color: color-mix(in srgb, var(--skill-color) 72%, var(--text-primary));
+  font: 650 9px/1 var(--font-mono);
+  white-space: nowrap;
+}
+
+.skill-tag-chip__subskills {
+  padding-left: 4px;
+  border-left: 1px solid color-mix(in srgb, currentColor 24%, transparent);
+  opacity: 0.78;
+  font-size: 8px;
+}
+
+.skill-tag-chip button {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: currentColor;
+  cursor: pointer;
+  opacity: 0.72;
+}
+
+.skill-tag-chip button:hover {
+  background: color-mix(in srgb, var(--skill-color) 16%, transparent);
+  opacity: 1;
+}
+
+.skill-flyout__configuration-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 10px 12px 16px;
+}
+
+.skill-flyout__config-card {
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--skill-color) 25%, var(--border-default));
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+
+.skill-flyout__config-card > header {
+  display: flex;
+  min-height: 55px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--skill-color) 18%, var(--border-default));
+  background: color-mix(in srgb, var(--skill-color) 6%, var(--bg-elevated));
+}
+
+.skill-flyout__config-card > header > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.skill-flyout__config-card h3,
+.skill-flyout__config-card p {
+  margin: 0;
+}
+
+.skill-flyout__config-card h3 {
+  color: color-mix(in srgb, var(--skill-color) 72%, var(--text-primary));
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.skill-flyout__config-card header p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.3;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.skill-flyout__config-card header button {
+  display: inline-flex;
+  min-height: 26px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: 600 9px/1 var(--font-sans);
+}
+
+.skill-flyout__config-card header button:hover {
+  border-color: color-mix(in srgb, var(--danger-color) 34%, var(--border-default));
+  background: color-mix(in srgb, var(--danger-color) 7%, transparent);
+  color: var(--danger-color);
+}
+
+.skill-variable-inputs {
+  display: grid;
+  gap: 10px;
+  padding: 11px;
+}
+
+.skill-variable-inputs__field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.skill-variable-inputs__field label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.skill-variable-inputs__field label span {
+  color: var(--danger-color);
+}
+
+.skill-variable-inputs__field input,
+.skill-variable-inputs__field textarea,
+.skill-variable-inputs__field select {
+  width: 100%;
+  min-height: 33px;
+  box-sizing: border-box;
+  padding: 7px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-control);
+  outline: none;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font: 11px/1.35 var(--font-sans);
+}
+
+.skill-variable-inputs__field textarea {
+  resize: vertical;
+}
+
+.skill-variable-inputs__field input:focus,
+.skill-variable-inputs__field textarea:focus,
+.skill-variable-inputs__field select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 13%, transparent);
+}
+
+.skill-variable-inputs__field input[readonly],
+.skill-variable-inputs__field textarea[readonly],
+.skill-variable-inputs__field select:disabled {
+  background: var(--bg-surface);
+  color: var(--text-muted);
+}
+
+.skill-variable-inputs__field > span {
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.skill-flyout__no-configuration {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 11px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.skill-flyout__no-configuration svg {
+  color: var(--status-success);
+}
+
+.skill-flyout__empty {
+  display: flex;
+  min-height: 180px;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 6px;
+  padding: 22px 16px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.skill-flyout__empty > strong {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.skill-flyout__empty > span {
+  max-width: 250px;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.skill-flyout__empty > button {
+  min-height: 29px;
+  margin-top: 4px;
+  padding: 0 9px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-control);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: 650 10px/1 var(--font-sans);
+}
+
+.skill-flyout__empty > button:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+.skill-flyout__empty--configuration {
+  min-height: 100%;
+}
+
+.skill-flyout__empty--configuration > div {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  margin-bottom: 3px;
+  place-items: center;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  color: var(--accent);
+}
+
+.skill-flyout__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  margin: -1px;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.skill-flyout button:focus-visible,
+.skill-flyout input:focus-visible,
+.skill-flyout textarea:focus-visible,
+.skill-flyout select:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 76%, white);
+  outline-offset: 2px;
+}
+
+.skill-flyout[data-compact="true"] .skill-flyout__body {
+  display: block;
+}
+
+.skill-flyout[data-compact="true"] .skill-flyout__browser,
+.skill-flyout[data-compact="true"] .skill-flyout__configuration {
+  height: 100%;
+  border-right: 0;
+}
+
+.skill-flyout [data-hidden="true"] {
+  display: none !important;
+}
+
+@media (max-width: 440px) {
+  .skill-flyout__header {
+    min-height: 58px;
+    padding: 8px 9px;
+  }
+
+  .skill-flyout__heading-icon {
+    width: 28px;
+    height: 28px;
+  }
+
+  .skill-flyout__heading-copy p {
+    max-width: 230px;
+  }
+
+  .skill-flyout__skill-row {
+    grid-template-columns: 26px minmax(0, 1fr) auto;
+    padding-inline: 6px;
+  }
+
+  .skill-flyout__skill-icon {
+    width: 26px;
+    height: 26px;
+  }
+
+  .skill-flyout__select-button {
+    min-width: 50px;
+    padding-inline: 5px;
+  }
+
+  .skill-flyout__configuration-list {
+    padding-inline: 8px;
+  }
+
+  .skill-flyout__config-card header button {
+    width: 28px;
+    padding: 0;
+    justify-content: center;
+    font-size: 0;
+  }
+}
+
 /* Prompt composer */
 .leader-prompt-bar--inline {
   padding: 9px 10px 10px !important;

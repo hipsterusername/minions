@@ -1,4 +1,18 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import {
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Download,
+  MoreHorizontal,
+  Pencil,
+  Play,
+  Plus,
+  Search,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { getPickableSkills } from "./skills/registry.ts";
 import type { SkillTemplate } from "./skills/types.ts";
 import {
@@ -7,6 +21,7 @@ import {
   useDockBadge,
   useDockPanelOpen,
 } from "./BottomRightDock.tsx";
+import "./skills-browser.css";
 
 interface SkillsBrowserProps {
   onLaunchSkill: (skillId: string) => void;
@@ -22,53 +37,148 @@ interface SkillsBrowserProps {
   refreshKey?: number;
 }
 
-/** Compact icon button used for both the header and per-card actions. */
-function IconButton({
-  label,
-  glyph,
-  onClick,
-  hoverColor = "var(--text-secondary)",
-}: {
+interface MenuAction {
   label: string;
-  glyph: React.ReactNode;
-  onClick: (e: React.MouseEvent) => void;
-  hoverColor?: string;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      onMouseDown={(e) => e.stopPropagation()}
-      title={label}
-      aria-label={label}
-      style={actionButtonStyle}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.color = hoverColor;
-        e.currentTarget.style.background = "var(--bg-elevated)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.color = "var(--text-muted)";
-        e.currentTarget.style.background = "transparent";
-      }}
-      onFocus={(e) => {
-        e.currentTarget.style.color = hoverColor;
-        e.currentTarget.style.background = "var(--bg-elevated)";
-      }}
-      onBlur={(e) => {
-        e.currentTarget.style.color = "var(--text-muted)";
-        e.currentTarget.style.background = "transparent";
-      }}
-    >
-      {glyph}
-    </button>
-  );
+  icon: React.ReactNode;
+  onSelect: () => void;
+  danger?: boolean;
 }
 
 /**
- * A single skill row. Per-card actions (edit/duplicate/export/delete) stay
- * mounted for accessibility + tests but are visually revealed only when the
- * card is hovered or contains keyboard focus, cutting the resting clutter.
- * Their column keeps a fixed width so revealing them causes no layout shift.
+ * Conventional overflow menu for secondary actions. The menu keeps labels
+ * visible, closes on outside click/Escape, and leaves the primary action out
+ * of the overflow so the common path is always obvious.
  */
+function ActionMenu({ label, actions }: { label: string; actions: MenuAction[] }) {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (
+        !triggerRef.current?.contains(target) &&
+        !menuRef.current?.contains(target)
+      ) {
+        setOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        // Dismiss the nested menu first; a second Escape can close the dock.
+        event.stopPropagation();
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    const handleViewportChange = () => setOpen(false);
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+    requestAnimationFrame(() => {
+      menuRef.current
+        ?.querySelector<HTMLButtonElement>("[role='menuitem']")
+        ?.focus();
+    });
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+    };
+  }, [open]);
+
+  const toggleMenu = () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const menuWidth = 184;
+    const menuHeight = actions.length * 32 + 10;
+    const viewportGap = 8;
+    const top =
+      rect.bottom + 5 + menuHeight <= window.innerHeight - viewportGap
+        ? rect.bottom + 5
+        : Math.max(viewportGap, rect.top - menuHeight - 5);
+    const left = Math.max(
+      viewportGap,
+      Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - viewportGap),
+    );
+    setPosition({ top, left });
+    setOpen(true);
+  };
+
+  const handleMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const items = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>("[role='menuitem']"),
+    );
+    const activeIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (event.key === "Home") items[0]?.focus();
+    else if (event.key === "End") items.at(-1)?.focus();
+    else if (event.key === "ArrowDown") items[(activeIndex + 1) % items.length]?.focus();
+    else items[(activeIndex - 1 + items.length) % items.length]?.focus();
+  };
+
+  return (
+    <div className="skills-browser__menu-root">
+      <button
+        ref={triggerRef}
+        type="button"
+        className="skills-browser__more-button"
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={label}
+        onClick={toggleMenu}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <MoreHorizontal size={16} strokeWidth={2} aria-hidden="true" />
+      </button>
+      {open && createPortal(
+        <div
+          ref={menuRef}
+          className="skills-browser__menu"
+          role="menu"
+          aria-label={label}
+          style={position}
+          onMouseDown={(event) => event.stopPropagation()}
+          onKeyDown={handleMenuKeyDown}
+        >
+          {actions.map((action) => (
+            <button
+              key={action.label}
+              type="button"
+              role="menuitem"
+              className="skills-browser__menu-item"
+              data-danger={action.danger ? "true" : undefined}
+              onClick={() => {
+                action.onSelect();
+                setOpen(false);
+              }}
+            >
+              {action.icon}
+              <span>{action.label}</span>
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
+/** A single skill with an explicit primary action and a labeled overflow. */
 function SkillCard({
   skill,
   onLaunch,
@@ -84,182 +194,79 @@ function SkillCard({
   onExport: () => void;
   onDelete: () => void;
 }) {
-  const [active, setActive] = useState(false);
+  const actions: MenuAction[] = [
+    {
+      label: "Edit skill",
+      icon: <Pencil size={14} aria-hidden="true" />,
+      onSelect: onEdit,
+    },
+    {
+      label: "Duplicate skill",
+      icon: <Copy size={14} aria-hidden="true" />,
+      onSelect: onDuplicate,
+    },
+    {
+      label: "Export skill",
+      icon: <Download size={14} aria-hidden="true" />,
+      onSelect: onExport,
+    },
+  ];
+
+  if (!skill.builtIn) {
+    actions.push({
+      label: "Delete skill",
+      icon: <Trash2 size={14} aria-hidden="true" />,
+      onSelect: onDelete,
+      danger: true,
+    });
+  }
 
   return (
-    <div
-      style={{
-        width: "100%",
-        marginBottom: 3,
-        borderRadius: 6,
-        background: "var(--bg-surface)",
-        border: "1px solid var(--border-default)",
-        display: "flex",
-        alignItems: "flex-start",
-        transition: "border-color 0.15s",
-        overflow: "hidden",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.borderColor = skill.accentColor;
-        setActive(true);
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = "var(--border-default)";
-        setActive(false);
-      }}
-      onFocus={() => setActive(true)}
-      onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
-          setActive(false);
-        }
-      }}
+    <article
+      className="skills-browser__card"
+      style={{ "--skill-accent": skill.accentColor } as React.CSSProperties}
     >
-      <button
-        onClick={onLaunch}
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{
-          flex: 1,
-          padding: "8px 10px",
-          background: "transparent",
-          border: "none",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "flex-start",
-          gap: 8,
-          textAlign: "left",
-          minWidth: 0,
-        }}
-      >
-        <span style={{ fontSize: 18, lineHeight: 1, flexShrink: 0 }}>
+      <div className="skills-browser__card-body">
+        <span className="skills-browser__skill-icon" aria-hidden="true">
           {skill.icon}
         </span>
-
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              marginBottom: 2,
-            }}
-          >
-            <span
-              style={{
-                fontSize: 12,
-                fontWeight: 600,
-                color: "var(--text-primary)",
-              }}
-            >
-              {skill.name}
-            </span>
+        <div className="skills-browser__skill-copy">
+          <div className="skills-browser__skill-title-row">
+            <h3>{skill.name}</h3>
             {skill.builtIn && (
-              <span
-                title="Built-in preset (read-only)"
-                style={{
-                  fontSize: 9,
-                  fontFamily: "var(--font-mono)",
-                  color: "var(--text-muted)",
-                  border: "1px solid var(--border-default)",
-                  borderRadius: 4,
-                  padding: "0 4px",
-                  flexShrink: 0,
-                }}
-              >
-                built-in
+              <span className="skills-browser__badge" title="Built-in preset">
+                Built-in
               </span>
             )}
             {skill.subskills && skill.subskills.length > 0 && (
               <span
-                title={`${skill.subskills.length} sub-skill${skill.subskills.length === 1 ? "" : "s"}`}
-                style={{
-                  fontSize: 9,
-                  fontFamily: "var(--font-mono)",
-                  color: "var(--text-secondary)",
-                  border: "1px solid var(--border-default)",
-                  borderRadius: 4,
-                  padding: "0 4px",
-                  flexShrink: 0,
-                }}
+                className="skills-browser__badge"
+                title={`${skill.subskills.length} sub-skill${
+                  skill.subskills.length === 1 ? "" : "s"
+                }`}
               >
-                {skill.subskills.length}▸
+                {skill.subskills.length} sub
               </span>
             )}
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                background: skill.accentColor,
-                flexShrink: 0,
-              }}
-            />
           </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--text-muted)",
-              lineHeight: 1.3,
-            }}
-          >
-            {skill.description}
-          </div>
+          <p>{skill.description}</p>
         </div>
-      </button>
-
-      {/* Actions: edit/duplicate/export for all, delete for custom.
-          Revealed on hover/focus; column width is reserved to avoid shift. */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          alignItems: "center",
-          justifyItems: "center",
-          padding: "4px 4px 4px 0",
-          gap: 0,
-          flexShrink: 0,
-          opacity: active ? 1 : 0,
-          transition: "opacity 0.12s ease",
-        }}
-      >
-        <IconButton
-          label="Edit skill"
-          glyph={<>&#9998;</>}
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit();
-          }}
-        />
-        <IconButton
-          label="Duplicate skill"
-          glyph={<>&#10697;</>}
-          onClick={(e) => {
-            e.stopPropagation();
-            onDuplicate();
-          }}
-        />
-        <IconButton
-          label="Export skill"
-          glyph={<>&#8681;</>}
-          onClick={(e) => {
-            e.stopPropagation();
-            onExport();
-          }}
-        />
-        {/* Built-in presets are code-authored: not deletable
-            (editing one creates a project override instead). */}
-        {!skill.builtIn && (
-          <IconButton
-            label="Delete skill"
-            glyph={<>&#215;</>}
-            hoverColor="var(--danger-color)"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-          />
-        )}
       </div>
-    </div>
+
+      <div className="skills-browser__card-actions">
+        <button
+          type="button"
+          className="skills-browser__launch-button"
+          onClick={onLaunch}
+          onMouseDown={(event) => event.stopPropagation()}
+          aria-label={`Launch with ${skill.name}`}
+        >
+          <Play size={13} fill="currentColor" aria-hidden="true" />
+          Launch
+        </button>
+        <ActionMenu label={`More actions for ${skill.name}`} actions={actions} />
+      </div>
+    </article>
   );
 }
 
@@ -271,22 +278,6 @@ const CATEGORY_LABELS: Record<string, string> = {
   analysis: "Analysis",
   design: "Design",
   general: "General",
-};
-
-const actionButtonStyle: React.CSSProperties = {
-  fontSize: 14,
-  padding: "2px 4px",
-  background: "transparent",
-  border: "none",
-  cursor: "pointer",
-  color: "var(--text-muted)",
-  width: 20,
-  height: 20,
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  borderRadius: 3,
-  lineHeight: 1,
 };
 
 export function SkillsBrowser({
@@ -308,11 +299,12 @@ export function SkillsBrowser({
     new Set(),
   );
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
+  const handleDrop = (event: React.DragEvent) => {
+    event.preventDefault();
     setDragActive(false);
-    const file = Array.from(e.dataTransfer.files).find(
-      (f) => f.type === "application/json" || f.name.endsWith(".json"),
+    const file = Array.from(event.dataTransfer.files).find(
+      (candidate) =>
+        candidate.type === "application/json" || candidate.name.endsWith(".json"),
     );
     if (!file) return;
     const reader = new FileReader();
@@ -326,12 +318,12 @@ export function SkillsBrowser({
 
   const filtered = useMemo(() => {
     if (!search.trim()) return allSkills;
-    const q = search.toLowerCase();
+    const query = search.toLowerCase();
     return allSkills.filter(
-      (s) =>
-        s.name.toLowerCase().includes(q) ||
-        s.description.toLowerCase().includes(q) ||
-        s.category.toLowerCase().includes(q),
+      (skill) =>
+        skill.name.toLowerCase().includes(query) ||
+        skill.description.toLowerCase().includes(query) ||
+        skill.category.toLowerCase().includes(query),
     );
   }, [allSkills, search]);
 
@@ -345,14 +337,11 @@ export function SkillsBrowser({
     return map;
   }, [filtered]);
 
-  const toggleCategory = (cat: string) => {
-    setCollapsedCategories((prev) => {
-      const next = new Set(prev);
-      if (next.has(cat)) {
-        next.delete(cat);
-      } else {
-        next.add(cat);
-      }
+  const toggleCategory = (category: string) => {
+    setCollapsedCategories((previous) => {
+      const next = new Set(previous);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
       return next;
     });
   };
@@ -360,206 +349,143 @@ export function SkillsBrowser({
   if (!isOpen) return null;
 
   return (
-    <DockPanel id="skills" width={300}>
+    <DockPanel id="skills" width={320}>
       <div
-        onDragOver={(e) => {
-          e.preventDefault();
+        className="skills-browser"
+        onDragOver={(event) => {
+          event.preventDefault();
           if (!dragActive) setDragActive(true);
         }}
-        onDragLeave={(e) => {
-          // Only clear when the pointer actually leaves the panel bounds.
-          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
             setDragActive(false);
           }
         }}
         onDrop={handleDrop}
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          minHeight: 0,
-          flex: 1,
-          position: "relative",
-        }}
       >
         {dragActive && (
-          <div
-            role="status"
-            aria-live="polite"
-            style={{
-              position: "absolute",
-              inset: 6,
-              zIndex: 5,
-              borderRadius: 8,
-              border: "2px dashed var(--accent)",
-              background: "var(--overlay-bg)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              pointerEvents: "none",
-              color: "var(--accent)",
-              fontSize: 12,
-              fontFamily: "var(--font-mono)",
-            }}
-          >
-            Drop skills .json to import
-          </div>
-        )}
-      <DockPanelHeader
-        title={<>Skills ({allSkills.length})</>}
-        actions={
-          <>
-            <IconButton label="New skill" glyph="+" onClick={onCreateSkill} />
-            <IconButton
-              label="Import skills"
-              glyph={<>&#8595;</>}
-              onClick={onImportSkills}
-            />
-            <IconButton
-              label="Export all skills"
-              glyph={<>&#8593;</>}
-              onClick={onExportSkills}
-            />
-          </>
-        }
-      />
-
-      <div
-        style={{
-          padding: "8px 10px",
-          borderBottom: "1px solid var(--border-default)",
-          flexShrink: 0,
-        }}
-      >
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search skills..."
-          onMouseDown={(e) => e.stopPropagation()}
-          style={{
-            width: "100%",
-            padding: "6px 10px",
-            fontSize: 12,
-            background: "var(--bg-primary)",
-            border: "1px solid var(--border-default)",
-            borderRadius: 6,
-            color: "var(--text-primary)",
-            fontFamily: "var(--font-mono)",
-            outline: "none",
-            boxSizing: "border-box",
-          }}
-          onFocus={(e) => {
-            e.currentTarget.style.borderColor = "var(--accent)";
-          }}
-          onBlur={(e) => {
-            e.currentTarget.style.borderColor = "var(--border-default)";
-          }}
-        />
-      </div>
-
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflow: "auto",
-          padding: "6px",
-        }}
-      >
-        {allSkills.length === 0 && (
-          <div
-            style={{
-              padding: "20px 12px",
-              textAlign: "center",
-              color: "var(--text-muted)",
-              fontSize: 11,
-            }}
-          >
-            <div style={{ fontStyle: "italic", marginBottom: 8 }}>
-              No skills yet — create one!
-            </div>
-            <button
-              onClick={onCreateSkill}
-              onMouseDown={(e) => e.stopPropagation()}
-              style={{
-                padding: "4px 12px",
-                fontSize: 11,
-                background: "var(--bg-surface)",
-                border: "1px solid var(--border-default)",
-                borderRadius: 4,
-                color: "var(--text-secondary)",
-                cursor: "pointer",
-                fontFamily: "var(--font-mono)",
-              }}
-            >
-              + Create Skill
-            </button>
+          <div className="skills-browser__drop-zone" role="status" aria-live="polite">
+            <Upload size={20} aria-hidden="true" />
+            Drop a skills JSON file to import
           </div>
         )}
 
-        {allSkills.length > 0 && filtered.length === 0 && (
-          <div
-            style={{
-              padding: "20px 12px",
-              textAlign: "center",
-              color: "var(--text-muted)",
-              fontSize: 11,
-              fontStyle: "italic",
-            }}
-          >
-            No skills match your search
-          </div>
-        )}
-
-        {Array.from(grouped.entries()).map(([category, skills]) => {
-          const isCatCollapsed = collapsedCategories.has(category);
-          return (
-            <div key={category} style={{ marginBottom: 4 }}>
+        <DockPanelHeader
+          title={
+            <>
+              Skills
+              <span className="skills-browser__title-count">{allSkills.length}</span>
+            </>
+          }
+          actions={
+            <>
               <button
-                onClick={() => toggleCategory(category)}
-                onMouseDown={(e) => e.stopPropagation()}
-                style={{
-                  width: "100%",
-                  padding: "6px 8px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  borderRadius: 4,
-                }}
+                type="button"
+                className="skills-browser__new-button"
+                onClick={onCreateSkill}
+                onMouseDown={(event) => event.stopPropagation()}
               >
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 600,
-                    fontFamily: "var(--font-mono)",
-                    textTransform: "uppercase",
-                    letterSpacing: 0.5,
-                    color: "var(--text-muted)",
-                  }}
-                >
-                  {isCatCollapsed ? "\u25B6" : "\u25BC"}{" "}
-                  {CATEGORY_LABELS[category] ?? category} ({skills.length})
-                </span>
+                <Plus size={14} strokeWidth={2.2} aria-hidden="true" />
+                New
               </button>
+              <ActionMenu
+                label="Skill library actions"
+                actions={[
+                  {
+                    label: "Import skills",
+                    icon: <Upload size={14} aria-hidden="true" />,
+                    onSelect: onImportSkills,
+                  },
+                  {
+                    label: "Export all skills",
+                    icon: <Download size={14} aria-hidden="true" />,
+                    onSelect: onExportSkills,
+                  },
+                ]}
+              />
+            </>
+          }
+        />
 
-              {!isCatCollapsed &&
-                skills.map((skill) => (
-                  <SkillCard
-                    key={skill.id}
-                    skill={skill}
-                    onLaunch={() => onLaunchSkill(skill.id)}
-                    onEdit={() => onEditSkill(skill)}
-                    onDuplicate={() => onDuplicateSkill(skill)}
-                    onExport={() => onExportSkill(skill)}
-                    onDelete={() => onDeleteSkill(skill.id)}
-                  />
-                ))}
+        <div className="skills-browser__toolbar">
+          <p>Choose a workflow, then launch a new leader with it armed.</p>
+          <label className="skills-browser__search">
+            <Search size={14} aria-hidden="true" />
+            <span className="skills-browser__sr-only">Search skills</span>
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search skills"
+              onMouseDown={(event) => event.stopPropagation()}
+            />
+          </label>
+        </div>
+
+        <div className="skills-browser__list">
+          {allSkills.length === 0 && (
+            <div className="skills-browser__empty">
+              <span className="skills-browser__empty-icon" aria-hidden="true">✦</span>
+              <strong>No skills yet</strong>
+              <p>Create a reusable workflow to guide your next leader.</p>
+              <button type="button" onClick={onCreateSkill}>
+                <Plus size={14} aria-hidden="true" />
+                Create first skill
+              </button>
             </div>
-          );
-        })}
-      </div>
+          )}
+
+          {allSkills.length > 0 && filtered.length === 0 && (
+            <div className="skills-browser__empty">
+              <Search size={19} aria-hidden="true" />
+              <strong>No matching skills</strong>
+              <p>Try a different name, description, or category.</p>
+              <button type="button" onClick={() => setSearch("")}>Clear search</button>
+            </div>
+          )}
+
+          {Array.from(grouped.entries()).map(([category, skills]) => {
+            const collapsed = collapsedCategories.has(category);
+            const categoryLabel = CATEGORY_LABELS[category] ?? category;
+            return (
+              <section className="skills-browser__category" key={category}>
+                <button
+                  type="button"
+                  className="skills-browser__category-button"
+                  onClick={() => toggleCategory(category)}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  aria-expanded={!collapsed}
+                >
+                  <span>
+                    {collapsed ? (
+                      <ChevronRight size={14} aria-hidden="true" />
+                    ) : (
+                      <ChevronDown size={14} aria-hidden="true" />
+                    )}
+                    {categoryLabel}
+                  </span>
+                  <span className="skills-browser__category-count">{skills.length}</span>
+                </button>
+
+                {!collapsed && (
+                  <div className="skills-browser__category-list">
+                    {skills.map((skill) => (
+                      <SkillCard
+                        key={skill.id}
+                        skill={skill}
+                        onLaunch={() => onLaunchSkill(skill.id)}
+                        onEdit={() => onEditSkill(skill)}
+                        onDuplicate={() => onDuplicateSkill(skill)}
+                        onExport={() => onExportSkill(skill)}
+                        onDelete={() => onDeleteSkill(skill.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+            );
+          })}
+        </div>
       </div>
     </DockPanel>
   );

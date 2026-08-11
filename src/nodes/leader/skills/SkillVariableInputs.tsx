@@ -1,10 +1,7 @@
+import { useId, type ChangeEvent } from "react";
 import type { SkillTemplate } from "../../../skills/types.ts";
 
-/**
- * Renders the configurable variables for a single skill — supports
- * text, textarea, and select input types. Used inside {@link SkillFlyout}
- * for each armed skill.
- */
+/** Accessible variable fields for one selected skill. */
 export function SkillVariableInputs({
   skill,
   values,
@@ -16,113 +13,63 @@ export function SkillVariableInputs({
   onChange: (varName: string, value: string) => void;
   readOnly: boolean;
 }) {
+  const idPrefix = useId();
   if (skill.variables.length === 0) return null;
 
   return (
-    <div style={{ padding: "6px 0", display: "flex", flexDirection: "column", gap: 6 }}>
-      <div
-        style={{
-          fontSize: 10,
-          fontFamily: "var(--font-mono)",
-          color: skill.accentColor,
-          opacity: 0.8,
-          textTransform: "uppercase",
-          letterSpacing: 0.5,
-          fontWeight: 600,
-        }}
-      >
-        {skill.icon} {skill.name}
-      </div>
-      {skill.variables.map((v) => (
-        <div key={v.name} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-          <label
-            style={{
-              fontSize: 11,
-              color: "var(--text-secondary)",
-              fontFamily: "var(--font-mono)",
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-            }}
-          >
-            {v.label}
-            {v.required && (
-              <span style={{ color: "var(--danger-color)", fontSize: 10 }}>*</span>
+    <div className="skill-variable-inputs">
+      {skill.variables.map((variable) => {
+        const inputId = `${idPrefix}-${variable.name}`;
+        const descriptionId = variable.description
+          ? `${inputId}-description`
+          : undefined;
+        const commonProps = {
+          id: inputId,
+          value: values[variable.name] ?? variable.defaultValue ?? "",
+          onChange: (
+            event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
+          ) => onChange(variable.name, event.target.value),
+          "aria-describedby": descriptionId,
+          "aria-required": variable.required || undefined,
+        };
+
+        return (
+          <div className="skill-variable-inputs__field" key={variable.name}>
+            <label htmlFor={inputId}>
+              {variable.label}
+              {variable.required && (
+                <span title="Required" aria-label="required">*</span>
+              )}
+            </label>
+            {variable.type === "select" ? (
+              <select {...commonProps} disabled={readOnly}>
+                {variable.options?.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            ) : variable.type === "textarea" ? (
+              <textarea
+                {...commonProps}
+                readOnly={readOnly}
+                placeholder={variable.placeholder}
+                rows={3}
+              />
+            ) : (
+              <input
+                {...commonProps}
+                type="text"
+                readOnly={readOnly}
+                placeholder={variable.placeholder}
+              />
             )}
-          </label>
-          {v.type === "select" ? (
-            <select
-              value={values[v.name] ?? v.defaultValue ?? ""}
-              onChange={(e) => onChange(v.name, e.target.value)}
-              onMouseDown={(e) => e.stopPropagation()}
-              disabled={readOnly}
-              style={{
-                padding: "6px 8px",
-                fontSize: 12,
-                fontFamily: "var(--font-mono)",
-                background: "var(--bg-primary)",
-                border: "1px solid var(--border-default)",
-                borderRadius: 4,
-                color: "var(--text-primary)",
-                outline: "none",
-                opacity: readOnly ? 0.6 : 1,
-              }}
-            >
-              {v.options?.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          ) : v.type === "textarea" ? (
-            <textarea
-              value={values[v.name] ?? v.defaultValue ?? ""}
-              onChange={(e) => onChange(v.name, e.target.value)}
-              onMouseDown={(e) => e.stopPropagation()}
-              readOnly={readOnly}
-              placeholder={v.placeholder}
-              rows={2}
-              style={{
-                padding: "6px 8px",
-                fontSize: 12,
-                fontFamily: "var(--font-mono)",
-                background: "var(--bg-primary)",
-                border: "1px solid var(--border-default)",
-                borderRadius: 4,
-                color: "var(--text-primary)",
-                outline: "none",
-                resize: "vertical",
-                opacity: readOnly ? 0.6 : 1,
-              }}
-            />
-          ) : (
-            <input
-              type="text"
-              value={values[v.name] ?? v.defaultValue ?? ""}
-              onChange={(e) => onChange(v.name, e.target.value)}
-              onMouseDown={(e) => e.stopPropagation()}
-              readOnly={readOnly}
-              placeholder={v.placeholder}
-              style={{
-                padding: "6px 8px",
-                fontSize: 12,
-                fontFamily: "var(--font-mono)",
-                background: "var(--bg-primary)",
-                border: "1px solid var(--border-default)",
-                borderRadius: 4,
-                color: "var(--text-primary)",
-                outline: "none",
-                opacity: readOnly ? 0.6 : 1,
-              }}
-            />
-          )}
-          {v.description && (
-            <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-              {v.description}
-            </span>
-          )}
-        </div>
-      ))}
+            {variable.description && (
+              <span id={descriptionId}>{variable.description}</span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

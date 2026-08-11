@@ -13,8 +13,8 @@
   --radius-pill: 0px;
   --border-width: 1.5px;
   --surface-blur: none;
-  --letter-spacing-label: 0.12em;
-  --label-transform: uppercase;
+  --letter-spacing-label: 0.035em;
+  --label-transform: none;
 }
 
 /* A faint vignette gives the curved drafting mesh a little depth. The mesh
@@ -61,17 +61,17 @@
   letter-spacing: 0.02em;
 }
 :root[data-theme="blueprint"] button {
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: var(--letter-spacing-label);
 }
 
-/* Uppercase technical headings. */
+/* Mixed-case display headings keep the drafting aesthetic without shouting. */
 :root[data-theme="blueprint"] h1,
 :root[data-theme="blueprint"] h2,
 :root[data-theme="blueprint"] h3 {
   font-family: var(--font-display);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  text-transform: none;
+  letter-spacing: -0.015em;
 }
 
 /* Technical scrollbars. */

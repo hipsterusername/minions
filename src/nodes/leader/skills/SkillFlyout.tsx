@@ -1,20 +1,21 @@
-import { useLayoutEffect, useState, type RefObject } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useId,
+  type CSSProperties,
+  type RefObject,
+} from "react";
 import { createPortal } from "react-dom";
+import { Check, Plus, Search, Settings2, X, Zap } from "lucide-react";
 import { getPickableSkills, getSkill } from "../../../skills/registry.ts";
 import type { SkillTemplate } from "../../../skills/types.ts";
 import { SkillTagChip } from "./SkillTagChip.tsx";
 import { SkillVariableInputs } from "./SkillVariableInputs.tsx";
 
-/**
- * A floating split-panel modal anchored to a trigger
- * button. Left panel browses available skills by category; right panel
- * configures the currently armed skills and their variable values.
- *
- * Portaled to `document.body` to escape any ancestor `overflow:hidden`
- * containers (the leader node's chrome).
- */
-
-const SKILL_CATEGORIES: { key: string; label: string }[] = [
+const SKILL_CATEGORIES: { key: SkillTemplate["category"]; label: string }[] = [
   { key: "code", label: "Code" },
   { key: "docs", label: "Docs" },
   { key: "testing", label: "Testing" },
@@ -24,11 +25,18 @@ const SKILL_CATEGORIES: { key: string; label: string }[] = [
   { key: "general", label: "General" },
 ];
 
-const FLYOUT_W = 680;
-const FLYOUT_H = 480;
-const FLYOUT_GAP = 6; // px below anchor
+const FLYOUT_W = 720;
+const FLYOUT_H = 520;
+const FLYOUT_GAP = 6;
 const VIEWPORT_GAP = 8;
 
+type CompactPane = "browse" | "configure";
+
+/**
+ * Searchable skill picker and configurator anchored to a leader node.
+ * It becomes a two-tab dialog on compact canvases so neither the library nor
+ * the configuration form is squeezed into an unusable column.
+ */
 export function SkillFlyout({
   skillIds,
   skillValues,
@@ -51,6 +59,7 @@ export function SkillFlyout({
   onClose: () => void;
 }) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [compactPane, setCompactPane] = useState<CompactPane>("browse");
   const [layout, setLayout] = useState<{
     top: number;
     left: number;
@@ -58,33 +67,60 @@ export function SkillFlyout({
     height: number;
     compact: boolean;
   } | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const onCloseRef = useRef(onClose);
+  const titleId = useId();
+  const descriptionId = useId();
+  const browsePanelId = useId();
+  const configurePanelId = useId();
+
+  useLayoutEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useLayoutEffect(() => {
     if (!open) {
       setLayout(null);
       return;
     }
+
     const positionFlyout = () => {
       const rect = anchorRef?.current?.getBoundingClientRect();
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      const compact = vw < 720;
-      const width = compact ? vw : Math.min(FLYOUT_W, vw - VIEWPORT_GAP * 2);
-      const height = compact
-        ? Math.min(620, Math.max(320, vh - VIEWPORT_GAP))
-        : Math.min(FLYOUT_H, vh - VIEWPORT_GAP * 2);
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const compact = viewportWidth < 720;
+      const width = Math.min(
+        FLYOUT_W,
+        Math.max(0, viewportWidth - VIEWPORT_GAP * 2),
+      );
+      const height = Math.min(
+        compact ? 620 : FLYOUT_H,
+        Math.max(0, viewportHeight - VIEWPORT_GAP * 2),
+      );
 
       if (compact || !rect) {
-        setLayout({ top: vh - height, left: 0, width, height, compact });
+        setLayout({
+          top: Math.max(VIEWPORT_GAP, viewportHeight - height - VIEWPORT_GAP),
+          left: Math.max(VIEWPORT_GAP, (viewportWidth - width) / 2),
+          width,
+          height,
+          compact,
+        });
         return;
       }
 
       let top = rect.bottom + FLYOUT_GAP;
-      if (top + height > vh - VIEWPORT_GAP) top = rect.top - height - FLYOUT_GAP;
-      top = Math.max(VIEWPORT_GAP, Math.min(top, vh - height - VIEWPORT_GAP));
+      if (top + height > viewportHeight - VIEWPORT_GAP) {
+        top = rect.top - height - FLYOUT_GAP;
+      }
+      top = Math.max(
+        VIEWPORT_GAP,
+        Math.min(top, viewportHeight - height - VIEWPORT_GAP),
+      );
       const left = Math.max(
         VIEWPORT_GAP,
-        Math.min(rect.left, vw - width - VIEWPORT_GAP),
+        Math.min(rect.left, viewportWidth - width - VIEWPORT_GAP),
       );
       setLayout({ top, left, width, height, compact });
     };
@@ -94,22 +130,64 @@ export function SkillFlyout({
     return () => window.removeEventListener("resize", positionFlyout);
   }, [open, anchorRef]);
 
+  useEffect(() => {
+    if (!open) return;
+
+    setSearchQuery("");
+    setCompactPane("browse");
+    const frame = requestAnimationFrame(() => searchRef.current?.focus());
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab" || !dialogRef.current) return;
+
+      const focusable = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => element.offsetParent !== null || element === document.activeElement);
+      if (focusable.length === 0) return;
+      const first = focusable[0]!;
+      const last = focusable.at(-1)!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", handleKeyDown);
+      anchorRef?.current?.focus();
+    };
+  }, [open, anchorRef]);
+
   const allSkills = getPickableSkills();
+  const selectedIds = useMemo(() => new Set(skillIds), [skillIds]);
   const taggedSkills = skillIds
     .map((id) => getSkill(id))
-    .filter((s): s is SkillTemplate => s !== undefined);
+    .filter((skill): skill is SkillTemplate => skill !== undefined);
 
   const handleAddSkill = (id: string) => {
-    if (!skillIds.includes(id)) {
+    if (!selectedIds.has(id)) {
       onUpdate({ skillIds: [...skillIds, id], skillPanelOpen: true });
     }
   };
 
   const handleRemoveSkill = (id: string) => {
-    const next = skillIds.filter((s) => s !== id);
     const nextValues = { ...skillValues };
     delete nextValues[id];
-    onUpdate({ skillIds: next, skillValues: nextValues });
+    onUpdate({
+      skillIds: skillIds.filter((skillId) => skillId !== id),
+      skillValues: nextValues,
+    });
   };
 
   const handleVarChange = (skillId: string, varName: string, value: string) => {
@@ -119,460 +197,306 @@ export function SkillFlyout({
     });
   };
 
-  // Filter available skills by search + category (show all when readOnly)
   const query = searchQuery.toLowerCase().trim();
-  const browseByCategory = SKILL_CATEGORIES.map((cat) => ({
-    ...cat,
+  const browseByCategory = SKILL_CATEGORIES.map((category) => ({
+    ...category,
     skills: allSkills.filter(
-      (s) =>
-        s.category === cat.key &&
-        (readOnly ? skillIds.includes(s.id) : !skillIds.includes(s.id)) &&
+      (skill) =>
+        skill.category === category.key &&
+        (!readOnly || selectedIds.has(skill.id)) &&
         (query === "" ||
-          s.name.toLowerCase().includes(query) ||
-          s.description.toLowerCase().includes(query)),
+          skill.name.toLowerCase().includes(query) ||
+          skill.description.toLowerCase().includes(query) ||
+          category.label.toLowerCase().includes(query)),
     ),
-  })).filter((cat) => cat.skills.length > 0);
+  })).filter((category) => category.skills.length > 0);
+  const visibleSkillCount = browseByCategory.reduce(
+    (count, category) => count + category.skills.length,
+    0,
+  );
 
   if (!open) return null;
 
-  const flyoutContent = (
+  return createPortal(
     <>
-      <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 9998 }} />
-
       <div
+        className="skill-flyout__backdrop"
+        aria-hidden="true"
+        onMouseDown={onClose}
+      />
+      <div
+        ref={dialogRef}
+        className="skill-flyout"
+        data-compact={layout?.compact ? "true" : undefined}
         role="dialog"
         aria-modal="true"
-        aria-label="Choose skills"
-        onMouseDown={(e) => e.stopPropagation()}
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        onMouseDown={(event) => event.stopPropagation()}
         style={{
-          position: "fixed",
           top: layout?.top ?? VIEWPORT_GAP,
           left: layout?.left ?? VIEWPORT_GAP,
-          zIndex: 9999,
           width: layout?.width ?? `calc(100vw - ${VIEWPORT_GAP * 2}px)`,
           height: layout?.height ?? `calc(100vh - ${VIEWPORT_GAP * 2}px)`,
-          background: "var(--bg-secondary)",
-          border: "1px solid var(--border-default)",
-          borderRadius: layout?.compact ? "14px 14px 0 0" : 10,
-          boxShadow: "var(--shadow-lg)",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
         }}
       >
-        <div
-          style={{
-            padding: "10px 14px",
-            borderBottom: "1px solid var(--border-default)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            background: "var(--bg-primary)",
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 14 }}>⚡</span>
-            <span
-              style={{
-                fontSize: 12,
-                fontWeight: 600,
-                color: "var(--text-primary)",
-                fontFamily: "var(--font-mono)",
-              }}
-            >
-              Skills
-            </span>
-            {taggedSkills.length > 0 && (
-              <span
-                style={{
-                  fontSize: 10,
-                  fontFamily: "var(--font-mono)",
-                  padding: "1px 6px",
-                  borderRadius: 10,
-                  background: "var(--state-active)",
-                  color: "var(--accent)",
-                  border: "1px solid var(--accent)",
-                }}
-              >
-                {taggedSkills.length} active
+        <header className="skill-flyout__header">
+          <div className="skill-flyout__heading-icon" aria-hidden="true">
+            <Zap size={16} fill="currentColor" />
+          </div>
+          <div className="skill-flyout__heading-copy">
+            <div className="skill-flyout__title-row">
+              <h2 id={titleId}>Skills</h2>
+              <span className="skill-flyout__selected-count" aria-live="polite">
+                {taggedSkills.length} selected
               </span>
-            )}
+            </div>
+            <p id={descriptionId}>
+              {readOnly
+                ? "Skills attached to this leader"
+                : "Choose reusable instructions and configure them for this leader"}
+            </p>
           </div>
           <button
+            type="button"
+            className="skill-flyout__icon-button"
             onClick={onClose}
-            onMouseDown={(e) => e.stopPropagation()}
-            style={{
-              background: "none",
-              border: "none",
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              fontSize: 16,
-              padding: "0 2px",
-              lineHeight: 1,
-            }}
+            title="Close skills"
+            aria-label="Close skills"
           >
-            ✕
+            <X size={17} aria-hidden="true" />
           </button>
-        </div>
+        </header>
 
-        <div style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: layout?.compact ? "column" : "row",
-          minHeight: 0,
-        }}>
-          <div
-            style={{
-              width: layout?.compact ? "100%" : 220,
-              height: layout?.compact ? "42%" : "auto",
-              flexShrink: 0,
-              borderRight: layout?.compact ? "none" : "1px solid var(--border-default)",
-              borderBottom: layout?.compact ? "1px solid var(--border-default)" : "none",
-              display: "flex",
-              flexDirection: "column",
-              background: "var(--bg-primary)",
-            }}
-          >
-            <div
-              style={{
-                padding: "8px 10px",
-                borderBottom: "1px solid var(--border-default)",
-                flexShrink: 0,
-              }}
+        {layout?.compact && (
+          <div className="skill-flyout__tabs" role="tablist" aria-label="Skill menu sections">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={compactPane === "browse"}
+              aria-controls={browsePanelId}
+              onClick={() => setCompactPane("browse")}
             >
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onMouseDown={(e) => e.stopPropagation()}
-                placeholder="Search skills…"
-                style={{
-                  width: "100%",
-                  padding: "5px 8px",
-                  fontSize: 11,
-                  fontFamily: "var(--font-mono)",
-                  background: "var(--bg-elevated)",
-                  border: "1px solid var(--border-default)",
-                  borderRadius: 5,
-                  color: "var(--text-primary)",
-                  outline: "none",
-                  boxSizing: "border-box",
-                }}
-              />
+              <Search size={14} aria-hidden="true" />
+              Browse
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={compactPane === "configure"}
+              aria-controls={configurePanelId}
+              onClick={() => setCompactPane("configure")}
+            >
+              <Settings2 size={14} aria-hidden="true" />
+              Configure
+              <span>{taggedSkills.length}</span>
+            </button>
+          </div>
+        )}
+
+        <div className="skill-flyout__body">
+          <section
+            id={browsePanelId}
+            className="skill-flyout__browser"
+            data-hidden={layout?.compact && compactPane !== "browse" ? "true" : undefined}
+            aria-label="Browse skills"
+          >
+            <div className="skill-flyout__browser-header">
+              <div className="skill-flyout__section-heading">
+                <strong>{readOnly ? "Attached skills" : "Skill library"}</strong>
+                <span>{visibleSkillCount}</span>
+              </div>
+              <label className="skill-flyout__search">
+                <Search size={14} aria-hidden="true" />
+                <span className="skill-flyout__sr-only">Search skills</span>
+                <input
+                  ref={searchRef}
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search skills"
+                  autoComplete="off"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery("");
+                      searchRef.current?.focus();
+                    }}
+                    title="Clear search"
+                    aria-label="Clear skill search"
+                  >
+                    <X size={13} aria-hidden="true" />
+                  </button>
+                )}
+              </label>
             </div>
 
-            <div
-              style={{
-                flex: 1,
-                overflowY: "auto",
-                minHeight: 0,
-                padding: "4px 6px 8px",
-              }}
-            >
+            <div className="skill-flyout__skill-list">
               {browseByCategory.length === 0 && (
-                <div
-                  style={{
-                    padding: "16px 8px",
-                    fontSize: 11,
-                    color: "var(--text-muted)",
-                    textAlign: "center",
-                    fontFamily: "var(--font-mono)",
-                  }}
-                >
-                  {query ? "No matches" : readOnly ? "No skills" : "All added ✓"}
+                <div className="skill-flyout__empty" role="status">
+                  <Search size={20} aria-hidden="true" />
+                  <strong>{query ? "No matching skills" : "No skills available"}</strong>
+                  <span>
+                    {query
+                      ? `Try another search for “${searchQuery.trim()}”.`
+                      : readOnly
+                        ? "No skills are attached to this leader."
+                        : "Create or import a skill from the Skills library."}
+                  </span>
+                  {query && (
+                    <button type="button" onClick={() => setSearchQuery("")}>
+                      Clear search
+                    </button>
+                  )}
                 </div>
               )}
-              {browseByCategory.map((cat) => (
-                <div key={cat.key}>
-                  <div
-                    style={{
-                      fontSize: 9,
-                      fontFamily: "var(--font-mono)",
-                      color: "var(--text-muted)",
-                      padding: "8px 6px 3px",
-                      textTransform: "uppercase",
-                      letterSpacing: 0.6,
-                    }}
-                  >
-                    {cat.label}
+
+              {browseByCategory.map((category) => (
+                <section className="skill-flyout__category" key={category.key}>
+                  <h3>
+                    {category.label}
+                    <span>{category.skills.length}</span>
+                  </h3>
+                  <div>
+                    {category.skills.map((skill) => {
+                      const selected = selectedIds.has(skill.id);
+                      return (
+                        <article
+                          className="skill-flyout__skill-row"
+                          data-selected={selected ? "true" : undefined}
+                          key={skill.id}
+                          style={{ "--skill-color": skill.accentColor } as CSSProperties}
+                        >
+                          <span className="skill-flyout__skill-icon" aria-hidden="true">
+                            {skill.icon}
+                          </span>
+                          <div className="skill-flyout__skill-copy">
+                            <strong>{skill.name}</strong>
+                            <span>{skill.description}</span>
+                          </div>
+                          {readOnly ? (
+                            <span className="skill-flyout__readonly-state">
+                              <Check size={13} aria-hidden="true" />
+                              Selected
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="skill-flyout__select-button"
+                              data-selected={selected ? "true" : undefined}
+                              onClick={() =>
+                                selected
+                                  ? handleRemoveSkill(skill.id)
+                                  : handleAddSkill(skill.id)
+                              }
+                              aria-label={`${selected ? "Remove" : "Add"} ${skill.name}`}
+                            >
+                              {selected ? (
+                                <X size={13} aria-hidden="true" />
+                              ) : (
+                                <Plus size={13} aria-hidden="true" />
+                              )}
+                              {selected ? "Remove" : "Add"}
+                            </button>
+                          )}
+                        </article>
+                      );
+                    })}
                   </div>
-                  {cat.skills.map((skill) => (
-                    <button
-                      key={skill.id}
-                      onClick={() => !readOnly && handleAddSkill(skill.id)}
-                      onMouseDown={(e) => e.stopPropagation()}
-                      disabled={readOnly}
-                      style={{
-                        display: "flex",
-                        alignItems: "flex-start",
-                        gap: 7,
-                        width: "100%",
-                        padding: "6px 6px",
-                        background: "transparent",
-                        border: "none",
-                        borderRadius: 5,
-                        color: "var(--text-primary)",
-                        fontSize: 11,
-                        cursor: readOnly ? "default" : "pointer",
-                        textAlign: "left",
-                        transition: "background 0.1s",
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!readOnly)
-                          e.currentTarget.style.background = "var(--bg-elevated)";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = "transparent";
-                      }}
-                    >
-                      <span
-                        style={{ fontSize: 13, lineHeight: 1.3, flexShrink: 0 }}
-                      >
-                        {skill.icon}
-                      </span>
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 1,
-                          minWidth: 0,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontWeight: 500,
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                          }}
-                        >
-                          {skill.name}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 10,
-                            color: "var(--text-muted)",
-                            lineHeight: 1.3,
-                          }}
-                        >
-                          {skill.description.length > 55
-                            ? skill.description.slice(0, 55) + "…"
-                            : skill.description}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
+                </section>
               ))}
             </div>
-          </div>
+          </section>
 
-          <div
-            style={{
-              flex: 1,
-              display: "flex",
-              flexDirection: "column",
-              minWidth: 0,
-            }}
+          <section
+            id={configurePanelId}
+            className="skill-flyout__configuration"
+            data-hidden={layout?.compact && compactPane !== "configure" ? "true" : undefined}
+            aria-label="Configure selected skills"
           >
-            <div
-              style={{
-                position: "relative",
-                borderBottom: "1px solid var(--border-default)",
-                flexShrink: 0,
-                background: "var(--state-hover)",
-              }}
-            >
-              <div
-                style={{
-                  padding: "6px 12px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  flexWrap: "nowrap",
-                  overflowX: "auto",
-                  scrollbarWidth: "none",
-                  msOverflowStyle: "none",
-                  minHeight: 38,
-                }}
-              >
-                {taggedSkills.length === 0 ? (
-                  <span
-                    style={{
-                      fontSize: 11,
-                      color: "var(--text-muted)",
-                      fontFamily: "var(--font-mono)",
-                      fontStyle: "italic",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    No skills selected — pick from the left panel
-                  </span>
-                ) : (
-                  taggedSkills.map((skill) => (
+            <div className="skill-flyout__configuration-header">
+              <div className="skill-flyout__section-heading">
+                <strong>Selected skills</strong>
+                <span>{taggedSkills.length}</span>
+              </div>
+              {taggedSkills.length > 0 && (
+                <div className="skill-flyout__chips" aria-label="Selected skills">
+                  {taggedSkills.map((skill) => (
                     <SkillTagChip
                       key={skill.id}
                       skill={skill}
                       readOnly={readOnly}
                       onRemove={() => handleRemoveSkill(skill.id)}
                     />
-                  ))
-                )}
-              </div>
-              {taggedSkills.length > 0 && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    right: 0,
-                    bottom: 0,
-                    width: 32,
-                    background:
-                      "linear-gradient(to right, transparent, var(--state-hover))",
-                    pointerEvents: "none",
-                  }}
-                />
+                  ))}
+                </div>
               )}
             </div>
 
-            <div style={{ flex: 1, position: "relative", minHeight: 0 }}>
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  overflowY: "auto",
-                  padding: "12px 16px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 16,
-                }}
-              >
-                {taggedSkills.length === 0 && (
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      height: "100%",
-                      gap: 10,
-                      color: "var(--text-muted)",
-                    }}
-                  >
-                    <span style={{ fontSize: 32, opacity: 0.3 }}>⚡</span>
-                    <span style={{ fontSize: 12, fontFamily: "var(--font-mono)" }}>
-                      Add skills to configure them here
+            <div className="skill-flyout__configuration-list">
+              {taggedSkills.length === 0 && (
+                <div className="skill-flyout__empty skill-flyout__empty--configuration">
+                  <div aria-hidden="true"><Settings2 size={22} /></div>
+                  <strong>No skills selected</strong>
+                  <span>Choose a skill from the library to configure it here.</span>
+                  {layout?.compact && !readOnly && (
+                    <button type="button" onClick={() => setCompactPane("browse")}>
+                      Browse skills
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {taggedSkills.map((skill) => (
+                <section
+                  className="skill-flyout__config-card"
+                  key={skill.id}
+                  style={{ "--skill-color": skill.accentColor } as CSSProperties}
+                >
+                  <header>
+                    <span className="skill-flyout__skill-icon" aria-hidden="true">
+                      {skill.icon}
                     </span>
-                  </div>
-                )}
-                {taggedSkills.map((skill) => (
-                  <div
-                    key={skill.id}
-                    style={{
-                      background: "var(--bg-primary)",
-                      border: `1px solid ${skill.accentColor}30`,
-                      borderRadius: 7,
-                      overflow: "hidden",
-                      flexShrink: 0,
-                    }}
-                  >
-                    <div
-                      style={{
-                        padding: "8px 12px",
-                        borderBottom: `1px solid ${skill.accentColor}20`,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        background: `${skill.accentColor}10`,
-                      }}
-                    >
-                      <span style={{ fontSize: 15 }}>{skill.icon}</span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 600,
-                            color: skill.accentColor,
-                            fontFamily: "var(--font-mono)",
-                          }}
-                        >
-                          {skill.name}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: 10,
-                            color: "var(--text-muted)",
-                            marginTop: 1,
-                          }}
-                        >
-                          {skill.description}
-                        </div>
-                      </div>
-                      {!readOnly && (
-                        <button
-                          onClick={() => handleRemoveSkill(skill.id)}
-                          onMouseDown={(e) => e.stopPropagation()}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            color: "var(--text-muted)",
-                            cursor: "pointer",
-                            fontSize: 12,
-                            padding: "2px 4px",
-                            borderRadius: 3,
-                            lineHeight: 1,
-                            flexShrink: 0,
-                          }}
-                        >
-                          ✕
-                        </button>
-                      )}
+                    <div>
+                      <h3>{skill.name}</h3>
+                      <p>{skill.description}</p>
                     </div>
-                    {skill.variables.length === 0 ? (
-                      <div
-                        style={{
-                          padding: "10px 12px",
-                          fontSize: 11,
-                          color: "var(--text-muted)",
-                          fontStyle: "italic",
-                        }}
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveSkill(skill.id)}
+                        title={`Remove ${skill.name}`}
+                        aria-label={`Remove ${skill.name} from leader`}
                       >
-                        No configuration needed.
-                      </div>
-                    ) : (
-                      <div style={{ padding: "10px 12px" }}>
-                        <SkillVariableInputs
-                          skill={skill}
-                          values={skillValues[skill.id] ?? {}}
-                          onChange={(varName, value) =>
-                            handleVarChange(skill.id, varName, value)
-                          }
-                          readOnly={readOnly}
-                        />
-                      </div>
+                        <X size={13} aria-hidden="true" />
+                        Remove
+                      </button>
                     )}
-                  </div>
-                ))}
-              </div>
-              <div
-                style={{
-                  position: "absolute",
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  height: 28,
-                  background:
-                    "linear-gradient(to bottom, transparent, var(--bg-secondary))",
-                  pointerEvents: "none",
-                }}
-              />
+                  </header>
+                  {skill.variables.length === 0 ? (
+                    <p className="skill-flyout__no-configuration">
+                      <Check size={14} aria-hidden="true" />
+                      Ready to use — no configuration needed.
+                    </p>
+                  ) : (
+                    <SkillVariableInputs
+                      skill={skill}
+                      values={skillValues[skill.id] ?? {}}
+                      onChange={(varName, value) =>
+                        handleVarChange(skill.id, varName, value)
+                      }
+                      readOnly={readOnly}
+                    />
+                  )}
+                </section>
+              ))}
             </div>
-          </div>
+          </section>
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
-
-  return createPortal(flyoutContent, document.body);
 }

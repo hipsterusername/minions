@@ -1,11 +1,10 @@
 /**
- * Component test for SkillsBrowser's built-in-preset surfacing.
+ * Component tests for the canvas Skills browser's interaction hierarchy.
  *
  * Behaviour pinned:
- *   - Built-in presets (e.g. "Skill Builder") appear in the browser even with
- *     an empty project library, tagged with a "built-in" badge.
- *   - Built-in presets have no delete affordance (code-authored, not deletable);
- *     project skills keep theirs.
+ *   - Launch is a persistent, explicit primary action.
+ *   - Secondary actions use labeled overflow menus instead of ambiguous glyphs.
+ *   - Built-in presets have no delete affordance.
  */
 import { useEffect, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -52,7 +51,7 @@ const PROJECT_SKILL: SkillTemplate = {
   variables: [],
 };
 
-describe("SkillsBrowser built-in presets", () => {
+describe("SkillsBrowser", () => {
   beforeEach(() => clearSkills());
   afterEach(() => clearSkills());
 
@@ -63,10 +62,14 @@ describe("SkillsBrowser built-in presets", () => {
     // Built-in surfaced despite the library holding only one project skill.
     expect(screen.getByText("Skill Builder")).toBeInTheDocument();
     expect(screen.getByText("Project Lint")).toBeInTheDocument();
-    expect(screen.getAllByText("built-in").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Built-in").length).toBeGreaterThanOrEqual(1);
 
-    // Only the project skill is deletable; built-ins are not.
-    expect(screen.getAllByTitle("Delete skill")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Project Lint" }));
+    expect(screen.getByRole("menuitem", { name: "Delete skill" })).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Project Lint" }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Skill Builder" }));
+    expect(screen.queryByRole("menuitem", { name: "Delete skill" })).not.toBeInTheDocument();
   });
 
   it("exposes duplicate and export actions and flows the skill through", () => {
@@ -75,37 +78,64 @@ describe("SkillsBrowser built-in presets", () => {
     const onDuplicateSkill = vi.fn();
     renderBrowser({ onExportSkill, onDuplicateSkill });
 
-    // Every card (project skill + built-ins) carries both actions.
-    expect(screen.getAllByTitle("Export skill").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByTitle("Duplicate skill").length).toBeGreaterThanOrEqual(1);
-
-    // The project skill (category "code") renders first, so its buttons lead.
-    fireEvent.click(screen.getAllByTitle("Export skill")[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Project Lint" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Export skill" }));
     expect(onExportSkill).toHaveBeenCalledWith(
       expect.objectContaining({ id: "proj-lint" }),
     );
 
-    fireEvent.click(screen.getAllByTitle("Duplicate skill")[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Project Lint" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Duplicate skill" }));
     expect(onDuplicateSkill).toHaveBeenCalledWith(
       expect.objectContaining({ id: "proj-lint" }),
     );
   });
 
-  it("keeps per-card actions mounted but reveals them only on hover", () => {
+  it("makes launch explicit and always available", () => {
+    registerSkill(PROJECT_SKILL);
+    const onLaunchSkill = vi.fn();
+    renderBrowser({ onLaunchSkill });
+
+    const launch = screen.getByRole("button", { name: "Launch with Project Lint" });
+    expect(launch).toBeVisible();
+    expect(launch).toHaveTextContent("Launch");
+
+    fireEvent.click(launch);
+    expect(onLaunchSkill).toHaveBeenCalledWith("proj-lint");
+  });
+
+  it("keeps the frequent create action visible and labels library actions", () => {
+    const onCreateSkill = vi.fn();
+    const onImportSkills = vi.fn();
+    const onExportSkills = vi.fn();
+    renderBrowser({ onCreateSkill, onImportSkills, onExportSkills });
+
+    fireEvent.click(screen.getByRole("button", { name: "New" }));
+    expect(onCreateSkill).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: "Skill library actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Import skills" }));
+    expect(onImportSkills).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: "Skill library actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Export all skills" }));
+    expect(onExportSkills).toHaveBeenCalledOnce();
+  });
+
+  it("closes an open action menu with Escape", () => {
     registerSkill(PROJECT_SKILL);
     renderBrowser();
 
-    const editBtn = screen.getAllByTitle("Edit skill")[0]!;
-    const actions = editBtn.parentElement!; // the actions grid
-    const card = actions.parentElement!; // the card row
+    const more = screen.getByRole("button", { name: "More actions for Project Lint" });
+    fireEvent.click(more);
+    expect(screen.getByRole("menu", { name: "More actions for Project Lint" })).toBeVisible();
 
-    // Mounted (so keyboard + tests reach them) but visually hidden at rest.
-    expect(actions.style.opacity).toBe("0");
-
-    fireEvent.mouseEnter(card);
-    expect(actions.style.opacity).toBe("1");
-
-    fireEvent.mouseLeave(card);
-    expect(actions.style.opacity).toBe("0");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(
+      screen.queryByRole("menu", { name: "More actions for Project Lint" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "More actions for Project Lint" }),
+    ).toHaveAttribute("aria-expanded", "false");
   });
 });
