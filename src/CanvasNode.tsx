@@ -21,6 +21,7 @@ interface CanvasNodeProps {
   getIncomingContextModes?: (() => string[]) | undefined;
   projectPath?: string | undefined;
   projectId?: string | undefined;
+  projectSettings?: import("./api.ts").ProjectSettings | undefined;
   onResize?: ((id: string, size: Size) => void) | undefined;
   /** Callback to add text content as a new markdown node */
   onAddContentNode?: ((content: string) => void) | undefined;
@@ -145,6 +146,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
   getIncomingContextModes,
   projectPath,
   projectId,
+  projectSettings,
   onResize,
   onAddContentNode,
   onRevealMinion,
@@ -477,6 +479,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
         getIncomingContextModes={getIncomingContextModes}
         projectPath={projectPath}
         projectId={projectId}
+        projectSettings={projectSettings}
         onResize={handleResize}
         onResizeStart={handleResizeStart}
         onResizeEnd={handleResizeEnd}

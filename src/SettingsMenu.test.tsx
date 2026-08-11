@@ -10,6 +10,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import { SettingsMenu } from "./SettingsMenu.tsx";
+import { useState } from "react";
 import { HarnessListProvider } from "./use-harness-list.tsx";
 import type { HarnessListEntry, ServerMessage, SocketSubscribe } from "./use-socket.ts";
 // The main Vitest project intentionally scans src/server/shared only. Import the
@@ -509,7 +510,7 @@ describe("SettingsMenu", () => {
     expect(screen.getByRole("dialog", { name: "Settings" })).toBeInTheDocument();
   });
 
-  it("edits a context action and emits the full action array", () => {
+  it("keeps edits local until Apply and emits the full action recipe", () => {
     const onChange = vi.fn();
     render(
       <SettingsMenu
@@ -528,40 +529,35 @@ describe("SettingsMenu", () => {
     fireEvent.change(screen.getByDisplayValue("Improve label"), {
       target: { value: "Polish" },
     });
-
-    expect(onChange).toHaveBeenCalledWith({
-      dashboardLeaderActions: [
-        { id: "a1", name: "Polish", prompt: "Improve old", icon: "sparkles" },
-      ],
-    });
-
     fireEvent.change(screen.getByDisplayValue("Improve old"), {
       target: { value: "Improve new" },
     });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 
     expect(onChange).toHaveBeenCalledWith({
       dashboardLeaderActions: [
-        { id: "a1", name: "Improve label", prompt: "Improve new", icon: "sparkles" },
+        { id: "a1", name: "Polish", prompt: "Improve new", icon: "sparkles", skillIds: [] },
       ],
     });
   });
 
-  it("keeps the icon picker menu inside the settings dialog", () => {
-    const bounds = vi
-      .spyOn(Element.prototype, "getBoundingClientRect")
-      .mockImplementation(function (this: Element) {
-        if (this.classList.contains("settings-dialog")) {
-          return DOMRect.fromRect({ x: 400, y: 52, width: 380, height: 448 });
-        }
-        if (this.classList.contains("settings-icon-picker")) {
-          return DOMRect.fromRect({ x: 700, y: 460, width: 32, height: 32 });
-        }
-        if (this.classList.contains("settings-icon-picker__menu")) {
-          return DOMRect.fromRect({ width: 150, height: 120 });
-        }
-        return DOMRect.fromRect();
-      });
+  it("keeps an incomplete existing recipe visible and shows local validation", () => {
+    const onChange = vi.fn();
+    render(<SettingsMenu settings={{ dashboardLeaderActions: [
+      { id: "a1", name: "Review", prompt: "Review this", icon: "microscope" },
+    ] }} onSettingsChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    openCategory("Context actions");
+    fireEvent.change(screen.getByRole("textbox", { name: "Prompt" }), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(screen.getByText("Instruction is required.")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Prompt" })).toHaveValue("");
+    expect(onChange).not.toHaveBeenCalled();
+  });
 
+  it("edits icons through an accessible radio group", () => {
+    const onChange = vi.fn();
     render(
       <SettingsMenu
         settings={{
@@ -569,18 +565,17 @@ describe("SettingsMenu", () => {
             { id: "a1", name: "Improve label", prompt: "Improve old", icon: "sparkles" },
           ],
         }}
-        onSettingsChange={() => {}}
+        onSettingsChange={onChange}
       />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
     openCategory("Context actions");
-    fireEvent.click(screen.getByRole("button", { name: /icon for improve label/i }));
-
-    const menu = screen.getByRole("menu");
-    expect(menu).toHaveStyle({ left: "622px", top: "334px" }); // BANNED_ASSERTION_OK: bounded coordinates are the behavior under test.
-    expect(menu).not.toHaveStyle({ visibility: "hidden" }); // BANNED_ASSERTION_OK: visibility proves positioning completed before display.
-    bounds.mockRestore();
+    fireEvent.click(screen.getByRole("radio", { name: "Ship" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(onChange).toHaveBeenCalledWith({ dashboardLeaderActions: [
+      { id: "a1", name: "Improve label", prompt: "Improve old", icon: "rocket", skillIds: [] },
+    ] });
   });
 
   it("adds a new context action to the end of the list", () => {
@@ -600,13 +595,52 @@ describe("SettingsMenu", () => {
     openCategory("Context actions");
 
     fireEvent.click(screen.getByRole("button", { name: /add action/i }));
-
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "New action" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Prompt" }), { target: { value: "Do the new thing" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     const next = onChange.mock.calls.at(-1)?.[0].dashboardLeaderActions;
     expect(next).toHaveLength(2);
     expect(next[0]).toMatchObject({ id: "a1", name: "Only" });
-    expect(next[1]).toMatchObject({ name: "New action", prompt: "" });
+    expect(next[1]).toMatchObject({ name: "New action", prompt: "Do the new thing", skillIds: [] });
     expect(typeof next[1].id).toBe("string");
     expect(next[1].id.length).toBeGreaterThan(0);
+  });
+
+  it("keeps a new draft through controlled rerenders and persists tagged skills", () => {
+    function ControlledSettings() {
+      const [settings, setSettings] = useState<import("./api.ts").ProjectSettings>({
+        dashboardLeaderActions: [
+          { id: "a1", name: "Only", prompt: "Just one", icon: "play", skillIds: [] },
+        ],
+      });
+      return <SettingsMenu settings={settings} onSettingsChange={setSettings} />;
+    }
+    render(<ControlledSettings />);
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    openCategory("Context actions");
+    fireEvent.click(screen.getByRole("button", { name: /add action/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "Model plan" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Prompt" }), { target: { value: "Plan from the model." } });
+    expect(screen.queryByRole("checkbox", { name: /system model authoring/i })).toBeNull();
+    const skillsSection = screen.getByText("Skills").closest("section");
+    expect(skillsSection).not.toBeNull();
+    const openPicker = within(skillsSection!).getByRole("button", { name: "Open skill picker" });
+    expect(skillsSection).toContainElement(openPicker);
+    expect(openPicker).toHaveClass("context-actions__apply");
+    expect(openPicker).toHaveTextContent("Add");
+    fireEvent.click(openPicker);
+    const skillSearch = screen.getByRole("searchbox", { name: "Search available skills" });
+    fireEvent.change(skillSearch, { target: { value: "system model" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /system model authoring/i }));
+    expect(screen.getByLabelText("Selected skills")).toHaveTextContent("System Model Authoring");
+    fireEvent.click(screen.getByRole("button", { name: "Close skill picker" }));
+    expect(screen.queryByRole("checkbox", { name: /system model authoring/i })).toBeNull();
+    expect(screen.getByLabelText("Selected skills")).toHaveTextContent("System Model Authoring");
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(screen.getByRole("option", { name: /model plan1 skill/i })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Model plan");
   });
 
   it("removes a context action", () => {
@@ -626,11 +660,12 @@ describe("SettingsMenu", () => {
     fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
     openCategory("Context actions");
 
+    fireEvent.click(screen.getByRole("option", { name: /drop/i }));
     fireEvent.click(screen.getByRole("button", { name: /remove drop/i }));
 
     expect(onChange).toHaveBeenCalledWith({
       dashboardLeaderActions: [
-        { id: "a1", name: "Keep", prompt: "p1", icon: "play" },
+        { id: "a1", name: "Keep", prompt: "p1", icon: "play", skillIds: [] },
       ],
     });
   });
@@ -652,14 +687,43 @@ describe("SettingsMenu", () => {
     fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
     openCategory("Context actions");
 
-    fireEvent.click(screen.getAllByRole("button", { name: /move action down/i })[0]!);
+    fireEvent.click(screen.getByRole("button", { name: /move first down/i }));
 
     expect(onChange).toHaveBeenCalledWith({
       dashboardLeaderActions: [
-        { id: "a2", name: "Second", prompt: "p2", icon: "bug" },
-        { id: "a1", name: "First", prompt: "p1", icon: "play" },
+        { id: "a2", name: "Second", prompt: "p2", icon: "bug", skillIds: [] },
+        { id: "a1", name: "First", prompt: "p1", icon: "play", skillIds: [] },
       ],
     });
+  });
+
+  it("filters action recipes and restores the list from the placeholder search input", () => {
+    render(
+      <SettingsMenu
+        settings={{
+          dashboardLeaderActions: [
+            { id: "a1", name: "Review", prompt: "Review this", icon: "play" },
+            { id: "a2", name: "Ship", prompt: "Ship this", icon: "rocket" },
+          ],
+        }}
+        onSettingsChange={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    openCategory("Context actions");
+
+    const search = screen.getByRole("searchbox", { name: "Search actions" });
+    expect(search).toHaveAttribute("placeholder", "Search actions…");
+    expect(search.closest("label")).toBeNull();
+    expect(screen.queryByText("Search actions")).toBeNull();
+    fireEvent.change(search, { target: { value: "ship" } });
+    expect(screen.getByRole("option", { name: /ship/i })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /review/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear action search" }));
+    expect(search).toHaveValue("");
+    expect(screen.getByRole("option", { name: /review/i })).toBeInTheDocument();
   });
 
   it("closes on Escape", () => {

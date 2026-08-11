@@ -55,6 +55,12 @@ describe("LeaderPromptBar slash commands", () => {
     expect(screen.getByText("Implement")).toBeInTheDocument();
     expect(screen.getByText("Fix")).toBeInTheDocument();
     expect(screen.getByText("Review")).toBeInTheDocument();
+    const composer = screen.getByRole("combobox", { name: "Leader prompt" });
+    const listbox = screen.getByRole("listbox");
+    expect(composer).toHaveAttribute("aria-expanded", "true");
+    expect(composer).toHaveAttribute("aria-controls", listbox.id);
+    expect(composer).toHaveAttribute("aria-activedescendant",
+      screen.getAllByRole("option")[0]?.id);
   });
 
   it("filters context shortcuts by display name", () => {

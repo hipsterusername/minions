@@ -59,6 +59,7 @@ describe("buildSlashCommands", () => {
       description: "Make the result sharper.",
       insertText: "Make the result sharper.",
       icon: "sparkles",
+      skillIds: [],
     });
   });
 

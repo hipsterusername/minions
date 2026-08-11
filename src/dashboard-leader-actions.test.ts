@@ -29,8 +29,8 @@ describe("normalizeDashboardLeaderActions", () => {
     });
 
     expect(actions).toEqual([
-      { id: "ship", name: "Ship it", prompt: "Do the thing", icon: "rocket" },
-      { id: "note", name: "Note", prompt: "Write it down", icon: "play" },
+      { id: "ship", name: "Ship it", prompt: "Do the thing", icon: "rocket", skillIds: [] },
+      { id: "note", name: "Note", prompt: "Write it down", icon: "play", skillIds: [] },
     ]);
   });
 
@@ -66,12 +66,12 @@ describe("normalizeDashboardLeaderActions", () => {
     );
   });
 
-  it("falls back to defaults when the stored array has no valid entries", () => {
+  it("preserves an explicitly configured array with no valid entries as empty", () => {
     expect(
       normalizeDashboardLeaderActions({
         dashboardLeaderActions: [{ id: "", name: "", prompt: "" }] as never,
       }),
-    ).toEqual(defaultDashboardLeaderActions());
+    ).toEqual([]);
   });
 });
 

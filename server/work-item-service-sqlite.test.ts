@@ -281,20 +281,25 @@ describe("SqliteWorkItemService", () => {
 
     const resumed = await service.replyToWaitingRun({
       requestId: "reply", workItemId: created.workItem.id, runKey: "run-start",
-      prompt: "Choose A", expectedLifecycleRevision: waiting.workItem.lifecycle.lifecycleRevision,
+      prompt: "Choose A", skillIds: ["review"],
+      skillValues: { review: { depth: "high" } },
+      expectedLifecycleRevision: waiting.workItem.lifecycle.lifecycleRevision,
       expectedCurrentRunKey: "run-start",
     });
 
     expect(resumed.workItem).toMatchObject({ waitKind: null, currentRunKey: "run-start" });
     expect(continuations).toEqual([expect.objectContaining({
       runKey: "run-start", resumeId: "provider-1", invocationKind: "resume_open_run",
+      skillIds: ["review"], skillValues: { review: { depth: "high" } },
     })]);
     service.sealPrimaryRun({ workItemId: created.workItem.id, runKey: "run-start",
       outcome: "error", expectedLifecycleRevision: resumed.workItem.lifecycle.lifecycleRevision,
       expectedCurrentRunKey: "run-start" });
     await service.replyToWaitingRun({
       requestId: "reply", workItemId: created.workItem.id, runKey: "run-start",
-      prompt: "Choose A", expectedLifecycleRevision: waiting.workItem.lifecycle.lifecycleRevision,
+      prompt: "Choose A", skillIds: ["review"],
+      skillValues: { review: { depth: "high" } },
+      expectedLifecycleRevision: waiting.workItem.lifecycle.lifecycleRevision,
       expectedCurrentRunKey: "run-start",
     });
     expect(continuations).toHaveLength(1);
@@ -348,11 +353,14 @@ describe("SqliteWorkItemService", () => {
       expectedLifecycleRevision: 0, expectedCurrentRunKey: null });
     const intent = { requestId: "live-guidance", workItemId: created.workItem.id,
       prompt: "steer this turn",
+      skillIds: ["review"], skillValues: { review: { depth: "high" } },
       expectedLifecycleRevision: started.workItem.lifecycle.lifecycleRevision,
       expectedCurrentRunKey: "run-live-start" };
     await service.continue(intent);
     await service.continue(intent);
     expect(queued).toHaveLength(1);
+    expect(queued[0]).toMatchObject({ skillIds: ["review"],
+      skillValues: { review: { depth: "high" } } });
     await expect(service.continue({ ...intent, requestId: "stale",
       expectedLifecycleRevision: 0 })).rejects.toMatchObject({
       code: "conflict", latest: { workItem: { currentRunKey: "run-live-start" } },

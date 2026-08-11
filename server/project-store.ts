@@ -5,6 +5,11 @@ import { initDb } from "./db.ts";
 import type Database from "better-sqlite3";
 import { findWorkspaceBySource, getMinionsHome, registerWorkspace } from "./workspace-registry.ts";
 import { DEFAULT_SANDBOX_POLICY, type SandboxPolicy } from "../shared/workspace-contracts.ts";
+import {
+  defaultContextActions,
+  normalizeContextActions,
+  type ContextActionConfig,
+} from "../shared/context-actions.ts";
 import { normalizeProjectSandboxPolicy } from "./project-defaults.ts";
 export { resolveMinionModelForHarness } from "./project-model-settings.ts";
 const SIDECAR_DIR = ".minions";
@@ -59,13 +64,9 @@ export interface ProjectSettings {
   [key: string]: unknown;
 }
 
-/** Mirror of src/api.ts DashboardLeaderActionConfig (no cross-tree imports). */
-export interface DashboardLeaderActionConfig {
-  id: string;
-  name: string;
-  prompt: string;
-  icon: string;
-}
+export type DashboardLeaderActionConfig = Omit<ContextActionConfig, "skillIds"> & {
+  skillIds?: string[];
+};
 
 export type ExecutorClass = "mechanical" | "standard" | "reasoning";
 
@@ -245,8 +246,14 @@ function migrateDashboardActions(settings: ProjectSettings): ProjectSettings {
   delete rest["dashboardLeaderActionNames"];
   delete rest["dashboardLeaderActionPrompts"];
 
-  // A valid array already wins; just make sure no legacy keys survive alongside.
-  if (Array.isArray(settings.dashboardLeaderActions)) return rest;
+  // A stored array wins, including an intentionally empty list. Normalize it
+  // to add new fields such as skillIds to older rows.
+  if (Array.isArray(settings.dashboardLeaderActions)) {
+    return {
+      ...rest,
+      dashboardLeaderActions: normalizeContextActions(rest),
+    };
+  }
 
   if (!names && !prompts) {
     return { ...rest, dashboardLeaderActions: defaultDashboardLeaderActions() };
@@ -322,35 +329,14 @@ function isFableModel(model: unknown): boolean {
  * imports allowed between server/ and src/).
  */
 function defaultDashboardLeaderActions(): DashboardLeaderActionConfig[] {
-  return [
-    {
-      id: "execute",
-      name: "Implement",
-      icon: "play",
-      prompt:
-        "Implement the change described by the connected context. Inspect the relevant code, make a complete production-ready change, run focused tests, and summarize what changed.",
-    },
-    {
-      id: "improve",
-      name: "Fix",
-      icon: "sparkles",
-      prompt:
-        "Investigate the problem in the connected context. Trace the root cause, implement the smallest robust fix, add or update regression coverage, and verify the result.",
-    },
-    {
-      id: "analyze",
-      name: "Review",
-      icon: "microscope",
-      prompt:
-        "Review the connected context and relevant code. Identify concrete bugs, risks, and missing cases, then report prioritized findings with file references. Do not make changes unless asked.",
-    },
-  ];
+  return defaultContextActions();
 }
 
 export function writeSettings(projectPath: string, settings: ProjectSettings): void {
   const settingsPath = path.join(sidecarPath(projectPath), "settings.json");
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-  fs.writeFileSync(settingsPath, JSON.stringify(normalizeProjectSandboxPolicy(settings), null, 2));
+  const migrated = migrateDashboardActions(settings);
+  fs.writeFileSync(settingsPath, JSON.stringify(normalizeProjectSandboxPolicy(migrated), null, 2));
 }
 
 export function readSkills(projectPath: string): unknown[] {

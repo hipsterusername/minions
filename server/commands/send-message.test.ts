@@ -15,6 +15,8 @@ interface StartCall {
   thinkingConfig?: unknown;
   attachments?: unknown;
   harness?: string;
+  skillIds?: string[];
+  skillValues?: Record<string, Record<string, string>>;
 }
 
 const createWorktreeCalls: { cwd: string; key: string }[] = [];
@@ -93,6 +95,21 @@ describe("send_message", () => {
     });
     // No worktree creation when isolation is off.
     expect(createWorktreeCalls).toHaveLength(0);
+  });
+
+  it("synchronizes follow-up skill state into the resumed host invocation", () => {
+    const h = setup();
+    h.host.role = "leader";
+    const { calls } = captureRegistryStart(h);
+    sendMessage(h.ctx, cmd({
+      type: "send_message", sessionKey: "leader-1", prompt: "use the recipe",
+      skillIds: ["review", "docs"],
+      skillValues: { review: { depth: "high" } },
+    }), h.ws);
+    expect(calls[0]).toMatchObject({
+      skillIds: ["review", "docs"],
+      skillValues: { review: { depth: "high" } },
+    });
   });
 
   it("forwards only a trimmed Leader prompt prefix while preserving non-leader behavior", () => {
@@ -182,13 +199,15 @@ describe("send_message", () => {
       continue: continueWorkItem } as unknown as WorkItemService;
     await sendMessage(h.ctx, cmd({
       type: "send_message", sessionKey: h.host.id, prompt: "Continue old row",
+      skillIds: ["review"], skillValues: { review: { depth: "high" } },
     }), h.ws);
 
     expect(calls).toEqual([]);
     expect(h.host.taskState.approval?.requested).toBe(true);
     expect(continueWorkItem).toHaveBeenCalledWith(expect.objectContaining({ workItemId: "work-1",
       prompt: "Continue old row", expectedLifecycleRevision: 4,
-      expectedCurrentRunKey: h.host.runKey }));
+      expectedCurrentRunKey: h.host.runKey, skillIds: ["review"],
+      skillValues: { review: { depth: "high" } } }));
     expect(h.wsSent).toEqual([]);
   });
 

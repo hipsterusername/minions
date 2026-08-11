@@ -10,7 +10,7 @@ import "./nodes/ImageNode.tsx";
 import "./nodes/DialecticNode.tsx";
 import { loadProjectSkillsFromData, saveUserSkill, deleteUserSkill as removeUserSkill, exportUserSkills, importSkillList } from "./skills/user-skills.ts";
 import { parseSkillTransfer } from "./skills/skill-transfer.ts";
-import { Suspense, lazy, useState, useEffect, useReducer, useCallback, useMemo, useSyncExternalStore } from "react";
+import { Suspense, lazy, useState, useEffect, useReducer, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 import { featureFlagStore, FLAG_MCP_SERVERS } from "./feature-flags.ts";
 import { Canvas } from "./Canvas.tsx";
 import { useSocket } from "./use-socket.ts";
@@ -53,6 +53,7 @@ import { usePreventBrowserZoom } from "./use-prevent-browser-zoom.ts";
 import { buildWsUrl } from "./ws-url.ts";
 import { browserLogger } from "./logging.ts";
 import { DEFAULT_SANDBOX_POLICY } from "../shared/workspace-contracts.ts";
+import type { SettingsSaveState } from "./ContextActionsSettings.tsx";
 
 const WS_URL = buildWsUrl();
 const log = browserLogger.child("app");
@@ -165,6 +166,10 @@ function ProjectView({
   });
   const [projectName, setProjectName] = useState("");
   const [projectSettings, setProjectSettings] = useState<ProjectSettings>({});
+  const [settingsSaveState, setSettingsSaveState] = useState<SettingsSaveState>({ status: "idle" });
+  const settingsSaveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const settingsSaveRevisionRef = useRef(0);
+  const failedSettingsRef = useRef<ProjectSettings | null>(null);
   const [loaded, setLoaded] = useState(false);
   // Loader-overlay state machine: the LeaderLoadingScreen plays its
   // one-shot animation + 1s hold, then signals `loaderAnimDone`.
@@ -243,10 +248,31 @@ function ProjectView({
   const handleSettingsChange = useCallback(
     (newSettings: ProjectSettings) => {
       setProjectSettings(newSettings);
-      void updateProjectSettings(projectId, newSettings);
+      const revision = ++settingsSaveRevisionRef.current;
+      setSettingsSaveState({ status: "saving" });
+      const request = settingsSaveQueueRef.current
+        .catch(() => undefined)
+        .then(() => updateProjectSettings(projectId, newSettings));
+      settingsSaveQueueRef.current = request;
+      void request.then(() => {
+        if (settingsSaveRevisionRef.current !== revision) return;
+        failedSettingsRef.current = null;
+        setSettingsSaveState({ status: "saved" });
+      }).catch((error: unknown) => {
+        if (settingsSaveRevisionRef.current !== revision) return;
+        failedSettingsRef.current = newSettings;
+        setSettingsSaveState({
+          status: "error",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
     },
     [projectId],
   );
+
+  const retrySettingsSave = useCallback(() => {
+    handleSettingsChange(failedSettingsRef.current ?? projectSettings);
+  }, [handleSettingsChange, projectSettings]);
 
   /** Compute a non-overlapping position centered in the current viewport. */
   const positionInViewport = useCallback(
@@ -686,6 +712,8 @@ function ProjectView({
               activityAttentionCount={activityAttentionCount + changesCount}
               settings={projectSettings}
               onSettingsChange={handleSettingsChange}
+              settingsSaveState={settingsSaveState}
+              onRetrySettingsSave={retrySettingsSave}
               socketSend={socket.send}
               socketSubscribe={socket.subscribe}
             />
@@ -705,6 +733,7 @@ function ProjectView({
                   socketSend={socket.send}
                   socketSubscribe={socket.subscribe}
                   projectPath={projectPath}
+                  projectSettings={projectSettings}
                   onUpdateNodeData={(nodeId, data) => dispatch({ type: "UPDATE_NODE_DATA", id: nodeId, data })}
                   workItemRuns={workItemState.runs}
                   runNextCursor={workItemState.runNextCursor}

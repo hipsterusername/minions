@@ -165,6 +165,8 @@ export interface NodeRenderProps {
   getIncomingContextModes?: (() => string[]) | undefined;
   projectPath?: string | undefined;
   projectId?: string | undefined;
+  /** Reactive project settings used by renderers such as Leader action recipes. */
+  projectSettings?: import("./api.ts").ProjectSettings | undefined;
   /** Callback to resize this node on the canvas */
   onResize?: ((size: Size) => void) | undefined;
   /** Called when the user starts dragging this node's resize handle. */

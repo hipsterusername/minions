@@ -3940,6 +3940,7 @@ export function Canvas({
             getIncomingContextModes={getStableIncomingModesGetter(node.id)}
             projectPath={projectPath}
             projectId={projectId}
+            projectSettings={projectSettings}
             onConnectionStart={handleConnectionStart}
             onConnectionEnd={handleConnectionEnd}
             isDragActive={isDragActive}

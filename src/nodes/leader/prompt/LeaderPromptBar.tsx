@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
+  useId,
   useRef,
   useState,
   type KeyboardEvent,
@@ -18,19 +19,22 @@ import {
   type SlashCommand,
 } from "./slash-commands.ts";
 
-const LeaderSlashCommandsContext = createContext<SlashCommand[] | undefined>(
-  undefined,
-);
+const LeaderSlashCommandsContext = createContext<{
+  commands: SlashCommand[];
+  onSelect: ((command: SlashCommand) => void) | undefined;
+} | undefined>(undefined);
 
 export function LeaderSlashCommandsProvider({
   commands,
+  onSelect,
   children,
 }: {
   commands: SlashCommand[];
+  onSelect?: (command: SlashCommand) => void;
   children: ReactNode;
 }) {
   return (
-    <LeaderSlashCommandsContext.Provider value={commands}>
+    <LeaderSlashCommandsContext.Provider value={{ commands, onSelect }}>
       {children}
     </LeaderSlashCommandsContext.Provider>
   );
@@ -73,12 +77,13 @@ export function LeaderPromptBar({
   /** Render slash commands at the viewport layer so constrained surfaces do not clip them. */
   portalSlashMenu?: boolean;
 }) {
-  const contextSlashCommands = useContext(LeaderSlashCommandsContext);
-  const availableSlashCommands = slashCommands ?? contextSlashCommands;
+  const slashCommandContext = useContext(LeaderSlashCommandsContext);
+  const availableSlashCommands = slashCommands ?? slashCommandContext?.commands;
   const [menuDismissed, setMenuDismissed] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const internalTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const inputWrapRef = useRef<HTMLDivElement | null>(null);
+  const slashMenuId = useId();
   const resolvedTextareaRef = textareaRef ?? internalTextareaRef;
   const pendingCaretPosition = useRef<number | null>(null);
   const query = availableSlashCommands?.length
@@ -117,6 +122,7 @@ export function LeaderPromptBar({
   const selectCommand = (command: SlashCommand) => {
     pendingCaretPosition.current = command.insertText.length;
     onInputChange(command.insertText);
+    slashCommandContext?.onSelect?.(command);
     setMenuDismissed(true);
   };
 
@@ -178,6 +184,7 @@ export function LeaderPromptBar({
         {menuOpen && (() => {
           const menu = (
             <LeaderSlashMenu
+              id={slashMenuId}
               commands={matches}
               selectedIndex={selectedIndex}
               onSelect={selectCommand}
@@ -196,6 +203,11 @@ export function LeaderPromptBar({
           onKeyDown={handleKeyDown}
           autoFocus={autoFocus}
           ariaLabel="Leader prompt"
+          ariaControls={query !== null ? slashMenuId : undefined}
+          ariaExpanded={menuOpen}
+          ariaActiveDescendant={menuOpen && matches[selectedIndex]
+            ? `${slashMenuId}-option-${matches[selectedIndex].id}`
+            : undefined}
           testId={`leader-prompt-input-${variant}`}
           placeholder={placeholder}
           maxRows={isOverlay ? 10 : 8}

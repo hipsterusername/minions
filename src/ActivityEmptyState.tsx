@@ -34,6 +34,7 @@ export function ActivityEmptyState({
   socketSend,
   socketSubscribe,
   projectPath,
+  projectSettings,
 }: {
   title?: string | undefined;
   subtitle?: string | undefined;
@@ -52,6 +53,7 @@ export function ActivityEmptyState({
   socketSend?: ((data: unknown) => void) | undefined;
   socketSubscribe?: SocketSubscribe | undefined;
   projectPath?: string | undefined;
+  projectSettings?: import("./api.ts").ProjectSettings | undefined;
 }) {
   const openRecent = (entry: RecentAgentWork) => {
     if (entry.sessionKey) onOpenSession(entry.sessionKey);
@@ -114,6 +116,7 @@ export function ActivityEmptyState({
               socketSend={socketSend}
               socketSubscribe={socketSubscribe}
               projectPath={projectPath}
+              projectSettings={projectSettings}
             />
           </div>
         ) : (

@@ -22,6 +22,7 @@ import type { Size } from "../types.ts";
 import { DEFAULT_THINKING_CONFIG } from "../types.ts";
 import { canvasScale } from "../canvas-scale.ts";
 import type { ServerMessage } from "../use-socket.ts";
+import type { ProjectSettings } from "../api.ts";
 import {
   createReplaySocket,
   loadFixture,
@@ -51,9 +52,10 @@ interface ProbeProps {
   size?: Size;
   onResize?: ((size: Size) => void) | undefined;
   onAddContentNode?: ((content: string) => void) | undefined;
+  projectSettings?: ProjectSettings;
 }
 
-function Probe({ socket, initial, onState, size, onResize, onAddContentNode }: ProbeProps) {
+function Probe({ socket, initial, onState, size, onResize, onAddContentNode, projectSettings }: ProbeProps) {
   const [data, setData] = useState<LeaderData>(initial);
   const node: CanvasNode = {
     id: "leader-test",
@@ -76,9 +78,37 @@ function Probe({ socket, initial, onState, size, onResize, onAddContentNode }: P
     },
     onResize,
     onAddContentNode,
+    projectSettings,
   };
   return <LeaderNodeRenderer {...props} />;
 }
+
+describe("LeaderNode: Context Action recipes", () => {
+  it("inserts a custom prompt and additively arms its available skills", () => {
+    const { socket } = createReplaySocket();
+    const states: LeaderData[] = [];
+    render(<Probe
+      socket={socket}
+      initial={makeInitialData({ skillIds: ["system-model-authoring"] })}
+      onState={(state) => states.push(state)}
+      projectSettings={{ dashboardLeaderActions: [{
+        id: "architect", name: "Architect", prompt: "Design the complete change.",
+        icon: "branch", skillIds: ["skill-builder", "missing-skill"],
+      }] }}
+    />);
+
+    const input = screen.getByTestId("leader-prompt-input-inline");
+    fireEvent.change(input, { target: { value: "/" } });
+    fireEvent.click(screen.getByTestId("leader-slash-command-architect"));
+
+    expect(input).toHaveValue("Design the complete change.");
+    expect(states.at(-1)?.skillIds).toEqual([
+      "system-model-authoring",
+      "skill-builder",
+    ]);
+    expect(screen.getByRole("status")).toHaveTextContent("missing-skill");
+  });
+});
 
 async function pump(
   replay: (entries: ReadonlyArray<FixtureEntry>) => Promise<void>,

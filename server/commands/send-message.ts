@@ -73,6 +73,7 @@ export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
           : {}),
         ...(cmd.thinkingConfig ? { thinkingConfig: cmd.thinkingConfig } : {}),
         ...(cmd.skillIds ? { skillIds: cmd.skillIds } : {}),
+        ...(cmd.skillValues ? { skillValues: cmd.skillValues } : {}),
         ...(cmd.attachments ? { attachments: cmd.attachments } : {}),
       });
     } catch (error) {
@@ -135,6 +136,8 @@ export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
       systemPrompt: turnSystemPrompt,
       role: host.role,
       thinkingConfig: turnThinking,
+      ...(cmd.skillIds !== undefined ? { skillIds: cmd.skillIds } : {}),
+      ...(cmd.skillValues !== undefined ? { skillValues: cmd.skillValues } : {}),
       harness: host.harnessName,
       sandboxPolicy: host.sandboxPolicy?.requested,
       ...(attachments ? { attachments } : {}),

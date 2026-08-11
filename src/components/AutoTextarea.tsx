@@ -12,6 +12,9 @@ interface AutoTextareaProps {
   autoFocus?: boolean;
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
   ariaLabel?: string;
+  ariaControls?: string | undefined;
+  ariaExpanded?: boolean | undefined;
+  ariaActiveDescendant?: string | undefined;
   testId?: string;
   style?: React.CSSProperties;
 }
@@ -32,6 +35,9 @@ export function AutoTextarea({
   autoFocus,
   textareaRef,
   ariaLabel,
+  ariaControls,
+  ariaExpanded,
+  ariaActiveDescendant,
   testId,
   style,
 }: AutoTextareaProps) {
@@ -75,6 +81,11 @@ export function AutoTextarea({
         onKeyDown={onKeyDown}
         onMouseDown={(e) => e.stopPropagation()}
         aria-label={ariaLabel}
+        role={ariaControls ? "combobox" : undefined}
+        aria-autocomplete={ariaControls ? "list" : undefined}
+        aria-controls={ariaControls}
+        aria-expanded={ariaExpanded}
+        aria-activedescendant={ariaActiveDescendant}
         data-testid={testId}
         placeholder={placeholder}
         disabled={disabled}

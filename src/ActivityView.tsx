@@ -8,6 +8,7 @@ import {
 } from "react";
 
 import type { CanvasNode } from "./types.ts";
+import type { ProjectSettings } from "./api.ts";
 import type { LeaderData } from "./nodes/leader/types.ts";
 import type { MobileSessionInfo } from "./mobile/mobile-selectors.ts";
 import {
@@ -122,6 +123,7 @@ export interface ActivityViewProps {
   socketSubscribe?: SocketSubscribe | undefined;
   /** Project working directory used when the embedded leader starts. */
   projectPath?: string | undefined;
+  projectSettings?: ProjectSettings | undefined;
   /** Update a leader node's data (e.g. after a merge is requested). */
   onUpdateNodeData: (nodeId: string, data: LeaderData) => void;
   workItemRuns?: Record<string, WorkItemRunSnapshot[]>;
@@ -1242,6 +1244,7 @@ export function ActivityView({
   socketSend,
   socketSubscribe,
   projectPath,
+  projectSettings,
   onUpdateNodeData,
   workItemRuns = {}, runNextCursor = {}, onLoadRuns, onPromptWorkItem,
   promptFailures = {}, onClearPromptFailure,
@@ -1788,6 +1791,7 @@ export function ActivityView({
               socketSend={socketSend}
               socketSubscribe={socketSubscribe}
               projectPath={projectPath}
+              projectSettings={projectSettings}
             />
           </div>
         </main>
@@ -1859,6 +1863,7 @@ export function ActivityView({
               socketSend={socketSend}
               socketSubscribe={socketSubscribe}
               projectPath={projectPath}
+              projectSettings={projectSettings}
             />
           </div>
         </section>

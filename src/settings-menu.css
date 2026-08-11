@@ -4,7 +4,7 @@
   right: 12px;
   z-index: 250;
   display: grid;
-  grid-template-columns: 190px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   width: min(780px, calc(100vw - 24px));
   height: min(680px, calc(100vh - 64px));
   height: min(680px, calc(100dvh - 64px));

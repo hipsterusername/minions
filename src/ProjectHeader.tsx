@@ -4,6 +4,7 @@ import type { SaveStatus } from "./use-autosave.ts";
 import type { ProjectSettings } from "./api.ts";
 import { SettingsMenu } from "./SettingsMenu.tsx";
 import type { SocketSubscribe } from "./use-socket.ts";
+import type { SettingsSaveState } from "./ContextActionsSettings.tsx";
 
 export type ActiveView = "activity" | "canvas";
 
@@ -24,6 +25,8 @@ interface ProjectHeaderProps {
   activityAttentionCount?: number;
   settings: ProjectSettings;
   onSettingsChange: (settings: ProjectSettings) => void;
+  settingsSaveState?: SettingsSaveState;
+  onRetrySettingsSave?: () => void;
   socketSend?: (data: unknown) => void;
   socketSubscribe?: SocketSubscribe;
 }
@@ -41,6 +44,8 @@ export function ProjectHeader({
   activityAttentionCount = 0,
   settings,
   onSettingsChange,
+  settingsSaveState,
+  onRetrySettingsSave,
   socketSend,
   socketSubscribe,
 }: ProjectHeaderProps) {
@@ -278,6 +283,8 @@ export function ProjectHeader({
       <SettingsMenu
         settings={settings}
         onSettingsChange={onSettingsChange}
+        settingsSaveState={settingsSaveState}
+        onRetrySettingsSave={onRetrySettingsSave}
         socketSend={socketSend}
         socketSubscribe={socketSubscribe}
       />

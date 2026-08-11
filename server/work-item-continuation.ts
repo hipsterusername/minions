@@ -14,6 +14,8 @@ export interface RunContinuationInput {
   runKey: string;
   prompt: string;
   displayPrompt?: string;
+  skillIds?: string[];
+  skillValues?: Record<string, Record<string, string>>;
 }
 
 export async function continueWorkItemIntent(
@@ -32,6 +34,8 @@ export async function continueWorkItemIntent(
         requestId: input.requestId, workItemId: input.workItemId,
         runKey: item.currentRunKey, prompt: input.prompt,
         ...(input.displayPrompt ? { displayPrompt: input.displayPrompt } : {}),
+        ...(input.skillIds !== undefined ? { skillIds: input.skillIds } : {}),
+        ...(input.skillValues !== undefined ? { skillValues: input.skillValues } : {}),
         expectedLifecycleRevision: item.lifecycle.lifecycleRevision,
         expectedCurrentRunKey: item.currentRunKey,
       });
@@ -46,11 +50,15 @@ export async function continueWorkItemIntent(
           requestId: input.requestId, workItemId: input.workItemId,
           command: "queue_guidance", payload: {
             workItemId: input.workItemId, runKey: item.currentRunKey, prompt: input.prompt,
+            ...(input.skillIds !== undefined ? { skillIds: input.skillIds } : {}),
+            ...(input.skillValues !== undefined ? { skillValues: input.skillValues } : {}),
           }, resultKey: item.currentRunKey, at: service.now(),
         }, () => item.currentRunKey!);
         if (!queued.idempotent) await service.options.queueRunGuidance?.({
           requestId: input.requestId, workItemId: input.workItemId,
           runKey: item.currentRunKey, prompt: input.prompt,
+          ...(input.skillIds !== undefined ? { skillIds: input.skillIds } : {}),
+          ...(input.skillValues !== undefined ? { skillValues: input.skillValues } : {}),
         });
         service.emit(detail, queued.idempotent ? "guidance_replayed" : "guidance_queued", service.now());
         return detail;

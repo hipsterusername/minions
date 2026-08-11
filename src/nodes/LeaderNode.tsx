@@ -81,6 +81,11 @@ import "./leader/leader-node.css";
 import { MinionsSurface } from "./leader/MinionsSurface.tsx";
 import { ActivityLaunchForm } from "./leader/ActivityLaunchForm.tsx";
 import { DEFAULT_SANDBOX_POLICY } from "./leader/SandboxPolicyControls.tsx";
+import { invokeContextAction } from "../../shared/context-actions.ts";
+
+function sameStringArray(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
 
 /* ── Main component ───────────────────────────────────────────────────── */
 
@@ -93,6 +98,7 @@ export function LeaderNodeRenderer({
   getIncomingContextModes,
   projectPath,
   projectId,
+  projectSettings,
   onResize,
   onResizeStart,
   onResizeEnd,
@@ -103,7 +109,10 @@ export function LeaderNodeRenderer({
   launchMode = false,
 }: NodeRenderProps & { launchMode?: boolean }) {
   const data = node.data as LeaderData;
-  const slashCommands = useMemo(() => buildSlashCommands(undefined), []);
+  const slashCommands = useMemo(
+    () => buildSlashCommands(projectSettings),
+    [projectSettings],
+  );
   const dataRef = useRef(data);
   dataRef.current = data;
 
@@ -121,6 +130,23 @@ export function LeaderNodeRenderer({
   // Wire-validation error for the most recent embedded-dashboard render_update.
   const [renderPayloadError, setRenderPayloadError] = useState<string | null>(null);
   const [launchNotice, setLaunchNotice] = useState<string | null>(null);
+
+  const handleContextActionSelect = useCallback((command: (typeof slashCommands)[number]) => {
+    const current = dataRef.current;
+    const invocation = invokeContextAction(
+      { prompt: command.insertText, skillIds: command.skillIds ?? [] },
+      current.skillIds ?? [],
+      (command.skillIds ?? []).filter((id) => getSkill(id) !== undefined),
+    );
+    if (!sameStringArray(invocation.skillIds, current.skillIds ?? [])) {
+      const next = { ...current, skillIds: invocation.skillIds };
+      dataRef.current = next;
+      onUpdateData(next);
+    }
+    setLaunchNotice(invocation.missingSkillIds.length > 0
+      ? `Action inserted. Unavailable Skills were not armed: ${invocation.missingSkillIds.join(", ")}.`
+      : null);
+  }, [onUpdateData, slashCommands]);
 
   useEffect(() => {
     armLeaderCompletionSound();
@@ -862,7 +888,10 @@ export function LeaderNodeRenderer({
           requestId: randomUuid(), workItemId: current.workItemId })).workItem;
         const activeRun = snapshot.lifecycle.runtimeState === "starting"
           || snapshot.lifecycle.runtimeState === "working";
-        const result = await sendCanonicalPrompt(snapshot, followUp.prompt);
+        const result = await sendCanonicalPrompt(snapshot, followUp.prompt, {
+          skillIds: dataRef.current.skillIds ?? [],
+          skillValues: dataRef.current.skillValues ?? {},
+        });
         return { ...result, queuedGuidance: activeRun
           && result.detail.workItem.currentRunKey === snapshot.currentRunKey };
       })().then(({ detail, outcome, queuedGuidance }) => {
@@ -883,6 +912,8 @@ export function LeaderNodeRenderer({
       prompt: followUp.prompt,
       systemPrompt: followUp.systemPrompt,
       thinkingConfig: current.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
+      skillIds: current.skillIds ?? [],
+      skillValues: current.skillValues ?? {},
       ...(attachments.length > 0 ? { attachments } : {}),
     });
     onUpdateData({
@@ -1083,7 +1114,7 @@ export function LeaderNodeRenderer({
 
   if (launchMode) {
     return (
-      <LeaderSlashCommandsProvider commands={slashCommands}>
+      <LeaderSlashCommandsProvider commands={slashCommands} onSelect={handleContextActionSelect}>
         <ActivityLaunchForm nodeId={node.id} data={data} input={input} slashCommands={slashCommands}
           promptPlaceholder={promptPlaceholder} submitDisabled={promptSubmitDisabled} submitActive={promptSubmitActive} textareaRef={promptTextareaRef} {...(projectPath ? { projectPath } : {})}
           onInputChange={setInput} onKeyDown={handleKeyDown} onSubmit={handlePromptSubmit} onUpdate={(patch) => onUpdateData({ ...dataRef.current, ...patch })} />
@@ -1093,7 +1124,7 @@ export function LeaderNodeRenderer({
   }
 
   return (
-    <LeaderSlashCommandsProvider commands={slashCommands}>
+    <LeaderSlashCommandsProvider commands={slashCommands} onSelect={handleContextActionSelect}>
     <div
       ref={nodeRootRef}
       tabIndex={-1}

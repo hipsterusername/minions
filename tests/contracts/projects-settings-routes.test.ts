@@ -149,6 +149,32 @@ describe("settings routes", () => {
     expect(body["defaultPermissionMode"]).toBeDefined();
     expect(body["roleSystemBeta"]).toBe(false);
   });
+
+  it("preserves an intentionally empty Context Action list", async () => {
+    const putRes = await fetch(`${baseUrl}/${encoded}/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dashboardLeaderActions: [] }),
+    });
+    expect(putRes.status).toBe(200);
+    const body = await (await fetch(`${baseUrl}/${encoded}/settings`)).json() as {
+      dashboardLeaderActions: unknown[];
+    };
+    expect(body.dashboardLeaderActions).toEqual([]);
+  });
+
+  it("rejects malformed actions with indexed validation issues", async () => {
+    const res = await fetch(`${baseUrl}/${encoded}/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dashboardLeaderActions: [
+        { id: "bad", name: "Bad", prompt: "", icon: "play", skillIds: [] },
+      ] }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json() as { issues: Array<{ index: number; field: string }> };
+    expect(body.issues).toContainEqual(expect.objectContaining({ index: 0, field: "prompt" }));
+  });
 });
 
 describe("skills routes", () => {

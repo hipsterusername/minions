@@ -2,6 +2,7 @@ import type { CanvasNode, CanvasTransform, ThinkingConfig } from "./types.ts";
 import type { GraphDocument } from "./graph.ts";
 import type { LeaderPreset } from "./leader-preset.ts";
 import type { SandboxPolicy } from "../shared/workspace-contracts.ts";
+import type { ContextActionConfig } from "../shared/context-actions.ts";
 
 const BASE = "/api";
 
@@ -63,12 +64,10 @@ export interface ProjectContext {
  * stable opaque identifier; `icon` keys into the icon palette in
  * src/dashboard-leader-actions.ts.
  */
-export interface DashboardLeaderActionConfig {
-  id: string;
-  name: string;
-  prompt: string;
-  icon: string;
-}
+export type DashboardLeaderActionConfig = Omit<ContextActionConfig, "skillIds"> & {
+  /** Skill tags were added after the original action format; absent migrates to []. */
+  skillIds?: string[];
+};
 
 export interface ProjectSettings {
   defaultModel?: string;

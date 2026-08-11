@@ -161,6 +161,8 @@ export class SqliteWorkItemService implements WorkItemService {
           workItemId: input.workItemId, runKey: started.run!.session_key,
           prompt: input.prompt, invocationKind: "new_run",
           ...(input.displayPrompt ? { displayPrompt: input.displayPrompt } : {}),
+          ...(input.skillIds !== undefined ? { skillIds: input.skillIds } : {}),
+          ...(input.skillValues !== undefined ? { skillValues: input.skillValues } : {}),
           ...(resumeId ? { resumeId } : {}), ...(plannedContribution ? { plannedContribution } : {}), ...config,
         });
       } catch (launchError) {
@@ -188,7 +190,9 @@ export class SqliteWorkItemService implements WorkItemService {
       const ledger = executeWorkItemCommand(this.options.db, {
         requestId: input.requestId, workItemId: input.workItemId,
         command: "reply", payload: { workItemId: input.workItemId,
-          runKey: input.runKey, prompt: input.prompt }, at: this.now(),
+          runKey: input.runKey, prompt: input.prompt,
+          ...(input.skillIds !== undefined ? { skillIds: input.skillIds } : {}),
+          ...(input.skillValues !== undefined ? { skillValues: input.skillValues } : {}) }, at: this.now(),
       }, () => resumeWaitingWorkItemRun(this.options.db, {
         workItemId: input.workItemId, runKey: input.runKey,
         expectedLifecycleRevision: input.expectedLifecycleRevision,
@@ -207,6 +211,8 @@ export class SqliteWorkItemService implements WorkItemService {
           workItemId: input.workItemId, runKey: input.runKey, prompt: input.prompt,
           invocationKind: "resume_open_run",
           ...(input.displayPrompt ? { displayPrompt: input.displayPrompt } : {}),
+          ...(input.skillIds !== undefined ? { skillIds: input.skillIds } : {}),
+          ...(input.skillValues !== undefined ? { skillValues: input.skillValues } : {}),
           ...(resumed.run?.session_id ? { resumeId: resumed.run.session_id } : {}),
           requestId: input.requestId,
         } as const;

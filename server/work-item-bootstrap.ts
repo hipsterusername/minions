@@ -145,6 +145,8 @@ export function bootstrapWorkItemRuntime(
       permissionMode: host.permissionMode ?? undefined,
       sandboxPolicy: host.sandboxPolicy?.requested,
       thinkingConfig: host.thinkingConfig,
+      ...(input.skillIds !== undefined ? { skillIds: input.skillIds } : {}),
+      ...(input.skillValues !== undefined ? { skillValues: input.skillValues } : {}),
     });
   };
 
@@ -201,6 +203,8 @@ export function bootstrapWorkItemRuntime(
           requestId: `${input.requestId}:queued:${randomUUID()}`,
           workItemId: input.workItemId, prompt: input.prompt,
           ...(input.displayPrompt ? { displayPrompt: input.displayPrompt } : {}),
+          ...(input.skillIds !== undefined ? { skillIds: input.skillIds } : {}),
+          ...(input.skillValues !== undefined ? { skillValues: input.skillValues } : {}),
           expectedLifecycleRevision: latest.workItem.lifecycle.lifecycleRevision,
           expectedCurrentRunKey: latest.workItem.currentRunKey,
         });

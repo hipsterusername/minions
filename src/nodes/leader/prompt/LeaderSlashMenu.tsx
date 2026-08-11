@@ -1,5 +1,6 @@
 import {
   Fragment,
+  useId,
   useLayoutEffect,
   useState,
   type CSSProperties,
@@ -41,6 +42,7 @@ function highlightMatch(text: string, query: string, emphasized: boolean) {
 }
 
 export function LeaderSlashMenu({
+  id,
   commands,
   selectedIndex,
   onSelect,
@@ -48,6 +50,7 @@ export function LeaderSlashMenu({
   query = "",
   anchorRef,
 }: {
+  id?: string;
   commands: SlashCommand[];
   selectedIndex: number;
   onSelect: (command: SlashCommand) => void;
@@ -56,6 +59,8 @@ export function LeaderSlashMenu({
   anchorRef?: RefObject<HTMLElement | null>;
 }) {
   const [portalPosition, setPortalPosition] = useState<CSSProperties | null>(null);
+  const generatedId = useId();
+  const menuId = id ?? generatedId;
 
   useLayoutEffect(() => {
     if (!anchorRef) return;
@@ -107,6 +112,7 @@ export function LeaderSlashMenu({
 
   return (
     <div
+      id={menuId}
       role="listbox"
       aria-label="Leader context shortcuts"
       data-no-drag
@@ -185,6 +191,7 @@ export function LeaderSlashMenu({
           const Icon = dashboardActionIcon(command.icon);
           return (
             <button
+              id={`${menuId}-option-${command.id}`}
               key={command.id}
               type="button"
               role="option"

@@ -7,6 +7,10 @@ import type { EffortLevel, ThinkingConfig } from "./types.ts";
 import { DEFAULT_THINKING_CONFIG, MINION_THINKING_CONFIG } from "./types.ts";
 import { getModelCapability } from "./model-meta.ts";
 import {
+  ContextActionsSettings as ContextActionsRecipeSettings,
+  type SettingsSaveState,
+} from "./ContextActionsSettings.tsx";
+import {
   DASHBOARD_ACTION_ICONS,
   DEFAULT_DASHBOARD_ACTION_ICON,
   dashboardActionIcon,
@@ -44,6 +48,8 @@ import "./settings-menu.css";
 interface SettingsMenuProps {
   settings: ProjectSettings;
   onSettingsChange: (settings: ProjectSettings) => void;
+  settingsSaveState?: SettingsSaveState | undefined;
+  onRetrySettingsSave?: (() => void) | undefined;
   socketSend?: ((data: unknown) => void) | undefined;
   socketSubscribe?: SocketSubscribe | undefined;
 }
@@ -116,6 +122,8 @@ const SETTINGS_CATEGORIES: ReadonlyArray<{
 export function SettingsMenu({
   settings,
   onSettingsChange,
+  settingsSaveState,
+  onRetrySettingsSave,
   socketSend,
   socketSubscribe,
 }: SettingsMenuProps) {
@@ -176,6 +184,8 @@ export function SettingsMenu({
         <SettingsPopover
           settings={settings}
           onSettingsChange={onSettingsChange}
+          settingsSaveState={settingsSaveState}
+          onRetrySettingsSave={onRetrySettingsSave}
           socketSend={socketSend}
           socketSubscribe={socketSubscribe}
         />
@@ -189,11 +199,15 @@ export function SettingsMenu({
 function SettingsPopover({
   settings,
   onSettingsChange,
+  settingsSaveState,
+  onRetrySettingsSave,
   socketSend,
   socketSubscribe,
 }: {
   settings: ProjectSettings;
   onSettingsChange: (settings: ProjectSettings) => void;
+  settingsSaveState?: SettingsSaveState | undefined;
+  onRetrySettingsSave?: (() => void) | undefined;
   socketSend?: ((data: unknown) => void) | undefined;
   socketSubscribe?: SocketSubscribe | undefined;
 }) {
@@ -633,9 +647,11 @@ function SettingsPopover({
           )}
 
           {activeCategory === "actions" && (
-            <ContextActionsSettings
+            <ContextActionsRecipeSettings
               settings={settings}
               onSettingsChange={onSettingsChange}
+              saveState={settingsSaveState}
+              onRetrySave={onRetrySettingsSave}
             />
           )}
 
@@ -989,7 +1005,7 @@ function Select({
 
 // ── Context actions manager ─────────────────────────────────
 
-function ContextActionsSettings({
+export function LegacyContextActionsSettings({
   settings,
   onSettingsChange,
 }: {
@@ -1036,6 +1052,7 @@ function ContextActionsSettings({
         name: "New action",
         prompt: "",
         icon: DEFAULT_DASHBOARD_ACTION_ICON,
+        skillIds: [],
       },
     ]);
 

@@ -43,7 +43,8 @@ export interface WorkItemService {
     skillValues?: Record<string, Record<string, string>>;
     systemPrompt?: string; attachments?: unknown[] }): Promise<WorkItemDetailSnapshot>;
   replyToWaitingRun(input: ExistingWorkItemMutationContext & { workItemId: string; runKey: string;
-    prompt: string; displayPrompt?: string }): Promise<WorkItemDetailSnapshot>;
+    prompt: string; displayPrompt?: string; skillIds?: string[];
+    skillValues?: Record<string, Record<string, string>> }): Promise<WorkItemDetailSnapshot>;
   review(input: ExistingWorkItemMutationContext & { workItemId: string }): Promise<WorkItemDetailSnapshot>;
   archive(input: ExistingWorkItemMutationContext & { workItemId: string }): Promise<WorkItemDetailSnapshot>;
   restore(input: ExistingWorkItemMutationContext & { workItemId: string }): Promise<WorkItemDetailSnapshot>;

@@ -10,6 +10,8 @@ export type SlashCommand = {
   insertText: string;
   /** Icon key from the action config; the menu falls back if unknown. */
   icon?: string;
+  /** Skill recipe retained even when some ids are currently unavailable. */
+  skillIds?: string[];
 };
 
 export function parseSlashQuery(input: string): string | null {
@@ -32,6 +34,7 @@ export function buildSlashCommands(
         : action.prompt,
     insertText: action.prompt,
     icon: action.icon,
+    skillIds: [...action.skillIds],
   }));
 }
 

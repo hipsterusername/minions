@@ -15,6 +15,7 @@ import {
   deleteMcpServer,
 } from "../../mcp-server-store.ts";
 import { param, resolveProjectReference } from "./helpers.ts";
+import { validateContextActionList } from "../../../shared/context-actions.ts";
 
 export function mountSettingsRoutes(router: Router): void {
 
@@ -53,7 +54,22 @@ export function mountSettingsRoutes(router: Router): void {
       res.status(403).json({ error: "Project path not registered" });
       return;
     }
+    if (typeof req.body !== "object" || req.body === null || Array.isArray(req.body)) {
+      res.status(400).json({ error: "Settings must be an object" });
+      return;
+    }
     const settings = req.body as ProjectSettings;
+    if (Object.prototype.hasOwnProperty.call(settings, "dashboardLeaderActions")) {
+      const validation = validateContextActionList(settings.dashboardLeaderActions);
+      if (!validation.actions) {
+        res.status(400).json({
+          error: "Invalid Context Actions",
+          issues: validation.issues,
+        });
+        return;
+      }
+      settings.dashboardLeaderActions = validation.actions;
+    }
     writeSettings(projectPath, settings);
     res.json({ ok: true });
   });
