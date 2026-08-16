@@ -1,29 +1,37 @@
-import { memo } from "react";
+import { memo, useId } from "react";
 import type { CanvasTransform } from "./types.ts";
 
 const GRID_SIZE = 24;
 const BLUEPRINT_VIEWBOX_WIDTH = 1200;
 const BLUEPRINT_VIEWBOX_HEIGHT = 800;
-const BLUEPRINT_GRID_STEP = 60;
-const BLUEPRINT_GRID_MAJOR_EVERY = 4;
-const BLUEPRINT_WARP_STRENGTH = 0.12;
+const BLUEPRINT_CURVE_STEP = 60;
+const BLUEPRINT_CURVE_MAJOR_EVERY = 4;
+const BLUEPRINT_CURVE_STRENGTH = 0.1;
 
 type GridPath = {
   d: string;
   major: boolean;
 };
 
-function warpedPoint(x: number, y: number): [number, number] {
+function positiveModulo(value: number, divisor: number): number {
+  return ((value % divisor) + divisor) % divisor;
+}
+
+function svgId(prefix: string, reactId: string): string {
+  return `${prefix}-${reactId.replaceAll(":", "")}`;
+}
+
+function curvedPoint(x: number, y: number): [number, number] {
   const halfWidth = BLUEPRINT_VIEWBOX_WIDTH / 2;
   const halfHeight = BLUEPRINT_VIEWBOX_HEIGHT / 2;
   const normalizedX = (x - halfWidth) / halfWidth;
   const normalizedY = (y - halfHeight) / halfHeight;
   const radiusSquared = normalizedX ** 2 + normalizedY ** 2;
-  const warp = 1 + BLUEPRINT_WARP_STRENGTH * radiusSquared;
+  const curve = 1 + BLUEPRINT_CURVE_STRENGTH * radiusSquared;
 
   return [
-    halfWidth + normalizedX * halfWidth * warp,
-    halfHeight + normalizedY * halfHeight * warp,
+    halfWidth + normalizedX * halfWidth * curve,
+    halfHeight + normalizedY * halfHeight * curve,
   ];
 }
 
@@ -33,63 +41,58 @@ function pathThrough(points: Array<[number, number]>): string {
     .join(" ");
 }
 
-function buildBlueprintGridPaths(): GridPath[] {
+function buildBlueprintCurvePaths(): GridPath[] {
   const paths: GridPath[] = [];
   const sampleStep = 20;
-  const xStart = -BLUEPRINT_GRID_STEP * 2;
-  const xEnd = BLUEPRINT_VIEWBOX_WIDTH + BLUEPRINT_GRID_STEP * 2;
-  const yStart = -BLUEPRINT_GRID_STEP * 2;
-  const yEnd = BLUEPRINT_VIEWBOX_HEIGHT + BLUEPRINT_GRID_STEP * 2;
+  const xStart = -BLUEPRINT_CURVE_STEP * 2;
+  const xEnd = BLUEPRINT_VIEWBOX_WIDTH + BLUEPRINT_CURVE_STEP * 2;
+  const yStart = -BLUEPRINT_CURVE_STEP * 2;
+  const yEnd = BLUEPRINT_VIEWBOX_HEIGHT + BLUEPRINT_CURVE_STEP * 2;
 
-  for (let x = xStart; x <= xEnd; x += BLUEPRINT_GRID_STEP) {
+  for (let x = xStart; x <= xEnd; x += BLUEPRINT_CURVE_STEP) {
     const points: Array<[number, number]> = [];
     for (let y = yStart; y <= yEnd; y += sampleStep) {
-      points.push(warpedPoint(x, y));
+      points.push(curvedPoint(x, y));
     }
-    const gridIndex = Math.round(x / BLUEPRINT_GRID_STEP);
     paths.push({
       d: pathThrough(points),
-      major: gridIndex % BLUEPRINT_GRID_MAJOR_EVERY === 0,
+      major:
+        Math.round(x / BLUEPRINT_CURVE_STEP) % BLUEPRINT_CURVE_MAJOR_EVERY === 0,
     });
   }
 
-  for (let y = yStart; y <= yEnd; y += BLUEPRINT_GRID_STEP) {
+  for (let y = yStart; y <= yEnd; y += BLUEPRINT_CURVE_STEP) {
     const points: Array<[number, number]> = [];
     for (let x = xStart; x <= xEnd; x += sampleStep) {
-      points.push(warpedPoint(x, y));
+      points.push(curvedPoint(x, y));
     }
-    const gridIndex = Math.round(y / BLUEPRINT_GRID_STEP);
     paths.push({
       d: pathThrough(points),
-      major: gridIndex % BLUEPRINT_GRID_MAJOR_EVERY === 0,
+      major:
+        Math.round(y / BLUEPRINT_CURVE_STEP) % BLUEPRINT_CURVE_MAJOR_EVERY === 0,
     });
   }
 
   return paths;
 }
 
-const BLUEPRINT_GRID_PATHS = buildBlueprintGridPaths();
+const BLUEPRINT_CURVE_PATHS = buildBlueprintCurvePaths();
 
-/**
- * Keep the warped drafting surface tied loosely to the canvas without letting
- * long pans drag it out of view. The arctangent gives us natural, bounded
- * movement: responsive near the resting point and increasingly subtle farther
- * away.
- */
 export function blueprintParallaxOffset(transform: CanvasTransform): {
   x: number;
   y: number;
 } {
   return {
-    x: Math.atan(transform.x / 1200) * 12,
-    y: Math.atan(transform.y / 900) * 9,
+    x: Math.atan(transform.x / 1200) * 14,
+    y: Math.atan(transform.y / 900) * 10,
   };
 }
 
 const DotGrid = memo(function DotGrid({ transform }: { transform: CanvasTransform }) {
+  const patternId = svgId("canvas-dot-grid", useId());
   const dotSpacing = GRID_SIZE * transform.scale;
-  const offsetX = (transform.x % dotSpacing + dotSpacing) % dotSpacing;
-  const offsetY = (transform.y % dotSpacing + dotSpacing) % dotSpacing;
+  const offsetX = positiveModulo(transform.x, dotSpacing);
+  const offsetY = positiveModulo(transform.y, dotSpacing);
 
   return (
     <svg
@@ -105,7 +108,7 @@ const DotGrid = memo(function DotGrid({ transform }: { transform: CanvasTransfor
     >
       <defs>
         <pattern
-          id="dot-grid"
+          id={patternId}
           width={dotSpacing}
           height={dotSpacing}
           patternUnits="userSpaceOnUse"
@@ -121,24 +124,27 @@ const DotGrid = memo(function DotGrid({ transform }: { transform: CanvasTransfor
           />
         </pattern>
       </defs>
-      <rect width="100%" height="100%" fill="url(#dot-grid)" />
+      <rect width="100%" height="100%" fill={`url(#${patternId})`} />
     </svg>
   );
 });
 
-const BlueprintSphereGrid = memo(function BlueprintSphereGrid({
+const BlueprintCurveGrid = memo(function BlueprintCurveGrid({
   transform,
 }: {
   transform: CanvasTransform;
 }) {
+  const reactId = useId();
+  const fadeId = svgId("blueprint-curve-fade", reactId);
+  const maskId = svgId("blueprint-curve-mask", reactId);
   const parallax = blueprintParallaxOffset(transform);
 
   return (
     <svg
-      className="blueprint-sphere-grid"
+      className="blueprint-curve-grid"
       aria-hidden="true"
       viewBox={`0 0 ${BLUEPRINT_VIEWBOX_WIDTH} ${BLUEPRINT_VIEWBOX_HEIGHT}`}
-      preserveAspectRatio="none"
+      preserveAspectRatio="xMidYMid slice"
       style={{
         position: "absolute",
         inset: 0,
@@ -149,30 +155,32 @@ const BlueprintSphereGrid = memo(function BlueprintSphereGrid({
       }}
     >
       <defs>
-        <radialGradient id="blueprint-grid-fade" cx="50%" cy="48%" r="72%">
-          <stop offset="0%" stopColor="white" stopOpacity="0.94" />
-          <stop offset="62%" stopColor="white" stopOpacity="0.7" />
-          <stop offset="100%" stopColor="white" stopOpacity="0.16" />
+        <radialGradient id={fadeId} cx="50%" cy="48%" r="72%">
+          <stop offset="0%" stopColor="white" stopOpacity="0.9" />
+          <stop offset="62%" stopColor="white" stopOpacity="0.62" />
+          <stop offset="100%" stopColor="white" stopOpacity="0.08" />
         </radialGradient>
-        <mask id="blueprint-grid-vignette">
+        <mask id={maskId}>
           <rect
-            width={BLUEPRINT_VIEWBOX_WIDTH}
-            height={BLUEPRINT_VIEWBOX_HEIGHT}
-            fill="url(#blueprint-grid-fade)"
+            x={-BLUEPRINT_CURVE_STEP * 3}
+            y={-BLUEPRINT_CURVE_STEP * 3}
+            width={BLUEPRINT_VIEWBOX_WIDTH + BLUEPRINT_CURVE_STEP * 6}
+            height={BLUEPRINT_VIEWBOX_HEIGHT + BLUEPRINT_CURVE_STEP * 6}
+            fill={`url(#${fadeId})`}
           />
         </mask>
       </defs>
       <g
-        mask="url(#blueprint-grid-vignette)"
+        mask={`url(#${maskId})`}
         transform={`translate(${parallax.x.toFixed(2)} ${parallax.y.toFixed(2)})`}
       >
-        {BLUEPRINT_GRID_PATHS.map((path, index) => (
+        {BLUEPRINT_CURVE_PATHS.map((path, index) => (
           <path
             key={index}
             className={
               path.major
-                ? "blueprint-sphere-grid__major"
-                : "blueprint-sphere-grid__minor"
+                ? "blueprint-curve-grid__major"
+                : "blueprint-curve-grid__minor"
             }
             d={path.d}
             fill="none"
@@ -192,7 +200,7 @@ export const CanvasBackground = memo(function CanvasBackground({
   return (
     <>
       <DotGrid transform={transform} />
-      <BlueprintSphereGrid transform={transform} />
+      <BlueprintCurveGrid transform={transform} />
     </>
   );
 });
