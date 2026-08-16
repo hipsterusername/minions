@@ -33,6 +33,11 @@ entry_points:
     files: [ server/commands/list-sessions.ts, server/commands/sync-session.ts, server/bus.ts ]
     tests: [ server/commands/list-sessions.test.ts, server/commands/sync-session.test.ts, tests/architecture/no-direct-broadcast.test.ts ]
     flows: [ flow.monitor_execution, flow.recover_after_disconnect ]
+  - surface: surface.graph_inspector
+    summary: Inspect a bounded, revisioned projection of graph topology, attempts, evidence, capacity, budget reservations, and critical path.
+    files: [ src/task-graph/**, shared/task-graph-view-contracts.ts, server/task-graph/view.ts ]
+    tests: [ src/task-graph/GraphInspector.test.tsx, src/task-graph/use-task-graph-view.test.tsx ]
+    flows: [ flow.inspect_execution_graph, flow.recover_after_disconnect ]
 freshness:
   class: code_coupled
 risk: high
@@ -41,4 +46,6 @@ depends_on: []
 bridges:
   - to: flow.delegate_and_steer_minions
     reason: Execution views expose delegated child activity while delegation retains ownership of the orchestration flow.
+  - to: flow.inspect_execution_graph
+    reason: Graph Inspector specializes the shared authoritative monitoring and reconnect model for execution graphs.
 risks: []

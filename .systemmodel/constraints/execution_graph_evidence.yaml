@@ -1,0 +1,30 @@
+id: constraint.execution_graph_evidence
+type: constraint
+statement: Attempt events are generation- and revision-fenced; committed artifacts and independent verifications bind exact producer attempts, source snapshots, declared outputs, and content hashes before satisfying dependencies.
+applies_to:
+  capabilities:
+    - capability.execution_graph_runtime
+  flows:
+    - flow.execute_execution_graph
+  surfaces:
+    - surface.agent_tools
+    - surface.graph_inspector
+  files:
+    - shared/task-graph-contracts.ts
+    - server/task-graph/evidence.ts
+    - server/task-graph/artifact-access.ts
+    - server/task-graph/artifact-store.ts
+    - server/task-graph/agent-tools.ts
+    - server/task-graph/scheduler.ts
+    - server/task-graph/service.ts
+    - server/task-graph/view.ts
+severity: critical
+agent_instruction: Reject stale generations, actor mismatches, superseded producers, undeclared outputs, write-set escape, changed artifact hashes, source-snapshot mismatch, and producer self-verification; evaluate edges only from current committed evidence.
+review_gate: gate.execution_graph_runtime
+suggested_tests: [ server/task-graph/runtime.test.ts, server/task-graph/service.test.ts, server/task-graph/artifact-store.test.ts, tests/task-graph/runtime.test.ts ]
+evidence: [ decision.server_owned_execution_graphs ]
+domain: domain.delegation
+scope: targeted
+guards:
+  - capability.execution_graph_runtime
+  - flow.execute_execution_graph

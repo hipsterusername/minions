@@ -1,0 +1,29 @@
+id: constraint.execution_graph_authority
+type: constraint
+statement: WorkItem owns durable intent and current primary authority; immutable graph revisions own topology; graph runs and node attempts own execution, and every child run carries attemptId and attemptNumber.
+applies_to:
+  capabilities:
+    - capability.durable_work_items
+    - capability.execution_graph_runtime
+  flows:
+    - flow.execute_execution_graph
+  surfaces:
+    - surface.ws_api
+    - surface.agent_tools
+  files:
+    - shared/work-item-contracts.ts
+    - shared/task-graph-contracts.ts
+    - server/work-item-child-repo.ts
+    - server/task-graph/repository.ts
+    - server/task-graph/service.ts
+    - server/commands/task-graph.ts
+severity: critical
+agent_instruction: Preserve the ownership hierarchy, reject mutable reuse of a graph revision, fence run start against the current WorkItem lifecycle and primary run, and allocate a fresh durable attempt identity for every retrying child.
+review_gate: gate.execution_graph_runtime
+suggested_tests: [ tests/contracts/work-item-contracts.test.ts, server/work-item-repo.test.ts, server/task-graph/runtime.test.ts, server/task-graph/service.test.ts ]
+evidence: [ decision.server_owned_execution_graphs, decision.canonical_work_item_lifecycle ]
+domain: domain.execution_lifecycle
+scope: targeted
+guards:
+  - capability.execution_graph_runtime
+  - flow.execute_execution_graph

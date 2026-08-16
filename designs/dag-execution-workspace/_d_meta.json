@@ -1,0 +1,86 @@
+{
+  "title": "DAG Execution Workspace",
+  "type": "interactive-prototype",
+  "createdAt": "2026-08-15",
+  "designSystem": {
+    "name": "Minions Obsidian",
+    "source": "src/themes.ts",
+    "notes": "Uses the repository's Obsidian color, typography, border, radius, and status language as a binding visual constraint."
+  },
+  "sourceReferences": [
+    "TASK_GRAPH_ORCHESTRATION_PLAN.md",
+    "src/task-graph/GraphSummaryCard.tsx",
+    "src/task-graph/GraphInspector.tsx",
+    "src/task-graph/Topology.tsx",
+    "src/nodes/leader/TaskPlanPanel.tsx",
+    "src/nodes/leader/fullscreen/ActivityRail.tsx",
+    "user-provided DAG execution screenshots"
+  ],
+  "deliverables": [
+    {
+      "path": "index.html",
+      "kind": "self-contained interactive HTML prototype",
+      "states": [
+        "proposal review",
+        "leader-node embedded dashboard",
+        "live orchestration flow",
+        "activity intervention",
+        "completion review",
+        "revision-gap recovery",
+        "plan-to-execution map",
+        "context lineage",
+        "node and checkpoint inspector",
+        "active and attention filters",
+        "responsive side rails"
+      ]
+    },
+    {
+      "path": "ux-contract.md",
+      "kind": "implementation-facing observable state and transition contract"
+    },
+    {
+      "path": "prototype-report.md",
+      "kind": "prototype coverage and local validation report"
+    }
+  ],
+  "assets": [
+    {
+      "path": "index.html",
+      "role": "primary prototype",
+      "selfContained": true
+    },
+    {
+      "path": "ux-contract.md",
+      "role": "implementation contract",
+      "selfContained": true
+    },
+    {
+      "path": "prototype-report.md",
+      "role": "validation handoff",
+      "selfContained": true
+    }
+  ],
+  "designDecisions": [
+    "The authored plan is a persistent rail rather than another graph layer.",
+    "Leaders, minions, and checkpoints use distinct visual grammar while runtime state stays secondary.",
+    "Context checkpoints are inspectable transfer objects, not unlabeled edges.",
+    "Flow, Plan map, and Context lineage are synchronized lenses over one selection.",
+    "The canvas shows a compact execution preview; the full graph remains in a dedicated workspace.",
+    "Activity owns cross-work triage while Graph Inspector owns diagnosis and fenced intervention.",
+    "Completion review, removal, and promotion remain separate user-driven transitions.",
+    "Responsive breakpoints are automatic; rail disclosure and selection-driven inspection are user-controlled."
+  ],
+  "implementation": {
+    "updatedAt": "2026-08-15",
+    "surfaces": [
+      "src/task-graph/GraphSummaryCard.tsx",
+      "src/task-graph/GraphInspector.tsx",
+      "src/task-graph/Topology.tsx",
+      "src/task-graph/PlanRail.tsx",
+      "src/task-graph/PlanMap.tsx",
+      "src/task-graph/ContextLineage.tsx",
+      "src/task-graph/IterationTrack.tsx"
+    ],
+    "mappingPolicy": "Authored plan items map only by canonical task ID or minion session identity; context checkpoints are projected from server evidence lineage."
+  }
+}

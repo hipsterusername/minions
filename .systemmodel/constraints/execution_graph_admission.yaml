@@ -1,0 +1,29 @@
+id: constraint.execution_graph_admission
+type: constraint
+statement: The leased server scheduler and transactional outbox are the sole operational authority; readiness plus active capacity, ownership, and requested budget reservations gate every attempt admission.
+applies_to:
+  capabilities:
+    - capability.execution_graph_runtime
+  flows:
+    - flow.execute_execution_graph
+  surfaces:
+    - surface.agent_tools
+    - surface.ws_api
+  files:
+    - server/task-graph/readiness.ts
+    - server/task-graph/scheduler.ts
+    - server/task-graph/recovery.ts
+    - server/task-graph/service.ts
+    - server/task-graph/schema.ts
+    - server/session-host-agent-context.ts
+    - server/mutation-coordination.ts
+severity: critical
+agent_instruction: Persist the attempt, generation, lease-fenced reservations, and outbox row atomically before dispatch; never launch from a UI projection or bypass capacity, ownership overlap, or requested budget checks.
+review_gate: gate.execution_graph_runtime
+suggested_tests: [ server/task-graph/runtime.test.ts, server/task-graph/service.test.ts, server/mutation-coordination.test.ts, tests/task-graph/runtime.test.ts ]
+evidence: [ decision.server_owned_execution_graphs ]
+domain: domain.delegation
+scope: targeted
+guards:
+  - capability.execution_graph_runtime
+  - flow.execute_execution_graph

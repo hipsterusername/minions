@@ -1,0 +1,1076 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Minions — DAG Execution Workspace</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #000;
+      --bg-2: #09090a;
+      --surface: #131315;
+      --surface-2: #1b1b1e;
+      --surface-3: #202024;
+      --border: #29292e;
+      --border-strong: #3a3a40;
+      --text: #f2f2f0;
+      --text-2: #b7b7b2;
+      --muted: #82827d;
+      --dim: #5a5a56;
+      --gold: #e3b866;
+      --gold-2: #c99a44;
+      --gold-soft: rgba(227, 184, 102, .12);
+      --blue: #4ab8e8;
+      --blue-soft: rgba(74, 184, 232, .11);
+      --green: #8fb7a3;
+      --green-soft: rgba(143, 183, 163, .11);
+      --violet: #b79ce0;
+      --violet-soft: rgba(183, 156, 224, .10);
+      --red: #d98a7a;
+      --red-soft: rgba(217, 138, 122, .11);
+      --amber: #e3b866;
+      --shadow: 0 22px 70px rgba(0, 0, 0, .62);
+      --sans: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+      --mono: "Space Mono", "SFMono-Regular", Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-width: 320px; min-height: 100%; margin: 0; }
+    body {
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+      outline: 2px solid var(--gold);
+      outline-offset: 2px;
+    }
+    .icon { width: 15px; height: 15px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+    .micro { color: var(--muted); font: 600 9px/1.3 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .mono { font-family: var(--mono); }
+    .hidden { display: none !important; }
+
+    /* Canvas / level-zero preview */
+    .canvas-screen, .workspace-screen { position: fixed; inset: 0; }
+    .canvas-screen {
+      background:
+        radial-gradient(circle at 50% -20%, rgba(227, 184, 102, .065), transparent 38%),
+        radial-gradient(circle, #1a1a1d 1px, transparent 1px),
+        #050506;
+      background-size: auto, 22px 22px, auto;
+    }
+    .canvas-topbar {
+      position: relative;
+      z-index: 3;
+      height: 54px;
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(10, 10, 11, .92);
+      backdrop-filter: blur(14px);
+    }
+    .brandmark { display: grid; width: 27px; height: 27px; place-items: center; border: 1px solid rgba(227,184,102,.35); border-radius: 6px; background: var(--gold-soft); color: var(--gold); font: 700 12px var(--mono); }
+    .crumbs { min-width: 0; flex: 1; color: var(--muted); font-size: 11px; }
+    .crumbs strong { color: var(--text); font-weight: 620; }
+    .top-actions { display: flex; gap: 6px; }
+    .quiet-button, .primary-button, .icon-button, .segmented button, .chip-button {
+      display: inline-flex;
+      min-height: 30px;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--surface-2);
+      color: var(--text-2);
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 650;
+      transition: 140ms ease;
+    }
+    .quiet-button { padding: 0 10px; }
+    .quiet-button:hover, .icon-button:hover, .chip-button:hover { border-color: var(--border-strong); color: var(--text); background: var(--surface-3); }
+    .primary-button { padding: 0 12px; border-color: var(--gold); background: var(--gold); color: #171719; }
+    .primary-button:hover { border-color: #efd094; background: #efd094; transform: translateY(-1px); }
+    .icon-button { width: 30px; padding: 0; }
+    .canvas-note {
+      position: absolute;
+      top: 84px;
+      left: 50%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: rgba(19,19,21,.88);
+      color: var(--muted);
+      font: 9px var(--mono);
+      transform: translateX(-50%);
+    }
+    .canvas-note .pulse-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--blue); box-shadow: 0 0 0 4px rgba(74,184,232,.12); }
+    .canvas-map-node {
+      position: absolute;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: rgba(19,19,21,.66);
+      color: var(--dim);
+      box-shadow: 0 16px 38px rgba(0,0,0,.25);
+    }
+    .canvas-map-node.one { top: 27%; left: 11%; width: 210px; height: 110px; }
+    .canvas-map-node.two { right: 9%; bottom: 19%; width: 240px; height: 132px; }
+    .canvas-map-node::before { position: absolute; inset: 13px; border: 1px dashed #242429; border-radius: 5px; content: ""; }
+    .leader-preview-wrap { position: absolute; inset: 56px 0 0; display: grid; place-items: center; padding: 46px 24px 32px; }
+    .leader-preview {
+      position: relative;
+      width: min(448px, calc(100vw - 36px));
+      overflow: hidden;
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      background: linear-gradient(180deg, rgba(27,27,30,.96), var(--surface) 68px);
+      box-shadow: 0 28px 90px rgba(0,0,0,.72), 0 0 0 1px rgba(255,255,255,.015) inset;
+    }
+    .leader-preview::before { position: absolute; top: 0; left: 50%; width: 62px; height: 3px; border-radius: 0 0 4px 4px; background: var(--gold); box-shadow: 0 0 16px rgba(227,184,102,.36); content: ""; transform: translateX(-50%); }
+    .preview-head { display: flex; align-items: center; gap: 10px; padding: 12px; border-bottom: 1px solid var(--border); }
+    .leader-avatar { position: relative; display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid rgba(227,184,102,.38); border-radius: 5px; background: var(--gold-soft); color: var(--gold); }
+    .leader-avatar::after { position: absolute; right: -3px; bottom: -3px; width: 8px; height: 8px; border: 2px solid var(--surface); border-radius: 50%; background: var(--blue); content: ""; }
+    .preview-title { min-width: 0; flex: 1; }
+    .preview-title strong { display: block; overflow: hidden; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    .preview-title span { display: block; margin-top: 3px; color: var(--blue); font: 600 9px var(--mono); letter-spacing: .04em; text-transform: uppercase; }
+    .preview-cost { color: var(--muted); font: 9px var(--mono); }
+    .preview-goal { padding: 12px 14px 10px; }
+    .preview-goal .micro { margin-bottom: 5px; }
+    .preview-goal p { margin: 0; color: var(--text-2); font-size: 11px; line-height: 1.45; }
+    .run-preview { margin: 0 10px 10px; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; background: #0c0c0e; }
+    .run-preview-head { display: flex; align-items: center; gap: 8px; padding: 9px 10px 8px; border-bottom: 1px solid var(--border); }
+    .run-preview-head strong { flex: 1; font-size: 11px; }
+    .run-preview-head .running { color: var(--blue); font: 600 9px var(--mono); }
+    .run-preview-stats { display: flex; align-items: center; gap: 10px; color: var(--muted); font: 9px var(--mono); }
+    .run-preview-stats b { color: var(--text); font-weight: 650; }
+    .mini-graph { position: relative; height: 92px; overflow: hidden; background: radial-gradient(circle, #1b1b1e .8px, transparent .9px); background-size: 14px 14px; }
+    .mini-graph svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .mini-edge { fill: none; stroke: #39393e; stroke-width: 1.2; }
+    .mini-edge.active { stroke: var(--blue); stroke-dasharray: 3 3; }
+    .mini-node { position: absolute; display: grid; height: 19px; place-items: center; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--surface-2); color: var(--muted); font: 700 7px var(--mono); }
+    .mini-node.lead { width: 38px; border-color: rgba(227,184,102,.65); color: var(--gold); }
+    .mini-node.task { width: 30px; }
+    .mini-node.done { border-color: rgba(143,183,163,.62); color: var(--green); }
+    .mini-node.run { border-color: var(--blue); color: var(--blue); box-shadow: 0 0 9px rgba(74,184,232,.18); }
+    .mini-node.check { width: 27px; transform: rotate(45deg); border-color: rgba(143,183,163,.62); }
+    .mini-node.check span { transform: rotate(-45deg); }
+    .mini-node.future { opacity: .45; }
+    .preview-plan { padding: 0 10px 10px; }
+    .preview-plan-row { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 7px; padding: 6px 7px; border-top: 1px solid #202024; font-size: 10px; }
+    .preview-plan-row:first-child { border-top: 0; }
+    .preview-plan-row .checkmark { color: var(--green); font: 700 10px var(--mono); }
+    .preview-plan-row .spinner { color: var(--blue); font: 700 10px var(--mono); }
+    .preview-plan-row small { color: var(--muted); font: 8px var(--mono); }
+    .preview-foot { display: flex; align-items: center; gap: 10px; padding: 10px; border-top: 1px solid var(--border); background: #101012; }
+    .preview-foot p { flex: 1; margin: 0; color: var(--muted); font-size: 9px; }
+
+    /* Full execution workspace */
+    .workspace-screen { display: flex; flex-direction: column; background: var(--bg); }
+    .workspace-header {
+      z-index: 10;
+      display: flex;
+      min-height: 54px;
+      align-items: center;
+      gap: 11px;
+      padding: 0 13px;
+      border-bottom: 1px solid var(--border);
+      background: #0b0b0c;
+    }
+    .workspace-heading { min-width: 0; flex: 1; }
+    .workspace-heading .title-line { display: flex; align-items: center; gap: 8px; }
+    .workspace-heading h1 { overflow: hidden; margin: 0; font-size: 13px; font-weight: 650; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+    .run-pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 6px; border: 1px solid rgba(74,184,232,.28); border-radius: 4px; background: var(--blue-soft); color: var(--blue); font: 650 8px var(--mono); text-transform: uppercase; }
+    .run-pill::before { width: 5px; height: 5px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px rgba(74,184,232,.10); content: ""; }
+    .workspace-heading .subline { margin-top: 3px; color: var(--muted); font: 8px var(--mono); }
+    .header-metrics { display: flex; align-items: center; gap: 14px; padding: 0 8px; }
+    .header-metric { min-width: 54px; }
+    .header-metric span { display: block; color: var(--dim); font: 600 7px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .header-metric strong { display: block; margin-top: 2px; color: var(--text-2); font: 650 9px var(--mono); }
+    .workspace-actions { display: flex; align-items: center; gap: 5px; }
+    .mission-strip {
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) auto;
+      align-items: center;
+      gap: 18px;
+      min-height: 66px;
+      padding: 9px 14px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(90deg, rgba(227,184,102,.055), transparent 42%), #0d0d0f;
+    }
+    .mission-copy { display: flex; min-width: 0; align-items: center; gap: 11px; }
+    .mission-icon { display: grid; width: 32px; height: 32px; flex: 0 0 auto; place-items: center; border: 1px solid rgba(227,184,102,.32); border-radius: 50%; background: var(--gold-soft); color: var(--gold); }
+    .mission-copy h2 { margin: 0 0 3px; color: var(--text); font-size: 12px; font-weight: 620; }
+    .mission-copy p { overflow: hidden; margin: 0; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .mission-progress { width: min(420px, 35vw); }
+    .progress-labels { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; color: var(--muted); font: 8px var(--mono); }
+    .progress-labels strong { color: var(--text-2); }
+    .segmented-progress { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+    .segmented-progress span { height: 4px; border-radius: 3px; background: #242428; }
+    .segmented-progress .done { background: var(--green); }
+    .segmented-progress .active { background: var(--blue); box-shadow: 0 0 9px rgba(74,184,232,.32); }
+
+    .workspace-main {
+      display: grid;
+      min-height: 0;
+      flex: 1;
+      grid-template-columns: 246px minmax(440px, 1fr) 304px;
+      transition: grid-template-columns 180ms ease;
+    }
+    .workspace-screen.plan-collapsed .workspace-main { grid-template-columns: 42px minmax(440px, 1fr) 304px; }
+    .workspace-screen.detail-collapsed .workspace-main { grid-template-columns: 246px minmax(440px, 1fr) 42px; }
+    .workspace-screen.plan-collapsed.detail-collapsed .workspace-main { grid-template-columns: 42px minmax(440px, 1fr) 42px; }
+    .side-rail { min-width: 0; overflow: hidden; background: #0d0d0f; }
+    .plan-rail { border-right: 1px solid var(--border); }
+    .detail-rail { border-left: 1px solid var(--border); }
+    .rail-head { display: flex; min-height: 43px; align-items: center; gap: 7px; padding: 0 9px 0 12px; border-bottom: 1px solid var(--border); }
+    .rail-head strong { min-width: 0; flex: 1; font-size: 10px; font-weight: 650; }
+    .rail-head small { color: var(--muted); font: 8px var(--mono); }
+    .rail-toggle { display: grid; width: 25px; height: 25px; place-items: center; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+    .rail-toggle:hover { background: var(--surface-2); color: var(--text); }
+    .workspace-screen.plan-collapsed .plan-rail .rail-head { height: 100%; flex-direction: column; justify-content: flex-start; padding: 9px 0; }
+    .workspace-screen.plan-collapsed .plan-rail .rail-head strong { flex: 0; writing-mode: vertical-rl; transform: rotate(180deg); }
+    .workspace-screen.plan-collapsed .plan-rail .rail-head small, .workspace-screen.plan-collapsed .plan-contents { display: none; }
+    .workspace-screen.detail-collapsed .detail-rail .rail-head { height: 100%; flex-direction: column; justify-content: flex-start; padding: 9px 0; }
+    .workspace-screen.detail-collapsed .detail-rail .rail-head strong { flex: 0; writing-mode: vertical-rl; }
+    .workspace-screen.detail-collapsed .detail-rail .rail-head small, .workspace-screen.detail-collapsed .detail-contents { display: none; }
+    .plan-contents, .detail-contents { height: calc(100% - 43px); overflow: auto; }
+    .plan-summary { padding: 10px 11px; border-bottom: 1px solid var(--border); }
+    .plan-summary-row { display: flex; justify-content: space-between; color: var(--muted); font: 8px var(--mono); }
+    .thin-progress { height: 3px; margin-top: 7px; overflow: hidden; border-radius: 3px; background: #26262a; }
+    .thin-progress span { display: block; width: 51%; height: 100%; background: linear-gradient(90deg, var(--green), var(--blue)); }
+    .plan-list { list-style: none; margin: 0; padding: 6px; }
+    .plan-item { margin: 1px 0; }
+    .plan-button {
+      position: relative;
+      display: grid;
+      width: 100%;
+      grid-template-columns: 23px 1fr auto;
+      align-items: start;
+      gap: 7px;
+      padding: 8px 6px;
+      border: 1px solid transparent;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--text-2);
+      cursor: pointer;
+      text-align: left;
+    }
+    .plan-button:hover { background: var(--surface); }
+    .plan-button[aria-pressed="true"] { border-color: rgba(227,184,102,.4); background: var(--gold-soft); }
+    .plan-id { display: grid; width: 21px; height: 21px; place-items: center; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); font: 650 7px var(--mono); }
+    .plan-item.done .plan-id { border-color: rgba(143,183,163,.42); color: var(--green); }
+    .plan-item.running .plan-id { border-color: rgba(74,184,232,.55); color: var(--blue); box-shadow: 0 0 8px rgba(74,184,232,.10); }
+    .plan-copy { min-width: 0; }
+    .plan-copy strong { display: block; overflow: hidden; font-size: 10px; font-weight: 580; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+    .plan-copy small { display: block; overflow: hidden; margin-top: 3px; color: var(--muted); font: 8px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+    .plan-state { margin-top: 2px; color: var(--dim); font: 7px var(--mono); text-transform: uppercase; }
+    .plan-item.running .plan-state { color: var(--blue); }
+    .plan-item.done .plan-state { color: var(--green); }
+    .plan-legend { margin: 5px 11px 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+    .legend-row { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: 7px; color: var(--muted); font: 8px var(--mono); }
+    .legend-key { display: inline-flex; align-items: center; gap: 5px; }
+    .legend-shape { width: 10px; height: 7px; border: 1px solid var(--border-strong); border-radius: 2px; }
+    .legend-shape.leader { border-color: var(--gold); }
+    .legend-shape.minion { border-color: var(--blue); }
+    .legend-shape.checkpoint { border-color: var(--green); transform: rotate(45deg); }
+
+    .graph-shell { display: flex; min-width: 0; min-height: 0; flex-direction: column; background: #070708; }
+    .graph-toolbar { display: flex; min-height: 43px; align-items: center; gap: 8px; padding: 6px 9px; border-bottom: 1px solid var(--border); background: #101012; }
+    .segmented { display: inline-flex; padding: 2px; border: 1px solid var(--border); border-radius: 6px; background: #09090a; }
+    .segmented button { min-height: 25px; padding: 0 9px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 9px; }
+    .segmented button:hover { color: var(--text); }
+    .segmented button[aria-selected="true"] { background: var(--surface-2); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+    .toolbar-spacer { flex: 1; }
+    .chip-button { min-height: 26px; padding: 0 8px; background: transparent; color: var(--muted); font: 600 8px var(--mono); }
+    .chip-button[aria-pressed="true"] { border-color: rgba(74,184,232,.45); background: var(--blue-soft); color: var(--blue); }
+    .selection-chip { display: none; align-items: center; gap: 5px; padding: 4px 7px; border: 1px solid rgba(227,184,102,.28); border-radius: 4px; background: var(--gold-soft); color: var(--gold); font: 7px var(--mono); }
+    .selection-chip.visible { display: inline-flex; }
+    .graph-content { position: relative; min-height: 0; flex: 1; overflow: hidden; }
+    .view-panel { position: absolute; inset: 0; overflow: auto; }
+
+    /* Flow view */
+    .flow-stage {
+      position: relative;
+      width: 1180px;
+      min-height: 100%;
+      height: 550px;
+      overflow: hidden;
+      background:
+        linear-gradient(90deg, transparent 0, transparent 375px, rgba(143,183,163,.035) 375px, rgba(143,183,163,.035) 505px, transparent 505px, transparent 865px, rgba(143,183,163,.025) 865px, rgba(143,183,163,.025) 995px, transparent 995px),
+        radial-gradient(circle, #1c1c20 .8px, transparent .9px),
+        #070708;
+      background-size: auto, 17px 17px, auto;
+    }
+    .phase-label { position: absolute; top: 16px; color: var(--dim); font: 650 8px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+    .phase-label span { margin-left: 6px; color: #343439; }
+    .phase-one { left: 26px; }
+    .phase-check-one { left: 396px; color: var(--green); }
+    .phase-two { left: 535px; }
+    .phase-check-two { left: 876px; color: var(--green); }
+    .flow-hint { position: absolute; right: 16px; bottom: 15px; display: flex; align-items: center; gap: 7px; color: var(--dim); font: 8px var(--mono); }
+    .flow-hint kbd { padding: 2px 5px; border: 1px solid var(--border); border-bottom-color: var(--border-strong); border-radius: 3px; background: var(--surface); color: var(--muted); font: inherit; }
+    .edge-layer { position: absolute; top: 46px; left: 0; width: 1180px; height: 470px; overflow: visible; pointer-events: none; }
+    .dag-edge { fill: none; stroke: #333339; stroke-width: 1.2; transition: opacity 140ms ease, stroke 140ms ease, stroke-width 140ms ease; }
+    .dag-edge.context { stroke: rgba(143,183,163,.55); stroke-dasharray: 5 5; }
+    .dag-edge.active { stroke: var(--blue); stroke-dasharray: 5 5; animation: dash 7s linear infinite; }
+    .dag-edge.related { stroke: var(--gold); stroke-width: 2; opacity: 1 !important; }
+    .edge-label { fill: var(--dim); font: 7px var(--mono); letter-spacing: .04em; text-transform: uppercase; }
+    .arrow-head { fill: #45454b; }
+    .arrow-context { fill: var(--green); }
+    @keyframes dash { to { stroke-dashoffset: -60; } }
+    .dag-node {
+      position: absolute;
+      z-index: 2;
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      justify-content: center;
+      padding: 9px 9px 8px 11px;
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      background: linear-gradient(180deg, #1a1a1d, #131315);
+      box-shadow: 0 9px 18px rgba(0,0,0,.32);
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+      transition: opacity 150ms ease, transform 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+    }
+    .dag-node:hover { z-index: 5; transform: translateY(-2px); border-color: #56565e; box-shadow: 0 13px 28px rgba(0,0,0,.46); }
+    .dag-node.selected { z-index: 6; border-color: var(--gold) !important; box-shadow: 0 0 0 2px rgba(227,184,102,.11), 0 14px 32px rgba(0,0,0,.5); }
+    .dag-node.dimmed { opacity: .18; }
+    .dag-node.related { opacity: 1; }
+    .dag-node .node-top { display: flex; align-items: center; gap: 5px; margin-bottom: 5px; }
+    .role-badge { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font: 650 7px var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+    .role-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+    .plan-badge { margin-left: auto; padding: 2px 4px; border: 1px solid var(--border); border-radius: 3px; color: var(--muted); font: 650 6px var(--mono); }
+    .dag-node strong { display: block; overflow: hidden; font-size: 10px; font-weight: 620; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+    .node-meta { display: flex; align-items: center; gap: 5px; margin-top: 5px; color: var(--muted); font: 7px var(--mono); }
+    .state-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); }
+    .node-meta .grow { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dag-node.leader { width: 142px; height: 76px; border-color: rgba(227,184,102,.42); background: linear-gradient(180deg, rgba(227,184,102,.105), rgba(19,19,21,.98) 62%); }
+    .dag-node.leader .role-badge { color: var(--gold); }
+    .dag-node.minion { width: 160px; height: 64px; border-left: 2px solid rgba(74,184,232,.68); }
+    .dag-node.minion .role-badge { color: var(--blue); }
+    .dag-node.checkpoint { width: 126px; height: 88px; padding: 9px; border-color: rgba(143,183,163,.48); background: linear-gradient(180deg, rgba(143,183,163,.11), #111314); text-align: center; }
+    .dag-node.checkpoint .node-top { justify-content: center; }
+    .dag-node.checkpoint .role-badge { color: var(--green); }
+    .dag-node.checkpoint .plan-badge { position: absolute; top: 7px; right: 7px; }
+    .dag-node.future { border-style: dashed; opacity: .47; box-shadow: none; }
+    .dag-node.done .state-dot { background: var(--green); }
+    .dag-node.running .state-dot { background: var(--blue); box-shadow: 0 0 0 3px rgba(74,184,232,.10), 0 0 8px rgba(74,184,232,.45); }
+    .dag-node.blocked { border-color: rgba(227,184,102,.45); }
+    .dag-node.blocked .state-dot { background: var(--amber); }
+    .dag-node.queued .state-dot { background: var(--dim); }
+    .node-progress { position: absolute; right: 7px; bottom: 5px; left: 7px; height: 2px; overflow: hidden; border-radius: 2px; background: #252529; }
+    .node-progress span { display: block; height: 100%; background: var(--blue); }
+    .attention-badge { position: absolute; top: -7px; right: -6px; display: grid; width: 17px; height: 17px; place-items: center; border: 2px solid #070708; border-radius: 50%; background: var(--amber); color: #151516; font: 800 8px var(--mono); }
+    .l1 { left: 24px; top: 239px; }
+    .m1 { left: 190px; top: 73px; }
+    .m2 { left: 190px; top: 167px; }
+    .m3 { left: 190px; top: 261px; }
+    .m4 { left: 190px; top: 355px; }
+    .c1 { left: 390px; top: 233px; }
+    .l2 { left: 540px; top: 239px; }
+    .m5 { left: 710px; top: 111px; }
+    .m6 { left: 710px; top: 239px; }
+    .m7 { left: 710px; top: 367px; }
+    .c2 { left: 900px; top: 233px; }
+    .l3 { left: 1048px; top: 239px; }
+    .stage-metric { position: absolute; top: 51px; display: flex; gap: 8px; color: var(--dim); font: 7px var(--mono); }
+    .stage-metric b { color: var(--muted); font-weight: 600; }
+    .metric-one { left: 24px; }
+    .metric-two { left: 540px; }
+    .graph-filter-active .dag-node[data-state="done"], .graph-filter-active .dag-node[data-state="queued"] { opacity: .15; }
+    .graph-filter-active .dag-node[data-state="done"].related, .graph-filter-active .dag-node[data-state="queued"].related { opacity: .75; }
+    .graph-filter-active .dag-edge { opacity: .18; }
+    .graph-filter-attention .dag-node:not([data-issue="true"]) { opacity: .13; }
+    .graph-filter-attention .dag-edge { opacity: .1; }
+
+    /* Plan map lens */
+    .plan-map { min-width: 860px; padding: 14px 16px 36px; }
+    .lens-intro { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+    .lens-intro h3 { margin: 0 0 4px; font-size: 12px; }
+    .lens-intro p { max-width: 590px; margin: 0; color: var(--muted); font-size: 9px; line-height: 1.45; }
+    .coverage-pill { padding: 5px 7px; border: 1px solid rgba(143,183,163,.28); border-radius: 4px; background: var(--green-soft); color: var(--green); font: 650 8px var(--mono); white-space: nowrap; }
+    .map-grid { display: grid; grid-template-columns: 194px 134px minmax(260px, 1fr) 134px 126px; border: 1px solid var(--border); border-radius: 6px; background: #0c0c0e; }
+    .map-cell { min-height: 51px; display: flex; align-items: center; gap: 5px; padding: 7px 8px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .map-cell:nth-child(5n) { border-right: 0; }
+    .map-cell.header { min-height: 31px; background: #131315; color: var(--muted); font: 650 7px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .map-cell.last-row { border-bottom: 0; }
+    .map-plan { align-items: flex-start; flex-direction: column; }
+    .map-plan strong { font-size: 9px; }
+    .map-plan small { color: var(--muted); font: 7px var(--mono); }
+    .task-chip { display: inline-flex; max-width: 100%; align-items: center; gap: 4px; padding: 4px 6px; border: 1px solid rgba(74,184,232,.25); border-radius: 4px; background: var(--blue-soft); color: var(--text-2); font: 7px var(--mono); white-space: nowrap; }
+    .task-chip.lead { border-color: rgba(227,184,102,.3); background: var(--gold-soft); color: var(--gold); }
+    .task-chip.check { border-color: rgba(143,183,163,.3); background: var(--green-soft); color: var(--green); }
+    .task-chip.ghost { border-style: dashed; background: transparent; color: var(--dim); }
+    .map-stack { display: flex; flex-wrap: wrap; gap: 4px; }
+    .empty-cell { color: #343439; font: 8px var(--mono); }
+
+    /* Context lineage lens */
+    .lineage-lens { min-width: 850px; padding: 14px 18px 40px; }
+    .checkpoint-switcher { display: flex; gap: 5px; }
+    .lineage-flow { position: relative; display: grid; grid-template-columns: 1fr 1.16fr 1fr; gap: 32px; margin-top: 20px; }
+    .lineage-flow::before { position: absolute; top: 52px; right: 16%; left: 16%; height: 1px; background: linear-gradient(90deg, var(--gold), var(--green), var(--gold)); content: ""; opacity: .48; }
+    .lineage-card { position: relative; z-index: 1; min-height: 128px; padding: 11px; border: 1px solid var(--border); border-radius: 6px; background: #131315; }
+    .lineage-card.source { border-top-color: var(--gold); }
+    .lineage-card.packet { border-color: rgba(143,183,163,.5); background: linear-gradient(180deg, var(--green-soft), #111314); }
+    .lineage-card.target { border-top-color: var(--gold); }
+    .lineage-icon { display: grid; width: 27px; height: 27px; margin-bottom: 8px; place-items: center; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--surface-2); color: var(--muted); }
+    .source .lineage-icon, .target .lineage-icon { color: var(--gold); }
+    .packet .lineage-icon { color: var(--green); }
+    .lineage-card h4 { margin: 0; font-size: 10px; }
+    .lineage-card p { margin: 4px 0 0; color: var(--muted); font-size: 8px; line-height: 1.45; }
+    .lineage-card .hash { display: block; margin-top: 10px; color: var(--dim); font: 7px var(--mono); }
+    .manifest-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+    .manifest-section { min-height: 180px; padding: 11px; border: 1px solid var(--border); border-radius: 6px; background: #0d0d0f; }
+    .manifest-section h4 { display: flex; align-items: center; justify-content: space-between; margin: 0 0 9px; color: var(--muted); font: 650 8px var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+    .manifest-section h4 span { color: var(--text); }
+    .manifest-item { display: flex; align-items: flex-start; gap: 7px; padding: 7px 0; border-top: 1px solid #232327; }
+    .manifest-item:first-of-type { border-top: 0; }
+    .manifest-item .kind { display: grid; width: 18px; height: 18px; flex: 0 0 auto; place-items: center; border: 1px solid var(--border); border-radius: 3px; color: var(--muted); font: 650 7px var(--mono); }
+    .manifest-item strong { display: block; font-size: 8px; font-weight: 580; }
+    .manifest-item small { display: block; margin-top: 2px; color: var(--dim); font: 7px var(--mono); line-height: 1.35; }
+    .manifest-section.include { border-color: rgba(143,183,163,.24); }
+    .manifest-section.reference { border-color: rgba(74,184,232,.22); }
+    .manifest-section.omit { border-color: rgba(217,138,122,.18); }
+    .manifest-section.include h4 { color: var(--green); }
+    .manifest-section.reference h4 { color: var(--blue); }
+    .manifest-section.omit h4 { color: var(--red); }
+
+    /* Detail rail */
+    .detail-status { display: flex; align-items: center; gap: 6px; padding: 10px 11px; border-bottom: 1px solid var(--border); }
+    .detail-status-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 6px; border: 1px solid rgba(143,183,163,.28); border-radius: 4px; background: var(--green-soft); color: var(--green); font: 650 7px var(--mono); text-transform: uppercase; }
+    .detail-status-badge.running { border-color: rgba(74,184,232,.3); background: var(--blue-soft); color: var(--blue); }
+    .detail-status-badge.queued { border-color: var(--border); background: var(--surface); color: var(--muted); }
+    .detail-section { padding: 11px; border-bottom: 1px solid var(--border); }
+    .detail-section h4 { margin: 0 0 8px; color: var(--muted); font: 650 8px var(--mono); letter-spacing: .07em; text-transform: uppercase; }
+    .detail-section p { margin: 0; color: var(--text-2); font-size: 9px; line-height: 1.55; }
+    .detail-title { margin: 0 0 3px; font-size: 12px; font-weight: 640; }
+    .detail-kicker { color: var(--muted); font: 7px var(--mono); }
+    .lineage-mini { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; align-items: center; gap: 4px; }
+    .lineage-mini .box { overflow: hidden; padding: 6px 4px; border: 1px solid var(--border); border-radius: 4px; background: #0a0a0b; color: var(--muted); font: 6px var(--mono); text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+    .lineage-mini .arrow { color: var(--dim); font-size: 9px; }
+    .kv-list { margin: 0; }
+    .kv-row { display: grid; grid-template-columns: 88px 1fr; gap: 7px; padding: 5px 0; border-top: 1px solid #222226; }
+    .kv-row:first-child { border-top: 0; }
+    .kv-row dt { color: var(--muted); font: 7px var(--mono); }
+    .kv-row dd { overflow: hidden; margin: 0; color: var(--text-2); font-size: 8px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+    .context-chip-list { display: flex; flex-wrap: wrap; gap: 4px; }
+    .context-chip { padding: 4px 5px; border: 1px solid rgba(143,183,163,.22); border-radius: 4px; background: var(--green-soft); color: var(--green); font: 7px var(--mono); }
+    .attention-card { padding: 8px; border: 1px solid rgba(227,184,102,.24); border-radius: 5px; background: var(--gold-soft); }
+    .attention-card strong { display: block; color: var(--gold); font-size: 8px; }
+    .attention-card p { margin-top: 4px; color: var(--text-2); font-size: 8px; }
+    .detail-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; padding: 10px 11px 16px; }
+    .detail-actions .quiet-button, .detail-actions .primary-button { width: 100%; }
+
+    /* Iteration bar */
+    .iteration-bar { display: grid; grid-template-columns: 140px 1fr auto; align-items: center; gap: 12px; min-height: 62px; padding: 7px 11px; border-top: 1px solid var(--border); background: #0c0c0e; }
+    .iteration-summary strong { display: block; font-size: 9px; }
+    .iteration-summary span { display: block; margin-top: 3px; color: var(--muted); font: 7px var(--mono); }
+    .iteration-track { position: relative; display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+    .iteration-track::before { position: absolute; top: 10px; right: 6%; left: 6%; height: 1px; background: #343439; content: ""; }
+    .iteration-step { position: relative; display: flex; align-items: center; flex-direction: column; gap: 4px; border: 0; background: transparent; color: var(--dim); cursor: pointer; font: 7px var(--mono); }
+    .iteration-step .dot { z-index: 1; display: grid; width: 20px; height: 20px; place-items: center; border: 1px solid var(--border-strong); border-radius: 50%; background: #0c0c0e; }
+    .iteration-step.done { color: var(--green); }
+    .iteration-step.done .dot { border-color: var(--green); }
+    .iteration-step.active { color: var(--blue); }
+    .iteration-step.active .dot { border-color: var(--blue); box-shadow: 0 0 0 4px var(--blue-soft); }
+    .iteration-step.checkpoint .dot { border-radius: 4px; transform: rotate(45deg); }
+    .iteration-step.checkpoint .dot span { transform: rotate(-45deg); }
+    .iteration-note { color: var(--muted); font: 7px var(--mono); white-space: nowrap; }
+
+    .toast { position: fixed; z-index: 30; right: 18px; bottom: 18px; max-width: 310px; padding: 9px 11px; border: 1px solid var(--border-strong); border-radius: 5px; background: #1b1b1e; box-shadow: var(--shadow); color: var(--text-2); font-size: 9px; opacity: 0; pointer-events: none; transform: translateY(8px); transition: 180ms ease; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    /* Funnel simulator: the five states map to Leader, Dashboard, Activity, and Inspector. */
+    .funnel-nav {
+      position: fixed; z-index: 80; right: 16px; bottom: 16px; display: flex; max-width: calc(100vw - 32px);
+      gap: 3px; padding: 4px; overflow-x: auto; border: 1px solid var(--border-strong); border-radius: 8px;
+      background: rgba(13,13,15,.96); box-shadow: var(--shadow); backdrop-filter: blur(16px);
+    }
+    .funnel-nav button { min-width: max-content; padding: 7px 9px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; font: 650 8px var(--mono); }
+    .funnel-nav button:hover { color: var(--text); background: var(--surface-2); }
+    .funnel-nav button[aria-current="step"] { background: var(--gold-soft); color: var(--gold); }
+    .funnel-nav b { display: inline-grid; width: 16px; height: 16px; margin-right: 5px; place-items: center; border: 1px solid currentColor; border-radius: 50%; font-size: 7px; }
+    .surface-label { position: fixed; z-index: 79; right: 18px; bottom: 64px; padding: 4px 7px; border-radius: 4px; background: #0d0d0f; color: var(--muted); font: 650 7px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+
+    .scene-layer { position: fixed; z-index: 55; inset: 0; display: grid; place-items: center; padding: 28px; background: rgba(0,0,0,.74); backdrop-filter: blur(8px); }
+    .scene-card { width: min(720px, 100%); max-height: calc(100vh - 56px); overflow: auto; border: 1px solid var(--border-strong); border-radius: 9px; background: #111113; box-shadow: var(--shadow); }
+    .scene-head { display: flex; align-items: flex-start; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--border); }
+    .scene-mark { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border: 1px solid rgba(227,184,102,.4); border-radius: 6px; background: var(--gold-soft); color: var(--gold); font: 700 12px var(--mono); }
+    .scene-head div:nth-child(2) { min-width: 0; flex: 1; }
+    .scene-head h2 { margin: 2px 0 4px; font-size: 16px; }
+    .scene-head p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+    .scene-body { padding: 16px 18px; }
+    .proposal-goal { margin: 0 0 13px; color: var(--text-2); font-size: 12px; line-height: 1.5; }
+    .proposal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .proposal-step { position: relative; min-height: 76px; padding: 11px 11px 10px 36px; border: 1px solid var(--border); border-radius: 6px; background: #0b0b0d; }
+    .proposal-step b { position: absolute; top: 11px; left: 11px; display: grid; width: 17px; height: 17px; place-items: center; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--muted); font: 650 7px var(--mono); }
+    .proposal-step strong { display: block; font-size: 10px; }
+    .proposal-step span { display: block; margin-top: 5px; color: var(--muted); font-size: 9px; line-height: 1.4; }
+    .proposal-step small { display: block; margin-top: 7px; color: var(--blue); font: 7px var(--mono); }
+    .gate-note { display: flex; gap: 9px; margin-top: 12px; padding: 10px; border: 1px solid rgba(227,184,102,.25); border-radius: 6px; background: var(--gold-soft); color: var(--text-2); font-size: 9px; line-height: 1.45; }
+    .gate-note b { color: var(--gold); }
+    .scene-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; padding: 12px 18px; border-top: 1px solid var(--border); background: #0d0d0f; }
+    .scene-actions .hint { margin-right: auto; color: var(--muted); font: 7px var(--mono); }
+
+    .activity-peek { position: fixed; z-index: 54; top: 72px; right: 18px; width: min(360px, calc(100vw - 36px)); border: 1px solid rgba(217,138,122,.45); border-radius: 8px; background: #151416; box-shadow: var(--shadow); }
+    .activity-peek header { display: flex; align-items: center; gap: 9px; padding: 11px 12px; border-bottom: 1px solid var(--border); }
+    .activity-peek header strong { flex: 1; font-size: 11px; }
+    .activity-peek .attention-count { display: grid; width: 21px; height: 21px; place-items: center; border-radius: 50%; background: var(--red-soft); color: var(--red); font: 700 8px var(--mono); }
+    .activity-row { padding: 12px; }
+    .activity-row .micro { color: var(--red); }
+    .activity-row h3 { margin: 6px 0 4px; font-size: 12px; }
+    .activity-row p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
+    .activity-actions { display: flex; gap: 6px; margin-top: 10px; }
+    .state-banner { position: fixed; z-index: 53; top: 64px; left: 50%; display: flex; width: min(680px, calc(100vw - 36px)); align-items: center; gap: 10px; padding: 9px 11px; border: 1px solid var(--border-strong); border-radius: 6px; background: #171719; box-shadow: 0 14px 38px rgba(0,0,0,.5); transform: translateX(-50%); }
+    .state-banner strong { color: var(--text); font-size: 9px; }
+    .state-banner span { min-width: 0; flex: 1; color: var(--muted); font-size: 9px; }
+    .state-banner.attention { border-color: rgba(217,138,122,.42); }
+    .state-banner.attention strong { color: var(--red); }
+    .state-banner.recovery { border-color: rgba(227,184,102,.4); }
+    .state-banner.recovery strong { color: var(--gold); }
+    .completion-card .scene-mark { border-color: rgba(143,183,163,.42); background: var(--green-soft); color: var(--green); }
+    .completion-metrics { display: grid; grid-template-columns: repeat(4,1fr); gap: 7px; margin: 14px 0; }
+    .completion-metrics div { padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: #0b0b0d; }
+    .completion-metrics strong { display: block; color: var(--green); font: 650 13px var(--mono); }
+    .completion-metrics span { display: block; margin-top: 4px; color: var(--muted); font: 7px var(--mono); text-transform: uppercase; }
+    .recovery-list { margin: 12px 0 0; padding: 0; list-style: none; }
+    .recovery-list li { display: grid; grid-template-columns: 84px 1fr; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); color: var(--muted); font-size: 9px; }
+    .recovery-list b { color: var(--text-2); font: 650 7px var(--mono); text-transform: uppercase; }
+
+    @media (max-width: 1120px) {
+      .workspace-main { grid-template-columns: 220px minmax(430px, 1fr) 270px; }
+      .workspace-screen.plan-collapsed .workspace-main { grid-template-columns: 42px minmax(430px, 1fr) 270px; }
+      .workspace-screen.detail-collapsed .workspace-main { grid-template-columns: 220px minmax(430px, 1fr) 42px; }
+      .header-metrics .header-metric:nth-child(3) { display: none; }
+      .mission-progress { width: 310px; }
+    }
+    @media (max-width: 900px) {
+      .workspace-main, .workspace-screen.plan-collapsed .workspace-main, .workspace-screen.detail-collapsed .workspace-main, .workspace-screen.plan-collapsed.detail-collapsed .workspace-main { grid-template-columns: 42px minmax(0, 1fr) 42px; }
+      .workspace-screen:not(.plan-collapsed) .plan-rail { position: absolute; z-index: 20; top: 120px; bottom: 62px; left: 0; width: 246px; box-shadow: 18px 0 35px rgba(0,0,0,.5); }
+      .workspace-screen:not(.detail-collapsed) .detail-rail { position: absolute; z-index: 20; top: 120px; right: 0; bottom: 62px; width: 304px; box-shadow: -18px 0 35px rgba(0,0,0,.5); }
+      .workspace-screen.plan-collapsed .plan-rail .rail-head, .workspace-screen.detail-collapsed .detail-rail .rail-head { height: 100%; }
+      .header-metrics { display: none; }
+      .mission-strip { grid-template-columns: 1fr; }
+      .mission-progress { width: 100%; }
+      .mission-copy p { white-space: normal; }
+      .iteration-bar { grid-template-columns: 100px 1fr; }
+      .iteration-note { display: none; }
+    }
+    @media (max-width: 620px) {
+      .canvas-topbar .top-actions .quiet-button { display: none; }
+      .canvas-map-node { display: none; }
+      .workspace-header { padding: 0 8px; }
+      .workspace-actions .quiet-button { display: none; }
+      .workspace-heading .subline { display: none; }
+      .mission-strip { min-height: 62px; padding: 8px 10px; }
+      .mission-icon { display: none; }
+      .mission-copy h2 { font-size: 10px; }
+      .mission-progress { display: none; }
+      .graph-toolbar { overflow-x: auto; }
+      .selection-chip { display: none !important; }
+      .iteration-bar { grid-template-columns: 1fr; }
+      .iteration-summary { display: none; }
+      .iteration-step { font-size: 0; }
+      .manifest-grid { grid-template-columns: 1fr; }
+      .lineage-flow { grid-template-columns: 1fr; }
+      .lineage-flow::before { display: none; }
+      .funnel-nav { right: 8px; bottom: 8px; left: 8px; max-width: none; }
+      .surface-label { right: 10px; bottom: 58px; }
+      .scene-layer { padding: 10px; }
+      .scene-card { max-height: calc(100vh - 20px); }
+      .proposal-grid { grid-template-columns: 1fr; }
+      .completion-metrics { grid-template-columns: 1fr 1fr; }
+      .scene-head, .scene-body { padding: 13px; }
+      .scene-actions { flex-wrap: wrap; padding: 10px 13px 66px; }
+      .scene-actions .hint { width: 100%; }
+      .activity-peek { top: 60px; right: 8px; width: calc(100vw - 16px); }
+      .state-banner { top: 58px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" aria-hidden="true" focusable="false">
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M21 16v5h-5" /></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></symbol>
+    <symbol id="i-goal" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M15 9 21 3M18 3h3v3"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14" /></symbol>
+    <symbol id="i-columns" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/></symbol>
+    <symbol id="i-focus" viewBox="0 0 24 24"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M21 16v5h-5"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-leader" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3"/><path d="M6 20c.5-4 2.5-6 6-6s5.5 2 6 6M5 9a7 7 0 0 1 14 0"/></symbol>
+    <symbol id="i-packet" viewBox="0 0 24 24"><path d="m12 3 8 4-8 4-8-4 8-4Z"/><path d="m4 12 8 4 8-4M4 17l8 4 8-4"/></symbol>
+  </svg>
+
+  <nav class="funnel-nav" aria-label="Prototype funnel stages">
+    <button data-stage="proposal" aria-current="step"><b>1</b>Review</button>
+    <button data-stage="live"><b>2</b>Execute</button>
+    <button data-stage="intervention"><b>3</b>Intervene</button>
+    <button data-stage="complete"><b>4</b>Complete</button>
+    <button data-stage="recovery"><b>5</b>Recover</button>
+  </nav>
+  <div class="surface-label" id="surfaceLabel">Leader node · proposal review</div>
+
+  <section class="scene-layer" id="proposalScene" aria-label="Proposal review state">
+    <article class="scene-card" role="dialog" aria-modal="true" aria-labelledby="proposalTitle">
+      <header class="scene-head"><span class="scene-mark">P</span><div><span class="micro">Leader node · proposed graph revision 3</span><h2 id="proposalTitle">Review the execution plan</h2><p>The source snapshot and ownership map are frozen. Starting creates the one canonical run; it does not approve final integration.</p></div><span class="run-pill">Ready</span></header>
+      <div class="scene-body">
+        <p class="proposal-goal">Deliver a coherent graph-task funnel across the Leader node, embedded Dashboard, Activity, and Graph Inspector.</p>
+        <div class="proposal-grid">
+          <article class="proposal-step"><b>1</b><strong>Define observable contract</strong><span>State vocabulary, transition ownership, revision fences, and responsive rules.</span><small>CAN START · owns designs/**</small></article>
+          <article class="proposal-step"><b>2</b><strong>Evolve prototype</strong><span>Demonstrate proposal, execution, attention, completion, and recovery.</span><small>CAN START · parallel</small></article>
+          <article class="proposal-step"><b>3</b><strong>Validate responsive modes</strong><span>Verify desktop rails, compact overlays, focus, and reduced motion.</span><small>AFTER 2 · independent review</small></article>
+          <article class="proposal-step"><b>4</b><strong>Package implementation handoff</strong><span>Bind observations to stable IDs and server-owned revision facts.</span><small>AFTER 1 + 3</small></article>
+        </div>
+        <div class="gate-note"><b>Review gate</b><span>Work may start now. Promotion remains a separate user action after exact-output verification; waiver requires a reason.</span></div>
+      </div>
+      <footer class="scene-actions"><span class="hint">Source 5f459b0c · budget $8 · capacity 4</span><button class="quiet-button" id="adjustPlan">Adjust in chat</button><button class="quiet-button" id="rejectPlan">Reject</button><button class="primary-button" id="startPlan">Start work</button></footer>
+    </article>
+  </section>
+
+  <aside class="activity-peek hidden" id="activityPeek" aria-label="Activity intervention preview">
+    <header><span class="brandmark">A</span><strong>Activity · Needs you</strong><span class="attention-count">1</span></header>
+    <div class="activity-row"><span class="micro">Input needed · graph revision 12</span><h3>Validate context lineage</h3><p>M6 is blocked on a product choice, not scheduler capacity. Other ready branches continue while this decision waits.</p><div class="activity-actions"><button class="quiet-button" id="inspectIssue">Inspect graph</button><button class="primary-button" id="answerIssue">Provide input</button></div></div>
+  </aside>
+  <div class="state-banner attention hidden" id="attentionBanner" role="status"><strong>Needs input</strong><span>M6 is blocked; unaffected branches continue automatically.</span><button class="quiet-button" id="openAttention">Inspect M6</button></div>
+  <div class="state-banner recovery hidden" id="recoveryBanner" role="status"><strong>Revision gap</strong><span>Updates 18–20 were missed. Controls are disabled while the full WorkItem projection refetches.</span><button class="quiet-button" id="finishRecovery">Refetch snapshot</button></div>
+
+  <section class="scene-layer hidden" id="completeScene" aria-label="Completion and review state">
+    <article class="scene-card completion-card" role="dialog" aria-modal="true" aria-labelledby="completeTitle">
+      <header class="scene-head"><span class="scene-mark">✓</span><div><span class="micro">Activity · ready for review</span><h2 id="completeTitle">Graph run completed</h2><p>All logical tasks reached terminal success and required evidence is verified. The result is reviewable; integration has not happened yet.</p></div><span class="run-pill" style="color:var(--green);border-color:rgba(143,183,163,.3);background:var(--green-soft)">Succeeded</span></header>
+      <div class="scene-body"><div class="completion-metrics"><div><strong>11/11</strong><span>Tasks</span></div><div><strong>7/7</strong><span>Verified</span></div><div><strong>$6.21</strong><span>Spent</span></div><div><strong>18:24</strong><span>Elapsed</span></div></div><div class="gate-note"><b>Next transition is yours</b><span>Review keeps the completed work in Activity. Review &amp; remove clears it from Activity and detaches it from Canvas. Promotion is a separate gated flow.</span></div></div>
+      <footer class="scene-actions"><span class="hint">Terminal graph revision 17 · outputs immutable</span><button class="quiet-button" id="openCompletedGraph">Open graph</button><button class="quiet-button" id="reviewKeep">Review &amp; keep</button><button class="primary-button" id="reviewRemove">Review &amp; remove</button></footer>
+    </article>
+  </section>
+
+  <section class="canvas-screen hidden" id="canvasScreen" aria-label="Canvas with leader execution preview">
+    <header class="canvas-topbar">
+      <div class="brandmark">M</div>
+      <div class="crumbs"><strong>Minions</strong>&nbsp; / &nbsp;Product architecture workspace</div>
+      <div class="top-actions"><button class="quiet-button">Share</button><button class="quiet-button">Run history</button></div>
+    </header>
+    <div class="canvas-note"><span class="pulse-dot"></span> Graph run 04 is executing · 3 active sessions</div>
+    <div class="canvas-map-node one"></div><div class="canvas-map-node two"></div>
+    <main class="leader-preview-wrap">
+      <article class="leader-preview" aria-label="Leader node with execution preview">
+        <header class="preview-head">
+          <div class="leader-avatar"><svg class="icon"><use href="#i-leader" /></svg></div>
+          <div class="preview-title"><strong>Design DAG execution workspace</strong><span>Leader · orchestrating</span></div>
+          <span class="preview-cost">$3.84</span>
+          <button class="icon-button" id="previewExpand" title="Open execution workspace" aria-label="Open execution workspace"><svg class="icon"><use href="#i-expand" /></svg></button>
+        </header>
+        <section class="preview-goal"><div class="micro">Goal</div><p>Make delegation, fan-out, handoffs, and leader iterations understandable without exposing every runtime detail at once.</p></section>
+        <section class="run-preview">
+          <div class="run-preview-head"><strong>Execution</strong><span class="running">● RUNNING</span><div class="run-preview-stats"><span><b>5/11</b> tasks</span><span><b>2</b> active</span></div></div>
+          <div class="mini-graph" aria-hidden="true">
+            <svg viewBox="0 0 420 92" preserveAspectRatio="none"><path class="mini-edge" d="M53 46 C82 46 75 19 106 19 M53 46 C82 46 75 41 106 41 M53 46 C82 46 75 64 106 64 M136 19 C173 19 162 46 194 46 M136 41 C173 41 162 46 194 46 M136 64 C173 64 162 46 194 46 M221 46 C249 46 244 46 274 46"/><path class="mini-edge active" d="M312 46 C338 46 337 28 362 28 M312 46 C338 46 337 63 362 63"/></svg>
+            <span class="mini-node lead" style="left:15px;top:36px">L1</span><span class="mini-node task done" style="left:106px;top:10px">✓</span><span class="mini-node task done" style="left:106px;top:32px">✓</span><span class="mini-node task run" style="left:106px;top:55px">•••</span><span class="mini-node check" style="left:194px;top:36px"><span>✓</span></span><span class="mini-node lead run" style="left:274px;top:36px">L2</span><span class="mini-node task run" style="left:362px;top:18px">•••</span><span class="mini-node task future" style="left:362px;top:54px">○</span>
+          </div>
+          <div class="preview-plan">
+            <div class="preview-plan-row"><span class="checkmark">✓</span><span>Map execution semantics</span><small>4 tasks</small></div>
+            <div class="preview-plan-row"><span class="spinner">◎</span><span>Prototype progressive disclosure</span><small>2 running</small></div>
+            <div class="preview-plan-row"><span>○</span><span>Validate context handoffs</span><small>queued</small></div>
+          </div>
+        </section>
+        <footer class="preview-foot"><p>Checkpoint C1 sealed · Leader 02 received 4 artifacts and 2 decisions.</p><button class="primary-button" id="openWorkspace">Open execution <svg class="icon"><use href="#i-expand" /></svg></button></footer>
+      </article>
+    </main>
+  </section>
+
+  <section class="workspace-screen" id="workspaceScreen" aria-label="Expanded DAG execution workspace">
+    <header class="workspace-header">
+      <div class="brandmark">M</div>
+      <div class="workspace-heading"><div class="title-line"><h1>Design DAG execution workspace</h1><span class="run-pill">Run 04</span></div><div class="subline">WORK ITEM WI-284 · REV 7 · UPDATED JUST NOW</div></div>
+      <div class="header-metrics"><div class="header-metric"><span>Elapsed</span><strong>08:42</strong></div><div class="header-metric"><span>Cost</span><strong>$3.84 / $8</strong></div><div class="header-metric"><span>Capacity</span><strong>3 / 4</strong></div></div>
+      <div class="workspace-actions"><button class="quiet-button" id="pauseRun"><svg class="icon"><use href="#i-pause" /></svg><span>Pause run</span></button><button class="icon-button" id="closeWorkspace" aria-label="Return to canvas" title="Return to canvas"><svg class="icon"><use href="#i-close" /></svg></button></div>
+    </header>
+
+    <section class="mission-strip" aria-label="Goal and plan progress">
+      <div class="mission-copy"><div class="mission-icon"><svg class="icon"><use href="#i-goal" /></svg></div><div><div class="micro">North-star goal</div><h2>Make complex agent execution understandable at a glance—and inspectable when it matters.</h2><p>Every runtime node, artifact, and handoff remains anchored to the authored seven-item plan.</p></div></div>
+      <div class="mission-progress"><div class="progress-labels"><span>Plan progress</span><strong>3 complete · 2 running · 2 queued</strong></div><div class="segmented-progress" aria-label="Three complete, two running, two queued"><span class="done"></span><span class="done"></span><span class="done"></span><span class="active"></span><span class="active"></span><span></span><span></span></div></div>
+    </section>
+
+    <div class="workspace-main">
+      <aside class="side-rail plan-rail" aria-label="Plan mapping">
+        <header class="rail-head"><strong>Plan</strong><small>7 items</small><button class="rail-toggle" id="togglePlan" aria-label="Collapse plan"><svg class="icon"><use href="#i-chevron" /></svg></button></header>
+        <div class="plan-contents">
+          <section class="plan-summary"><div class="plan-summary-row"><span>Outcome progress</span><span>3 / 7</span></div><div class="thin-progress"><span></span></div></section>
+          <ol class="plan-list">
+            <li class="plan-item done"><button class="plan-button" data-plan-filter="p1" aria-pressed="false"><span class="plan-id">P1</span><span class="plan-copy"><strong>Frame mission contract</strong><small>Leader 01 · 1 output</small></span><span class="plan-state">Done</span></button></li>
+            <li class="plan-item done"><button class="plan-button" data-plan-filter="p2" aria-pressed="false"><span class="plan-id">P2</span><span class="plan-copy"><strong>Audit current surfaces</strong><small>2 minions · 4 artifacts</small></span><span class="plan-state">Done</span></button></li>
+            <li class="plan-item done"><button class="plan-button" data-plan-filter="p3" aria-pressed="false"><span class="plan-id">P3</span><span class="plan-copy"><strong>Define visual model</strong><small>Checkpoint C1 sealed</small></span><span class="plan-state">Done</span></button></li>
+            <li class="plan-item running"><button class="plan-button" data-plan-filter="p4" aria-pressed="false"><span class="plan-id">P4</span><span class="plan-copy"><strong>Prototype the workspace</strong><small>2 of 3 tasks active</small></span><span class="plan-state">Running</span></button></li>
+            <li class="plan-item running"><button class="plan-button" data-plan-filter="p5" aria-pressed="false"><span class="plan-id">P5</span><span class="plan-copy"><strong>Validate context handoffs</strong><small>1 task waiting on capacity</small></span><span class="plan-state">Running</span></button></li>
+            <li class="plan-item"><button class="plan-button" data-plan-filter="p6" aria-pressed="false"><span class="plan-id">P6</span><span class="plan-copy"><strong>Synthesize findings</strong><small>Requires checkpoint C2</small></span><span class="plan-state">Queued</span></button></li>
+            <li class="plan-item"><button class="plan-button" data-plan-filter="p7" aria-pressed="false"><span class="plan-id">P7</span><span class="plan-copy"><strong>Deliver recommendation</strong><small>Final leader iteration</small></span><span class="plan-state">Queued</span></button></li>
+          </ol>
+          <section class="plan-legend"><div class="micro">Execution grammar</div><div class="legend-row"><span class="legend-key"><i class="legend-shape leader"></i>Leader</span><span class="legend-key"><i class="legend-shape minion"></i>Minion</span><span class="legend-key"><i class="legend-shape checkpoint"></i>Checkpoint</span></div></section>
+        </div>
+      </aside>
+
+      <main class="graph-shell">
+        <header class="graph-toolbar">
+          <div class="segmented" role="tablist" aria-label="Execution views"><button role="tab" aria-selected="true" data-view-target="flow">Flow</button><button role="tab" aria-selected="false" data-view-target="planmap">Plan map</button><button role="tab" aria-selected="false" data-view-target="lineage">Context lineage</button></div>
+          <span class="selection-chip" id="selectionChip">Plan P4 focused</span>
+          <span class="toolbar-spacer"></span>
+          <button class="chip-button" id="focusFilter" aria-pressed="false"><svg class="icon"><use href="#i-focus" /></svg><span>All nodes</span></button>
+          <button class="icon-button" id="fitGraph" aria-label="Fit graph" title="Fit graph"><svg class="icon"><use href="#i-expand" /></svg></button>
+        </header>
+
+        <div class="graph-content" id="graphContent">
+          <section class="view-panel" data-view="flow" aria-label="Orchestration flow">
+            <div class="flow-stage" id="flowStage">
+              <div class="phase-label phase-one">Iteration 01 <span>4m 18s</span></div><div class="phase-label phase-check-one">Context C1</div><div class="phase-label phase-two">Iteration 02 <span>4m 24s</span></div><div class="phase-label phase-check-two">Context C2</div>
+              <div class="stage-metric metric-one"><span><b>4</b> tasks</span><span><b>$1.46</b> spent</span><span><b>18</b> claims</span></div><div class="stage-metric metric-two"><span><b>3</b> tasks</span><span><b>$2.38</b> spent</span><span><b>2</b> active</span></div>
+              <svg class="edge-layer" viewBox="0 0 1180 470" aria-hidden="true">
+                <defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path class="arrow-head" d="M0,0 L8,4 L0,8 Z" /></marker><marker id="arrowGreen" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path class="arrow-context" d="M0,0 L8,4 L0,8 Z" /></marker></defs>
+                <path class="dag-edge" data-from="l1" data-to="m1" marker-end="url(#arrow)" d="M166 231 C180 231 174 59 190 59" />
+                <path class="dag-edge" data-from="l1" data-to="m2" marker-end="url(#arrow)" d="M166 231 C180 231 174 153 190 153" />
+                <path class="dag-edge active" data-from="l1" data-to="m3" marker-end="url(#arrow)" d="M166 231 C180 231 174 247 190 247" />
+                <path class="dag-edge active" data-from="l1" data-to="m4" marker-end="url(#arrow)" d="M166 231 C180 231 174 341 190 341" />
+                <path class="dag-edge" data-from="m1" data-to="c1" marker-end="url(#arrow)" d="M350 59 C375 59 365 231 390 231" />
+                <path class="dag-edge" data-from="m2" data-to="c1" marker-end="url(#arrow)" d="M350 153 C375 153 365 231 390 231" />
+                <path class="dag-edge active" data-from="m3" data-to="c1" marker-end="url(#arrow)" d="M350 247 C375 247 365 231 390 231" />
+                <path class="dag-edge active" data-from="m4" data-to="c1" marker-end="url(#arrow)" d="M350 341 C375 341 365 231 390 231" />
+                <path class="dag-edge context" data-from="c1" data-to="l2" marker-end="url(#arrowGreen)" d="M516 231 C526 231 530 231 540 231" />
+                <text class="edge-label" x="517" y="218">4 artifacts · scoped</text>
+                <path class="dag-edge active" data-from="l2" data-to="m5" marker-end="url(#arrow)" d="M682 231 C696 231 694 97 710 97" />
+                <path class="dag-edge" data-from="l2" data-to="m6" marker-end="url(#arrow)" d="M682 231 C696 231 694 225 710 225" />
+                <path class="dag-edge" data-from="l2" data-to="m7" marker-end="url(#arrow)" d="M682 231 C696 231 694 353 710 353" />
+                <path class="dag-edge active" data-from="m5" data-to="c2" marker-end="url(#arrow)" d="M870 97 C890 97 880 231 900 231" />
+                <path class="dag-edge" data-from="m6" data-to="c2" marker-end="url(#arrow)" d="M870 225 C890 225 880 231 900 231" />
+                <path class="dag-edge" data-from="m7" data-to="c2" marker-end="url(#arrow)" d="M870 353 C890 353 880 231 900 231" />
+                <path class="dag-edge context" data-from="c2" data-to="l3" marker-end="url(#arrowGreen)" d="M1026 231 C1034 231 1040 231 1048 231" />
+              </svg>
+
+              <button class="dag-node leader done l1" data-node="l1" data-plan="p1 p2 p3" data-state="done"><span class="node-top"><span class="role-badge"><i class="role-dot"></i>Leader 01</span><span class="plan-badge">P1–3</span></span><strong>Frame execution model</strong><span class="node-meta"><i class="state-dot"></i><span class="grow">Complete · 4m 18s</span><span>$0.62</span></span></button>
+              <button class="dag-node minion done m1" data-node="m1" data-plan="p2" data-state="done"><span class="node-top"><span class="role-badge"><i class="role-dot"></i>Minion</span><span class="plan-badge">P2</span></span><strong>Audit current graph UI</strong><span class="node-meta"><i class="state-dot"></i><span class="grow">Verified</span><span>1m 42s</span></span></button>
+              <button class="dag-node minion done m2" data-node="m2" data-plan="p2 p3" data-state="done"><span class="node-top"><span class="role-badge"><i class="role-dot"></i>Minion</span><span class="plan-badge">P2, P3</span></span><strong>Map execution semantics</strong><span class="node-meta"><i class="state-dot"></i><span class="grow">Verified</span><span>2 artifacts</span></span></button>
+              <button class="dag-node minion running m3" data-node="m3" data-plan="p3 p4" data-state="running"><span class="node-top"><span class="role-badge"><i class="role-dot"></i>Minion</span><span class="plan-badge">P3, P4</span></span><strong>Prototype node preview</strong><span class="node-meta"><i class="state-dot"></i><span class="grow">Rendering states</span><span>68%</span></span><i class="node-progress"><span style="width:68%"></span></i></button>
+              <button class="dag-node minion running m4" data-node="m4" data-plan="p3 p5" data-state="running"><span class="node-top"><span class="role-badge"><i class="role-dot"></i>Minion</span><span class="plan-badge">P3, P5</span></span><strong>Stress-test 1k nodes</strong><span class="node-meta"><i class="state-dot"></i><span class="grow">Simulating fan-out</span><span>41%</span></span><i class="node-progress"><span style="width:41%"></span></i></button>
+              <button class="dag-node checkpoint done c1 selected" data-node="c1" data-plan="p3" data-state="done"><span class="node-top"><span class="role-badge"><svg class="icon"><use href="#i-packet" /></svg>Checkpoint</span><span class="plan-badge">P3</span></span><strong>C1 · Model handoff</strong><span class="node-meta"><i class="state-dot"></i><span class="grow">4 artifacts · 18 claims</span></span></button>
+              <button class="dag-node leader running l2" data-node="l2" data-plan="p4 p5" data-state="running"><span class="node-top"><span class="role-badge"><i class="role-dot"></i>Leader 02</span><span class="plan-badge">P4–5</span></span><strong>Refine interaction model</strong><span class="node-meta"><i class="state-dot"></i><span class="grow">Orchestrating · 4m 24s</span><span>$1.04</span></span></button>
+              <button class="dag-node minion running m5" data-node="m5" data-plan="p4" data-state="running"><span class="node-top"><span class="role-badge"><i class="role-dot"></i>Minion</span><span class="plan-badge">P4</span></span><strong>Build flow workspace</strong><span class="node-meta"><i class="state-dot"></i><span class="grow">Implementing lenses</span><span>54%</span></span><i class="node-progress"><span style="width:54%"></span></i></button>
+              <button class="dag-node minion blocked m6" data-node="m6" data-plan="p5" data-state="running" data-issue="true"><span class="attention-badge">!</span><span class="node-top"><span class="role-badge"><i class="role-dot"></i>Minion</span><span class="plan-badge">P5</span></span><strong>Validate context lineage</strong><span class="node-meta"><i class="state-dot"></i><span class="grow">Waiting for capacity</span><span>8m</span></span></button>
+              <button class="dag-node minion queued m7" data-node="m7" data-plan="p5" data-state="queued"><span class="node-top"><span class="role-badge"><i class="role-dot"></i>Minion</span><span class="plan-badge">P5</span></span><strong>Accessibility pass</strong><span class="node-meta"><i class="state-dot"></i><span class="grow">Queued after M5</span><span>—</span></span></button>
+              <button class="dag-node checkpoint future c2" data-node="c2" data-plan="p6" data-state="queued" data-issue="true"><span class="node-top"><span class="role-badge"><svg class="icon"><use href="#i-packet" /></svg>Checkpoint</span><span class="plan-badge">P6</span></span><strong>C2 · Validation join</strong><span class="node-meta"><i class="state-dot"></i><span class="grow">1 of 3 inputs ready</span></span></button>
+              <button class="dag-node leader future l3" data-node="l3" data-plan="p6 p7" data-state="queued"><span class="node-top"><span class="role-badge"><i class="role-dot"></i>Leader 03</span><span class="plan-badge">P6–7</span></span><strong>Synthesize &amp; deliver</strong><span class="node-meta"><i class="state-dot"></i><span class="grow">Awaiting C2</span><span>—</span></span></button>
+              <div class="flow-hint"><kbd>Click</kbd> inspect node <kbd>Plan</kbd> focus mapping</div>
+            </div>
+          </section>
+
+          <section class="view-panel hidden" data-view="planmap" aria-label="Plan to execution map">
+            <div class="plan-map">
+              <header class="lens-intro"><div><h3>Plan-to-execution map</h3><p>Authored plan items remain the stable rows. Runtime leaders, minions, and checkpoints are projections against them—so fan-out never obscures why a task exists.</p></div><span class="coverage-pill">100% mapped · 0 orphan tasks</span></header>
+              <div class="map-grid" role="table" aria-label="Plan items mapped to execution nodes">
+                <div class="map-cell header">Plan item</div><div class="map-cell header">Leader intent</div><div class="map-cell header">Delegated work</div><div class="map-cell header">Handoff</div><div class="map-cell header">Outcome</div>
+                <div class="map-cell map-plan"><strong>P1 · Frame mission contract</strong><small>Complete</small></div><div class="map-cell"><span class="task-chip lead">L1 · frame</span></div><div class="map-cell"><span class="empty-cell">Direct leader work</span></div><div class="map-cell"><span class="empty-cell">—</span></div><div class="map-cell"><span class="task-chip check">mission.json</span></div>
+                <div class="map-cell map-plan"><strong>P2 · Audit surfaces</strong><small>Complete</small></div><div class="map-cell"><span class="task-chip lead">L1 · scope</span></div><div class="map-cell"><div class="map-stack"><span class="task-chip">M1 · UI audit</span><span class="task-chip">M2 · semantics</span></div></div><div class="map-cell"><span class="task-chip check">C1</span></div><div class="map-cell"><span class="task-chip check">4 artifacts</span></div>
+                <div class="map-cell map-plan"><strong>P3 · Define visual model</strong><small>Complete</small></div><div class="map-cell"><span class="task-chip lead">L1 · decide</span></div><div class="map-cell"><div class="map-stack"><span class="task-chip">M2 · grammar</span><span class="task-chip">M3 · preview</span><span class="task-chip">M4 · scale</span></div></div><div class="map-cell"><span class="task-chip check">C1 sealed</span></div><div class="map-cell"><span class="task-chip check">model.md</span></div>
+                <div class="map-cell map-plan"><strong>P4 · Prototype workspace</strong><small>Running · 54%</small></div><div class="map-cell"><span class="task-chip lead">L2 · refine</span></div><div class="map-cell"><div class="map-stack"><span class="task-chip">M3 · preview</span><span class="task-chip">M5 · flow UI</span></div></div><div class="map-cell"><span class="task-chip ghost">C2 pending</span></div><div class="map-cell"><span class="task-chip ghost">prototype.html</span></div>
+                <div class="map-cell map-plan"><strong>P5 · Validate handoffs</strong><small>Running · attention</small></div><div class="map-cell"><span class="task-chip lead">L2 · criteria</span></div><div class="map-cell"><div class="map-stack"><span class="task-chip">M4 · scale</span><span class="task-chip">M6 · lineage</span><span class="task-chip ghost">M7 · a11y</span></div></div><div class="map-cell"><span class="task-chip ghost">C2 pending</span></div><div class="map-cell"><span class="task-chip ghost">verification</span></div>
+                <div class="map-cell map-plan"><strong>P6 · Synthesize findings</strong><small>Queued</small></div><div class="map-cell"><span class="task-chip ghost">L3 · reduce</span></div><div class="map-cell"><span class="empty-cell">No fan-out planned</span></div><div class="map-cell"><span class="task-chip ghost">C2 required</span></div><div class="map-cell"><span class="task-chip ghost">recommendation</span></div>
+                <div class="map-cell map-plan last-row"><strong>P7 · Deliver recommendation</strong><small>Queued</small></div><div class="map-cell last-row"><span class="task-chip ghost">L3 · deliver</span></div><div class="map-cell last-row"><span class="empty-cell">Direct leader work</span></div><div class="map-cell last-row"><span class="empty-cell">—</span></div><div class="map-cell last-row"><span class="task-chip ghost">final handoff</span></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="view-panel hidden" data-view="lineage" aria-label="Context lineage">
+            <div class="lineage-lens">
+              <header class="lens-intro"><div><h3>Context lineage</h3><p>A checkpoint is a first-class, inspectable transfer—not a mysterious line. It shows what was included, referenced, or deliberately omitted before a new leader iteration starts.</p></div><div class="checkpoint-switcher segmented"><button aria-selected="true" data-checkpoint="c1">C1 · sealed</button><button aria-selected="false" data-checkpoint="c2">C2 · pending</button></div></header>
+              <div class="lineage-flow">
+                <article class="lineage-card source"><div class="lineage-icon"><svg class="icon"><use href="#i-leader" /></svg></div><h4 id="lineageSourceTitle">Leader 01 · rev 3</h4><p id="lineageSourceCopy">Four parallel attempts completed against source snapshot 9fd2.</p><span class="hash" id="lineageSourceHash">source: 9fd2 · graph rev 6</span></article>
+                <article class="lineage-card packet"><div class="lineage-icon"><svg class="icon"><use href="#i-packet" /></svg></div><h4 id="lineagePacketTitle">Checkpoint C1 · sealed</h4><p id="lineagePacketCopy">4 artifacts · 18 claims · 2 decisions · 2 risks. Verified before transfer.</p><span class="hash" id="lineagePacketHash">manifest: c1-77ac · 41 KB scoped</span></article>
+                <article class="lineage-card target"><div class="lineage-icon"><svg class="icon"><use href="#i-leader" /></svg></div><h4 id="lineageTargetTitle">Leader 02 · rev 7</h4><p id="lineageTargetCopy">Started with a minimal mission packet and artifact references—not raw transcripts.</p><span class="hash" id="lineageTargetHash">context: 2e14 · 67% smaller</span></article>
+              </div>
+              <div class="manifest-grid">
+                <section class="manifest-section include"><h4>Included <span id="includedCount">4</span></h4><div class="manifest-item"><span class="kind">A</span><div><strong>Surface audit</strong><small>UI gaps, evidence, file references</small></div></div><div class="manifest-item"><span class="kind">D</span><div><strong>Visual grammar decision</strong><small>Role, state, verification encodings</small></div></div><div class="manifest-item"><span class="kind">R</span><div><strong>Scale constraints</strong><small>Aggregation and semantic zoom rules</small></div></div></section>
+                <section class="manifest-section reference"><h4>Referenced <span id="referencedCount">3</span></h4><div class="manifest-item"><span class="kind">#</span><div><strong>Source snapshot 9fd2</strong><small>Immutable repository and context hash</small></div></div><div class="manifest-item"><span class="kind">V</span><div><strong>Verification report</strong><small>Bound to exact artifact digests</small></div></div><div class="manifest-item"><span class="kind">P</span><div><strong>Mission contract</strong><small>Goal, constraints, non-goals, budget</small></div></div></section>
+                <section class="manifest-section omit"><h4>Omitted <span id="omittedCount">2</span></h4><div class="manifest-item"><span class="kind">×</span><div><strong>Raw minion transcripts</strong><small>92 KB · available on demand</small></div></div><div class="manifest-item"><span class="kind">×</span><div><strong>Unverified draft claims</strong><small>Excluded from downstream readiness</small></div></div></section>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <footer class="iteration-bar" aria-label="Leader iteration timeline">
+          <div class="iteration-summary"><strong>Iteration lineage</strong><span>2 of 3 leaders active</span></div>
+          <div class="iteration-track">
+            <button class="iteration-step done" data-jump-node="l1"><span class="dot">✓</span><span>Leader 01</span></button>
+            <button class="iteration-step done" data-jump-node="m2"><span class="dot">✓</span><span>Fan-out A</span></button>
+            <button class="iteration-step done checkpoint" data-jump-node="c1"><span class="dot"><span>✓</span></span><span>C1</span></button>
+            <button class="iteration-step active" data-jump-node="l2"><span class="dot">2</span><span>Leader 02</span></button>
+            <button class="iteration-step checkpoint" data-jump-node="c2"><span class="dot"><span>○</span></span><span>C2</span></button>
+            <button class="iteration-step" data-jump-node="l3"><span class="dot">3</span><span>Delivery</span></button>
+          </div>
+          <span class="iteration-note">Next gate: 2 inputs + 1 verification</span>
+        </footer>
+      </main>
+
+      <aside class="side-rail detail-rail" aria-label="Selection details">
+        <header class="rail-head"><button class="rail-toggle" id="toggleDetail" aria-label="Collapse details"><svg class="icon" style="transform:rotate(180deg)"><use href="#i-chevron" /></svg></button><strong>Inspector</strong><small id="detailId">C1</small></header>
+        <div class="detail-contents">
+          <div class="detail-status"><span class="detail-status-badge" id="detailStatus">Verified handoff</span></div>
+          <section class="detail-section"><div class="detail-kicker" id="detailKicker">CONTEXT CHECKPOINT · PLAN P3</div><h3 class="detail-title" id="detailTitle">C1 · Model handoff</h3><p id="detailDescription">A sealed context packet that joins the first fan-out and starts Leader 02 with only decision-relevant material.</p></section>
+          <section class="detail-section"><h4>Lineage</h4><div class="lineage-mini" id="detailLineage"><span class="box">L1</span><span class="arrow">→</span><span class="box">C1</span><span class="arrow">→</span><span class="box">L2</span></div></section>
+          <section class="detail-section"><h4>Runtime facts</h4><dl class="kv-list" id="detailFacts"><div class="kv-row"><dt>Transfer</dt><dd>4 artifacts · 41 KB</dd></div><div class="kv-row"><dt>Claims</dt><dd>18 · all resolved</dd></div><div class="kv-row"><dt>Verification</dt><dd>Passed · exact hashes</dd></div><div class="kv-row"><dt>Context delta</dt><dd>−67% vs transcripts</dd></div></dl></section>
+          <section class="detail-section"><h4>Transferred context</h4><div class="context-chip-list" id="detailChips"><span class="context-chip">surface-audit.md</span><span class="context-chip">visual-model.json</span><span class="context-chip">scale-risks.md</span><span class="context-chip">mission contract</span></div></section>
+          <section class="detail-section" id="attentionSection"><h4>Why this matters</h4><div class="attention-card"><strong>Scope stays coherent</strong><p>The next leader sees resolved claims and linked evidence while raw execution detail remains available on demand.</p></div></section>
+          <div class="detail-actions"><button class="quiet-button" id="compareButton">Compare transfer</button><button class="primary-button" id="openEvidence">Open evidence</button></div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    (() => {
+      const canvas = document.getElementById('canvasScreen');
+      const workspace = document.getElementById('workspaceScreen');
+      const toast = document.getElementById('toast');
+      const flowStage = document.getElementById('flowStage');
+      const selectionChip = document.getElementById('selectionChip');
+      const proposalScene = document.getElementById('proposalScene');
+      const completeScene = document.getElementById('completeScene');
+      const activityPeek = document.getElementById('activityPeek');
+      const attentionBanner = document.getElementById('attentionBanner');
+      const recoveryBanner = document.getElementById('recoveryBanner');
+      const surfaceLabel = document.getElementById('surfaceLabel');
+      let selectedNode = 'c1';
+      let selectedPlan = null;
+      let filterMode = 'all';
+      let activeStage = 'proposal';
+      let toastTimer;
+
+      // On narrow screens the rails begin as edge tabs; either one can then be
+      // opened as an overlay without covering the graph on first load.
+      if (window.innerWidth < 900) {
+        workspace.classList.add('plan-collapsed', 'detail-collapsed');
+      }
+      let wasNarrow = window.innerWidth < 900;
+      window.addEventListener('resize', () => {
+        const isNarrow = window.innerWidth < 900;
+        if (isNarrow && !wasNarrow) workspace.classList.add('plan-collapsed', 'detail-collapsed');
+        wasNarrow = isNarrow;
+      });
+
+      const nodeData = {
+        l1: { id:'L1', status:'Complete', statusClass:'', kicker:'LEADER ITERATION 01 · PLAN P1–P3', title:'Frame execution model', description:'Established the mission contract, selected the visualization grammar, and delegated four independent investigations.', lineage:['Goal','L1','C1'], facts:[['Duration','4m 18s'],['Spend','$0.62'],['Fan-out','4 attempts'],['Outputs','3 committed']], chips:['mission.json','delegation-plan.md','decision-04'], note:['Iteration complete','All planned outputs committed; checkpoint C1 sealed the accepted results.'] },
+        m1: { id:'M1', status:'Verified', statusClass:'', kicker:'MINION ATTEMPT · PLAN P2', title:'Audit current graph UI', description:'Inspected the compact summary, graph inspector, plan rail, and fullscreen leader surfaces for gaps in relationship visibility.', lineage:['L1','M1','C1'], facts:[['Attempt','#1'],['Duration','1m 42s'],['Spend','$0.21'],['Verification','Passed']], chips:['ui-audit.md','file-evidence.json'], note:['Evidence accepted','The artifact is bound to source snapshot 9fd2 and consumed by C1.'] },
+        m2: { id:'M2', status:'Verified', statusClass:'', kicker:'MINION ATTEMPT · PLAN P2, P3', title:'Map execution semantics', description:'Separated logical outcome, runtime attempt, verification state, blockers, and typed context transfer into a consistent visual grammar.', lineage:['L1','M2','C1'], facts:[['Attempt','#1'],['Duration','2m 06s'],['Spend','$0.28'],['Claims','8 accepted']], chips:['grammar.json','semantics.md'], note:['No contradictions','All claims reconciled with the mission contract before C1 was sealed.'] },
+        m3: { id:'M3', status:'Running · 68%', statusClass:'running', kicker:'MINION ATTEMPT · PLAN P3, P4', title:'Prototype node preview', description:'Building the level-zero leader card preview and its transition into the full execution workspace.', lineage:['L1','M3','C1'], facts:[['Attempt','#1'],['Elapsed','3m 11s'],['Spend','$0.47'],['Owner','designs/**']], chips:['preview states','micro-DAG','open action'], note:['Currently rendering','Working on compact states for active, attention, and completed graph runs.'] },
+        m4: { id:'M4', status:'Running · 41%', statusClass:'running', kicker:'MINION ATTEMPT · PLAN P3, P5', title:'Stress-test 1k nodes', description:'Testing aggregation, stage folding, and selection-driven edge emphasis so large graphs remain readable.', lineage:['L1','M4','C1'], facts:[['Attempt','#2'],['Elapsed','2m 38s'],['Spend','$0.51'],['Fixture','1,000 nodes']], chips:['scale report','aggregation rules'], note:['Retry succeeded','Attempt #1 exceeded the layout budget; attempt #2 uses stage aggregation.'] },
+        c1: { id:'C1', status:'Verified handoff', statusClass:'', kicker:'CONTEXT CHECKPOINT · PLAN P3', title:'C1 · Model handoff', description:'A sealed context packet that joins the first fan-out and starts Leader 02 with only decision-relevant material.', lineage:['L1','C1','L2'], facts:[['Transfer','4 artifacts · 41 KB'],['Claims','18 · all resolved'],['Verification','Passed · exact hashes'],['Context delta','−67% vs transcripts']], chips:['surface-audit.md','visual-model.json','scale-risks.md','mission contract'], note:['Scope stays coherent','The next leader sees resolved claims and linked evidence while raw execution detail remains available on demand.'] },
+        l2: { id:'L2', status:'Orchestrating', statusClass:'running', kicker:'LEADER ITERATION 02 · PLAN P4–P5', title:'Refine interaction model', description:'Consumes C1, resolves the workspace hierarchy, and coordinates prototype, context-lineage, and accessibility work.', lineage:['C1','L2','C2'], facts:[['Elapsed','4m 24s'],['Spend','$1.04'],['Active children','2 of 3'],['Context','41 KB scoped']], chips:['C1 manifest','mission contract','4 artifacts'], note:['Current decision','Keep Flow, Plan map, and Context lineage as lenses over one persistent selection.'] },
+        m5: { id:'M5', status:'Running · 54%', statusClass:'running', kicker:'MINION ATTEMPT · PLAN P4', title:'Build flow workspace', description:'Implementing the expanded workspace, selection behavior, plan focus, and progressive disclosure states.', lineage:['L2','M5','C2'], facts:[['Attempt','#1'],['Elapsed','2m 55s'],['Spend','$0.66'],['Progress','54%']], chips:['flow lens','plan map','details rail'], note:['Active step','Wiring selection across all three lenses and the iteration timeline.'] },
+        m6: { id:'M6', status:'Waiting', statusClass:'queued', kicker:'MINION · PLAN P5 · ATTENTION', title:'Validate context lineage', description:'Ready to verify checkpoint manifests, but scheduler capacity is currently reserved by two critical-path attempts.', lineage:['L2','M6','C2'], facts:[['Readiness','Ready'],['Blocker','Executor capacity'],['Queue age','8m 03s'],['Priority','72']], chips:['C1 manifest','verification policy'], note:['Why not running?','Ready and admitted. Waiting for one of four executor slots to become available.'] },
+        m7: { id:'M7', status:'Queued', statusClass:'queued', kicker:'MINION · PLAN P5', title:'Accessibility pass', description:'Will verify keyboard traversal, focus continuity, readable state encoding, and responsive behavior after M5 commits.', lineage:['L2','M7','C2'], facts:[['Readiness','Not ready'],['Dependency','M5 artifact'],['Priority','61'],['Estimate','2m']], chips:['prototype.html','a11y criteria'], note:['Dependency pending','M5 must commit the interactive prototype before verification can begin.'] },
+        c2: { id:'C2', status:'Pending · 1/3', statusClass:'queued', kicker:'CONTEXT CHECKPOINT · PLAN P6', title:'C2 · Validation join', description:'Will combine the built prototype, context-lineage verification, and accessibility report before Leader 03 begins.', lineage:['L2','C2','L3'], facts:[['Inputs','1 of 3 ready'],['Verification','Pending'],['Critical path','Yes'],['Estimate','5m remaining']], chips:['prototype.html','lineage report','a11y report'], note:['Gate not satisfied','Two required artifacts and one independent verification are still missing.'] },
+        l3: { id:'L3', status:'Awaiting C2', statusClass:'queued', kicker:'LEADER ITERATION 03 · PLAN P6–P7', title:'Synthesize & deliver', description:'The final leader iteration will consume only the verified C2 packet, reconcile findings, and produce the recommendation.', lineage:['C2','L3','Outcome'], facts:[['Readiness','Not ready'],['Blocker','Checkpoint C2'],['Budget','$1.50 reserved'],['Output','Final recommendation']], chips:['C2 manifest','goal criteria'], note:['Future iteration','The session is not started yet; it will inherit a frozen, scoped context manifest.'] }
+      };
+
+      function showToast(message) {
+        toast.textContent = message;
+        toast.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove('show'), 2200);
+      }
+
+      function openWorkspace() { canvas.classList.add('hidden'); workspace.classList.remove('hidden'); surfaceLabel.textContent = 'Graph Inspector · full projection'; setTimeout(() => document.querySelector('[data-node="c1"]')?.focus(), 30); }
+      function closeWorkspace() { workspace.classList.add('hidden'); canvas.classList.remove('hidden'); surfaceLabel.textContent = 'Leader node · embedded dashboard'; setTimeout(() => document.getElementById('openWorkspace')?.focus(), 30); }
+      document.getElementById('openWorkspace').addEventListener('click', openWorkspace);
+      document.getElementById('previewExpand').addEventListener('click', openWorkspace);
+      document.getElementById('closeWorkspace').addEventListener('click', closeWorkspace);
+
+      document.getElementById('togglePlan').addEventListener('click', () => {
+        workspace.classList.toggle('plan-collapsed');
+        const collapsed = workspace.classList.contains('plan-collapsed');
+        document.getElementById('togglePlan').setAttribute('aria-label', collapsed ? 'Expand plan' : 'Collapse plan');
+      });
+      document.getElementById('toggleDetail').addEventListener('click', () => {
+        workspace.classList.toggle('detail-collapsed');
+        const collapsed = workspace.classList.contains('detail-collapsed');
+        document.getElementById('toggleDetail').setAttribute('aria-label', collapsed ? 'Expand details' : 'Collapse details');
+      });
+
+      function setView(view) {
+        document.querySelectorAll('[data-view-target]').forEach(button => button.setAttribute('aria-selected', String(button.dataset.viewTarget === view)));
+        document.querySelectorAll('.view-panel').forEach(panel => panel.classList.toggle('hidden', panel.dataset.view !== view));
+        if (view === 'lineage') selectNode(selectedNode === 'c2' ? 'c2' : 'c1', false);
+      }
+      document.querySelectorAll('[data-view-target]').forEach(button => button.addEventListener('click', () => setView(button.dataset.viewTarget)));
+
+      function renderDetails(data) {
+        document.getElementById('detailId').textContent = data.id;
+        const badge = document.getElementById('detailStatus');
+        badge.textContent = data.status;
+        badge.className = 'detail-status-badge ' + data.statusClass;
+        document.getElementById('detailKicker').textContent = data.kicker;
+        document.getElementById('detailTitle').textContent = data.title;
+        document.getElementById('detailDescription').textContent = data.description;
+        document.getElementById('detailLineage').innerHTML = data.lineage.map((item, index) => `<span class="box">${item}</span>${index < data.lineage.length - 1 ? '<span class="arrow">→</span>' : ''}`).join('');
+        document.getElementById('detailFacts').innerHTML = data.facts.map(([key,value]) => `<div class="kv-row"><dt>${key}</dt><dd>${value}</dd></div>`).join('');
+        document.getElementById('detailChips').innerHTML = data.chips.map(item => `<span class="context-chip">${item}</span>`).join('');
+        document.getElementById('attentionSection').innerHTML = `<h4>Why this matters</h4><div class="attention-card"><strong>${data.note[0]}</strong><p>${data.note[1]}</p></div>`;
+      }
+
+      function selectNode(id, revealFlow = true) {
+        const data = nodeData[id];
+        if (!data) return;
+        selectedNode = id;
+        document.querySelectorAll('.dag-node').forEach(node => {
+          node.classList.toggle('selected', node.dataset.node === id);
+          node.classList.remove('related');
+        });
+        document.querySelectorAll('.dag-edge').forEach(edge => {
+          const isRelated = edge.dataset.from === id || edge.dataset.to === id;
+          edge.classList.toggle('related', isRelated);
+          if (isRelated) {
+            document.querySelector(`[data-node="${edge.dataset.from}"]`)?.classList.add('related');
+            document.querySelector(`[data-node="${edge.dataset.to}"]`)?.classList.add('related');
+          }
+        });
+        renderDetails(data);
+        workspace.classList.remove('detail-collapsed');
+        if (revealFlow) setView('flow');
+      }
+      document.querySelectorAll('.dag-node').forEach(node => node.addEventListener('click', () => selectNode(node.dataset.node)));
+      document.querySelectorAll('[data-jump-node]').forEach(step => step.addEventListener('click', () => selectNode(step.dataset.jumpNode)));
+
+      document.querySelectorAll('[data-plan-filter]').forEach(button => button.addEventListener('click', () => {
+        const plan = button.dataset.planFilter;
+        selectedPlan = selectedPlan === plan ? null : plan;
+        document.querySelectorAll('[data-plan-filter]').forEach(other => other.setAttribute('aria-pressed', String(other.dataset.planFilter === selectedPlan)));
+        document.querySelectorAll('.dag-node').forEach(node => {
+          const matches = !selectedPlan || (node.dataset.plan || '').split(' ').includes(selectedPlan);
+          node.classList.toggle('dimmed', !matches);
+        });
+        selectionChip.textContent = selectedPlan ? `Plan ${selectedPlan.toUpperCase()} focused` : '';
+        selectionChip.classList.toggle('visible', Boolean(selectedPlan));
+        setView('flow');
+      }));
+
+      const filterButton = document.getElementById('focusFilter');
+      filterButton.addEventListener('click', () => {
+        filterMode = filterMode === 'all' ? 'active' : filterMode === 'active' ? 'attention' : 'all';
+        flowStage.classList.toggle('graph-filter-active', filterMode === 'active');
+        flowStage.classList.toggle('graph-filter-attention', filterMode === 'attention');
+        filterButton.querySelector('span').textContent = filterMode === 'all' ? 'All nodes' : filterMode === 'active' ? 'Active path' : 'Needs attention';
+        filterButton.setAttribute('aria-pressed', String(filterMode !== 'all'));
+      });
+
+      document.getElementById('fitGraph').addEventListener('click', () => {
+        const panel = document.querySelector('[data-view="flow"]');
+        panel.scrollTo({ left: 0, top: 0, behavior: 'smooth' });
+        showToast('Graph reset to the current iteration');
+      });
+
+      document.getElementById('pauseRun').addEventListener('click', event => {
+        const paused = event.currentTarget.dataset.paused === 'true';
+        event.currentTarget.dataset.paused = String(!paused);
+        event.currentTarget.querySelector('span').textContent = paused ? 'Pause run' : 'Resume run';
+        showToast(paused ? 'Scheduling resumed · active attempts continue' : 'Scheduling paused · active attempts continue');
+      });
+
+      const checkpointData = {
+        c1: ['Leader 01 · rev 3','Four parallel attempts completed against source snapshot 9fd2.','source: 9fd2 · graph rev 6','Checkpoint C1 · sealed','4 artifacts · 18 claims · 2 decisions · 2 risks. Verified before transfer.','manifest: c1-77ac · 41 KB scoped','Leader 02 · rev 7','Started with a minimal mission packet and artifact references—not raw transcripts.','context: 2e14 · 67% smaller','4','3','2'],
+        c2: ['Leader 02 · rev 7','Three delegated attempts are producing validation evidence.','source: 2e14 · graph rev 7','Checkpoint C2 · pending','1 of 3 required artifacts is committed. Independent verification is still pending.','manifest: draft · not sealed','Leader 03 · not started','Session and context snapshot will be created only after the gate is satisfied.','context: pending','1','2','3']
+      };
+      document.querySelectorAll('[data-checkpoint]').forEach(button => button.addEventListener('click', () => {
+        const id = button.dataset.checkpoint;
+        document.querySelectorAll('[data-checkpoint]').forEach(other => other.setAttribute('aria-selected', String(other === button)));
+        const v = checkpointData[id];
+        ['lineageSourceTitle','lineageSourceCopy','lineageSourceHash','lineagePacketTitle','lineagePacketCopy','lineagePacketHash','lineageTargetTitle','lineageTargetCopy','lineageTargetHash','includedCount','referencedCount','omittedCount'].forEach((elementId, index) => document.getElementById(elementId).textContent = v[index]);
+        selectNode(id, false);
+      }));
+
+      document.getElementById('compareButton').addEventListener('click', () => {
+        setView('lineage');
+        showToast('Showing the checkpoint manifest and its context delta');
+      });
+      document.getElementById('openEvidence').addEventListener('click', () => showToast('Evidence lineage would open with exact artifact and verification hashes'));
+
+      function setStage(stage) {
+        activeStage = stage;
+        document.querySelectorAll('[data-stage]').forEach(button => {
+          if (button.dataset.stage === stage) button.setAttribute('aria-current', 'step');
+          else button.removeAttribute('aria-current');
+        });
+        proposalScene.classList.toggle('hidden', stage !== 'proposal');
+        completeScene.classList.toggle('hidden', stage !== 'complete');
+        activityPeek.classList.toggle('hidden', stage !== 'intervention');
+        attentionBanner.classList.toggle('hidden', stage !== 'intervention');
+        recoveryBanner.classList.toggle('hidden', stage !== 'recovery');
+        document.querySelectorAll('.workspace-actions button, .detail-actions button, .graph-toolbar button').forEach(button => {
+          button.disabled = stage === 'recovery';
+        });
+
+        if (stage === 'proposal') {
+          canvas.classList.remove('hidden'); workspace.classList.add('hidden');
+          surfaceLabel.textContent = 'Leader node · proposal review';
+        } else if (stage === 'live') {
+          canvas.classList.remove('hidden'); workspace.classList.add('hidden');
+          surfaceLabel.textContent = 'Leader node · embedded dashboard';
+        } else if (stage === 'intervention') {
+          Object.assign(nodeData.m6, {
+            status:'Input needed', statusClass:'queued', kicker:'MINION · PLAN P5 · DECISION WAIT',
+            description:'The verification scope is ambiguous. This is a resumable decision wait; unrelated ready branches continue.',
+            facts:[['Readiness','Blocked on input'],['Decision','Choose verification scope'],['Graph revision','12'],['Attempt','M6 · attempt 1']],
+            note:['Your decision is required','Choose exact-output verification or the broader interaction suite. The reply is accepted only against the current decision wait.']
+          });
+          openWorkspace(); selectNode('m6');
+          surfaceLabel.textContent = 'Activity + Graph Inspector · decision wait';
+        } else if (stage === 'complete') {
+          workspace.classList.add('hidden'); canvas.classList.remove('hidden');
+          surfaceLabel.textContent = 'Activity · completion review';
+        } else if (stage === 'recovery') {
+          openWorkspace();
+          workspace.classList.add('plan-collapsed', 'detail-collapsed');
+          surfaceLabel.textContent = 'Graph Inspector · recovering projection';
+        }
+      }
+
+      document.querySelectorAll('[data-stage]').forEach(button => button.addEventListener('click', () => setStage(button.dataset.stage)));
+      document.getElementById('startPlan').addEventListener('click', () => { setStage('live'); showToast('Canonical run created · embedded Dashboard is now live'); });
+      document.getElementById('adjustPlan').addEventListener('click', () => showToast('Returns focus to Leader chat; proposal remains pending'));
+      document.getElementById('rejectPlan').addEventListener('click', () => showToast('Proposal rejected · no graph run created'));
+      document.getElementById('inspectIssue').addEventListener('click', () => { activityPeek.classList.add('hidden'); selectNode('m6'); });
+      document.getElementById('openAttention').addEventListener('click', () => { activityPeek.classList.remove('hidden'); selectNode('m6'); });
+      document.getElementById('answerIssue').addEventListener('click', () => {
+        Object.assign(nodeData.m6, {status:'Ready', description:'Input was accepted against revision 12. The scheduler may now reconsider M6 from current server truth.', facts:[['Readiness','Ready'],['Decision','Exact-output verification'],['Graph revision','13'],['Attempt','M6 · attempt 1']]});
+        setStage('live'); showToast('Input accepted against revision 12 · M6 can be reconsidered');
+      });
+      document.getElementById('openCompletedGraph').addEventListener('click', () => { completeScene.classList.add('hidden'); openWorkspace(); surfaceLabel.textContent = 'Graph Inspector · terminal revision 17'; });
+      document.getElementById('reviewKeep').addEventListener('click', () => showToast('Reviewed · completed work stays in Activity'));
+      document.getElementById('reviewRemove').addEventListener('click', () => showToast('Reviewed · Activity entry removed and Canvas detached'));
+      document.getElementById('finishRecovery').addEventListener('click', () => { setStage('live'); openWorkspace(); showToast('Full snapshot revision 21 loaded · controls restored'); });
+
+      setStage('proposal');
+
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && !workspace.classList.contains('hidden')) closeWorkspace();
+        if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'f') {
+          event.preventDefault();
+          workspace.classList.contains('hidden') ? openWorkspace() : closeWorkspace();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

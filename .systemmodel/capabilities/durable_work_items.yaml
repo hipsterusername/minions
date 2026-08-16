@@ -2,8 +2,9 @@ id: capability.durable_work_items
 type: capability
 name: Durable work items
 summary: Users can create a durable intention once, bind it to a canvas node, revision-fence its lifecycle, and retain run history beyond any node or session.
-constraints: []
-decisions: [ decision.canonical_work_item_lifecycle ]
+constraints:
+  - constraint.execution_graph_authority
+decisions: [ decision.canonical_work_item_lifecycle, decision.server_owned_execution_graphs ]
 risks:
   - risk.dual_ingress_divergence
 suggested_files: [ shared/work-item-contracts.ts, server/work-item-service.ts, server/commands/work-items.ts, src/use-work-items.ts ]
@@ -40,3 +41,5 @@ bridges:
     reason: Durable work-item surfaces restore state through the observability-owned reconnect flow.
   - to: flow.triage_attention
     reason: Durable work-item surfaces expose canonical records to the observability-owned attention triage flow.
+  - to: capability.execution_graph_runtime
+    reason: Execution graphs attach immutable topology and attempt execution beneath the current primary WorkItem run.

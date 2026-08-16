@@ -1,0 +1,30 @@
+id: constraint.execution_graph_projection
+type: constraint
+statement: Graph Inspector is a bounded WorkItem-topic projection; compact changes carry monotonic run revisions, adjacent deltas fold by stable IDs, and reconnects or revision gaps trigger a full snapshot refetch.
+applies_to:
+  capabilities:
+    - capability.execution_graph_runtime
+    - capability.execution_observability
+  flows:
+    - flow.inspect_execution_graph
+    - flow.recover_after_disconnect
+  surfaces:
+    - surface.graph_inspector
+    - surface.ws_api
+  files:
+    - shared/task-graph-view-contracts.ts
+    - server/task-graph/view.ts
+    - server/task-graph/service.ts
+    - server/commands/task-graph.ts
+    - src/task-graph/use-task-graph-view.ts
+    - src/task-graph/LeaderTaskGraphBridge.tsx
+severity: high
+agent_instruction: Keep topology and history server-owned, emit only typed bus envelopes on the owning WorkItem topic, fence controls from the displayed revision and attempt, and refetch rather than inventing missing state.
+review_gate: gate.execution_graph_runtime
+suggested_tests: [ src/task-graph/use-task-graph-view.test.tsx, src/task-graph/LeaderTaskGraphIntegration.test.tsx, server/task-graph/service.test.ts, tests/architecture/no-direct-broadcast.test.ts ]
+evidence: [ decision.server_owned_execution_graphs, decision.typed_event_bus ]
+domain: domain.observability
+scope: targeted
+guards:
+  - capability.execution_graph_runtime
+  - flow.inspect_execution_graph
