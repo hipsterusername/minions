@@ -242,6 +242,29 @@ describe("SqliteWorkItemService", () => {
     expect(ensured).toEqual(["run-primary", "run-child"]);
   });
 
+  it("preserves an exact child sandbox policy on idempotent launch replay", async () => {
+    const created = await draft();
+    startWorkItemIteration(db, { workItemId: created.workItem.id, runKey: "run-primary",
+      idempotencyKey: "primary", expectedLifecycleRevision: 0,
+      expectedCurrentRunKey: null, at: tick++ });
+    const ensured: WorkItemInvocation[] = [];
+    service = createSqliteWorkItemService({ db, bus: createBus({ clients: new Set() } as never),
+      generateKey: (_kind, requestId) => `run-${requestId}`, launchRun: vi.fn(),
+      ensureRunLaunched: (input) => { ensured.push(input); }, continueRun: vi.fn(), now: () => tick++ });
+    const child = { requestId: "sandboxed-child", workItemId: created.workItem.id,
+      parentRunKey: "run-primary", taskId: "task", prompt: "inspect only",
+      sandboxPolicy: { filesystemScope: "read-only", approvalPolicy: "never" } as const };
+    await service.startChildRun(child);
+    await service.startChildRun(child);
+    expect(ensured).toHaveLength(2);
+    expect(ensured.map(input=>input.sandboxPolicy)).toEqual([
+      child.sandboxPolicy,child.sandboxPolicy,
+    ]);
+    await expect(service.startChildRun({...child,sandboxPolicy:{
+      filesystemScope:"workspace-write",approvalPolicy:"never",
+    }})).rejects.toThrow("idempotency request was reused with different input");
+  });
+
   it("seals a committed run error when post-commit launch fails", async () => {
     const created = await draft();
     service = createSqliteWorkItemService({

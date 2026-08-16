@@ -17,6 +17,10 @@ import type { WorkItemBindingSurface } from "../../shared/work-item-contracts.ts
 import type { LiveEditAwareness } from "../../shared/live-edit-coordination.ts";
 import type { WorktreeIntegrationService } from "../worktree-integration-service.ts";
 import type { SandboxPolicy, WorkspaceId } from "../../shared/workspace-contracts.ts";
+import type { GraphRevisionInput, SourceSnapshot } from "../../shared/task-graph-contracts.ts";
+import type { TaskGraphService } from "../task-graph/service.ts";
+import type { LeaderOrchestrationMode } from "../../shared/task-graph-planning-contracts.ts";
+import type { TaskGraphPlanningCoordinator } from "../task-graph/planning-coordinator.ts";
 
 /** Every WebSocket command recognised by the server. */
 export type WsCommandType =
@@ -44,6 +48,26 @@ export type WsCommandType =
   | "get_work_item"
   | "list_work_items"
   | "get_work_item_runs"
+  // Durable execution graphs
+  | "get_task_graph_plan"
+  | "approve_task_graph_plan"
+  | "reject_task_graph_plan"
+  | "validate_task_graph_revision"
+  | "create_task_graph_revision"
+  | "start_task_graph_run"
+  | "get_task_graph_snapshot"
+  | "pause_task_graph_run"
+  | "resume_task_graph_run"
+  | "cancel_task_graph_run"
+  | "retry_task_node"
+  | "cancel_task_attempt"
+  | "request_task_verification"
+  | "waive_task_verification"
+  | "provide_task_input"
+  | "list_task_graph_attempts"
+  | "steer_task_graph"
+  | "get_task_artifact"
+  | "reconcile_task_graph_run"
   | "create_worktree_lineage" | "join_worktree_lineage"
   | "review_worktree_contribution" | "enqueue_worktree_contribution"
   | "retry_worktree_contribution" | "discard_worktree_contribution"
@@ -142,6 +166,7 @@ export interface WsCommand {
   skillIds?: string[];
   /** Template values configured for tagged skills. */
   skillValues?: Record<string, Record<string, string>>;
+  orchestrationMode?: LeaderOrchestrationMode;
   worktreeIsolation?: boolean;
   // Configuration params
   model?: string;
@@ -172,6 +197,22 @@ export interface WsCommand {
   serverName?: string;
   enabled?: boolean;
   runId?: string;
+  primaryRunKey?: string;
+  revisionId?: string;
+  graphRevision?: GraphRevisionInput;
+  sourceSnapshot?: SourceSnapshot;
+  expectedRunRevision?: number;
+  nodeId?: string;
+  currentAttemptId?: string | null;
+  input?: string;
+  instructions?: string;
+  affectedNodeIds?: string[];
+  artifactId?: string;
+  artifactIds?: string[];
+  verificationIds?: string[];
+  sourceDiffHash?: string;
+  proposalId?: string;
+  expectedProposalRevision?: number;
   // Render-DSL interactive submit_form command params
   formComponentId?: string;
   formAnswers?: Record<string, unknown>;
@@ -217,6 +258,8 @@ export interface CommandContext {
   maxSessions: number;
   launchSession: (options: StartSessionOptions) => Promise<SessionLaunchResult>;
   workItems?: WorkItemService;
+  taskGraphs?: TaskGraphService;
+  taskGraphPlanning?: TaskGraphPlanningCoordinator;
   worktreeIntegrations?: WorktreeIntegrationService;
   getLiveEditAwareness?: (projectPath: string, workItemIds: readonly string[]) => Record<string, LiveEditAwareness>;
   /** Canonical registered-path/project ownership seam. */

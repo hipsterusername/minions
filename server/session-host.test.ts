@@ -176,6 +176,8 @@ describe("SessionHost.start — happy-path lifecycle", () => {
   it("allows a canonical live run when the harness has no interception", async () => {
     harnessRef.mutationInterception = "none";
     const { host, deps, envelopes } = makeHarness("live-none");
+    // This lifecycle-only harness deliberately omits the Task Graph runtime.
+    deps.getLeaderOrchestrationMode = () => "direct";
     host.workItemId = "work-1";
     await host.start({ sessionKey: host.id, workItemId: "work-1",
       prompt: "change files", cwd: host.cwd, role: "leader",
@@ -188,6 +190,8 @@ describe("SessionHost.start — happy-path lifecycle", () => {
   it("allows a canonical live run when the harness is only observe-only", async () => {
     harnessRef.mutationInterception = "observe_only";
     const { host, deps, envelopes } = makeHarness("live-observe-only");
+    // This lifecycle-only harness deliberately omits the Task Graph runtime.
+    deps.getLeaderOrchestrationMode = () => "direct";
     host.workItemId = "work-1";
     await host.start({ sessionKey: host.id, workItemId: "work-1",
       prompt: "change files", cwd: host.cwd, role: "leader",
@@ -701,6 +705,8 @@ describe("SessionHost.start — error path", () => {
 
   it("keeps the logical run active while a checkpoint opens its fresh provider thread", async () => {
     const { host, deps, envelopes } = makeHarness("leader-checkpoint-lifecycle");
+    // This lifecycle-only harness deliberately omits the Task Graph runtime.
+    deps.getLeaderOrchestrationMode = () => "direct";
     host.workItemId = "work-checkpoint-lifecycle";
     const runtimeLifecycle = {
       providerInitialized: vi.fn(),

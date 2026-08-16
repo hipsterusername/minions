@@ -50,7 +50,10 @@ export function buildAgentContext(
       if (!isResume && host.workItemId && params.taskId && deps.startWorkItemChildRun) {
         return deps.startWorkItemChildRun({
           workItemId: host.workItemId, parentRunKey: host.runKey, taskId: params.taskId,
-          requestId: `child:${host.runKey}:${params.taskId}`, prompt: params.prompt,
+          ...(params.attemptId ? { attemptId: params.attemptId } : {}),
+          ...(params.attemptNumber ? { attemptNumber: params.attemptNumber } : {}),
+          requestId: `child:${host.runKey}:${params.taskId}:${params.attemptId ?? params.sessionKey}`,
+          prompt: params.prompt,
           cwd: params.cwd, systemPrompt: params.systemPrompt,
           ...(params.model ? { model: params.model } : {}),
           ...(params.harness ? { harness: params.harness } : {}),
@@ -122,8 +125,9 @@ export function buildAgentContext(
   };
   if (host.workItemId && !host.worktreeIsolation
     && getHarness(host.harnessName).capabilities.mutationInterception === "complete") {
+    const taskGraphScope=deps.getTaskGraphMutationScope?.(host.runKey)??null;
     ctx.mutationCoordination = new RunMutationCoordination(
-      getLiveEditCoordinator(host.cwd), host.cwd, host.workItemId, host.runKey);
+      getLiveEditCoordinator(host.cwd),host.cwd,host.workItemId,host.runKey,5_000,taskGraphScope);
   }
   const markDecisionNeeded = ctx.markDecisionNeeded;
   ctx.markDecisionNeeded = (reason) => {
@@ -132,6 +136,17 @@ export function buildAgentContext(
     if (identity) deps.workItemLifecycle?.runWaiting({ ...identity, waitKind: "decision", at: Date.now() });
   };
   if (host.taskState) ctx.existingTaskState = host.taskState;
+  const graphTools = deps.getTaskGraphTools?.(host.runKey) ?? [];
+  if (graphTools.length) ctx.taskGraphToolDefs = graphTools;
+  const graphAllowedTools=deps.getTaskGraphAllowedTools?.(host.runKey);
+  if (graphAllowedTools) host.toolAllowlist=[...graphAllowedTools];
+  // Canonical primary Leaders use Task Graph by default. Bare compatibility
+  // sessions have no durable graph authority and therefore remain legacy.
+  ctx.orchestrationMode = host.workItemId
+    ? (deps.getLeaderOrchestrationMode?.(host.runKey) ?? "auto")
+    : "direct";
+  const planning = deps.getTaskGraphPlanning?.(host.runKey);
+  if (planning && ctx.orchestrationMode !== "direct") ctx.taskGraphPlanning = planning;
   if (host.renderState) ctx.existingRenderState = host.renderState;
   if (host.skillIds.length > 0) ctx.skillIds = host.skillIds;
   if (Object.keys(host.skillValues).length > 0) ctx.skillValues = host.skillValues;

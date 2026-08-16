@@ -27,9 +27,14 @@ import { join } from "node:path";
 // tmpdir path deterministically from the PID inside `vi.hoisted` (which
 // executes alongside the mock factory) and create the directory itself in
 // `beforeAll`. The pid-based name is unique per vitest worker.
-const { FAKE_HOME } = vi.hoisted(() => ({
-  FAKE_HOME: require("path").resolve(require("os").tmpdir(), `minions-fakehome-${process.pid}`),
-}));
+const { FAKE_HOME, PRIOR_MINIONS_HOME } = vi.hoisted(() => {
+  const fakeHome = require("path").resolve(require("os").tmpdir(), `minions-fakehome-${process.pid}`);
+  const priorMinionsHome = process.env["MINIONS_HOME"];
+  // project-store captures its global directory at module load. Give this
+  // worker a private override so parallel suites cannot mutate its recents.
+  process.env["MINIONS_HOME"] = require("path").join(fakeHome, ".minions");
+  return { FAKE_HOME: fakeHome, PRIOR_MINIONS_HOME: priorMinionsHome };
+});
 
 vi.mock("node:os", async () => {
   const actual = await vi.importActual<typeof import("node:os")>("node:os");
@@ -56,7 +61,7 @@ import {
   writeSettings,
   writeSkills,
 } from "./project-store.ts";
-import { findWorkspaceBySource, registerWorkspace } from "./workspace-registry.ts";
+import { findWorkspaceBySource, getMinionsHome, registerWorkspace } from "./workspace-registry.ts";
 
 let project: string;
 const cleanup: (() => void)[] = [];
@@ -68,6 +73,8 @@ beforeAll(() => {
 
 afterAll(() => {
   rmSync(FAKE_HOME, { recursive: true, force: true });
+  if (PRIOR_MINIONS_HOME === undefined) delete process.env["MINIONS_HOME"];
+  else process.env["MINIONS_HOME"] = PRIOR_MINIONS_HOME;
 });
 
 beforeEach(() => {
@@ -77,8 +84,9 @@ beforeEach(() => {
 
 afterEach(() => {
   while (cleanup.length) cleanup.pop()!();
-  // Reset the recent-projects.json between tests so they're independent.
-  rmSync(join(FAKE_HOME, ".minions", "recent-projects.json"), {
+  // Reset the canonical index between tests. getMinionsHome() also honors a
+  // test-runner MINIONS_HOME override, so sandboxed full-suite runs stay isolated.
+  rmSync(join(getMinionsHome(), "recent-projects.json"), {
     force: true,
   });
 });
@@ -130,6 +138,7 @@ describe("initSidecar / openProjectDb", () => {
       approvalPolicy: "on-failure",
     });
     expect(typeof settings.defaultWorktreeIsolation).toBe("boolean");
+    expect(settings.leaderPlanningBackend).toBe("task_graph");
   });
 
   it("openProjectDb initialises without provider defaults and re-uses an existing sidecar", () => {
@@ -183,6 +192,11 @@ describe("context / settings / skills / mcp-servers round-trip", () => {
     writeSettings(project, next);
     // readSettings merges in defaults for new harness fields; assert written values are preserved
     expect(readSettings(project)).toMatchObject(next);
+  });
+
+  it("round-trips the legacy planning debug override", () => {
+    writeSettings(project, { leaderPlanningBackend: "legacy" });
+    expect(readSettings(project).leaderPlanningBackend).toBe("legacy");
   });
 
   it("drops the removed network axis from legacy sandbox defaults", () => {

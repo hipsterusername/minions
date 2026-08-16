@@ -37,7 +37,7 @@ export function listWorkItemRunsPage(db: Database.Database, input: {
   const scope = `runs:${input.workItemId}`; const cursor = decode(input.cursor, scope);
   const rows = db.prepare(`
     SELECT session_key, work_item_id, run_number, run_kind, previous_run_key,
-           parent_run_key, task_id, started_at, ended_at, run_outcome,
+           parent_run_key, task_id, attempt_id, attempt_number, started_at, ended_at, run_outcome,
            final_report_event_id, start_idempotency_key, session_id, final_report, provider_generation, run_config_json, harness_name, model
     FROM sessions WHERE work_item_id = ?
       ${cursor ? "AND (started_at < ? OR (started_at = ? AND session_key < ?))" : ""}
@@ -64,7 +64,7 @@ export function getRunByStartRequest(
     { session_key: string } | undefined;
   if (!row) return null;
   return db.prepare(`SELECT session_key, work_item_id, run_number, run_kind,
-    previous_run_key, parent_run_key, task_id, started_at, ended_at, run_outcome,
+    previous_run_key, parent_run_key, task_id, attempt_id, attempt_number, started_at, ended_at, run_outcome,
     final_report_event_id, start_idempotency_key, session_id, final_report, provider_generation, run_config_json, harness_name, model
     FROM sessions WHERE session_key = ?`).get(row.session_key) as WorkItemRunRow;
 }

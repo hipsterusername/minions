@@ -140,7 +140,7 @@ describe("complete_task", () => {
     expect(result.content[0]!.text).toContain("t1");
   });
 
-  it("sets executor='leader' even when the task was previously delegated to a minion", async () => {
+  it("rejects leader completion while a delegated child is still attached", async () => {
     const ctx = makeCtx();
     const completeTool = createCompleteTaskToolDef(ctx);
 
@@ -158,7 +158,10 @@ describe("complete_task", () => {
       result: null,
     });
 
-    await call(completeTool, { taskId: "t1", result: "leader-finished-it" });
-    expect(ctx.taskState.tasks.get("t1")!.executor).toBe("leader");
+    const result = await call(completeTool, { taskId: "t1", result: "leader-finished-it" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("Cancel it before completing");
+    expect(ctx.taskState.tasks.get("t1")!.status).toBe("running");
+    expect(ctx.taskState.tasks.get("t1")!.executor).toBe("minion");
   });
 });

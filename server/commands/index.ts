@@ -58,6 +58,7 @@ import { waiveReviewGate } from "./waive-review-gate.ts";
 import { workItemCommand } from "./work-items.ts";
 import { worktreeIntegrationCommand } from "./worktree-integration.ts";
 import { listWorktreeLineages } from "./list-worktree-lineages.ts";
+import { taskGraphCommand } from "./task-graph.ts";
 import type { CommandContext, CommandTable, WsCommand } from "./types.ts";
 import type { WebSocket } from "ws";
 
@@ -90,6 +91,25 @@ export const COMMAND_TABLE = {
   get_work_item: workItemCommand,
   list_work_items: workItemCommand,
   get_work_item_runs: workItemCommand,
+  get_task_graph_plan: taskGraphCommand,
+  approve_task_graph_plan: taskGraphCommand,
+  reject_task_graph_plan: taskGraphCommand,
+  validate_task_graph_revision: taskGraphCommand,
+  create_task_graph_revision: taskGraphCommand,
+  start_task_graph_run: taskGraphCommand,
+  get_task_graph_snapshot: taskGraphCommand,
+  pause_task_graph_run: taskGraphCommand,
+  resume_task_graph_run: taskGraphCommand,
+  cancel_task_graph_run: taskGraphCommand,
+  retry_task_node: taskGraphCommand,
+  cancel_task_attempt: taskGraphCommand,
+  request_task_verification: taskGraphCommand,
+  waive_task_verification: taskGraphCommand,
+  provide_task_input: taskGraphCommand,
+  list_task_graph_attempts: taskGraphCommand,
+  steer_task_graph: taskGraphCommand,
+  get_task_artifact: taskGraphCommand,
+  reconcile_task_graph_run: taskGraphCommand,
   create_worktree_lineage: worktreeIntegrationCommand,
   join_worktree_lineage: worktreeIntegrationCommand,
   review_worktree_contribution: worktreeIntegrationCommand,

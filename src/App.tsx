@@ -322,6 +322,8 @@ function ProjectView({
         skillIds: [],
         skillValues: {},
         skillPanelOpen: false,
+        orchestrationMode: projectSettings.leaderPlanningBackend === "legacy"
+          ? "direct" : "auto",
       },
     };
     dispatch({ type: "ADD_NODE", node });
@@ -548,6 +550,8 @@ function ProjectView({
         skillIds: [skillId],
         skillValues: {},
         skillPanelOpen: true,
+        orchestrationMode: projectSettings.leaderPlanningBackend === "legacy"
+          ? "direct" : "auto",
       },
     };
     dispatch({ type: "ADD_NODE", node });

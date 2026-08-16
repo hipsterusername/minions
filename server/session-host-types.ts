@@ -5,6 +5,10 @@ import type { RuntimeSessionInfo, TaskManagerState } from "./task-tools.ts";
 import type { SessionRole, ThinkingConfig } from "./session-host-config.ts";
 import type { SessionTerminateReason } from "./session-host-terminate.ts";
 import type { SandboxPolicy } from "../shared/workspace-contracts.ts";
+import type { NormalizedToolDef } from "./harness/types.ts";
+import type { LiveEditPathInput } from "./live-edit-paths.ts";
+import type { LeaderOrchestrationMode } from "../shared/task-graph-planning-contracts.ts";
+import type { TaskGraphPlanningCoordinator } from "./task-graph/planning-coordinator.ts";
 
 export interface SessionHostDeps {
   bus: Bus;
@@ -23,6 +27,7 @@ export interface SessionHostDeps {
   workItemLifecycle?: WorkItemRuntimeLifecycle;
   startWorkItemChildRun?: (input: {
     workItemId: string; parentRunKey: string; taskId: string; requestId: string;
+    attemptId?: string; attemptNumber?: number;
     prompt: string; cwd: string; systemPrompt: string; model?: string;
     harness?: string; thinkingConfig?: ThinkingConfig; permissionMode?: string;
     executorClass?: "mechanical" | "standard" | "reasoning";
@@ -33,6 +38,11 @@ export interface SessionHostDeps {
   resumeWorkItemRun?: (input: { workItemId: string; runKey: string; prompt: string; requestId: string }) => void | Promise<void>;
   continueWorkItemChild?: (input: { workItemId: string; runKey: string; prompt: string; requestId: string }) => void | Promise<void>;
   cleanupLiveEditRun?: (runKey: string) => void;
+  getTaskGraphTools?: (runKey:string) => NormalizedToolDef[];
+  getTaskGraphAllowedTools?: (runKey:string) => string[]|null;
+  getTaskGraphMutationScope?: (runKey:string) => LiveEditPathInput[]|null;
+  getLeaderOrchestrationMode?: (runKey: string) => LeaderOrchestrationMode;
+  getTaskGraphPlanning?: (runKey: string) => TaskGraphPlanningCoordinator | null;
   transitionWorktreeProvisioning?: (runKey: string,
     outcome: "provisioning" | "active" | "failed", error?: string) => void;
 }
@@ -109,6 +119,8 @@ export interface StartSessionOptions {
   externalMcpServers?: Record<string, unknown> | undefined;
   /** Formatted `mcp__<serverId>__<toolName>` names allowed without prompts. */
   externalMcpToolNames?: string[] | undefined;
+  /** Optional exact task-scoped provider tool allowlist; internal completion/evidence tools remain available. */
+  toolAllowlist?: string[] | undefined;
   /** Registered AgentHarness name. Defaults to "claude". */
   harness?: string | undefined;
   /** Initial permission mode; only honoured on the first start. */
@@ -116,6 +128,8 @@ export interface StartSessionOptions {
   /** Explicit provider-neutral execution boundary; resolved against harness support at launch. */
   sandboxPolicy?: SandboxPolicy | undefined;
   executorClass?: "mechanical" | "standard" | "reasoning" | undefined;
+  orchestrationMode?: LeaderOrchestrationMode | undefined;
+  planningContext?: string | undefined;
   /** Guard for one automatic context-window recovery attempt. */
   contextRecoveryAttempt?: number | undefined;
   contextCheckpointId?: string | undefined;

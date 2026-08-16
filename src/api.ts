@@ -3,6 +3,7 @@ import type { GraphDocument } from "./graph.ts";
 import type { LeaderPreset } from "./leader-preset.ts";
 import type { SandboxPolicy } from "../shared/workspace-contracts.ts";
 import type { ContextActionConfig } from "../shared/context-actions.ts";
+import type { LeaderPlanningBackend } from "../shared/leader-planning.ts";
 
 const BASE = "/api";
 
@@ -96,6 +97,8 @@ export interface ProjectSettings {
   systemModel?: "off" | "advisory" | "enforced";
   /** Beta: add decision-oriented role contracts to Leader and Minion prompts. */
   roleSystemBeta?: boolean;
+  /** Debug override for new Leaders; absent/default uses Task Graph. */
+  leaderPlanningBackend?: LeaderPlanningBackend;
   /**
    * User-configurable Context Actions shown in the Leader slash menu. An
    * ordered, freely extensible list — add, remove, rename, re-prompt, or

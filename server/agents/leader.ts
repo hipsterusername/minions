@@ -6,6 +6,7 @@
 import { registerAgentType } from "./registry.ts";
 import type { AgentType, AgentTypeContext, AgentToolResult } from "./types.ts";
 import { createTaskToolsForLeader } from "../task-tools.ts";
+import { createTaskGraphPlanningTools } from "../task-graph/planning-tools.ts";
 import { createRenderToolsForLeader } from "../render-tools.ts";
 import { createSystemModelToolsForLeader } from "../system-model-tools/index.ts";
 import { createSkillAuthoringTools } from "../skill-authoring-tools.ts";
@@ -18,11 +19,18 @@ import type { SessionTerminateReason } from "../session-host-terminate.ts";
 import { cancelChildrenOnLeaderTeardown } from "./leader-teardown.ts";
 import {
   CLAUDE_LEADER_BUILT_IN_TOOLS,
-  DEFAULT_LEADER_TOOL_NAMES,
+  TASK_GRAPH_LEADER_TOOL_NAMES,
   buildLeaderSkillInventory,
   composeLeaderPrompt,
   decodeLeaderPromptCustomization,
 } from "../../shared/leader-prompt.ts";
+import {
+  LEADER_RENDER_TOOL_NAMES,
+} from "../../shared/leader-planning.ts";
+import {
+  resolveLeaderPlanningProfile,
+  type LeaderPlanningProfile,
+} from "./leader-planning-profile.ts";
 import {
   LEADER_ROLE_SYSTEM_PROMPT,
   appendRoleSystemPrompt,
@@ -36,14 +44,17 @@ import {
 const SYSTEM_MODEL_TRUNCATION_POINTER =
   "[system-model addendum truncated — use `query_system_model` to fetch omitted objects]";
 
-function buildSystemModelAddendum(runtime: SystemModelRuntime): string {
+function buildSystemModelAddendum(runtime: SystemModelRuntime, graphMode = false): string {
   if (runtime.mode === "off" || !runtime.model) return "";
   // Redesign §6: factual addendum listing gated surfaces, no "query for planning" mandate.
   const globs = gatedSurfaceGlobs(runtime.model);
   const surfaces = globs.length > 0 ? globs.join(", ") : "(none currently defined)";
+  const workflow = graphMode
+    ? "The semantic graph plan must identify gated files and Work Packet IDs for affected steps; the scheduler injects their frozen context."
+    : "You do not need to check preemptively: `plan_task` and `assign_task` compute this deterministically and tell you when a task hits one. When assigning a minion for packet-scoped work, pass `workPacketId` to `assign_task` so the stored Context Pack is injected.";
   const addendum = `## System Model
 
-A system model is active. Gated surfaces — a work packet is required when a task touches them: ${surfaces}. You do not need to check preemptively: \`plan_task\` and \`assign_task\` compute this deterministically and tell you when a task hits one. When assigning a minion for packet-scoped work, pass \`workPacketId\` to \`assign_task\` so the stored Context Pack is injected.
+A system model is active. Gated surfaces — a work packet is required when a task touches them: ${surfaces}. ${workflow}
 
 Tools (available, not mandated): \`query_system_model\` (scored, topK), \`create_work_packet\`, \`amend_work_packet\`, \`check_freshness\`, \`record_verification\`.`;
   const maxChars = runtime.model.policies.contextBudgets.leaderPromptAddendum * 4;
@@ -60,17 +71,19 @@ const SYSTEM_MODEL_TOOL_NAMES = [
   "check_freshness", "record_verification", "reconcile_run",
   "record_constraint_verdicts", "model_health",
 ];
-
 /** The skill ID that gates the skill-authoring tools. */
 const SKILL_BUILDER_ID = "skill-builder";
 
 function registeredPromptToolNames(
   ctx: AgentTypeContext,
   runtime: SystemModelRuntime,
+  planning: LeaderPlanningProfile,
 ): string[] {
   return [
-    ...DEFAULT_LEADER_TOOL_NAMES,
+    ...planning.taskToolNames,
+    ...planning.planningToolNames,
     ...(ctx.worktreeIsolation && ctx.worktreeInfo ? ["request_approval"] : []),
+    ...LEADER_RENDER_TOOL_NAMES,
     ...(ctx.skillIds?.includes(SKILL_BUILDER_ID) ? SKILL_AUTHORING_TOOL_NAMES : []),
     ...(runtime.mode !== "off" && runtime.model ? SYSTEM_MODEL_TOOL_NAMES : []),
   ];
@@ -79,6 +92,7 @@ function registeredPromptToolNames(
 function buildSkillsAddendum(
   ctx: AgentTypeContext,
   frozenSkillsAddendum: string,
+  planning: LeaderPlanningProfile,
 ): string {
   const projectPath = ctx.worktreeInfo?.projectPath ?? ctx.cwd;
   const allSkills = loadAllSkills(projectPath);
@@ -86,7 +100,8 @@ function buildSkillsAddendum(
     loadSkillsByIds(projectPath, ctx.skillIds ?? []),
     ctx.skillValues ?? {},
   );
-  const inventory = buildLeaderSkillInventory(allSkills);
+  const inventory = planning.includeSkillInventory
+    ? buildLeaderSkillInventory(allSkills) : "";
   return [active, inventory].filter(Boolean).join("\n\n");
 }
 
@@ -101,7 +116,7 @@ function isRoleSystemEnabled(ctx: AgentTypeContext): boolean {
  */
 export const LEADER_SYSTEM_PROMPT = composeLeaderPrompt({
   builtInTools: CLAUDE_LEADER_BUILT_IN_TOOLS,
-  registeredToolNames: DEFAULT_LEADER_TOOL_NAMES,
+  registeredToolNames: TASK_GRAPH_LEADER_TOOL_NAMES,
 });
 
 const leaderAgent: AgentType = {
@@ -111,16 +126,24 @@ const leaderAgent: AgentType = {
     const systemModelRuntime = resolveSystemModelRuntime(ctx);
     const roleSystemEnabled = isRoleSystemEnabled(ctx);
     const customization = decodeLeaderPromptCustomization(customPrompt);
+    const planning = resolveLeaderPlanningProfile({
+      orchestrationMode: ctx.orchestrationMode,
+      hasCanonicalIdentity: Boolean(ctx.workItemId && ctx.runKey),
+    });
     return composeLeaderPrompt({
       builtInTools: tools ?? CLAUDE_LEADER_BUILT_IN_TOOLS,
-      registeredToolNames: registeredPromptToolNames(ctx, systemModelRuntime),
+      registeredToolNames: registeredPromptToolNames(ctx, systemModelRuntime, planning),
+      promptFeatureIds: planning.promptFeatureIds,
       roleSystemAddendum: roleSystemEnabled ? LEADER_ROLE_SYSTEM_PROMPT : "",
-      skillsAddendum: buildSkillsAddendum(ctx, customization.skillsAddendum),
+      skillsAddendum: buildSkillsAddendum(ctx, customization.skillsAddendum, planning),
       // For Leaders only, the WS `systemPrompt` slot is a structured
       // prefix + frozen-skill envelope. It can customize designated sections
       // but never replace the canonical core or capability inventory.
       userPrefix: customization.promptPrefix,
-      systemModelAddendum: buildSystemModelAddendum(systemModelRuntime),
+      systemModelAddendum: buildSystemModelAddendum(
+        systemModelRuntime,
+        planning.usesTaskGraph,
+      ),
     });
   },
 
@@ -134,6 +157,14 @@ const leaderAgent: AgentType = {
     // Resolved once up front: task tools need it for the packet trigger (§5).
     const systemModelRuntime = resolveSystemModelRuntime(ctx);
     const roleSystemEnabled = isRoleSystemEnabled(ctx);
+    const planning = resolveLeaderPlanningProfile({
+      orchestrationMode: ctx.orchestrationMode,
+      hasCanonicalIdentity: Boolean(ctx.workItemId && ctx.runKey),
+    });
+    if (planning.usesTaskGraph && (!ctx.taskGraphPlanning
+      || !ctx.workItemId || !ctx.runKey)) {
+      throw new Error("Graph-mode Leader requires canonical planning authority");
+    }
 
     const lifecycleCallbacks = createLeaderStateCallbacks(ctx, leaderSessionKey);
     const { toolDefs: taskDefs, taskState } = createTaskToolsForLeader({
@@ -162,7 +193,22 @@ const leaderAgent: AgentType = {
       onStateChange: lifecycleCallbacks.onTaskStateChange,
       onTaskNameChange: ctx.updateTaskName,
       getRenderComponents: ctx.getRenderComponents,
+      planningBackend: planning.backend,
     });
+
+    const planningDefs = planning.usesTaskGraph
+      ? createTaskGraphPlanningTools({
+        coordinator: ctx.taskGraphPlanning!,
+        workItemId: ctx.workItemId!,
+        primaryRunKey: ctx.runKey!,
+        mode: planning.orchestrationMode === "plan" ? "plan" : "auto",
+        leaderSessionKey,
+        bus: ctx.bus,
+        taskState,
+        onTaskStateChange: lifecycleCallbacks.onTaskStateChange,
+        markDecisionNeeded: ctx.markDecisionNeeded,
+        scheduleWaitContinue: ctx.scheduleWaitContinue,
+      }) : [];
 
     const { toolDefs: renderDefs, renderState } = createRenderToolsForLeader({
       leaderSessionKey,
@@ -194,6 +240,7 @@ const leaderAgent: AgentType = {
 
     const toolGroups: Record<string, import("../harness/types.ts").NormalizedToolDef[]> = {
       "task-manager": taskDefs,
+      ...(planningDefs.length > 0 ? { "graph-planner": planningDefs } : {}),
       "render-dashboard": renderDefs,
       ...(hasSkillBuilder ? { skills: skillAuthoringDefs } : {}),
       ...(systemModelDefs.length > 0 ? { "system-model": systemModelDefs } : {}),

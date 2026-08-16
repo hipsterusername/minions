@@ -607,7 +607,8 @@ describe("SessionRegistry.hydrateFromDb — sessionId round-trip", () => {
     `).run();
     db.prepare(`
       UPDATE sessions SET work_item_id = 'work-1', run_kind = 'child',
-        parent_run_key = 'root-run', task_id = 'task-1', started_at = 1
+        parent_run_key = 'root-run', task_id = 'task-1', attempt_id = 'attempt-1',
+        attempt_number = 1, started_at = 1
       WHERE session_key = 'child-1'
     `).run();
 

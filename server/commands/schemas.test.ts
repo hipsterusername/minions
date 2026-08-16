@@ -151,6 +151,59 @@ describe("validateWsCommand – accept", () => {
     accept({ type: "list_work_items", projectId: "p1", includeArchived: true, limit: 50 });
     accept({ type: "get_work_item_runs", workItemId: "w1", cursor: "next" });
   });
+
+  it("accepts every task-graph command with its canonical fences", () => {
+    const hash=`sha256:${"a".repeat(64)}`;
+    const graphRevision={definitionId:"definition",revisionId:"revision",workItemId:"work",
+      workspaceId:"workspace",objective:"Execute",acceptanceCriteria:["done"],nonGoals:[],constraints:[],
+      terminalNodeIds:["node"],maxActiveAttempts:2,edges:[],nodes:[{id:"node",title:"Node",
+        objective:"Do it",inputBindings:{},outputSchemas:{},constraints:[],acceptanceCriteria:[],
+        executorClass:"standard",allowedHarnesses:["codex"],allowedTools:[],ownershipRequest:[],
+        budgetRequest:{},timeoutMs:1_000,retryPolicy:{maxAttempts:2,backoffMs:10,
+          retryableOutcomes:["failed","lost"],jitterMs:0},verificationRequired:false,
+        failurePolicy:"fail_graph",expansionPolicy:null}]};
+    const sourceSnapshot={id:"source",workItemId:"work",primaryRunKey:"primary",
+      taskGraphRevisionId:"revision",repositoryBaseCommit:"abc",dirtyDiffDigest:hash,
+      workspaceId:"workspace",worktreeIdentity:"worktree",systemModelDigest:hash,
+      workPacketRevisionId:null,connectedContext:[],compiledSkills:[],harnessPolicyDigest:hash,
+      toolPolicyDigest:hash,createdAt:1};
+    accept({type:"validate_task_graph_revision",requestId:"request",graphRevision});
+    accept({type:"create_task_graph_revision",requestId:"request",workItemId:"work",graphRevision});
+    accept({type:"start_task_graph_run",requestId:"request",runId:"run",workItemId:"work",
+      primaryRunKey:"primary",revisionId:"revision",sourceSnapshot,expectedLifecycleRevision:3});
+    accept({type:"get_task_graph_snapshot",requestId:"request",workItemId:"work",runId:"run"});
+    for (const type of ["pause_task_graph_run","resume_task_graph_run","cancel_task_graph_run"] as const) {
+      accept({type,requestId:"request",workItemId:"work",runId:"run",expectedRunRevision:4});
+    }
+    accept({type:"retry_task_node",requestId:"request",workItemId:"work",runId:"run",nodeId:"node",
+      currentAttemptId:"attempt",expectedRunRevision:4});
+    accept({type:"cancel_task_attempt",requestId:"request",workItemId:"work",runId:"run",nodeId:"node",
+      currentAttemptId:"attempt",expectedRunRevision:4});
+    accept({type:"request_task_verification",requestId:"request",workItemId:"work",runId:"run",nodeId:"node",
+      currentAttemptId:"attempt",expectedRunRevision:4});
+    accept({type:"waive_task_verification",requestId:"request",workItemId:"work",runId:"run",nodeId:"node",
+      currentAttemptId:"attempt",expectedRunRevision:4,actor:"operator",reason:"Emergency approval"});
+    accept({type:"provide_task_input",requestId:"request",workItemId:"work",runId:"run",nodeId:"node",
+      currentAttemptId:null,expectedRunRevision:4,actor:"operator",input:"Proceed"});
+    accept({type:"list_task_graph_attempts",requestId:"request",workItemId:"work",runId:"run",nodeId:"node"});
+    accept({type:"steer_task_graph",requestId:"request",workItemId:"work",runId:"run",
+      expectedRunRevision:4,instructions:"Prioritize node",affectedNodeIds:["node"]});
+    accept({type:"get_task_artifact",requestId:"request",workItemId:"work",runId:"run",
+      artifactId:"artifact"});
+    accept({type:"reconcile_task_graph_run",requestId:"request",workItemId:"work",runId:"run",
+      expectedRunRevision:4,artifactIds:["artifact"],verificationIds:["verification"],sourceDiffHash:hash});
+  });
+});
+
+describe("validateWsCommand – connected context budgets", () => {
+  it("rejects an oversized canvas context item", () => {
+    reject({
+      type: "canvas_context",
+      sessionKey: "leader",
+      items: [{ nodeId: "node", nodeType: "markdown", label: "Context",
+        content: "x".repeat(256 * 1024 + 1) }],
+    }, "Too big");
+  });
 });
 
 describe("validateWsCommand – reject", () => {
@@ -242,6 +295,48 @@ describe("validateWsCommand – reject", () => {
       { type: "create_session", worktreeIsolation: "yes" },
       "create_session",
     );
+  });
+
+  it("rejects unfenced or unaudited task-graph mutations", () => {
+    reject({type:"pause_task_graph_run",requestId:"request",workItemId:"work",runId:"run"},
+      "pause_task_graph_run");
+    reject({type:"cancel_task_attempt",requestId:"request",workItemId:"work",runId:"run",
+      nodeId:"node",expectedRunRevision:1},"cancel_task_attempt");
+    reject({type:"retry_task_node",requestId:"request",workItemId:"work",runId:"run",
+      nodeId:"node",expectedRunRevision:1},"retry_task_node");
+    for (const type of ["retry_task_node","request_task_verification","waive_task_verification"] as const) {
+      const extra=type==="waive_task_verification"?{actor:"operator",reason:"reviewed"}:{};
+      const command={type,requestId:"request",workItemId:"work",runId:"run",nodeId:"node",
+        expectedRunRevision:1,...extra};
+      reject(command,type);
+      reject({...command,currentAttemptId:null},type);
+    }
+    reject({type:"waive_task_verification",requestId:"request",workItemId:"work",runId:"run",
+      nodeId:"node",currentAttemptId:"attempt",expectedRunRevision:1,actor:"operator"},
+      "waive_task_verification");
+    reject({type:"provide_task_input",requestId:"request",workItemId:"work",runId:"run",
+      nodeId:"node",currentAttemptId:null,expectedRunRevision:1,actor:"operator",input:"  "},
+      "provide_task_input");
+    reject({type:"steer_task_graph",workItemId:"work",runId:"run",expectedRunRevision:1,
+      instructions:"Proceed",affectedNodeIds:[]},"steer_task_graph");
+    reject({type:"steer_task_graph",requestId:"request",workItemId:"work",runId:"run",
+      instructions:"Proceed",affectedNodeIds:[]},"steer_task_graph");
+    reject({type:"steer_task_graph",requestId:"request",workItemId:"work",runId:"run",
+      expectedRunRevision:1,instructions:"Proceed",affectedNodeIds:[]},"steer_task_graph");
+    reject({type:"reconcile_task_graph_run",requestId:"request",workItemId:"work",runId:"run",
+      artifactIds:[],verificationIds:[],sourceDiffHash:`sha256:${"a".repeat(64)}`},
+      "reconcile_task_graph_run");
+    reject({type:"reconcile_task_graph_run",requestId:"request",workItemId:"work",runId:"run",
+      expectedRunRevision:1,artifactIds:[],verificationIds:[],
+      sourceDiffHash:`sha256:${"a".repeat(64)}`},"reconcile_task_graph_run");
+    reject({type:"reconcile_task_graph_run",requestId:"request",workItemId:"work",runId:"run",
+      expectedRunRevision:1,artifactIds:[],verificationIds:[],sourceDiffHash:"not-a-hash"},
+      "reconcile_task_graph_run");
+  });
+
+  it("rejects ambiguous task-graph snapshot selectors", () => {
+    reject({type:"get_task_graph_snapshot",requestId:"request",workItemId:"work",
+      runId:"run",primaryRunKey:"primary"},"mutually exclusive");
   });
 
   it("rejects invalid workspace identity and sandbox policy values", () => {

@@ -42,6 +42,8 @@ export interface WorkItemRunRow {
   previous_run_key: string | null;
   parent_run_key: string | null;
   task_id: string | null;
+  attempt_id: string | null;
+  attempt_number: number | null;
   started_at: number;
   ended_at: number | null;
   run_outcome: Outcome;
@@ -84,7 +86,7 @@ function idempotentResult(db: Database.Database, row: WorkItemRow): WorkItemMuta
 function getRun(db: Database.Database, runKey: string): WorkItemRunRow | null {
   return (db.prepare(`
     SELECT session_key, work_item_id, run_number, run_kind, previous_run_key,
-           parent_run_key, task_id, started_at,
+           parent_run_key, task_id, attempt_id, attempt_number, started_at,
            ended_at, run_outcome, final_report_event_id, start_idempotency_key,
            session_id, final_report, provider_generation, run_config_json, harness_name, model
     FROM sessions WHERE session_key = ? AND work_item_id IS NOT NULL
@@ -99,7 +101,7 @@ export function getWorkItem(db: Database.Database, id: string): WorkItemRow | nu
 export function listWorkItemRuns(db: Database.Database, id: string): WorkItemRunRow[] {
   return db.prepare(`
     SELECT session_key, work_item_id, run_number, run_kind, previous_run_key,
-           parent_run_key, task_id, started_at,
+           parent_run_key, task_id, attempt_id, attempt_number, started_at,
            ended_at, run_outcome, final_report_event_id, start_idempotency_key,
            session_id, final_report, provider_generation, run_config_json, harness_name, model
     FROM sessions WHERE work_item_id = ? ORDER BY run_number
@@ -187,7 +189,7 @@ export function startWorkItemIteration(db: Database.Database, input: {
   return db.transaction(() => {
     const duplicate = db.prepare(`
       SELECT session_key, work_item_id, run_number, run_kind, previous_run_key,
-             parent_run_key, task_id, started_at,
+             parent_run_key, task_id, attempt_id, attempt_number, started_at,
              ended_at, run_outcome, final_report_event_id, start_idempotency_key,
              session_id, final_report, provider_generation, run_config_json, harness_name, model
       FROM sessions WHERE work_item_id = ? AND start_idempotency_key = ?

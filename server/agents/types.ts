@@ -15,6 +15,8 @@ import type { NormalizedToolDef } from "../harness/types.ts";
 import type { ThinkingConfig } from "../session-host-config.ts";
 import type { SessionTerminateReason } from "../session-host-terminate.ts";
 import type { SessionInvocationKind } from "../session-host-types.ts";
+import type { LeaderOrchestrationMode } from "../../shared/task-graph-planning-contracts.ts";
+import type { TaskGraphPlanningCoordinator } from "../task-graph/planning-coordinator.ts";
 
 export interface AgentTypeContext {
   sessionKey: string;
@@ -26,6 +28,11 @@ export interface AgentTypeContext {
   worktreeInfo: WorktreeInfo | null;
   worktreeIsolation: boolean;
   mutationCoordination?: RunMutationCoordination;
+  /** Attempt-scoped execution-graph tools, present only for graph children. */
+  taskGraphToolDefs?: NormalizedToolDef[];
+  /** Primary-Leader graph planner; present only for graph orchestration mode. */
+  taskGraphPlanning?: TaskGraphPlanningCoordinator;
+  orchestrationMode?: LeaderOrchestrationMode;
   /** Existing task state to preserve across resume calls (leader only) */
   existingTaskState?: TaskManagerState;
   /** Existing render state to preserve across resume calls (leader only) */
@@ -51,6 +58,8 @@ export interface AgentTypeContext {
   startMinionSession?: (params: {
     sessionKey: string;
     taskId?: string;
+    attemptId?: string;
+    attemptNumber?: number;
     invocationKind?: SessionInvocationKind;
     prompt: string;
     cwd: string;

@@ -31,7 +31,8 @@ describe("global work-item schema migration", () => {
     expect(columns(db, "work_item_bindings")).toContain("detached_at");
     expect(columns(db, "sessions")).toEqual(expect.arrayContaining([
       "work_item_id", "run_number", "run_kind", "previous_run_key",
-      "parent_run_key", "task_id", "started_at", "ended_at", "run_outcome",
+      "parent_run_key", "task_id", "attempt_id", "attempt_number",
+      "started_at", "ended_at", "run_outcome",
       "final_report_event_id", "start_idempotency_key",
     ]));
     const indexes = db.prepare(`
@@ -42,6 +43,8 @@ describe("global work-item schema migration", () => {
       "idx_sessions_work_item_start_idempotency",
       "idx_sessions_one_unsealed_primary",
       "idx_sessions_parent_task",
+      "idx_sessions_parent_attempt",
+      "idx_sessions_parent_task_attempt_number",
     ]));
     db.close();
   });
@@ -62,7 +65,7 @@ describe("global work-item schema migration", () => {
     db.close();
   });
 
-  it("enforces primary/child shape and unique child task identity", () => {
+  it("enforces primary/child shape and unique child attempt identity", () => {
     const db = initDb(":memory:");
     ensureWorkItemSchema(db);
     db.prepare(`
@@ -78,15 +81,24 @@ describe("global work-item schema migration", () => {
     db.prepare(`
       INSERT INTO sessions (
         session_key, work_item_id, run_kind, run_number, parent_run_key, task_id,
-        started_at, run_outcome
-      ) VALUES ('child-1', 'work-1', 'child', NULL, 'parent-1', 'task-1', 1, 'none')
+        attempt_id, attempt_number, started_at, run_outcome
+      ) VALUES ('child-1', 'work-1', 'child', NULL, 'parent-1', 'task-1',
+        'attempt-1', 1, 1, 'none')
     `).run();
     expect(() => db.prepare(`
       INSERT INTO sessions (
         session_key, work_item_id, run_kind, run_number, parent_run_key, task_id,
-        started_at, run_outcome
-      ) VALUES ('child-2', 'work-1', 'child', NULL, 'parent-1', 'task-1', 2, 'none')
+        attempt_id, attempt_number, started_at, run_outcome
+      ) VALUES ('child-2', 'work-1', 'child', NULL, 'parent-1', 'task-1',
+        'attempt-1', 2, 2, 'none')
     `).run()).toThrow();
+    expect(() => db.prepare(`
+      INSERT INTO sessions (
+        session_key, work_item_id, run_kind, run_number, parent_run_key, task_id,
+        attempt_id, attempt_number, started_at, run_outcome
+      ) VALUES ('child-2', 'work-1', 'child', NULL, 'parent-1', 'task-1',
+        'attempt-2', 2, 2, 'none')
+    `).run()).not.toThrow();
     db.close();
   });
 

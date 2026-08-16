@@ -24,6 +24,9 @@ import { changeModeSchema } from "../../shared/work-item-lifecycle.ts";
 import { workItemBindingSurfaceSchema } from "../../shared/work-item-contracts.ts";
 import { isLeaderPromptCustomizationEnvelope } from "../../shared/leader-prompt.ts";
 import { sandboxPolicySchema, workspaceIdSchema } from "../../shared/workspace-contracts.ts";
+import { TASK_GRAPH_COMMAND_SCHEMAS } from "./task-graph-schemas.ts";
+import { leaderOrchestrationModeSchema } from "../../shared/task-graph-planning-contracts.ts";
+import { attachmentSchema, canvasContextItemsSchema } from "./common-schemas.ts";
 
 const SESSION_ROLES = [
   "leader",
@@ -51,22 +54,6 @@ const mutationFields = {
   expectedLifecycleRevision: z.number().int().nonnegative(),
   expectedCurrentRunKey: requiredId.nullable(),
 };
-
-/** Mirrors `WsImageAttachment` in `./types.ts`. */
-const attachmentSchema = z.object({
-  kind: z.literal("image"),
-  filename: z.string().optional(),
-  mediaType: z.enum(["image/jpeg", "image/png", "image/gif", "image/webp"]),
-  data: z.string(),
-});
-
-const canvasContextItemSchema = z.object({
-  nodeId: z.string(),
-  nodeType: z.string(),
-  label: z.string(),
-  content: z.string(),
-  attachments: z.array(attachmentSchema).optional(),
-});
 
 const sessionConfigFields = {
   prompt,
@@ -126,7 +113,7 @@ export const COMMAND_SCHEMAS = {
   }),
   canvas_context: command("canvas_context", {
     sessionKey,
-    items: z.array(canvasContextItemSchema),
+    items: canvasContextItemsSchema,
   }),
   stop_session: sessionScoped("stop_session"),
   sync_session: sessionScoped("sync_session"),
@@ -172,11 +159,13 @@ export const COMMAND_SCHEMAS = {
     skillIds: z.array(requiredId).optional(), systemPrompt: requiredId.optional(),
     skillValues: z.record(z.string(), z.record(z.string(), z.string())).optional(),
     attachments: z.array(z.unknown()).optional(),
+    orchestrationMode: leaderOrchestrationModeSchema.optional(),
     ...workspaceLaunchFields,
   }),
   start_work_item_run: command("start_work_item_run", {
     ...mutationFields, workItemId: requiredId, prompt: z.string().min(1),
     displayPrompt: z.string().min(1).optional(),
+    orchestrationMode: leaderOrchestrationModeSchema.optional(),
     harness: requiredId.optional(), model: requiredId.optional(),
     permissionMode: requiredId.optional(), thinkingConfig: z.unknown().optional(),
     skillIds: z.array(requiredId).optional(), systemPrompt: requiredId.optional(),
@@ -217,6 +206,8 @@ export const COMMAND_SCHEMAS = {
     workItemId: requiredId, cursor: requiredId.optional(),
     limit: z.number().int().positive().max(100).optional(),
   }),
+  // Durable execution graphs
+  ...TASK_GRAPH_COMMAND_SCHEMAS,
   create_worktree_lineage: command("create_worktree_lineage", {
     requestId: workItemRequestId, workItemId: requiredId, targetBranch: requiredId.optional(),
   }),

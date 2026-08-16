@@ -83,6 +83,20 @@ describe("RunMutationCoordination", () => {
     bridge.finishTool("rename", "success");
   });
 
+  it("hard-fences task-scoped mutations before any live-edit lease is acquired", async () => {
+    const { projectPath,coordinator }=setup();
+    const bridge=new RunMutationCoordination(coordinator,projectPath,"work","run",1_000,
+      [{path:"a.ts",scope:"file"}]);
+    await expect(bridge.beforeTool("allowed",{operation:"write",paths:["a.ts"],opaque:false}))
+      .resolves.toBeUndefined();
+    bridge.finishTool("allowed","success");
+    await expect(bridge.beforeTool("outside",{operation:"write",paths:["b.ts"],opaque:false}))
+      .rejects.toThrow("mutation exceeds task ownership scope: b.ts");
+    await expect(bridge.beforeTool("opaque",{operation:"shell",paths:[],opaque:true}))
+      .rejects.toThrow("mutation exceeds task ownership scope: .");
+    expect(coordinator.snapshotRun("run").state).toBe("clean");
+  });
+
   it("cancels a queued tool before it can mutate", async () => {
     const { projectPath, coordinator } = setup();
     const first = new RunMutationCoordination(coordinator, projectPath, "work-a", "run-a");

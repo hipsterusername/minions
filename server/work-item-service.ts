@@ -7,6 +7,7 @@ import type {
 } from "../shared/work-item-contracts.ts";
 import type { ChangeMode } from "../shared/work-item-lifecycle.ts";
 import type { SandboxPolicy } from "../shared/workspace-contracts.ts";
+import type { LeaderOrchestrationMode } from "../shared/task-graph-planning-contracts.ts";
 
 export interface WorkItemMutationContext {
   requestId: string;
@@ -36,12 +37,14 @@ export interface WorkItemService {
     displayPrompt?: string;
     harness?: string; model?: string; permissionMode?: string; sandboxPolicy?: SandboxPolicy; thinkingConfig?: unknown; skillIds?: string[];
     skillValues?: Record<string, Record<string, string>>;
-    systemPrompt?: string; attachments?: unknown[] }): Promise<WorkItemDetailSnapshot>;
+    systemPrompt?: string; attachments?: unknown[];
+    orchestrationMode?: LeaderOrchestrationMode }): Promise<WorkItemDetailSnapshot>;
   startRun(input: ExistingWorkItemMutationContext & { workItemId: string; prompt: string;
     displayPrompt?: string;
     harness?: string; model?: string; permissionMode?: string; sandboxPolicy?: SandboxPolicy; thinkingConfig?: unknown; skillIds?: string[];
     skillValues?: Record<string, Record<string, string>>;
-    systemPrompt?: string; attachments?: unknown[] }): Promise<WorkItemDetailSnapshot>;
+    systemPrompt?: string; attachments?: unknown[];
+    orchestrationMode?: LeaderOrchestrationMode }): Promise<WorkItemDetailSnapshot>;
   replyToWaitingRun(input: ExistingWorkItemMutationContext & { workItemId: string; runKey: string;
     prompt: string; displayPrompt?: string; skillIds?: string[];
     skillValues?: Record<string, Record<string, string>> }): Promise<WorkItemDetailSnapshot>;

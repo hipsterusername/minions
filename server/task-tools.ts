@@ -15,6 +15,7 @@ import type { Bus } from "./bus.ts";
 import type { WorktreeInfo } from "./worktree.js";
 import type { LoadedSystemModel } from "./system-model/types.ts";
 import type { RenderComponent } from "../shared/render-dsl.ts";
+import type { LeaderPlanningBackend } from "../shared/leader-planning.ts";
 
 // Re-export public types so callers keep importing from "server/task-tools"
 export type {
@@ -55,6 +56,9 @@ export function createTaskToolsForLeader(opts: {
   bus: Bus;
   startMinionSession: (params: {
     sessionKey: string;
+    taskId?: string;
+    attemptId?: string;
+    attemptNumber?: number;
     prompt: string;
     cwd: string;
     systemPrompt: string;
@@ -89,6 +93,7 @@ export function createTaskToolsForLeader(opts: {
   onStateChange?: (state: TaskManagerState) => void;
   onTaskNameChange?: (name: string) => void;
   getRenderComponents?: () => RenderComponent[];
+  planningBackend?: LeaderPlanningBackend;
 }): { toolDefs: NormalizedToolDef[]; taskState: TaskManagerState } {
   const taskState: TaskManagerState = opts.existingTaskState ?? {
     tasks: new Map(),
@@ -120,7 +125,7 @@ export function createTaskToolsForLeader(opts: {
     getRenderComponents: opts.getRenderComponents,
   };
 
-  const baseDefs = [
+  const directDefs = [
     createPlanTaskToolDef(ctx),
     createAssignTaskToolDef(ctx),
     createCompleteTaskToolDef(ctx),
@@ -132,6 +137,12 @@ export function createTaskToolsForLeader(opts: {
     createCheckpointSessionToolDef(ctx),
     createLoadSubskillToolDef(ctx),
   ];
+  const graphDefs = [
+    createSetTaskNameToolDef(ctx),
+    createCheckpointSessionToolDef(ctx),
+    createLoadSubskillToolDef(ctx),
+  ];
+  const baseDefs = opts.planningBackend === "task_graph" ? graphDefs : directDefs;
 
   // Only add request_approval when worktree isolation is active
   const toolDefs: NormalizedToolDef[] =

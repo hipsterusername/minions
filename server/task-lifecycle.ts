@@ -1,11 +1,4 @@
-/**
- * Server-owned lifecycle projection for task records.
- *
- * The reducer is intentionally pure: callers hand it a TaskRecord plus one
- * lifecycle event and receive the next TaskRecord. Persistence and broadcast
- * happen only in applyLifecycleEvent().
- */
-
+/** Pure server-owned reducer plus persisted/broadcast lifecycle application. */
 import type { Bus } from "./bus.ts";
 import { emitTaskPlanUpdate } from "./task-tools/shared.ts";
 import type { TaskManagerState, TaskRecord, TaskStatus } from "./task-tools/types.ts";
@@ -18,13 +11,19 @@ export const DEFAULT_TASK_TIMEOUT_MS = 30 * 60 * 1000;
 
 interface TimeoutEntry {
   timer: ReturnType<typeof setTimeout>;
-  /** Re-arms the timeout for the full window (used by heartbeat extension). */
   reArm: () => ReturnType<typeof setTimeout>;
+  attemptId: string | undefined;
+  attemptGeneration: number | undefined;
 }
 const taskTimeouts = new Map<string, TimeoutEntry>();
 
-export type TaskLifecycleEvent =
-  | { type: "assigned"; minionSessionKey: string }
+type AttemptFence = {
+  attemptId?: string;
+  attemptGeneration?: number;
+};
+
+export type TaskLifecycleEvent = (
+  | { type: "assigned"; minionSessionKey: string; nextAttemptId?: string; nextAttemptGeneration?: number }
   | { type: "session_starting"; minionSessionKey?: string }
   | { type: "session_running" }
   | { type: "reported_step"; message?: string }
@@ -43,7 +42,8 @@ export type TaskLifecycleEvent =
   | { type: "timeout"; result?: string; timestamp?: number }
   | { type: "parent_terminated"; timestamp?: number }
   | { type: "discarded"; timestamp?: number }
-  | { type: "cancelled"; result?: string; timestamp?: number };
+  | { type: "cancelled"; result?: string; timestamp?: number }
+) & AttemptFence;
 
 export const TERMINAL_TASK_STATUSES = new Set<TaskStatus>(
   ["completed", "failed", "ended_without_report", "cancelled", "orphaned"],
@@ -53,7 +53,6 @@ export function isTerminalTaskStatus(status: TaskStatus): boolean {
   return TERMINAL_TASK_STATUSES.has(status);
 }
 
-/** Statuses from which a task may be retried via a new "assigned" event. */
 export const RETRYABLE_TASK_STATUSES = new Set<TaskStatus>(
   ["failed", "ended_without_report", "orphaned", "cancelled"],
 );
@@ -80,21 +79,31 @@ export function scheduleTaskTimeout(opts: {
   taskState: TaskManagerState;
   taskId: string;
   timeoutMs?: number;
+  deadlineAt?: number;
   onStateChange?: (state: TaskManagerState) => void;
   onTimeout?: () => void;
 }): ReturnType<typeof setTimeout> {
   const key = taskTimeoutKey(opts.leaderSessionKey, opts.taskId);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TASK_TIMEOUT_MS;
+  const scheduledAttempt = opts.taskState.tasks.get(opts.taskId);
+  const attemptId = scheduledAttempt?.attemptId;
+  const attemptGeneration = scheduledAttempt?.attemptGeneration;
+  let restoreDeadline = opts.deadlineAt;
 
-  /**
-   * Arm (or re-arm) the timeout for the full window.
-   * Cancels any in-flight timer before setting a new one so callers can
-   * safely invoke this multiple times (e.g. on each reported_step).
-   */
   function arm(): ReturnType<typeof setTimeout> {
     const prev = taskTimeouts.get(key);
     if (prev) clearTimeout(prev.timer);
 
+    const deadlineAt = restoreDeadline ?? Date.now() + timeoutMs;
+    restoreDeadline = undefined;
+    const current = opts.taskState.tasks.get(opts.taskId);
+    if (current && attemptMatches(current, { attemptId, attemptGeneration })) {
+      opts.taskState.tasks.set(opts.taskId, {
+        ...current,
+        timeoutMs,
+        timeoutDeadlineAt: deadlineAt,
+      });
+    }
     const timer = setTimeout(() => {
       taskTimeouts.delete(key);
       const before = opts.taskState.tasks.get(opts.taskId);
@@ -103,17 +112,19 @@ export function scheduleTaskTimeout(opts: {
         leaderSessionKey: opts.leaderSessionKey,
         taskState: opts.taskState,
         taskId: opts.taskId,
-        event: { type: "timeout", result: `Task timed out after ${Math.round(timeoutMs / 1000)}s.` },
+        event: { type: "timeout", result: `Task timed out after ${Math.round(timeoutMs / 1000)}s.`, attemptId, attemptGeneration },
         onStateChange: opts.onStateChange,
       });
       if (before && next !== before && next?.status === "failed") opts.onTimeout?.();
-    }, timeoutMs);
+    }, Math.max(0, deadlineAt - Date.now()));
     (timer as { unref?: () => void }).unref?.();
-    taskTimeouts.set(key, { timer, reArm: arm });
+    taskTimeouts.set(key, { timer, reArm: arm, attemptId, attemptGeneration });
     return timer;
   }
 
-  return arm();
+  const timer = arm();
+  emitTaskPlanUpdate(opts.bus, opts.leaderSessionKey, opts.taskState, opts.onStateChange);
+  return timer;
 }
 
 export function reduceTaskLifecycle(
@@ -121,8 +132,8 @@ export function reduceTaskLifecycle(
   event: TaskLifecycleEvent,
   now = Date.now(),
 ): TaskRecord {
+  if (event.type !== "assigned" && !attemptMatches(task, event)) return task;
   if (isTerminalTaskStatus(task.status)) {
-    // Allow a single exception: retrying a retryable terminal task.
     if (event.type === "assigned" && isRetryableTaskStatus(task.status)) {
       return {
         ...task,
@@ -132,10 +143,16 @@ export function reduceTaskLifecycle(
         result: null,
         completedAt: null,
         attempt: (task.attempt ?? 1) + 1,
+        attemptId: event.nextAttemptId ?? `${event.minionSessionKey}:${(task.attempt ?? 1) + 1}`,
+        attemptGeneration: event.nextAttemptGeneration ?? (task.attemptGeneration ?? task.attempt ?? 1) + 1,
+        timeoutDeadlineAt: null,
         previousAttempts: [
           ...(task.previousAttempts ?? []),
           {
             attempt: task.attempt ?? 1,
+            attemptId: task.attemptId,
+            attemptGeneration: task.attemptGeneration,
+            minionSessionKey: task.minionSessionKey,
             status: task.status,
             result: task.result,
             completedAt: task.completedAt,
@@ -155,6 +172,10 @@ export function reduceTaskLifecycle(
         executor: "minion",
         minionSessionKey: event.minionSessionKey,
         status: "starting",
+        attempt: task.attempt ?? 1,
+        attemptId: event.nextAttemptId ?? task.attemptId ?? `${event.minionSessionKey}:1`,
+        attemptGeneration: event.nextAttemptGeneration ?? task.attemptGeneration ?? task.attempt ?? 1,
+        timeoutDeadlineAt: null,
         attentionRequestedAt: null,
         attentionDeliveredAt: null,
       };
@@ -179,7 +200,6 @@ export function reduceTaskLifecycle(
       };
 
     case "reported_step":
-      // Always return a new record so lastStep and stepCount are updated.
       return {
         ...task,
         status: "running",
@@ -197,6 +217,7 @@ export function reduceTaskLifecycle(
       return closeTask(task, "completed", event.result, event.timestamp ?? now);
 
     case "leader_completed":
+      if (task.executor === "minion" && task.minionSessionKey) return task;
       return closeTask(
         { ...task, executor: "leader", minionSessionKey: null },
         "completed",
@@ -208,8 +229,6 @@ export function reduceTaskLifecycle(
       return closeTask(task, "failed", event.result, event.timestamp ?? now);
 
     case "reported_blocked":
-      // Non-terminal: the minion's turn ended awaiting a leader decision. We
-      // record the question as the latest step so the UI/digest can surface it.
       return {
         ...task,
         status: "blocked",
@@ -220,68 +239,33 @@ export function reduceTaskLifecycle(
 
     case "session_ended": {
       if (event.reason === "error") {
-        return closeTask(
-          task,
-          "failed",
-          event.result ?? "Session ended with an error.",
-          event.timestamp ?? now,
-        );
+        return closeTask(task, "failed", event.result ?? "Session ended with an error.",
+          event.timestamp ?? now);
       }
       if (event.reason === "clean") {
-        return closeTask(
-          task,
-          "ended_without_report",
-          event.result ?? "Session ended without a minion report.",
-          event.timestamp ?? now,
-        );
+        return closeTask(task, "ended_without_report",
+          event.result ?? "Session ended without a minion report.", event.timestamp ?? now);
       }
-      return closeTask(
-        task,
-        "cancelled",
-        `Session ${event.reason}.`,
-        event.timestamp ?? now,
-      );
+      return closeTask(task, "cancelled", `Session ${event.reason}.`, event.timestamp ?? now);
     }
 
     case "rehydrated_orphan":
-      return closeTask(
-        task,
-        "orphaned",
+      return closeTask(task, "orphaned",
         "Task had no live minion session after the server restarted; re-assign to resume.",
-        event.timestamp ?? now,
-      );
+        event.timestamp ?? now);
 
     case "timeout":
-      return closeTask(
-        task,
-        "failed",
-        event.result ?? "Task timed out.",
-        event.timestamp ?? now,
-      );
+      return closeTask(task, "failed", event.result ?? "Task timed out.", event.timestamp ?? now);
 
     case "parent_terminated":
-      return closeTask(
-        task,
-        "cancelled",
-        "Parent session terminated.",
-        event.timestamp ?? now,
-      );
+      return closeTask(task, "cancelled", "Parent session terminated.", event.timestamp ?? now);
 
     case "discarded":
-      return closeTask(
-        task,
-        "cancelled",
-        "Worktree was discarded.",
-        event.timestamp ?? now,
-      );
+      return closeTask(task, "cancelled", "Worktree was discarded.", event.timestamp ?? now);
 
     case "cancelled":
-      return closeTask(
-        task,
-        "cancelled",
-        event.result ?? "Task cancelled by leader.",
-        event.timestamp ?? now,
-      );
+      return closeTask(task, "cancelled", event.result ?? "Task cancelled by leader.",
+        event.timestamp ?? now);
   }
 }
 
@@ -312,17 +296,10 @@ export function applyLifecycleEvent(opts: {
   if (isTerminalTaskStatus(next.status)) {
     clearTaskTimeout(opts.leaderSessionKey, opts.taskId);
   } else if (next.status === "running" && opts.event.type === "reported_step") {
-    // Heartbeat extension: re-arm the full timeout window so a minion that
-    // actively reports steps is never killed mid-work.
     const entry = taskTimeouts.get(taskTimeoutKey(opts.leaderSessionKey, opts.taskId));
-    entry?.reArm();
+    if (entry && attemptMatches(next, entry)) entry.reArm();
   }
-  emitTaskPlanUpdate(
-    opts.bus,
-    opts.leaderSessionKey,
-    opts.taskState,
-    opts.onStateChange,
-  );
+  emitTaskPlanUpdate(opts.bus, opts.leaderSessionKey, opts.taskState, opts.onStateChange);
   return next;
 }
 
@@ -391,7 +368,17 @@ function closeTask(
     status,
     result,
     completedAt,
+    timeoutDeadlineAt: null,
     attentionRequestedAt: requestsAttention ? completedAt : null,
     attentionDeliveredAt: null,
   };
+}
+
+function attemptMatches(task: TaskRecord, fence: AttemptFence): boolean {
+  if (fence.attemptId != null && task.attemptId !== fence.attemptId) return false;
+  if (
+    fence.attemptGeneration != null &&
+    task.attemptGeneration !== fence.attemptGeneration
+  ) return false;
+  return true;
 }

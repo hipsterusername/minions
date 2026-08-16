@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  LEGACY_PLANNING_PROMPT,
   LEADER_PROMPT_CORE,
+  TASK_GRAPH_PLANNING_PROMPT,
+  buildLeaderPromptFeatures,
   buildLeaderCapabilityInventory,
   composeLeaderPrompt,
   decodeLeaderPromptCustomization,
@@ -9,6 +12,16 @@ import {
 } from "./leader-prompt.ts";
 
 describe("leader prompt composition", () => {
+  it("injects planning features from a typed registry", () => {
+    expect(buildLeaderPromptFeatures(["task_graph_planning"]))
+      .toEqual([TASK_GRAPH_PLANNING_PROMPT]);
+    expect(buildLeaderPromptFeatures(["legacy_planning"]))
+      .toEqual([LEGACY_PLANNING_PROMPT]);
+    expect(buildLeaderPromptFeatures([
+      "task_graph_planning", "task_graph_planning",
+    ])).toEqual([TASK_GRAPH_PLANNING_PROMPT]);
+  });
+
   it("keeps the stable core first and the volatile system-model addendum last", () => {
     const prompt = composeLeaderPrompt({
       builtInTools: ["Read"],

@@ -124,12 +124,15 @@ export function buildHarnessStartOpts(
   const derivedMcpToolNames = Object.entries(toolResult.toolGroups).flatMap(
     ([serverName, defs]) => defs.map((def) => `mcp__${serverName}__${def.name}`),
   );
-  const allowedTools = [
+  const availableTools = [
     ...harness.builtInTools,
     ...toolResult.mcpToolNames,
     ...derivedMcpToolNames,
     ...externalToolNames,
   ];
+  const requested=opts.toolAllowlist ? new Set(opts.toolAllowlist) : host.toolAllowlist ? new Set(host.toolAllowlist) : null;
+  const allowedTools = [...new Set(availableTools.filter(name => !requested || requested.has(name)
+    || name.startsWith("mcp__minion-status__") || name.startsWith("mcp__task-graph__")))];
 
   const basePrompt = agentType.buildSystemPrompt(agentCtx, opts.systemPrompt, harness.builtInTools);
   const systemPrompt = basePrompt

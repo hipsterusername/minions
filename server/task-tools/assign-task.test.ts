@@ -935,6 +935,39 @@ describe("assign_task", () => {
     expect(harness.spawns).toHaveLength(2);
   });
 
+  it("retries a cancelled task with a fresh durable attempt identity", async () => {
+    await callAssign(harness.ctx, {
+      taskId: "t-cancelled",
+      title: "Cancelled",
+      description: "details",
+      priority: "low",
+    });
+    const first = harness.ctx.taskState.tasks.get("t-cancelled")!;
+    const firstAttemptId = first.attemptId;
+    const firstGeneration = first.attemptGeneration;
+    first.status = "cancelled";
+    first.result = "redirected";
+    first.completedAt = Date.now();
+
+    const { text } = await callAssign(harness.ctx, {
+      taskId: "t-cancelled",
+      title: "Cancelled retry",
+      description: "details",
+      priority: "high",
+    });
+
+    const retried = harness.ctx.taskState.tasks.get("t-cancelled")!;
+    expect(text).toContain("attempt 2");
+    expect(harness.spawns).toHaveLength(2);
+    expect(retried.attemptId).not.toBe(firstAttemptId);
+    expect(retried.attemptGeneration).toBe((firstGeneration ?? 1) + 1);
+    expect(retried.previousAttempts?.at(-1)).toMatchObject({
+      attemptId: firstAttemptId,
+      attemptGeneration: firstGeneration,
+      status: "cancelled",
+    });
+  });
+
   it("refuses a completed task with a create-new-task hint", async () => {
     await callAssign(harness.ctx, {
       taskId: "t-completed",

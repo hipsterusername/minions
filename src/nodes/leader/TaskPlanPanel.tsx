@@ -127,13 +127,12 @@ export function TaskPlanPanel({
 
   if (taskPlan.length === 0) return null;
 
-  const completedCount = taskPlan.filter(
-    (t) =>
-      t.status === "completed" ||
-      t.status === "failed" ||
-      t.status === "ended_without_report" ||
-      t.status === "cancelled" ||
-      t.status === "orphaned",
+  const succeededCount = taskPlan.filter((t) => t.status === "completed").length;
+  const unsuccessfulCount = taskPlan.filter((t) =>
+    t.status === "failed" ||
+    t.status === "ended_without_report" ||
+    t.status === "cancelled" ||
+    t.status === "orphaned"
   ).length;
 
   return (
@@ -177,7 +176,7 @@ export function TaskPlanPanel({
         <span style={{ flex: 1 }}>
           Plan{" "}
           <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>
-            ({completedCount}/{taskPlan.length})
+            ({`${succeededCount} succeeded · ${unsuccessfulCount} unsuccessful · ${taskPlan.length} total`})
           </span>
         </span>
         {taskPlan.some((t) => t.status === "running" || t.status === "starting") && (

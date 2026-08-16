@@ -67,6 +67,33 @@ describe("work-item runtime lifecycle disposition", () => {
     expect(timer.host.reviewLifecycle.terminalAt).toBeNull();
   });
 
+  it("keeps a timer wait open when its intentional provider interruption reports abort", () => {
+    const timer = fixture();
+    timer.host.taskState = {
+      tasks: new Map(),
+      pendingWait: {
+        durationMs: 5,
+        reason: "wait",
+        scheduledAt: 1,
+        timerId: null,
+      },
+      approval: null,
+    };
+
+    processNormalizedEvent(
+      timer.host,
+      timer.bus,
+      timer.agent,
+      timer.ctx,
+      { kind: "done", reason: "abort" },
+      timer.hooks,
+    );
+
+    expect(timer.hooks.runTerminal).not.toHaveBeenCalled();
+    expect(timer.host.reviewLifecycle.terminalAt).toBeNull();
+    expect(timer.host.status).toBe("idle");
+  });
+
   it("keeps blocked children and synchronous report nudges open", () => {
     const blocked = fixture();
     blocked.ctx.forEachLeaderTaskState = (fn) => fn("leader", {

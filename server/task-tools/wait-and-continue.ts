@@ -6,6 +6,7 @@ import { z } from "zod/v4";
 import type { NormalizedToolDef } from "../harness/types.ts";
 import { textResult } from "../harness/tool-result.ts";
 import type { TaskToolContext } from "./types.ts";
+import { isTerminalTaskStatus } from "../task-lifecycle.ts";
 
 const waitAndContinueInputSchema = z.object({
   duration_seconds: z
@@ -43,6 +44,10 @@ export function createWaitAndContinueToolDef(ctx: TaskToolContext): NormalizedTo
         scheduledAt,
         timerId: timerId ?? null,
         wakeOn: args.wake_on,
+        taskIds: Array.from(ctx.taskState.tasks.values())
+          .filter((task) => task.executor === "minion" && !isTerminalTaskStatus(task.status))
+          .map((task) => task.taskId)
+          .sort(),
       };
 
       // Broadcast so the frontend can show the countdown immediately

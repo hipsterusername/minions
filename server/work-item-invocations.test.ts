@@ -266,6 +266,8 @@ describe("run seal projection table", () => {
       .toEqual({ action: "seal", outcome: "interrupted" });
     expect(projectRunInvocationSeal({ ...base, terminalKind: "cancelled", terminationIntent: null }))
       .toEqual({ action: "seal", outcome: "interrupted" });
+    expect(projectRunInvocationSeal({ ...base, terminalKind: "cancelled", terminationIntent: null,
+      cleanTerminalPolicy: "continue" })).toEqual({ action: "continue" });
     expect(projectRunInvocationSeal({ ...base, terminalKind: null, terminationIntent: null,
       invocationDisappeared: true })).toEqual({ action: "seal", outcome: "interrupted" });
   });

@@ -210,6 +210,21 @@ describe("task lifecycle reducer", () => {
     expect(resumed.status).toBe("running");
   });
 
+  it("rejects leader completion of a live delegated child", () => {
+    const delegated = {
+      ...task("running"),
+      executor: "minion" as const,
+      minionSessionKey: "minion-1",
+      attemptId: "attempt-1",
+      attemptGeneration: 1,
+    };
+
+    expect(reduceTaskLifecycle(delegated, {
+      type: "leader_completed",
+      result: "claimed by leader",
+    })).toBe(delegated);
+  });
+
   it("fails a nonterminal task when its soft timeout fires", () => {
     vi.useFakeTimers();
     try {
@@ -355,7 +370,7 @@ describe("heartbeat timeout extension", () => {
 });
 
 describe("retry lineage", () => {
-  it.each(["failed", "ended_without_report", "orphaned"] as TaskStatus[])(
+  it.each(["failed", "ended_without_report", "orphaned", "cancelled"] as TaskStatus[])(
     "allows retry from %s status",
     (retryableStatus) => {
       const failed = {
@@ -378,7 +393,7 @@ describe("retry lineage", () => {
       expect(retried.completedAt).toBeNull();
       expect(retried.attempt).toBe(2);
       expect(retried.previousAttempts).toHaveLength(1);
-      expect(retried.previousAttempts![0]).toEqual({
+      expect(retried.previousAttempts![0]).toMatchObject({
         attempt: 1,
         status: retryableStatus,
         result: "previous failure",
@@ -386,6 +401,54 @@ describe("retry lineage", () => {
       });
     },
   );
+
+  it("ignores mutable events fenced to a superseded attempt", () => {
+    const current = {
+      ...task("running"),
+      executor: "minion" as const,
+      minionSessionKey: "m-new",
+      attempt: 2,
+      attemptId: "attempt-new",
+      attemptGeneration: 2,
+    };
+
+    const late = reduceTaskLifecycle(current, {
+      type: "reported_done",
+      result: "late old result",
+      attemptId: "attempt-old",
+      attemptGeneration: 1,
+    });
+
+    expect(late).toBe(current);
+    expect(late.status).toBe("running");
+  });
+
+  it("persists and clears an absolute attempt deadline", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    try {
+      const state = makeState("running");
+      state.tasks.set("t1", {
+        ...state.tasks.get("t1")!,
+        attemptId: "attempt-1",
+        attemptGeneration: 1,
+      });
+      scheduleTaskTimeout({
+        bus: makeBus(),
+        leaderSessionKey: "leader-1",
+        taskState: state,
+        taskId: "t1",
+        timeoutMs: 500,
+      });
+
+      expect(state.tasks.get("t1")?.timeoutDeadlineAt).toBe(1_500);
+      vi.advanceTimersByTime(500);
+      expect(state.tasks.get("t1")?.status).toBe("failed");
+      expect(state.tasks.get("t1")?.timeoutDeadlineAt).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("increments attempt correctly across multiple retries", () => {
     let t = { ...task("failed"), result: "attempt 1 failed", completedAt: 100 };

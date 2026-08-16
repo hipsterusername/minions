@@ -30,6 +30,10 @@ export const workItemRunSnapshotSchema = z.object({
   runKind: z.enum(["primary", "child"]),
   parentRunKey: z.string().min(1).nullable(),
   taskId: z.string().min(1).nullable(),
+  // Optional only for wire compatibility with snapshots persisted before
+  // first-class child attempts; all current producers emit explicit nulls or values.
+  attemptId: z.string().min(1).nullable().optional(),
+  attemptNumber: z.number().int().positive().nullable().optional(),
   runNumber: z.number().int().positive().nullable(),
   previousRunKey: z.string().min(1).nullable(),
   providerSessionId: z.string().min(1).nullable(),
@@ -40,13 +44,15 @@ export const workItemRunSnapshotSchema = z.object({
 }).superRefine((run, ctx) => {
   if (run.runKind === "primary") {
     if (run.runNumber === null) ctx.addIssue({ code: "custom", message: "primary runs require runNumber" });
-    if (run.parentRunKey !== null || run.taskId !== null) {
-      ctx.addIssue({ code: "custom", message: "primary runs cannot have parentRunKey or taskId" });
+    if (run.parentRunKey !== null || run.taskId !== null
+      || run.attemptId != null || run.attemptNumber != null) {
+      ctx.addIssue({ code: "custom", message: "primary runs cannot have child attempt identity" });
     }
   } else {
     if (run.runNumber !== null) ctx.addIssue({ code: "custom", message: "child runs cannot have runNumber" });
-    if (run.parentRunKey === null || run.taskId === null) {
-      ctx.addIssue({ code: "custom", message: "child runs require parentRunKey and taskId" });
+    if (run.parentRunKey === null || run.taskId === null
+      || run.attemptId == null || run.attemptNumber == null) {
+      ctx.addIssue({ code: "custom", message: "child runs require parent, task, and attempt identity" });
     }
     if (run.previousRunKey !== null) ctx.addIssue({ code: "custom", message: "child runs cannot have previousRunKey" });
   }

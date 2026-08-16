@@ -2,10 +2,10 @@
 
 import type { SessionHost } from "./session-host.ts";
 import type { SessionHostDeps } from "./session-host-types.ts";
-import { applyLifecycleEvent } from "./task-lifecycle.ts";
+import { applyLifecycleEvent, scheduleTaskTimeout } from "./task-lifecycle.ts";
 import { persistTaskState } from "./session-persist.ts";
 import { requestWaitResume } from "./wait-resume.ts";
-import { isWakeWorthyStatus } from "./wake-coalescer.ts";
+import { ensureWaitCohort, isWaitCohortSatisfied } from "./leader-wake.ts";
 
 export function recoverDurableWorkflowState(opts: {
   sessions: Iterable<[string, SessionHost]>;
@@ -23,12 +23,10 @@ export function recoverDurableWorkflowState(opts: {
       opts.wakeLeader(leaderKey);
       continue;
     }
-    const minionTasks = Array.from(host.taskState.tasks.values())
-      .filter((task) => task.executor === "minion");
-    const wakeOn = wait.wakeOn ?? "all_terminal";
-    const conditionMet = minionTasks.length > 0 && (wakeOn === "any_terminal"
-      ? minionTasks.some((task) => isWakeWorthyStatus(task.status))
-      : minionTasks.every((task) => isWakeWorthyStatus(task.status)));
+    const conditionMet = isWaitCohortSatisfied(
+      ensureWaitCohort(host.taskState, wait),
+      wait.wakeOn ?? "all_terminal",
+    );
     if (conditionMet) {
       opts.wakeLeader(leaderKey);
       continue;
@@ -50,6 +48,22 @@ function reconcileChildren(
     const child = task.minionSessionKey
       ? opts.getSession(task.minionSessionKey)
       : undefined;
+    if (child && child.reviewLifecycle.terminalReason == null) {
+      if (task.timeoutDeadlineAt != null) {
+        scheduleTaskTimeout({
+          bus: opts.deps.bus,
+          leaderSessionKey: leaderKey,
+          taskState: host.taskState!,
+          taskId: task.taskId,
+          timeoutMs: task.timeoutMs ?? undefined,
+          deadlineAt: task.timeoutDeadlineAt,
+          onStateChange: (state) => persistTaskState(leaderKey, state),
+          onTimeout: () => task.minionSessionKey &&
+            opts.deps.terminateSession?.(task.minionSessionKey, "abort"),
+        });
+      }
+      continue;
+    }
     const reason = child?.reviewLifecycle.terminalReason ?? null;
     const event = reason === "error"
       ? { type: "session_ended" as const, reason: "error" as const,

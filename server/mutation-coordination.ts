@@ -28,9 +28,11 @@ export class RunMutationCoordination {
   private readonly tools = new Map<string, ActiveTool>();
   private leaseLost: (() => void) | undefined;
   private readonly unsubscribe: () => void;
+  private readonly allowedPaths: CanonicalLiveEditPath[] | null;
   constructor(readonly coordinator: LiveEditCoordinator, readonly projectPath: string,
     readonly workItemId: string, readonly runKey: string,
-    private readonly heartbeatMs = 5_000) {
+    private readonly heartbeatMs = 5_000,allowedPaths:readonly LiveEditPathInput[]|null=null) {
+    this.allowedPaths=allowedPaths?canonicalizeLiveEditPaths(projectPath,allowedPaths):null;
     this.unsubscribe = coordinator.subscribe((event) => {
       if (event.runKey !== runKey || event.type !== "expired") return;
       if (this.explicit?.token === event.token) {
@@ -48,6 +50,7 @@ export class RunMutationCoordination {
 
   async openIntent(requestId: string, paths: readonly LiveEditPathInput[], opaqueShell = false) {
     if (this.explicit) throw new Error("a change intent is already open for this run");
+    this.assertAllowed(opaqueShell?[{path:".",scope:"prefix"}]:paths);
     const lease = await this.coordinator.openIntent({ requestId, workItemId: this.workItemId,
       runKey: this.runKey, paths, ...(opaqueShell ? { opaqueShell: true } : {}) });
     this.explicit = lease;
@@ -62,6 +65,7 @@ export class RunMutationCoordination {
   }
   async beforeTool(callId: string, descriptor: MutationDescriptor): Promise<void> {
     const paths = desiredPaths(descriptor, this.projectPath);
+    this.assertAllowed(paths);
     let token: string; let release = true; let refreshOnSuccess = false;
     if (this.explicit && this.intentCovers(paths)) {
       token = this.explicit.token; release = false; refreshOnSuccess = true;
@@ -114,6 +118,13 @@ export class RunMutationCoordination {
     if (!this.explicit) return false;
     const desired = canonicalizeLiveEditPaths(this.projectPath, paths);
     return desired.every((entry) => this.explicit!.paths.some((held) => covers(held, entry)));
+  }
+  private assertAllowed(paths:readonly LiveEditPathInput[]):void {
+    if (this.allowedPaths===null) return;
+    const desired=canonicalizeLiveEditPaths(this.projectPath,paths);
+    const outside=desired.filter(entry=>!this.allowedPaths!.some(allowed=>covers(allowed,entry)));
+    if (outside.length) throw new Error(
+      `mutation exceeds task ownership scope: ${outside.map(entry=>entry.path).join(", ")}`);
   }
   private safeHeartbeat(token: string, inFlight = false): void {
     try { this.coordinator.heartbeat(token, { inFlight }); } catch { /* expiry/max-hold is terminal */ }

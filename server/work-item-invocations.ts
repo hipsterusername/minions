@@ -28,7 +28,7 @@ export type RunSealProjection =
 
 /**
  * The canonical run outcome projection. Only durable provider/server evidence
- * and a server-authored clean-turn policy may affect the result.
+ * and a server-authored open-run policy may affect the result.
  *
  * A termination intent outranks a clean witness while the run is still open.
  * This is what makes stopping a BetweenTurns run deterministic even though its
@@ -51,6 +51,14 @@ export function projectRunInvocationSeal(input: {
     return input.cleanTerminalPolicy === "seal"
       ? { action: "seal", outcome: "completed" }
       : { action: "continue" };
+  }
+  // wait_and_continue deliberately interrupts the active provider turn after
+  // persisting durable wait evidence. Adapters report that interruption as a
+  // cancelled witness, but without a server termination intent it is only a
+  // turn boundary: the canonical run must remain open for its wake/resume.
+  if (input.terminalKind === "cancelled"
+    && input.cleanTerminalPolicy === "continue") {
+    return { action: "continue" };
   }
   if (input.terminalKind === "lost" || input.terminalKind === "cancelled"
     || input.invocationDisappeared === true) {

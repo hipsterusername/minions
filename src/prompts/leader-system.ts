@@ -8,16 +8,24 @@
 
 import {
   CLAUDE_LEADER_BUILT_IN_TOOLS,
-  DEFAULT_LEADER_TOOL_NAMES,
+  LEGACY_LEADER_TOOL_NAMES,
+  TASK_GRAPH_LEADER_TOOL_NAMES,
   composeLeaderPrompt,
 } from "../../shared/leader-prompt.ts";
+import type { LeaderOrchestrationMode } from "../../shared/task-graph-planning-contracts.ts";
 
 export const CLAUDE_BUILT_IN_TOOLS = CLAUDE_LEADER_BUILT_IN_TOOLS;
 
-export function buildBaseLeaderPrompt(tools: readonly string[]): string {
+export function buildBaseLeaderPrompt(
+  tools: readonly string[],
+  orchestrationMode: LeaderOrchestrationMode = "auto",
+): string {
+  const graph = orchestrationMode !== "direct";
   return composeLeaderPrompt({
     builtInTools: tools,
-    registeredToolNames: DEFAULT_LEADER_TOOL_NAMES,
+    registeredToolNames: graph
+      ? TASK_GRAPH_LEADER_TOOL_NAMES : LEGACY_LEADER_TOOL_NAMES,
+    promptFeatureIds: [graph ? "task_graph_planning" : "legacy_planning"],
   });
 }
 

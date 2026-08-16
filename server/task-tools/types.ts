@@ -46,9 +46,20 @@ export interface TaskRecord {
   stepCount?: number;
   /** 1-based attempt number; undefined/1 means first attempt. */
   attempt?: number;
+  /** Immutable identity of the current execution attempt. */
+  attemptId?: string;
+  /** Monotonic fence for mutable events from the current attempt. */
+  attemptGeneration?: number;
+  /** Inactivity window used to re-arm the durable deadline on progress. */
+  timeoutMs?: number | null;
+  /** Absolute wall-clock deadline for the current attempt. */
+  timeoutDeadlineAt?: number | null;
   /** Archived records of previous attempts (filled on retry). */
   previousAttempts?: Array<{
     attempt: number;
+    attemptId?: string;
+    attemptGeneration?: number;
+    minionSessionKey?: string | null;
     status: TaskStatus;
     result: string | null;
     completedAt: number | null;
@@ -105,6 +116,8 @@ export interface PendingWait {
    * "all_terminal" — wake only when every awaited child is terminal.
    */
   wakeOn?: "any_terminal" | "all_terminal";
+  /** Frozen task membership for this wait; absent only in legacy snapshots. */
+  taskIds?: string[];
 }
 
 export interface ApprovalState {
@@ -136,6 +149,10 @@ export interface TaskToolContext {
   startMinionSession: (params: {
     sessionKey: string;
     taskId?: string;
+    /** Immutable logical execution attempt allocated before child creation. */
+    attemptId?: string;
+    /** 1-based attempt ordinal within the logical task. */
+    attemptNumber?: number;
     invocationKind?: SessionInvocationKind;
     prompt: string;
     cwd: string;

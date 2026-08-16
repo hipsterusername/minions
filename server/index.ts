@@ -54,6 +54,10 @@ import { createGitIntegrationPump } from "./git-integration-pump.ts";
 import { getLineageState, getQueueEntry, recordLineageGate,
   recoverInterruptedIntegrations } from "./worktree-integration-repo.ts";
 import { emitItemChanged } from "./work-item-service-events.ts";
+import { TaskGraphService } from "./task-graph/service.ts";
+import { createTaskGraphAgentTools } from "./task-graph/agent-tools.ts";
+import { validateTaskGraphNodePolicy } from "./task-graph/execution-policy.ts";
+import { installTaskGraphPlanningRuntime } from "./task-graph/planning-runtime.ts";
 
 const log = serverLogger.child("main");
 
@@ -273,6 +277,30 @@ sessionDeps.startWorkItemChildRun = async (input) => {
 };
 sessionDeps.resumeWorkItemRun = async (input) => { await workItems.resumePrimaryRun(input); };
 sessionDeps.continueWorkItemChild = async (input) => { await workItems.continueChildRun(input); };
+
+const taskGraphs = new TaskGraphService({
+  db: pushDb,
+  bus,
+  availableDispatchSlots:() => Math.max(0,MAX_SESSIONS-registry.activeCount()),
+  validateNodePolicy:validateTaskGraphNodePolicy,
+  children: {
+    startChildRun: (input) => workItems.startChildRun(input),
+    cancelChildRun: (runKey) => sessionDeps.terminateSession?.(runKey,"abort"),
+  },
+});
+sessionDeps.getTaskGraphTools = (runKey) => createTaskGraphAgentTools(taskGraphs,runKey);
+sessionDeps.getTaskGraphAllowedTools = (runKey) => {
+  const allowed=taskGraphs.agentBinding(runKey)?.allowedTools;
+  return allowed ?? null;
+};
+sessionDeps.getTaskGraphMutationScope = (runKey) => {
+  const binding=taskGraphs.agentBinding(runKey);
+  return binding?binding.ownershipRequest.filter(scope=>scope.scope==="path" && scope.mode==="write")
+    .map(scope=>({path:scope.normalizedValue,scope:"prefix" as const})):null;
+};
+const taskGraphPlanning = installTaskGraphPlanningRuntime({
+  db: pushDb, bus, registry, sessionDeps, taskGraphs,
+});
 registry.setDeps(sessionDeps);
 
 let keyCounter = 0;
@@ -289,6 +317,8 @@ const commandContext: CommandContext = {
   maxSessions: MAX_SESSIONS,
   launchSession: (options) => launchSession({ registry, bus, options }),
   workItems,
+  taskGraphs,
+  taskGraphPlanning,
   worktreeIntegrations,
   resolveWorkItemProject,
   resolveWorkItemWorkspace: resolveWorkItemProjectIdentity,
@@ -314,6 +344,8 @@ server.listen(PORT, HOST, () => {
   void getHarnessReadiness().catch((error) => log.warn("readiness_warm_failed", { error }));
 
   registry.hydrateFromDb();
+  taskGraphPlanning.start();
+  taskGraphs.start();
 
   // Sweep temporary HTML artifacts whose session no longer exists (a session
   // that died without its remove/clear cleanup running). Session-scoped dirs
@@ -345,6 +377,8 @@ async function shutdownCleanup(): Promise<void> {
   log.info("shutdown_requested", { worktrees: "preserved" });
   gitIntegrationPump.shutdown();
   liveEditWorkItems.shutdown();
+  taskGraphs.dispose();
+  taskGraphPlanning.dispose();
   process.exit(0);
 }
 

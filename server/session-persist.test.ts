@@ -264,6 +264,7 @@ describe("session-persist integration", () => {
       scheduledAt: 100,
       timerId: setTimeout(() => {}, 30_000),
       wakeOn: "any_terminal",
+      taskIds: ["t1"],
     };
 
     persistTaskState("sess-1", state);
@@ -289,6 +290,7 @@ describe("session-persist integration", () => {
       scheduledAt: 100,
       timerId: null,
       wakeOn: "any_terminal",
+      taskIds: ["t1"],
     });
   });
 

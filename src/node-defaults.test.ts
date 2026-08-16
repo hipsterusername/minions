@@ -3,6 +3,18 @@ import { applyPromptSeed, createDefaultNodeData } from "./node-defaults.ts";
 import type { ThinkingConfig } from "./types.ts";
 
 describe("createDefaultNodeData leader thinking defaults", () => {
+  it("uses Task Graph planning for new leaders by default", () => {
+    const data = createDefaultNodeData("leader", {}) as { orchestrationMode: string };
+    expect(data.orchestrationMode).toBe("auto");
+  });
+
+  it("uses direct mode only when the legacy debug backend is selected", () => {
+    const data = createDefaultNodeData("leader", {
+      leaderPlanningBackend: "legacy",
+    }) as { orchestrationMode: string };
+    expect(data.orchestrationMode).toBe("direct");
+  });
+
   it("applies the project sandbox default to new leaders", () => {
     const sandboxPolicy = {
       filesystemScope: "read-only" as const,

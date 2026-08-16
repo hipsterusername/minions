@@ -20,10 +20,11 @@ export interface WaitResumeRequest {
   idempotencyKey?: string;
 }
 
-const queuedWaitResumes = new WeakMap<SessionHost, WaitResumeRequest>();
+const queuedWaitResumes = new WeakMap<SessionHost, WaitResumeRequest[]>();
 
 export function getQueuedWaitResume(host: SessionHost): WaitResumeRequest | null {
-  return queuedWaitResumes.get(host) ?? null;
+  const requests = queuedWaitResumes.get(host);
+  return requests?.length ? mergeWaitResumes(requests) : null;
 }
 
 export function cancelQueuedWaitResume(host: SessionHost): void {
@@ -59,7 +60,12 @@ export function requestWaitResume(
   };
   if (host.status === "running") {
     host.clearWaitTimer();
-    if (!queuedWaitResumes.has(host)) queuedWaitResumes.set(host, continuation);
+    const queued = queuedWaitResumes.get(host) ?? [];
+    if (!continuation.idempotencyKey
+      || !queued.some((candidate) => candidate.idempotencyKey === continuation.idempotencyKey)) {
+      queued.push(continuation);
+      queuedWaitResumes.set(host, queued);
+    }
     if (host.taskState) persistTaskState(host.id, host.taskState);
     return false;
   }
@@ -71,13 +77,47 @@ export function drainQueuedWaitResume(
   deps: SessionHostDeps,
 ): boolean {
   if (host.status !== "idle") return false;
-  const request = queuedWaitResumes.get(host);
-  if (!request) return false;
+  const requests = queuedWaitResumes.get(host);
+  if (!requests?.length) return false;
   queuedWaitResumes.delete(host);
+  const merged = mergeWaitResumes(requests);
   return completeWaitAndResume(host, deps, {
-    ...request,
-    immediate: request.immediate ?? true,
+    ...merged,
+    immediate: merged.immediate ?? true,
   });
+}
+
+function mergeWaitResumes(requests: WaitResumeRequest[]): WaitResumeRequest {
+  const first = requests[0]!;
+  if (requests.length === 1) return first;
+  const keys = [...new Set(requests
+    .map((request) => request.idempotencyKey).filter((key): key is string => !!key))].sort();
+  return {
+    ...first,
+    immediate: requests.some((request) => request.immediate === true) ? true
+      : requests.every((request) => request.immediate === false) ? false : undefined,
+    idempotencyKey: keys.length ? keys.join("\n") : undefined,
+    completedReason: "Multiple queued continuations were delivered.",
+    opts: {
+      ...first.opts,
+      prompt: [
+        "Multiple wake events occurred for this leader session. Review each event and continue orchestrating.",
+        "",
+        ...requests.flatMap((request, index) => [
+          `Wake event ${index + 1}:`, request.opts.prompt, "",
+        ]),
+      ].join("\n").trim(),
+    },
+    onDelivered: () => {
+      for (const request of requests) {
+        try {
+          request.onDelivered?.();
+        } catch (error) {
+          log.warn("queued_wait_delivery_checkpoint_failed", { error });
+        }
+      }
+    },
+  };
 }
 
 function completeWaitAndResume(

@@ -115,6 +115,7 @@ export function bootstrapWorkItemRuntime(
       ...(input.permissionMode ? { permissionMode: input.permissionMode } : {}),
       ...(input.sandboxPolicy ? { sandboxPolicy: input.sandboxPolicy } : {}),
       ...(input.executorClass ? { executorClass: input.executorClass } : {}),
+      ...(input.toolAllowlist ? { toolAllowlist: input.toolAllowlist } : {}),
       ...(input.skillIds ? { skillIds: input.skillIds } : {}),
       ...(input.skillValues ? { skillValues: input.skillValues } : {}),
       ...(input.attachments ? { attachments: input.attachments } : {}),

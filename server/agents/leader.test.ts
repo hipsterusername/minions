@@ -15,30 +15,52 @@ import {
   encodeLeaderPromptCustomization,
 } from "../../shared/leader-prompt.ts";
 import { ROLE_SYSTEM_PROMPT } from "../../shared/prompts/role-system.ts";
+import type { TaskGraphPlanningCoordinator } from "../task-graph/planning-coordinator.ts";
 import "./leader.ts";
 
 beforeEach(() => disablePersistence());
 
 describe("leader agent wiring", () => {
-  it("documents assign_task executorClass, model override, timeout_minutes, ownedPaths, and retry in delegation guidelines", () => {
-    expect(LEADER_SYSTEM_PROMPT).toContain("## Token Economy");
-    expect(LEADER_SYSTEM_PROMPT).toContain("Buy conclusions, not raw data");
-    expect(LEADER_SYSTEM_PROMPT).toContain("over ~2000 chars through their summaries");
-    expect(LEADER_SYSTEM_PROMPT).toContain("never Read multi-thousand-line files");
-    expect(LEADER_SYSTEM_PROMPT).toContain("executorClass");
-    expect(LEADER_SYSTEM_PROMPT).toContain("timeout_minutes");
-    expect(LEADER_SYSTEM_PROMPT).toContain("ownedPaths");
-    expect(LEADER_SYSTEM_PROMPT).toMatch(/retry|re-assign/i);
-    expect(LEADER_SYSTEM_PROMPT).toMatch(/model.*overrides.*executorClass/i);
+  it("keeps legacy delegation guidance behind the direct-mode prompt", () => {
+    const prompt = getAgentType("leader").buildSystemPrompt({
+      sessionKey: "legacy-prompt",
+      cwd: "/tmp/project",
+      bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
+      worktreeInfo: null,
+      worktreeIsolation: false,
+      orchestrationMode: "direct",
+    });
+    expect(prompt).toContain("## Token Economy");
+    expect(prompt).toContain("Buy conclusions, not raw data");
+    expect(prompt).toContain("over ~2000 chars through their summaries");
+    expect(prompt).toContain("never Read multi-thousand-line files");
+    expect(prompt).toContain("## Legacy planning mode (debug)");
+    expect(prompt).toContain("executorClass");
+    expect(prompt).toContain("timeout_minutes");
+    expect(prompt).toContain("ownedPaths");
+    expect(prompt).toMatch(/retry|re-assign/i);
+    expect(prompt).toMatch(/model.*overrides.*executorClass/i);
+    expect(prompt).not.toContain("## Task Graph planning");
   });
 
-  it("Wait & Continue section explains early auto-wake and recommends generous durations", () => {
+  it("keeps legacy wait guidance out of the standard Task Graph prompt", () => {
+    expect(LEADER_SYSTEM_PROMPT).toContain("## Task Graph planning");
+    expect(LEADER_SYSTEM_PROMPT).not.toContain("## Legacy planning mode (debug)");
+    expect(LEADER_SYSTEM_PROMPT).not.toContain("wait_and_continue");
+    const legacyPrompt = getAgentType("leader").buildSystemPrompt({
+      sessionKey: "legacy-wait-prompt",
+      cwd: "/tmp/project",
+      bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
+      worktreeInfo: null,
+      worktreeIsolation: false,
+      orchestrationMode: "direct",
+    });
     // The section must explain that the system wakes the leader early when all
     // child tasks finish — so agents use long waits rather than short polling loops.
-    expect(LEADER_SYSTEM_PROMPT).toMatch(/auto-wake|wakes you early/i);
-    expect(LEADER_SYSTEM_PROMPT).toMatch(/10.{1,5}30 min/i);
+    expect(legacyPrompt).toMatch(/auto-wake|wakes you early/i);
+    expect(legacyPrompt).toMatch(/10.{1,5}30 min/i);
     // The old 60-second example must no longer appear.
-    expect(LEADER_SYSTEM_PROMPT).not.toMatch(/wait_and_continue.*60 seconds/i);
+    expect(legacyPrompt).not.toMatch(/wait_and_continue.*60 seconds/i);
   });
 
   it("exposes task and render tools to leader sessions", () => {
@@ -67,6 +89,73 @@ describe("leader agent wiring", () => {
       result.toolGroups["task-manager"]!.map((d) => d.name),
     ).toContain("load_subskill");
     expect(result.toolGroups["skills"]).toBeUndefined();
+  });
+
+  it("makes graph planning exclusive for graph-mode primary Leaders", () => {
+    const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+    const ctx = {
+      sessionKey: "leader-graph", runKey: "primary", workItemId: "work",
+      cwd: "/tmp/project", bus, worktreeInfo: null, worktreeIsolation: false,
+      startMinionSession: vi.fn(), scheduleWaitContinue: vi.fn(),
+      orchestrationMode: "plan" as const,
+      taskGraphPlanning: {} as TaskGraphPlanningCoordinator,
+    };
+    const leader = getAgentType("leader");
+    const result = leader.getToolGroups(ctx);
+    const taskNames = result.toolGroups["task-manager"]!.map((tool) => tool.name);
+    const graphNames = result.toolGroups["graph-planner"]!.map((tool) => tool.name);
+
+    expect(taskNames).toEqual(["set_task_name", "checkpoint_session", "load_subskill"]);
+    expect(taskNames).not.toContain("assign_task");
+    expect(graphNames).toEqual([
+      "submit_graph_plan", "get_graph_plan", "start_graph_plan", "read_graph_artifact",
+    ]);
+    expect(result.mcpToolNames).not.toContain("mcp__task-manager__plan_task");
+    expect(leader.buildSystemPrompt(ctx)).toContain("## Task Graph planning");
+    expect(leader.buildSystemPrompt(ctx)).not.toContain("## Legacy planning mode (debug)");
+  });
+
+  it("defaults canonical Leaders without a persisted mode to Task Graph", () => {
+    const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+    const ctx = {
+      sessionKey: "leader-default-graph", runKey: "primary", workItemId: "work",
+      cwd: "/tmp/project", bus, worktreeInfo: null, worktreeIsolation: false,
+      startMinionSession: vi.fn(), scheduleWaitContinue: vi.fn(),
+      taskGraphPlanning: {} as TaskGraphPlanningCoordinator,
+    };
+    const leader = getAgentType("leader");
+    const result = leader.getToolGroups(ctx);
+    const taskNames = result.toolGroups["task-manager"]!.map((tool) => tool.name);
+
+    expect(taskNames).toEqual(["set_task_name", "checkpoint_session", "load_subskill"]);
+    expect(result.toolGroups["graph-planner"]!.map((tool) => tool.name)).toEqual([
+      "submit_graph_plan", "get_graph_plan", "start_graph_plan", "read_graph_artifact",
+    ]);
+    expect(result.mcpToolNames).not.toContain("mcp__task-manager__plan_task");
+    expect(leader.buildSystemPrompt(ctx)).toContain("Task Graph is the standard");
+    expect(leader.buildSystemPrompt(ctx)).not.toContain("- **plan_task**");
+  });
+
+  it("switches a canonical Leader's prompt and tools together in legacy debug mode", () => {
+    const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
+    const ctx = {
+      sessionKey: "leader-legacy-debug", runKey: "primary", workItemId: "work",
+      cwd: "/tmp/project", bus, worktreeInfo: null, worktreeIsolation: false,
+      startMinionSession: vi.fn(), scheduleWaitContinue: vi.fn(),
+      orchestrationMode: "direct" as const,
+    };
+    const leader = getAgentType("leader");
+    const result = leader.getToolGroups(ctx);
+    const prompt = leader.buildSystemPrompt(ctx);
+    const taskNames = result.toolGroups["task-manager"]!.map((tool) => tool.name);
+
+    expect(taskNames).toContain("plan_task");
+    expect(taskNames).toContain("assign_task");
+    expect(result.toolGroups["graph-planner"]).toBeUndefined();
+    expect(prompt).toContain("## Legacy planning mode (debug)");
+    expect(prompt).toContain("- **plan_task**");
+    expect(prompt).not.toContain("## Task Graph planning");
+    expect(prompt).not.toContain("- **submit_graph_plan**");
   });
 
   it("documents every registered Leader tool and keeps the allowlist exact", () => {

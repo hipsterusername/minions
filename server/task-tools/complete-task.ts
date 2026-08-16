@@ -39,6 +39,12 @@ export function createCompleteTaskToolDef(ctx: TaskToolContext): NormalizedToolD
         return textResult(`Task ${taskId} is already ${record.status}.`);
       }
 
+      if (record.executor === "minion" && record.minionSessionKey) {
+        return errorResult(
+          `Task ${taskId} has a delegated child. Cancel it before completing the task yourself.`,
+        );
+      }
+
       applyLifecycleEvent({
         bus: ctx.bus,
         leaderSessionKey: ctx.leaderSessionKey,

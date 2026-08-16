@@ -388,6 +388,31 @@ describe("work-item repository", () => {
     expect(getWorkItem(db, "work-1")?.current_run_key).toBe(primary.run?.session_key);
   });
 
+  it("keeps logical task identity while allocating immutable retry attempts", () => {
+    seed(db);
+    startWorkItemIteration(db, {
+      workItemId: "work-1", runKey: "leader-run", idempotencyKey: "leader",
+      expectedLifecycleRevision: 0, expectedCurrentRunKey: null, at: 20,
+    });
+    const first = createChildWorkItemRun(db, {
+      workItemId: "work-1", runKey: "child-1", parentRunKey: "leader-run",
+      taskId: "task-1", attemptId: "attempt-1", attemptNumber: 1,
+      idempotencyKey: "child-attempt-1", at: 21,
+    });
+    sealChildWorkItemRun(db, {
+      workItemId: "work-1", runKey: first.run.session_key, outcome: "error", at: 22,
+    });
+    const retry = createChildWorkItemRun(db, {
+      workItemId: "work-1", runKey: "child-2", parentRunKey: "leader-run",
+      taskId: "task-1", attemptId: "attempt-2", attemptNumber: 2,
+      idempotencyKey: "child-attempt-2", at: 23,
+    });
+    expect(retry.run).toMatchObject({
+      task_id: "task-1", attempt_id: "attempt-2", attempt_number: 2,
+    });
+    expect(first.run.session_key).not.toBe(retry.run.session_key);
+  });
+
   it("rejects a child whose primary parent is sealed and seals children independently", () => {
     seed(db);
     const primary = startWorkItemIteration(db, {

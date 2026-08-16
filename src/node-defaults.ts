@@ -9,6 +9,10 @@ import { DEFAULT_THINKING_CONFIG, MINION_THINKING_CONFIG } from "./types.ts";
 import { createImageNodeDefaultData } from "./nodes/ImageNode.tsx";
 import { createDialecticDefaultData } from "./nodes/DialecticNode.tsx";
 import { DEFAULT_SANDBOX_POLICY } from "../shared/workspace-contracts.ts";
+import {
+  defaultOrchestrationModeForBackend,
+  normalizeLeaderPlanningBackend,
+} from "../shared/leader-planning.ts";
 
 export function createDefaultNodeData(
   type: string,
@@ -60,6 +64,9 @@ export function createDefaultNodeData(
         skillValues: {},
         skillPanelOpen: false,
         systemPromptPrefix: null,
+        orchestrationMode: defaultOrchestrationModeForBackend(
+          normalizeLeaderPlanningBackend(projectSettings?.leaderPlanningBackend),
+        ),
         thinkingConfig: resolveLeaderThinkingConfig(projectSettings),
       };
 
