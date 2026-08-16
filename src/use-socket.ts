@@ -12,11 +12,18 @@ import type { WorkItemListSnapshot, WorkItemRunListSnapshot, WorkItemRunSnapshot
 import type { LiveEditCoordinationEvent } from "../shared/live-edit-coordination.ts";
 import type { WorktreeLineageSnapshot } from "../shared/worktree-integration.ts";
 import type { SandboxResolution } from "../shared/workspace-contracts.ts";
+import type { TaskGraphChangedEnvelope, TaskGraphResponseEnvelope, TaskGraphSnapshotEnvelope } from "../shared/task-graph-view-contracts.ts";
+import type { TaskGraphPlanEnvelope } from "../shared/task-graph-planning-contracts.ts";
 import { browserLogger } from "./logging.ts";
 
 const log = browserLogger.child("websocket");
 
 export type ServerMessage =
+  | { type: "socket_reconnected" }
+  | TaskGraphSnapshotEnvelope
+  | TaskGraphChangedEnvelope
+  | TaskGraphResponseEnvelope
+  | TaskGraphPlanEnvelope
   | { type: "live_edit_coordination"; workItemId: string; event: LiveEditCoordinationEvent; timestamp: number }
   | { type: "work_item_response"; command: string; requestId: string | null; success: boolean; result?: WorkItemListSnapshot | WorkItemRunListSnapshot | unknown; error?: string; code?: string; latest?: unknown }
   | { type: "worktree_integration_response"; command: string; requestId: string | null;
@@ -51,7 +58,7 @@ export type ServerMessage =
   | { type: "worktree_merge_failed"; sessionKey: string; result?: { conflicts?: string[]; summary?: string; targetBranch?: string }; error?: string }
   | { type: "session_completed"; sessionKey: string; reason: string; timestamp: number }
   | { type: "session_lifecycle_changed"; sessionKey: string; lifecycle: SessionReviewLifecycle; timestamp: number }
-  | { type: "minion_status"; minionSessionKey: string; trigger: "step" | "done" | "fail"; message: string; timestamp: number; leaderSessionKey?: string; taskId?: string }
+  | { type: "minion_status"; minionSessionKey: string; trigger: "step" | "done" | "fail" | "blocked"; message: string; timestamp: number; leaderSessionKey?: string; taskId?: string }
   | { type: "minion_completed"; leaderSessionKey: string; minionSessionKey: string; taskId: string; status: "completed" | "failed"; result: string; timestamp: number }
   | { type: "agent_task_update"; leaderSessionKey: string; taskId: string; status: string; summary?: string; timestamp: number }
   | { type: "task_plan_update"; leaderSessionKey: string; tasks: SyncTaskRecord[] }
@@ -311,6 +318,7 @@ export function useSocket(url: string): SocketHandle {
   // wsRef.current is still null and closes nothing, leaving BOTH sockets open
   // and sharing listenersRef → every event is delivered twice.
   const connectingRef = useRef(false);
+  const hasOpenedRef = useRef(false);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -336,6 +344,12 @@ export function useSocket(url: string): SocketHandle {
         setReconnectState("connected");
         attemptRef.current = 0;
         setReconnectAttempt(0);
+
+        if (hasOpenedRef.current) {
+          const reconnectMessage: ServerMessage = { type: "socket_reconnected" };
+          for (const listener of listenersRef.current) listener.fn(reconnectMessage);
+        }
+        hasOpenedRef.current = true;
 
         // Flush anything queued while we were disconnected, in order. New
         // sends that arrive during the loop go straight out on the now-OPEN

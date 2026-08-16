@@ -18,6 +18,7 @@ import {
 } from "../skills/types.ts";
 import { builtInSkillPresets } from "../../shared/skill-presets.ts";
 import { encodeLeaderPromptCustomization } from "../../shared/leader-prompt.ts";
+import type { LeaderOrchestrationMode } from "../../shared/task-graph-planning-contracts.ts";
 
 /**
  * The catalog the leader can arm minions from: every project skill in the
@@ -45,6 +46,8 @@ export interface BuildLeaderPromptInput {
    * Defaults to the Claude built-in tool list.
    */
   tools?: readonly string[];
+  /** Planning prompt/tool preview. Canonical Leaders default to Task Graph. */
+  orchestrationMode?: LeaderOrchestrationMode | undefined;
 }
 
 export function buildLeaderSystemPrompt(input: BuildLeaderPromptInput): string {
@@ -63,8 +66,10 @@ export function buildLeaderSystemPromptPreview(input: BuildLeaderPromptInput): s
     .map((id) => getSkill(id))
     .filter((s): s is SkillTemplate => s !== undefined);
   const activeAddendum = compileSkills(taggedSkills, input.skillValues);
-  const inventory = buildArmingInventory(armableSkills());
+  const inventory = input.orchestrationMode === "direct"
+    ? buildArmingInventory(armableSkills()) : "";
   const prefix = input.systemPromptPrefix?.trim();
-  return buildBaseLeaderPrompt(tools) + activeAddendum + inventory
+  return buildBaseLeaderPrompt(tools, input.orchestrationMode ?? "auto")
+    + activeAddendum + inventory
     + (prefix ? `\n\n${prefix}` : "");
 }

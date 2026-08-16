@@ -144,11 +144,14 @@ const minionAgent: AgentType = {
     return {
       toolGroups: {
         "minion-status": toolDefs,
+        ...(ctx.taskGraphToolDefs?.length ? { "task-graph":ctx.taskGraphToolDefs } : {}),
         skills: [...subskillDefs, ...skillAuthoringDefs],
       },
       mcpToolNames: hasSkillBuilder
-        ? [...MINION_MCP_TOOLS_BASE, ...SKILL_AUTHORING_TOOLS]
-        : MINION_MCP_TOOLS_BASE,
+        ? [...MINION_MCP_TOOLS_BASE, ...SKILL_AUTHORING_TOOLS,
+          ...(ctx.taskGraphToolDefs?.map(def => `mcp__task-graph__${def.name}`) ?? [])]
+        : [...MINION_MCP_TOOLS_BASE,
+          ...(ctx.taskGraphToolDefs?.map(def => `mcp__task-graph__${def.name}`) ?? [])],
     };
   },
 

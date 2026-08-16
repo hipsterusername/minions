@@ -193,7 +193,7 @@ describe("CodexHarness.start()", () => {
     expect(out[0]).toMatchObject({ kind: "init", sessionId: "th-001", model: "gpt-5.6-sol" });
     expect(out[1]).toMatchObject({ kind: "text", role: "assistant", text: "hi" });
     expect(out[2]).toMatchObject({ kind: "usage", input: 7, output: 11, cacheRead: 3 });
-    expect(out[3]).toMatchObject({ kind: "done", reason: "completed" });
+    expect(out[3]).toMatchObject({ kind: "done", reason: "completed", result: "hi" });
     expect(terminalProvenance(out[3] as Extract<NormalizedEvent, { kind: "done" }>))
       .toBe("adapter");
   });

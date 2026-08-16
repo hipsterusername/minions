@@ -317,6 +317,20 @@ describe("SettingsMenu", () => {
     });
   });
 
+  it("defaults new Leaders to Task Graph and exposes legacy planning as a debug toggle", () => {
+    const onChange = vi.fn();
+    render(<SettingsMenu settings={{}} onSettingsChange={onChange} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    openCategory("Agent defaults");
+
+    const toggle = screen.getByRole("checkbox", { name: /use legacy planning tools/i });
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByText(/Task Graph is the standard planner/i)).toBeVisible();
+    fireEvent.click(toggle);
+    expect(onChange).toHaveBeenCalledWith({ leaderPlanningBackend: "legacy" });
+  });
+
   it("uses a fixed Minion definition by default and reveals tier tabs only after opt-in", () => {
     const onChange = vi.fn();
     renderWithHarnesses([CLAUDE_ENTRY], {

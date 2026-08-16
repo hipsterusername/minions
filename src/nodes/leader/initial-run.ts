@@ -42,7 +42,8 @@ export function buildInitialLeaderRun(input: {
   let prompt = block ? `${block}\n\n${userPrompt}` : userPrompt;
   if (sessionContext) prompt = `${sessionContext}\n\n${prompt}`;
   const frozen = freezeLeaderSystemPrompt({ skillIds: data.skillIds ?? [],
-    skillValues: data.skillValues ?? {}, systemPromptPrefix: mergeContextPreamble(
+    skillValues: data.skillValues ?? {}, orchestrationMode: data.orchestrationMode ?? "auto",
+    systemPromptPrefix: mergeContextPreamble(
       input.incomingModes.map(resolveContextMode), data.systemPromptPrefix) });
   return { prompt, frozen, previousMessages: data.messages,
     attachments: contextItems.flatMap((item) => item.attachments ?? []),

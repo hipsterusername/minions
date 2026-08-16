@@ -245,6 +245,7 @@ class CodexHarness implements AgentHarness {
         // generator can synthesize exactly one truthful terminal event.
         let terminalEmitted = false;
         let turnCompleted = false;
+        let finalAssistantText: string | null = null;
         try {
           for await (const evt of runResult.events as AsyncIterable<ThreadEvent>) {
             if (ac.signal.aborted) break;
@@ -255,6 +256,9 @@ class CodexHarness implements AgentHarness {
                 fullError: fullCodexError(e.error ?? "unknown", streamErrors) } : e, "adapter")
               : e);
             for (const e of normalized) {
+              if (e.kind === "text" && e.role === "assistant" && e.text.trim()) {
+                finalAssistantText = e.text.trim();
+              }
               if (e.kind === "done") terminalEmitted = true;
               yield e;
             }
@@ -272,6 +276,7 @@ class CodexHarness implements AgentHarness {
               yield tagTerminalProvenance({
                 kind: "done",
                 reason: turnCompleted ? "completed" : "stop",
+                ...(finalAssistantText ? { result: finalAssistantText } : {}),
               }, "adapter");
             }
             return;
@@ -283,7 +288,8 @@ class CodexHarness implements AgentHarness {
         if (terminalEmitted) return;
         yield tagTerminalProvenance(ac.signal.aborted
           ? { kind: "done", reason: "abort" }
-          : { kind: "done", reason: turnCompleted ? "completed" : "stop" }, "adapter");
+          : { kind: "done", reason: turnCompleted ? "completed" : "stop",
+            ...(finalAssistantText ? { result: finalAssistantText } : {}) }, "adapter");
       } finally {
         bridgeReg?.dispose();
         if (scratch !== null) {

@@ -84,6 +84,8 @@ export interface LeaderFullscreenProps {
   onOpenSkillFlyout: () => void;
   /** Anchor element for the skill flyout's positioning. */
   skillFlyoutAnchorRef: RefObject<HTMLElement | null>;
+  graphProjection?: { title: string; status: string; detail: string } | null;
+  onOpenGraph?: (() => void) | undefined;
 
   /* Slot: chrome to mount inside the overlay so the existing
      SessionToolbar / StatusBannerStack render at the top of the chat
@@ -125,6 +127,8 @@ export function LeaderFullscreen(props: LeaderFullscreenProps) {
     onRevealMinion,
     onOpenSkillFlyout,
     skillFlyoutAnchorRef,
+    graphProjection,
+    onOpenGraph,
     toolbarSlot,
     bannerSlot,
   } = props;
@@ -586,6 +590,8 @@ export function LeaderFullscreen(props: LeaderFullscreenProps) {
             onUpdateData={onUpdateData}
             skillFlyoutAnchorRef={skillFlyoutAnchorRef}
             onOpenSkillFlyout={onOpenSkillFlyout}
+            {...(graphProjection !== undefined ? { graphProjection } : {})}
+            onOpenGraph={onOpenGraph}
           />
         </div>
       </div>

@@ -43,6 +43,7 @@ export interface WorkItemInvocation {
   harness?: string; permissionMode?: string;
   sandboxPolicy?: import("../shared/workspace-contracts.ts").SandboxPolicy;
   executorClass?: "mechanical" | "standard" | "reasoning"; skillIds?: string[]; skillValues?: Record<string, Record<string, string>>;
+  toolAllowlist?: string[];
   plannedContribution?: import("./worktree-create.ts").PlannedWorktree & { resolutionTargetRef?: string; resolutionKind?: "contribution" | "lineage" };
 }
 export interface SqliteWorkItemServiceOptions {
@@ -129,8 +130,8 @@ export class SqliteWorkItemService implements WorkItemService {
     const inherited = previous?.run_config_json ?? (previous
       ? JSON.stringify({ harness: previous.harness_name, ...(previous.model ? { model: previous.model } : {}) })
       : null);
-    const resolved = resolvePrimaryRunConfig(inherited, input);
     try {
+      const resolved = resolvePrimaryRunConfig(inherited, input);
       const ledger = executeWorkItemCommand(this.options.db, { requestId: input.requestId,
         workItemId: input.workItemId, command: "start_run", payload: input, at: this.now() }, () =>
         startWorkItemIteration(this.options.db, {
@@ -332,9 +333,12 @@ export class SqliteWorkItemService implements WorkItemService {
     return detail;
   }
 
-  async startChildRun(input: { workItemId: string; parentRunKey: string; taskId: string; prompt: string; requestId: string;
+  async startChildRun(input: { workItemId: string; parentRunKey: string; taskId: string;
+    attemptId?: string; attemptNumber?: number; prompt: string; requestId: string;
     systemPrompt?: string; model?: string; thinkingConfig?: ThinkingConfig; harness?: string;
-    permissionMode?: string; executorClass?: "mechanical" | "standard" | "reasoning"; skillIds?: string[]; }) {
+    permissionMode?: string; sandboxPolicy?: import("../shared/workspace-contracts.ts").SandboxPolicy;
+    executorClass?: "mechanical" | "standard" | "reasoning";
+    skillIds?: string[]; toolAllowlist?: string[]; }) {
     const runKey = this.options.generateKey("run", input.requestId);
     const ledger = executeWorkItemCommand(this.options.db, { requestId: input.requestId,
       workItemId: input.workItemId, command: "start_child_run", payload: input, at: this.now() }, () =>
@@ -358,7 +362,9 @@ export class SqliteWorkItemService implements WorkItemService {
           parentRunKey: input.parentRunKey, taskId: input.taskId,
           prompt: input.prompt, invocationKind: "new_run", systemPrompt: input.systemPrompt,
           model: input.model, thinkingConfig: input.thinkingConfig, harness: input.harness,
-          permissionMode: input.permissionMode, executorClass: input.executorClass, skillIds: input.skillIds });
+          permissionMode: input.permissionMode,...(input.sandboxPolicy?{sandboxPolicy:input.sandboxPolicy}:{}),
+          executorClass: input.executorClass, skillIds: input.skillIds,
+          toolAllowlist:input.toolAllowlist });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (this.options.isRunLive?.(created.run.session_key)) {

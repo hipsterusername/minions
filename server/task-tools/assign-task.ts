@@ -3,6 +3,7 @@
  */
 
 import { z } from "zod/v4";
+import { randomUUID } from "node:crypto";
 import type { NormalizedToolDef } from "../harness/types.ts";
 import { textResult } from "../harness/tool-result.ts";
 import type { TaskToolContext, TaskRecord } from "./types.ts";
@@ -99,7 +100,7 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
   return {
     name: "assign_task",
     description:
-      "Delegate a task to a new Minion agent. Creates a minion session that will execute the task autonomously. executorClass describes the capability tier and selects its configured model only when adaptive Minion routing is enabled; pass model for an exact override. If the task was registered with plan_task, it will transition from planned to running. Skills selected on the Leader are inherited automatically; `skillIds` adds task-specific skills. Tasks that ended in failed/ended_without_report/orphaned may be re-assigned with the same taskId to retry.",
+      "Delegate a task to a new Minion agent. Creates a minion session that will execute the task autonomously. executorClass describes the capability tier and selects its configured model only when adaptive Minion routing is enabled; pass model for an exact override. If the task was registered with plan_task, it will transition from planned to running. Skills selected on the Leader are inherited automatically; `skillIds` adds task-specific skills. Tasks that ended in failed/ended_without_report/orphaned/cancelled may be re-assigned with the same taskId to retry.",
     inputSchema: assignTaskInputSchema,
     handler: async (input: unknown) => {
       const args = assignTaskInputSchema.parse(input);
@@ -109,7 +110,7 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
       const existing = ctx.taskState.tasks.get(taskId);
       if (existing) {
         const { status } = existing;
-        if (status === "starting" || status === "running") {
+        if (status === "starting" || status === "running" || status === "blocked") {
           return textResult(
             `Task ${taskId} is already ${status}. Use get_task_status to check its progress.`,
           );
@@ -119,18 +120,16 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
             `Task ${taskId} is already completed. Task already completed; create a new task instead.`,
           );
         }
-        if (status === "cancelled") {
-          return textResult(
-            `Task ${taskId} is already ${status}. Use get_task_status to check its progress.`,
-          );
-        }
-        // "planned" and retryable terminal statuses (failed, ended_without_report,
-        // orphaned) fall through to the spawn logic below.
+        // "planned" and retryable terminal statuses fall through to spawn.
       }
 
       // Track whether this is a retry for the result message
       const isRetry = existing != null && isRetryableTaskStatus(existing.status);
       const retryAttempt = isRetry ? (existing!.attempt ?? 1) + 1 : undefined;
+      const nextAttemptId = randomUUID();
+      const nextAttemptGeneration = isRetry
+        ? (existing!.attemptGeneration ?? existing!.attempt ?? 1) + 1
+        : (existing?.attemptGeneration ?? existing?.attempt ?? 1);
 
       let minionKey = `minion-${Date.now().toString(36)}-${taskId.slice(0, 8)}`;
 
@@ -254,13 +253,20 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
         if (allocationPersisted) return;
         applyLifecycleEvent({ bus: ctx.bus, leaderSessionKey: ctx.leaderSessionKey,
           taskState: ctx.taskState, taskId,
-          event: { type: "assigned", minionSessionKey: minionKey }, onStateChange: ctx.onStateChange });
+          event: {
+            type: "assigned",
+            minionSessionKey: minionKey,
+            nextAttemptId,
+            nextAttemptGeneration,
+          }, onStateChange: ctx.onStateChange });
         allocationPersisted = true;
       };
       try {
         launched = await ctx.startMinionSession({
           sessionKey: minionKey,
           taskId,
+          attemptId: nextAttemptId,
+          attemptNumber: retryAttempt ?? existing?.attempt ?? 1,
           prompt,
           cwd: ctx.cwd,
           systemPrompt: minionSystemPrompt,

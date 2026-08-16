@@ -278,6 +278,12 @@ export function ActivityLaunchForm({
                 <Sparkles size={12} aria-hidden />
                 {selectedSkills.length} {selectedSkills.length === 1 ? "skill" : "skills"}
               </span>
+              <span title="Planning and orchestration mode">
+                <GitBranch size={12} aria-hidden />
+                {(data.orchestrationMode ?? "auto") === "plan" ? "Plan first"
+                  : (data.orchestrationMode ?? "auto") === "direct"
+                    ? "Legacy planning (debug)" : "Auto plan"}
+              </span>
             </div>
 
             <div className="leader-launch-config-grid">
@@ -299,6 +305,20 @@ export function ActivityLaunchForm({
                       ))}
                     </optgroup>
                   ))}
+                </select>
+              </label>
+
+              <label className="leader-launch-field">
+                <span>Orchestration</span>
+                <select aria-label="Orchestration"
+                  value={data.orchestrationMode ?? "auto"}
+                  onChange={(event) => onUpdate({ orchestrationMode:
+                    event.target.value as NonNullable<LeaderData["orchestrationMode"]> })}>
+                  <option value="auto">Auto plan — start safe work</option>
+                  <option value="plan">Plan first — review before start</option>
+                  {data.orchestrationMode === "direct" ? (
+                    <option value="direct">Legacy planning — debug</option>
+                  ) : null}
                 </select>
               </label>
 

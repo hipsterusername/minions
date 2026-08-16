@@ -11,6 +11,7 @@ import {
   type ContextActionConfig,
 } from "../shared/context-actions.ts";
 import { normalizeProjectSandboxPolicy } from "./project-defaults.ts";
+import type { LeaderPlanningBackend } from "../shared/leader-planning.ts";
 export { resolveMinionModelForHarness } from "./project-model-settings.ts";
 const SIDECAR_DIR = ".minions";
 const GLOBAL_DIR = getMinionsHome();
@@ -54,6 +55,8 @@ export interface ProjectSettings {
   systemModel?: "off" | "advisory" | "enforced";
   /** Beta: add decision-oriented role contracts to Leader and Minion prompts. */
   roleSystemBeta?: boolean;
+  /** Debug override for new Leaders; absent/default uses Task Graph. */
+  leaderPlanningBackend?: LeaderPlanningBackend;
   /**
    * User-configurable Context Actions (Leader slash commands). Ordered and
    * freely extensible. Absent = built-in defaults. Legacy installs stored two
@@ -298,6 +301,7 @@ function defaultProjectSettings(): ProjectSettings {
     defaultWorktreeIsolation: false,
     systemModel: "off",
     roleSystemBeta: false,
+    leaderPlanningBackend: "task_graph",
     dashboardLeaderActions: defaultDashboardLeaderActions(),
   };
 }

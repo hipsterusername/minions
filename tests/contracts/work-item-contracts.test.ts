@@ -55,7 +55,7 @@ describe("work-item snapshot contracts", () => {
     expect(workItemRunSnapshotSchema.safeParse({ ...run, runKind: "child" }).success).toBe(false);
     expect(workItemRunSnapshotSchema.safeParse({
       ...run, runKey: "child-1", runKind: "child", runNumber: null,
-      parentRunKey: "run-1", taskId: "task-1",
+      parentRunKey: "run-1", taskId: "task-1", attemptId: "attempt-1", attemptNumber: 1,
     }).success).toBe(true);
     expect(workItemRunSnapshotSchema.safeParse({
       ...run, outcome: "completed", endedAt: 5, finalReport: null,

@@ -152,6 +152,8 @@ export function ensureWorkItemSchema(db: Database.Database): void {
   ensureColumn(db, "sessions", "previous_run_key", "TEXT");
   ensureColumn(db, "sessions", "parent_run_key", "TEXT");
   ensureColumn(db, "sessions", "task_id", "TEXT");
+  ensureColumn(db, "sessions", "attempt_id", "TEXT");
+  ensureColumn(db, "sessions", "attempt_number", "INTEGER");
   ensureColumn(db, "sessions", "started_at", "INTEGER");
   ensureColumn(db, "sessions", "ended_at", "INTEGER");
   ensureColumn(db, "sessions", "run_outcome", `TEXT NOT NULL DEFAULT 'none' ${RUN_OUTCOME_CHECK}`);
@@ -161,9 +163,20 @@ export function ensureWorkItemSchema(db: Database.Database): void {
   ensureColumn(db, "sessions", "run_config_json", "TEXT");
   ensureStoppedRunOutcome(db);
 
+  // Child attempts predate first-class attempt identity. The former unique
+  // (parent_run_key, task_id) index guaranteed that every legacy logical task
+  // had at most one child, so these values are an unambiguous migration.
+  db.exec(`
+    UPDATE sessions
+    SET attempt_id = COALESCE(attempt_id, session_key),
+        attempt_number = COALESCE(attempt_number, 1)
+    WHERE work_item_id IS NOT NULL AND run_kind = 'child';
+  `);
+
   db.exec(`
     DROP TRIGGER IF EXISTS validate_work_item_run_insert;
     DROP TRIGGER IF EXISTS validate_work_item_run_update;
+    DROP INDEX IF EXISTS idx_sessions_parent_task;
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_work_item_run
       ON sessions(work_item_id, run_number)
@@ -177,9 +190,16 @@ export function ensureWorkItemSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_sessions_parent_run
       ON sessions(parent_run_key, started_at)
       WHERE parent_run_key IS NOT NULL;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_parent_task
+    CREATE INDEX IF NOT EXISTS idx_sessions_parent_task
       ON sessions(parent_run_key, task_id)
       WHERE run_kind = 'child' AND parent_run_key IS NOT NULL AND task_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_parent_attempt
+      ON sessions(parent_run_key, attempt_id)
+      WHERE run_kind = 'child' AND parent_run_key IS NOT NULL AND attempt_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_parent_task_attempt_number
+      ON sessions(parent_run_key, task_id, attempt_number)
+      WHERE run_kind = 'child' AND parent_run_key IS NOT NULL
+        AND task_id IS NOT NULL AND attempt_number IS NOT NULL;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_work_item_bindings_active_surface
       ON work_item_bindings(surface, binding_id)
       WHERE detached_at IS NULL;
@@ -189,19 +209,26 @@ export function ensureWorkItemSchema(db: Database.Database): void {
     WHEN NEW.work_item_id IS NOT NULL AND (
       NEW.run_kind NOT IN ('primary', 'child') OR
       NEW.run_outcome NOT IN ('none', 'completed', 'error', 'stopped', 'interrupted') OR
-      (NEW.run_kind = 'primary' AND (NEW.run_number IS NULL OR NEW.parent_run_key IS NOT NULL OR NEW.task_id IS NOT NULL)) OR
-      (NEW.run_kind = 'child' AND (NEW.run_number IS NOT NULL OR NEW.parent_run_key IS NULL OR NEW.task_id IS NULL)) OR
+      (NEW.run_kind = 'primary' AND (NEW.run_number IS NULL OR NEW.parent_run_key IS NOT NULL
+        OR NEW.task_id IS NOT NULL OR NEW.attempt_id IS NOT NULL OR NEW.attempt_number IS NOT NULL)) OR
+      (NEW.run_kind = 'child' AND (NEW.run_number IS NOT NULL OR NEW.parent_run_key IS NULL
+        OR NEW.task_id IS NULL OR NEW.attempt_id IS NULL OR NEW.attempt_number IS NULL
+        OR NEW.attempt_number < 1)) OR
       (NEW.ended_at IS NULL AND NEW.run_outcome <> 'none') OR
       (NEW.ended_at IS NOT NULL AND NEW.run_outcome = 'none')
     ) BEGIN SELECT RAISE(ABORT, 'invalid work-item run shape'); END;
 
     CREATE TRIGGER IF NOT EXISTS validate_work_item_run_update
-    BEFORE UPDATE OF work_item_id, run_number, run_kind, parent_run_key, task_id, ended_at, run_outcome ON sessions
+    BEFORE UPDATE OF work_item_id, run_number, run_kind, parent_run_key, task_id,
+      attempt_id, attempt_number, ended_at, run_outcome ON sessions
     WHEN NEW.work_item_id IS NOT NULL AND (
       NEW.run_kind NOT IN ('primary', 'child') OR
       NEW.run_outcome NOT IN ('none', 'completed', 'error', 'stopped', 'interrupted') OR
-      (NEW.run_kind = 'primary' AND (NEW.run_number IS NULL OR NEW.parent_run_key IS NOT NULL OR NEW.task_id IS NOT NULL)) OR
-      (NEW.run_kind = 'child' AND (NEW.run_number IS NOT NULL OR NEW.parent_run_key IS NULL OR NEW.task_id IS NULL)) OR
+      (NEW.run_kind = 'primary' AND (NEW.run_number IS NULL OR NEW.parent_run_key IS NOT NULL
+        OR NEW.task_id IS NOT NULL OR NEW.attempt_id IS NOT NULL OR NEW.attempt_number IS NOT NULL)) OR
+      (NEW.run_kind = 'child' AND (NEW.run_number IS NOT NULL OR NEW.parent_run_key IS NULL
+        OR NEW.task_id IS NULL OR NEW.attempt_id IS NULL OR NEW.attempt_number IS NULL
+        OR NEW.attempt_number < 1)) OR
       (NEW.ended_at IS NULL AND NEW.run_outcome <> 'none') OR
       (NEW.ended_at IS NOT NULL AND NEW.run_outcome = 'none')
     ) BEGIN SELECT RAISE(ABORT, 'invalid work-item run shape'); END;

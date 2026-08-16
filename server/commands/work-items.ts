@@ -132,7 +132,9 @@ export const workItemCommand: CommandHandler = async (ctx, cmd, ws) => {
         ...(cmd.skillIds !== undefined ? { skillIds: cmd.skillIds } : {}),
         ...(cmd.skillValues !== undefined ? { skillValues: cmd.skillValues } : {}),
         ...(cmd.systemPrompt !== undefined ? { systemPrompt: cmd.systemPrompt } : {}),
-        ...(cmd.attachments !== undefined ? { attachments: cmd.attachments } : {}) });
+        ...(cmd.attachments !== undefined ? { attachments: cmd.attachments } : {}),
+        ...(cmd.orchestrationMode !== undefined
+          ? { orchestrationMode: cmd.orchestrationMode } : {}) });
       break;
     case "start_work_item_run":
       result = await service.startRun({ ...existingMutationContext(cmd),
@@ -146,7 +148,9 @@ export const workItemCommand: CommandHandler = async (ctx, cmd, ws) => {
         ...(cmd.skillIds !== undefined ? { skillIds: cmd.skillIds } : {}),
         ...(cmd.skillValues !== undefined ? { skillValues: cmd.skillValues } : {}),
         ...(cmd.systemPrompt !== undefined ? { systemPrompt: cmd.systemPrompt } : {}),
-        ...(cmd.attachments !== undefined ? { attachments: cmd.attachments } : {}) });
+        ...(cmd.attachments !== undefined ? { attachments: cmd.attachments } : {}),
+        ...(cmd.orchestrationMode !== undefined
+          ? { orchestrationMode: cmd.orchestrationMode } : {}) });
       break;
     case "reply_to_waiting_run":
       result = await service.replyToWaitingRun({ ...existingMutationContext(cmd),

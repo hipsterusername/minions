@@ -63,11 +63,17 @@ describe("buildBaseLeaderPrompt", () => {
     );
   });
 
-  it("Wait & Continue section explains early auto-wake and recommends generous durations", () => {
+  it("uses Task Graph by default and isolates legacy wait guidance to direct mode", () => {
+    expect(LEADER_SYSTEM_PROMPT).toContain("## Task Graph planning");
+    expect(LEADER_SYSTEM_PROMPT).toContain("submit_graph_plan");
+    expect(LEADER_SYSTEM_PROMPT).not.toContain("## Legacy planning mode (debug)");
+    const legacyPrompt = buildBaseLeaderPrompt(CLAUDE_BUILT_IN_TOOLS, "direct");
     // Must explain that the system wakes the leader early when all minion tasks finish.
-    expect(LEADER_SYSTEM_PROMPT).toMatch(/auto-wake|wakes you early/i);
-    expect(LEADER_SYSTEM_PROMPT).toMatch(/10.{1,5}30 min/i);
+    expect(legacyPrompt).toMatch(/auto-wake|wakes you early/i);
+    expect(legacyPrompt).toMatch(/10.{1,5}30 min/i);
     // The old 60-second polling example must be gone.
-    expect(LEADER_SYSTEM_PROMPT).not.toMatch(/wait_and_continue.*60 seconds/i);
+    expect(legacyPrompt).not.toMatch(/wait_and_continue.*60 seconds/i);
+    expect(legacyPrompt).toContain("## Legacy planning mode (debug)");
+    expect(legacyPrompt).not.toContain("## Task Graph planning");
   });
 });

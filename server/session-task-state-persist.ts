@@ -16,6 +16,7 @@ export function persistLeaderTaskState(
   leaderSessionKey: string,
   state: TaskManagerState,
 ): void {
+  freezeLegacyWaitCohort(state);
   db.transaction(() => {
     const currentIds = new Set(state.tasks.keys());
     const existing = repo.getTaskRecordsForLeader(db, leaderSessionKey);
@@ -58,14 +59,18 @@ export function hydrateLeaderTaskState(
         pendingWait?: TaskManagerState["pendingWait"];
         approval?: ApprovalState | null;
       };
-      const records = Array.isArray(snapshot.tasks) ? snapshot.tasks : [];
-      return {
+      const records = Array.isArray(snapshot.tasks)
+        ? snapshot.tasks.map(normalizeTaskRecord)
+        : [];
+      const state: TaskManagerState = {
         tasks: new Map(records.map((record) => [record.taskId, record])),
         pendingWait: snapshot.pendingWait
           ? { ...snapshot.pendingWait, timerId: null }
           : null,
         approval: snapshot.approval ?? approval,
       };
+      freezeLegacyWaitCohort(state);
+      return state;
     } catch (error) {
       log.warn("task_state_snapshot_load_failed", {
         sessionKey: row.session_key,
@@ -73,12 +78,42 @@ export function hydrateLeaderTaskState(
       });
     }
   }
-  const records = repo.getTaskRecordsForLeader(db, row.session_key);
+  const records = repo.getTaskRecordsForLeader(db, row.session_key).map(normalizeTaskRecord);
   return {
     tasks: new Map(records.map((record) => [record.taskId, record])),
     pendingWait: null,
     approval,
   };
+}
+
+function normalizeTaskRecord(record: TaskRecord): TaskRecord {
+  if (record.executor !== "minion" || !record.minionSessionKey) return record;
+  const generation = record.attemptGeneration ?? record.attempt ?? 1;
+  return {
+    ...record,
+    attempt: record.attempt ?? generation,
+    attemptGeneration: generation,
+    attemptId:
+      record.attemptId ??
+      `legacy:${record.leaderSessionKey}:${record.taskId}:${generation}:${record.minionSessionKey}`,
+  };
+}
+
+function freezeLegacyWaitCohort(state: TaskManagerState): void {
+  const wait = state.pendingWait;
+  if (!wait || wait.taskIds) return;
+  wait.taskIds = Array.from(state.tasks.values())
+    .filter((task) => task.executor === "minion" && (
+      !isTerminalStatus(task.status) ||
+      (task.completedAt != null && task.completedAt >= wait.scheduledAt)
+    ))
+    .map((task) => task.taskId)
+    .sort();
+}
+
+function isTerminalStatus(status: TaskRecord["status"]): boolean {
+  return status === "completed" || status === "failed" ||
+    status === "ended_without_report" || status === "cancelled" || status === "orphaned";
 }
 
 function parseApproval(value: string | null): ApprovalState | null {

@@ -9,6 +9,7 @@ export interface LeaderPromptStateInput {
   skillIds: readonly string[];
   skillValues: Record<string, Record<string, string>>;
   systemPromptPrefix?: string | null | undefined;
+  orchestrationMode?: import("../../../shared/task-graph-planning-contracts.ts").LeaderOrchestrationMode | undefined;
 }
 
 export interface FrozenLeaderPrompt {

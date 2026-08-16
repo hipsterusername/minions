@@ -110,6 +110,8 @@ export class SessionHost {
   skillIds: string[] = [];
   /** Configured values for tagged skill templates. */
   skillValues: Record<string, Record<string, string>> = {};
+  /** Task-scoped provider tool restriction, re-derived for execution-graph children on recovery. */
+  toolAllowlist: string[] | null = null;
   taskName: string | null = null;
 
   totalCost = 0;
@@ -265,6 +267,7 @@ export class SessionHost {
       // cycles where opts no longer carries them.
       if (opts.skillIds) this.skillIds = opts.skillIds;
       if (opts.skillValues) this.skillValues = opts.skillValues;
+      if (opts.toolAllowlist) this.toolAllowlist = [...opts.toolAllowlist];
       if (opts.resumeId) this.sessionId = opts.resumeId;
       if (opts.harness) this.harnessName = opts.harness;
       if (opts.initialModel && !this.model) this.model = opts.initialModel;

@@ -44,6 +44,7 @@ import {
   Trash2,
 } from "lucide-react";
 import "./settings-menu.css";
+import { normalizeLeaderPlanningBackend } from "../shared/leader-planning.ts";
 
 interface SettingsMenuProps {
   settings: ProjectSettings;
@@ -590,6 +591,25 @@ function SettingsPopover({
                     : undefined}
                   onChange={(defaultSandboxPolicy) =>
                     onSettingsChange({ ...settings, defaultSandboxPolicy })
+                  }
+                />
+              </SettingsCard>
+
+              <SettingsCard
+                title="Planning implementation"
+                description="Task Graph is the standard planner for new canonical Leaders."
+              >
+                <ToggleRow
+                  label="Use legacy planning tools"
+                  description="Debug only. New Leaders receive plan_task and assign_task instead of the Task Graph planner and scheduler."
+                  checked={normalizeLeaderPlanningBackend(
+                    settings.leaderPlanningBackend,
+                  ) === "legacy"}
+                  onChange={(checked) =>
+                    onSettingsChange({
+                      ...settings,
+                      leaderPlanningBackend: checked ? "legacy" : "task_graph",
+                    })
                   }
                 />
               </SettingsCard>

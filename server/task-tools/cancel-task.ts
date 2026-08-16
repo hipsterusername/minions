@@ -43,21 +43,27 @@ export function createCancelTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
         );
       }
 
-      // Kill the live minion session first (if one is attached). The
-      // session_ended/abort event this triggers is absorbed because the
-      // explicit `cancelled` event below makes the task terminal.
-      if (record.minionSessionKey) {
-        ctx.terminateSession?.(record.minionSessionKey, "abort");
-      }
+      // Fence and persist the attempt before termination can synchronously
+      // report a session-ended event back into the lifecycle reducer.
+      const minionSessionKey = record.minionSessionKey;
 
       applyLifecycleEvent({
         bus: ctx.bus,
         leaderSessionKey: ctx.leaderSessionKey,
         taskState: ctx.taskState,
         taskId,
-        event: { type: "cancelled", result: reason },
+        event: {
+          type: "cancelled",
+          result: reason,
+          attemptId: record.attemptId,
+          attemptGeneration: record.attemptGeneration,
+        },
         onStateChange: ctx.onStateChange,
       });
+
+      if (minionSessionKey) {
+        ctx.terminateSession?.(minionSessionKey, "abort");
+      }
 
       return textResult(`Task ${taskId} cancelled.`);
     },

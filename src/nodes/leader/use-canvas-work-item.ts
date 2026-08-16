@@ -194,6 +194,7 @@ export function useCanvasWorkItem(input: Input) {
       permissionMode: input.dataRef.current.permissionMode,
       sandboxPolicy: input.dataRef.current.sandboxPolicy,
       ...(input.dataRef.current.harness ? { harness: input.dataRef.current.harness } : {}),
+      orchestrationMode: input.dataRef.current.orchestrationMode ?? "auto",
       ...(run.attachments.length > 0 ? { attachments: run.attachments } : {}) });
     const started = promptResult.detail;
     const next = applyCanvasWorkItemSnapshot(input.dataRef.current, started.workItem);

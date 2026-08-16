@@ -4,7 +4,7 @@ import type { WebSocketServer } from "ws";
 import { createBus } from "./bus.ts";
 import { SessionHost, type SessionHostDeps } from "./session-host.ts";
 import type { TaskRecord } from "./task-tools.ts";
-import type { TaskStatus } from "./task-tools/types.ts";
+import type { PendingWait, TaskStatus } from "./task-tools/types.ts";
 import { cancelQueuedWaitResume } from "./wait-resume.ts";
 import {
   buildWakeTaskDigest,
@@ -14,6 +14,7 @@ import {
   WAKE_COALESCE_WINDOW_MS,
   WAKE_DIGEST_EXCERPT_CHARS,
 } from "./wake-coalescer.ts";
+import { ensureWaitCohort, isWaitCohortSatisfied } from "./leader-wake.ts";
 
 function task(status: TaskStatus, over: Partial<TaskRecord> = {}): TaskRecord {
   return {
@@ -213,6 +214,34 @@ describe("wake coalescer", () => {
     for (const status of ["planned", "starting", "running"] as TaskStatus[]) {
       expect(isWakeWorthyStatus(status)).toBe(false);
     }
+  });
+
+  it("freezes wait membership and does not count blocked as join success", () => {
+    const state = {
+      tasks: new Map([
+        ["blocked", task("blocked", { taskId: "blocked" })],
+        ["running", task("running", { taskId: "running" })],
+      ]),
+      pendingWait: null,
+      approval: null,
+    };
+    const wait: PendingWait = {
+      durationMs: 1_000,
+      reason: "join",
+      scheduledAt: 1,
+      timerId: null,
+      wakeOn: "all_terminal" as const,
+    };
+
+    const cohort = ensureWaitCohort(state, wait);
+    state.tasks.set("later", task("completed", { taskId: "later" }));
+
+    expect(wait.taskIds).toEqual(["blocked", "running"]);
+    expect(isWaitCohortSatisfied(cohort, "all_terminal")).toBe(false);
+    expect(ensureWaitCohort(state, wait).map((entry) => entry.taskId)).toEqual([
+      "blocked",
+      "running",
+    ]);
   });
 
   it("includes blocked questions regardless of the completion window", () => {

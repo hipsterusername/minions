@@ -10,8 +10,11 @@ const e2eHome =
   process.env.MINIONS_E2E_HOME ??
   fs.mkdtempSync(path.join(os.tmpdir(), "minions-playwright-"));
 const projectPath = path.join(e2eHome, "smoke-project");
+const serverDb = path.join(e2eHome, ".minions", "server.db");
+const fakePiPath = path.resolve("tests/e2e/task-graph-fixtures/fake-pi.mjs");
 process.env.MINIONS_E2E_HOME = e2eHome;
 process.env.MINIONS_E2E_PROJECT = projectPath;
+process.env.MINIONS_E2E_DB = serverDb;
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -43,8 +46,9 @@ export default defineConfig({
       PORT: "3473",
       VITE_PORT: "6473",
       MINIONS_TEST_HARNESS: "echo",
+      PI_PATH: fakePiPath,
       MINIONS_NO_OPEN: "1",
-      MINIONS_SERVER_DB: path.join(e2eHome, ".minions", "server.db"),
+      MINIONS_SERVER_DB: serverDb,
     },
   },
   globalTeardown: "./tests/e2e/global-teardown.mjs",

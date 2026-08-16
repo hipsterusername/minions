@@ -9,6 +9,36 @@ import {
   isWakeWorthyStatus,
   requestCoalescedWake,
 } from "./wake-coalescer.ts";
+import { isTerminalTaskStatus } from "./task-lifecycle.ts";
+import type { PendingWait, TaskManagerState, TaskRecord } from "./task-tools/types.ts";
+
+export function ensureWaitCohort(
+  state: TaskManagerState,
+  wait: PendingWait,
+): TaskRecord[] {
+  if (!wait.taskIds) {
+    wait.taskIds = Array.from(state.tasks.values())
+      .filter((task) => task.executor === "minion" && (
+        !isTerminalTaskStatus(task.status) ||
+        (task.completedAt != null && task.completedAt >= wait.scheduledAt)
+      ))
+      .map((task) => task.taskId)
+      .sort();
+  }
+  return wait.taskIds
+    .map((taskId) => state.tasks.get(taskId))
+    .filter((task): task is TaskRecord => task?.executor === "minion");
+}
+
+export function isWaitCohortSatisfied(
+  tasks: TaskRecord[],
+  wakeOn: PendingWait["wakeOn"] = "all_terminal",
+): boolean {
+  if (tasks.length === 0) return false;
+  return wakeOn === "any_terminal"
+    ? tasks.some((task) => isTerminalTaskStatus(task.status))
+    : tasks.every((task) => isTerminalTaskStatus(task.status));
+}
 
 export function wakeLeaderFromDurableTaskState(
   host: SessionHost,
@@ -24,27 +54,26 @@ export function wakeLeaderFromDurableTaskState(
 
   if (pendingWait) {
     const wakeOn = pendingWait.wakeOn ?? "all_terminal";
-    const conditionMet = wakeOn === "any_terminal"
-      ? minionTasks.some((task) => isWakeWorthyStatus(task.status))
-      : !minionTasks.some((task) => !isWakeWorthyStatus(task.status));
+    const waitTasks = ensureWaitCohort(host.taskState!, pendingWait);
+    const conditionMet = isWaitCohortSatisfied(waitTasks, wakeOn);
     if (!conditionMet) return;
-    const digest = buildWakeTaskDigest(minionTasks, pendingWait.scheduledAt);
+    const digest = buildWakeTaskDigest(waitTasks, pendingWait.scheduledAt);
     requestWaitResume(host, deps, {
-      completedReason: "All delegated child tasks reached a wake-worthy state (terminal or blocked).",
+      completedReason: "The delegated wait cohort reached its terminal policy.",
       immediate: wakeOn === "all_terminal",
       idempotencyKey: `wait:${host.id}:${pendingWait.scheduledAt}`,
       opts: {
         sessionKey: host.id,
         invocationKind: "resume_open_run",
         prompt:
-          `Continue. All delegated child tasks reached a wake-worthy state (terminal or blocked) while waiting (${pendingWait.reason}). Pick up where you left off.` +
+          `Continue. The delegated wait cohort reached its terminal policy while waiting (${pendingWait.reason}). Pick up where you left off.` +
           (digest ? `\n\nTask results:\n${digest}` : ""),
         cwd: host.cwd,
         resumeId: host.sessionId ?? undefined,
         role: host.role,
         harness: host.harnessName,
       },
-      onDelivered: () => markAttentionDelivered(host, minionTasks),
+      onDelivered: () => markAttentionDelivered(host, waitTasks),
     });
     return;
   }

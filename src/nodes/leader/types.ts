@@ -12,6 +12,7 @@ import { emptyRenderState } from "../../../shared/render-dsl.ts";
 import type { WorkItemSnapshot } from "../../../shared/work-item-contracts.ts";
 import type { LiveEditAwareness } from "../../../shared/live-edit-coordination.ts";
 import type { SandboxPolicy, SandboxResolution } from "../../../shared/workspace-contracts.ts";
+import type { LeaderOrchestrationMode } from "../../../shared/task-graph-planning-contracts.ts";
 
 /**
  * Zoom level below which the leader prompt overlay (zoomed-in prompt editor)
@@ -86,6 +87,8 @@ export interface LeaderData {
   harness?: string;
   /** Adaptive-thinking config sent to the SDK on every query() call. */
   thinkingConfig: ThinkingConfig;
+  /** First-prompt planning behavior; absence defaults canonical Leaders to Task Graph auto mode. */
+  orchestrationMode?: LeaderOrchestrationMode;
   taskPlan: TaskPlanItem[];
   worktreeIsolation: boolean;
   worktreePath: string | null;
@@ -185,6 +188,7 @@ export const LEADER_DEFAULT_DATA: LeaderData = {
   },
   effectiveSandboxPolicy: null,
   thinkingConfig: { ...DEFAULT_THINKING_CONFIG },
+  orchestrationMode: "auto",
   taskPlan: [],
   worktreeIsolation: false,
   worktreePath: null,

@@ -103,7 +103,7 @@ describe("Phase B — minion harness inheritance", () => {
     expect(allocate).toHaveBeenCalledOnce();
     expect(allocate).toHaveBeenCalledWith(expect.objectContaining({
       workItemId: "work-1", parentRunKey: "primary-run", taskId: "task-1",
-      requestId: "child:primary-run:task-1",
+      requestId: "child:primary-run:task-1:provisional",
     }));
     expect(calls).toEqual([]);
   });

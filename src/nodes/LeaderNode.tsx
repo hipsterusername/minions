@@ -82,6 +82,8 @@ import { MinionsSurface } from "./leader/MinionsSurface.tsx";
 import { ActivityLaunchForm } from "./leader/ActivityLaunchForm.tsx";
 import { DEFAULT_SANDBOX_POLICY } from "./leader/SandboxPolicyControls.tsx";
 import { invokeContextAction } from "../../shared/context-actions.ts";
+import { LeaderTaskGraphBridge } from "../task-graph/LeaderTaskGraphBridge.tsx";
+import { useLeaderTaskGraphController } from "../task-graph/use-leader-task-graph-controller.ts";
 
 function sameStringArray(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
@@ -115,6 +117,11 @@ export function LeaderNodeRenderer({
   );
   const dataRef = useRef(data);
   dataRef.current = data;
+  const taskGraphController = useLeaderTaskGraphController({
+    workItemId: data.workItemId ?? data.workItemSnapshot?.id ?? null,
+    socketSend,
+    socketSubscribe,
+  });
 
   const [input, setInput] = useState("");
   const [tasksExpanded, setTasksExpanded] = useState(false);
@@ -870,7 +877,12 @@ export function LeaderNodeRenderer({
     ]
       .filter((part): part is string => Boolean(part))
       .join("\n\n");
-    const frozen = frozenPromptRef.current ?? freezeLeaderSystemPrompt({ skillIds: current.skillIds ?? [], skillValues: current.skillValues ?? {}, systemPromptPrefix: current.systemPromptPrefix });
+    const frozen = frozenPromptRef.current ?? freezeLeaderSystemPrompt({
+      skillIds: current.skillIds ?? [],
+      skillValues: current.skillValues ?? {},
+      systemPromptPrefix: current.systemPromptPrefix,
+      orchestrationMode: current.orchestrationMode ?? "auto",
+    });
     frozenPromptRef.current = frozen;
     const followUp = buildFrozenLeaderFollowUpPrompt({ frozen, current, prompt });
 
@@ -1036,6 +1048,7 @@ export function LeaderNodeRenderer({
       model: current.model,
       permissionMode: current.permissionMode,
       sandboxPolicy: current.sandboxPolicy ?? DEFAULT_SANDBOX_POLICY,
+      orchestrationMode: current.orchestrationMode ?? "auto",
       worktreeIsolation: false, // worktree isolation off by default
       ...(pendingPrompt ? { autoStartPrompt: pendingPrompt } : {}),
     });
@@ -1284,6 +1297,12 @@ export function LeaderNodeRenderer({
 
       <StatusBannerStack banners={banners} onDismiss={dismissBanner} />
       {launchNotice ? <div role="status" style={{ padding: "6px 10px", fontSize: 11, background: "var(--warning-bg)", color: "var(--text-primary)" }}>{launchNotice}</div> : null}
+      <LeaderTaskGraphBridge
+        controller={taskGraphController}
+        goal={data.taskName ?? null}
+        plan={data.taskPlan ?? []}
+        onAdjust={() => promptTextareaRef.current?.focus()}
+      />
 
       <SkillFlyout
         skillIds={data.skillIds ?? []}
@@ -1423,6 +1442,16 @@ export function LeaderNodeRenderer({
             setIsFullscreen(false);
           }}
           onOpenSkillFlyout={() => setSkillFlyoutOpen(true)}
+          graphProjection={taskGraphController.snapshot ? {
+            title: taskGraphController.snapshot.title,
+            status: taskGraphController.snapshot.status,
+            detail: `${taskGraphController.snapshot.nodes.length} graph tasks`,
+          } : taskGraphController.planSnapshot ? {
+            title: taskGraphController.planSnapshot.objective,
+            status: taskGraphController.planSnapshot.state.replace("_", " "),
+            detail: `${taskGraphController.planSnapshot.steps.length} planned steps`,
+          } : null}
+          onOpenGraph={taskGraphController.openInspector}
           skillFlyoutAnchorRef={fullscreenSkillAnchorRef}
           toolbarSlot={
             <SessionToolbar

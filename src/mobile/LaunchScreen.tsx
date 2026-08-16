@@ -195,14 +195,14 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
 
     const sessionKey = `leader-${randomUuid()}`;
     // Only arm skills when the user picked at least one. When armed we build the
-    // full leader system prompt client-side (active skills + arming inventory),
-    // exactly as the desktop LeaderNode does, and pass it verbatim to the server.
+    // structured Leader customization for this bare compatibility session.
     const skillPayload =
       selectedSkillIds.length > 0
         ? {
             systemPrompt: freezeLeaderSystemPrompt({
               skillIds: selectedSkillIds,
               skillValues,
+              orchestrationMode: "direct",
             }).systemPrompt,
             skillIds: selectedSkillIds,
             skillValues,

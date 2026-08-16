@@ -4,7 +4,12 @@ import type { WebSocketServer } from "ws";
 import { createBus } from "./bus.ts";
 import { SessionHost } from "./session-host.ts";
 import { disablePersistence } from "./session-persist.ts";
-import { pauseActiveRunForWait, requestWaitResume } from "./wait-resume.ts";
+import {
+  drainQueuedWaitResume,
+  getQueuedWaitResume,
+  pauseActiveRunForWait,
+  requestWaitResume,
+} from "./wait-resume.ts";
 
 function waitingHost(): SessionHost {
   const host = new SessionHost("leader-1", "/tmp/work");
@@ -52,6 +57,38 @@ describe("wait resume coordination", () => {
 
     await vi.runAllTimersAsync();
     expect(abort).toHaveBeenCalledOnce();
+  });
+
+  it("coalesces terminal synthesis with ordinary queued wakes", () => {
+    disablePersistence();
+    const host = waitingHost();
+    const startChildSession = vi.fn();
+    const deps = {
+      bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
+      startChildSession, forEachLeaderTaskState: () => {},
+    };
+    const delivered = [vi.fn(), vi.fn(), vi.fn()];
+    const request = (idempotencyKey: string, index: number, immediate = false) =>
+      requestWaitResume(host, deps, {
+        idempotencyKey, immediate, onDelivered: delivered[index],
+        completedReason: idempotencyKey,
+        opts: { sessionKey: host.id, prompt: idempotencyKey, cwd: host.cwd,
+          role: host.role, harness: host.harnessName },
+      });
+
+    request("attention", 0);
+    request("terminal", 1, true);
+    request("later-attention", 2);
+
+    expect(getQueuedWaitResume(host)?.opts.prompt).toContain("terminal");
+    host.status = "idle";
+    expect(drainQueuedWaitResume(host, deps)).toBe(true);
+
+    expect(startChildSession).toHaveBeenCalledOnce();
+    expect(startChildSession.mock.calls[0]?.[0].prompt).toContain("attention");
+    expect(startChildSession.mock.calls[0]?.[0].prompt).toContain("terminal");
+    expect(startChildSession.mock.calls[0]?.[0].prompt).toContain("later-attention");
+    delivered.forEach((callback) => expect(callback).toHaveBeenCalledOnce());
   });
 
   it("coalesces an elapsed wait resume instead of resuming immediately", async () => {

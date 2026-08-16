@@ -261,6 +261,33 @@ describe("buildHarnessStartOpts — capability gating", () => {
     expect(allowedTools).toContain("mcp__ext__bar");
   });
 
+  it("enforces a task-scoped tool allowlist while retaining graph completion tools",() => {
+    const harness=fakeHarness("fake",{},["Read","Write","Bash"]);
+    const toolResult:AgentToolResult={toolGroups:{},mcpToolNames:[
+      "mcp__minion-status__report_done","mcp__task-graph__stage_output_artifact","mcp__skills__load_subskill",
+    ]};
+    const {allowedTools}=buildHarnessStartOpts({host:fakeHost(),opts:fakeOpts({toolAllowlist:["Read"]}),
+      agentType:fakeAgentType,agentCtx:fakeCtx,toolResult,abortController:new AbortController(),
+      harness,prompt:"hello"});
+    expect(allowedTools).toEqual([
+      "Read","mcp__minion-status__report_done","mcp__task-graph__stage_output_artifact",
+    ]);
+  });
+
+  it("treats an empty task allowlist as deny-by-default",()=>{
+    const harness=fakeHarness("fake",{},["Read","Write","Bash"]);
+    const toolResult:AgentToolResult={toolGroups:{},mcpToolNames:[
+      "mcp__minion-status__report_done","mcp__task-graph__stage_output_artifact",
+      "mcp__skills__load_subskill",
+    ]};
+    const {allowedTools}=buildHarnessStartOpts({host:fakeHost(),opts:fakeOpts({toolAllowlist:[]}),
+      agentType:fakeAgentType,agentCtx:fakeCtx,toolResult,abortController:new AbortController(),
+      harness,prompt:"hello"});
+    expect(allowedTools).toEqual([
+      "mcp__minion-status__report_done","mcp__task-graph__stage_output_artifact",
+    ]);
+  });
+
   it("derives MCP allowed tool names from registered tool groups", () => {
     const harness = fakeHarness("fake", {}, []);
     const toolResult: AgentToolResult = {

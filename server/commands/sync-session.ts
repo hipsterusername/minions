@@ -6,7 +6,7 @@
  * a `render_update` so the RenderNode subscription picks it up.
  */
 
-import { unicastToSession } from "../bus.ts";
+import { unicastToSession, unicastToWorkItem } from "../bus.ts";
 import { getHarness } from "../harness/index.ts";
 import type { HarnessCapabilities } from "../harness/types.ts";
 import type { CommandHandler } from "./types.ts";
@@ -115,6 +115,13 @@ export const syncSession: CommandHandler = (ctx, cmd, ws) => {
         gap: host.renderState.layout.gap,
       },
       components: host.renderState.components,
+    });
+  }
+  if (host.workItemId && ctx.taskGraphs) {
+    const snapshot = ctx.taskGraphs.viewForWorkItem(host.workItemId,host.runKey);
+    if (snapshot) unicastToWorkItem(ws,host.workItemId,{
+      type:"task_graph_snapshot",workItemId:host.workItemId,runId:snapshot.graphRunId,
+      revision:snapshot.revision,cause:"session_sync",snapshot,timestamp:Date.now(),
     });
   }
 };

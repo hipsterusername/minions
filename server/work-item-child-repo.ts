@@ -13,9 +13,15 @@ import {
 
 export function createChildWorkItemRun(db: Database.Database, input: {
   workItemId: string; runKey: string; parentRunKey: string; taskId: string;
+  attemptId?: string; attemptNumber?: number;
   idempotencyKey: string; at: number;
 }): { run: WorkItemRunRow; idempotent: boolean } {
   if (!input.idempotencyKey) throw new Error("idempotencyKey is required");
+  const attemptId = input.attemptId ?? input.runKey;
+  const attemptNumber = input.attemptNumber ?? 1;
+  if (!attemptId || !Number.isInteger(attemptNumber) || attemptNumber < 1) {
+    throw new Error("valid child attempt identity is required");
+  }
   return db.transaction(() => {
     const duplicate = db.prepare(`SELECT session_key FROM sessions
       WHERE work_item_id = ? AND start_idempotency_key = ?`)
@@ -31,12 +37,14 @@ export function createChildWorkItemRun(db: Database.Database, input: {
     db.prepare(`INSERT INTO sessions (
       session_key, project_id, status, cwd, role, task_name, work_item_id,
       run_number, run_kind, previous_run_key, parent_run_key, task_id,
+      attempt_id, attempt_number,
       started_at, ended_at, run_outcome, final_report_event_id,
       start_idempotency_key, created_at, updated_at
-    ) VALUES (?, ?, 'idle', ?, 'minion', ?, ?, NULL, 'child', NULL, ?, ?, ?, NULL,
+    ) VALUES (?, ?, 'idle', ?, 'minion', ?, ?, NULL, 'child', NULL, ?, ?, ?, ?, ?, NULL,
       'none', NULL, ?, ?, ?)`)
       .run(input.runKey, item.project_id, item.project_path, item.title, item.id,
-        input.parentRunKey, input.taskId, input.at, input.idempotencyKey, iso, iso);
+        input.parentRunKey, input.taskId, attemptId, attemptNumber,
+        input.at, input.idempotencyKey, iso, iso);
     return { run: getWorkItemRun(db, input.runKey)!, idempotent: false };
   }).immediate();
 }

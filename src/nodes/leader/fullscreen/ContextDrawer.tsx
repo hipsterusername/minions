@@ -20,18 +20,22 @@ import { selectCanvasChangeMode } from "../work-item.ts";
  * source-of-truth.
  */
 
-type TabId = "overview" | "worktree" | "approval" | "skills" | "prompt";
+type TabId = "overview" | "graph" | "worktree" | "approval" | "skills" | "prompt";
 
 export function ContextDrawer({
   data,
   onUpdateData,
   skillFlyoutAnchorRef,
   onOpenSkillFlyout,
+  graphProjection,
+  onOpenGraph,
 }: {
   data: LeaderData;
   onUpdateData: (next: LeaderData) => void;
   skillFlyoutAnchorRef: RefObject<HTMLElement | null>;
   onOpenSkillFlyout: () => void;
+  graphProjection?: { title: string; status: string; detail: string } | null;
+  onOpenGraph?: (() => void) | undefined;
 }) {
   const isWorktreeMode = selectCanvasChangeMode(data) === "worktree";
   const approvalPending = isWorktreeMode && !!data.approvalPending;
@@ -41,10 +45,13 @@ export function ContextDrawer({
 
   useEffect(() => {
     if (!isWorktreeMode && activeTab === "approval") setActiveTab("overview");
-  }, [activeTab, isWorktreeMode]);
+    if (!graphProjection && activeTab === "graph") setActiveTab("overview");
+  }, [activeTab, graphProjection, isWorktreeMode]);
 
   const tabs: { id: TabId; label: string; badge?: string | undefined }[] = [
     { id: "overview", label: "Overview" },
+    ...(graphProjection ? [{ id: "graph", label: "Graph",
+      badge: ["failed", "stale", "blocked"].includes(graphProjection.status) ? "•" : undefined } as const] : []),
     { id: "worktree", label: "Worktree" },
     ...(isWorktreeMode ? [{
       id: "approval",
@@ -163,6 +170,8 @@ export function ContextDrawer({
         }}
       >
         {activeTab === "overview" && <OverviewPanel data={data} />}
+        {activeTab === "graph" && graphProjection
+          ? <GraphPanel projection={graphProjection} onOpen={onOpenGraph} /> : null}
         {activeTab === "worktree" && <WorktreePanel data={data} />}
         {activeTab === "approval" && <ApprovalPanel data={data} />}
         {activeTab === "skills" && (
@@ -177,6 +186,27 @@ export function ContextDrawer({
       </div>
     </aside>
   );
+}
+
+function GraphPanel({ projection, onOpen }: {
+  projection: { title: string; status: string; detail: string };
+  onOpen?: (() => void) | undefined;
+}) {
+  return <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+    <div style={{ padding: "10px 12px", background: "var(--bg-elevated)",
+      border: "1px solid var(--border-default)", borderRadius: 6 }}>
+      <div style={{ color: "var(--text-primary)", fontWeight: 700 }}>{projection.title}</div>
+      <div style={{ marginTop: 4, color: "var(--text-muted)", fontFamily: "var(--font-mono)",
+        fontSize: 10 }}>{projection.status} · {projection.detail}</div>
+    </div>
+    <button type="button" onClick={onOpen} disabled={!onOpen}
+      style={{ padding: "7px 10px", border: "1px solid var(--accent)", borderRadius: 5,
+        background: "var(--accent)", color: "var(--text-on-accent)", cursor: "pointer",
+        fontWeight: 700 }}>Open graph details</button>
+    <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 10 }}>
+      This is the same server-authoritative projection shown on the canvas. It is not stored in Leader node data.
+    </p>
+  </div>;
 }
 
 function StatRow({ label, value }: { label: string; value: React.ReactNode }) {

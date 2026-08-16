@@ -24,6 +24,7 @@ export function runSnapshot(row: WorkItemRunRow): WorkItemRunSnapshot {
   return workItemRunSnapshotSchema.parse({
     runKey: row.session_key, workItemId: row.work_item_id, runKind: row.run_kind,
     parentRunKey: row.parent_run_key, taskId: row.task_id, runNumber: row.run_number,
+    attemptId: row.attempt_id, attemptNumber: row.attempt_number,
     previousRunKey: row.previous_run_key, providerSessionId: row.session_id,
     outcome: row.run_outcome, startedAt: row.started_at, endedAt: row.ended_at,
     finalReport: row.final_report,

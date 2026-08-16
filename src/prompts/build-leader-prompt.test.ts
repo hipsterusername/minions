@@ -3,8 +3,7 @@
  *
  * Pinning behaviour:
  *   - The base LEADER_SYSTEM_PROMPT is always included.
- *   - The arming inventory section appears whenever the registry has
- *     any skills, listing their IDs + names + descriptions.
+ *   - The legacy arming inventory lists skill IDs + names + descriptions.
  *   - Tagged skills (active for the leader itself) are compiled and
  *     appended via the existing Active Skills section.
  *   - Built-in skill presets (e.g. the Skill Builder) always appear in the
@@ -47,22 +46,27 @@ describe("buildLeaderSystemPrompt", () => {
     clearSkills();
   });
 
-  it("surfaces built-in presets in the inventory even when the registry is empty", () => {
-    const out = buildLeaderSystemPromptPreview({ skillIds: [], skillValues: {} });
-    // Base prompt is present, plus the always-available built-in inventory.
-    expect(out).toContain(LEADER_SYSTEM_PROMPT);
+  it("surfaces built-in presets in the legacy inventory even when the registry is empty", () => {
+    const out = buildLeaderSystemPromptPreview({
+      skillIds: [], skillValues: {}, orchestrationMode: "direct",
+    });
+    // Stable core is present, plus the always-available built-in inventory.
+    expect(out).toContain("You are the Lead Developer agent");
+    expect(out).toContain("## Legacy planning mode (debug)");
     expect(out).toContain("# Available Skills (for arming Minions)");
     expect(out).toContain("`skill-builder`");
     // Nothing tagged → no active section.
     expect(out).not.toContain("# Active Skills");
   });
 
-  it("appends the arming inventory when the registry has skills", () => {
+  it("appends the legacy arming inventory when the registry has skills", () => {
     registerSkill(makeSkill({ id: "a", name: "Alpha", description: "First" }));
     registerSkill(makeSkill({ id: "b", name: "Beta", description: "Second" }));
 
-    const out = buildLeaderSystemPromptPreview({ skillIds: [], skillValues: {} });
-    expect(out).toContain(LEADER_SYSTEM_PROMPT);
+    const out = buildLeaderSystemPromptPreview({
+      skillIds: [], skillValues: {}, orchestrationMode: "direct",
+    });
+    expect(out).toContain("## Legacy planning mode (debug)");
     expect(out).toContain("# Available Skills (for arming Minions)");
     expect(out).toContain("`a` — **Alpha**: First");
     expect(out).toContain("`b` — **Beta**: Second");
@@ -88,6 +92,7 @@ describe("buildLeaderSystemPrompt", () => {
     const out = buildLeaderSystemPromptPreview({
       skillIds: ["lint"],
       skillValues: {},
+      orchestrationMode: "direct",
     });
     expect(out).toContain("# Active Skills");
     expect(out).toContain("## Skill: Lint");
@@ -97,6 +102,17 @@ describe("buildLeaderSystemPrompt", () => {
     // Both armed and unarmed skills appear in the inventory
     expect(out).toContain("`lint` — **Lint**: Cleanup");
     expect(out).toContain("`review` — **Review**: Read code");
+  });
+
+  it("uses Task Graph by default without injecting the legacy arming inventory", () => {
+    registerSkill(makeSkill({ id: "review", name: "Review", description: "Read code" }));
+    const out = buildLeaderSystemPromptPreview({ skillIds: [], skillValues: {} });
+
+    expect(out).toContain(LEADER_SYSTEM_PROMPT);
+    expect(out).toContain("## Task Graph planning");
+    expect(out).toContain("submit_graph_plan");
+    expect(out).not.toContain("# Available Skills (for arming Minions)");
+    expect(out).not.toContain("## Legacy planning mode (debug)");
   });
 
   it("injects a tagged skill's sub-skill map into the Active Skills section", () => {
