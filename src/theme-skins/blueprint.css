@@ -17,8 +17,8 @@
   --label-transform: none;
 }
 
-/* A faint vignette gives the curved drafting mesh a little depth. The mesh
-   itself lives in CanvasBackground so it can respond gently to canvas pan. */
+/* A faint vignette gives the curved drafting surface depth. The parallax mesh
+   lives in CanvasBackground. */
 :root[data-theme="blueprint"] body,
 :root[data-theme="blueprint"] .canvas-root {
   background-image:
@@ -27,7 +27,8 @@
   background-attachment: fixed;
 }
 
-/* Blueprint replaces the shared dots with a single barrel-warped mesh. */
+/* Blueprint replaces the shared dots with a curved mesh that moves at a
+   different visual depth. */
 :root[data-theme="blueprint"] {
   --blueprint-grid-display: block;
 }
@@ -36,14 +37,18 @@
   display: none;
 }
 
-:root[data-theme="blueprint"] .blueprint-sphere-grid__minor {
-  stroke: rgba(56, 189, 248, 0.075);
-  stroke-width: 0.7;
+:root[data-theme="blueprint"] .blueprint-curve-grid {
+  mix-blend-mode: screen;
 }
 
-:root[data-theme="blueprint"] .blueprint-sphere-grid__major {
-  stroke: rgba(56, 189, 248, 0.16);
-  stroke-width: 1;
+:root[data-theme="blueprint"] .blueprint-curve-grid__minor {
+  stroke: rgba(56, 189, 248, 0.045);
+  stroke-width: 0.65;
+}
+
+:root[data-theme="blueprint"] .blueprint-curve-grid__major {
+  stroke: rgba(56, 189, 248, 0.11);
+  stroke-width: 0.95;
 }
 
 /* Hard-edged cards with a crisp offset shadow. */

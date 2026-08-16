@@ -6,45 +6,52 @@ import {
 } from "./CanvasBackground.tsx";
 
 describe("CanvasBackground", () => {
-  it("keeps the shared dot grid and Blueprint mesh as separately themeable layers", () => {
+  it("keeps the shared dots and curved Blueprint layer separately themeable", () => {
     const { container } = render(
       <CanvasBackground transform={{ x: 48, y: -24, scale: 1 }} />,
     );
 
     expect(container.querySelector(".canvas-dot-grid")).toBeInTheDocument();
-    expect(container.querySelector(".blueprint-sphere-grid")).toBeInTheDocument();
-    expect(
-      container.querySelectorAll(".blueprint-sphere-grid__minor").length,
-    ).toBeGreaterThan(0);
-    expect(
-      container.querySelectorAll(".blueprint-sphere-grid__major").length,
-    ).toBeGreaterThan(0);
+    expect(container.querySelector(".blueprint-curve-grid")).toBeInTheDocument();
+    expect(container.querySelector(".blueprint-grid")).not.toBeInTheDocument();
   });
 
-  it("moves the Blueprint mesh only a small, bounded amount during long pans", () => {
-    const nearby = blueprintParallaxOffset({ x: 600, y: -450, scale: 1 });
-    const distant = blueprintParallaxOffset({ x: 100_000, y: -100_000, scale: 1 });
-
-    expect(nearby.x).toBeGreaterThan(0);
-    expect(nearby.y).toBeLessThan(0);
-    expect(Math.abs(nearby.x)).toBeLessThan(10);
-    expect(Math.abs(nearby.y)).toBeLessThan(10);
-    expect(Math.abs(distant.x)).toBeLessThan(19);
-    expect(Math.abs(distant.y)).toBeLessThan(15);
-  });
-
-  it("renders visibly curved grid paths instead of straight drafting rules", () => {
+  it("renders a curved mesh without stretching its viewBox to the viewport", () => {
     const { container } = render(
       <CanvasBackground transform={{ x: 0, y: 0, scale: 1 }} />,
     );
-    const path = container.querySelector(
-      ".blueprint-sphere-grid__minor",
-    )?.getAttribute("d");
+    const curveGrid = container.querySelector(".blueprint-curve-grid");
+    const path = container
+      .querySelector(".blueprint-curve-grid__minor")
+      ?.getAttribute("d");
 
+    expect(curveGrid).toHaveAttribute("preserveAspectRatio", "xMidYMid slice");
     expect(path).toBeTruthy();
     const xCoordinates = path!
       .match(/[ML](-?\d+(?:\.\d+)?) /g)!
       .map((point) => Number.parseFloat(point.slice(1)));
     expect(new Set(xCoordinates).size).toBeGreaterThan(1);
+  });
+
+  it("moves the curved depth layer by a small bounded parallax amount", () => {
+    const nearby = blueprintParallaxOffset({ x: 600, y: -450, scale: 1 });
+    const distant = blueprintParallaxOffset({ x: 100_000, y: -100_000, scale: 1 });
+
+    expect(nearby.x).toBeGreaterThan(0);
+    expect(nearby.y).toBeLessThan(0);
+    expect(Math.abs(distant.x)).toBeLessThan(22);
+    expect(Math.abs(distant.y)).toBeLessThan(16);
+  });
+
+  it("uses unique SVG resource ids for multiple canvas instances", () => {
+    const { container } = render(
+      <>
+        <CanvasBackground transform={{ x: 0, y: 0, scale: 1 }} />
+        <CanvasBackground transform={{ x: 100, y: 50, scale: 1 }} />
+      </>,
+    );
+    const ids = Array.from(container.querySelectorAll("[id]"), (node) => node.id);
+
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });

@@ -38,3 +38,20 @@ describe("Blueprint typography", () => {
     expect(headings).toContain("letter-spacing: -0.015em");
   });
 });
+
+describe("Blueprint canvas background", () => {
+  it("enables the grid only for the Blueprint theme", () => {
+    expect(css).toMatch(
+      /:root\[data-theme="blueprint"\]\s*\{[^}]*--blueprint-grid-display: block/s,
+    );
+  });
+
+  it("keeps the curved depth treatment scoped to Blueprint", () => {
+    const curveLayer = ruleBody(
+      ':root[data-theme="blueprint"] .blueprint-curve-grid',
+    );
+
+    expect(curveLayer).toContain("mix-blend-mode: screen");
+    expect(css).not.toMatch(/(?:^|\n)\.blueprint-curve-grid\s*\{/);
+  });
+});
