@@ -38,3 +38,5 @@ bridges:
     reason: Delegated child controls share the execution-lifecycle session control flow.
   - to: flow.monitor_execution
     reason: Delegated child status is presented through the observability-owned monitoring flow.
+  - to: capability.execution_graph_runtime
+    reason: Large dependency plans use the canonical execution graph while lightweight Leader task plans retain their existing orchestration path.

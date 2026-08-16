@@ -1,0 +1,27 @@
+id: flow.inspect_execution_graph
+type: flow
+name: Inspect and control an execution graph
+summary: Project canonical graph state into the Leader Graph Inspector, fold adjacent revisioned deltas, and refetch a full snapshot after reconnect or any revision gap.
+constraints:
+  - constraint.execution_graph_projection
+decisions:
+  - decision.server_owned_execution_graphs
+  - decision.typed_event_bus
+risks: []
+suggested_files: [ shared/task-graph-view-contracts.ts, server/task-graph/view.ts, server/task-graph/service.ts, server/commands/task-graph.ts, src/task-graph/LeaderTaskGraphBridge.tsx, src/task-graph/GraphInspector.tsx, src/task-graph/use-task-graph-view.ts ]
+suggested_tests: [ src/task-graph/GraphInspector.test.tsx, src/task-graph/use-task-graph-view.test.tsx, src/task-graph/LeaderTaskGraphIntegration.test.tsx, server/task-graph/service.test.ts ]
+steps:
+  - Fetch the current WorkItem-bound graph snapshot without persisting the large projection in Leader node data.
+  - Inspect logical outcome, readiness, attempt history, blockers, topology, evidence lineage, capacity, reserved budget, critical path, and timeline.
+  - Send pause, resume, cancel, retry, verification, waiver, or human-input controls with the displayed run revision and attempt identity.
+  - Fold only adjacent typed change envelopes, ignore stale revisions, and request a canonical snapshot on reconnect, run mismatch, or sequence gap.
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.observability
+primary_capability: capability.execution_graph_runtime
+bridges:
+  - to: capability.execution_graph_runtime
+    reason: The inspector projects and controls the delegation-owned execution graph runtime.
+  - to: flow.monitor_execution
+    reason: Graph Inspector shares typed server truth, reconnect, and projection semantics with general execution monitoring.

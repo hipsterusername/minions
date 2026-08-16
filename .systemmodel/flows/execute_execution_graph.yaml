@@ -1,0 +1,32 @@
+id: flow.execute_execution_graph
+type: flow
+name: Execute a canonical execution graph
+summary: Validate immutable topology, bind it to the current primary WorkItem run and source snapshot, then centrally admit and recover fenced attempts until evidence satisfies terminal nodes.
+constraints:
+  - constraint.execution_graph_authority
+  - constraint.execution_graph_admission
+  - constraint.execution_graph_evidence
+decisions:
+  - decision.server_owned_execution_graphs
+  - decision.canonical_work_item_lifecycle
+risks: []
+suggested_files: [ shared/task-graph-contracts.ts, shared/work-item-contracts.ts, server/task-graph/repository.ts, server/task-graph/scheduler.ts, server/task-graph/recovery.ts, server/task-graph/evidence.ts, server/task-graph/service.ts, server/commands/task-graph.ts ]
+suggested_tests: [ server/task-graph/runtime.test.ts, server/task-graph/service.test.ts, tests/task-graph/runtime.test.ts, tests/contracts/work-item-contracts.test.ts ]
+steps:
+  - Validate an acyclic bounded graph and persist its content-hashed revision immutably under the owning WorkItem.
+  - Start one graph run for the current primary run only after WorkItem lifecycle CAS and source-snapshot ownership checks pass.
+  - Freeze joins, acquire the server scheduler lease, and admit ready nodes only when capacity, ownership, and requested budget reservations are available.
+  - Persist each attempt, generation, resource reservation, and outbox dispatch before launching its attempt-identified child WorkItem run.
+  - Fence progress and terminal events by run revision, attempt generation, actor session, and idempotency key; retry with a new attempt identity.
+  - Commit only current successful attempt artifacts and satisfy verified edges only with source-snapshot- and hash-bound independent evidence.
+  - Recover expired claims as lost, replay only undelivered outbox rows, and continue scheduling under the current lease token.
+freshness:
+  class: code_coupled
+risk: critical
+domain: domain.delegation
+primary_capability: capability.execution_graph_runtime
+bridges:
+  - to: capability.durable_work_items
+    reason: WorkItem durable intent and current primary run remain the lifecycle authority above graph execution.
+  - to: constraint.execution_graph_authority
+    reason: Starting graph execution crosses into canonical WorkItem lifecycle authority.

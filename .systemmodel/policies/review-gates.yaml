@@ -1,4 +1,13 @@
 review_gates:
+  - id: gate.execution_graph_runtime
+    name: Execution graph runtime
+    description: Preserve canonical authority, immutable topology, fenced attempts, leased admission, durable outbox recovery, evidence binding, and revisioned projection convergence.
+    blocks_merge: true
+    required_when:
+      files: [server/task-graph/**, shared/task-graph-contracts.ts, shared/task-graph-view-contracts.ts, server/commands/task-graph.ts, src/task-graph/**]
+      capabilities: [capability.execution_graph_runtime, capability.durable_work_items, capability.execution_observability]
+      flows: [flow.execute_execution_graph, flow.inspect_execution_graph]
+      risk: [high, critical]
   - id: gate.event_bus_architecture
     name: Event bus architecture
     description: Preserve typed bus routing and prohibit direct server broadcast.

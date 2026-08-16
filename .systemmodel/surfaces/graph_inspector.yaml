@@ -1,0 +1,7 @@
+id: surface.graph_inspector
+type: surface
+name: Graph Inspector
+summary: Leader-attached projection for execution-graph overview, topology, queue, evidence lineage, timeline, node attempts, and fenced controls.
+keywords: [ graph_inspector, execution_graph, topology, queue, attempts, evidence, budget, critical_path, timeline, control ]
+suggested_files: [ src/task-graph/**, shared/task-graph-view-contracts.ts, server/task-graph/view.ts ]
+suggested_tests: [ src/task-graph/GraphInspector.test.tsx, src/task-graph/use-task-graph-view.test.tsx, src/task-graph/LeaderTaskGraphIntegration.test.tsx ]
