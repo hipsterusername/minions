@@ -926,7 +926,7 @@ describe("ActivityView", () => {
     expect(composer).toHaveValue("Do not lose this.");
   });
 
-  it("offers a Launch action from the activity header", () => {
+  it("offers a New action from the activity header", () => {
     const onLaunchLeader = vi.fn();
     render(
       <ActivityView
@@ -937,7 +937,7 @@ describe("ActivityView", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /launch leader/i }));
+    fireEvent.click(screen.getByRole("button", { name: "New" }));
     expect(onLaunchLeader).toHaveBeenCalledTimes(1);
   });
 
@@ -957,7 +957,7 @@ describe("ActivityView", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /launch leader/i }));
+    fireEvent.click(screen.getByRole("button", { name: "New" }));
     expect(onCommitLaunchLeader).not.toHaveBeenCalled();
 
     const launchPanel = screen.getByRole("region", { name: /new leader/i });
@@ -1012,7 +1012,7 @@ describe("ActivityView", () => {
     expect(within(setup).getByRole("checkbox", { name: /isolated worktree/i })).toBeVisible();
     expect(within(setup).getByText("Skills")).toBeVisible();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /launch workspace open/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /new leader form open/i })).toBeDisabled();
 
     const prompt = screen.getByRole("textbox", { name: "Leader prompt" });
     const promptSurface = prompt.closest(".leader-launch-prompt");
@@ -1076,7 +1076,7 @@ describe("ActivityView", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /launch leader/i }));
+    fireEvent.click(screen.getByRole("button", { name: "New" }));
     fireEvent.click(screen.getByRole("button", { name: /cancel new leader/i }));
 
     expect(onCancelLaunchLeader).toHaveBeenCalledWith(draft.id);
@@ -1148,9 +1148,9 @@ describe("ActivityView", () => {
     expect(screen.getByRole("complementary", { name: /session details/i })).toHaveTextContent("Fresh task");
   });
 
-  it("offers Launch from the empty activity state when no draft could be created", () => {
+  it("offers New from the empty activity state when no draft could be created", () => {
     // onLaunchLeader returns void — the auto-open attempt yields no draft, so
-    // the empty state falls back to an explicit Launch CTA.
+    // the empty state falls back to an explicit New CTA.
     const onLaunchLeader = vi.fn();
     render(
       <ActivityView
@@ -1162,7 +1162,8 @@ describe("ActivityView", () => {
     );
 
     expect(onLaunchLeader).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: /^launch$/i }));
+    fireEvent.click(within(screen.getByRole("region", { name: /add an agent/i }))
+      .getByRole("button", { name: /^new$/i }));
     expect(onLaunchLeader).toHaveBeenCalledTimes(2);
   });
 

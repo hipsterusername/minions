@@ -1539,7 +1539,7 @@ export function ActivityView({
             className="act-launch-btn"
             type="button"
             onClick={openLaunchExperience}
-            aria-label={launchNode ? "Launch workspace open" : "Launch leader"}
+            aria-label={launchNode ? "New leader form open" : "New"}
             disabled={Boolean(launchNode)}
           >
             <svg width="14" height="14" viewBox="0 0 40 40" fill="none" aria-hidden="true">
@@ -1557,7 +1557,7 @@ export function ActivityView({
               />
               <circle cx="20" cy="28" r="2" fill="currentColor" />
             </svg>
-            <span>Launch</span>
+            <span>New</span>
           </button>
         </header>
         <div className="act-summary" aria-label="Filter activity by status">

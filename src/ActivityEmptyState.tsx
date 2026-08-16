@@ -17,7 +17,7 @@ import { LeaderNodeRenderer } from "./nodes/LeaderNode.tsx";
  * 2. The variant's headline (and Clear-filter escape hatch when filtering).
  * 3. "Add an agent" — the full launch composer (prompt bar, starter chips,
  *    model/permissions, skills) inline, so the first keystroke starts a
- *    session with zero extra clicks. Falls back to a Launch button until the
+ *    session with zero extra clicks. Falls back to a New button until the
  *    draft leader node exists.
  */
 export function ActivityEmptyState({
@@ -125,7 +125,7 @@ export function ActivityEmptyState({
             type="button"
             onClick={onLaunch}
           >
-            Launch
+            New
           </button>
         )}
       </section>

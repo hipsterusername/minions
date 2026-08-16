@@ -326,7 +326,7 @@ describe("MobileApp", () => {
       ],
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
+    fireEvent.click(await screen.findByRole("button", { name: "New" }));
     fireEvent.change(screen.getByLabelText("Prompt"), {
       target: { value: "Start a new leader" },
     });

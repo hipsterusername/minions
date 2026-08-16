@@ -144,7 +144,7 @@ function viewTitle(input: {
     case "approvals":
       return "Review";
     case "launch":
-      return "Launch";
+      return "New";
     case "settings":
       return "Settings";
     case "chat":
@@ -556,7 +556,7 @@ export default function MobileApp() {
           onClick={openLaunch}
           aria-current={activeTab === "launch" ? "page" : undefined}
         >
-          Launch
+          New
         </button>
         <button
           type="button"

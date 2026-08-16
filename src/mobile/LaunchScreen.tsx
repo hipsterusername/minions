@@ -274,9 +274,9 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
   }
 
   return (
-    <main className="mob-screen mob-launch" aria-label="Launch">
+    <main className="mob-screen mob-launch" aria-label="New leader">
       <header className="mob-screen-header">
-        <h1>Launch</h1>
+        <h1>New</h1>
       </header>
 
       {loading ? <div className="mob-launch-status">Loading projects...</div> : null}
