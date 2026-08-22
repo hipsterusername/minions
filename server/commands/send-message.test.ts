@@ -4,6 +4,7 @@ import type { WorkItemService } from "../work-item-service.ts";
 import { initialWorkItemLifecycle } from "../../shared/work-item-lifecycle.ts";
 import { setup, cmd } from "../../tests/support/server-command-harness.ts";
 import { encodeLeaderPromptCustomization } from "../../shared/leader-prompt.ts";
+import { SessionCapacityError } from "../session-registry.ts";
 
 interface StartCall {
   sessionKey: string;
@@ -178,6 +179,27 @@ describe("send_message", () => {
     expect(h.wsSent).toHaveLength(1);
     expect(h.wsSent[0]!["type"]).toBe("error");
     expect(h.wsSent[0]!["topic"]).toBe("session:ghost");
+  });
+
+  it("reports a typed session error when a retained host cannot resume at capacity", async () => {
+    const h = setup();
+    h.ctx.registry.start = () => {
+      throw new SessionCapacityError(1);
+    };
+
+    await sendMessage(h.ctx, cmd({
+      type: "send_message",
+      sessionKey: h.host.id,
+      prompt: "resume",
+    }), h.ws);
+
+    expect(h.wsSent).toContainEqual(expect.objectContaining({
+      type: "session_error",
+      topic: `session:${h.host.id}`,
+      sessionKey: h.host.id,
+      code: "SESSION_CAPACITY_REACHED",
+    }));
+    expect(h.host.status).toBe("idle");
   });
 
   it("bridges a legacy continuation into a canonical interrupted-run restart", async () => {

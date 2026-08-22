@@ -198,4 +198,26 @@ describe("work-item boot recovery witnesses", () => {
       SELECT ended_at, run_outcome FROM sessions WHERE session_key = 'run-1'
     `).get()).toEqual({ ended_at: null, run_outcome: "none" });
   });
+
+  it("repairs inherited decision evidence that was left projected as working", () => {
+    const db = memoryDb();
+    db.prepare(`UPDATE work_items SET runtime_state = 'working' WHERE id = 'work-1'`).run();
+    db.prepare(`UPDATE sessions SET review_state = 'decision_needed',
+      review_reason = 'Choose a path' WHERE session_key = 'run-1'`).run();
+    startRunInvocation(db, { runKey: "run-1", providerId: "codex", startedAt: 30 });
+    claimRunInvocationTerminal(db, { runKey: "run-1", providerGeneration: 1,
+      terminalKind: "clean", terminalSource: "provider", terminalAt: 40 });
+
+    expect(recoverOrphanedWorkItemRuns(db, new Set(), 50).recoveredRunKeys).toEqual([]);
+    expect(db.prepare(`SELECT runtime_state,outcome,wait_kind,lifecycle_revision
+      FROM work_items WHERE id = 'work-1'`).get()).toEqual({
+        runtime_state:"waiting",outcome:"none",wait_kind:"decision",lifecycle_revision:2,
+      });
+    expect(db.prepare(`SELECT ended_at,run_outcome FROM sessions
+      WHERE session_key = 'run-1'`).get()).toEqual({ ended_at:null,run_outcome:"none" });
+
+    recoverOrphanedWorkItemRuns(db,new Set(),60);
+    expect(db.prepare(`SELECT lifecycle_revision FROM work_items WHERE id = 'work-1'`).get())
+      .toEqual({ lifecycle_revision:2 });
+  });
 });

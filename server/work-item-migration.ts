@@ -14,6 +14,7 @@ import {
   recordBootRecoveryWitness,
   type RunRecoveryWitness,
 } from "./work-item-recovery.ts";
+import { reconcileDurableWaitAtBoot } from "./work-item-wait-recovery.ts";
 
 interface LegacySessionRow {
   session_key: string;
@@ -282,20 +283,32 @@ export function recoverOrphanedWorkItemRuns(
 ): BootRecoveryResult {
   return db.transaction(() => {
     const rows = db.prepare(`
-      SELECT w.id, w.current_run_key, w.lifecycle_revision
+      SELECT w.id, w.current_run_key, w.lifecycle_revision,
+        w.runtime_state, w.wait_kind, s.review_state, s.task_state_json
       FROM work_items w
       JOIN sessions s ON s.session_key = w.current_run_key
       WHERE w.runtime_state IN ('starting', 'working', 'waiting')
         AND w.outcome = 'none' AND s.run_kind = 'primary'
         AND s.ended_at IS NULL AND s.run_outcome = 'none'
       ORDER BY w.id
-    `).all() as Array<{ id: string; current_run_key: string; lifecycle_revision: number }>;
+    `).all() as Array<{
+      id: string;
+      current_run_key: string;
+      lifecycle_revision: number;
+      runtime_state: string;
+      wait_kind: string | null;
+      review_state: string | null;
+      task_state_json: string | null;
+    }>;
     const recoveredRunKeys: string[] = [];
 
     for (const row of rows) {
       if (liveRunKeys.has(row.current_run_key)) continue;
       const witness = inspectRunRecoveryWitness(db, row.current_run_key);
-      if (witness.action === "resume") continue;
+      if (witness.action === "resume") {
+        reconcileDurableWaitAtBoot(db,row,at);
+        continue;
+      }
       const outcome = recoveryOutcome(witness);
       const terminalReason = witness.action === "stop"
         && witness.terminationIntent === "stop" ? "stop" : "abort";

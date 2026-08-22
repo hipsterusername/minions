@@ -21,6 +21,7 @@ import { dirname, basename } from "node:path";
 import { randomUUID } from "node:crypto";
 import { serverLogger } from "../logging.ts";
 import { isLeaderPromptCustomizationEnvelope } from "../../shared/leader-prompt.ts";
+import { SessionCapacityError } from "../session-registry.ts";
 
 const log = serverLogger.child("send-message");
 
@@ -117,31 +118,44 @@ export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
     ? cmd.systemPrompt?.trim() || undefined
     : cmd.systemPrompt;
 
-  const resumeLeader = (cwd: string): void => {
+  const resumeLeader = (cwd: string): boolean => {
     // Mid-thread harness switching is intentionally not supported. Even if
     // `cmd.harness` is present, we route through the host's existing
     // `harnessName` so a Claude conversation cannot silently flip into Codex
     // (or vice versa) on a follow-up turn.
-    ctx.registry.start({
-      sessionKey: cmd.sessionKey!,
-      // The external legacy follow-up path deliberately retains new-run
-      // behavior; internal replies are annotated separately.
-      invocationKind: "new_run",
-      prompt,
-      ...(cmd.displayPrompt ? { displayPrompt: cmd.displayPrompt } : {}),
-      cwd,
-      resumeId: host.sessionId ?? undefined,
-      // Leader customization is prefix-only. Non-leader roles retain their
-      // existing customPrompt behavior unchanged.
-      systemPrompt: turnSystemPrompt,
-      role: host.role,
-      thinkingConfig: turnThinking,
-      ...(cmd.skillIds !== undefined ? { skillIds: cmd.skillIds } : {}),
-      ...(cmd.skillValues !== undefined ? { skillValues: cmd.skillValues } : {}),
-      harness: host.harnessName,
-      sandboxPolicy: host.sandboxPolicy?.requested,
-      ...(attachments ? { attachments } : {}),
-    });
+    try {
+      ctx.registry.start({
+        sessionKey: cmd.sessionKey!,
+        // The external legacy follow-up path deliberately retains new-run
+        // behavior; internal replies are annotated separately.
+        invocationKind: "new_run",
+        prompt,
+        ...(cmd.displayPrompt ? { displayPrompt: cmd.displayPrompt } : {}),
+        cwd,
+        resumeId: host.sessionId ?? undefined,
+        // Leader customization is prefix-only. Non-leader roles retain their
+        // existing customPrompt behavior unchanged.
+        systemPrompt: turnSystemPrompt,
+        role: host.role,
+        thinkingConfig: turnThinking,
+        ...(cmd.skillIds !== undefined ? { skillIds: cmd.skillIds } : {}),
+        ...(cmd.skillValues !== undefined ? { skillValues: cmd.skillValues } : {}),
+        harness: host.harnessName,
+        sandboxPolicy: host.sandboxPolicy?.requested,
+        ...(attachments ? { attachments } : {}),
+      });
+      return true;
+    } catch (error) {
+      if (!(error instanceof SessionCapacityError)) throw error;
+      unicastToSession(ws, cmd.sessionKey!, {
+        type: "session_error",
+        sessionKey: cmd.sessionKey!,
+        code: error.code,
+        error: error.message,
+        timestamp: Date.now(),
+      });
+      return false;
+    }
   };
 
   const needsNewWorktree =

@@ -4,7 +4,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { SessionRegistry } from "./session-registry.ts";
+import {
+  SessionCapacityError,
+  SessionRegistry,
+} from "./session-registry.ts";
 import { SessionHost } from "./session-host.ts";
 import {
   closePersistDb,
@@ -64,7 +67,7 @@ function makePersisted(
 }
 
 describe("SessionRegistry.activeCount", () => {
-  it("counts hosts with non-stopped statuses", () => {
+  it("counts only hosts with active execution", () => {
     const r = new SessionRegistry();
     const map = (r as unknown as { map: Map<string, SessionHost> }).map;
     for (const [key, status] of [
@@ -78,7 +81,43 @@ describe("SessionRegistry.activeCount", () => {
       h.status = status;
       map.set(key, h);
     }
-    expect(r.activeCount()).toBe(4);
+    expect(r.activeCount()).toBe(1);
+  });
+
+  it("does not let a retained idle host resume past the live cap", () => {
+    const r = new SessionRegistry(1);
+    r.setDeps({
+      bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
+      startChildSession: vi.fn(),
+      forEachLeaderTaskState: vi.fn(),
+    });
+    const map = (r as unknown as { map: Map<string, SessionHost> }).map;
+    const running = new SessionHost("running", "/tmp");
+    running.status = "running";
+    map.set(running.id, running);
+    const idle = new SessionHost("idle", "/tmp");
+    idle.status = "idle";
+    map.set(idle.id, idle);
+
+    expect(() => r.start({
+      sessionKey: idle.id,
+      invocationKind: "resume_open_run",
+      prompt: "resume",
+      cwd: idle.cwd,
+    })).toThrow(SessionCapacityError);
+    expect(idle.status).toBe("idle");
+  });
+
+  it("holds launch reservations against the cap without counting them as active", () => {
+    const r = new SessionRegistry(1);
+    const reservation = r.reserveCapacity("pending");
+
+    expect(r.activeCount()).toBe(0);
+    expect(r.capacityCount()).toBe(1);
+    expect(() => r.reserveCapacity("other")).toThrow(SessionCapacityError);
+
+    r.releaseCapacity(reservation);
+    expect(r.capacityCount()).toBe(0);
   });
 });
 

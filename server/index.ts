@@ -174,7 +174,7 @@ const MAX_SESSIONS = 50;
 // outside `server/bus.ts` are forbidden by the `no-direct-broadcast`
 // architecture fitness test.
 
-const registry = new SessionRegistry();
+const registry = new SessionRegistry(MAX_SESSIONS);
 const bus = createBus(wss);
 
 // Fan approval/minion/error bus events out as Web Push notifications.
@@ -281,7 +281,7 @@ sessionDeps.continueWorkItemChild = async (input) => { await workItems.continueC
 const taskGraphs = new TaskGraphService({
   db: pushDb,
   bus,
-  availableDispatchSlots:() => Math.max(0,MAX_SESSIONS-registry.activeCount()),
+  availableDispatchSlots:() => Math.max(0,MAX_SESSIONS-registry.capacityCount()),
   validateNodePolicy:validateTaskGraphNodePolicy,
   children: {
     startChildRun: (input) => workItems.startChildRun(input),

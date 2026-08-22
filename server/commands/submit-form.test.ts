@@ -14,6 +14,7 @@ import {
   requestDecision,
   type SessionReviewLifecycle,
 } from "../session-review-lifecycle.ts";
+import { SessionCapacityError } from "../session-registry.ts";
 
 interface SentMessage {
   payload: Record<string, unknown>;
@@ -296,6 +297,29 @@ describe("submitForm — success path", () => {
 });
 
 describe("submitForm — validation errors", () => {
+  it("keeps a legacy form pending when runtime capacity is unavailable", () => {
+    const { ctx, startMock, host, emitted } = makeCtx(DEFAULT_HOST);
+    startMock.mockImplementation(() => {
+      throw new SessionCapacityError(1);
+    });
+    const { ws, sent } = makeFakeWs();
+
+    submitForm(ctx, baseCmd({ requestId: "capacity-form" }),
+      ws as unknown as Parameters<typeof submitForm>[2]);
+
+    expect(findFormById(host!.renderState.components, "form-abc")?.submittedAnswers)
+      .toBeUndefined();
+    expect(host!.reviewLifecycle.reviewState).toBe("decision_needed");
+    expect(emitted).toEqual([]);
+    expect(sent[0]?.payload).toMatchObject({
+      type: "control_response",
+      command: "submit_form",
+      success: false,
+      code: "SESSION_CAPACITY_REACHED",
+      requestId: "capacity-form",
+    });
+  });
+
   it("sends global error and does not call start when sessionKey is missing", () => {
     const { ctx, startMock } = makeCtx(DEFAULT_HOST);
     const { ws, sent } = makeFakeWs();

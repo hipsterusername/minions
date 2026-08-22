@@ -21,6 +21,7 @@ import { sanitizeAttachments } from "./attachment-sanitize.ts";
 import type { CommandContext, CommandHandler } from "./types.ts";
 import type { WebSocket } from "ws";
 import { SessionLaunchError } from "../session-launch.ts";
+import { SessionCapacityError } from "../session-registry.ts";
 import { listMcpServers, resolveClaudeMcpServers } from "../mcp-server-store.ts";
 import { resolveWorkspace } from "../workspace-registry.ts";
 
@@ -147,7 +148,7 @@ export const createSession: CommandHandler = async (
     return;
   }
 
-  if (ctx.registry.activeCount() >= ctx.maxSessions) {
+  if (ctx.registry.capacityCount() >= ctx.maxSessions) {
     rejectCreate(
       ws,
       cmd.sessionKey,
@@ -230,6 +231,10 @@ export const createSession: CommandHandler = async (
   try {
     await ctx.launchSession(options);
   } catch (error) {
+    if (error instanceof SessionCapacityError) {
+      rejectCreate(ws, key, error.message, { code: error.code });
+      return;
+    }
     if (error instanceof SessionLaunchError) {
       rejectCreate(ws, key, error.message, { code: error.code, readiness: error.readiness });
       return;
