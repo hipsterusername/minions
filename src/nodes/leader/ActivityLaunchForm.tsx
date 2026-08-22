@@ -280,9 +280,9 @@ export function ActivityLaunchForm({
               </span>
               <span title="Planning and orchestration mode">
                 <GitBranch size={12} aria-hidden />
-                {(data.orchestrationMode ?? "auto") === "plan" ? "Plan first"
+                {(data.orchestrationMode ?? "auto") === "plan" ? "Graph review"
                   : (data.orchestrationMode ?? "auto") === "direct"
-                    ? "Legacy planning (debug)" : "Auto plan"}
+                    ? "Direct tools only" : "Graph available"}
               </span>
             </div>
 
@@ -314,10 +314,10 @@ export function ActivityLaunchForm({
                   value={data.orchestrationMode ?? "auto"}
                   onChange={(event) => onUpdate({ orchestrationMode:
                     event.target.value as NonNullable<LeaderData["orchestrationMode"]> })}>
-                  <option value="auto">Auto plan — start safe work</option>
-                  <option value="plan">Plan first — review before start</option>
+                  <option value="auto">Graph available — auto-start safe graph work</option>
+                  <option value="plan">Graph available — review graph before start</option>
                   {data.orchestrationMode === "direct" ? (
-                    <option value="direct">Legacy planning — debug</option>
+                    <option value="direct">Direct tools only — debug</option>
                   ) : null}
                 </select>
               </label>

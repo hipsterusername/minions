@@ -63,9 +63,11 @@ describe("buildBaseLeaderPrompt", () => {
     );
   });
 
-  it("uses Task Graph by default and isolates legacy wait guidance to direct mode", () => {
+  it("offers Task Graph by default without removing direct Leader tools", () => {
     expect(LEADER_SYSTEM_PROMPT).toContain("## Task Graph planning");
     expect(LEADER_SYSTEM_PROMPT).toContain("submit_graph_plan");
+    expect(LEADER_SYSTEM_PROMPT).toContain("assign_task");
+    expect(LEADER_SYSTEM_PROMPT).toMatch(/optional reasoning and orchestration aid/i);
     expect(LEADER_SYSTEM_PROMPT).not.toContain("## Legacy planning mode (debug)");
     const legacyPrompt = buildBaseLeaderPrompt(CLAUDE_BUILT_IN_TOOLS, "direct");
     // Must explain that the system wakes the leader early when all minion tasks finish.

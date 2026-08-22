@@ -104,14 +104,15 @@ describe("buildLeaderSystemPrompt", () => {
     expect(out).toContain("`review` — **Review**: Read code");
   });
 
-  it("uses Task Graph by default without injecting the legacy arming inventory", () => {
+  it("uses Task Graph by default while preserving the direct arming inventory", () => {
     registerSkill(makeSkill({ id: "review", name: "Review", description: "Read code" }));
     const out = buildLeaderSystemPromptPreview({ skillIds: [], skillValues: {} });
 
     expect(out).toContain(LEADER_SYSTEM_PROMPT);
     expect(out).toContain("## Task Graph planning");
     expect(out).toContain("submit_graph_plan");
-    expect(out).not.toContain("# Available Skills (for arming Minions)");
+    expect(out).toContain("# Available Skills (for arming Minions)");
+    expect(out).toContain("`review` — **Review**: Read code");
     expect(out).not.toContain("## Legacy planning mode (debug)");
   });
 

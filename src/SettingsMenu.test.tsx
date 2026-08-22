@@ -317,16 +317,17 @@ describe("SettingsMenu", () => {
     });
   });
 
-  it("defaults new Leaders to Task Graph and exposes legacy planning as a debug toggle", () => {
+  it("offers Task Graph assistance without describing it as a replacement for direct tools", () => {
     const onChange = vi.fn();
     render(<SettingsMenu settings={{}} onSettingsChange={onChange} />);
 
     fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
     openCategory("Agent defaults");
 
-    const toggle = screen.getByRole("checkbox", { name: /use legacy planning tools/i });
+    const toggle = screen.getByRole("checkbox", { name: /disable task graph tools/i });
     expect(toggle).not.toBeChecked();
-    expect(screen.getByText(/Task Graph is the standard planner/i)).toBeVisible();
+    expect(screen.getByText(/Leaders keep their direct execution and delegation tools/i))
+      .toBeVisible();
     fireEvent.click(toggle);
     expect(onChange).toHaveBeenCalledWith({ leaderPlanningBackend: "legacy" });
   });

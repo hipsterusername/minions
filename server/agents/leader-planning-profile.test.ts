@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resolveLeaderPlanningProfile } from "./leader-planning-profile.ts";
 
 describe("Leader planning profile", () => {
-  it("selects Task Graph for a canonical Leader when persisted mode is absent", () => {
+  it("adds Task Graph assistance without removing direct Leader tools", () => {
     const profile = resolveLeaderPlanningProfile({ hasCanonicalIdentity: true });
 
     expect(profile).toMatchObject({
@@ -10,10 +10,17 @@ describe("Leader planning profile", () => {
       orchestrationMode: "auto",
       promptFeatureIds: ["task_graph_planning"],
       usesTaskGraph: true,
-      includeSkillInventory: false,
+      includeSkillInventory: true,
     });
-    expect(profile.taskToolNames).not.toContain("plan_task");
-    expect(profile.planningToolNames).toContain("submit_graph_plan");
+    expect(profile.taskToolNames).toContain("plan_task");
+    expect(profile.taskToolNames).toContain("assign_task");
+    expect(profile.taskToolNames).toContain("message_task");
+    expect(profile.planningToolNames).toEqual([
+      "initialize_graph_document", "upsert_graph_node", "remove_graph_node",
+      "upsert_graph_edge", "remove_graph_edge", "get_graph_document", "submit_graph_document",
+      "submit_graph_plan", "get_graph_plan", "start_graph_plan", "read_graph_artifact",
+      "cancel_graph_run", "adjudicate_graph_node",
+    ]);
   });
 
   it("keeps noncanonical compatibility sessions on the legacy profile", () => {

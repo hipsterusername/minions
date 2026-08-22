@@ -102,16 +102,20 @@ Selected Leader skills are compiled for this run. Use \`load_subskill\` for adve
 
 export const TASK_GRAPH_PLANNING_PROMPT = `## Task Graph planning
 
-Task Graph is the standard planning and delegation implementation.
+Task Graph is an optional reasoning and orchestration aid. Use it when explicit dependencies, parallel attempts, durable artifacts, or independent verification make the work easier to reason about and observe. For small, sequential, exploratory, or tightly integrated work, execute directly or use \`plan_task\` and \`assign_task\`. Enabling graph assistance never revokes the Leader's direct execution, delegation, steering, or waiting authority.
 
-1. Call \`set_task_name\`, inspect only enough context to define observable work, then call \`submit_graph_plan\` once with the complete semantic plan.
-2. Express real dependencies, typed artifact handoffs, task-scoped context selectors, read/write ownership scopes, risks, approval needs, and acceptance criteria. Do not emit private chain-of-thought.
-3. Do not create or launch children directly. The server materializes immutable graph identity and the graph scheduler is the sole child-allocation authority.
-4. If the projection is \`needs_input\` or \`ready\`, briefly explain the question or review state and end the turn. If it is \`running\`, end the turn while the coordinator waits durably.
-5. After an automatic completion wake, call \`get_graph_plan\`, read only the necessary terminal outputs with \`read_graph_artifact\`, and synthesize the final response from canonical runtime and verified evidence.
-6. Use \`start_graph_plan\` only when the user approved the exact proposal revision conversationally; UI approval uses the same server gate.
+1. Call \`set_task_name\` for the durable user objective. Decide whether a graph adds value; do not submit one merely to satisfy process ceremony.
+2. When using a graph, inspect only enough context to define observable work, then call \`submit_graph_plan\` with the complete semantic plan. Express real dependencies, typed artifact handoffs, task-scoped context selectors, read/write ownership scopes, risks, approval needs, and acceptance criteria. Do not duplicate the same work through both graph and direct delegation paths.
+3. Set \`completionMode: "verification"\` only when the step itself must return a structured passed/failed/inconclusive verdict; only passed satisfies that step, and omitted failure policy defaults to a recoverable Leader-decision block. Use \`verificationRequired: true\` separately when a normal producer step's committed artifacts require an independent verifier. Performing verification is not the same as passing verification. Do not emit private chain-of-thought.
+4. The server materializes immutable identity and schedules attempts only for work the Leader placed in a graph. Within that graph run, let the scheduler own node admission and child allocation. Work outside the graph remains under the Leader's normal direct tools and judgment.
+5. Before graph execution, revise a draft with the current \`baseProposalRevision\`. Started revisions are immutable. After a graph completes, fails, or is explicitly cancelled, submit a successor under the same WorkItem only when another graph iteration is useful.
+6. If the projection is \`needs_input\`, render one focused decision form and end the turn. In \`auto\` mode, a \`ready\` projection is only a user approval when a step explicitly sets \`requiresApproval\`; resolve policy or source blockers yourself and ask the user only when a real decision or clarification is required. In \`plan\` mode, \`ready\` awaits review of the exact proposal revision. A \`running\` graph does not prohibit safe, in-scope direct work that does not conflict with graph ownership.
+7. After an automatic completion wake, call \`get_graph_plan\`, read only the necessary terminal outputs with \`read_graph_artifact\`, and synthesize the relevant results from canonical runtime and verified evidence.
+   If a verification-mode node is blocked because its verdict is failed, inconclusive, missing, or malformed, inspect the current attempt and use \`adjudicate_graph_node\` to accept with an auditable reason, reject, or retry with guidance. Never infer a verdict from prose.
+   If the active graph has become obsolete and the objective requires replanning, call \`cancel_graph_run\` with the exact displayed run revision, then submit a successor using the latest proposal revision. Cancellation is explicit: never silently replace running work, and never rewrite its evidence.
+8. Use \`start_graph_plan\` only for explicit plan-mode review or a step that explicitly requires approval, after the user approved the exact proposal revision conversationally; UI approval uses the same server gate. Risk metadata and pending merge-review requirements never create a plan-start approval by themselves.
 
-Selected skills are frozen into the source snapshot and routed as task-scoped context. Legacy \`plan_task\`, \`assign_task\`, \`complete_task\`, \`cancel_task\`, and \`message_task\` are unavailable.`;
+Selected skills are frozen into graph source snapshots and routed as task-scoped context. Direct Minion assignments continue to use the selected-skill inventory and task-specific \`skillIds\`/\`skillValues\`.`;
 
 export type LeaderPromptFeatureId = "task_graph_planning" | "legacy_planning";
 
@@ -158,7 +162,9 @@ const TOOL_DESCRIPTIONS: Readonly<Record<string, string>> = {
   submit_graph_plan: "Submit or revise a semantic execution plan for server validation and materialization.",
   get_graph_plan: "Inspect the persisted plan and its canonical runtime projection.",
   start_graph_plan: "Start an approved, revision-fenced graph plan.",
-  read_graph_artifact: "Read bounded current artifact content for final graph synthesis.",
+  read_graph_artifact: "Read bounded artifact content from the latest or a selected historical graph run.",
+  cancel_graph_run: "Explicitly cancel the active revision-fenced graph so a successor iteration can be planned.",
+  adjudicate_graph_node: "Resolve an unsuccessful verification-mode node with a revision- and attempt-fenced accept, reject, or guided retry decision.",
 };
 
 export interface LeaderCapabilityInput {

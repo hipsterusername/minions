@@ -137,12 +137,9 @@ export function createTaskToolsForLeader(opts: {
     createCheckpointSessionToolDef(ctx),
     createLoadSubskillToolDef(ctx),
   ];
-  const graphDefs = [
-    createSetTaskNameToolDef(ctx),
-    createCheckpointSessionToolDef(ctx),
-    createLoadSubskillToolDef(ctx),
-  ];
-  const baseDefs = opts.planningBackend === "task_graph" ? graphDefs : directDefs;
+  // The graph backend adds graph-planning tools in agents/leader.ts. It never
+  // replaces these direct Leader controls: graph use is a choice, not a gate.
+  const baseDefs = directDefs;
 
   // Only add request_approval when worktree isolation is active
   const toolDefs: NormalizedToolDef[] =

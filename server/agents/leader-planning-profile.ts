@@ -34,7 +34,7 @@ const TASK_GRAPH_AUTO_PROFILE: LeaderPlanningProfile = {
   promptFeatureIds: ["task_graph_planning"],
   taskToolNames: TASK_GRAPH_LEADER_TASK_TOOL_NAMES,
   planningToolNames: TASK_GRAPH_PLANNING_TOOL_NAMES,
-  includeSkillInventory: false,
+  includeSkillInventory: true,
   usesTaskGraph: true,
 };
 
