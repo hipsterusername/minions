@@ -5,6 +5,30 @@ const idSchema = z.string().min(1);
 const revisionSchema = z.number().int().nonnegative();
 const optionalTextSchema = z.string().min(1).optional();
 
+export const MAX_TASK_VIEW_OBJECTIVE_CHARS = 8_000;
+export const MAX_TASK_VIEW_BRIEF_ITEMS = 50;
+export const MAX_TASK_VIEW_BRIEF_ITEM_CHARS = 2_000;
+export const MAX_TASK_VIEW_CONTEXT_ENTRIES = 20;
+export const MAX_TASK_VIEW_CONTEXT_CHARS = 8_000;
+export const MAX_TASK_VIEW_SOURCE_ID_CHARS = 256;
+export const MAX_TASK_VIEW_RESPONSE_CHARS = 12_000;
+
+const visibleTaskContextEntryViewSchema=z.object({
+  sourceId:z.string().min(1).max(MAX_TASK_VIEW_SOURCE_ID_CHARS),
+  contentHash:z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  classification:z.enum(["public","internal"]),
+  content:z.string().max(MAX_TASK_VIEW_CONTEXT_CHARS),
+});
+const withheldTaskContextEntryViewSchema=z.object({
+  sourceId:z.string().min(1).max(MAX_TASK_VIEW_SOURCE_ID_CHARS),
+  contentHash:z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  classification:z.enum(["sensitive","secret"]),
+  withheld:z.literal(true),
+});
+export const taskContextEntryViewSchema=z.union([
+  visibleTaskContextEntryViewSchema,withheldTaskContextEntryViewSchema,
+]);
+
 export const graphRunStatusViewSchema = z.enum([
   "draft", "running", "quiescent", "paused", "blocked", "completed", "failed", "cancelled",
 ]);
@@ -33,12 +57,18 @@ export const taskAttemptViewSchema = z.object({
   costUsd: z.number().nonnegative(),
   tokens: z.number().int().nonnegative(),
   summary: optionalTextSchema,
+  response:z.string().min(1).max(MAX_TASK_VIEW_RESPONSE_CHARS).optional(),
 });
 
 export const taskGraphNodeViewSchema = z.object({
   id: idSchema,
   title: idSchema,
+  objective:z.string().min(1).max(MAX_TASK_VIEW_OBJECTIVE_CHARS),
+  constraints:z.array(z.string().max(MAX_TASK_VIEW_BRIEF_ITEM_CHARS)).max(MAX_TASK_VIEW_BRIEF_ITEMS),
+  acceptanceCriteria:z.array(z.string().max(MAX_TASK_VIEW_BRIEF_ITEM_CHARS)).max(MAX_TASK_VIEW_BRIEF_ITEMS),
+  context:z.array(taskContextEntryViewSchema).max(MAX_TASK_VIEW_CONTEXT_ENTRIES),
   kind: z.enum(["task", "stage", "map", "reducer", "terminal"]),
+  completionMode:z.enum(["task","verification"]),
   stageId: optionalTextSchema,
   groupId: optionalTextSchema,
   logicalState: logicalStateViewSchema,
@@ -51,6 +81,11 @@ export const taskGraphNodeViewSchema = z.object({
     evidenceIds: z.array(idSchema),
     explanation: optionalTextSchema,
   }),
+  adjudication:z.object({
+    decision:z.enum(["accepted","rejected","retry"]),attemptId:idSchema,
+    actor:z.string().min(1).max(256),reason:z.string().min(1).max(2_000),
+    guidance:z.string().min(1).max(4_000).optional(),createdAt:z.iso.datetime(),
+  }).nullable(),
   blocker: z.object({ category: blockerCategoryViewSchema, explanation: optionalTextSchema }).nullable(),
   priority: z.number(),
   queueAgeMs: z.number().nonnegative().optional(),
@@ -192,11 +227,19 @@ export const taskGraphViewControlCommandSchema = z.discriminatedUnion("type", [
   nodeControlFenceSchema.extend({ type: z.literal("cancel_task_attempt"), currentAttemptId: idSchema }),
   nodeControlFenceSchema.extend({ type: z.literal("request_task_verification") }),
   nodeControlFenceSchema.extend({ type: z.literal("waive_task_verification"),actor:idSchema,reason:idSchema }),
+  nodeControlFenceSchema.extend({type:z.literal("adjudicate_task_node"),currentAttemptId:idSchema,
+    adjudication:z.enum(["accepted","rejected","retry"]),
+    reason:z.string().trim().min(1).max(2_000),guidance:z.string().trim().min(1).max(4_000).optional()}).strict(),
   nodeControlFenceSchema.extend({ type: z.literal("provide_task_input"),actor:idSchema,input: z.string().trim().min(1) }),
 ]).superRefine((value,ctx)=>{
   if ((value.type==="retry_task_node" || value.type==="request_task_verification"
-    || value.type==="waive_task_verification") && value.currentAttemptId===null) {
+    || value.type==="waive_task_verification" || value.type==="adjudicate_task_node")
+    && value.currentAttemptId===null) {
     ctx.addIssue({code:"custom",path:["currentAttemptId"],message:"current attempt identity is required"});
+  }
+  if (value.type==="adjudicate_task_node" && value.guidance
+    && value.adjudication!=="retry") {
+    ctx.addIssue({code:"custom",path:["guidance"],message:"guidance is only valid for retry"});
   }
 });
 
@@ -207,6 +250,7 @@ export type AttemptState = z.infer<typeof attemptStateViewSchema>;
 export type VerificationState = z.infer<typeof verificationStateViewSchema>;
 export type BlockerCategory = z.infer<typeof blockerCategoryViewSchema>;
 export type TaskAttemptView = z.infer<typeof taskAttemptViewSchema>;
+export type TaskContextEntryView = z.infer<typeof taskContextEntryViewSchema>;
 export type TaskGraphNodeView = z.infer<typeof taskGraphNodeViewSchema>;
 export type TaskGraphSnapshotView = z.infer<typeof taskGraphSnapshotViewSchema>;
 export type TaskGraphArtifactView = z.infer<typeof taskGraphArtifactViewSchema>;

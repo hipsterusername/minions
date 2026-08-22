@@ -5,8 +5,15 @@ import { TaskGraphConflictError, TaskGraphValidationError } from "./errors.ts";
 import { contentHash } from "./hash.ts";
 import { TaskGraphRepository } from "./repository.ts";
 import path from "node:path";
+import {z} from "zod/v4";
+import {hasPassedVerificationTaskWitness} from "./verification-verdict.ts";
+import {effectiveAttemptSuccessSql,isAcceptedNodeAdjudication} from "./adjudication.ts";
 
 type Row = Record<string, unknown>;
+export const MAX_VERIFICATION_SUMMARY_CHARS=1_000;
+const storedVerificationInputSchema=verificationInputSchema.extend({
+  summary:z.string().min(1).max(MAX_VERIFICATION_SUMMARY_CHARS).optional(),
+});
 export function currentProducerArtifacts(db:Database.Database,runId:string,nodeId:string,
   outputName:string|null=null):Row[] {
   return db.prepare(`SELECT artifact.* FROM task_artifacts artifact
@@ -16,7 +23,7 @@ export function currentProducerArtifacts(db:Database.Database,runId:string,nodeI
     WHERE artifact.run_id=? AND artifact.node_id=? AND artifact.state='committed'
       AND artifact.source_snapshot_id=run.source_snapshot_id
       AND attempt.source_snapshot_id=run.source_snapshot_id
-      AND attempt.runtime='terminal' AND attempt.outcome='succeeded'
+      AND attempt.runtime='terminal' AND ${effectiveAttemptSuccessSql("attempt")}
       AND attempt.id=(SELECT latest.id FROM task_node_attempts latest
         WHERE latest.run_id=artifact.run_id AND latest.node_id=artifact.node_id
         ORDER BY latest.attempt_number DESC LIMIT 1)
@@ -88,8 +95,8 @@ export class TaskGraphEvidence {
     }).immediate();
   }
 
-  recordVerification(inputRaw: VerificationInput, expectedRunRevision: number, idempotencyKey: string): boolean {
-    const input = verificationInputSchema.parse(inputRaw);
+  recordVerification(inputRaw: VerificationInput&{summary?:string}, expectedRunRevision: number, idempotencyKey: string): boolean {
+    const input = storedVerificationInputSchema.parse(inputRaw);
     return this.db.transaction(() => {
       const run = this.db.prepare("SELECT * FROM task_graph_runs WHERE id=?").get(input.runId) as Row | undefined;
       if (!run || run.revision !== expectedRunRevision
@@ -191,6 +198,11 @@ export class TaskGraphEvidence {
     for (const node of spec.nodes) {
       const attempt = this.db.prepare(`SELECT * FROM task_node_attempts WHERE run_id=? AND node_id=?
         ORDER BY attempt_number DESC LIMIT 1`).get(runId,node.id) as Row | undefined;
+      const adjudication=attempt ? this.db.prepare(`SELECT * FROM task_node_adjudications
+        WHERE run_id=? AND node_id=? AND attempt_id=? ORDER BY created_at DESC,id DESC LIMIT 1`)
+        .get(runId,node.id,attempt.id) as Row|undefined:undefined;
+      const accepted=isAcceptedNodeAdjudication(adjudication,node,attempt,
+        String(run.source_snapshot_id));
       const invalidated = attempt && this.db.prepare(`SELECT 1 FROM task_node_invalidations
         WHERE run_id=? AND node_id=? AND invalidated_attempt_id=? LIMIT 1`)
         .get(runId,node.id,attempt.id);
@@ -198,15 +210,18 @@ export class TaskGraphEvidence {
         WHERE run_id=? AND node_id=?`).get(runId,node.id) as Row|undefined)?.remaining??0);
       const retryable=attempt && node.retryPolicy.retryableOutcomes.includes(
         String(attempt.outcome) as "failed"|"lost"|"cancelled");
-      const retryPending=attempt?.outcome!=="succeeded" && (manualRetries>0
+      const retryPending=!accepted && attempt?.outcome!=="succeeded" && (manualRetries>0
         || (retryable && Number(attempt.attempt_number)<node.retryPolicy.maxAttempts));
       if (attempt?.runtime === "terminal" && !invalidated && !retryPending) terminal.add(node.id);
       if (invalidated) continue;
-      if (!attempt || attempt.outcome !== "succeeded" || attempt.source_snapshot_id !== run.source_snapshot_id) continue;
+      if (!attempt || (!accepted && attempt.outcome !== "succeeded")
+        || attempt.source_snapshot_id !== run.source_snapshot_id) continue;
+      if (node.completionMode==="verification" && !accepted
+        && !hasPassedVerificationTaskWitness(attempt)) continue;
       const artifacts=currentProducerArtifacts(this.db,runId,node.id);
       const required = Object.keys(node.outputSchemas);
       if (required.some(name => !artifacts.some(a => a.output_name === name))) continue;
-      if (node.verificationRequired) {
+      if (node.verificationRequired && !accepted) {
         const hashes = artifacts.map(a => String(a.content_hash)).sort();
         const verification = this.db.prepare(`SELECT * FROM task_verifications WHERE run_id=? AND producer_attempt_id=?
           AND source_snapshot_id=? AND result IN ('passed','waived') ORDER BY created_at DESC LIMIT 1`)

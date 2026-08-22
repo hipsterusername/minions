@@ -28,6 +28,16 @@ describe("task graph execution policy",()=>{
       .toThrow("unavailable on harness test: Write");
   });
 
+  it("inherits native shell/filesystem access instead of accepting guessed aliases",()=>{
+    const codex={...harness,name:"codex",builtInTools:[],capabilities:{
+      ...harness.capabilities,builtInFilesystem:true,
+      sandboxEnforcement:{filesystem:["read-only","workspace-write"],approval:true},
+    }} as AgentHarness;
+    expect(()=>validateTaskGraphNodePolicy(node({allowedTools:[]}),()=>codex)).not.toThrow();
+    expect(()=>validateTaskGraphNodePolicy(node({allowedTools:["shell"]}),()=>codex))
+      .toThrow("omit allowedTools to inherit harness-native shell/filesystem access");
+  });
+
   it("rejects write ownership that the selected harness cannot enforce",()=>{
     const writer=node({ownershipRequest:[{scope:"path",mode:"write",normalizedValue:"server"}]});
     expect(()=>validateTaskGraphNodePolicy(writer,()=>harness))
@@ -42,8 +52,9 @@ describe("task graph execution policy",()=>{
   it("requires explicit read-only sandbox enforcement for built-in filesystem harnesses",()=>{
     const codex={...harness,name:"codex",capabilities:{...harness.capabilities,builtInFilesystem:true,
       sandboxEnforcement:{filesystem:["read-only","workspace-write"],approval:true}}} as AgentHarness;
-    expect(()=>validateTaskGraphNodePolicy(node(),()=>codex)).not.toThrow();
-    expect(sandboxPolicyForTaskGraphNode(node(),()=>codex)).toEqual({
+    const outputProducer=node({outputSchemas:{result:{type:"object"}},ownershipRequest:[]});
+    expect(()=>validateTaskGraphNodePolicy(outputProducer,()=>codex)).not.toThrow();
+    expect(sandboxPolicyForTaskGraphNode(outputProducer,()=>codex)).toEqual({
       filesystemScope:"read-only",approvalPolicy:"never",
     });
     const writer=node({ownershipRequest:[{

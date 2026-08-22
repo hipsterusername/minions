@@ -156,6 +156,14 @@ export const taskGraphCommand: CommandHandler = async (ctx,cmd,ws) => {
           currentAttemptId:cmd.currentAttemptId!,expectedRunRevision:cmd.expectedRunRevision!,
           actor:cmd.actor!,reason:cmd.reason!,requestId:cmd.requestId! });
         result = service.viewSnapshot(cmd.runId!); break;
+      case "adjudicate_task_node":
+        service.assertWorkItem(cmd.runId!,cmd.workItemId!);
+        await service.adjudicateNode({runId:cmd.runId!,nodeId:cmd.nodeId!,
+          currentAttemptId:cmd.currentAttemptId!,expectedRunRevision:cmd.expectedRunRevision!,
+          requestId:cmd.requestId!,decision:cmd.adjudication!,actor:"operator:websocket",
+          reason:cmd.reason!,
+          ...(cmd.guidance?{guidance:cmd.guidance}:{})});
+        result=service.viewSnapshot(cmd.runId!);break;
       case "provide_task_input":
         service.assertWorkItem(cmd.runId!,cmd.workItemId!);
         await service.provideInput({ runId:cmd.runId!,nodeId:cmd.nodeId!,

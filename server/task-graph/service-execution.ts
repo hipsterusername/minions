@@ -1,5 +1,6 @@
 import type { AttemptEvent,GraphRevisionInput,GraphSnapshot } from "../../shared/task-graph-contracts.ts";
 import type { WorkItemRunSnapshot } from "../../shared/work-item-contracts.ts";
+import type { WsEnvelope } from "../../shared/ws-envelope.ts";
 import { serverLogger } from "../logging.ts";
 import { getWorkItemRun } from "../work-item-repo.ts";
 import { runSnapshot } from "../work-item-snapshots.ts";
@@ -10,7 +11,7 @@ import { scopedContextForNode } from "./context-sources.ts";
 import { currentProducerArtifacts } from "./evidence.ts";
 import { renderTaskGraphNodePrompt } from "./node-prompt.ts";
 import { steeringInstructions } from "./service-controls.ts";
-import { onVerifierSealed,recoverTaskGraphVerifications } from "./service-verification.ts";
+import { onVerifierSealed,recoverTaskGraphVerifications } from "./service-verification.ts";import {parseVerificationTaskVerdict} from "./verification-verdict.ts";
 import type { TaskGraphService } from "./service.ts";type Row=Record<string,unknown>;
 const log=serverLogger.child("task-graph-execution");
 export async function tickTaskGraphExclusive(service:TaskGraphService,runId:string):Promise<GraphSnapshot> {
@@ -19,14 +20,12 @@ export async function tickTaskGraphExclusive(service:TaskGraphService,runId:stri
   await reconcileEndedGraphChildren(service,runId);if (isTerminal(service,runId)) return drainTerminalTick(service,runId);
   const now=service.now();const recovered=service.recovery.recover(runId,service.ownerId,now,service.leaseTtlMs);
   if (isTerminal(service,runId)) return drainTerminalTick(service,runId);
-  for (const record of recovered.pending) {
-    if (record.kind==="cancel_child") {
-      await deliverCancellation(service,record);
-      continue;
-    }
-    if (availableDispatchSlots(service)<1) break;
-    await dispatch(service,record);if (isTerminal(service,runId)) return drainTerminalTick(service,runId);
-  }
+  const cancellations=recovered.pending.filter(record=>record.kind==="cancel_child");
+  for (const record of cancellations) await deliverCancellation(service,record);
+  const recoveredLaunches=recovered.pending.filter(record=>record.kind!=="cancel_child")
+    .slice(0,availableDispatchSlots(service));
+  await Promise.all(recoveredLaunches.map(record=>dispatch(service,record)));
+  if (isTerminal(service,runId)) return drainTerminalTick(service,runId);
   await recoverTaskGraphVerifications(service,runId);if (isTerminal(service,runId)) return drainTerminalTick(service,runId);
   const current=service.repo.snapshot(runId,0);service.evidence.evaluate(runId,current.run.revision,service.now());
   if (isTerminal(service,runId)) return drainTerminalTick(service,runId);
@@ -38,11 +37,10 @@ export async function tickTaskGraphExclusive(service:TaskGraphService,runId:stri
     const admissions=service.scheduler.schedule({runId,expectedRunRevision:snapshot.run.revision,
       ownerId:service.ownerId,fencingToken,now:scheduledAt,admissionLimit});
     if (!admissions.length) break;
-    for (const admission of admissions) {
-      const record=service.recovery.pendingDispatches(runId)
-        .find(candidate=>candidate.id===admission.outboxId);
-      if (record) await dispatch(service,record);
-    }
+    const pending=service.recovery.pendingDispatches(runId);
+    const records=admissions.map(admission=>pending.find(candidate=>candidate.id===admission.outboxId))
+      .filter((record):record is DispatchRecord=>record!==undefined);
+    await Promise.all(records.map(record=>dispatch(service,record)));
   }
   settleGraphStatus(service,runId);const snapshot=service.repo.snapshot(runId);
   service.publishChanged(snapshot,"scheduler_tick");return snapshot;
@@ -104,6 +102,21 @@ export async function onTaskGraphProgress(service:TaskGraphService,sessionRunKey
     service.publishChanged(snapshot,"attempt_progress");
     return snapshot;
   });
+}
+export async function onTaskGraphActivity(service:TaskGraphService,sessionRunKey:string,at:number):Promise<void> {
+  const binding=service.options.db.prepare(`SELECT run_id FROM task_node_attempts
+    WHERE session_run_key=? AND runtime IN ('running','waiting')`).get(sessionRunKey) as Row|undefined;
+  if (!binding) return;
+  await service.enqueue(String(binding.run_id),async()=>{
+    service.scheduler.renewAttemptActivity(sessionRunKey,at);
+    return service.repo.snapshot(String(binding.run_id));
+  });
+}
+export function observeTaskGraphActivity(service:TaskGraphService,envelope:WsEnvelope):boolean {
+  if (envelope.type!=="sdk_event" || typeof envelope["sessionKey"]!=="string") return false;
+  const sessionRunKey=String(envelope["sessionKey"]);
+  void onTaskGraphActivity(service,sessionRunKey,Number(envelope["timestamp"]??service.now())).catch(error=>log.warn("attempt_activity_reconciliation_failed",{sessionRunKey,error}));
+  return true;
 }
 export function activeTaskGraphRunIds(service:TaskGraphService):string[] {
   return (service.options.db.prepare(`SELECT id FROM task_graph_runs
@@ -300,7 +313,7 @@ async function onGraphChildSealed(service:TaskGraphService,run:WorkItemRunSnapsh
     outcome=run.outcome==="completed"?"succeeded":run.outcome==="stopped"?"cancelled"
       :run.outcome==="interrupted"?"lost":"failed";
   }
-  const node=snapshot.revision.nodes.find(candidate=>candidate.id===String(row.node_id));
+  const node=snapshot.revision.nodes.find(candidate=>candidate.id===String(row.node_id));const completionVerdict=node?.completionMode==="verification"?parseVerificationTaskVerdict(run.finalReport,run.outcome):null;if (row.runtime!=="terminal" && completionVerdict?.result!==undefined && completionVerdict.result!=="passed") outcome="failed";
   const staged=service.options.db.prepare(`SELECT * FROM task_artifacts WHERE run_id=?
     AND producer_attempt_id=? AND state='staged' ORDER BY id`).all(runId,run.attemptId) as Row[];
   if (row.runtime!=="terminal" && outcome==="succeeded" && node) {
@@ -311,7 +324,7 @@ async function onGraphChildSealed(service:TaskGraphService,run:WorkItemRunSnapsh
     service.scheduler.terminal({runId,attemptId:run.attemptId!,generation:Number(row.generation),
       actorSessionKey:run.runKey,idempotencyKey:`work-item-terminal:${run.runKey}:${run.endedAt??service.now()}`,
       expectedRunRevision:snapshot.run.revision,at:run.endedAt??service.now()},outcome,{
-      source:"work_item_run",runKey:run.runKey,finalReport:run.finalReport,
+      source:"work_item_run",runKey:run.runKey,finalReport:run.finalReport,...(completionVerdict?{completionVerdict}:{}),
     });
   }
   if (outcome==="succeeded") {

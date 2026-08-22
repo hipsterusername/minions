@@ -59,6 +59,29 @@ describe("canonical task graph runtime", () => {
       targetNodeId:"consumer",kind:"artifact",sourceOutput:"result",targetInput:"result",
       satisfactionPolicy:"all_success",failurePolicy:"fail",optional:false}]),2))
       .toThrow(TaskGraphValidationError);
+    expect(()=>repo.createRevision({...spec([node("verification",{completionMode:"verification"})]),
+      revisionId:"verification-without-criteria"},3)).toThrow("declares no acceptance criteria");
+  });
+
+  it("does not satisfy a verification-mode terminal from a succeeded row with a negative verdict",()=>{
+    const verification=node("verification",{completionMode:"verification",
+      acceptanceCriteria:["checks pass"]});
+    const {repo,scheduler,evidence}=setup(spec([verification]));
+    const token=scheduler.acquireLease("run","owner",3,100);
+    const attempt=scheduler.schedule({runId:"run",expectedRunRevision:0,ownerId:"owner",
+      fencingToken:token,now:4})[0]!;
+    scheduler.acknowledgeDispatch(event(1,attempt,"ack",5),"child");
+    const finalReport=JSON.stringify({result:"failed",confidence:1});
+    scheduler.terminal(event(2,attempt,"done",6,"child"),"succeeded",{
+      source:"work_item_run",runKey:"child",finalReport,
+      completionVerdict:{result:"failed",confidence:1},
+    });
+
+    evidence.evaluate("run",repo.snapshot("run",0).run.revision,7);
+
+    expect(repo.snapshot("run").run.status).not.toBe("completed");
+    expect(repo.snapshot("run").attempts[0]).toMatchObject({outcome:"succeeded",
+      source_snapshot_id:"source"});
   });
 
   it("reconstructs a normalized snapshot with a frozen deterministic join", () => {
@@ -71,8 +94,8 @@ describe("canonical task graph runtime", () => {
     expect(snapshot.events[0]).toMatchObject({ type:"run_started",runRevision:0 });
   });
 
-  it("accepts only exact graph-run replays for a canonical primary run",() => {
-    const {repo}=setup();
+  it("accepts exact replays and serial runs while rejecting a second active graph",() => {
+    const {db,repo}=setup();
     expect(repo.startRun({id:"run",workItemId:"work",primaryRunKey:"primary",revisionId:"revision",
       sourceSnapshot:source(),expectedLifecycleRevision:7,at:3}).run.id).toBe("run");
     expect(()=>repo.startRun({id:"other",workItemId:"work",primaryRunKey:"primary",revisionId:"revision",
@@ -80,6 +103,18 @@ describe("canonical task graph runtime", () => {
     expect(()=>repo.startRun({id:"run",workItemId:"work",primaryRunKey:"primary",revisionId:"revision",
       sourceSnapshot:{...source(),repositoryBaseCommit:"changed"},expectedLifecycleRevision:7,at:5}))
       .toThrow(TaskGraphConflictError);
+
+    db.prepare("UPDATE task_graph_runs SET status='completed' WHERE id='run'").run();
+    const successor={...spec([node("next")]),revisionId:"revision-2"};
+    const successorSource={...source(),id:"source-2",taskGraphRevisionId:"revision-2",createdAt:6};
+    repo.createRevision(successor,6);
+    expect(repo.startRun({id:"other",workItemId:"work",primaryRunKey:"primary",
+      revisionId:"revision-2",sourceSnapshot:successorSource,
+      expectedLifecycleRevision:7,at:7}).run.id).toBe("other");
+    expect(repo.snapshot("run").run.status).toBe("completed");
+    expect(()=>repo.startRun({id:"third",workItemId:"work",primaryRunKey:"primary",
+      revisionId:"revision-2",sourceSnapshot:{...successorSource,id:"source-3",createdAt:8},
+      expectedLifecycleRevision:7,at:8})).toThrow("cancel it before starting a successor");
   });
 
   it("atomically admits attempts, reservations, and dispatch outbox under a scheduler fence", () => {
@@ -211,6 +246,21 @@ describe("canonical task graph runtime", () => {
     const second = scheduler.schedule({ runId:"run",expectedRunRevision:3,ownerId:"owner",fencingToken:token,now:18 })[0]!;
     expect(second.attemptId).not.toBe(first.attemptId); expect(second.generation).toBe(2);
     expect(repo.snapshot("run").attempts).toHaveLength(2);
+  });
+
+  it("renews live attempt reservations from accepted progress",()=>{
+    const {db,repo,scheduler}=setup();
+    const token=scheduler.acquireLease("run","owner",3,100);
+    const attempt=scheduler.schedule({runId:"run",expectedRunRevision:0,ownerId:"owner",
+      fencingToken:token,now:4})[0]!;
+    scheduler.acknowledgeDispatch(event(1,attempt,"ack",5,"child"),"child");
+
+    expect(scheduler.reportProgress(event(2,attempt,"progress",900,"child"),1)).toBe(true);
+    expect(db.prepare(`SELECT expires_at FROM task_resource_reservations
+      WHERE attempt_id=? AND kind='active_attempt'`).get(attempt.attemptId))
+      .toEqual({expires_at:1_900});
+    expect(scheduler.reportProgress(event(3,attempt,"late",1_901,"child"),2)).toBe(false);
+    expect(repo.snapshot("run").attempts[0]).toMatchObject({runtime:"running",progress_seq:1});
   });
 
   it("does not automatically retry outcomes excluded by the node policy",()=>{

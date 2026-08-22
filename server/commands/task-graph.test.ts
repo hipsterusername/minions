@@ -48,15 +48,36 @@ describe("task-graph command dispatcher",() => {
     }
   });
 
+  it("dispatches Leader adjudication with revision and attempt fences",async()=>{
+    const h=setup();
+    const adjudicateNode=vi.fn(async()=>({}));
+    h.ctx.taskGraphs={assertWorkItem:vi.fn(),adjudicateNode,
+      viewSnapshot:vi.fn(()=>({graphRunId:"run",revision:6}))} as never;
+    dispatchCommand(h.ctx,{type:"adjudicate_task_node",requestId:"adjudicate-1",
+      workItemId:"work",runId:"run",nodeId:"verify",currentAttemptId:"attempt",
+      expectedRunRevision:5,adjudication:"retry",
+      reason:"The verifier omitted the command result.",guidance:"Run the focused suite."},h.ws);
+
+    await vi.waitFor(()=>expect(h.wsSent).toHaveLength(1));
+    expect(adjudicateNode).toHaveBeenCalledWith({runId:"run",nodeId:"verify",
+      currentAttemptId:"attempt",expectedRunRevision:5,requestId:"adjudicate-1",
+      decision:"retry",actor:"operator:websocket",reason:"The verifier omitted the command result.",
+      guidance:"Run the focused suite."});
+  });
+
   it("rejects missing or null attempt identities before dispatch",() => {
-    for (const type of ["retry_task_node","request_task_verification","waive_task_verification"] as const) {
+    for (const type of ["retry_task_node","request_task_verification","waive_task_verification",
+      "adjudicate_task_node"] as const) {
       for (const currentAttemptId of [undefined,null]) {
         const h=setup();
         const assertWorkItem=vi.fn();const retryNode=vi.fn();const requestVerification=vi.fn();
-        const waiveVerification=vi.fn();
-        h.ctx.taskGraphs={assertWorkItem,retryNode,requestVerification,waiveVerification} as never;
+        const waiveVerification=vi.fn();const adjudicateNode=vi.fn();
+        h.ctx.taskGraphs={assertWorkItem,retryNode,requestVerification,waiveVerification,
+          adjudicateNode} as never;
         const dispatch=vi.fn(dispatchCommand);
-        const extra=type==="waive_task_verification"?{actor:"operator",reason:"reviewed"}:{};
+        const extra=type==="waive_task_verification"?{actor:"operator",reason:"reviewed"}
+          :type==="adjudicate_task_node"
+            ? {reason:"reviewed",adjudication:"accepted" as const}:{};
         const validation=validateWsCommand({type,requestId:`request-${type}-${String(currentAttemptId)}`,
           workItemId:"work",runId:"run",nodeId:"node",expectedRunRevision:5,
           ...(currentAttemptId===null?{currentAttemptId}:{}),...extra});
@@ -72,6 +93,7 @@ describe("task-graph command dispatcher",() => {
         expect(retryNode).not.toHaveBeenCalled();
         expect(requestVerification).not.toHaveBeenCalled();
         expect(waiveVerification).not.toHaveBeenCalled();
+        expect(adjudicateNode).not.toHaveBeenCalled();
         expect(h.wsSent).toHaveLength(0);
       }
     }

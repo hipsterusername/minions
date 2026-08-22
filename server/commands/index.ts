@@ -105,6 +105,7 @@ export const COMMAND_TABLE = {
   cancel_task_attempt: taskGraphCommand,
   request_task_verification: taskGraphCommand,
   waive_task_verification: taskGraphCommand,
+  adjudicate_task_node: taskGraphCommand,
   provide_task_input: taskGraphCommand,
   list_task_graph_attempts: taskGraphCommand,
   steer_task_graph: taskGraphCommand,

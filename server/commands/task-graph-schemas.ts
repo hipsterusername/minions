@@ -56,6 +56,19 @@ export const TASK_GRAPH_COMMAND_SCHEMAS={
     workItemId:requiredId,runId:requiredId,nodeId:requiredId,currentAttemptId:requiredId,
     expectedRunRevision:revision,actor:requiredId,reason:requiredId,
   }),
+  adjudicate_task_node:command("adjudicate_task_node",{
+    workItemId:requiredId,runId:requiredId,nodeId:requiredId,currentAttemptId:requiredId,
+    expectedRunRevision:revision,adjudication:z.enum(["accepted","rejected","retry"]),
+    reason:z.string().trim().min(1).max(2_000),
+    guidance:z.string().trim().min(1).max(4_000).optional(),
+  }).strict().superRefine((value,ctx)=>{
+    const adjudication=value as typeof value & {
+      adjudication:"accepted"|"rejected"|"retry";guidance?:string;
+    };
+    if (adjudication.guidance && adjudication.adjudication!=="retry") {
+      ctx.addIssue({code:"custom",path:["guidance"],message:"guidance is only valid for retry"});
+    }
+  }),
   provide_task_input:command("provide_task_input",{
     workItemId:requiredId,runId:requiredId,nodeId:requiredId,currentAttemptId:requiredId.nullable(),
     expectedRunRevision:revision,actor:requiredId,input:z.string().trim().min(1),

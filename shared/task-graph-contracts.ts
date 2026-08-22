@@ -19,6 +19,11 @@ export const budgetRequestSchema = z.looseObject({
   tokens:z.number().int().positive().optional(),maxTokens:z.number().int().positive().optional(),
   costMicros:z.number().int().positive().optional(),maxCostMicros:z.number().int().positive().optional(),
 });
+export const verificationTaskVerdictSchema = z.object({
+  result: z.enum(["passed", "failed", "inconclusive"]),
+  confidence: z.number().min(0).max(1),
+  summary: z.string().trim().min(1).max(1_000).optional(),
+}).strict();
 export const taskNodeSchema = z.object({
   id: z.string().min(1), title: z.string().min(1), objective: z.string().min(1),
   inputBindings: jsonRecordSchema.default({}), outputSchemas: jsonRecordSchema.default({}),
@@ -26,7 +31,9 @@ export const taskNodeSchema = z.object({
   executorClass: z.enum(["mechanical","standard","reasoning"]), allowedHarnesses: z.array(z.string().min(1)).min(1),
   allowedTools: z.array(z.string()).default([]), ownershipRequest: z.array(ownershipRequestSchema).default([]),
   budgetRequest: budgetRequestSchema.default({}), timeoutMs: z.number().int().positive().max(604_800_000),
-  retryPolicy: retryPolicySchema, verificationRequired: z.boolean().default(false),
+  retryPolicy: retryPolicySchema,
+  completionMode: z.enum(["task", "verification"]).optional(),
+  verificationRequired: z.boolean().default(false),
   failurePolicy: z.enum(["fail_graph", "block_for_decision", "continue_optional", "satisfy_all_terminal_only", "activate_fallback_node"]),
   expansionPolicy: expansionPolicySchema,
 });
@@ -68,6 +75,25 @@ export const artifactInputSchema = z.object({
   classification: z.enum(["public", "internal", "sensitive", "secret"]),
   retentionPolicy: z.string().min(1), outputName: z.string().min(1), observedWriteSet: z.array(z.string()),
 });
+export const artifactStageMetadataSchema = z.object({
+  schemaName: z.string().min(1).default("GraphOutput"),
+  schemaVersion: z.string().min(1).default("1"),
+  // Integrity metadata is server-derived. Callers may supply expectations as
+  // optimistic guards, but agents never need to hash or size their own JSON.
+  contentHash: hashSchema.optional(), byteSize: z.number().int().nonnegative().optional(),
+  classification: z.enum(["public", "internal", "sensitive", "secret"]).default("internal"),
+  retentionPolicy: z.string().min(1).default("graph-run"), outputName: z.string().min(1),
+  observedWriteSet: z.array(z.string()).default([]),
+});
+export const inlineArtifactStageInputSchema = artifactStageMetadataSchema.extend({
+  source: z.literal("inline"), inlineJson: z.json(),
+}).strict();
+export const pathArtifactStageInputSchema = artifactStageMetadataSchema.extend({
+  source: z.literal("path"), storageRef: z.string().min(1),
+}).strict();
+export const artifactStageInputSchema = z.discriminatedUnion("source",[
+  inlineArtifactStageInputSchema,pathArtifactStageInputSchema,
+]);
 export const verificationInputSchema = z.object({
   id: z.string().min(1), runId: z.string().min(1), nodeId: z.string().min(1),
   producerAttemptId: z.string().min(1), verifierAttemptId: z.string().min(1), sourceSnapshotId: z.string().min(1),
@@ -76,11 +102,24 @@ export const verificationInputSchema = z.object({
   evidenceRefs: z.array(z.string()), result: z.enum(["pending", "passed", "failed", "inconclusive", "waived"]),
   confidence: z.number().min(0).max(1).nullable(), at: z.number().int().nonnegative(),
 });
+export const taskNodeAdjudicationSchema = z.object({
+  id: z.string().min(1), runId: z.string().min(1), nodeId: z.string().min(1),
+  attemptId: z.string().min(1), sourceSnapshotId: z.string().min(1),
+  acceptanceCriteriaVersion: hashSchema,
+  decision: z.enum(["accepted", "rejected", "retry"]),
+  actor: z.string().trim().min(1).max(256), reason: z.string().trim().min(1).max(2_000),
+  guidance: z.string().trim().min(1).max(4_000).nullable(),
+  createdAt: z.number().int().nonnegative(),
+});
 export const graphRunStatusSchema = z.enum(["active", "quiescent", "blocked", "completed", "failed", "cancelled"]);
 export const attemptOutcomeSchema = z.enum(["none", "succeeded", "failed", "cancelled", "lost", "superseded"]);
 export const graphEventSchema = z.object({
   sequence: z.number().int().positive(), runId: z.string(), runRevision: z.number().int().nonnegative(),
   type: z.string(), objectId: z.string(), payload: jsonRecordSchema, createdAt: z.number().int().nonnegative(),
+});
+export const graphContextSourceSchema = z.object({
+  nodeId: z.string().min(1), sourceId: z.string().min(1), contentHash: hashSchema,
+  classification: z.string().min(1), content: z.string(),
 });
 export const graphSnapshotSchema = z.object({
   run: z.object({ id: z.string(), workItemId: z.string(), primaryRunKey: z.string(), revisionId: z.string(),
@@ -94,7 +133,9 @@ export const graphSnapshotSchema = z.object({
   schedulerLease: jsonRecordSchema.nullable(), expansions: z.array(jsonRecordSchema),
   reductions: z.array(jsonRecordSchema), reconciliations: z.array(jsonRecordSchema),
   steeringEvents: z.array(jsonRecordSchema), invalidations: z.array(jsonRecordSchema),
+  adjudications: z.array(jsonRecordSchema).default([]),
   usage: z.array(jsonRecordSchema),
+  contextSources: z.array(graphContextSourceSchema).default([]),
   events: z.array(graphEventSchema),
 });
 
@@ -104,5 +145,8 @@ export type TaskEdge = z.infer<typeof taskEdgeSchema>;
 export type SourceSnapshot = z.infer<typeof sourceSnapshotSchema>;
 export type AttemptEvent = z.infer<typeof attemptEventSchema>;
 export type ArtifactInput = z.infer<typeof artifactInputSchema>;
+export type ArtifactStageInput = z.infer<typeof artifactStageInputSchema>;
+export type VerificationTaskVerdict = z.infer<typeof verificationTaskVerdictSchema>;
 export type VerificationInput = z.infer<typeof verificationInputSchema>;
+export type TaskNodeAdjudication = z.infer<typeof taskNodeAdjudicationSchema>;
 export type GraphSnapshot = z.infer<typeof graphSnapshotSchema>;

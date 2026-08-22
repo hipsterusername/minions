@@ -183,6 +183,9 @@ describe("validateWsCommand – accept", () => {
       currentAttemptId:"attempt",expectedRunRevision:4});
     accept({type:"waive_task_verification",requestId:"request",workItemId:"work",runId:"run",nodeId:"node",
       currentAttemptId:"attempt",expectedRunRevision:4,actor:"operator",reason:"Emergency approval"});
+    accept({type:"adjudicate_task_node",requestId:"request",workItemId:"work",runId:"run",
+      nodeId:"node",currentAttemptId:"attempt",expectedRunRevision:4,
+      adjudication:"retry",reason:"Missing evidence",guidance:"Run tests"});
     accept({type:"provide_task_input",requestId:"request",workItemId:"work",runId:"run",nodeId:"node",
       currentAttemptId:null,expectedRunRevision:4,actor:"operator",input:"Proceed"});
     accept({type:"list_task_graph_attempts",requestId:"request",workItemId:"work",runId:"run",nodeId:"node"});
@@ -304,8 +307,11 @@ describe("validateWsCommand – reject", () => {
       nodeId:"node",expectedRunRevision:1},"cancel_task_attempt");
     reject({type:"retry_task_node",requestId:"request",workItemId:"work",runId:"run",
       nodeId:"node",expectedRunRevision:1},"retry_task_node");
-    for (const type of ["retry_task_node","request_task_verification","waive_task_verification"] as const) {
-      const extra=type==="waive_task_verification"?{actor:"operator",reason:"reviewed"}:{};
+    for (const type of ["retry_task_node","request_task_verification","waive_task_verification",
+      "adjudicate_task_node"] as const) {
+      const extra=type==="waive_task_verification"?{actor:"operator",reason:"reviewed"}
+        :type==="adjudicate_task_node"
+          ? {reason:"reviewed",adjudication:"accepted" as const}:{};
       const command={type,requestId:"request",workItemId:"work",runId:"run",nodeId:"node",
         expectedRunRevision:1,...extra};
       reject(command,type);
@@ -314,6 +320,13 @@ describe("validateWsCommand – reject", () => {
     reject({type:"waive_task_verification",requestId:"request",workItemId:"work",runId:"run",
       nodeId:"node",currentAttemptId:"attempt",expectedRunRevision:1,actor:"operator"},
       "waive_task_verification");
+    reject({type:"adjudicate_task_node",requestId:"request",workItemId:"work",runId:"run",
+      nodeId:"node",currentAttemptId:"attempt",expectedRunRevision:1,
+      adjudication:"accepted",reason:"reviewed",guidance:"retry details"},
+      "adjudicate_task_node");
+    reject({type:"adjudicate_task_node",requestId:"request",workItemId:"work",runId:"run",
+      nodeId:"node",currentAttemptId:"attempt",expectedRunRevision:1,actor:"spoofed-leader",
+      adjudication:"accepted",reason:"reviewed"},"adjudicate_task_node");
     reject({type:"provide_task_input",requestId:"request",workItemId:"work",runId:"run",
       nodeId:"node",currentAttemptId:null,expectedRunRevision:1,actor:"operator",input:"  "},
       "provide_task_input");

@@ -33,7 +33,7 @@ function snapshot(nodes:TaskNode[],edges:TaskEdge[],extra:Partial<GraphSnapshot>
       harnessPolicyDigest:HASH,toolPolicyDigest:HASH,createdAt:1},
     attempts:[],artifacts:[],verifications:[],verificationRequests:[],humanInputs:[],edgeEvaluations:[],
     reservations:[],joins:[],outbox:[],schedulerLease:null,expansions:[],reductions:[],reconciliations:[],
-    steeringEvents:[],invalidations:[],usage:[],events:[],...extra,
+    steeringEvents:[],invalidations:[],adjudications:[],usage:[],events:[],contextSources:[],...extra,
   };
 }
 
@@ -52,6 +52,95 @@ function projectedNode(view:ReturnType<typeof projectTaskGraphSnapshot>,id:strin
 }
 
 describe("projectTaskGraphSnapshot logical projection",()=>{
+  it("does not project a legacy succeeded verification task without a passed verdict witness",()=>{
+    const verificationTask=node("verification-task",{completionMode:"verification"});
+    const facts=snapshot([verificationTask],[],{run:{...snapshot([verificationTask],[]).run,
+      status:"blocked"},attempts:[{
+      ...attempt("verifier-attempt","verification-task",1,"succeeded"),
+      session_run_key:"child",source_snapshot_id:"source",
+      terminal_witness_json:{source:"work_item_run",runKey:"child",
+        finalReport:JSON.stringify({result:"failed",confidence:1}),
+        completionVerdict:{result:"failed",confidence:1}},
+    }]});
+
+    const projected=projectedNode(projectTaskGraphSnapshot(facts,[],30),"verification-task");
+    expect(projected).toMatchObject({logicalState:"failed",readiness:"terminal",
+      currentAttempt:{state:"failed"},blocker:{category:"policy",
+        explanation:"Verification needs Leader adjudication or a guided retry"}});
+  });
+
+  it("projects bounded authored briefs, visible frozen context, withheld sensitive sources, and final responses",()=>{
+    const detailed=node("detailed",{
+      objective:`Ship ${"x".repeat(9_000)}`,
+      constraints:Array.from({length:60},(_,index)=>`constraint ${index} ${"c".repeat(2_100)}`),
+      acceptanceCriteria:Array.from({length:60},(_,index)=>`criterion ${index} ${"a".repeat(2_100)}`),
+    });
+    const facts=snapshot([detailed],[],{
+      attempts:[{...attempt("attempt","detailed",1,"succeeded"),
+        final_report:`Completed ${"r".repeat(14_000)}`}],
+      contextSources:[
+        ...Array.from({length:18},(_,index)=>({nodeId:"detailed",sourceId:`visible-${index}`,
+          contentHash:HASH,classification:index%2===0?"public":"internal",
+          content:`Context ${index} ${"v".repeat(9_000)}`})),
+        {nodeId:"detailed",sourceId:"credential",contentHash:HASH,
+          classification:"secret",content:"never expose me"},
+        {nodeId:"detailed",sourceId:"/srv/minions/context/private.json",contentHash:HASH,
+          classification:"internal",content:"Path-safe content"},
+        ...Array.from({length:5},(_,index)=>({nodeId:"detailed",sourceId:`trailing-${index}`,
+          contentHash:HASH,classification:"internal",content:"trailing"})),
+      ],
+    });
+
+    const view=projectTaskGraphSnapshot(facts,[],30);
+    const projected=projectedNode(view,"detailed");
+
+    expect(projected.objective).toHaveLength(8_000);
+    expect(projected.constraints).toHaveLength(50);
+    expect(projected.constraints[0]).toHaveLength(2_000);
+    expect(projected.acceptanceCriteria).toHaveLength(50);
+    expect(projected.context).toHaveLength(20);
+    const firstContext=projected.context[0];
+    expect(firstContext).toMatchObject({classification:"public",content:expect.any(String)});
+    if (!firstContext || !("content" in firstContext)) throw new Error("expected visible context");
+    expect(firstContext.content).toHaveLength(8_000);
+    expect(projected.context.find(entry=>entry.sourceId==="credential"))
+      .toEqual({sourceId:"credential",contentHash:HASH,classification:"secret",withheld:true});
+    expect(projected.context.find(entry=>entry.sourceId==="source:aaaaaaaaaaaa"))
+      .toMatchObject({classification:"internal",content:"Path-safe content"});
+    expect(projected.currentAttempt?.response).toHaveLength(12_000);
+    expect(JSON.stringify(projected)).not.toContain("never expose me");
+    expect(JSON.stringify(projected)).not.toContain("/srv/minions");
+  });
+
+  it("redacts credential-shaped values from attempt final reports and witnesses",()=>{
+    const task=node("response");
+    const facts=snapshot([task],[],{attempts:[{
+      ...attempt("response-attempt","response",1,"succeeded"),
+      final_report:"Completed with Authorization: Bearer response-secret",
+      terminal_witness_json:{finalReport:"api_key=witness-secret"},
+    }]});
+
+    const projected=projectedNode(projectTaskGraphSnapshot(facts,[],30),"response");
+    expect(projected.currentAttempt?.response).toContain("Authorization: [REDACTED]");
+    expect(projected.currentAttempt?.summary).toContain("api_key=[REDACTED]");
+    expect(JSON.stringify(projected)).not.toMatch(/response-secret|witness-secret/);
+  });
+
+  it.each(["sensitive","secret"] as const)("withholds attempt text for %s outputs",classification=>{
+    const task=node("response",{outputSchemas:{result:{type:"object"}}});
+    const facts=snapshot([task],[],{
+      attempts:[{...attempt("response-attempt","response",1,"succeeded"),
+        final_report:"private response",terminal_witness_json:{finalReport:"private witness"}}],
+      artifacts:[{...artifact("result","response","response-attempt"),
+        metadata_json:JSON.stringify({classification})}],
+    });
+
+    const projected=projectedNode(projectTaskGraphSnapshot(facts,[],30),"response");
+    expect(projected.currentAttempt?.response).toBeUndefined();
+    expect(projected.currentAttempt?.summary).toBeUndefined();
+    expect(JSON.stringify(projected)).not.toMatch(/private response|private witness/);
+  });
+
   it("uses live readiness to distinguish manual retries from terminal nonretryable outcomes",()=>{
     const granted=node("granted",{retryPolicy:{maxAttempts:2,backoffMs:0,
       retryableOutcomes:["failed"],jitterMs:0}});
@@ -94,6 +183,84 @@ describe("projectTaskGraphSnapshot logical projection",()=>{
       verification:{state:"failed",explanation:"Independent verifier could not produce a conclusive verdict"},
       blocker:{category:"policy",explanation:"Independent verification was inconclusive"},
     });
+  });
+
+  it.each(["sensitive","secret"] as const)("withholds verifier detail for %s evidence",classification=>{
+    const verified=node("verified",{outputSchemas:{result:{type:"object"}},verificationRequired:true});
+    const facts=snapshot([verified],[],{
+      attempts:[attempt("producer","verified",1,"succeeded")],
+      artifacts:[{...artifact("artifact","verified","producer"),
+        metadata_json:JSON.stringify({classification})}],
+      verifications:[{id:"verification",producer_attempt_id:"producer",
+        verifier_attempt_id:"verifier",result:"failed",
+        record_json:JSON.stringify({summary:"credential value must never appear"})}],
+    });
+
+    const projected=projectedNode(projectTaskGraphSnapshot(facts,[],30),"verified");
+    expect(projected.verification.explanation).toBeUndefined();
+    expect(projected.blocker?.explanation).toBe("Independent verification rejected the output");
+    expect(JSON.stringify(projected)).not.toContain("credential value must never appear");
+  });
+
+  it("redacts credential-shaped values from visible verifier detail",()=>{
+    const verified=node("verified",{outputSchemas:{result:{type:"object"}},verificationRequired:true});
+    const summary=[
+      "diagnostic: checksum mismatch remains readable",
+      "api_key=supersecret",
+      "OPENAI_API_KEY=environment-secret",
+      "serviceApiKey=camel-secret",
+      '"AWS_SECRET_ACCESS_KEY" = "aws-assignment-secret"',
+      'client-secret: "another-secret"',
+      "Authorization: Bearer bearer-value",
+      "Basic basic-value",
+      "Digest digest-value",
+      "password='password-value'",
+      `raw sk-${"a".repeat(24)}`,
+      `github ghp_${"b".repeat(36)}`,
+      `aws AKIA${"C".repeat(16)}`,
+    ].join("; ");
+    const facts=snapshot([verified],[],{
+      attempts:[attempt("producer","verified",1,"succeeded")],
+      artifacts:[artifact("artifact","verified","producer")],
+      verifications:[{id:"verification",producer_attempt_id:"producer",
+        verifier_attempt_id:"verifier",result:"failed",
+        record_json:JSON.stringify({summary})}],
+    });
+
+    const projected=projectedNode(projectTaskGraphSnapshot(facts,[],30),"verified");
+    expect(projected.verification.explanation).toContain("api_key=[REDACTED]");
+    expect(projected.verification.explanation).toContain("OPENAI_API_KEY=[REDACTED]");
+    expect(projected.verification.explanation).toContain("serviceApiKey=[REDACTED]");
+    expect(projected.verification.explanation).toContain('"AWS_SECRET_ACCESS_KEY" = [REDACTED]');
+    expect(projected.verification.explanation).toContain("client-secret: [REDACTED]");
+    expect(projected.verification.explanation).toContain("Authorization: [REDACTED]");
+    expect(projected.verification.explanation).toContain("Basic [REDACTED]");
+    expect(projected.verification.explanation).toContain("Digest [REDACTED]");
+    expect(projected.verification.explanation).toContain("password=[REDACTED]");
+    expect(projected.verification.explanation).toContain("raw [REDACTED]");
+    expect(projected.verification.explanation).toContain("diagnostic: checksum mismatch remains readable");
+    expect(projected.blocker?.explanation).toContain("api_key=[REDACTED]");
+    expect(JSON.stringify(projected)).not.toMatch(
+      /supersecret|environment-secret|camel-secret|aws-assignment-secret|another-secret|bearer-value|basic-value|digest-value|password-value|sk-a{24}|ghp_b{36}|AKIAC{16}/,
+    );
+  });
+
+  it("keeps non-secret verifier diagnostics readable and bounded",()=>{
+    const verified=node("verified",{outputSchemas:{result:{type:"object"}},verificationRequired:true});
+    const facts=snapshot([verified],[],{
+      attempts:[attempt("producer","verified",1,"succeeded")],
+      artifacts:[artifact("artifact","verified","producer")],
+      verifications:[{id:"verification",producer_attempt_id:"producer",
+        verifier_attempt_id:"verifier",result:"failed",
+        record_json:JSON.stringify({summary:`checksum mismatch: ${"detail ".repeat(300)}`})}],
+    });
+
+    const projected=projectedNode(projectTaskGraphSnapshot(facts,[],30),"verified");
+    expect(projected.verification.explanation).toHaveLength(1_000);
+    expect(projected.verification.explanation).toMatch(/^checksum mismatch: detail/);
+    expect(projected.blocker?.explanation).toBe(
+      `Independent verification rejected the output: ${projected.verification.explanation}`,
+    );
   });
 
   it("binds current inputs and outputs to exact current producers while retaining stale lineage",()=>{

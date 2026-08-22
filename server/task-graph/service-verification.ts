@@ -8,10 +8,9 @@ import { safeArtifactReference } from "./artifact-access.ts";
 import { contentHash } from "./hash.ts";
 import { executeTaskGraphCommand } from "./service-idempotency.ts";
 import type { TaskGraphService } from "./service.ts";
-import {
-  applyVerificationDisposition,
-  MAX_AUTOMATIC_INCONCLUSIVE_VERIFICATIONS,
-} from "./verification-disposition.ts";
+import {applyVerificationDisposition,MAX_AUTOMATIC_INCONCLUSIVE_VERIFICATIONS} from "./verification-disposition.ts";
+import {parseVerificationTaskVerdict} from "./verification-verdict.ts";
+import {effectiveAttemptSuccessSql,isEffectiveAttemptSuccess} from "./adjudication.ts";
 
 type Row=Record<string,unknown>;
 type VerificationSubjectInput={runId:string;nodeId:string;currentAttemptId:string;
@@ -123,7 +122,8 @@ function recoverLaunchingVerificationRequests(service:TaskGraphService,runId:str
       WHERE s.work_item_id=g.work_item_id AND s.run_kind='child'
       AND s.parent_run_key=g.primary_run_key AND s.task_id=? || ':verification'
       AND s.attempt_id=? AND s.start_idempotency_key=?
-      AND p.runtime='terminal' AND p.outcome='succeeded' AND p.source_snapshot_id=g.source_snapshot_id
+      AND p.runtime='terminal' AND ${effectiveAttemptSuccessSql("p")}
+      AND p.source_snapshot_id=g.source_snapshot_id
       AND NOT EXISTS (SELECT 1 FROM task_node_invalidations i WHERE i.run_id=p.run_id
         AND i.node_id=p.node_id AND i.invalidated_attempt_id=p.id)
       AND NOT EXISTS (SELECT 1 FROM task_node_attempts newer WHERE newer.run_id=p.run_id
@@ -153,7 +153,8 @@ function recoverLaunchingVerificationRequests(service:TaskGraphService,runId:str
         AND EXISTS (SELECT 1 FROM task_graph_runs g JOIN task_node_attempts p
           ON p.id=task_verification_requests.producer_attempt_id AND p.run_id=g.id
           AND p.node_id=task_verification_requests.node_id
-          WHERE g.id=task_verification_requests.run_id AND p.runtime='terminal' AND p.outcome='succeeded'
+          WHERE g.id=task_verification_requests.run_id AND p.runtime='terminal'
+          AND ${effectiveAttemptSuccessSql("p")}
           AND p.source_snapshot_id=g.source_snapshot_id
           AND NOT EXISTS (SELECT 1 FROM task_node_invalidations i WHERE i.run_id=p.run_id
             AND i.node_id=p.node_id AND i.invalidated_attempt_id=p.id)
@@ -172,7 +173,8 @@ async function recoverMissingVerificationRequests(service:TaskGraphService,runId
   for (const node of snapshot.revision.nodes.filter(candidate=>candidate.verificationRequired)) {
     const attempt=service.options.db.prepare(`SELECT * FROM task_node_attempts WHERE run_id=? AND node_id=?
       ORDER BY attempt_number DESC LIMIT 1`).get(runId,node.id) as Row|undefined;
-    if (!attempt || attempt.runtime!=="terminal" || attempt.outcome!=="succeeded") continue;
+    if (!attempt || attempt.runtime!=="terminal"
+      || !isEffectiveAttemptSuccess(service.options.db,attempt)) continue;
     const invalidated=service.options.db.prepare(`SELECT 1 FROM task_node_invalidations
       WHERE run_id=? AND node_id=? AND invalidated_attempt_id=? LIMIT 1`)
       .get(runId,node.id,attempt.id);
@@ -221,13 +223,16 @@ function completeVerifier(service:TaskGraphService,run:WorkItemRunSnapshot):stri
         .run("verification subject became unavailable",at,request.id)});
     return String(request.run_id);
   }
-  const verdict=parseVerifierReport(run.finalReport??(request.result?String(request.result):null),run.outcome);
+  const verdict=parseVerificationTaskVerdict(
+    run.finalReport??(request.result?String(request.result):null),run.outcome,
+  );
   service.evidence.recordVerification({id:service.repo.newId("verification"),runId:String(request.run_id),
     nodeId:String(request.node_id),producerAttemptId:String(request.producer_attempt_id),
     verifierAttemptId:String(request.verifier_attempt_id),sourceSnapshotId:graph.run.sourceSnapshotId,
     artifactHashes:artifacts.map(row=>String(row.content_hash)),
     acceptanceCriteriaVersion:contentHash(node.acceptanceCriteria),method:"independent_agent",
     evidenceRefs:[`work-item-run:${run.runKey}`],result:verdict.result,confidence:verdict.confidence,
+    ...(verdict.summary ? {summary:verdict.summary} : {}),
     at:run.endedAt??service.now()},graph.run.revision,
   `verification-result:${String(request.id)}:${run.runKey}`);
   service.options.db.prepare(`UPDATE task_verification_requests SET verifier_run_key=?,status='completed',
@@ -360,7 +365,8 @@ function verificationSubject(service:TaskGraphService,input:VerificationSubjectI
     .find(candidate=>candidate.id===input.nodeId);
   const attempt=service.options.db.prepare(`SELECT * FROM task_node_attempts WHERE run_id=? AND node_id=?
     ORDER BY attempt_number DESC LIMIT 1`).get(input.runId,input.nodeId) as Row|undefined;
-  if (!node || !attempt || attempt.runtime!=="terminal" || attempt.outcome!=="succeeded") {
+  if (!node || !attempt || attempt.runtime!=="terminal"
+    || !isEffectiveAttemptSuccess(service.options.db,attempt)) {
     throw new TaskGraphConflictError("node has no successful producer attempt",run);
   }
   if (attempt.id!==input.currentAttemptId) {
@@ -383,18 +389,4 @@ function renderVerificationPrompt(node:GraphRevisionInput["nodes"][number],produ
     "Read artifact content only through mcp__task-graph__read_input_artifact using the listed artifactId.",
     "Your final report must be JSON only: {\"result\":\"passed\"|\"failed\"|\"inconclusive\",\"confidence\":0..1,\"summary\":\"...\"}.",
   ].join("\n\n");
-}
-
-function parseVerifierReport(report:string|null,outcome:WorkItemRunSnapshot["outcome"]):{
-  result:"passed"|"failed"|"inconclusive";confidence:number|null
-} {
-  if (outcome!=="completed" || !report) return {result:"inconclusive",confidence:null};
-  try {
-    const parsed=JSON.parse(report) as {result?:unknown;confidence?:unknown};
-    const result=parsed.result==="passed" || parsed.result==="failed" || parsed.result==="inconclusive"
-      ? parsed.result:"inconclusive";
-    const confidence=typeof parsed.confidence==="number" && parsed.confidence>=0 && parsed.confidence<=1
-      ? parsed.confidence:null;
-    return {result,confidence};
-  } catch { return {result:"inconclusive",confidence:null}; }
 }

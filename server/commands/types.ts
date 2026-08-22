@@ -63,6 +63,7 @@ export type WsCommandType =
   | "cancel_task_attempt"
   | "request_task_verification"
   | "waive_task_verification"
+  | "adjudicate_task_node"
   | "provide_task_input"
   | "list_task_graph_attempts"
   | "steer_task_graph"
@@ -237,6 +238,8 @@ export interface WsCommand {
   summary?: string;
   gates?: Array<{ id: string; state: "passed" | "failed" | "waived"; detail?: string }>;
   decision?: "approved" | "rejected";
+  adjudication?: "accepted" | "rejected" | "retry";
+  guidance?: string;
   actor?: string;
   strategy?: "manual" | "ours" | "theirs";
   queueId?: string;

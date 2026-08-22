@@ -6,6 +6,7 @@ import { TaskGraphValidationError } from "./errors.ts";
 
 const READ_ONLY_GRAPH_SANDBOX:SandboxPolicy={filesystemScope:"read-only",approvalPolicy:"never"};
 const WRITE_GRAPH_SANDBOX:SandboxPolicy={filesystemScope:"workspace-write",approvalPolicy:"never"};
+const GENERIC_NATIVE_TOOL_ALIASES=new Set(["file","filesystem","shell"]);
 
 function resolveTaskGraphHarness(node:TaskNode,resolveHarness:(name:string)=>AgentHarness,
   name=node.allowedHarnesses[0]!):AgentHarness {
@@ -54,6 +55,11 @@ export function validateTaskGraphNodePolicy(
     "mcp__task-graph__read_input_artifact","mcp__task-graph__stage_output_artifact"]);
   const unsupported=node.allowedTools.filter(name=>!supported.has(name));
   if (unsupported.length) {
+    const genericAliases=unsupported.filter(name=>GENERIC_NATIVE_TOOL_ALIASES.has(
+      name.trim().toLowerCase()));
+    if (genericAliases.length) throw new TaskGraphValidationError(
+      `node ${node.id} uses generic shell/filesystem aliases that are not tool allowlist identifiers: ${genericAliases.join(", ")}. allowedTools accepts only exact harness built-in or fully qualified MCP identifiers; omit allowedTools to inherit harness-native shell/filesystem access`,
+    );
     throw new TaskGraphValidationError(
       `node ${node.id} requests tools unavailable on harness ${selected.name}: ${unsupported.join(", ")}`,
     );
