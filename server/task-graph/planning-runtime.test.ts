@@ -36,7 +36,7 @@ describe("planning runtime installation", () => {
     start.mockRestore();
   });
 
-  it("resumes the bound Leader once when terminal reconciliation arrives", async () => {
+  it("resumes the bound Leader once when duplicate terminal reconciliation arrives", async () => {
     const db = initDb(":memory:");
     const bus: Bus = {
       emit: () => {}, emitToSession: () => {}, emitToProject: () => {},
@@ -56,12 +56,46 @@ describe("planning runtime installation", () => {
       sessionDeps, taskGraphs: { options: { db } } as unknown as TaskGraphService });
     const terminalPlan = { proposalId:"proposal",workItemId:"work",primaryRunKey:"primary",
       graphRunId:"graph",state:"completed" } as TaskGraphPlanSnapshotView;
+    const acknowledge=vi.spyOn(coordinator,"acknowledgeTerminalWake");
 
+    coordinator.options.onTerminal?.(terminalPlan);
     coordinator.options.onTerminal?.(terminalPlan);
     await vi.waitFor(() => expect(resumeWorkItemRun).toHaveBeenCalledOnce());
     expect(resumeWorkItemRun.mock.calls[0]?.[0]).toMatchObject({
       workItemId:"work",runKey:"primary",requestId:expect.stringMatching(/^wake:primary:/),
     });
+    expect(acknowledge).toHaveBeenCalledOnce();
     coordinator.dispose();
+  });
+
+  it("acknowledges a terminal wake only after transient dispatch failure recovers", async () => {
+    vi.useFakeTimers();vi.setSystemTime(0);
+    try {
+      const db=initDb(":memory:");
+      const bus:Bus={emit:()=>{},emitToSession:()=>{},emitToProject:()=>{},emitGlobal:()=>{},
+        subscribe:()=>()=>{}};
+      const leader=new SessionHost("primary","/tmp/work");
+      leader.status="idle";leader.role="leader";leader.workItemId="work";leader.runKind="primary";
+      const resumeWorkItemRun=vi.fn().mockRejectedValueOnce(new Error("transient"))
+        .mockResolvedValueOnce(undefined);
+      const sessionDeps={bus,startChildSession:vi.fn(),resumeWorkItemRun,
+        forEachLeaderTaskState:()=>{}} as unknown as SessionHostDeps;
+      const coordinator=installTaskGraphPlanningRuntime({db,bus,
+        registry:{get:()=>leader} as unknown as SessionRegistry,sessionDeps,
+        taskGraphs:{options:{db}} as unknown as TaskGraphService});
+      const acknowledge=vi.spyOn(coordinator,"acknowledgeTerminalWake");
+      const terminalPlan={proposalId:"proposal",workItemId:"work",primaryRunKey:"primary",
+        graphRunId:"graph",state:"failed"} as TaskGraphPlanSnapshotView;
+
+      coordinator.options.onTerminal?.(terminalPlan);
+      await Promise.resolve();
+      expect(resumeWorkItemRun).toHaveBeenCalledOnce();
+      expect(acknowledge).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(resumeWorkItemRun).toHaveBeenCalledTimes(2);
+      await Promise.resolve();
+      expect(acknowledge).toHaveBeenCalledOnce();
+      coordinator.dispose();
+    } finally { vi.useRealTimers(); }
   });
 });

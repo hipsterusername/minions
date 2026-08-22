@@ -18,6 +18,7 @@ export function installTaskGraphPlanningRuntime(input: {
   taskGraphs: TaskGraphService;
 }): TaskGraphPlanningCoordinator {
   let coordinator: TaskGraphPlanningCoordinator;
+  const terminalWakePending = new Set<string>();
   coordinator = new TaskGraphPlanningCoordinator({
     db: input.db,
     bus: input.bus,
@@ -45,14 +46,18 @@ export function installTaskGraphPlanningRuntime(input: {
     onTerminal: (plan) => {
       const host = input.registry.get(plan.primaryRunKey);
       if (!host) return;
+      const wakeId = plan.graphRunId ?? plan.proposalId;
+      if (terminalWakePending.has(wakeId)) return;
+      terminalWakePending.add(wakeId);
       requestWaitResume(host, input.sessionDeps, {
         immediate: true,
-        idempotencyKey: `graph-terminal:${plan.graphRunId ?? plan.proposalId}:${plan.state}`,
+        idempotencyKey: `graph-terminal:${wakeId}:${plan.state}`,
         completedReason: `Execution graph ${plan.state}`,
         onDelivered: () => {
           if (plan.graphRunId) coordinator.acknowledgeTerminalWake(
             plan.proposalId, plan.graphRunId,
           );
+          terminalWakePending.delete(wakeId);
         },
         opts: {
           sessionKey: host.id,
