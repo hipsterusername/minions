@@ -328,7 +328,7 @@ export function processNormalizedEvent(
       : (host.status as string) === "running" ? "continuation" : null;
     const projection = projectHostInvocation(host, event, waitKind ? "continue" : "seal");
     if (projection.action === "continue") {
-      if (host.workItemId && (waitKind === "blocked" || waitKind === "continuation")) runtimeLifecycle?.runWaiting({
+      if (host.workItemId && waitKind) runtimeLifecycle?.runWaiting({
         workItemId: host.workItemId, runKey: host.runKey, runKind: host.runKind,
         parentRunKey: host.parentRunKey, taskId: host.taskId, waitKind, at: now,
       });

@@ -22,6 +22,7 @@ import {
   incrementDashboardRevision,
 } from "../session-review-lifecycle.ts";
 import { WorkItemServiceError } from "../work-item-service.ts";
+import { SessionCapacityError } from "../session-registry.ts";
 import { sendControlError } from "./helpers.ts";
 import type { CommandHandler } from "./types.ts";
 import type { SessionHost } from "../session-host.ts";
@@ -212,17 +213,28 @@ export const submitForm: CommandHandler = (ctx, cmd, ws) => {
     return;
   }
 
+  try {
+    // Secure live runtime capacity before consuming the pending decision. The
+    // host yields at its first async boundary, so the accepted render state is
+    // still published before provider events from the resumed turn can arrive.
+    ctx.registry.start({
+      sessionKey: cmd.sessionKey,
+      invocationKind: "resume_open_run",
+      prompt,
+      cwd: host.cwd,
+      resumeId: host.sessionId ?? undefined,
+      systemPrompt: undefined,
+      role: host.role,
+      thinkingConfig: host.thinkingConfig,
+      harness: host.harnessName,
+    });
+  } catch (error) {
+    if (!(error instanceof SessionCapacityError)) throw error;
+    rejectForm(ws, host.id, cmd.requestId, error.code, error.message, {
+      maxSessions: error.maxSessions,
+    });
+    return;
+  }
   form.submittedAnswers = answers;
   publishAcceptedForm(ctx, host);
-  ctx.registry.start({
-    sessionKey: cmd.sessionKey,
-    invocationKind: "resume_open_run",
-    prompt,
-    cwd: host.cwd,
-    resumeId: host.sessionId ?? undefined,
-    systemPrompt: undefined,
-    role: host.role,
-    thinkingConfig: host.thinkingConfig,
-    harness: host.harnessName,
-  });
 };

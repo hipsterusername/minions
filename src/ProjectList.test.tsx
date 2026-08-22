@@ -82,28 +82,29 @@ describe("ProjectList journeys", () => {
     expect(logo.querySelector(".project-list-brand__crown")).toBeInTheDocument();
   });
 
-  it("shows a sleeping project when it has no running sessions", async () => {
+  it("shows a sleeping project when it has no active sessions", async () => {
     render(<ProjectList onOpenProject={vi.fn()} />);
 
-    expect(await screen.findByRole("img", { name: "Alpha is sleeping with no running sessions" })).toHaveClass(
+    expect(await screen.findByRole("img", { name: "Alpha is sleeping with no active sessions" })).toHaveClass(
       "project-list-recent__activity--sleeping",
     );
-    expect(screen.getByText("0 running sessions")).toBeInTheDocument();
+    expect(screen.getByText("0 active sessions")).toBeInTheDocument();
   });
 
-  it("shows the dashboard minion icon and top-level running session count", async () => {
+  it("counts running, creating, and waiting leaders while excluding minions", async () => {
     sessionSnapshot = [
       { sessionKey: "leader-1", sessionId: "s1", status: "running", cwd: "/repo/alpha", role: "leader" },
       { sessionKey: "leader-2", sessionId: "s2", status: "creating", cwd: "/repo/alpha/.minions/worktrees/leader-2", role: "leader" },
+      { sessionKey: "leader-3", sessionId: "s3", status: "waiting", cwd: "/repo/alpha/.minions/worktrees/leader-3", role: "leader" },
       { sessionKey: "minion-1", sessionId: "s3", status: "running", cwd: "/repo/alpha/.minions/worktrees/minion-1", role: "minion" },
       { sessionKey: "other", sessionId: "s4", status: "running", cwd: "/repo/beta", role: "leader" },
     ];
     render(<ProjectList onOpenProject={vi.fn()} />);
 
-    const activity = await screen.findByRole("img", { name: "Alpha has 2 running sessions" });
+    const activity = await screen.findByRole("img", { name: "Alpha has 3 active sessions" });
     expect(activity).toHaveClass("project-list-recent__activity--active");
     expect(activity.querySelector('img[src="/icons/minion.svg"]')).toBeInTheDocument();
-    expect(screen.getByText("2 running sessions")).toHaveClass("project-list-recent__session-count--active");
+    expect(screen.getByText("3 active sessions")).toHaveClass("project-list-recent__session-count--active");
   });
 
   it("opens a recent project without issuing a second server request", async () => {

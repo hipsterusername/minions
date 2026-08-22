@@ -58,12 +58,14 @@ describe("work-item runtime lifecycle disposition", () => {
     decision.host.reviewLifecycle = requestDecision(initialSessionReviewLifecycle(), "Choose");
     processNormalizedEvent(decision.host, decision.bus, decision.agent, decision.ctx, { kind: "done", reason: "stop" }, decision.hooks);
     expect(decision.hooks.runTerminal).not.toHaveBeenCalled();
+    expect(decision.hooks.runWaiting).toHaveBeenCalledWith(expect.objectContaining({ waitKind: "decision" }));
     expect(decision.host.reviewLifecycle.reviewState).toBe("decision_needed");
 
     const timer = fixture();
     timer.host.taskState = { tasks: new Map(), pendingWait: { durationMs: 5, reason: "wait", scheduledAt: 1, timerId: null }, approval: null };
     processNormalizedEvent(timer.host, timer.bus, timer.agent, timer.ctx, { kind: "done", reason: "stop" }, timer.hooks);
     expect(timer.hooks.runTerminal).not.toHaveBeenCalled();
+    expect(timer.hooks.runWaiting).toHaveBeenCalledWith(expect.objectContaining({ waitKind: "timer" }));
     expect(timer.host.reviewLifecycle.terminalAt).toBeNull();
   });
 

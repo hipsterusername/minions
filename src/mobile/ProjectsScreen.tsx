@@ -11,7 +11,7 @@ interface ProjectsScreenProps {
 
 interface ProjectStats {
   count: number;
-  running: number;
+  active: number;
   attention: number;
   cost: number;
 }
@@ -22,25 +22,25 @@ function statsForProject(
   projectId: string,
 ): ProjectStats {
   let count = 0;
-  let running = 0;
+  let active = 0;
   let attention = 0;
   let cost = 0;
   for (const session of sessions) {
     if (session.role === "minion") continue;
     if (!sessionBelongsToProject(session, projectPath, projectId)) continue;
     count += 1;
-    if (session.status === "running" || session.status === "creating") running += 1;
+    if (session.status === "running" || session.status === "creating" || session.status === "waiting") active += 1;
     if (needsAttention(session)) attention += 1;
     if (session.totalCost != null && Number.isFinite(session.totalCost)) {
       cost += session.totalCost;
     }
   }
-  return { count, running, attention, cost };
+  return { count, active, attention, cost };
 }
 
 function formatProjectStats(stats: ProjectStats): string {
-  const parts = stats.running > 0
-    ? [`▶ ${stats.running} running`]
+  const parts = stats.active > 0
+    ? [`▶ ${stats.active} active`]
     : [stats.count === 1 ? "1 session" : `${stats.count} sessions`];
   parts.push(`$${stats.cost.toFixed(2)}`);
   if (stats.attention > 0) parts.push(`⚠ ${stats.attention} needs you`);
@@ -191,7 +191,7 @@ export function ProjectsScreen({ sessions, onSelectProject }: ProjectsScreenProp
 
       <div className="mob-project-list">
         {projects.map((project) => {
-          const stat = stats.get(project.id) ?? { count: 0, running: 0, attention: 0, cost: 0 };
+          const stat = stats.get(project.id) ?? { count: 0, active: 0, attention: 0, cost: 0 };
           return (
             <button
               className={`mob-project-card${stat.attention > 0 ? " mob-project-card--attention" : ""}`}

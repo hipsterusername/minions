@@ -33,9 +33,35 @@ type ArmedPromptHost = SessionHost & {
   armedSystemPrompt?: string | null;
 };
 
+export interface SessionCapacityReservation {
+  readonly sessionKey: string;
+  readonly token: symbol | null;
+}
+
+export class SessionCapacityError extends Error {
+  override readonly name = "SessionCapacityError";
+  readonly code = "SESSION_CAPACITY_REACHED";
+
+  constructor(readonly maxSessions: number) {
+    super(`Maximum session limit (${maxSessions}) reached. Stop active work before starting another session.`);
+  }
+}
+
+/** Terminal and waiting hosts remain addressable but do not consume compute capacity. */
+export function consumesSessionCapacity(
+  host: Pick<SessionHost, "status">,
+): boolean {
+  return host.status === "running";
+}
+
 export class SessionRegistry {
   private readonly map = new Map<string, SessionHost>();
+  private readonly capacityReservations = new Map<symbol, string>();
   private deps: SessionHostDeps | null = null;
+
+  constructor(
+    private readonly maxActiveSessions = Number.POSITIVE_INFINITY,
+  ) {}
 
   /** Supply the execution dependencies. Must be called before `start()`. */
   setDeps(deps: SessionHostDeps): void {
@@ -61,8 +87,8 @@ export class SessionRegistry {
 
   /**
    * Number of sessions currently consuming live runtime resources
-   * (open SDK query, MCP servers, worktree). Hydrated-but-never-resumed
-   * sessions come back as `status: "stopped"` and are excluded.
+   * (open SDK query, MCP servers, worktree). Waiting and terminal hosts stay
+   * registered for resume/review but are excluded alongside hydrated history.
    *
    * `MAX_SESSIONS` is meant to cap concurrent compute, not on-disk
    * history — without this distinction, a project with N saved
@@ -72,9 +98,33 @@ export class SessionRegistry {
   activeCount(): number {
     let n = 0;
     for (const host of this.map.values()) {
-      if (host.status !== "stopped") n += 1;
+      if (consumesSessionCapacity(host)) n += 1;
     }
     return n;
+  }
+
+  /** Active execution plus launches that have claimed a slot before async readiness checks. */
+  capacityCount(): number {
+    return this.activeCount() + this.capacityReservations.size;
+  }
+
+  reserveCapacity(sessionKey: string): SessionCapacityReservation {
+    const host = this.map.get(sessionKey);
+    if (host && consumesSessionCapacity(host)) {
+      return { sessionKey, token: null };
+    }
+    if (this.capacityCount() >= this.maxActiveSessions) {
+      throw new SessionCapacityError(this.maxActiveSessions);
+    }
+    const token = Symbol(sessionKey);
+    this.capacityReservations.set(token, sessionKey);
+    return { sessionKey, token };
+  }
+
+  releaseCapacity(reservation: SessionCapacityReservation): void {
+    if (reservation.token !== null) {
+      this.capacityReservations.delete(reservation.token);
+    }
   }
 
   values(): IterableIterator<SessionHost> {
@@ -94,38 +144,59 @@ export class SessionRegistry {
    * doesn't exist for this key yet; otherwise re-enters `start()` on
    * the existing host (the resume path).
    */
-  start(opts: StartSessionOptions): void {
+  start(
+    opts: StartSessionOptions,
+    reservation?: SessionCapacityReservation,
+  ): void {
     if (!this.deps) {
       throw new Error(
         "SessionRegistry: deps not set — call setDeps() before start().",
       );
     }
-    let host = this.map.get(opts.sessionKey);
-    if (!host) {
-      host = new SessionHost(opts.sessionKey, opts.cwd);
-      this.map.set(opts.sessionKey, host);
+    const claimed = reservation ?? this.reserveCapacity(opts.sessionKey);
+    if (claimed.sessionKey !== opts.sessionKey) {
+      this.releaseCapacity(claimed);
+      throw new Error("Session capacity reservation does not match the requested session.");
     }
-    const armedHost = host as ArmedPromptHost;
-    const role = opts.role ?? host.role;
-    if (role === "minion") {
-      let armedPrompt =
-        armedHost.armedSystemPrompt ?? loadArmedSystemPrompt(opts.sessionKey);
-      const invocationKind = opts.invocationKind ?? "new_run";
-      if (
-        armedPrompt == null &&
-        invocationKind === "new_run" &&
-        opts.systemPrompt !== undefined
-      ) {
-        armedPrompt = persistArmedSystemPrompt(
-          opts.sessionKey,
-          opts.systemPrompt,
-        );
+    if (
+      claimed.token !== null &&
+      this.capacityReservations.get(claimed.token) !== opts.sessionKey
+    ) {
+      throw new Error("Session capacity reservation is no longer valid.");
+    }
+    try {
+      let host = this.map.get(opts.sessionKey);
+      if (!host) {
+        host = new SessionHost(opts.sessionKey, opts.cwd);
+        this.map.set(opts.sessionKey, host);
       }
-      armedHost.armedSystemPrompt = armedPrompt;
-      if (armedPrompt !== null) opts = { ...opts, systemPrompt: armedPrompt };
+      const armedHost = host as ArmedPromptHost;
+      const role = opts.role ?? host.role;
+      if (role === "minion") {
+        let armedPrompt =
+          armedHost.armedSystemPrompt ?? loadArmedSystemPrompt(opts.sessionKey);
+        const invocationKind = opts.invocationKind ?? "new_run";
+        if (
+          armedPrompt == null &&
+          invocationKind === "new_run" &&
+          opts.systemPrompt !== undefined
+        ) {
+          armedPrompt = persistArmedSystemPrompt(
+            opts.sessionKey,
+            opts.systemPrompt,
+          );
+        }
+        armedHost.armedSystemPrompt = armedPrompt;
+        if (armedPrompt !== null) opts = { ...opts, systemPrompt: armedPrompt };
+      }
+      // Fire-and-forget; the host fans progress out via the bus. SessionHost
+      // marks itself running synchronously before its first async boundary.
+      this.releaseCapacity(claimed);
+      void host.start(opts, this.deps);
+    } catch (error) {
+      this.releaseCapacity(claimed);
+      throw error;
     }
-    // Fire-and-forget; the host fans progress out via the bus.
-    void host.start(opts, this.deps);
   }
 
   /**

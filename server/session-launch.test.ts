@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import "./harness/register-production.ts";
 import { launchSession, SessionLaunchError } from "./session-launch.ts";
 import type { SessionRegistry } from "./session-registry.ts";
+import type { SessionCapacityReservation } from "./session-registry.ts";
 import type { Bus } from "./bus.ts";
 import type { HarnessReadinessSnapshot } from "./harness/readiness-types.ts";
 
@@ -12,7 +13,12 @@ function snapshot(readyHarnesses: string[]): HarnessReadinessSnapshot {
 function setup() {
   const starts: unknown[] = [];
   const events: unknown[] = [];
-  const registry = { has: () => false, start: (options: unknown) => starts.push(options) } as unknown as SessionRegistry;
+  const registry = {
+    has: () => false,
+    reserveCapacity: (sessionKey: string): SessionCapacityReservation => ({ sessionKey, token: null }),
+    releaseCapacity: vi.fn(),
+    start: (options: unknown) => starts.push(options),
+  } as unknown as SessionRegistry;
   const bus = { emitToSession: (_key: string, event: unknown) => events.push(event) } as unknown as Bus;
   return { registry, bus, starts, events };
 }
@@ -34,5 +40,50 @@ describe("launchSession", () => {
     const h = setup();
     await expect(launchSession({ registry: h.registry, bus: h.bus, options: { sessionKey: "s1", cwd: "/work", prompt: "hello" }, getReadiness: vi.fn(async () => snapshot([])) })).rejects.toBeInstanceOf(SessionLaunchError);
     expect(h.starts).toEqual([]);
+  });
+
+  it("holds a capacity reservation across asynchronous readiness", async () => {
+    let releaseReadiness!: () => void;
+    const readinessGate = new Promise<void>((resolve) => { releaseReadiness = resolve; });
+    const reservations = new Set<symbol>();
+    const registry = {
+      has: () => false,
+      reserveCapacity: (sessionKey: string): SessionCapacityReservation => {
+        if (reservations.size >= 1) {
+          throw new Error("capacity exhausted");
+        }
+        const token = Symbol(sessionKey);
+        reservations.add(token);
+        return { sessionKey, token };
+      },
+      releaseCapacity: (reservation: SessionCapacityReservation) => {
+        if (reservation.token) reservations.delete(reservation.token);
+      },
+      start: (_options: unknown, reservation: SessionCapacityReservation) => {
+        if (reservation.token) reservations.delete(reservation.token);
+      },
+    } as unknown as SessionRegistry;
+    const bus = { emitToSession: vi.fn() } as unknown as Bus;
+    const first = launchSession({
+      registry,
+      bus,
+      options: { sessionKey: "s1", cwd: "/work", prompt: "hello" },
+      getReadiness: vi.fn(async () => {
+        await readinessGate;
+        return snapshot(["claude"]);
+      }),
+    });
+
+    expect(reservations.size).toBe(1);
+    await expect(launchSession({
+      registry,
+      bus,
+      options: { sessionKey: "s2", cwd: "/work", prompt: "hello" },
+      getReadiness: vi.fn(async () => snapshot(["claude"])),
+    })).rejects.toThrow("capacity exhausted");
+
+    releaseReadiness();
+    await first;
+    expect(reservations.size).toBe(0);
   });
 });

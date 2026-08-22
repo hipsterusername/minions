@@ -26,7 +26,7 @@ import "./project-list.css";
 const log = browserLogger.child("project-list");
 const WS_URL = buildWsUrl();
 
-function countRunningSessions(
+function countActiveSessions(
   sessions: SessionInfo[],
   projectPath: string,
   projectId: string,
@@ -35,7 +35,7 @@ function countRunningSessions(
     (session) =>
       session.role !== "minion" &&
       sessionBelongsToProject(session, projectPath, projectId) &&
-      (session.status === "running" || session.status === "creating"),
+      (session.status === "running" || session.status === "creating" || session.status === "waiting"),
   ).length;
 }
 
@@ -93,7 +93,7 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
       new Map(
         projects.map((project) => [
           project.id,
-          countRunningSessions(sessions, project.path, project.id),
+          countActiveSessions(sessions, project.path, project.id),
         ]),
       ),
     [projects, sessions],
@@ -296,9 +296,9 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
             ) : (
               <div className="project-list-recents">
                 {projects.map((p) => {
-                  const runningSessions = runningSessionsByProject.get(p.id) ?? 0;
-                  const hasRunningSessions = runningSessions > 0;
-                  const runningLabel = `${runningSessions} running ${runningSessions === 1 ? "session" : "sessions"}`;
+                  const activeSessions = runningSessionsByProject.get(p.id) ?? 0;
+                  const hasActiveSessions = activeSessions > 0;
+                  const activeLabel = `${activeSessions} active ${activeSessions === 1 ? "session" : "sessions"}`;
 
                   return (
                     <div
@@ -307,11 +307,11 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
                       onClick={() => onOpenProject(p.id, p.path)}
                     >
                       <span
-                        className={`project-list-recent__activity ${hasRunningSessions ? "project-list-recent__activity--active" : "project-list-recent__activity--sleeping"}`}
+                        className={`project-list-recent__activity ${hasActiveSessions ? "project-list-recent__activity--active" : "project-list-recent__activity--sleeping"}`}
                         role="img"
-                        aria-label={hasRunningSessions ? `${p.name} has ${runningLabel}` : `${p.name} is sleeping with no running sessions`}
+                        aria-label={hasActiveSessions ? `${p.name} has ${activeLabel}` : `${p.name} is sleeping with no active sessions`}
                       >
-                        {hasRunningSessions ? (
+                        {hasActiveSessions ? (
                           <img src="/icons/minion.svg" alt="" aria-hidden="true" />
                         ) : (
                           <span className="project-list-recent__zzz" aria-hidden="true">ZZZ</span>
@@ -319,8 +319,8 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
                       </span>
                       <div className="project-list-recent__details">
                         <strong>{p.name}</strong>
-                        <span className={`project-list-recent__session-count ${hasRunningSessions ? "project-list-recent__session-count--active" : ""}`}>
-                          {runningLabel}
+                        <span className={`project-list-recent__session-count ${hasActiveSessions ? "project-list-recent__session-count--active" : ""}`}>
+                          {activeLabel}
                         </span>
                         <span className="project-list-recent__path">{p.path}</span>
                         <small>
