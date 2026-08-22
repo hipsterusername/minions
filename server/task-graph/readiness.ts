@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import type { GraphRevisionInput, TaskNode } from "../../shared/task-graph-contracts.ts";
+import {isAcceptedNodeAdjudication} from "./adjudication.ts";
 
 type Row = Record<string, unknown>;
 export interface NodeReadiness { nodeId: string; ready: boolean; reason: string; }
@@ -21,18 +22,27 @@ export function readiness(db: Database.Database, runId: string, revision: GraphR
   const invalidatedAttempts=new Set((db.prepare(`SELECT invalidated_attempt_id FROM task_node_invalidations
     WHERE run_id=? AND invalidated_attempt_id IS NOT NULL`).all(runId) as Row[])
     .map(row=>String(row.invalidated_attempt_id)));
+  const adjudications=new Map((db.prepare(`SELECT * FROM task_node_adjudications WHERE run_id=?
+    ORDER BY created_at DESC,id DESC`).all(runId) as Row[])
+    .map(row=>[String(row.attempt_id),row]));
+  const sourceSnapshotId=String((db.prepare("SELECT source_snapshot_id FROM task_graph_runs WHERE id=?")
+    .get(runId) as Row).source_snapshot_id);
   return revision.nodes.map(node => assess(node, revision, byNode.get(node.id) ?? [], evaluations,
     joins.get(node.id),retryGrants.get(node.id)??0,terminationPending.has(node.id),
-    invalidatedAttempts,now));
+    invalidatedAttempts,adjudications,sourceSnapshotId,now));
 }
 
 function assess(node: TaskNode, revision: GraphRevisionInput, attempts: Row[], edges: Map<string, boolean>,
   join: Row|undefined,manualRetries:number,terminationPending:boolean,
-  invalidatedAttempts:Set<string>,now:number):NodeReadiness {
+  invalidatedAttempts:Set<string>,adjudications:Map<string,Row>,sourceSnapshotId:string,
+  now:number):NodeReadiness {
   const current = attempts[0];
   if (current && current.runtime !== "terminal") return { nodeId: node.id, ready: false, reason: "attempt_active" };
   if (terminationPending) return {nodeId:node.id,ready:false,reason:"termination_pending"};
-  if (current?.outcome === "succeeded" && !invalidatedAttempts.has(String(current.id))) {
+  const accepted=current && !invalidatedAttempts.has(String(current.id))
+    && isAcceptedNodeAdjudication(adjudications.get(String(current.id)),node,current,sourceSnapshotId);
+  if ((current?.outcome === "succeeded" || accepted)
+    && !invalidatedAttempts.has(String(current?.id))) {
     return {nodeId:node.id,ready:false,reason:"attempt_succeeded_pending_satisfaction"};
   }
   if (current && current.outcome!=="none" && current.outcome!=="succeeded"

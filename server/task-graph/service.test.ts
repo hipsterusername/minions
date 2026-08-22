@@ -1,8 +1,10 @@
-import "./test-helpers.ts";
+import { taskGraphTestHome } from "./test-helpers.ts";
 import { describe,expect,it,vi } from "vitest";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import type { Bus } from "../bus.ts";
+import { wrapTools } from "../harness/claude/tools.ts";
 import type { WsEnvelope } from "../../shared/ws-envelope.ts";
 import type { GraphRevisionInput,SourceSnapshot } from "../../shared/task-graph-contracts.ts";
 import type { WorkItemRunSnapshot } from "../../shared/work-item-contracts.ts";
@@ -15,10 +17,23 @@ import { createTaskGraphAgentTools } from "./agent-tools.ts";
 import { TaskGraphService } from "./service.ts";
 import { activeTaskGraphRunIds } from "./service-execution.ts";
 import { validateTaskGraphNodePolicy } from "./execution-policy.ts";
+import { TaskGraphValidationError } from "./errors.ts";
+import { SessionRegistry } from "../session-registry.ts";
+import { SessionHost } from "../session-host.ts";
 
 const HASH = `sha256:${"a".repeat(64)}`;
 const PACKAGE_BYTES=fs.readFileSync("package.json");
 const PACKAGE_HASH=`sha256:${crypto.createHash("sha256").update(PACKAGE_BYTES).digest("hex")}`;
+const INLINE_JSON={result:"immutable"};
+const INLINE_BYTES=Buffer.from(JSON.stringify(INLINE_JSON));
+const INLINE_HASH=`sha256:${crypto.createHash("sha256").update(INLINE_BYTES).digest("hex")}`;
+const inlineArtifact=()=>({source:"inline" as const,inlineJson:INLINE_JSON,schemaName:"Result",
+  schemaVersion:"1",contentHash:INLINE_HASH,byteSize:INLINE_BYTES.length,classification:"internal" as const,
+  retentionPolicy:"keep",outputName:"result",observedWriteSet:[]});
+const minimalInlineArtifact=()=>({source:"inline" as const,inlineJson:INLINE_JSON,outputName:"result"});
+const pathArtifact=()=>({source:"path" as const,storageRef:"package.json",schemaName:"Result",
+  schemaVersion:"1",contentHash:PACKAGE_HASH,byteSize:PACKAGE_BYTES.length,classification:"internal" as const,
+  retentionPolicy:"keep",outputName:"result",observedWriteSet:[]});
 
 function revision(): GraphRevisionInput {
   return { definitionId:"definition",revisionId:"revision",workItemId:"work",workspaceId:"workspace",
@@ -105,8 +120,8 @@ describe("TaskGraphService central wiring",() => {
     const service = new TaskGraphService({ db,bus,now:(() => { let at=10; return () => at++; })(),children:{
       startChildRun:async(input) => { children.push(input); return childSnapshot(input.attemptId,input.attemptNumber); },
     },validateNodePolicy:(node)=>validateTaskGraphNodePolicy(node,()=>codex),resolveHarness:()=>codex});
-    const graph=revision();graph.nodes[0]={...graph.nodes[0]!,ownershipRequest:[{
-      scope:"path",mode:"write",normalizedValue:"server/task-graph",
+    const graph=revision();graph.nodes[0]={...graph.nodes[0]!,outputSchemas:{result:{type:"object"}},ownershipRequest:[{
+      scope:"path",mode:"write",normalizedValue:"package.json",
     }]};
     service.createRevision(graph,3);
     const result = await service.startRun({ id:"graph",workItemId:"work",primaryRunKey:"primary",revisionId:"revision",
@@ -114,12 +129,98 @@ describe("TaskGraphService central wiring",() => {
     expect(children).toEqual([expect.objectContaining({ taskId:"node",attemptNumber:1,
       requestId:expect.stringMatching(/^task-graph:attempt_/),
       sandboxPolicy:{filesystemScope:"workspace-write",approvalPolicy:"never"}} )]);
+    expect(String(children[0]!["prompt"])).toContain("source=path");
     expect(result.attempts[0]).toMatchObject({ runtime:"running",session_run_key:"child-run" });
     expect(db.prepare("SELECT delivered_at FROM task_scheduler_outbox").get()).toMatchObject({ delivered_at:expect.any(Number) });
     expect(emitted.some(envelope => envelope.type === "task_graph_snapshot")).toBe(true);
     expect(service.viewSnapshot("graph")).toMatchObject({ graphRunId:"graph",status:"running",nodes:[
       expect.objectContaining({ id:"node",readiness:"claimed" }),
     ] });
+    const writerTool=createTaskGraphAgentTools(service,"child-run")[0]!;
+    expect((writerTool.inputSchema as {shape?:unknown}).shape).toBeDefined();
+    expect(()=>wrapTools("task-graph",[writerTool])).not.toThrow();
+    expect(writerTool.inputSchema.safeParse(pathArtifact()).success).toBe(true);
+    expect(writerTool.inputSchema.safeParse({source:"path",storageRef:"package.json",
+      outputName:"result"}).success).toBe(true);
+    expect(writerTool.inputSchema.safeParse(inlineArtifact()).success).toBe(true);
+    expect(writerTool.inputSchema.safeParse({...pathArtifact(),inlineJson:INLINE_JSON}).success).toBe(false);
+    await expect(writerTool.handler({source:"path",storageRef:"server/task-graph/service.ts",
+      outputName:"result"})).rejects.toThrow("storageRef exceeds write ownership");
+    await writerTool.handler({source:"path",storageRef:"package.json",outputName:"result"});
+    expect(service.snapshot("graph").artifacts[0]).toMatchObject({content_hash:PACKAGE_HASH,
+      metadata_json:expect.objectContaining({storageRef:expect.stringContaining("artifacts/task-graph"),
+        observedWriteSet:["package.json"]})});
+  });
+
+  it("submits independent attempts concurrently so fleet workers can claim them",async()=>{
+    const db=setup();const {bus}=fakeBus();
+    const launches:Array<Record<string,unknown>>=[];const release:Array<()=>void>=[];
+    const service=new TaskGraphService({db,bus,availableDispatchSlots:()=>3,children:{
+      startChildRun:async input=>{
+        launches.push(input);
+        await new Promise<void>(resolve=>release.push(resolve));
+        return childSnapshot(input.attemptId,input.attemptNumber,String(input.taskId),
+          `child-${String(input.taskId)}`);
+      },
+    }});
+    const graph=revision();graph.maxActiveAttempts=3;graph.nodes=[
+      {...graph.nodes[0]!,id:"take-1",title:"Take 1"},
+      {...graph.nodes[0]!,id:"take-2",title:"Take 2"},
+      {...graph.nodes[0]!,id:"take-3",title:"Take 3"},
+    ];graph.terminalNodeIds=graph.nodes.map(node=>node.id);
+    service.createRevision(graph,3);
+
+    const starting=service.startRun({id:"graph",workItemId:"work",primaryRunKey:"primary",
+      revisionId:"revision",sourceSnapshot:source(),expectedLifecycleRevision:1,at:4});
+    await vi.waitFor(()=>expect(launches.map(launch=>launch["taskId"])).toEqual([
+      "take-1","take-2","take-3",
+    ]));
+    release.forEach(resolve=>resolve());
+    const snapshot=await starting;
+
+    expect(snapshot.attempts).toHaveLength(3);
+    expect(snapshot.attempts.every(attempt=>attempt["runtime"]==="running")).toBe(true);
+  });
+
+  it("keeps an output-producing node read-only while staging bounded inline JSON",async()=>{
+    const db=setup();const transport=fakeBus();const children:Array<Record<string,unknown>>=[];
+    const codex={name:"codex",builtInTools:[],capabilities:{mutationInterception:"observe_only",
+      builtInFilesystem:true,sandboxEnforcement:{filesystem:["read-only","workspace-write"],approval:true}}} as unknown as AgentHarness;
+    const service=new TaskGraphService({db,bus:transport.bus,children:{startChildRun:async(input)=>{
+      children.push(input);return childSnapshot(input.attemptId,input.attemptNumber);
+    }},validateNodePolicy:(node)=>validateTaskGraphNodePolicy(node,()=>codex),resolveHarness:()=>codex});
+    service.start();
+    const graph=revision();graph.nodes[0]={...graph.nodes[0]!,
+      outputSchemas:{result:{type:"object",required:["result"]}}};
+    service.createRevision(graph,3);
+    await service.startRun({id:"graph",workItemId:"work",primaryRunKey:"primary",revisionId:"revision",
+      sourceSnapshot:source(),expectedLifecycleRevision:1,at:4});
+
+    expect(children[0]).toMatchObject({sandboxPolicy:{filesystemScope:"read-only",approvalPolicy:"never"}});
+    expect(String(children[0]!["prompt"])).toContain("filesystem-read-only");
+    const tool=createTaskGraphAgentTools(service,"child-run")[0]!;
+    expect(tool.description).toContain("Path-backed staging requires write ownership");
+    expect(tool.description).toContain("server serializes, hashes, sizes, validates, and stores it");
+    expect(tool.inputSchema.safeParse(inlineArtifact()).success).toBe(true);
+    expect(tool.inputSchema.safeParse(minimalInlineArtifact()).success).toBe(true);
+    const pathInput=pathArtifact();
+    expect(tool.inputSchema.safeParse(pathInput).success).toBe(false);
+    expect(()=>service.stageArtifactForSession("child-run",pathInput))
+      .toThrow("path-backed artifact storageRef exceeds write ownership");
+
+    await tool.handler(minimalInlineArtifact());
+    const metadata=service.snapshot("graph").artifacts[0]!["metadata_json"] as Record<string,unknown>;
+    expect(metadata).toMatchObject({contentHash:INLINE_HASH,byteSize:INLINE_BYTES.length,
+      outputName:"result",observedWriteSet:[]});
+    expect(metadata.storageRef).toContain(path.join(taskGraphTestHome,"artifacts","task-graph"));
+    expect(fs.readFileSync(String(metadata.storageRef),"utf8")).toBe(JSON.stringify(INLINE_JSON));
+    const attempt=service.snapshot("graph").attempts[0]!;
+    transport.fan({topic:"work-item:work",type:"work_item_run_sealed",workItemId:"work",
+      run:{...childSnapshot(String(attempt["id"]),1,"node","child-run"),outcome:"completed",
+        endedAt:20,finalReport:"done"},timestamp:20});
+    await vi.waitFor(()=>expect(service.snapshot("graph").artifacts[0]).toMatchObject({state:"committed",
+      producer_attempt_id:attempt["id"],source_snapshot_id:"source",content_hash:INLINE_HASH}));
+    service.dispose();
   });
 
   it("refreshes skipped and all-terminal edges after an exhausted child launch failure",async() => {
@@ -239,9 +340,7 @@ describe("TaskGraphService central wiring",() => {
     await service.startRun({id:"graph",workItemId:"work",primaryRunKey:"primary",
       revisionId:"revision",sourceSnapshot:source(),expectedLifecycleRevision:1,at:4});
     const producer=service.snapshot("graph").attempts[0]!;
-    service.stageArtifactForSession("producer-child",{schemaName:"Result",schemaVersion:"1",
-      contentHash:PACKAGE_HASH,storageRef:"package.json",byteSize:PACKAGE_BYTES.length,
-      classification:"internal",retentionPolicy:"keep",outputName:"result",observedWriteSet:[]});
+    service.stageArtifactForSession("producer-child",inlineArtifact());
     transport.fan({topic:"work-item:work",type:"work_item_run_sealed",workItemId:"work",
       run:{...childSnapshot(String(producer["id"]),1,"node","producer-child"),outcome:"completed",
         endedAt:20,finalReport:"done"},timestamp:20});
@@ -255,12 +354,18 @@ describe("TaskGraphService central wiring",() => {
     service.dispose();
   });
 
-  it("bounds cross-graph admission by centrally reported session capacity",async() => {
-    const db=setup();const transport=fakeBus();const launches:WorkItemRunSnapshot[]=[];let slots=1;
-    const service=new TaskGraphService({db,bus:transport.bus,availableDispatchSlots:()=>slots,
+  it("admits downstream work after a retained terminal child releases live capacity",async() => {
+    const db=setup();const transport=fakeBus();const launches:WorkItemRunSnapshot[]=[];
+    const registry=new SessionRegistry(2);
+    const hosts=(registry as unknown as {map:Map<string,SessionHost>}).map;
+    const primary=new SessionHost("primary",process.cwd());primary.status="running";hosts.set(primary.id,primary);
+    const service=new TaskGraphService({db,bus:transport.bus,
+      availableDispatchSlots:()=>Math.max(0,2-registry.capacityCount()),
       children:{startChildRun:async(input)=>{
         const child=childSnapshot(input.attemptId,input.attemptNumber,String(input.taskId),
-          `child-${launches.length+1}`);launches.push(child);slots=0;return child;
+          `child-${launches.length+1}`);launches.push(child);
+        const host=new SessionHost(child.runKey,process.cwd());host.status="running";hosts.set(host.id,host);
+        return child;
       }}});
     service.start();const graph=revision();
     graph.nodes=[graph.nodes[0]!,{...graph.nodes[0]!,id:"node-2",title:"Node 2"}];
@@ -273,7 +378,9 @@ describe("TaskGraphService central wiring",() => {
     expect(service.viewSnapshot("graph").nodes.find(node=>node.id==="node-2")?.blocker)
       .toMatchObject({category:"capacity"});
 
-    slots=1;
+    const retained=registry.get(launches[0]!.runKey)!;retained.status="idle";
+    expect(registry.get(retained.id)).toBe(retained);
+    expect(registry.activeCount()).toBe(1);
     transport.fan({topic:"work-item:work",type:"work_item_run_sealed",workItemId:"work",
       run:{...launches[0]!,outcome:"completed",endedAt:20,finalReport:"done"},timestamp:20});
     await vi.waitFor(()=>expect(launches).toHaveLength(2));
@@ -315,6 +422,92 @@ describe("TaskGraphService central wiring",() => {
       expect.objectContaining({ logicalState:"succeeded" }),
     ] });
     service.dispose();
+  });
+
+  it.each([
+    ["failed",JSON.stringify({result:"failed",confidence:0.99}),"fail_graph","failed"],
+    ["inconclusive",JSON.stringify({result:"inconclusive",confidence:0.2}),"fail_graph","failed"],
+    ["malformed","verification failed","fail_graph","failed"],
+    ["inconclusive-blocked",JSON.stringify({result:"inconclusive",confidence:0.2}),
+      "block_for_decision","blocked"],
+  ] as const)("does not complete a verification-mode node for a %s verdict",
+    async(_label,finalReport,failurePolicy,expectedStatus)=>{
+    const db=setup();const transport=fakeBus();let allocated:WorkItemRunSnapshot|null=null;
+    const service=new TaskGraphService({db,bus:transport.bus,children:{startChildRun:async input=>{
+      allocated=childSnapshot(input.attemptId,input.attemptNumber);return allocated;
+    }}});
+    service.start();const graph=revision();graph.nodes[0]={...graph.nodes[0]!,
+      completionMode:"verification",failurePolicy,
+      retryPolicy:{...graph.nodes[0]!.retryPolicy,maxAttempts:1}};
+    service.createRevision(graph,3);
+    await service.startRun({id:"graph",workItemId:"work",primaryRunKey:"primary",revisionId:"revision",
+      sourceSnapshot:source(),expectedLifecycleRevision:1,at:4});
+    transport.fan({topic:"work-item:work",type:"work_item_run_sealed",workItemId:"work",
+      run:{...allocated!,outcome:"completed",endedAt:20,finalReport},timestamp:20});
+
+    await vi.waitFor(()=>expect(service.snapshot("graph").run.status).toBe(expectedStatus));
+    expect(service.snapshot("graph").attempts[0]).toMatchObject({
+      runtime:"terminal",outcome:"failed",terminal_witness_json:{
+        source:"work_item_run",completionVerdict:{
+          result:_label==="malformed"?"inconclusive":_label.startsWith("inconclusive")
+            ? "inconclusive":"failed",
+        },
+      },
+    });
+    expect(service.viewSnapshot("graph")).toMatchObject({status:expectedStatus,nodes:[{
+      logicalState:"exhausted",currentAttempt:{state:"failed"},
+    }]});
+    service.dispose();
+  });
+
+  it("lets a passed verification-mode verdict and a normal prose task both complete",async()=>{
+    const db=setup();const transport=fakeBus();const allocated:WorkItemRunSnapshot[]=[];
+    const service=new TaskGraphService({db,bus:transport.bus,children:{startChildRun:async input=>{
+      const child=childSnapshot(input.attemptId,input.attemptNumber,String(input.taskId),
+        `mode-child-${allocated.length}`);allocated.push(child);return child;
+    }}});
+    service.start();const graph=revision();graph.nodes=[
+      {...graph.nodes[0]!,id:"normal",title:"Normal"},
+      {...graph.nodes[0]!,id:"verify",title:"Verify",completionMode:"verification"},
+    ];graph.terminalNodeIds=["normal","verify"];
+    service.createRevision(graph,3);
+    await service.startRun({id:"graph",workItemId:"work",primaryRunKey:"primary",revisionId:"revision",
+      sourceSnapshot:source(),expectedLifecycleRevision:1,at:4});
+    const reports=new Map([["normal","ordinary completion prose"],
+      ["verify",JSON.stringify({result:"passed",confidence:1})]]);
+    for (const child of allocated) transport.fan({topic:"work-item:work",type:"work_item_run_sealed",
+      workItemId:"work",run:{...child,outcome:"completed",endedAt:20,
+        finalReport:reports.get(child.taskId!)!},timestamp:20});
+
+    await vi.waitFor(()=>expect(service.snapshot("graph").run.status).toBe("completed"));
+    expect(service.snapshot("graph").attempts).toEqual(expect.arrayContaining([
+      expect.objectContaining({node_id:"normal",outcome:"succeeded"}),
+      expect.objectContaining({node_id:"verify",outcome:"succeeded"}),
+    ]));
+    service.dispose();
+  });
+
+  it("recovery re-evaluates a completed verification child instead of trusting completion",async()=>{
+    const db=setup();const {bus}=fakeBus();
+    const service=new TaskGraphService({db,bus,children:{startChildRun:async input=>{
+      createChildWorkItemRun(db,{workItemId:input.workItemId,runKey:"recovered-verification",
+        parentRunKey:input.parentRunKey,taskId:input.taskId,attemptId:input.attemptId,
+        attemptNumber:input.attemptNumber,idempotencyKey:input.requestId,at:8});
+      sealChildWorkItemRun(db,{workItemId:input.workItemId,runKey:"recovered-verification",
+        outcome:"completed",finalReport:JSON.stringify({result:"failed",confidence:1}),at:9});
+      throw new Error("launch response lost after verifier sealed");
+    }}});
+    const graph=revision();graph.nodes[0]={...graph.nodes[0]!,completionMode:"verification",
+      retryPolicy:{...graph.nodes[0]!.retryPolicy,maxAttempts:1}};
+    service.createRevision(graph,3);
+
+    const snapshot=await service.startRun({id:"graph",workItemId:"work",primaryRunKey:"primary",
+      revisionId:"revision",sourceSnapshot:source(),expectedLifecycleRevision:1,at:4});
+
+    expect(snapshot.run.status).toBe("failed");
+    expect(snapshot.attempts[0]).toMatchObject({runtime:"terminal",outcome:"failed",
+      session_run_key:"recovered-verification",source_snapshot_id:"source",
+      terminal_witness_json:{completionVerdict:{result:"failed"}}});
   });
 
   it("lets an operator retry an exhausted decision-blocked node with a fresh attempt",async() => {
@@ -368,6 +561,40 @@ describe("TaskGraphService central wiring",() => {
       && !String(row["kind"]).startsWith("budget_")).every(row=>row["released_at"]===20)).toBe(true);
   });
 
+  it("treats bound child sdk events as reservation liveness",async()=>{
+    const db=setup();const transport=fakeBus();let at=10;
+    const service=new TaskGraphService({db,bus:transport.bus,now:()=>at,pollIntervalMs:0,
+      children:{startChildRun:async(input)=>childSnapshot(input.attemptId,input.attemptNumber)}});
+    const graph=revision();graph.nodes[0]={...graph.nodes[0]!,timeoutMs:5};
+    service.createRevision(graph,3);service.start();
+    await service.startRun({id:"graph",workItemId:"work",primaryRunKey:"primary",revisionId:"revision",
+      sourceSnapshot:source(),expectedLifecycleRevision:1,at:4});
+    const attempt=service.snapshot("graph").attempts[0]!;
+    expect(service.snapshot("graph").reservations.find(row=>row["kind"]==="active_attempt"))
+      .toMatchObject({expires_at:15});
+
+    at=14;
+    transport.fan({topic:"session:child-run",type:"sdk_event",sessionKey:"child-run",
+      timestamp:14,event:{kind:"tool_call",id:"tool-1",name:"codex_command",input:{}}});
+    await vi.waitFor(()=>expect(service.snapshot("graph").reservations
+      .find(row=>row["attempt_id"]===attempt["id"]&&row["kind"]==="active_attempt"))
+      .toMatchObject({expires_at:19}));
+
+    at=18;
+    transport.fan({topic:"session:child-run",type:"minion_status",minionSessionKey:"child-run",
+      trigger:"step",message:"still working",timestamp:18});
+    await vi.waitFor(()=>{
+      expect(service.snapshot("graph").attempts[0]).toMatchObject({progress_seq:1});
+      expect(service.snapshot("graph").reservations
+        .find(row=>row["attempt_id"]===attempt["id"]&&row["kind"]==="active_attempt"))
+        .toMatchObject({expires_at:23});
+    });
+
+    at=20;await service.tick("graph");
+    expect(service.snapshot("graph").attempts[0]).toMatchObject({runtime:"running",outcome:"none"});
+    service.dispose();
+  });
+
   it("reconciles a durably sealed child before reservation-expiry loss",async() => {
     const db=setup();const {bus}=fakeBus();let at=10;let childAttemptId="";
     const service=new TaskGraphService({db,bus,now:()=>at,children:{startChildRun:async(input)=>{
@@ -413,9 +640,7 @@ describe("TaskGraphService central wiring",() => {
     await service.startRun({id:"graph",workItemId:"work",primaryRunKey:"primary",revisionId:"revision",
       sourceSnapshot:source(),expectedLifecycleRevision:1,at:4});
     const producer=service.snapshot("graph").attempts[0]!;
-    service.stageArtifactForSession("child-1",{schemaName:"Result",schemaVersion:"1",
-      contentHash:PACKAGE_HASH,storageRef:"package.json",byteSize:PACKAGE_BYTES.length,
-      classification:"internal",retentionPolicy:"keep",outputName:"result",observedWriteSet:[]});
+    service.stageArtifactForSession("child-1",inlineArtifact());
     sealChildWorkItemRun(db,{workItemId:"work",runKey:"child-1",outcome:"completed",at:21});
     service.scheduler.terminal({runId:"graph",attemptId:String(producer["id"]),
       generation:Number(producer["generation"]),actorSessionKey:"child-1",
@@ -444,9 +669,7 @@ describe("TaskGraphService central wiring",() => {
     await service.startRun({id:"graph",workItemId:"work",primaryRunKey:"primary",revisionId:"revision",
       sourceSnapshot:source(),expectedLifecycleRevision:1,at:4});
     const attempt=service.snapshot("graph").attempts[0]!;
-    service.stageArtifactForSession("late-child",{schemaName:"Result",schemaVersion:"1",
-      contentHash:PACKAGE_HASH,storageRef:"package.json",byteSize:PACKAGE_BYTES.length,
-      classification:"internal",retentionPolicy:"keep",outputName:"result",observedWriteSet:[]});
+    service.stageArtifactForSession("late-child",inlineArtifact());
     service.scheduler.terminal({runId:"graph",attemptId:String(attempt["id"]),
       generation:Number(attempt["generation"]),actorSessionKey:"late-child",
       idempotencyKey:"first-terminal-witness",expectedRunRevision:service.snapshot("graph").run.revision,
@@ -678,9 +901,7 @@ describe("TaskGraphService central wiring",() => {
       (id,run_id,node_id,producer_attempt_id,source_snapshot_id,output_name,content_hash,metadata_json,
         state,created_at,committed_at) VALUES('zz-historical','graph','producer','historical-attempt',
         'source','result',?,'{}','committed',1,20)`).run(HASH);
-    service.stageArtifactForSession("child-1",{schemaName:"Result",schemaVersion:"1",contentHash:PACKAGE_HASH,
-      storageRef:"package.json",byteSize:PACKAGE_BYTES.length,classification:"internal",retentionPolicy:"keep",
-      outputName:"result",observedWriteSet:[]});
+    service.stageArtifactForSession("child-1",inlineArtifact());
     transport.fan({topic:"work-item:work",type:"work_item_run_sealed",workItemId:"work",
       run:{...childSnapshot(String(producer["id"]),1,"producer","child-1"),outcome:"completed",
         endedAt:20,finalReport:"done"},timestamp:20});
@@ -688,25 +909,66 @@ describe("TaskGraphService central wiring",() => {
     await vi.waitFor(()=>expect(launches).toHaveLength(2));
     expect(launches[1]).toMatchObject({taskId:"consumer",harness:"codex",executorClass:"standard",
       toolAllowlist:["Read"]});
-    expect(String(launches[1]!["prompt"])).toContain(`\"contentHash\":\"${PACKAGE_HASH}\"`);
+    expect(String(launches[1]!["prompt"])).toContain(`\"contentHash\":\"${INLINE_HASH}\"`);
     expect(String(launches[1]!["prompt"])).not.toContain(HASH);
-    expect(String(launches[1]!["prompt"])).toContain(PACKAGE_HASH.slice("sha256:".length));
+    expect(String(launches[1]!["prompt"])).toContain(INLINE_HASH.slice("sha256:".length));
     expect(String(launches[1]!["prompt"])).not.toContain("storageRef");
     expect(String(launches[1]!["prompt"])).not.toContain("artifacts/task-graph");
     const artifacts=service.snapshot("graph").artifacts;
     expect(artifacts).toHaveLength(2);
-    const artifactId=String(artifacts.find(item=>item["content_hash"]===PACKAGE_HASH)!["id"]);
+    const artifactId=String(artifacts.find(item=>item["content_hash"]===INLINE_HASH)!["id"]);
     const tools=createTaskGraphAgentTools(service,"child-2");
     expect(tools.map(tool=>tool.name)).toEqual(["read_input_artifact"]);
     const read=await tools[0]!.handler({artifactId,maxBytes:256});
-    expect(JSON.parse(read.content[0]!.text)).toMatchObject({artifactId,contentHash:PACKAGE_HASH,
-      encoding:"utf8",offset:0,nextOffset:256});
+    const chunk=JSON.parse(read.content[0]!.text);
+    expect(chunk).toMatchObject({artifactId,contentHash:INLINE_HASH,encoding:"utf8",offset:0,
+      content:JSON.stringify(INLINE_JSON)});
+    expect(chunk).not.toHaveProperty("nextOffset");
     const stored=db.prepare("SELECT metadata_json FROM task_artifacts WHERE id=?")
       .get(artifactId) as {metadata_json:string};
     db.prepare("UPDATE task_artifacts SET metadata_json=? WHERE id=?")
       .run(JSON.stringify({...JSON.parse(stored.metadata_json),classification:"secret"}),artifactId);
     await expect(tools[0]!.handler({artifactId})).rejects.toThrow(
       "secret artifacts cannot be copied into agent context");
+    service.dispose();
+  });
+
+  it("rejects non-JSON output bytes before storage and never dispatches their consumer",async() => {
+    const db=setup();const transport=fakeBus();const launches:Array<Record<string,unknown>>=[];
+    const service=new TaskGraphService({db,bus:transport.bus,children:{startChildRun:async(input)=>{
+      launches.push(input);return childSnapshot(input.attemptId,input.attemptNumber,
+        String(input.taskId),`child-${launches.length}`);
+    }}});
+    service.start();
+    const graph=revision();graph.nodes=[{...graph.nodes[0]!,id:"producer",title:"Producer",
+      outputSchemas:{result:{type:"object"}},ownershipRequest:[{scope:"path",mode:"write",
+        normalizedValue:"server/task-graph"}],retryPolicy:{...graph.nodes[0]!.retryPolicy,maxAttempts:1}},
+    {...graph.nodes[0]!,id:"consumer",title:"Consumer",inputBindings:{result:{type:"object"}}}];
+    graph.terminalNodeIds=["consumer"];
+    graph.edges=[{id:"result",sourceNodeId:"producer",targetNodeId:"consumer",kind:"artifact",
+      sourceOutput:"result",targetInput:"result",satisfactionPolicy:"all_success",
+      failurePolicy:"fail",optional:false}];
+    service.createRevision(graph,3);
+    await service.startRun({id:"graph",workItemId:"work",primaryRunKey:"primary",revisionId:"revision",
+      sourceSnapshot:source(),expectedLifecycleRevision:1,at:4});
+    const bytes=fs.readFileSync("server/task-graph/service.ts");
+    const hash=`sha256:${crypto.createHash("sha256").update(bytes).digest("hex")}`;
+
+    expect(()=>service.stageArtifactForSession("child-1",{schemaName:"Result",schemaVersion:"1",
+      source:"path",contentHash:hash,storageRef:"server/task-graph/service.ts",byteSize:bytes.length,
+      classification:"internal",retentionPolicy:"keep",outputName:"result",observedWriteSet:[]}))
+      .toThrow(TaskGraphValidationError);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM task_artifacts").get()).toEqual({count:0});
+    expect(fs.existsSync(path.join(taskGraphTestHome,"artifacts","task-graph",
+      hash.slice("sha256:".length)))).toBe(false);
+    const producer=service.snapshot("graph").attempts[0]!;
+    transport.fan({topic:"work-item:work",type:"work_item_run_sealed",workItemId:"work",
+      run:{...childSnapshot(String(producer["id"]),1,"producer","child-1"),outcome:"completed",
+        endedAt:20,finalReport:"done"},timestamp:20});
+
+    await vi.waitFor(()=>expect(service.snapshot("graph").run.status).toBe("failed"));
+    expect(service.snapshot("graph").artifacts).toEqual([]);
+    expect(launches.map(item=>item.taskId)).toEqual(["producer"]);
     service.dispose();
   });
 
@@ -729,13 +991,11 @@ describe("TaskGraphService central wiring",() => {
       sourceSnapshot:source(),expectedLifecycleRevision:1,at:4});
     const producer=service.snapshot("graph").attempts[0]!;
     expect(service.agentBinding("child-1")).toMatchObject({nodeId:"node",outputSchemas:{result:{type:"object"}}});
-    service.stageArtifactForSession("child-1",{schemaName:"Result",schemaVersion:"1",contentHash:PACKAGE_HASH,
-      storageRef:"package.json",byteSize:PACKAGE_BYTES.length,classification:"internal",retentionPolicy:"keep",
-      outputName:"result",observedWriteSet:[]});
+    service.stageArtifactForSession("child-1",inlineArtifact());
     transport.fan({topic:"work-item:work",type:"work_item_run_sealed",workItemId:"work",
       run:{...childSnapshot(String(producer["id"]),1,"node","child-1"),outcome:"completed",endedAt:20,finalReport:"done"},timestamp:20});
     await vi.waitFor(()=>expect(launches).toHaveLength(2));
-    expect(service.snapshot("graph").artifacts[0]).toMatchObject({state:"committed",content_hash:PACKAGE_HASH});
+    expect(service.snapshot("graph").artifacts[0]).toMatchObject({state:"committed",content_hash:INLINE_HASH});
     expect(service.snapshot("graph").verificationRequests[0]).toMatchObject({
       status:"running",verifier_run_key:"child-2",
     });

@@ -108,11 +108,28 @@ export class TaskGraphScheduler {
   reportProgress(event: AttemptEvent, sequence: number): boolean {
     if (!Number.isInteger(sequence) || sequence < 1) throw new TaskGraphValidationError("invalid progress sequence");
     return this.applyEvent(event,["running","waiting"],null,row => {
+      if (!this.hasLiveReservation(String(row.id),event.at)) return false;
       const result = this.db.prepare(`UPDATE task_node_attempts SET progress_seq=?,updated_at=?
         WHERE id=? AND generation=? AND progress_seq<? AND runtime IN ('running','waiting')`)
         .run(sequence,event.at,event.attemptId,event.generation,sequence);
+      if (result.changes === 1) this.extendAttemptReservations(row,event.at);
       return result.changes === 1;
     },"attempt_progress",{ sequence });
+  }
+
+  /** Renew operational reservations from observed activity by the bound child. */
+  renewAttemptActivity(sessionRunKey:string,at:number):boolean {
+    return this.db.transaction(()=>{
+      const row=this.db.prepare(`SELECT * FROM task_node_attempts
+        WHERE session_run_key=? AND runtime IN ('running','waiting')`).get(sessionRunKey) as Row|undefined;
+      if (!row || !this.hasLiveReservation(String(row.id),at)) return false;
+      const touched=this.db.prepare(`UPDATE task_node_attempts SET updated_at=?
+        WHERE id=? AND generation=? AND runtime IN ('running','waiting')`)
+        .run(at,row.id,row.generation);
+      if (touched.changes!==1) return false;
+      this.extendAttemptReservations(row,at);
+      return true;
+    }).immediate();
   }
 
   terminal(event: AttemptEvent, outcome: "succeeded"|"failed"|"cancelled"|"lost", witness: unknown): boolean {
@@ -214,6 +231,23 @@ export class TaskGraphScheduler {
       .all(spec.workspaceId) as Row[];
     return requestedOwnership.every(candidate => active.every(existing =>
       !ownershipConflicts(candidate.kind,String(existing.kind)))) ? null : "ownership_conflict";
+  }
+
+  private hasLiveReservation(attemptId:string,at:number):boolean {
+    return Boolean(this.db.prepare(`SELECT 1 FROM task_resource_reservations
+      WHERE attempt_id=? AND released_at IS NULL AND expires_at>? LIMIT 1`).get(attemptId,at));
+  }
+
+  private extendAttemptReservations(row:Row,at:number):void {
+    const run=this.db.prepare("SELECT revision_id FROM task_graph_runs WHERE id=?")
+      .get(row.run_id) as Row;
+    const node=this.repo.getRevision(String(run.revision_id)).nodes
+      .find(candidate=>candidate.id===row.node_id);
+    if (!node) throw new TaskGraphValidationError(`attempt node ${String(row.node_id)} disappeared`);
+    const expiresAt=at+node.timeoutMs;
+    this.db.prepare(`UPDATE task_resource_reservations SET expires_at=?
+      WHERE attempt_id=? AND released_at IS NULL AND expires_at<?`)
+      .run(expiresAt,row.id,expiresAt);
   }
 
   private applyEvent(eventRaw: AttemptEvent, allowed: string[], nextRuntime: string|null,

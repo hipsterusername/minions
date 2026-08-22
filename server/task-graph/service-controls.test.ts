@@ -1,6 +1,5 @@
 import "./test-helpers.ts";
 import crypto from "node:crypto";
-import fs from "node:fs";
 import { describe,expect,it,vi } from "vitest";
 import type { Bus } from "../bus.ts";
 import { initDb } from "../db.ts";
@@ -14,8 +13,9 @@ import { TaskGraphConflictError } from "./errors.ts";
 import { TaskGraphService } from "./service.ts";
 
 const HASH=`sha256:${"a".repeat(64)}`;
-const PACKAGE_BYTES=fs.readFileSync("package.json");
-const PACKAGE_HASH=`sha256:${crypto.createHash("sha256").update(PACKAGE_BYTES).digest("hex")}`;
+const INLINE_JSON={result:"immutable"};
+const INLINE_BYTES=Buffer.from(JSON.stringify(INLINE_JSON));
+const INLINE_HASH=`sha256:${crypto.createHash("sha256").update(INLINE_BYTES).digest("hex")}`;
 
 function setup() {
   const db=initDb(":memory:");ensureWorkItemSchema(db);
@@ -274,7 +274,7 @@ describe("TaskGraphService controls",()=>{
     await service.startRun({id:"run",workItemId:"work",primaryRunKey:"primary",revisionId:"revision",
       sourceSnapshot:source(),expectedLifecycleRevision:1,at:4});
     service.stageArtifactForSession("child-1",{schemaName:"Result",schemaVersion:"1",
-      contentHash:PACKAGE_HASH,storageRef:"package.json",byteSize:PACKAGE_BYTES.length,
+      source:"inline",inlineJson:INLINE_JSON,contentHash:INLINE_HASH,byteSize:INLINE_BYTES.length,
       classification:"internal",retentionPolicy:"keep",outputName:"result",observedWriteSet:[]});
     wire.emit({topic:"work-item:work",type:"work_item_run_sealed",workItemId:"work",
       run:{...launched!,outcome:"completed",endedAt:20,finalReport:"done"},timestamp:20});
@@ -283,7 +283,7 @@ describe("TaskGraphService controls",()=>{
     const current=service.snapshot("run");const artifactId=String(current.artifacts[0]!["id"]);
 
     const artifact=service.artifact({runId:"run",artifactId});
-    expect(artifact).toMatchObject({id:artifactId,contentHash:PACKAGE_HASH,byteSize:PACKAGE_BYTES.length});
+    expect(artifact).toMatchObject({id:artifactId,contentHash:INLINE_HASH,byteSize:INLINE_BYTES.length});
     expect(artifact).not.toHaveProperty("storageRef");
     const reconciliationRevision=current.run.revision;
     const reconciled=await service.reconcile({runId:"run",expectedRunRevision:reconciliationRevision,

@@ -2,11 +2,11 @@ import type Database from "better-sqlite3";
 import type { Bus } from "../bus.ts";
 import { serverLogger } from "../logging.ts";
 import type { WorkItemRunSnapshot } from "../../shared/work-item-contracts.ts";
-import type { ArtifactInput,GraphRevisionInput,GraphSnapshot,
-  SourceSnapshot } from "../../shared/task-graph-contracts.ts";
+import type { ArtifactStageInput,GraphRevisionInput,GraphSnapshot,SourceSnapshot } from "../../shared/task-graph-contracts.ts";
 import type { TaskGraphSnapshotView } from "../../shared/task-graph-view-contracts.ts";
 import { workItemRunSealedEnvelopeSchema } from "../../shared/ws-envelope.ts";
-import { storeTaskGraphArtifact } from "./artifact-store.ts";
+import { storeTaskGraphArtifactForNode } from "./artifact-store.ts";
+import { adjudicateTaskGraphNode,type TaskNodeAdjudicationInput } from "./adjudication.ts";
 import { TaskGraphConflictError,TaskGraphValidationError } from "./errors.ts";
 import { TaskGraphEvidence } from "./evidence.ts";
 import { contentHash } from "./hash.ts";
@@ -15,7 +15,7 @@ import { TaskGraphRepository } from "./repository.ts";
 import { TaskGraphScheduler } from "./scheduler.ts";
 import { activeTaskGraphRunIds,availableAdmissionSlots,availableDispatchSlots,
   deliverPendingCancellations,onTaskGraphChildSealed,onTaskGraphPrimarySealed,onTaskGraphProgress,
-  tickTaskGraphExclusive } from "./service-execution.ts";
+  observeTaskGraphActivity,tickTaskGraphExclusive } from "./service-execution.ts";
 import { reconcileTaskGraph,steerTaskGraph,taskGraphArtifact } from "./service-controls.ts";
 import { executeTaskGraphCommand } from "./service-idempotency.ts";
 import { publishTaskGraphChanged,publishTaskGraphSnapshot } from "./service-projection.ts";
@@ -25,7 +25,6 @@ import { projectTaskGraphSnapshot } from "./view.ts";
 
 type Row=Record<string,unknown>;
 const log=serverLogger.child("task-graph-service");
-
 export interface TaskGraphChildLauncher {
   startChildRun(input:{workItemId:string;parentRunKey:string;taskId:string;attemptId:string;
     attemptNumber:number;prompt:string;requestId:string;harness?:string;
@@ -85,6 +84,7 @@ export class TaskGraphService {
         }
         return;
       }
+      if (observeTaskGraphActivity(this,envelope)) return;
       if (envelope.type!=="minion_status" || typeof envelope["minionSessionKey"]!=="string") return;
       const sessionRunKey=String(envelope["minionSessionKey"]);
       if (envelope["trigger"]==="step") {
@@ -157,7 +157,7 @@ export class TaskGraphService {
 
   snapshotForWorkItem(workItemId:string,primaryRunKey?:string|null):GraphSnapshot|null {
     const row=this.options.db.prepare(`SELECT id FROM task_graph_runs WHERE work_item_id=?
-      ${primaryRunKey?"AND primary_run_key=?":""} ORDER BY created_at DESC LIMIT 1`)
+      ${primaryRunKey?"AND primary_run_key=?":""} ORDER BY created_at DESC,id DESC LIMIT 1`)
       .get(workItemId,...(primaryRunKey?[primaryRunKey]:[])) as Row|undefined;
     return row?this.repo.snapshot(String(row.id)):null;
   }
@@ -270,6 +270,10 @@ export class TaskGraphService {
     return waiveTaskGraphVerification(this,input);
   }
 
+  adjudicateNode(input:TaskNodeAdjudicationInput):Promise<GraphSnapshot> {
+    return adjudicateTaskGraphNode(this,input);
+  }
+
   steer(input:{runId:string;expectedRunRevision:number;requestId:string;instructions:string;
     affectedNodeIds:string[]}):Promise<GraphSnapshot> {
     return steerTaskGraph(this,input);
@@ -341,28 +345,21 @@ export class TaskGraphService {
       outputSchemas:node.outputSchemas,allowedTools:node.allowedTools,ownershipRequest:node.ownershipRequest}:null;
   }
 
-  stageArtifactForSession(sessionRunKey:string,input:Omit<ArtifactInput,"id">):{
-    artifactId:string;staged:boolean
-  } {
+  stageArtifactForSession(sessionRunKey:string,input:ArtifactStageInput):{artifactId:string;staged:boolean} {
     const attempt=this.attemptForSession(sessionRunKey,["running","waiting"]);
     if (!attempt) throw new TaskGraphValidationError("session is not a current graph attempt");
-    const workItem=this.options.db.prepare(`SELECT w.project_path FROM task_graph_runs g
-      JOIN work_items w ON w.id=g.work_item_id WHERE g.id=?`).get(attempt.run_id) as Row|undefined;
-    if (!workItem) throw new TaskGraphValidationError("graph workspace authority is unavailable");
-    const stored=storeTaskGraphArtifact(String(workItem.project_path),input);
+    const node=this.repo.getRevision(String(attempt.revision_id)).nodes.find(item=>item.id===attempt.node_id)!;
+    const stored=storeTaskGraphArtifactForNode(this.options.db,String(attempt.run_id),node,input);
     const artifactId=`artifact_${contentHash({attemptId:attempt.id,outputName:stored.outputName,
       contentHash:stored.contentHash}).slice("sha256:".length)}`;
     const staged=this.evidence.stageArtifact({runId:String(attempt.run_id),attemptId:String(attempt.id),
       generation:Number(attempt.generation),actorSessionKey:sessionRunKey,idempotencyKey:`stage:${artifactId}`,
       expectedRunRevision:Number(attempt.revision),at:this.now()},{id:artifactId,...stored});
-    const snapshot=this.repo.snapshot(String(attempt.run_id));
-    this.publishChanged(snapshot,"artifact_staged");
+    const snapshot=this.repo.snapshot(String(attempt.run_id));this.publishChanged(snapshot,"artifact_staged");
     return {artifactId,staged};
   }
 
-  async tick(runId:string):Promise<GraphSnapshot> {
-    return this.enqueue(runId,()=>this.tickExclusive(runId));
-  }
+  async tick(runId:string):Promise<GraphSnapshot> { return this.enqueue(runId,()=>this.tickExclusive(runId)); }
 
   /** Package-internal serialized execution seam used by recovery helpers. */
   async enqueue(runId:string,operation:()=>Promise<GraphSnapshot>):Promise<GraphSnapshot> {

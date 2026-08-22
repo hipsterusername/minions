@@ -1,9 +1,21 @@
 import {
+  MAX_TASK_VIEW_BRIEF_ITEM_CHARS,
+  MAX_TASK_VIEW_BRIEF_ITEMS,
+  MAX_TASK_VIEW_CONTEXT_CHARS,
+  MAX_TASK_VIEW_CONTEXT_ENTRIES,
+  MAX_TASK_VIEW_OBJECTIVE_CHARS,
+  MAX_TASK_VIEW_RESPONSE_CHARS,
+  MAX_TASK_VIEW_SOURCE_ID_CHARS,
   taskGraphSnapshotViewSchema,
   type TaskGraphSnapshotView,
 } from "../../shared/task-graph-view-contracts.ts";
 import type { GraphSnapshot, TaskEdge, TaskNode } from "../../shared/task-graph-contracts.ts";
 import type { NodeReadiness } from "./readiness.ts";
+import {hasPassedVerificationTaskWitness} from "./verification-verdict.ts";
+import {isAcceptedNodeAdjudication} from "./adjudication.ts";
+import {hasRestrictedArtifactContent,projectVerificationSummary,redactTaskGraphPayload,
+  redactTaskGraphText}
+  from "./view-verification.ts";
 
 type JsonRow = Record<string, unknown>;
 
@@ -17,6 +29,7 @@ const number = (row: JsonRow, snake: string, camel: string): number | null => {
   return candidate == null ? null : Number(candidate);
 };
 const iso = (at: number | null | undefined): string | undefined => at == null ? undefined : new Date(at).toISOString();
+const bounded=(input:string,limit:number):string=>input.slice(0,limit);
 
 export function projectTaskGraphSnapshot(
   snapshot: GraphSnapshot,
@@ -37,9 +50,13 @@ export function projectTaskGraphSnapshot(
   const currentAttemptIdByNode = new Map([...attemptsByNode].map(([nodeId,attempts]) =>
     [nodeId,text(attempts.at(-1)!,"id","id")]));
   const artifactsByNode = new Map<string,JsonRow[]>();
+  const artifactsByAttempt = new Map<string,JsonRow[]>();
   for (const artifact of snapshot.artifacts) {
     const nodeId = text(artifact,"node_id","nodeId");
     if (nodeId) artifactsByNode.set(nodeId,[...(artifactsByNode.get(nodeId) ?? []),artifact]);
+    const attemptId=text(artifact,"producer_attempt_id","producerAttemptId");
+    if (attemptId) artifactsByAttempt.set(attemptId,
+      [...(artifactsByAttempt.get(attemptId)??[]),artifact]);
   }
   const invalidatedAttempts=new Set(snapshot.invalidations
     .map(row=>text(row,"invalidated_attempt_id","invalidatedAttemptId"))
@@ -48,6 +65,9 @@ export function projectTaskGraphSnapshot(
     text(row,"attempt_id","attemptId")??"",row,
   ]));
   const readinessByNode = new Map(readinessRows.map(row => [row.nodeId,row]));
+  const contextByNode=new Map<string,GraphSnapshot["contextSources"]>();
+  for (const source of snapshot.contextSources) contextByNode.set(source.nodeId,
+    [...(contextByNode.get(source.nodeId)??[]),source]);
   const criticalPath = criticalPathNodeIds(snapshot.revision.nodes,snapshot.revision.edges,
     snapshot.revision.terminalNodeIds);
   const critical = new Set(criticalPath);
@@ -59,23 +79,36 @@ export function projectTaskGraphSnapshot(
     const history = attemptsByNode.get(node.id) ?? [];
     const latest = history.at(-1) ?? null;
     const latestId = latest ? text(latest,"id","id") : null;
+    const adjudicationRows=latestId?snapshot.adjudications.filter(row=>
+      text(row,"node_id","nodeId")===node.id
+      && text(row,"attempt_id","attemptId")===latestId):[];
+    const adjudication=adjudicationRows.at(-1);
+    const accepted=isAcceptedNodeAdjudication(adjudication,node,latest??undefined,
+      snapshot.run.sourceSnapshotId);
     const stale=latestId?invalidatedAttempts.has(latestId):false;
     const artifacts = currentArtifacts(node.id,artifactsByNode,currentAttemptIdByNode,invalidatedAttempts);
     const verificationRows = latestId ? snapshot.verifications.filter(row =>
       text(row,"producer_attempt_id","producerAttemptId") === latestId && !stale) : [];
     const verification = verificationRows.at(-1);
     const verificationResult = verification ? text(verification,"result","result") : null;
+    const verificationSummary = verification
+      ? projectVerificationSummary(verification,artifacts):null;
     const verificationRequest = snapshot.verificationRequests
       .filter(row => text(row,"node_id","nodeId") === node.id).at(-1);
     const requestStatus = verificationRequest ? text(verificationRequest,"status","status") : null;
     const requiredOutputs = Object.keys(node.outputSchemas);
     const hasOutputs = requiredOutputs.every(name => artifacts.some(row => text(row,"output_name","outputName") === name));
-    const verified = !node.verificationRequired || verificationResult === "passed" || verificationResult === "waived";
-    const satisfied = latest ? !stale && text(latest,"outcome","outcome") === "succeeded"
-      && hasOutputs && verified : false;
+    const verified = !node.verificationRequired || accepted
+      || verificationResult === "passed" || verificationResult === "waived";
+    const completionPassed=node.completionMode!=="verification" || accepted
+      || Boolean(latest && hasPassedVerificationTaskWitness(latest));
+    const executionPassed=accepted || text(latest??{},"outcome","outcome") === "succeeded";
+    const satisfied = latest ? !stale && executionPassed
+      && completionPassed && hasOutputs && verified : false;
     const latestOutcome = latest ? text(latest,"outcome","outcome") : null;
+    const invalidCompletion=!accepted && latestOutcome!==null && !completionPassed;
     const unsuccessful = latestOutcome === "failed" || latestOutcome === "cancelled"
-      || latestOutcome === "lost" || latestOutcome === "superseded";
+      || latestOutcome === "lost" || latestOutcome === "superseded" || invalidCompletion;
     const ready = readinessByNode.get(node.id);
     const graphCancelled = snapshot.run.status === "cancelled";
     const logicalState = satisfied ? "succeeded" as const
@@ -85,6 +118,7 @@ export function projectTaskGraphSnapshot(
       : unsuccessful && ready?.reason === "attempts_exhausted" ? "exhausted" as const
       : unsuccessful && ready?.reason === "outcome_not_retryable"
         ? latestOutcome === "cancelled" ? "cancelled" as const : "failed" as const
+      : invalidCompletion ? "failed" as const
       : "pending" as const;
     const currentRuntime = latest ? text(latest,"runtime","runtime") : null;
     const readiness = ready?.ready ? "ready" as const
@@ -92,16 +126,21 @@ export function projectTaskGraphSnapshot(
       : logicalState !== "pending" && logicalState !== "invalidated"
         ? "terminal" as const : "not_ready" as const;
     const currentAttempt = latest ? projectAttempt(latest,node.executorClass,now,
-      usageByAttempt.get(latestId??"")) : null;
+      usageByAttempt.get(latestId??""),node.completionMode==="verification",
+      hasRestrictedArtifactContent(artifactsByAttempt.get(latestId??"")??[])) : null;
     const waitingForHuman = snapshot.revision.edges.some(edge => edge.targetNodeId === node.id
       && edge.kind === "human_gate" && !snapshot.edgeEvaluations.some(row =>
         text(row,"edge_id","edgeId") === edge.id && Boolean(value(row,"satisfied","satisfied"))));
     const verificationBlocker=verificationResult==="failed"
-      ? {category:"policy" as const,explanation:"Independent verification rejected the output"}
+      ? {category:"policy" as const,explanation:verificationSummary
+        ? `Independent verification rejected the output: ${verificationSummary}`
+        : "Independent verification rejected the output"}
       : verificationResult==="inconclusive"
         ? {category:"policy" as const,explanation:"Independent verification was inconclusive"}:null;
+    const completionBlocker=invalidCompletion
+      ? {category:"policy" as const,explanation:"Verification needs Leader adjudication or a guided retry"}:null;
     const blocker = waitingForHuman ? { category:"input" as const,explanation:"Waiting for required human input" }
-      : verificationBlocker??projectBlocker(ready?.reason,currentAttempt?.state ?? null);
+      : completionBlocker??verificationBlocker??projectBlocker(ready?.reason,currentAttempt?.state ?? null);
     const inputIds = snapshot.revision.edges.filter(edge => edge.targetNodeId === node.id)
       .flatMap(edge => currentArtifacts(edge.sourceNodeId,artifactsByNode,currentAttemptIdByNode,invalidatedAttempts)
         .filter(row => !edge.sourceOutput || text(row,"output_name","outputName") === edge.sourceOutput)
@@ -111,11 +150,21 @@ export function projectTaskGraphSnapshot(
     const logs = snapshot.events.filter(event => event.objectId === latestId || attemptNode.get(event.objectId) === node.id)
       .slice(-50).map(event => `${event.type}: ${summarizePayload(event.payload)}`);
     return {
-      id:node.id,title:node.title,kind:node.expansionPolicy ? "map" as const
+      id:node.id,title:node.title,
+      objective:bounded(node.objective,MAX_TASK_VIEW_OBJECTIVE_CHARS),
+      constraints:node.constraints.slice(0,MAX_TASK_VIEW_BRIEF_ITEMS)
+        .map(item=>bounded(item,MAX_TASK_VIEW_BRIEF_ITEM_CHARS)),
+      acceptanceCriteria:node.acceptanceCriteria.slice(0,MAX_TASK_VIEW_BRIEF_ITEMS)
+        .map(item=>bounded(item,MAX_TASK_VIEW_BRIEF_ITEM_CHARS)),
+      context:(contextByNode.get(node.id)??[]).slice(0,MAX_TASK_VIEW_CONTEXT_ENTRIES)
+        .map(projectContextSource),
+      kind:node.expansionPolicy ? "map" as const
         : snapshot.revision.terminalNodeIds.includes(node.id) ? "terminal" as const : "task" as const,
+      completionMode:node.completionMode??"task",
       groupId:`executor:${node.executorClass}`,logicalState,readiness,currentAttempt,
       attemptHistory:history.map(row => projectAttempt(row,node.executorClass,now,
-        usageByAttempt.get(text(row,"id","id")??""))),
+        usageByAttempt.get(text(row,"id","id")??""),node.completionMode==="verification",
+        hasRestrictedArtifactContent(artifactsByAttempt.get(text(row,"id","id")??"")??[]))),
       verification:{ state:node.verificationRequired
         ? verificationResult === "passed" ? "passed" as const
           : verificationResult === "failed" ? "failed" as const
@@ -125,11 +174,21 @@ export function projectTaskGraphSnapshot(
         : "not_required" as const,
         ...(verification ? { verifierAttemptId:text(verification,"verifier_attempt_id","verifierAttemptId") ?? undefined } : {}),
         evidenceIds:verificationRows.map(row => text(row,"id","id")).filter((id):id is string => id !== null),
-        ...(verificationResult === "inconclusive"
+        ...(verificationSummary ? {explanation:verificationSummary}
+          : verificationResult === "inconclusive"
           ? { explanation:"Independent verifier could not produce a conclusive verdict" }
           : !verificationResult && requestStatus === "failed"
             ? { explanation:"Independent verifier failed to produce a valid verdict" } : {}),
       },
+      adjudication:adjudication?{
+        decision:text(adjudication,"decision","decision") as "accepted"|"rejected"|"retry",
+        attemptId:text(adjudication,"attempt_id","attemptId")!,
+        actor:bounded(text(adjudication,"actor","actor")??"unknown",256),
+        reason:bounded(text(adjudication,"reason","reason")??"No reason recorded",2_000),
+        ...(text(adjudication,"guidance","guidance")
+          ? {guidance:bounded(text(adjudication,"guidance","guidance")!,4_000)}:{}),
+        createdAt:iso(number(adjudication,"created_at","createdAt"))!,
+      }:null,
       blocker,priority:snapshot.revision.nodes.length-index,
       ...(latest ? {} : { queueAgeMs:Math.max(0,snapshot.run.updatedAt-snapshot.run.createdAt) }),
       ...(latest && number(latest,"backoff_until","backoffUntil") != null
@@ -198,26 +257,50 @@ export function projectTaskGraphSnapshot(
   });
 }
 
-function projectAttempt(row:JsonRow,executor:string,now:number,usage?:JsonRow) {
+function projectAttempt(row:JsonRow,executor:string,now:number,usage?:JsonRow,
+  verdictRequired=false,withholdText=false) {
   const runtime = text(row,"runtime","runtime");
   const outcome = text(row,"outcome","outcome");
   const backoffUntil = number(row,"backoff_until","backoffUntil");
-  const state = runtime === "terminal" ? outcome === "succeeded" ? "succeeded" as const
+  const effectiveSuccess=outcome==="succeeded"
+    && (!verdictRequired || hasPassedVerificationTaskWitness(row));
+  const state = runtime === "terminal" ? effectiveSuccess ? "succeeded" as const
     : outcome === "cancelled" ? "cancelled" as const
       : outcome === "superseded" ? "superseded" as const
       : backoffUntil && backoffUntil > now ? "backoff" as const : "failed" as const
     : runtime === "running" ? "running" as const : runtime === "waiting" ? "blocked" as const : "queued" as const;
   const created = number(row,"created_at","createdAt");
   const updated = number(row,"updated_at","updatedAt");
+  const rawResponse=text(row,"final_report","finalReport")?.trim();
+  const response=rawResponse && !withholdText ? redactTaskGraphText(rawResponse):null;
   return { id:text(row,"id","id")!,number:number(row,"attempt_number","attemptNumber") ?? 1,state,executor,
     ...(text(row,"session_run_key","sessionRunKey") ? { sessionId:text(row,"session_run_key","sessionRunKey")! } : {}),
     ...(iso(created) ? { startedAt:iso(created)! } : {}),
     ...(runtime === "terminal" && iso(updated) ? { finishedAt:iso(updated)! } : {}),
     costUsd:number(usage??{},"cost_usd","costUsd")??0,
     tokens:number(usage??{},"tokens","tokens")??0,
-    ...(value(row,"terminal_witness_json","terminalWitness")
+    ...(!withholdText && value(row,"terminal_witness_json","terminalWitness")
       ? { summary:summarizePayload(value(row,"terminal_witness_json","terminalWitness")) } : {}),
+    ...(response ? {response:bounded(response,MAX_TASK_VIEW_RESPONSE_CHARS)} : {}),
   };
+}
+
+function projectContextSource(source:GraphSnapshot["contextSources"][number]) {
+  const sourceId=safeSourceId(source.sourceId,source.contentHash);
+  if (source.classification==="public" || source.classification==="internal") return {
+    sourceId,contentHash:source.contentHash,classification:source.classification,
+    content:bounded(source.content,MAX_TASK_VIEW_CONTEXT_CHARS),
+  };
+  return {sourceId,contentHash:source.contentHash,
+    classification:source.classification==="secret"?"secret" as const:"sensitive" as const,
+    withheld:true as const};
+}
+
+function safeSourceId(sourceId:string,contentHash:string):string {
+  const looksLikeStoragePath=sourceId.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(sourceId)
+    || sourceId.startsWith("file://");
+  return looksLikeStoragePath ? `source:${contentHash.slice("sha256:".length,"sha256:".length+12)}`
+    : bounded(sourceId,MAX_TASK_VIEW_SOURCE_ID_CHARS)||"context";
 }
 
 function projectBlocker(reason: string | undefined, attemptState: string | null) {
@@ -246,7 +329,7 @@ function eventType(type: string) {
   if (type.includes("dispatch")) return "dispatch" as const;
   if (type.includes("progress") || type.includes("terminal")) return "progress" as const;
   if (type.includes("retry")) return "retry" as const;
-  if (type.includes("waiv")) return "waiver" as const;
+  if (type.includes("waiv") || type.includes("adjudicat")) return "waiver" as const;
   if (type.includes("artifact") || type.includes("verification")) return "invalidation" as const;
   if (type.includes("steer") || type.includes("pause") || type.includes("resume")
     || type.includes("cancel")) return "steering" as const;
@@ -254,10 +337,14 @@ function eventType(type: string) {
 }
 
 function summarizePayload(payload: unknown): string {
-  if (payload == null) return "";
-  if (typeof payload === "string") return payload;
-  try { const rendered = JSON.stringify(payload); return rendered.length > 180 ? `${rendered.slice(0,177)}...` : rendered; }
-  catch { return String(payload); }
+  let rendered:string;
+  if (payload == null) rendered="";
+  else if (typeof payload === "string") rendered=redactTaskGraphText(payload);
+  else {
+    try { rendered=JSON.stringify(redactTaskGraphPayload(payload)); }
+    catch { rendered=String(payload); }
+  }
+  return redactTaskGraphText(rendered.length>180?`${rendered.slice(0,177)}...`:rendered);
 }
 
 function budgetMicros(request: Record<string,unknown>): number {

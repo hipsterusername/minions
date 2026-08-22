@@ -28,14 +28,29 @@ describe("task graph response envelope",() => {
 
 describe("task graph view commands",() => {
   it("requires a concrete displayed attempt fence for attempt-bound controls",() => {
-    for (const type of ["retry_task_node","request_task_verification","waive_task_verification"] as const) {
-      const extra=type==="waive_task_verification"?{actor:"operator",reason:"reviewed"}:{};
+    for (const type of ["retry_task_node","request_task_verification","waive_task_verification",
+      "adjudicate_task_node"] as const) {
+      const extra=type==="waive_task_verification"?{actor:"operator",reason:"reviewed"}
+        :type==="adjudicate_task_node"
+          ? {reason:"reviewed",adjudication:"accepted" as const}:{};
       const command={type,requestId:"request",workItemId:"work",runId:"run",nodeId:"node",
         expectedRunRevision:2,...extra};
       expect(taskGraphViewControlCommandSchema.safeParse(command).success).toBe(false);
       expect(taskGraphViewControlCommandSchema.safeParse({...command,currentAttemptId:null}).success).toBe(false);
       expect(taskGraphViewControlCommandSchema.safeParse({...command,currentAttemptId:"attempt"}).success).toBe(true);
     }
+  });
+
+  it("accepts guidance only for a retry adjudication",()=>{
+    const command={type:"adjudicate_task_node" as const,requestId:"request",
+      workItemId:"work",runId:"run",nodeId:"node",currentAttemptId:"attempt",
+      expectedRunRevision:2,reason:"reviewed",guidance:"Run tests"};
+    expect(taskGraphViewControlCommandSchema.safeParse({...command,
+      adjudication:"retry"}).success).toBe(true);
+    expect(taskGraphViewControlCommandSchema.safeParse({...command,
+      adjudication:"accepted"}).success).toBe(false);
+    expect(taskGraphViewControlCommandSchema.safeParse({...command,
+      adjudication:"retry",actor:"spoofed-leader"}).success).toBe(false);
   });
 
   it("keeps pre-attempt human input explicitly nullable",() => {

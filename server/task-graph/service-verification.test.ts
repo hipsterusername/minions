@@ -221,8 +221,9 @@ describe("verification request revision projection",()=>{
     db=rejected.db;
     await rejected.service.requestVerification({runId:"graph",nodeId:"node",
       currentAttemptId:"producer",expectedRunRevision:0});
+    const rejectionSummary=`Hash mismatch at output.result ${"x".repeat(1_200)}`;
     sealChildWorkItemRun(db,{workItemId:"work",runKey:"verifier-rejected",outcome:"completed",
-      finalReport:JSON.stringify({result:"failed",confidence:0.95}),at:21});
+      finalReport:JSON.stringify({result:"failed",confidence:0.95,summary:rejectionSummary}),at:21});
     await rejected.service.tick("graph");
 
     const snapshot=rejected.service.snapshot("graph");
@@ -230,6 +231,47 @@ describe("verification request revision projection",()=>{
     expect(snapshot.verificationRequests[0]).toMatchObject({status:"completed",result:"failed"});
     expect(snapshot.events).toContainEqual(expect.objectContaining({type:"verification_disposition",
       payload:expect.objectContaining({nodeId:"node",result:"failed",status:"failed"})}));
+    const durable=snapshot.verifications[0]!["record_json"] as {summary:string};
+    expect(durable.summary).toHaveLength(1_000);
+    expect(durable.summary).toContain("Hash mismatch at output.result");
+    expect(rejected.service.viewSnapshot("graph").nodes[0]).toMatchObject({
+      verification:{state:"failed",explanation:expect.stringContaining("Hash mismatch at output.result")},
+      blocker:{category:"policy",explanation:expect.stringContaining("Hash mismatch at output.result")},
+    });
+    rejected.service.dispose();
+  });
+
+  it("lets the Leader resolve a rejected producer verification without rewriting evidence",async()=>{
+    let db!:ReturnType<typeof initDb>;
+    const rejected=fixture({startChildRun:async input=>{
+      createChildWorkItemRun(db,{workItemId:"work",runKey:"verifier-adjudicated",
+        parentRunKey:"primary",taskId:input.taskId,attemptId:input.attemptId,
+        attemptNumber:input.attemptNumber,idempotencyKey:input.requestId,at:10});
+      return child(input.attemptId,input.attemptNumber,"verifier-adjudicated");
+    }},()=>20);
+    db=rejected.db;
+    await rejected.service.requestVerification({runId:"graph",nodeId:"node",
+      currentAttemptId:"producer",expectedRunRevision:0});
+    sealChildWorkItemRun(db,{workItemId:"work",runKey:"verifier-adjudicated",outcome:"completed",
+      finalReport:JSON.stringify({result:"failed",confidence:0.95,
+        summary:"The output needs a documented exception."}),at:21});
+    await rejected.service.tick("graph");
+    const blocked=rejected.service.snapshot("graph");
+    expect(blocked.run.status).toBe("failed");
+
+    const accepted=await rejected.service.adjudicateNode({runId:"graph",nodeId:"node",
+      currentAttemptId:"producer",expectedRunRevision:blocked.run.revision,
+      requestId:"accept-rejected-verification",decision:"accepted",
+      actor:"leader:primary",reason:"The Leader reviewed and accepted the documented exception."});
+
+    expect(accepted.run.status).toBe("completed");
+    expect(accepted.verifications[0]).toMatchObject({result:"failed"});
+    expect(accepted.adjudications[0]).toMatchObject({decision:"accepted",
+      attempt_id:"producer"});
+    expect(rejected.service.viewSnapshot("graph").nodes[0]).toMatchObject({
+      logicalState:"succeeded",verification:{state:"failed"},
+      adjudication:{decision:"accepted"},
+    });
     rejected.service.dispose();
   });
 

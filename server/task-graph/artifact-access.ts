@@ -1,6 +1,7 @@
 import type { TaskGraphService } from "./service.ts";
 import { TaskGraphConflictError,TaskGraphValidationError } from "./errors.ts";
 import { readStoredTaskGraphArtifact } from "./artifact-store.ts";
+import {effectiveAttemptSuccessSql} from "./adjudication.ts";
 
 type Row=Record<string,unknown>;
 
@@ -86,7 +87,8 @@ function attemptInputs(service:TaskGraphService,attempt:Row):AuthorizedArtifact[
     const row=service.options.db.prepare(`SELECT ar.* FROM task_artifacts ar
       JOIN task_node_attempts producer ON producer.id=ar.producer_attempt_id
       WHERE ar.run_id=? AND ar.node_id=? AND ar.output_name=? AND ar.state='committed'
-      AND ar.source_snapshot_id=? AND producer.runtime='terminal' AND producer.outcome='succeeded'
+      AND ar.source_snapshot_id=? AND producer.runtime='terminal'
+      AND ${effectiveAttemptSuccessSql("producer")}
       AND NOT EXISTS (SELECT 1 FROM task_node_invalidations i WHERE i.run_id=ar.run_id
         AND i.invalidated_attempt_id=ar.producer_attempt_id)
       AND NOT EXISTS (SELECT 1 FROM task_node_attempts newer WHERE newer.run_id=producer.run_id

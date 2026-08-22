@@ -69,6 +69,9 @@ export function validateRevision(
     if (node.verificationRequired && Object.keys(node.outputSchemas).length===0) {
       throw new TaskGraphValidationError(`node ${node.id} requires verification but declares no outputs`);
     }
+    if (node.completionMode==="verification" && node.acceptanceCriteria.length===0) {
+      throw new TaskGraphValidationError(`verification-mode node ${node.id} declares no acceptance criteria`);
+    }
     if (node.failurePolicy==="continue_optional"
       && (revision.terminalNodeIds.includes(node.id)
         || outgoingEdges.some(edge=>!edge.optional && edge.failurePolicy!=="skip"))) {

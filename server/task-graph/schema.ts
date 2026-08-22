@@ -27,8 +27,7 @@ export function migrateTaskGraph(db: Database.Database): void {
       id TEXT PRIMARY KEY, work_item_id TEXT NOT NULL, primary_run_key TEXT NOT NULL,
       revision_id TEXT NOT NULL REFERENCES task_graph_revisions(id), source_snapshot_id TEXT NOT NULL,
       status TEXT NOT NULL, paused INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 0,
-      max_active_attempts INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
-      UNIQUE(work_item_id,primary_run_key)
+      max_active_attempts INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS task_node_attempts (
       id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES task_graph_runs(id), node_id TEXT NOT NULL,
@@ -119,6 +118,15 @@ export function migrateTaskGraph(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS task_node_invalidations_latest
       ON task_node_invalidations(run_id,node_id,created_at DESC);
+    CREATE TABLE IF NOT EXISTS task_node_adjudications (
+      id TEXT PRIMARY KEY, run_id TEXT NOT NULL, node_id TEXT NOT NULL,
+      attempt_id TEXT NOT NULL, source_snapshot_id TEXT NOT NULL,
+      acceptance_criteria_version TEXT NOT NULL, decision TEXT NOT NULL,
+      actor TEXT NOT NULL, reason TEXT NOT NULL, guidance TEXT, created_at INTEGER NOT NULL,
+      UNIQUE(run_id,node_id,attempt_id)
+    );
+    CREATE INDEX IF NOT EXISTS task_node_adjudications_run
+      ON task_node_adjudications(run_id,node_id,created_at DESC);
     CREATE TABLE IF NOT EXISTS task_scheduler_events (
       sequence INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, run_revision INTEGER NOT NULL,
       type TEXT NOT NULL, object_id TEXT NOT NULL, idempotency_key TEXT NOT NULL,
@@ -155,7 +163,47 @@ export function migrateTaskGraph(db: Database.Database): void {
   ensureColumn(db,"task_graph_plan_proposals","review_requirements_json",
     "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(db,"task_graph_plan_proposals","terminal_wake_delivered_at","INTEGER");
+  migrateLegacyGraphRunUniqueness(db);
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS task_one_nonterminal_graph_run
+    ON task_graph_runs(work_item_id,primary_run_key)
+    WHERE status NOT IN ('completed','failed','cancelled')`);
   migrateLegacyPendingReviewBlockers(db);
+}
+
+/**
+ * Early task-graph databases encoded "one graph ever" as a table UNIQUE constraint.
+ * Rebuild only that legacy shape so history can contain many terminal iterations while
+ * the partial index above continues to enforce one nonterminal graph transactionally.
+ */
+function migrateLegacyGraphRunUniqueness(db:Database.Database):void {
+  const table=db.prepare(`SELECT sql FROM sqlite_master
+    WHERE type='table' AND name='task_graph_runs'`).get() as {sql:string}|undefined;
+  if (!table?.sql || !/UNIQUE\s*\(\s*work_item_id\s*,\s*primary_run_key\s*\)/i.test(table.sql)) {
+    return;
+  }
+  const objects=db.prepare(`SELECT name,sql FROM sqlite_master
+    WHERE tbl_name='task_graph_runs' AND type IN ('index','trigger') AND sql IS NOT NULL
+    ORDER BY type,name`).all() as Array<{name:string;sql:string}>;
+  const columns=(db.pragma("table_info(task_graph_runs)") as Array<{name:string}>)
+    .map(row=>`"${row.name.replaceAll('"','""')}"`).join(", ");
+  const createSql=table.sql
+    .replace(/^CREATE TABLE\s+(?:IF NOT EXISTS\s+)?(?:"task_graph_runs"|`task_graph_runs`|\[task_graph_runs\]|task_graph_runs)/i,
+      "CREATE TABLE task_graph_runs_iteration_migration")
+    .replace(/,\s*UNIQUE\s*\(\s*work_item_id\s*,\s*primary_run_key\s*\)/i,"");
+  const foreignKeys=db.pragma("foreign_keys",{simple:true}) as number;
+  if (foreignKeys) db.pragma("foreign_keys = OFF");
+  try {
+    db.transaction(()=>{
+      db.exec(createSql);
+      db.exec(`INSERT INTO task_graph_runs_iteration_migration (${columns})
+        SELECT ${columns} FROM task_graph_runs`);
+      db.exec("DROP TABLE task_graph_runs");
+      db.exec("ALTER TABLE task_graph_runs_iteration_migration RENAME TO task_graph_runs");
+      for (const object of objects) db.exec(object.sql);
+    }).immediate();
+  } finally {
+    if (foreignKeys) db.pragma("foreign_keys = ON");
+  }
 }
 
 function migrateLegacyPendingReviewBlockers(db: Database.Database): void {

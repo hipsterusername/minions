@@ -42,20 +42,31 @@ export class TaskGraphRepository {
   startRun(input: { id: string; workItemId: string; primaryRunKey: string; revisionId: string;
     sourceSnapshot: SourceSnapshot; expectedLifecycleRevision: number; at: number }): GraphSnapshot {
     return this.db.transaction(() => {
-      const duplicate = this.db.prepare("SELECT * FROM task_graph_runs WHERE work_item_id=? AND primary_run_key=?")
-        .get(input.workItemId, input.primaryRunKey) as Row | undefined;
+      const duplicate = this.db.prepare("SELECT * FROM task_graph_runs WHERE id=?")
+        .get(input.id) as Row | undefined;
       if (duplicate) {
         const source=this.db.prepare("SELECT content_hash FROM task_source_snapshots WHERE id=?")
           .get(duplicate.source_snapshot_id) as Row|undefined;
-        if (duplicate.id!==input.id || duplicate.revision_id!==input.revisionId
+        if (duplicate.work_item_id!==input.workItemId
+          || duplicate.primary_run_key!==input.primaryRunKey
+          || duplicate.revision_id!==input.revisionId
           || duplicate.source_snapshot_id!==input.sourceSnapshot.id
           || source?.content_hash!==contentHash(sourceSnapshotSchema.parse(input.sourceSnapshot))) {
-          throw new TaskGraphConflictError("graph run replay does not match canonical run",this.snapshot(String(duplicate.id)));
+          throw new TaskGraphConflictError("graph run replay does not match immutable run",
+            this.snapshot(String(duplicate.id)));
         }
         return this.snapshot(String(duplicate.id));
       }
-      const collidingRun=this.db.prepare("SELECT id FROM task_graph_runs WHERE id=?").get(input.id);
-      if (collidingRun) throw new TaskGraphConflictError("graph run id already belongs to another authority");
+      const active=this.db.prepare(`SELECT id FROM task_graph_runs WHERE work_item_id=?
+        AND primary_run_key=? AND status NOT IN ('completed','failed','cancelled')
+        ORDER BY created_at DESC,id DESC LIMIT 1`).get(
+        input.workItemId,input.primaryRunKey) as Row|undefined;
+      if (active) {
+        throw new TaskGraphConflictError(
+          "another graph run is active; cancel it before starting a successor",
+          this.snapshot(String(active.id)),
+        );
+      }
       const workItem = this.db.prepare("SELECT lifecycle_revision,current_run_key FROM work_items WHERE id=?")
         .get(input.workItemId) as Row | undefined;
       if (!workItem || workItem.lifecycle_revision !== input.expectedLifecycleRevision || workItem.current_run_key !== input.primaryRunKey) {
@@ -140,7 +151,7 @@ export class TaskGraphRepository {
         paused: Boolean(run.paused), revision: run.revision, maxActiveAttempts: run.max_active_attempts,
         createdAt: run.created_at, updatedAt: run.updated_at },
       revision, sourceSnapshot: parse(sourceRow.snapshot_json),
-      attempts: rows("task_node_attempts", "created_at,id").map(this.mapJson("terminal_witness_json")),
+      attempts: this.attemptRows(runId),
       artifacts: rows("task_artifacts", "created_at,id").map(this.mapJson("metadata_json")),
       verifications: rows("task_verifications", "created_at,id").map(this.mapJson("record_json")),
       verificationRequests: rows("task_verification_requests", "created_at,id"),
@@ -155,7 +166,14 @@ export class TaskGraphRepository {
       reconciliations: rows("task_reconciliations", "created_at,id").map(this.mapJson("record_json")),
       steeringEvents: rows("task_graph_steering_events", "created_at,id").map(this.mapJson("record_json")),
       invalidations: rows("task_node_invalidations", "created_at,node_id"),
+      adjudications: rows("task_node_adjudications", "created_at,id"),
       usage: this.usageRows(runId),
+      contextSources:(this.db.prepare(`SELECT node_id,source_id,content_hash,classification,content
+        FROM task_graph_context_sources WHERE source_snapshot_id=? ORDER BY node_id,source_id`)
+        .all(run.source_snapshot_id) as Row[]).map(row=>({
+          nodeId:String(row.node_id),sourceId:String(row.source_id),contentHash:String(row.content_hash),
+          classification:String(row.classification),content:String(row.content),
+        })),
       events: events.reverse().map(e => ({ sequence:e.sequence,runId:e.run_id,runRevision:e.run_revision,type:e.type,
         objectId:e.object_id,payload:parse(e.payload_json),createdAt:e.created_at })),
     });
@@ -163,6 +181,16 @@ export class TaskGraphRepository {
 
   private mapJson(column: string): (row: Row) => Row {
     return row => ({ ...row, [column]: row[column] == null ? null : parse(row[column]) });
+  }
+  private attemptRows(runId:string):Row[] {
+    const sessionColumns=new Set((this.db.prepare("PRAGMA table_info('sessions')").all() as Row[])
+      .map(row=>String(row.name)));
+    const select=sessionColumns.has("final_report")
+      ? `SELECT a.*,s.final_report FROM task_node_attempts a
+          LEFT JOIN sessions s ON s.session_key=a.session_run_key
+          WHERE a.run_id=? ORDER BY a.created_at,a.id`
+      : `SELECT * FROM task_node_attempts WHERE run_id=? ORDER BY created_at,id`;
+    return (this.db.prepare(select).all(runId) as Row[]).map(this.mapJson("terminal_witness_json"));
   }
   private usageRows(runId:string):Row[] {
     const tables=new Set((this.db.prepare(`SELECT name FROM sqlite_master WHERE type='table'
