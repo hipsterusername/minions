@@ -114,6 +114,10 @@ export function graphActionToCommand(action: GraphInspectorAction, workItemId: s
     case "waive_verification": command = { type: "waive_task_verification", ...fence,
       nodeId: action.nodeId!, currentAttemptId: action.currentAttemptId,actor:"operator",
       reason:action.reason }; break;
+    case "adjudicate": command={type:"adjudicate_task_node",...fence,
+      nodeId:action.nodeId!,currentAttemptId:action.currentAttemptId!,
+      adjudication:action.decision,reason:action.reason,
+      ...(action.guidance?{guidance:action.guidance}:{})};break;
     case "provide_input": command = { type: "provide_task_input", ...fence,
       nodeId: action.nodeId!, currentAttemptId: action.currentAttemptId,actor:"operator",input: action.input }; break;
   }

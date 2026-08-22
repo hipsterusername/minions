@@ -29,6 +29,7 @@ export function ViewportOverlay({
         height: "100dvh",
         overflow: "hidden",
         pointerEvents: "none",
+        isolation: "isolate",
         zIndex,
         ...style,
       }}

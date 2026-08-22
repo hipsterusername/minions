@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -12,6 +12,7 @@ import {
 import type { DisplayMessage } from "../sdk-messages.ts";
 import type { ServerMessage, SocketSubscribe } from "../use-socket.ts";
 import type { MobileSessionInfo } from "./mobile-selectors.ts";
+import { createGraphFixture } from "../task-graph/fixtures.ts";
 
 function fakeSubscribe(onMessage?: (listener: (msg: ServerMessage) => void) => void): SocketSubscribe {
   return Object.assign(
@@ -37,6 +38,48 @@ function leaderSession(overrides: Partial<MobileSessionInfo> = {}): MobileSessio
 }
 
 describe("SessionChatScreen", () => {
+  it("opens the canonical graph inspector from a leader session on mobile", async () => {
+    const previousWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    const listeners: Array<(message: ServerMessage) => void> = [];
+    const send = vi.fn();
+    try {
+      render(
+        <SessionChatScreen
+          sessionKey="leader-graph"
+          session={leaderSession({ sessionKey: "leader-graph", workItemId: "work-item-graph" })}
+          subscribe={fakeSubscribe((listener) => listeners.push(listener))}
+          send={send}
+          onBack={() => {}}
+        />,
+      );
+
+      await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({
+        type: "get_task_graph_snapshot",
+        workItemId: "work-item-graph",
+      })));
+      const snapshot = createGraphFixture(10);
+      act(() => listeners.forEach((listener) => listener({
+        topic: "work-item:work-item-graph",
+        type: "task_graph_snapshot",
+        workItemId: "work-item-graph",
+        runId: snapshot.graphRunId,
+        revision: snapshot.revision,
+        cause: "mobile-test",
+        timestamp: 1,
+        snapshot,
+      } as never)));
+
+      fireEvent.click(await screen.findByRole("button", { name: /Graph/ }));
+      expect(screen.getByRole("dialog", { name: /10-node research graph/ })).toBeInTheDocument();
+      expect(screen.queryByRole("complementary", { name: "Authored execution plan" })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Close graph inspector" }));
+      expect(screen.queryByRole("dialog", { name: /10-node research graph/ })).not.toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
+    }
+  });
+
   it("shows an accessible pulsing affordance while the agent is thinking", () => {
     render(<ActiveThinkingIndicator />);
 

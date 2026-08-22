@@ -1,4 +1,4 @@
-import { useId, useMemo } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { nodeIdsForPlanItem, projectTopology, runtimeRole, whyNotRunning } from "./model.ts";
 import { NodeState } from "./NodeState.tsx";
 import type { GraphFilter, GraphPlanItem, TaskGraphEdgeView, TaskGraphNodeView, TaskGraphSnapshotView } from "./types.ts";
@@ -11,6 +11,23 @@ const ROOT_WIDTH = 150;
 const ROOT_GAP = 76;
 const PADDING_X = 32;
 const PADDING_Y = 52;
+const CAMERA_PADDING_X = 28;
+const CAMERA_PADDING_Y = 44;
+const MIN_CAMERA_SCALE = 0.72;
+const MAX_CAMERA_SCALE = 1.25;
+
+interface Dimensions {
+  width: number;
+  height: number;
+}
+
+interface TopologyCamera {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+  stageWidth: number;
+  stageHeight: number;
+}
 
 interface PositionedNode {
   node: TaskGraphNodeView;
@@ -33,17 +50,18 @@ export function Topology({
   plan?: readonly GraphPlanItem[];
   onSelect: (id: string) => void;
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const viewport = useElementDimensions(scrollRef);
   const markerId = useId().replaceAll(":", "");
   const projection = useMemo(
     () => projectTopology(snapshot, filter, selectedNodeId),
     [snapshot, filter, selectedNodeId],
   );
-  const visibleIds = useMemo(() => new Set(projection.nodes.map((node) => node.id)), [projection.nodes]);
-  const layoutEdges = useMemo(
-    () => snapshot.edges.filter((edge) => visibleIds.has(edge.source) && visibleIds.has(edge.target)),
-    [snapshot.edges, visibleIds],
+  const layout = useMemo(
+    () => layoutDag(projection.nodes, projection.edges),
+    [projection.nodes, projection.edges],
   );
-  const layout = useMemo(() => layoutDag(projection.nodes, layoutEdges), [projection.nodes, layoutEdges]);
+  const camera = fitTopologyCamera(layout, viewport);
   const focusedPlan = plan.find((item) => item.taskId === focusedPlanTaskId);
   const focusedIds = nodeIdsForPlanItem(snapshot.nodes, focusedPlan);
   const hasPlanFocus = focusedIds.size > 0;
@@ -52,7 +70,7 @@ export function Topology({
       .filter((edge) => edge.source === selectedNodeId || edge.target === selectedNodeId)
       .map((edge) => edge.id),
   );
-  const rootTargets = layout.positioned.filter(({ node }) => !layoutEdges.some((edge) => edge.target === node.id));
+  const rootTargets = layout.positioned.filter(({ node }) => !projection.edges.some((edge) => edge.target === node.id));
   const rootY = Math.max(PADDING_Y, (layout.height - NODE_HEIGHT) / 2);
 
   return (
@@ -63,75 +81,100 @@ export function Topology({
         {projection.hiddenEdgeCount > 0 ? <span>{projection.hiddenEdgeCount} edges hidden until focus.</span> : null}
         {focusedPlanTaskId && !hasPlanFocus ? <span className="tg-notice-attention">Selected plan item has no exact runtime projection.</span> : null}
       </div>
-      <div className="tg-flow-scroll">
-        <div className="tg-flow-canvas" style={{ width: layout.width, height: layout.height }}>
-          <svg className="tg-flow-edges" viewBox={`0 0 ${layout.width} ${layout.height}`} aria-hidden="true">
-            <defs>
-              <marker id={`tg-arrow-${markerId}`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
-                <path d="M0,0 L8,4 L0,8 z" />
-              </marker>
-            </defs>
-            {rootTargets.map(({ node, x, y }) => (
-              <path
-                className="tg-flow-edge tg-flow-edge--expansion"
-                key={`root-${node.id}`}
-                d={edgePath(PADDING_X + ROOT_WIDTH, rootY + NODE_HEIGHT / 2, x, y + NODE_HEIGHT / 2)}
-                markerEnd={`url(#tg-arrow-${markerId})`}
-              />
-            ))}
-            {projection.edges.map((edge) => {
-              const source = layout.byId.get(edge.source);
-              const target = layout.byId.get(edge.target);
-              if (!source || !target) return null;
-              const related = selectedEdges.has(edge.id);
-              const dimmed = hasPlanFocus && !focusedIds.has(edge.source) && !focusedIds.has(edge.target);
-              return (
+      <div ref={scrollRef} className="tg-flow-scroll">
+        <div
+          className="tg-flow-canvas"
+          style={{ width: camera.stageWidth, height: camera.stageHeight }}
+        >
+          <div
+            className="tg-flow-scene"
+            data-camera-offset-x={camera.offsetX}
+            data-camera-offset-y={camera.offsetY}
+            data-camera-scale={camera.scale}
+            data-scene-width={layout.width}
+            data-scene-height={layout.height}
+            style={{
+              width: layout.width,
+              height: layout.height,
+              transform: `translate(${camera.offsetX}px, ${camera.offsetY}px) scale(${camera.scale})`,
+            }}
+          >
+            <svg
+              className="tg-flow-layer tg-flow-layer--edges tg-flow-edges"
+              width={layout.width}
+              height={layout.height}
+              viewBox={`0 0 ${layout.width} ${layout.height}`}
+              aria-hidden="true"
+            >
+              <defs>
+                <marker id={`tg-arrow-${markerId}`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+                  <path d="M0,0 L8,4 L0,8 z" />
+                </marker>
+              </defs>
+              {rootTargets.map(({ node, x, y }) => (
                 <path
-                  key={edge.id}
-                  className={`tg-flow-edge tg-flow-edge--${edge.type} tg-flow-edge--${edge.state}${related ? " is-related" : ""}${dimmed ? " is-dimmed" : ""}`}
-                  d={edgePath(source.x + NODE_WIDTH, source.y + NODE_HEIGHT / 2, target.x, target.y + NODE_HEIGHT / 2)}
+                  className="tg-flow-edge tg-flow-edge--expansion"
+                  key={`root-${node.id}`}
+                  d={edgePath(PADDING_X + ROOT_WIDTH, rootY + NODE_HEIGHT / 2, x, y + NODE_HEIGHT / 2)}
                   markerEnd={`url(#tg-arrow-${markerId})`}
-                >
-                  <title>{edge.source} to {edge.target}: {edge.type}</title>
-                </path>
-              );
-            })}
-          </svg>
+                />
+              ))}
+              {projection.edges.map((edge) => {
+                const source = layout.byId.get(edge.source);
+                const target = layout.byId.get(edge.target);
+                if (!source || !target) return null;
+                const related = selectedEdges.has(edge.id);
+                const dimmed = hasPlanFocus && !focusedIds.has(edge.source) && !focusedIds.has(edge.target);
+                return (
+                  <path
+                    key={edge.id}
+                    className={`tg-flow-edge tg-flow-edge--${edge.type} tg-flow-edge--${edge.state}${related ? " is-related" : ""}${dimmed ? " is-dimmed" : ""}`}
+                    d={edgePath(source.x + NODE_WIDTH, source.y + NODE_HEIGHT / 2, target.x, target.y + NODE_HEIGHT / 2)}
+                    markerEnd={`url(#tg-arrow-${markerId})`}
+                  >
+                    <title>{edge.source} to {edge.target}: {edge.type}</title>
+                  </path>
+                );
+              })}
+            </svg>
 
-          <article className="tg-flow-root" style={{ left: PADDING_X, top: rootY }}>
-            <span className="tg-role-label">Leader · graph run</span>
-            <strong>{snapshot.title}</strong>
-            <small>rev {snapshot.revision} · {snapshot.status}</small>
-          </article>
+            <div className="tg-flow-layer tg-flow-layer--nodes">
+              <article className="tg-flow-root" style={{ left: PADDING_X, top: rootY }}>
+                <span className="tg-role-label">Leader · graph run</span>
+                <strong>{snapshot.title}</strong>
+                <small>rev {snapshot.revision} · {snapshot.status}</small>
+              </article>
 
-          {layout.positioned.map(({ node, x, y }) => {
-            const role = runtimeRole(node, plan);
-            const mappedPlanIndex = plan.findIndex((item) => item.taskId === node.id || (!!item.minionSessionKey && item.minionSessionKey === node.currentAttempt?.sessionId));
-            const selected = selectedNodeId === node.id;
-            const related = selectedEdges.size > 0 && projection.edges.some((edge) => selectedEdges.has(edge.id) && (edge.source === node.id || edge.target === node.id));
-            const dimmed = hasPlanFocus && !focusedIds.has(node.id);
-            return (
-              <button
-                type="button"
-                key={node.id}
-                className={`tg-flow-node tg-flow-node--${role}${selected ? " is-selected" : ""}${related ? " is-related" : ""}${dimmed ? " is-dimmed" : ""}`}
-                style={{ left: x, top: y }}
-                aria-label={`${roleLabel(role)} ${node.title}; logical ${node.logicalState}; ${whyNotRunning(node)}`}
-                onClick={() => onSelect(node.id)}
-              >
-                <span className="tg-flow-node__top">
-                  <span className="tg-role-label"><i />{roleLabel(role)}</span>
-                  {mappedPlanIndex >= 0 ? <span className="tg-plan-badge">P{mappedPlanIndex + 1}</span> : null}
-                </span>
-                <strong>{node.title}</strong>
-                <span className="tg-flow-node__meta">
-                  <NodeState node={node} compact />
-                  <span>{node.currentAttempt?.state ?? node.readiness}</span>
-                  <span>${node.costUsd.toFixed(2)}</span>
-                </span>
-              </button>
-            );
-          })}
+              {layout.positioned.map(({ node, x, y }) => {
+                const role = runtimeRole(node, plan);
+                const mappedPlanIndex = plan.findIndex((item) => item.taskId === node.id || (!!item.minionSessionKey && item.minionSessionKey === node.currentAttempt?.sessionId));
+                const selected = selectedNodeId === node.id;
+                const related = selectedEdges.size > 0 && projection.edges.some((edge) => selectedEdges.has(edge.id) && (edge.source === node.id || edge.target === node.id));
+                const dimmed = hasPlanFocus && !focusedIds.has(node.id);
+                return (
+                  <button
+                    type="button"
+                    key={node.id}
+                    className={`tg-flow-node tg-flow-node--${role}${selected ? " is-selected" : ""}${related ? " is-related" : ""}${dimmed ? " is-dimmed" : ""}`}
+                    style={{ left: x, top: y }}
+                    aria-label={`${roleLabel(role)} ${node.title}; logical ${node.logicalState}; ${whyNotRunning(node)}`}
+                    onClick={() => onSelect(node.id)}
+                  >
+                    <span className="tg-flow-node__top">
+                      <span className="tg-role-label"><i />{roleLabel(role)}</span>
+                      {mappedPlanIndex >= 0 ? <span className="tg-plan-badge">P{mappedPlanIndex + 1}</span> : null}
+                    </span>
+                    <strong>{node.title}</strong>
+                    <span className="tg-flow-node__meta">
+                      <NodeState node={node} compact />
+                      <span>{node.currentAttempt?.state ?? node.readiness}</span>
+                      <span>${node.costUsd.toFixed(2)}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
       <div className="tg-flow-hint"><kbd>Click</kbd> inspect · <kbd>Plan</kbd> focus mapping · ordinary edges collapse at scale</div>
@@ -139,15 +182,75 @@ export function Topology({
   );
 }
 
+export function fitTopologyCamera(scene: Dimensions, viewport: Dimensions): TopologyCamera {
+  if (viewport.width <= 0 || viewport.height <= 0) {
+    return {
+      scale: 1,
+      offsetX: 0,
+      offsetY: 0,
+      stageWidth: scene.width,
+      stageHeight: scene.height,
+    };
+  }
+
+  const availableWidth = Math.max(0, viewport.width - CAMERA_PADDING_X * 2);
+  const availableHeight = Math.max(0, viewport.height - CAMERA_PADDING_Y * 2);
+  const fitScale = Math.min(availableWidth / scene.width, availableHeight / scene.height);
+  const scale = roundCameraValue(Math.min(MAX_CAMERA_SCALE, Math.max(MIN_CAMERA_SCALE, fitScale)));
+  const scaledWidth = scene.width * scale;
+  const scaledHeight = scene.height * scale;
+  const stageWidth = roundCameraValue(Math.max(viewport.width, scaledWidth + CAMERA_PADDING_X * 2));
+  const stageHeight = roundCameraValue(Math.max(viewport.height, scaledHeight + CAMERA_PADDING_Y * 2));
+
+  return {
+    scale,
+    offsetX: roundCameraValue(Math.max(CAMERA_PADDING_X, (stageWidth - scaledWidth) / 2)),
+    offsetY: roundCameraValue(Math.max(CAMERA_PADDING_Y, (stageHeight - scaledHeight) / 2)),
+    stageWidth,
+    stageHeight,
+  };
+}
+
+function useElementDimensions(ref: RefObject<HTMLElement | null>): Dimensions {
+  const [dimensions, setDimensions] = useState<Dimensions>({ width: 0, height: 0 });
+
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const update = () => {
+      const bounds = element.getBoundingClientRect();
+      const next = { width: bounds.width, height: bounds.height };
+      setDimensions((current) => current.width === next.width && current.height === next.height ? current : next);
+    };
+    update();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    observer?.observe(element);
+    window.addEventListener("resize", update);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [ref]);
+
+  return dimensions;
+}
+
+function roundCameraValue(value: number) {
+  return Math.round(value * 1_000) / 1_000;
+}
+
 export function layoutDag(nodes: readonly TaskGraphNodeView[], edges: readonly TaskGraphEdgeView[]) {
   const visibleIds = new Set(nodes.map((node) => node.id));
   const indegree = new Map(nodes.map((node) => [node.id, 0]));
   const outgoing = new Map(nodes.map((node) => [node.id, [] as string[]]));
+  const incoming = new Map(nodes.map((node) => [node.id, [] as string[]]));
   for (const edge of edges) {
     if (!visibleIds.has(edge.source) || !visibleIds.has(edge.target)) continue;
     indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1);
     outgoing.get(edge.source)?.push(edge.target);
+    incoming.get(edge.target)?.push(edge.source);
   }
+  for (const adjacent of [...outgoing.values(), ...incoming.values()]) adjacent.sort();
 
   const depth = new Map(nodes.map((node) => [node.id, 0]));
   const queue = nodes.filter((node) => indegree.get(node.id) === 0).toSorted(nodeOrder).map((node) => node.id);
@@ -174,8 +277,10 @@ export function layoutDag(nodes: readonly TaskGraphNodeView[], edges: readonly T
     const column = depth.get(node.id) ?? 0;
     columns.set(column, [...(columns.get(column) ?? []), node]);
   }
+  reduceCrossings(columns, incoming, outgoing);
   const maxRows = Math.max(1, ...[...columns.values()].map((column) => column.length));
-  const width = Math.max(900, PADDING_X * 2 + ROOT_WIDTH + ROOT_GAP + columns.size * NODE_WIDTH + Math.max(0, columns.size - 1) * COLUMN_GAP);
+  const columnCount = Math.max(1, ...columns.keys()) + 1;
+  const width = Math.max(900, PADDING_X * 2 + ROOT_WIDTH + ROOT_GAP + columnCount * NODE_WIDTH + Math.max(0, columnCount - 1) * COLUMN_GAP);
   const height = Math.max(520, PADDING_Y * 2 + maxRows * NODE_HEIGHT + Math.max(0, maxRows - 1) * ROW_GAP);
   const positioned: PositionedNode[] = [];
   for (const [columnIndex, columnNodes] of [...columns].toSorted(([a], [b]) => a - b)) {
@@ -188,6 +293,54 @@ export function layoutDag(nodes: readonly TaskGraphNodeView[], edges: readonly T
     }));
   }
   return { positioned, byId: new Map(positioned.map((item) => [item.node.id, item])), width, height };
+}
+
+function reduceCrossings(
+  columns: Map<number, TaskGraphNodeView[]>,
+  incoming: ReadonlyMap<string, readonly string[]>,
+  outgoing: ReadonlyMap<string, readonly string[]>,
+) {
+  const columnIndexes = [...columns.keys()].toSorted((left, right) => left - right);
+  for (let pass = 0; pass < 4; pass += 1) {
+    for (const columnIndex of columnIndexes.slice(1)) {
+      sortByAdjacentBarycenter(columns, columnIndex, incoming);
+    }
+    for (const columnIndex of columnIndexes.slice(0, -1).reverse()) {
+      sortByAdjacentBarycenter(columns, columnIndex, outgoing);
+    }
+  }
+}
+
+function sortByAdjacentBarycenter(
+  columns: Map<number, TaskGraphNodeView[]>,
+  columnIndex: number,
+  adjacent: ReadonlyMap<string, readonly string[]>,
+) {
+  const column = columns.get(columnIndex);
+  if (!column || column.length < 2) return;
+  const ranks = new Map<string, number>();
+  for (const nodes of columns.values()) {
+    nodes.forEach((node, index) => ranks.set(node.id, index));
+  }
+  const barycenter = (node: TaskGraphNodeView) => {
+    const adjacentRanks = (adjacent.get(node.id) ?? [])
+      .map((id) => ranks.get(id))
+      .filter((rank): rank is number => rank != null);
+    return adjacentRanks.length
+      ? adjacentRanks.reduce((sum, rank) => sum + rank, 0) / adjacentRanks.length
+      : null;
+  };
+  const previousRank = new Map(column.map((node, index) => [node.id, index]));
+  column.sort((left, right) => {
+    const leftBarycenter = barycenter(left);
+    const rightBarycenter = barycenter(right);
+    if (leftBarycenter != null && rightBarycenter != null && leftBarycenter !== rightBarycenter) {
+      return leftBarycenter - rightBarycenter;
+    }
+    if (leftBarycenter != null && rightBarycenter == null) return -1;
+    if (leftBarycenter == null && rightBarycenter != null) return 1;
+    return (previousRank.get(left.id) ?? 0) - (previousRank.get(right.id) ?? 0) || nodeOrder(left, right);
+  });
 }
 
 function nodeOrder(left: TaskGraphNodeView, right: TaskGraphNodeView) {

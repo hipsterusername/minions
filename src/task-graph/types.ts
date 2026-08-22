@@ -63,6 +63,8 @@ export type GraphInspectorAction =
   | (GraphActionFence & { type: "pause" | "resume" })
   | (GraphActionFence & { type: "retry" | "cancel_attempt" | "request_verification" })
   | (GraphActionFence & { type: "waive_verification"; reason:string })
+  | (GraphActionFence & {type:"adjudicate";decision:"accepted"|"rejected"|"retry";
+      reason:string;guidance?:string})
   | (GraphActionFence & { type: "provide_input"; input: string })
   | (GraphActionFence & { type: "cancel_run" });
 

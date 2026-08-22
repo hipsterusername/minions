@@ -8,10 +8,14 @@ export function createGraphFixture(nodeCount = 10): TaskGraphSnapshotView {
     const verification: VerificationState = logicalState === "succeeded" ? (index % 2 ? "pending" : "passed") : "not_required";
     const attempt = { id: `attempt-${index}-2`, number: 2, state: attemptState, executor: `worker-${index % 4}`, sessionId: `session-${index}`, startedAt: "2026-08-14T12:00:00.000Z", costUsd: index / 100, tokens: index * 100 };
     return {
-      id: `node-${index}`, title: `Task ${index}`, kind: index % 20 === 19 ? "reducer" as const : "task" as const,
+      id: `node-${index}`, title: `Task ${index}`, objective:`Complete task ${index}`,
+      constraints:["Keep the change scoped"],acceptanceCriteria:["The task is verified"],context:[],
+      kind: index % 20 === 19 ? "reducer" as const : "task" as const,
+      completionMode:"task" as const,
       stageId: `stage-${Math.floor(index / 20)}`, logicalState, readiness: attemptState === "running" ? "claimed" as const : index % 3 === 0 ? "ready" as const : "not_ready" as const,
       currentAttempt: attempt, attemptHistory: [{ ...attempt, id: `attempt-${index}-1`, number: 1, state: "failed" as const }, attempt],
       verification: { state: verification, evidenceIds: verification === "passed" ? [`evidence-${index}`] : [] },
+      adjudication:null,
       blocker: attemptState === "blocked" ? { category: "input" as const, explanation: "Waiting for operator input" } : null,
       priority: 100 - (index % 100), queueAgeMs: index * 1000, costUsd: index / 100, tokens: index * 100,
       criticalPath: index < 8, stale: index % 31 === 0 && index > 0, inputIds: index ? [`artifact-${index - 1}`] : [], outputArtifactIds: logicalState === "succeeded" ? [`artifact-${index}`] : [], owner: `owner-${index % 3}`, budgetReservedUsd: 0.5, logs: [`Task ${index} dispatched`, `Task ${index} progress`],
