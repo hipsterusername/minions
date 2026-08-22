@@ -1,9 +1,11 @@
 import type Database from "better-sqlite3";
 import {
   semanticTaskGraphPlanSchema,
+  taskGraphPlanHistoryEntrySchema,
   taskGraphPlanSnapshotViewSchema,
   type LeaderOrchestrationMode,
   type SemanticTaskGraphPlan,
+  type TaskGraphPlanHistoryEntry,
   type TaskGraphPlanReviewRequirement,
   type TaskGraphPlanSnapshotView,
   type TaskGraphPlanState,
@@ -68,14 +70,21 @@ export class TaskGraphPlanningRepository {
         );
       }
       if (latest?.graph_run_id) {
-        throw new TaskGraphConflictError(
-          "a started graph plan can only be revised in a new WorkItem iteration",
-          this.map(latest),
-        );
+        const run=this.db.prepare("SELECT status FROM task_graph_runs WHERE id=?")
+          .get(latest.graph_run_id) as Row|undefined;
+        const active=run
+          ? !["completed","failed","cancelled"].includes(String(run.status))
+          : latest.state!=="failed";
+        if (active) {
+          throw new TaskGraphConflictError(
+            "the current graph is still active; cancel it before submitting a successor plan",
+            this.map(latest),
+          );
+        }
       }
       const proposalRevision = (latestRevision ?? 0) + 1;
       const projectionRevision = latest ? Number(latest.projection_revision) + 1 : 1;
-      if (latest) this.db.prepare(`UPDATE task_graph_plan_proposals
+      if (latest && !latest.graph_run_id) this.db.prepare(`UPDATE task_graph_plan_proposals
         SET state='superseded',projection_revision=?,updated_at=? WHERE id=?`)
         .run(projectionRevision, at, latest.id);
       const proposalId = canonicalId("proposal", {
@@ -113,6 +122,27 @@ export class TaskGraphPlanningRepository {
       : this.db.prepare(`SELECT * FROM task_graph_plan_proposals WHERE work_item_id=?
           ORDER BY updated_at DESC,proposal_revision DESC LIMIT 1`).get(workItemId) as Row | undefined;
     return row ? this.map(row) : null;
+  }
+
+  history(workItemId:string,primaryRunKey:string,limit=20):TaskGraphPlanHistoryEntry[] {
+    this.assertAuthority(workItemId,primaryRunKey);
+    const bounded=Math.max(1,Math.min(50,Math.trunc(limit)));
+    return (this.db.prepare(`SELECT * FROM task_graph_plan_proposals
+      WHERE work_item_id=? AND primary_run_key=?
+      ORDER BY proposal_revision DESC LIMIT ?`).all(workItemId,primaryRunKey,bounded) as Row[])
+      .map(row=>{
+        const snapshot=this.map(row);
+        return taskGraphPlanHistoryEntrySchema.parse({
+          proposalId:snapshot.proposalId,
+          proposalRevision:snapshot.proposalRevision,
+          baseProposalRevision:snapshot.baseProposalRevision,
+          state:snapshot.state,
+          objective:snapshot.objective,
+          materializedRevisionId:snapshot.materializedRevisionId,
+          graphRunId:snapshot.graphRunId,
+          updatedAt:snapshot.updatedAt,
+        });
+      });
   }
 
   source(proposalId: string): { snapshot: SourceSnapshot; fingerprint: string } | null {
@@ -171,7 +201,7 @@ export class TaskGraphPlanningRepository {
       .get(workItemId, primaryRunKey) as Row | undefined;
   }
 
-  private assertAuthority(workItemId: string, primaryRunKey: string): void {
+  assertAuthority(workItemId: string, primaryRunKey: string): void {
     const row = this.db.prepare("SELECT current_run_key FROM work_items WHERE id=?")
       .get(workItemId) as Row | undefined;
     if (!row || row.current_run_key !== primaryRunKey) {

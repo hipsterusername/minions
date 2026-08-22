@@ -242,10 +242,10 @@ function planningPolicy(
   const reviewRequirements = storedPacket.packet.reviewGates
     .filter((gate) => gate.status === "required_pending")
     .map((gate) => ({ gateId: gate.gateId, name: gate.name, reason: gate.reason }));
-  return { startBlockedReason: null,
-    autoStart: storedPacket.packet.freshness.status === "fresh"
-      && reviewRequirements.length === 0,
-    reviewRequirements };
+  // Pending review and partially-stale guidance are execution context, not a
+  // request for user approval to begin work. Failed gates and stale_blocked
+  // packets still stop execution above; merge-time gates remain authoritative.
+  return { startBlockedReason: null, autoStart: true, reviewRequirements };
 }
 
 async function git(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {

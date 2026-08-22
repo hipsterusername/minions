@@ -112,7 +112,7 @@ describe("planning source capture", () => {
     expect(second.snapshot.dirtyDiffDigest).not.toBe(first.snapshot.dirtyDiffDigest);
   });
 
-  it("defers pending merge reviews without blocking manual start", async () => {
+  it("carries pending merge reviews without blocking automatic execution", async () => {
     mocks.storedPacket = packet("required_pending", "partially_stale");
     const semanticPlan = { ...plan([]), workPacketId: "packet-1" };
 
@@ -120,7 +120,7 @@ describe("planning source capture", () => {
       async () => ({ baseCommit: "abc", dirtyDigest: HASH_A }));
 
     expect(captured.startBlockedReason).toBeNull();
-    expect(captured.policyAllowsAutoStart).toBe(false);
+    expect(captured.policyAllowsAutoStart).toBe(true);
     expect(captured.reviewRequirements).toEqual([{
       gateId: "gate.execution", name: "Execution graph runtime", reason: "Matched packet scope",
     }]);
@@ -138,8 +138,9 @@ describe("planning source capture", () => {
   });
 });
 
-function packet(status: "required_pending" | "failed", freshness: string) {
+function packet(status: "required_pending" | "failed",
+  freshness: "fresh" | "partially_stale" | "stale_blocked") {
   return { packet: { id: "packet-1", reviewGates: [{ gateId: "gate.execution",
     name: "Execution graph runtime", status, reason: "Matched packet scope" }],
-  freshness: { status } }, contextPack: "Packet context" };
+  freshness: { status: freshness } }, contextPack: "Packet context" };
 }

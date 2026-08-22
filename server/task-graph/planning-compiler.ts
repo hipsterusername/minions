@@ -59,8 +59,10 @@ export function compileSemanticGraphPlan(input: CompileSemanticGraphPlanInput): 
     budgetRequest: step.budgetRequest,
     timeoutMs: step.timeoutMs,
     retryPolicy: step.retryPolicy,
+    completionMode: step.completionMode ?? "task",
     verificationRequired: step.verificationRequired,
-    failurePolicy: step.failurePolicy,
+    failurePolicy: step.failurePolicy ?? (step.completionMode === "verification"
+      ? "block_for_decision" : "fail_graph"),
     expansionPolicy: null,
   }));
   const edges: TaskEdge[] = plan.steps.flatMap((target) => target.dependsOn.map((dependency) => {
@@ -100,7 +102,7 @@ export function compileSemanticGraphPlan(input: CompileSemanticGraphPlanInput): 
     revision,
     nodeIdsByStepKey,
     autoStartEligible: plan.questions.length === 0
-      && plan.steps.every((step) => step.risk === "low" && !step.requiresApproval),
+      && plan.steps.every((step) => !step.requiresApproval),
   };
 }
 

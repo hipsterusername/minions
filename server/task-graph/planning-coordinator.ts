@@ -17,23 +17,16 @@ import {
 } from "./planning-source.ts";
 import { TaskGraphPlanningRepository } from "./planning-repository.ts";
 import { storeScopedContextSources } from "./context-sources.ts";
-import { readPlanningArtifact } from "./planning-artifact.ts";
+import {cancelPlanningGraphRun,inspectPlanningHistory,readPlanningHistoryArtifact,
+  synchronizeLatestPlanningRuntime,type PlanningHistorySelector,type PlanningInspection}
+  from "./planning-inspection.ts";
 import type { TaskGraphService } from "./service.ts";
 
 type Row = Record<string, unknown>;
 const log = serverLogger.child("task-graph-planning");
 
-export interface PlanningSourceAuthority {
-  workspaceId: string;
-  cwd: string;
-  projectPath: string;
-  worktreeIdentity: string;
-  connectedContext: string | null;
-  skillIds: readonly string[];
-  skillValues: Record<string, Record<string, string>>;
-  harnessName: string;
-  allowedTools: readonly string[];
-}
+export type PlanningSourceAuthority=Omit<PlanningSourceContext,
+  "workItemId"|"primaryRunKey"|"revisionId"|"plan"|"nodeIdsByStepKey">;
 
 export interface TaskGraphPlanningCoordinatorOptions {
   db: Database.Database;
@@ -102,6 +95,8 @@ export class TaskGraphPlanningCoordinator {
     const at = this.now();
     const plan = semanticTaskGraphPlanSchema.parse(input.plan);
     const authority = await this.requireAuthority(input.workItemId, input.primaryRunKey);
+    synchronizeLatestPlanningRuntime(this.repo,this.options.taskGraphs,input.workItemId,
+      input.primaryRunKey,(runId,status,revision)=>this.reflectGraphStatus(runId,status,revision));
     const proposalRevision = (input.baseProposalRevision ?? 0) + 1;
     const needsInput = plan.questions.length > 0;
     let compiled: ReturnType<typeof compileSemanticGraphPlan>;
@@ -247,6 +242,7 @@ export class TaskGraphPlanningCoordinator {
           expectedProjectionRevision: latest.revision, state: "failed",
           graphRunId, error: error instanceof Error ? error.message : "Graph start failed" }, this.now());
         this.publish(proposal, "plan_start_failed");
+        this.options.onTerminal?.(proposal);
       }
       throw error;
     }
@@ -271,20 +267,22 @@ export class TaskGraphPlanningCoordinator {
     return this.repo.latest(workItemId, primaryRunKey);
   }
 
-  inspection(workItemId: string, primaryRunKey: string): {
-    plan: TaskGraphPlanSnapshotView | null;
-    runtime: import("../../shared/task-graph-view-contracts.ts").TaskGraphSnapshotView | null;
-  } {
-    const plan = this.snapshot(workItemId, primaryRunKey);
-    return { plan, runtime: plan?.graphRunId
-      ? this.options.taskGraphs.viewSnapshot(plan.graphRunId) : null };
+  inspection(workItemId:string,primaryRunKey:string,
+    selector:PlanningHistorySelector={}):PlanningInspection {
+    return inspectPlanningHistory(this.repo,this.options.taskGraphs,workItemId,
+      primaryRunKey,selector);
   }
 
-  readArtifact(input: { workItemId: string; primaryRunKey: string; artifactId: string;
+  readArtifact(input: { workItemId: string; primaryRunKey: string; graphRunId?:string;
+    artifactId: string;
     offset: number; maxBytes: number }): Record<string, unknown> {
-    const plan = this.snapshot(input.workItemId, input.primaryRunKey);
-    if (!plan) throw new TaskGraphValidationError("graph plan not found");
-    return readPlanningArtifact(this.options.db, plan, input);
+    return readPlanningHistoryArtifact(this.repo,input);
+  }
+
+  cancel(input:{workItemId:string;primaryRunKey:string;runId:string;
+    expectedRunRevision:number;requestId:string}):Promise<TaskGraphPlanSnapshotView> {
+    return cancelPlanningGraphRun(this.repo,this.options.taskGraphs,input,
+      (runId,status,revision)=>this.reflectGraphStatus(runId,status,revision));
   }
 
   acknowledgeTerminalWake(proposalId: string, graphRunId: string): void {
@@ -310,11 +308,11 @@ export class TaskGraphPlanningCoordinator {
       .all() as Row[];
     for (const row of rows) {
       const proposal = this.repo.get(String(row.id));
+      if (isTerminalState(proposal.state)) {
+        this.options.onTerminal?.(proposal);
+        continue;
+      }
       if (typeof row.graph_status === "string") {
-        if (isTerminalState(proposal.state)) {
-          this.options.onTerminal?.(proposal);
-          continue;
-        }
         this.reflectGraphStatus(
           proposal.graphRunId!, String(row.graph_status), Number(row.graph_run_revision ?? 0),
         );

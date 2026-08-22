@@ -10,6 +10,7 @@ import { TaskGraphService } from "./service.ts";
 import { TaskGraphPlanningCoordinator } from "./planning-coordinator.ts";
 import type { CapturedPlanningSource, PlanningSourceContext } from "./planning-source.ts";
 import { migrateTaskGraph } from "./schema.ts";
+import {storeInlineTaskGraphArtifact} from "./artifact-store.ts";
 
 const HASH_A = `sha256:${"a".repeat(64)}`;
 const HASH_B = `sha256:${"b".repeat(64)}`;
@@ -59,13 +60,13 @@ function setup() {
     policyAllowsAutoStart: true,
     startBlockedReason: null,
     reviewRequirements: [],
-    snapshot: { id: `source-${fingerprint.slice(-1)}`, workItemId: input.workItemId,
+    snapshot: { id: `source-${input.revisionId}`, workItemId: input.workItemId,
       primaryRunKey: input.primaryRunKey, taskGraphRevisionId: input.revisionId,
       repositoryBaseCommit: "abc", dirtyDiffDigest: fingerprint,
       workspaceId: input.workspaceId, worktreeIdentity: input.worktreeIdentity,
       systemModelDigest: HASH_A, workPacketRevisionId: null, connectedContext: [],
       compiledSkills: [], harnessPolicyDigest: HASH_A, toolPolicyDigest: HASH_A, createdAt: at },
-    scopedSources: [{ sourceSnapshotId: `source-${fingerprint.slice(-1)}`,
+    scopedSources: [{ sourceSnapshotId: `source-${input.revisionId}`,
       nodeId: input.nodeIdsByStepKey["build"]!, sourceId: "canvas:design",
       contentHash: HASH_A, classification: "internal", content: "Design context" }],
   }));
@@ -188,11 +189,22 @@ describe("TaskGraphPlanningCoordinator", () => {
     });
   });
 
-  it("auto-starts only an eligible low-risk plan", async () => {
+  it.each(["medium", "high"] as const)("auto-starts an eligible %s-risk plan", async (risk) => {
     const { coordinator } = setup();
+    const plan = semanticPlan();
+    plan.steps[0] = { ...plan.steps[0]!, risk };
     const result = await coordinator.submit({ workItemId: "work", primaryRunKey: "primary",
-      mode: "auto", requestId: "submit", baseProposalRevision: null, plan: semanticPlan() });
+      mode: "auto", requestId: "submit", baseProposalRevision: null, plan });
     expect(result).toMatchObject({ state: "running", graphRunId: expect.any(String) });
+  });
+
+  it("keeps explicitly approved steps ready for manual approval in auto mode", async () => {
+    const { coordinator } = setup();
+    const plan = semanticPlan();
+    plan.steps[0] = { ...plan.steps[0]!, requiresApproval: true };
+    const result = await coordinator.submit({ workItemId: "work", primaryRunKey: "primary",
+      mode: "auto", requestId: "submit", baseProposalRevision: null, plan });
+    expect(result).toMatchObject({ state: "ready", autoStartEligible: false, graphRunId: null });
   });
 
   it("keeps unanswered questions in needs-input without materializing a graph", async () => {
@@ -289,7 +301,35 @@ describe("TaskGraphPlanningCoordinator", () => {
     restarted.dispose();
   });
 
-  it("requires a new WorkItem iteration before revising a started graph", async () => {
+  it("persists a failed graph start and retries its terminal wake after restart", async () => {
+    const { coordinator, service, terminal, db } = setup();
+    const ready = await coordinator.submit({ workItemId: "work", primaryRunKey: "primary",
+      mode: "plan", requestId: "submit", baseProposalRevision: null, plan: semanticPlan() });
+    vi.spyOn(service,"startRun").mockRejectedValueOnce(new Error("dispatch setup exploded"));
+
+    await expect(coordinator.approve({ workItemId:"work",proposalId:ready.proposalId,
+      expectedProposalRevision:ready.proposalRevision })).rejects.toThrow("dispatch setup exploded");
+    expect(coordinator.repo.get(ready.proposalId)).toMatchObject({state:"failed",
+      error:"dispatch setup exploded"});
+    expect(db.prepare(`SELECT terminal_wake_delivered_at deliveredAt
+      FROM task_graph_plan_proposals WHERE id=?`).get(ready.proposalId)).toEqual({deliveredAt:null});
+    expect(terminal).toHaveBeenCalledOnce();
+    await expect(coordinator.submit({workItemId:"work",primaryRunKey:"primary",mode:"plan",
+      requestId:"repair-start",baseProposalRevision:ready.proposalRevision,
+      plan:{...semanticPlan(),objective:"Repair failed graph start"}}))
+      .resolves.toMatchObject({proposalRevision:2,state:"ready",graphRunId:null});
+    coordinator.dispose();
+
+    terminal.mockClear();
+    const restarted=new TaskGraphPlanningCoordinator(coordinator.options);
+    restarted.start();
+    await vi.waitFor(()=>expect(terminal).toHaveBeenCalledOnce());
+    expect(terminal).toHaveBeenCalledWith(expect.objectContaining({state:"failed",
+      proposalId:ready.proposalId}));
+    restarted.dispose();
+  });
+
+  it("requires explicit cancellation before replacing an active graph", async () => {
     const { coordinator } = setup();
     const running = await coordinator.submit({ workItemId: "work", primaryRunKey: "primary",
       mode: "auto", requestId: "submit", baseProposalRevision: null, plan: semanticPlan() });
@@ -297,7 +337,98 @@ describe("TaskGraphPlanningCoordinator", () => {
     await expect(coordinator.submit({ workItemId: "work", primaryRunKey: "primary",
       mode: "plan", requestId: "revise", baseProposalRevision: running.proposalRevision,
       plan: { ...semanticPlan(), objective: "Revise the running work" } }))
-      .rejects.toThrow("new WorkItem iteration");
+      .rejects.toThrow("cancel it before submitting a successor");
+  });
+
+  it("preserves a cancelled run and starts a fresh successor in the same WorkItem iteration",async()=>{
+    const {coordinator}=setup();
+    const first=await coordinator.submit({workItemId:"work",primaryRunKey:"primary",
+      mode:"auto",requestId:"first",baseProposalRevision:null,plan:semanticPlan()});
+    const runtime=coordinator.inspection("work","primary").runtime!;
+    const cancelled=await coordinator.cancel({workItemId:"work",primaryRunKey:"primary",
+      runId:first.graphRunId!,expectedRunRevision:runtime.revision,requestId:"cancel-first"});
+    expect(cancelled).toMatchObject({proposalId:first.proposalId,state:"cancelled"});
+
+    const successor=await coordinator.submit({workItemId:"work",primaryRunKey:"primary",
+      mode:"auto",requestId:"second",baseProposalRevision:first.proposalRevision,
+      plan:{...semanticPlan(),objective:"Continue with an improved workflow"}});
+    expect(successor).toMatchObject({proposalRevision:2,state:"running",
+      graphRunId:expect.not.stringMatching(new RegExp(`^${first.graphRunId}$`))});
+    expect(coordinator.repo.get(first.proposalId)).toMatchObject({state:"cancelled",
+      graphRunId:first.graphRunId});
+    expect(coordinator.inspection("work","primary").history).toEqual([
+      expect.objectContaining({proposalId:successor.proposalId,proposalRevision:2,state:"running"}),
+      expect.objectContaining({proposalId:first.proposalId,proposalRevision:1,state:"cancelled"}),
+    ]);
+  });
+
+  it.each(["completed","failed"] as const)("starts a successor after a %s graph",async(status)=>{
+    const {coordinator,db}=setup();
+    const first=await coordinator.submit({workItemId:"work",primaryRunKey:"primary",
+      mode:"auto",requestId:"first",baseProposalRevision:null,plan:semanticPlan()});
+    db.prepare("UPDATE task_graph_runs SET status=?,revision=revision+1 WHERE id=?")
+      .run(status,first.graphRunId);
+
+    const successor=await coordinator.submit({workItemId:"work",primaryRunKey:"primary",
+      mode:"plan",requestId:`after-${status}`,baseProposalRevision:first.proposalRevision,
+      plan:{...semanticPlan(),objective:`Follow ${status} graph`}});
+    expect(successor).toMatchObject({proposalRevision:2,state:"ready",graphRunId:null});
+    expect(coordinator.repo.get(first.proposalId).state).toBe(status);
+  });
+
+  it("inspects bounded historical plans by proposal or run",async()=>{
+    const {coordinator}=setup();
+    const first=await coordinator.submit({workItemId:"work",primaryRunKey:"primary",
+      mode:"auto",requestId:"first",baseProposalRevision:null,plan:semanticPlan()});
+    const runtime=coordinator.inspection("work","primary").runtime!;
+    await coordinator.cancel({workItemId:"work",primaryRunKey:"primary",runId:first.graphRunId!,
+      expectedRunRevision:runtime.revision,requestId:"cancel"});
+    const second=await coordinator.submit({workItemId:"work",primaryRunKey:"primary",
+      mode:"plan",requestId:"second",baseProposalRevision:1,
+      plan:{...semanticPlan(),objective:"Second workflow"}});
+
+    expect(coordinator.inspection("work","primary",{proposalId:first.proposalId,historyLimit:1}))
+      .toMatchObject({plan:{proposalId:first.proposalId,state:"cancelled"},
+        runtime:{graphRunId:first.graphRunId},history:[{proposalId:second.proposalId}]});
+    expect(coordinator.inspection("work","primary",{graphRunId:first.graphRunId!}).plan)
+      .toMatchObject({proposalId:first.proposalId});
+  });
+
+  it("reads committed artifacts from a selected historical graph iteration",async()=>{
+    const {coordinator,db}=setup();
+    const firstPlan=semanticPlan();
+    firstPlan.steps[0]={...firstPlan.steps[0]!,outputSchemas:{result:{type:"object"}}};
+    const first=await coordinator.submit({workItemId:"work",primaryRunKey:"primary",
+      mode:"auto",requestId:"first",baseProposalRevision:null,plan:firstPlan});
+    const graph=coordinator.options.taskGraphs.snapshot(first.graphRunId!);
+    const nodeId=graph.revision.nodes[0]!.id;
+    const stored=storeInlineTaskGraphArtifact({source:"inline",inlineJson:{value:"historic"},
+      outputName:"result",schemaName:"Result",schemaVersion:"1",classification:"internal",
+      retentionPolicy:"graph-run",observedWriteSet:[]},{type:"object"});
+    db.prepare(`INSERT INTO task_node_attempts
+      (id,run_id,node_id,attempt_number,generation,source_snapshot_id,runtime,outcome,
+        progress_seq,created_at,updated_at)
+      VALUES('historic-attempt',?,?,1,1,?,'terminal','succeeded',0,20,20)`)
+      .run(first.graphRunId,nodeId,graph.run.sourceSnapshotId);
+    db.prepare(`INSERT INTO task_artifacts
+      (id,run_id,node_id,producer_attempt_id,source_snapshot_id,output_name,content_hash,
+        metadata_json,state,created_at,committed_at)
+      VALUES('historic-artifact',?,?, 'historic-attempt',?,'result',?,?,'committed',20,20)`)
+      .run(first.graphRunId,nodeId,graph.run.sourceSnapshotId,stored.contentHash,
+        JSON.stringify(stored));
+    const runtime=coordinator.inspection("work","primary").runtime!;
+    await coordinator.cancel({workItemId:"work",primaryRunKey:"primary",runId:first.graphRunId!,
+      expectedRunRevision:runtime.revision,requestId:"cancel"});
+    await coordinator.submit({workItemId:"work",primaryRunKey:"primary",mode:"plan",
+      requestId:"successor",baseProposalRevision:1,
+      plan:{...semanticPlan(),objective:"Use prior result"}});
+
+    expect(coordinator.readArtifact({workItemId:"work",primaryRunKey:"primary",
+      graphRunId:first.graphRunId!,artifactId:"historic-artifact",offset:0,maxBytes:1_000}))
+      .toMatchObject({artifactId:"historic-artifact",content:'{"value":"historic"}'});
+    expect(()=>coordinator.readArtifact({workItemId:"work",primaryRunKey:"primary",
+      artifactId:"historic-artifact",offset:0,maxBytes:1_000}))
+      .toThrow("no runtime artifacts");
   });
 
   it("wakes graph attention once per blocked runtime revision", async () => {

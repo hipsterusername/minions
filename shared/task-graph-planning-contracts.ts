@@ -36,7 +36,9 @@ export const semanticGraphPlanStepSchema = z.object({
   outputSchemas: jsonRecordSchema.default({}),
   executorClass: z.enum(["mechanical", "standard", "reasoning"]).default("standard"),
   allowedHarnesses: z.array(idSchema).min(1).optional(),
-  allowedTools: z.array(z.string()).optional(),
+  allowedTools: z.array(z.string()).optional().describe(
+    "Exact harness built-in or fully qualified MCP tool identifiers (for example Read or mcp__server__tool). Omit this field to inherit the selected harness policy, including harness-native shell/filesystem access that has no allowlist identifier.",
+  ),
   ownershipRequest: z.array(ownershipRequestSchema).default([]),
   budgetRequest: budgetRequestSchema.default({}),
   timeoutMs: z.number().int().positive().max(604_800_000).default(1_800_000),
@@ -46,10 +48,12 @@ export const semanticGraphPlanStepSchema = z.object({
     retryableOutcomes: ["failed", "lost"],
     jitterMs: 0,
   }),
+  completionMode: z.enum(["task", "verification"]).optional()
+    .describe("Use verification only when this step's own completion is a structured pass/fail/inconclusive verdict; verificationRequired separately requests independent verification of this step's produced artifacts."),
   verificationRequired: z.boolean().default(false),
   failurePolicy: z.enum([
     "fail_graph", "block_for_decision", "continue_optional", "satisfy_all_terminal_only",
-  ]).default("fail_graph"),
+  ]).optional().describe("Defaults to block_for_decision for verification-mode steps and fail_graph for ordinary task steps."),
   risk: z.enum(["low", "medium", "high"]).default("low"),
   requiresApproval: z.boolean().default(false),
 });
@@ -149,6 +153,17 @@ export const taskGraphPlanSnapshotViewSchema = z.object({
   updatedAt: z.number().int().nonnegative(),
 });
 
+export const taskGraphPlanHistoryEntrySchema = z.object({
+  proposalId: idSchema,
+  proposalRevision: revisionSchema,
+  baseProposalRevision: revisionSchema.nullable(),
+  state: taskGraphPlanStateSchema,
+  objective: z.string().min(1),
+  materializedRevisionId: idSchema.nullable(),
+  graphRunId: idSchema.nullable(),
+  updatedAt: z.number().int().nonnegative(),
+});
+
 const planEnvelopeBase = wsEnvelopeSchema.extend({
   workItemId: idSchema,
   revision: revisionSchema,
@@ -193,6 +208,7 @@ export type TaskGraphPlanReviewRequirement = z.infer<
   typeof taskGraphPlanReviewRequirementSchema
 >;
 export type TaskGraphPlanSnapshotView = z.infer<typeof taskGraphPlanSnapshotViewSchema>;
+export type TaskGraphPlanHistoryEntry = z.infer<typeof taskGraphPlanHistoryEntrySchema>;
 export type TaskGraphPlanState = z.infer<typeof taskGraphPlanStateSchema>;
 export type TaskGraphPlanControlCommand = z.infer<typeof taskGraphPlanControlCommandSchema>;
 export type TaskGraphPlanEnvelope = z.infer<typeof taskGraphPlanSnapshotEnvelopeSchema>
