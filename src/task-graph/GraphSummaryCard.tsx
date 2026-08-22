@@ -1,12 +1,11 @@
-import { runtimeRole, summarizeGraph } from "./model.ts";
+import { Workflow } from "lucide-react";
+import { summarizeGraph } from "./model.ts";
 import type { GraphPlanItem, TaskGraphSnapshotView } from "./types.ts";
 import "./task-graph.css";
 
 export function GraphSummaryCard({
   snapshot,
   onOpen,
-  plan = [],
-  goal,
   stale = false,
 }: {
   snapshot: TaskGraphSnapshotView;
@@ -18,61 +17,38 @@ export function GraphSummaryCard({
   const summary = summarizeGraph(snapshot);
   const remaining = snapshot.budget.limitUsd == null ? null : Math.max(0, snapshot.budget.limitUsd - snapshot.budget.spentUsd);
   const progress = summary.total ? (summary.succeeded / summary.total) * 100 : 0;
-  const previewNodes = snapshot.nodes
-    .filter((node) => node.currentAttempt?.state === "running" || node.blocker || node.readiness === "ready")
-    .slice(0, 3);
-  const fallbackNodes = previewNodes.length ? previewNodes : snapshot.nodes.slice(0, 3);
+  const attention = summary.blocked + summary.logicalFailed;
+  const budget = remaining == null
+    ? `$${snapshot.budget.spentUsd.toFixed(2)} spent`
+    : `$${remaining.toFixed(2)} left`;
 
   return (
-    <section className="tg-summary" aria-label={`Task graph ${snapshot.title}`}>
-      <header className="tg-summary__head">
+    <section className="tg-summary tg-summary--graph" aria-label={`Task graph ${snapshot.title}`}>
+      <div className="tg-summary-strip">
         <div className="tg-summary__identity">
-          <span className="tg-summary__leader-mark" aria-hidden="true">L</span>
-          <div><strong>{snapshot.title}</strong><span>{goal ?? "Canonical execution graph"}</span></div>
+          <span className="tg-summary__leader-mark" aria-hidden="true"><Workflow aria-hidden="true" /></span>
+          <div className="tg-summary__copy">
+            <strong title={snapshot.title}>{snapshot.title}</strong>
+            <div className="tg-summary__signals">
+              <span className={`tg-run-status tg-run-status--${snapshot.status}`}>{snapshot.status}</span>
+              <span className="tg-summary__metric" aria-label={`${summary.succeeded} of ${summary.total} logical tasks succeeded`}>
+                <b>{summary.succeeded}/{summary.total}</b> succeeded
+              </span>
+              {summary.running > 0 ? <span className="tg-summary__signal tg-summary__signal--running">{summary.running} running</span> : null}
+              {attention > 0 ? <span className="tg-summary__signal tg-summary__signal--attention">{attention} need attention</span> : null}
+              {summary.running === 0 && attention === 0 ? <span className="tg-summary__signal">All clear</span> : null}
+              {stale ? <span className="tg-summary__signal tg-summary__signal--stale">Reconnecting</span> : null}
+            </div>
+          </div>
         </div>
-        <span className={`tg-run-status tg-run-status--${snapshot.status}`}>{snapshot.status}</span>
-      </header>
-
-      <div className="tg-summary__goal">
-        <span className="tg-eyebrow">Goal</span>
-        <p>{goal ?? snapshot.title}</p>
-      </div>
-
-      <div className="tg-mini-flow" aria-hidden="true">
-        <span className="tg-mini-flow__leader">Leader</span>
-        <span className="tg-mini-flow__line" />
-        <span className="tg-mini-flow__fanout">
-          {fallbackNodes.map((node) => (
-            <i
-              key={node.id}
-              className={`tg-mini-flow__node tg-mini-flow__node--${runtimeRole(node, plan)} tg-mini-flow__node--${node.currentAttempt?.state ?? node.logicalState}`}
-              title={node.title}
-            />
-          ))}
+        <span className="tg-summary__secondary" title={`${budget} · ${formatDuration(snapshot.criticalPath.estimatedRemainingMs)} critical path`}>
+          {budget} · {formatDuration(snapshot.criticalPath.estimatedRemainingMs)} path
         </span>
-        <span className="tg-mini-flow__line" />
-        <span className={`tg-mini-flow__checkpoint${snapshot.evidence.length ? " is-ready" : ""}`}>◇</span>
+        <button type="button" className="tg-button tg-button--primary tg-summary__open" onClick={onOpen}>
+          Open graph <span aria-hidden="true">↗</span>
+        </button>
       </div>
-
-      <div className="tg-summary__progress-copy">
-        <strong>{summary.succeeded}/{summary.total} logical tasks</strong>
-        <span>{summary.running} running · {summary.blocked + summary.logicalFailed} need attention</span>
-      </div>
-      <div className="tg-progress" aria-label={`${summary.succeeded} of ${summary.total} logical tasks succeeded`}>
-        <span style={{ width: `${progress}%` }} />
-      </div>
-      <div className="tg-summary__stats">
-        <span><b>{summary.running}</b>Running</span>
-        <span><b>{summary.ready}</b>Ready</span>
-        <span><b>{snapshot.evidence.length}</b>Checkpoints</span>
-        <span><b>{summary.unverified}</b>Unverified</span>
-      </div>
-      <footer className="tg-summary__foot">
-        {stale ? <span className="tg-plan-proposal__warning">Reconnecting · controls paused</span> : null}
-        <span>${snapshot.budget.spentUsd.toFixed(2)} spent{remaining == null ? "" : ` · $${remaining.toFixed(2)} left`}</span>
-        <span>{formatDuration(snapshot.criticalPath.estimatedRemainingMs)} critical path</span>
-        <button type="button" className="tg-button tg-button--primary" onClick={onOpen}>Open graph</button>
-      </footer>
+      <span className="tg-summary__progress" aria-hidden="true" style={{ width: `${progress}%` }} />
     </section>
   );
 }

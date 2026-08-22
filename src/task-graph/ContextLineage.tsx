@@ -1,3 +1,4 @@
+import { Inbox, Send } from "lucide-react";
 import type { EvidenceLineageView, TaskGraphNodeView, TaskGraphSnapshotView } from "./types.ts";
 
 const MAX_CHECKPOINTS = 80;
@@ -54,7 +55,7 @@ export function ContextLineage({
 
       <div className="tg-lineage-flow">
         <article className="tg-lineage-card tg-lineage-card--source">
-          <span className="tg-lineage-icon">L</span>
+          <span className="tg-lineage-icon" aria-hidden="true"><Send aria-hidden="true" /></span>
           <span className="tg-eyebrow">Source</span>
           <h4>{producer?.title ?? "Producer attempt"}</h4>
           <p>{active.producerAttemptId}</p>
@@ -71,7 +72,7 @@ export function ContextLineage({
         </article>
         <span className="tg-lineage-arrow" aria-hidden="true">→</span>
         <article className="tg-lineage-card tg-lineage-card--target">
-          <span className="tg-lineage-icon">L</span>
+          <span className="tg-lineage-icon" aria-hidden="true"><Inbox aria-hidden="true" /></span>
           <span className="tg-eyebrow">Next consumers</span>
           <h4>{consumers.length ? `${consumers.length} downstream ${consumers.length === 1 ? "task" : "tasks"}` : "No consumers admitted"}</h4>
           <p>{consumers.length ? "Consumers reference the committed artifact identity." : "The artifact remains available without an invented downstream handoff."}</p>

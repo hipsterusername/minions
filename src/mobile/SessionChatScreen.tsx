@@ -11,6 +11,9 @@ import {
   emptySessionStreamState,
   type SessionStreamState,
 } from "../session-stream.ts";
+import { GraphInspector } from "../task-graph/GraphInspector.tsx";
+import type { GraphPlanItem } from "../task-graph/types.ts";
+import { useTaskGraphView } from "../task-graph/use-task-graph-view.ts";
 import { useSessionStream } from "../use-session-stream.ts";
 import {
   type ActiveMinion,
@@ -51,7 +54,27 @@ interface SessionChatScreenProps {
   onSelectSession?: ((sessionKey: string) => void) | undefined;
 }
 
-type ChatTab = "chat" | "plan" | "dashboard";
+type ChatTab = "chat" | "plan" | "graph" | "dashboard";
+
+const GRAPH_PLAN_STATUSES = new Set<GraphPlanItem["status"]>([
+  "planned", "starting", "running", "blocked", "completed", "failed",
+  "ended_without_report", "cancelled", "orphaned",
+]);
+
+export function mobileGraphPlan(tasks: readonly SyncTaskRecord[]): GraphPlanItem[] {
+  return tasks.map((task) => ({
+    taskId: task.taskId,
+    title: task.title,
+    description: task.description,
+    priority: task.priority,
+    executor: task.executor,
+    minionSessionKey: task.minionSessionKey,
+    status: GRAPH_PLAN_STATUSES.has(task.status as GraphPlanItem["status"])
+      ? task.status as GraphPlanItem["status"]
+      : "planned",
+    result: task.result,
+  }));
+}
 
 function messageTone(message: DisplayMessage): string {
   if (message.role === "tool" || message.role === "result") return "tool";
@@ -629,12 +652,21 @@ export function SessionChatScreen({
   const feedRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const renderState = session?.renderState ?? emptyRenderState();
+  const graph = useTaskGraphView({
+    workItemId: session?.role === "leader" ? session.workItemId ?? null : null,
+    send,
+    subscribe,
+  });
 
   useEffect(() => {
     setState(emptySessionStreamState(sessionKey));
     setActiveTab("chat");
     send({ type: "sync_session", sessionKey });
   }, [send, sessionKey]);
+
+  useEffect(() => {
+    if (activeTab === "graph" && !graph.snapshot) setActiveTab("chat");
+  }, [activeTab, graph.snapshot]);
 
   useSessionStream({
     socketSubscribe: subscribe,
@@ -720,6 +752,7 @@ export function SessionChatScreen({
   const promptLength = prompt.trim().length;
   const activeMinions = session?.role === "leader" ? (session.activeMinions ?? []) : [];
   const taskPlan = session?.role === "leader" ? (session.taskPlan ?? []) : [];
+  const graphPlan = useMemo(() => mobileGraphPlan(taskPlan), [taskPlan]);
   const isLeader = session?.role === "leader";
   const hasDashboard = renderState.components.length > 0;
   const planTotal = taskPlan.length || activeMinions.length;
@@ -773,7 +806,7 @@ export function SessionChatScreen({
       ) : null}
 
       {isLeader ? (
-        <nav className="mob-chat-tabs" aria-label="Leader session views">
+        <nav className="mob-chat-tabs" data-has-graph={graph.snapshot ? "true" : "false"} aria-label="Leader session views">
           <button
             type="button"
             aria-pressed={activeTab === "chat"}
@@ -783,6 +816,18 @@ export function SessionChatScreen({
           >
             Chat
           </button>
+          {graph.snapshot ? (
+            <button
+              type="button"
+              aria-pressed={activeTab === "graph"}
+              className="mob-chat-tab"
+              data-active={activeTab === "graph" ? "true" : "false"}
+              onClick={() => setActiveTab("graph")}
+            >
+              Graph
+              <span>{graph.snapshot.nodes.length}</span>
+            </button>
+          ) : null}
           <button
             type="button"
             aria-pressed={activeTab === "plan"}
@@ -939,6 +984,17 @@ export function SessionChatScreen({
 
       {activeTab === "dashboard" ? (
         <MobileDashboardPanel renderState={renderState} sessionKey={sessionKey} send={send} />
+      ) : null}
+
+      {activeTab === "graph" && graph.snapshot ? (
+        <GraphInspector
+          snapshot={graph.snapshot}
+          goal={session?.taskName}
+          plan={graphPlan}
+          controlsEnabled={graph.controlsEnabled && !graph.stale}
+          onClose={() => setActiveTab("chat")}
+          onAction={graph.sendAction}
+        />
       ) : null}
     </main>
   );

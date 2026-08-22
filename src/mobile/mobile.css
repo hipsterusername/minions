@@ -888,6 +888,10 @@
   background: color-mix(in srgb, var(--bg-secondary) 96%, var(--bg-primary));
 }
 
+.mob-chat-tabs[data-has-graph="true"] {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .mob-chat-tab {
   min-width: 0;
   min-height: 36px;

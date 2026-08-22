@@ -46,7 +46,9 @@ describe("LeaderNode task graph integration", () => {
       node, isSelected: false, onUpdateData: update,
       socketSend: send, socketSubscribe: subscribe,
     };
-    render(<LeaderNodeRenderer {...props} />);
+    render(<div data-testid="transformed-canvas-host" style={{ transform: "translate3d(120px, 80px, 0) scale(0.8)" }}>
+      <LeaderNodeRenderer {...props} />
+    </div>);
 
     expect(send).toHaveBeenCalledWith(expect.objectContaining({
       type: "get_task_graph_snapshot", workItemId: "work-1",
@@ -59,11 +61,32 @@ describe("LeaderNode task graph integration", () => {
       });
     });
 
-    expect(screen.getByRole("button", { name: "Open graph" })).toBeInTheDocument();
-    expect(screen.getAllByText("Explain the execution handoff").length).toBeGreaterThan(1);
-    fireEvent.click(screen.getByRole("button", { name: "Open graph" }));
-    expect(screen.getByRole("dialog", { name: /10-node research graph/ })).toBeInTheDocument();
+    const canvasHost = screen.getByTestId("transformed-canvas-host");
+    const openGraph = screen.getByRole("button", { name: "Open graph" });
+    expect(canvasHost).toContainElement(openGraph);
+    expect(canvasHost.querySelectorAll(".tg-summary-strip")).toHaveLength(1);
+    expect(canvasHost.querySelector(".tg-summary__leader-mark")).toHaveTextContent("");
+    expect(canvasHost.querySelector(".tg-summary__leader-mark svg.lucide-workflow")).toHaveAttribute("aria-hidden", "true");
+    expect(canvasHost.querySelector(".tg-mini-flow, .tg-summary__stats, .tg-summary__foot")).not.toBeInTheDocument();
+    expect(screen.getByText("10-node research graph")).toBeInTheDocument();
+    fireEvent.click(openGraph);
+    const inspector = screen.getByRole("dialog", { name: /10-node research graph/ });
+    expect(inspector).toBeInTheDocument();
+    expect(inspector.querySelector(".tg-inspector__mark")).toHaveTextContent("");
+    expect(inspector.querySelector(".tg-inspector__mark svg.lucide-workflow")).toHaveAttribute("aria-hidden", "true");
+    expect(canvasHost).not.toContainElement(inspector);
+    const inspectorOverlay = inspector.closest("[data-viewport-overlay]");
+    expect(inspectorOverlay?.parentElement).toBe(document.body);
     expect(screen.getByRole("button", { name: /Inspect the runtime.*runtime node/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      type: "pause_task_graph_run", workItemId: "work-1", runId: "run-graph-1",
+      expectedRunRevision: 42,
+    }));
+    fireEvent.click(screen.getByRole("button", { name: "Close graph inspector" }));
+    expect(screen.queryByRole("dialog", { name: /10-node research graph/ })).not.toBeInTheDocument();
+    expect(inspectorOverlay).not.toBeInTheDocument();
+    expect(canvasHost).toContainElement(openGraph);
     expect(update).not.toHaveBeenCalledWith(expect.objectContaining({ graphRunId: "run-graph-1" }));
   });
 
@@ -102,10 +125,15 @@ describe("LeaderNode task graph integration", () => {
     });
 
     expect(screen.getByText("Plan ready")).toBeInTheDocument();
+    const proposal = screen.getByRole("region", { name: /Execution plan Build graph planning/ });
+    expect(proposal.querySelector(".tg-summary__leader-mark")).toHaveTextContent("");
+    expect(proposal.querySelector("svg.lucide-clipboard-list")).toHaveAttribute("aria-hidden", "true");
     expect(screen.getByText("Build coordinator")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Details" }));
-    expect(screen.getByRole("dialog", { name: /Execution plan: Build graph planning/ }))
-      .toBeInTheDocument();
+    const planDialog = screen.getByRole("dialog", { name: /Execution plan: Build graph planning/ });
+    expect(planDialog).toBeInTheDocument();
+    expect(planDialog.querySelector(".tg-summary__leader-mark")).toHaveTextContent("");
+    expect(planDialog.querySelector("svg.lucide-clipboard-list")).toHaveAttribute("aria-hidden", "true");
     fireEvent.click(screen.getByRole("button", { name: "Start work" }));
     expect(send).toHaveBeenCalledWith(expect.objectContaining({
       type: "approve_task_graph_plan", workItemId: "work-plan",

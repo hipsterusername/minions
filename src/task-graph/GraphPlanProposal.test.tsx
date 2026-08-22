@@ -3,10 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import { taskGraphPlanSnapshotViewSchema } from "../../shared/task-graph-planning-contracts.ts";
 import { GraphPlanProposalCard, GraphPlanProposalDialog } from "./GraphPlanProposal.tsx";
 
-function snapshot(input: { canStart: boolean; error?: string | null; reviews?: boolean }) {
+function snapshot(input: { canStart: boolean; error?: string | null; reviews?: boolean;
+  state?: "ready" | "failed" }) {
   return taskGraphPlanSnapshotViewSchema.parse({
     proposalId: "proposal", workItemId: "work", primaryRunKey: "primary",
-    revision: 1, proposalRevision: 1, baseProposalRevision: null, state: "ready", mode: "plan",
+    revision: 1, proposalRevision: 1, baseProposalRevision: null, state: input.state ?? "ready", mode: "plan",
     objective: "Repair graph planning", acceptanceCriteria: ["Verified"], assumptions: [],
     questions: [], workPacketId: "packet", steps: [{ key: "build", nodeId: "node",
       title: "Build", objective: "Build it", acceptanceCriteria: ["Passes"], dependsOn: [],
@@ -44,6 +45,36 @@ describe("GraphPlanProposal", () => {
     expect(screen.getByText("Work Packet freshness checks are stale and blocking."))
       .toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+  });
+
+  it("keeps failed plan cards compact while retaining their reason and actions", () => {
+    const onAdjust = vi.fn();
+    const onOpen = vi.fn();
+    const error = "Planning failed because the Work Packet source snapshot changed while validation was running. ".repeat(3);
+    render(<GraphPlanProposalCard snapshot={snapshot({ canStart: false, state: "failed",
+      error, reviews: true })} actions={{ ...actions(), onAdjust, onOpen }} />);
+
+    expect(screen.getByText("Plan failed")).toBeInTheDocument();
+    expect(screen.getByText(/Planning failed because the Work Packet source snapshot changed/))
+      .toHaveTextContent("…");
+    expect(screen.queryByText("Outcome")).not.toBeInTheDocument();
+    expect(screen.queryByText("Build")).not.toBeInTheDocument();
+    expect(screen.queryByText("1 steps")).not.toBeInTheDocument();
+    expect(screen.queryByText("Review required before integration")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Adjust" }));
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(onAdjust).toHaveBeenCalledOnce();
+    expect(onOpen).toHaveBeenCalledOnce();
+  });
+
+  it("keeps failed plan details available in the unchanged proposal dialog", () => {
+    render(<GraphPlanProposalDialog snapshot={snapshot({ canStart: false, state: "failed",
+      error: "The planner could not validate the Work Packet.", reviews: true })}
+      actions={actions()} onClose={vi.fn()} />);
+
+    expect(screen.getByText("Build")).toBeInTheDocument();
+    expect(screen.getByText("The planner could not validate the Work Packet.")).toBeInTheDocument();
+    expect(screen.getByText(/Matched packet scope/)).toBeInTheDocument();
   });
 
   it("shows detailed deferred reviews in the proposal dialog", () => {

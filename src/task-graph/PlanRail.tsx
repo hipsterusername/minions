@@ -6,11 +6,13 @@ export function PlanRail({
   plan,
   selectedTaskId,
   onSelect,
+  onClose,
 }: {
   snapshot: TaskGraphSnapshotView;
   plan: readonly GraphPlanItem[];
   selectedTaskId: string | null;
   onSelect: (taskId: string | null) => void;
+  onClose?: (() => void) | undefined;
 }) {
   const completed = plan.filter((item) => item.status === "completed").length;
   const active = plan.filter((item) => item.status === "running" || item.status === "starting").length;
@@ -22,7 +24,10 @@ export function PlanRail({
           <span className="tg-eyebrow">Plan</span>
           <strong>{plan.length ? `${completed}/${plan.length} complete` : "Not attached"}</strong>
         </div>
-        {active > 0 ? <span className="tg-live-count">{active} active</span> : null}
+        <div className="tg-rail-header__actions">
+          {active > 0 ? <span className="tg-live-count">{active} active</span> : null}
+          {onClose ? <button type="button" className="tg-close tg-rail-close" aria-label="Collapse plan" onClick={onClose}>×</button> : null}
+        </div>
       </header>
 
       {plan.length ? (

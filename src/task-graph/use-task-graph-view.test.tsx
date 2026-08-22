@@ -176,5 +176,13 @@ describe("graphActionToCommand", () => {
       type: "cancel_task_attempt", runId: "run-1",workItemId:"work-1",
       expectedRunRevision: 10, currentAttemptId: "attempt-3",
     }));
+    expect(graphActionToCommand({
+      type:"adjudicate",requestId:"req-6",graphRunId:"run-1",
+      expectedRunRevision:10,nodeId:"node-1",currentAttemptId:"attempt-3",
+      decision:"retry",reason:"The verifier omitted evidence.",guidance:"Run the suite.",
+    },"work-1")).toEqual({type:"adjudicate_task_node",requestId:"req-6",
+      workItemId:"work-1",runId:"run-1",expectedRunRevision:10,nodeId:"node-1",
+      currentAttemptId:"attempt-3",adjudication:"retry",
+      reason:"The verifier omitted evidence.",guidance:"Run the suite."});
   });
 });
