@@ -66,8 +66,7 @@ export function buildLeaderSystemPromptPreview(input: BuildLeaderPromptInput): s
     .map((id) => getSkill(id))
     .filter((s): s is SkillTemplate => s !== undefined);
   const activeAddendum = compileSkills(taggedSkills, input.skillValues);
-  const inventory = input.orchestrationMode === "direct"
-    ? buildArmingInventory(armableSkills()) : "";
+  const inventory = buildArmingInventory(armableSkills());
   const prefix = input.systemPromptPrefix?.trim();
   return buildBaseLeaderPrompt(tools, input.orchestrationMode ?? "auto")
     + activeAddendum + inventory

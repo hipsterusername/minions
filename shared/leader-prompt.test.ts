@@ -58,6 +58,15 @@ describe("leader prompt composition", () => {
     expect(inventory).toContain('wake_on: "any_terminal"');
   });
 
+  it("keeps graph orchestration optional and preserves direct Leader authority", () => {
+    expect(TASK_GRAPH_PLANNING_PROMPT).toMatch(/optional reasoning and orchestration aid/i);
+    expect(TASK_GRAPH_PLANNING_PROMPT).toMatch(/never revokes.*direct execution/i);
+    expect(TASK_GRAPH_PLANNING_PROMPT).toContain("plan_task");
+    expect(TASK_GRAPH_PLANNING_PROMPT).toContain("assign_task");
+    expect(TASK_GRAPH_PLANNING_PROMPT).toMatch(/do not submit one merely.*ceremony/i);
+    expect(TASK_GRAPH_PLANNING_PROMPT).not.toMatch(/sole child-allocation authority/i);
+  });
+
   it("defines all three continuity tags without conflating restart and continuation", () => {
     expect(LEADER_PROMPT_CORE).toContain("<previous-session-context>");
     expect(LEADER_PROMPT_CORE).toContain("<session-continuation>");

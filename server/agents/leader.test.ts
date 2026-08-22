@@ -43,10 +43,11 @@ describe("leader agent wiring", () => {
     expect(prompt).not.toContain("## Task Graph planning");
   });
 
-  it("keeps legacy wait guidance out of the standard Task Graph prompt", () => {
+  it("keeps direct controls available without copying legacy-mode prose into the graph prompt", () => {
     expect(LEADER_SYSTEM_PROMPT).toContain("## Task Graph planning");
     expect(LEADER_SYSTEM_PROMPT).not.toContain("## Legacy planning mode (debug)");
-    expect(LEADER_SYSTEM_PROMPT).not.toContain("wait_and_continue");
+    expect(LEADER_SYSTEM_PROMPT).toContain("wait_and_continue");
+    expect(LEADER_SYSTEM_PROMPT).toMatch(/optional reasoning and orchestration aid/i);
     const legacyPrompt = getAgentType("leader").buildSystemPrompt({
       sessionKey: "legacy-wait-prompt",
       cwd: "/tmp/project",
@@ -91,7 +92,7 @@ describe("leader agent wiring", () => {
     expect(result.toolGroups["skills"]).toBeUndefined();
   });
 
-  it("makes graph planning exclusive for graph-mode primary Leaders", () => {
+  it("adds graph planning alongside direct tools for graph-mode primary Leaders", () => {
     const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
     const ctx = {
       sessionKey: "leader-graph", runKey: "primary", workItemId: "work",
@@ -105,12 +106,19 @@ describe("leader agent wiring", () => {
     const taskNames = result.toolGroups["task-manager"]!.map((tool) => tool.name);
     const graphNames = result.toolGroups["graph-planner"]!.map((tool) => tool.name);
 
-    expect(taskNames).toEqual(["set_task_name", "checkpoint_session", "load_subskill"]);
-    expect(taskNames).not.toContain("assign_task");
-    expect(graphNames).toEqual([
-      "submit_graph_plan", "get_graph_plan", "start_graph_plan", "read_graph_artifact",
+    expect(taskNames).toEqual([
+      "plan_task", "assign_task", "complete_task", "cancel_task", "message_task",
+      "get_task_status", "set_task_name", "wait_and_continue", "checkpoint_session",
+      "load_subskill",
     ]);
-    expect(result.mcpToolNames).not.toContain("mcp__task-manager__plan_task");
+    expect(graphNames).toEqual([
+      "initialize_graph_document", "upsert_graph_node", "remove_graph_node",
+      "upsert_graph_edge", "remove_graph_edge", "get_graph_document", "submit_graph_document",
+      "submit_graph_plan", "get_graph_plan", "start_graph_plan", "read_graph_artifact",
+      "cancel_graph_run", "adjudicate_graph_node",
+    ]);
+    expect(result.mcpToolNames).toContain("mcp__task-manager__plan_task");
+    expect(result.mcpToolNames).toContain("mcp__task-manager__assign_task");
     expect(leader.buildSystemPrompt(ctx)).toContain("## Task Graph planning");
     expect(leader.buildSystemPrompt(ctx)).not.toContain("## Legacy planning mode (debug)");
   });
@@ -127,13 +135,20 @@ describe("leader agent wiring", () => {
     const result = leader.getToolGroups(ctx);
     const taskNames = result.toolGroups["task-manager"]!.map((tool) => tool.name);
 
-    expect(taskNames).toEqual(["set_task_name", "checkpoint_session", "load_subskill"]);
-    expect(result.toolGroups["graph-planner"]!.map((tool) => tool.name)).toEqual([
-      "submit_graph_plan", "get_graph_plan", "start_graph_plan", "read_graph_artifact",
+    expect(taskNames).toEqual([
+      "plan_task", "assign_task", "complete_task", "cancel_task", "message_task",
+      "get_task_status", "set_task_name", "wait_and_continue", "checkpoint_session",
+      "load_subskill",
     ]);
-    expect(result.mcpToolNames).not.toContain("mcp__task-manager__plan_task");
-    expect(leader.buildSystemPrompt(ctx)).toContain("Task Graph is the standard");
-    expect(leader.buildSystemPrompt(ctx)).not.toContain("- **plan_task**");
+    expect(result.toolGroups["graph-planner"]!.map((tool) => tool.name)).toEqual([
+      "initialize_graph_document", "upsert_graph_node", "remove_graph_node",
+      "upsert_graph_edge", "remove_graph_edge", "get_graph_document", "submit_graph_document",
+      "submit_graph_plan", "get_graph_plan", "start_graph_plan", "read_graph_artifact",
+      "cancel_graph_run", "adjudicate_graph_node",
+    ]);
+    expect(result.mcpToolNames).toContain("mcp__task-manager__plan_task");
+    expect(leader.buildSystemPrompt(ctx)).toMatch(/Task Graph is an optional/i);
+    expect(leader.buildSystemPrompt(ctx)).toContain("- **plan_task**");
   });
 
   it("switches a canonical Leader's prompt and tools together in legacy debug mode", () => {

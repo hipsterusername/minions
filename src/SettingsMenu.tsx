@@ -596,12 +596,12 @@ function SettingsPopover({
               </SettingsCard>
 
               <SettingsCard
-                title="Planning implementation"
-                description="Task Graph is the standard planner for new canonical Leaders."
+                title="Graph assistance"
+                description="Task Graph is available for dependency reasoning and durable orchestration; Leaders keep their direct execution and delegation tools."
               >
                 <ToggleRow
-                  label="Use legacy planning tools"
-                  description="Debug only. New Leaders receive plan_task and assign_task instead of the Task Graph planner and scheduler."
+                  label="Disable Task Graph tools"
+                  description="Debug only. New Leaders keep direct planning and delegation but do not receive graph proposal tools."
                   checked={normalizeLeaderPlanningBackend(
                     settings.leaderPlanningBackend,
                   ) === "legacy"}

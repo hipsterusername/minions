@@ -50,7 +50,7 @@ function buildSystemModelAddendum(runtime: SystemModelRuntime, graphMode = false
   const globs = gatedSurfaceGlobs(runtime.model);
   const surfaces = globs.length > 0 ? globs.join(", ") : "(none currently defined)";
   const workflow = graphMode
-    ? "The semantic graph plan must identify gated files and Work Packet IDs for affected steps; the scheduler injects their frozen context."
+    ? "For graph work, the semantic plan must identify gated files and Work Packet IDs for affected steps so the scheduler can inject frozen context. Direct `plan_task` and `assign_task` work remains available and computes the same packet requirement deterministically; pass `workPacketId` when assigning packet-scoped work."
     : "You do not need to check preemptively: `plan_task` and `assign_task` compute this deterministically and tell you when a task hits one. When assigning a minion for packet-scoped work, pass `workPacketId` to `assign_task` so the stored Context Pack is injected.";
   const addendum = `## System Model
 
@@ -203,11 +203,7 @@ const leaderAgent: AgentType = {
         primaryRunKey: ctx.runKey!,
         mode: planning.orchestrationMode === "plan" ? "plan" : "auto",
         leaderSessionKey,
-        bus: ctx.bus,
-        taskState,
-        onTaskStateChange: lifecycleCallbacks.onTaskStateChange,
         markDecisionNeeded: ctx.markDecisionNeeded,
-        scheduleWaitContinue: ctx.scheduleWaitContinue,
       }) : [];
 
     const { toolDefs: renderDefs, renderState } = createRenderToolsForLeader({
