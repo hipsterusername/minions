@@ -1,7 +1,7 @@
 id: flow.execute_execution_graph
 type: flow
 name: Execute a canonical execution graph
-summary: Validate immutable topology, bind it to the current primary WorkItem run and source snapshot, then centrally admit and recover fenced attempts until evidence satisfies terminal nodes.
+summary: When a Leader chooses graph orchestration, revision-fence and preflight the semantic proposal against frozen planning source and harness policy, materialize immutable topology, then centrally admit and recover fenced attempts until evidence satisfies terminal nodes.
 constraints:
   - constraint.execution_graph_authority
   - constraint.execution_graph_admission
@@ -10,16 +10,20 @@ decisions:
   - decision.server_owned_execution_graphs
   - decision.canonical_work_item_lifecycle
 risks: []
-suggested_files: [ shared/task-graph-contracts.ts, shared/work-item-contracts.ts, server/task-graph/repository.ts, server/task-graph/scheduler.ts, server/task-graph/recovery.ts, server/task-graph/evidence.ts, server/task-graph/service.ts, server/commands/task-graph.ts ]
-suggested_tests: [ server/task-graph/runtime.test.ts, server/task-graph/service.test.ts, tests/task-graph/runtime.test.ts, tests/contracts/work-item-contracts.test.ts ]
+suggested_files: [ shared/task-graph-planning-contracts.ts, shared/task-graph-contracts.ts, shared/work-item-contracts.ts, server/task-graph/planning-coordinator.ts, server/task-graph/planning-source.ts, server/task-graph/planning-compiler.ts, server/task-graph/execution-policy.ts, server/task-graph/repository.ts, server/task-graph/scheduler.ts, server/task-graph/recovery.ts, server/task-graph/evidence.ts, server/task-graph/service.ts, server/commands/task-graph.ts ]
+suggested_tests: [ server/task-graph/planning-coordinator.test.ts, server/task-graph/planning-compiler.test.ts, server/task-graph/execution-policy.test.ts, server/task-graph/runtime.test.ts, server/task-graph/service.test.ts, tests/task-graph/runtime.test.ts, tests/contracts/work-item-contracts.test.ts ]
 steps:
-  - Validate an acyclic bounded graph and persist its content-hashed revision immutably under the owning WorkItem.
+  - Let the Leader decide whether graph orchestration adds value; preserve direct execution and direct delegation outside submitted graph scope.
+  - Accept a semantic plan only against the latest proposal revision, treating omitted tool restrictions as inherited harness policy and supplied allowedTools values as exact harness or fully qualified MCP identifiers.
+  - Freeze repository, connected-context, skill, harness, and tool-policy planning sources; preflight topology, ownership, sandbox enforcement, and tool availability before the proposal can start.
+  - Persist each proposal revision and materialize its validated acyclic bounded graph as a content-hashed immutable revision under the owning WorkItem.
   - Start one graph run for the current primary run only after WorkItem lifecycle CAS and source-snapshot ownership checks pass.
   - Freeze joins, acquire the server scheduler lease, and admit ready nodes only when capacity, ownership, and requested budget reservations are available.
   - Persist each attempt, generation, resource reservation, and outbox dispatch before launching its attempt-identified child WorkItem run.
   - Fence progress and terminal events by run revision, attempt generation, actor session, and idempotency key; retry with a new attempt identity.
   - Commit only current successful attempt artifacts and satisfy verified edges only with source-snapshot- and hash-bound independent evidence.
   - Recover expired claims as lost, replay only undelivered outbox rows, and continue scheduling under the current lease token.
+  - Permit a successor proposal only as a serial iteration after the prior graph is terminal or explicitly cancelled; preserve all started revisions and evidence immutably.
 freshness:
   class: code_coupled
 risk: critical

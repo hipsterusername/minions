@@ -1044,5 +1044,7 @@ Task-graph orchestration is complete only when:
 - Every UI surface derives from the same canonical server snapshot.
 - The Graph Inspector remains useful for both small and 1,000-node graphs.
 - The direct Leader/Minion workflow remains available for simple tasks.
+- Enabling graph assistance neither removes direct Leader tools nor
+  automatically puts the Leader into a wait state.
 - Required unit, property, contract, crash-recovery, architecture, cohesion,
   and performance tests pass.

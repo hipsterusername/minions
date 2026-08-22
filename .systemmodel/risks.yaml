@@ -46,22 +46,27 @@ risks:
     domain: domain.integration
   - id: risk.agent_tool_allowlist_drift
     type: risk
-    summary: Tool factories, role allowlists, conditional registration, and prompt documentation can drift and make tools unavailable or overexposed.
+    summary: Tool factories, role allowlists, conditional registration, prompt documentation, and semantic-plan restrictions can drift or confuse exact callable identifiers with unnamed harness-native capabilities.
     severity: high
     applies_to:
       capabilities:
         - capability.task_orchestration
         - capability.skill_library
+        - capability.execution_graph_runtime
       flows:
         - flow.delegate_and_steer_minions
         - flow.arm_and_author_skills
+        - flow.execute_execution_graph
       surfaces:
         - surface.agent_tools
       files:
         - server/agents/leader.ts
         - server/task-tools.ts
         - server/minion-tools.ts
-    mitigation: Assert filtered factory definitions and role allowlists agree and update prompts with callable tool changes.
+        - shared/task-graph-planning-contracts.ts
+        - server/task-graph/planning-compiler.ts
+        - server/task-graph/execution-policy.ts
+    mitigation: Assert filtered factory definitions and role allowlists agree, update prompts with callable tool changes, validate semantic-plan allowedTools as exact harness/MCP identifiers, and inherit unnamed harness-native shell/filesystem access only through omission and the frozen planning policy.
     domain: domain.delegation
   - id: risk.canonical_conflict_controls_latent
     type: risk

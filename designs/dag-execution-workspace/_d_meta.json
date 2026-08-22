@@ -41,6 +41,10 @@
     {
       "path": "prototype-report.md",
       "kind": "prototype coverage and local validation report"
+    },
+    {
+      "path": "graph-inspector-audit.md",
+      "kind": "production visual audit and repair disposition"
     }
   ],
   "assets": [
@@ -57,6 +61,11 @@
     {
       "path": "prototype-report.md",
       "role": "validation handoff",
+      "selfContained": true
+    },
+    {
+      "path": "graph-inspector-audit.md",
+      "role": "implementation audit",
       "selfContained": true
     }
   ],
@@ -79,7 +88,8 @@
       "src/task-graph/PlanRail.tsx",
       "src/task-graph/PlanMap.tsx",
       "src/task-graph/ContextLineage.tsx",
-      "src/task-graph/IterationTrack.tsx"
+      "src/task-graph/IterationTrack.tsx",
+      "src/mobile/SessionChatScreen.tsx"
     ],
     "mappingPolicy": "Authored plan items map only by canonical task ID or minion session identity; context checkpoints are projected from server evidence lineage."
   }
