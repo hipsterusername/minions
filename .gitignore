@@ -5,6 +5,12 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Local design and prototype artifacts
+/designs/
+/prototypes/
+/mockups/
+/wireframes/
+
 # Local documentation work
 /docs/
 
