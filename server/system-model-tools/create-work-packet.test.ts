@@ -22,9 +22,16 @@ describe("create_work_packet", () => {
       userRequest: "approve workspace change",
       objectIds: ["capability.workspace_management"],
       files: ["server/session-host.ts"],
+      acceptanceCriteria: ["Focused verification passes"],
     });
     const payload = JSON.parse(result.content[0]!.text) as {
-      packet: { id: string; matchConfidence: string; freshness: { status: string } };
+      packet: {
+        id: string;
+        matchConfidence: string;
+        freshness: { status: string };
+        criterionCoverage: Array<{ criterionId: string; status: string }>;
+        signals: Array<{ type: string; status: string }>;
+      };
       contextPack: string;
       packetRequired: boolean;
     };
@@ -32,6 +39,13 @@ describe("create_work_packet", () => {
     expect(payload.packetRequired).toBe(true);
     expect(payload.packet.matchConfidence).toBe("high");
     expect(payload.packet.freshness.status).toBe("fresh");
+    expect(payload.packet.criterionCoverage).toEqual([
+      expect.objectContaining({ criterionId: "criterion-1", status: "open" }),
+    ]);
+    expect(payload.packet.signals).toEqual([
+      expect.objectContaining({ type: "coverage_gap", status: "open" }),
+    ]);
+    expect(payload.contextPack).toContain("Criterion criterion-1 [open]");
     expect(payload.contextPack).toContain("Suggested files are hints");
     expect(getWorkPacket(project, payload.packet.id)?.contextPack).toBe(payload.contextPack);
     expect(emissions.some((event) => event.type === "work_packet_created")).toBe(true);

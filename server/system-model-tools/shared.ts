@@ -3,6 +3,7 @@ import { exec } from "../worktree-exec.ts";
 import type { FreshnessTimestampFn } from "../system-model/freshness.ts";
 import type { SystemModelRuntime } from "../system-model/runtime.ts";
 import type { Bus } from "../bus.ts";
+import type { DetailedDiff } from "../worktree-types.ts";
 
 export interface SystemModelToolContext {
   leaderSessionKey: string;
@@ -13,6 +14,8 @@ export interface SystemModelToolContext {
   now?: () => number;
   getHeadSha?: () => Promise<string>;
   timestampFn?: FreshnessTimestampFn;
+  /** Actual worktree or repository diff used by terminal reconciliation. */
+  getDetailedDiff?: () => Promise<DetailedDiff>;
 }
 
 export function modeForCompile(runtime: SystemModelRuntime): "advisory" | "enforced" {

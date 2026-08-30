@@ -13,6 +13,7 @@ import { globMatches, LOW_CONFIDENCE_FALLBACK, type MatchCandidate } from "./mat
 import { computePacketApplicability } from "./applicability.ts";
 import { expandScope, type ExpandedScope } from "./compile-scope.ts";
 import type { LoadedSystemModel } from "./types.ts";
+import { initializeWorkPacketState } from "./work-packet-state.ts";
 
 export const CONTEXT_PACK_PREAMBLE =
   "Suggested files are hints, not truth. Inspect current code before editing. Hard constraints override implementation convenience. If current code contradicts this context, report the conflict.";
@@ -28,6 +29,7 @@ export interface CompileInput {
   matchConfidence: WorkPacket["matchConfidence"];
   taskFiles?: string[];
   ownedPaths?: string[];
+  acceptanceCriteria?: string[];
   timestampFn: FreshnessTimestampFn;
   now: number;
   packetId?: string;
@@ -104,6 +106,7 @@ export async function compileWorkPacket(input: CompileInput): Promise<CompiledWo
   });
   const reviewGates = deriveReviewGateRequirements(input.model, scope.capabilities, scope.flows, suggestedFiles);
   const base = input.existingPacket;
+  const initialState = base ?? initializeWorkPacketState(input.acceptanceCriteria, input.now);
   const packet: WorkPacket = {
     id: base?.id ?? input.packetId ?? "packet.generated",
     leaderSessionKey: base?.leaderSessionKey ?? input.leaderSessionKey ?? "leader.generated",
@@ -125,65 +128,115 @@ export async function compileWorkPacket(input: CompileInput): Promise<CompiledWo
     reviewGates,
     riskLevel: maxRisk([...expanded.capabilities, ...expanded.flows, ...expanded.constraints, ...expanded.risks]),
     matchConfidence: input.matchConfidence,
+    criterionCoverage: initialState.criterionCoverage ?? [],
+    evidenceLedger: initialState.evidenceLedger ?? [],
+    signals: initialState.signals ?? [],
     amendments: input.amendment
       ? [...(base?.amendments ?? []), { at: input.now, reason: input.amendment.reason, delta: input.amendment.delta }]
       : (base?.amendments ?? []),
   };
   return {
     packet,
-    contextPack: renderContextPack(
-      input.model.policies.contextBudgets,
-      expanded,
-      scope,
-      input.matchConfidence,
-      freshnessReport.requiredAgentActions,
-    ),
+    contextPack: renderWorkPacketContextPack(input.model, packet),
     packetRequired,
     freshnessReport,
   };
 }
 
+export function renderWorkPacketContextPack(
+  model: LoadedSystemModel,
+  packet: WorkPacket,
+): string {
+  const expanded: ExpandedScope = {
+    capabilities: model.capabilities.filter((item) => packet.scope.capabilities.includes(item.id)),
+    flows: model.flows.filter((item) => packet.scope.flows.includes(item.id)),
+    surfaces: model.surfaces.filter((item) => (packet.scope.surfaces ?? []).includes(item.id)),
+    constraints: model.constraints.filter((item) => packet.scope.constraints.includes(item.id)),
+    decisions: model.decisions.filter((item) => packet.scope.decisions.includes(item.id)),
+    risks: model.risks.filter((item) => packet.scope.risks.includes(item.id)),
+  };
+  return renderContextPack(model.policies.contextBudgets, expanded, packet);
+}
+
 function renderContextPack(
   budget: ContextBudget,
   expanded: ExpandedScope,
-  scope: WorkPacket["scope"],
-  confidence: WorkPacket["matchConfidence"],
-  freshnessActions: string[],
+  packet: WorkPacket,
 ): string {
   const chunks = [
     CONTEXT_PACK_PREAMBLE,
-    confidence === "low" ? `Fallback: ${LOW_CONFIDENCE_FALLBACK}` : "",
+    packet.matchConfidence === "low" ? `Fallback: ${LOW_CONFIDENCE_FALLBACK}` : "",
   ].filter(Boolean);
-  const objects = [
+  const recentEvidence = [...(packet.evidenceLedger ?? [])]
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, 8);
+  const objects: Array<{ id: string; text: string }> = [
     ...expanded.constraints.flatMap((o) => [
-      `Constraint ${o.id}: ${o.statement}`,
-      ...(o.agentInstruction ? [`Instruction ${o.id}: ${o.agentInstruction}`] : []),
+      { id: o.id, text: `Constraint ${o.id}: ${o.statement}` },
+      ...(o.agentInstruction ? [{ id: `${o.id}.instruction`, text: `Instruction ${o.id}: ${o.agentInstruction}` }] : []),
     ]),
-    ...freshnessActions.map((action) => `Freshness instruction: ${action}`),
-    ...expanded.decisions.map((o) => `Decision ${o.id}: ${o.summary}`),
-    ...expanded.flows.map((o) => `Flow ${o.id}: ${o.summary}`),
-    ...expanded.capabilities.map((o) => `Capability ${o.id}: ${o.summary}`),
+    ...packet.agentInstructions
+      .filter((instruction) => !expanded.constraints.some((constraint) =>
+        constraint.agentInstruction === instruction))
+      .map((instruction, index) => ({
+      id: `packet-instruction-${index + 1}`,
+      text: `Freshness instruction: ${instruction}`,
+      })),
+    ...(packet.signals ?? [])
+      .filter((signal) => signal.status === "open")
+      .sort((a, b) => riskRank(b.priority) - riskRank(a.priority) || a.id.localeCompare(b.id))
+      .map((signal) => ({ id: signal.id, text: `Open ${signal.priority} signal ${signal.id}: ${signal.summary}` })),
+    ...(packet.criterionCoverage ?? []).map((coverage) => ({
+      id: coverage.criterionId,
+      text: `Criterion ${coverage.criterionId} [${coverage.status}]: ${coverage.criterion}; evidence ${coverage.evidenceRefs.join(", ") || "none"}`,
+    })),
+    ...recentEvidence.map((evidence) => ({
+      id: evidence.id,
+      text: `Evidence ${evidence.id} [${evidence.provenance}/${evidence.kind}]: ${evidence.summary}`,
+    })),
+    ...packet.freshness.warnings.map((warning, index) => ({
+      id: `freshness-warning-${index + 1}`,
+      text: `Freshness warning: ${warning}`,
+    })),
+    ...packet.freshness.requiredVerifications.map((verification) => ({
+      id: `verification-${verification.kind}-${verification.target}`,
+      text: `Required verification [${verification.status}] ${verification.kind}/${verification.target}: ${verification.reason}`,
+    })),
+    ...expanded.decisions.map((o) => ({ id: o.id, text: `Decision ${o.id}: ${o.summary}` })),
+    ...expanded.flows.map((o) => ({ id: o.id, text: `Flow ${o.id}: ${o.summary}` })),
+    ...expanded.capabilities.map((o) => ({ id: o.id, text: `Capability ${o.id}: ${o.summary}` })),
     ...expanded.capabilities.flatMap((capability) => (capability.entryPoints ?? []).map((entryPoint) =>
-      `Entry point ${entryPoint.surface} for ${capability.id}: files ${entryPoint.files.join(", ") || "none"}; tests ${entryPoint.tests.join(", ") || "none"}`)),
-    `Suggested files: ${scope.suggestedFiles.join(", ") || "none"}`,
-    `Suggested tests: ${scope.suggestedTests.join(", ") || "none"}`,
+      ({ id: `${capability.id}.${entryPoint.surface}`, text: `Entry point ${entryPoint.surface} for ${capability.id}: files ${entryPoint.files.join(", ") || "none"}; tests ${entryPoint.tests.join(", ") || "none"}` }))),
+    { id: "suggested-files", text: `Suggested files: ${packet.scope.suggestedFiles.join(", ") || "none"}` },
+    { id: "suggested-tests", text: `Suggested tests: ${packet.scope.suggestedTests.join(", ") || "none"}` },
   ];
-  let omitted = 0;
+  const omitted: string[] = [];
   for (const object of objects) {
-    const line = trimToTokens(object, budget.perObjectSummary);
+    const line = trimToTokens(object.text, budget.perObjectSummary);
     if (estimatedTokens([...chunks, line].join("\n")) <= budget.minionContextPack) chunks.push(line);
-    else omitted += 1;
+    else omitted.push(object.id);
   }
-  if (omitted > 0) {
-    const marker = `[${omitted} objects omitted by context budget — use query_system_model]`;
-    const fixedLines = confidence === "low" ? 2 : 1;
+  if (omitted.length > 0) {
+    const fixedLines = packet.matchConfidence === "low" ? 2 : 1;
+    let marker = omissionMarker(omitted);
     while (chunks.length > fixedLines && estimatedTokens([...chunks, marker].join("\n")) > budget.minionContextPack) {
-      chunks.pop();
-      omitted += 1;
+      const removed = chunks.pop();
+      if (removed) omitted.unshift("additional-context");
+      marker = omissionMarker(omitted);
     }
-    chunks.push(`[${omitted} objects omitted by context budget — use query_system_model]`);
+    chunks.push(marker);
   }
   return chunks.join("\n");
+}
+
+function omissionMarker(ids: string[]): string {
+  const shown = unique(ids).slice(0, 5);
+  const remaining = Math.max(0, unique(ids).length - shown.length);
+  return `[${ids.length} objects omitted by context budget: ${shown.join(", ")}${remaining ? `, +${remaining} more` : ""} — use query_system_model with ids]`;
+}
+
+function riskRank(level: RiskLevel): number {
+  return ["low", "medium", "high", "critical"].indexOf(level);
 }
 
 function derivePacketRequired(model: LoadedSystemModel, scope: { files: string[]; capabilities: string[]; flows: string[] }): boolean {

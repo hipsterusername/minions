@@ -23,6 +23,8 @@ export const deterministicReconciliationSchema = z.object({
   changedFiles: z.array(z.string()).default([]),
   affectedCapabilities: z.array(z.string()).default([]),
   affectedFlows: z.array(z.string()).default([]),
+  candidateModelObjects: z.array(z.string()).default([]),
+  changedModelFiles: z.array(z.string()).default([]),
   affectedEntryPoints: z.array(z.object({
     capabilityId: z.string(),
     surfaceId: z.string(),
@@ -38,9 +40,31 @@ export const deterministicReconciliationSchema = z.object({
   diffSummary: z.string().default("No changed files"),
 });
 
+export const systemModelUpdateAssessmentSchema = z.object({
+  status: z.enum(["updated", "no_change_needed"]),
+  objectIds: z.array(z.string()).default([]),
+  rationale: z.string().min(1),
+  evidence: z.array(z.string().min(1)).min(1),
+});
+
+export const systemModelUpdateSchema = z.object({
+  status: z.enum(["not_needed", "review_required", "updated", "no_change_needed"]),
+  candidateObjectIds: z.array(z.string()).default([]),
+  changedModelFiles: z.array(z.string()).default([]),
+  rationale: z.string().optional(),
+  evidence: z.array(z.string()).default([]),
+  provenance: z.enum(["deterministic", "leader_judged"]),
+});
+
+export const acceptanceCoverageSummarySchema = z.object({
+  status: z.enum(["complete", "incomplete"]),
+  unresolvedCriterionIds: z.array(z.string()).default([]),
+});
+
 export const reconciliationProvenanceSchema = z.object({
   deterministic: z.literal("deterministic"),
   constraintVerdicts: z.literal("minion_judged").optional(),
+  systemModelUpdate: z.literal("leader_judged").optional(),
 });
 
 export const reconciliationReportSchema = z.object({
@@ -52,6 +76,17 @@ export const reconciliationReportSchema = z.object({
   provenance: reconciliationProvenanceSchema.default({ deterministic: "deterministic" }),
   agentSummary: z.string().optional(),
   reviewerTaskDescription: z.string().optional(),
+  systemModelUpdate: systemModelUpdateSchema.default({
+    status: "not_needed",
+    candidateObjectIds: [],
+    changedModelFiles: [],
+    evidence: [],
+    provenance: "deterministic",
+  }),
+  acceptanceCoverage: acceptanceCoverageSummarySchema.default({
+    status: "complete",
+    unresolvedCriterionIds: [],
+  }),
   // Compatibility summary fields for compact consumers and gate lookups.
   affectedObjects: z.array(z.string()).default([]),
   changedFiles: z.array(z.string()).default([]),
@@ -64,4 +99,5 @@ export const reconciliationReportSchema = z.object({
 export type ConstraintCheck = z.infer<typeof constraintCheckSchema>;
 export type ConstraintVerdict = z.infer<typeof constraintVerdictSchema>;
 export type DeterministicReconciliation = z.infer<typeof deterministicReconciliationSchema>;
+export type SystemModelUpdateAssessment = z.infer<typeof systemModelUpdateAssessmentSchema>;
 export type ReconciliationReport = z.infer<typeof reconciliationReportSchema>;

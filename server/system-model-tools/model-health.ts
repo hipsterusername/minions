@@ -29,6 +29,14 @@ interface PruneRecommendation {
   recommendation: "prune_or_update" | "prune_or_link" | "review_for_prune";
 }
 
+interface EvidenceGap {
+  id: string;
+  type: UsageObject["type"] | "decision";
+  label: string;
+  missing: Array<"suggested_files" | "suggested_tests" | "evidence">;
+  recommendation: string;
+}
+
 type ComputeOverbreadthFn = (model: LoadedSystemModel, trackedFiles: string[]) => unknown[];
 
 interface ModelHealthToolContext extends SystemModelToolContext {
@@ -41,7 +49,7 @@ export function createModelHealthToolDef(ctx: ModelHealthToolContext): Normalize
   return {
     name: "model_health",
     description:
-      "Report unused, stale, orphaned, and overbroad system-model objects with prune recommendations.",
+      "Report unused, stale, orphaned, overbroad, and under-evidenced system-model objects with actionable recommendations.",
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true },
     inputSchema: modelHealthInputSchema,
     handler: async (input: unknown) => {
@@ -54,6 +62,7 @@ export function createModelHealthToolDef(ctx: ModelHealthToolContext): Normalize
           stale: [],
           orphaned: [],
           overbroad: [],
+          evidenceGaps: [],
           pruneRecommendations: [],
           loadErrors: ctx.runtime.loadErrors,
         });
@@ -80,10 +89,50 @@ export function createModelHealthToolDef(ctx: ModelHealthToolContext): Normalize
         stale,
         orphaned,
         overbroad,
+        evidenceGaps: evidenceGaps(model),
         pruneRecommendations: recommendations(unused, stale, orphaned),
       });
     },
   };
+}
+
+function evidenceGaps(model: LoadedSystemModel): EvidenceGap[] {
+  const gaps: EvidenceGap[] = [];
+  for (const object of [...model.capabilities, ...model.flows]) {
+    const missing: EvidenceGap["missing"] = [];
+    if (object.suggestedFiles.length === 0) missing.push("suggested_files");
+    if (object.suggestedTests.length === 0) missing.push("suggested_tests");
+    if (missing.length > 0) gaps.push({
+      id: object.id,
+      type: object.type,
+      label: object.name,
+      missing,
+      recommendation: "Add current implementation and verification anchors, or prune the object if it no longer guides work.",
+    });
+  }
+  for (const constraint of model.constraints) {
+    const missing: EvidenceGap["missing"] = [];
+    if (constraint.suggestedTests.length === 0) missing.push("suggested_tests");
+    if (constraint.evidence.length === 0) missing.push("evidence");
+    if (missing.length > 0) gaps.push({
+      id: constraint.id,
+      type: "constraint",
+      label: constraint.statement,
+      missing,
+      recommendation: "Anchor the invariant to a decision and an executable or reviewable verification target.",
+    });
+  }
+  for (const decision of model.decisions.filter((item) => item.status === "accepted")) {
+    if (decision.evidence.length > 0) continue;
+    gaps.push({
+      id: decision.id,
+      type: "decision",
+      label: decision.title,
+      missing: ["evidence"],
+      recommendation: "Add current code or test evidence that demonstrates the accepted decision remains implemented.",
+    });
+  }
+  return gaps.sort((a, b) => a.id.localeCompare(b.id));
 }
 
 function modelCounts(model: LoadedSystemModel) {

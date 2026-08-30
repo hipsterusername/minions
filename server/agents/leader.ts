@@ -40,6 +40,7 @@ import {
   loadAllSkills,
   loadSkillsByIds,
 } from "../skills.ts";
+import { getDetailedDiff } from "../worktree.ts";
 
 const SYSTEM_MODEL_TRUNCATION_POINTER =
   "[system-model addendum truncated — use `query_system_model` to fetch omitted objects]";
@@ -56,7 +57,11 @@ function buildSystemModelAddendum(runtime: SystemModelRuntime, graphMode = false
 
 A system model is active. Gated surfaces — a work packet is required when a task touches them: ${surfaces}. ${workflow}
 
-Tools (available, not mandated): \`query_system_model\` (scored, topK), \`create_work_packet\`, \`amend_work_packet\`, \`check_freshness\`, \`record_verification\`.`;
+Treat a Work Packet Context Pack as scoped, freshness-qualified guidance, not runtime truth. Hard constraints remain authoritative; inspect current code when guidance is stale, incomplete, or contradicted. Use acceptance coverage and open signals to decide what evidence to gather next. Record material observations with \`record_work_packet_evidence\`; never use confidence alone as authority.
+
+Terminal graph or task execution is not Work Packet closure. After the actual diff is stable, call \`reconcile_run\`. Resolve every acceptance-coverage gap and constraint verdict. If reconciliation reports \`systemModelUpdate.status = review_required\`, either update the smallest accurate \`.systemmodel\` objects and validate them, or rerun reconciliation with an evidence-backed \`no_change_needed\` assessment. Only then may the packet become reconciled.
+
+Tools (available, not mandated): \`query_system_model\` (scored, topK), \`create_work_packet\`, \`amend_work_packet\`, \`check_freshness\`, \`record_verification\`, \`record_work_packet_evidence\`, \`reconcile_run\`, \`record_constraint_verdicts\`, \`model_health\`.`;
   const maxChars = runtime.model.policies.contextBudgets.leaderPromptAddendum * 4;
   if (addendum.length <= maxChars) return addendum;
   const bodyChars = Math.max(0, maxChars - SYSTEM_MODEL_TRUNCATION_POINTER.length - 1);
@@ -68,7 +73,7 @@ const SKILL_AUTHORING_TOOL_NAMES = [
 ];
 const SYSTEM_MODEL_TOOL_NAMES = [
   "query_system_model", "create_work_packet", "amend_work_packet",
-  "check_freshness", "record_verification", "reconcile_run",
+  "check_freshness", "record_verification", "record_work_packet_evidence", "reconcile_run",
   "record_constraint_verdicts", "model_health",
 ];
 /** The skill ID that gates the skill-authoring tools. */
@@ -220,6 +225,14 @@ const leaderAgent: AgentType = {
         cwd: ctx.cwd,
         runtime: systemModelRuntime,
         bus: ctx.bus,
+        getDetailedDiff: () => getDetailedDiff(ctx.worktreeInfo ?? {
+          path: ctx.cwd,
+          branch: "HEAD",
+          leaderSessionKey,
+          createdAt: 0,
+          projectPath: ctx.cwd,
+          lifecycle: "active",
+        }),
       })
       : [];
 

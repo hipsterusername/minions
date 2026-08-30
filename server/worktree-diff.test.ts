@@ -117,7 +117,8 @@ describe("getDetailedDiff", () => {
     //   2. diff --numstat <merge-base> canvas/k  (in projectPath)
     //   3. diff --numstat HEAD               (in worktree path)
     //   4. diff --name-status <merge-base> canvas/k  (in projectPath)
-    //   5. log --oneline <merge-base>..canvas/k (in projectPath)
+    //   5. ls-files --others --exclude-standard -z (in worktree path)
+    //   6. log --oneline <merge-base>..canvas/k (in projectPath)
     queue.push({ ok: true, stdout: "abc123\n" }); // merge-base
     queue.push({
       ok: true,
@@ -131,6 +132,7 @@ describe("getDetailedDiff", () => {
       ok: true,
       stdout: ["A\tsrc/a.ts", "D\tsrc/b.ts"].join("\n"),
     }); // name-status
+    queue.push({ ok: true, stdout: "" }); // untracked
     queue.push({
       ok: true,
       stdout: ["abc1234 first commit", "def5678 second"].join("\n"),
@@ -164,6 +166,7 @@ describe("getDetailedDiff", () => {
     queue.push({ ok: true, stdout: "" });
     queue.push({ ok: true, stdout: "" });
     queue.push({ ok: true, stdout: "" });
+    queue.push({ ok: true, stdout: "" });
 
     const out = await getDetailedDiff(fakeInfo);
     expect(out.filesChanged).toBe(0);
@@ -185,6 +188,7 @@ describe("getDetailedDiff", () => {
     }); // committed numstat — binary
     queue.push({ ok: true, stdout: "" }); // uncommitted
     queue.push({ ok: true, stdout: "M\timg.png" }); // name-status
+    queue.push({ ok: true, stdout: "" }); // untracked
     queue.push({ ok: true, stdout: "" }); // log
 
     const out = await getDetailedDiff(fakeInfo);
@@ -192,5 +196,23 @@ describe("getDetailedDiff", () => {
     expect(out.insertions).toBe(0);
     expect(out.deletions).toBe(0);
     expect(out.files[0]!.file).toBe("img.png");
+  });
+
+  it("includes untracked files in the actual diff", async () => {
+    queue.push({ ok: true, stdout: "abc\n" }); // merge-base
+    queue.push({ ok: true, stdout: "" }); // committed numstat
+    queue.push({ ok: true, stdout: "" }); // uncommitted numstat
+    queue.push({ ok: true, stdout: "" }); // name-status
+    queue.push({ ok: true, stdout: "src/new-file.ts\0" }); // untracked
+    queue.push({ ok: true, stdout: "" }); // log
+
+    const out = await getDetailedDiff(fakeInfo);
+
+    expect(out.files).toContainEqual({
+      file: "src/new-file.ts",
+      insertions: 0,
+      deletions: 0,
+      status: "added",
+    });
   });
 });

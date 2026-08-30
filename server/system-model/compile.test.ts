@@ -62,7 +62,31 @@ describe("compileWorkPacket", () => {
     expect(result.contextPack).toContain("[");
     expect(result.contextPack).toContain("objects omitted by context budget");
     expect(result.contextPack).toContain("use query_system_model");
+    expect(result.contextPack).toMatch(/constraint\.bus_only|additional-context/);
     expect(result.contextPack).toContain("inspect repo; ask only if required");
+  });
+
+  it("routes open signals and acceptance coverage ahead of general model context", async () => {
+    const model = loadSystemModel("tests/fixtures/system-model/valid").model!;
+    const result = await compileWorkPacket({
+      model,
+      cwd: "/repo",
+      headSha: "abc",
+      mode: "advisory",
+      userRequest: "approve workspace change",
+      normalizedGoal: "Approve workspace change",
+      matchedCandidates: [{ id: "capability.workspace_management", type: "capability", score: 5, reasons: [] }],
+      matchConfidence: "high",
+      acceptanceCriteria: ["Focused tests demonstrate the behavior"],
+      timestampFn: freshTimestamps,
+      now: 100,
+    });
+
+    expect(result.contextPack).toContain("Open high signal signal.coverage_gap.criterion-1");
+    expect(result.contextPack).toContain("Criterion criterion-1 [open]");
+    expect(result.contextPack.indexOf("Open high signal")).toBeLessThan(
+      result.contextPack.indexOf("Capability capability.workspace_management"),
+    );
   });
 
   it("appends amendments without dropping prior packet identity", async () => {

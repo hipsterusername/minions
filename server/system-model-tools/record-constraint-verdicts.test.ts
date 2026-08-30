@@ -19,6 +19,20 @@ describe("record_constraint_verdicts", () => {
     })).rejects.toThrow();
   });
 
+  it("rejects verdicts outside the deterministic reconciliation scope", async () => {
+    const project = copyValidFixture();
+    saveWorkPacket(project, packet, "context", 1);
+    saveReconciliationReport(project, report);
+    await expect(createRecordConstraintVerdictsToolDef(makeCtx(project)).handler({
+      workPacketId: packet.id,
+      verdicts: [{
+        constraintId: "constraint.not_in_scope",
+        status: "not_checked",
+        evidence: [],
+      }],
+    })).rejects.toThrow(/not in the reconciliation scope/);
+  });
+
   it("merges minion verdicts, persists the report, reconciles the packet, and emits", async () => {
     const project = copyValidFixture();
     const emissions: BusPayload[] = [];
@@ -47,8 +61,46 @@ describe("record_constraint_verdicts", () => {
     expect(getLatestReconciliationReportForPacket(project, packet.id)?.provenance).toEqual({
       deterministic: "deterministic",
       constraintVerdicts: "minion_judged",
+      systemModelUpdate: "leader_judged",
     });
     expect(emissions.map((event) => event.type)).toContain("reconciliation_ready");
+  });
+
+  it("does not reconcile while system-model review or acceptance coverage is pending", async () => {
+    const project = copyValidFixture();
+    const emissions: BusPayload[] = [];
+    saveWorkPacket(project, packet, "context", 1);
+    saveReconciliationReport(project, {
+      ...report,
+      systemModelUpdate: {
+        status: "review_required",
+        candidateObjectIds: ["capability.workspace_management"],
+        changedModelFiles: [],
+        evidence: ["actual diff matched the capability"],
+        provenance: "deterministic",
+      },
+      acceptanceCoverage: {
+        status: "incomplete",
+        unresolvedCriterionIds: ["criterion-1"],
+      },
+    });
+
+    const result = await createRecordConstraintVerdictsToolDef(makeCtx(project, emissions)).handler({
+      workPacketId: packet.id,
+      verdicts: [{
+        constraintId: "constraint.bus_only",
+        status: "appears_satisfied",
+        evidence: ["server/session-host.ts uses Bus helpers"],
+      }],
+    });
+    const payload = JSON.parse(result.content[0]!.text) as {
+      packet: { status: string };
+      pendingActions: string[];
+    };
+
+    expect(payload.packet.status).toBe("active");
+    expect(payload.pendingActions).toHaveLength(2);
+    expect(emissions.map((event) => event.type)).not.toContain("reconciliation_ready");
   });
 });
 
@@ -89,6 +141,8 @@ const report: ReconciliationReport = {
     changedFiles: ["server/session-host.ts"],
     affectedCapabilities: [],
     affectedFlows: [],
+    candidateModelObjects: [],
+    changedModelFiles: [],
     affectedEntryPoints: [],
     siblingSurfaces: [],
     constraintsInScope: ["constraint.bus_only"],
@@ -97,6 +151,15 @@ const report: ReconciliationReport = {
     gateRequirements: [],
     diffSummary: "1 file changed",
   },
+  systemModelUpdate: {
+    status: "no_change_needed",
+    candidateObjectIds: [],
+    changedModelFiles: [],
+    rationale: "No modeled behavior changed",
+    evidence: ["Reviewed actual diff"],
+    provenance: "leader_judged",
+  },
+  acceptanceCoverage: { status: "complete", unresolvedCriterionIds: [] },
   constraintVerdicts: [],
   provenance: { deterministic: "deterministic" },
   affectedObjects: [],

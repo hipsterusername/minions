@@ -23,6 +23,7 @@ const createWorkPacketInputSchema = z.object({
   })).optional().describe("Leader-confirmed capability and surface entry-point pairs."),
   files: z.array(z.string()).optional(),
   ownedPaths: z.array(z.string()).optional(),
+  acceptanceCriteria: z.array(z.string().trim().min(1)).optional(),
   normalizedGoal: z.string().optional(),
 });
 
@@ -54,6 +55,7 @@ export function createCreateWorkPacketToolDef(ctx: SystemModelToolContext): Norm
         matchConfidence: candidates.length > 0 ? prefilter.matchConfidence : "low",
         taskFiles: args.files,
         ownedPaths: args.ownedPaths,
+        acceptanceCriteria: args.acceptanceCriteria,
         timestampFn: ctx.timestampFn ?? gitTimestampFn,
         now,
         packetId: createPacketId(now, args.userRequest),

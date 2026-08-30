@@ -83,6 +83,7 @@ describe("leader agent wiring", () => {
     ]);
     expect(result.mcpToolNames).toContain("mcp__task-manager__plan_task");
     expect(result.mcpToolNames).toContain("mcp__task-manager__load_subskill");
+    expect(result.mcpToolNames).toContain("mcp__task-manager__update_project_context");
     expect(result.mcpToolNames).toContain("mcp__render-dashboard__render_set");
     expect(result.mcpToolNames).not.toContain("mcp__skills__create_skill");
     // The load_subskill tool def is registered under task-manager.
@@ -109,7 +110,7 @@ describe("leader agent wiring", () => {
     expect(taskNames).toEqual([
       "plan_task", "assign_task", "complete_task", "cancel_task", "message_task",
       "get_task_status", "set_task_name", "wait_and_continue", "checkpoint_session",
-      "load_subskill",
+      "load_subskill", "update_project_context",
     ]);
     expect(graphNames).toEqual([
       "initialize_graph_document", "upsert_graph_node", "remove_graph_node",
@@ -138,7 +139,7 @@ describe("leader agent wiring", () => {
     expect(taskNames).toEqual([
       "plan_task", "assign_task", "complete_task", "cancel_task", "message_task",
       "get_task_status", "set_task_name", "wait_and_continue", "checkpoint_session",
-      "load_subskill",
+      "load_subskill", "update_project_context",
     ]);
     expect(result.toolGroups["graph-planner"]!.map((tool) => tool.name)).toEqual([
       "initialize_graph_document", "upsert_graph_node", "remove_graph_node",
@@ -200,6 +201,7 @@ describe("leader agent wiring", () => {
       "cancel_task",
       "checkpoint_session",
       "load_subskill",
+      "update_project_context",
       "publish_html",
     ]) {
       expect(prompt).toContain(required);
@@ -473,12 +475,48 @@ describe("leader agent wiring", () => {
       "amend_work_packet",
       "check_freshness",
       "record_verification",
+      "record_work_packet_evidence",
       "reconcile_run",
       "record_constraint_verdicts",
       "model_health",
     ]);
     expect(result.mcpToolNames).toContain("mcp__system-model__query_system_model");
     expect(result.mcpToolNames).toContain("mcp__system-model__create_work_packet");
+  });
+
+  it("wires an actual-diff provider into reconcile_run", async () => {
+    const project = copyValidFixture();
+    writeSettings(project, { systemModel: "advisory" });
+    const result = getAgentType("leader").getToolGroups({
+      sessionKey: "leader-reconcile",
+      cwd: project,
+      bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
+      worktreeInfo: null,
+      worktreeIsolation: false,
+      startMinionSession: vi.fn(),
+      scheduleWaitContinue: vi.fn(),
+    });
+    const createPacket = result.toolGroups["system-model"]!
+      .find((tool) => tool.name === "create_work_packet")!;
+    const created = await createPacket.handler({
+      userRequest: "approve workspace change",
+      objectIds: ["capability.workspace_management"],
+    });
+    const packetId = JSON.parse(created.content[0]!.text).packet.id as string;
+    const reconcile = result.toolGroups["system-model"]!
+      .find((tool) => tool.name === "reconcile_run")!;
+
+    const reconciled = await reconcile.handler({
+      workPacketId: packetId,
+      agentSummary: "No repository changes in fixture.",
+    });
+    const payload = JSON.parse(reconciled.content[0]!.text) as {
+      report: { deterministic: { changedFiles: string[] } };
+      error?: string;
+    };
+
+    expect(payload.error).toBeUndefined();
+    expect(payload.report.deterministic.changedFiles).toEqual([]);
   });
 
   it("appends the system-model leader prompt addendum only when active", () => {
@@ -496,6 +534,9 @@ describe("leader agent wiring", () => {
     expect(prompt).toContain("## System Model");
     expect(prompt).toContain("create_work_packet");
     expect(prompt).toContain("workPacketId");
+    expect(prompt).toContain("record_work_packet_evidence");
+    expect(prompt).toMatch(/Terminal graph or task execution is not Work Packet closure/i);
+    expect(prompt).toContain("no_change_needed");
     // Redesign §6: the addendum lists the concrete gated surfaces …
     expect(prompt).toContain("Gated surfaces");
     expect(prompt).toContain("server/**/*.ts");

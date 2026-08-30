@@ -24,6 +24,19 @@ describe("reconciliationReportSchema", () => {
     expect(report.constraintVerdicts).toEqual([]);
     expect(report.deterministic.affectedEntryPoints).toEqual([]);
     expect(report.deterministic.siblingSurfaces).toEqual([]);
+    expect(report.deterministic.candidateModelObjects).toEqual([]);
+    expect(report.deterministic.changedModelFiles).toEqual([]);
+    expect(report.systemModelUpdate).toEqual({
+      status: "not_needed",
+      candidateObjectIds: [],
+      changedModelFiles: [],
+      evidence: [],
+      provenance: "deterministic",
+    });
+    expect(report.acceptanceCoverage).toEqual({
+      status: "complete",
+      unresolvedCriterionIds: [],
+    });
   });
 
   it("labels reviewer verdicts separately from deterministic fields", () => {

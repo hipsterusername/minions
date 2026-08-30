@@ -1,5 +1,7 @@
 import type { WorktreeInfo, GitStatus, FileChange, DetailedDiff } from "./worktree-types.js";
 import { exec } from "./worktree-exec.js";
+import fs from "node:fs";
+import path from "node:path";
 
 /**
  * Get a change summary for a worktree by parsing `git diff --stat`.
@@ -136,6 +138,26 @@ export async function getDetailedDiff(
     // Non-critical
   }
 
+  // Git diff omits untracked files, but they are part of the actual review and
+  // reconciliation surface. Add them without mutating or staging the worktree.
+  try {
+    const { stdout } = await exec(
+      ["ls-files", "--others", "--exclude-standard", "-z"],
+      cwd,
+    );
+    for (const file of stdout.split("\0").filter(Boolean)) {
+      if (fileMap.has(file)) continue;
+      fileMap.set(file, {
+        file,
+        insertions: countTextLines(path.join(cwd, file)),
+        deletions: 0,
+        status: "added",
+      });
+    }
+  } catch {
+    // Non-critical: reconciliation still reports tracked changes.
+  }
+
   // Compute totals from the map
   for (const f of fileMap.values()) {
     files.push(f);
@@ -165,4 +187,16 @@ export async function getDetailedDiff(
     commits,
     branch,
   };
+}
+
+function countTextLines(file: string): number {
+  try {
+    const bytes = fs.readFileSync(file);
+    if (bytes.includes(0)) return 0;
+    const text = bytes.toString("utf8");
+    if (text.length === 0) return 0;
+    return text.split(/\r?\n/).length - (/\r?\n$/.test(text) ? 1 : 0);
+  } catch {
+    return 0;
+  }
 }

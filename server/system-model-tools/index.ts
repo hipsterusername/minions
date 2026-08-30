@@ -7,6 +7,7 @@ import { createQuerySystemModelToolDef } from "./query-system-model.ts";
 import { createReconcileRunToolDef } from "./reconcile-run.ts";
 import { createRecordConstraintVerdictsToolDef } from "./record-constraint-verdicts.ts";
 import { createRecordVerificationToolDef } from "./record-verification.ts";
+import { createRecordWorkPacketEvidenceToolDef } from "./record-work-packet-evidence.ts";
 import type { SystemModelToolContext } from "./shared.ts";
 
 export function createSystemModelToolsForLeader(ctx: SystemModelToolContext): NormalizedToolDef[] {
@@ -16,6 +17,7 @@ export function createSystemModelToolsForLeader(ctx: SystemModelToolContext): No
     createAmendWorkPacketToolDef(ctx),
     createCheckFreshnessToolDef(ctx),
     createRecordVerificationToolDef(ctx),
+    createRecordWorkPacketEvidenceToolDef(ctx),
     createReconcileRunToolDef(ctx),
     createRecordConstraintVerdictsToolDef(ctx),
     createModelHealthToolDef(ctx),

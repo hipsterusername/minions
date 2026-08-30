@@ -18,11 +18,17 @@ export function reconcileDeterministic(input: ReconcileInput): DeterministicReco
   const affectedFlows = input.model.flows
     .filter((flow) => changedFiles.some((file) => matchesAny(file, flow.suggestedFiles)))
     .map((flow) => flow.id);
+  const changedModelFiles = changedFiles.filter((file) => file.startsWith(".systemmodel/"));
   const affectedEntryPoints = input.model.capabilities.flatMap((capability) =>
     (capability.entryPoints ?? [])
       .filter((entryPoint) => changedFiles.some((file) => matchesAny(file, entryPoint.files)))
       .map((entryPoint) => ({ capabilityId: capability.id, surfaceId: entryPoint.surface })));
   const affectedEntryPointCapabilities = unique(affectedEntryPoints.map((item) => item.capabilityId));
+  const candidateModelObjects = unique([
+    ...affectedCapabilities,
+    ...affectedFlows,
+    ...affectedEntryPointCapabilities,
+  ]);
   const siblingSurfaces = affectedEntryPointCapabilities.map((capabilityId) => ({
     capabilityId,
     surfaceIds: unique(input.model.capabilities.find((item) => item.id === capabilityId)
@@ -65,6 +71,8 @@ export function reconcileDeterministic(input: ReconcileInput): DeterministicReco
     changedFiles,
     affectedCapabilities: unique([...affectedCapabilities, ...affectedEntryPointCapabilities]),
     affectedFlows: affectedFlows.sort(),
+    candidateModelObjects,
+    changedModelFiles,
     affectedEntryPoints: affectedEntryPoints.sort((a, b) =>
       a.capabilityId.localeCompare(b.capabilityId) || a.surfaceId.localeCompare(b.surfaceId)),
     siblingSurfaces,

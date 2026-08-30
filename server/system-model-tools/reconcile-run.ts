@@ -3,24 +3,25 @@ import type { NormalizedToolDef } from "../harness/types.ts";
 import { jsonResult } from "../harness/tool-result.ts";
 import {
   reconciliationReportSchema,
+  systemModelUpdateAssessmentSchema,
   type Constraint,
   type ReconciliationReport,
 } from "../../shared/system-model/index.ts";
 import { reconcileDeterministic } from "../system-model/reconcile.ts";
-import { getWorkPacket, saveReconciliationReport } from "../system-model/store.ts";
-import type { DetailedDiff } from "../worktree-types.ts";
+import {
+  getWorkPacket,
+  saveReconciliationReport,
+  updateWorkPacketStatus,
+} from "../system-model/store.ts";
 import type { SystemModelToolContext } from "./shared.ts";
 
 const reconcileRunInputSchema = z.object({
   workPacketId: z.string().min(1),
   agentSummary: z.string().min(1),
+  systemModelUpdate: systemModelUpdateAssessmentSchema.optional(),
 });
 
-type ReconcileRunContext = SystemModelToolContext & {
-  getDetailedDiff?: () => Promise<DetailedDiff>;
-};
-
-export function createReconcileRunToolDef(ctx: ReconcileRunContext): NormalizedToolDef {
+export function createReconcileRunToolDef(ctx: SystemModelToolContext): NormalizedToolDef {
   return {
     name: "reconcile_run",
     description:
@@ -39,6 +40,30 @@ export function createReconcileRunToolDef(ctx: ReconcileRunContext): NormalizedT
         packet: stored.packet,
         diff: await ctx.getDetailedDiff(),
       });
+      if (args.systemModelUpdate?.status === "updated"
+        && deterministic.changedModelFiles.length === 0) {
+        throw new Error("An updated system-model assessment requires a changed .systemmodel file in the actual diff");
+      }
+      const unknownAssessmentObject = args.systemModelUpdate?.objectIds.find((id) =>
+        !model.objectsById.has(id));
+      if (unknownAssessmentObject) {
+        throw new Error(`Unknown system-model object ${unknownAssessmentObject}`);
+      }
+      const missingAssessmentObject = args.systemModelUpdate?.objectIds.length
+        ? deterministic.candidateModelObjects.find((id) =>
+          !args.systemModelUpdate!.objectIds.includes(id))
+        : undefined;
+      if (missingAssessmentObject) {
+        throw new Error(`System-model assessment does not cover candidate object ${missingAssessmentObject}`);
+      }
+      const systemModelUpdate = deriveSystemModelUpdate(deterministic, args.systemModelUpdate);
+      const unresolvedCriterionIds = (stored.packet.criterionCoverage ?? [])
+        .filter((criterion) => !["supported", "verified", "waived"].includes(criterion.status))
+        .map((criterion) => criterion.criterionId);
+      const acceptanceCoverage = {
+        status: unresolvedCriterionIds.length === 0 ? "complete" as const : "incomplete" as const,
+        unresolvedCriterionIds,
+      };
       const constraints = model.constraints.filter((constraint) =>
         deterministic.constraintsInScope.includes(constraint.id));
       const reviewerTaskDescription = constraints.length > 0
@@ -57,6 +82,13 @@ export function createReconcileRunToolDef(ctx: ReconcileRunContext): NormalizedT
         deterministic,
         agentSummary: args.agentSummary,
         reviewerTaskDescription,
+        systemModelUpdate,
+        acceptanceCoverage,
+        provenance: {
+          deterministic: "deterministic",
+          ...(systemModelUpdate.provenance === "leader_judged"
+            ? { systemModelUpdate: "leader_judged" as const } : {}),
+        },
         affectedObjects: [...deterministic.affectedCapabilities, ...deterministic.affectedFlows],
         changedFiles: deterministic.changedFiles,
         testsMissing: deterministic.testsMissing,
@@ -65,8 +97,52 @@ export function createReconcileRunToolDef(ctx: ReconcileRunContext): NormalizedT
         constraintChecks: [],
       });
       saveReconciliationReport(ctx.projectPath, report);
-      return jsonResult({ report, reviewerTaskDescription });
+      const pendingActions = [
+        ...(acceptanceCoverage.status === "incomplete"
+          ? [`Resolve acceptance coverage for: ${unresolvedCriterionIds.join(", ")}`] : []),
+        ...(systemModelUpdate.status === "review_required"
+          ? ["Assess candidate system-model objects; update and validate the model, or record an evidence-backed no-change decision"] : []),
+        ...(constraints.length > 0 ? ["Record reviewer constraint verdicts"] : []),
+      ];
+      const packet = pendingActions.length === 0
+        ? updateWorkPacketStatus(ctx.projectPath, args.workPacketId, "reconciled", now)
+        : stored.packet;
+      return jsonResult({ report, reviewerTaskDescription, pendingActions, packet });
     },
+  };
+}
+
+function deriveSystemModelUpdate(
+  deterministic: ReconciliationReport["deterministic"],
+  assessment: z.infer<typeof systemModelUpdateAssessmentSchema> | undefined,
+): ReconciliationReport["systemModelUpdate"] {
+  const candidates = deterministic.candidateModelObjects;
+  if (assessment) {
+    return {
+      status: assessment.status,
+      candidateObjectIds: unique(assessment.objectIds.length > 0 ? assessment.objectIds : candidates),
+      changedModelFiles: deterministic.changedModelFiles,
+      rationale: assessment.rationale,
+      evidence: assessment.evidence,
+      provenance: "leader_judged",
+    };
+  }
+  if (candidates.length === 0 && deterministic.changedModelFiles.length === 0) {
+    return {
+      status: "not_needed",
+      candidateObjectIds: [],
+      changedModelFiles: [],
+      evidence: [],
+      provenance: "deterministic",
+    };
+  }
+  return {
+    status: "review_required",
+    candidateObjectIds: candidates,
+    changedModelFiles: deterministic.changedModelFiles,
+    rationale: "The actual diff intersects modeled implementation surfaces; canonical guidance may need revision.",
+    evidence: [deterministic.diffSummary],
+    provenance: "deterministic",
   };
 }
 
@@ -104,4 +180,8 @@ function renderReviewerTask(input: {
 
 function createReconciliationId(now: number, workPacketId: string): string {
   return `recon_${now.toString(36)}_${workPacketId.replace(/[^a-zA-Z0-9_]+/g, "_").slice(0, 40)}`;
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)].sort();
 }

@@ -45,6 +45,7 @@ describe("model_health", () => {
       stale: Array<{ id: string }>;
       orphaned: Array<{ id: string }>;
       overbroad: Array<{ id: string; coveragePercent: number; thresholdPercent: number }>;
+      evidenceGaps: Array<{ id: string; missing: string[]; recommendation: string }>;
       pruneRecommendations: Array<{ id: string; reasons: string[]; recommendation: string }>;
     };
 
@@ -59,6 +60,10 @@ describe("model_health", () => {
         thresholdPercent: 40,
       }),
     ]);
+    expect(payload.evidenceGaps).toContainEqual(expect.objectContaining({
+      id: "decision.bus_architecture",
+      missing: ["evidence"],
+    }));
     expect(payload.pruneRecommendations).toContainEqual(expect.objectContaining({
       id: "capability.workspace_management",
       recommendation: "prune_or_update",

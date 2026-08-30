@@ -15,6 +15,8 @@ describe("reconcileDeterministic", () => {
       changedFiles: ["server/commands/approve-changes.ts", "server/session-host.ts", "src/Canvas.tsx"],
       affectedCapabilities: ["capability.workspace_management"],
       affectedFlows: ["flow.approve_changes"],
+      candidateModelObjects: ["capability.workspace_management", "flow.approve_changes"],
+      changedModelFiles: [],
       constraintsInScope: ["constraint.bus_only"],
       testsMissing: ["server/session-host.test.ts"],
       outOfScopeFiles: ["server/commands/approve-changes.ts", "src/Canvas.tsx"],
