@@ -45,7 +45,7 @@ export function ReviewChangesScreen({
       <main className="mob-review" aria-label="Live changes">
         <header className="mob-chat-header">
           <button className="mob-icon-button" type="button" onClick={props.onClose} aria-label="Close">
-            x
+            ×
           </button>
           <div className="mob-chat-title">
             <span>Live mode</span>
@@ -159,7 +159,7 @@ function WorktreeReviewChangesScreen({
     <main className="mob-review" aria-label="Review changes">
       <header className="mob-chat-header">
         <button className="mob-icon-button" type="button" onClick={onClose} aria-label="Close review">
-          x
+          ×
         </button>
         <div className="mob-chat-title">
           <span>Review changes</span>

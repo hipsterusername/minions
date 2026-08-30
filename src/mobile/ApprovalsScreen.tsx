@@ -15,9 +15,9 @@ export function ApprovalsScreen({
   if (approvals.length === 0) {
     return (
       <main className="mob-screen mob-approvals" aria-label="Approvals">
-        <div className="mob-empty">
-          <h1>Approvals</h1>
-          <p>No sessions are awaiting approval.</p>
+        <div className="mob-empty mob-empty--surface">
+          <h1>Review</h1>
+          <p><span>No sessions are awaiting approval.</span> Nothing needs your decision right now.</p>
         </div>
       </main>
     );
@@ -26,7 +26,10 @@ export function ApprovalsScreen({
   return (
     <main className="mob-screen mob-approvals" aria-label="Approvals">
       <header className="mob-screen-header">
-        <h1>Approvals</h1>
+        <div>
+          <h1>Review</h1>
+          <p className="mob-screen-intro">Changes waiting for your decision.</p>
+        </div>
         <span className="mob-count">{approvals.length}</span>
       </header>
       <div className="mob-approval-list">

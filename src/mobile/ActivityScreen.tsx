@@ -533,7 +533,8 @@ export function ActivityScreen({ sessions, onOpenSession, notice,
         </header>
         {notice ? <NoticeBanner notice={notice} /> : null}
         {filters}
-        <div className="mob-empty">
+        <div className="mob-empty mob-empty--surface">
+          <h2>{visibility === "dismissed" ? "Nothing dismissed" : "No active sessions"}</h2>
           <p>{visibility === "dismissed" ? "No dismissed sessions." : "No sessions are running."}</p>
         </div>
       </main>
@@ -609,7 +610,8 @@ export function ActivityScreen({ sessions, onOpenSession, notice,
       ) : null}
 
       {visibleSessions.length === 0 ? (
-        <div className="mob-empty">
+        <div className="mob-empty mob-empty--surface">
+          <h2>No matches</h2>
           <p>No sessions match this activity filter.</p>
         </div>
       ) : null}

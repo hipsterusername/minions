@@ -9,10 +9,20 @@ import {
 } from "../api.ts";
 import { randomUuid } from "../random-id.ts";
 import { useHarnessList } from "../use-harness-list.tsx";
+import { DEFAULT_HARNESS_NAME, findHarness } from "../harness-list.ts";
+import { getModelCapability } from "../model-meta.ts";
 import { freezeLeaderSystemPrompt } from "../nodes/leader/frozen-prompt.ts";
+import { normalizeThinkingForCapability } from "../SettingsMenu.tsx";
 import { loadProjectSkills } from "../skills/user-skills.ts";
 import type { SkillTemplate } from "../skills/types.ts";
+import type { ThinkingConfig } from "../types.ts";
+import {
+  DEFAULT_SANDBOX_POLICY,
+  type SandboxPolicy,
+} from "../../shared/workspace-contracts.ts";
 import { LaunchSkillsPanel } from "./LaunchSkillsPanel.tsx";
+import { MobileLeaderRuntimeControls } from "./MobileLeaderRuntimeControls.tsx";
+import { MobileSandboxAccessControl } from "./MobileSandboxAccessControl.tsx";
 import {
   TEXT_ATTACHMENT_ACCEPT,
   appendTextAttachmentsToPrompt,
@@ -54,12 +64,14 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
   const [skillValues, setSkillValues] = useState<Record<string, Record<string, string>>>({});
   const [skillsPanelOpen, setSkillsPanelOpen] = useState(false);
   const [projectSettings, setProjectSettings] = useState<ProjectSettings>({});
+  const [thinkingOverride, setThinkingOverride] = useState<ThinkingConfig | null>(null);
+  const [sandboxPolicyOverride, setSandboxPolicyOverride] = useState<SandboxPolicy | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Enumerated models for the launch dropdown, across every registered harness
   // (Anthropic, OpenAI, …) so all providers are selectable. Empty until
   // `list_harnesses` answers — the "Default" option always works meanwhile.
-  const { harnesses } = useHarnessList();
+  const { harnesses, loaded: harnessesLoaded } = useHarnessList();
   const modelGroups = buildLaunchModelGroups(harnesses);
 
   useEffect(() => {
@@ -99,6 +111,8 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
     if (!targetProjectId) {
       setProjectSettings({});
       setModelValue("");
+      setThinkingOverride(null);
+      setSandboxPolicyOverride(null);
       setWorktreeIsolation(false);
       return;
     }
@@ -108,6 +122,8 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
       .then((settings) => {
         if (cancelled) return;
         setProjectSettings(settings);
+        setThinkingOverride(null);
+        setSandboxPolicyOverride(null);
         const harness = settings.defaultLeaderHarness;
         const model = settings.defaultLeaderModel ?? settings.defaultModel;
         setModelValue(harness && model ? `${harness}::${model}` : "");
@@ -117,6 +133,8 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
         if (cancelled) return;
         setProjectSettings({});
         setModelValue("");
+        setThinkingOverride(null);
+        setSandboxPolicyOverride(null);
         setWorktreeIsolation(false);
       });
 
@@ -157,7 +175,54 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
   const attachedFileCount = imageAttachments.length + textAttachments.length;
   const canSubmit = targetPath !== null && (trimmedPrompt.length > 0 || attachedFileCount > 0);
   const selectedModel = parseLaunchModelValue(modelValue);
-  const modelLabel = selectedModel?.model ?? "Default";
+  const selectedModelGroup = selectedModel
+    ? modelGroups.find((group) => group.harness === selectedModel.harness)
+    : null;
+  const selectedModelOption = selectedModel
+    ? selectedModelGroup?.options.find((option) => option.id === selectedModel.model)
+    : null;
+  const modelLabel = selectedModelOption?.label ?? selectedModel?.model ?? "Project default";
+  const effectiveThinking = thinkingOverride ?? projectSettings.defaultLeaderThinkingConfig;
+  const selectedModelCapability = selectedModel
+    ? getModelCapability(
+        selectedModel.model,
+        findHarness(harnesses, selectedModel.harness),
+      )
+    : null;
+  const launchThinking = effectiveThinking && selectedModelCapability
+    ? normalizeThinkingForCapability(effectiveThinking, selectedModelCapability)
+    : effectiveThinking;
+  const reasoningLabel = thinkingOverride === null
+    ? projectSettings.defaultLeaderThinkingConfig
+      ? selectedModelCapability?.supportsAdaptiveThinking === false
+        ? "Unavailable"
+        : `Default · ${launchThinking?.enabled ? launchThinking.effort : "off"}`
+      : "Project default"
+    : thinkingOverride.enabled
+      ? `${thinkingOverride.effort} · ${thinkingOverride.display === "summarized" ? "summaries" : "hidden"}`
+      : "Off";
+  const launchSandboxPolicy = sandboxPolicyOverride
+    ?? projectSettings.defaultSandboxPolicy
+    ?? DEFAULT_SANDBOX_POLICY;
+  const explicitSandboxPolicy = sandboxPolicyOverride ?? projectSettings.defaultSandboxPolicy;
+  const activeHarnessName = selectedModel?.harness
+    ?? projectSettings.defaultLeaderHarness
+    ?? DEFAULT_HARNESS_NAME;
+  const activeHarness = findHarness(harnesses, activeHarnessName);
+  const sandboxSupport = harnessesLoaded
+    ? activeHarness?.capabilities.sandboxEnforcement ?? null
+    : undefined;
+  const requestedAccessLabel = launchSandboxPolicy.filesystemScope === "unrestricted"
+    ? "Full host"
+    : launchSandboxPolicy.filesystemScope === "workspace-write"
+      ? "Workspace"
+      : "Read only";
+  const sandboxScopeUnmanaged = sandboxSupport !== undefined
+    && (sandboxSupport === null
+      || !sandboxSupport.filesystem.includes(launchSandboxPolicy.filesystemScope));
+  const accessLabel = sandboxScopeUnmanaged
+    ? `${requestedAccessLabel} · unmanaged`
+    : requestedAccessLabel;
   const selectedSkills = useMemo(
     () =>
       selectedSkillIds
@@ -222,11 +287,11 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
       ...(projectSettings.defaultPermissionMode
         ? { permissionMode: projectSettings.defaultPermissionMode }
         : {}),
-      ...(projectSettings.defaultSandboxPolicy
-        ? { sandboxPolicy: projectSettings.defaultSandboxPolicy }
+      ...(explicitSandboxPolicy
+        ? { sandboxPolicy: launchSandboxPolicy }
         : {}),
-      ...(projectSettings.defaultLeaderThinkingConfig
-        ? { thinkingConfig: projectSettings.defaultLeaderThinkingConfig }
+      ...(launchThinking
+        ? { thinkingConfig: launchThinking }
         : {}),
       ...skillPayload,
     });
@@ -273,10 +338,27 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
     setTextAttachments((current) => current.filter((_, i) => i !== index));
   }
 
+  function handleModelChange(value: string) {
+    setModelValue(value);
+    const selection = parseLaunchModelValue(value);
+    if (!selection) return;
+    setThinkingOverride((current) =>
+      current
+        ? normalizeThinkingForCapability(
+            current,
+            getModelCapability(selection.model, findHarness(harnesses, selection.harness)),
+          )
+        : null,
+    );
+  }
+
   return (
     <main className="mob-screen mob-launch" aria-label="New leader">
       <header className="mob-screen-header">
-        <h1>New</h1>
+        <div>
+          <h1>New Leader</h1>
+          <p className="mob-screen-intro">Describe the outcome, then tune this run.</p>
+        </div>
       </header>
 
       {loading ? <div className="mob-launch-status">Loading projects...</div> : null}
@@ -345,6 +427,35 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
             rows={7}
             placeholder="What should the leader do?"
           />
+        </label>
+
+        <MobileLeaderRuntimeControls
+          harnesses={harnesses}
+          modelGroups={modelGroups}
+          modelValue={modelValue}
+          projectThinkingConfig={projectSettings.defaultLeaderThinkingConfig}
+          thinkingOverride={thinkingOverride}
+          onModelChange={handleModelChange}
+          onThinkingOverrideChange={setThinkingOverride}
+        />
+
+        <MobileSandboxAccessControl
+          policy={launchSandboxPolicy}
+          support={sandboxSupport}
+          onChange={setSandboxPolicyOverride}
+        />
+
+        <label className="mob-launch-checkbox">
+          <input
+            type="checkbox"
+            aria-label="Worktree isolation"
+            checked={worktreeIsolation}
+            onChange={(event) => setWorktreeIsolation(event.currentTarget.checked)}
+          />
+          <span>
+            <strong>Worktree isolation</strong>
+            <small>Keep this run's changes separate until review.</small>
+          </span>
         </label>
 
         <section className="mob-launch-files" aria-label="Launch attachments">
@@ -439,34 +550,6 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
           )}
         </section>
 
-        <label className="mob-launch-checkbox">
-          <input
-            type="checkbox"
-            checked={worktreeIsolation}
-            onChange={(event) => setWorktreeIsolation(event.currentTarget.checked)}
-          />
-          <span>Worktree isolation</span>
-        </label>
-
-        <label className="mob-launch-field">
-          <span>Model</span>
-          <select
-            value={modelValue}
-            onChange={(event) => setModelValue(event.currentTarget.value)}
-          >
-            <option value="">Default</option>
-            {modelGroups.map((group) => (
-              <optgroup key={group.harness} label={group.label}>
-                {group.options.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-        </label>
-
         <section className="mob-launch-review" aria-label="Launch summary">
           <div>
             <span>Target</span>
@@ -477,8 +560,16 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
             <strong>{modelLabel}</strong>
           </div>
           <div>
+            <span>Reasoning</span>
+            <strong>{reasoningLabel}</strong>
+          </div>
+          <div>
             <span>Isolation</span>
             <strong>{worktreeIsolation ? "Worktree" : "Live"}</strong>
+          </div>
+          <div>
+            <span>Access</span>
+            <strong>{accessLabel}</strong>
           </div>
           <div>
             <span>Files</span>

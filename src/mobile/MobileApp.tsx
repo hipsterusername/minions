@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
+import { Activity, CheckSquare2, MessageSquare, Plus, Settings } from "lucide-react";
 
 import type { ProjectSummary } from "../api.ts";
 import { useSocket } from "../use-socket.ts";
@@ -202,7 +203,7 @@ function MobileHeader({
         </div>
       </div>
       <div className="mob-app-header-actions">
-        <span className="mob-connection-pill" data-state={reconnectState}>
+        <span className="mob-connection-pill" data-state={reconnectState} role="status" aria-live="polite">
           {statusLabel}
         </span>
         {reconnectState === "failed" ? (
@@ -528,6 +529,7 @@ export default function MobileApp() {
           aria-current={activeTab === "activity" ? "page" : undefined}
           aria-label={attentionCount > 0 ? `Activity, ${attentionCount} need you` : "Activity"}
         >
+          <Activity size={18} aria-hidden="true" />
           <span>Activity</span>
           {attentionCount > 0 ? <span className="mob-tab-badge">{attentionCount}</span> : null}
         </button>
@@ -538,7 +540,8 @@ export default function MobileApp() {
           onClick={() => setActiveTab("chat")}
           aria-current={activeTab === "chat" && selectedSessionKey ? "page" : undefined}
         >
-          Chat
+          <MessageSquare size={18} aria-hidden="true" />
+          <span>Chat</span>
         </button>
         <button
           type="button"
@@ -547,6 +550,7 @@ export default function MobileApp() {
           aria-current={activeTab === "approvals" ? "page" : undefined}
           aria-label={approvalCount > 0 ? `Approvals, ${approvalCount} pending` : "Approvals"}
         >
+          <CheckSquare2 size={18} aria-hidden="true" />
           <span>Review</span>
           {approvalCount > 0 ? <span className="mob-tab-badge">{approvalCount}</span> : null}
         </button>
@@ -556,7 +560,8 @@ export default function MobileApp() {
           onClick={openLaunch}
           aria-current={activeTab === "launch" ? "page" : undefined}
         >
-          New
+          <Plus size={18} aria-hidden="true" />
+          <span>New</span>
         </button>
         <button
           type="button"
@@ -564,7 +569,8 @@ export default function MobileApp() {
           onClick={openSettings}
           aria-current={activeTab === "settings" ? "page" : undefined}
         >
-          Settings
+          <Settings size={18} aria-hidden="true" />
+          <span>Settings</span>
         </button>
       </nav>
       )}

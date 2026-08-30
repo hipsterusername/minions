@@ -249,7 +249,7 @@ export function SettingsScreen({ project, send, subscribe }: SettingsScreenProps
           <h1>Settings</h1>
           <p className="mob-settings-project">{project.name}</p>
         </div>
-        <span className="mob-settings-save" data-state={saveState}>
+        <span className="mob-settings-save" data-state={saveState} role="status" aria-live="polite">
           {saveState === "saving"
             ? "Saving"
             : saveState === "saved"

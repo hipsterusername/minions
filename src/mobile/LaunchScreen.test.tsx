@@ -19,6 +19,7 @@ const CLAUDE_HARNESS: HarnessListEntry = {
     resume: true,
     partialMessages: true,
     builtInFilesystem: true,
+    sandboxEnforcement: { filesystem: [], approval: false },
   },
   builtInTools: [],
   models: [
@@ -41,6 +42,10 @@ const CODEX_HARNESS: HarnessListEntry = {
     resume: true,
     partialMessages: true,
     builtInFilesystem: true,
+    sandboxEnforcement: {
+      filesystem: ["read-only", "workspace-write", "unrestricted"],
+      approval: true,
+    },
   },
   builtInTools: [],
   models: [
@@ -50,6 +55,26 @@ const CODEX_HARNESS: HarnessListEntry = {
   commands: [],
   agents: [],
   account: { provider: "openai" },
+};
+
+const NO_REASONING_HARNESS: HarnessListEntry = {
+  name: "echo",
+  capabilities: {
+    mutationInterception: "none",
+    thinking: false,
+    promptCaching: false,
+    mcp: false,
+    permissionPrompts: false,
+    resume: false,
+    partialMessages: false,
+    builtInFilesystem: false,
+    sandboxEnforcement: { filesystem: [], approval: false },
+  },
+  builtInTools: [],
+  models: [{ id: "echo-fast", label: "Echo Fast" }],
+  commands: [],
+  agents: [],
+  account: { provider: "echo" },
 };
 
 vi.mock("../api.ts", () => ({
@@ -107,6 +132,7 @@ describe("LaunchScreen", () => {
       expect(screen.getByLabelText("Model")).toHaveValue("codex::gpt-5.5-codex");
     });
     expect(screen.getByLabelText("Worktree isolation")).toBeChecked();
+    expect(screen.getByLabelText("Read only")).toBeChecked();
 
     fireEvent.change(screen.getByLabelText("Prompt"), {
       target: { value: "Use the project defaults" },
@@ -125,6 +151,48 @@ describe("LaunchScreen", () => {
         approvalPolicy: "always",
       },
       worktreeIsolation: true,
+    }));
+  });
+
+  it("lets a mobile Leader grant full host access without changing approval policy", async () => {
+    vi.mocked(getProjectSettings).mockResolvedValue({
+      defaultLeaderHarness: "codex",
+      defaultLeaderModel: "gpt-5.5-codex",
+      defaultSandboxPolicy: {
+        filesystemScope: "workspace-write",
+        approvalPolicy: "on-request",
+      },
+    });
+    let subscriber: ((msg: unknown) => void) | undefined;
+    const subscribe = vi.fn((fn: (msg: unknown) => void) => {
+      subscriber = fn;
+      return () => {};
+    });
+    const send = vi.fn();
+
+    render(
+      <HarnessListProvider send={vi.fn()} subscribe={subscribe} connected>
+        <LaunchScreen
+          send={send}
+          onLaunched={vi.fn()}
+          lockedProject={{ id: "host-access", path: "/work/host-access", name: "Host access" }}
+        />
+      </HarnessListProvider>,
+    );
+    act(() => {
+      subscriber?.({ type: "harness_list", harnesses: [CLAUDE_HARNESS, CODEX_HARNESS] });
+    });
+
+    await waitFor(() => expect(screen.getByLabelText("Workspace write")).toBeChecked());
+    fireEvent.click(screen.getByLabelText("Full host access"));
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Use host tools" } });
+    fireEvent.click(screen.getByRole("button", { name: "Launch leader" }));
+
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      sandboxPolicy: {
+        filesystemScope: "unrestricted",
+        approvalPolicy: "on-request",
+      },
     }));
   });
 
@@ -323,6 +391,88 @@ describe("LaunchScreen", () => {
       model: "gpt-5.5",
       harness: "codex",
     });
+  });
+
+  it("lets a mobile Leader override reasoning for the selected model", async () => {
+    let subscriber: ((msg: unknown) => void) | undefined;
+    const subscribe = vi.fn((fn: (msg: unknown) => void) => {
+      subscriber = fn;
+      return () => {};
+    });
+    const send = vi.fn();
+
+    render(
+      <HarnessListProvider send={vi.fn()} subscribe={subscribe} connected>
+        <LaunchScreen
+          send={send}
+          onLaunched={vi.fn()}
+          lockedProject={{ path: "/work/reasoning", name: "Reasoning" }}
+        />
+      </HarnessListProvider>,
+    );
+
+    act(() => {
+      subscriber?.({ type: "harness_list", harnesses: [CLAUDE_HARNESS, CODEX_HARNESS] });
+    });
+
+    fireEvent.change(screen.getByLabelText("Model"), {
+      target: { value: "codex::gpt-5.5-codex" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Medium" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hidden" }));
+    fireEvent.change(screen.getByLabelText("Prompt"), {
+      target: { value: "Use focused reasoning" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Launch leader" }));
+
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      model: "gpt-5.5-codex",
+      harness: "codex",
+      thinkingConfig: { enabled: true, effort: "medium", display: "omitted" },
+    }));
+  });
+
+  it("explains capability gating and disables reasoning for unsupported models", async () => {
+    vi.mocked(getProjectSettings).mockResolvedValue({
+      defaultLeaderThinkingConfig: { enabled: true, effort: "high", display: "summarized" },
+    });
+    let subscriber: ((msg: unknown) => void) | undefined;
+    const subscribe = vi.fn((fn: (msg: unknown) => void) => {
+      subscriber = fn;
+      return () => {};
+    });
+    const send = vi.fn();
+
+    render(
+      <HarnessListProvider send={vi.fn()} subscribe={subscribe} connected>
+        <LaunchScreen
+          send={send}
+          onLaunched={vi.fn()}
+          lockedProject={{ id: "gated", path: "/work/gated", name: "Gated" }}
+        />
+      </HarnessListProvider>,
+    );
+    act(() => {
+      subscriber?.({ type: "harness_list", harnesses: [NO_REASONING_HARNESS] });
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Default · high")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText("Model"), {
+      target: { value: "echo::echo-fast" },
+    });
+    expect(screen.getByRole("status")).toHaveTextContent(/does not expose reasoning controls/i);
+    expect(screen.getByText("Unmanaged by the selected harness")).toBeInTheDocument();
+    expect(screen.getByText("Workspace · unmanaged")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Run safely" } });
+    fireEvent.click(screen.getByRole("button", { name: "Launch leader" }));
+
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      model: "echo-fast",
+      harness: "echo",
+      thinkingConfig: { enabled: false, effort: "high", display: "summarized" },
+    }));
   });
 
   it("omits the model when left on Default", async () => {

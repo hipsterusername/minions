@@ -40,15 +40,18 @@ test("keeps New Leader configuration and popovers contained", async ({ page }) =
   await addAgent.getByRole("textbox", { name: "Leader prompt" }).fill("/");
   const emptyCommandMenu = page.getByRole("listbox", { name: "Leader context shortcuts" });
   await expectCommandPopoverAbove(emptyPrompt, emptyCommandMenu, 520);
+  await page.keyboard.press("Escape");
+  await expect(emptyCommandMenu).toBeHidden();
 
   await page.setViewportSize({ width: 1440, height: 900 });
-  await addAgent.getByRole("textbox", { name: "Leader prompt" }).fill(
+  await addAgent.getByRole("combobox", { name: "Leader prompt" }).fill(
     "Create a small baseline session for the Activity launch test.",
   );
   await addAgent.getByRole("button", { name: "Launch leader" }).click();
-  await expect(page.getByRole("button", { name: "Launch leader" })).toBeEnabled();
+  const newLeader = page.getByRole("button", { name: "New", exact: true });
+  await expect(newLeader).toBeEnabled();
 
-  await page.getByRole("button", { name: "Launch leader" }).click();
+  await newLeader.click();
   const launchPanel = page.getByRole("region", { name: "New leader" });
   await expect(launchPanel).toBeVisible();
 
@@ -102,8 +105,10 @@ test("keeps New Leader configuration and popovers contained", async ({ page }) =
   await launchPanel.getByRole("textbox", { name: "Leader prompt" }).fill("/");
   const commandMenu = page.getByRole("listbox", { name: "Leader context shortcuts" });
   await expectCommandPopoverAbove(prompt, commandMenu, 900);
+  await page.keyboard.press("Escape");
+  await expect(commandMenu).toBeHidden();
 
-  await launchPanel.getByRole("textbox", { name: "Leader prompt" }).fill(
+  await launchPanel.getByRole("combobox", { name: "Leader prompt" }).fill(
     "Create a contained Activity launch experience.",
   );
   await expect(launchPanel.getByRole("button", { name: "Launch leader" })).toBeVisible();
@@ -119,19 +124,24 @@ test("keeps New Leader configuration and popovers contained", async ({ page }) =
       || !(config instanceof HTMLElement)
     ) return null;
     const bounds = card.getBoundingClientRect();
+    const inputsBounds = inputs.getBoundingClientRect();
     return {
       inputsScroll: inputs.scrollHeight > inputs.clientHeight,
       configScrolls: config.scrollHeight > config.clientHeight,
       cardTop: bounds.top,
       cardBottom: bounds.bottom,
+      inputsTop: inputsBounds.top,
+      inputsBottom: inputsBounds.bottom,
       viewportHeight: window.innerHeight,
     };
   });
   expect(shortViewport).not.toBeNull();
-  expect(shortViewport.inputsScroll).toBe(false);
+  expect(shortViewport.inputsScroll).toBe(true);
   expect(typeof shortViewport.configScrolls).toBe("boolean");
   expect(shortViewport.cardTop).toBeGreaterThanOrEqual(0);
-  expect(shortViewport.cardBottom).toBeLessThanOrEqual(shortViewport.viewportHeight);
+  expect(shortViewport.cardBottom).toBeGreaterThan(shortViewport.inputsBottom);
+  expect(shortViewport.inputsTop).toBeGreaterThanOrEqual(0);
+  expect(shortViewport.inputsBottom).toBeLessThanOrEqual(shortViewport.viewportHeight);
 
   await page.setViewportSize({ width: 1440, height: 520 });
   await launchPanel.getByRole("textbox", { name: "Leader prompt" }).fill("/");
