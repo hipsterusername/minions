@@ -177,6 +177,7 @@ beforeEach(() => {
           input_tokens: 7,
           output_tokens: 11,
           cached_input_tokens: 3,
+          cache_write_input_tokens: 0,
           reasoning_output_tokens: 0,
         },
       },
@@ -300,6 +301,7 @@ describe("CodexHarness.start()", () => {
             input_tokens: 1,
             output_tokens: 1,
             cached_input_tokens: 0,
+            cache_write_input_tokens: 0,
             reasoning_output_tokens: 0,
           },
         };
