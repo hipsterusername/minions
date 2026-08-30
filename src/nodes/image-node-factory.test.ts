@@ -41,7 +41,7 @@ describe("createImageNodeFromProjectPath", () => {
     const setSelectedIds = vi.fn<(ids: Set<string>) => void>();
 
     const ok = await createImageNodeFromProjectPath(
-      "/home/user/proj",
+      "/workspace/proj",
       "assets/missing.png",
       dispatch,
       setSelectedIds,

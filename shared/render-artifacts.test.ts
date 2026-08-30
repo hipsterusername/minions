@@ -97,7 +97,7 @@ describe("imageComponentSchema", () => {
 
   it.each([
     "https://tracker.example/pixel.png",
-    "file:///home/user/secret.png",
+    "file:///workspace/secret.png",
     "javascript:alert(1)",
     "data:image/svg+xml,<svg/>",
   ])("rejects unsafe model-generated source %s", (src) => {
@@ -112,7 +112,7 @@ describe("filePreviewComponentSchema", () => {
     const result = filePreviewComponentSchema.safeParse({
       id: "fp-1",
       type: "file-preview",
-      source: { kind: "path", path: "/home/user/file.txt" },
+      source: { kind: "path", path: "/workspace/file.txt" },
     });
     expect(result.success).toBe(true);
   });
@@ -322,11 +322,11 @@ describe("formatFilePreview", () => {
     const c: FilePreviewComponent = {
       id: "fp-1",
       type: "file-preview",
-      source: { kind: "path", path: "/home/user/data.csv" },
+      source: { kind: "path", path: "/workspace/data.csv" },
     };
     const result = formatFilePreview(c);
     expect(result).toMatch(/^\[File:/);
-    expect(result).toContain("/home/user/data.csv");
+    expect(result).toContain("/workspace/data.csv");
   });
 
   it("uses the filename override instead of path in the link label", () => {

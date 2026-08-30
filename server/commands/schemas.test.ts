@@ -33,7 +33,7 @@ describe("validateWsCommand – accept", () => {
       type: "create_session",
       sessionKey: "s1",
       workItemId: "work-1",
-      cwd: "/home/user",
+      cwd: "/workspace",
       workspaceId: "8dcf241e-52b8-4d50-a2f3-9b12fdab7a1c",
       sandboxPolicy: {
         filesystemScope: "workspace-write",
@@ -91,7 +91,7 @@ describe("validateWsCommand – accept", () => {
     accept({
       type: "seed_read_state",
       sessionKey: "s1",
-      path: "/home/user/file.ts",
+      path: "/workspace/file.ts",
       mtime: 1700000000,
     });
   });

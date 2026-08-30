@@ -131,8 +131,8 @@ describe("workspace registry", () => {
 
   it("derives Windows state paths with Windows separators", () => {
     const id = "33333333-3333-4333-8333-333333333333";
-    expect(workspaceStateRoot("C:\\Users\\Ada\\.minions", id, path.win32))
-      .toBe(`C:\\Users\\Ada\\.minions\\workspaces\\${id}`);
+    expect(workspaceStateRoot("C:\\workspace\\.minions", id, path.win32))
+      .toBe(`C:\\workspace\\.minions\\workspaces\\${id}`);
   });
 
   it("fails closed when a workspace state root is replaced by a symlink", () => {

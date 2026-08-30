@@ -72,7 +72,7 @@ describe("loadImageFromProjectPath — fetch wiring", () => {
 
     await expect(
       loadImageFromProjectPath(
-        "/home/user/proj",
+        "/workspace/proj",
         "assets/screenshot.png",
       ),
     ).rejects.toThrow(/Failed to load image/);

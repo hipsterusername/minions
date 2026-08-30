@@ -74,7 +74,7 @@ describe("logging", () => {
   it("redacts private fields by default and allows explicit server opt-in", () => {
     const hidden = captureLogger();
     hidden.logger.info("worktree", {
-      worktreePath: "/home/alice/repo/.worktrees/task",
+      worktreePath: "/workspace/repo/.worktrees/task",
       reason: "customer request",
     });
     expect(hidden.records[0]?.fields).toEqual({
@@ -84,17 +84,17 @@ describe("logging", () => {
 
     const visible = captureLogger({ includePrivateFields: true });
     visible.logger.info("worktree", {
-      worktreePath: "/home/alice/repo/.worktrees/task",
+      worktreePath: "/workspace/repo/.worktrees/task",
     });
     expect(visible.records[0]?.fields).toEqual({
-      worktreePath: "/home/alice/repo/.worktrees/task",
+      worktreePath: "/workspace/repo/.worktrees/task",
     });
   });
 
   it("normalizes errors without exposing stacks or private paths", () => {
     const { logger, records } = captureLogger();
-    const error = new Error("failed in /home/alice/private/repo/file.ts");
-    error.stack = "Error: failed\n at /home/alice/private/repo/file.ts:2:3";
+    const error = new Error("failed in /workspace/private/repo/file.ts");
+    error.stack = "Error: failed\n at /workspace/private/repo/file.ts:2:3";
     logger.error("failed", { error });
 
     expect(records[0]?.fields).toEqual({

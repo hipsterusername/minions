@@ -36,7 +36,7 @@ function renderFileViewer(content: string, filePath = "README.md") {
     node,
     isSelected: false,
     onUpdateData: vi.fn(),
-    projectPath: "/home/test/project",
+    projectPath: "/workspace/project",
   };
 
   return {

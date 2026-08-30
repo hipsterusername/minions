@@ -93,6 +93,7 @@ export function createNodeHandlerFetch(
       "pipe",
       "unpipe",
       "destroy",
+      "_destroy",
     ]);
 
     return await new Promise<Response>((resolve, reject) => {

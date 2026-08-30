@@ -5,7 +5,7 @@ import { enrichSystemPromptForWorktree } from "./session-host-config.ts";
 const FAKE_WORKTREE = {
   path: "/tmp/worktrees/feature-abc",
   branch: "wt/feature-abc",
-  projectPath: "/home/user/myproject",
+  projectPath: "/workspace/myproject",
 };
 
 const BASE_LEADER = "Leader base prompt content.";
