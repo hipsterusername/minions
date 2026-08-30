@@ -39,6 +39,8 @@ const ECHO_CAPABILITIES: HarnessCapabilities = {
   sandboxEnforcement: { filesystem: [], approval: false },
 };
 
+const HOLD_DIRECTIVE = "[[echo:hold]]";
+
 class EchoHarness implements AgentHarness {
   readonly name = "echo";
   readonly exposure = "test" as const;
@@ -116,6 +118,20 @@ class EchoHarness implements AgentHarness {
       }
 
       yield { kind: "text", text: promptText, role: "assistant" };
+
+      // Recovery E2E tests need a credential-free child that remains live
+      // across a browser reconnect. Echo is test-only, so keep that behavior
+      // behind an explicit prompt directive and terminate only when the real
+      // run cancellation path aborts the harness.
+      if (promptText.includes(HOLD_DIRECTIVE)) {
+        await new Promise<void>((resolve) => {
+          if (ac.signal.aborted) resolve();
+          else ac.signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        yield { kind: "done", reason: "abort" };
+        return;
+      }
+
       yield { kind: "done", reason: "stop" };
     }
 

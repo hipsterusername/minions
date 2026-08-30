@@ -43,9 +43,10 @@ export function createTaskGraphAgentTools(service: TaskGraphService,sessionRunKe
     // canonical discriminated union in the handler, not at the tool boundary.
     const stageInputSchema=writes?writableArtifactStageInputSchema:inlineArtifactStageInputSchema;
     tools.push({ name:"stage_output_artifact",
-    description:writes
+    description:(writes
       ? "Stage one declared graph output as immutable evidence. Choose exactly one source: inline with inlineJson, or path with a workspace-relative storageRef. The server derives hash and byte size; optional supplied values are treated as integrity guards."
-      : "Stage one declared graph output as immutable evidence using inline JSON. Set source to inline and provide inlineJson; the server serializes, hashes, sizes, validates, and stores it. Path-backed staging requires write ownership and is unavailable to this read-only node.",
+      : "Stage one declared graph output as immutable evidence using inline JSON. Set source to inline and provide inlineJson; the server serializes, hashes, sizes, validates, and stores it. Path-backed staging requires write ownership and is unavailable to this read-only node.")
+      + ` Frozen output contracts: ${JSON.stringify(binding.outputSchemas)}. Validation failures report the exact JSON path and do not consume the output slot; repair inlineJson and restage without repeating the task.`,
     inputSchema:stageInputSchema,
     handler:async(raw) => {
       const input = artifactStageInputSchema.parse(stageInputSchema.parse(raw));

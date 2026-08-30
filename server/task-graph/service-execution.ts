@@ -1,4 +1,4 @@
-import type { AttemptEvent,GraphRevisionInput,GraphSnapshot } from "../../shared/task-graph-contracts.ts";
+import type { AttemptEvent,GraphSnapshot } from "../../shared/task-graph-contracts.ts";
 import type { WorkItemRunSnapshot } from "../../shared/work-item-contracts.ts";
 import type { WsEnvelope } from "../../shared/ws-envelope.ts";
 import { serverLogger } from "../logging.ts";
@@ -6,11 +6,10 @@ import { getWorkItemRun } from "../work-item-repo.ts";
 import { runSnapshot } from "../work-item-snapshots.ts";
 import { TaskGraphConflictError,TaskGraphValidationError } from "./errors.ts";import { sandboxPolicyForTaskGraphNode } from "./execution-policy.ts";
 import type { DispatchRecord } from "./recovery.ts";
-import { safeArtifactReference,type TaskGraphArtifactReference } from "./artifact-access.ts";
 import { scopedContextForNode } from "./context-sources.ts";
-import { currentProducerArtifacts } from "./evidence.ts";
 import { renderTaskGraphNodePrompt } from "./node-prompt.ts";
 import { steeringInstructions } from "./service-controls.ts";
+import {recoveryDraftForAttempt,resolvedInputArtifacts} from "./staging-recovery.ts";
 import { onVerifierSealed,recoverTaskGraphVerifications } from "./service-verification.ts";import {parseVerificationTaskVerdict} from "./verification-verdict.ts";
 import type { TaskGraphService } from "./service.ts";type Row=Record<string,unknown>;
 const log=serverLogger.child("task-graph-execution");
@@ -30,7 +29,7 @@ export async function tickTaskGraphExclusive(service:TaskGraphService,runId:stri
   const current=service.repo.snapshot(runId,0);service.evidence.evaluate(runId,current.run.revision,service.now());
   if (isTerminal(service,runId)) return drainTerminalTick(service,runId);
   for (let pass=0;pass<4;pass+=1) {
-    const snapshot=service.repo.snapshot(runId,0);if (!["active","quiescent"].includes(snapshot.run.status) || snapshot.run.paused) break;
+    const snapshot=service.repo.snapshot(runId,0);if (!["active","quiescent","blocked"].includes(snapshot.run.status) || snapshot.run.paused) break;
     const admissionLimit=availableAdmissionSlots(service);if (admissionLimit<1) break;
     const scheduledAt=service.now();
     const fencingToken=service.scheduler.acquireLease(runId,service.ownerId,scheduledAt,service.leaseTtlMs);
@@ -205,8 +204,12 @@ async function dispatch(service:TaskGraphService,record:DispatchRecord):Promise<
   const spec=service.repo.getRevision(String(run.revision_id));
   const node=spec.nodes.find(candidate=>candidate.id===attempt.node_id);
   if (!node) throw new TaskGraphValidationError("dispatch node not found");
-  const inputArtifacts=resolvedInputArtifacts(service,record.runId,spec,node.id);
+  const inputArtifacts=resolvedInputArtifacts(service.options.db,record.runId,spec,node.id);
   const steering=steeringInstructions(service,record.runId,node.id);
+  const recoveryDraft=recoveryDraftForAttempt(service.options.db,record.runId,node.id,
+    Number(attempt.attempt_number));
+  const frozenSkillIds=service.repo.snapshot(record.runId,0).sourceSnapshot.compiledSkills
+    .map(skill=>skill.skillId);
   const sandboxPolicy=(service.options.validateNodePolicy||service.options.resolveHarness)?sandboxPolicyForTaskGraphNode(node,service.options.resolveHarness):undefined;
   try {
     const child=await service.options.children.startChildRun({
@@ -214,10 +217,10 @@ async function dispatch(service:TaskGraphService,record:DispatchRecord):Promise<
       attemptId:record.attemptId,attemptNumber:Number(attempt.attempt_number),
       requestId:`task-graph:${record.attemptId}:${record.generation}`,
       harness:node.allowedHarnesses[0],executorClass:node.executorClass,
-      toolAllowlist:node.allowedTools,...(sandboxPolicy?{sandboxPolicy}:{}),
+      toolAllowlist:node.allowedTools,skillIds:frozenSkillIds,...(sandboxPolicy?{sandboxPolicy}:{}),
       prompt:renderTaskGraphNodePrompt(spec,node,record.attemptId,Number(attempt.attempt_number),
         String(run.source_snapshot_id),inputArtifacts,steering,
-        scopedContextForNode(service.options.db,String(run.source_snapshot_id),node.id)),
+        scopedContextForNode(service.options.db,String(run.source_snapshot_id),node.id),recoveryDraft),
     });
     if (!hasDispatchFence(service,record,fencingToken,service.now())) {
       await cancelLateChild(service,record,child.runKey);
@@ -316,15 +319,23 @@ async function onGraphChildSealed(service:TaskGraphService,run:WorkItemRunSnapsh
   const node=snapshot.revision.nodes.find(candidate=>candidate.id===String(row.node_id));const completionVerdict=node?.completionMode==="verification"?parseVerificationTaskVerdict(run.finalReport,run.outcome):null;if (row.runtime!=="terminal" && completionVerdict?.result!==undefined && completionVerdict.result!=="passed") outcome="failed";
   const staged=service.options.db.prepare(`SELECT * FROM task_artifacts WHERE run_id=?
     AND producer_attempt_id=? AND state='staged' ORDER BY id`).all(runId,run.attemptId) as Row[];
+  let stagingFailure:{missingOutputs:string[];stagedOutputs:string[]}|null=null;
   if (row.runtime!=="terminal" && outcome==="succeeded" && node) {
     const stagedNames=new Set(staged.map(artifact=>String(artifact.output_name)));
-    if (Object.keys(node.outputSchemas).some(name=>!stagedNames.has(name))) outcome="failed";
+    const missingOutputs=Object.keys(node.outputSchemas).filter(name=>!stagedNames.has(name));
+    if (missingOutputs.length) {
+      stagingFailure={missingOutputs,stagedOutputs:[...stagedNames].sort()};
+      outcome="failed";
+    }
   }
   if (row.runtime!=="terminal") {
     service.scheduler.terminal({runId,attemptId:run.attemptId!,generation:Number(row.generation),
       actorSessionKey:run.runKey,idempotencyKey:`work-item-terminal:${run.runKey}:${run.endedAt??service.now()}`,
       expectedRunRevision:snapshot.run.revision,at:run.endedAt??service.now()},outcome,{
-      source:"work_item_run",runKey:run.runKey,finalReport:run.finalReport,...(completionVerdict?{completionVerdict}:{}),
+      source:"work_item_run",runKey:run.runKey,
+      ...(stagingFailure?{failureKind:"artifact_staging"}:{}),
+      finalReport:run.finalReport,...(stagingFailure?{stagingFailure}:{ }),
+      ...(completionVerdict?{completionVerdict}:{}),
     });
   }
   if (outcome==="succeeded") {
@@ -363,16 +374,6 @@ function attemptEvent(service:TaskGraphService,record:DispatchRecord,expectedRun
   return {runId:record.runId,attemptId:record.attemptId,generation:record.generation,actorSessionKey,
     idempotencyKey:`dispatch-ack:${record.attemptId}:${record.generation}`,
     expectedRunRevision,at:service.now()};
-}
-function resolvedInputArtifacts(service:TaskGraphService,runId:string,spec:GraphRevisionInput,
-  nodeId:string):TaskGraphArtifactReference[] {
-  const inputs:TaskGraphArtifactReference[]=[];
-  for (const edge of spec.edges.filter(candidate=>candidate.targetNodeId===nodeId
-    && (candidate.kind==="artifact" || candidate.kind==="verified_artifact"))) {
-    const row=currentProducerArtifacts(service.options.db,runId,edge.sourceNodeId,edge.sourceOutput)[0];
-    if (!row) continue;inputs.push(safeArtifactReference(row,edge.targetInput));
-  }
-  return inputs;
 }
 function settleGraphStatus(service:TaskGraphService,runId:string):void {
   const snapshot=service.repo.snapshot(runId,0);

@@ -33,7 +33,7 @@ export const graphRunStatusViewSchema = z.enum([
   "draft", "running", "quiescent", "paused", "blocked", "completed", "failed", "cancelled",
 ]);
 export const logicalStateViewSchema = z.enum([
-  "pending", "succeeded", "failed", "exhausted", "cancelled", "invalidated",
+  "pending", "succeeded", "failed", "exhausted", "cancelled", "invalidated", "not_run",
 ]);
 export const readinessStateViewSchema = z.enum(["not_ready", "ready", "claimed", "terminal"]);
 export const attemptStateViewSchema = z.enum([
@@ -121,7 +121,8 @@ export const taskGraphSnapshotViewSchema = z.object({
   evidence: z.array(z.object({
     id: idSchema, sourceSnapshot: idSchema, producerAttemptId: idSchema,
     artifactId: idSchema, verifierAttemptId: optionalTextSchema,
-    consumerNodeIds: z.array(idSchema), status: verificationStateViewSchema,
+    consumerNodeIds: z.array(idSchema), consumedByNodeIds:z.array(idSchema).default([]),
+    status: verificationStateViewSchema,
   })),
   timeline: z.array(z.object({
     id: idSchema, at: z.iso.datetime(),

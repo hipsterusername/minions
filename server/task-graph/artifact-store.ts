@@ -1,17 +1,16 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import Ajv,{type AnySchema} from "ajv";
 import type Database from "better-sqlite3";
 import { artifactStageInputSchema,type ArtifactInput,type ArtifactStageInput,
   type TaskNode } from "../../shared/task-graph-contracts.ts";
 import { getMinionsHome } from "../workspace-registry.ts";
 import { TaskGraphValidationError } from "./errors.ts";
+import {validateArtifactContract} from "./artifact-contract.ts";
 
 export const MAX_ARTIFACT_BYTES=50*1024*1024;
 export const MAX_INLINE_ARTIFACT_BYTES=256*1024;
 const MAX_ARTIFACT_CHUNK_BYTES=256*1024;
-const artifactSchemaValidator=new Ajv({strict:false,allErrors:true});
 
 export interface TaskGraphArtifactChunk {
   byteSize:number;
@@ -30,7 +29,9 @@ type UnverifiedArtifactMetadata = Omit<ArtifactInput,"id"|"contentHash"|"byteSiz
 export function storeTaskGraphArtifactForNode(db:Database.Database,runId:string,node:TaskNode,
   rawInput:ArtifactStageInput):Omit<ArtifactInput,"id"> {
   const input=artifactStageInputSchema.parse(rawInput);
-  if (!(input.outputName in node.outputSchemas)) throw new TaskGraphValidationError("undeclared artifact output");
+  if (!(input.outputName in node.outputSchemas)) throw new TaskGraphValidationError(
+    `$.outputName: expected one of ${JSON.stringify(Object.keys(node.outputSchemas))}; received ${JSON.stringify(input.outputName)}. Choose a declared output and restage; the rejected draft did not consume an output slot.`,
+  );
   const schema=node.outputSchemas[input.outputName];
   if (input.source==="inline") return storeInlineTaskGraphArtifact(input,schema);
   const storageRef=canonicalArtifactStorageRef(input.storageRef);
@@ -109,10 +110,7 @@ function validateDeclaredOutput(bytes:Buffer,declaredOutputSchema:unknown):void 
   let value:unknown;
   try { value=JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(bytes)); }
   catch { throw new TaskGraphValidationError("artifact content must be valid UTF-8 JSON"); }
-  let validate;
-  try { validate=artifactSchemaValidator.compile(declaredOutputSchema as AnySchema); }
-  catch { throw new TaskGraphValidationError("declared artifact output schema is invalid or unsupported"); }
-  if (!validate(value)) throw new TaskGraphValidationError("artifact content does not satisfy declared output schema");
+  validateArtifactContract(value,declaredOutputSchema);
 }
 
 /** Read a bounded chunk only after revalidating canonical storage and content identity. */

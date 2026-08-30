@@ -1,11 +1,18 @@
 import type { GraphRevisionInput } from "../../shared/task-graph-contracts.ts";
 import type { TaskGraphArtifactReference } from "./artifact-access.ts";
+import {artifactContractExample} from "./artifact-contract.ts";
 
 interface ScopedContext {
   sourceId: string;
   contentHash: string;
   classification: string;
   content: string;
+}
+
+export interface TaskGraphRecoveryDraft {
+  attemptId:string;
+  finalReport:string;
+  stagingFailure?:{missingOutputs:string[];stagedOutputs:string[]}|undefined;
 }
 
 export function renderTaskGraphNodePrompt(
@@ -17,6 +24,7 @@ export function renderTaskGraphNodePrompt(
   inputArtifacts: TaskGraphArtifactReference[],
   steering: string[],
   scopedContext: ScopedContext[],
+  recoveryDraft?:TaskGraphRecoveryDraft|null,
 ): string {
   return [
     `Mission: ${revision.objective}`,
@@ -40,6 +48,7 @@ export function renderTaskGraphNodePrompt(
       ? `Constraints:\n${node.constraints.map((value) => `- ${value}`).join("\n")}` : "",
     steering.length
       ? `Revision-fenced steering:\n${steering.map((value) => `- ${value}`).join("\n")}` : "",
+    recoveryDraft ? recoveryGuidance(recoveryDraft) : "",
     node.acceptanceCriteria.length
       ? `Acceptance criteria:\n${node.acceptanceCriteria.map((value) => `- ${value}`).join("\n")}` : "",
     node.completionMode === "verification"
@@ -57,9 +66,31 @@ export function renderTaskGraphNodePrompt(
 }
 
 function artifactStagingGuidance(node:GraphRevisionInput["nodes"][number]):string {
-  const names=Object.keys(node.outputSchemas).join(", ");
+  const contracts=Object.entries(node.outputSchemas).map(([name,schema])=>[
+    `### ${name}`,
+    `Exact JSON Schema: ${JSON.stringify(schema)}`,
+    `Accepted example: ${JSON.stringify(artifactContractExample(schema))}`,
+    `Required stage fields: ${JSON.stringify({source:"inline",outputName:name,
+      schemaName:declaredText(schema,"schemaName","GraphOutput"),
+      schemaVersion:declaredText(schema,"schemaVersion","1"),
+      inlineJson:artifactContractExample(schema)})}`,
+  ].join("\n")).join("\n\n");
   const writes=node.ownershipRequest.some(scope=>scope.mode==="write");
-  return writes
-    ? `Before reporting done, call mcp__task-graph__stage_output_artifact once for every declared output: ${names}. Choose exactly one source variant: source=inline with inlineJson, or source=path with a workspace-relative storageRef. The server derives contentHash and byteSize; only provide them when you need an additional integrity precondition.`
-    : `Before reporting done, call mcp__task-graph__stage_output_artifact once for every declared output: ${names}. This node is filesystem-read-only, so use only source=inline with inlineJson; path-backed staging is unavailable. The server serializes, hashes, sizes, validates, and stores the JSON.`;
+  const instruction=writes
+    ? "Choose exactly one source variant: source=inline with inlineJson, or source=path with a workspace-relative storageRef."
+    : "This node is filesystem-read-only, so use only source=inline with inlineJson; path-backed staging is unavailable.";
+  return `Artifact output contracts (frozen before execution):\n${contracts}\n\nBefore reporting done, call mcp__task-graph__stage_output_artifact once for every declared output. ${instruction} The server derives contentHash and byteSize. If validation fails, repair only the rejected JSON and call the staging tool again; completed reasoning and successfully staged outputs remain in this attempt.`;
+}
+
+function recoveryGuidance(draft:TaskGraphRecoveryDraft):string {
+  const staging=draft.stagingFailure
+    ? `The prior attempt completed its reasoning but failed artifact submission. Missing outputs: ${draft.stagingFailure.missingOutputs.join(", ")||"none"}. Already staged in that attempt: ${draft.stagingFailure.stagedOutputs.join(", ")||"none"}.`
+    : "A prior attempt produced a final draft that may be reused.";
+  return `Recovery draft from ${draft.attemptId}:\n${staging}\nDo not repeat completed analysis unless the draft is substantively wrong. Repair or serialize the draft into the frozen output contract, restage every required output for this attempt, then return a concise report.\n\nPrior final report:\n${draft.finalReport}`;
+}
+
+function declaredText(schema:unknown,key:string,fallback:string):string {
+  if (!schema || typeof schema!=="object") return fallback;
+  const value=(schema as Record<string,unknown>)[key];
+  return typeof value==="string"&&value?value:fallback;
 }

@@ -48,6 +48,7 @@ function runtimePlanStatus(node: import("./types.ts").TaskGraphNodeView | undefi
   if (node.logicalState === "succeeded") return "completed";
   if (node.logicalState === "failed" || node.logicalState === "exhausted") return "failed";
   if (node.logicalState === "cancelled") return "cancelled";
+  if (node.logicalState === "not_run") return "cancelled";
   if (node.currentAttempt?.state === "running") return "running";
   if (node.blocker) return "blocked";
   return node.readiness === "claimed" ? "starting" : "planned";

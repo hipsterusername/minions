@@ -14,6 +14,12 @@ import {
 import type { TaskManagerState, TaskRecord } from "../task-tools.ts";
 import { MINION_SYSTEM_PROMPT } from "../../shared/prompts/minion-system.ts";
 import { applyLifecycleEvent } from "../task-lifecycle.ts";
+import {
+  MINION_MCP_TOOLS_BASE,
+  SKILL_AUTHORING_TOOLS,
+  SKILL_BUILDER_ID,
+  minionSkillMcpToolNames,
+} from "./minion-tool-policy.ts";
 
 // Re-exported so leader.ts can pass it to task-tools when spawning minions.
 export { MINION_SYSTEM_PROMPT };
@@ -22,30 +28,6 @@ export { MINION_SYSTEM_PROMPT };
  * Always-available minion tool names: status reporting + sub-skill retrieval.
  * The skill-authoring tools are gated separately (see SKILL_AUTHORING_TOOLS).
  */
-const MINION_MCP_TOOLS_BASE = [
-  "mcp__minion-status__report_step",
-  "mcp__minion-status__report_done",
-  "mcp__minion-status__report_fail",
-  "mcp__minion-status__report_blocked",
-  "mcp__skills__load_subskill",
-];
-
-/**
- * Skill-authoring tool names — opt-in. Only loaded for a minion whose task
- * armed the `skill-builder` skill. Keeps ~1.5k tokens of tool schemas off
- * every other minion.
- */
-const SKILL_AUTHORING_TOOLS = [
-  "mcp__skills__list_skills",
-  "mcp__skills__get_skill",
-  "mcp__skills__create_skill",
-  "mcp__skills__update_skill",
-  "mcp__skills__delete_skill",
-];
-
-/** The skill ID that gates the skill-authoring tools. */
-const SKILL_BUILDER_ID = "skill-builder";
-
 const REPORT_NUDGE_PROMPT =
   "Your task is still open. Call mcp__minion-status__report_done with a one-line summary of what you completed, or report_fail with what blocked you. Do not start new work.";
 
@@ -133,10 +115,13 @@ const minionAgent: AgentType = {
       projectPath,
     });
 
-    // Skill-authoring tools are opt-in: load them only when the parent task
-    // armed the `skill-builder` skill. Sub-skill retrieval stays always-on.
+    // Skill-authoring tools are opt-in: load them only when this run was armed
+    // with `skill-builder`. Canonical graph children do not have a legacy
+    // parent TaskRecord, so the run context is the authority; retain the
+    // TaskRecord fallback for legacy/direct children.
     const hasSkillBuilder =
-      parent?.task.skillIds?.includes(SKILL_BUILDER_ID) ?? false;
+      (ctx.skillIds?.includes(SKILL_BUILDER_ID) ?? false)
+      || (parent?.task.skillIds?.includes(SKILL_BUILDER_ID) ?? false);
     const skillAuthoringDefs = hasSkillBuilder
       ? createSkillAuthoringTools({ projectPath })
       : [];
@@ -147,11 +132,11 @@ const minionAgent: AgentType = {
         ...(ctx.taskGraphToolDefs?.length ? { "task-graph":ctx.taskGraphToolDefs } : {}),
         skills: [...subskillDefs, ...skillAuthoringDefs],
       },
-      mcpToolNames: hasSkillBuilder
-        ? [...MINION_MCP_TOOLS_BASE, ...SKILL_AUTHORING_TOOLS,
-          ...(ctx.taskGraphToolDefs?.map(def => `mcp__task-graph__${def.name}`) ?? [])]
-        : [...MINION_MCP_TOOLS_BASE,
-          ...(ctx.taskGraphToolDefs?.map(def => `mcp__task-graph__${def.name}`) ?? [])],
+      mcpToolNames: [
+        ...MINION_MCP_TOOLS_BASE,
+        ...minionSkillMcpToolNames(hasSkillBuilder ? [SKILL_BUILDER_ID] : []),
+        ...(ctx.taskGraphToolDefs?.map(def => `mcp__task-graph__${def.name}`) ?? []),
+      ],
     };
   },
 

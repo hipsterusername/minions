@@ -1,25 +1,26 @@
 id: capability.execution_graph_runtime
 type: capability
 name: Execution graph runtime
-summary: Leaders can optionally submit semantic plans that are source-frozen, policy-preflighted, and materialized as immutable dependency graphs under a canonical WorkItem, then execute them with bounded parallel attempts, durable evidence, retries, recovery, and fenced controls while retaining direct execution and delegation tools outside the graph.
+summary: Leaders can optionally classify work with versioned authoring patterns, review deterministic routing and lint findings, and submit expanded semantic plans that are source-frozen, policy-preflighted, and materialized as immutable dependency graphs under a canonical WorkItem, then execute them with bounded parallel attempts, durable evidence, retries, recovery, and fenced controls while retaining direct execution and delegation tools outside the graph.
 constraints:
   - constraint.execution_graph_authority
   - constraint.execution_graph_admission
   - constraint.execution_graph_evidence
   - constraint.execution_graph_projection
+  - constraint.work_packet_reconciliation
 decisions:
   - decision.server_owned_execution_graphs
   - decision.canonical_work_item_lifecycle
   - decision.typed_event_bus
 risks: []
-suggested_files: [ server/task-graph/**, shared/task-graph-contracts.ts, shared/task-graph-planning-contracts.ts, shared/work-item-contracts.ts, server/commands/task-graph.ts ]
-suggested_tests: [ server/task-graph/planning-compiler.test.ts, server/task-graph/planning-coordinator.test.ts, server/task-graph/runtime.test.ts, server/task-graph/service.test.ts, tests/task-graph/runtime.test.ts, tests/contracts/work-item-contracts.test.ts ]
-keywords: [ execution_graph, task_graph, semantic_plan, proposal_revision, source_snapshot, policy_preflight, serial_iteration, topology, graph_revision, graph_run, node_attempt, scheduler, lease, outbox, artifact, verification, ownership, budget ]
+suggested_files: [ server/task-graph/**, server/task-graph/patterns.ts, shared/task-graph-patterns.ts, shared/task-graph-contracts.ts, shared/task-graph-planning-contracts.ts, shared/work-item-contracts.ts, shared/leader-prompt.ts, server/agents/leader.ts, server/system-model-tools/reconcile-run.ts, server/commands/task-graph.ts ]
+suggested_tests: [ shared/task-graph-patterns.test.ts, server/task-graph/patterns.test.ts, server/task-graph/planning-compiler.test.ts, server/task-graph/planning-coordinator.test.ts, server/task-graph/runtime.test.ts, server/task-graph/service.test.ts, shared/leader-prompt.test.ts, server/agents/leader.test.ts, server/system-model-tools/reconcile-run.test.ts, tests/task-graph/runtime.test.ts, tests/contracts/work-item-contracts.test.ts ]
+keywords: [ execution_graph, task_graph, semantic_plan, pattern, router, lint, problem_signature, bounded_episode, proposal_revision, source_snapshot, policy_preflight, serial_iteration, topology, graph_revision, graph_run, node_attempt, scheduler, lease, outbox, artifact, verification, ownership, budget ]
 entry_points:
   - surface: surface.agent_tools
-    summary: Leaders submit revision-fenced semantic proposals that freeze source and policy before immutable materialization; attempt-bound agents then stage declared artifacts and return independently verifiable results.
-    files: [ shared/task-graph-planning-contracts.ts, server/task-graph/planning-tools.ts, server/task-graph/planning-coordinator.ts, server/task-graph/planning-source.ts, server/task-graph/planning-compiler.ts, server/task-graph/execution-policy.ts, server/task-graph/agent-tools.ts, server/session-host-agent-context.ts, server/agents/minion.ts ]
-    tests: [ server/task-graph/planning-coordinator.test.ts, server/task-graph/planning-source.test.ts, server/task-graph/planning-compiler.test.ts, server/task-graph/execution-policy.test.ts, server/task-graph/service.test.ts, server/agents/minion.test.ts ]
+    summary: Leaders may attach versioned pattern, problem-signature, and bounded-episode metadata to expanded semantic proposals; the server recommends and lints authoring structure, then freezes source and policy before immutable materialization while attempt-bound agents stage declared artifacts and return independently verifiable results.
+    files: [ shared/task-graph-patterns.ts, shared/task-graph-planning-contracts.ts, server/task-graph/patterns.ts, server/task-graph/planning-tools.ts, server/task-graph/planning-coordinator.ts, server/task-graph/planning-source.ts, server/task-graph/planning-compiler.ts, server/task-graph/execution-policy.ts, server/task-graph/agent-tools.ts, server/session-host-agent-context.ts, server/agents/minion.ts ]
+    tests: [ shared/task-graph-patterns.test.ts, server/task-graph/patterns.test.ts, server/task-graph/planning-coordinator.test.ts, server/task-graph/planning-source.test.ts, server/task-graph/planning-compiler.test.ts, server/task-graph/execution-policy.test.ts, server/task-graph/service.test.ts, server/agents/minion.test.ts ]
     flows: [ flow.execute_execution_graph ]
   - surface: surface.ws_api
     summary: Validated commands create revisions, start and control fenced runs, and retrieve canonical graph projections.
@@ -27,7 +28,7 @@ entry_points:
     tests: [ server/commands/schemas.test.ts, server/task-graph/service.test.ts ]
     flows: [ flow.execute_execution_graph ]
   - surface: surface.graph_inspector
-    summary: Inspect topology, readiness, attempts, evidence, budget, critical path, and timeline without making the UI authoritative.
+    summary: Review proposal pattern provenance, router rationale, lint findings, and artifact contracts, then inspect runtime topology, readiness, attempts, evidence, budget, critical path, and timeline without making the UI authoritative.
     files: [ src/task-graph/**, shared/task-graph-view-contracts.ts, server/task-graph/view.ts ]
     tests: [ src/task-graph/GraphInspector.test.tsx, src/task-graph/use-task-graph-view.test.tsx, src/task-graph/LeaderTaskGraphIntegration.test.tsx ]
     flows: [ flow.inspect_execution_graph ]
@@ -50,3 +51,5 @@ bridges:
     reason: Graph attempts launch attempt-identified child WorkItem runs while direct planning, delegation, steering, and waiting remain available whenever the Leader decides a graph would not add value.
   - to: flow.monitor_execution
     reason: Graph state is observed through the shared typed event and reconnect model.
+  - to: constraint.work_packet_reconciliation
+    reason: A terminal graph run completes scheduler execution but does not close an attached Work Packet before evidence and model reconciliation.

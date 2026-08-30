@@ -101,6 +101,24 @@ describe("TaskGraphPlanningCoordinator", () => {
     expect(transport.emitted.some((event) => event.type === "task_graph_plan_changed")).toBe(true);
   });
 
+  it("projects pattern provenance and a deterministic router recommendation",async()=>{
+    const {coordinator}=setup();
+    const value={...semanticPlan(),pattern:{id:"p10.causal_diagnosis" as const,version:1 as const},
+      problemSignature:{taskKind:"diagnosis" as const,goalClarity:"explicit" as const,
+        procedure:"unknown" as const,decomposability:"high" as const,evidenceModes:"multiple" as const,
+        alternatives:"several" as const,deepUncertainty:false,verificationNeed:"ordinary" as const},
+      iteration:{strategy:"single_episode" as const,episode:1,evidenceRefs:[]}};
+    const ready=await coordinator.submit({workItemId:"work",primaryRunKey:"primary",
+      mode:"plan",requestId:"pattern",baseProposalRevision:null,plan:value});
+    expect(ready).toMatchObject({
+      pattern:{id:"p10.causal_diagnosis",version:1},
+      patternRecommendation:{id:"p10.causal_diagnosis",version:1,source:"problem_signature"},
+      patternTemplate:{id:"p10.causal_diagnosis",version:1,
+        topology:"Event -> Cause model -> {Evidence | Tests} -> Remedy check"},
+      iteration:{strategy:"single_episode",episode:1},
+    });
+  });
+
   it("migrates legacy pending review blockers without losing the integration requirement", async () => {
     const { db, coordinator } = setup();
     const ready = await coordinator.submit({ workItemId: "work", primaryRunKey: "primary",

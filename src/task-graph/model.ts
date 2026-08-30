@@ -16,12 +16,14 @@ export function matchesGraphFilter(node: TaskGraphNodeView, filter: GraphFilter)
     case "all": return true;
     case "active": return node.currentAttempt?.state === "running" || node.readiness === "ready" || node.criticalPath;
     case "attention": return node.logicalState === "failed" || node.logicalState === "exhausted"
+      || node.logicalState === "not_run"
       || node.currentAttempt?.state === "failed"
       || (!!node.blocker && node.blocker.category !== "none")
       || ["pending", "failed", "stale"].includes(node.verification.state);
     case "ready": return node.readiness === "ready";
     case "blocked": return !!node.blocker && node.blocker.category !== "none";
-    case "failed": return node.logicalState === "failed" || node.logicalState === "exhausted" || node.currentAttempt?.state === "failed";
+    case "failed": return node.logicalState === "failed" || node.logicalState === "exhausted"
+      || node.logicalState === "not_run" || node.currentAttempt?.state === "failed";
     case "unverified": return node.verification.state === "pending" || node.verification.state === "failed" || node.verification.state === "stale";
     case "expensive": return node.costUsd > 0;
     case "stale": return node.stale;

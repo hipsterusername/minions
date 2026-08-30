@@ -111,9 +111,11 @@ export function projectTaskGraphSnapshot(
       || latestOutcome === "lost" || latestOutcome === "superseded" || invalidCompletion;
     const ready = readinessByNode.get(node.id);
     const graphCancelled = snapshot.run.status === "cancelled";
+    const graphFailedBeforeRun = snapshot.run.status === "failed" && !latest;
     const logicalState = satisfied ? "succeeded" as const
       : stale ? "invalidated" as const
       : graphCancelled ? "cancelled" as const
+      : graphFailedBeforeRun ? "not_run" as const
       : ready?.ready ? "pending" as const
       : unsuccessful && ready?.reason === "attempts_exhausted" ? "exhausted" as const
       : unsuccessful && ready?.reason === "outcome_not_retryable"
@@ -139,7 +141,9 @@ export function projectTaskGraphSnapshot(
         ? {category:"policy" as const,explanation:"Independent verification was inconclusive"}:null;
     const completionBlocker=invalidCompletion
       ? {category:"policy" as const,explanation:"Verification needs Leader adjudication or a guided retry"}:null;
-    const blocker = waitingForHuman ? { category:"input" as const,explanation:"Waiting for required human input" }
+    const blocker = graphFailedBeforeRun
+      ? {category:"policy" as const,explanation:"Not run—graph terminated after another node failed"}
+      : waitingForHuman ? { category:"input" as const,explanation:"Waiting for required human input" }
       : completionBlocker??verificationBlocker??projectBlocker(ready?.reason,currentAttempt?.state ?? null);
     const inputIds = snapshot.revision.edges.filter(edge => edge.targetNodeId === node.id)
       .flatMap(edge => currentArtifacts(edge.sourceNodeId,artifactsByNode,currentAttemptIdByNode,invalidatedAttempts)
@@ -228,10 +232,13 @@ export function projectTaskGraphSnapshot(
     const result = verification ? text(verification,"result","result") : null;
     const stale=invalidatedAttempts.has(producerAttemptId)
       || currentAttemptIdByNode.get(nodeId) !== producerAttemptId;
+    const consumerNodeIds=snapshot.revision.edges.filter(edge=>edge.sourceNodeId===nodeId)
+      .map(edge=>edge.targetNodeId);
     return { id:`lineage:${text(artifact,"id","id")}`,sourceSnapshot:text(artifact,"source_snapshot_id","sourceSnapshotId") ?? snapshot.run.sourceSnapshotId,
       producerAttemptId,artifactId:text(artifact,"id","id") ?? "unknown",
       ...(verification ? { verifierAttemptId:text(verification,"verifier_attempt_id","verifierAttemptId") ?? undefined } : {}),
-      consumerNodeIds:snapshot.revision.edges.filter(edge => edge.sourceNodeId === nodeId).map(edge => edge.targetNodeId),
+      consumerNodeIds,consumedByNodeIds:consumerNodeIds.filter(consumerId=>
+        currentAttemptIdByNode.has(consumerId)),
       status:stale ? "stale" as const : result === "passed" ? "passed" as const : result === "failed" ? "failed" as const
         : result === "waived" ? "waived" as const : "pending" as const };
   });
@@ -304,7 +311,9 @@ function safeSourceId(sourceId:string,contentHash:string):string {
 }
 
 function projectBlocker(reason: string | undefined, attemptState: string | null) {
-  if (attemptState === "running" || !reason || reason === "ready" || reason === "attempt_active") return null;
+  if (attemptState === "running" || attemptState === "succeeded" || !reason
+    || reason === "ready" || reason === "attempt_active"
+    || reason === "attempt_succeeded_pending_satisfaction") return null;
   const category = reason.startsWith("join_unsatisfied") ? "dependency" as const
     : reason === "retry_backoff" ? "backoff" as const
       : reason.startsWith("budget_") ? "budget" as const

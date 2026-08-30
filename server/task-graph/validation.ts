@@ -1,6 +1,7 @@
 import { graphRevisionInputSchema, type GraphRevisionInput } from "../../shared/task-graph-contracts.ts";
 import { TaskGraphValidationError } from "./errors.ts";
 import path from "node:path";
+import {artifactContractExample,validateArtifactContract} from "./artifact-contract.ts";
 
 export type TaskGraphNodePolicyValidator = (
   node: GraphRevisionInput["nodes"][number],
@@ -26,6 +27,15 @@ export function validateRevision(
         throw new TaskGraphValidationError(`node ${node.id} has a non-canonical ownership path`);
       }
     }
+    for (const [outputName,schema] of Object.entries(node.outputSchemas)) {
+      const example=artifactContractExample(schema);
+      try { validateArtifactContract(example,schema); }
+      catch (error) {
+        throw new TaskGraphValidationError(
+          `node ${node.id} output ${outputName} has no valid accepted example: ${error instanceof Error?error.message:String(error)} Add an example or examples value that satisfies the declared JSON Schema before execution.`,
+        );
+      }
+    }
     validateNodePolicy?.(node);
   }
   const edgeIds = new Set<string>();
@@ -46,8 +56,15 @@ export function validateRevision(
     if (edge.kind === "artifact" || edge.kind === "verified_artifact") {
       const source=revision.nodes.find(node=>node.id===edge.sourceNodeId)!;
       const target=revision.nodes.find(node=>node.id===edge.targetNodeId)!;
-      if (!(edge.sourceOutput! in source.outputSchemas) || !(edge.targetInput! in target.inputBindings)) {
-        throw new TaskGraphValidationError(`edge ${edge.id} references undeclared artifact bindings`);
+      if (!(edge.sourceOutput! in source.outputSchemas)) {
+        throw new TaskGraphValidationError(
+          `edge ${edge.id} sourceOutput "${edge.sourceOutput}" is not declared in source node ${source.id}.outputSchemas`,
+        );
+      }
+      if (!(edge.targetInput! in target.inputBindings)) {
+        throw new TaskGraphValidationError(
+          `edge ${edge.id} targetInput "${edge.targetInput}" is not declared in target node ${target.id}.inputBindings`,
+        );
       }
       if (edge.kind === "verified_artifact" && !source.verificationRequired) {
         throw new TaskGraphValidationError(`edge ${edge.id} requires a verified source node`);

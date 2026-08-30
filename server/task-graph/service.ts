@@ -29,6 +29,7 @@ export interface TaskGraphChildLauncher {
   startChildRun(input:{workItemId:string;parentRunKey:string;taskId:string;attemptId:string;
     attemptNumber:number;prompt:string;requestId:string;harness?:string;
     executorClass?:"mechanical"|"standard"|"reasoning";toolAllowlist?:string[];
+    skillIds?:string[];
     sandboxPolicy?:import("../../shared/workspace-contracts.ts").SandboxPolicy}):Promise<WorkItemRunSnapshot>;
   cancelChildRun?(runKey:string):void|Promise<void>;
 }

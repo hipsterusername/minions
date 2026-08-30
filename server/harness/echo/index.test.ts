@@ -224,4 +224,34 @@ describe("start() — abort via AbortSignal mid-stream", () => {
       expect(doneEv.reason).toBe("abort");
     }
   });
+
+  it("holds a directed test run until the control surface aborts it", async () => {
+    const controller = new AbortController();
+    const run = echoHarness.start({
+      cwd: "/tmp",
+      systemPrompt: "",
+      model: "echo",
+      allowedTools: [],
+      abortSignal: controller.signal,
+      sessionKey: "test-session",
+      prompt: "keep this child live [[echo:hold]]",
+    });
+    const iterator = run.events[Symbol.asyncIterator]();
+
+    expect((await iterator.next()).value?.kind).toBe("init");
+    expect((await iterator.next()).value?.kind).toBe("text");
+
+    let settled = false;
+    const terminal = iterator.next().then((result) => {
+      settled = true;
+      return result;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+
+    run.control.abort();
+    const done = (await terminal).value;
+    expect(done?.kind).toBe("done");
+    if (done?.kind === "done") expect(done.reason).toBe("abort");
+  });
 });

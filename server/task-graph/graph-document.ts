@@ -5,6 +5,11 @@ import {
   semanticTaskGraphPlanSchema,
   type SemanticTaskGraphPlan,
 } from "../../shared/task-graph-planning-contracts.ts";
+import {
+  taskGraphIterationSchema,
+  taskGraphPatternProvenanceSchema,
+  taskGraphProblemSignatureSchema,
+} from "../../shared/task-graph-patterns.ts";
 import { TaskGraphConflictError, TaskGraphValidationError } from "./errors.ts";
 
 const revisionSchema = z.number().int().nonnegative();
@@ -19,6 +24,9 @@ export const graphDocumentHeaderSchema = z.object({
   assumptions: z.array(z.string().trim().min(1)).default([]),
   questions: z.array(z.string().trim().min(1)).max(1).default([]),
   workPacketId: z.string().min(1).nullable().optional(),
+  pattern: taskGraphPatternProvenanceSchema.nullable().optional(),
+  problemSignature: taskGraphProblemSignatureSchema.optional(),
+  iteration: taskGraphIterationSchema.optional(),
   terminalStepKeys: z.array(stepKeySchema).min(1).optional(),
   maxActiveAttempts: z.number().int().min(1).max(100).default(4),
   budgetLimits: z.object({
@@ -250,9 +258,25 @@ export class SemanticGraphDocumentDraft {
       const source = this.nodes.get(edge.sourceStepKey);
       const target = this.nodes.get(edge.targetStepKey);
       if (!source || !target) throw new TaskGraphValidationError("graph document edge has an unknown endpoint");
-      if (edge.kind !== "control" && (!(edge.sourceOutput! in source.outputSchemas)
-        || !(edge.targetInput! in target.inputBindings))) {
-        throw new TaskGraphValidationError("graph document edge references undeclared artifact bindings");
+      if (edge.kind === "control" && (edge.sourceOutput || edge.targetInput)) {
+        throw new TaskGraphValidationError(
+          `control edge ${edge.sourceStepKey} -> ${edge.targetStepKey} cannot declare artifact bindings; set sourceOutput and targetInput to null or use an artifact kind`,
+        );
+      }
+      if (edge.kind !== "control" && (!edge.sourceOutput || !edge.targetInput)) {
+        throw new TaskGraphValidationError(
+          `artifact edge ${edge.sourceStepKey} -> ${edge.targetStepKey} requires sourceOutput and targetInput`,
+        );
+      }
+      if (edge.kind !== "control" && !(edge.sourceOutput! in source.outputSchemas)) {
+        throw new TaskGraphValidationError(
+          `artifact edge ${edge.sourceStepKey} -> ${edge.targetStepKey} sourceOutput "${edge.sourceOutput}" is not declared in ${edge.sourceStepKey}.outputSchemas`,
+        );
+      }
+      if (edge.kind !== "control" && !(edge.targetInput! in target.inputBindings)) {
+        throw new TaskGraphValidationError(
+          `artifact edge ${edge.sourceStepKey} -> ${edge.targetStepKey} targetInput "${edge.targetInput}" is not declared in ${edge.targetStepKey}.inputBindings`,
+        );
       }
     }
   }

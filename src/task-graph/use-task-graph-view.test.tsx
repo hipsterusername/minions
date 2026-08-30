@@ -140,7 +140,8 @@ function planSnapshot(revision: number) {
     workPacketId: null,
     steps: [{ key: "build", nodeId: "node-1", title: "Build", objective: "Build it",
       acceptanceCriteria: ["passes"], dependsOn: [], contextSelectors: [],
-      executorClass: "standard", risk: "low", requiresApproval: false }],
+      inputBindings:{},outputSchemas:{},outputExamples:{},executorClass: "standard",
+      risk: "low", requiresApproval: false }],
     materializedRevisionId: "revision-1", graphRunId: null, sourceSnapshotId: "source-1",
     autoStartEligible: true, canStart: true, error: null, updatedAt: revision } as const;
 }

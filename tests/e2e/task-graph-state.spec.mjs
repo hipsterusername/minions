@@ -29,7 +29,7 @@ test("converges successful and failure/retry/blocked Task Graph state through th
   await page.getByRole("tab", { name: "Canvas" }).click();
   await page.getByTitle("Add Leader node").click();
   await page.getByRole("button", { name: "Model selection" }).click();
-  await page.getByRole("tab", { name: "Pi" }).click();
+  await page.getByRole("tab", { name: "PI Pi", exact: true }).click();
   await page.getByRole("button", { name: "Deterministic Fixture Model" }).click();
   await page.getByRole("textbox", { name: "Leader prompt" }).fill(
     "Hold the canonical primary authority open for Task Graph state E2E.",
@@ -94,8 +94,9 @@ test("converges successful and failure/retry/blocked Task Graph state through th
   await expect(retry).toBeEnabled();
   await retry.click();
 
-  const secondBlocked = await pollGraphAttempt(page, workItemId, graph.graphRunId, "blocked-node", 2);
-  expect(secondBlocked.status).toBe("blocked");
+  const secondBlocked = await pollGraphAttempt(
+    page, workItemId, graph.graphRunId, "blocked-node", 2, "blocked",
+  );
   expect(secondBlocked.revision).toBeGreaterThan(firstBlocked.revision);
   const retriedNode = secondBlocked.nodes.find((node) => node.id === "blocked-node");
   expect(retriedNode).toMatchObject({
@@ -106,17 +107,27 @@ test("converges successful and failure/retry/blocked Task Graph state through th
   await expect(inspector.getByRole("region", {
     name: "Execution goal and run status",
   })).toContainText("blocked");
-  await expect(inspector).toContainText("#2 failed");
+  await expect(inspector.getByText("Attempt 2", { exact: true })).toBeVisible();
   await expectMonotonicProjection(page, graph.graphRunId, "blocked");
 
   assertSqliteEvidence(dbPath, graph.graphRunId, workItemId);
 
   await inspector.getByRole("button", { name: "Close graph inspector" }).click();
-  const latest = await sendCommand(page, {
-    type: "get_work_item",
-    requestId: crypto.randomUUID(),
-    workItemId,
-  });
+  await page.evaluate((sessionKey) => {
+    window.__minionsTaskGraphHarness.socket.send(JSON.stringify({
+      type: "stop_session",
+      sessionKey,
+    }));
+  }, primaryRunKey);
+  let latest;
+  await expect.poll(async () => {
+    latest = await sendCommand(page, {
+      type: "get_work_item",
+      requestId: crypto.randomUUID(),
+      workItemId,
+    });
+    return latest.result.workItem.lifecycle.runtimeState;
+  }, { timeout: 15_000 }).toBe("inactive");
   await sendCommand(page, {
     type: "review_work_item",
     requestId: crypto.randomUUID(),
@@ -191,7 +202,7 @@ async function pollGraph(page, workItemId, runId, status) {
   return snapshot;
 }
 
-async function pollGraphAttempt(page, workItemId, runId, nodeId, attemptNumber) {
+async function pollGraphAttempt(page, workItemId, runId, nodeId, attemptNumber, status) {
   let snapshot;
   await expect.poll(async () => {
     snapshot = (await sendCommand(page, {
@@ -200,8 +211,9 @@ async function pollGraphAttempt(page, workItemId, runId, nodeId, attemptNumber) 
       workItemId,
       runId,
     })).snapshot;
-    return snapshot.nodes.find((node) => node.id === nodeId)?.currentAttempt?.number;
-  }, { timeout: 15_000 }).toBe(attemptNumber);
+    const currentAttempt = snapshot.nodes.find((node) => node.id === nodeId)?.currentAttempt;
+    return `${currentAttempt?.number ?? "none"}:${snapshot.status}`;
+  }, { timeout: 15_000 }).toBe(`${attemptNumber}:${status}`);
   return snapshot;
 }
 

@@ -38,7 +38,9 @@ test("drives a real credential-free Task Graph through browser, dispatcher, SQLi
   });
   const detail = createWorkItem.result;
   const workItemId = detail.workItem.id;
-  expect(createWorkItem.topic).toBe(`work-item:${workItemId}`);
+  // The create request has no WorkItem ID to address yet. The command reply
+  // is global; subsequent graph snapshots and lifecycle events are item-bound.
+  expect(createWorkItem.topic).toBe("global");
   expect(detail.workItem.lifecycle.lifecycleRevision).toBe(0);
 
   const primary = await sendCommand(page, {
@@ -54,6 +56,16 @@ test("drives a real credential-free Task Graph through browser, dispatcher, SQLi
   });
   const primaryRunKey = primary.result.workItem.currentRunKey;
   expect(primaryRunKey).toMatch(/^run-/);
+  let currentWorkItem;
+  await expect.poll(async () => {
+    currentWorkItem = (await sendCommand(page, {
+      type: "get_work_item",
+      requestId: crypto.randomUUID(),
+      workItemId,
+    })).result.workItem;
+    return currentWorkItem.lifecycle.runtimeState;
+  }, { timeout: 15_000 }).toBe("working");
+  expect(currentWorkItem.currentRunKey).toBe(primaryRunKey);
   const fixture = graphFixture({ workItemId, workspaceId, primaryRunKey });
   const createRevision = await sendCommand(page, {
     type: "create_task_graph_revision",
@@ -71,7 +83,7 @@ test("drives a real credential-free Task Graph through browser, dispatcher, SQLi
     primaryRunKey,
     revisionId: fixture.revisionId,
     sourceSnapshot: fixture.sourceSnapshot,
-    expectedLifecycleRevision: 1,
+    expectedLifecycleRevision: currentWorkItem.lifecycle.lifecycleRevision,
   });
 
   let completed;
@@ -111,12 +123,27 @@ test("drives a real credential-free Task Graph through browser, dispatcher, SQLi
     db.close();
   }
 
+  await page.evaluate((sessionKey) => {
+    window.__minionsTaskGraphHarness.socket.send(JSON.stringify({
+      type: "stop_session",
+      sessionKey,
+    }));
+  }, primaryRunKey);
+  let reviewableWorkItem;
+  await expect.poll(async () => {
+    reviewableWorkItem = (await sendCommand(page, {
+      type: "get_work_item",
+      requestId: crypto.randomUUID(),
+      workItemId,
+    })).result.workItem;
+    return reviewableWorkItem.lifecycle.runtimeState;
+  }, { timeout: 15_000 }).toBe("inactive");
   await sendCommand(page, {
     type: "review_work_item",
     requestId: crypto.randomUUID(),
     workItemId,
-    expectedLifecycleRevision: 1,
-    expectedCurrentRunKey: primaryRunKey,
+    expectedLifecycleRevision: reviewableWorkItem.lifecycle.lifecycleRevision,
+    expectedCurrentRunKey: reviewableWorkItem.currentRunKey,
   });
   await closeTaskGraphSocket(page);
 });

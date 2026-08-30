@@ -1,7 +1,18 @@
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { listHarnesses } from "./list-harnesses.ts";
 import { setup, cmd } from "../../tests/support/server-command-harness.ts";
+
+vi.mock("../harness/readiness.ts", () => ({
+  getHarnessReadiness: async () => ({
+    schemaVersion: 1,
+    checkedAt: "2026-01-01T00:00:00.000Z",
+    expiresAt: "2026-01-01T00:00:30.000Z",
+    ready: false,
+    readyHarnesses: [],
+    harnesses: [],
+  }),
+}));
 
 // Side-effect imports register harnesses for the registry the handler reads.
 import "../harness/claude/index.ts";

@@ -63,6 +63,22 @@ describe("canonical task graph runtime", () => {
       revisionId:"verification-without-criteria"},3)).toThrow("declares no acceptance criteria");
   });
 
+  it("identifies the exact undeclared runtime artifact binding",() => {
+    const db=new Database(":memory:");const repo=new TaskGraphRepository(db);
+    const producer=node("producer");
+    const consumer=node("consumer",{inputBindings:{report:{type:"object"}}});
+    const edge={id:"report-edge",sourceNodeId:"producer",targetNodeId:"consumer",
+      kind:"artifact" as const,sourceOutput:"report",targetInput:"report",
+      satisfactionPolicy:"all_success" as const,failurePolicy:"fail" as const,optional:false};
+    expect(()=>repo.createRevision(spec([producer,consumer],[edge]),1))
+      .toThrow('sourceOutput "report" is not declared in source node producer.outputSchemas');
+
+    producer.outputSchemas={report:{type:"object"}};
+    consumer.inputBindings={};
+    expect(()=>repo.createRevision(spec([producer,consumer],[edge]),2))
+      .toThrow('targetInput "report" is not declared in target node consumer.inputBindings');
+  });
+
   it("does not satisfy a verification-mode terminal from a succeeded row with a negative verdict",()=>{
     const verification=node("verification",{completionMode:"verification",
       acceptanceCriteria:["checks pass"]});

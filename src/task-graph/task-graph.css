@@ -363,6 +363,17 @@
 .tg-plan-proposal__review p { margin: 3px 0; }
 .tg-plan-proposal__review span { color: var(--text-muted); }
 .tg-plan-proposal__review ul { margin: 6px 0 0; padding-left: 18px; }
+.tg-plan-pattern {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+.tg-plan-pattern p { margin: 0; color: var(--text-muted); }
+.tg-plan-pattern small { color: var(--text-muted); }
+.tg-plan-pattern ul { margin: 2px 0 0; padding-left: 18px; color: var(--text-secondary); }
 
 .tg-plan-dialog {
   display: flex;
@@ -610,6 +621,9 @@
 .tg-logical--succeeded { background: var(--success-bg); }
 .tg-logical--failed,
 .tg-logical--exhausted { background: var(--danger-bg); }
+.tg-logical--not_run { background: var(--muted-bg); }
+.tg-plan-contracts { margin-top: 8px; }
+.tg-plan-contracts pre { max-height: 220px; overflow: auto; white-space: pre-wrap; }
 .tg-logical--cancelled,
 .tg-logical--invalidated { opacity: 0.65; }
 .tg-attempt--running { border-color: var(--status-creating); box-shadow: 0 0 0 1px color-mix(in srgb, var(--status-creating) 30%, transparent); }

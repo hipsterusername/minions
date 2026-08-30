@@ -10,6 +10,7 @@ import {
 import { TaskGraphValidationError } from "./errors.ts";
 import { contentHash } from "./hash.ts";
 import { validateRevision, type TaskGraphNodePolicyValidator } from "./validation.ts";
+import {routeTaskGraphPattern} from "./patterns.ts";
 
 export interface CompileSemanticGraphPlanInput {
   workItemId: string;
@@ -75,7 +76,8 @@ export function compileSemanticGraphPlan(input: CompileSemanticGraphPlanInput): 
       kind: dependency.kind,
       sourceOutput: dependency.sourceOutput,
       targetInput: dependency.targetInput,
-      satisfactionPolicy: "all_success" as const,
+      satisfactionPolicy: dependency.satisfactionPolicy,
+      ...(dependency.quorum == null ? {} : { quorum: dependency.quorum }),
       failurePolicy: dependency.failurePolicy,
       optional: dependency.optional,
     };
@@ -102,7 +104,9 @@ export function compileSemanticGraphPlan(input: CompileSemanticGraphPlanInput): 
     revision,
     nodeIdsByStepKey,
     autoStartEligible: plan.questions.length === 0
-      && plan.steps.every((step) => !step.requiresApproval),
+      && plan.steps.every((step) => !step.requiresApproval)
+      && (!(plan.pattern || plan.problemSignature)
+        || routeTaskGraphPattern(plan).id !== "p00.direct"),
   };
 }
 

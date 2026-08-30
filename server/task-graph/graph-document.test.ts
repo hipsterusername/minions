@@ -53,6 +53,19 @@ describe("semantic graph document draft", () => {
     });
   });
 
+  it("preserves pattern and bounded-episode metadata in the assembled plan",()=>{
+    const draft=new SemanticGraphDocumentDraft();
+    draft.initialize({...header,pattern:{id:"p01.pipeline",version:1},
+      problemSignature:{taskKind:"delivery",procedure:"known"},
+      iteration:{strategy:"single_episode",episode:1}},0);
+    draft.upsertNode(node("build"),1);
+    expect(draft.inspect("full")).toMatchObject({plan:{
+      pattern:{id:"p01.pipeline",version:1},
+      problemSignature:{taskKind:"delivery",procedure:"known"},
+      iteration:{strategy:"single_episode",episode:1},
+    }});
+  });
+
   it("returns the latest draft on a stale revision and preserves it", () => {
     const draft = new SemanticGraphDocumentDraft();
     draft.initialize(header, 0);
@@ -81,6 +94,29 @@ describe("semantic graph document draft", () => {
     expect(draft.removeEdge({sourceStepKey:"producer",targetStepKey:"consumer",kind:"artifact",
       sourceOutput:"report",targetInput:"report"},4)).toMatchObject({ documentRevision: 5 });
     expect(draft.removeNode("producer", 5)).toMatchObject({ documentRevision: 6 });
+  });
+
+  it("identifies the exact missing artifact declaration", () => {
+    const draft = new SemanticGraphDocumentDraft();
+    draft.initialize(header, 0);
+    draft.upsertNode(node("producer"), 1);
+    draft.upsertNode({ ...node("consumer"), inputBindings: { report: { type: "string" } } }, 2);
+
+    expect(() => draft.upsertEdge({ sourceStepKey: "producer", targetStepKey: "consumer",
+      kind: "artifact", sourceOutput: "report", targetInput: "report" }, 3))
+      .toThrow('sourceOutput "report" is not declared in producer.outputSchemas');
+    expect(draft.inspect("compact")).toMatchObject({ documentRevision: 3, edges: [] });
+  });
+
+  it("rejects artifact fields on ordering-only edges", () => {
+    const draft = new SemanticGraphDocumentDraft();
+    draft.initialize(header, 0);
+    draft.upsertNode(node("first"), 1);
+    draft.upsertNode(node("second"), 2);
+
+    expect(() => draft.upsertEdge({ sourceStepKey: "first", targetStepKey: "second",
+      kind: "control", sourceOutput: "report", targetInput: "report" }, 3))
+      .toThrow("cannot declare artifact bindings");
   });
 
   it("preserves distinct artifact bindings between the same pair of nodes",()=>{

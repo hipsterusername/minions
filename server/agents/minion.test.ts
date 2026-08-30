@@ -8,6 +8,7 @@ import {
 import type { TaskManagerState } from "../task-tools.ts";
 import { applyLifecycleEvent, applySessionEndedForMinion } from "../task-lifecycle.ts";
 import { getAgentType } from "./registry.ts";
+import { minionSkillMcpToolNames } from "./minion-tool-policy.ts";
 import "./minion.ts";
 
 beforeEach(() => disablePersistence());
@@ -295,6 +296,15 @@ describe("minion task lifecycle", () => {
 });
 
 describe("minion sub-skill tool group", () => {
+  it("derives exact skill tools from the armed skill identities", () => {
+    expect(minionSkillMcpToolNames(["code-review"])).toEqual([
+      "mcp__skills__load_subskill",
+    ]);
+    expect(minionSkillMcpToolNames(["skill-builder"])).toContain(
+      "mcp__skills__create_skill",
+    );
+  });
+
   function ctxWith(over: Record<string, unknown> = {}) {
     const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
     return {
@@ -373,6 +383,16 @@ describe("minion sub-skill tool group", () => {
       "delete_skill",
     ]);
     expect(mcpToolNames).toContain("mcp__skills__load_subskill");
+    expect(mcpToolNames).toContain("mcp__skills__create_skill");
+  });
+
+  it("exposes authoring tools for an armed graph child without a legacy parent task", () => {
+    const minion = getAgentType("minion");
+    const { toolGroups, mcpToolNames } = minion.getToolGroups(
+      ctxWith({ skillIds: ["skill-builder"] }),
+    );
+
+    expect(toolGroups["skills"]?.map((tool) => tool.name)).toContain("create_skill");
     expect(mcpToolNames).toContain("mcp__skills__create_skill");
   });
 

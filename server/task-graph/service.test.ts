@@ -152,6 +152,21 @@ describe("TaskGraphService central wiring",() => {
         observedWriteSet:["package.json"]})});
   });
 
+  it("dispatches frozen graph skill identities to the child run",async()=>{
+    const db=setup();const {bus}=fakeBus();const children:Array<Record<string,unknown>>=[];
+    const service=new TaskGraphService({db,bus,children:{startChildRun:async input=>{
+      children.push(input);return childSnapshot(input.attemptId,input.attemptNumber);
+    }}});
+    service.createRevision(revision(),3);
+    const frozen=source();frozen.compiledSkills=[{skillId:"skill-builder",version:"v1",
+      contentHash:HASH,valuesHash:HASH}];
+
+    await service.startRun({id:"graph",workItemId:"work",primaryRunKey:"primary",
+      revisionId:"revision",sourceSnapshot:frozen,expectedLifecycleRevision:1,at:4});
+
+    expect(children).toEqual([expect.objectContaining({skillIds:["skill-builder"]})]);
+  });
+
   it("submits independent attempts concurrently so fleet workers can claim them",async()=>{
     const db=setup();const {bus}=fakeBus();
     const launches:Array<Record<string,unknown>>=[];const release:Array<()=>void>=[];
@@ -512,7 +527,9 @@ describe("TaskGraphService central wiring",() => {
 
   it("lets an operator retry an exhausted decision-blocked node with a fresh attempt",async() => {
     const db=setup();const transport=fakeBus();const allocated:WorkItemRunSnapshot[]=[];
+    const prompts:string[]=[];
     const service=new TaskGraphService({db,bus:transport.bus,children:{startChildRun:async(input)=>{
+      prompts.push(String(input.prompt));
       const child=childSnapshot(input.attemptId,input.attemptNumber,String(input.taskId),
         `child-${allocated.length+1}`);allocated.push(child);return child;
     }}});
@@ -531,6 +548,58 @@ describe("TaskGraphService central wiring",() => {
     expect(allocated).toHaveLength(2);
     expect(service.snapshot("graph").run.status).toBe("active");
     expect(service.snapshot("graph").attempts[1]).toMatchObject({attempt_number:2,runtime:"running"});
+    expect(prompts[1]).not.toContain("Recovery draft");
+    expect(prompts[1]).not.toContain("Prior final report:\nfailed");
+    service.dispose();
+  });
+
+  it("reuses completed reasoning only when retrying an artifact-staging failure",async()=>{
+    const db=setup();const transport=fakeBus();const allocated:WorkItemRunSnapshot[]=[];
+    const prompts:string[]=[];
+    const service=new TaskGraphService({db,bus:transport.bus,children:{startChildRun:async input=>{
+      prompts.push(String(input.prompt));
+      const child=childSnapshot(input.attemptId,input.attemptNumber,String(input.taskId),
+        `child-${allocated.length+1}`);allocated.push(child);return child;
+    }}});
+    service.start();const graph=revision();graph.nodes[0]={...graph.nodes[0]!,
+      outputSchemas:{result:{type:"object",required:["result"]}}};
+    service.createRevision(graph,3);
+    await service.startRun({id:"graph",workItemId:"work",primaryRunKey:"primary",
+      revisionId:"revision",sourceSnapshot:source(),expectedLifecycleRevision:1,at:4});
+
+    transport.fan({topic:"work-item:work",type:"work_item_run_sealed",workItemId:"work",
+      run:{...allocated[0]!,outcome:"completed",endedAt:20,
+        finalReport:"completed audit reasoning"},timestamp:20});
+
+    await vi.waitFor(()=>expect(allocated).toHaveLength(2));
+    expect(prompts[1]).toContain("Recovery draft");
+    expect(prompts[1]).toContain("Missing outputs: result");
+    expect(prompts[1]).toContain("completed audit reasoning");
+    service.dispose();
+  });
+
+  it("continues an unaffected branch while a sibling awaits a Leader decision",async()=>{
+    const db=setup();const transport=fakeBus();const allocated:WorkItemRunSnapshot[]=[];
+    const service=new TaskGraphService({db,bus:transport.bus,children:{startChildRun:async input=>{
+      const child=childSnapshot(input.attemptId,input.attemptNumber,String(input.taskId),
+        `child-${allocated.length+1}`);allocated.push(child);return child;
+    }}});
+    service.start();const graph=revision();graph.maxActiveAttempts=1;
+    graph.nodes=[
+      {...graph.nodes[0]!,id:"audit-a",failurePolicy:"block_for_decision",
+        retryPolicy:{...graph.nodes[0]!.retryPolicy,maxAttempts:1}},
+      {...graph.nodes[0]!,id:"audit-b",failurePolicy:"block_for_decision"},
+    ];
+    graph.terminalNodeIds=graph.nodes.map(node=>node.id);
+    service.createRevision(graph,3);
+    await service.startRun({id:"graph",workItemId:"work",primaryRunKey:"primary",
+      revisionId:"revision",sourceSnapshot:source(),expectedLifecycleRevision:1,at:4});
+    expect(allocated.map(run=>run.taskId)).toEqual(["audit-a"]);
+
+    transport.fan({topic:"work-item:work",type:"work_item_run_sealed",workItemId:"work",
+      run:{...allocated[0]!,outcome:"error",endedAt:20,finalReport:"audit draft"},timestamp:20});
+    await vi.waitFor(()=>expect(allocated.map(run=>run.taskId)).toEqual(["audit-a","audit-b"]));
+    expect(service.snapshot("graph").run.status).toBe("active");
     service.dispose();
   });
 

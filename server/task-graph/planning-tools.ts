@@ -83,7 +83,7 @@ export function createTaskGraphPlanningTools(input: {
   return [
     {
       name: "initialize_graph_document",
-      description: "Initialize or replace the session-local semantic graph draft at the exact document revision. The server applies all omitted plan defaults and starts with no nodes or edges.",
+      description: "Initialize or replace the session-local semantic graph draft at the exact document revision. The optional pattern and problemSignature fields record reviewed authoring provenance; iteration metadata bounds successor episodes. The server applies all omitted plan defaults and starts with no nodes or edges.",
       inputSchema: initializeGraphDocumentSchema,
       handler: async (raw) => {
         const args = initializeGraphDocumentSchema.parse(raw);
@@ -92,7 +92,7 @@ export function createTaskGraphPlanningTools(input: {
     },
     {
       name: "upsert_graph_node",
-      description: "Add or deterministically replace one semantic graph node at the exact document revision. Omitted node fields receive server-owned defaults.",
+      description: "Add or deterministically replace one semantic graph node at the exact document revision. Before adding artifact edges, declare their named outputs in the producer's outputSchemas and named inputs in the consumer's inputBindings. Omitted node fields receive server-owned defaults.",
       inputSchema: upsertGraphDocumentNodeSchema,
       handler: async (raw) => {
         const args = upsertGraphDocumentNodeSchema.parse(raw);
@@ -110,7 +110,7 @@ export function createTaskGraphPlanningTools(input: {
     },
     {
       name: "upsert_graph_edge",
-      description: "Add or deterministically replace one semantic dependency at the exact document revision. Dependency identity includes both endpoints, kind, and artifact bindings, so multiple mapped outputs may connect the same nodes.",
+      description: "Add or deterministically replace one semantic dependency at the exact document revision. Use a control edge with null bindings for ordering only. For an artifact edge, sourceOutput must already exist in the source node's outputSchemas and targetInput in the target node's inputBindings. Dependency identity includes both endpoints, kind, and artifact bindings, so multiple mapped outputs may connect the same nodes.",
       inputSchema: upsertGraphDocumentEdgeSchema,
       handler: async (raw) => {
         const args = upsertGraphDocumentEdgeSchema.parse(raw);
@@ -158,7 +158,7 @@ export function createTaskGraphPlanningTools(input: {
     },
     {
       name: "submit_graph_plan",
-      description: "Submit or revise a semantic execution plan. Draft proposal revisions remain replaceable until start. After a run is terminal or explicitly cancelled, submit a successor with the latest baseProposalRevision to start a fresh serial graph iteration; an active run must be cancelled first. Executed revisions and evidence remain immutable.",
+      description: "Submit or revise a semantic execution plan. Optionally declare a reviewed pattern and problemSignature; the server shows a deterministic recommendation and lint findings without giving the pattern runtime authority. Use control dependencies for ordering only; every artifact dependency must map a sourceOutput declared by its producer's outputSchemas to a targetInput declared by its consumer's inputBindings. For partial synthesis, use quorum artifact dependencies, or pair required skipped/all-terminal control dependencies with optional artifact dependencies; use fail_graph only for truly fail-fast nodes. Draft proposal revisions remain replaceable until start. After a run is terminal or explicitly cancelled, submit a successor with the latest baseProposalRevision and bounded iteration metadata; an active run must be cancelled first. Executed revisions and evidence remain immutable.",
       inputSchema: submitSchema,
       handler: async (raw) => {
         const args = submitSchema.parse(raw);

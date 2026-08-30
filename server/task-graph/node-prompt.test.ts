@@ -31,4 +31,25 @@ describe("renderTaskGraphNodePrompt",()=>{
     expect(prompt).not.toContain("verification-mode step");
     expect(prompt).toContain("provide a concise evidence-backed final report");
   });
+
+  it("freezes exact output contracts and an accepted staging example into the prompt",()=>{
+    const task={...node("task"),outputSchemas:{audit:{type:"object",required:["findings"],
+      properties:{findings:{type:"array",items:{type:"string"}}}}}};
+    const prompt=renderTaskGraphNodePrompt(revision(task),task,"attempt",1,"source",[],[],[]);
+    expect(prompt).toContain("Artifact output contracts (frozen before execution)");
+    expect(prompt).toContain('Exact JSON Schema: {"type":"object","required":["findings"]');
+    expect(prompt).toContain('Accepted example: {"findings":["string"]}');
+    expect(prompt).toContain('"outputName":"audit"');
+  });
+
+  it("reuses a prior final report for a staging-only recovery attempt",()=>{
+    const task={...node("task"),outputSchemas:{audit:{type:"object"}}};
+    const prompt=renderTaskGraphNodePrompt(revision(task),task,"attempt-2",2,"source",[],[],[],{
+      attemptId:"attempt-1",finalReport:"Completed audit reasoning",
+      stagingFailure:{missingOutputs:["audit"],stagedOutputs:[]},
+    });
+    expect(prompt).toContain("Do not repeat completed analysis");
+    expect(prompt).toContain("Missing outputs: audit");
+    expect(prompt).toContain("Completed audit reasoning");
+  });
 });

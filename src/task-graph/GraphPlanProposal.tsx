@@ -37,11 +37,15 @@ export function GraphPlanProposalCard({ snapshot, actions }: {
         <div className="tg-plan-proposal__meta">
           <span>{snapshot.steps.length} steps</span><span>{parallel} can begin in parallel</span>
           <span>{snapshot.steps.filter((step) => step.requiresApproval).length} approvals</span>
+          {snapshot.pattern ? <span>{snapshot.pattern.id} · v{snapshot.pattern.version}</span> : null}
         </div>
         {actions.stale || snapshot.state === "stale" ? <p className="tg-plan-proposal__warning">
           The source or connection changed. Refresh the plan before starting.
         </p> : null}
         {snapshot.questions[0] ? <p className="tg-plan-proposal__warning">{snapshot.questions[0]}</p> : null}
+        {snapshot.patternRecommendation?.id === "p00.direct"
+          ? <p className="tg-plan-proposal__warning">Router recommends direct execution for this bounded unit.</p>
+          : null}
         <ReviewRequirements requirements={snapshot.reviewRequirements} />
         {snapshot.error && snapshot.state !== "stale"
           ? <p className="tg-plan-proposal__warning">{snapshot.error}</p> : null}
@@ -85,6 +89,30 @@ export function GraphPlanProposalDialog({ snapshot, actions, onClose }: {
         <div><strong>{titleFor(snapshot)}</strong><span>{snapshot.objective}</span></div>
       </div><button type="button" className="tg-close" onClick={onClose} aria-label="Close">×</button></header>
       <div className="tg-plan-dialog__body">
+        {snapshot.patternRecommendation ? <section className="tg-plan-pattern">
+          <span className="tg-eyebrow">Orchestration pattern</span>
+          <strong>{snapshot.pattern
+            ? `${snapshot.pattern.id} · v${snapshot.pattern.version}`
+            : `Router recommendation: ${snapshot.patternRecommendation.label}`}</strong>
+          <p>{snapshot.patternRecommendation.rationale}</p>
+          {snapshot.patternTemplate ? <>
+            <small>Topology: {snapshot.patternTemplate.topology}</small>
+            {snapshot.patternTemplate.requiredArtifacts.length
+              ? <small>Artifact vocabulary: {snapshot.patternTemplate.requiredArtifacts.join(", ")}</small>
+              : null}
+            <ul>{snapshot.patternTemplate.safetyChecks.map(check=><li key={check}>{check}</li>)}</ul>
+          </> : null}
+          {snapshot.pattern && snapshot.pattern.id !== snapshot.patternRecommendation.id
+            ? <small>Router recommendation: {snapshot.patternRecommendation.id}</small> : null}
+        </section> : null}
+        {snapshot.iteration ? <section className="tg-plan-pattern">
+          <span className="tg-eyebrow">Bounded episode</span>
+          <strong>{snapshot.iteration.strategy === "successor_revision"
+            ? `Successor episode ${snapshot.iteration.episode}` : "Single episode"}</strong>
+          {snapshot.iteration.reason ? <p>{snapshot.iteration.reason}</p> : null}
+          {snapshot.iteration.stopCondition
+            ? <small>Stop when: {snapshot.iteration.stopCondition}</small> : null}
+        </section> : null}
         <section><span className="tg-eyebrow">Acceptance criteria</span><ul>
           {snapshot.acceptanceCriteria.map((criterion) => <li key={criterion}>{criterion}</li>)}
         </ul></section>
@@ -93,12 +121,23 @@ export function GraphPlanProposalDialog({ snapshot, actions, onClose }: {
             <p>{step.objective}</p><small>{step.dependsOn.length
               ? `After ${step.dependsOn.join(", ")}` : "Can start immediately"}
               {step.contextSelectors.length ? ` · Context: ${step.contextSelectors.join(", ")}` : ""}</small>
+            {Object.keys(step.outputSchemas).length ? <details className="tg-plan-contracts">
+              <summary>Artifact contracts ({Object.keys(step.outputSchemas).length})</summary>
+              {Object.entries(step.outputSchemas).map(([name,schema]) => <section key={name}>
+                <strong>{name}</strong>
+                <small>Exact JSON Schema</small><pre>{JSON.stringify(schema,null,2)}</pre>
+                <small>Accepted example</small><pre>{JSON.stringify(step.outputExamples[name],null,2)}</pre>
+              </section>)}
+            </details> : null}
           </li>)}
         </ol></section>
         {snapshot.assumptions.length ? <section><span className="tg-eyebrow">Assumptions</span><ul>
           {snapshot.assumptions.map((assumption) => <li key={assumption}>{assumption}</li>)}
         </ul></section> : null}
         <ReviewRequirements requirements={snapshot.reviewRequirements} detailed />
+        {snapshot.topologyWarnings.length ? <section className="tg-plan-proposal__warning">
+          <strong>Topology preflight</strong><ul>{snapshot.topologyWarnings.map(warning=><li key={warning}>{warning}</li>)}</ul>
+        </section> : null}
         {snapshot.error ? <p className="tg-plan-proposal__warning">{snapshot.error}</p> : null}
       </div>
       <footer className="tg-plan-dialog__actions">

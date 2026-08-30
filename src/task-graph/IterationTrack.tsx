@@ -64,7 +64,8 @@ function checkpointAfterGroup(snapshot: TaskGraphSnapshotView, group: TaskGraphG
 
 function groupState(nodes: readonly TaskGraphNodeView[]) {
   if (nodes.length && nodes.every((node) => node.logicalState === "succeeded")) return "done" as const;
-  if (nodes.some((node) => node.logicalState === "failed" || node.logicalState === "exhausted" || (node.blocker && node.blocker.category !== "none"))) return "attention" as const;
+  if (nodes.some((node) => node.logicalState === "failed" || node.logicalState === "exhausted"
+    || node.logicalState === "not_run" || (node.blocker && node.blocker.category !== "none"))) return "attention" as const;
   if (nodes.some((node) => node.currentAttempt?.state === "running")) return "active" as const;
   return "future" as const;
 }

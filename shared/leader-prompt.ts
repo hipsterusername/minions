@@ -11,6 +11,7 @@ import {
   TASK_GRAPH_LEADER_TASK_TOOL_NAMES,
   TASK_GRAPH_PLANNING_TOOL_NAMES,
 } from "./leader-planning.ts";
+import { TASK_GRAPH_PATTERN_AUTHORING_GUIDE } from "./task-graph-patterns.ts";
 
 export const CLAUDE_LEADER_BUILT_IN_TOOLS: readonly string[] = [
   "Read",
@@ -104,13 +105,19 @@ export const TASK_GRAPH_PLANNING_PROMPT = `## Task Graph planning
 
 Task Graph is an optional reasoning and orchestration aid. Use it when explicit dependencies, parallel attempts, durable artifacts, or independent verification make the work easier to reason about and observe. For small, sequential, exploratory, or tightly integrated work, execute directly or use \`plan_task\` and \`assign_task\`. Enabling graph assistance never revokes the Leader's direct execution, delegation, steering, or waiting authority.
 
+Choose the problem model before authoring topology. Set \`problemSignature\` before expansion when the classification is known; use \`taskKind: "partitioned_batch"\` for bounded homogeneous partitions and \`taskKind: "draft_refinement"\` for bounded draft/critique/revision work. The router can infer direct, pipeline, quorum, survivorship, verification, and fork-join patterns from expanded topology. The first matching strategy should explain the work's dominant structure; when signals overlap, select the dominant uncertainty and record assumptions. Pattern metadata and router recommendations are advisory provenance and never runtime authority.
+
+${TASK_GRAPH_PATTERN_AUTHORING_GUIDE}
+
 1. Call \`set_task_name\` for the durable user objective. Decide whether a graph adds value; do not submit one merely to satisfy process ceremony.
-2. When using a graph, inspect only enough context to define observable work, then call \`submit_graph_plan\` with the complete semantic plan. Express real dependencies, typed artifact handoffs, task-scoped context selectors, read/write ownership scopes, risks, approval needs, and acceptance criteria. Do not duplicate the same work through both graph and direct delegation paths.
+2. When using a graph, inspect only enough context to define observable work, then call \`submit_graph_plan\` with the complete semantic plan. Express real dependencies, typed artifact handoffs, task-scoped context selectors, read/write ownership scopes, risks, approval needs, and acceptance criteria. For each artifact dependency, declare \`sourceOutput\` as a key in the producer's \`outputSchemas\` and \`targetInput\` as a key in the consumer's \`inputBindings\`, with compatible schemas. Include required JSON Schema properties and an \`example\` or \`examples\` value when a generated example would be ambiguous. If a dependency only controls order, use kind \`control\` and leave both bindings null. Do not duplicate the same work through both graph and direct delegation paths.
 3. Set \`completionMode: "verification"\` only when the step itself must return a structured passed/failed/inconclusive verdict; only passed satisfies that step, and omitted failure policy defaults to a recoverable Leader-decision block. Use \`verificationRequired: true\` separately when a normal producer step's committed artifacts require an independent verifier. Performing verification is not the same as passing verification. Do not emit private chain-of-thought.
 4. The server materializes immutable identity and schedules attempts only for work the Leader placed in a graph. Within that graph run, let the scheduler own node admission and child allocation. Work outside the graph remains under the Leader's normal direct tools and judgment.
-5. Before graph execution, revise a draft with the current \`baseProposalRevision\`. Started revisions are immutable. After a graph completes, fails, or is explicitly cancelled, submit a successor under the same WorkItem only when another graph iteration is useful.
+5. Before graph execution, inspect the proposed step contracts and topology, then revise the draft with the current \`baseProposalRevision\`. Map every mission acceptance criterion to a producer or verification step. If independent verification is promised, declare \`verificationRequired\` on the artifact producer or add a distinct verification-mode step. Started revisions are immutable. After a graph completes, fails, or is explicitly cancelled, submit a successor under the same WorkItem only when another graph iteration is useful.
 6. If the projection is \`needs_input\`, render one focused decision form and end the turn. In \`auto\` mode, a \`ready\` projection is only a user approval when a step explicitly sets \`requiresApproval\`; resolve policy or source blockers yourself and ask the user only when a real decision or clarification is required. In \`plan\` mode, \`ready\` awaits review of the exact proposal revision. A \`running\` graph does not prohibit safe, in-scope direct work that does not conflict with graph ownership.
-7. After an automatic completion wake, call \`get_graph_plan\`, read only the necessary terminal outputs with \`read_graph_artifact\`, and synthesize the relevant results from canonical runtime and verified evidence.
+7. Choose failure behavior deliberately. Use \`fail_graph\` only for true fail-fast work. For independent audits that must survive sibling failure, use \`block_for_decision\` or \`continue_optional\`. For partial synthesis, either use quorum artifact dependencies, or pair required skipped/all-terminal control dependencies with optional artifact dependencies so missing artifacts do not block the join; require explicit coverage warnings in the synthesis acceptance criteria. Artifact-validation retries should reuse the preserved recovery draft and repair/restage outputs instead of repeating completed reasoning.
+   After an automatic completion wake, call \`get_graph_plan\`, read only the necessary committed outputs with \`read_graph_artifact\`, and synthesize the relevant results from canonical runtime and verified evidence. If the run is incomplete, state artifact coverage and distinguish committed/available evidence from evidence actually consumed by synthesis.
+   When the graph is associated with a system-model Work Packet, a terminal graph run completes execution but does not close the packet. Append material evidence and coverage updates, reconcile against the stable actual diff, resolve constraint verdicts, and either validate the smallest necessary canonical model update or record an evidence-backed no-change assessment before treating the packet as reconciled.
    If a verification-mode node is blocked because its verdict is failed, inconclusive, missing, or malformed, inspect the current attempt and use \`adjudicate_graph_node\` to accept with an auditable reason, reject, or retry with guidance. Never infer a verdict from prose.
    If the active graph has become obsolete and the objective requires replanning, call \`cancel_graph_run\` with the exact displayed run revision, then submit a successor using the latest proposal revision. Cancellation is explicit: never silently replace running work, and never rewrite its evidence.
 8. Use \`start_graph_plan\` only for explicit plan-mode review or a step that explicitly requires approval, after the user approved the exact proposal revision conversationally; UI approval uses the same server gate. Risk metadata and pending merge-review requirements never create a plan-start approval by themselves.
@@ -141,6 +148,8 @@ const TOOL_DESCRIPTIONS: Readonly<Record<string, string>> = {
   request_approval: "Submit isolated-worktree changes for user review and merge.",
   checkpoint_session: "Request proactive compaction at a safe session boundary.",
   load_subskill: "Load an advertised on-demand sub-skill into the current context.",
+  update_project_context:
+    "Replace workspace-owned project context used by subsequently delegated Minions.",
   render_set: "Replace the complete structured dashboard.",
   render_patch: "Patch existing dashboard components by stable ID.",
   render_append: "Append structured components; ID collisions replace existing components.",
@@ -156,9 +165,10 @@ const TOOL_DESCRIPTIONS: Readonly<Record<string, string>> = {
   amend_work_packet: "Amend an existing work packet.",
   check_freshness: "Check whether packet context is still current.",
   record_verification: "Record verification evidence for modeled work.",
-  reconcile_run: "Reconcile run scope and system-model guidance.",
+  record_work_packet_evidence: "Append Work Packet evidence and update criterion coverage or signals.",
+  reconcile_run: "Reconcile the actual diff, acceptance coverage, constraints, and model-update need.",
   record_constraint_verdicts: "Record constraint verdicts with provenance.",
-  model_health: "Inspect system-model health and validation state.",
+  model_health: "Inspect system-model health, evidence gaps, and validation state.",
   submit_graph_plan: "Submit or revise a semantic execution plan for server validation and materialization.",
   get_graph_plan: "Inspect the persisted plan and its canonical runtime projection.",
   start_graph_plan: "Start an approved, revision-fenced graph plan.",

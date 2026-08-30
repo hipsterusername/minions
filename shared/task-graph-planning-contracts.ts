@@ -5,6 +5,13 @@ import {
   ownershipRequestSchema,
   retryPolicySchema,
 } from "./task-graph-contracts.ts";
+import {
+  taskGraphIterationSchema,
+  taskGraphPatternProvenanceSchema,
+  taskGraphPatternRecommendationSchema,
+  taskGraphPatternTemplateViewSchema,
+  taskGraphProblemSignatureSchema,
+} from "./task-graph-patterns.ts";
 import { wsEnvelopeSchema } from "./ws-envelope.ts";
 
 const idSchema = z.string().min(1);
@@ -16,11 +23,20 @@ export const leaderOrchestrationModeSchema = z.enum(["auto", "plan", "direct"]);
 
 export const semanticGraphDependencySchema = z.object({
   stepKey: stepKeySchema,
-  kind: z.enum(["control", "artifact", "verified_artifact"]).default("control"),
-  sourceOutput: z.string().min(1).nullable().default(null),
-  targetInput: z.string().min(1).nullable().default(null),
+  kind: z.enum(["control", "artifact", "verified_artifact"]).default("control")
+    .describe("Use control for ordering only. Artifact kinds require a declared producer output and consumer input."),
+  sourceOutput: z.string().min(1).nullable().default(null)
+    .describe("Producer outputSchemas key for an artifact dependency; null for control dependencies."),
+  targetInput: z.string().min(1).nullable().default(null)
+    .describe("Consumer inputBindings key for an artifact dependency; null for control dependencies."),
+  satisfactionPolicy: z.enum(["all_success", "all_terminal", "any_success", "quorum"])
+    .default("all_success")
+    .describe("Join behavior for all non-optional dependencies entering the consumer. For partial synthesis, use quorum artifact edges, or pair required all_terminal control edges with optional artifact edges so missing artifacts do not block the join."),
+  quorum: z.number().int().positive().optional()
+    .describe("Required distinct successful upstream steps when satisfactionPolicy is quorum."),
   optional: z.boolean().default(false),
-  failurePolicy: z.enum(["block", "skip", "fail"]).default("block"),
+  failurePolicy: z.enum(["block", "skip", "fail"]).default("block")
+    .describe("Use skip on required all_terminal control edges when a consumer may synthesize surviving optional artifacts with explicit coverage warnings."),
 });
 
 export const semanticGraphPlanStepSchema = z.object({
@@ -32,8 +48,10 @@ export const semanticGraphPlanStepSchema = z.object({
   dependsOn: z.array(semanticGraphDependencySchema).default([]),
   contextSelectors: z.array(z.string().trim().min(1)).default([])
     .describe("Task-scoped source selectors. Prefix connected-canvas selectors with canvas:; use repo: for repository paths or symbols."),
-  inputBindings: jsonRecordSchema.default({}),
-  outputSchemas: jsonRecordSchema.default({}),
+  inputBindings: jsonRecordSchema.default({})
+    .describe("Named artifact inputs accepted by this step. Every incoming artifact targetInput must name one of these keys."),
+  outputSchemas: jsonRecordSchema.default({})
+    .describe("Named artifacts produced by this step. Every outgoing artifact sourceOutput must name one of these keys."),
   executorClass: z.enum(["mechanical", "standard", "reasoning"]).default("standard"),
   allowedHarnesses: z.array(idSchema).min(1).optional(),
   allowedTools: z.array(z.string()).optional().describe(
@@ -66,6 +84,12 @@ export const semanticTaskGraphPlanSchema = z.object({
   assumptions: z.array(z.string().trim().min(1)).default([]),
   questions: z.array(z.string().trim().min(1)).max(1).default([]),
   workPacketId: idSchema.nullable().optional(),
+  pattern: taskGraphPatternProvenanceSchema.nullable().optional()
+    .describe("Optional reviewed authoring pattern. It records provenance but never controls runtime scheduling."),
+  problemSignature: taskGraphProblemSignatureSchema.optional()
+    .describe("Optional bounded problem classification used to recommend direct execution or a reviewed static pattern."),
+  iteration: taskGraphIterationSchema.optional()
+    .describe("Optional bounded-episode metadata. Successor revisions identify new evidence and an explicit stop condition."),
   steps: z.array(semanticGraphPlanStepSchema).min(1).max(1_000),
   terminalStepKeys: z.array(stepKeySchema).min(1).optional(),
   maxActiveAttempts: z.number().int().min(1).max(100).default(4),
@@ -75,6 +99,7 @@ export const semanticTaskGraphPlanSchema = z.object({
   }).optional(),
 }).superRefine((plan, ctx) => {
   const keys = new Set<string>();
+  const stepsByKey = new Map(plan.steps.map((step) => [step.key, step]));
   plan.steps.forEach((step, index) => {
     if (keys.has(step.key)) ctx.addIssue({
       code: "custom", path: ["steps", index, "key"], message: `duplicate step key: ${step.key}`,
@@ -94,6 +119,29 @@ export const semanticTaskGraphPlanSchema = z.object({
     if (artifact && (!dependency.sourceOutput || !dependency.targetInput)) ctx.addIssue({
       code: "custom", path: ["steps", index, "dependsOn", dependencyIndex],
       message: "artifact dependencies require sourceOutput and targetInput",
+    });
+    if (!artifact && (dependency.sourceOutput || dependency.targetInput)) ctx.addIssue({
+      code: "custom", path: ["steps", index, "dependsOn", dependencyIndex],
+      message: "control dependencies cannot declare artifact bindings; set sourceOutput and targetInput to null or use an artifact kind",
+    });
+    if (dependency.satisfactionPolicy === "quorum" && dependency.quorum == null) ctx.addIssue({
+      code: "custom", path: ["steps", index, "dependsOn", dependencyIndex, "quorum"],
+      message: "quorum is required when satisfactionPolicy is quorum",
+    });
+    if (dependency.satisfactionPolicy !== "quorum" && dependency.quorum != null) ctx.addIssue({
+      code: "custom", path: ["steps", index, "dependsOn", dependencyIndex, "quorum"],
+      message: "quorum is only allowed when satisfactionPolicy is quorum",
+    });
+    const source = stepsByKey.get(dependency.stepKey);
+    if (artifact && source && dependency.sourceOutput
+      && !(dependency.sourceOutput in source.outputSchemas)) ctx.addIssue({
+      code: "custom", path: ["steps", index, "dependsOn", dependencyIndex, "sourceOutput"],
+      message: `sourceOutput "${dependency.sourceOutput}" is not declared in step "${source.key}" outputSchemas`,
+    });
+    if (artifact && dependency.targetInput
+      && !(dependency.targetInput in step.inputBindings)) ctx.addIssue({
+      code: "custom", path: ["steps", index, "dependsOn", dependencyIndex, "targetInput"],
+      message: `targetInput "${dependency.targetInput}" is not declared in step "${step.key}" inputBindings`,
     });
   }));
   plan.terminalStepKeys?.forEach((key, index) => {
@@ -116,6 +164,9 @@ export const taskGraphPlanStepViewSchema = z.object({
   acceptanceCriteria: z.array(z.string()),
   dependsOn: z.array(stepKeySchema),
   contextSelectors: z.array(z.string()),
+  inputBindings: jsonRecordSchema,
+  outputSchemas: jsonRecordSchema,
+  outputExamples: jsonRecordSchema,
   executorClass: z.enum(["mechanical", "standard", "reasoning"]),
   risk: z.enum(["low", "medium", "high"]),
   requiresApproval: z.boolean(),
@@ -142,6 +193,10 @@ export const taskGraphPlanSnapshotViewSchema = z.object({
   assumptions: z.array(z.string()),
   questions: z.array(z.string()),
   workPacketId: idSchema.nullable(),
+  pattern: taskGraphPatternProvenanceSchema.nullable().optional(),
+  patternRecommendation: taskGraphPatternRecommendationSchema.optional(),
+  patternTemplate: taskGraphPatternTemplateViewSchema.optional(),
+  iteration: taskGraphIterationSchema.nullable().optional(),
   steps: z.array(taskGraphPlanStepViewSchema).max(1_000),
   materializedRevisionId: idSchema.nullable(),
   graphRunId: idSchema.nullable(),
@@ -149,6 +204,7 @@ export const taskGraphPlanSnapshotViewSchema = z.object({
   autoStartEligible: z.boolean(),
   canStart: z.boolean(),
   reviewRequirements: z.array(taskGraphPlanReviewRequirementSchema).default([]),
+  topologyWarnings: z.array(z.string().min(1)).default([]),
   error: z.string().nullable(),
   updatedAt: z.number().int().nonnegative(),
 });

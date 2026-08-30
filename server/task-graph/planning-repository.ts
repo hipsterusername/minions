@@ -11,10 +11,13 @@ import {
   type TaskGraphPlanState,
 } from "../../shared/task-graph-planning-contracts.ts";
 import type { SourceSnapshot } from "../../shared/task-graph-contracts.ts";
+import {taskGraphPatternDescriptor} from "../../shared/task-graph-patterns.ts";
 import { TaskGraphConflictError, TaskGraphValidationError } from "./errors.ts";
 import { contentHash } from "./hash.ts";
 import { canonicalId } from "./planning-compiler.ts";
+import {artifactContractExample} from "./artifact-contract.ts";
 import { migrateTaskGraph } from "./schema.ts";
+import {lintSemanticGraphPlan,routeTaskGraphPattern} from "./patterns.ts";
 
 type Row = Record<string, unknown>;
 
@@ -213,6 +216,8 @@ export class TaskGraphPlanningRepository {
     const plan = semanticTaskGraphPlanSchema.parse(JSON.parse(String(row.plan_json)));
     const nodeIds = JSON.parse(String(row.node_ids_json)) as Record<string, string>;
     const state = String(row.state) as TaskGraphPlanState;
+    const patternRecommendation=routeTaskGraphPattern(plan);
+    const patternDescriptor=taskGraphPatternDescriptor(plan.pattern?.id??patternRecommendation.id);
     return taskGraphPlanSnapshotViewSchema.parse({
       proposalId: row.id,
       workItemId: row.work_item_id,
@@ -227,6 +232,13 @@ export class TaskGraphPlanningRepository {
       assumptions: plan.assumptions,
       questions: plan.questions,
       workPacketId: plan.workPacketId ?? null,
+      pattern: plan.pattern ?? null,
+      patternRecommendation,
+      patternTemplate:{id:patternDescriptor.id,version:patternDescriptor.version,
+        label:patternDescriptor.label,topology:patternDescriptor.topology,
+        requiredArtifacts:[...patternDescriptor.requiredArtifacts],
+        safetyChecks:[...patternDescriptor.safetyChecks]},
+      iteration: plan.iteration ?? null,
       steps: plan.steps.map((step) => ({
         key: step.key,
         nodeId: nodeIds[step.key] ?? null,
@@ -235,6 +247,10 @@ export class TaskGraphPlanningRepository {
         acceptanceCriteria: step.acceptanceCriteria,
         dependsOn: step.dependsOn.map((dependency) => dependency.stepKey),
         contextSelectors: step.contextSelectors,
+        inputBindings: step.inputBindings,
+        outputSchemas: step.outputSchemas,
+        outputExamples: Object.fromEntries(Object.entries(step.outputSchemas)
+          .map(([name,schema])=>[name,artifactContractExample(schema)])),
         executorClass: step.executorClass,
         risk: step.risk,
         requiresApproval: step.requiresApproval,
@@ -247,6 +263,10 @@ export class TaskGraphPlanningRepository {
       canStart: state === "ready" && Boolean(row.graph_revision_id)
         && Boolean(row.source_snapshot_json) && !row.start_blocked_reason,
       reviewRequirements: JSON.parse(String(row.review_requirements_json ?? "[]")),
+      topologyWarnings: lintSemanticGraphPlan(plan,{
+        baseProposalRevision:row.base_proposal_revision==null
+          ? null:Number(row.base_proposal_revision),
+      }).map(finding=>finding.message),
       error: row.error,
       updatedAt: row.updated_at,
     });

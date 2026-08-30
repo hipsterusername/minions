@@ -74,7 +74,8 @@ test("reconnect refetch converges in flight and a stale control cannot rewrite S
   });
   const primaryRunKey = primary.result.workItem.currentRunKey;
   const fixture = graphFixture({ workItemId, workspaceId, primaryRunKey });
-  fixture.revision.nodes[0].allowedHarnesses = ["pi"];
+  fixture.revision.nodes[0].objective =
+    "Remain live across reconnect until cancelled [[echo:hold]]";
   fixture.revision.nodes[0].timeoutMs = 45_000;
 
   try {

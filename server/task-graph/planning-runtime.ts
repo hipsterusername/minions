@@ -6,6 +6,7 @@ import type { SessionRegistry } from "../session-registry.ts";
 import type { SessionHostDeps } from "../session-host-types.ts";
 import { requestWaitResume } from "../wait-resume.ts";
 import { findWorkspaceBySource } from "../workspace-registry.ts";
+import { minionSkillMcpToolNames } from "../agents/minion-tool-policy.ts";
 import { TaskGraphPlanningCoordinator } from "./planning-coordinator.ts";
 import { leaderOrchestrationModeForRun, planningContextForRun } from "./planning-mode.ts";
 import type { TaskGraphService } from "./service.ts";
@@ -40,7 +41,10 @@ export function installTaskGraphPlanningRuntime(input: {
         skillIds: host.skillIds,
         skillValues: host.skillValues,
         harnessName: host.harnessName,
-        allowedTools: host.toolAllowlist ?? getHarness(host.harnessName).builtInTools,
+        allowedTools: host.toolAllowlist ?? [
+          ...getHarness(host.harnessName).builtInTools,
+          ...minionSkillMcpToolNames(host.skillIds),
+        ],
       };
     },
     onTerminal: (plan) => {

@@ -20,7 +20,8 @@ function plan(): SemanticTaskGraphPlan {
       { key: "build", title: "Build", objective: "Implement the change",
         acceptanceCriteria: ["Tests pass"], constraints: [],
         dependsOn: [{ stepKey: "inspect", kind: "artifact", sourceOutput: "report",
-          targetInput: "analysis", optional: false, failurePolicy: "block" }],
+          targetInput: "analysis", satisfactionPolicy:"all_success",
+          optional: false, failurePolicy: "block" }],
         contextSelectors: [], inputBindings: { analysis: { type: "object" } },
         outputSchemas: { result: { type: "object" } },
         executorClass: "standard", ownershipRequest: [], budgetRequest: {}, timeoutMs: 30_000,
@@ -47,6 +48,68 @@ describe("semantic graph-plan compiler", () => {
       targetInput: "analysis" });
     expect(first.autoStartEligible).toBe(true);
     expect(first.revision.nodes.map(node=>node.completionMode)).toEqual(["task","task"]);
+  });
+
+  it("keeps pattern metadata declarative and out of runtime policy",()=>{
+    const value={...plan(),pattern:{id:"p07.independent_verification" as const,version:1 as const},
+      iteration:{strategy:"single_episode" as const,episode:1,evidenceRefs:[]}};
+    const compiled=compile(value);
+    expect(compiled.revision.nodes.every(node=>node.expansionPolicy===null)).toBe(true);
+    expect(compiled.revision.edges).toHaveLength(1);
+    expect(compiled.revision.edges[0]).toMatchObject({
+      kind:"artifact",satisfactionPolicy:"all_success",failurePolicy:"block",
+    });
+    expect(compiled.revision).not.toHaveProperty("pattern");
+    expect(compiled.revision).not.toHaveProperty("iteration");
+  });
+
+  it("keeps legacy auto-start behavior but holds an opted-in direct recommendation for review",()=>{
+    const legacy=plan();legacy.steps=[legacy.steps[0]!];
+    expect(compile(legacy).autoStartEligible).toBe(true);
+    const routed={...legacy,problemSignature:{taskKind:"delivery" as const,
+      goalClarity:"explicit" as const,procedure:"known" as const,decomposability:"low" as const,
+      evidenceModes:"single" as const,alternatives:"one" as const,deepUncertainty:false,
+      verificationNeed:"ordinary" as const}};
+    expect(compile(routed).autoStartEligible).toBe(false);
+  });
+
+  it("rejects undeclared artifact bindings with semantic step names", () => {
+    const missingOutput = plan();
+    missingOutput.steps[0] = { ...missingOutput.steps[0]!, outputSchemas: {} };
+    expect(() => compile(missingOutput))
+      .toThrow(/sourceOutput.*report.*inspect.*outputSchemas/);
+
+    const missingInput = plan();
+    missingInput.steps[1] = { ...missingInput.steps[1]!, inputBindings: {} };
+    expect(() => compile(missingInput))
+      .toThrow(/targetInput.*analysis.*build.*inputBindings/);
+  });
+
+  it("requires ordering-only dependencies to omit artifact bindings", () => {
+    const value = plan();
+    value.steps[1]!.dependsOn = [{ ...value.steps[1]!.dependsOn[0]!, kind: "control" }];
+    expect(() => compile(value)).toThrow(
+      "control dependencies cannot declare artifact bindings",
+    );
+  });
+
+  it("materializes explicit quorum joins for partial synthesis",()=>{
+    const value=plan();
+    value.steps[1]!.dependsOn[0]={...value.steps[1]!.dependsOn[0]!,
+      satisfactionPolicy:"quorum",quorum:1,failurePolicy:"skip"};
+    expect(compile(value).revision.edges[0]).toMatchObject({
+      satisfactionPolicy:"quorum",quorum:1,failurePolicy:"skip",
+    });
+  });
+
+  it("preflights the accepted output example against its declared schema",()=>{
+    const invalid=plan();
+    invalid.steps[0]!.outputSchemas.report={type:"string",pattern:"^audit$"};
+    invalid.steps[1]!.inputBindings.analysis={type:"string"};
+    expect(()=>compile(invalid)).toThrow(/output report has no valid accepted example/);
+
+    invalid.steps[0]!.outputSchemas.report={type:"string",pattern:"^audit$",example:"audit"};
+    expect(()=>compile(invalid)).not.toThrow();
   });
 
   it("accepts omitted tool restrictions for a harness with native filesystem access",()=>{

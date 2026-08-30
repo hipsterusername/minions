@@ -13,6 +13,7 @@ import type { CanvasNode } from "./types.ts";
 import type { LeaderData } from "./nodes/leader/types.ts";
 import type { MobileSessionInfo } from "./mobile/mobile-selectors.ts";
 import type { DisplayMessage } from "./sdk-messages.ts";
+import { createGraphFixture } from "./task-graph/fixtures.ts";
 
 function session(overrides: Partial<MobileSessionInfo>): MobileSessionInfo {
   return {
@@ -78,6 +79,119 @@ function activityList(): HTMLElement {
 }
 
 describe("ActivityView", () => {
+  it("routes constructed task graphs through a conditional leader-panel tab", () => {
+    const listeners = new Map<string, Set<(message: unknown) => void>>();
+    const socketSubscribe = Object.assign(
+      ((topic: string, listener: (message: unknown) => void) => {
+        const topicListeners = listeners.get(topic) ?? new Set();
+        topicListeners.add(listener);
+        listeners.set(topic, topicListeners);
+        return () => { topicListeners.delete(listener); };
+      }) as unknown as SocketSubscribe,
+      { supportsTopics: true as const },
+    );
+    const socketSend = vi.fn();
+    render(
+      <ActivityView
+        sessions={[session({
+          sessionKey: "graph-run",
+          workItemId: "work-graph",
+          canonicalWorkItem: true,
+          role: "leader",
+          status: "running",
+          taskName: "Coordinate the graph",
+        })]}
+        nodes={[leaderNode("graph-run", [], { workItemId: "work-graph" })]}
+        {...noop}
+        socketSend={socketSend}
+        socketSubscribe={socketSubscribe}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /coordinate the graph/i }));
+    expect(screen.queryByRole("tab", { name: "Graph" })).not.toBeInTheDocument();
+    expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
+      type: "get_task_graph_snapshot",
+      workItemId: "work-graph",
+    }));
+
+    act(() => {
+      for (const listener of listeners.get("work-item:work-graph") ?? []) {
+        listener({
+          topic: "work-item:work-graph",
+          type: "task_graph_plan_snapshot",
+          workItemId: "work-graph",
+          revision: 1,
+          timestamp: 1,
+          snapshot: {
+            proposalId: "proposal-graph",
+            workItemId: "work-graph",
+            primaryRunKey: "graph-run",
+            revision: 1,
+            proposalRevision: 1,
+            baseProposalRevision: null,
+            state: "ready",
+            mode: "auto",
+            objective: "Coordinate the graph",
+            acceptanceCriteria: ["Verified"],
+            assumptions: [],
+            questions: [],
+            workPacketId: null,
+            steps: [{
+              key: "inspect",
+              nodeId: "node-1",
+              title: "Inspect the graph",
+              objective: "Verify the constructed graph",
+              acceptanceCriteria: ["Graph is visible"],
+              dependsOn: [],
+              contextSelectors: [],
+              inputBindings: {},
+              outputSchemas: {},
+              outputExamples: {},
+              executorClass: "standard",
+              risk: "low",
+              requiresApproval: false,
+            }],
+            materializedRevisionId: "revision-graph",
+            graphRunId: null,
+            sourceSnapshotId: "source-graph",
+            autoStartEligible: true,
+            canStart: true,
+            error: null,
+            updatedAt: 1,
+          },
+        });
+      }
+    });
+
+    const graphTab = screen.getByRole("tab", { name: "Graph" });
+    expect(graphTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("region", { name: /execution plan coordinate the graph/i }))
+      .toBeInTheDocument();
+
+    act(() => {
+      for (const listener of listeners.get("work-item:work-graph") ?? []) {
+        listener({
+          topic: "work-item:work-graph",
+          type: "task_graph_snapshot",
+          workItemId: "work-graph",
+          runId: "run-graph-1",
+          revision: 42,
+          cause: "command_snapshot",
+          snapshot: createGraphFixture(10),
+          timestamp: 1,
+        });
+      }
+    });
+
+    expect(graphTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("region", { name: /task graph 10-node research graph/i }))
+      .toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open graph" }));
+    expect(screen.getByRole("dialog", { name: /10-node research graph/i }))
+      .toBeInTheDocument();
+  });
+
   it("uses the canvas task plan as the canonical 1:1 minion roster", () => {
     const leader = session({
       sessionKey: "leader-with-stale-roster",

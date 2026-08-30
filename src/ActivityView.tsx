@@ -49,6 +49,7 @@ import {
   RotateCcw,
   Square,
   UsersRound,
+  Workflow,
   X,
 } from "lucide-react";
 import {
@@ -74,6 +75,8 @@ import { useWorkItemHistory } from "./use-work-item-history.ts";
 import { SessionTranscript } from "./components/SessionTranscript.tsx";
 import { previousPrimaryRuns } from "./work-item-run-history.ts";
 import type { DisplayMessage } from "./sdk-messages.ts";
+import { LeaderTaskGraphBridge } from "./task-graph/LeaderTaskGraphBridge.tsx";
+import { useLeaderTaskGraphController } from "./task-graph/use-leader-task-graph-controller.ts";
 import "./activity.css";
 
 /**
@@ -145,7 +148,7 @@ type ActivitySession = MobileSessionInfo & {
 };
 
 type ActivitySummaryFilter = "needs-you" | "working" | "waiting";
-type InspectorSideTab = "dashboard" | "minions" | "details";
+type InspectorSideTab = "dashboard" | "graph" | "minions" | "details";
 
 const ACTIVITY_OPTIMISTIC_USER_PREFIX = "activity-optimistic-user-";
 
@@ -616,6 +619,14 @@ function Inspector({
   const isRunning = session.status === "running" || session.status === "creating";
   const showChanges = !!leader && leaderHasReviewableChanges(leader.data);
   const minions = selectActivityMinions(session, leader?.data.taskPlan);
+  const taskGraphController = useLeaderTaskGraphController({
+    workItemId: session.workItemId ?? null,
+    socketSend,
+    socketSubscribe,
+  });
+  const graphAvailable = Boolean(
+    taskGraphController.snapshot || taskGraphController.planSnapshot,
+  );
   const [reply, setReply] = useState("");
   const [conversation, setConversation] = useState(
     () => emptySessionStreamState(session.sessionKey),
@@ -664,6 +675,13 @@ function Inspector({
       setActiveSideTab("dashboard");
     }
   }, [hasDashboard, session.sessionKey]);
+  useEffect(() => {
+    if (graphAvailable && !manuallySelectedSideTab.current) {
+      setActiveSideTab("graph");
+    } else if (!graphAvailable && activeSideTab === "graph") {
+      setActiveSideTab("details");
+    }
+  }, [activeSideTab, graphAvailable, session.sessionKey]);
   const conversationMatches = conversation.sessionKey === session.sessionKey;
   const rawTranscriptMessages = conversationMatches && conversation.messages.length > 0
     ? preserveOptimisticUserMessages(leader?.data.messages ?? [], conversation.messages)
@@ -753,6 +771,11 @@ function Inspector({
       label: "Dashboard",
       icon: LayoutDashboard,
     },
+    ...(graphAvailable ? [{
+      id: "graph" as const,
+      label: "Graph",
+      icon: Workflow,
+    }] : []),
     {
       id: "minions",
       label: "Minions",
@@ -985,6 +1008,21 @@ function Inspector({
                     <p>Structured progress updates will appear here without hiding the conversation.</p>
                   </div>
                 )}
+              </section>
+            )}
+
+            {activeSideTab === "graph" && graphAvailable && (
+              <section className="act-side-stack" aria-label="Leader task graph">
+                <header className="act-side-heading">
+                  <span>Execution graph</span>
+                  <h3>Plan and progress</h3>
+                  <p>Inspect the server-authoritative graph this leader constructed.</p>
+                </header>
+                <LeaderTaskGraphBridge
+                  controller={taskGraphController}
+                  goal={session.taskName ?? leader?.data.taskName ?? null}
+                  plan={leader?.data.taskPlan ?? []}
+                />
               </section>
             )}
 

@@ -11,6 +11,7 @@ risks: []
 suggested_files: [ shared/task-graph-view-contracts.ts, server/task-graph/view.ts, server/task-graph/service.ts, server/commands/task-graph.ts, src/task-graph/LeaderTaskGraphBridge.tsx, src/task-graph/GraphInspector.tsx, src/task-graph/use-task-graph-view.ts ]
 suggested_tests: [ src/task-graph/GraphInspector.test.tsx, src/task-graph/use-task-graph-view.test.tsx, src/task-graph/LeaderTaskGraphIntegration.test.tsx, server/task-graph/service.test.ts ]
 steps:
+  - Before execution, review the selected or recommended pattern, versioned topology template, router rationale, artifact vocabulary, bounded-episode metadata, and non-authoritative lint findings.
   - Fetch the current WorkItem-bound graph snapshot without persisting the large projection in Leader node data.
   - Inspect logical outcome, readiness, attempt history, blockers, topology, evidence lineage, capacity, reserved budget, critical path, and timeline.
   - Send pause, resume, cancel, retry, verification, waiver, or human-input controls with the displayed run revision and attempt identity.

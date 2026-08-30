@@ -52,6 +52,23 @@ function projectedNode(view:ReturnType<typeof projectTaskGraphSnapshot>,id:strin
 }
 
 describe("projectTaskGraphSnapshot logical projection",()=>{
+  it("marks untouched nodes as not run after graph failure",()=>{
+    const untouched=node("untouched");
+    const facts=snapshot([untouched],[],{run:{...snapshot([untouched],[]).run,status:"failed"}});
+    expect(projectedNode(projectTaskGraphSnapshot(facts,[],30),"untouched")).toMatchObject({
+      logicalState:"not_run",readiness:"terminal",
+      blocker:{category:"policy",explanation:"Not run—graph terminated after another node failed"},
+    });
+  });
+
+  it("does not show pending-satisfaction as a blocker on a succeeded attempt",()=>{
+    const completed=node("completed");
+    const facts=snapshot([completed],[],{attempts:[attempt("attempt","completed",1,"succeeded")]});
+    const readiness=[{nodeId:"completed",ready:false,
+      reason:"attempt_succeeded_pending_satisfaction"}] satisfies NodeReadiness[];
+    expect(projectedNode(projectTaskGraphSnapshot(facts,readiness,30),"completed").blocker)
+      .toBeNull();
+  });
   it("does not project a legacy succeeded verification task without a passed verdict witness",()=>{
     const verificationTask=node("verification-task",{completionMode:"verification"});
     const facts=snapshot([verificationTask],[],{run:{...snapshot([verificationTask],[]).run,

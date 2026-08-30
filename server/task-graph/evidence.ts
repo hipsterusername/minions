@@ -43,13 +43,20 @@ export class TaskGraphEvidence {
       if (this.duplicate(event)) return false;
       const { run, attempt } = this.assertAttempt(event,["running","waiting"]);
       const node = this.repo.getRevision(String(run.revision_id)).nodes.find(item => item.id === attempt.node_id)!;
-      if (!(input.outputName in node.outputSchemas)) throw new TaskGraphValidationError("undeclared artifact output");
+      if (!(input.outputName in node.outputSchemas)) throw new TaskGraphValidationError(
+        `$.outputName: expected one of ${JSON.stringify(Object.keys(node.outputSchemas))}; received ${JSON.stringify(input.outputName)}`,
+      );
       const declaration=node.outputSchemas[input.outputName];
       if (declaration && typeof declaration === "object") {
         const declared=declaration as Record<string,unknown>;
         if ((typeof declared["schemaName"] === "string" && declared["schemaName"] !== input.schemaName)
           || (typeof declared["schemaVersion"] === "string" && declared["schemaVersion"] !== input.schemaVersion)) {
-          throw new TaskGraphValidationError("artifact schema does not match declared output");
+          const expected={schemaName:typeof declared["schemaName"]==="string"
+            ?declared["schemaName"]:"GraphOutput",schemaVersion:typeof declared["schemaVersion"]==="string"
+            ?declared["schemaVersion"]:"1"};
+          throw new TaskGraphValidationError(
+            `artifact metadata does not match declared output: expected ${JSON.stringify(expected)}; received ${JSON.stringify({schemaName:input.schemaName,schemaVersion:input.schemaVersion})}. Repair the metadata and restage; the rejected draft did not consume the output slot.`,
+          );
         }
       }
       const declaredScopes = node.ownershipRequest

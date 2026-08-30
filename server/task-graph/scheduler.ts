@@ -51,7 +51,7 @@ export class TaskGraphScheduler {
     now: number; admissionLimit?: number }): Admission[] {
     return this.db.transaction(() => {
       const run = this.assertRunAndLease(input);
-      if (Boolean(run.paused) || !["active","quiescent"].includes(String(run.status))) return [];
+      if (Boolean(run.paused) || !["active","quiescent","blocked"].includes(String(run.status))) return [];
       const active = Number((this.db.prepare("SELECT count(*) n FROM task_node_attempts WHERE run_id=? AND runtime<>'terminal'").get(input.runId) as Row).n);
       const capacity = Math.max(0,Math.min(Number(run.max_active_attempts)-active,
         input.admissionLimit ?? Number.POSITIVE_INFINITY));

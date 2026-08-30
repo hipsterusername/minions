@@ -89,7 +89,15 @@ describe("task graph artifact store",() => {
     expect(()=>storeInlineTaskGraphArtifact({...input,inlineJson:{result:7},
       byteSize:JSON.stringify({result:7}).length,
       contentHash:`sha256:${crypto.createHash("sha256").update(JSON.stringify({result:7})).digest("hex")}`},
-      {type:"object",properties:{result:{type:"string"}}})).toThrow("does not satisfy declared output schema");
+      {type:"object",properties:{result:{type:"string"}}})).toThrow(
+        '$.result: expected type string; received 7',
+      );
+    expect(()=>storeInlineTaskGraphArtifact({...input,inlineJson:{},
+      byteSize:JSON.stringify({}).length,
+      contentHash:`sha256:${crypto.createHash("sha256").update(JSON.stringify({})).digest("hex")}`},
+      {type:"object",required:["result"],properties:{result:{type:"string"}}})).toThrow(
+        '$: missing required property "result"',
+      );
   });
 
   it("derives integrity metadata for minimal inline staging input",()=>{
