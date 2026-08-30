@@ -1,8 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { createProject, getHarnessReadiness, listProjects, type HarnessReadinessSnapshot, type ProjectSummary } from "../api.ts";
+import {
+  checkProjectGit,
+  createProject,
+  getHarnessReadiness,
+  listProjects,
+  type HarnessReadinessSnapshot,
+  type ProjectGitAction,
+  type ProjectSummary,
+} from "../api.ts";
 import type { MobileSessionInfo } from "./mobile-selectors.ts";
 import { needsAttention, sessionBelongsToProject } from "./mobile-selectors.ts";
+import { ProjectGitWarning } from "../ProjectGitWarning.tsx";
 
 interface ProjectsScreenProps {
   sessions: MobileSessionInfo[];
@@ -57,6 +66,7 @@ export function ProjectsScreen({ sessions, onSelectProject }: ProjectsScreenProp
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [readiness, setReadiness] = useState<HarnessReadinessSnapshot | null>(null);
+  const [pendingGitDecision, setPendingGitDecision] = useState<{ name: string; path: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,17 +106,19 @@ export function ProjectsScreen({ sessions, onSelectProject }: ProjectsScreenProp
     setProjectPath("");
     setProjectName("");
     setCreateError(null);
+    setPendingGitDecision(null);
   }
 
-  async function handleCreateProject(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const trimmedPath = projectPath.trim();
-    if (!trimmedPath || creating) return;
-
+  async function finishCreateProject(
+    project: { name: string; path: string },
+    gitAction?: ProjectGitAction,
+  ) {
     setCreating(true);
     setCreateError(null);
     try {
-      const created = await createProject(projectName.trim() || "Untitled", trimmedPath);
+      const created = gitAction
+        ? await createProject(project.name, project.path, gitAction)
+        : await createProject(project.name, project.path);
       onSelectProject({
         id: created.id,
         path: created.path,
@@ -116,6 +128,29 @@ export function ProjectsScreen({ sessions, onSelectProject }: ProjectsScreenProp
       });
     } catch (err: unknown) {
       setCreateError(err instanceof Error ? err.message : "Failed to create project");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function handleCreateProject(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmedPath = projectPath.trim();
+    if (!trimmedPath || creating) return;
+
+    const project = { name: projectName.trim() || "Untitled", path: trimmedPath };
+    setCreating(true);
+    setCreateError(null);
+    setPendingGitDecision(null);
+    try {
+      const status = await checkProjectGit(project.path);
+      if (!status.isRepository) {
+        setPendingGitDecision(project);
+        return;
+      }
+      await finishCreateProject(project);
+    } catch (err: unknown) {
+      setCreateError(err instanceof Error ? err.message : "Failed to check project Git status");
     } finally {
       setCreating(false);
     }
@@ -149,7 +184,10 @@ export function ProjectsScreen({ sessions, onSelectProject }: ProjectsScreenProp
             <input
               type="text"
               value={projectPath}
-              onChange={(event) => setProjectPath(event.currentTarget.value)}
+              onChange={(event) => {
+                setProjectPath(event.currentTarget.value);
+                setPendingGitDecision(null);
+              }}
               placeholder="/path/to/new/project"
               autoCapitalize="off"
               autoComplete="off"
@@ -163,10 +201,21 @@ export function ProjectsScreen({ sessions, onSelectProject }: ProjectsScreenProp
             <input
               type="text"
               value={projectName}
-              onChange={(event) => setProjectName(event.currentTarget.value)}
+              onChange={(event) => {
+                setProjectName(event.currentTarget.value);
+                setPendingGitDecision(null);
+              }}
               placeholder="Untitled"
             />
           </label>
+          {pendingGitDecision ? (
+            <ProjectGitWarning
+              busy={creating}
+              variant="mobile"
+              onContinue={() => void finishCreateProject(pendingGitDecision, "continue_without_git")}
+              onInitialize={() => void finishCreateProject(pendingGitDecision, "initialize")}
+            />
+          ) : null}
           {createError ? <div className="mob-launch-error" role="alert">{createError}</div> : null}
           <div className="mob-project-create-actions">
             <button className="mob-header-action" type="button" onClick={closeCreateForm}>
@@ -175,7 +224,7 @@ export function ProjectsScreen({ sessions, onSelectProject }: ProjectsScreenProp
             <button
               className="mob-launch-submit"
               type="submit"
-              disabled={creating || !projectPath.trim() || readiness?.ready === false}
+              disabled={creating || !projectPath.trim() || readiness?.ready === false || pendingGitDecision !== null}
             >
               {creating ? "Creating..." : "Create project"}
             </button>
@@ -186,7 +235,10 @@ export function ProjectsScreen({ sessions, onSelectProject }: ProjectsScreenProp
       {loading ? <div className="mob-launch-status">Loading projects...</div> : null}
       {error ? <div className="mob-launch-error" role="alert">{error}</div> : null}
       {!loading && !error && projects.length === 0 ? (
-        <p className="mob-muted">No recent projects found.</p>
+        <div className="mob-empty mob-empty--surface">
+          <h2>Start with a project</h2>
+          <p><span>No recent projects found.</span> Create one to launch and monitor Leaders from your phone.</p>
+        </div>
       ) : null}
 
       <div className="mob-project-list">

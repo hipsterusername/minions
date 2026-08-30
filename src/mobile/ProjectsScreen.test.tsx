@@ -1,11 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createProject, getHarnessReadiness, listProjects } from "../api.ts";
+import { checkProjectGit, createProject, getHarnessReadiness, listProjects } from "../api.ts";
 import type { MobileSessionInfo } from "./mobile-selectors.ts";
 import { ProjectsScreen } from "./ProjectsScreen.tsx";
 
 vi.mock("../api.ts", () => ({
+  checkProjectGit: vi.fn(async () => ({ isRepository: true })),
   createProject: vi.fn(),
   listProjects: vi.fn(),
   getHarnessReadiness: vi.fn(async () => ({ schemaVersion: 1, checkedAt: "", expiresAt: "", ready: true, readyHarnesses: ["claude"], harnesses: [] })),
@@ -13,6 +14,7 @@ vi.mock("../api.ts", () => ({
 
 afterEach(() => {
   vi.mocked(createProject).mockReset();
+  vi.mocked(checkProjectGit).mockResolvedValue({ isRepository: true });
   vi.mocked(listProjects).mockReset();
   vi.mocked(getHarnessReadiness).mockResolvedValue({ schemaVersion: 1, checkedAt: "", expiresAt: "", ready: true, readyHarnesses: ["claude"], harnesses: [] });
   vi.restoreAllMocks();
@@ -109,6 +111,36 @@ describe("ProjectsScreen", () => {
       name: "New Project",
       lastOpened: "2026-07-03T12:00:00.000Z",
       hasSidecar: true,
+    });
+  });
+
+  it("warns before initializing Git for a new mobile project", async () => {
+    vi.mocked(listProjects).mockResolvedValue([]);
+    vi.mocked(checkProjectGit).mockResolvedValue({ isRepository: false });
+    vi.mocked(createProject).mockResolvedValue({
+      id: "new-project",
+      path: "/work/new-project",
+      name: "New Project",
+      transform: { x: 0, y: 0, scale: 1 },
+      createdAt: "2026-07-03T12:00:00.000Z",
+      updatedAt: "2026-07-03T12:00:00.000Z",
+      nodes: [],
+    });
+
+    render(<ProjectsScreen sessions={[]} onSelectProject={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "New project" }));
+    fireEvent.change(screen.getByLabelText("Project path"), {
+      target: { value: "/work/new-project" },
+    });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "New Project" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Minions may run into issues without Git");
+    expect(createProject).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Initialize Git & commit" }));
+
+    await waitFor(() => {
+      expect(createProject).toHaveBeenCalledWith("New Project", "/work/new-project", "initialize");
     });
   });
 });

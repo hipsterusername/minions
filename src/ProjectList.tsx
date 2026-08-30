@@ -1,18 +1,21 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import {
   listProjects,
+  checkProjectGit,
   createProject,
   openProject,
   deleteProject,
   getHarnessReadiness,
   type ProjectSummary,
   type HarnessReadinessSnapshot,
+  type ProjectGitAction,
 } from "./api.ts";
 import { browserLogger } from "./logging.ts";
 import { sessionBelongsToProject } from "./mobile/mobile-selectors.ts";
 import { useSessionActivity } from "./use-session-activity.ts";
 import { useSocket, type SessionInfo } from "./use-socket.ts";
 import { buildWsUrl } from "./ws-url.ts";
+import { ProjectGitWarning } from "./ProjectGitWarning.tsx";
 import {
   ArrowRight,
   Clock3,
@@ -43,6 +46,8 @@ interface ProjectListProps {
   onOpenProject: (id: string, projectPath: string) => void;
 }
 
+type PendingGitDecision = { mode: "open" | "create"; path: string; name?: string };
+
 export function ProjectList({ onOpenProject }: ProjectListProps) {
   const socket = useSocket(WS_URL);
   const { sessions } = useSessionActivity(socket.subscribe);
@@ -54,6 +59,7 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
   const [newName, setNewName] = useState("");
   const [readiness, setReadiness] = useState<HarnessReadinessSnapshot | null>(null);
   const [checkingReadiness, setCheckingReadiness] = useState(false);
+  const [pendingGitDecision, setPendingGitDecision] = useState<PendingGitDecision | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -99,35 +105,54 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
     [projects, sessions],
   );
 
-  const handleOpen = async () => {
-    const p = folderPath.trim();
-    if (!p) return;
+  const finishProjectInitialization = async (decision: PendingGitDecision, gitAction?: ProjectGitAction) => {
     setCreating(true);
     try {
-      const project = await openProject(p);
+      const project = decision.mode === "open"
+        ? await (gitAction ? openProject(decision.path, gitAction) : openProject(decision.path))
+        : await (gitAction
+          ? createProject(decision.name ?? "Untitled", decision.path, gitAction)
+          : createProject(decision.name ?? "Untitled", decision.path));
       onOpenProject(project.id, project.path);
     } catch (err) {
-      log.error("project_open_failed", { error: err });
-      alert(`Failed to open project: ${err}`);
+      const action = decision.mode === "open" ? "open" : "create";
+      log.error(`project_${action}_failed`, { error: err });
+      alert(`Failed to ${action} project: ${err}`);
     } finally {
       setCreating(false);
     }
   };
 
-  const handleCreate = async () => {
-    const p = folderPath.trim();
-    if (!p) return;
+  const preflightProjectInitialization = async (decision: PendingGitDecision) => {
     setCreating(true);
+    setPendingGitDecision(null);
     try {
-      const name = newName.trim() || undefined;
-      const project = await createProject(name ?? "Untitled", p);
-      onOpenProject(project.id, project.path);
+      const status = await checkProjectGit(decision.path);
+      if (!status.isRepository) {
+        setPendingGitDecision(decision);
+        return;
+      }
+      await finishProjectInitialization(decision);
     } catch (err) {
-      log.error("project_create_failed", { error: err });
-      alert(`Failed to create project: ${err}`);
+      const action = decision.mode === "open" ? "open" : "create";
+      log.error(`project_${action}_preflight_failed`, { error: err });
+      alert(`Failed to check project Git status: ${err}`);
     } finally {
       setCreating(false);
     }
+  };
+
+  const handleOpen = async () => {
+    const p = folderPath.trim();
+    if (!p) return;
+    await preflightProjectInitialization({ mode: "open", path: p });
+  };
+
+  const handleCreate = async () => {
+    const p = folderPath.trim();
+    if (!p) return;
+    const name = newName.trim() || undefined;
+    await preflightProjectInitialization({ mode: "create", path: p, ...(name ? { name } : {}) });
   };
 
   const handleRemoveRecent = async (e: React.MouseEvent, id: string) => {
@@ -199,7 +224,10 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
               <button
                 type="button"
                 aria-pressed={mode === "open"}
-                onClick={() => setMode("open")}
+                onClick={() => {
+                  setMode("open");
+                  setPendingGitDecision(null);
+                }}
               >
                 <FolderOpen size={13} aria-hidden="true" />
                 Open Folder
@@ -207,7 +235,10 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
               <button
                 type="button"
                 aria-pressed={mode === "create"}
-                onClick={() => setMode("create")}
+                onClick={() => {
+                  setMode("create");
+                  setPendingGitDecision(null);
+                }}
               >
                 <Plus size={13} aria-hidden="true" />
                 New Project
@@ -221,7 +252,10 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
                   type="text"
                   placeholder={mode === "open" ? "/path/to/existing/project..." : "/path/to/new/project..."}
                   value={folderPath}
-                  onChange={(e) => setFolderPath(e.target.value)}
+                  onChange={(e) => {
+                    setFolderPath(e.target.value);
+                    setPendingGitDecision(null);
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") void (mode === "open" ? handleOpen() : handleCreate());
                   }}
@@ -234,7 +268,10 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
                     type="text"
                     placeholder="Project name (optional, defaults to folder name)"
                     value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
+                    onChange={(e) => {
+                      setNewName(e.target.value);
+                      setPendingGitDecision(null);
+                    }}
                   />
                 </label>
               )}
@@ -248,6 +285,15 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
                 {!creating && <ArrowRight size={14} aria-hidden="true" />}
               </button>
             </div>
+
+            {pendingGitDecision && (
+              <ProjectGitWarning
+                busy={creating}
+                variant="desktop"
+                onContinue={() => void finishProjectInitialization(pendingGitDecision, "continue_without_git")}
+                onInitialize={() => void finishProjectInitialization(pendingGitDecision, "initialize")}
+              />
+            )}
 
             {readiness?.ready === false && (
               <div role="alert" className="project-list-alert">

@@ -84,7 +84,14 @@ function buildApp(): express.Express {
   mountCoreRoutes(router, { getReadiness: async () => ({
     schemaVersion: 1, checkedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 30_000).toISOString(),
     ready: true, readyHarnesses: ["claude", "codex"], harnesses: [],
-  }) });
+  }), projectGit: {
+    inspectProjectGit: (projectPath) => ({
+      isRepository: fs.existsSync(path.join(projectPath, ".git")),
+    }),
+    initializeProjectGit: (projectPath) => {
+      fs.mkdirSync(path.join(projectPath, ".git"), { recursive: true });
+    },
+  } });
   const app = express();
   app.use(express.json({ limit: "1mb" }));
   app.use("/", router);
@@ -142,6 +149,31 @@ function teardownProject() {
 }
 
 describe("POST /  — create project", () => {
+  it("requires an explicit choice for a non-Git project", async () => {
+    teardownProject();
+    const newPath = path.join(parentDir, "needs-git-choice");
+
+    const statusRes = await fetch(`${baseUrl}/git-status`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: newPath }),
+    });
+    expect(statusRes.status).toBe(200);
+    expect(await statusRes.json()).toEqual({ isRepository: false });
+
+    const createRes = await fetch(`${baseUrl}/`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Needs choice", path: newPath }),
+    });
+    expect(createRes.status).toBe(409);
+    expect(await createRes.json()).toMatchObject({
+      code: "GIT_CONFIRMATION_REQUIRED",
+      warning: expect.stringContaining("may run into issues"),
+    });
+    expect(fs.existsSync(newPath)).toBe(false);
+  });
+
   it("creates a clean source with UUID-addressed central state", async () => {
     teardownProject(); // we'll re-register through POST.
     const newPath = path.join(parentDir, "fresh-create");
@@ -149,7 +181,7 @@ describe("POST /  — create project", () => {
     const res = await fetch(`${baseUrl}/`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Fresh", path: newPath }),
+      body: JSON.stringify({ name: "Fresh", path: newPath, gitAction: "initialize" }),
     });
     expect(res.status).toBe(201);
     const body = (await res.json()) as Record<string, unknown>;
@@ -163,6 +195,7 @@ describe("POST /  — create project", () => {
     const workspace = resolveWorkspace(body["id"] as string)!;
     expect(workspace.sourceRoot).toBe(fs.realpathSync(newPath));
     expect(fs.existsSync(path.join(newPath, ".minions"))).toBe(false);
+    expect(fs.existsSync(path.join(newPath, ".git"))).toBe(true);
     expect(fs.existsSync(path.join(workspace.stateRoot, "context.md"))).toBe(true);
 
     const uuidRes = await fetch(`${baseUrl}/${body["id"] as string}`);
@@ -192,7 +225,7 @@ describe("POST /  — create project", () => {
     const res = await fetch(`${baseUrl}/`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: mountedProject }),
+      body: JSON.stringify({ path: mountedProject, gitAction: "continue_without_git" }),
     });
     expect(res.status).toBe(201);
     const body = (await res.json()) as { id: string; path: string };
@@ -232,7 +265,7 @@ describe("POST /open — open existing project", () => {
     const res = await fetch(`${baseUrl}/open`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: project }),
+      body: JSON.stringify({ path: project, gitAction: "continue_without_git" }),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
@@ -257,7 +290,7 @@ describe("workspace identity lifecycle", () => {
     teardownProject();
     const openRes = await fetch(`${baseUrl}/open`, {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: project }),
+      body: JSON.stringify({ path: project, gitAction: "continue_without_git" }),
     });
     const opened = (await openRes.json()) as { id: string };
     const before = resolveWorkspace(opened.id)!;
@@ -281,13 +314,13 @@ describe("workspace identity lifecycle", () => {
     teardownProject();
     const originalRes = await fetch(`${baseUrl}/open`, {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: project }),
+      body: JSON.stringify({ path: project, gitAction: "continue_without_git" }),
     });
     const original = (await originalRes.json()) as { id: string };
     const copy = fs.mkdtempSync(path.join(parentDir, "copy-"));
     const copyRes = await fetch(`${baseUrl}/open`, {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: copy }),
+      body: JSON.stringify({ path: copy, gitAction: "continue_without_git" }),
     });
     const copied = (await copyRes.json()) as { id: string };
     expect(copied.id).not.toBe(original.id);
@@ -338,7 +371,7 @@ describe("PUT /:encodedPath — update project", () => {
     await fetch(`${baseUrl}/open`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: project }),
+      body: JSON.stringify({ path: project, gitAction: "continue_without_git" }),
     });
 
     const res = await fetch(`${baseUrl}/${encoded}`, {
@@ -374,7 +407,7 @@ describe("PUT /:encodedPath/state — bulk save", () => {
     await fetch(`${baseUrl}/open`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: project }),
+      body: JSON.stringify({ path: project, gitAction: "continue_without_git" }),
     });
 
     const stateRes = await fetch(`${baseUrl}/${encoded}/state`, {
@@ -434,7 +467,7 @@ describe("PUT /:encodedPath/state — bulk save", () => {
     await fetch(`${baseUrl}/open`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: project }),
+      body: JSON.stringify({ path: project, gitAction: "continue_without_git" }),
     });
 
     const nodes = [
@@ -500,7 +533,7 @@ describe("PUT /:encodedPath/state — bulk save", () => {
     await fetch(`${baseUrl}/open`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: project }),
+      body: JSON.stringify({ path: project, gitAction: "continue_without_git" }),
     });
 
     // First save: 2 nodes.
@@ -537,7 +570,7 @@ describe("DELETE /:encodedPath — drop from recent", () => {
     await fetch(`${baseUrl}/open`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: project }),
+      body: JSON.stringify({ path: project, gitAction: "continue_without_git" }),
     });
 
     // The DELETE route drops the cache entry; close the Windows file
@@ -563,7 +596,7 @@ describe("GET / — list recents", () => {
     await fetch(`${baseUrl}/open`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: project }),
+      body: JSON.stringify({ path: project, gitAction: "continue_without_git" }),
     });
     const res = await fetch(`${baseUrl}/`);
     expect(res.status).toBe(200);

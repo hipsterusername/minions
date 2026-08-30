@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearAuthToken,
   attachProject,
+  checkProjectGit,
   createProject,
   encodePath,
   getAuthToken,
@@ -50,6 +51,27 @@ describe("API client boundary", () => {
         Authorization: "Bearer secret",
       },
     });
+  });
+
+  it("checks Git status and sends an explicit initialization choice", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({ token: "secret" }))
+      .mockResolvedValueOnce(jsonResponse({ isRepository: false }))
+      .mockResolvedValueOnce(jsonResponse({ id: "p1", path: "/repo" }));
+
+    await expect(checkProjectGit("/repo")).resolves.toEqual({ isRepository: false });
+    await createProject("Demo", "/repo", "initialize");
+
+    expect(fetchMock.mock.calls.slice(1)).toEqual([
+      ["/api/projects/git-status", expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ path: "/repo" }),
+      })],
+      ["/api/projects", expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ name: "Demo", path: "/repo", gitAction: "initialize" }),
+      })],
+    ]);
   });
 
   it("sends explicit workspace attachment and rebind operations", async () => {

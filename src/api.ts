@@ -184,17 +184,37 @@ export function getHarnessReadiness(refresh = false): Promise<HarnessReadinessSn
   return apiFetch(`/readiness${refresh ? "?refresh=1" : ""}`);
 }
 
-export function createProject(name: string, projectPath: string): Promise<ProjectWithNodes> {
-  return apiFetch("/projects", {
+export type ProjectGitAction = "initialize" | "continue_without_git";
+
+export interface ProjectGitStatus {
+  isRepository: boolean;
+}
+
+export function checkProjectGit(projectPath: string): Promise<ProjectGitStatus> {
+  return apiFetch("/projects/git-status", {
     method: "POST",
-    body: JSON.stringify({ name, path: projectPath }),
+    body: JSON.stringify({ path: projectPath }),
   });
 }
 
-export function openProject(projectPath: string): Promise<ProjectWithNodes> {
+export function createProject(
+  name: string,
+  projectPath: string,
+  gitAction?: ProjectGitAction,
+): Promise<ProjectWithNodes> {
+  return apiFetch("/projects", {
+    method: "POST",
+    body: JSON.stringify({ name, path: projectPath, ...(gitAction ? { gitAction } : {}) }),
+  });
+}
+
+export function openProject(
+  projectPath: string,
+  gitAction?: ProjectGitAction,
+): Promise<ProjectWithNodes> {
   return apiFetch("/projects/open", {
     method: "POST",
-    body: JSON.stringify({ path: projectPath }),
+    body: JSON.stringify({ path: projectPath, ...(gitAction ? { gitAction } : {}) }),
   });
 }
 

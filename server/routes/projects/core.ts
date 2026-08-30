@@ -41,6 +41,11 @@ import {
   updateWorkspaceNickname,
 } from "../../workspace-registry.ts";
 import { mountWorkspaceLifecycleRoutes } from "./workspace-lifecycle.ts";
+import {
+  ensureProjectGitReady,
+  mountProjectGitRoutes,
+  type ProjectGitDependencies,
+} from "./git.ts";
 
 interface StateEdge {
   id: string;
@@ -61,9 +66,13 @@ function loadProjectEdges(db: ReturnType<typeof getDb>, projectId: string): Stat
 
 export function mountCoreRoutes(
   router: Router,
-  deps: { getReadiness?: (opts: { fresh: true }) => Promise<HarnessReadinessSnapshot> } = {},
+  deps: {
+    getReadiness?: (opts: { fresh: true }) => Promise<HarnessReadinessSnapshot>;
+    projectGit?: ProjectGitDependencies;
+  } = {},
 ): void {
   const readiness = deps.getReadiness ?? getHarnessReadiness;
+  mountProjectGitRoutes(router, deps.projectGit);
   // Restore the path allowlist from durable storage so projects remain
   // accessible across server restarts without requiring re-open.
   for (const recent of listRecentProjects()) {
@@ -91,7 +100,11 @@ export function mountCoreRoutes(
   });
 
   router.post("/", async (req: Request, res: Response) => {
-    const { name, path: projectPath } = req.body as { name?: string; path?: string };
+    const { name, path: projectPath, gitAction } = req.body as {
+      name?: string;
+      path?: string;
+      gitAction?: unknown;
+    };
 
     if (!projectPath) {
       res.status(400).json({ error: "Project path is required" });
@@ -103,6 +116,8 @@ export function mountCoreRoutes(
       res.status(403).json({ error: "Project path must be an absolute canonical source root" });
       return;
     }
+    const gitReady = ensureProjectGitReady(res, canonicalPath, gitAction, deps.projectGit);
+    if (typeof gitReady === "boolean" ? !gitReady : !(await gitReady)) return;
 
     const snapshot = await readiness({ fresh: true });
     const initialSettings = resolveNewProjectDefaults(snapshot);
@@ -143,7 +158,7 @@ export function mountCoreRoutes(
   });
 
   router.post("/open", async (req: Request, res: Response) => {
-    const { path: projectPath } = req.body as { path?: string };
+    const { path: projectPath, gitAction } = req.body as { path?: string; gitAction?: unknown };
 
     if (!projectPath) {
       res.status(400).json({ error: "Project path is required" });
@@ -154,6 +169,13 @@ export function mountCoreRoutes(
       res.status(404).json({ error: "Directory does not exist" });
       return;
     }
+    const canonicalPath = canonicalizeSourceRoot(projectPath);
+    if (!canonicalPath) {
+      res.status(403).json({ error: "Project path must be an absolute canonical source root" });
+      return;
+    }
+    const gitReady = ensureProjectGitReady(res, canonicalPath, gitAction, deps.projectGit);
+    if (typeof gitReady === "boolean" ? !gitReady : !(await gitReady)) return;
     const workspace = registerWorkspace(projectPath);
     const absPath = workspace && registerProjectPath(workspace.sourceRoot);
     if (!workspace || !absPath) {

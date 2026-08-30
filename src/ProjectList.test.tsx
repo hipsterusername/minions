@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectList } from "./ProjectList.tsx";
 import {
+  checkProjectGit,
   createProject,
   deleteProject,
   getHarnessReadiness,
@@ -30,6 +31,7 @@ vi.mock("./use-session-activity.ts", () => ({
 
 vi.mock("./api.ts", () => ({
   listProjects: vi.fn(),
+  checkProjectGit: vi.fn(),
   createProject: vi.fn(),
   openProject: vi.fn(),
   deleteProject: vi.fn(),
@@ -68,6 +70,7 @@ describe("ProjectList journeys", () => {
     sessionSnapshot = [];
     vi.mocked(listProjects).mockResolvedValue([project]);
     vi.mocked(getHarnessReadiness).mockResolvedValue(ready);
+    vi.mocked(checkProjectGit).mockResolvedValue({ isRepository: true });
     vi.mocked(openProject).mockResolvedValue({ ...project, transform: { x: 0, y: 0, scale: 1 }, createdAt: "", updatedAt: "", nodes: [] });
     vi.mocked(createProject).mockResolvedValue({ ...project, transform: { x: 0, y: 0, scale: 1 }, createdAt: "", updatedAt: "", nodes: [] });
     vi.mocked(deleteProject).mockResolvedValue({});
@@ -140,6 +143,38 @@ describe("ProjectList journeys", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
     await waitFor(() => expect(createProject).toHaveBeenCalledWith("New repo", "/repo/new"));
+  });
+
+  it("requires an explicit choice before initializing Git and creating the first commit", async () => {
+    vi.mocked(checkProjectGit).mockResolvedValue({ isRepository: false });
+    render(<ProjectList onOpenProject={vi.fn()} />);
+    await screen.findByText("Alpha");
+
+    fireEvent.click(screen.getByRole("button", { name: "New Project" }));
+    fireEvent.change(screen.getByPlaceholderText("/path/to/new/project..."), { target: { value: "/repo/new" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Minions may run into issues");
+    expect(createProject).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Initialize Git & create first commit" }));
+
+    await waitFor(() => {
+      expect(createProject).toHaveBeenCalledWith("Untitled", "/repo/new", "initialize");
+    });
+  });
+
+  it("allows opening a non-Git folder only after acknowledging the warning", async () => {
+    vi.mocked(checkProjectGit).mockResolvedValue({ isRepository: false });
+    render(<ProjectList onOpenProject={vi.fn()} />);
+    const path = await screen.findByPlaceholderText("/path/to/existing/project...");
+
+    fireEvent.change(path, { target: { value: "/repo/plain" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Continue without Git" }));
+
+    await waitFor(() => {
+      expect(openProject).toHaveBeenCalledWith("/repo/plain", "continue_without_git");
+    });
   });
 
   it("keeps recent projects usable when the optional readiness check fails", async () => {

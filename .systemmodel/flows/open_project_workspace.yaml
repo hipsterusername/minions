@@ -1,12 +1,13 @@
 id: flow.open_project_workspace
 type: flow
 name: Open or recover a project workspace
-summary: A user explicitly registers a source folder, receives a stable workspace UUID, and loads central state before reconciling sessions and work items.
+summary: A user checks Git readiness, explicitly initializes Git or accepts the non-Git warning, registers the source folder, receives a stable workspace UUID, and loads central state before reconciling sessions and work items.
 constraints: []
 decisions: [ decision.typed_event_bus, decision.canonical_work_item_lifecycle, decision.portable_workspace_roots ]
-suggested_files: [ src/ProjectList.tsx, src/App.tsx, src/ProjectHeader.tsx, src/mobile/ProjectsScreen.tsx, src/use-work-items.ts, server/workspace-registry.ts, server/routes/projects/core.ts ]
-suggested_tests: [ src/ProjectList.test.tsx, src/App.dom.test.tsx, src/api.test.ts, src/use-autosave.test.tsx, src/canvas-work-item-reconcile.test.ts, server/workspace-registry.test.ts, tests/contracts/projects-core-routes.test.ts ]
+suggested_files: [ src/ProjectList.tsx, src/ProjectGitWarning.tsx, src/App.tsx, src/ProjectHeader.tsx, src/mobile/ProjectsScreen.tsx, src/api.ts, src/use-work-items.ts, server/project-git.ts, server/workspace-registry.ts, server/routes/projects/core.ts, server/routes/projects/git.ts ]
+suggested_tests: [ src/ProjectList.test.tsx, src/mobile/ProjectsScreen.test.tsx, src/App.dom.test.tsx, src/api.test.ts, src/use-autosave.test.tsx, src/canvas-work-item-reconcile.test.ts, server/project-git.test.ts, server/workspace-registry.test.ts, tests/contracts/projects-core-routes.test.ts ]
 steps:
+  - Check whether the source root belongs to a Git worktree; for a non-Git source, require an explicit choice to initialize and create the first commit or continue after a reliability warning.
   - Canonicalize an explicitly opened source root, including mounted-volume paths, and bind it to a stable UUID.
   - Preserve one unambiguous legacy UUID and non-destructively import a legacy .minions sidecar into MINIONS_HOME/workspaces/<uuid> on first registration.
   - Rebind a moved source to its existing UUID, or explicitly attach a copied source; copies otherwise receive a new UUID.

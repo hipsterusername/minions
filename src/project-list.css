@@ -251,6 +251,55 @@
   border-radius: var(--radius-control);
 }
 
+.project-list-git-warning {
+  margin-top: 12px;
+  padding: 11px;
+  color: var(--text-secondary);
+  font: 400 11px/1.45 var(--font-sans);
+  background: color-mix(in srgb, var(--warning-color) 6%, var(--bg-primary));
+  border: 1px solid color-mix(in srgb, var(--warning-color) 45%, var(--border-default));
+  border-radius: var(--radius-control);
+}
+
+.project-list-git-warning strong {
+  display: block;
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.project-list-git-warning p {
+  margin: 4px 0 10px;
+}
+
+.project-list-git-warning__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  justify-content: flex-end;
+}
+
+.project-list-git-warning__actions button {
+  min-height: 30px;
+  padding: 6px 9px;
+  color: var(--text-secondary);
+  font: 600 10px/1.2 var(--font-sans);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.project-list-git-warning__actions .project-list-git-warning__primary {
+  color: var(--text-on-accent, #fff);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.project-list-git-warning__actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 .project-list-alert button {
   display: inline-flex;
   flex: 0 0 auto;
