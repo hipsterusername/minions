@@ -3925,13 +3925,13 @@ export function Canvas({
             onAddContentNode={addContentNode}
             onRevealMinion={revealMinion}
             onDuplicateLeaderSetup={
-              node.type === "leader" ? () => duplicateLeaderSetup(node.id) : undefined
+              node.type === "leader" ? duplicateLeaderSetup : undefined
             }
             onOpenSystemModel={
-              node.type === "leader" ? () => openSystemModelForLeader(node.id) : undefined
+              node.type === "leader" ? openSystemModelForLeader : undefined
             }
             onSaveLeaderPreset={
-              node.type === "leader" ? (input) => saveLeaderPreset(node.id, input) : undefined
+              node.type === "leader" ? saveLeaderPreset : undefined
             }
             onFocusNode={node.type === "leader" ? handleFocusNode : undefined}
             socketSend={socketSend}

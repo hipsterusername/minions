@@ -1,0 +1,21 @@
+id: constraint.canvas_action_prop_stability
+type: constraint
+statement: Viewport-only Canvas updates do not invalidate memoized node subtrees through newly allocated action-handler props, and node actions preserve their target node identity and input payload semantics.
+applies_to:
+  capabilities:
+    - capability.spatial_canvas
+  flows:
+    - flow.navigate_spatial_workspace
+  surfaces:
+    - surface.canvas
+  files:
+    - src/Canvas.tsx
+    - src/CanvasNode.tsx
+severity: medium
+agent_instruction: Keep action-handler props stable across viewport renders, bind node-local identity at or below the memoized node boundary, preserve renderer-facing callback behavior, and cover node-id and payload forwarding with focused tests.
+suggested_tests: [ src/CanvasNode.test.tsx, src/canvas-state.dom.test.tsx ]
+domain: domain.workspace
+scope: targeted
+guards:
+  - capability.spatial_canvas
+  - flow.navigate_spatial_workspace

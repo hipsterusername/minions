@@ -28,11 +28,11 @@ interface CanvasNodeProps {
   /** Callback to reveal (create or scroll-to) a minion node for a given session key */
   onRevealMinion?: ((minionSessionKey: string) => void) | undefined;
   /** Callback for LeaderNode: duplicate setup without runtime session state */
-  onDuplicateLeaderSetup?: (() => void) | undefined;
+  onDuplicateLeaderSetup?: ((nodeId: string) => void) | undefined;
   /** Callback for LeaderNode: open a System Model node for this session */
-  onOpenSystemModel?: (() => void) | undefined;
+  onOpenSystemModel?: ((nodeId: string) => void) | undefined;
   /** Callback for LeaderNode: save setup as a reusable preset */
-  onSaveLeaderPreset?: ((input: {
+  onSaveLeaderPreset?: ((nodeId: string, input: {
     name: string;
     description?: string;
     systemPromptPrefix?: string;
@@ -321,6 +321,22 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
     (size: Size) => onResize?.(node.id, size),
     [node.id, onResize],
   );
+  const handleDuplicateLeaderSetup = useCallback(
+    () => onDuplicateLeaderSetup?.(node.id),
+    [node.id, onDuplicateLeaderSetup],
+  );
+  const handleOpenSystemModel = useCallback(
+    () => onOpenSystemModel?.(node.id),
+    [node.id, onOpenSystemModel],
+  );
+  const handleSaveLeaderPreset = useCallback(
+    (input: {
+      name: string;
+      description?: string;
+      systemPromptPrefix?: string;
+    }) => onSaveLeaderPreset?.(node.id, input) ?? false,
+    [node.id, onSaveLeaderPreset],
+  );
   const handleResizeStart = useCallback(() => {
     setIsResizing(true);
   }, []);
@@ -485,9 +501,11 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
         onResizeEnd={handleResizeEnd}
         onAddContentNode={onAddContentNode}
         onRevealMinion={onRevealMinion}
-        onDuplicateLeaderSetup={onDuplicateLeaderSetup}
-        onOpenSystemModel={onOpenSystemModel}
-        onSaveLeaderPreset={onSaveLeaderPreset}
+        onDuplicateLeaderSetup={
+          onDuplicateLeaderSetup ? handleDuplicateLeaderSetup : undefined
+        }
+        onOpenSystemModel={onOpenSystemModel ? handleOpenSystemModel : undefined}
+        onSaveLeaderPreset={onSaveLeaderPreset ? handleSaveLeaderPreset : undefined}
         isDropTarget={isDropTarget}
         isBeingDragged={isBeingDragged}
       />
