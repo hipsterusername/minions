@@ -13,10 +13,13 @@ interface TaskSpawnPromptArgs {
   ownedPaths?: string[];
   canvasContext?: string | null;
   contextPack?: string | null;
+  projectContext?: string | null;
 }
 
 export const CANVAS_CONTEXT_CHAR_LIMIT = 6000;
 export const CANVAS_CONTEXT_TRUNCATED_MARKER = "…canvas context truncated";
+export const PROJECT_CONTEXT_CHAR_LIMIT = 6000;
+export const PROJECT_CONTEXT_TRUNCATED_MARKER = "…project context truncated";
 
 function appendListSection(lines: string[], title: string, items?: string[]): void {
   if (!items || items.length === 0) return;
@@ -90,6 +93,13 @@ export function buildTaskSpawnPrompt(args: TaskSpawnPromptArgs): string {
   lines.push(
     "**Project context:** Skim `CLAUDE.md` at the repo root before significant work - it captures conventions and testing rules the Leader expects.",
   );
+
+  if (args.projectContext) {
+    const projectContext = args.projectContext.length <= PROJECT_CONTEXT_CHAR_LIMIT
+      ? args.projectContext
+      : `${args.projectContext.slice(0, PROJECT_CONTEXT_CHAR_LIMIT - PROJECT_CONTEXT_TRUNCATED_MARKER.length - 1)}\n${PROJECT_CONTEXT_TRUNCATED_MARKER}`;
+    lines.push("", "## Minions project context", "", projectContext);
+  }
 
   if (args.contextPack) {
     lines.push("", "## System Model Context", "", args.contextPack);

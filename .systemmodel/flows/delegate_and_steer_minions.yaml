@@ -6,10 +6,10 @@ constraints: [ constraint.minion_lifecycle_semantics ]
 decisions: [ decision.role_gated_agent_tools, decision.typed_event_bus ]
 risks:
   - risk.agent_tool_allowlist_drift
-suggested_files: [ server/agents/leader.ts, server/agents/minion.ts, server/task-tools/assign-task.ts, server/minion-tools.ts, server/agents/leader-teardown.ts, server/session-registry.ts, server/leader-wake.ts, server/session-persist.ts, server/session-task-state-persist.ts, server/wake-coalescer.ts, server/wait-resume.ts ]
-suggested_tests: [ server/agents/leader.test.ts, server/agents/minion.test.ts, server/task-tools/assign-task.test.ts, server/minion-tools.test.ts, server/session-registry.test.ts, server/session-persist.test.ts, server/wake-coalescer.test.ts ]
+suggested_files: [ server/agents/leader.ts, server/agents/minion.ts, server/task-tools/assign-task.ts, server/task-tools/task-prompt.ts, server/minion-tools.ts, server/agents/leader-teardown.ts, server/session-registry.ts, server/leader-wake.ts, server/session-persist.ts, server/session-task-state-persist.ts, server/wake-coalescer.ts, server/wait-resume.ts ]
+suggested_tests: [ server/agents/leader.test.ts, server/agents/minion.test.ts, server/task-tools/assign-task.test.ts, server/task-tools/task-prompt.test.ts, server/minion-tools.test.ts, server/session-registry.test.ts, server/session-persist.test.ts, server/wake-coalescer.test.ts ]
 steps:
-  - Plan a stable task ID before assignment and freeze executor, harness, owned paths, skills, and work packet into the child prompt.
+  - Plan a stable task ID before assignment and freeze configured Minions project context, executor, harness, owned paths, skills, and work packet into the child prompt.
   - Start the child session and publish progress to both child and Leader topics.
   - Keep report_blocked resumable and make done, fail, and cancellation terminal transitions idempotent.
   - Persist the complete task snapshot and attention intent before requesting a Leader wake.

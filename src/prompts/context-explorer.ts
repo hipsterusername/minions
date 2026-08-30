@@ -1,6 +1,6 @@
-export const CONTEXT_EXPLORER_PROMPT = (projectPath: string) => `Explore the project at ${projectPath} and generate a comprehensive context document.
+export const CONTEXT_EXPLORER_PROMPT = (projectPath: string) => `Explore the project at ${projectPath} and populate its Minions project context.
 
-Your goal is to understand this project and produce a context.md that would help any developer or AI agent work effectively in this codebase.
+Your goal is to understand this project and save concise context that will help subsequently delegated Minion agents work effectively in this codebase.
 
 ## What to investigate
 
@@ -12,9 +12,11 @@ Your goal is to understand this project and produce a context.md that would help
 6. **Development workflow** — How to build, test, run, deploy.
 7. **Current state** — What's working, what's in progress, any known issues.
 
-## Output format
+## Save the result
 
-Write the context as a well-structured markdown document. Use headers, bullet points, and code references. Be specific — reference actual file paths, function names, and type names.
+After investigating, call \`update_project_context\` exactly once with the complete context as well-structured Markdown. Use headers, bullet points, and code references. Be specific — reference actual file paths, function names, and type names.
+
+Do not create or edit \`context.md\`, \`CLAUDE.md\`, or another repository file. Those files do not populate the Minions Context panel; only \`update_project_context\` fulfills this task.
 
 ## Important
 

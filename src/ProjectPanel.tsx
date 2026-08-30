@@ -11,6 +11,9 @@ import type { LeaderData } from "./nodes/LeaderNode.tsx";
 import type { MinionData } from "./nodes/MinionNode.tsx";
 import { ProjectTree, type LeaderActivity } from "./components/ProjectTree.tsx";
 import { browserLogger } from "./logging.ts";
+import { isProjectContextEmpty } from "../shared/project-context.ts";
+import { projectTopic } from "../shared/ws-envelope.ts";
+import { subscribeSocketTopic, type SocketSubscribeLike } from "./use-socket.ts";
 
 const log = browserLogger.child("project-panel");
 
@@ -19,6 +22,7 @@ interface ProjectPanelProps {
   projectPath: string;
   projectName: string;
   onSpawnContextExplorer: () => void;
+  socketSubscribe?: SocketSubscribeLike;
   nodes: CanvasNode[];
   /** Called when user clicks a file in the project tree */
   onOpenFile?: (relativePath: string) => void;
@@ -122,6 +126,7 @@ export function ProjectPanel({
   projectPath,
   projectName,
   onSpawnContextExplorer,
+  socketSubscribe,
   nodes,
   onOpenFile,
   onUpdateNodeData,
@@ -134,10 +139,7 @@ export function ProjectPanel({
   const [editBuffer, setEditBuffer] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const contextIsEmpty =
-    !context?.exists ||
-    !context.content.trim() ||
-    context.content.includes("Project context has not been configured yet.");
+  const contextIsEmpty = isProjectContextEmpty(context);
 
   // Default tab: show context setup if empty, dashboard otherwise
   const [activeTab, setActiveTab] = useState<Tab>(contextIsEmpty ? "context" : "dashboard");
@@ -160,6 +162,14 @@ export function ProjectPanel({
       }
     })();
   }, [projectId]);
+
+  useEffect(() => subscribeSocketTopic(socketSubscribe, projectTopic(projectId), (raw) => {
+    const message = raw as Record<string, unknown>;
+    if (message["type"] !== "project_context_updated"
+      || message["projectId"] !== projectId
+      || typeof message["content"] !== "string") return;
+    setContext({ content: message["content"], exists: true });
+  }), [projectId, socketSubscribe]);
 
   const handleEditStart = useCallback(() => {
     setEditBuffer(context?.content ?? "");

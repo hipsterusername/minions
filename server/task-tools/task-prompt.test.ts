@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CANVAS_CONTEXT_TRUNCATED_MARKER,
+  PROJECT_CONTEXT_TRUNCATED_MARKER,
   buildTaskSpawnPrompt,
   truncateCanvasContext,
 } from "./task-prompt.ts";
@@ -10,6 +11,22 @@ function contextBlock(groups: string[]): string {
 }
 
 describe("buildTaskSpawnPrompt canvas context", () => {
+  it("places bounded Minions project context before the task description", () => {
+    const prompt = buildTaskSpawnPrompt({
+      taskId: "t1",
+      title: "Use project knowledge",
+      priority: "high",
+      description: "details",
+      armedSkillIds: [],
+      projectContext: `# Project\n\n${"a".repeat(7000)}`,
+    });
+
+    expect(prompt).toContain("## Minions project context");
+    expect(prompt.indexOf("## Minions project context")).toBeLessThan(prompt.indexOf("## Description"));
+    expect(prompt).toContain(PROJECT_CONTEXT_TRUNCATED_MARKER);
+    expect(prompt.length).toBeLessThan(7000);
+  });
+
   it("injects system-model context before the task description", () => {
     const prompt = buildTaskSpawnPrompt({
       taskId: "t1",

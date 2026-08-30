@@ -8,7 +8,8 @@ import type { NormalizedToolDef } from "../harness/types.ts";
 import { textResult } from "../harness/tool-result.ts";
 import type { TaskToolContext, TaskRecord } from "./types.ts";
 import { compileSkills, loadSkillsByIds } from "../skills.ts";
-import { readSettings, resolveMinionModelForHarness } from "../project-store.ts";
+import { readContext, readSettings, resolveMinionModelForHarness } from "../project-store.ts";
+import { isProjectContextEmpty } from "../../shared/project-context.ts";
 import { isValidThinkingConfig } from "../session-host-config.ts";
 import { getSessionCanvasContext } from "../canvas-context-store.ts";
 import { buildTaskSpawnPrompt } from "./task-prompt.ts";
@@ -210,6 +211,7 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
       const skillsAddendum = compileSkills(skills, resolvedSkillValues);
       const minionSystemPrompt = ctx.minionSystemPrompt + skillsAddendum;
       const settings = readSettings(ctx.projectPath);
+      const storedProjectContext = readContext(ctx.projectPath);
       const contextPack = args.workPacketId && settings.systemModel !== "off" && hasSystemModelManifest(ctx.cwd)
         ? getWorkPacketContextPack(ctx.projectPath, args.workPacketId)
         : null;
@@ -226,6 +228,9 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
         acceptanceCriteria: task.acceptanceCriteria,
         ownedPaths: task.ownedPaths,
         contextPack,
+        projectContext: isProjectContextEmpty(storedProjectContext)
+          ? null
+          : storedProjectContext.content.trim(),
         canvasContext:
           args.include_canvas_context === false
             ? null

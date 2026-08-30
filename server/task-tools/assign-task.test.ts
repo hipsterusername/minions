@@ -9,7 +9,7 @@ import type {
   TaskToolContext,
 } from "./types.ts";
 import type { Bus, BusPayload } from "../bus.ts";
-import { writeSettings, writeSkills } from "../project-store.ts";
+import { writeContext, writeSettings, writeSkills } from "../project-store.ts";
 import { saveWorkPacket } from "../system-model/store.ts";
 import { loadSystemModel } from "../system-model/load.ts";
 import type { WorkPacket } from "../../shared/system-model/index.ts";
@@ -538,6 +538,29 @@ describe("assign_task", () => {
       const prompt = lastSpawnPrompt(harness);
       expect(prompt).toContain("**Project context:**");
       expect(prompt).toContain("CLAUDE.md");
+    });
+
+    it("injects configured Minions project context and omits the empty placeholder", async () => {
+      writeContext(projectDir, "# Architecture\n\nUse the typed event bus.");
+      await callAssign(harness.ctx, {
+        taskId: "t-project-context",
+        title: "Use project context",
+        description: "details",
+        priority: "low",
+      });
+
+      expect(lastSpawnPrompt(harness)).toContain("## Minions project context");
+      expect(lastSpawnPrompt(harness)).toContain("Use the typed event bus.");
+
+      writeContext(projectDir, "# Project\n\nProject context has not been configured yet.\n");
+      await callAssign(harness.ctx, {
+        taskId: "t-empty-project-context",
+        title: "Ignore placeholder",
+        description: "details",
+        priority: "low",
+      });
+      expect(lastSpawnPrompt(harness)).not.toContain("## Minions project context");
+      expect(lastSpawnPrompt(harness)).not.toContain("has not been configured yet");
     });
 
     it("injects the worktree branch when ctx.worktreeBranch is set", async () => {

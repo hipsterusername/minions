@@ -292,7 +292,7 @@ function ProjectView({
     [transform, nodes],
   );
 
-  // Spawn a Leader node to explore the project and generate context.md
+  // Spawn a Leader node to explore the project and populate Minions context.
   const handleSpawnContextExplorer = useCallback(() => {
     const typeDef = getAllNodeTypes().find((t) => t.type === "leader");
     if (!typeDef) return undefined;
@@ -783,6 +783,7 @@ function ProjectView({
                     projectPath={projectPath}
                     projectName={projectName}
                     onSpawnContextExplorer={handleSpawnContextExplorer}
+                    socketSubscribe={socket.subscribe}
                     nodes={nodes}
                     onOpenFile={handleOpenFile}
                     onUpdateNodeData={(nodeId, data) => dispatch({ type: "UPDATE_NODE_DATA", id: nodeId, data })}

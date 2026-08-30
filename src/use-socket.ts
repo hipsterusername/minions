@@ -48,6 +48,7 @@ export type ServerMessage =
   | { type: "control_response"; command: string; sessionKey: string | null; requestId: string | null; success: boolean; error?: string; [key: string]: unknown }
   | { type: "session_cleared"; sessionKey: string }
   | { type: "session_task_name"; sessionKey: string; taskName: string }
+  | { type: "project_context_updated"; projectId: string; content: string; exists: true; updatedBySessionKey: string; timestamp: number }
   | { type: "approval_requested"; sessionKey: string; summary: string; diff: unknown; timestamp: number; graceUntil?: number }
   | { type: "approval_resolved"; sessionKey: string; action: string; timestamp: number }
   | { type: "worktree_status"; sessionKey: string; status: string; path?: string; branch?: string }

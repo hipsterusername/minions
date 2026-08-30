@@ -42,6 +42,7 @@ import { createSetTaskNameToolDef } from "./task-tools/set-task-name.ts";
 import { createRequestApprovalToolDef } from "./task-tools/request-approval.ts";
 import { createCheckpointSessionToolDef } from "./task-tools/checkpoint-session.ts";
 import { createLoadSubskillToolDef } from "./task-tools/load-subskill.ts";
+import { createUpdateProjectContextToolDef } from "./task-tools/update-project-context.ts";
 
 /**
  * Create task management tool definitions bound to a specific leader session.
@@ -136,6 +137,7 @@ export function createTaskToolsForLeader(opts: {
     createWaitAndContinueToolDef(ctx),
     createCheckpointSessionToolDef(ctx),
     createLoadSubskillToolDef(ctx),
+    createUpdateProjectContextToolDef(ctx),
   ];
   // The graph backend adds graph-planning tools in agents/leader.ts. It never
   // replaces these direct Leader controls: graph use is a choice, not a gate.

@@ -10,6 +10,7 @@ import {
   normalizeContextActions,
   type ContextActionConfig,
 } from "../shared/context-actions.ts";
+import { defaultProjectContext } from "../shared/project-context.ts";
 import { normalizeProjectSandboxPolicy } from "./project-defaults.ts";
 import type { LeaderPlanningBackend } from "../shared/leader-planning.ts";
 export { resolveMinionModelForHarness } from "./project-model-settings.ts";
@@ -161,7 +162,7 @@ export function initSidecar(projectPath: string, initialSettings: ProjectSetting
   const contextPath = path.join(sidecar, "context.md");
   if (!fs.existsSync(contextPath)) {
     const dirName = path.basename(projectPath);
-    fs.writeFileSync(contextPath, `# ${dirName}\n\nProject context has not been configured yet.\n`);
+    fs.writeFileSync(contextPath, defaultProjectContext(dirName));
   }
 
   const settingsPath = path.join(sidecar, "settings.json");

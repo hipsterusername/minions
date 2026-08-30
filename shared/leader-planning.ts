@@ -10,7 +10,7 @@ export const DEFAULT_LEADER_PLANNING_BACKEND: LeaderPlanningBackend = "task_grap
 export const LEGACY_LEADER_TASK_TOOL_NAMES = [
   "plan_task", "assign_task", "complete_task", "cancel_task", "message_task",
   "get_task_status", "set_task_name", "wait_and_continue", "checkpoint_session",
-  "load_subskill",
+  "load_subskill", "update_project_context",
 ] as const;
 
 /**
