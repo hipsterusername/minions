@@ -1,0 +1,32 @@
+id: constraint.dialectic_reasoning_integrity
+type: constraint
+statement: A canonical dialectic is a bounded immutable graph whose materially different participants and neutral synthesizer use separate totally ordered cache-stable provider threads, whose non-final syntheses expose calibrated goal distance and unresolved disagreement through a Leader-controlled human gate, and whose moderation is revision-fenced.
+applies_to:
+  capabilities:
+    - capability.execution_graph_runtime
+  flows:
+    - flow.execute_execution_graph
+  surfaces:
+    - surface.agent_tools
+    - surface.graph_inspector
+  files:
+    - server/dialectic/graph-plan.ts
+    - shared/task-graph-contracts.ts
+    - shared/task-graph-planning-contracts.ts
+    - server/task-graph/validation.ts
+    - server/task-graph/execution-policy.ts
+    - server/task-graph/dispatch-context.ts
+    - server/task-graph/service-execution.ts
+    - server/task-graph/planning-runtime.ts
+    - server/task-graph/planning-tools.ts
+    - server/work-item-service-sqlite.ts
+severity: high
+agent_instruction: Require materially different participant roles and prefer different compatible models, harnesses, or executor tiers; keep every affinity chain contiguous, totally ordered, runtime-stable, and confined to one dialectic participant; resume only a prior successful provider session on a cache-capable harness; emit structured synthesis at bounded intervals; and never start the next episode until the Leader resolves its human gate with a revision-fenced continue, reshape, or stop decision.
+review_gate: gate.execution_graph_runtime
+suggested_tests: [ server/dialectic/graph-plan.test.ts, server/task-graph/session-affinity.test.ts, server/task-graph/execution-policy.test.ts, server/task-graph/planning-runtime.test.ts, server/task-graph/planning-tools.test.ts, server/work-item-service-sqlite.test.ts ]
+evidence: [ decision.leader_moderated_dialectic_graphs, decision.server_owned_execution_graphs ]
+domain: domain.delegation
+scope: targeted
+guards:
+  - capability.execution_graph_runtime
+  - flow.execute_execution_graph

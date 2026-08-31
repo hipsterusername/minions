@@ -1,4 +1,24 @@
 risks:
+  - id: risk.dialectic_correlated_reasoning
+    type: risk
+    summary: A dialectic can create expensive agreement theater when participants share the same assumptions, runtime profile, or context framing, or can corrupt cache continuity when provider threads cross participant boundaries.
+    severity: high
+    applies_to:
+      capabilities:
+        - capability.execution_graph_runtime
+      flows:
+        - flow.execute_execution_graph
+      surfaces:
+        - surface.agent_tools
+        - surface.graph_inspector
+      files:
+        - server/dialectic/graph-plan.ts
+        - server/task-graph/patterns.ts
+        - server/task-graph/validation.ts
+        - server/task-graph/dispatch-context.ts
+        - server/task-graph/planning-runtime.ts
+    mitigation: Require materially distinct epistemic roles, differentiate compatible executor tiers, models, or harnesses where available, lint correlated runtime profiles, prohibit cross-participant affinity, and use bounded synthesis plus Leader goal-distance review to stop unproductive convergence.
+    domain: domain.delegation
   - id: risk.dual_ingress_divergence
     type: risk
     summary: Mobile and transient actors still create bare sessions while canvas uses canonical WorkItems.

@@ -1,26 +1,28 @@
 id: capability.execution_graph_runtime
 type: capability
 name: Execution graph runtime
-summary: Leaders can optionally classify work with versioned authoring patterns, review deterministic routing and lint findings, and submit expanded semantic plans that are source-frozen, policy-preflighted, and materialized as immutable dependency graphs under a canonical WorkItem, then execute them with bounded parallel attempts, durable evidence, retries, recovery, and fenced controls while retaining direct execution and delegation tools outside the graph.
+summary: Leaders can optionally classify work with versioned authoring patterns, including a bounded role-differentiated dialectic for difficult reasoning, and submit source-frozen, policy-preflighted semantic plans that materialize as immutable dependency graphs under a canonical WorkItem, then execute them with cache-stable provider-thread affinity, periodic synthesis, bounded attempts, durable evidence, recovery, and fenced controls while retaining direct execution and delegation outside the graph.
 constraints:
   - constraint.execution_graph_authority
   - constraint.execution_graph_admission
   - constraint.execution_graph_evidence
   - constraint.execution_graph_projection
+  - constraint.dialectic_reasoning_integrity
   - constraint.work_packet_reconciliation
 decisions:
   - decision.server_owned_execution_graphs
+  - decision.leader_moderated_dialectic_graphs
   - decision.canonical_work_item_lifecycle
   - decision.typed_event_bus
-risks: []
-suggested_files: [ server/task-graph/**, server/task-graph/patterns.ts, shared/task-graph-patterns.ts, shared/task-graph-contracts.ts, shared/task-graph-planning-contracts.ts, shared/work-item-contracts.ts, shared/leader-prompt.ts, server/agents/leader.ts, server/system-model-tools/reconcile-run.ts, server/commands/task-graph.ts ]
-suggested_tests: [ shared/task-graph-patterns.test.ts, server/task-graph/patterns.test.ts, server/task-graph/planning-compiler.test.ts, server/task-graph/planning-coordinator.test.ts, server/task-graph/runtime.test.ts, server/task-graph/service.test.ts, shared/leader-prompt.test.ts, server/agents/leader.test.ts, server/system-model-tools/reconcile-run.test.ts, tests/task-graph/runtime.test.ts, tests/contracts/work-item-contracts.test.ts ]
-keywords: [ execution_graph, task_graph, semantic_plan, pattern, router, lint, problem_signature, bounded_episode, proposal_revision, source_snapshot, policy_preflight, serial_iteration, topology, graph_revision, graph_run, node_attempt, scheduler, lease, outbox, artifact, verification, ownership, budget ]
+risks: [ risk.dialectic_correlated_reasoning ]
+suggested_files: [ server/dialectic/graph-plan.ts, server/task-graph/**, server/task-graph/patterns.ts, server/task-graph/dispatch-context.ts, server/task-graph/planning-runtime.ts, server/work-item-service-sqlite.ts, shared/task-graph-patterns.ts, shared/task-graph-contracts.ts, shared/task-graph-planning-contracts.ts, shared/work-item-contracts.ts, shared/leader-prompt.ts, server/agents/leader.ts, server/system-model-tools/reconcile-run.ts, server/commands/task-graph.ts ]
+suggested_tests: [ server/dialectic/graph-plan.test.ts, server/task-graph/session-affinity.test.ts, shared/task-graph-patterns.test.ts, server/task-graph/patterns.test.ts, server/task-graph/planning-compiler.test.ts, server/task-graph/planning-coordinator.test.ts, server/task-graph/planning-runtime.test.ts, server/task-graph/runtime.test.ts, server/task-graph/service.test.ts, server/work-item-service-sqlite.test.ts, shared/leader-prompt.test.ts, server/agents/leader.test.ts, server/system-model-tools/reconcile-run.test.ts, tests/task-graph/runtime.test.ts, tests/contracts/work-item-contracts.test.ts ]
+keywords: [ execution_graph, task_graph, semantic_plan, dialectic, cognitive_diversity, session_affinity, provider_thread, prompt_cache, synthesis, goal_distance, leader_moderation, human_gate, pattern, router, lint, problem_signature, bounded_episode, proposal_revision, source_snapshot, policy_preflight, serial_iteration, topology, graph_revision, graph_run, node_attempt, scheduler, lease, outbox, artifact, verification, ownership, budget ]
 entry_points:
   - surface: surface.agent_tools
-    summary: Leaders may attach versioned pattern, problem-signature, and bounded-episode metadata to expanded semantic proposals; the server recommends and lints authoring structure, then freezes source and policy before immutable materialization while attempt-bound agents stage declared artifacts and return independently verifiable results.
-    files: [ shared/task-graph-patterns.ts, shared/task-graph-planning-contracts.ts, server/task-graph/patterns.ts, server/task-graph/planning-tools.ts, server/task-graph/planning-coordinator.ts, server/task-graph/planning-source.ts, server/task-graph/planning-compiler.ts, server/task-graph/execution-policy.ts, server/task-graph/agent-tools.ts, server/session-host-agent-context.ts, server/agents/minion.ts ]
-    tests: [ shared/task-graph-patterns.test.ts, server/task-graph/patterns.test.ts, server/task-graph/planning-coordinator.test.ts, server/task-graph/planning-source.test.ts, server/task-graph/planning-compiler.test.ts, server/task-graph/execution-policy.test.ts, server/task-graph/service.test.ts, server/agents/minion.test.ts ]
+    summary: Leaders may attach versioned pattern and problem-signature metadata or submit a specialized dialectic graph; the server expands bounded role-differentiated turns, cache-stable affinity chains, structured synthesis checkpoints, and Leader gates before the ordinary source freeze, policy preflight, immutable materialization, and evidence lifecycle.
+    files: [ server/dialectic/graph-plan.ts, shared/task-graph-patterns.ts, shared/task-graph-planning-contracts.ts, server/task-graph/patterns.ts, server/task-graph/planning-tools.ts, server/task-graph/planning-runtime.ts, server/task-graph/planning-coordinator.ts, server/task-graph/planning-source.ts, server/task-graph/planning-compiler.ts, server/task-graph/execution-policy.ts, server/task-graph/dispatch-context.ts, server/task-graph/agent-tools.ts, server/session-host-agent-context.ts, server/agents/minion.ts ]
+    tests: [ server/dialectic/graph-plan.test.ts, server/task-graph/session-affinity.test.ts, shared/task-graph-patterns.test.ts, server/task-graph/patterns.test.ts, server/task-graph/planning-runtime.test.ts, server/task-graph/planning-coordinator.test.ts, server/task-graph/planning-source.test.ts, server/task-graph/planning-compiler.test.ts, server/task-graph/execution-policy.test.ts, server/task-graph/service.test.ts, server/agents/minion.test.ts ]
     flows: [ flow.execute_execution_graph ]
   - surface: surface.ws_api
     summary: Validated commands create revisions, start and control fenced runs, and retrieve canonical graph projections.
