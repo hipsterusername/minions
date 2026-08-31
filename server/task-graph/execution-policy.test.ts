@@ -28,6 +28,18 @@ describe("task graph execution policy",()=>{
       .toThrow("unavailable on harness test: Write");
   });
 
+  it("validates exact models and cache-stable session affinity against harness capabilities",()=>{
+    const capable={...harness,capabilities:{...harness.capabilities,resume:true,
+      promptCaching:true},resolveModel:(value:string)=>value==="available"?value:null} as AgentHarness;
+    expect(()=>validateTaskGraphNodePolicy(node({model:"available",sessionAffinity:{
+      key:"participant-a",sequence:0,cacheMode:"provider_thread"}}),()=>capable)).not.toThrow();
+    expect(()=>validateTaskGraphNodePolicy(node({model:"missing"}),()=>capable))
+      .toThrow("model missing unavailable");
+    expect(()=>validateTaskGraphNodePolicy(node({sessionAffinity:{key:"participant-a",
+      sequence:0,cacheMode:"provider_thread"}}),()=>harness))
+      .toThrow("requires provider resume and prompt caching");
+  });
+
   it("inherits native shell/filesystem access instead of accepting guessed aliases",()=>{
     const codex={...harness,name:"codex",builtInTools:[],capabilities:{
       ...harness.capabilities,builtInFilesystem:true,

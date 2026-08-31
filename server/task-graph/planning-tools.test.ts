@@ -98,6 +98,28 @@ describe("graph planning tools", () => {
     expect(markDecisionNeeded).not.toHaveBeenCalled();
   });
 
+  it("submits the specialized dialectic topology through the canonical coordinator",async()=>{
+    const submit=vi.fn(async(_request:unknown)=>snapshot("running"));
+    const coordinator={submit} as unknown as TaskGraphPlanningCoordinator;
+    const tools=createTaskGraphPlanningTools({coordinator,workItemId:"work",
+      primaryRunKey:"primary",mode:"auto",leaderSessionKey:"leader"});
+
+    await tools.find(tool=>tool.name==="submit_dialectic_graph")!.handler({
+      requestId:"dialectic",baseProposalRevision:null,objective:"Resolve the tradeoff",
+      acceptanceCriteria:["A defensible choice is produced"],mode:"proposer-critic",
+      rounds:3,checkpointEvery:1,participantA:{},participantB:{},synthesizer:{},
+      contextSelectors:[],
+    });
+
+    const submitted=submit.mock.calls[0]![0] as {plan:SemanticTaskGraphPlan};
+    expect(submitted.plan.pattern).toEqual({id:"p13.dialectic",version:1});
+    expect(submitted.plan.steps.some((step:SemanticTaskGraphPlan["steps"][number])=>
+      step.dependsOn.some(edge=>edge.kind==="human_gate"))).toBe(true);
+    expect(submitted.plan.steps.filter((step:SemanticTaskGraphPlan["steps"][number])=>
+      step.reasoning?.participantId==="A").map((step:SemanticTaskGraphPlan["steps"][number])=>
+        step.sessionAffinity?.sequence)).toEqual([0,1,2]);
+  });
+
   it("inspects a running graph without interrupting the Leader", async () => {
     const coordinator = {
       inspection: vi.fn(() => ({ plan: snapshot("running"), runtime: null })),
@@ -230,5 +252,38 @@ describe("graph planning tools", () => {
     await expect(adjudicate.handler({requestId:"decision-2",runId:"run",nodeId:"verify",
       currentAttemptId:"attempt",expectedRunRevision:8,decision:"rejected",reason:"not valid"}))
       .rejects.toBeInstanceOf(TaskGraphConflictError);
+  });
+
+  it("continues, reshapes, or stops only at an authorized dialectic checkpoint",async()=>{
+    const checkpoint={id:"synthesis",reasoning:{kind:"dialectic",dialecticId:"d",
+      phase:"synthesis",participantId:"synthesis",role:"neutral",round:2,final:false}};
+    const graph={run:{workItemId:"work",primaryRunKey:"primary",revision:7},
+      revision:{nodes:[checkpoint],edges:[{sourceNodeId:"synthesis",targetNodeId:"next",
+        kind:"human_gate"}]}};
+    const taskGraphs={snapshot:vi.fn(()=>graph),viewSnapshot:vi.fn(()=>({graphRunId:"run"})),
+      provideInput:vi.fn(async()=>graph),steer:vi.fn(async()=>({...graph,run:{...graph.run,
+        revision:8}})),cancel:vi.fn(async()=>graph)};
+    const coordinator={options:{taskGraphs}} as unknown as TaskGraphPlanningCoordinator;
+    const moderate=createTaskGraphPlanningTools({coordinator,workItemId:"work",
+      primaryRunKey:"primary",mode:"auto",leaderSessionKey:"leader"})
+      .find(tool=>tool.name==="moderate_dialectic")!;
+
+    await moderate.handler({requestId:"continue",runId:"run",checkpointNodeId:"synthesis",
+      expectedRunRevision:7,decision:"continue"});
+    expect(taskGraphs.provideInput).toHaveBeenLastCalledWith(expect.objectContaining({
+      nodeId:"next",expectedRunRevision:7,actor:"leader:leader",
+      value:expect.stringContaining("Leader decision: continue")}),
+    );
+
+    await moderate.handler({requestId:"reshape",runId:"run",checkpointNodeId:"synthesis",
+      expectedRunRevision:7,decision:"reshape",instructions:"Challenge the cost premise."});
+    expect(taskGraphs.steer).toHaveBeenCalledWith(expect.objectContaining({
+      expectedRunRevision:7,affectedNodeIds:["next"],instructions:"Challenge the cost premise."}));
+    expect(taskGraphs.provideInput).toHaveBeenLastCalledWith(expect.objectContaining({
+      expectedRunRevision:8,value:expect.stringContaining("Challenge the cost premise.")}));
+
+    await moderate.handler({requestId:"stop",runId:"run",checkpointNodeId:"synthesis",
+      expectedRunRevision:7,decision:"stop"});
+    expect(taskGraphs.cancel).toHaveBeenCalledWith("run",7,"stop:cancel");
   });
 });

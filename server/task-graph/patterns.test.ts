@@ -39,6 +39,7 @@ describe("task graph pattern router", () => {
       [{taskKind:"diagnosis"},"p10.causal_diagnosis"],
       [{taskKind:"decision"},"p11.value_focused_decision"],
       [{taskKind:"comparison"},"p12.multi_criteria_scorecard"],
+      [{taskKind:"dialectic"},"p13.dialectic"],
       [{taskKind:"search"},"p09.hypothesis_tournament"],
       [{taskKind:"design",goalClarity:"ambiguous"},"p18.double_diamond"],
       [{taskKind:"schedule"},"p16.critical_path_delivery"],
@@ -79,7 +80,8 @@ describe("task graph pattern router", () => {
   it("has a deterministic recommendation path for every catalog pattern", () => {
     const signaturePlans = [
       {deepUncertainty:true},{taskKind:"diagnosis"},{taskKind:"decision"},
-      {taskKind:"comparison"},{taskKind:"search"},{taskKind:"design",goalClarity:"ambiguous"},
+      {taskKind:"comparison"},{taskKind:"dialectic"},{taskKind:"search"},
+      {taskKind:"design",goalClarity:"ambiguous"},
       {taskKind:"schedule"},{taskKind:"partitioned_batch"},{taskKind:"draft_refinement"},
       {procedure:"hierarchical"},{taskKind:"research",evidenceModes:"multiple"},
       {verificationNeed:"independent"},{decomposability:"high"},

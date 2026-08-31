@@ -258,22 +258,23 @@ export class SemanticGraphDocumentDraft {
       const source = this.nodes.get(edge.sourceStepKey);
       const target = this.nodes.get(edge.targetStepKey);
       if (!source || !target) throw new TaskGraphValidationError("graph document edge has an unknown endpoint");
-      if (edge.kind === "control" && (edge.sourceOutput || edge.targetInput)) {
+      const artifact=edge.kind==="artifact"||edge.kind==="verified_artifact";
+      if (!artifact && (edge.sourceOutput || edge.targetInput)) {
         throw new TaskGraphValidationError(
-          `control edge ${edge.sourceStepKey} -> ${edge.targetStepKey} cannot declare artifact bindings; set sourceOutput and targetInput to null or use an artifact kind`,
+          `control or human-gate edge ${edge.sourceStepKey} -> ${edge.targetStepKey} cannot declare artifact bindings; set sourceOutput and targetInput to null or use an artifact kind`,
         );
       }
-      if (edge.kind !== "control" && (!edge.sourceOutput || !edge.targetInput)) {
+      if (artifact && (!edge.sourceOutput || !edge.targetInput)) {
         throw new TaskGraphValidationError(
           `artifact edge ${edge.sourceStepKey} -> ${edge.targetStepKey} requires sourceOutput and targetInput`,
         );
       }
-      if (edge.kind !== "control" && !(edge.sourceOutput! in source.outputSchemas)) {
+      if (artifact && !(edge.sourceOutput! in source.outputSchemas)) {
         throw new TaskGraphValidationError(
           `artifact edge ${edge.sourceStepKey} -> ${edge.targetStepKey} sourceOutput "${edge.sourceOutput}" is not declared in ${edge.sourceStepKey}.outputSchemas`,
         );
       }
-      if (edge.kind !== "control" && !(edge.targetInput! in target.inputBindings)) {
+      if (artifact && !(edge.targetInput! in target.inputBindings)) {
         throw new TaskGraphValidationError(
           `artifact edge ${edge.sourceStepKey} -> ${edge.targetStepKey} targetInput "${edge.targetInput}" is not declared in ${edge.targetStepKey}.inputBindings`,
         );

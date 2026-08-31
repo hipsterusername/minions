@@ -18,8 +18,8 @@ describe("Leader planning profile", () => {
     expect(profile.planningToolNames).toEqual([
       "initialize_graph_document", "upsert_graph_node", "remove_graph_node",
       "upsert_graph_edge", "remove_graph_edge", "get_graph_document", "submit_graph_document",
-      "submit_graph_plan", "get_graph_plan", "start_graph_plan", "read_graph_artifact",
-      "cancel_graph_run", "adjudicate_graph_node",
+      "submit_graph_plan", "submit_dialectic_graph", "get_graph_plan", "start_graph_plan",
+      "read_graph_artifact", "cancel_graph_run", "moderate_dialectic", "adjudicate_graph_node",
     ]);
   });
 

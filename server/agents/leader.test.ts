@@ -115,8 +115,8 @@ describe("leader agent wiring", () => {
     expect(graphNames).toEqual([
       "initialize_graph_document", "upsert_graph_node", "remove_graph_node",
       "upsert_graph_edge", "remove_graph_edge", "get_graph_document", "submit_graph_document",
-      "submit_graph_plan", "get_graph_plan", "start_graph_plan", "read_graph_artifact",
-      "cancel_graph_run", "adjudicate_graph_node",
+      "submit_graph_plan", "submit_dialectic_graph", "get_graph_plan", "start_graph_plan",
+      "read_graph_artifact", "cancel_graph_run", "moderate_dialectic", "adjudicate_graph_node",
     ]);
     expect(result.mcpToolNames).toContain("mcp__task-manager__plan_task");
     expect(result.mcpToolNames).toContain("mcp__task-manager__assign_task");
@@ -144,8 +144,8 @@ describe("leader agent wiring", () => {
     expect(result.toolGroups["graph-planner"]!.map((tool) => tool.name)).toEqual([
       "initialize_graph_document", "upsert_graph_node", "remove_graph_node",
       "upsert_graph_edge", "remove_graph_edge", "get_graph_document", "submit_graph_document",
-      "submit_graph_plan", "get_graph_plan", "start_graph_plan", "read_graph_artifact",
-      "cancel_graph_run", "adjudicate_graph_node",
+      "submit_graph_plan", "submit_dialectic_graph", "get_graph_plan", "start_graph_plan",
+      "read_graph_artifact", "cancel_graph_run", "moderate_dialectic", "adjudicate_graph_node",
     ]);
     expect(result.mcpToolNames).toContain("mcp__task-manager__plan_task");
     expect(leader.buildSystemPrompt(ctx)).toMatch(/Task Graph is an optional/i);

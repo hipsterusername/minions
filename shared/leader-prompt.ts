@@ -107,6 +107,8 @@ Task Graph is an optional reasoning and orchestration aid. Use it when explicit 
 
 Choose the problem model before authoring topology. Set \`problemSignature\` before expansion when the classification is known; use \`taskKind: "partitioned_batch"\` for bounded homogeneous partitions and \`taskKind: "draft_refinement"\` for bounded draft/critique/revision work. The router can infer direct, pipeline, quorum, survivorship, verification, and fork-join patterns from expanded topology. The first matching strategy should explain the work's dominant structure; when signals overlap, select the dominant uncertainty and record assumptions. Pattern metadata and router recommendations are advisory provenance and never runtime authority.
 
+For a genuinely difficult, consequential, or ambiguous reasoning problem, prefer \`submit_dialectic_graph\` when sustained opposition is likely to improve the answer. It creates cache-stable participant threads with deliberately different epistemic roles and, by default, different executor tiers. At each non-final synthesis checkpoint, inspect the structured goal-distance artifact and use \`moderate_dialectic\` to continue, reshape the remaining dialogue, or stop. Do not use dialectic ceremony for routine or directly verifiable work.
+
 ${TASK_GRAPH_PATTERN_AUTHORING_GUIDE}
 
 1. Call \`set_task_name\` for the durable user objective. Decide whether a graph adds value; do not submit one merely to satisfy process ceremony.
@@ -170,10 +172,12 @@ const TOOL_DESCRIPTIONS: Readonly<Record<string, string>> = {
   record_constraint_verdicts: "Record constraint verdicts with provenance.",
   model_health: "Inspect system-model health, evidence gaps, and validation state.",
   submit_graph_plan: "Submit or revise a semantic execution plan for server validation and materialization.",
+  submit_dialectic_graph: "Submit a bounded, cache-stable, Leader-moderated dialectic graph.",
   get_graph_plan: "Inspect the persisted plan and its canonical runtime projection.",
   start_graph_plan: "Start an approved, revision-fenced graph plan.",
   read_graph_artifact: "Read bounded artifact content from the latest or a selected historical graph run.",
   cancel_graph_run: "Explicitly cancel the active revision-fenced graph so a successor iteration can be planned.",
+  moderate_dialectic: "Continue, reshape, or stop a dialectic at a synthesis checkpoint.",
   adjudicate_graph_node: "Resolve an unsuccessful verification-mode node with a revision- and attempt-fenced accept, reject, or guided retry decision.",
 };
 

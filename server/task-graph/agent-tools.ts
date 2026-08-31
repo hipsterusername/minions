@@ -31,7 +31,7 @@ export function createTaskGraphAgentTools(service: TaskGraphService,sessionRunKe
   const binding = service.agentBinding(sessionRunKey);
   const readable=taskGraphArtifactsForSession(service,sessionRunKey);
   const tools:NormalizedToolDef[]=[];
-  if (readable.length) tools.push({name:"read_input_artifact",
+  if (readable.length||binding?.sessionAffinity) tools.push({name:"read_input_artifact",
     description:"Read a bounded chunk of an immutable artifact authorized for this graph attempt or verifier. Use nextOffset to continue; secret artifacts are never copied into agent context.",
     inputSchema:readInputSchema,
     handler:async(raw)=>jsonResult(readTaskGraphArtifactForSession(service,sessionRunKey,

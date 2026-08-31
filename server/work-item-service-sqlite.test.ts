@@ -265,6 +265,25 @@ describe("SqliteWorkItemService", () => {
     }})).rejects.toThrow("idempotency request was reused with different input");
   });
 
+  it("forwards a graph affinity resume without changing durable child-run identity",async()=>{
+    const created=await draft();
+    startWorkItemIteration(db,{workItemId:created.workItem.id,runKey:"run-primary",
+      idempotencyKey:"primary",expectedLifecycleRevision:0,
+      expectedCurrentRunKey:null,at:tick++});
+    await service.startChildRun({requestId:"affinity-child",workItemId:created.workItem.id,
+      parentRunKey:"run-primary",taskId:"turn-a-2",attemptId:"attempt-2",attemptNumber:1,
+      prompt:"Continue the dialectic",invocationKind:"resume_open_run",
+      resumeId:"provider-thread-a",harness:"codex",model:"reasoning-model"});
+
+    expect(launches.at(-1)).toMatchObject({runKey:"run-affinity-child",
+      invocationKind:"resume_open_run",resumeId:"provider-thread-a",harness:"codex",
+      model:"reasoning-model"});
+    const runs=await service.getRuns({workItemId:created.workItem.id,limit:20});
+    expect(runs.runs.find(run=>run.runKey==="run-affinity-child")).toMatchObject({
+      runKind:"child",taskId:"turn-a-2",attemptId:"attempt-2",providerSessionId:null,
+    });
+  });
+
   it("seals a committed run error when post-commit launch fails", async () => {
     const created = await draft();
     service = createSqliteWorkItemService({

@@ -19,6 +19,20 @@ export const budgetRequestSchema = z.looseObject({
   tokens:z.number().int().positive().optional(),maxTokens:z.number().int().positive().optional(),
   costMicros:z.number().int().positive().optional(),maxCostMicros:z.number().int().positive().optional(),
 });
+export const taskNodeSessionAffinitySchema = z.object({
+  key:z.string().trim().min(1).max(160),
+  sequence:z.number().int().nonnegative(),
+  cacheMode:z.literal("provider_thread").default("provider_thread"),
+}).strict();
+export const dialecticNodeMetadataSchema = z.object({
+  kind:z.literal("dialectic"),
+  dialecticId:z.string().trim().min(1).max(200),
+  phase:z.enum(["turn","synthesis"]),
+  participantId:z.string().trim().min(1).max(80),
+  role:z.string().trim().min(1).max(2_000),
+  round:z.number().int().positive(),
+  final:z.boolean().default(false),
+}).strict();
 export const verificationTaskVerdictSchema = z.object({
   result: z.enum(["passed", "failed", "inconclusive"]),
   confidence: z.number().min(0).max(1),
@@ -29,6 +43,9 @@ export const taskNodeSchema = z.object({
   inputBindings: jsonRecordSchema.default({}), outputSchemas: jsonRecordSchema.default({}),
   constraints: z.array(z.string()).default([]), acceptanceCriteria: z.array(z.string()).default([]),
   executorClass: z.enum(["mechanical","standard","reasoning"]), allowedHarnesses: z.array(z.string().min(1)).min(1),
+  model:z.string().trim().min(1).optional(),
+  sessionAffinity:taskNodeSessionAffinitySchema.optional(),
+  reasoning:dialecticNodeMetadataSchema.optional(),
   allowedTools: z.array(z.string()).default([]), ownershipRequest: z.array(ownershipRequestSchema).default([]),
   budgetRequest: budgetRequestSchema.default({}), timeoutMs: z.number().int().positive().max(604_800_000),
   retryPolicy: retryPolicySchema,
@@ -141,6 +158,8 @@ export const graphSnapshotSchema = z.object({
 
 export type GraphRevisionInput = z.infer<typeof graphRevisionInputSchema>;
 export type TaskNode = z.infer<typeof taskNodeSchema>;
+export type TaskNodeSessionAffinity = z.infer<typeof taskNodeSessionAffinitySchema>;
+export type DialecticNodeMetadata = z.infer<typeof dialecticNodeMetadataSchema>;
 export type TaskEdge = z.infer<typeof taskEdgeSchema>;
 export type SourceSnapshot = z.infer<typeof sourceSnapshotSchema>;
 export type AttemptEvent = z.infer<typeof attemptEventSchema>;

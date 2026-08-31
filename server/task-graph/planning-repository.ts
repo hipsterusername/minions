@@ -252,6 +252,10 @@ export class TaskGraphPlanningRepository {
         outputExamples: Object.fromEntries(Object.entries(step.outputSchemas)
           .map(([name,schema])=>[name,artifactContractExample(schema)])),
         executorClass: step.executorClass,
+        allowedHarnesses:step.allowedHarnesses ?? null,
+        model:step.model ?? null,
+        sessionAffinity:step.sessionAffinity ?? null,
+        reasoning:step.reasoning ?? null,
         risk: step.risk,
         requiresApproval: step.requiresApproval,
       })),

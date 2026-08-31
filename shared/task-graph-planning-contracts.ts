@@ -1,9 +1,11 @@
 import { z } from "zod/v4";
 import {
   budgetRequestSchema,
+  dialecticNodeMetadataSchema,
   jsonRecordSchema,
   ownershipRequestSchema,
   retryPolicySchema,
+  taskNodeSessionAffinitySchema,
 } from "./task-graph-contracts.ts";
 import {
   taskGraphIterationSchema,
@@ -23,7 +25,7 @@ export const leaderOrchestrationModeSchema = z.enum(["auto", "plan", "direct"]);
 
 export const semanticGraphDependencySchema = z.object({
   stepKey: stepKeySchema,
-  kind: z.enum(["control", "artifact", "verified_artifact"]).default("control")
+  kind: z.enum(["control", "artifact", "verified_artifact", "human_gate"]).default("control")
     .describe("Use control for ordering only. Artifact kinds require a declared producer output and consumer input."),
   sourceOutput: z.string().min(1).nullable().default(null)
     .describe("Producer outputSchemas key for an artifact dependency; null for control dependencies."),
@@ -54,6 +56,12 @@ export const semanticGraphPlanStepSchema = z.object({
     .describe("Named artifacts produced by this step. Every outgoing artifact sourceOutput must name one of these keys."),
   executorClass: z.enum(["mechanical", "standard", "reasoning"]).default("standard"),
   allowedHarnesses: z.array(idSchema).min(1).optional(),
+  model: z.string().trim().min(1).optional()
+    .describe("Exact model override. Omit to use executorClass routing for the selected harness."),
+  sessionAffinity: taskNodeSessionAffinitySchema.optional()
+    .describe("Resume a stable provider thread across a totally ordered sequence of graph nodes."),
+  reasoning: dialecticNodeMetadataSchema.optional()
+    .describe("Structured reasoning-node metadata used by specialized graph authoring and moderation tools."),
   allowedTools: z.array(z.string()).optional().describe(
     "Exact harness built-in or fully qualified MCP tool identifiers (for example Read or mcp__server__tool). Omit this field to inherit the selected harness policy, including harness-native shell/filesystem access that has no allowlist identifier.",
   ),
@@ -115,14 +123,19 @@ export const semanticTaskGraphPlanSchema = z.object({
       code: "custom", path: ["steps", index, "dependsOn", dependencyIndex, "stepKey"],
       message: "a step cannot depend on itself",
     });
-    const artifact = dependency.kind !== "control";
+    const artifact = dependency.kind === "artifact" || dependency.kind === "verified_artifact";
     if (artifact && (!dependency.sourceOutput || !dependency.targetInput)) ctx.addIssue({
       code: "custom", path: ["steps", index, "dependsOn", dependencyIndex],
       message: "artifact dependencies require sourceOutput and targetInput",
     });
     if (!artifact && (dependency.sourceOutput || dependency.targetInput)) ctx.addIssue({
       code: "custom", path: ["steps", index, "dependsOn", dependencyIndex],
-      message: "control dependencies cannot declare artifact bindings; set sourceOutput and targetInput to null or use an artifact kind",
+      message: "control dependencies cannot declare artifact bindings; human-gate dependencies also require null bindings; use an artifact kind for mapped inputs",
+    });
+    if (dependency.kind === "human_gate"
+      && dependency.satisfactionPolicy !== "all_success") ctx.addIssue({
+      code: "custom", path: ["steps", index, "dependsOn", dependencyIndex, "satisfactionPolicy"],
+      message: "human-gate dependencies use all_success; the recorded input is their satisfaction witness",
     });
     if (dependency.satisfactionPolicy === "quorum" && dependency.quorum == null) ctx.addIssue({
       code: "custom", path: ["steps", index, "dependsOn", dependencyIndex, "quorum"],
@@ -168,6 +181,10 @@ export const taskGraphPlanStepViewSchema = z.object({
   outputSchemas: jsonRecordSchema,
   outputExamples: jsonRecordSchema,
   executorClass: z.enum(["mechanical", "standard", "reasoning"]),
+  allowedHarnesses:z.array(idSchema).min(1).nullable().optional(),
+  model:z.string().min(1).nullable().optional(),
+  sessionAffinity:taskNodeSessionAffinitySchema.nullable().optional(),
+  reasoning:dialecticNodeMetadataSchema.nullable().optional(),
   risk: z.enum(["low", "medium", "high"]),
   requiresApproval: z.boolean(),
 });

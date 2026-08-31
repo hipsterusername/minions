@@ -52,4 +52,12 @@ describe("renderTaskGraphNodePrompt",()=>{
     expect(prompt).toContain("Missing outputs: audit");
     expect(prompt).toContain("Completed audit reasoning");
   });
+
+  it("includes Leader moderation supplied at a dialectic checkpoint",()=>{
+    const task=node("task");
+    const prompt=renderTaskGraphNodePrompt(revision(task),task,"attempt",1,"source",[],[],[],
+      null,["Continue, but test the rollback assumptions before converging."]);
+    expect(prompt).toContain("Leader moderation input");
+    expect(prompt).toContain("test the rollback assumptions");
+  });
 });

@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import type { Bus } from "../bus.ts";
+import type { TaskGraphPlanSnapshotView } from "../../shared/task-graph-planning-contracts.ts";
 import { getSessionCanvasContext } from "../canvas-context-store.ts";
 import { getHarness } from "../harness/index.ts";
 import type { SessionRegistry } from "../session-registry.ts";
@@ -77,6 +78,7 @@ export function installTaskGraphPlanningRuntime(input: {
     onAttention: (plan, _reason, runRevision) => {
       const host = input.registry.get(plan.primaryRunKey);
       if (!host) return;
+      const prompt=attentionPrompt(coordinator,input.taskGraphs,plan,runRevision);
       requestWaitResume(host, input.sessionDeps, {
         immediate: true,
         idempotencyKey: `graph-attention:${plan.graphRunId ?? plan.proposalId}:${runRevision}`,
@@ -84,7 +86,7 @@ export function installTaskGraphPlanningRuntime(input: {
         opts: {
           sessionKey: host.id,
           invocationKind: "resume_open_run",
-          prompt: "The execution graph is blocked. Call get_graph_plan, inspect the canonical blocker and evidence, then resolve it or ask the user one focused question.",
+          prompt,
           cwd: host.cwd,
           resumeId: host.sessionId ?? undefined,
           harness: host.harnessName,
@@ -99,3 +101,38 @@ export function installTaskGraphPlanningRuntime(input: {
     leaderOrchestrationModeForRun(input.db, runKey) === "direct" ? null : coordinator;
   return coordinator;
 }
+
+function attentionPrompt(
+  coordinator:TaskGraphPlanningCoordinator,
+  taskGraphs:TaskGraphService,
+  plan:TaskGraphPlanSnapshotView,
+  runRevision:number,
+):string {
+  if (!plan.graphRunId) return genericAttentionPrompt;
+  try {
+    const graph=taskGraphs.snapshot(plan.graphRunId);
+    const satisfied=new Set(graph.edgeEvaluations.filter(row=>Boolean(row["satisfied"]))
+      .map(row=>String(row["edge_id"])));
+    const gate=graph.revision.edges.find(edge=>edge.kind==="human_gate"
+      &&!satisfied.has(edge.id)&&graph.revision.nodes.some(node=>node.id===edge.sourceNodeId
+        &&node.reasoning?.kind==="dialectic"&&node.reasoning.phase==="synthesis"
+        &&!node.reasoning.final));
+    if (!gate) return genericAttentionPrompt;
+    const artifact=graph.artifacts.find(row=>row["node_id"]===gate.sourceNodeId
+      &&row["output_name"]==="synthesis"&&row["state"]==="committed");
+    const report=artifact?coordinator.readArtifact({workItemId:plan.workItemId,
+      primaryRunKey:plan.primaryRunKey,graphRunId:plan.graphRunId,
+      artifactId:String(artifact["id"]),offset:0,maxBytes:16_384})["content"]:null;
+    return [
+      "A dialectic synthesis checkpoint is ready for Leader moderation.",
+      `Checkpoint node: ${gate.sourceNodeId}. Expected graph revision: ${graph.run.revision||runRevision}.`,
+      typeof report==="string"?`Synthesis report:\n${report}`:
+        "Call get_graph_plan and read_graph_artifact to inspect the synthesis report.",
+      "Evaluate goal distance and unresolved questions, then call moderate_dialectic to continue, reshape, or stop.",
+    ].join("\n\n");
+  } catch {
+    return genericAttentionPrompt;
+  }
+}
+
+const genericAttentionPrompt="The execution graph is blocked. Call get_graph_plan, inspect the canonical blocker and evidence, then resolve it or ask the user one focused question.";

@@ -50,10 +50,17 @@ export function validateRevision(
     if (edge.satisfactionPolicy === "reduce") {
       throw new TaskGraphValidationError(`edge ${edge.id} uses an unsupported reduction policy`);
     }
-    if ((edge.kind === "artifact" || edge.kind === "verified_artifact") && (!edge.sourceOutput || !edge.targetInput)) {
+    const artifact=edge.kind === "artifact" || edge.kind === "verified_artifact";
+    if (artifact && (!edge.sourceOutput || !edge.targetInput)) {
       throw new TaskGraphValidationError(`edge ${edge.id} requires artifact bindings`);
     }
-    if (edge.kind === "artifact" || edge.kind === "verified_artifact") {
+    if (!artifact && (edge.sourceOutput || edge.targetInput)) {
+      throw new TaskGraphValidationError(`edge ${edge.id} cannot declare artifact bindings`);
+    }
+    if (edge.kind==="human_gate" && edge.satisfactionPolicy!=="all_success") {
+      throw new TaskGraphValidationError(`human-gate edge ${edge.id} must use all_success`);
+    }
+    if (artifact) {
       const source=revision.nodes.find(node=>node.id===edge.sourceNodeId)!;
       const target=revision.nodes.find(node=>node.id===edge.targetNodeId)!;
       if (!(edge.sourceOutput! in source.outputSchemas)) {
@@ -119,7 +126,72 @@ export function validateRevision(
     visiting.delete(id); visited.add(id);
   };
   for (const id of nodeIds) visit(id);
+  validateSessionAffinity(revision,outgoing);
   return revision;
+}
+
+function validateSessionAffinity(
+  revision:GraphRevisionInput,
+  outgoing:Map<string,string[]>,
+):void {
+  const groups=new Map<string,GraphRevisionInput["nodes"]>();
+  for (const node of revision.nodes) if (node.sessionAffinity) {
+    groups.set(node.sessionAffinity.key,[...(groups.get(node.sessionAffinity.key)??[]),node]);
+  }
+  const reaches=(source:string,target:string):boolean=>{
+    const queue=[source];const seen=new Set<string>();
+    while (queue.length) {
+      const current=queue.shift()!;
+      if (current===target) return true;
+      if (seen.has(current)) continue;
+      seen.add(current);queue.push(...(outgoing.get(current)??[]));
+    }
+    return false;
+  };
+  for (const [key,nodes] of groups) {
+    const ordered=[...nodes].sort((left,right)=>
+      left.sessionAffinity!.sequence-right.sessionAffinity!.sequence);
+    const baseline=affinityRuntimeFingerprint(ordered[0]!);
+    for (let index=0;index<ordered.length;index+=1) {
+      const node=ordered[index]!;
+      if (node.sessionAffinity!.sequence!==index) {
+        throw new TaskGraphValidationError(
+          `session affinity ${key} must use contiguous sequence numbers starting at 0`,
+        );
+      }
+      if (affinityRuntimeFingerprint(node)!==baseline) {
+        throw new TaskGraphValidationError(
+          `session affinity ${key} changes harness, model, tools, sandbox, or output contract`,
+        );
+      }
+      const previous=ordered[index-1];
+      if (previous&&!reaches(previous.id,node.id)) {
+        throw new TaskGraphValidationError(
+          `session affinity ${key} must be totally ordered by graph dependencies`,
+        );
+      }
+    }
+    const dialectic=ordered.map(node=>node.reasoning).filter(metadata=>metadata?.kind==="dialectic");
+    if (dialectic.length&&new Set(dialectic.map(metadata=>
+      `${metadata!.dialecticId}\u0000${metadata!.participantId}\u0000${metadata!.role}`)).size!==1) {
+      throw new TaskGraphValidationError(
+        `session affinity ${key} mixes dialectic participants or roles`,
+      );
+    }
+  }
+}
+
+function affinityRuntimeFingerprint(node:GraphRevisionInput["nodes"][number]):string {
+  return JSON.stringify({
+    allowedHarnesses:node.allowedHarnesses,
+    model:node.model??null,
+    executorClass:node.executorClass,
+    allowedTools:node.allowedTools,
+    ownershipRequest:node.ownershipRequest,
+    outputSchemas:node.outputSchemas,
+    completionMode:node.completionMode??"task",
+    verificationRequired:node.verificationRequired,
+  });
 }
 
 function schemasCompatible(output:unknown,input:unknown): boolean {

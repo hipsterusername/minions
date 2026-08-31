@@ -40,6 +40,17 @@ export function validateTaskGraphNodePolicy(
   resolveHarness:(name:string)=>AgentHarness=getHarness,
 ):void {
   const selected=node.allowedHarnesses.map(name=>resolveTaskGraphHarness(node,resolveHarness,name))[0]!;
+  if (node.model && !selected.resolveModel(node.model)) {
+    throw new TaskGraphValidationError(
+      `node ${node.id} requests model ${node.model} unavailable on harness ${selected.name}`,
+    );
+  }
+  if (node.sessionAffinity
+    && (!selected.capabilities.resume || !selected.capabilities.promptCaching)) {
+    throw new TaskGraphValidationError(
+      `node ${node.id} requires provider resume and prompt caching on harness ${selected.name}`,
+    );
+  }
   if (node.ownershipRequest.some(scope=>scope.mode==="write" && scope.scope==="symbol")) {
     throw new TaskGraphValidationError(`node ${node.id} requests unsupported symbol write ownership`);
   }

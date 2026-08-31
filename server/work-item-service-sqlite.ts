@@ -335,6 +335,7 @@ export class SqliteWorkItemService implements WorkItemService {
 
   async startChildRun(input: { workItemId: string; parentRunKey: string; taskId: string;
     attemptId?: string; attemptNumber?: number; prompt: string; requestId: string;
+    invocationKind?: "new_run" | "resume_open_run"; resumeId?: string;
     systemPrompt?: string; model?: string; thinkingConfig?: ThinkingConfig; harness?: string;
     permissionMode?: string; sandboxPolicy?: import("../shared/workspace-contracts.ts").SandboxPolicy;
     executorClass?: "mechanical" | "standard" | "reasoning";
@@ -360,7 +361,8 @@ export class SqliteWorkItemService implements WorkItemService {
       try {
         await (this.options.ensureRunLaunched ?? this.options.launchRun)({ workItemId: input.workItemId, runKey: created.run.session_key,
           parentRunKey: input.parentRunKey, taskId: input.taskId,
-          prompt: input.prompt, invocationKind: "new_run", systemPrompt: input.systemPrompt,
+          prompt: input.prompt, invocationKind: input.invocationKind??"new_run",
+          ...(input.resumeId?{resumeId:input.resumeId}:{}),systemPrompt: input.systemPrompt,
           model: input.model, thinkingConfig: input.thinkingConfig, harness: input.harness,
           permissionMode: input.permissionMode,...(input.sandboxPolicy?{sandboxPolicy:input.sandboxPolicy}:{}),
           executorClass: input.executorClass, skillIds: input.skillIds,
@@ -395,5 +397,4 @@ export class SqliteWorkItemService implements WorkItemService {
     return updateRunProviderSessionId(this.options.db, runKey, providerSessionId, providerGeneration, at ?? this.now());
   }
 }
-
 export const createSqliteWorkItemService = (options: SqliteWorkItemServiceOptions): SqliteWorkItemService => new SqliteWorkItemService(options);

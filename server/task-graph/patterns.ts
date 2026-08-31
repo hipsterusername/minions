@@ -115,6 +115,7 @@ export function lintSemanticGraphPlan(plan: SemanticTaskGraphPlan, input: {
 }
 
 function routeSignature(signature: TaskGraphProblemSignature): { id:TaskGraphPatternId;reason:string } | null {
+  if (signature.taskKind === "dialectic") return {id:"p13.dialectic",reason:"The task explicitly requests bounded, role-differentiated dialogue with synthesis and Leader moderation."};
   if (signature.deepUncertainty) return {id:"p14.scenario_stress_test",reason:"Deep uncertainty favors bounded scenario stress testing."};
   if (signature.taskKind === "diagnosis") return {id:"p10.causal_diagnosis",reason:"The task is diagnostic and needs discriminating causal evidence."};
   if (signature.taskKind === "decision") return {id:"p11.value_focused_decision",reason:"The task separates decision authority, objectives, alternatives, and uncertainty."};
@@ -150,7 +151,46 @@ function patternConformance(plan:SemanticTaskGraphPlan):TaskGraphLintFinding[] {
   if (selected==="p07.independent_verification"&&!dependencies.some(edge=>edge.kind==="verified_artifact")
     &&!plan.steps.some(step=>step.verificationRequired||step.completionMode==="verification")) return [finding(
       "pattern_conformance","The selected independent-verification pattern has no verification boundary.",[])];
+  if (selected==="p13.dialectic") return dialecticConformance(plan);
   return [];
+}
+
+function dialecticConformance(plan:SemanticTaskGraphPlan):TaskGraphLintFinding[] {
+  const nodes=plan.steps.filter(step=>step.reasoning?.kind==="dialectic");
+  const turns=nodes.filter(step=>step.reasoning?.phase==="turn");
+  const syntheses=nodes.filter(step=>step.reasoning?.phase==="synthesis");
+  const participants=new Map<string,{role:string;fingerprint:string}>();
+  for (const step of turns) {
+    const metadata=step.reasoning!;
+    participants.set(metadata.participantId,{role:metadata.role,
+      fingerprint:JSON.stringify({harnesses:step.allowedHarnesses??[],model:step.model??null,
+        executorClass:step.executorClass})});
+  }
+  const findings:TaskGraphLintFinding[]=[];
+  if (participants.size<2) findings.push(finding("pattern_conformance",
+    "A dialectic requires at least two explicit participant identities.",turns.map(step=>step.key)));
+  if (new Set([...participants.values()].map(item=>item.role.trim().toLowerCase())).size
+    <participants.size) findings.push(finding("pattern_conformance",
+    "Dialectic participants must have materially distinct epistemic roles.",turns.map(step=>step.key)));
+  if (syntheses.length===0) findings.push(finding("pattern_conformance",
+    "A dialectic requires at least one synthesis node.",[]));
+  if (nodes.some(step=>!step.sessionAffinity)) findings.push(finding("pattern_conformance",
+    "Every dialectic turn and synthesis node requires provider-thread affinity.",
+    nodes.filter(step=>!step.sessionAffinity).map(step=>step.key)));
+  for (const synthesis of syntheses.filter(step=>!step.reasoning?.final)) {
+    const gated=plan.steps.some(target=>target.dependsOn.some(edge=>
+      edge.stepKey===synthesis.key&&edge.kind==="human_gate"));
+    if (!gated) findings.push(finding("pattern_conformance",
+      `Non-final synthesis ${synthesis.key} must hand control to the Leader through a human gate.`,
+      [synthesis.key]));
+  }
+  if (participants.size>=2 && new Set([...participants.values()].map(item=>item.fingerprint)).size===1
+    && !mentions(plan,/different role|epistemic|adversarial|oppos|critic|challenge/i)) {
+    findings.push(finding("correlated_ensemble",
+      "Dialectic participants share the same runtime profile; record how their roles create meaningful cognitive diversity.",
+      turns.map(step=>step.key)));
+  }
+  return findings;
 }
 
 function hasParallelWork(plan:SemanticTaskGraphPlan):boolean {

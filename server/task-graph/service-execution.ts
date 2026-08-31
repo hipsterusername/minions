@@ -6,7 +6,7 @@ import { getWorkItemRun } from "../work-item-repo.ts";
 import { runSnapshot } from "../work-item-snapshots.ts";
 import { TaskGraphConflictError,TaskGraphValidationError } from "./errors.ts";import { sandboxPolicyForTaskGraphNode } from "./execution-policy.ts";
 import type { DispatchRecord } from "./recovery.ts";
-import { scopedContextForNode } from "./context-sources.ts";
+import { scopedContextForNode } from "./context-sources.ts";import { affinityResumeForNode,humanGuidanceForNode } from "./dispatch-context.ts";
 import { renderTaskGraphNodePrompt } from "./node-prompt.ts";
 import { steeringInstructions } from "./service-controls.ts";
 import {recoveryDraftForAttempt,resolvedInputArtifacts} from "./staging-recovery.ts";
@@ -208,19 +208,20 @@ async function dispatch(service:TaskGraphService,record:DispatchRecord):Promise<
   const steering=steeringInstructions(service,record.runId,node.id);
   const recoveryDraft=recoveryDraftForAttempt(service.options.db,record.runId,node.id,
     Number(attempt.attempt_number));
-  const frozenSkillIds=service.repo.snapshot(record.runId,0).sourceSnapshot.compiledSkills
-    .map(skill=>skill.skillId);
+  const frozenSkillIds=service.repo.snapshot(record.runId,0).sourceSnapshot.compiledSkills.map(skill=>skill.skillId);
   const sandboxPolicy=(service.options.validateNodePolicy||service.options.resolveHarness)?sandboxPolicyForTaskGraphNode(node,service.options.resolveHarness):undefined;
+  const affinity=affinityResumeForNode(service,record.runId,spec,node);
   try {
     const child=await service.options.children.startChildRun({
       workItemId:String(run.work_item_id),parentRunKey:String(run.primary_run_key),taskId:node.id,
       attemptId:record.attemptId,attemptNumber:Number(attempt.attempt_number),
       requestId:`task-graph:${record.attemptId}:${record.generation}`,
-      harness:node.allowedHarnesses[0],executorClass:node.executorClass,
+      harness:affinity?.harness??node.allowedHarnesses[0],...((affinity?.model??node.model)?{model:affinity?.model??node.model}:{}),
+      ...(affinity?{resumeId:affinity.resumeId,invocationKind:"resume_open_run" as const}:{}),executorClass:node.executorClass,
       toolAllowlist:node.allowedTools,skillIds:frozenSkillIds,...(sandboxPolicy?{sandboxPolicy}:{}),
       prompt:renderTaskGraphNodePrompt(spec,node,record.attemptId,Number(attempt.attempt_number),
         String(run.source_snapshot_id),inputArtifacts,steering,
-        scopedContextForNode(service.options.db,String(run.source_snapshot_id),node.id),recoveryDraft),
+        scopedContextForNode(service.options.db,String(run.source_snapshot_id),node.id),recoveryDraft,humanGuidanceForNode(service,record.runId,node.id)),
     });
     if (!hasDispatchFence(service,record,fencingToken,service.now())) {
       await cancelLateChild(service,record,child.runKey);

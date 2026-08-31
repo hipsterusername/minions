@@ -9,7 +9,7 @@ import {
 
 describe("task graph pattern contracts", () => {
   it("publishes a unique versioned Phase A catalog", () => {
-    expect(TASK_GRAPH_PATTERN_CATALOG).toHaveLength(17);
+    expect(TASK_GRAPH_PATTERN_CATALOG).toHaveLength(18);
     expect(new Set(TASK_GRAPH_PATTERN_CATALOG.map((pattern) => pattern.id)).size)
       .toBe(TASK_GRAPH_PATTERN_CATALOG.length);
     expect(TASK_GRAPH_PATTERN_CATALOG.every((pattern) => pattern.version === 1)).toBe(true);
@@ -32,6 +32,8 @@ describe("task graph pattern contracts", () => {
       .toBe("partitioned_batch");
     expect(taskGraphProblemSignatureSchema.parse({taskKind:"draft_refinement"}).taskKind)
       .toBe("draft_refinement");
+    expect(taskGraphProblemSignatureSchema.parse({taskKind:"dialectic"}).taskKind)
+      .toBe("dialectic");
     expect(taskGraphProblemSignatureSchema.parse({}).taskKind).toBe("delivery");
   });
 

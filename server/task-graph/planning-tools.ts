@@ -9,6 +9,10 @@ import { jsonResult } from "../harness/tool-result.ts";
 import type { TaskGraphPlanningCoordinator } from "./planning-coordinator.ts";
 import {TaskGraphConflictError} from "./errors.ts";
 import {
+  buildDialecticGraphPlan,
+  submitDialecticGraphSchema,
+} from "../dialectic/graph-plan.ts";
+import {
   initializeGraphDocumentSchema,
   inspectGraphDocumentSchema,
   removeGraphDocumentEdgeSchema,
@@ -60,6 +64,16 @@ const adjudicateSchema=z.object({
   if (value.guidance && value.decision!=="retry") {
     ctx.addIssue({code:"custom",path:["guidance"],message:"guidance is only valid for retry"});
   }
+});
+const moderateDialecticSchema=z.object({
+  requestId:z.string().min(1).describe("Stable idempotency key for this moderation decision."),
+  runId:z.string().min(1),checkpointNodeId:z.string().min(1),
+  expectedRunRevision:z.number().int().nonnegative(),
+  decision:z.enum(["continue","reshape","stop"]),
+  instructions:z.string().trim().min(1).max(4_000).optional(),
+}).superRefine((value,ctx)=>{
+  if (value.decision==="reshape"&&!value.instructions) ctx.addIssue({code:"custom",
+    path:["instructions"],message:"reshape requires moderation instructions"});
 });
 
 export function createTaskGraphPlanningTools(input: {
@@ -171,6 +185,19 @@ export function createTaskGraphPlanningTools(input: {
       },
     },
     {
+      name:"submit_dialectic_graph",
+      description:"Build and submit a bounded p13.dialectic execution graph. The server creates two role-differentiated participant chains plus periodic synthesis checkpoints, stable provider-thread affinities, structured goal-distance artifacts, and Leader gates. Executor tiers differ by default; exact harness/model overrides are optional. Use this as a primary reasoning tool for genuinely difficult or ambiguous problems, not routine work.",
+      inputSchema:submitDialecticGraphSchema,
+      handler:async(raw)=>{
+        const args=submitDialecticGraphSchema.parse(raw);
+        const plan=buildDialecticGraphPlan(args);
+        return jsonResult(handleProjection(await input.coordinator.submit({
+          workItemId:input.workItemId,primaryRunKey:input.primaryRunKey,mode:input.mode,
+          requestId:args.requestId,baseProposalRevision:args.baseProposalRevision,plan,
+        })));
+      },
+    },
+    {
       name: "get_graph_plan",
       description: "Read the latest or selected persisted graph plan, its canonical runtime projection, and bounded serial iteration history. Select history by proposalId or graphRunId.",
       inputSchema: getSchema,
@@ -213,6 +240,48 @@ export function createTaskGraphPlanningTools(input: {
         const args=cancelSchema.parse(raw);
         return jsonResult(await input.coordinator.cancel({workItemId:input.workItemId,
           primaryRunKey:input.primaryRunKey,...args}));
+      },
+    },
+    {
+      name:"moderate_dialectic",
+      description:"Resolve a non-final dialectic synthesis gate with an exact run-revision fence. Continue supplies the next episode with Leader guidance; reshape also revision-fences steering across the remaining dialectic subtree; stop cancels further turns while preserving checkpoint evidence.",
+      inputSchema:moderateDialecticSchema,
+      handler:async(raw)=>{
+        const args=moderateDialecticSchema.parse(raw);
+        const service=input.coordinator.options.taskGraphs;
+        let graph=service.snapshot(args.runId);
+        if (graph.run.workItemId!==input.workItemId
+          ||graph.run.primaryRunKey!==input.primaryRunKey) {
+          throw new TaskGraphConflictError("graph is outside the current Leader authority",graph);
+        }
+        if (graph.run.revision!==args.expectedRunRevision) {
+          throw new TaskGraphConflictError("stale graph-run revision",graph);
+        }
+        const checkpoint=graph.revision.nodes.find(node=>node.id===args.checkpointNodeId);
+        if (checkpoint?.reasoning?.kind!=="dialectic"
+          ||checkpoint.reasoning.phase!=="synthesis"||checkpoint.reasoning.final) {
+          throw new TaskGraphConflictError("node is not a non-final dialectic checkpoint",graph);
+        }
+        if (args.decision==="stop") {
+          await service.cancel(args.runId,args.expectedRunRevision,`${args.requestId}:cancel`);
+          return jsonResult(service.viewSnapshot(args.runId));
+        }
+        const gates=graph.revision.edges.filter(edge=>edge.sourceNodeId===checkpoint.id
+          &&edge.kind==="human_gate");
+        if (gates.length!==1) throw new TaskGraphConflictError(
+          "dialectic checkpoint does not have exactly one Leader gate",graph);
+        const targetNodeId=gates[0]!.targetNodeId;
+        if (args.decision==="reshape") {
+          graph=await service.steer({runId:args.runId,
+            expectedRunRevision:args.expectedRunRevision,requestId:`${args.requestId}:steer`,
+            instructions:args.instructions!,affectedNodeIds:[targetNodeId]});
+        }
+        const guidance=[`Leader decision: ${args.decision}.`,args.instructions??
+          "Continue the dialectic using the checkpoint's highest-priority unresolved questions."].join("\n");
+        await service.provideInput({runId:args.runId,nodeId:targetNodeId,
+          expectedRunRevision:graph.run.revision,actor:`leader:${input.leaderSessionKey}`,
+          value:guidance,requestId:`${args.requestId}:input`});
+        return jsonResult(service.viewSnapshot(args.runId));
       },
     },
     {

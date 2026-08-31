@@ -25,6 +25,7 @@ export function renderTaskGraphNodePrompt(
   steering: string[],
   scopedContext: ScopedContext[],
   recoveryDraft?:TaskGraphRecoveryDraft|null,
+  humanGuidance:string[]=[],
 ): string {
   return [
     `Mission: ${revision.objective}`,
@@ -48,6 +49,8 @@ export function renderTaskGraphNodePrompt(
       ? `Constraints:\n${node.constraints.map((value) => `- ${value}`).join("\n")}` : "",
     steering.length
       ? `Revision-fenced steering:\n${steering.map((value) => `- ${value}`).join("\n")}` : "",
+    humanGuidance.length
+      ? `Leader moderation input:\n${humanGuidance.map((value)=>`- ${value}`).join("\n")}` : "",
     recoveryDraft ? recoveryGuidance(recoveryDraft) : "",
     node.acceptanceCriteria.length
       ? `Acceptance criteria:\n${node.acceptanceCriteria.map((value) => `- ${value}`).join("\n")}` : "",

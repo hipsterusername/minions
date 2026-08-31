@@ -14,6 +14,7 @@ export const taskGraphPatternIdSchema = z.enum([
   "p10.causal_diagnosis",
   "p11.value_focused_decision",
   "p12.multi_criteria_scorecard",
+  "p13.dialectic",
   "p14.scenario_stress_test",
   "p15.hierarchical_decomposition",
   "p16.critical_path_delivery",
@@ -45,7 +46,7 @@ export const taskGraphPatternTemplateViewSchema = z.object({
 export const taskGraphProblemSignatureSchema = z.object({
   taskKind: z.enum([
     "delivery", "research", "diagnosis", "decision", "comparison", "search", "design", "schedule",
-    "partitioned_batch", "draft_refinement",
+    "partitioned_batch", "draft_refinement", "dialectic",
   ]).default("delivery"),
   goalClarity: z.enum(["explicit", "ambiguous"]).default("explicit"),
   procedure: z.enum(["known", "unknown", "hierarchical"]).default("known"),
@@ -114,6 +115,7 @@ export const TASK_GRAPH_PATTERN_CATALOG: readonly TaskGraphPatternDescriptor[] =
   { id:"p10.causal_diagnosis",version:1,label:"Causal diagnosis",support:"semantic_native",intent:"Collect discriminating evidence for a causal or fault model.",useWhen:"The task asks why an event or fault occurred and remedies must be checked.",avoidWhen:"Only description or correlation is needed.",topology:"Event -> Cause model -> {Evidence | Tests} -> Remedy check",requiredArtifacts:["HypothesisSet","TestResult","EvidenceSet"],safetyChecks:["Association alone is not treated as intervention evidence."] },
   { id:"p11.value_focused_decision",version:1,label:"Value-focused decision",support:"semantic_native",intent:"Separate facts, values, alternatives, and accountable choice.",useWhen:"An accountable human must choose using explicit objectives and uncertainty.",avoidWhen:"The task has one mandated outcome or is only factual comparison.",topology:"Frame -> Evaluate -> Sensitivity -> Human choice",requiredArtifacts:["DecisionFrame","DecisionEvaluation"],safetyChecks:["Human decision authority is preserved."] },
   { id:"p12.multi_criteria_scorecard",version:1,label:"Multi-criteria scorecard",support:"semantic_native",intent:"Compare known alternatives with explicit criteria and sensitivity.",useWhen:"Known alternatives need transparent multi-criteria scoring and sensitivity.",avoidWhen:"Objectives are still disputed or hard constraints would be averaged away.",topology:"Criteria + Alternatives -> Score -> Sensitivity -> Human choice",requiredArtifacts:["DecisionFrame","DecisionEvaluation"],safetyChecks:["Hard constraints are not hidden in weighted sums."] },
+  { id:"p13.dialectic",version:1,label:"Leader-moderated dialectic",support:"static_encoding",intent:"Improve difficult reasoning through role-differentiated dialogue, periodic synthesis, and explicit Leader moderation.",useWhen:"A consequential or ambiguous problem benefits from sustained disagreement, competing frames, and bounded convergence checks.",avoidWhen:"The answer is routine, directly verifiable, or one bounded actor can resolve it without meaningful opposition.",topology:"A1 -> B1 -> ... -> Synthesis checkpoint -> Leader gate -> next episode -> Final synthesis",requiredArtifacts:["EvidenceSet","DecisionFrame"],safetyChecks:["Participant roles are materially different.","Provider-thread affinity is stable within each participant.","Every non-final synthesis checkpoint has a Leader gate.","Rounds and stopping conditions are bounded."] },
   { id:"p14.scenario_stress_test",version:1,label:"Scenario stress test",support:"static_encoding",intent:"Compare strategies across bounded plausible futures.",useWhen:"Deep uncertainty makes robustness across plausible futures more useful than one forecast.",avoidWhen:"One stable forecast is adequate or scenarios cannot be bounded.",topology:"Frame -> Scenarios x Strategies -> Vulnerability -> Choice",requiredArtifacts:["ScenarioSet","DecisionEvaluation","RiskRegister"],safetyChecks:["Scenario and strategy counts are bounded."] },
   { id:"p15.hierarchical_decomposition",version:1,label:"Hierarchical decomposition",support:"static_encoding",intent:"Compile a reviewed bounded leaf DAG from reusable work packages.",useWhen:"A mission has reusable hierarchical work packages that compile to bounded leaves.",avoidWhen:"Decomposition depth or aggregate budget is unknown.",topology:"Mission -> Work packages -> Bounded leaf DAG -> Integrate",requiredArtifacts:["CoverageReport"],safetyChecks:["Depth and aggregate budget are capped."] },
   { id:"p16.critical_path_delivery",version:1,label:"Critical-path delivery",support:"semantic_native",intent:"Execute known dependencies while exposing schedule bottlenecks.",useWhen:"Known dependency timing and bottlenecks dominate delivery risk.",avoidWhen:"The route is exploratory or duration estimates are meaningless.",topology:"WBS -> Dependency DAG -> Deliver -> Schedule review",requiredArtifacts:["RiskRegister","CoverageReport"],safetyChecks:["Schedule heuristics never bypass scheduler authority."] },

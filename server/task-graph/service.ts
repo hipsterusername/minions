@@ -27,7 +27,8 @@ type Row=Record<string,unknown>;
 const log=serverLogger.child("task-graph-service");
 export interface TaskGraphChildLauncher {
   startChildRun(input:{workItemId:string;parentRunKey:string;taskId:string;attemptId:string;
-    attemptNumber:number;prompt:string;requestId:string;harness?:string;
+    attemptNumber:number;prompt:string;requestId:string;harness?:string;model?:string;
+    resumeId?:string;invocationKind?:"new_run"|"resume_open_run";
     executorClass?:"mechanical"|"standard"|"reasoning";toolAllowlist?:string[];
     skillIds?:string[];
     sandboxPolicy?:import("../../shared/workspace-contracts.ts").SandboxPolicy}):Promise<WorkItemRunSnapshot>;
@@ -47,7 +48,6 @@ export interface TaskGraphRuntimeOptions {
   validateNodePolicy?:TaskGraphNodePolicyValidator;
   resolveHarness?:(name:string)=>import("../harness/types.ts").AgentHarness;
 }
-
 /** Canonical facade translating immutable graph topology into child WorkItem runs. */
 export class TaskGraphService {
   readonly repo:TaskGraphRepository;
@@ -336,14 +336,16 @@ export class TaskGraphService {
     return nodeId?snapshot.attempts.filter(row=>row["node_id"]===nodeId):snapshot.attempts;
   }
 
-  agentBinding(sessionRunKey:string):{runId:string;nodeId:string;attemptId:string;
-    outputSchemas:Record<string,unknown>;allowedTools:string[];ownershipRequest:GraphRevisionInput["nodes"][number]["ownershipRequest"]}|null {
+  agentBinding(sessionRunKey:string):{runId:string;nodeId:string;attemptId:string;outputSchemas:Record<string,unknown>;allowedTools:string[];
+    ownershipRequest:GraphRevisionInput["nodes"][number]["ownershipRequest"];
+    sessionAffinity:GraphRevisionInput["nodes"][number]["sessionAffinity"]}|null {
     const row=this.attemptForSession(sessionRunKey,["dispatching","running","waiting"]);
     if (!row) return null;
     const node=this.repo.getRevision(String(row.revision_id)).nodes
       .find(candidate=>candidate.id===row.node_id);
     return node?{runId:String(row.run_id),nodeId:node.id,attemptId:String(row.id),
-      outputSchemas:node.outputSchemas,allowedTools:node.allowedTools,ownershipRequest:node.ownershipRequest}:null;
+      outputSchemas:node.outputSchemas,allowedTools:node.allowedTools,
+      ownershipRequest:node.ownershipRequest,sessionAffinity:node.sessionAffinity}:null;
   }
 
   stageArtifactForSession(sessionRunKey:string,input:ArtifactStageInput):{artifactId:string;staged:boolean} {
