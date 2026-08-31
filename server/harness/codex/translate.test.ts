@@ -411,6 +411,7 @@ describe("turn.completed", () => {
         input_tokens: 200,
         output_tokens: 80,
         cached_input_tokens: 50,
+        cache_write_input_tokens: 0,
         reasoning_output_tokens: 0,
       },
     } as never);
@@ -431,7 +432,13 @@ describe("turn.completed", () => {
     const tr = makeTranslator();
     const events = tr.translate({
       type: "turn.completed",
-      usage: { input_tokens: 1, output_tokens: 1, cached_input_tokens: 0, reasoning_output_tokens: 0 },
+      usage: {
+        input_tokens: 1,
+        output_tokens: 1,
+        cached_input_tokens: 0,
+        cache_write_input_tokens: 0,
+        reasoning_output_tokens: 0,
+      },
     });
     expect(events.some((e) => e.kind === "done")).toBe(false);
   });
