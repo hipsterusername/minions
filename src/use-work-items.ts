@@ -196,6 +196,19 @@ export interface PromptFailure {
   error: string;
 }
 
+export interface WorkItemLaunchInput {
+  title: string;
+  changeMode: "live" | "worktree";
+  prompt: string;
+  options?: Record<string, unknown>;
+}
+
+interface PendingLaunch extends WorkItemLaunchInput {
+  projectId: string;
+  onStarted: (sessionKey: string) => void;
+  onError: (error: string) => void;
+}
+
 export function useWorkItems(input: {
   projectId: string | null; connected: boolean; subscribe: SocketSubscribe; send: (data: unknown) => void;
 }) {
@@ -204,7 +217,11 @@ export function useWorkItems(input: {
   const listRequests = useRef(new Map<string, { projectId: string; replace: boolean }>());
   const pendingPrompts = useRef(new Map<string, {
     prompt: string; attempts: number; projectId: string; workItemId: string;
+    options?: Record<string, unknown>;
+    onStarted?: (sessionKey: string) => void;
+    onError?: (error: string) => void;
   }>());
+  const pendingLaunches = useRef(new Map<string, PendingLaunch>());
   const requestListPage = useCallback((projectId: string, cursor?: string, replace = false) => {
     const requestId = randomUuid();
     listRequests.current.set(requestId, { projectId, replace });
@@ -252,10 +269,41 @@ export function useWorkItems(input: {
     }
     dispatch(message);
     if (message.type !== "work_item_response" || !message.requestId) return;
+    const launch = pendingLaunches.current.get(message.requestId);
+    if (launch) {
+      pendingLaunches.current.delete(message.requestId);
+      if (!message.success) {
+        launch.onError(message.error ?? "Unable to create work item");
+        return;
+      }
+      const detail = message.result as WorkItemDetailSnapshot;
+      const item = detail.workItem;
+      const requestId = randomUuid();
+      pendingPrompts.current.set(requestId, {
+        prompt: launch.prompt, attempts: 1, projectId: launch.projectId,
+        workItemId: item.id,
+        ...(launch.options ? { options: launch.options } : {}),
+        onStarted: launch.onStarted, onError: launch.onError,
+      });
+      input.send({
+        type: "continue_work_item", requestId, workItemId: item.id,
+        expectedLifecycleRevision: item.lifecycle.lifecycleRevision,
+        expectedCurrentRunKey: item.currentRunKey,
+        prompt: launch.prompt, displayPrompt: launch.prompt,
+        ...(launch.options ?? {}),
+      });
+      return;
+    }
     const pending = pendingPrompts.current.get(message.requestId);
     if (!pending) return;
     pendingPrompts.current.delete(message.requestId);
-    if (message.success) return;
+    if (message.success) {
+      const detail = message.result as WorkItemDetailSnapshot;
+      const sessionKey = detail.workItem.currentRunKey;
+      if (pending.onStarted && sessionKey) pending.onStarted(sessionKey);
+      else if (pending.onError && !sessionKey) pending.onError("Work item started without a run key");
+      return;
+    }
     const recovery = decideConflictRecovery({
       code: message.code,
       latest: message.latest as WorkItemDetailSnapshot | null | undefined,
@@ -269,10 +317,12 @@ export function useWorkItems(input: {
       pendingPrompts.current.set(recovery.command.requestId, {
         ...pending, attempts: pending.attempts + 1,
       });
-      input.send({ ...recovery.command, displayPrompt: pending.prompt });
+      input.send({ ...recovery.command, displayPrompt: pending.prompt,
+        ...(pending.options ?? {}) });
       return;
     }
     if (recovery.kind === "give-up" && pending.projectId === input.projectId) {
+      pending.onError?.(message.error ?? "Work-item command failed");
       setPromptFailures((current) => ({
         ...current,
         [pending.workItemId]: {
@@ -289,10 +339,12 @@ export function useWorkItems(input: {
   useEffect(() => {
     listRequests.current.clear();
     pendingPrompts.current.clear();
+    pendingLaunches.current.clear();
     setPromptFailures({});
     return () => {
       listRequests.current.clear();
       pendingPrompts.current.clear();
+      pendingLaunches.current.clear();
     };
   }, [input.connected, input.projectId]);
   useEffect(() => {
@@ -316,6 +368,21 @@ export function useWorkItems(input: {
         : {}),
     });
   }, [clearPromptFailure, input.send]);
+  const launch = useCallback((launchInput: WorkItemLaunchInput,
+    onStarted: (sessionKey: string) => void, onError: (error: string) => void) => {
+    if (!input.projectId) {
+      onError("Canonical workspace identity is unavailable");
+      return;
+    }
+    const requestId = randomUuid();
+    pendingLaunches.current.set(requestId, {
+      ...launchInput, projectId: input.projectId, onStarted, onError,
+    });
+    input.send({
+      type: "create_work_item", requestId, workspaceId: input.projectId,
+      title: launchInput.title, changeMode: launchInput.changeMode,
+    });
+  }, [input.projectId, input.send]);
   return useMemo(() => ({ ...state,
     promptFailures, clearPromptFailure,
     orderedItems: state.projectId === input.projectId
@@ -328,5 +395,6 @@ export function useWorkItems(input: {
     restore: (item: WorkItemSnapshot) => mutate("restore_work_item", item),
     start: (item: WorkItemSnapshot, prompt: string) => mutate("continue_work_item", item, { prompt }),
     reply: (item: WorkItemSnapshot, prompt: string) => mutate("continue_work_item", item, { prompt }),
-  }), [state, promptFailures, clearPromptFailure, input.projectId, input.send, mutate]);
+    launch,
+  }), [state, promptFailures, clearPromptFailure, input.projectId, input.send, mutate, launch]);
 }

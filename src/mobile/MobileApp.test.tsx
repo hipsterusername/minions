@@ -299,7 +299,9 @@ describe("MobileApp", () => {
 
   it("shows an actionable activity notice when mobile launch hits the session limit", async () => {
     installPushGlobals();
-    vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000010");
+    let uuidSequence = 10;
+    vi.spyOn(crypto, "randomUUID").mockImplementation(() =>
+      `00000000-0000-4000-8000-${String(uuidSequence++).padStart(12, "0")}`);
     vi.mocked(listProjects).mockResolvedValue([
       { id: "alpha", name: "Alpha", path: "/work/alpha", lastOpened: "2026-06-01T00:00:00.000Z", hasSidecar: true },
     ]);
@@ -332,18 +334,43 @@ describe("MobileApp", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Launch leader" }));
 
-    const payload = send.mock.calls.find(
+    const createPayload = send.mock.calls.find(
       ([message]) =>
         typeof message === "object" &&
         message !== null &&
         "type" in message &&
-        message.type === "create_session",
-    )?.[0] as { sessionKey: string } | undefined;
-    expect(payload?.sessionKey).toBe("leader-00000000-0000-4000-8000-000000000010");
+        message.type === "create_work_item",
+    )?.[0] as { requestId: string } | undefined;
+    expect(createPayload).toMatchObject({
+      type: "create_work_item", workspaceId: "alpha", title: "Start a new leader",
+      changeMode: "live",
+    });
 
     emitSocketMessage({
-      type: "session_error",
-      sessionKey: payload!.sessionKey,
+      type: "work_item_response", command: "create_work_item",
+      requestId: createPayload!.requestId, success: true,
+      result: {
+        workItem: {
+          id: "work-new", projectId: "alpha", projectPath: "/work/alpha",
+          title: "Start a new leader",
+          lifecycle: { runtimeState: "draft", outcome: "none", resolution: "open",
+            changeMode: "live", integrationState: "live_clean", lifecycleRevision: 0 },
+          waitKind: null, currentRunKey: null, iteration: 0,
+          lastTransitionAt: 1, createdAt: 1, updatedAt: 1,
+        },
+        bindings: [], currentRun: null, runs: [], nextCursor: null,
+      },
+    });
+    const continuePayload = send.mock.calls.find(
+      ([message]) => typeof message === "object" && message !== null
+        && "type" in message && message.type === "continue_work_item",
+    )?.[0] as { requestId: string } | undefined;
+    expect(continuePayload).toMatchObject({
+      type: "continue_work_item", workItemId: "work-new", orchestrationMode: "auto",
+    });
+    emitSocketMessage({
+      type: "work_item_response", command: "continue_work_item",
+      requestId: continuePayload!.requestId, success: false, code: "internal",
       error: "Maximum session limit (50) reached. Remove unused sessions first.",
     });
 

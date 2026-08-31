@@ -34,10 +34,14 @@ import {
   type TextAttachment,
 } from "./attachments.ts";
 import { buildLaunchModelGroups, parseLaunchModelValue } from "./launch-models.ts";
+import type { WorkItemLaunchInput } from "../use-work-items.ts";
 
 interface LaunchScreenProps {
   send: (data: unknown) => void;
   onLaunched: (sessionKey: string) => void;
+  onLaunchError?: (error: string) => void;
+  canonicalLaunch?: (input: WorkItemLaunchInput,
+    onStarted: (sessionKey: string) => void, onError: (error: string) => void) => void;
   /**
    * When provided, the launch screen is locked to a single project: the
    * project picker is hidden and no project list is fetched. Used when the
@@ -47,7 +51,7 @@ interface LaunchScreenProps {
   lockedProject?: { id?: string; path: string; name: string };
 }
 
-export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenProps) {
+export function LaunchScreen({ send, onLaunched, onLaunchError, canonicalLaunch, lockedProject }: LaunchScreenProps) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
@@ -66,7 +70,9 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
   const [projectSettings, setProjectSettings] = useState<ProjectSettings>({});
   const [thinkingOverride, setThinkingOverride] = useState<ThinkingConfig | null>(null);
   const [sandboxPolicyOverride, setSandboxPolicyOverride] = useState<SandboxPolicy | null>(null);
+  const [launching, setLaunching] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const launchingRef = useRef(false);
 
   // Enumerated models for the launch dropdown, across every registered harness
   // (Anthropic, OpenAI, …) so all providers are selectable. Empty until
@@ -256,44 +262,63 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!targetPath || (!trimmedPrompt && attachedFileCount === 0)) return;
+    if (launchingRef.current || !targetPath || (!trimmedPrompt && attachedFileCount === 0)) return;
 
-    const sessionKey = `leader-${randomUuid()}`;
-    // Only arm skills when the user picked at least one. When armed we build the
-    // structured Leader customization for this bare compatibility session.
+    launchingRef.current = true;
+    setLaunching(true);
+
+    const canonical = Boolean(targetProjectId && canonicalLaunch);
+    // Only freeze a custom prompt when the user picked skills. Canonical runs
+    // still receive the server-owned default Leader prompt when none are armed.
     const skillPayload =
       selectedSkillIds.length > 0
         ? {
             systemPrompt: freezeLeaderSystemPrompt({
               skillIds: selectedSkillIds,
               skillValues,
-              orchestrationMode: "direct",
+              orchestrationMode: canonical ? "auto" : "direct",
             }).systemPrompt,
             skillIds: selectedSkillIds,
             skillValues,
           }
         : {};
-    send({
-      type: "create_session",
-      sessionKey,
-      prompt: appendTextAttachmentsToPrompt(trimmedPrompt, textAttachments),
-      role: "leader",
-      ...(targetProjectId ? { workspaceId: targetProjectId } : { cwd: targetPath }),
-      worktreeIsolation,
-      ...(imageAttachments.length > 0 ? { attachments: imageAttachments } : {}),
-      // Empty value = let the server/harness pick its default model. A chosen
-      // model carries its harness so cross-provider models (e.g. OpenAI) resolve.
+    const launchPrompt = appendTextAttachmentsToPrompt(trimmedPrompt, textAttachments);
+    const runtimeOptions = {
       ...(selectedModel ? { model: selectedModel.model, harness: selectedModel.harness } : {}),
       ...(projectSettings.defaultPermissionMode
         ? { permissionMode: projectSettings.defaultPermissionMode }
         : {}),
-      ...(explicitSandboxPolicy
-        ? { sandboxPolicy: launchSandboxPolicy }
-        : {}),
-      ...(launchThinking
-        ? { thinkingConfig: launchThinking }
-        : {}),
+      ...(explicitSandboxPolicy ? { sandboxPolicy: launchSandboxPolicy } : {}),
+      ...(launchThinking ? { thinkingConfig: launchThinking } : {}),
+      ...(imageAttachments.length > 0 ? { attachments: imageAttachments } : {}),
       ...skillPayload,
+    };
+    if (canonical && canonicalLaunch) {
+      setError(null);
+      canonicalLaunch({
+        title: trimmedPrompt.split("\n")[0]!.slice(0, 120) || "Mobile Leader",
+        changeMode: worktreeIsolation ? "worktree" : "live",
+        prompt: launchPrompt,
+        options: { ...runtimeOptions, orchestrationMode: "auto" },
+      }, onLaunched, (message) => {
+        launchingRef.current = false;
+        setLaunching(false);
+        setError(message);
+        onLaunchError?.(message);
+      });
+      return;
+    }
+
+    const sessionKey = `leader-${randomUuid()}`;
+    send({
+      type: "create_session",
+      sessionKey,
+      prompt: launchPrompt,
+      ...(trimmedPrompt ? { displayPrompt: trimmedPrompt } : {}),
+      role: "leader",
+      ...(targetProjectId ? { workspaceId: targetProjectId } : { cwd: targetPath }),
+      worktreeIsolation,
+      ...runtimeOptions,
     });
     onLaunched(sessionKey);
   }
@@ -581,7 +606,12 @@ export function LaunchScreen({ send, onLaunched, lockedProject }: LaunchScreenPr
           </div>
         </section>
 
-        <button className="mob-launch-submit" type="submit" disabled={!canSubmit}>
+        <button
+          className="mob-launch-submit"
+          type="submit"
+          disabled={!canSubmit || launching}
+          aria-busy={launching || undefined}
+        >
           Launch leader
         </button>
       </form>

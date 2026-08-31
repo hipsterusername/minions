@@ -356,6 +356,24 @@ export default function MobileApp() {
     openSession(sessionToStopForLimit.sessionKey);
   }, [openSession, sessionToStopForLimit]);
 
+  const showSessionLimitNotice = useCallback(() => {
+    setPendingLaunchSessionKey(null);
+    setSelectedSessionKey(null);
+    setSelectedReviewSessionKey(null);
+    setActiveTab("activity");
+    const notice: ActivityNotice = {
+      title: "Session limit reached",
+      message:
+        "Minions already has 50 non-stopped sessions. Open an idle or errored session and tap Stop, or remove old sessions on desktop, then launch again.",
+      onDismiss: dismissActivityNotice,
+    };
+    if (sessionToStopForLimit) {
+      notice.actionLabel = "Open session to stop";
+      notice.onAction = openSessionToStopForLimit;
+    }
+    setActivityNotice(notice);
+  }, [dismissActivityNotice, openSessionToStopForLimit, sessionToStopForLimit]);
+
   useEffect(() => {
     return subscribe("*", (msg) => {
       if (msg.type === "session_created" && msg.sessionKey === pendingLaunchSessionKey) {
@@ -371,27 +389,12 @@ export default function MobileApp() {
         return;
       }
 
-      setPendingLaunchSessionKey(null);
-      setSelectedSessionKey(null);
-      setSelectedReviewSessionKey(null);
-      setActiveTab("activity");
-      const notice: ActivityNotice = {
-        title: "Session limit reached",
-        message:
-          "Minions already has 50 non-stopped sessions. Open an idle or errored session and tap Stop, or remove old sessions on desktop, then launch again.",
-        onDismiss: dismissActivityNotice,
-      };
-      if (sessionToStopForLimit) {
-        notice.actionLabel = "Open session to stop";
-        notice.onAction = openSessionToStopForLimit;
-      }
-      setActivityNotice(notice);
+      showSessionLimitNotice();
     });
   }, [
-    dismissActivityNotice,
-    openSessionToStopForLimit,
     pendingLaunchSessionKey,
     sessionToStopForLimit,
+    showSessionLimitNotice,
     subscribe,
   ]);
 
@@ -500,7 +503,11 @@ export default function MobileApp() {
       ) : activeTab === "approvals" ? (
         <ApprovalsScreen approvals={scopedApprovalRows} onOpenReview={openReview} />
       ) : activeTab === "launch" ? (
-        <LaunchScreen send={send} onLaunched={handleLaunchSubmitted} lockedProject={selectedProject} />
+        <LaunchScreen send={send} onLaunched={handleLaunchSubmitted}
+          onLaunchError={(message) => {
+            if (/Maximum session limit/i.test(message)) showSessionLimitNotice();
+          }}
+          canonicalLaunch={workItemState.launch} lockedProject={selectedProject} />
       ) : activeTab === "settings" ? (
         <SettingsScreen
           project={selectedProject}

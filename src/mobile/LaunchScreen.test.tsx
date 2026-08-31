@@ -242,12 +242,67 @@ describe("LaunchScreen", () => {
         type: "create_session",
         sessionKey: "leader-00000000-0000-4000-8000-000000000001",
         prompt: "Build the mobile launch flow",
+        displayPrompt: "Build the mobile launch flow",
         role: "leader",
         workspaceId: "alpha",
         worktreeIsolation: false,
       });
     });
     expect(onLaunched).toHaveBeenCalledWith("leader-00000000-0000-4000-8000-000000000001");
+  });
+
+  it("disables canonical launch immediately and ignores duplicate submissions", () => {
+    const canonicalLaunch = vi.fn();
+
+    render(
+      <LaunchScreen
+        send={vi.fn()}
+        onLaunched={vi.fn()}
+        canonicalLaunch={canonicalLaunch}
+        lockedProject={{ id: "alpha", path: "/work/alpha", name: "Alpha" }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Prompt"), {
+      target: { value: "Launch once" },
+    });
+    const submit = screen.getByRole("button", { name: "Launch leader" });
+    const form = submit.closest("form");
+    expect(form).not.toBeNull();
+
+    fireEvent.click(submit);
+    fireEvent.submit(form!);
+
+    expect(submit).toBeDisabled();
+    expect(submit).toHaveAttribute("aria-busy", "true");
+    expect(canonicalLaunch).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-enables canonical launch after an error", () => {
+    const canonicalLaunch = vi.fn((
+      _input: unknown,
+      _onStarted: (sessionKey: string) => void,
+      onError: (error: string) => void,
+    ) => onError("Unable to launch"));
+
+    render(
+      <LaunchScreen
+        send={vi.fn()}
+        onLaunched={vi.fn()}
+        canonicalLaunch={canonicalLaunch}
+        lockedProject={{ id: "alpha", path: "/work/alpha", name: "Alpha" }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Prompt"), {
+      target: { value: "Try launch" },
+    });
+    const submit = screen.getByRole("button", { name: "Launch leader" });
+    fireEvent.click(submit);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Unable to launch");
+    expect(submit).toBeEnabled();
+    expect(submit).not.toHaveAttribute("aria-busy");
   });
 
   it("still launches when crypto.randomUUID is unavailable (non-secure LAN context)", async () => {
@@ -332,6 +387,7 @@ describe("LaunchScreen", () => {
         type: "create_session",
         sessionKey: "leader-00000000-0000-4000-8000-000000000002",
         prompt: "Do the thing",
+        displayPrompt: "Do the thing",
         role: "leader",
         cwd: "/work/gamma",
         worktreeIsolation: false,
@@ -385,6 +441,7 @@ describe("LaunchScreen", () => {
       type: "create_session",
       sessionKey: "leader-00000000-0000-4000-8000-000000000003",
       prompt: "Do work",
+      displayPrompt: "Do work",
       role: "leader",
       cwd: "/work/epsilon",
       worktreeIsolation: false,
