@@ -1649,6 +1649,23 @@ article.mob-plan-row {
   align-self: flex-start;
 }
 
+.mob-message[data-copyable="true"] {
+  touch-action: pan-y pinch-zoom;
+}
+
+.mob-message-copy-status {
+  position: absolute;
+  right: 8px;
+  bottom: 5px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--success-bg);
+  color: var(--success-color);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
 .mob-message--tool,
 .mob-message--system,
 .mob-message--thinking {

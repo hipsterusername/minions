@@ -38,6 +38,29 @@ function leaderSession(overrides: Partial<MobileSessionInfo> = {}): MobileSessio
 }
 
 describe("SessionChatScreen", () => {
+  it("renders persisted user inputs in the mobile transcript", async () => {
+    const listeners: Array<(message: ServerMessage) => void> = [];
+    render(
+      <SessionChatScreen
+        sessionKey="user-inputs"
+        subscribe={fakeSubscribe((listener) => listeners.push(listener))}
+        send={vi.fn()}
+        onBack={() => {}}
+      />,
+    );
+
+    act(() => listeners.forEach((listener) => listener({
+      type: "sdk_event",
+      sessionKey: "user-inputs",
+      timestamp: 1,
+      event: { kind: "text", role: "user", text: "Keep this visible", id: "input-1" },
+    })));
+
+    expect(await screen.findByRole("article", { name: "You" })).toHaveTextContent(
+      "Keep this visible",
+    );
+  });
+
   it("opens the canonical graph inspector from a leader session on mobile", async () => {
     const previousWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
@@ -129,6 +152,77 @@ describe("SessionChatScreen", () => {
 
     expect(screen.getByText(/command: pnpm test -- --runInBand/)).toBeInTheDocument();
     expect(screen.getByText(/timeout: 120000/)).toBeInTheDocument();
+  });
+
+  it("copies a response after a deliberate horizontal swipe", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const message: DisplayMessage = {
+      id: "assistant-1",
+      role: "assistant",
+      content: "Copy this response",
+      timestamp: 1,
+    };
+
+    render(<MessageBubble message={message} />);
+
+    const response = screen.getByRole("article");
+    fireEvent.touchStart(response, {
+      touches: [{ identifier: 1, clientX: 20, clientY: 80 }],
+    });
+    fireEvent.touchEnd(response, {
+      changedTouches: [{ identifier: 1, clientX: 100, clientY: 86 }],
+    });
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Copy this response"));
+    expect(screen.getByRole("status")).toHaveTextContent("Copied");
+  });
+
+  it("does not copy a response for vertical, short, or user-message swipes", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const { rerender } = render(<MessageBubble message={{
+      id: "assistant-1",
+      role: "assistant",
+      content: "Do not copy yet",
+      timestamp: 1,
+    }} />);
+
+    const response = screen.getByRole("article");
+    fireEvent.touchStart(response, {
+      touches: [{ identifier: 1, clientX: 20, clientY: 20 }],
+    });
+    fireEvent.touchEnd(response, {
+      changedTouches: [{ identifier: 1, clientX: 35, clientY: 120 }],
+    });
+    fireEvent.touchStart(response, {
+      touches: [{ identifier: 2, clientX: 20, clientY: 20 }],
+    });
+    fireEvent.touchEnd(response, {
+      changedTouches: [{ identifier: 2, clientX: 70, clientY: 20 }],
+    });
+
+    rerender(<MessageBubble message={{
+      id: "user-1",
+      role: "user",
+      content: "My message",
+      timestamp: 2,
+    }} />);
+    const userMessage = screen.getByRole("article", { name: "You" });
+    fireEvent.touchStart(userMessage, {
+      touches: [{ identifier: 3, clientX: 20, clientY: 20 }],
+    });
+    fireEvent.touchEnd(userMessage, {
+      changedTouches: [{ identifier: 3, clientX: 120, clientY: 20 }],
+    });
+
+    expect(writeText).not.toHaveBeenCalled();
   });
 
   it("consolidates consecutive auxiliary events into one activity affordance", () => {
@@ -259,6 +353,7 @@ describe("SessionChatScreen", () => {
         type: "send_message",
         sessionKey: "s-2",
         prompt: "Please focus on tests",
+        displayPrompt: "Please focus on tests",
       });
     });
   });
@@ -349,6 +444,7 @@ describe("SessionChatScreen", () => {
         type: "send_message",
         sessionKey: "s-4",
         prompt: "Use this file\n\nAttached file: spec.md\nMedia type: text/markdown\n```markdown\n# Spec\nBuild mobile upload.\n```",
+        displayPrompt: "Use this file",
       });
     });
   });

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent, FormEvent, TouchEvent as ReactTouchEvent } from "react";
 
 import type { DisplayMessage } from "../sdk-messages.ts";
+import { copyText } from "../components/CopyButton.tsx";
 import { formatToolInputDetail, toolDisplayInfo } from "../nodes/leader-message-helpers.ts";
 import {
   RenderComponentView,
@@ -84,6 +85,8 @@ function messageTone(message: DisplayMessage): string {
 
 export function MessageBubble({ message, detail = false }: { message: DisplayMessage; detail?: boolean }) {
   const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const touchStartRef = useRef<{ identifier: number; x: number; y: number } | null>(null);
   const toolInfo = message.role === "tool" ? toolDisplayInfo(message.toolName, message.toolInput) : null;
   const label = toolInfo?.label ?? message.toolName ?? message.role;
   const previewBody = toolInfo?.summary ?? (message.content || message.toolName || "Tool activity");
@@ -91,6 +94,44 @@ export function MessageBubble({ message, detail = false }: { message: DisplayMes
     ? formatToolInputDetail(message.toolInput)
     : previewBody;
   const compact = !detail && (message.role === "tool" || message.role === "system" || message.role === "thinking");
+  const copyable = (message.role === "assistant" || message.role === "result") && message.content.length > 0;
+  const handleTouchStart = useCallback((event: ReactTouchEvent<HTMLElement>) => {
+    if (!copyable || event.touches.length !== 1) {
+      touchStartRef.current = null;
+      return;
+    }
+    const touch = event.touches[0]!;
+    touchStartRef.current = {
+      identifier: touch.identifier,
+      x: touch.clientX,
+      y: touch.clientY,
+    };
+  }, [copyable]);
+  const handleTouchEnd = useCallback((event: ReactTouchEvent<HTMLElement>) => {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    if (!copyable || !start) return;
+
+    const touch = Array.from(event.changedTouches).find(
+      (candidate) => candidate.identifier === start.identifier,
+    );
+    if (!touch) return;
+
+    const horizontalDistance = Math.abs(touch.clientX - start.x);
+    const verticalDistance = Math.abs(touch.clientY - start.y);
+    if (horizontalDistance < 64 || horizontalDistance < verticalDistance * 1.5) return;
+
+    void copyText(message.content)
+      .then(() => setCopied(true))
+      .catch(() => setCopied(false));
+  }, [copyable, message.content]);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timeout = window.setTimeout(() => setCopied(false), 1_500);
+    return () => window.clearTimeout(timeout);
+  }, [copied]);
+
   const contents = (
     <>
       <div className="mob-message-label">
@@ -109,7 +150,11 @@ export function MessageBubble({ message, detail = false }: { message: DisplayMes
       data-tone={messageTone(message)}
       data-tool-kind={toolInfo?.kind}
       data-expanded={compact ? String(expanded) : undefined}
+      data-copyable={copyable ? "true" : undefined}
       aria-label={message.role === "user" ? "You" : undefined}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={() => { touchStartRef.current = null; }}
     >
       {compact ? (
         <button
@@ -122,6 +167,7 @@ export function MessageBubble({ message, detail = false }: { message: DisplayMes
           {contents}
         </button>
       ) : contents}
+      {copied ? <span className="mob-message-copy-status" role="status">Copied</span> : null}
     </article>
   );
 }
@@ -700,6 +746,7 @@ export function SessionChatScreen({
       type: "send_message",
       sessionKey,
       prompt: appendTextAttachmentsToPrompt(trimmed, textAttachments),
+      ...(trimmed ? { displayPrompt: trimmed } : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
     });
     setPrompt("");
