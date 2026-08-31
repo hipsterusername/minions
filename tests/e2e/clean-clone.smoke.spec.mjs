@@ -19,13 +19,24 @@ test("creates, launches, persists, and reloads an echo-backed project", async ({
     .getByPlaceholder("Project name (optional, defaults to folder name)")
     .fill("Smoke Project");
 
+  const gitStatusResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/projects/git-status" &&
+      response.ok(),
+  );
+  await page.getByRole("button", { name: "Create" }).click();
+  expect(await (await gitStatusResponse).json()).toEqual({ isRepository: false });
+
   const createdResponse = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
       new URL(response.url()).pathname === "/api/projects" &&
       response.status() === 201,
   );
-  await page.getByRole("button", { name: "Create" }).click();
+  await page
+    .getByRole("button", { name: "Initialize Git & create first commit" })
+    .click();
   const created = await (await createdResponse).json();
   expect(created.settings.defaultLeaderHarness).toBe("echo");
 
