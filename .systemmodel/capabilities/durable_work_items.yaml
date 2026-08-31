@@ -22,10 +22,10 @@ entry_points:
     tests: [ src/ActivityView.test.tsx, src/use-work-items.test.ts ]
     flows: [ flow.triage_attention, flow.steer_session ]
   - surface: surface.mobile
-    summary: Project canonical lifecycle state into remote Activity and session controls.
-    files: [ src/mobile/ActivityScreen.tsx, src/mobile/mobile-activity-actions.ts ]
-    tests: [ src/mobile/ActivityScreen.test.tsx, src/mobile/mobile-activity-actions.test.ts ]
-    flows: [ flow.triage_attention, flow.steer_session ]
+    summary: Create canonical mobile Leader intentions, start their runs with lifecycle fences, and project their state into remote Activity and session controls.
+    files: [ src/use-work-items.ts, src/mobile/LaunchScreen.tsx, src/mobile/MobileApp.tsx, src/mobile/ActivityScreen.tsx, src/mobile/mobile-activity-actions.ts ]
+    tests: [ src/use-work-items.test.ts, src/mobile/MobileApp.test.tsx, src/mobile/ActivityScreen.test.tsx, src/mobile/mobile-activity-actions.test.ts ]
+    flows: [ flow.launch_leader, flow.triage_attention, flow.steer_session ]
   - surface: surface.ws_api
     summary: Validate and dispatch the WorkItem command family into the durable service.
     files: [ server/commands/work-items.ts, server/work-item-service.ts, shared/work-item-contracts.ts ]

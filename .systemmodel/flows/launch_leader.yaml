@@ -1,7 +1,7 @@
 id: flow.launch_leader
 type: flow
 name: Launch a Leader on a new intention
-summary: A user launches configured Leader work from canvas, activity, or mobile and observes the resulting canonical run or bare session.
+summary: A user launches configured Leader work from canvas, activity, or mobile and observes the resulting canonical run; bare sessions remain an explicit legacy ingress.
 constraints:
   - constraint.skill_freezing_and_role_gate
 decisions: [ decision.canonical_work_item_lifecycle, decision.role_gated_agent_tools ]
@@ -11,7 +11,7 @@ suggested_files: [ src/nodes/LeaderNode.tsx, src/ActivityView.tsx, src/mobile/La
 suggested_tests: [ src/nodes/LeaderNode.session-init.test.tsx, src/ActivityView.test.tsx, src/mobile/LaunchScreen.test.tsx, server/commands/create-session.test.ts, server/commands/work-items.test.ts ]
 steps:
   - Capture prompt, context, harness, model, permission, thinking, isolation, and armed skill choices.
-  - Create and bind a WorkItem for canonical ingress or explicitly create a bare session for legacy ingress.
+  - Create and bind a WorkItem for canvas, activity, and project-scoped mobile ingress, or explicitly create a bare session for legacy compatibility.
   - Enforce project ownership, revision fences, harness readiness, and active session bounds.
   - Start SessionHost through the resolved harness and replay status to the initiating surface.
 freshness:

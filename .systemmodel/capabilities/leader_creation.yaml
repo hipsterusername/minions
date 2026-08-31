@@ -16,9 +16,9 @@ entry_points:
     tests: [ src/empty-canvas.test.ts, src/nodes/LeaderNode.session-init.test.tsx, src/nodes/leader/work-item.test.ts ]
     flows: [ flow.launch_leader, flow.steer_session ]
   - surface: surface.mobile
-    summary: Launch a configured remote Leader session and open its chat.
-    files: [ src/mobile/LaunchScreen.tsx, src/mobile/MobileApp.tsx ]
-    tests: [ src/mobile/LaunchScreen.test.tsx, src/mobile/MobileApp.test.tsx ]
+    summary: Create a canonical WorkItem, start its auto-orchestrated Leader run with the selected runtime controls, and open its chat.
+    files: [ src/mobile/LaunchScreen.tsx, src/mobile/MobileApp.tsx, src/use-work-items.ts ]
+    tests: [ src/mobile/LaunchScreen.test.tsx, src/mobile/MobileApp.test.tsx, src/use-work-items.test.ts ]
     flows: [ flow.launch_leader, flow.steer_session ]
   - surface: surface.activity
     summary: Open the embedded launch experience or start a new canonical iteration from triage.
