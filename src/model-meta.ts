@@ -5,7 +5,8 @@
  * argument lets each harness
  * declare whether thinking is supported at all and which effort levels
  * apply, alongside the per-model gating Claude needs
- * (Haiku has no thinking; Opus 4.8 and GPT-5.6 Sol support xhigh/max).
+ * (Haiku has no thinking; Opus 4.8, GPT-6 Astra, and GPT-5.6 Sol support
+ * xhigh/max).
  *
  * Source for Claude entries: the Anthropic adaptive-thinking docs and
  * `ModelInfo` in the Claude Agent SDK. Codex entries follow the
@@ -24,7 +25,7 @@ export interface ModelCapability {
 }
 
 const STANDARD_EFFORTS: EffortLevel[] = ["low", "medium", "high"];
-const CODEX_SOL_EFFORTS: EffortLevel[] = [
+const CODEX_MAX_EFFORTS: EffortLevel[] = [
   "low",
   "medium",
   "high",
@@ -32,6 +33,7 @@ const CODEX_SOL_EFFORTS: EffortLevel[] = [
   "max",
 ];
 const OPUS_EFFORTS: EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
+const CODEX_MAX_EFFORT_MODELS = new Set(["gpt-6-astra", "gpt-5.6-sol"]);
 
 /**
  * Per-Claude-model capability table. Keyed by both UI alias
@@ -124,10 +126,10 @@ export function getModelCapability(
   }
   const claudeCap = CLAUDE_MODEL_CAPABILITIES[model];
   if (claudeCap) return claudeCap;
-  if (harness?.name === "codex" && model === "gpt-5.6-sol") {
+  if (harness?.name === "codex" && CODEX_MAX_EFFORT_MODELS.has(model)) {
     return {
       supportsAdaptiveThinking: true,
-      supportedEffortLevels: CODEX_SOL_EFFORTS,
+      supportedEffortLevels: CODEX_MAX_EFFORTS,
     };
   }
   if (harness && harness.capabilities.thinking) {

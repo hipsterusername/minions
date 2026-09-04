@@ -8,35 +8,57 @@
 /**
  * Codex model entries exposed in the UI.
  *
- * GPT-5.6 is a three-tier model family (OpenAI, 2026-07). The generation
- * number ("5.6") is shared; the tier name is a durable capability tier:
- *   - Sol   — flagship, most capable  (`gpt-5.6-sol`)
+ * GPT-6 Astra is the flagship for the hardest end-to-end work. GPT-5.6
+ * remains a three-tier model family whose tier names describe the durable
+ * capability/cost tradeoff:
+ *   - Sol   — strongest GPT-5.6 tier  (`gpt-5.6-sol`)
  *   - Terra — strong lower-cost mid   (`gpt-5.6-terra`)
  *   - Luna  — fastest / cheapest      (`gpt-5.6-luna`)
- * The bare `gpt-5.6` generation alias routes to the flagship tier (Sol),
- * matching OpenAI's own routing. Older explicit IDs (`gpt-5`, `gpt-5.5`,
- * `gpt-5.3-codex-spark`, …) are rejected by current Codex accounts, so they
- * resolve forward to the nearest current tier.
+ * The bare `gpt-5.6` generation alias continues to route to Sol. Older
+ * explicit IDs (`gpt-5`, `gpt-5.5`, `gpt-5.3-codex-spark`, …) resolve
+ * forward to the nearest current GPT-5.6 tier.
  */
+export const CODEX_ASTRA_MODEL_ID = "gpt-6-astra";
 export const CODEX_SOL_MODEL_ID = "gpt-5.6-sol";
 export const CODEX_TERRA_MODEL_ID = "gpt-5.6-terra";
 export const CODEX_LUNA_MODEL_ID = "gpt-5.6-luna";
 
-/** Flagship tier is the default when a caller asks for Codex without a tier. */
-export const CODEX_DEFAULT_MODEL_ID = CODEX_SOL_MODEL_ID;
+/** The current flagship is the default when a caller asks for Codex. */
+export const CODEX_DEFAULT_MODEL_ID = CODEX_ASTRA_MODEL_ID;
 
 export const CODEX_STATIC_MODELS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: CODEX_ASTRA_MODEL_ID, label: "GPT-6 Astra" },
   { id: CODEX_SOL_MODEL_ID, label: "GPT-5.6 Sol" },
   { id: CODEX_TERRA_MODEL_ID, label: "GPT-5.6 Terra" },
   { id: CODEX_LUNA_MODEL_ID, label: "GPT-5.6 Luna" },
 ];
 
 export const CODEX_MODEL_POLICY = {
-  leader: [CODEX_SOL_MODEL_ID, CODEX_TERRA_MODEL_ID, CODEX_LUNA_MODEL_ID],
+  leader: [
+    CODEX_ASTRA_MODEL_ID,
+    CODEX_SOL_MODEL_ID,
+    CODEX_TERRA_MODEL_ID,
+    CODEX_LUNA_MODEL_ID,
+  ],
   minion: {
-    mechanical: [CODEX_LUNA_MODEL_ID, CODEX_TERRA_MODEL_ID, CODEX_SOL_MODEL_ID],
-    standard: [CODEX_TERRA_MODEL_ID, CODEX_LUNA_MODEL_ID, CODEX_SOL_MODEL_ID],
-    reasoning: [CODEX_SOL_MODEL_ID, CODEX_TERRA_MODEL_ID, CODEX_LUNA_MODEL_ID],
+    mechanical: [
+      CODEX_LUNA_MODEL_ID,
+      CODEX_TERRA_MODEL_ID,
+      CODEX_SOL_MODEL_ID,
+      CODEX_ASTRA_MODEL_ID,
+    ],
+    standard: [
+      CODEX_TERRA_MODEL_ID,
+      CODEX_LUNA_MODEL_ID,
+      CODEX_SOL_MODEL_ID,
+      CODEX_ASTRA_MODEL_ID,
+    ],
+    reasoning: [
+      CODEX_ASTRA_MODEL_ID,
+      CODEX_SOL_MODEL_ID,
+      CODEX_TERRA_MODEL_ID,
+      CODEX_LUNA_MODEL_ID,
+    ],
   },
 } as const;
 
@@ -45,7 +67,8 @@ export const CODEX_MODEL_POLICY = {
  * Lookup is done after lowercasing the input, so aliases are case-insensitive.
  */
 const CODEX_MODEL_ALIAS_MAP: Record<string, string> = {
-  // Canonical tier IDs (identity).
+  // Canonical model IDs (identity).
+  [CODEX_ASTRA_MODEL_ID]: CODEX_ASTRA_MODEL_ID,
   [CODEX_SOL_MODEL_ID]: CODEX_SOL_MODEL_ID,
   [CODEX_TERRA_MODEL_ID]: CODEX_TERRA_MODEL_ID,
   [CODEX_LUNA_MODEL_ID]: CODEX_LUNA_MODEL_ID,

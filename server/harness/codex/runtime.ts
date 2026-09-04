@@ -4,13 +4,14 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import type { HarnessReadinessContext, HarnessReadinessProbe } from "../readiness-types.ts";
 import { runProcess, type ProcessRunner } from "../process-runner.ts";
+import { resolveCliRuntime } from "../cli-runtime.ts";
 import { resolveCodexCredentials } from "./auth.ts";
 
 const require = createRequire(import.meta.url);
 
 export interface CodexRuntime {
   executable: string;
-  source: "env_override" | "sdk_bundled";
+  source: "env_override" | "sdk_bundled" | "path";
   env: NodeJS.ProcessEnv;
 }
 
@@ -23,21 +24,33 @@ const TARGETS: Record<string, [string, string]> = {
   "win32:arm64": ["@openai/codex-win32-arm64", "aarch64-pc-windows-msvc"],
 };
 
-export function resolveCodexRuntime(env: NodeJS.ProcessEnv = process.env): CodexRuntime | null {
+export function resolveCodexRuntime(
+  env: NodeJS.ProcessEnv = process.env,
+  deps: { resolveBundled?: () => string | null } = {},
+): CodexRuntime | null {
   const credentials = resolveCodexCredentials(env);
   const runtimeEnv = { ...env };
   if (credentials.apiKey) runtimeEnv["CODEX_API_KEY"] = credentials.apiKey;
   const override = credentials.codexPathOverride?.trim();
   if (override) return fs.existsSync(override) ? { executable: override, source: "env_override", env: runtimeEnv } : null;
+  const bundled = (deps.resolveBundled ?? resolveBundledCodexExecutable)();
+  if (bundled) return { executable: bundled, source: "sdk_bundled", env: runtimeEnv };
+  const standalone = resolveCliRuntime("CODEX_PATH", "codex", runtimeEnv);
+  return standalone ? { ...standalone, env: runtimeEnv } : null;
+}
+
+function resolveBundledCodexExecutable(): string | null {
   const target = TARGETS[`${process.platform}:${process.arch}`];
-  if (!target) return null;
-  try {
-    const sdkRequire = createRequire(fileURLToPath(import.meta.resolve("@openai/codex-sdk")));
-    const codexPackage = sdkRequire.resolve("@openai/codex/package.json");
-    const packageJson = createRequire(codexPackage).resolve(`${target[0]}/package.json`);
-    const executable = path.join(path.dirname(packageJson), "vendor", target[1], "bin", process.platform === "win32" ? "codex.exe" : "codex");
-    return fs.existsSync(executable) ? { executable, source: "sdk_bundled", env: runtimeEnv } : null;
-  } catch { return null; }
+  if (target) {
+    try {
+      const sdkRequire = createRequire(fileURLToPath(import.meta.resolve("@openai/codex-sdk")));
+      const codexPackage = sdkRequire.resolve("@openai/codex/package.json");
+      const packageJson = createRequire(codexPackage).resolve(`${target[0]}/package.json`);
+      const executable = path.join(path.dirname(packageJson), "vendor", target[1], "bin", process.platform === "win32" ? "codex.exe" : "codex");
+      if (fs.existsSync(executable)) return executable;
+    } catch { /* Fall through to a standalone Codex CLI on PATH. */ }
+  }
+  return null;
 }
 
 export async function checkCodexReadiness(

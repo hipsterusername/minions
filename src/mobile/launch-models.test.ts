@@ -37,7 +37,7 @@ const CODEX = harness({
   name: "codex",
   account: { provider: "openai" },
   models: [
-    { id: "gpt-5.5", label: "GPT-5.5" },
+    { id: "gpt-6-astra", label: "GPT-6 Astra" },
     { id: "gpt-5.5-codex", label: "GPT-5.5 Codex" },
   ],
 });
@@ -61,7 +61,7 @@ describe("buildLaunchModelGroups", () => {
     const groups = buildLaunchModelGroups([CLAUDE, CODEX]);
     expect(groups.map((g) => g.label)).toEqual(["Anthropic", "OpenAI"]);
     expect(groups[1]!.options).toEqual([
-      { value: "codex::gpt-5.5", harness: "codex", id: "gpt-5.5", label: "GPT-5.5" },
+      { value: "codex::gpt-6-astra", harness: "codex", id: "gpt-6-astra", label: "GPT-6 Astra" },
       { value: "codex::gpt-5.5-codex", harness: "codex", id: "gpt-5.5-codex", label: "GPT-5.5 Codex" },
     ]);
   });

@@ -20,7 +20,7 @@ const REMEDIATION: Record<string, Partial<Record<HarnessReadinessState, HarnessR
     probe_failed: { label: "Retry Claude sign-in", command: "claude auth login" },
   },
   codex: {
-    runtime_missing: { label: "Install the Codex SDK runtime" },
+    runtime_missing: { label: "Install the Codex CLI or SDK runtime" },
     unauthenticated: { label: "Sign in to Codex", command: "codex login" },
     probe_timeout: { label: "Retry the Codex authentication check" },
     probe_failed: { label: "Retry Codex sign-in", command: "codex login" },

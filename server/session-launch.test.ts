@@ -31,9 +31,9 @@ describe("launchSession", () => {
       options: { sessionKey: "s1", cwd: "/work", prompt: "hello", role: "leader", harness: "claude", initialModel: "claude-opus-4-8", permissionMode: "plan" },
       getReadiness: vi.fn(async () => snapshot(["codex"])),
     });
-    expect(result).toMatchObject({ harness: "codex", model: "gpt-5.6-sol", permissionMode: "plan", reasons: ["harness_not_ready", "model_incompatible"] });
+    expect(result).toMatchObject({ harness: "codex", model: "gpt-6-astra", permissionMode: "plan", reasons: ["harness_not_ready", "model_incompatible"] });
     expect(h.events[0]).toMatchObject({ type: "session_launch_resolved", transient: true });
-    expect(h.starts[0]).toMatchObject({ harness: "codex", initialModel: "gpt-5.6-sol", permissionMode: "plan" });
+    expect(h.starts[0]).toMatchObject({ harness: "codex", initialModel: "gpt-6-astra", permissionMode: "plan" });
   });
 
   it("rejects before creating a host when no harness is ready", async () => {

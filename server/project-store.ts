@@ -289,7 +289,7 @@ function defaultProjectSettings(): ProjectSettings {
   return {
     defaultModel: "claude-sonnet-5",
     defaultLeaderHarness: "codex",
-    defaultLeaderModel: "gpt-5.6-sol",
+    defaultLeaderModel: "gpt-6-astra",
     defaultLeaderThinkingConfig: DEFAULT_LEADER_THINKING_CONFIG,
     defaultMinionHarness: "claude",
     defaultMinionModel: "claude-sonnet-5",

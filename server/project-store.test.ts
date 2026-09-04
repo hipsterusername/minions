@@ -125,7 +125,7 @@ describe("initSidecar / openProjectDb", () => {
 
     const settings = readSettings(project);
     expect(settings.defaultModel).toBeTruthy();
-    // Leader defaults to Codex GPT-5.6; minions stay on Claude.
+    // Explicit model selections are preserved when settings are read back.
     expect(settings.defaultLeaderHarness).toBe("codex");
     expect(settings.defaultLeaderModel).toBe("gpt-5.6-sol");
     expect(settings.defaultMinionModel).toBe("claude-sonnet-5");
@@ -146,6 +146,8 @@ describe("initSidecar / openProjectDb", () => {
     const db1 = openProjectDb(project);
     expect(hasSidecar(project)).toBe(true);
     db1.close();
+
+    expect(readSettings(project).defaultLeaderModel).toBe("gpt-6-astra");
 
     const db1b = openProjectDb(project);
     db1b

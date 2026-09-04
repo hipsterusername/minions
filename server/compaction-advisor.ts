@@ -31,7 +31,8 @@ export function contextWindowForModel(model: string | null | undefined): number 
   if (
     normalized.includes("opus") ||
     normalized.includes("fable") ||
-    normalized.includes("gpt-5")
+    normalized.includes("gpt-5") ||
+    normalized.includes("gpt-6")
   ) {
     return DEFAULT_LARGE_CONTEXT_WINDOW_TOKENS;
   }

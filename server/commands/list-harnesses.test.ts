@@ -53,6 +53,7 @@ describe("listHarnesses", () => {
     expect(codex).toBeDefined();
     expect(codex!.capabilities["thinking"]).toBe(true);
     expect(codex!.capabilities["mcp"]).toBe(true);
+    expect(codex!.models).toContainEqual({ id: "gpt-6-astra", label: "GPT-6 Astra" });
     expect(codex!.models.map((m) => m.id)).toContain("gpt-5.6-sol");
     expect(codex!.models.map((m) => m.id)).toContain("gpt-5.6-terra");
     expect(codex!.models.map((m) => m.id)).toContain("gpt-5.6-luna");

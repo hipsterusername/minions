@@ -1,6 +1,10 @@
 
 import { describe, expect, it } from "vitest";
-import { CODEX_STATIC_MODELS, resolveCodexModel } from "./models.ts";
+import {
+  CODEX_MODEL_POLICY,
+  CODEX_STATIC_MODELS,
+  resolveCodexModel,
+} from "./models.ts";
 import {
   buildCodexConfig,
   mapPermission,
@@ -48,13 +52,14 @@ describe("resolveCodexModel", () => {
 
   it.each([
     // Short harness aliases + flagship default.
-    ["codex", "gpt-5.6-sol"],
-    ["default", "gpt-5.6-sol"],
-    ["codex-default", "gpt-5.6-sol"],
+    ["codex", "gpt-6-astra"],
+    ["default", "gpt-6-astra"],
+    ["codex-default", "gpt-6-astra"],
     ["fast", "gpt-5.6-luna"],
     // Bare generation alias routes to the flagship tier.
     ["gpt-5.6", "gpt-5.6-sol"],
-    // Canonical tier IDs are identities.
+    // Canonical model IDs are identities.
+    ["gpt-6-astra", "gpt-6-astra"],
     ["gpt-5.6-sol", "gpt-5.6-sol"],
     ["gpt-5.6-terra", "gpt-5.6-terra"],
     ["gpt-5.6-luna", "gpt-5.6-luna"],
@@ -70,10 +75,11 @@ describe("resolveCodexModel", () => {
   });
 
   it.each([
-    ["CODEX", "gpt-5.6-sol"],
-    ["Default", "gpt-5.6-sol"],
+    ["CODEX", "gpt-6-astra"],
+    ["Default", "gpt-6-astra"],
     ["FAST", "gpt-5.6-luna"],
-    ["Codex", "gpt-5.6-sol"],
+    ["Codex", "gpt-6-astra"],
+    ["GPT-6-ASTRA", "gpt-6-astra"],
     ["GPT-5.6-Sol", "gpt-5.6-sol"],
   ] as const)("resolves alias '%s' case-insensitively", (alias, expected) => {
     expect(resolveCodexModel(alias)).toBe(expected);
@@ -100,14 +106,26 @@ describe("CODEX_STATIC_MODELS", () => {
     }
   });
 
-  it("exposes only the current GPT-5.6 tier options", () => {
+  it("exposes Astra followed by the current GPT-5.6 tier options", () => {
     const ids = CODEX_STATIC_MODELS.map((m) => m.id);
-    expect(ids).toEqual(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
+    expect(ids).toEqual([
+      "gpt-6-astra",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+    ]);
     // Legacy / bare generation IDs are not exposed as selectable options.
     expect(ids).not.toContain("gpt-5");
     expect(ids).not.toContain("gpt-5.6");
     expect(ids).not.toContain("gpt-5.5");
     expect(ids).not.toContain("gpt-5.3-codex-spark");
+  });
+
+  it("prefers Astra for leaders and reasoning minions without displacing lower-cost tiers", () => {
+    expect(CODEX_MODEL_POLICY.leader[0]).toBe("gpt-6-astra");
+    expect(CODEX_MODEL_POLICY.minion.reasoning[0]).toBe("gpt-6-astra");
+    expect(CODEX_MODEL_POLICY.minion.standard[0]).toBe("gpt-5.6-terra");
+    expect(CODEX_MODEL_POLICY.minion.mechanical[0]).toBe("gpt-5.6-luna");
   });
 });
 

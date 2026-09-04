@@ -48,6 +48,7 @@ const CODEX_ENTRY: HarnessListEntry = {
   },
   builtInTools: [],
   models: [
+    { id: "gpt-6-astra", label: "GPT-6 Astra" },
     { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
     { id: "gpt-5.5", label: "GPT-5.5" },
     { id: "gpt-5.4", label: "GPT-5.4" },
@@ -166,9 +167,9 @@ describe("SessionToolbar — model selection picker", () => {
       { sessionKey: null, harness: "claude" },
     );
     fireEvent.click(screen.getByTitle("Model selection"));
-    // The OpenAI provider's default is its first model (GPT-5.6 Sol in the fixture).
+    // The OpenAI provider's default is its first model (GPT-6 Astra in the fixture).
     fireEvent.click(screen.getByRole("tab", { name: /OpenAI/ }));
-    expect(props.onHarnessChange).toHaveBeenCalledWith("codex", "gpt-5.6-sol");
+    expect(props.onHarnessChange).toHaveBeenCalledWith("codex", "gpt-6-astra");
   });
 
   it("scopes the model list to the active provider", () => {
@@ -363,10 +364,13 @@ describe("SessionToolbar — harness-aware models", () => {
     });
   });
 
-  it("offers documented xhigh reasoning for GPT-5.6 Sol", () => {
+  it.each([
+    ["GPT-6 Astra", "gpt-6-astra"],
+    ["GPT-5.6 Sol", "gpt-5.6-sol"],
+  ])("offers documented xhigh reasoning for %s", (_label, model) => {
     const props = renderWithHarnesses(
       [CODEX_ENTRY],
-      { harness: "codex", model: "gpt-5.6-sol" },
+      { harness: "codex", model },
     );
     fireEvent.click(screen.getByTitle("Model selection"));
     fireEvent.click(screen.getByRole("button", { name: "XHigh" }));
@@ -376,10 +380,13 @@ describe("SessionToolbar — harness-aware models", () => {
     });
   });
 
-  it("offers documented max reasoning for GPT-5.6 Sol", () => {
+  it.each([
+    ["GPT-6 Astra", "gpt-6-astra"],
+    ["GPT-5.6 Sol", "gpt-5.6-sol"],
+  ])("offers documented max reasoning for %s", (_label, model) => {
     const props = renderWithHarnesses(
       [CODEX_ENTRY],
-      { harness: "codex", model: "gpt-5.6-sol" },
+      { harness: "codex", model },
     );
     fireEvent.click(screen.getByTitle("Model selection"));
     fireEvent.click(screen.getByRole("button", { name: "Max" }));

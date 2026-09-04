@@ -20,7 +20,7 @@ export interface SessionToolbarProps {
   className?: string;
   sessionKey: string | null;
   status: string;
-  /** Either a Claude alias ("sonnet") or a concrete harness model id ("gpt-5.6-sol"). */
+  /** Either a Claude alias ("sonnet") or a concrete harness model id ("gpt-6-astra"). */
   model: string;
   permissionMode: PermissionMode;
   /** Interrupt callback. When omitted, the interrupt button is not rendered. */
@@ -92,8 +92,8 @@ const EFFORT_DESCRIPTIONS: Record<EffortLevel, string> = {
   low: "Skip thinking when possible — fastest, cheapest",
   medium: "Light reasoning on harder requests",
   high: "Always think (default) — deep reasoning",
-  xhigh: "Deeper exploration — Opus 4.8 and GPT-5.6 Sol",
-  max: "Maximum effort — GPT-5.6 Sol and supported models",
+  xhigh: "Deeper exploration — Opus 4.8, GPT-6 Astra, and GPT-5.6 Sol",
+  max: "Maximum effort — GPT-6 Astra, GPT-5.6 Sol, and supported models",
 };
 
 // Shared button style base

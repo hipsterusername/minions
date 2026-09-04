@@ -69,7 +69,8 @@ export function mapPermission(
 /**
  * Map a Minions thinking effort level to a Codex ModelReasoningEffort value.
  *
- * The stable Codex CLI accepts GPT-5.6's documented `max` value, but the
+ * The stable Codex CLI accepts GPT-6 Astra and GPT-5.6 Sol's documented
+ * `max` value, but the
  * current TypeScript SDK's `ModelReasoningEffort` declaration still stops at
  * `xhigh`. Keep the compatibility assertion isolated here while forwarding
  * the value unchanged to the CLI.

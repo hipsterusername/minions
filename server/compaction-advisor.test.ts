@@ -44,7 +44,7 @@ describe("compaction advisor", () => {
   it("uses a large local default for opus/fable-tier models and 200k fallback", () => {
     expect(contextWindowForModel("claude-opus-4-5")).toBe(DEFAULT_LARGE_CONTEXT_WINDOW_TOKENS);
     expect(contextWindowForModel("fable-5")).toBe(DEFAULT_LARGE_CONTEXT_WINDOW_TOKENS);
+    expect(contextWindowForModel("gpt-6-astra")).toBe(DEFAULT_LARGE_CONTEXT_WINDOW_TOKENS);
     expect(contextWindowForModel("unknown-small")).toBe(FALLBACK_CONTEXT_WINDOW_TOKENS);
   });
 });
-
