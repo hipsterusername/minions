@@ -6,14 +6,22 @@ import type { PortDefinition } from "./graph.ts";
 import { PortDot } from "./components/PortDot.tsx";
 import type { PortInfo } from "./components/PortDot.tsx";
 import { wheelDetector } from "./wheel-detector.ts";
-import { canvasScale } from "./canvas-scale.ts";
+import { useCanvasNodeDrag } from "./use-canvas-node-drag.ts";
+import { LeaderDragCard } from "./LeaderDragCard.tsx";
 import type { SocketSubscribe } from "./use-socket.ts";
 
 interface CanvasNodeProps {
   node: CanvasNode;
   isSelected: boolean;
+  parked?: boolean | undefined;
+  zoneConnections?: string | undefined;
+  dragZoneName?: string | undefined;
+  dragNodeCount?: number | undefined;
+  /** Hide the live renderer while its moving group is represented by a preview. */
+  isDragPreview?: boolean | undefined;
+  onMoveToZone?: ((nodeId: string) => void) | undefined;
   onSelect: (id: string, additive: boolean) => void;
-  onMove: (id: string, position: Position) => void;
+  onMove: (id: string, position: Position, cancelled?: boolean) => void;
   onUpdateData: (id: string, data: unknown) => void;
   socketSend?: ((data: unknown) => void) | undefined;
   socketSubscribe?: SocketSubscribe | undefined;
@@ -51,9 +59,9 @@ interface CanvasNodeProps {
   /** Set of "nodeId:portId" keys for all ports that have at least one edge */
   connectedPorts?: Set<string> | undefined;
   /** Called when the user starts dragging this node */
-  onDragStart?: ((nodeId: string) => void) | undefined;
+  onDragStart?: ((nodeId: string, event?: MouseEvent) => void) | undefined;
   /** Called when the user stops dragging this node */
-  onDragEnd?: ((nodeId: string) => void) | undefined;
+  onDragEnd?: ((nodeId: string, event?: MouseEvent) => void) | undefined;
   /** True when a droppable node is hovering over this node (context-group) */
   isDropTarget?: boolean | undefined;
   /** True when this node is currently being dragged by the user.
@@ -137,6 +145,12 @@ export function isPortDynamicallyHidden(
 export const CanvasNodeComponent = memo(function CanvasNodeComponent({
   node,
   isSelected,
+  parked = false,
+  zoneConnections,
+  dragZoneName,
+  dragNodeCount,
+  isDragPreview = false,
+  onMoveToZone,
   onSelect,
   onMove,
   onUpdateData,
@@ -169,108 +183,10 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
 }: CanvasNodeProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
   const [isResizing, setIsResizing] = useState(false);
-  const dragRef = useRef<{
-    startX: number;
-    startY: number;
-    nodeStartX: number;
-    nodeStartY: number;
-  } | null>(null);
-
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      if (e.button !== 0) return;
-
-      // Don't steal drag from interactive elements — let them handle their own
-      // mouse events so text inside inputs/textareas remains selectable.
-      const target = e.target as Element;
-      const interactiveTags = new Set(["input", "textarea", "select", "button", "a", "label"]);
-      if (
-        interactiveTags.has(target.tagName.toLowerCase()) ||
-        target.closest("[contenteditable]") ||
-        target.closest("[data-no-drag]")
-      ) {
-        return;
-      }
-
-      e.stopPropagation();
-      // Prevent the browser from starting a text-selection drag from this
-      // mousedown. Interactive children are excluded above, so this only
-      // fires when we're actually initiating a node-move gesture.
-      e.preventDefault();
-
-      // e.preventDefault() above suppresses the browser's natural focus-shift,
-      // meaning any previously-focused child (textarea, input, etc.) stays as
-      // document.activeElement. That would swallow canvas hotkeys like Delete.
-      // Explicitly blur it so keyboard events route to the window level.
-      if (
-        document.activeElement &&
-        document.activeElement !== document.body &&
-        document.activeElement !== document.documentElement
-      ) {
-        (document.activeElement as HTMLElement).blur();
-      }
-
-      // ── Multi-select drag UX ──
-      // When clicking a node that's already part of a multi-selection WITHOUT
-      // shift, defer the "narrow to single" selection until mouseup — so the
-      // user can start dragging the whole group without losing the selection.
-      const isPartOfMultiSelect = isSelected && !e.shiftKey;
-      if (!isPartOfMultiSelect) {
-        onSelect(node.id, e.shiftKey);
-      }
-
-      // Disable text selection for the whole document while dragging so that
-      // fast mouse moves don't accidentally highlight content under the cursor.
-      const prevUserSelect = document.body.style.userSelect;
-      document.body.style.userSelect = "none";
-
-      dragRef.current = {
-        startX: e.clientX,
-        startY: e.clientY,
-        nodeStartX: node.position.x,
-        nodeStartY: node.position.y,
-      };
-
-      let didDrag = false;
-      onDragStart?.(node.id);
-
-      const handleMouseMove = (ev: MouseEvent) => {
-        if (!dragRef.current) return;
-        const scale = canvasScale.current;
-        const dx = (ev.clientX - dragRef.current.startX) / scale;
-        const dy = (ev.clientY - dragRef.current.startY) / scale;
-        // Only count as a drag if we've moved at least 3px (avoids jitter
-        // on click from accidentally narrowing multi-select)
-        if (!didDrag && Math.abs(dx) + Math.abs(dy) > 3 / scale) {
-          didDrag = true;
-        }
-        onMove(node.id, {
-          x: dragRef.current.nodeStartX + dx,
-          y: dragRef.current.nodeStartY + dy,
-        });
-      };
-
-      const handleMouseUp = () => {
-        dragRef.current = null;
-        onDragEnd?.(node.id);
-
-        // If the node was part of a multi-select and the user clicked
-        // without dragging, narrow to single selection now.
-        if (isPartOfMultiSelect && !didDrag) {
-          onSelect(node.id, false);
-        }
-
-        // Restore whatever user-select was set before the drag started.
-        document.body.style.userSelect = prevUserSelect;
-        window.removeEventListener("mousemove", handleMouseMove);
-        window.removeEventListener("mouseup", handleMouseUp);
-      };
-
-      window.addEventListener("mousemove", handleMouseMove);
-      window.addEventListener("mouseup", handleMouseUp);
-    },
-    [node.id, node.position, isSelected, onSelect, onMove, onDragStart, onDragEnd],
-  );
+  const { pointer: dragPointer, onMouseDown: handleMouseDown } = useCanvasNodeDrag({
+    node, isSelected, onSelect, onMove, onDragStart, onDragEnd,
+  });
+  const hiddenForDrag = isDragPreview || (!!dragPointer && node.type === "leader");
 
   /** Absorb mouse-wheel zoom events on nodes so the canvas never zooms
    *  while the pointer is over a node. Trackpad pan events are allowed
@@ -423,13 +339,27 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
   }
 
   return (
+    <>
+    {dragPointer && hiddenForDrag && <LeaderDragCard node={node} pointer={dragPointer} zoneName={dragZoneName} count={dragNodeCount} />}
     <div
       ref={nodeRef}
       className="canvas-node-card"
+      data-canvas-node-id={node.id}
+      data-parked={parked || undefined}
+      inert={hiddenForDrag ? true : undefined}
+      onContextMenu={onMoveToZone ? event => {
+        if (!event.currentTarget.contains(event.target as Node) || (event.target as Element).closest("input,textarea,[contenteditable=true]")) return;
+        event.preventDefault(); event.stopPropagation(); onMoveToZone(node.id);
+      } : undefined}
       onMouseDown={handleMouseDown}
       onDoubleClick={handleDoubleClick}
       onWheel={handleWheel}
       style={{
+        display: parked ? "none" : undefined,
+        // Keep the live renderer and its geometry mounted while the drag card takes over.
+        visibility: hiddenForDrag ? "hidden" : undefined,
+        opacity: hiddenForDrag ? 0 : undefined,
+        pointerEvents: hiddenForDrag ? "none" : undefined,
         position: "absolute",
         // Use translate3d instead of left/top — this promotes the node to its
         // own compositor layer so position changes during drag skip layout
@@ -474,7 +404,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
               ? 0                           // context groups always stay below children
               : isSelected ? 10 : 1,
         // Brief scale-in on mount so newly added nodes catch the eye
-        animation: "nodeEnter 0.25s cubic-bezier(0.22, 1, 0.36, 1) both",
+        animation: hiddenForDrag ? "none" : "nodeEnter 0.25s cubic-bezier(0.22, 1, 0.36, 1) both",
         // Lift effect when dragging over a group
         ...(isBeingDragged && {
           filter: "drop-shadow(0 12px 24px var(--overlay-bg))",
@@ -483,6 +413,8 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
     >
       {/* Port dots — rendered outside the inner node renderer so they
           are never clipped by overflow:hidden containers */}
+      {zoneConnections && <div className="canvas-zone-connection-label" style={{ position: "absolute", top: -24, left: 0,
+        fontSize: 11, color: "var(--text-secondary)", background: "var(--bg-secondary)", padding: "3px 6px", borderRadius: 5 }}>{zoneConnections}</div>}
       {portDots}
 
       <NodeRenderer
@@ -510,5 +442,6 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
         isBeingDragged={isBeingDragged}
       />
     </div>
+    </>
   );
 });

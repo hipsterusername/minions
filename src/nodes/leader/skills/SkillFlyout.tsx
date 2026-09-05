@@ -1,3 +1,4 @@
+import { SkillIcon } from "../../../components/SkillIcon.tsx";
 import {
   useEffect,
   useLayoutEffect,
@@ -370,7 +371,7 @@ export function SkillFlyout({
                           style={{ "--skill-color": skill.accentColor } as CSSProperties}
                         >
                           <span className="skill-flyout__skill-icon" aria-hidden="true">
-                            {skill.icon}
+                            <SkillIcon skill={skill} />
                           </span>
                           <div className="skill-flyout__skill-copy">
                             <strong>{skill.name}</strong>
@@ -457,7 +458,7 @@ export function SkillFlyout({
                 >
                   <header>
                     <span className="skill-flyout__skill-icon" aria-hidden="true">
-                      {skill.icon}
+                      <SkillIcon skill={skill} />
                     </span>
                     <div>
                       <h3>{skill.name}</h3>

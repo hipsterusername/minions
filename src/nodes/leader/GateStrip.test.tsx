@@ -46,10 +46,10 @@ describe("GateStrip", () => {
   it("renders honest status chips and hides not-required gates", () => {
     render(<GateStrip gates={verdict()} sessionKey="leader-1" socketSend={vi.fn()} />);
 
-    expect(screen.getByRole("button", { name: /Tests Passed/ })).toHaveTextContent("✓");
-    expect(screen.getByRole("button", { name: /Review Pending/ })).toHaveTextContent("⚠");
-    expect(screen.getByRole("button", { name: /Security Failed/ })).toHaveTextContent("✕");
-    expect(screen.getByRole("button", { name: /Docs Waived/ })).toHaveTextContent("~");
+    expect(screen.getByRole("button", { name: /Tests Passed/ }).querySelector('svg[data-minions-icon="check"]')).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByRole("button", { name: /Review Pending/ }).querySelector('svg[data-minions-icon="warning"]')).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByRole("button", { name: /Security Failed/ }).querySelector('svg[data-minions-icon="close"]')).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByRole("button", { name: /Docs Waived/ }).querySelector('svg[data-minions-icon="waived"]')).toHaveAttribute("aria-hidden", "true");
     expect(screen.queryByText("Mobile")).not.toBeInTheDocument();
   });
 

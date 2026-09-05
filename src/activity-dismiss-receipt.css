@@ -1,0 +1,6 @@
+.act-dismiss-receipt { margin: 8px 16px; padding: 12px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-secondary); font-size: 12px; }
+.act-dismiss-receipt p { margin: 0 0 8px; font-weight: 600; }
+.act-dismiss-receipt > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-block: 6px; }
+.act-dismiss-receipt button { font: inherit; color: var(--text-primary); background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: 5px; padding: 6px 10px; cursor: pointer; }
+.act-dismiss-receipt button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.act-dismiss-receipt small { color: var(--text-secondary); }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   getProjectContext,
   updateProjectContext,
@@ -21,6 +21,8 @@ interface ProjectPanelProps {
   projectId: string;
   projectPath: string;
   projectName: string;
+  /** Viewport edge occupied by the visible panel, including its collapsed header. */
+  onRightEdgeChange?: (right: number) => void;
   onSpawnContextExplorer: () => void;
   socketSubscribe?: SocketSubscribeLike;
   nodes: CanvasNode[];
@@ -125,6 +127,7 @@ export function ProjectPanel({
   projectId,
   projectPath,
   projectName,
+  onRightEdgeChange,
   onSpawnContextExplorer,
   socketSubscribe,
   nodes,
@@ -133,6 +136,21 @@ export function ProjectPanel({
   onFocusNode,
 }: ProjectPanelProps) {
   const [collapsed, setCollapsed] = useState(true);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (!panel || !onRightEdgeChange) return;
+    const measure = () => onRightEdgeChange(panel.getBoundingClientRect().right);
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(panel);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+      onRightEdgeChange(0);
+    };
+  }, [collapsed, projectName, onRightEdgeChange]);
   const userCollapsedRef = useRef(false);
   const [context, setContext] = useState<ProjectContext | null>(null);
   const [editing, setEditing] = useState(false);
@@ -272,10 +290,11 @@ export function ProjectPanel({
 
   if (collapsed) {
     return (
-      <div style={{ position: "absolute", top: 12, left: 16, zIndex: 100 }}>
+      <div ref={panelRef} style={{ position: "absolute", top: 12, left: 16, zIndex: 100 }}>
         <button
           onClick={() => setCollapsed(false)}
           style={{
+            maxWidth: 340,
             padding: "8px 12px",
             background: "var(--bg-secondary)",
             border: "1px solid var(--border-default)",
@@ -291,7 +310,7 @@ export function ProjectPanel({
           }}
         >
           <span style={{ fontSize: 14 }}>&#9776;</span>
-          <span>{projectName}</span>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{projectName}</span>
           {runningCount > 0 && (
             <span
               style={{
@@ -336,6 +355,7 @@ export function ProjectPanel({
 
   return (
     <div
+      ref={panelRef}
       style={{
         position: "absolute",
         top: 12,

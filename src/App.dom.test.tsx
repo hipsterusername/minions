@@ -50,17 +50,20 @@ vi.mock("./ProjectHeader.tsx", () => ({
     name,
     onRename,
     onBack,
+    onSwitchProject,
     onViewChange,
   }: {
     name: string;
     onRename: (name: string) => void;
     onBack: () => void;
+    onSwitchProject: (id: string, path: string) => void;
     onViewChange: (view: string) => void;
   }) => (
     <div>
       <h1>{name}</h1>
       <button onClick={() => onRename("Beta Project")}>Rename Project</button>
       <button onClick={onBack}>Back To Projects</button>
+      <button onClick={() => onSwitchProject("project-2", "/tmp/beta")}>Switch To Beta</button>
       <button onClick={() => onViewChange("canvas")}>Go To Canvas</button>
     </div>
   ),
@@ -151,6 +154,31 @@ describe("App document title", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Back To Projects" }));
     expect(document.title).toBe("Minions");
+  });
+
+  it("loads a project selected from the header switcher", async () => {
+    vi.mocked(getProject).mockImplementation(async (id) => ({
+      id,
+      path: id === "project-2" ? "/tmp/beta" : "/tmp/alpha",
+      name: id === "project-2" ? "Beta Project" : "Alpha Project",
+      transform: { x: 0, y: 0, scale: 1 },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      nodes: [],
+      graph: { edges: [] },
+      settings: {},
+      skills: [],
+    }));
+    render(<App />);
+
+    fireEvent.click(await screen.findByText("Recent Alpha"));
+    await waitFor(() => expect(document.title).toBe("Alpha Project (Minions)"));
+    fireEvent.click(screen.getByRole("button", { name: "Switch To Beta" }));
+
+    await waitFor(() => {
+      expect(getProject).toHaveBeenCalledWith("project-2");
+      expect(document.title).toBe("Beta Project (Minions)");
+    });
   });
 });
 

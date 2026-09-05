@@ -51,3 +51,41 @@ describe("ProjectPanel context updates", () => {
     expect(screen.getByText(/Minions inherit this context/)).toBeInTheDocument();
   });
 });
+
+
+describe("ProjectPanel navigation clearance", () => {
+  it("reports the visible edge on collapse, expansion, resize and removal", async () => {
+    vi.mocked(getProjectContext).mockResolvedValue({ exists: false, content: "" });
+    let collapsedRight = 146;
+    const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return { right: this.style.width === "340px" ? 358 : collapsedRight } as DOMRect;
+    });
+    let notifyResize = () => {};
+    const disconnect = vi.fn();
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: () => void) { notifyResize = callback; }
+      observe() {}
+      disconnect = disconnect;
+    });
+    const onRightEdgeChange = vi.fn();
+    try {
+      const { unmount } = render(<ProjectPanel projectId="workspace-1" projectPath="/source/project"
+        projectName="Project" onSpawnContextExplorer={vi.fn()} nodes={[]} onRightEdgeChange={onRightEdgeChange} />);
+      expect(onRightEdgeChange).toHaveBeenLastCalledWith(146);
+      fireEvent.click(screen.getByRole("button", { name: /Project/ }));
+      await screen.findByText(/No project context configured yet/);
+      expect(onRightEdgeChange).toHaveBeenLastCalledWith(358);
+      fireEvent.click(screen.getByRole("button", { name: "✕" }));
+      expect(onRightEdgeChange).toHaveBeenLastCalledWith(146);
+      collapsedRight = 210;
+      act(() => notifyResize());
+      expect(onRightEdgeChange).toHaveBeenLastCalledWith(210);
+      unmount();
+      expect(onRightEdgeChange).toHaveBeenLastCalledWith(0);
+      expect(disconnect).toHaveBeenCalled();
+    } finally {
+      bounds.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+});

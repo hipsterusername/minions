@@ -56,7 +56,7 @@ describe("activityFromMessage", () => {
       activityFromMessage({
         type: "wait_state",
         sessionKey: "s1",
-        action: "wait",
+        action: "started",
         reason: "waiting",
         timestamp: 1,
       } as ServerMessage)?.attention,
@@ -312,7 +312,7 @@ describe("reduceSessionActivity", () => {
     let state = reduceSessionActivity(emptyState(), {
       type: "wait_state",
       sessionKey: "a",
-      action: "wait",
+      action: "started",
       reason: "needs you",
       timestamp: 10,
     } as ServerMessage);
@@ -327,5 +327,62 @@ describe("reduceSessionActivity", () => {
     } as ServerMessage);
     expect(state.activities["a"]!.text).toBe("still thinking");
     expect(state.attention["a"]).toBe(true);
+  });
+});
+
+describe("review lifecycle snapshot ordering", () => {
+  const dismissed = {
+    reviewState: "completion_to_review" as const,
+    reviewReason: "Read report", finalReport: "Done", finalDashboardRevision: null,
+    dashboardRevision: 0, terminalReason: "completed" as const, terminalAt: 10,
+    acknowledgedAt: null, dismissedAt: 20, lifecycleRevision: 4,
+  };
+  const stale = { ...dismissed, dismissedAt: null, lifecycleRevision: 3 };
+
+  it.each(["session_list", "sync_response"] as const)(
+    "does not resurrect a dismissed session from a delayed %s",
+    (type) => {
+      const start = { ...emptyState(), sessions: [session({ reviewLifecycle: dismissed })] };
+      const message = type === "session_list"
+        ? { type, sessions: [session({ reviewLifecycle: stale })] }
+        : { type, sessionKey: "s1", found: true, reviewLifecycle: stale };
+      const next = reduceSessionActivity(start, message as ServerMessage);
+      expect(next.sessions[0]?.reviewLifecycle).toEqual(dismissed);
+      const restored = { ...dismissed, dismissedAt: null, lifecycleRevision: 5 };
+      const fresh = type === "session_list"
+        ? { type, sessions: [session({ reviewLifecycle: restored })] }
+        : { type, sessionKey: "s1", found: true, reviewLifecycle: restored };
+      expect(reduceSessionActivity(next, fresh as ServerMessage).sessions[0]?.reviewLifecycle)
+        .toEqual(restored);
+    },
+  );
+
+  it("preserves dismissal through compact refreshes in the live hook", () => {
+    let emit: (message: ServerMessage) => void = () => {};
+    const subscribe = ((_topic: unknown, listener: (message: ServerMessage) => void) => {
+      emit = listener;
+      return () => {};
+    }) as SocketSubscribe;
+    const { result } = renderHook(() => useSessionActivity(subscribe));
+    act(() => emit({ type: "session_list", sessions: [session({ reviewLifecycle: stale })] } as ServerMessage));
+    act(() => emit({ type: "session_lifecycle_changed", sessionKey: "s1", lifecycle: dismissed, timestamp: 20 } as ServerMessage));
+    act(() => emit({ type: "session_list", sessions: [session()] } as ServerMessage));
+    act(() => emit({ type: "sync_response", sessionKey: "s1", found: true, reviewLifecycle: stale } as ServerMessage));
+    expect(result.current.mobileSessions[0]?.reviewLifecycle).toEqual(dismissed);
+  });
+});
+
+
+describe("wait completion attention", () => {
+  it.each(["completed", "cancelled"])("clears a started wait on %s", (action) => {
+    let state = reduceSessionActivity(emptyState(), {
+      type: "wait_state", sessionKey: "s1", action: "started", reason: "Waiting for tasks", scheduledAt: 10,
+    } as ServerMessage);
+    expect(state.attention["s1"]).toBe(true);
+    expect(state.activities["s1"]?.timestamp).toBe(10);
+    state = reduceSessionActivity(state, {
+      type: "wait_state", sessionKey: "s1", action, reason: "Wait ended", timestamp: 20,
+    } as ServerMessage);
+    expect(state.attention["s1"]).toBe(false);
   });
 });

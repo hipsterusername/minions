@@ -48,10 +48,11 @@ function renderPromptBar({
 }
 
 describe("LeaderPromptBar slash commands", () => {
-  it("shows all three context shortcuts for a slash", () => {
+  it("shows context shortcuts and Graph for a slash", () => {
     renderPromptBar({ initialInput: "/" });
 
-    expect(screen.getAllByRole("option")).toHaveLength(3);
+    expect(screen.getAllByRole("option")).toHaveLength(4);
+    expect(screen.getByText("Graph")).toBeInTheDocument();
     expect(screen.getByText("Implement")).toBeInTheDocument();
     expect(screen.getByText("Fix")).toBeInTheDocument();
     expect(screen.getByText("Review")).toBeInTheDocument();
@@ -68,6 +69,18 @@ describe("LeaderPromptBar slash commands", () => {
 
     expect(screen.getAllByRole("option")).toHaveLength(1);
     expect(screen.getByRole("option", { name: /Review/ })).toBeInTheDocument();
+  });
+
+  it.each(["/graph", "/crew"])("invokes Graph from %s with Enter", (input) => {
+    const { onSubmit } = renderPromptBar({ initialInput: input });
+    const command = slashCommands.find(({ id }) => id === "task-graph")!;
+    const option = screen.getByRole("option", { name: /Graph/ });
+    expect(option.querySelector(".crew-icon")).not.toBeNull();
+    const composer = screen.getByLabelText("Leader prompt");
+    fireEvent.keyDown(composer, { key: "Enter" });
+    expect(composer).toHaveValue(command.insertText);
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it("inserts the highlighted prompt on ArrowDown and Enter without submitting", () => {

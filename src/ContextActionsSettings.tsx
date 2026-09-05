@@ -1,3 +1,4 @@
+import { SkillIcon } from "./components/SkillIcon.tsx";
 import { useEffect, useId, useMemo, useState } from "react";
 import {
   AlertTriangle,
@@ -323,7 +324,7 @@ export function ContextActionsSettings({
                     const skill = availableSkills.find((candidate) => candidate.id === skillId);
                     return (
                       <span key={skillId} className="context-actions__skill-chip" data-missing={!skill}>
-                        <span aria-hidden="true">{skill?.icon ?? "?"}</span>
+                        <span aria-hidden="true">{skill ? <SkillIcon skill={skill} /> : "?"}</span>
                         <strong>{skill?.name ?? skillId}</strong>
                       </span>
                     );
@@ -366,7 +367,7 @@ export function ContextActionsSettings({
                       <p className="context-actions__empty-skills">No matching Skills.</p>
                     ) : filteredSkills.map((skill) => {
                       const checked = draft.skillIds.includes(skill.id);
-                      return <label key={skill.id} data-checked={checked}><input type="checkbox" checked={checked} onChange={() => setDraft({ ...draft, skillIds: checked ? draft.skillIds.filter((id) => id !== skill.id) : [...draft.skillIds, skill.id] })} /><span>{skill.icon}</span><span><strong>{skill.name}</strong><small>{skill.description}</small></span>{checked && <Check size={13} />}</label>;
+                      return <label key={skill.id} data-checked={checked}><input type="checkbox" checked={checked} onChange={() => setDraft({ ...draft, skillIds: checked ? draft.skillIds.filter((id) => id !== skill.id) : [...draft.skillIds, skill.id] })} /><span><SkillIcon skill={skill} /></span><span><strong>{skill.name}</strong><small>{skill.description}</small></span>{checked && <Check size={13} />}</label>;
                     })}
                   </div>
                 </div>

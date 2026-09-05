@@ -1,15 +1,41 @@
 import { useCallback, useRef, useState } from "react";
 import type { CanvasAction, CanvasNode } from "./types.ts";
+import { activeWorkspaceId, createZone, GLOBAL_WORKSPACE_ID, moveToZone, readZones, zoneMembership, ZONE_NODE_TYPE } from "./canvas-zones.ts";
 
 export function canvasReducer(
   state: CanvasNode[],
   action: CanvasAction,
 ): CanvasNode[] {
   switch (action.type) {
-    case "ADD_NODE":
-      return [...state, action.node];
+    case "SET_ACTIVE_WORKSPACE": {
+      const id = action.id === GLOBAL_WORKSPACE_ID || readZones(state).some(z => z.id === action.id) ? action.id : GLOBAL_WORKSPACE_ID;
+      const global = createZone(GLOBAL_WORKSPACE_ID, "Global");
+      return [...state.filter(n => n.id !== GLOBAL_WORKSPACE_ID), { ...global, data: { ...global.data, activeWorkspaceId: id } }];
+    }
+    case "UPDATE_ZONES": {
+      // Apply membership and placement atomically, preserving live session data.
+      const positions = new Map(action.moves.map((move) => [move.id, move.position]));
+      const content = state.filter((node) => node.type !== ZONE_NODE_TYPE || node.id === GLOBAL_WORKSPACE_ID).map((node) => {
+        const position = positions.get(node.id);
+        return position ? { ...node, position } : node;
+      });
+      return [...content, ...readZones([...content, ...action.zones.filter(node => node.id !== GLOBAL_WORKSPACE_ID)])];
+    }
+    case "ADD_NODE": {
+      const next = [...state, action.node];
+      const owner = (action.node.data as { leaderId?: string } | null)?.leaderId;
+      const owned = (action.node.type === "minion" || action.node.type === "render") && owner && state.some(n => n.id === owner && n.type === "leader");
+      const workspace = owned ? zoneMembership(state).get(owner)?.id ?? GLOBAL_WORKSPACE_ID : activeWorkspaceId(state);
+      if (action.node.type === ZONE_NODE_TYPE || workspace === GLOBAL_WORKSPACE_ID) return next;
+      const content = next.filter(n => n.type !== ZONE_NODE_TYPE || n.id === GLOBAL_WORKSPACE_ID);
+      return [...content, ...readZones([...content, ...moveToZone(readZones(next), [action.node.id], workspace)])];
+    }
     case "REMOVE_NODE":
-      return state.filter((n) => n.id !== action.id);
+      return state.filter((n) => (n.id !== action.id || n.id === GLOBAL_WORKSPACE_ID));
+    case "REMOVE_NODES": {
+      const ids = new Set(action.ids);
+      return state.filter((node) => (!ids.has(node.id) || node.id === GLOBAL_WORKSPACE_ID));
+    }
     case "MOVE_NODE":
       return state.map((n) =>
         n.id === action.id ? { ...n, position: action.position } : n,
@@ -20,7 +46,7 @@ export function canvasReducer(
       );
     case "UPDATE_NODE_DATA":
       return state.map((n) =>
-        n.id === action.id ? { ...n, data: action.data } : n,
+        n.id === action.id && n.id !== GLOBAL_WORKSPACE_ID ? { ...n, data: action.data } : n,
       );
     case "SET_NODES":
       return action.nodes;
@@ -39,6 +65,7 @@ export function canvasReducer(
 const HISTORY_ACTIONS = new Set<CanvasAction["type"]>([
   "ADD_NODE",
   "REMOVE_NODE",
+  "REMOVE_NODES",
   "MOVE_NODE",
   "RESIZE_NODE",
   "UPDATE_NODE_DATA",
@@ -83,6 +110,7 @@ export function useCanvasHistory(): CanvasHistoryState {
       futureRef.current = [];
     }
 
+    nodesRef.current = next;
     setNodes(next);
   }, []);
 
@@ -91,6 +119,7 @@ export function useCanvasHistory(): CanvasHistoryState {
     if (past.length === 0) return;
     const previous = past.pop()!;
     futureRef.current.push(nodesRef.current);
+    nodesRef.current = previous;
     setNodes(previous);
   }, []);
 
@@ -99,6 +128,7 @@ export function useCanvasHistory(): CanvasHistoryState {
     if (future.length === 0) return;
     const next = future.pop()!;
     pastRef.current.push(nodesRef.current);
+    nodesRef.current = next;
     setNodes(next);
   }, []);
 

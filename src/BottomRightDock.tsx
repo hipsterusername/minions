@@ -95,7 +95,7 @@ function useDockDensity(): DockDensity {
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export type DockPanelId = "sessions" | "map" | "mcp" | "skills";
+export type DockPanelId = "sessions" | "map" | "mcp" | "skills" | "zones";
 
 export interface DockBadge {
   /** Numeric badge shown next to the icon. Zero or undefined hides it. */
@@ -116,6 +116,7 @@ interface DockContextValue {
 }
 
 const DockContext = createContext<DockContextValue | null>(null);
+export function useOptionalDock() { return useContext(DockContext); }
 
 // ── Provider ─────────────────────────────────────────────────────────────────
 
@@ -156,7 +157,7 @@ export function DockProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (activePanel == null) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setActivePanel(null);
+      if (e.key === "Escape" && !e.defaultPrevented && !document.querySelector('[role="dialog"], dialog[open]')) setActivePanel(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

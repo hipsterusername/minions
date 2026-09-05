@@ -11,6 +11,9 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
+import { ArrowUp, X } from "lucide-react";
+import "./leader-prompt.css";
+import { PromptAttachmentsContext } from "./use-prompt-attachments.ts";
 import { AutoTextarea } from "../../../components/AutoTextarea.tsx";
 import { LeaderSlashMenu } from "./LeaderSlashMenu.tsx";
 import {
@@ -77,6 +80,7 @@ export function LeaderPromptBar({
   /** Render slash commands at the viewport layer so constrained surfaces do not clip them. */
   portalSlashMenu?: boolean;
 }) {
+  const attachments = useContext(PromptAttachmentsContext);
   const slashCommandContext = useContext(LeaderSlashCommandsContext);
   const availableSlashCommands = slashCommands ?? slashCommandContext?.commands;
   const [menuDismissed, setMenuDismissed] = useState(false);
@@ -101,8 +105,6 @@ export function LeaderPromptBar({
   const overlayMenuSpace = menuOpen && !portalSlashMenu
     ? Math.min(340, matches.length * 52 + 88)
     : 0;
-  const buttonHeight = isOverlay ? 52 : 38;
-  const buttonMinWidth = isOverlay ? 124 : 88;
   const buttonIsPrimary = active && !disabled;
 
   useEffect(() => {
@@ -168,92 +170,89 @@ export function LeaderPromptBar({
       data-testid={`leader-prompt-bar-${variant}`}
       data-no-drag
       className={`leader-prompt-bar leader-prompt-bar--${variant}`}
-      style={{
-        padding: isOverlay
-          ? `${10 + overlayMenuSpace}px 10px 10px`
-          : "8px 10px",
-        borderTop: isOverlay ? "none" : "1px solid var(--border-default)",
-        display: "flex",
-        gap: isOverlay ? 8 : 6,
-        flexShrink: 0,
-        background: isOverlay ? "transparent" : "var(--bg-secondary)",
-        alignItems: "flex-end",
-      }}
+      style={isOverlay ? { paddingTop: 10 + overlayMenuSpace } : undefined}
     >
-      <div className="leader-prompt-bar__input-wrap" ref={inputWrapRef}>
-        {menuOpen && (() => {
-          const menu = (
-            <LeaderSlashMenu
-              id={slashMenuId}
-              commands={matches}
-              selectedIndex={selectedIndex}
-              onSelect={selectCommand}
-              onHover={setSelectedIndex}
-              query={query ?? ""}
-              {...(portalSlashMenu ? { anchorRef: inputWrapRef } : {})}
-            />
-          );
-          return portalSlashMenu && typeof document !== "undefined"
-            ? createPortal(menu, document.body)
-            : menu;
-        })()}
-        <AutoTextarea
-          value={input}
-          onChange={handleInputChange}
-          onKeyDown={handleKeyDown}
-          autoFocus={autoFocus}
-          ariaLabel="Leader prompt"
-          ariaControls={query !== null ? slashMenuId : undefined}
-          ariaExpanded={menuOpen}
-          ariaActiveDescendant={menuOpen && matches[selectedIndex]
-            ? `${slashMenuId}-option-${matches[selectedIndex].id}`
-            : undefined}
-          testId={`leader-prompt-input-${variant}`}
-          placeholder={placeholder}
-          maxRows={isOverlay ? 10 : 8}
-          {...(onTextareaFocus ? { onFocus: onTextareaFocus } : {})}
-          textareaRef={resolvedTextareaRef}
-          style={{
-            fontSize: isOverlay ? 15 : 12,
-            lineHeight: isOverlay ? "24px" : "20px",
-            padding: isOverlay ? "12px 14px" : "8px 10px",
-            minHeight: isOverlay ? 52 : undefined,
-          }}
-        />
+      <div className="leader-prompt-bar__surface">
+        {attachments && attachments.drafts.length > 0 && (
+          <ul className="leader-prompt-bar__attachments" aria-label="Attached context">
+            {attachments.drafts.map(draft => (
+              <li key={draft.id}>
+                {draft.preview && <img src={draft.preview} alt={draft.filename} />}
+                <span>{draft.filename}{!draft.item && !draft.error ? " — Loading…" : ""}
+                  {draft.error && <span role="alert">{draft.error}</span>}
+                </span>
+                <button type="button" aria-label={`Remove ${draft.filename}`}
+                  onClick={() => attachments.remove([draft.id])}><X size={14} /></button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="leader-prompt-bar__input-wrap" ref={inputWrapRef}>
+          {menuOpen && (() => {
+            const menu = (
+              <LeaderSlashMenu
+                id={slashMenuId}
+                commands={matches}
+                selectedIndex={selectedIndex}
+                onSelect={selectCommand}
+                onHover={setSelectedIndex}
+                query={query ?? ""}
+                {...(portalSlashMenu ? { anchorRef: inputWrapRef } : {})}
+              />
+            );
+            return portalSlashMenu && typeof document !== "undefined"
+              ? createPortal(menu, document.body)
+              : menu;
+          })()}
+          <AutoTextarea
+            value={input}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            {...(attachments ? { onPaste: attachments.onPaste } : {})}
+            autoFocus={autoFocus}
+            ariaLabel="Leader prompt"
+            ariaControls={query !== null ? slashMenuId : undefined}
+            ariaExpanded={menuOpen}
+            ariaActiveDescendant={menuOpen && matches[selectedIndex]
+              ? `${slashMenuId}-option-${matches[selectedIndex].id}`
+              : undefined}
+            testId={`leader-prompt-input-${variant}`}
+            placeholder={placeholder}
+            maxRows={isOverlay ? 10 : 8}
+            {...(onTextareaFocus ? { onFocus: onTextareaFocus } : {})}
+            textareaRef={resolvedTextareaRef}
+            style={{
+              fontSize: isOverlay ? 15 : 12,
+              lineHeight: isOverlay ? "24px" : "20px",
+              padding: isOverlay ? "14px 14px 10px" : "12px 12px 8px",
+              minHeight: isOverlay ? 64 : 48,
+              border: 0,
+              borderRadius: 0,
+              background: "transparent",
+              boxShadow: "none",
+              display: "block",
+            }}
+          />
+        </div>
+        <div className="leader-prompt-bar__toolbar">
+          <span className="leader-prompt-bar__hint" aria-hidden="true">
+            {availableSlashCommands?.length ? <span>/ commands</span> : null}
+            {attachments && <span>Paste images or text files</span>}
+            <span>Shift + Enter for a new line</span>
+          </span>
+          <button
+            type="button"
+            className="leader-prompt-bar__submit"
+            data-primary={buttonIsPrimary}
+            onClick={onSubmit}
+            onMouseDown={(e) => e.stopPropagation()}
+            disabled={disabled}
+          >
+            {submitLabel}
+            <ArrowUp size={14} strokeWidth={2} aria-hidden="true" />
+          </button>
+        </div>
       </div>
-      <button
-        type="button"
-        className="leader-prompt-bar__submit"
-        onClick={onSubmit}
-        onMouseDown={(e) => e.stopPropagation()}
-        disabled={disabled}
-        style={{
-          height: buttonHeight,
-          minWidth: buttonMinWidth,
-          padding: isOverlay ? "0 18px" : "0 14px",
-          borderRadius: 6,
-          border: buttonIsPrimary
-            ? "1px solid var(--accent)"
-            : "1px solid var(--border-default)",
-          background: buttonIsPrimary ? "var(--accent)" : "var(--bg-elevated)",
-          color: buttonIsPrimary ? "var(--text-on-accent)" : "var(--text-muted)",
-          fontSize: isOverlay ? 13 : 12,
-          fontWeight: 700,
-          cursor: disabled ? "not-allowed" : "pointer",
-          flexShrink: 0,
-          opacity: disabled ? 0.62 : 1,
-          marginBottom: isOverlay ? 0 : 1,
-          boxShadow: buttonIsPrimary
-            ? "0 2px 8px color-mix(in srgb, var(--accent) 24%, transparent)"
-            : "none",
-          transition:
-            "background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease",
-          whiteSpace: "nowrap",
-          lineHeight: 1,
-        }}
-      >
-        {submitLabel}
-      </button>
     </div>
   );
 }

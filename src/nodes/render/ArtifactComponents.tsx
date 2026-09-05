@@ -7,8 +7,8 @@
  * dashboard node is rendered in the canvas.
  */
 
-import { useState, useEffect } from "react";
-import { createPortal } from "react-dom";
+import { useState } from "react";
+import { ArtifactLightbox } from "./ArtifactLightbox.tsx";
 import type { ImageComponent, FilePreviewComponent, HtmlArtifactComponent } from "../../../shared/render-dsl.ts";
 import { isSafeModelGeneratedImageSrc, toSafeEmbeddedRasterDataUrl } from "../../../shared/render-artifacts.ts";
 import { copyText } from "../../components/CopyButton.tsx";
@@ -33,20 +33,13 @@ export function ImageRenderer({ c }: { c: ImageComponent }) {
   // Defense in depth for restored state and callers using stale data.
   const safeSrc = isSafeModelGeneratedImageSrc(c.src) ? c.src : null;
 
-  useEffect(() => {
-    if (!lightboxOpen) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setLightboxOpen(false);
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [lightboxOpen]);
+
 
   return (
     <>
       <div className="rd-card rd-card--hover rd-fade-in" style={{ ...CARD, overflow: "hidden", padding: 0 }}>
         {safeSrc === null ? (
-          <div role="alert" style={{ padding: 12, color: "var(--text-muted)", fontSize: 11 }}>
+          <div role="alert" style={{ padding: 12, color: "var(--text-muted)", fontSize: "var(--rd-body-size, 14px)" }}>
             External image blocked. Embed PNG, JPEG, GIF, or WebP data instead.
           </div>
         ) : (
@@ -79,7 +72,7 @@ export function ImageRenderer({ c }: { c: ImageComponent }) {
         {c.caption !== undefined && (
           <div style={{
             padding: "6px 12px 8px",
-            fontSize: 11,
+            fontSize: "var(--rd-body-size, 14px)",
             color: "var(--text-muted)",
             lineHeight: 1.4,
             fontStyle: "italic",
@@ -89,37 +82,10 @@ export function ImageRenderer({ c }: { c: ImageComponent }) {
           </div>
         )}
       </div>
-      {safeSrc !== null && lightboxOpen && typeof document !== "undefined" && createPortal(
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Image lightbox"
-          onClick={() => setLightboxOpen(false)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 9999,
-            background: "rgba(0,0,0,0.85)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 24,
-          }}
-        >
-          <img
-            src={safeSrc}
-            alt={c.alt}
-            style={{
-              maxWidth: "100%",
-              maxHeight: "100%",
-              objectFit: "contain",
-              borderRadius: 4,
-              boxShadow: "0 8px 40px rgba(0,0,0,0.5)",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>,
-        document.body,
+      {safeSrc !== null && lightboxOpen && (
+        <ArtifactLightbox label="Image lightbox" onClose={() => setLightboxOpen(false)}>
+          <img src={safeSrc} alt={c.alt} className="dashboard-lightbox-image" />
+        </ArtifactLightbox>
       )}
     </>
   );
@@ -177,7 +143,7 @@ function JsonTree({ text }: { text: string }) {
     parsed = JSON.parse(text) as unknown;
   } catch {
     return (
-      <pre style={{ margin: 0, padding: "10px 12px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--status-error)" }}>
+      <pre style={{ margin: 0, padding: "10px 12px", fontSize: "var(--rd-body-size, 14px)", fontFamily: "var(--font-mono)", color: "var(--status-error)" }}>
         Invalid JSON
       </pre>
     );
@@ -185,7 +151,7 @@ function JsonTree({ text }: { text: string }) {
 
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return (
-      <pre style={{ margin: 0, padding: "10px 12px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-primary)", lineHeight: 1.6, overflowX: "auto" }}>
+      <pre style={{ margin: 0, padding: "10px 12px", fontSize: "var(--rd-body-size, 14px)", fontFamily: "var(--font-mono)", color: "var(--text-primary)", lineHeight: 1.6, overflowX: "auto" }}>
         {JSON.stringify(parsed, null, 2)}
       </pre>
     );
@@ -195,7 +161,7 @@ function JsonTree({ text }: { text: string }) {
   return (
     <div style={{ padding: "8px 12px" }}>
       {entries.map(([key, val]) => (
-        <div key={key} style={{ display: "flex", gap: 8, padding: "3px 0", borderBottom: "1px solid var(--border-default)", fontSize: 11, fontFamily: "var(--font-mono)" }}>
+        <div key={key} style={{ display: "flex", gap: 8, padding: "3px 0", borderBottom: "1px solid var(--border-default)", fontSize: "var(--rd-body-size, 14px)", fontFamily: "var(--font-mono)" }}>
           <span style={{ color: "var(--accent)", flexShrink: 0 }}>{key}</span>
           <span style={{ color: "var(--text-muted)", flexShrink: 0 }}>:</span>
           <span style={{ color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -212,13 +178,13 @@ function JsonTree({ text }: { text: string }) {
 function CsvTable({ text }: { text: string }) {
   const rows = parseCSV(text);
   if (rows.length === 0) {
-    return <div style={{ padding: "10px 12px", color: "var(--text-muted)", fontSize: 11 }}>Empty CSV</div>;
+    return <div style={{ padding: "10px 12px", color: "var(--text-muted)", fontSize: "var(--rd-body-size, 14px)" }}>Empty CSV</div>;
   }
   const headers = rows[0] ?? [];
   const dataRows = rows.slice(1);
   return (
     <div style={{ overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: "var(--font-mono)" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--rd-body-size, 14px)", fontFamily: "var(--font-mono)" }}>
         <thead>
           <tr>
             {headers.map((h, i) => (
@@ -260,16 +226,16 @@ function PreviewBody({ viewMode, content, mime }: PreviewBodyProps) {
       {viewMode === "csv" && <CsvTable text={content} />}
       {viewMode === "image" && (
         imageSrc === null
-          ? <div role="alert" style={{ padding: 12, color: "var(--text-muted)", fontSize: 11 }}>Unsafe image preview blocked.</div>
+          ? <div role="alert" style={{ padding: 12, color: "var(--text-muted)", fontSize: "var(--rd-body-size, 14px)" }}>Unsafe image preview blocked.</div>
           : <img src={imageSrc} alt="file preview" style={{ maxWidth: "100%", display: "block" }} />
       )}
       {viewMode === "hex" && (
-        <pre style={{ margin: 0, padding: "10px 12px", fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-primary)", overflowX: "auto", lineHeight: 1.5 }}>
+        <pre style={{ margin: 0, padding: "10px 12px", fontSize: "var(--rd-label-size, 12px)", fontFamily: "var(--font-mono)", color: "var(--text-primary)", overflowX: "auto", lineHeight: 1.5 }}>
           {hexDump(content)}
         </pre>
       )}
       {viewMode === "text" && (
-        <pre style={{ margin: 0, padding: "10px 12px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-primary)", overflowX: "auto", lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+        <pre style={{ margin: 0, padding: "10px 12px", fontSize: "var(--rd-body-size, 14px)", fontFamily: "var(--font-mono)", color: "var(--text-primary)", overflowX: "auto", lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
           {content}
         </pre>
       )}
@@ -286,7 +252,7 @@ function ActionBtn({ label, onClick }: { label: string; onClick: () => void }) {
       onClick={onClick}
       style={{
         padding: "3px 9px",
-        fontSize: 10,
+        fontSize: "var(--rd-label-size, 12px)",
         fontFamily: "var(--font-mono)",
         background: "var(--bg-elevated)",
         border: "1px solid var(--border-default)",
@@ -307,14 +273,7 @@ export function HtmlArtifactRenderer({ c }: { c: HtmlArtifactComponent }) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const title = c.title ?? "HTML artifact";
 
-  useEffect(() => {
-    if (!lightboxOpen) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setLightboxOpen(false);
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [lightboxOpen]);
+
 
   return (
     <>
@@ -331,7 +290,7 @@ export function HtmlArtifactRenderer({ c }: { c: HtmlArtifactComponent }) {
             <div style={{
               flex: 1,
               minWidth: 0,
-              fontSize: 11,
+              fontSize: "var(--rd-body-size, 14px)",
               fontFamily: "var(--font-mono)",
               fontWeight: 600,
               color: "var(--text-primary)",
@@ -364,70 +323,11 @@ export function HtmlArtifactRenderer({ c }: { c: HtmlArtifactComponent }) {
           />
         </div>
       </div>
-      {lightboxOpen && typeof document !== "undefined" && createPortal(
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={`${title} lightbox`}
-          onClick={() => setLightboxOpen(false)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 9999,
-            background: "rgba(0,0,0,0.85)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 24,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              position: "relative",
-              width: "min(1100px, 92vw)",
-              height: "82vh",
-            }}
-          >
-            <button
-              type="button"
-              aria-label="Close HTML artifact lightbox"
-              onClick={() => setLightboxOpen(false)}
-              style={{
-                position: "absolute",
-                top: -16,
-                right: -16,
-                width: 32,
-                height: 32,
-                borderRadius: 16,
-                border: "1px solid rgba(255,255,255,0.25)",
-                background: "rgba(0,0,0,0.75)",
-                color: "white",
-                cursor: "pointer",
-                fontSize: 18,
-                lineHeight: "30px",
-              }}
-            >
-              ×
-            </button>
-            <iframe
-              sandbox=""
-              srcDoc={c.html}
-              referrerPolicy="no-referrer"
-              title={title}
-              style={{
-                display: "block",
-                width: "100%",
-                height: "100%",
-                border: "1px solid rgba(255,255,255,0.2)",
-                borderRadius: 4,
-                background: "white",
-                boxShadow: "0 8px 40px rgba(0,0,0,0.5)",
-              }}
-            />
-          </div>
-        </div>,
-        document.body,
+      {lightboxOpen && (
+        <ArtifactLightbox label={`${title} lightbox`} onClose={() => setLightboxOpen(false)}>
+          <iframe sandbox="" srcDoc={c.html} referrerPolicy="no-referrer" title={title}
+            className="dashboard-lightbox-html" />
+        </ArtifactLightbox>
       )}
     </>
   );
@@ -461,12 +361,12 @@ function PathSourcePreview({ c }: { c: FilePreviewComponent }) {
   return (
     <div className="rd-card rd-fade-in" style={{ ...CARD, overflow: "hidden" }}>
       <div style={{ padding: "8px 12px", display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid var(--border-default)", background: "var(--bg-elevated)" }}>
-        <span style={{ flex: 1, fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+        <span style={{ flex: 1, fontSize: "var(--rd-body-size, 14px)", fontFamily: "var(--font-mono)", color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
           {displayName}
         </span>
         {enabledActions.includes("copy-path") && <ActionBtn label="Copy path" onClick={handleCopyPath} />}
       </div>
-      <div style={{ padding: "12px 14px", color: "var(--text-muted)", fontSize: 11, fontStyle: "italic" }}>
+      <div style={{ padding: "12px 14px", color: "var(--text-muted)", fontSize: "var(--rd-body-size, 14px)", fontStyle: "italic" }}>
         File content not available client-side. Open and download are disabled for untrusted paths.
       </div>
     </div>
@@ -523,11 +423,11 @@ function InlineSourcePreview({ c }: { c: FilePreviewComponent }) {
     <div className="rd-card rd-fade-in" style={{ ...CARD, overflow: "hidden" }}>
       <div style={{ padding: "8px 12px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", borderBottom: "1px solid var(--border-default)", background: "var(--bg-elevated)" }}>
         {c.filename !== undefined && (
-          <span style={{ flex: 1, fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+          <span style={{ flex: 1, fontSize: "var(--rd-body-size, 14px)", fontFamily: "var(--font-mono)", color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
             {c.filename}
           </span>
         )}
-        <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", flexShrink: 0 }}>
+        <span style={{ fontSize: "var(--rd-label-size, 12px)", color: "var(--text-muted)", fontFamily: "var(--font-mono)", flexShrink: 0 }}>
           {sizeLabel}
         </span>
         {enabledActions.includes("open") && canOpen && <ActionBtn label="Open" onClick={handleOpen} />}
@@ -535,7 +435,7 @@ function InlineSourcePreview({ c }: { c: FilePreviewComponent }) {
       </div>
       <PreviewBody viewMode={viewMode} content={content} mime={srcMime} />
       {isTruncated && (
-        <div style={{ padding: "6px 12px", fontSize: 10, color: "var(--status-warning)", background: "var(--warning-bg)", borderTop: "1px solid var(--border-default)", fontFamily: "var(--font-mono)" }}>
+        <div style={{ padding: "6px 12px", fontSize: "var(--rd-label-size, 12px)", color: "var(--status-warning)", background: "var(--warning-bg)", borderTop: "1px solid var(--border-default)", fontFamily: "var(--font-mono)" }}>
           Truncated at {byteCap} bytes ({bytesOmitted} bytes omitted)
         </div>
       )}

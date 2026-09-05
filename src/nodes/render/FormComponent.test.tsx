@@ -170,7 +170,7 @@ describe("FormComponent — required validation", () => {
     const input = screen.getByLabelText(/Name/);
     expect(input).toBeInvalid();
     expect(input).toHaveAccessibleDescription(/Used on generated reports\..*Name is required/);
-    expect(input).toHaveAttribute("aria-describedby", "name-description name-error");
+    expect(input).toHaveAttribute("aria-describedby", `${input.id}-description ${input.id}-error`);
   });
 
   it("clears the error and calls onSubmit after valid input", () => {
@@ -360,7 +360,7 @@ describe("FormComponent — locked (submitted) state", () => {
 
   it("shows a 'Submitted' badge when locked", () => {
     render(<FormComponent component={submittedForm} onSubmit={vi.fn()} />);
-    expect(screen.getByText(/Submitted/)).toBeInTheDocument();
+    expect(screen.getByText(/Response received ✓/)).toBeInTheDocument();
   });
 
   it("pre-fills inputs with submitted answer values", () => {
@@ -372,7 +372,7 @@ describe("FormComponent — locked (submitted) state", () => {
 
 // ── Test 6: optimistic feedback on submit ──────────────────
 
-describe("FormComponent — optimistic submit feedback", () => {
+describe("FormComponent — authoritative submit feedback", () => {
   const simpleForm: FormComponentType = {
     id: "fb",
     type: "form",
@@ -380,15 +380,15 @@ describe("FormComponent — optimistic submit feedback", () => {
     fields: [{ id: "answer", kind: "text", label: "Answer", default: "hi" }],
   };
 
-  it("locks the form and shows a confirmation line after a valid submit", () => {
+  it("locks the form without claiming receipt after a valid submit", () => {
     render(<FormComponent component={simpleForm} onSubmit={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: /submit/i }));
 
     // Submit button is gone, confirmation is shown, badge appears.
     expect(screen.queryByRole("button", { name: /submit/i })).toBeNull();
-    expect(screen.getByText(/the agent has been notified/i)).toBeInTheDocument();
-    expect(screen.getByText(/Submitted/)).toBeInTheDocument();
+    expect(screen.getByText(/Sending response/)).toBeInTheDocument();
+    expect(screen.queryByText(/Response received/)).toBeNull();
     expect(screen.getByLabelText(/Answer/)).toBeDisabled();
   });
 
@@ -422,7 +422,7 @@ describe("FormComponent — optimistic submit feedback", () => {
 
   it("uses a distinct confirmation copy for agent-locked forms", () => {
     render(<FormComponent component={submittedForm} onSubmit={vi.fn()} />);
-    expect(screen.getByText(/Response received/i)).toBeInTheDocument();
+    expect(screen.getByText(/Response received ✓/)).toBeInTheDocument();
     expect(screen.queryByText(/the agent has been notified/i)).toBeNull();
   });
 });

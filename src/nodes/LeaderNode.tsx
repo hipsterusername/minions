@@ -1,3 +1,4 @@
+import { FormSubmissionProvider } from "./render/FormSubmissionProvider.tsx";
 import { useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore } from "react";
 import { Maximize2, Square, Zap } from "lucide-react";
 import type { NodeRenderProps, ThinkingConfig } from "../types.ts";
@@ -11,11 +12,10 @@ import { useSessionStream } from "../use-session-stream.ts";
 import { SessionToolbar } from "../components/SessionToolbar.tsx";
 import type { PermissionMode } from "../components/SessionToolbar.tsx";
 import { getSkill } from "../skills/registry.ts";
-import type { SkillTemplate } from "../skills/types.ts";
+import { SkillsPill } from "./leader/skills/SkillsPill.tsx";
 import { ResizeHandle } from "../components/ResizeHandle.tsx";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { debugFlagStore } from "../debug.ts";
-import { randomUuid } from "../random-id.ts";
 import { useLeaderFullscreenRequest } from "../use-leader-fullscreen-request.ts";
 import { ConfirmModal } from "../components/ConfirmModal.tsx";
 import { canvasScale } from "../canvas-scale.ts";
@@ -33,15 +33,17 @@ import {
 import { buildSessionContext, extractLeaderCore, msgId } from "./leader/session-context.ts";
 import { EditableTitle } from "./leader/EditableTitle.tsx";
 import {
-  buildContextBlock,
   sendCanvasContextSnapshotIfChanged,
   type CanvasContextSignature,
 } from "../connected-context.ts";
-import { diffContextDelivery, buildContextUpdateBlock } from "../context-delivery.ts";
-import { buildFrozenLeaderFollowUpPrompt, freezeLeaderSystemPrompt, type FrozenLeaderPrompt } from "./leader/frozen-prompt.ts";
+import { type FrozenLeaderPrompt } from "./leader/frozen-prompt.ts";
 import { consumeLeaderInputFocus } from "../leader-focus-request.ts";
-import { applyCanvasWorkItemSnapshot,
+import {
   formatCanvasWorkItemStatus, selectCanvasChangeMode, selectCanvasPrompt } from "./leader/work-item.ts";
+import { useCanvasDelivery } from "./leader/use-canvas-delivery.ts";
+import { useLaunchFeedback } from "./leader/use-launch-feedback.ts";
+import { WorkItemCommandError } from "./leader/work-item.ts";
+import { CanvasDeliveryContext } from "./leader/CanvasDeliveryReceipt.tsx";
 import { useCanvasWorkItem } from "./leader/use-canvas-work-item.ts";
 import { buildInitialLeaderRun, claimLeaderAutoStart, releaseLeaderAutoStart } from "./leader/initial-run.ts";
 import { armLeaderCompletionSound, playLeaderCompletionSound } from "../leader-completion-sound.ts";
@@ -66,15 +68,16 @@ import { LeaderMessageFeed } from "./leader/messages/LeaderMessageFeed.tsx";
 
 import { TaskPlanPanel } from "./leader/TaskPlanPanel.tsx";
 
-import { SkillTagChip } from "./leader/skills/SkillTagChip.tsx";
 import { SkillFlyout } from "./leader/skills/SkillFlyout.tsx";
 
 import { ConfigFooter } from "./leader/ConfigFooter.tsx";
 
 import { HeaderMenu } from "./leader/HeaderMenu.tsx";
 import { LeaderStatusIcon } from "./leader/LeaderStatusIcon.tsx";
+import { PromptAttachmentsContext, usePromptAttachments } from "./leader/prompt/use-prompt-attachments.ts";
 import { LeaderPromptBar, LeaderSlashCommandsProvider } from "./leader/prompt/LeaderPromptBar.tsx";
 import { LeaderPromptOverlay } from "./leader/prompt/LeaderPromptOverlay.tsx";
+import { DashboardSurface } from "./render/DashboardSurface.tsx";
 import { LeaderFullscreen } from "./leader/fullscreen/LeaderFullscreen.tsx";
 import { buildSlashCommands } from "./leader/prompt/slash-commands.ts";
 import "./leader/leader-node.css";
@@ -124,6 +127,8 @@ export function LeaderNodeRenderer({
   });
 
   const [input, setInput] = useState("");
+  const promptAttachments = usePromptAttachments();
+  const submittedAttachmentIds = useRef<string[]>([]);
   const [tasksExpanded, setTasksExpanded] = useState(false);
   const [skillFlyoutOpen, setSkillFlyoutOpen] = useState(false);
   const [promptOverlayOpen, setPromptOverlayOpen] = useState(false);
@@ -246,7 +251,8 @@ export function LeaderNodeRenderer({
         }
         return;
       }
-      if (e.key === "Escape" && isFullscreen) {
+      if (e.key === "Escape" && isFullscreen && !e.defaultPrevented
+        && !document.querySelector('[role="dialog"]:not([data-testid="leader-fullscreen-overlay"]), [role="menu"]')) {
         e.preventDefault();
         setIsFullscreen(false);
       }
@@ -356,10 +362,9 @@ export function LeaderNodeRenderer({
       let merged: LeaderData = {
         ...current,
         sessionKey: next.sessionKey,
+        contextDelivery: next.contextDelivery ?? current.contextDelivery,
         status: next.status,
-        // The session-stream reducer never emits user turns (they exist only
-        // as optimistic local appends), and a sync_response rebuild or a
-        // stale-snapshot reduction can omit ones already in the feed. Re-graft
+        // A sync rebuild may omit optimistic user turns. Re-graft
         // them so the user's own messages never disappear between agent turns.
         messages: preserveOptimisticUserMessages(current.messages, next.messages),
         streamingText: next.streamingText,
@@ -698,19 +703,28 @@ export function LeaderNodeRenderer({
     });
   }, [socketSubscribe, data.sessionKey, emitUpdate, processNormalizedEvent, onResize, node.size.width, node.size.height]);
 
+  const launchFeedback = useLaunchFeedback(data, nodeRootRef,
+    (prompt) => {
+      setInput((draft) => draft === prompt ? "" : draft);
+      promptAttachments.remove(submittedAttachmentIds.current);
+      submittedAttachmentIds.current = [];
+    },
+    () => { syncedRef.current = false; emitUpdate({ ...dataRef.current, sessionKey: null }); });
+
   const handleCreate = useCallback(() => {
     if (!socketSend) return;
     // syncedRef is claimed synchronously by the first path (autoStart / create /
     // reattach); guarding here closes the double-create race (duplicate host).
-    if (syncedRef.current) return;
+    if (syncedRef.current || !promptAttachments.canSubmit() || !launchFeedback.begin(input)) return;
+    submittedAttachmentIds.current = promptAttachments.drafts.map(draft => draft.id);
     const key = `leader-${Date.now().toString(36)}`;
     const userPrompt =
-      input.trim() || "Analyze the project and suggest how to proceed.";
+      input.trim() || (promptAttachments.items.length ? "Use the attached context." : "Analyze the project and suggest how to proceed.");
 
     const contextItems = getContextForNode?.() ?? [];
     const { prompt: fullPrompt, frozen: frozenPrompt, previousMessages: prevMessages,
       attachments, contextDelivery } = buildInitialLeaderRun({ userPrompt,
-      data: dataRef.current, contextItems, incomingModes: getIncomingContextModes?.() ?? [] });
+      data: dataRef.current, contextItems, promptContextItems: promptAttachments.items, incomingModes: getIncomingContextModes?.() ?? [] });
     frozenPromptRef.current = frozenPrompt;
 
     if (projectId && projectPath) {
@@ -718,12 +732,12 @@ export function LeaderNodeRenderer({
       emitUpdate({ ...dataRef.current, status: "creating", contextDelivery,
         messages: [...prevMessages, { id: msgId(), role: "user" as const,
           content: userPrompt, timestamp: Date.now() }] });
-      setInput("");
       void beginCanonicalRun({ userPrompt, prompt: fullPrompt,
         systemPrompt: frozenPrompt.systemPrompt, attachments, contextItems })
         .catch((error: unknown) => {
-          syncedRef.current = false;
-          setInput(userPrompt);
+          const uncertain = !(error instanceof WorkItemCommandError);
+          launchFeedback.failed(uncertain);
+          syncedRef.current = uncertain;
           emitUpdate({ ...dataRef.current, status: "error",
             error: error instanceof Error ? error.message : String(error) });
         });
@@ -763,10 +777,9 @@ export function LeaderNodeRenderer({
         },
       ],
     });
-    setInput("");
   }, [socketSend, input, getContextForNode, getIncomingContextModes, publishCanvasContext,
     data.skillIds, data.skillValues, data.model, data.thinkingConfig, data.sandboxPolicy, projectId,
-    projectPath, emitUpdate, beginCanonicalRun]);
+    projectPath, emitUpdate, beginCanonicalRun, launchFeedback, promptAttachments]);
   const autoStartFired = useRef(false);
   useEffect(() => {
     if (autoStartFired.current) return;
@@ -774,13 +787,15 @@ export function LeaderNodeRenderer({
     if (!prompt || dataRef.current.sessionKey || !socketSend || syncedRef.current) return;
     if (!claimLeaderAutoStart(node.id, prompt)) return;
     autoStartFired.current = true;
+    launchFeedback.begin(prompt);
+    submittedAttachmentIds.current = promptAttachments.drafts.map(draft => draft.id);
 
     const key = `leader-${Date.now().toString(36)}`;
 
     const contextItems = getContextForNode?.() ?? [];
     const { prompt: fullPrompt, frozen: frozenPrompt, previousMessages: prevMessages,
       attachments, contextDelivery } = buildInitialLeaderRun({ userPrompt: prompt,
-      data: dataRef.current, contextItems, incomingModes: getIncomingContextModes?.() ?? [] });
+      data: dataRef.current, contextItems, promptContextItems: promptAttachments.items, incomingModes: getIncomingContextModes?.() ?? [] });
     frozenPromptRef.current = frozenPrompt;
 
     if (projectId && projectPath) {
@@ -791,11 +806,12 @@ export function LeaderNodeRenderer({
       void beginCanonicalRun({ userPrompt: prompt, prompt: fullPrompt,
         systemPrompt: frozenPrompt.systemPrompt, attachments, contextItems })
         .catch((error: unknown) => {
-          syncedRef.current = false;
-          autoStartFired.current = false;
-          releaseLeaderAutoStart(node.id, prompt);
-          setInput(prompt);
-          emitUpdate({ ...dataRef.current, status: "error", autoStartPrompt: prompt,
+          const uncertain = !(error instanceof WorkItemCommandError);
+          launchFeedback.failed(uncertain);
+          syncedRef.current = uncertain;
+          if (!uncertain) releaseLeaderAutoStart(node.id, prompt);
+          setInput((draft) => draft || prompt);
+          emitUpdate({ ...dataRef.current, status: "error", autoStartPrompt: null,
             error: error instanceof Error ? error.message : String(error) });
         });
       return;
@@ -851,99 +867,16 @@ export function LeaderNodeRenderer({
     promptTextareaRef.current?.focus({ preventScroll: true });
   }, [node.id]);
 
+  const delivery = useCanvasDelivery({ dataRef, emitUpdate, socketSend, socketSubscribe,
+    getContextForNode, frozenPromptRef, requestWorkItem, sendCanonicalPrompt });
   const handleSend = useCallback(() => {
-    const current = dataRef.current;
-    if (!socketSend || !input.trim() || !current.sessionKey) return;
-
-    // Re-gather context on each turn:
-    //   (a) binary attachments always forwarded for image nodes added after the first turn,
-    //   (b) never-delivered sources prepended as a <connected-context> block,
-    //   (c) changed sources prepended as a <connected-context-update> block —
-    //       transcript sources send only the suffix of new blocks (append),
-    //       everything else is a full replace. The ledger is persisted in
-    //       node data so reloads don't re-send unchanged context.
-    const contextItems = getContextForNode?.() ?? [];
-    const attachments = contextItems.flatMap((item) => item.attachments ?? []);
-    const { newItems, updates, nextLedger } = diffContextDelivery(
-      contextItems,
-      current.contextDelivery ?? {},
-      Date.now(),
-    );
-    const rawPrompt = input.trim();
-    const prompt = [
-      buildContextUpdateBlock(updates),
-      buildContextBlock(newItems),
-      rawPrompt,
-    ]
-      .filter((part): part is string => Boolean(part))
-      .join("\n\n");
-    const frozen = frozenPromptRef.current ?? freezeLeaderSystemPrompt({
-      skillIds: current.skillIds ?? [],
-      skillValues: current.skillValues ?? {},
-      systemPromptPrefix: current.systemPromptPrefix,
-      orchestrationMode: current.orchestrationMode ?? "auto",
-    });
-    frozenPromptRef.current = frozen;
-    const followUp = buildFrozenLeaderFollowUpPrompt({ frozen, current, prompt });
-
-    const canonical = current.workItemSnapshot;
-    // A legacy node can receive its durable workItemId from session sync one
-    // render before get_work_item hydrates the snapshot. Never fall through to
-    // send_message during that window: canonical hosts deliberately reject it.
-    if (canonical || (current.workItemId && !canonical)) {
-      onUpdateData({ ...current, contextDelivery: nextLedger,
-        messages: [...current.messages, { id: msgId(), role: "user" as const,
-          content: rawPrompt, timestamp: Date.now() }] });
+    if (!promptAttachments.canSubmit()) return;
+    const text = input.trim() ? input : promptAttachments.items.length ? "Use the attached context." : "";
+    if (delivery.send(text, promptAttachments.items)) {
       setInput("");
-      void (async () => {
-        const snapshot = canonical ?? (await requestWorkItem({ type: "get_work_item",
-          requestId: randomUuid(), workItemId: current.workItemId })).workItem;
-        const activeRun = snapshot.lifecycle.runtimeState === "starting"
-          || snapshot.lifecycle.runtimeState === "working";
-        const result = await sendCanonicalPrompt(snapshot, followUp.prompt, {
-          skillIds: dataRef.current.skillIds ?? [],
-          skillValues: dataRef.current.skillValues ?? {},
-        });
-        return { ...result, queuedGuidance: activeRun
-          && result.detail.workItem.currentRunKey === snapshot.currentRunKey };
-      })().then(({ detail, outcome, queuedGuidance }) => {
-        if (outcome === "converged") setInput(rawPrompt);
-        if (outcome === "sent" && queuedGuidance) {
-          setLaunchNotice("Your message was queued and will be passed to the active leader at the next opportunity.");
-        }
-        const next = applyCanvasWorkItemSnapshot(dataRef.current, detail.workItem);
-        emitUpdate({ ...next, sessionKey: detail.workItem.currentRunKey,
-          currentRunKey: detail.workItem.currentRunKey });
-      }).catch((error: unknown) => emitUpdate({ ...dataRef.current,
-        error: error instanceof Error ? error.message : String(error) }));
-      return;
+      promptAttachments.remove(promptAttachments.drafts.map(draft => draft.id));
     }
-    socketSend({
-      type: "send_message",
-      sessionKey: current.sessionKey,
-      prompt: followUp.prompt,
-      systemPrompt: followUp.systemPrompt,
-      thinkingConfig: current.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
-      skillIds: current.skillIds ?? [],
-      skillValues: current.skillValues ?? {},
-      ...(attachments.length > 0 ? { attachments } : {}),
-    });
-    onUpdateData({
-      ...current,
-      status: "running",
-      contextDelivery: nextLedger,
-      messages: [
-        ...current.messages,
-        {
-          id: msgId(),
-          role: "user" as const,
-          content: rawPrompt,
-          timestamp: Date.now(),
-        },
-      ],
-    });
-    setInput("");
-  }, [socketSend, input, onUpdateData, getContextForNode, requestWorkItem, sendCanonicalPrompt, emitUpdate]);
+  }, [delivery, input, promptAttachments]);
 
   const handleStop = useCallback(() => {
     const current = dataRef.current;
@@ -1028,7 +961,7 @@ export function LeaderNodeRenderer({
   // for the new session so they don't have to click "Start" again.
   const handleNewSession = useCallback(() => {
     const current = dataRef.current;
-    const pendingPrompt = input.trim() || null;
+    const pendingPrompt = input.trim() || (promptAttachments.items.length ? "Use the attached context." : null);
     // Stop the old session on the server if it's still tracked
     if (socketSend && current.sessionKey) {
       socketSend({ type: "stop_session", sessionKey: current.sessionKey });
@@ -1053,11 +986,14 @@ export function LeaderNodeRenderer({
       ...(pendingPrompt ? { autoStartPrompt: pendingPrompt } : {}),
     });
     setInput("");
-  }, [socketSend, emitUpdate, input]);
+  }, [socketSend, emitUpdate, input, promptAttachments]);
 
   const { displayStatus, placeholder: promptPlaceholder,
-    submitLabel: promptSubmitLabel, submitDisabled: promptSubmitDisabled,
-    submitActive: promptSubmitActive } = selectCanvasPrompt(data, Boolean(input.trim()));
+    submitLabel: baseSubmitLabel, submitDisabled: baseSubmitDisabled,
+    submitActive: promptSubmitActive } = selectCanvasPrompt(data, Boolean(input.trim()) || promptAttachments.items.length > 0);
+
+  const promptSubmitLabel = launchFeedback.pending ? "Starting leader…" : baseSubmitLabel;
+  const promptSubmitDisabled = launchFeedback.pending || baseSubmitDisabled || promptAttachments.blocked;
 
   const handlePromptSubmit = useCallback(() => {
     if (promptSubmitDisabled) return;
@@ -1123,28 +1059,37 @@ export function LeaderNodeRenderer({
     completed: "var(--success-color)",
   };
 
+  const configFooter = <ConfigFooter data={data} onUpdateData={emitUpdate} socketSend={socketSend}
+    socketSubscribe={socketSubscribe} getContextForNode={getContextForNode} onNewSession={handleNewSession} />;
+  const headerMenu = <HeaderMenu data={data} onReset={handleReset} onExportLog={handleExportLog}
+    onDuplicateSetup={onDuplicateLeaderSetup ? () => { setIsFullscreen(false); onDuplicateLeaderSetup(); } : undefined}
+    onOpenSystemModel={onOpenSystemModel ? () => { setIsFullscreen(false); onOpenSystemModel(); } : undefined} onSavePreset={onSaveLeaderPreset} />;
+  const minionsSurface = <MinionsSurface tasks={minionTasks} selectedTaskId={selectedMinionTaskId}
+    onSelectTask={setSelectedMinionTaskId} socketSend={socketSend} socketSubscribe={socketSubscribe} />;
+
   const taggedSkillCount = (data.skillIds ?? []).length;
 
   if (launchMode) {
     return (
-      <LeaderSlashCommandsProvider commands={slashCommands} onSelect={handleContextActionSelect}>
+      <FormSubmissionProvider key={data.sessionKey} sessionKey={data.sessionKey ?? ""} socketSend={socketSend} socketSubscribe={socketSubscribe}><CanvasDeliveryContext.Provider value={delivery}><PromptAttachmentsContext.Provider value={promptAttachments}><LeaderSlashCommandsProvider commands={slashCommands} onSelect={handleContextActionSelect}>
         <ActivityLaunchForm nodeId={node.id} data={data} input={input} slashCommands={slashCommands}
-          promptPlaceholder={promptPlaceholder} submitDisabled={promptSubmitDisabled} submitActive={promptSubmitActive} textareaRef={promptTextareaRef} {...(projectPath ? { projectPath } : {})}
+          promptPlaceholder={promptPlaceholder} submitDisabled={promptSubmitDisabled} submitActive={promptSubmitActive} pending={launchFeedback.pending} unavailableReason={!socketSend ? "Connection unavailable" : undefined} textareaRef={promptTextareaRef} {...(projectPath ? { projectPath } : {})}
           onInputChange={setInput} onKeyDown={handleKeyDown} onSubmit={handlePromptSubmit} onUpdate={(patch) => onUpdateData({ ...dataRef.current, ...patch })} />
-        {launchNotice ? <div className="leader-launch-notice" role="status">{launchNotice}</div> : null}
-      </LeaderSlashCommandsProvider>
+        {launchFeedback.notice || launchNotice ? <div className="leader-launch-notice" role="status">{launchFeedback.notice ?? launchNotice}</div> : null}
+      </LeaderSlashCommandsProvider></PromptAttachmentsContext.Provider></CanvasDeliveryContext.Provider></FormSubmissionProvider>
     );
   }
 
   return (
-    <LeaderSlashCommandsProvider commands={slashCommands} onSelect={handleContextActionSelect}>
+    <FormSubmissionProvider key={data.sessionKey} sessionKey={data.sessionKey ?? ""} socketSend={socketSend} socketSubscribe={socketSubscribe}><CanvasDeliveryContext.Provider value={delivery}><PromptAttachmentsContext.Provider value={promptAttachments}><LeaderSlashCommandsProvider commands={slashCommands} onSelect={handleContextActionSelect}>
     <div
       ref={nodeRootRef}
       tabIndex={-1}
-      data-fullscreen={isFullscreen}
+      data-fullscreen={isFullscreen} inert={isFullscreen}
       data-status={displayStatus}
       className="leader-node"
     >
+      {launchFeedback.notice && <div className={launchFeedback.pending ? "leader-launch-notice" : "leader-node__announcement"} role="status">{launchFeedback.notice}</div>}
       {onResize && (
         <ResizeHandle
           currentSize={node.size}
@@ -1231,14 +1176,7 @@ export function LeaderNodeRenderer({
           >
             <Maximize2 size={14} strokeWidth={1.8} aria-hidden="true" />
           </button>
-          <HeaderMenu
-            onReset={handleReset}
-            onExportLog={handleExportLog}
-            onDuplicateSetup={onDuplicateLeaderSetup}
-            onOpenSystemModel={onOpenSystemModel}
-            onSavePreset={onSaveLeaderPreset}
-            data={data}
-          />
+          {headerMenu}
         </div>
       </header>
 
@@ -1260,37 +1198,11 @@ export function LeaderNodeRenderer({
             ref={skillAnchorRef}
             className="leader-node__skills"
           >
-            <button
-              type="button"
-              className="leader-node__skills-button"
-              onClick={() => setSkillFlyoutOpen(true)}
-              onMouseDown={(e) => e.stopPropagation()}
-              data-active={taggedSkillCount > 0}
-              aria-label={`Configure skills${taggedSkillCount > 0 ? `, ${taggedSkillCount} active` : ""}`}
-            >
-              <Zap size={11} strokeWidth={2.2} aria-hidden="true" />
-              <span>Skills</span>
-              {taggedSkillCount > 0 && <strong>{taggedSkillCount}</strong>}
-            </button>
-            <div className="leader-node__skill-chips">
-              {(data.skillIds ?? [])
-                .map((id) => getSkill(id))
-                .filter((s): s is SkillTemplate => s !== undefined)
-                .slice(0, 3)
-                .map((skill) => (
-                  <SkillTagChip key={skill.id} skill={skill} readOnly={false} onRemove={() => {
-                    const next = (data.skillIds ?? []).filter((s) => s !== skill.id);
-                    const nextValues = { ...(data.skillValues ?? {}) };
-                    delete nextValues[skill.id];
-                    onUpdateData({ ...dataRef.current, skillIds: next, skillValues: nextValues });
-                  }} />
-                ))}
-              {taggedSkillCount > 3 && (
-                <span className="leader-node__skills-more">
-                  +{taggedSkillCount - 3}
-                </span>
-              )}
-            </div>
+            <SkillsPill
+              skillIds={data.skillIds ?? []}
+              open={skillFlyoutOpen}
+              onOpen={() => setSkillFlyoutOpen(true)}
+            />
           </div>
         }
       />
@@ -1309,7 +1221,7 @@ export function LeaderNodeRenderer({
         skillValues={data.skillValues ?? {}}
         open={skillFlyoutOpen}
         readOnly={false}
-        anchorRef={skillAnchorRef}
+        anchorRef={isFullscreen ? fullscreenSkillAnchorRef : skillAnchorRef}
         onUpdate={(patch) => {
           onUpdateData({ ...dataRef.current, ...patch });
         }}
@@ -1329,7 +1241,7 @@ export function LeaderNodeRenderer({
           position: "relative",
         }}
       >
-      <LeaderBody
+      {!isFullscreen && <LeaderBody
         renderState={data.renderState ?? emptyRenderState()}
         payloadError={renderPayloadError}
         onSubmitForm={handleSubmitForm}
@@ -1341,15 +1253,7 @@ export function LeaderNodeRenderer({
         dashboardHeaderActive={(data.taskPlan?.length ?? 0) > 0}
         minionsActive={minionTasks.length > 0}
         minionCount={minionTasks.length}
-        minions={
-          <MinionsSurface
-            tasks={minionTasks}
-            selectedTaskId={selectedMinionTaskId}
-            onSelectTask={setSelectedMinionTaskId}
-            socketSend={socketSend}
-            socketSubscribe={socketSubscribe}
-          />
-        }
+        minions={minionsSurface}
         dashboardHeader={
           <TaskPlanPanel
             taskPlan={data.taskPlan ?? []}
@@ -1373,14 +1277,7 @@ export function LeaderNodeRenderer({
         isWorking={displayStatus === "running"}
       />
 
-      <ConfigFooter
-        data={data}
-        onUpdateData={(d) => emitUpdate(d)}
-        socketSend={socketSend}
-        socketSubscribe={socketSubscribe}
-        getContextForNode={getContextForNode}
-        onNewSession={handleNewSession}
-      />
+      {configFooter}
 
       <LeaderPromptBar
         input={input}
@@ -1397,7 +1294,7 @@ export function LeaderNodeRenderer({
       />
           </>
         }
-      />
+      />}
       </div>
 
       <LeaderPromptOverlay
@@ -1439,7 +1336,6 @@ export function LeaderNodeRenderer({
           onAddContentNode={onAddContentNode}
           onRevealMinion={(taskIdOrSessionKey) => {
             selectMinionTask(taskIdOrSessionKey);
-            setIsFullscreen(false);
           }}
           onOpenSkillFlyout={() => setSkillFlyoutOpen(true)}
           graphProjection={taskGraphController.snapshot ? {
@@ -1453,6 +1349,10 @@ export function LeaderNodeRenderer({
           } : null}
           onOpenGraph={taskGraphController.openInspector}
           skillFlyoutAnchorRef={fullscreenSkillAnchorRef}
+          actionsSlot={headerMenu} configSlot={configFooter} minionsSlot={minionsSurface}
+          contextItems={getContextForNode?.()}
+          dashboardSlot={<DashboardSurface renderState={data.renderState ?? emptyRenderState()} payloadError={renderPayloadError}
+            onSubmitForm={handleSubmitForm} onAddContentNode={onAddContentNode} />}
           toolbarSlot={
             <SessionToolbar
               sessionKey={data.sessionKey}
@@ -1539,7 +1439,7 @@ export function LeaderNodeRenderer({
         </div>
       )}
     </div>
-    </LeaderSlashCommandsProvider>
+    </LeaderSlashCommandsProvider></PromptAttachmentsContext.Provider></CanvasDeliveryContext.Provider></FormSubmissionProvider>
   );
 }
 

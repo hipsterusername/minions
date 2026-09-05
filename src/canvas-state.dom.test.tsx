@@ -17,6 +17,7 @@ import {
   useCanvasHistory,
   type CanvasHistoryState,
 } from "./canvas-state.ts";
+import { activeWorkspaceId, createZone, visibleZoneNodes } from "./canvas-zones.ts";
 import type { CanvasAction } from "./types.ts";
 import { makeNode } from "../tests/fixtures/builders.ts";
 
@@ -261,4 +262,17 @@ describe("generateId", () => {
     expect(bCounter).toBeGreaterThan(aCounter);
     expect(cCounter).toBeGreaterThan(bCounter);
   });
+});
+
+it("applies batched workspace creation, switching, and content additions in order", () => {
+  const h = mount();
+  act(() => {
+    h.state.dispatch({ type: "UPDATE_ZONES", zones: [createZone("release", "Release")], moves: [] });
+    h.state.dispatch({ type: "SET_ACTIVE_WORKSPACE", id: "release" });
+    h.state.dispatch({ type: "ADD_NODE", node: makeNode("first") });
+    h.state.dispatch({ type: "ADD_NODE", node: makeNode("second") });
+  });
+  expect(activeWorkspaceId(h.state.nodes)).toBe("release");
+  expect(visibleZoneNodes(h.state.nodes, "release").map(n => n.id)).toEqual(["first", "second"]);
+  expect(visibleZoneNodes(h.state.nodes)).toEqual([]);
 });

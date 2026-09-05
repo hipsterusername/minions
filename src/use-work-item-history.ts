@@ -31,6 +31,8 @@ export function useWorkItemHistory(input: {
   const [streams, setStreams] = useState<Record<string, SessionStreamState>>({});
   const requestedPages = useRef(new Set<string>());
   const requestedRuns = useRef(new Set<string>());
+  const loadRunsRef = useRef(onLoadRuns);
+  loadRunsRef.current = onLoadRuns;
   const orderedRuns = useMemo(
     () => [...runs].sort((a, b) => a.startedAt - b.startedAt || a.runKey.localeCompare(b.runKey)),
     [runs],
@@ -44,8 +46,8 @@ export function useWorkItemHistory(input: {
   }, [workItemId]);
 
   useEffect(() => {
-    // A new subscription identity means reconnect. Re-request ledger pages and
-    // snapshots so history converges after events or responses were missed.
+    // Also reset requests when the caller replaces the socket subscription.
+    // Normal reconnects retain its identity and are handled below.
     requestedPages.current.clear();
     requestedRuns.current.clear();
   }, [socketSubscribe]);
@@ -65,8 +67,29 @@ export function useWorkItemHistory(input: {
   useEffect(() => {
     if (!workItemId || !socketSubscribe) return;
     const runKeys = new Set(runKeySignature ? runKeySignature.split("\u0000") : []);
+    const syncRuns = () => {
+      if (!socketSend) return;
+      for (const runKey of runKeys) {
+        if (requestedRuns.current.has(runKey)) continue;
+        requestedRuns.current.add(runKey);
+        socketSend({ type: "sync_session", sessionKey: runKey });
+      }
+    };
     const unsubscribe = socketSubscribe("*", (raw: unknown) => {
       const msg = raw as ServerMessage;
+      if (msg.type === "socket_reconnected") {
+        // useSocket keeps subscribe stable across reconnects. Refresh from
+        // page one even when the cached ledger was complete: runs and replay
+        // responses may have been missed while the connection was down.
+        requestedPages.current.clear();
+        requestedRuns.current.clear();
+        if (loadRunsRef.current) {
+          requestedPages.current.add("__first__");
+          loadRunsRef.current(undefined);
+        }
+        syncRuns();
+        return;
+      }
       const sessionKey = "sessionKey" in msg && typeof msg.sessionKey === "string"
         ? msg.sessionKey
         : null;
@@ -77,11 +100,7 @@ export function useWorkItemHistory(input: {
         return next === previous ? current : { ...current, [sessionKey]: next };
       });
     });
-    for (const runKey of runKeys) {
-      if (requestedRuns.current.has(runKey)) continue;
-      requestedRuns.current.add(runKey);
-      socketSend?.({ type: "sync_session", sessionKey: runKey });
-    }
+    syncRuns();
     return unsubscribe;
   }, [runKeySignature, socketSend, socketSubscribe, workItemId]);
 

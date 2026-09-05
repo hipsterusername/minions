@@ -1,3 +1,4 @@
+import { PROJECT_CONTEXT_CHAR_LIMIT } from "../../shared/project-context.ts";
 export const CONTEXT_EXPLORER_PROMPT = (projectPath: string) => `Explore the project at ${projectPath} and populate its Minions project context.
 
 Your goal is to understand this project and save concise context that will help subsequently delegated Minion agents work effectively in this codebase.
@@ -23,6 +24,6 @@ Do not create or edit \`context.md\`, \`CLAUDE.md\`, or another repository file.
 - Read actual source files, don't guess
 - If you're unsure about something, note it as uncertain
 - Focus on what's useful for someone about to work in this codebase
-- Keep it concise but complete — aim for a document someone can read in 5 minutes
+- Keep it concise but complete — keep the complete document within ${PROJECT_CONTEXT_CHAR_LIMIT} characters (the delegated prompt budget). Prioritize current constraints, build/test commands, key entry points and exact reference paths; remove repeated background
 
 Begin by exploring the project structure and key files.`;

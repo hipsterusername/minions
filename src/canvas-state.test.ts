@@ -35,6 +35,13 @@ describe("canvasReducer", () => {
     });
   });
 
+  describe("REMOVE_NODES", () => {
+    it("removes a group atomically", () => {
+      const initial = [makeNode("a"), makeNode("b"), makeNode("c")];
+      expect(canvasReducer(initial, { type: "REMOVE_NODES", ids: ["a", "c"] })).toEqual([initial[1]]);
+    });
+  });
+
   describe("MOVE_NODE", () => {
     it("updates the position of the matching node only", () => {
       const initial = [makeNode("a"), makeNode("b")];

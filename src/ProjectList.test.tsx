@@ -114,7 +114,11 @@ describe("ProjectList journeys", () => {
     const onOpenProject = vi.fn();
     render(<ProjectList onOpenProject={onOpenProject} />);
 
-    fireEvent.click(await screen.findByText("Alpha"));
+    const openButton = await screen.findByRole("button", { name: "Open Alpha" });
+    expect(openButton.tagName).toBe("BUTTON");
+    expect(openButton).toHaveAttribute("type", "button");
+    expect(openButton.querySelector("button")).toBeNull();
+    fireEvent.click(openButton);
 
     expect(onOpenProject).toHaveBeenCalledWith("p1", "/repo/alpha");
     expect(openProject).not.toHaveBeenCalled();

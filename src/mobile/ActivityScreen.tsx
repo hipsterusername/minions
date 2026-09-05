@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ListX, RotateCcw, X } from "lucide-react";
+import { Check, ListX, Plus, RotateCcw, X } from "lucide-react";
 
 import type { MobileSessionInfo, ActivityVisibility } from "./mobile-selectors.ts";
 import type { WorkItemRunSnapshot } from "../../shared/work-item-contracts.ts";
@@ -28,6 +28,7 @@ import {
 interface ActivityScreenProps {
   sessions: MobileSessionInfo[];
   onOpenSession: (sessionKey: string) => void;
+  onNewLeader?: () => void;
   notice?: ActivityNotice | null;
   workItemRuns?: Record<string, WorkItemRunSnapshot[]>;
   runNextCursor?: Record<string, string | null>;
@@ -149,6 +150,7 @@ function LifecycleActions({
           title={retainedInactive ? "Review and keep in Activity" : "Mark reviewed"}
         >
           <Check size={18} strokeWidth={2.5} aria-hidden />
+          <span>{retainedInactive ? "Review" : "Mark reviewed"}</span>
         </button>
       ) : null}
       {dismissed ? (
@@ -160,6 +162,7 @@ function LifecycleActions({
           title="Restore"
         >
           <RotateCcw size={17} strokeWidth={2.25} aria-hidden />
+          <span>Restore</span>
         </button>
       ) : (
         <button
@@ -174,6 +177,7 @@ function LifecycleActions({
           {retainedInactive
             ? <ListX size={18} strokeWidth={2.25} aria-hidden />
             : <X size={18} strokeWidth={2.25} aria-hidden />}
+          <span>{retainedInactive ? "Remove" : "Dismiss"}</span>
         </button>
       )}
     </span>
@@ -265,7 +269,7 @@ function SessionCard({
 }) {
   const hasSessionRun = !session.sessionKey.startsWith("work-item:");
   const activity = session.lastActivity?.trim();
-  const showActivity = !isSessionTitleEcho(session, activity);
+  const showActivity = Boolean(activity) && !isSessionTitleEcho(session, activity);
   return (
     <div
       className={`mob-session-card-wrap${checked ? " mob-session-card-wrap--selected" : ""}`}
@@ -292,13 +296,14 @@ function SessionCard({
         </span>
         <span className="mob-card-title">{sessionDisplayTitle(session)}</span>
         <span className="mob-card-meta">
-          {formatCost(session.totalCost)} · {session.turns ?? 0} turns
+          {formatCost(session.totalCost)}
+          {session.turns ? ` · ${session.turns} turns` : ""}
           {session.model ? ` · ${session.model}` : ""}
         </span>
         <MinionSummary session={session} />
         {showActivity ? (
           <span className="mob-card-activity">
-            {activity || session.cwd || session.sessionKey}
+            {activity}
           </span>
         ) : null}
       </button>
@@ -412,9 +417,10 @@ function RunHistory({
   );
 }
 
-export function ActivityScreen({ sessions, onOpenSession, notice,
+export function ActivityScreen({ sessions, onOpenSession, onNewLeader, notice,
   workItemRuns = {}, runNextCursor = {}, onLoadRuns, send }: ActivityScreenProps) {
   const [visibility, setVisibility] = useState<ActivityVisibility>("open");
+  const [selecting, setSelecting] = useState(false);
   const [summaryFilter, setSummaryFilter] = useState<ActivitySummaryFilter | null>(null);
   const [checkedKeys, setCheckedKeys] = useState<Set<string>>(() => new Set());
 
@@ -525,6 +531,7 @@ export function ActivityScreen({ sessions, onOpenSession, notice,
   );
 
   if (visibilitySessions.length === 0) {
+    const canStartFirstLeader = sessions.length === 0 && visibility !== "dismissed" && onNewLeader;
     return (
       <main className="mob-screen mob-activity" aria-label="Activity">
         <header className="mob-screen-header">
@@ -535,7 +542,21 @@ export function ActivityScreen({ sessions, onOpenSession, notice,
         {filters}
         <div className="mob-empty mob-empty--surface">
           <h2>{visibility === "dismissed" ? "Nothing dismissed" : "No active sessions"}</h2>
-          <p>{visibility === "dismissed" ? "No dismissed sessions." : "No sessions are running."}</p>
+          <p>{visibility === "dismissed"
+            ? "No dismissed sessions."
+            : canStartFirstLeader
+              ? "Start a Leader to give this project its first task."
+              : "No sessions are running."}</p>
+          {canStartFirstLeader ? (
+            <button
+              type="button"
+              className="mob-empty-action mob-primary-action"
+              onClick={onNewLeader}
+            >
+              <Plus size={18} aria-hidden="true" />
+              New leader
+            </button>
+          ) : null}
         </div>
       </main>
     );
@@ -544,8 +565,17 @@ export function ActivityScreen({ sessions, onOpenSession, notice,
   return (
     <main className="mob-screen mob-activity" aria-label="Activity">
       <header className="mob-screen-header">
-        <h1>Activity</h1>
-        <span className="mob-count">{visibleSessions.length}</span>
+        <div className="mob-activity-heading">
+          <h1>Activity</h1>
+          <span className="mob-count">{visibleSessions.length}</span>
+        </div>
+        {handleAction ? (
+          <button className="mob-header-action mob-selection-toggle" type="button"
+            aria-pressed={selecting}
+            onClick={() => { setSelecting(!selecting); clearSelection(); }}>
+            {selecting ? "Done" : "Select"}
+          </button>
+        ) : null}
       </header>
       {notice ? <NoticeBanner notice={notice} /> : null}
 
@@ -631,7 +661,7 @@ export function ActivityScreen({ sessions, onOpenSession, notice,
                   onAction={handleAction}
                   checked={checkedKeys.has(session.sessionKey)}
                   onToggleSelect={
-                    handleAction ? () => toggleChecked(session.sessionKey) : undefined
+                    handleAction && selecting ? () => toggleChecked(session.sessionKey) : undefined
                   }
                 />
                 <RunHistory
@@ -665,7 +695,7 @@ export function ActivityScreen({ sessions, onOpenSession, notice,
                   onAction={handleAction}
                   checked={checkedKeys.has(session.sessionKey)}
                   onToggleSelect={
-                    handleAction ? () => toggleChecked(session.sessionKey) : undefined
+                    handleAction && selecting ? () => toggleChecked(session.sessionKey) : undefined
                   }
                 />
                 <RunHistory

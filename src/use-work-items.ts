@@ -149,7 +149,8 @@ export function mergeCanonicalActivity(
         reviewState: item.lifecycle.runtimeState === "waiting" && item.waitKind === "decision" ? "decision_needed"
           : item.lifecycle.outcome === "completed" ? "completion_to_review"
           : item.lifecycle.outcome === "error" ? "error_to_review"
-          : item.lifecycle.outcome === "interrupted" ? "interrupted_to_review" : "none",
+          : item.lifecycle.outcome === "interrupted" || item.lifecycle.outcome === "stopped"
+            ? "interrupted_to_review" : "none",
         reviewReason: presentation.label, finalReport: base?.reviewLifecycle?.finalReport ?? null,
         finalDashboardRevision: base?.reviewLifecycle?.finalDashboardRevision ?? null,
         dashboardRevision: base?.reviewLifecycle?.dashboardRevision ?? 0,

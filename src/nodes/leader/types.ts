@@ -64,6 +64,7 @@ export interface LeaderData {
   sessionKey: string | null;
   status: "disconnected" | "creating" | "running" | "idle" | "stopped" | "error" | "completed";
   messages: LeaderMessage[];
+  messageDelivery?: Record<string, import("./CanvasDeliveryReceipt.tsx").DeliveryReceipt>;
   /** Accumulated partial text from streaming deltas */
   streamingText: string;
   /**

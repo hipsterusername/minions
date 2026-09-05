@@ -324,7 +324,9 @@ describe("LeaderNode: new-session initiation", () => {
       });
     });
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Start" }));
+      const pending = screen.getByRole("button", { name: "Starting leader…" });
+      expect(pending).toBeDisabled();
+      fireEvent.click(pending);
     });
 
     expect(creates()).toHaveLength(1);
@@ -412,7 +414,7 @@ describe("LeaderNode: new-session initiation", () => {
       result: { workItem: canonicalItem("run-1", 3, "working", "none"),
         bindings: [], currentRun: null, runs: [], nextCursor: null } } }]));
     expect(await screen.findByRole("status")).toHaveTextContent(
-      "queued and will be passed to the active leader at the next opportunity");
+      "Queued for leader");
     expect(latest.error).toBeNull();
   });
 
@@ -502,7 +504,7 @@ describe("LeaderNode: new-session initiation", () => {
     expect(latest.error ?? null).toBeNull();
   });
 
-  it("restores the typed prompt when a competing surface already started the run", async () => {
+  it("retains the failed bubble without overwriting a newer draft when another surface starts", async () => {
     const { socket, replay } = createReplaySocket();
     let latest: LeaderData = { ...disconnectedLeaderData(), status: "stopped",
       sessionKey: "run-1", workItemId: "work-1",
@@ -524,6 +526,7 @@ describe("LeaderNode: new-session initiation", () => {
     const start = socket.sent.filter((message) => (message as { type?: string }).type
       === "continue_work_item").at(-1) as { requestId: string };
 
+    fireEvent.change(composer, { target: { value: "Newer draft" } });
     await act(() => replay([{ message: {
       type: "work_item_response", command: "continue_work_item",
       requestId: start.requestId, success: false, error: "stale work-item lifecycle",
@@ -532,7 +535,9 @@ describe("LeaderNode: new-session initiation", () => {
         bindings: [], currentRun: null, runs: [], nextCursor: null },
     } }]));
 
-    await waitFor(() => expect(composer).toHaveValue("Keep this canvas prompt"));
+    await waitFor(() => expect(screen.getByText(/Not sent/)).toBeInTheDocument());
+    expect(composer).toHaveValue("Newer draft");
+    expect(latest.messages.at(-1)?.content).toBe("Keep this canvas prompt");
     expect(socket.sent.filter((message) =>
       (message as { type?: string }).type === "continue_work_item")).toHaveLength(1);
     expect(latest.currentRunKey).toBe("run-2");

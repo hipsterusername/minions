@@ -1,3 +1,4 @@
+import { CanvasLayoutControls } from "./CanvasLayoutControls.tsx";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ProjectSettings } from "./api.ts";
 import { useTheme } from "./use-theme.ts";
@@ -654,14 +655,7 @@ function SettingsPopover({
                 title="Canvas layout"
                 description="Keep spatial workflows legible as the project grows."
               >
-                <ToggleRow
-                  label="Tidy layout"
-                  description="Snap to grid, prevent overlaps, and keep dashboards attached to their Leader."
-                  checked={settings.tidyLayout !== false}
-                  onChange={(checked) =>
-                    onSettingsChange({ ...settings, tidyLayout: checked })
-                  }
-                />
+                <CanvasLayoutControls settings={settings} onSettingsChange={onSettingsChange} />
               </SettingsCard>
             </>
           )}

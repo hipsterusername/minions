@@ -1,3 +1,4 @@
+import { renderRecoveryFacts } from "../../../shared/recovery-context.ts";
 /**
  * Session-context helpers for the Leader node.
  *
@@ -5,6 +6,7 @@
  * shapes the session-stream hook and prompt builder expect.
  */
 
+import { retainUserDirectives, userTextFromPrompt } from "../../../shared/handoff-text.ts";
 import { msgId as sharedMsgId } from "../../sdk-messages.ts";
 import type { SessionStreamState } from "../../session-stream.ts";
 import type { LeaderData, LeaderMessage, TaskPlanItem } from "./types.ts";
@@ -22,6 +24,7 @@ export function msgId(): string {
 export function extractLeaderCore(d: LeaderData): SessionStreamState {
   return {
     sessionKey: d.sessionKey,
+    contextDelivery: d.contextDelivery,
     status: d.status,
     messages: d.messages,
     streamingText: d.streamingText,
@@ -68,13 +71,12 @@ export function buildSessionContext(
 
   const parts: string[] = [];
 
-  parts.push("<previous-session-context>");
+  parts.push("<session-continuation>");
   parts.push(
     "This is a CONTINUATION session. A prior session existed in this leader node (it may have completed successfully, been restarted, or lost due to disconnect).",
   );
-  parts.push(
-    "Below is the conversation history and task state from the prior session.",
-  );
+  parts.push(renderRecoveryFacts({ providerThread: "unknown", taskRegistry: "unknown", dashboard: "unknown", worktree: "unknown" }));
+  parts.push("Client history and task-plan projection follow; they do not establish current server state.");
   parts.push(
     "Use this to maintain continuity — do NOT repeat completed work. Build on what was already accomplished.\n",
   );
@@ -82,6 +84,10 @@ export function buildSessionContext(
   if (taskName) {
     parts.push(`Session name: ${taskName}\n`);
   }
+
+  const directives = retainUserDirectives(messages.filter(m => m.role === "user")
+    .map(m => userTextFromPrompt(m.content)));
+  if (directives.length) parts.push(`Original request and subsequent instructions, oldest first. Later corrections supersede earlier conflicts.\n<user-directives>\n${directives.join("\n\n")}\n</user-directives>`);
 
   // Task plan state
   if (taskPlan.length > 0) {
@@ -132,7 +138,7 @@ export function buildSessionContext(
     parts.push("</conversation-history>");
   }
 
-  parts.push("</previous-session-context>");
+  parts.push("</session-continuation>");
 
   return parts.join("\n");
 }

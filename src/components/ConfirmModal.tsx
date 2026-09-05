@@ -119,7 +119,7 @@ const primaryStyle: React.CSSProperties = {
 
 const dangerStyle: React.CSSProperties = {
   background: "var(--danger-color)",
-  color: "var(--text-primary)",
+  color: "var(--text-on-status)",
   border: "1px solid var(--danger-color)",
 };
 

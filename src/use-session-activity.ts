@@ -48,7 +48,9 @@ function sessionWithSyncResponse(session: SessionInfo, msg: Extract<ServerMessag
     ...(msg.taskPlan !== undefined ? { taskPlan: msg.taskPlan } : {}),
     ...(msg.activeMinions !== undefined ? { activeMinions: msg.activeMinions } : {}),
     ...(msg.renderState !== undefined ? { renderState: msg.renderState } : {}),
-    ...(msg.reviewLifecycle !== undefined ? { reviewLifecycle: msg.reviewLifecycle } : {}),
+    ...(msg.reviewLifecycle !== undefined &&
+      msg.reviewLifecycle.lifecycleRevision >= (session.reviewLifecycle?.lifecycleRevision ?? -1)
+      ? { reviewLifecycle: msg.reviewLifecycle } : {}),
   };
 }
 
@@ -81,7 +83,8 @@ function sessionsWithSyncResponse(
  * The registry's session_list payload is deliberately compact and does not
  * include dashboard render state. Keep render state learned from sync_response
  * or render_update while still treating the incoming list as authoritative for
- * membership and every field it does carry.
+ * membership. Lifecycle state is revisioned: delayed snapshots must not undo
+ * a newer dismissal, acknowledgement, or restore learned from a live event.
  */
 function sessionsFromList(
   current: SessionInfo[],
@@ -90,8 +93,14 @@ function sessionsFromList(
   const currentByKey = new Map(current.map((session) => [session.sessionKey, session]));
   return incoming.map((session) => {
     const prior = currentByKey.get(session.sessionKey);
-    if (session.renderState !== undefined || prior?.renderState === undefined) return session;
-    return { ...session, renderState: prior.renderState };
+    return {
+      ...session,
+      ...(session.renderState === undefined && prior?.renderState !== undefined
+        ? { renderState: prior.renderState } : {}),
+      ...(prior?.reviewLifecycle && prior.reviewLifecycle.lifecycleRevision >
+        (session.reviewLifecycle?.lifecycleRevision ?? -1)
+        ? { reviewLifecycle: prior.reviewLifecycle } : {}),
+    };
   });
 }
 
@@ -128,8 +137,8 @@ export function activityFromMessage(
       return {
         sessionKey: msg.sessionKey,
         text: msg.reason,
-        timestamp: msg.timestamp ?? Date.now(),
-        attention: true,
+        timestamp: msg.timestamp ?? msg.scheduledAt ?? Date.now(),
+        attention: msg.action === "started",
       };
     case "approval_requested":
       return {

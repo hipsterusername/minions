@@ -66,14 +66,14 @@ describe("LeaderNode task graph integration", () => {
     expect(canvasHost).toContainElement(openGraph);
     expect(canvasHost.querySelectorAll(".tg-summary-strip")).toHaveLength(1);
     expect(canvasHost.querySelector(".tg-summary__leader-mark")).toHaveTextContent("");
-    expect(canvasHost.querySelector(".tg-summary__leader-mark svg.lucide-workflow")).toHaveAttribute("aria-hidden", "true");
+    expect(canvasHost.querySelector(".tg-summary__leader-mark svg.crew-icon")).toHaveAttribute("aria-hidden", "true");
     expect(canvasHost.querySelector(".tg-mini-flow, .tg-summary__stats, .tg-summary__foot")).not.toBeInTheDocument();
     expect(screen.getByText("10-node research graph")).toBeInTheDocument();
     fireEvent.click(openGraph);
     const inspector = screen.getByRole("dialog", { name: /10-node research graph/ });
     expect(inspector).toBeInTheDocument();
     expect(inspector.querySelector(".tg-inspector__mark")).toHaveTextContent("");
-    expect(inspector.querySelector(".tg-inspector__mark svg.lucide-workflow")).toHaveAttribute("aria-hidden", "true");
+    expect(inspector.querySelector(".tg-inspector__mark svg.crew-icon")).toHaveAttribute("aria-hidden", "true");
     expect(canvasHost).not.toContainElement(inspector);
     const inspectorOverlay = inspector.closest("[data-viewport-overlay]");
     expect(inspectorOverlay?.parentElement).toBe(document.body);
@@ -128,13 +128,13 @@ describe("LeaderNode task graph integration", () => {
     expect(screen.getByText("Plan ready")).toBeInTheDocument();
     const proposal = screen.getByRole("region", { name: /Execution plan Build graph planning/ });
     expect(proposal.querySelector(".tg-summary__leader-mark")).toHaveTextContent("");
-    expect(proposal.querySelector("svg.lucide-clipboard-list")).toHaveAttribute("aria-hidden", "true");
+    expect(proposal.querySelector("svg.crew-icon")).toHaveAttribute("aria-hidden", "true");
     expect(screen.getByText("Build coordinator")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Details" }));
     const planDialog = screen.getByRole("dialog", { name: /Execution plan: Build graph planning/ });
     expect(planDialog).toBeInTheDocument();
     expect(planDialog.querySelector(".tg-summary__leader-mark")).toHaveTextContent("");
-    expect(planDialog.querySelector("svg.lucide-clipboard-list")).toHaveAttribute("aria-hidden", "true");
+    expect(planDialog.querySelector("svg.crew-icon")).toHaveAttribute("aria-hidden", "true");
     fireEvent.click(screen.getByRole("button", { name: "Start work" }));
     expect(send).toHaveBeenCalledWith(expect.objectContaining({
       type: "approve_task_graph_plan", workItemId: "work-plan",

@@ -80,13 +80,7 @@ export function MessageSelectionGroup({
     <div
       aria-label={label}
       role="group"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 2,
-        paddingInlineStart: 5,
-        borderLeft: "1px solid var(--border-default)",
-      }}
+      className="message-selection-group"
     >
       {children}
     </div>
@@ -108,7 +102,6 @@ export const MessageSelectionButton = memo(function MessageSelectionButton({
   tone?: "neutral" | "primary";
   title?: string | undefined;
 }) {
-  const isPrimary = tone === "primary";
   return (
     <button
       type="button"
@@ -116,33 +109,8 @@ export const MessageSelectionButton = memo(function MessageSelectionButton({
       disabled={disabled}
       title={title ?? label}
       aria-label={label}
-      style={{
-        width: 26,
-        height: 26,
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 0,
-        borderRadius: 4,
-        border: `1px solid ${
-          disabled
-            ? "var(--border-default)"
-            : isPrimary
-              ? "color-mix(in srgb, var(--accent) 54%, var(--border-default))"
-              : "var(--border-default)"
-        }`,
-        background: disabled
-          ? "var(--bg-primary)"
-          : isPrimary
-            ? "color-mix(in srgb, var(--accent) 14%, var(--bg-elevated))"
-            : "var(--bg-elevated)",
-        color: disabled
-          ? "var(--text-dim)"
-          : isPrimary
-            ? "var(--accent)"
-            : "var(--text-secondary)",
-        cursor: disabled ? "default" : "pointer",
-      }}
+      className="message-selection-button"
+      data-tone={tone}
     >
       <MessageSelectionIcon kind={icon} />
     </button>

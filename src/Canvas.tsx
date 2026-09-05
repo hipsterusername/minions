@@ -1,3 +1,9 @@
+import { useCanvasDragSnap } from "./use-canvas-drag-snap.ts";
+import { LeaderDropPreview } from "./LeaderDropPreview.tsx";
+import { EmptyCanvasState } from "./EmptyCanvasState.tsx";
+import { CanvasZones } from "./CanvasZones.tsx";
+import { useCanvasZones } from "./use-canvas-zones.ts";
+import { zoneConnectionLabels } from "./canvas-zones.ts";
 import {
   memo,
   useMemo,
@@ -6,13 +12,17 @@ import {
   useRef,
   useEffect,
   type Dispatch,
-  type FormEvent,
 } from "react";
 import type { CanvasTransform, CanvasNode, CanvasAction, Position, Size, ContextItem } from "./types.ts";
 import { MINION_THINKING_CONFIG } from "./types.ts";
 import { generateId } from "./canvas-state.ts";
 import { CanvasNodeComponent } from "./CanvasNode.tsx";
 import { getAllNodeTypes, getUserCreatableNodeTypes, isContextProvider } from "./node-registry.ts";
+import { CanvasNavigation } from "./components/CanvasNavigation.tsx";
+import { useCanvasNavigation } from "./use-canvas-navigation.ts";
+import { canvasAttentionItems } from "./canvas-attention.ts";
+import type { MobileSessionInfo } from "./mobile/mobile-selectors.ts";
+import { nodeSearchEntry } from "./node-search.ts";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette.tsx";
 import { extractContextItem } from "./context-extraction.ts";
 import {
@@ -54,7 +64,7 @@ import { agentSpawnDedupKey, claimSpawnEvent } from "./canvas/spawn-event.ts";
 import { useSuppressMiddleClickPaste } from "./use-suppress-middle-click-paste.ts";
 import { createImageNodeFromFile } from "./nodes/image-node-factory.ts";
 import { createMarkdownNodeFromText } from "./nodes/markdown-node-factory.ts";
-import { ABOVE_TOP_GAP, findNonOverlappingPosition, placeAboveTopNode, viewportCenter, snapToGrid, resolveTidyDrop, shouldRelocateOnDrop, centerTransformOnRect, focusTransformOnRects, didReposition } from "./canvas-utils.ts";
+import { ABOVE_TOP_GAP, findNonOverlappingPosition, placeAboveTopNode, viewportCenter, snapToGrid, centerTransformOnRect, focusTransformOnRects, didReposition } from "./canvas-utils.ts";
 import { computeAutoLayout } from "./auto-layout.ts";
 import { cloneLeaderContextEdges, cloneLeaderSetupData } from "./leader-setup-clone.ts";
 import {
@@ -65,7 +75,6 @@ import {
 import { decideConnectionDropAction } from "./connection-drop-decision.ts";
 import {
   buildEmptyCanvasLeaderPrompt,
-  isValidEmptyCanvasDescription,
 } from "./empty-canvas.ts";
 import { LEADER_PROMPT_OVERLAY_ZOOM_THRESHOLD } from "./nodes/leader/types.ts";
 import { browserLogger } from "./logging.ts";
@@ -166,171 +175,6 @@ type CreateNodeAnchor =
   // Stack the new node above the current top-most card; falls back to the
   // viewport centre when the canvas is empty.
   | { kind: "above-top" };
-
-function EmptyCanvasState({
-  onStart,
-}: {
-  onStart: (description: string) => void;
-}) {
-  const [description, setDescription] = useState("");
-  const [submitted, setSubmitted] = useState(false);
-  const canStart = isValidEmptyCanvasDescription(description);
-
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setSubmitted(true);
-    if (!canStart) return;
-    onStart(description.trim());
-  };
-
-  return (
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        zIndex: 80,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        pointerEvents: "none",
-        padding: 24,
-      }}
-    >
-      <form
-        onSubmit={handleSubmit}
-        onMouseDown={(event) => event.stopPropagation()}
-        onPointerDown={(event) => event.stopPropagation()}
-        style={{
-          width: "min(560px, calc(100vw - 48px))",
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-          padding: 18,
-          background: "var(--bg-secondary)",
-          border: "1px solid var(--border-default)",
-          borderRadius: 8,
-          boxShadow: "var(--shadow-lg)",
-          pointerEvents: "auto",
-          fontFamily: "var(--font-sans)",
-        }}
-        aria-label="Start canvas with context"
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <div
-            style={{
-              fontSize: 14,
-              fontWeight: 650,
-              color: "var(--text-primary)",
-              lineHeight: 1.3,
-            }}
-          >
-            Start with context
-          </div>
-          <div
-            style={{
-              fontSize: 12,
-              color: "var(--text-muted)",
-              lineHeight: 1.5,
-            }}
-          >
-            Describe the project, goal, constraints, or current state before
-            the Leader begins.
-          </div>
-        </div>
-
-        <label
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 6,
-          }}
-        >
-          <span
-            style={{
-              fontSize: 10,
-              color: "var(--text-muted)",
-              fontFamily: "var(--font-mono)",
-              textTransform: "uppercase",
-              letterSpacing: 0.8,
-            }}
-          >
-            Context description
-          </span>
-          <textarea
-            value={description}
-            onChange={(event) => setDescription(event.currentTarget.value)}
-            rows={5}
-            placeholder="Example: This repo is a canvas for coordinating agent work. I want to triage the next product improvements and keep a dashboard current."
-            style={{
-              width: "100%",
-              resize: "vertical",
-              minHeight: 112,
-              border: "1px solid var(--border-default)",
-              borderRadius: 6,
-              outline: "none",
-              background: "var(--bg-primary)",
-              color: "var(--text-primary)",
-              padding: "10px 12px",
-              fontSize: 13,
-              lineHeight: "19px",
-              fontFamily: "var(--font-sans)",
-            }}
-          />
-        </label>
-
-        {submitted && !canStart && (
-          <div
-            role="alert"
-            style={{
-              fontSize: 11,
-              color: "var(--status-warning)",
-              lineHeight: 1.4,
-            }}
-          >
-            Add a bit more context before starting.
-          </div>
-        )}
-
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-          }}
-        >
-          <span
-            style={{
-              fontSize: 11,
-              color: "var(--text-muted)",
-              lineHeight: 1.4,
-            }}
-          >
-            The Leader will create and refresh the dashboard as it works.
-          </span>
-          <button
-            type="submit"
-            disabled={!canStart}
-            style={{
-              flexShrink: 0,
-              padding: "8px 12px",
-              borderRadius: 6,
-              border: "none",
-              background: canStart ? "var(--accent)" : "var(--bg-elevated)",
-              color: canStart ? "#000" : "var(--text-muted)",
-              cursor: canStart ? "pointer" : "default",
-              fontSize: 12,
-              fontWeight: 700,
-              fontFamily: "var(--font-sans)",
-            }}
-          >
-            Start Leader
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
 
 interface ToolbarProps {
   transform: CanvasTransform;
@@ -580,6 +424,8 @@ const Toolbar = memo(function Toolbar({
   );
 });
 
+const EMPTY_ACTIVITY_SESSIONS: MobileSessionInfo[] = [];
+
 interface CanvasProps {
   nodes: CanvasNode[];
   dispatch: Dispatch<CanvasAction>;
@@ -600,6 +446,9 @@ interface CanvasProps {
   focusNodeId?: string | null;
   onFocusNodeHandled?: () => void;
   viewportTopOffset?: number;
+  projectPanelRight?: number;
+  activitySessions?: MobileSessionInfo[];
+  onOpenActivitySession?: (session: MobileSessionInfo) => void;
 }
 
 export function Canvas({
@@ -621,6 +470,9 @@ export function Canvas({
   focusNodeId,
   onFocusNodeHandled,
   viewportTopOffset = 0,
+  projectPanelRight = 0,
+  activitySessions = EMPTY_ACTIVITY_SESSIONS,
+  onOpenActivitySession,
 }: CanvasProps) {
   // Keep the module-level scale ref in sync so CanvasNode / ResizeHandle
   // can read the current zoom in event handlers without a prop (which would
@@ -628,12 +480,38 @@ export function Canvas({
   canvasScaleRef.current = transform.scale;
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const containerRef = useRef<HTMLDivElement>(null);
+  const removeCanvasNode = useCallback((node: CanvasNode) => {
+    if (node.type !== "leader" || !socketSend) return;
+    const command = canvasDetachCommand(node.data as LeaderData, node.id);
+    if (command) socketSend(command);
+  }, [socketSend]);
+  const removeCanvasNodes = useCallback((removed: CanvasNode[]) => {
+    for (const node of removed) {
+      removeCanvasNode(node);
+      graphDispatch({ type: "REMOVE_EDGES_FOR_NODE", nodeId: node.id });
+    }
+    dispatch({ type: "REMOVE_NODES", ids: removed.map(node => node.id) });
+  }, [dispatch, graphDispatch, removeCanvasNode]);
+  const zones = useCanvasZones({ nodes, dispatch, selectedIds, setSelectedIds, transform, containerRef,
+    topOffset: viewportTopOffset, removeNodes: removeCanvasNodes, reveal: (target, ids) => { cancelCameraAnim(); setTransform(target); setSelectedIds(new Set(ids)); } });
+  const visibleNodes = zones.visibleNodes;
+  const visibleNodesRef = useRef(visibleNodes); visibleNodesRef.current = visibleNodes;
+  const visibleGraph = useMemo(() => ({ ...graph, edges: graph.edges.filter(edge =>
+    !zones.hiddenMembership.has(edge.sourceNodeId) && !zones.hiddenMembership.has(edge.targetNodeId)) }), [graph, zones.hiddenMembership]);
+  const zoneNames = useMemo(() => new Map([...zones.membership].map(([id, zone]) => [id, zone.data.name])), [zones.membership]);
+  const sessionZones = useMemo(() => new Map(nodes.flatMap(n => {
+    const key = (n.data as { sessionKey?: string })?.sessionKey; const zone = zoneNames.get(n.id);
+    return key && zone ? [[key, zone] as const] : [];
+  })), [nodes, zoneNames]);
+  const zoneConnections = useMemo(() => zoneConnectionLabels(graph.edges, zones.hiddenMembership), [graph.edges, zones.hiddenMembership]);
   // Edge selection is separate from node selection: clicking an edge selects
   // exactly one edge and clears node selection (and vice versa). Hover is
   // tracked independently so the inspector can preview which edge would be
   // selected.
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
+  useEffect(() => { setSelectedEdgeId(null); setHoveredEdgeId(null); }, [zones.activeId]);
   const [isPanning, setIsPanning] = useState(false);
 
   // ── Marquee (rectangle) selection state ──
@@ -737,19 +615,18 @@ export function Canvas({
 
   /** Set of node IDs that are spatially inside a context-group. */
   const nodesInsideGroups = useMemo(() => {
-    const groups = nodes.filter((n) => n.type === "context-group");
+    const groups = visibleNodes.filter((n) => n.type === "context-group");
     if (groups.length === 0) return new Set<string>();
     const s = new Set<string>();
-    for (const n of nodes) {
+    for (const n of visibleNodes) {
       if (n.type === "context-group") continue;
       for (const g of groups) {
         if (isInsideGroup(n, g)) { s.add(n.id); break; }
       }
     }
     return s;
-  }, [nodes]);
+  }, [visibleNodes]);
 
-  const containerRef = useRef<HTMLDivElement>(null);
   const panRef = useRef<{ startX: number; startY: number } | null>(null);
   const spaceRef = useRef(false);
   const lastCanvasPointerRef = useRef<{
@@ -764,6 +641,8 @@ export function Canvas({
   /** Which node is currently being dragged by the user, null when idle */
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const draggingNodeIdRef = useRef<string | null>(null);
+  const { begin: beginSnap, move: snapDrag, placement: dragPlacement } = useCanvasDragSnap(
+    nodes, visibleNodes, selectedIds, transform.scale, projectSettings?.snapWhileDragging !== false);
   /** World-space position of the dragged node when the drag began — used to
    *  decide whether a drop repositioned it far enough to recenter the camera. */
   const dragStartPosRef = useRef<Position | null>(null);
@@ -871,7 +750,9 @@ export function Canvas({
   // Cancel any running camera tween on unmount to avoid setState-after-unmount.
   useEffect(() => cancelCameraAnim, [cancelCameraAnim]);
 
-  const handleDragStart = useCallback((nodeId: string) => {
+  const handleDragStart = useCallback((nodeId: string, event?: MouseEvent) => {
+    beginSnap(nodeId);
+    zones.beginDrag(nodeId, event);
     draggingNodeIdRef.current = nodeId;
     setDraggingNodeId(nodeId);
     // Starting a new drag interrupts any in-flight camera glide, and records
@@ -908,24 +789,26 @@ export function Canvas({
       if (!groupNode) continue;
       const ids = new Set<string>();
       for (const n of nodesRef.current) {
-        if (n.id === gId || n.type === "context-group") continue;
+        if (n.id === gId || n.type === "context-group" || !visibleNodesRef.current.some(v => v.id === n.id)) continue;
         if (isInsideGroup(n, groupNode)) ids.add(n.id);
       }
       snapshotMap.set(gId, ids);
     }
 
     dragGroupContainedIdsRef.current = snapshotMap;
-  }, [isInsideGroup, cancelCameraAnim]);
+  }, [isInsideGroup, cancelCameraAnim, zones.beginDrag, beginSnap]);
 
-  const handleDragEnd = useCallback((nodeId: string) => {
+  const handleDragEnd = useCallback((nodeId: string, event?: MouseEvent) => {
     const targetGroupId = dropTargetGroupIdRef.current;
     draggingNodeIdRef.current = null;
     dragGroupContainedIdsRef.current = new Map();
     setDraggingNodeId(null);
     setDropTargetGroupId(null);
 
+    if (zones.endDrag(nodeId, event)) { dragStartPosRef.current = null; return; }
     const startPos = dragStartPosRef.current;
     dragStartPosRef.current = null;
+    if (!event) return;
     const draggedNode = nodesRef.current.find((n) => n.id === nodeId);
 
     // Resolve the node's final placement after any drop-snapping. The branches
@@ -961,51 +844,18 @@ export function Canvas({
         return { ...draggedNode.position };
       }
 
-      // ── Tidy layout: snap the dropped node/cluster flush to its neighbour ──
-      // When tidy layout is on, a node dropped so it overlaps another snaps flush
-      // against that neighbour — on the side nearest where it was dropped
-      // (right/left share the top edge, top/bottom share the left edge) with a
-      // small gutter — so nodes never overlap. Free drops just snap to the grid.
-      // Leaders carry their minions and dashboards as one cluster. Context-groups
-      // (frames that intentionally contain overlapping nodes) and multi-select
-      // drags (a deliberate manual arrangement) are left alone.
-      if (projectSettingsRef.current?.tidyLayout === false) {
-        return { ...draggedNode.position };
+      const moves = dragPlacement(draggedNode, nodesRef.current, visibleNodesRef.current,
+        selectedIdsRef.current, projectSettingsRef.current?.tidyLayout !== false);
+      const position = moves.find(move => move.id === nodeId)?.position ?? draggedNode.position;
+      if (position.x !== draggedNode.position.x || position.y !== draggedNode.position.y) {
+        dispatch({ type: "MOVE_GROUP", moves });
       }
-      const isMultiSelect =
-        selectedIdsRef.current.has(nodeId) && selectedIdsRef.current.size > 1;
-      if (!shouldRelocateOnDrop(draggedNode, isMultiSelect)) {
-        return { ...draggedNode.position };
-      }
-
-      const movers: CanvasNode[] = [draggedNode];
-      if (draggedNode.type === "leader") {
-        for (const n of nodesRef.current) {
-          if (n.type === "minion" && (n.data as MinionData).leaderId === draggedNode.id) {
-            movers.push(n);
-          }
-        }
-      }
-      const moverIds = new Set(movers.map((m) => m.id));
-      // Context-group frames are containers, not obstacles.
-      const obstacles = nodesRef.current.filter(
-        (n) => !moverIds.has(n.id) && n.type !== "context-group",
-      );
-      const { dx, dy } = resolveTidyDrop(movers, obstacles);
-      if (dx === 0 && dy === 0) return { ...draggedNode.position };
-      dispatch({
-        type: "MOVE_GROUP",
-        moves: movers.map((m) => ({
-          id: m.id,
-          position: { x: m.position.x + dx, y: m.position.y + dy },
-        })),
-      });
-      return { x: draggedNode.position.x + dx, y: draggedNode.position.y + dy };
+      return position;
     };
 
     // Follow the node to its new placement (pan only, preserves zoom).
     recenterCameraOnPlacement(startPos, resolveFinalPosition(), draggedNode?.size ?? null);
-  }, [dispatch, recenterCameraOnPlacement]);
+  }, [dispatch, recenterCameraOnPlacement, zones.endDrag, dragPlacement]);
 
   // Keep refs to nodes, transform, and selection so callbacks can access latest
   // state without needing them in dependency arrays (which would defeat memoization).
@@ -1063,7 +913,7 @@ export function Canvas({
         rawY,
         clipboard.sourceSize.width,
         clipboard.sourceSize.height,
-        nodesRef.current,
+        visibleNodesRef.current,
       );
 
       const node: CanvasNode = {
@@ -1234,18 +1084,36 @@ export function Canvas({
     [sessionKeyToNodeId],
   );
 
-  /**
-   * Focus on specific nodes: center viewport and zoom to a "goldilocks" level.
-   * For a single node, picks a scale that shows the node with comfortable padding.
-   * For multiple nodes, fits them all with padding.
-   */
+  const { navigateTo, goBack, canGoBack, announcement } = useCanvasNavigation({
+    transform, setTransform, selectedIds, setSelectedIds, nodes: visibleNodes, historyKey: zones.activeId,
+    containerRef, cancelCameraAnim, clearEdgeSelection: () => setSelectedEdgeId(null),
+  });
+  const attention = useMemo(() => canvasAttentionItems(activitySessions, nodes).map(item => ({
+    ...item, zoneName: item.nodeId ? zoneNames.get(item.nodeId) : undefined,
+  })), [activitySessions, nodes, zoneNames]);
+  const nodeContext = useMemo(() => {
+    const context: Record<string, string> = {};
+    const byId = new Map(nodes.map(node => [node.id, node]));
+    const parents = new Map(graph.edges.filter(edge => edge.sourcePortId === "task-out").map(edge => [edge.targetNodeId, edge.sourceNodeId]));
+    for (const node of nodes) {
+      const data = node.data as { status?: string; parentSessionKey?: string; leaderId?: string };
+      const parent = byId.get(parents.get(node.id) ?? data.leaderId ?? "") ?? nodes.find(candidate =>
+        candidate.type === "leader" && data.parentSessionKey && (candidate.data as LeaderData).sessionKey === data.parentSessionKey);
+      context[node.id] = [parent ? `Leader: ${nodeSearchEntry(parent).title}` : "", data.status ?? ""].filter(Boolean).join(" · ");
+    }
+    return context;
+  }, [nodes, graph.edges]);
+
+  /** Fit a destination with comfortable padding and save the prior view. */
   const focusNodes = useCallback(
     (targetIds: Set<string>) => {
       if (targetIds.size === 0) return;
       const container = containerRef.current;
       if (!container) return;
 
-      const targets = nodes.filter((n) => targetIds.has(n.id));
+      const parked = [...targetIds].find(id => zones.hiddenMembership.has(id));
+      if (parked && zones.inspect(parked)) return;
+      const targets = visibleNodes.filter((n) => targetIds.has(n.id));
       if (targets.length === 0) return;
 
       const target = focusTransformOnRects(
@@ -1253,19 +1121,20 @@ export function Canvas({
         { width: container.clientWidth, height: container.clientHeight },
         { padding: 80, maxScale: 1 },
       );
-      if (target) setTransform(target);
+      if (target) navigateTo(target, new Set(targets.map(node => node.id)));
     },
-    [nodes, setTransform],
+    [visibleNodes, navigateTo, zones.hiddenMembership, zones.inspect],
   );
 
   const handleFocusNode = useCallback(
     (nodeId: string) => {
+      if (zones.inspect(nodeId)) return;
       const ids = new Set([nodeId]);
       setSelectedEdgeId(null);
       setSelectedIds(ids);
       focusNodes(ids);
     },
-    [focusNodes],
+    [focusNodes, zones.inspect],
   );
 
   // Focus the canvas on the node hosting the given sessionKey (if any).
@@ -1282,7 +1151,7 @@ export function Canvas({
   // Includes running, idle, creating, and waiting — excludes disconnected/stopped/error
   const INACTIVE_STATUSES = new Set(["disconnected", "stopped", "error"]);
   const activeNodeIds = useMemo(() => {
-    return nodes
+    return visibleNodes
       .filter((n) => {
         if (n.type === "leader") {
           const s = (n.data as LeaderData).status;
@@ -1295,7 +1164,7 @@ export function Canvas({
         return false;
       })
       .map((n) => n.id);
-  }, [nodes]);
+  }, [visibleNodes]);
   const activeNodeIdSet = useMemo(() => new Set(activeNodeIds), [activeNodeIds]);
 
   useEffect(() => {
@@ -1323,11 +1192,9 @@ export function Canvas({
   // Handle external focus-node requests — select AND zoom/center
   useEffect(() => {
     if (!focusNodeId) return;
-    const ids = new Set([focusNodeId]);
-    setSelectedIds(ids);
-    focusNodes(ids);
+    handleFocusNode(focusNodeId);
     onFocusNodeHandled?.();
-  }, [focusNodeId, onFocusNodeHandled, focusNodes]);
+  }, [focusNodeId, onFocusNodeHandled, handleFocusNode]);
 
   // ── Reveal minion on demand ──
   // Called from the leader's task plan UI when the user clicks a minion task.
@@ -1586,18 +1453,13 @@ export function Canvas({
     [selectedEdge, focusNodes],
   );
 
-  const removeCanvasNode = useCallback((node: CanvasNode) => {
-    if (node.type !== "leader" || !socketSend) return;
-    const command = canvasDetachCommand(node.data as LeaderData, node.id);
-    if (command) socketSend(command);
-  }, [socketSend]);
   // Keyboard shortcuts: space (pan), delete, undo/redo
   useCanvasKeyboard({
     selectedIds,
     setSelectedIds,
     selectedEdgeId,
     onDeleteSelectedEdge: handleDeleteSelectedEdge,
-    nodes,
+    nodes: visibleNodes,
     graph,
     dispatch,
     onRemoveNode: removeCanvasNode,
@@ -1876,7 +1738,7 @@ export function Canvas({
             const selMaxY = Math.max(p1.y, p2.y);
 
             const hitIds = new Set<string>();
-            for (const n of nodesRef.current) {
+            for (const n of visibleNodesRef.current) {
               // Node intersects marquee if rects overlap
               if (
                 n.position.x + n.size.width > selMinX &&
@@ -1941,14 +1803,7 @@ export function Canvas({
   const GROUP_MIN_H = 200;
 
 
-  // ── Nodes inside a dragging context-group need elevated z-index ──
-  // When a context-group is being dragged, its z-index jumps to 50 but
-  // contained children stay at z-index 1, causing the group to render ON
-  // TOP of its children.  We use the **snapshot** taken at drag start
-  // (dragGroupContainedIdsRef) rather than live spatial detection so that
-  // children of OTHER groups that the dragging group passes over don't
-  // get incorrectly elevated.  Only the actual children that were inside
-  // the group when the drag began should ride along at z-index 51.
+  // Elevate only children captured at drag start above the moving group frame.
   const draggingGroupContainedIds = useMemo<Set<string>>(() => {
     if (!draggingNodeId) return new Set();
     // Union all snapshots from all dragging context-groups — this covers
@@ -1966,6 +1821,20 @@ export function Canvas({
     }
     return merged;
   }, [draggingNodeId, nodes]);
+
+  const dragPreviewMoves = useMemo(() => {
+    const node = nodes.find(n => n.id === draggingNodeId);
+    const multi = !!node && selectedIds.has(node.id) && selectedIds.size > 1;
+    if (!node || (node.type !== "leader" && !multi)) return [];
+    // Include the children captured at drag start, just as handleMoveNode does.
+    const moves = dragPlacement(node, nodes, visibleNodes, selectedIds, projectSettings?.tidyLayout !== false);
+    const ids = new Set(moves.map(move => move.id));
+    return [...moves, ...nodes.filter(n => draggingGroupContainedIds.has(n.id) && !ids.has(n.id))
+      .map(n => ({ id: n.id, position: n.position }))];
+  }, [draggingNodeId, nodes, visibleNodes, selectedIds, draggingGroupContainedIds, projectSettings?.tidyLayout, projectSettings?.snapWhileDragging, dragPlacement]);
+  const dragPreviewIds = useMemo(() => new Set(dragPreviewMoves.map(move => move.id)), [dragPreviewMoves]);
+  const dragVisibleGraph = useMemo(() => ({ ...visibleGraph, edges: visibleGraph.edges.filter(edge =>
+    !dragPreviewIds.has(edge.sourceNodeId) && !dragPreviewIds.has(edge.targetNodeId)) }), [visibleGraph, dragPreviewIds]);
 
   // ── Context-group auto-fit on membership change ─────
   // Debounced: waits for drag to settle before snapping layout.
@@ -2005,7 +1874,7 @@ export function Canvas({
       return;
     }
 
-    const groups = nodes.filter((n) => n.type === "context-group");
+    const groups = visibleNodes.filter((n) => n.type === "context-group");
     if (groups.length === 0) {
       if (groupMembershipRef.current.size > 0) {
         groupMembershipRef.current = new Map();
@@ -2027,7 +1896,7 @@ export function Canvas({
 
     for (const group of groups) {
       const currentIds = new Set<string>();
-      for (const n of nodes) {
+      for (const n of visibleNodes) {
         if (n.id === group.id) continue;
         if (!contextNodeTypes.has(n.type)) continue;
         if (isInsideGroup(n, group)) currentIds.add(n.id);
@@ -2222,13 +2091,13 @@ export function Canvas({
         groupLayoutTimerRef.current = null;
       }
     };
-  }, [nodes, isInsideGroup, dispatch, draggingNodeId]);
+  }, [visibleNodes, isInsideGroup, dispatch, draggingNodeId]);
 
   const handleMoveNode = useCallback(
-    (id: string, position: Position) => {
+    (id: string, position: Position, cancelled = false) => {
       const currentNode = nodesRef.current.find((n) => n.id === id);
       if (!currentNode) return;
-
+      if (draggingNodeIdRef.current === id) position = snapDrag(id, position, cancelled);
       const dx = position.x - currentNode.position.x;
       const dy = position.y - currentNode.position.y;
 
@@ -2260,7 +2129,7 @@ export function Canvas({
               for (const cid of groupSnapshot) moveIds.add(cid);
             } else {
               for (const n of nodesRef.current) {
-                if (n.id === selId || n.type === "context-group") continue;
+                if (n.id === selId || n.type === "context-group" || !visibleNodesRef.current.some(v => v.id === n.id)) continue;
                 if (isInsideGroup(n, selNode)) moveIds.add(n.id);
               }
             }
@@ -2298,7 +2167,7 @@ export function Canvas({
         const snapshotIds = dragGroupContainedIdsRef.current.get(id);
         const contained = snapshotIds && snapshotIds.size > 0
           ? nodesRef.current.filter((n) => snapshotIds.has(n.id))
-          : nodesRef.current.filter(
+          : visibleNodesRef.current.filter(
               (n) => n.id !== id && n.type !== "context-group" && isInsideGroup(n, currentNode),
             );
         const moves = [
@@ -2327,7 +2196,7 @@ export function Canvas({
       for (const ids of dragGroupContainedIdsRef.current.values()) {
         if (ids.has(id)) { isPartOfDraggingGroup = true; break; }
       }
-      if (draggingNodeIdRef.current === id && DROPPABLE_TYPES.has(currentNode.type) && !isPartOfDraggingGroup) {
+      if (draggingNodeIdRef.current === id && DROPPABLE_TYPES.has(currentNode.type) && !isPartOfDraggingGroup && !(sel.has(id) && sel.size > 1)) {
         const nodeL = position.x;
         const nodeT = position.y;
         const nodeR = position.x + currentNode.size.width;
@@ -2337,7 +2206,7 @@ export function Canvas({
         let foundGroupId: string | null = null;
         let bestOverlap = 0;
 
-        for (const n of nodesRef.current) {
+        for (const n of visibleNodesRef.current) {
           if (n.type !== "context-group") continue;
           const groupL = n.position.x;
           const groupT = n.position.y;
@@ -2369,7 +2238,7 @@ export function Canvas({
         }
       }
     },
-    [dispatch, isInsideGroup, DROPPABLE_TYPES],
+    [dispatch, isInsideGroup, DROPPABLE_TYPES, snapDrag],
   );
 
   const handleUpdateNodeData = useCallback(
@@ -2425,7 +2294,7 @@ export function Canvas({
       const placement = computeLeaderDropPlacement(
         worldX,
         worldY,
-        nodesRef.current,
+        visibleNodesRef.current,
       );
       if (!placement) return;
       const { leaderDef } = placement;
@@ -2483,7 +2352,7 @@ export function Canvas({
 
       // Read current values from refs so this callback stays stable
       const currentTransform = transformRef.current;
-      const currentNodes = nodesRef.current;
+      const currentNodes = visibleNodesRef.current;
 
       setDashboardDropMenu(null);
 
@@ -2537,7 +2406,7 @@ export function Canvas({
 
         // ── Snap detection: find nearest valid target port ──────────
         // Use latest nodes from ref for accurate positions during drag
-        const liveNodes = nodesRef.current;
+        const liveNodes = visibleNodesRef.current;
         let nearestTarget: PortInfo | null = null;
         let nearestDist = SNAP_RADIUS;
 
@@ -2620,7 +2489,7 @@ export function Canvas({
               const placement = computeLeaderDropPlacement(
                 dropX,
                 dropY,
-                nodesRef.current,
+                visibleNodesRef.current,
               );
               if (placement) {
                 setDashboardDropMenu({
@@ -2740,7 +2609,7 @@ export function Canvas({
         // viewport centre when the canvas is empty.
         const center = getViewportCenterPoint();
         const pos = placeAboveTopNode(
-          nodesRef.current,
+          visibleNodesRef.current,
           typeDef.defaultSize,
           ABOVE_TOP_GAP,
           {
@@ -2762,10 +2631,10 @@ export function Canvas({
           rawY = pointer.worldY - typeDef.defaultSize.height / 2;
         } else {
           const selectedNode = [...selectedIdsRef.current]
-            .map((id) => nodesRef.current.find((n) => n.id === id))
+            .map((id) => visibleNodesRef.current.find((n) => n.id === id))
             .find((n): n is CanvasNode => n != null);
           const recentLeader = recentActiveLeaderIdRef.current
-            ? nodesRef.current.find((n) => n.id === recentActiveLeaderIdRef.current)
+            ? visibleNodesRef.current.find((n) => n.id === recentActiveLeaderIdRef.current)
             : null;
           const anchorNode = selectedNode ?? recentLeader;
 
@@ -2785,7 +2654,7 @@ export function Canvas({
         rawY,
         typeDef.defaultSize.width,
         typeDef.defaultSize.height,
-        nodesRef.current,
+        visibleNodesRef.current,
       );
     },
     [getViewportCenterPoint],
@@ -3003,7 +2872,7 @@ export function Canvas({
         rawY,
         typeDef.defaultSize.width,
         typeDef.defaultSize.height,
-        nodesRef.current,
+        visibleNodesRef.current,
       );
 
       // Derive a short title from the first line of content
@@ -3035,7 +2904,7 @@ export function Canvas({
     setSelectedIds,
     containerRef,
     transformRef,
-    nodesRef,
+    nodesRef: visibleNodesRef,
     projectPath,
   });
 
@@ -3073,7 +2942,7 @@ export function Canvas({
           dispatch,
           setSelectedIds,
           transformRef.current,
-          nodesRef.current,
+          visibleNodesRef.current,
           getViewportCenterPoint(),
         );
         return;
@@ -3086,7 +2955,7 @@ export function Canvas({
         dispatch,
         setSelectedIds,
         transformRef.current,
-        nodesRef.current,
+        visibleNodesRef.current,
         getViewportCenterPoint(),
       );
       if (created) e.preventDefault();
@@ -3118,8 +2987,8 @@ export function Canvas({
   );
 
   const fitView = useCallback(() => {
-    if (nodes.length === 0) {
-      setTransform({ x: 0, y: 0, scale: 1 });
+    if (visibleNodes.length === 0) {
+      navigateTo({ x: 0, y: 0, scale: 1 }, new Set());
       return;
     }
     const container = containerRef.current;
@@ -3129,7 +2998,7 @@ export function Canvas({
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    for (const n of nodes) {
+    for (const n of visibleNodes) {
       minX = Math.min(minX, n.position.x);
       minY = Math.min(minY, n.position.y);
       maxX = Math.max(maxX, n.position.x + n.size.width);
@@ -3146,7 +3015,7 @@ export function Canvas({
       Math.max(MIN_ZOOM, Math.min(scaleX, scaleY)),
     );
 
-    setTransform({
+    navigateTo({
       x:
         container.clientWidth / 2 -
         ((minX + maxX) / 2) * scale,
@@ -3154,8 +3023,8 @@ export function Canvas({
         container.clientHeight / 2 -
         ((minY + maxY) / 2) * scale,
       scale,
-    });
-  }, [nodes, setTransform]);
+    }, new Set());
+  }, [visibleNodes, navigateTo]);
 
   const handleTidyLayout = useCallback(() => {
     const container = containerRef.current;
@@ -3165,11 +3034,11 @@ export function Canvas({
         ? { width: container.clientWidth, height: container.clientHeight }
         : undefined,
     );
-    const moves = computeAutoLayout(nodes, graph.edges, { center });
+    const moves = computeAutoLayout(visibleNodes, visibleGraph.edges, { center });
     if (moves.length > 0) {
       dispatch({ type: "MOVE_GROUP", moves });
     }
-  }, [nodes, graph.edges, transform, dispatch]);
+  }, [visibleNodes, visibleGraph.edges, transform, dispatch]);
 
   const leaderSessionTopicKey = useMemo(() => {
     const topics = nodes
@@ -3519,14 +3388,14 @@ export function Canvas({
   const getContextFromGroup = useCallback((groupNode: CanvasNode): ContextItem[] => {
     const items: ContextItem[] = [];
     for (const n of nodes) {
-      if (n.id === groupNode.id) continue;
+      if (n.id === groupNode.id || zones.membership.get(n.id)?.id !== zones.membership.get(groupNode.id)?.id) continue;
       if (!isContextProvider(n.type)) continue;
       if (!isInsideGroup(n, groupNode)) continue;
       const item = extractContextItem(n);
       if (item) items.push(item);
     }
     return items;
-  }, [nodes, isInsideGroup]);
+  }, [nodes, isInsideGroup, zones.membership]);
 
   const getContextForNode = useCallback((nodeId: string): ContextItem[] => {
     const targetNode = nodes.find((n) => n.id === nodeId);
@@ -3597,7 +3466,7 @@ export function Canvas({
     if (!allContext) return null;
 
     // Check if all selected nodes are already in the same context group
-    const groups = nodes.filter((n) => n.type === "context-group");
+    const groups = visibleNodes.filter((n) => n.type === "context-group");
     let sharedGroupId: string | null = null;
     let allInSameGroup = false;
 
@@ -3625,7 +3494,7 @@ export function Canvas({
       sharedGroupId,
       bounds: { minX, minY, maxX, maxY },
     };
-  }, [selectedIds, nodes, CONTEXT_NODE_TYPES, isInsideGroup]);
+  }, [selectedIds, nodes, visibleNodes, CONTEXT_NODE_TYPES, isInsideGroup]);
 
   /** Create a context group containing all currently selected context nodes */
   const groupSelectedAsContext = useCallback(() => {
@@ -3786,9 +3655,13 @@ export function Canvas({
       }}
     >
       <CanvasBackground transform={transform} />
+      <CanvasZones controller={zones} nodes={nodes} selectedIds={selectedIds} transform={transform} topOffset={viewportTopOffset} socketConnected={socketConnected ?? false} />
 
-      {nodes.length === 0 && (
-        <EmptyCanvasState onStart={startFromEmptyCanvas} />
+      {visibleNodes.length === 0 && (
+        <EmptyCanvasState
+          onStart={startFromEmptyCanvas}
+          onAddLeader={() => addNode("leader")}
+        />
       )}
 
       {isDragOverCanvas && (
@@ -3858,12 +3731,15 @@ export function Canvas({
         onAttachSession={handleAttachSession}
         onFocusSession={handleFocusSession}
         attachedSessionKeys={attachedSessionKeys}
+        sessionZones={sessionZones}
       />
 
       {commandPaletteOpen && (
         <CommandPalette
           items={commandPaletteItems}
-          nodes={nodes}
+          zoneNames={zoneNames}
+          nodeContext={nodeContext}
+          nodes={nodes.filter(n => n.type !== "canvas-zone")}
           onCreate={handleCommandPaletteCreate}
           onJump={(nodeId) => {
             handleFocusNode(nodeId);
@@ -3905,18 +3781,25 @@ export function Canvas({
         }}
       >
         <EdgeRenderer
-          graph={graph}
-          nodes={nodes}
+          graph={dragVisibleGraph}
+          nodes={visibleNodes}
           selectedEdgeId={selectedEdgeId}
           hoveredEdgeId={hoveredEdgeId}
           onEdgeClick={handleEdgeClick}
           onEdgeHover={handleEdgeHover}
         />
 
+        <LeaderDropPreview nodes={nodes} moves={dragPreviewMoves} overZone={!!zones.dragTarget} />
         {nodes.map((node) => (
           <CanvasNodeComponent
             key={node.id}
             node={node}
+            parked={zones.hiddenMembership.has(node.id)}
+            zoneConnections={zoneConnections.get(node.id)}
+            dragZoneName={draggingNodeId === node.id ? (zones.dragTarget === "new" ? "a new workspace" : zones.zones.find(z => z.id === zones.dragTarget)?.data.name) : undefined}
+            dragNodeCount={draggingNodeId === node.id ? dragPreviewMoves.length : undefined}
+            isDragPreview={dragPreviewIds.has(node.id)}
+            onMoveToZone={zones.choose}
             isSelected={selectedIds.has(node.id)}
             onSelect={handleSelectNode}
             onMove={handleMoveNode}
@@ -3974,7 +3857,7 @@ export function Canvas({
       </div>
 
       <NodeStatusOverlay
-        nodes={nodes}
+        nodes={visibleNodes}
         transform={transform}
         visible={transform.scale <= LEADER_PROMPT_OVERLAY_ZOOM_THRESHOLD}
       />
@@ -4325,42 +4208,21 @@ export function Canvas({
       )}
 
       <ViewportOverlay zIndex={850}>
-        <div
-          style={{
-            position: "absolute",
-            top: viewportTopOffset + 12,
-            right: 16,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "6px 12px",
-            background: "var(--bg-secondary)",
-            border: "1px solid var(--border-default)",
-            borderRadius: 8,
-            pointerEvents: "auto",
+        <CanvasNavigation
+          left={projectPanelRight + 16}
+          right={224}
+          top={viewportTopOffset + 12}
+          canGoBack={canGoBack}
+          onBack={goBack}
+          onFind={openCommandPalette}
+          attention={attention}
+          onAttention={item => {
+            if (item.nodeId) handleFocusNode(item.nodeId);
+            else onOpenActivitySession?.(item.session);
           }}
-        >
-          <div
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              background: socketConnected ? "var(--success-color)" : "var(--danger-color)",
-              boxShadow: socketConnected ? "0 0 6px var(--success-color)" : "none",
-            }}
-          />
-          <span
-            style={{
-              fontSize: 10,
-              color: "var(--text-muted)",
-              fontFamily: "var(--font-mono)",
-              textTransform: "uppercase",
-              letterSpacing: 1,
-            }}
-          >
-            {socketConnected ? "Connected" : "Disconnected"}
-          </span>
-        </div>
+          announcement={announcement}
+        />
+
 
         <Toolbar
           transform={transform}
@@ -4394,8 +4256,8 @@ export function Canvas({
         />
       </ViewportOverlay>
       <CanvasMiniMap
-        nodes={nodes}
-        edges={graph.edges}
+        nodes={visibleNodes}
+        edges={visibleGraph.edges}
         transform={transform}
         setTransform={setTransform}
         containerRef={containerRef}

@@ -1,0 +1,157 @@
+.mob-launch .mob-launch-form {
+  gap: 12px;
+}
+
+.mob-launch-prompt-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.mob-launch-prompt-heading label {
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.mob-launch-prompt-heading > span {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mob-launch .mob-launch-prompt textarea {
+  min-height: 120px;
+}
+
+.mob-launch .mob-launch-templates button {
+  min-height: 44px;
+}
+
+.mob-launch-options {
+  min-width: 0;
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  background: var(--bg-surface);
+}
+
+.mob-launch-options > summary {
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 12px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--text-primary);
+}
+
+.mob-launch-options > summary::-webkit-details-marker {
+  display: none;
+}
+
+.mob-launch-options-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.mob-launch-options-copy strong,
+.mob-launch-options-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mob-launch-options-copy strong {
+  margin-bottom: 2px;
+  font-size: 14px;
+}
+
+.mob-launch-options-copy small {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.mob-launch-options-copy small:last-of-type {
+  white-space: normal;
+}
+
+.mob-launch-options-chevron {
+  flex: none;
+  color: var(--accent);
+  font-size: 22px;
+  line-height: 1;
+  transition: transform 160ms ease;
+}
+
+.mob-launch-options[open] > summary {
+  border-bottom: 1px solid var(--border-default);
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-surface));
+}
+
+.mob-launch-options[open] .mob-launch-options-chevron {
+  transform: rotate(180deg);
+}
+
+.mob-launch-options-body {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.mob-launch-action {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  margin: 0 -4px;
+  padding: 10px 4px 4px;
+  background: linear-gradient(to bottom, transparent, var(--bg-primary) 10px);
+}
+
+.mob-launch-action .mob-launch-submit {
+  width: 100%;
+  box-shadow: 0 -6px 24px color-mix(in srgb, var(--bg-primary) 72%, transparent);
+}
+
+@media (max-width: 340px), (max-height: 760px) {
+  .mob-launch .mob-screen-header {
+    margin-bottom: 10px;
+  }
+
+  .mob-launch .mob-screen-intro {
+    margin-top: 2px;
+  }
+
+  .mob-launch .mob-launch-prompt textarea {
+    min-height: 104px;
+  }
+}
+
+@media (max-width: 380px) {
+  /* mobile.css stacks these at this breakpoint. The short labels fit safely
+     in one row and preserving that row keeps the collapsed setup readable. */
+  .mob-launch .mob-launch-templates {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 340px) {
+  /* A bottom-sticky action can cover the setup summary in the 320px layout.
+     Keep it in document flow so collapsed and expanded setup stay unobscured. */
+  .mob-launch .mob-launch-action {
+    position: static;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mob-launch-options-chevron {
+    transition: none;
+  }
+}

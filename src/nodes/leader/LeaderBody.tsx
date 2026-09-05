@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { RenderState } from "../../../shared/render-dsl.ts";
 import { DashboardSurface } from "../render/DashboardSurface.tsx";
+import "./leader-body.css";
 import { PaneDivider } from "./fullscreen/PaneDivider.tsx";
 
 /** Below this content width, the split collapses to a tab toggle. */
@@ -199,14 +200,8 @@ export function LeaderBody({
       <div
         role="tablist"
         aria-label="Leader body view"
-        style={{
-          display: "flex",
-          flexShrink: 0,
-          gap: 2,
-          padding: "4px 6px",
-          borderBottom: "1px solid var(--border-default)",
-          background: "var(--bg-secondary)",
-        }}
+        className="leader-view-tabs"
+        onMouseDown={(event) => event.stopPropagation()}
       >
         <BodyTab label="Conversation" active={view === "chat"} onClick={() => onActiveBodyViewChange?.("chat")} />
         {showDashboard && <BodyTab label="Dashboard" active={view === "dashboard"} onClick={() => onActiveBodyViewChange?.("dashboard")} />}
@@ -233,44 +228,12 @@ function WorkspaceTabs({
     <div
       role="tablist"
       aria-label="Leader workspace"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 18,
-        minHeight: 36,
-        padding: "0 14px",
-        borderBottom: "1px solid var(--border-default)",
-        background: "var(--bg-secondary)",
-        flexShrink: 0,
-      }}
+      className="leader-view-tabs"
+      onMouseDown={(event) => event.stopPropagation()}
     >
-      <WorkspaceTab label="Dashboard" active={active === "dashboard"} onClick={() => onChange("dashboard")} />
-      <WorkspaceTab label={`Minions · ${minionCount}`} active={active === "minions"} onClick={() => onChange("minions")} />
+      <BodyTab label="Dashboard" active={active === "dashboard"} onClick={() => onChange("dashboard")} />
+      <BodyTab label={`Minions · ${minionCount}`} active={active === "minions"} onClick={() => onChange("minions")} />
     </div>
-  );
-}
-
-function WorkspaceTab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      style={{
-        alignSelf: "stretch",
-        padding: "0 1px",
-        border: "none",
-        borderBottom: `2px solid ${active ? "var(--accent)" : "transparent"}`,
-        background: "transparent",
-        color: active ? "var(--text-primary)" : "var(--text-muted)",
-        cursor: "pointer",
-        fontSize: 11,
-        fontWeight: active ? 650 : 500,
-      }}
-    >
-      {label}
-    </button>
   );
 }
 
@@ -288,19 +251,7 @@ function BodyTab({ label, active, onClick }: { label: string; active: boolean; o
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      style={{
-        flex: 1,
-        padding: "5px 8px",
-        borderRadius: 5,
-        border: "1px solid",
-        borderColor: active ? "color-mix(in srgb, var(--accent) 40%, var(--border-default))" : "transparent",
-        background: active ? "color-mix(in srgb, var(--accent) 12%, var(--bg-surface))" : "transparent",
-        color: active ? "var(--accent)" : "var(--text-secondary)",
-        cursor: "pointer",
-        fontSize: 11,
-        fontWeight: active ? 600 : 500,
-        letterSpacing: "-0.01em",
-      }}
+      className="leader-view-tabs__tab"
     >
       {label}
     </button>

@@ -141,3 +141,9 @@ describe("coerceSkill", () => {
     expect(skill?.subskills?.[0]?.attachments?.[0]?.filename).toBe("deep.txt");
   });
 });
+
+it.each(["minions:rocket", "minions:shield", "UX", "🎨"])("preserves the icon %s through export and import", (icon) => {
+  const { skills, skipped } = parseSkillTransfer(serializeSkills([{ ...SKILL, icon }], NOW));
+  expect(skipped).toBe(0);
+  expect(skills[0]?.icon).toBe(icon);
+});

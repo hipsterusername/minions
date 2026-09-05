@@ -1,4 +1,5 @@
-import { useMemo, type KeyboardEvent, type RefObject } from "react";
+import { SkillIcon } from "../../components/SkillIcon.tsx";
+import { useContext, useMemo, type KeyboardEvent, type RefObject } from "react";
 import {
   Bot,
   Brain,
@@ -16,6 +17,7 @@ import { getPickableSkills, getSkill } from "../../skills/registry.ts";
 import type { SkillTemplate } from "../../skills/types.ts";
 import { useHarnessList } from "../../use-harness-list.tsx";
 import type { PermissionMode } from "../../components/SessionToolbar.tsx";
+import { PromptAttachmentsContext } from "./prompt/use-prompt-attachments.ts";
 import { LeaderPromptBar } from "./prompt/LeaderPromptBar.tsx";
 import type { SlashCommand } from "./prompt/slash-commands.ts";
 import type { LeaderData } from "./types.ts";
@@ -99,6 +101,8 @@ export function ActivityLaunchForm({
   promptPlaceholder,
   submitDisabled,
   submitActive,
+  pending = data.status === "creating",
+  unavailableReason,
   textareaRef,
   projectPath,
   onInputChange,
@@ -113,6 +117,8 @@ export function ActivityLaunchForm({
   promptPlaceholder: string;
   submitDisabled: boolean;
   submitActive: boolean;
+  pending?: boolean;
+  unavailableReason?: string | undefined;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   projectPath?: string;
   onInputChange: (value: string) => void;
@@ -150,6 +156,17 @@ export function ActivityLaunchForm({
       || !activeHarness.capabilities.sandboxEnforcement.filesystem.includes(requestedFilesystem))
       ? "unmanaged" : requestedFilesystem);
 
+  const missingVariable = selectedSkills.some((skill) => skill.variables.some((variable) =>
+    variable.required && !(data.skillValues?.[skill.id]?.[variable.name]
+      ?? variable.defaultValue ?? "").trim()));
+  const attachments = useContext(PromptAttachmentsContext);
+  const readiness = pending ? "Starting leader…" : unavailableReason
+    || (!input.trim() && !attachments?.items.length ? "Describe a goal to launch" : missingVariable ? "Complete required skill settings"
+      : !harnessesLoaded ? "Checking model availability…"
+      : !activeHarness || !selectedModel ? "Selected model unavailable"
+      : submitDisabled ? "Launch unavailable" : "Ready to launch");
+  const ready = readiness === "Ready to launch";
+
   function updateSkill(id: string, checked: boolean) {
     const skillIds = checked
       ? [...new Set([...(data.skillIds ?? []), id])]
@@ -178,7 +195,7 @@ export function ActivityLaunchForm({
                 <h3>Define the work</h3>
                 <p>Describe the outcome. You can steer the leader from Activity after launch.</p>
               </div>
-              <span className="leader-launch-ready">Ready to launch</span>
+              <span className="leader-launch-ready" role="status">{readiness}</span>
             </div>
 
             <label className="leader-launch-field" htmlFor={`leader-launch-title-${nodeId}`}>
@@ -209,12 +226,15 @@ export function ActivityLaunchForm({
                 input={input}
                 slashCommands={slashCommands}
                 onInputChange={onInputChange}
-                onKeyDown={onKeyDown}
-                onSubmit={onSubmit}
+                onKeyDown={(event) => {
+                  if (!ready && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); return; }
+                  onKeyDown(event);
+                }}
+                onSubmit={() => { if (ready) onSubmit(); }}
                 placeholder={promptPlaceholder}
-                submitLabel="Launch leader"
-                disabled={submitDisabled}
-                active={submitActive}
+                submitLabel={pending ? "Starting leader…" : "Launch leader"}
+                disabled={!ready}
+                active={ready && submitActive}
                 variant="overlay"
                 portalSlashMenu
                 autoFocus
@@ -407,7 +427,7 @@ export function ActivityLaunchForm({
                             checked={selected}
                             onChange={(event) => updateSkill(skill.id, event.target.checked)}
                           />
-                          <span className="leader-launch-skill-icon" aria-hidden>{skill.icon}</span>
+                          <span className="leader-launch-skill-icon" aria-hidden><SkillIcon skill={skill} /></span>
                           <span>
                             <strong>{skill.name}</strong>
                             <small>{skill.description}</small>

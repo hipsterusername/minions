@@ -27,39 +27,41 @@
   isolation: isolate;
 }
 
-.leader-node::before {
+/* Announce successful startup without adding a row above the node header. */
+.leader-node__announcement {
   position: absolute;
-  z-index: 5;
-  top: -1px;
-  left: 50%;
-  width: 56px;
-  height: 4px;
-  border-radius: 0 0 4px 4px;
-  background: color-mix(in srgb, var(--accent) 55%, transparent);
-  clip-path: polygon(0 0, 100% 0, calc(100% - 5px) 100%, 5px 100%);
-  content: "";
-  opacity: 0.42;
-  pointer-events: none;
-  transform: translateX(-50%);
-  transition: opacity 160ms ease, box-shadow 160ms ease;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
-.leader-node[data-status="running"]::before,
-.leader-node[data-status="creating"]::before {
-  opacity: 1;
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 34%, transparent);
+.leader-launch-notice {
+  margin: 8px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-control);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .leader-node__header {
   position: relative;
   z-index: 20;
   display: flex;
-  min-height: 58px;
+  min-height: 62px;
   flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 11px 9px 12px;
+  padding: 12px;
   border-bottom: 1px solid color-mix(in srgb, var(--border-default) 84%, transparent);
 }
 
@@ -84,6 +86,10 @@
   box-shadow: 0 1px 3px color-mix(in srgb, var(--overlay-bg) 32%, transparent);
 }
 
+.leader-node__avatar .leader-status-icon[data-state="active"] {
+  transform: scale(1.4);
+}
+
 .leader-node__presence {
   position: absolute;
   right: -2px;
@@ -95,7 +101,10 @@
   background: var(--status-idle);
 }
 
-.leader-node[data-status="running"] .leader-node__presence,
+.leader-node[data-status="running"] .leader-node__presence {
+  background: var(--status-running);
+}
+
 .leader-node[data-status="completed"] .leader-node__presence {
   background: var(--status-success);
 }
@@ -108,8 +117,11 @@
   background: var(--status-idle);
 }
 
-.leader-node[data-status="error"] .leader-node__presence,
 .leader-node[data-status="stopped"] .leader-node__presence {
+  background: var(--status-stopped);
+}
+
+.leader-node[data-status="error"] .leader-node__presence {
   background: var(--status-error);
 }
 
@@ -129,8 +141,8 @@
   gap: 6px;
   color: var(--text-primary);
   font-family: var(--font-display);
-  font-size: 13px;
-  font-weight: 650;
+  font-size: 14px;
+  font-weight: 600;
   letter-spacing: -0.015em;
   line-height: 1.25;
 }
@@ -299,19 +311,19 @@
 
 .leader-node__skills {
   display: flex;
-  min-width: 0;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 6px;
 }
 
 .leader-node__skills-button {
   display: inline-flex;
+  flex: 0 0 auto;
   min-height: 24px;
   align-items: center;
   gap: 4px;
   padding: 3px 8px;
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-pill);
   background: var(--bg-elevated);
   color: var(--text-muted);
   cursor: pointer;
@@ -323,6 +335,11 @@
 .leader-node__skills-button:hover {
   border-color: var(--border-hover);
   color: var(--text-secondary);
+}
+
+.leader-node__skills-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .leader-node__skills-button[data-active="true"] {
@@ -342,21 +359,21 @@
   font-size: 8px;
 }
 
-.leader-node__skill-chips {
-  display: flex;
-  min-width: 0;
+.leader-node__skill-previews {
+  display: inline-flex;
   align-items: center;
   gap: 4px;
+  margin-left: 2px;
+}
+
+.leader-node__skill-preview {
+  display: inline-flex;
+  flex: 0 0 13px;
+  width: 13px;
+  height: 13px;
+  align-items: center;
+  justify-content: center;
   overflow: hidden;
-}
-
-.leader-node__skill-chips > span {
-  flex: 0 0 auto;
-}
-
-.leader-node__skills-more {
-  color: var(--text-muted) !important;
-  font: 500 9px/1 var(--font-mono);
 }
 
 /* Leader skill picker ----------------------------------------------------- */
@@ -1108,37 +1125,6 @@
   }
 }
 
-/* Prompt composer */
-.leader-prompt-bar--inline {
-  padding: 9px 10px 10px !important;
-  border-top-color: color-mix(in srgb, var(--border-default) 84%, transparent) !important;
-  background: color-mix(in srgb, var(--bg-secondary) 88%, var(--bg-surface)) !important;
-}
-
-.leader-prompt-bar__input-wrap {
-  position: relative;
-  display: flex;
-  min-width: 0;
-  flex: 1;
-}
-
-.leader-prompt-bar--inline textarea {
-  border-color: var(--border-default) !important;
-  border-radius: var(--radius-control) !important;
-  background: color-mix(in srgb, var(--bg-primary) 82%, var(--bg-surface)) !important;
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--overlay-bg) 16%, transparent) inset;
-  transition: border-color 120ms ease, box-shadow 120ms ease !important;
-}
-
-.leader-prompt-bar--inline textarea:focus {
-  border-color: color-mix(in srgb, var(--accent) 66%, var(--border-default)) !important;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 13%, transparent) !important;
-}
-
-.leader-prompt-bar__submit {
-  border-radius: var(--radius-control) !important;
-}
-
 /* Footer summary */
 .leader-config-footer {
   border-top-color: color-mix(in srgb, var(--border-default) 84%, transparent) !important;
@@ -1343,10 +1329,6 @@
 /* Resizable-card breakpoints. These respond to node width rather than the
    browser viewport, which is what matters on a spatial canvas. */
 @container leader-node (max-width: 540px) {
-  .leader-node__skill-chips {
-    display: none;
-  }
-
   .leader-node__cost {
     display: none;
   }
@@ -1397,24 +1379,8 @@
     padding-inline: 8px !important;
   }
 
-  .leader-node__skills-button {
-    width: 28px;
-    justify-content: center;
-    padding-inline: 0;
-  }
-
-  .leader-node__skills-button > span,
-  .leader-node__skills-button > strong {
-    display: none;
-  }
-
   .leader-prompt-bar--inline {
-    padding-inline: 8px !important;
-  }
-
-  .leader-prompt-bar--inline .leader-prompt-bar__submit {
-    min-width: 72px !important;
-    padding-inline: 10px !important;
+    padding-inline: 8px;
   }
 
   .leader-config-footer__summary {
@@ -1427,7 +1393,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .leader-node::before,
   .leader-node__icon-button,
   .leader-node__stop,
   .leader-header-menu__item,

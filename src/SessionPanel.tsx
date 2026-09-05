@@ -42,6 +42,7 @@ interface SessionPanelProps {
   ) => void;
   onFocusSession?: (sessionKey: string) => void;
   attachedSessionKeys: Set<string>;
+  sessionZones?: ReadonlyMap<string, string>;
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -70,6 +71,7 @@ export function SessionPanel({
   onAttachSession,
   onFocusSession,
   attachedSessionKeys,
+  sessionZones,
 }: SessionPanelProps) {
   const isOpen = useDockPanelOpen("sessions");
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -355,6 +357,7 @@ export function SessionPanel({
                     key={session.sessionKey}
                     session={session}
                     attached
+                    zoneName={sessionZones?.get(session.sessionKey)}
                     usage={
                       usageBySession.get(session.sessionKey) ??
                       usageFromSessionInfo(session)
@@ -457,6 +460,7 @@ function EmptySessions() {
 }
 
 interface SessionRowProps {
+  zoneName?: string | undefined;
   session: SessionInfo;
   attached: boolean;
   usage: SessionUsage;
@@ -469,6 +473,7 @@ interface SessionRowProps {
 
 function SessionRow({
   session,
+  zoneName,
   attached,
   usage,
   controlsAvailable,
@@ -482,6 +487,7 @@ function SessionRow({
     STATUS_COLOR[session.status] ?? "var(--text-muted)";
   const usageLine = formatSessionUsageLine(usage);
   const metadata = [
+    zoneName ? `Workspace: ${zoneName}` : null,
     session.harness,
     session.model ? shortModelLabel(session.model) : null,
   ].filter((value): value is string => Boolean(value));

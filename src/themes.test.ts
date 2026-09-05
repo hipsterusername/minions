@@ -28,6 +28,88 @@ function contrastRatio(a: string, b: string): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
+function mixHex(foreground: string, background: string, opacity: number): string {
+  const fg = hexToRgb(foreground);
+  const bg = hexToRgb(background);
+  return `#${fg.map((channel, index) =>
+    Math.round(channel * opacity + bg[index]! * (1 - opacity)).toString(16).padStart(2, "0"),
+  ).join("")}`;
+}
+
+function compositeTint(value: string, vars: Record<string, string>, background: string): string {
+  const resolved = value.replace(/var\((--[^)]+)\)/g, (_, token: string) => vars[token]!);
+  const mix = resolved.match(/^color-mix\(in srgb, (#[a-f\d]{6}) (\d+)%, transparent\)$/i);
+  if (mix) return mixHex(mix[1]!, background, Number(mix[2]) / 100);
+  const rgba = resolved.match(/^rgba\(([^)]+)\)$/);
+  if (rgba) {
+    const [r, g, b, opacity] = rgba[1]!.split(",").map(Number);
+    const hex = `#${[r!, g!, b!].map(c => c.toString(16).padStart(2, "0")).join("")}`;
+    return mixHex(hex, background, opacity!);
+  }
+  throw new Error(`Unsupported theme tint: ${value}`);
+}
+
+describe("theme text and semantic contrast", () => {
+  for (const theme of themes) {
+    const vars = theme.vars;
+    const surfaces = ["--bg-primary", "--bg-secondary", "--bg-surface", "--bg-elevated"];
+
+    it(`${theme.id} keeps its text hierarchy readable on every base surface`, () => {
+      for (const surface of surfaces) {
+        let previous = Infinity;
+        for (const token of ["--text-primary", "--text-secondary", "--text-muted", "--text-dim"]) {
+          const ratio = contrastRatio(vars[token]!, vars[surface]!);
+          expect(ratio, `${token} on ${surface}`).toBeGreaterThanOrEqual(4.5);
+          expect(ratio, `${token} hierarchy on ${surface}`).toBeLessThan(previous);
+          previous = ratio;
+        }
+      }
+    });
+
+    it(`${theme.id} keeps status, priority and model labels readable on tinted badges`, () => {
+      for (const [token, color] of Object.entries(vars)) {
+        if (!/^--(status|priority|model)-/.test(token)) continue;
+        // Activity status pills use up to 18% ink; model/priority chips use
+        // subtler tints. Composite the transparent chip over its host surface.
+        const opacity = token.startsWith("--status-") ? 0.18 : 0.12;
+        for (const surface of surfaces) {
+          expect(contrastRatio(color, mixHex(color, vars[surface]!, opacity)),
+            `${token} badge on ${surface}`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    });
+
+    it(`${theme.id} keeps filled actions readable in both normal and hover states`, () => {
+      for (const background of ["--accent", "--accent-dark"]) {
+        expect(contrastRatio(vars["--text-on-accent"]!, vars[background]!), background)
+          .toBeGreaterThanOrEqual(4.5);
+      }
+      for (const background of ["--status-success", "--danger-color"]) {
+        expect(contrastRatio(vars["--text-on-status"]!, vars[background]!), background)
+          .toBeGreaterThanOrEqual(4.5);
+      }
+      expect(contrastRatio(vars["--text-on-status"]!,
+        mixHex(vars["--status-success"]!, vars["--text-primary"]!, 0.82)), "success hover")
+        .toBeGreaterThanOrEqual(4.5);
+    });
+
+    it(`${theme.id} keeps semantic panel text readable on its actual tints`, () => {
+      for (const kind of ["tool", "thinking", "success", "danger", "warning", "info"]) {
+        const expandable = kind === "tool" || kind === "thinking";
+        const color = vars[`--${kind}-${expandable ? "accent" : "color"}`]!;
+        for (const suffix of expandable ? ["bg", "bg-hover"] : ["bg"]) {
+          const token = `--${kind}-${suffix}`;
+          for (const surface of surfaces) {
+            const background = compositeTint(vars[token]!, vars, vars[surface]!);
+            expect(contrastRatio(color, background), `${token} on ${surface}`)
+              .toBeGreaterThanOrEqual(4.5);
+          }
+        }
+      }
+    });
+  }
+});
+
 describe("theme accent text tokens", () => {
   it("defines AA text color for every accent surface", () => {
     for (const theme of themes) {

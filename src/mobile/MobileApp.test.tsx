@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getProjectSettings, listProjects, restartServer, updateProjectSettings } from "../api.ts";
 import MobileApp from "./MobileApp.tsx";
+import { themeMap } from "../themes.ts";
 
 const send = vi.fn();
 const manualReconnect = vi.fn();
@@ -34,7 +35,8 @@ vi.mock("../api.ts", () => ({
   updateProjectSettings: vi.fn(async () => ({})),
 }));
 
-vi.mock("../use-socket.ts", () => ({
+vi.mock("../use-socket.ts", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../use-socket.ts")>(),
   subscribeSocketTopic: (
     socketSubscribe: ((topic: string, fn: (msg: unknown) => void) => () => void) | undefined,
     topic: string,
@@ -100,13 +102,41 @@ afterEach(() => {
 });
 
 describe("MobileApp", () => {
+  it.each([
+    ["daybook", "daybook"],
+    ["obsidian", "obsidian"],
+    ["removed-theme", "midnight"],
+  ])("applies the saved %s theme on the standalone mobile route", (savedId, expectedId) => {
+    const root = document.documentElement;
+    const previousStyle = root.getAttribute("style");
+    const previousTheme = root.getAttribute("data-theme");
+    const previousSavedTheme = localStorage.getItem("canvas-theme");
+    try {
+      localStorage.setItem("canvas-theme", savedId);
+      render(<MobileApp />);
+
+      const theme = themeMap[expectedId!]!;
+      expect(root.dataset["theme"]).toBe(expectedId);
+      expect(root.style.getPropertyValue("--bg-primary")).toBe(theme.vars["--bg-primary"]);
+      expect(root.style.getPropertyValue("--text-on-accent")).toBe(theme.vars["--text-on-accent"]);
+      expect(root.style.getPropertyValue("--font-sans")).toBe(theme.fonts.sans);
+    } finally {
+      if (previousStyle === null) root.removeAttribute("style");
+      else root.setAttribute("style", previousStyle);
+      if (previousTheme === null) root.removeAttribute("data-theme");
+      else root.setAttribute("data-theme", previousTheme);
+      if (previousSavedTheme === null) localStorage.removeItem("canvas-theme");
+      else localStorage.setItem("canvas-theme", previousSavedTheme);
+    }
+  });
+
   it("shows the enable notifications control from the default push state", async () => {
     installPushGlobals();
 
     render(<MobileApp />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Enable notifications" })).toHaveTextContent("Alerts");
+      expect(screen.getByRole("button", { name: "Enable notifications" })).toHaveAttribute("title", "Enable notifications");
     });
   });
 
@@ -141,6 +171,22 @@ describe("MobileApp", () => {
     await waitFor(() => {
       expect(screen.getByRole("main", { name: "Projects" })).toBeInTheDocument();
     });
+  });
+
+  it("opens the existing launch screen from the no-sessions Activity action", async () => {
+    installPushGlobals();
+    vi.mocked(listProjects).mockResolvedValue([
+      { id: "alpha", name: "Alpha", path: "/work/alpha", lastOpened: "2026-06-01T00:00:00.000Z", hasSidecar: true },
+    ]);
+
+    render(<MobileApp />);
+    fireEvent.click(await screen.findByText("Alpha"));
+
+    const emptyAction = await screen.findByRole("button", { name: "New leader" });
+    fireEvent.click(emptyAction);
+
+    expect(await screen.findByRole("main", { name: "New leader" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New" })).toHaveAttribute("aria-current", "page");
   });
 
   it("opens review mode from a mobile approval deep link", async () => {

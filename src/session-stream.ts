@@ -27,6 +27,7 @@ import {
   isStreamingEvent,
 } from "./streaming.ts";
 import type { ServerMessage } from "./use-socket.ts";
+import type { ContextDeliveryLedger } from "./context-delivery.ts";
 import type { NormalizedEvent } from "../shared/normalized-event.ts";
 
 /** Statuses tracked by the shared session stream. */
@@ -67,6 +68,7 @@ export interface SessionStreamState {
   turns: number;
   error: string | null;
   fullError?: string | null;
+  contextDelivery?: ContextDeliveryLedger | undefined;
 }
 
 /**
@@ -109,6 +111,7 @@ function reduceSessionCompacted(
   return {
     ...state,
     messages: [...state.messages, marker],
+    contextDelivery: {},
   };
 }
 
@@ -188,6 +191,8 @@ function reduceSyncResponse(
     ...state,
     status,
     messages: rebuilt.length > 0 ? rebuilt : state.messages,
+    contextDelivery: rebuilt.some(m => m.id.startsWith(`${prefix}-checkpoint-`)
+      && !state.messages.some(old => old.id === m.id)) ? {} : state.contextDelivery,
     streamingText: "",
     streamingBlockIndex: null,
     totalCost: cost,

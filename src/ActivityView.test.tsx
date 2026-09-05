@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { act } from "react";
+import { act, useState, type ReactNode } from "react";
+import { HarnessListProvider } from "./use-harness-list.tsx";
 
 import {
   ActivityView,
@@ -14,6 +15,7 @@ import type { LeaderData } from "./nodes/leader/types.ts";
 import type { MobileSessionInfo } from "./mobile/mobile-selectors.ts";
 import type { DisplayMessage } from "./sdk-messages.ts";
 import { createGraphFixture } from "./task-graph/fixtures.ts";
+import { useActivityLifecycle } from "./use-activity-lifecycle.ts";
 
 function session(overrides: Partial<MobileSessionInfo>): MobileSessionInfo {
   return {
@@ -78,7 +80,62 @@ function activityList(): HTMLElement {
   return list;
 }
 
+function ReadyLaunchHarness({ children }: { children: ReactNode }) {
+  return <HarnessListProvider connected send={() => {}} subscribe={(listener) => {
+    listener({ type: "harness_list", harnesses: [{ name: "claude",
+      models: [{ id: "opus", label: "Opus" }], builtInTools: [], commands: [], agents: [],
+      account: { provider: "anthropic" }, capabilities: { mutationInterception: "complete",
+        thinking: true, promptCaching: true, mcp: true, permissionPrompts: true,
+        resume: true, partialMessages: true, builtInFilesystem: true } }] });
+    return () => {};
+  }}>{children}</HarnessListProvider>;
+}
+
+function makeSubscribe() {
+  const handlers = new Set<(msg: unknown) => void>();
+  const subscribe = Object.assign(
+    ((...args: unknown[]) => {
+      const handler = (args.length === 1 ? args[0] : args[1]) as (msg: unknown) => void;
+      handlers.add(handler);
+      return () => { handlers.delete(handler); };
+    }) as SocketSubscribe,
+    { supportsTopics: true as const },
+  );
+  return {
+    subscribe,
+    emit: (msg: unknown) => act(() => handlers.forEach((handler) => handler(msg))),
+  };
+}
+
+function sentCommand(socketSend: ReturnType<typeof vi.fn>, type: string) {
+  return socketSend.mock.calls.map(([command]) => command as Record<string, unknown>)
+    .find((command) => command["type"] === type)!;
+}
+
 describe("ActivityView", () => {
+  it("returns from a session with a back button before the activity icon", () => {
+    render(
+      <ActivityView
+        sessions={[session({ sessionKey: "focused", taskName: "Focused session" })]}
+        nodes={[]}
+        {...noop}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /focused session/i }));
+
+    const inspector = screen.getByRole("complementary", { name: "Session details" });
+    const back = within(inspector).getByRole("button", { name: "Back to activity" });
+    const avatar = inspector.querySelector(".act-inspector-avatar");
+    expect(back.nextElementSibling).toBe(avatar);
+    expect(within(inspector).queryByRole("button", { name: "Close inspector" }))
+      .not.toBeInTheDocument();
+
+    fireEvent.click(back);
+    expect(screen.queryByRole("complementary", { name: "Session details" }))
+      .not.toBeInTheDocument();
+  });
+
   it("routes constructed task graphs through a conditional leader-panel tab", () => {
     const listeners = new Map<string, Set<(message: unknown) => void>>();
     const socketSubscribe = Object.assign(
@@ -315,13 +372,14 @@ describe("ActivityView", () => {
     );
     expect(screen.getByRole("button", { name: /open work/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /dismissed work/i })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^dismissed$/i }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Activity visibility" }), { target: { value: "dismissed" } });
     expect(screen.getByRole("button", { name: /dismissed work/i })).toBeInTheDocument();
   });
 
   it("shows an interrupted inactive work item as inactive", () => {
     const socketSend = vi.fn();
     const onDetachFromCanvas = vi.fn();
+    const { subscribe, emit } = makeSubscribe();
     render(
       <ActivityView
         sessions={[session({
@@ -340,6 +398,7 @@ describe("ActivityView", () => {
         nodes={[]}
         {...noop}
         socketSend={socketSend}
+        socketSubscribe={subscribe}
         onDetachFromCanvas={onDetachFromCanvas}
       />,
     );
@@ -374,20 +433,38 @@ describe("ActivityView", () => {
     expect(rowRemove).toHaveTextContent("");
 
     fireEvent.click(rowReview);
-    expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
+    const reviewCommand = sentCommand(socketSend, "acknowledge_session");
+    expect(reviewCommand).toEqual(expect.objectContaining({
       type: "acknowledge_session",
       sessionKey: "inactive-run",
+      requestId: expect.any(String),
     }));
     expect(onDetachFromCanvas).not.toHaveBeenCalled();
 
-    fireEvent.click(rowRemove);
-    expect(onDetachFromCanvas).toHaveBeenCalledWith({
-      sessionKey: "inactive-run",
+    // One lifecycle action per activity remains locked until its matching reply.
+    expect(rowRemove).toBeDisabled();
+    emit({
+      type: "control_response",
+      command: "acknowledge_session",
+      requestId: reviewCommand["requestId"],
+      success: true,
     });
-    expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
+
+    fireEvent.click(rowRemove);
+    const dismissCommand = sentCommand(socketSend, "dismiss_session");
+    expect(onDetachFromCanvas).not.toHaveBeenCalled();
+    expect(dismissCommand).toEqual(expect.objectContaining({
       type: "dismiss_session",
       sessionKey: "inactive-run",
+      requestId: expect.any(String),
     }));
+    emit({
+      type: "control_response",
+      command: "dismiss_session",
+      requestId: dismissCommand["requestId"],
+      success: true,
+    });
+    expect(onDetachFromCanvas).toHaveBeenCalledWith({ sessionKey: "inactive-run" });
   });
 
   it("dismisses a non-canonical work-item session via the session envelope", () => {
@@ -412,11 +489,12 @@ describe("ActivityView", () => {
     );
     const row = within(activityList()).getByText("hi").closest(".act-triage-row") as HTMLElement;
     fireEvent.click(within(row).getByRole("button", { name: /^dismiss$/i }));
-    expect(socketSend).toHaveBeenCalledWith({
+    expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
       type: "dismiss_session",
       sessionKey: "leader-new",
       expectedLifecycleRevision: 3,
-    });
+      requestId: expect.any(String),
+    }));
     expect(socketSend).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: "archive_work_item" }),
     );
@@ -425,6 +503,7 @@ describe("ActivityView", () => {
   it("detaches a completed session from Canvas when it is dismissed", () => {
     const socketSend = vi.fn();
     const onDetachFromCanvas = vi.fn();
+    const { subscribe, emit } = makeSubscribe();
     render(
       <ActivityView
         sessions={[session({
@@ -437,6 +516,7 @@ describe("ActivityView", () => {
         nodes={[]}
         {...noop}
         socketSend={socketSend}
+        socketSubscribe={subscribe}
         onDetachFromCanvas={onDetachFromCanvas}
       />,
     );
@@ -445,14 +525,67 @@ describe("ActivityView", () => {
       .closest(".act-triage-row") as HTMLElement;
     fireEvent.click(within(row).getByRole("button", { name: "Dismiss" }));
 
+    const command = sentCommand(socketSend, "archive_work_item");
+    expect(onDetachFromCanvas).not.toHaveBeenCalled();
+    expect(command).toEqual(expect.objectContaining({
+      type: "archive_work_item",
+      workItemId: "work-1",
+      requestId: expect.any(String),
+    }));
+    emit({
+      type: "work_item_response",
+      command: "archive_work_item",
+      requestId: command["requestId"],
+      success: true,
+    });
     expect(onDetachFromCanvas).toHaveBeenCalledWith({
       sessionKey: "completed-run",
       workItemId: "work-1",
     });
-    expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
-      type: "archive_work_item",
-      workItemId: "work-1",
-    }));
+  });
+
+  it("keeps a parent-owned dismissal request alive when Activity unmounts", () => {
+    const socketSend = vi.fn();
+    const onDetachFromCanvas = vi.fn();
+    const { subscribe, emit } = makeSubscribe();
+    const completed = session({
+      sessionKey: "tab-switch-run",
+      taskName: "Tab switch work",
+      reviewLifecycle: completeLifecycle,
+    });
+
+    function ParentHarness() {
+      const [showActivity, setShowActivity] = useState(true);
+      const lifecycleController = useActivityLifecycle({
+        socketSend,
+        socketSubscribe: subscribe,
+        onDetachFromCanvas,
+      });
+      return (
+        <>
+          <button type="button" onClick={() => setShowActivity(false)}>Open other tab</button>
+          {showActivity ? (
+            <ActivityView
+              sessions={[completed]}
+              nodes={[]}
+              {...noop}
+              lifecycleController={lifecycleController}
+            />
+          ) : <div>Other tab</div>}
+        </>
+      );
+    }
+
+    render(<ParentHarness />);
+    fireEvent.click(within(activityList()).getByRole("button", { name: /^dismiss$/i }));
+    const command = sentCommand(socketSend, "dismiss_session");
+    fireEvent.click(screen.getByRole("button", { name: /open other tab/i }));
+    expect(screen.queryByRole("heading", { name: "Activity" })).not.toBeInTheDocument();
+
+    emit({ type: "control_response", command: "dismiss_session",
+      requestId: command["requestId"], success: true });
+
+    expect(onDetachFromCanvas).toHaveBeenCalledWith({ sessionKey: "tab-switch-run" });
   });
 
   it("removes a session from Open after the server confirms dismissal", () => {
@@ -480,39 +613,48 @@ describe("ActivityView", () => {
 
   it("shows the persisted final report and sends revisioned review commands", () => {
     const socketSend = vi.fn();
+    const { subscribe, emit } = makeSubscribe();
     render(
       <ActivityView
         sessions={[session({ sessionKey: "done", taskName: "Finished task", reviewLifecycle: completeLifecycle })]}
         nodes={[]}
         {...noop}
         socketSend={socketSend}
+        socketSubscribe={subscribe}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: /finished task/i }));
     expect(screen.getByText(/implemented the migration/i)).toBeInTheDocument();
     const inspector = screen.getByRole("complementary", { name: /session details/i });
     fireEvent.click(within(inspector).getByRole("button", { name: /mark reviewed/i }));
-    expect(socketSend).toHaveBeenCalledWith({
+    const reviewCommand = sentCommand(socketSend, "acknowledge_session");
+    expect(reviewCommand).toEqual(expect.objectContaining({
       type: "acknowledge_session",
       sessionKey: "done",
       expectedLifecycleRevision: 3,
-    });
+      requestId: expect.any(String),
+    }));
+    emit({ type: "control_response", command: "acknowledge_session",
+      requestId: reviewCommand["requestId"], success: true });
     fireEvent.click(within(inspector).getByRole("button", { name: /^dismiss$/i }));
-    expect(socketSend).toHaveBeenCalledWith({
+    expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
       type: "dismiss_session",
       sessionKey: "done",
       expectedLifecycleRevision: 3,
-    });
+      requestId: expect.any(String),
+    }));
   });
 
   it("resolves an individual session inline from the list without opening the inspector", () => {
     const socketSend = vi.fn();
+    const { subscribe, emit } = makeSubscribe();
     render(
       <ActivityView
         sessions={[session({ sessionKey: "done", taskName: "Finished task", reviewLifecycle: completeLifecycle })]}
         nodes={[]}
         {...noop}
         socketSend={socketSend}
+        socketSubscribe={subscribe}
       />,
     );
 
@@ -530,20 +672,26 @@ describe("ActivityView", () => {
     expect(dismissAction.textContent).toBe("");
 
     fireEvent.click(reviewAction);
-    expect(socketSend).toHaveBeenCalledWith({
+    const reviewCommand = sentCommand(socketSend, "acknowledge_session");
+    expect(reviewCommand).toEqual(expect.objectContaining({
       type: "acknowledge_session",
       sessionKey: "done",
       expectedLifecycleRevision: 3,
-    });
+      requestId: expect.any(String),
+    }));
     // Still no inspector — the action was immediate.
     expect(screen.queryByRole("complementary", { name: /session details/i })).not.toBeInTheDocument();
 
+    expect(dismissAction).toBeDisabled();
+    emit({ type: "control_response", command: "acknowledge_session",
+      requestId: reviewCommand["requestId"], success: true });
     fireEvent.click(dismissAction);
-    expect(socketSend).toHaveBeenCalledWith({
+    expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
       type: "dismiss_session",
       sessionKey: "done",
       expectedLifecycleRevision: 3,
-    });
+      requestId: expect.any(String),
+    }));
   });
 
   describe("on a non-secure origin (no crypto.randomUUID)", () => {
@@ -584,6 +732,7 @@ describe("ActivityView", () => {
       // no-op and the command never reached the socket.
       stubInsecureCrypto();
       const socketSend = vi.fn();
+      const { subscribe, emit } = makeSubscribe();
       render(
         <ActivityView
           sessions={[session({
@@ -596,6 +745,7 @@ describe("ActivityView", () => {
           nodes={[]}
           {...noop}
           socketSend={socketSend}
+          socketSubscribe={subscribe}
         />,
       );
 
@@ -609,6 +759,10 @@ describe("ActivityView", () => {
         expectedCurrentRunKey: "run-1",
         requestId: expect.stringMatching(UUID_V4),
       }));
+
+      const reviewCommand = sentCommand(socketSend, "review_work_item");
+      emit({ type: "work_item_response", command: "review_work_item",
+        requestId: reviewCommand["requestId"], success: true });
 
       fireEvent.click(within(row).getByRole("button", { name: /^dismiss$/i }));
       expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
@@ -639,16 +793,18 @@ describe("ActivityView", () => {
       fireEvent.click(within(bulk).getByRole("button", { name: /dismiss 2/i }));
 
       expect(socketSend).toHaveBeenCalledTimes(2);
-      expect(socketSend).toHaveBeenCalledWith({
+      expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
         type: "dismiss_session",
         sessionKey: "a",
         expectedLifecycleRevision: 0,
-      });
-      expect(socketSend).toHaveBeenCalledWith({
+        requestId: expect.stringMatching(UUID_V4),
+      }));
+      expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
         type: "dismiss_session",
         sessionKey: "b",
         expectedLifecycleRevision: 0,
-      });
+        requestId: expect.stringMatching(UUID_V4),
+      }));
     });
   });
 
@@ -675,16 +831,18 @@ describe("ActivityView", () => {
     fireEvent.click(within(bulk).getByRole("button", { name: /dismiss 2/i }));
 
     expect(socketSend).toHaveBeenCalledTimes(2);
-    expect(socketSend).toHaveBeenCalledWith({
+    expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
       type: "dismiss_session",
       sessionKey: "a",
       expectedLifecycleRevision: 0,
-    });
-    expect(socketSend).toHaveBeenCalledWith({
+      requestId: expect.any(String),
+    }));
+    expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
       type: "dismiss_session",
       sessionKey: "b",
       expectedLifecycleRevision: 0,
-    });
+      requestId: expect.any(String),
+    }));
     // Selection clears after the bulk action, hiding the toolbar.
     expect(screen.queryByRole("toolbar", { name: /bulk actions/i })).not.toBeInTheDocument();
   });
@@ -710,16 +868,18 @@ describe("ActivityView", () => {
 
     fireEvent.click(within(bulk).getByRole("button", { name: /mark 2 reviewed/i }));
     expect(socketSend).toHaveBeenCalledTimes(2);
-    expect(socketSend).toHaveBeenCalledWith({
+    expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
       type: "acknowledge_session",
       sessionKey: "r1",
       expectedLifecycleRevision: 3,
-    });
-    expect(socketSend).toHaveBeenCalledWith({
+      requestId: expect.any(String),
+    }));
+    expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
       type: "acknowledge_session",
       sessionKey: "r2",
       expectedLifecycleRevision: 3,
-    });
+      requestId: expect.any(String),
+    }));
   });
 
   it("presents count-free bulk actions side by side with the individual-card icons", () => {
@@ -749,7 +909,7 @@ describe("ActivityView", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /^all$/i }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Activity visibility" }), { target: { value: "all" } });
     fireEvent.click(screen.getByRole("checkbox", { name: /select interrupted work/i }));
     fireEvent.click(screen.getByRole("checkbox", { name: /select open work/i }));
     fireEvent.click(screen.getByRole("checkbox", { name: /select dismissed work/i }));
@@ -777,39 +937,27 @@ describe("ActivityView", () => {
   });
 
   describe("lifecycle action failures", () => {
-    function makeSubscribe() {
-      const handlers: Array<(msg: unknown) => void> = [];
-      const subscribe = Object.assign(
-        ((...args: unknown[]) => {
-          const fn = (args.length === 1 ? args[0] : args[1]) as (msg: unknown) => void;
-          handlers.push(fn);
-          return () => {};
-        }) as SocketSubscribe,
-        { supportsTopics: true as const },
-      );
-      return {
-        subscribe,
-        emit: (msg: unknown) => act(() => handlers.forEach((handler) => handler(msg))),
-      };
-    }
-
-    it("surfaces a rejected lifecycle command and clears it on later success", () => {
+    it("surfaces only the failure correlated to the pending lifecycle command", () => {
       const { subscribe, emit } = makeSubscribe();
+      const socketSend = vi.fn();
       render(
         <ActivityView
           sessions={[session({ sessionKey: "done", taskName: "Finished task", reviewLifecycle: completeLifecycle })]}
           nodes={[]}
           {...noop}
-          socketSend={vi.fn()}
+          socketSend={socketSend}
           socketSubscribe={subscribe}
         />,
       );
 
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      const dismiss = within(activityList()).getByRole("button", { name: /^dismiss$/i });
+      fireEvent.click(dismiss);
+      const command = sentCommand(socketSend, "dismiss_session");
       emit({
-        type: "work_item_response",
-        command: "archive_work_item",
-        requestId: "r-1",
+        type: "control_response",
+        command: "dismiss_session",
+        requestId: command["requestId"],
         success: false,
         error: "Lifecycle revision conflict",
       });
@@ -817,34 +965,37 @@ describe("ActivityView", () => {
         /dismiss failed: lifecycle revision conflict/i,
       );
 
-      // A later successful lifecycle response clears the stale banner.
+      // An unrelated success cannot erase this activity's failure.
       emit({
         type: "work_item_response",
         command: "archive_work_item",
-        requestId: "r-2",
+        requestId: "another-request",
         success: true,
         result: {},
       });
-      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.getByRole("alert")).toHaveTextContent(/lifecycle revision conflict/i);
     });
 
     it("surfaces control_response failures and supports manual dismissal", () => {
       const { subscribe, emit } = makeSubscribe();
+      const socketSend = vi.fn();
       render(
         <ActivityView
           sessions={[session({ sessionKey: "done", taskName: "Finished task", reviewLifecycle: completeLifecycle })]}
           nodes={[]}
           {...noop}
-          socketSend={vi.fn()}
+          socketSend={socketSend}
           socketSubscribe={subscribe}
         />,
       );
 
+      fireEvent.click(within(activityList()).getByRole("button", { name: /mark reviewed/i }));
+      const command = sentCommand(socketSend, "acknowledge_session");
       emit({
         type: "control_response",
         command: "acknowledge_session",
         sessionKey: "done",
-        requestId: null,
+        requestId: command["requestId"],
         success: false,
         error: "Session done not found",
       });
@@ -887,7 +1038,7 @@ describe("ActivityView", () => {
         socketSubscribe={socketSubscribe}
       />,
     );
-    fireEvent.click(within(activityList()).getByText("Working").closest("button")!);
+    fireEvent.click(within(screen.getByRole("region", { name: "Active" })).getByText("Working").closest("button")!);
     const composer = screen.getByRole("textbox", { name: /reply or steer/i });
     expect(composer).toHaveAttribute("rows", "3");
     fireEvent.change(composer, {
@@ -1068,7 +1219,7 @@ describe("ActivityView", () => {
         onCommitLaunchLeader={onCommitLaunchLeader}
         socketSend={socketSend}
         projectPath="/tmp/project"
-      />,
+      />, { wrapper: ReadyLaunchHarness },
     );
 
     fireEvent.click(screen.getByRole("button", { name: "New" }));
@@ -1217,7 +1368,7 @@ describe("ActivityView", () => {
         onLaunchLeader={() => draft.id}
         socketSend={socketSend}
         projectPath="/tmp/project"
-      />,
+      />, { wrapper: ReadyLaunchHarness },
     );
 
     const workspace = screen.getByRole("region", { name: /add an agent/i });
@@ -1260,6 +1411,8 @@ describe("ActivityView", () => {
 
     expect(screen.queryByRole("region", { name: /add an agent/i })).not.toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: /session details/i })).toHaveTextContent("Fresh task");
+    expect(screen.getByText("Leader started")).toHaveAttribute("role", "status");
+    expect(screen.getByRole("heading", { name: "Fresh task", level: 2 })).toHaveFocus();
   });
 
   it("offers New from the empty activity state when no draft could be created", () => {
@@ -1315,20 +1468,51 @@ describe("ActivityView", () => {
       />,
     );
 
-    // Zero "working" sessions → filtered-empty state with the preview + composer.
+    // A zero-result filter stays focused: no draft, composer, or recent-work cards.
     fireEvent.click(screen.getByRole("button", { name: /working: 0\. filter activity/i }));
     expect(screen.getByText("No sessions match this activity filter")).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: /add an agent/i })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /add an agent/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /recent agent work/i })).not.toBeInTheDocument();
 
-    const recent = screen.getByRole("region", { name: /recent agent work/i });
-    fireEvent.click(within(recent).getByRole("button", { name: /quiet agent/i }));
-    expect(screen.getByRole("complementary", { name: /session details/i }))
-      .toHaveTextContent("Quiet agent");
+    fireEvent.click(screen.getByRole("button", { name: /^clear filter$/i }));
+    expect(screen.getByRole("button", { name: /quiet agent/i })).toBeInTheDocument();
     expect(onAttachToCanvas).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { visibility: "All", activityName: "Dismissed in all" },
+    { visibility: "Dismissed", activityName: "Dismissed only" },
+  ])("keeps $visibility visibility when clearing an empty summary filter", ({
+    visibility, activityName,
+  }) => {
+    render(
+      <ActivityView
+        sessions={[session({
+          sessionKey: `dismissed-${visibility.toLowerCase()}`,
+          taskName: activityName,
+          status: "idle",
+          reviewLifecycle: { ...completeLifecycle, dismissedAt: 20 },
+        })]}
+        nodes={[]}
+        {...noop}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Activity visibility" }), { target: { value: visibility.toLowerCase() } });
+    expect(screen.getByRole("button", { name: new RegExp(activityName, "i") }))
+      .toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /working: 0\. filter activity/i }));
+    expect(screen.getByText("No sessions match this activity filter")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^clear filter$/i }));
+
+    expect(screen.getByRole("combobox", { name: "Activity visibility" })).toHaveValue(visibility.toLowerCase());
+    expect(screen.getByRole("button", { name: new RegExp(activityName, "i") }))
+      .toBeInTheDocument();
+  });
+
   it("groups sessions Active → Idle → Stopped and excludes minions from the count", () => {
-    const { container } = render(
+    render(
       <ActivityView
         sessions={[
           session({ sessionKey: "run", status: "running", taskName: "Working", lastActivityAt: 100 }),
@@ -1348,10 +1532,10 @@ describe("ActivityView", () => {
       "Stopped / Cleared",
     ]);
     expect(screen.queryByText("Minion")).not.toBeInTheDocument();
-    expect(container.querySelector(".act-header-count")?.textContent).toBe("3");
+    expect(screen.getByRole("combobox", { name: "Activity visibility" })).toHaveDisplayValue("Open · 3");
   });
 
-  it("makes running and idle cards state-led instead of telemetry-led", () => {
+  it("shows compact session context and keeps telemetry in the inspector", () => {
     render(
       <ActivityView
         sessions={[
@@ -1395,8 +1579,8 @@ describe("ActivityView", () => {
       .getByRole("button", { name: /dependency audit/i });
     expect(activeCard).toHaveTextContent("Working now");
     expect(activeCard).toHaveTextContent("Checking production licenses");
-    expect(activeCard).toHaveTextContent("Updated 1m ago");
-    expect(activeCard).toHaveTextContent("1 minion working");
+    expect(within(activeCard).getByLabelText("Updated 1m ago")).toHaveTextContent("1m ago");
+    expect(activeCard).not.toHaveTextContent("1 minion working");
     expect(activeCard).not.toHaveTextContent("$7.25");
     expect(activeCard).not.toHaveTextContent("18 turns");
     expect(activeCard).not.toHaveTextContent("internal-debug-model");
@@ -1404,7 +1588,7 @@ describe("ActivityView", () => {
     const idleCard = within(screen.getByRole("region", { name: /^idle$/i }))
       .getByRole("button", { name: /release notes/i });
     expect(idleCard).toHaveTextContent("Ready for input");
-    expect(idleCard).toHaveTextContent("No recent activity");
+    expect(within(idleCard).getByLabelText("No recent activity")).toHaveTextContent("—");
     expect(idleCard).not.toHaveTextContent("/tmp/project");
     expect(idleCard).not.toHaveTextContent("idle");
   });
@@ -1561,6 +1745,7 @@ describe("ActivityView", () => {
     const workingFilter = screen.getByRole("button", { name: /working: 1\. filter activity/i });
     fireEvent.click(workingFilter);
     expect(workingFilter).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("combobox", { name: "Activity visibility" })).toHaveDisplayValue("Open · 3");
     expect(within(activityList()).getByText("In progress")).toBeInTheDocument();
     expect(within(activityList()).queryByText("Needs reply")).not.toBeInTheDocument();
     expect(within(activityList()).queryByText("Taking a break")).not.toBeInTheDocument();
@@ -1583,7 +1768,7 @@ describe("ActivityView", () => {
       />,
     );
 
-    const reviewFilter = screen.getByRole("button", { name: /to review: 1\. filter activity/i });
+    const reviewFilter = screen.getByRole("button", { name: /needs you: 1\. filter activity/i });
     fireEvent.click(reviewFilter);
     expect(within(activityList()).getByText("Needs reply")).toBeInTheDocument();
     expect(within(activityList()).queryByText("Taking a break")).not.toBeInTheDocument();
@@ -1593,7 +1778,7 @@ describe("ActivityView", () => {
     expect(waitingFilter).toHaveAttribute("aria-pressed", "true");
     expect(within(activityList()).getByText("Needs reply")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /^all$/i }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Activity visibility" }), { target: { value: "all" } });
     expect(waitingFilter).toHaveAttribute("aria-pressed", "false");
 
     fireEvent.click(screen.getByRole("button", { name: /working: 0\. filter activity/i }));

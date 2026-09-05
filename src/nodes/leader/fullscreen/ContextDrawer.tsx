@@ -1,191 +1,82 @@
-import { useEffect, useState, type RefObject } from "react";
+import { CrewIcon } from "../../../components/CrewIcon.tsx";
+import { MinionsIcon } from "../../../components/MinionsIcon.tsx";
+import { useEffect, useId, useState, type ReactNode, type RefObject } from "react";
 import { buildLeaderSystemPrompt } from "../../../prompts/build-leader-prompt.ts";
 import { CopyButton } from "../../../components/CopyButton.tsx";
 import type { LeaderData } from "../types.ts";
+import type { ContextItem } from "../../../types.ts";
 import { selectCanvasChangeMode } from "../work-item.ts";
 
-/**
- * Right-side tabbed context drawer for the Leader fullscreen cockpit.
- *
- * Tabs:
- *   - Overview: status, cost, turns, wait countdown, recent activity stats
- *   - Worktree: branch, isolation flag, status
- *   - Approval: pending approval summary + diff stats (when set)
- *   - Skills: armed skills list (opens the existing flyout for edits)
- *   - Prompt: composed leader system prompt (read-only preview)
- *
- * All tabs are pure presentation fed by `data` — no internal session
- * subscriptions. State changes flow back through `onUpdateData` so the
- * cockpit and the in-canvas card stay in sync via the shared LeaderData
- * source-of-truth.
- */
+type TabId = "overview" | "graph" | "worktree" | "approval" | "skills" | "prompt" | "sources";
 
-type TabId = "overview" | "graph" | "worktree" | "approval" | "skills" | "prompt";
-
-export function ContextDrawer({
-  data,
-  onUpdateData,
-  skillFlyoutAnchorRef,
-  onOpenSkillFlyout,
-  graphProjection,
-  onOpenGraph,
+export function ContextDrawer({ data, onUpdateData, skillFlyoutAnchorRef,
+  onOpenSkillFlyout, graphProjection, onOpenGraph, configSlot, contextItems = [], reviewRequest = 0,
 }: {
   data: LeaderData;
   onUpdateData: (next: LeaderData) => void;
   skillFlyoutAnchorRef: RefObject<HTMLElement | null>;
   onOpenSkillFlyout: () => void;
-  graphProjection?: { title: string; status: string; detail: string } | null;
+  graphProjection?: { title: string; status: string; detail: string } | null | undefined;
   onOpenGraph?: (() => void) | undefined;
+  configSlot?: ReactNode;
+  reviewRequest?: number;
+  contextItems?: ContextItem[] | undefined;
 }) {
+  const id = useId();
   const isWorktreeMode = selectCanvasChangeMode(data) === "worktree";
   const approvalPending = isWorktreeMode && !!data.approvalPending;
-  const [activeTab, setActiveTab] = useState<TabId>(
-    approvalPending ? "approval" : "overview",
-  );
-
+  const [activeTab, setActiveTab] = useState<TabId>(approvalPending ? "approval" : "overview");
   useEffect(() => {
-    if (!isWorktreeMode && activeTab === "approval") setActiveTab("overview");
-    if (!graphProjection && activeTab === "graph") setActiveTab("overview");
+    if ((!isWorktreeMode && activeTab === "approval") || (!graphProjection && activeTab === "graph")) setActiveTab("overview");
   }, [activeTab, graphProjection, isWorktreeMode]);
-
-  const tabs: { id: TabId; label: string; badge?: string | undefined }[] = [
+  useEffect(() => { if (reviewRequest > 0) setActiveTab(isWorktreeMode ? "approval" : "worktree"); }, [reviewRequest, isWorktreeMode]);
+  const tabs: { id: TabId; label: string; badge?: string }[] = [
     { id: "overview", label: "Overview" },
-    ...(graphProjection ? [{ id: "graph", label: "Graph",
-      badge: ["failed", "stale", "blocked"].includes(graphProjection.status) ? "•" : undefined } as const] : []),
-    { id: "worktree", label: "Worktree" },
-    ...(isWorktreeMode ? [{
-      id: "approval",
-      label: "Approval",
-      ...(approvalPending ? { badge: "•" } : {}),
-    } as const] : []),
-    { id: "skills", label: "Skills" },
+    { id: "sources", label: `Sources · ${contextItems.length}` },
+    { id: "worktree", label: "Settings" },
+    ...(isWorktreeMode ? [{ id: "approval" as const, label: "Changes", ...(approvalPending ? { badge: "•" } : {}) }] : []),
+    ...(graphProjection ? [{ id: "graph" as const, label: "Graph" }] : []),
+    { id: "skills", label: `Skills · ${data.skillIds.length}` },
     { id: "prompt", label: "Prompt" },
   ];
+  return <aside className="leader-fs-drawer" data-testid="leader-fullscreen-context-drawer">
+    <div className="leader-fs-context-tabs" role="tablist" aria-label="Context drawer tabs">
+      {tabs.map((tab, index) => <button key={tab.id} id={`${id}-${tab.id}`} role="tab"
+        aria-selected={activeTab === tab.id} aria-controls={`${id}-panel`} tabIndex={activeTab === tab.id ? 0 : -1}
+        data-testid={`drawer-tab-${tab.id}`} onClick={() => setActiveTab(tab.id)}
+        onKeyDown={event => {
+          const next = event.key === "ArrowRight" ? (index + 1) % tabs.length
+            : event.key === "ArrowLeft" ? (index - 1 + tabs.length) % tabs.length
+            : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : null;
+          if (next === null) return;
+          event.preventDefault(); setActiveTab(tabs[next]!.id);
+          document.getElementById(`${id}-${tabs[next]!.id}`)?.focus();
+        }}>{tab.id === "graph" && <CrewIcon size={14} />} {tab.label}{tab.badge && <span aria-label="Review pending"> {tab.badge}</span>}</button>)}
+    </div>
+    <div className="leader-fs-context-content" id={`${id}-panel`} role="tabpanel" tabIndex={0}
+      aria-labelledby={`${id}-${activeTab}`} data-testid={`drawer-panel-${activeTab}`}>
+      {activeTab === "overview" && <OverviewPanel data={data} />}
+      {activeTab === "sources" && <SourcesPanel items={contextItems} />}
+      {activeTab === "graph" && graphProjection && <GraphPanel projection={graphProjection} onOpen={onOpenGraph} />}
+      {activeTab === "worktree" && <WorktreePanel data={data} />}
+      {activeTab === "approval" && <ApprovalPanel data={data} />}
+      <div hidden={activeTab !== "worktree" && activeTab !== "approval"} className="leader-fs-config">{configSlot}</div>
+      {activeTab === "skills" && <SkillsPanel data={data} onUpdateData={onUpdateData} anchorRef={skillFlyoutAnchorRef} onOpen={onOpenSkillFlyout} />}
+      {activeTab === "prompt" && <PromptPanel data={data} />}
+    </div>
+  </aside>;
+}
 
-  return (
-    <aside
-      data-testid="leader-fullscreen-context-drawer"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        background: "var(--bg-surface)",
-        borderLeft: "1px solid var(--border-default)",
-        minWidth: 0,
-        height: "100%",
-      }}
-    >
-      {/* Tab strip — compact pills with accent underline.
-          Horizontal scroll is the safety net when the drawer is narrow:
-          tabs always stay on a single row, no wrap, no overflow-clip. */}
-      <div
-        role="tablist"
-        aria-label="Context drawer tabs"
-        data-no-drag
-        onWheel={(e) => {
-          // Convert vertical wheel to horizontal scroll inside the tab
-          // strip so a trackpad swipe doesn't also pan the canvas under
-          // the overlay. Required because the wheel listener on the
-          // outer overlay calls stopPropagation but not preventDefault.
-          if (e.deltaY !== 0 && e.currentTarget.scrollWidth > e.currentTarget.clientWidth) {
-            e.currentTarget.scrollLeft += e.deltaY;
-          }
-        }}
-        style={{
-          display: "flex",
-          gap: 2,
-          padding: "4px 6px 0",
-          borderBottom: "1px solid var(--border-default)",
-          flexShrink: 0,
-          background: "var(--bg-secondary)",
-          overflowX: "auto",
-          overflowY: "hidden",
-          scrollbarWidth: "thin",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {tabs.map((t) => {
-          const isActive = activeTab === t.id;
-          return (
-            <button
-              key={t.id}
-              role="tab"
-              aria-selected={isActive}
-              data-testid={`drawer-tab-${t.id}`}
-              onClick={() => setActiveTab(t.id)}
-              onMouseDown={(e) => e.stopPropagation()}
-              style={{
-                padding: "5px 9px",
-                background: "transparent",
-                border: "none",
-                borderBottom: isActive
-                  ? "2px solid var(--accent)"
-                  : "2px solid transparent",
-                color: isActive ? "var(--text-primary)" : "var(--text-muted)",
-                fontSize: 10,
-                fontWeight: isActive ? 700 : 500,
-                fontFamily: "var(--font-mono)",
-                cursor: "pointer",
-                flexShrink: 0,
-                transition: "color 0.15s, border-color 0.15s",
-                marginBottom: -1,
-                letterSpacing: 0.2,
-              }}
-              onMouseEnter={(e) => {
-                if (!isActive)
-                  e.currentTarget.style.color = "var(--text-secondary)";
-              }}
-              onMouseLeave={(e) => {
-                if (!isActive)
-                  e.currentTarget.style.color = "var(--text-muted)";
-              }}
-            >
-              {t.label}
-              {t.badge && (
-                <span
-                  style={{
-                    marginLeft: 4,
-                    color: "var(--accent)",
-                    fontWeight: 700,
-                  }}
-                >
-                  {t.badge}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      <div
-        role="tabpanel"
-        data-testid={`drawer-panel-${activeTab}`}
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: "auto",
-          padding: "12px 14px",
-          fontSize: 12,
-          color: "var(--text-secondary)",
-          lineHeight: 1.5,
-        }}
-      >
-        {activeTab === "overview" && <OverviewPanel data={data} />}
-        {activeTab === "graph" && graphProjection
-          ? <GraphPanel projection={graphProjection} onOpen={onOpenGraph} /> : null}
-        {activeTab === "worktree" && <WorktreePanel data={data} />}
-        {activeTab === "approval" && <ApprovalPanel data={data} />}
-        {activeTab === "skills" && (
-          <SkillsPanel
-            data={data}
-            onUpdateData={onUpdateData}
-            anchorRef={skillFlyoutAnchorRef}
-            onOpen={onOpenSkillFlyout}
-          />
-        )}
-        {activeTab === "prompt" && <PromptPanel data={data} />}
-      </div>
-    </aside>
-  );
+function SourcesPanel({ items }: { items: ContextItem[] }) {
+  return <div className="leader-fs-source-list">
+    <h3>Connected sources</h3>
+    <p className="leader-fs-muted">Current context connected on the canvas. Preview each source to check its relevance before your next message.</p>
+    {items.length === 0 && <p>No connected sources. Return to the canvas to connect files, notes, images, or another leader.</p>}
+    {items.map(item => <details key={item.nodeId} className="leader-fs-source">
+      <summary><strong>{item.label || item.nodeType}</strong><span>{item.nodeType} · {item.content.length.toLocaleString()} characters{item.attachments?.length ? ` · ${item.attachments.length} attachments` : ""}</span></summary>
+      <pre>{item.content || "This source contains attachments only."}</pre>
+    </details>)}
+  </div>;
 }
 
 function GraphPanel({ projection, onOpen }: {
@@ -204,7 +95,7 @@ function GraphPanel({ projection, onOpen }: {
         background: "var(--accent)", color: "var(--text-on-accent)", cursor: "pointer",
         fontWeight: 700 }}>Open graph details</button>
     <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 10 }}>
-      This is the same server-authoritative projection shown on the canvas. It is not stored in Leader node data.
+      Inspect dependencies, task outcomes, and any decisions needed to continue.
     </p>
   </div>;
 }
@@ -315,7 +206,7 @@ function TaskProgressBar({
           marginBottom: 4,
         }}
       >
-        <span>Task progress</span>
+        <span>Task progress · completed</span>
         <span>
           {done}/{total}
           {running > 0 && (
@@ -358,10 +249,10 @@ function OverviewPanel({ data }: { data: LeaderData }) {
   const totalTasks = data.taskPlan?.length ?? 0;
   const doneTasks =
     data.taskPlan?.filter(
-      (t) => t.status === "completed" || t.status === "failed",
+      (t) => t.status === "completed",
     ).length ?? 0;
   const runningTasks =
-    data.taskPlan?.filter((t) => t.status === "running").length ?? 0;
+    data.taskPlan?.filter((t) => t.status === "running" || t.status === "starting").length ?? 0;
   const minionTasks =
     data.taskPlan?.filter((t) => t.executor === "minion").length ?? 0;
   const skillCount = data.skillIds?.length ?? 0;
@@ -371,7 +262,7 @@ function OverviewPanel({ data }: { data: LeaderData }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", gap: 6 }}>
         <HeroMetric
-          label="Cost"
+          label="Leader cost"
           value={`$${data.totalCost.toFixed(3)}`}
           hint={
             avgCostPerTurn > 0
@@ -390,7 +281,8 @@ function OverviewPanel({ data }: { data: LeaderData }) {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
         <StatRow label="Status" value={data.status} />
-        <StatRow label="Messages" value={data.messages.length} />
+        <StatRow label="Needs attention" value={data.taskPlan.filter(t => ["failed", "blocked", "orphaned", "ended_without_report"].includes(t.status)).length} />
+        <StatRow label="Cancelled" value={data.taskPlan.filter(t => t.status === "cancelled").length} />
         <StatRow label="Minion tasks" value={minionTasks} />
         <StatRow label="Skills armed" value={skillCount} />
         <StatRow label="Model" value={data.model ?? "—"} />
@@ -408,7 +300,7 @@ function OverviewPanel({ data }: { data: LeaderData }) {
             fontSize: 11,
           }}
         >
-          ⏳ Waiting · {Math.ceil((data.waitUntil - Date.now()) / 1000)}s
+          <MinionsIcon name="wait" size={13} /> Waiting · {Math.ceil((data.waitUntil - Date.now()) / 1000)}s
           remaining
           {data.waitReason && (
             <div
@@ -466,9 +358,7 @@ function ApprovalPanel({ data }: { data: LeaderData }) {
   if (!data.approvalPending) {
     return (
       <div style={{ color: "var(--text-muted)", fontStyle: "italic" }}>
-        No pending approval. When the leader calls{" "}
-        <code style={{ fontFamily: "var(--font-mono)" }}>request_approval</code>{" "}
-        the diff summary will appear here.
+        No pending approval. Use the review controls below to inspect available changes.
       </div>
     );
   }
@@ -585,8 +475,7 @@ function ApprovalPanel({ data }: { data: LeaderData }) {
           fontStyle: "italic",
         }}
       >
-        Use the Approve / Discard controls in the bottom config bar to act on
-        this approval.
+        Review changes and available integration actions below.
       </div>
     </div>
   );
@@ -625,8 +514,9 @@ function SkillsPanel({
           cursor: "pointer",
         }}
       >
-        ⚡ Manage skills {skillIds.length > 0 ? `(${skillIds.length})` : ""}
+        <MinionsIcon name="skill" size={13} /> Manage skills {skillIds.length > 0 ? `(${skillIds.length})` : ""}
       </button>
+      <ul className="leader-fs-skill-list">{skillIds.map(id => <li key={id}>{id}</li>)}</ul>
       {/* Note: The actual SkillFlyout modal is rendered by LeaderNodeRenderer
           and is portaled to document.body, so it appears on top of this
           overlay when `onOpen` is called. We just provide the anchor + trigger
@@ -680,6 +570,7 @@ function PromptPanel({ data }: { data: LeaderData }) {
         </span>
         <CopyButton text={prompt} layout="inline" alwaysVisible />
       </div>
+      <p className="leader-fs-muted">Instruction preview from the current setup. Runtime instructions, connected sources, and the session’s frozen skill snapshot may differ.</p>
       <pre
         style={{
           margin: 0,

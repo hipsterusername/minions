@@ -39,6 +39,40 @@ function envelope(type: "task_graph_snapshot" | "task_graph_changed", revision: 
 }
 
 describe("useTaskGraphView", () => {
+  it.each([true, false])("blocks fresh retry intents after refresh and reconnect (acknowledged: %s)", (acknowledged) => {
+    vi.useFakeTimers();
+    try {
+      const socket = createSocket();
+      const send = vi.fn();
+      const { result } = renderHook(() => useTaskGraphView({ workItemId: "work-1", send, subscribe: socket.subscribe }));
+      act(() => socket.emit(envelope("task_graph_snapshot", 42)));
+      const action = { type: "retry" as const, requestId: "original", graphRunId: result.current.snapshot!.graphRunId,
+        expectedRunRevision: 42, nodeId: "node-7", currentAttemptId: "attempt-7-2" };
+      act(() => result.current.sendAction(action));
+      if (acknowledged) act(() => socket.emit({ type: "task_graph_response", command: "retry_task_node",
+        requestId: "original", success: true, result: {} }));
+      act(() => vi.advanceTimersByTime(15000));
+      act(() => result.current.refetch());
+      act(() => socket.emit(envelope("task_graph_snapshot", 43)));
+      act(() => result.current.sendAction({ ...action, requestId: "after-refresh", expectedRunRevision: 43 }));
+      act(() => socket.emit({ type: "socket_reconnected" }));
+      act(() => socket.emit(envelope("task_graph_snapshot", 43)));
+      expect(result.current.controlsEnabled).toBe(true);
+      act(() => result.current.sendAction({ ...action, requestId: "after-reconnect", expectedRunRevision: 43 }));
+      expect(result.current.retryReceipts["node-7"]).toMatchObject({ pending: true, accepted: acknowledged });
+      expect(send.mock.calls.filter(([command]) => command.type === "retry_task_node"))
+        .toEqual([[{ type: "retry_task_node", requestId: "original", workItemId: "work-1",
+          runId: action.graphRunId, expectedRunRevision: 42, nodeId: "node-7", currentAttemptId: "attempt-7-2" }]]);
+    } finally { vi.useRealTimers(); }
+  });
+  it("does not subscribe to an invalid work item before a canonical launch", () => {
+    const socket = createSocket();
+    const send = vi.fn();
+    const { result } = renderHook(() => useTaskGraphView({ workItemId: null, send, subscribe: socket.subscribe }));
+    expect(result.current.snapshot).toBeNull();
+    expect(result.current.retryReceipts).toEqual({});
+    expect(send).not.toHaveBeenCalled();
+  });
   it("folds adjacent revisions, ignores stale changes, and refetches gaps", () => {
     const socket = createSocket();
     const send = vi.fn();

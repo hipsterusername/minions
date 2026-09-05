@@ -9,19 +9,17 @@
  *   • Each field kind renders the appropriate HTML input element.
  *   • Validation (required, pattern, maxLength, min/max) runs on submit.
  *   • Per-field error messages are shown below the input on failure.
- *   • On a successful submit the form locks itself optimistically (before the
- *     agent round-trips) so the user gets immediate feedback: fields disable,
- *     a green "Submitted ✓" badge appears, and a confirmation line explains
- *     the response was sent to the agent.
- *   • When component.submittedAnswers is set by the agent, the form is also
- *     locked (read-only) with the same acknowledgement.
+ *   • Pending answers remain locked until authoritative receipt or rejection.
+ *   • Unconfirmed responses are reconciled without automatic resubmission.
  *   • CSS variables match the existing RenderNode card styling.
  *
  * DO NOT register or import this from RenderNode.tsx — the Leader wires that in.
  */
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { FormComponent, FormField } from "../../../shared/render-form.ts";
+
+import { useFormSubmission } from "./FormSubmissionProvider.tsx";
 
 // ── Props ──────────────────────────────────────────────────
 
@@ -114,7 +112,7 @@ function validateField(field: FormField, value: unknown): string | null {
 const inputStyle: React.CSSProperties = {
   width: "100%",
   padding: "6px 10px",
-  fontSize: 12,
+  fontSize: "var(--rd-body-size, 14px)",
   fontFamily: "inherit",
   background: "var(--bg-elevated, #1e1e1e)",
   border: "1px solid var(--border-default, #333)",
@@ -159,7 +157,7 @@ const fieldWrapperStyle: React.CSSProperties = {
 };
 
 const fieldLabelStyle: React.CSSProperties = {
-  fontSize: 11,
+  fontSize: "var(--rd-body-size, 14px)",
   fontWeight: 600,
   color: "var(--text-secondary, #aaa)",
   letterSpacing: "0.02em",
@@ -191,7 +189,7 @@ function FieldWrapper({
     <div
       id={fieldDescriptionId(field)}
       style={{
-        fontSize: 10,
+        fontSize: "var(--rd-label-size, 12px)",
         color: "var(--text-muted, #666)",
         lineHeight: 1.5,
       }}
@@ -204,7 +202,7 @@ function FieldWrapper({
       id={fieldErrorId(field)}
       role="alert"
       style={{
-        fontSize: 10,
+        fontSize: "var(--rd-label-size, 12px)",
         color: "var(--status-error, #e05252)",
         marginTop: 2,
       }}
@@ -430,7 +428,7 @@ function MultiselectField({
                 display: "flex",
                 alignItems: "center",
                 gap: 8,
-                fontSize: 12,
+                fontSize: "var(--rd-body-size, 14px)",
                 color: "var(--text-primary, #e0e0e0)",
                 cursor: disabled ? "not-allowed" : "pointer",
                 opacity: disabled ? 0.65 : 1,
@@ -488,7 +486,7 @@ function SliderField({
         />
         <span
           style={{
-            fontSize: 12,
+            fontSize: "var(--rd-body-size, 14px)",
             fontFamily: "var(--font-mono, monospace)",
             color: "var(--text-primary, #e0e0e0)",
             minWidth: 32,
@@ -522,7 +520,7 @@ function CheckboxField({
           display: "flex",
           alignItems: "center",
           gap: 8,
-          fontSize: 12,
+          fontSize: "var(--rd-body-size, 14px)",
           color: "var(--text-primary, #e0e0e0)",
           cursor: disabled ? "not-allowed" : "pointer",
           opacity: disabled ? 0.65 : 1,
@@ -588,11 +586,14 @@ function FormFieldView({
   disabled: boolean;
   error: string | null;
 }) {
+  // DOM identity belongs to this mounted field; answer keys stay server-owned.
+  const domId = useId();
+  const domField = { ...field, id: domId };
   switch (field.kind) {
     case "text":
       return (
         <TextField
-          field={field}
+          field={domField}
           value={value}
           onChange={(v) => onValueChange(field.id, v)}
           disabled={disabled}
@@ -602,7 +603,7 @@ function FormFieldView({
     case "textarea":
       return (
         <TextareaField
-          field={field}
+          field={domField}
           value={value}
           onChange={(v) => onValueChange(field.id, v)}
           disabled={disabled}
@@ -612,7 +613,7 @@ function FormFieldView({
     case "number":
       return (
         <NumberField
-          field={field}
+          field={domField}
           value={value}
           onChange={(v) => onValueChange(field.id, v)}
           disabled={disabled}
@@ -622,7 +623,7 @@ function FormFieldView({
     case "select":
       return (
         <SelectField
-          field={field}
+          field={domField}
           value={value}
           onChange={(v) => onValueChange(field.id, v)}
           disabled={disabled}
@@ -632,7 +633,7 @@ function FormFieldView({
     case "multiselect":
       return (
         <MultiselectField
-          field={field}
+          field={domField}
           value={value}
           onChange={(v) => onValueChange(field.id, v)}
           disabled={disabled}
@@ -642,7 +643,7 @@ function FormFieldView({
     case "slider":
       return (
         <SliderField
-          field={field}
+          field={domField}
           value={value}
           onChange={(v) => onValueChange(field.id, v)}
           disabled={disabled}
@@ -652,7 +653,7 @@ function FormFieldView({
     case "checkbox":
       return (
         <CheckboxField
-          field={field}
+          field={domField}
           value={value}
           onChange={(v) => onValueChange(field.id, v)}
           disabled={disabled}
@@ -662,7 +663,7 @@ function FormFieldView({
     case "date":
       return (
         <DateField
-          field={field}
+          field={domField}
           value={value}
           onChange={(v) => onValueChange(field.id, v)}
           disabled={disabled}
@@ -675,29 +676,22 @@ function FormFieldView({
 // ── Main component ─────────────────────────────────────────
 
 export function FormComponent({ component, onSubmit }: FormComponentProps) {
-  // Locked by the agent (it re-rendered the form carrying submittedAnswers).
-  const serverLocked = component.submittedAnswers != null;
+  const submission = useFormSubmission(component, onSubmit, buildInitialValues(component.fields));
+  const serverLocked = submission.authoritativeAnswers != null;
+  const isLocked = submission.locked;
 
-  // Locked optimistically the moment the user submits, so feedback is
-  // immediate and doesn't depend on the agent choosing to re-render.
-  const [locallySubmitted, setLocallySubmitted] = useState(false);
-  const isLocked = serverLocked || locallySubmitted;
-
-  const [values, setValues] = useState<Record<string, unknown>>(
-    serverLocked
-      ? { ...buildInitialValues(component.fields), ...component.submittedAnswers }
-      : buildInitialValues(component.fields),
-  );
+  const values = submission.values;
   const [errors, setErrors] = useState<Record<string, string | null>>({});
 
   function handleValueChange(id: string, value: unknown): void {
-    setValues((prev) => ({ ...prev, [id]: value }));
+    submission.setValue(id, value);
     // Clear error on change
     setErrors((prev) => ({ ...prev, [id]: null }));
   }
 
   function handleSubmit(e: React.FormEvent): void {
     e.preventDefault();
+    if (isLocked) return;
     const nextErrors: Record<string, string | null> = {};
     let hasError = false;
     for (const field of component.fields) {
@@ -707,10 +701,7 @@ export function FormComponent({ component, onSubmit }: FormComponentProps) {
     }
     setErrors(nextErrors);
     if (!hasError) {
-      // Lock optimistically first so the acknowledgement paints on this click,
-      // then hand the answers off to the paired session.
-      setLocallySubmitted(true);
-      onSubmit({ ...values });
+      submission.submit({ ...values });
     }
   }
 
@@ -737,7 +728,7 @@ export function FormComponent({ component, onSubmit }: FormComponentProps) {
           {component.title && (
             <span
               style={{
-                fontSize: 12,
+                fontSize: "var(--rd-body-size, 14px)",
                 fontWeight: 600,
                 color: "var(--text-primary, #e0e0e0)",
                 letterSpacing: "-0.01em",
@@ -746,10 +737,10 @@ export function FormComponent({ component, onSubmit }: FormComponentProps) {
               {component.title}
             </span>
           )}
-          {isLocked && (
+          {serverLocked && (
             <span
               style={{
-                fontSize: 11,
+                fontSize: "var(--rd-body-size, 14px)",
                 fontWeight: 600,
                 color: "var(--status-success, #4caf50)",
                 background:
@@ -760,7 +751,7 @@ export function FormComponent({ component, onSubmit }: FormComponentProps) {
                 padding: "2px 10px",
               }}
             >
-              Submitted ✓
+              Response received ✓
             </span>
           )}
         </div>
@@ -770,7 +761,7 @@ export function FormComponent({ component, onSubmit }: FormComponentProps) {
         <div
           style={{
             padding: "8px 14px 0",
-            fontSize: 11,
+            fontSize: "var(--rd-body-size, 14px)",
             color: "var(--text-secondary, #aaa)",
             lineHeight: 1.6,
           }}
@@ -785,7 +776,7 @@ export function FormComponent({ component, onSubmit }: FormComponentProps) {
             <FormFieldView
               key={field.id}
               field={field}
-              value={values[field.id]}
+              value={(submission.authoritativeAnswers ?? values)[field.id]}
               onValueChange={handleValueChange}
               disabled={isLocked}
               error={errors[field.id] ?? null}
@@ -793,27 +784,20 @@ export function FormComponent({ component, onSubmit }: FormComponentProps) {
           ))}
         </div>
 
-        {/* Submit button — replaced by a confirmation line once locked */}
+        {submission.error && !serverLocked && (
+          <div role="alert" style={{ padding: "0 14px 10px", fontSize: "var(--rd-body-size, 14px)", color: "var(--status-error)" }}>
+            {submission.error}
+          </div>
+        )}
         {isLocked ? (
-          <div
-            role="status"
-            style={{
-              padding: "0 14px 14px",
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              fontSize: 11,
-              color: "var(--status-success, #4caf50)",
-            }}
-          >
-            <span aria-hidden="true" style={{ fontWeight: 700 }}>
-              ✓
-            </span>
-            <span>
-              {serverLocked
-                ? "Response received."
-                : "Response submitted — the agent has been notified."}
-            </span>
+          <div role="status" aria-live="polite" style={{ padding: "0 14px 14px", fontSize: "var(--rd-body-size, 14px)", color: serverLocked ? "var(--status-success)" : "var(--text-secondary)" }}>
+            {serverLocked ? "Response received." : submission.state === "sending"
+              ? "Sending response…"
+              : submission.state === "stale" ? "This question is no longer pending. Checking the current response."
+              : "Not confirmed. Your answers are preserved; checking the current response before retrying."}
+            {!serverLocked && submission.state !== "sending" && submission.canReconcile && (
+              <button type="button" onClick={submission.reconcile} style={{ marginLeft: 8 }}>Check response</button>
+            )}
           </div>
         ) : (
           <div
@@ -827,7 +811,7 @@ export function FormComponent({ component, onSubmit }: FormComponentProps) {
               type="submit"
               style={{
                 padding: "7px 18px",
-                fontSize: 12,
+                fontSize: "var(--rd-body-size, 14px)",
                 fontWeight: 600,
                 background: "var(--accent, #6c8ebf)",
                 color: "var(--text-on-accent)",

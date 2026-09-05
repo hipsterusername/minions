@@ -3,6 +3,7 @@ import { useRef, useCallback, useEffect } from "react";
 interface AutoTextareaProps {
   value: string;
   onChange: (value: string) => void;
+  onPaste?: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void;
   onKeyDown?: (e: React.KeyboardEvent) => void;
   onFocus?: (e: React.FocusEvent<HTMLTextAreaElement>) => void;
   onBlur?: (e: React.FocusEvent<HTMLTextAreaElement>) => void;
@@ -27,6 +28,7 @@ export function AutoTextarea({
   value,
   onChange,
   onKeyDown,
+  onPaste,
   onFocus,
   onBlur,
   placeholder,
@@ -79,6 +81,7 @@ export function AutoTextarea({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
+        onPaste={onPaste}
         onMouseDown={(e) => e.stopPropagation()}
         aria-label={ariaLabel}
         role={ariaControls ? "combobox" : undefined}

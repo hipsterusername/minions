@@ -42,6 +42,22 @@ describe("filterSlashCommands", () => {
 });
 
 describe("buildSlashCommands", () => {
+  it.each(["graph", "crew", "CREW", "gra", "cr"])("resolves %s to the same Graph feature", (query) => {
+    const commands = buildSlashCommands({ dashboardLeaderActions: [] });
+    expect(filterSlashCommands(commands, query)).toEqual([
+      expect.objectContaining({ id: "task-graph", label: "Graph", icon: "crew" }),
+    ]);
+  });
+
+  it("keeps custom action ids unique when adding the Graph feature", () => {
+    const commands = buildSlashCommands({ dashboardLeaderActions: [
+      { id: "task-graph", name: "Custom", prompt: "Keep this recipe", icon: "play", skillIds: [] },
+    ] });
+    expect(new Set(commands.map(({ id }) => id)).size).toBe(commands.length);
+    expect(commands[0]?.insertText).toBe("Keep this recipe");
+    expect(filterSlashCommands(commands, "crew")[0]?.label).toBe("Graph");
+  });
+
   it("resolves custom names and prompts in dashboard action order", () => {
     const commands = buildSlashCommands({
       dashboardLeaderActionNames: { improve: "Polish" },
@@ -52,6 +68,7 @@ describe("buildSlashCommands", () => {
       "execute",
       "improve",
       "analyze",
+      "task-graph",
     ]);
     expect(commands[1]).toEqual({
       id: "improve",

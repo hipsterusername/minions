@@ -25,7 +25,7 @@
   background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; }
 .lin-btn:disabled { cursor: not-allowed; opacity: .45; }
 .lin-btn--sm { padding: 2px 7px; font-size: 10.5px; }
-.lin-btn--primary { background: linear-gradient(135deg, var(--accent), var(--accent-dark)); border-color: transparent; color: #1a1206; font-weight: 600; }
+.lin-btn--primary { background: linear-gradient(135deg, var(--accent), var(--accent-dark)); border-color: transparent; color: var(--text-on-accent); font-weight: 600; }
 .lin-btn--ghost { background: transparent; color: var(--text-secondary); }
 .lin-btn--approve { border-color: color-mix(in srgb, var(--status-success) 45%, transparent); color: var(--status-success); background: transparent; }
 .lin-btn--reject { border-color: color-mix(in srgb, var(--status-error) 45%, transparent); color: var(--status-error); background: transparent; }

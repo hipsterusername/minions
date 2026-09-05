@@ -10,7 +10,7 @@
  * session hits merge conflicts this panel deep-links to it via "Open in
  * Canvas" rather than duplicating that stateful flow.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   GitMerge,
   GitBranch,
@@ -23,15 +23,14 @@ import {
 import type { CanvasNode } from "./types.ts";
 import type { LeaderData } from "./nodes/leader/types.ts";
 import { ConfirmModal } from "./components/ConfirmModal.tsx";
-import { subscribeSocketTopic, type SocketSubscribe } from "./use-socket.ts";
-import { sessionTopic } from "../shared/ws-envelope.ts";
+import type { SocketSubscribe } from "./use-socket.ts";
+import { useReviewDiff } from "./use-review-diff.ts";
+import "./review-feedback.css";
 import { randomUuid } from "./random-id.ts";
 import { useWorktreeIntegration } from "./use-worktree-integration.ts";
 import { WorktreeIntegrationControls } from "./WorktreeIntegrationControls.tsx";
 import { selectCanvasChangeMode } from "./nodes/leader/work-item.ts";
 import "./changes-view.css";
-
-type WorktreeDiff = NonNullable<LeaderData["approvalDiff"]>;
 
 /**
  * Pure predicate: does this leader have worktree changes worth surfacing for
@@ -113,8 +112,7 @@ function WorktreeSessionChangesPanel({
   onUpdateNodeData: (nodeId: string, data: LeaderData) => void;
   onOpenInCanvas: (nodeId: string) => void;
 }) {
-  const [loading, setLoading] = useState(true);
-  const [diff, setDiff] = useState<WorktreeDiff | null>(null);
+  const { diff, loading, error: diffError, loadedAt, refresh: fetchDiff } = useReviewDiff(sessionKey, socketSend, socketSubscribe);
   const [confirm, setConfirm] = useState<"merge" | "discard" | null>(null);
   const integration = useWorktreeIntegration({ workItemId: data.workItemId ?? null,
     runKey: sessionKey, ...(socketSend ? { send: socketSend } : {}),
@@ -122,37 +120,6 @@ function WorktreeSessionChangesPanel({
 
   const hasConflict = !!data.mergeConflict;
   const approvalPending = !!data.approvalPending;
-
-  const fetchDiff = useCallback(() => {
-    if (!socketSend) return;
-    setLoading(true);
-    socketSend({ type: "get_worktree_diff", sessionKey });
-  }, [socketSend, sessionKey]);
-
-  useEffect(() => {
-    if (!socketSubscribe) return;
-    const unsub = subscribeSocketTopic(
-      socketSubscribe,
-      sessionTopic(sessionKey),
-      (msg) => {
-        const m = msg as {
-          type?: string;
-          command?: string;
-          sessionKey?: string;
-          success?: boolean;
-          diff?: WorktreeDiff;
-        };
-        if (m.sessionKey !== sessionKey) return;
-        if (m.type !== "control_response" || m.command !== "get_worktree_diff")
-          return;
-        setDiff(m.success ? m.diff ?? null : null);
-        setLoading(false);
-      },
-    );
-    if (socketSend) socketSend({ type: "get_worktree_diff", sessionKey });
-    else setLoading(false);
-    return () => unsub?.();
-  }, [sessionKey, socketSubscribe, socketSend]);
 
   const doMerge = useCallback(() => {
     if (socketSend && !data.workItemId) socketSend({ type: "approve_changes", sessionKey });
@@ -198,13 +165,13 @@ function WorktreeSessionChangesPanel({
       )}
 
       {loading && (
-        <div className="changes-card__loading">
+        <div className="changes-card__loading" role="status">
           <Loader2 size={13} strokeWidth={2} className="changes-spin" aria-hidden />
-          Loading diff…
+          {diff ? "Refreshing…" : "Loading diff…"}
         </div>
       )}
 
-      {!loading && diff && diff.filesChanged > 0 && (
+      {diff && diff.filesChanged > 0 && (
         <>
           <div className="changes-card__stats">
             {diff.filesChanged} file{diff.filesChanged !== 1 ? "s" : ""} ·{" "}
@@ -234,10 +201,12 @@ function WorktreeSessionChangesPanel({
         </>
       )}
 
-      {!loading && diff && diff.filesChanged === 0 && (
+      {diff && diff.filesChanged === 0 && (
         <div className="changes-card__none">No changes yet.</div>
       )}
 
+      {loadedAt != null && <div className="review-feedback" role="status">Last loaded {new Date(loadedAt).toLocaleTimeString()}</div>}
+      {diffError && <div className="review-feedback" role="alert">Couldn’t load changes: {diffError} <button className="changes-btn" onClick={fetchDiff}>Retry</button></div>}
       {integration.error ? <div className="changes-card__none" role="alert">{integration.error}</div> : null}
       {data.workItemId && integration.lineage && socketSend ? (
         <WorktreeIntegrationControls lineage={integration.lineage} workItemId={data.workItemId}

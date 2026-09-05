@@ -122,7 +122,7 @@ describe("<SessionChangesPanel />", () => {
   it("requests a diff for the session on mount", () => {
     const send = vi.fn();
     renderPanel({}, { send });
-    expect(send).toHaveBeenCalledWith({ type: "get_worktree_diff", sessionKey: "s1" });
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "get_worktree_diff", sessionKey: "s1", requestId: expect.any(String) }));
   });
 
   it("does not mount a review surface or request a diff in live mode", () => {

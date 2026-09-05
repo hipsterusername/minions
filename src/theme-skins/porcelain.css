@@ -26,13 +26,13 @@
   box-shadow: var(--shadow-lg);
 }
 
-/* Pillowed, borderless controls that press in on click. */
+/* Pillowed controls that press in on click. Preserve component borders so
+   focus, validation and destructive states keep their semantic colors. */
 :root[data-theme="porcelain"] button,
 :root[data-theme="porcelain"] input,
 :root[data-theme="porcelain"] textarea,
 :root[data-theme="porcelain"] select {
   border-radius: var(--radius-control) !important;
-  border-color: transparent !important;
   box-shadow: var(--shadow-sm);
   font-family: var(--font-display);
 }

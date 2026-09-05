@@ -141,7 +141,7 @@ function ThisLineageTab({
   );
 
   const lineageQueue = selectLatestQueueEntry(lineage, (entry) => entry.kind === "lineage");
-  const lineageGates = lineage.gates.filter((gate) => gate.scope === "lineage");
+  const lineageGates = lineage.gates.filter((gate) => gate.scope === "lineage" && gate.name !== "promotion_runtime");
   const lineageBlocked = lineageGates.some(
     (gate) => gate.status === "pending" || gate.status === "failed",
   );
@@ -199,8 +199,8 @@ function ThisLineageTab({
 
       {lineage.integrationState === "conflicted" ? (
         <div className="lin2-alert" role="alert">
-          Promotion conflict. Resolve it in the retained integration worktree, merge the latest
-          target, and submit the combined head for final re-review.
+          Promotion needs another review. Start an iteration on this work item; the server prepares
+          the target merge. Resolve files, verify the combined result, and approve again.
         </div>
       ) : null}
       {lineageQueue?.conflictDetails ? (
@@ -327,7 +327,7 @@ function ContributionDetail({
           {contributionGates.map((gate) => (
             <li key={gate.id} className="lin2-gate" data-status={gate.status}>
               {gate.name}: {gate.status}
-              {gate.details ? ` — ${gate.details}` : ""}
+              {gateReason(gate.details) ? ` — ${gateReason(gate.details)}` : ""}
             </li>
           ))}
         </ul>
@@ -338,7 +338,6 @@ function ContributionDetail({
           <button
             type="button"
             className="lin-btn lin-btn--approve"
-            disabled={contributionBlocked}
             onClick={() =>
               command({
                 type: "review_worktree_contribution",
@@ -418,11 +417,10 @@ function ContributionDetail({
             Discard contribution
           </button>
         ) : null}
-        {finalReady && !finalApproved ? (
+        {finalReady ? (
           <button
             type="button"
             className="lin-btn lin-btn--approve"
-            disabled={lineageBlocked}
             onClick={() =>
               command({
                 type: "review_worktree_lineage",
@@ -434,7 +432,7 @@ function ContributionDetail({
               })
             }
           >
-            Approve combined lineage
+            {finalApproved ? "Recheck combined lineage" : "Approve combined lineage"}
           </button>
         ) : null}
         {finalReady && latestFinalReview?.decision !== "rejected" ? (
@@ -575,10 +573,17 @@ function AllLineagesTab({
           </button>
         </div>
         <div className="lin3-map__note">
-          Mapping locks before the first worktree run — a leader can only join a lineage while its
-          work item has not yet provisioned a worktree.
+          Finish the current run before mapping. Unqueued contributions move with the work item and
+          require a new review. Queued or integrated contributions cannot be moved.
         </div>
       </div>
     </>
   );
+}
+
+function gateReason(details: string | null): string {
+  if (!details) return "";
+  try { const value: unknown = JSON.parse(details);
+    return value && typeof value === "object" && "reason" in value && typeof value.reason === "string" ? value.reason : "";
+  } catch { return details; }
 }

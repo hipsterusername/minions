@@ -1,0 +1,89 @@
+.dashboard-surface,
+.rd-card {
+  --rd-body-size: 14px;
+  --rd-label-size: 12px;
+  --rd-title-size: 16px;
+  font-family: var(--font-sans, sans-serif);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-header {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.dashboard-header > div:first-child { min-width: 0; }
+.dashboard-title { overflow-wrap: anywhere; }
+.dashboard-header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.dashboard-action {
+  min-height: 32px;
+  padding: 5px 9px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font: 500 var(--rd-label-size, 12px)/1.4 var(--font-sans, sans-serif);
+  cursor: pointer;
+}
+.dashboard-action:hover { border-color: var(--border-hover); background: var(--state-hover); }
+.dashboard-action--question { color: var(--text-primary); border-color: var(--accent); }
+.dashboard-surface :is(button, a, input, textarea, select, [tabindex]):focus-visible,
+.rd-card :is(button, a, summary):focus-visible,
+.dashboard-lightbox :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.render-context-selectable:focus-within { outline: 2px solid var(--accent); }
+/* Reserve a separate selection rail so the marker never covers a card action. */
+.render-context-selectable--active { padding-top: 34px; }
+.render-context-selectable__marker[hidden] { display: none; }
+.render-context-selectable__marker { top: 0; right: 0; width: 30px; height: 30px; }
+
+.dashboard-lightbox {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 64px 24px 24px;
+  border: 0;
+  background: rgb(0 0 0 / 85%);
+  color: var(--text-primary);
+}
+.dashboard-lightbox[open] { display: flex; align-items: center; justify-content: center; }
+.dashboard-lightbox::backdrop { background: transparent; }
+.dashboard-lightbox-close {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  min-height: 40px;
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  font: 600 14px/1.4 var(--font-sans, sans-serif);
+  cursor: pointer;
+}
+.dashboard-lightbox-image { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; }
+.dashboard-lightbox-html { width: min(1100px, 100%); height: 100%; background: white; border: 0; border-radius: 8px; }
+.dashboard-chart-data { color: var(--text-secondary); font-size: var(--rd-label-size, 12px); }
+.dashboard-chart-data summary { cursor: pointer; padding: 6px 0; }
+.dashboard-chart-data table { border-collapse: collapse; width: 100%; font-size: var(--rd-body-size, 14px); }
+.dashboard-chart-data :is(th, td) { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border-default); }
+.dashboard-chart-data caption { text-align: left; padding-block: 8px; font-weight: 600; }
+.dashboard-chart-data-scroll { overflow-x: auto; }
+
+@media (pointer: coarse) {
+  .dashboard-action, .dashboard-header-actions button { min-height: 44px; }
+  .render-context-selectable--active { padding-top: 48px; }
+  .render-context-selectable__marker { width: 44px; height: 44px; opacity: 1; }
+  .dashboard-surface :is(input, textarea, select) { font-size: 16px !important; }
+}

@@ -1,3 +1,5 @@
+import { CrewIcon } from "./components/CrewIcon.tsx";
+import { ActivityDismissReceipt, useActivityRemovalFocus } from "./ActivityDismissReceipt.tsx";
 import {
   useEffect,
   useMemo,
@@ -21,12 +23,10 @@ import {
   attentionKind,
   attentionReason,
   attentionAction,
-  activeMinionSummary,
   sessionDisplayTitle,
   sessionRoleLabel,
 } from "./mobile/mobile-selectors.ts";
 import {
-  buildLifecycleCommand,
   canAcknowledge,
   isDismissed,
   type LifecycleAction,
@@ -35,7 +35,9 @@ import { timeAgo } from "./nodes/leader-message-helpers.ts";
 import { ActivityTranscript } from "./WorkItemTranscript.tsx";
 import {
   Activity as ActivityIcon,
+  ArrowLeft,
   Check,
+  ChevronDown,
   ChevronRight,
   FileText,
   GitCompare,
@@ -46,10 +48,10 @@ import {
   Monitor,
   Paperclip,
   Pause,
+  Plus,
   RotateCcw,
   Square,
   UsersRound,
-  Workflow,
   X,
 } from "lucide-react";
 import {
@@ -57,14 +59,17 @@ import {
   leaderHasReviewableChanges,
 } from "./ChangesView.tsx";
 import type { ActiveMinion, SocketSubscribe, SyncTaskRecord } from "./use-socket.ts";
-import type { WorkItemRunSnapshot } from "../shared/work-item-contracts.ts";
+import type { WorkItemRunSnapshot, WorkItemSnapshot } from "../shared/work-item-contracts.ts";
 import { DashboardSurface } from "./nodes/render/DashboardSurface.tsx";
+import { FormSubmissionProvider } from "./nodes/render/FormSubmissionProvider.tsx";
 import { LeaderNodeRenderer } from "./nodes/LeaderNode.tsx";
 import { ActivityEmptyState } from "./ActivityEmptyState.tsx";
 import { ActivityOnboarding } from "./ActivityOnboarding.tsx";
 import { ActivitySessionHome } from "./ActivitySessionHome.tsx";
 import { selectRecentAgentWork } from "./activity-recent-work.ts";
 import { randomUuid } from "./random-id.ts";
+import { useActivityLifecycle } from "./use-activity-lifecycle.ts";
+export { lifecycleActionError } from "./use-activity-lifecycle.ts";
 import { activityEntryId, type PromptFailure } from "./use-work-items.ts";
 import {
   emptySessionStreamState,
@@ -96,6 +101,10 @@ import "./activity.css";
  */
 
 export interface ActivityViewProps {
+  /** Initial destination when opening detached work from Canvas. */
+  initialSelectedKey?: string | null;
+  /** Project-owned request state survives switching to Canvas. */
+  lifecycleController?: ReturnType<typeof useActivityLifecycle>;
   sessions: MobileSessionInfo[];
   nodes: CanvasNode[];
   /** Prepare a fresh Leader draft with the same defaults as Canvas. */
@@ -119,6 +128,7 @@ export interface ActivityViewProps {
   /** Remove every canvas node attached to this session. */
   onDetachFromCanvas?: (
     session: Pick<MobileSessionInfo, "sessionKey" | "workItemId">,
+    workItem?: WorkItemSnapshot,
   ) => void;
   /** WS send — used by the inline worktree review panel. */
   socketSend?: ((data: unknown) => void) | undefined;
@@ -145,6 +155,7 @@ interface LeaderNodeRef {
 
 type ActivitySession = MobileSessionInfo & {
   reviewableChanges?: boolean;
+  lifecyclePending?: boolean;
 };
 
 type ActivitySummaryFilter = "needs-you" | "working" | "waiting";
@@ -179,39 +190,6 @@ function collapseActivityOptimisticEchoes(messages: readonly DisplayMessage[]): 
   return matchedOptimistic.size === 0
     ? [...messages]
     : messages.filter((_, index) => !matchedOptimistic.has(index));
-}
-
-/**
- * The command names whose server responses the Activity view surfaces inline.
- * Rejected lifecycle mutations must land in a visible banner so the
- * Check/X/bulk controls always provide feedback.
- */
-const LIFECYCLE_COMMANDS = new Set([
-  "review_work_item",
-  "archive_work_item",
-  "restore_work_item",
-  "acknowledge_session",
-  "dismiss_session",
-  "reopen_session",
-]);
-
-/** Extract a user-facing error from a lifecycle command response, or null. */
-export function lifecycleActionError(msg: unknown): { failed: boolean; error: string } | null {
-  const m = msg as {
-    type?: unknown; command?: unknown; success?: unknown; error?: unknown;
-  };
-  if (m.type !== "work_item_response" && m.type !== "control_response") return null;
-  if (typeof m.command !== "string" || !LIFECYCLE_COMMANDS.has(m.command)) return null;
-  if (m.success !== false) return { failed: false, error: "" };
-  const detail = typeof m.error === "string" && m.error.trim()
-    ? m.error
-    : "The server rejected the action.";
-  const verb = m.command.startsWith("review") || m.command.startsWith("acknowledge")
-    ? "Mark reviewed"
-    : m.command.startsWith("archive") || m.command.startsWith("dismiss")
-      ? "Dismiss"
-      : "Restore";
-  return { failed: true, error: `${verb} failed: ${detail}` };
 }
 
 function matchesSummaryFilter(
@@ -311,6 +289,7 @@ function LifecycleActions({
         <button
           className="act-icon-action act-icon-action--review"
           type="button"
+          disabled={session.lifecyclePending}
           onClick={act("acknowledge")}
           aria-label={retainedInactive ? "Review" : "Mark reviewed"}
           title={retainedInactive ? "Review and keep in Activity" : "Mark reviewed"}
@@ -322,6 +301,7 @@ function LifecycleActions({
         <button
           className="act-icon-action"
           type="button"
+          disabled={session.lifecyclePending}
           onClick={act("reopen")}
           aria-label="Restore"
           title="Restore"
@@ -332,6 +312,7 @@ function LifecycleActions({
         <button
           className="act-icon-action act-icon-action--dismiss"
           type="button"
+          disabled={session.lifecyclePending}
           onClick={act("dismiss")}
           aria-label={retainedInactive ? "Review and remove from Activity" : "Dismiss"}
           title={retainedInactive
@@ -386,28 +367,21 @@ function SessionTriageRow({
         onClick={onSelect}
         aria-pressed={selected}
       >
-        <span className={`act-triage-icon act-triage-icon--${kind}`} aria-hidden>
-          {kind === "inactive"
-            ? <Pause size={15} />
-            : kind === "error"
-              ? "!"
-              : kind === "waiting"
-                ? "?"
-                : <GitCompare size={15} />}
-        </span>
         <span className="act-triage-body">
           <span className="act-triage-line">
-            <span className="act-triage-title">{sessionDisplayTitle(session)}</span>
+            <span className="act-triage-title" title={sessionDisplayTitle(session)}>{sessionDisplayTitle(session)}</span>
+            {session.lastActivityAt != null && <span className="act-card-time" title={`Updated ${timeAgo(session.lastActivityAt)}`}>{timeAgo(session.lastActivityAt)}</span>}
           </span>
           <span className="act-triage-sub">
             <span className={`act-triage-reason act-triage-reason--${kind}`}>
               {attentionReason(session)}
             </span>
-            <span className="act-triage-meta">
-              {sessionRoleLabel(session).toUpperCase()} · {formatCost(session.totalCost)} ·{" "}
-              {session.turns ?? 0} turns
-              {session.lastActivityAt ? ` · ${timeAgo(session.lastActivityAt)}` : ""}
-            </span>
+            {session.lastActivity?.trim() && !isSessionTitleEcho(session, session.lastActivity) && (
+              <>
+                <span className="act-card-separator" aria-hidden>·</span>
+                <span className="act-card-activity" title={session.lastActivity}>{session.lastActivity}</span>
+              </>
+            )}
           </span>
         </span>
       </button>
@@ -479,7 +453,6 @@ function SessionCard({
       : tone === "idle"
         ? "No recent activity"
         : "No update time";
-  const activeMinionCount = activeMinionSummary(session).running;
   const classes = [
     "act-card",
     `act-card--${tone}`,
@@ -499,28 +472,22 @@ function SessionCard({
       />
       <button className="act-card-main" type="button" onClick={onSelect} aria-pressed={selected}>
         <span className="act-card-top">
+          <span className="act-card-title" title={sessionDisplayTitle(session)}>{sessionDisplayTitle(session)}</span>
+          <span className="act-card-time" title={activityTime} aria-label={activityTime}>
+            {session.lastActivityAt ? timeAgo(session.lastActivityAt) : "—"}
+          </span>
+        </span>
+        <span className="act-card-context">
           <span className="act-card-state">
             <span className="act-card-state-dot" aria-hidden />
             <span>{stateLabel}</span>
           </span>
-        </span>
-        <span className="act-card-title">{sessionDisplayTitle(session)}</span>
-        {activitySummary && <span className="act-card-activity">{activitySummary}</span>}
-        <span className="act-card-foot">
-          <span className="act-card-time">{activityTime}</span>
-          <span className="act-card-foot-tags">
-            {activeMinionCount > 0 && (
-              <span className="act-card-minions">
-                <UsersRound size={10} strokeWidth={2.25} aria-hidden />
-                {activeMinionCount} {activeMinionCount === 1 ? "minion" : "minions"} working
-              </span>
-            )}
-            {hasChanges && (
-              <span className="act-card-changes">
-                <GitCompare size={9} strokeWidth={2.5} aria-hidden /> changes
-              </span>
-            )}
-          </span>
+          {(activitySummary || hasChanges) && <>
+            <span className="act-card-separator" aria-hidden>·</span>
+            <span className="act-card-activity" title={activitySummary ?? "Changes ready to review"}>
+              {activitySummary ?? "Changes ready to review"}
+            </span>
+          </>}
         </span>
       </button>
       <LifecycleActions session={session} onAction={onAction} className="act-card-actions" />
@@ -596,7 +563,7 @@ function Inspector({
   onClearPromptFailure,
   runs = [], runNextCursor, onLoadRuns,
 }: {
-  session: MobileSessionInfo;
+  session: ActivitySession;
   leader: LeaderNodeRef | undefined;
   onClose: () => void;
   onOpenInCanvas: (nodeId: string) => void;
@@ -774,7 +741,7 @@ function Inspector({
     ...(graphAvailable ? [{
       id: "graph" as const,
       label: "Graph",
-      icon: Workflow,
+      icon: CrewIcon,
     }] : []),
     {
       id: "minions",
@@ -814,6 +781,14 @@ function Inspector({
     <aside className="act-inspector" aria-label="Session details">
       <header className="act-inspector-topbar">
         <div className="act-inspector-identity">
+          <button
+            className="act-inspector-back"
+            type="button"
+            onClick={onClose}
+            aria-label="Back to activity"
+          >
+            <ArrowLeft size={17} aria-hidden />
+          </button>
           <span className="act-inspector-avatar" aria-hidden>
             <ActivityIcon size={16} strokeWidth={2.2} />
           </span>
@@ -822,7 +797,7 @@ function Inspector({
               <span className="act-inspector-kicker">{sessionRoleLabel(session)} session</span>
               <StatusPill status={session.status} />
             </div>
-            <h2>{sessionDisplayTitle(session)}</h2>
+            <h2 tabIndex={-1}>{sessionDisplayTitle(session)}</h2>
           </div>
         </div>
         <div className="act-inspector-topactions">
@@ -858,14 +833,6 @@ function Inspector({
               <span>Add to canvas</span>
             </button>
           )}
-          <button
-            className="act-inspector-close"
-            type="button"
-            onClick={onClose}
-            aria-label="Close inspector"
-          >
-            <X size={17} aria-hidden />
-          </button>
         </div>
       </header>
 
@@ -984,14 +951,12 @@ function Inspector({
           >
             {activeSideTab === "dashboard" && (
               <section className="act-side-stack" aria-label="Leader dashboard">
-                <header className="act-side-heading">
-                  <span>Live dashboard</span>
-                  <h3>Progress and decisions</h3>
-                  <p>Structured updates published by this leader.</p>
-                </header>
                 {hasDashboard && session.renderState ? (
                   <div className="act-dashboard-frame">
+                    <FormSubmissionProvider key={session.sessionKey} sessionKey={session.sessionKey}
+                      socketSend={socketSend} socketSubscribe={socketSubscribe}>
                     <DashboardSurface
+                      scrollWithin={false}
                       renderState={session.renderState}
                       onSubmitForm={(formComponentId, formAnswers) => socketSend?.({
                         type: "submit_form",
@@ -1000,6 +965,7 @@ function Inspector({
                         formAnswers,
                       })}
                     />
+                    </FormSubmissionProvider>
                   </div>
                 ) : (
                   <div className="act-side-empty">
@@ -1209,12 +1175,11 @@ function Inspector({
           </div>
 
           <div className="act-context-controls" aria-label="Session controls">
-            {session.reviewLifecycle && session.reviewLifecycle.reviewState !== "none" &&
-              session.reviewLifecycle.acknowledgedAt == null &&
-              session.reviewLifecycle.dismissedAt == null && (
+            {canAcknowledge(session) && (
                 <button
                   className="act-icon-action act-icon-action--review"
                   type="button"
+                  disabled={session.lifecyclePending}
                   onClick={onAcknowledge}
                   aria-label={isRetainedInactive(session) ? "Review" : "Mark reviewed"}
                   title={isRetainedInactive(session)
@@ -1228,6 +1193,7 @@ function Inspector({
               <button
                 className="act-icon-action act-icon-action--dismiss"
                 type="button"
+                disabled={session.lifecyclePending}
                 onClick={onDismiss}
                 aria-label={isRetainedInactive(session)
                   ? "Review and remove from Activity"
@@ -1244,6 +1210,7 @@ function Inspector({
               <button
                 className="act-icon-action"
                 type="button"
+                disabled={session.lifecyclePending}
                 onClick={onReopen}
                 aria-label="Restore"
                 title="Restore"
@@ -1269,6 +1236,8 @@ function Inspector({
 }
 
 export function ActivityView({
+  initialSelectedKey = null,
+  lifecycleController,
   sessions,
   nodes,
   onLaunchLeader,
@@ -1287,25 +1256,21 @@ export function ActivityView({
   workItemRuns = {}, runNextCursor = {}, onLoadRuns, onPromptWorkItem,
   promptFailures = {}, onClearPromptFailure,
 }: ActivityViewProps) {
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(initialSelectedKey);
+  const [startedEntry, setStartedEntry] = useState<string | null>(null);
   const [visibility, setVisibility] = useState<ActivityVisibility>("open");
   const [summaryFilter, setSummaryFilter] = useState<ActivitySummaryFilter | null>(null);
   const [launchNodeId, setLaunchNodeId] = useState<string | null>(null);
   const [launchDraft, setLaunchDraft] = useState<CanvasNode | null>(null);
   const launchCommittedRef = useRef(false);
   const [checkedKeys, setCheckedKeys] = useState<Set<string>>(() => new Set());
-  const [actionError, setActionError] = useState<string | null>(null);
-
-  // Surface rejected lifecycle mutations (revision conflicts, invalid
-  // transitions) instead of swallowing them; a later success clears the banner.
-  useEffect(() => {
-    if (!socketSubscribe) return;
-    return socketSubscribe("*", (msg: unknown) => {
-      const outcome = lifecycleActionError(msg);
-      if (!outcome) return;
-      setActionError(outcome.failed ? outcome.error : null);
-    });
-  }, [socketSubscribe]);
+  const removalFocus = useActivityRemovalFocus();
+  const localLifecycle = useActivityLifecycle({
+    socketSend: lifecycleController ? undefined : socketSend,
+    socketSubscribe: lifecycleController ? undefined : socketSubscribe,
+    onDetachFromCanvas,
+  });
+  const { sendLifecycle, pendingKeys, actionError, clearActionError } = lifecycleController ?? localLifecycle;
 
   const toggleChecked = (entryId: string) =>
     setCheckedKeys((prev) => {
@@ -1314,18 +1279,6 @@ export function ActivityView({
       else next.add(entryId);
       return next;
     });
-
-  const sendLifecycle = (action: LifecycleAction, session: MobileSessionInfo) => {
-    if (action === "dismiss") {
-      onDetachFromCanvas?.({
-        sessionKey: session.sessionKey,
-        ...(session.workItemId !== undefined
-          ? { workItemId: session.workItemId }
-          : {}),
-      });
-    }
-    socketSend?.(buildLifecycleCommand(action, session, randomUuid()));
-  };
 
   // Top-level surface only — minions are managed by their leader (mirrors mobile).
   const visibleSessions = useMemo(
@@ -1340,6 +1293,8 @@ export function ActivityView({
 
   function openLaunchExperience() {
     if (launchNodeId) return;
+    setVisibility("open");
+    setSummaryFilter(null);
     const draft = onLaunchLeader();
     if (typeof draft === "string") {
       setSelectedKey(null);
@@ -1381,10 +1336,9 @@ export function ActivityView({
       visibleSessions.map((session) => {
         const leader = leaderIndex.get(session.sessionKey);
         const reviewableChanges = !!leader && leaderHasReviewableChanges(leader.data);
-        if (session.reviewableChanges === reviewableChanges) return session;
-        return { ...session, reviewableChanges };
+        return { ...session, reviewableChanges, lifecyclePending: pendingKeys.has(activityEntryId(session)) };
       }),
-    [leaderIndex, visibleSessions],
+    [leaderIndex, visibleSessions, pendingKeys],
   );
   const visibilitySessions = useMemo(
     () => allActivitySessions
@@ -1410,18 +1364,18 @@ export function ActivityView({
   }> = [
     {
       id: "needs-you",
-      label: "to review",
+      label: "Needs you",
       count: visibilitySessions.filter((session) => needsAttention(session)).length,
       attention: true,
     },
     {
       id: "working",
-      label: "working",
+      label: "Working",
       count: visibilitySessions.filter((session) => matchesSummaryFilter(session, "working")).length,
     },
     {
       id: "waiting",
-      label: "waiting",
+      label: "Waiting",
       count: visibilitySessions.filter((session) => matchesSummaryFilter(session, "waiting")).length,
     },
   ];
@@ -1438,10 +1392,11 @@ export function ActivityView({
   };
 
   // ── Empty-state launchpad ────────────────────────────────────────────────
-  // Both empty states embed the full launch composer inline plus a preview of
-  // the most recent agents' work. The composer uses an Activity-local draft;
-  // it is not committed to Canvas until the launch assigns a session key.
-  const emptyStateActive = visibleSessions.length === 0 || activitySessions.length === 0;
+  // An empty Open view embeds the launch composer and recent work. Filtering
+  // never creates a draft. A draft is committed to Canvas only after launch
+  // assigns a session key.
+  const emptyStateActive = activitySessions.length === 0;
+  const autoLaunchActive = emptyStateActive && visibility === "open" && !summaryFilter;
   const recentWork = useMemo(
     () => selectRecentAgentWork(sessions, nodes.filter((node) => node.id !== launchNodeId)),
     [sessions, nodes, launchNodeId],
@@ -1449,7 +1404,7 @@ export function ActivityView({
   const autoLaunchNodeRef = useRef<string | null>(null);
   const autoLaunchTriedRef = useRef(false);
   useEffect(() => {
-    if (!emptyStateActive) {
+    if (!autoLaunchActive) {
       autoLaunchTriedRef.current = false;
       return;
     }
@@ -1465,10 +1420,10 @@ export function ActivityView({
       setLaunchDraft(draft);
       setLaunchNodeId(draft.id);
     }
-  }, [emptyStateActive, launchNodeId, onLaunchLeader]);
+  }, [autoLaunchActive, launchNodeId, onLaunchLeader]);
 
   useEffect(() => {
-    if (emptyStateActive) return;
+    if (autoLaunchActive) return;
     const autoNodeId = autoLaunchNodeRef.current;
     if (!autoNodeId || autoNodeId !== launchNodeId) return;
     const node = nodes.find((candidate) => candidate.id === autoNodeId)
@@ -1481,7 +1436,7 @@ export function ActivityView({
       setLaunchNodeId(null);
     }
     autoLaunchNodeRef.current = null;
-  }, [emptyStateActive, launchDraft, launchNodeId, nodes, onCancelLaunchLeader]);
+  }, [autoLaunchActive, launchDraft, launchNodeId, nodes, onCancelLaunchLeader]);
 
   // Unmount: drop an auto-created draft that never launched (latest state via ref).
   const unmountCleanupRef = useRef<() => void>(() => {});
@@ -1497,7 +1452,7 @@ export function ActivityView({
 
   // The concrete sessions currently checked for a bulk action, in list order.
   const checkedSessions = useMemo(
-    () => activitySessions.filter((session) => checkedKeys.has(activityEntryId(session))),
+    () => activitySessions.filter((session) => checkedKeys.has(activityEntryId(session)) && !session.lifecyclePending),
     [activitySessions, checkedKeys],
   );
   const bulkCounts = useMemo(
@@ -1521,13 +1476,7 @@ export function ActivityView({
   const applyBulk = (
     action: LifecycleAction,
     isEligible: (session: ActivitySession) => boolean,
-  ) => {
-    for (const session of checkedSessions) {
-      if (!isEligible(session)) continue;
-      sendLifecycle(action, session);
-    }
-    clearSelection();
-  };
+  ) => checkedSessions.filter(isEligible).forEach((session) => sendLifecycle(action, session));
 
   // The launch-only renderer owns the existing, well-tested session creation
   // path. Once that new session reaches Activity, replace the form with its
@@ -1537,10 +1486,18 @@ export function ActivityView({
     const sessionKey = (launchNode.data as LeaderData).sessionKey;
     if (!sessionKey || !activitySessions.some((session) => session.sessionKey === sessionKey)) return;
     const launched = activitySessions.find((session) => session.sessionKey === sessionKey);
-    setSelectedKey(launched ? activityEntryId(launched) : `session:${sessionKey}`);
+    const entry = launched ? activityEntryId(launched) : `session:${sessionKey}`;
+    setSelectedKey(entry);
+    setStartedEntry(entry);
     setLaunchDraft(null);
     setLaunchNodeId(null);
   }, [activitySessions, launchNode]);
+
+  useEffect(() => {
+    if ((startedEntry && startedEntry === selectedKey) || (initialSelectedKey && initialSelectedKey === selectedKey)) {
+      removalFocus.ref.current?.querySelector<HTMLElement>(".act-inspector h2")?.focus({ preventScroll: true });
+    }
+  }, [startedEntry, selectedKey, initialSelectedKey, removalFocus.ref]);
 
   // Durable selection survives a work item's active-run replacement.
   useEffect(() => {
@@ -1566,85 +1523,82 @@ export function ActivityView({
   }, [activitySessions]);
 
   return (
-    <div className="act-root">
+    <div className="act-root" {...removalFocus}>
+      {startedEntry && startedEntry === selectedKey && <p className="act-action-pending" role="status">Leader started</p>}
       <div className="act-main">
-        <header className="act-header">
-          <div className="act-header-main">
-            <h1 className="act-header-title">Activity</h1>
-            <span className="act-header-count">{activitySessions.length}</span>
-          </div>
-          <button
-            className="act-launch-btn"
-            type="button"
-            onClick={openLaunchExperience}
-            aria-label={launchNode ? "New leader form open" : "New"}
-            disabled={Boolean(launchNode)}
-          >
-            <svg width="14" height="14" viewBox="0 0 40 40" fill="none" aria-hidden="true">
-              <circle
-                cx="20"
-                cy="20"
-                r="16"
-                fill="rgba(255,255,255,0.25)"
-                stroke="currentColor"
-                strokeWidth="2"
-              />
-              <path
-                d="M12 24L10 16L16 20L20 14L24 20L30 16L28 24H12Z"
-                fill="currentColor"
-              />
-              <circle cx="20" cy="28" r="2" fill="currentColor" />
-            </svg>
-            <span>New</span>
-          </button>
-        </header>
-        <div className="act-summary" aria-label="Filter activity by status">
-          {summaryItems.map((item) => {
-            const selected = summaryFilter === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                className={`act-summary-item${item.attention ? " act-summary-item--attention" : ""}${
-                  selected ? " act-summary-item--active" : ""
-                }`}
-                aria-pressed={selected}
-                aria-label={`${item.label}: ${item.count}. ${selected ? "Clear filter" : "Filter activity"}`}
-                onClick={() => setSummaryFilter(selected ? null : item.id)}
-              >
-                <strong>{item.count}</strong><span>{item.label}</span>
-              </button>
-            );
-          })}
-        </div>
-        <div className="act-filters" aria-label="Activity visibility">
-          {(["open", "all", "dismissed"] as const).map((id) => (
+        <div className="act-list-toolbar">
+          <header className="act-header">
+            <div className="act-header-main">
+              <h1 className="act-header-title">Activity</h1>
+              <div className="act-scope">
+                <select
+                  className="act-scope-select"
+                  aria-label="Activity visibility"
+                  value={visibility}
+                  onChange={(event) => {
+                    setVisibility(event.target.value as ActivityVisibility);
+                    setSummaryFilter(null);
+                  }}
+                >
+                  {(["open", "all", "dismissed"] as const).map((id) => (
+                    <option key={id} value={id}>
+                      {id === "open" ? "Open" : id === "all" ? "All" : "Dismissed"}
+                      {" · "}{allActivitySessions.filter((session) => isVisibleInActivity(session, id)).length}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={12} aria-hidden="true" />
+              </div>
+            </div>
             <button
-              key={id}
+              className="act-launch-btn"
               type="button"
-              className={`act-filter${visibility === id ? " act-filter--active" : ""}`}
-              onClick={() => {
-                setVisibility(id);
-                setSummaryFilter(null);
-              }}
+              onClick={openLaunchExperience}
+              aria-label={launchNode ? "New leader form open" : "New"}
+              disabled={Boolean(launchNode)}
             >
-              {id === "open" ? "Open" : id === "all" ? "All" : "Dismissed"}
+              <Plus size={14} aria-hidden="true" />
+              <span>New</span>
             </button>
-          ))}
+          </header>
+          <div className="act-summary" aria-label="Filter activity by status">
+            {summaryItems.map((item) => {
+              const selected = summaryFilter === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`act-summary-item${item.attention && item.count > 0 ? " act-summary-item--attention" : ""}${item.count === 0 ? " act-summary-item--empty" : ""}${
+                    selected ? " act-summary-item--active" : ""
+                  }`}
+                  aria-pressed={selected}
+                  aria-label={`${item.label}: ${item.count}. ${selected ? "Clear filter" : "Filter activity"}`}
+                  onClick={() => setSummaryFilter(selected ? null : item.id)}
+                >
+                  <span>{item.label}</span><strong>{item.count}</strong>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
+        <ActivityDismissReceipt controller={lifecycleController ?? localLifecycle} sessions={visibleSessions} />
         {actionError && (
           <div className="act-action-error" role="alert">
             <span>{actionError}</span>
             <button
               className="act-icon-btn"
               type="button"
-              onClick={() => setActionError(null)}
+              onClick={clearActionError}
               aria-label="Dismiss error"
             >
               ×
             </button>
           </div>
+        )}
+
+        {pendingKeys.size > 0 && (
+          <p className="act-action-pending" role="status">Updating {pendingKeys.size} {pendingKeys.size === 1 ? "activity" : "activities"}…</p>
         )}
 
         {checkedSessions.length > 0 && (
@@ -1803,7 +1757,23 @@ export function ActivityView({
         )}
       </div>
 
-      {activitySessions.length === 0 && (
+      {activitySessions.length === 0 && !autoLaunchActive && !launchNode && (
+        <main className="act-empty-workspace act-filter-workspace" aria-label="Activity workspace">
+          <div className="act-empty-headline">
+            <ActivityIcon size={28} aria-hidden />
+            <h2 className="act-empty-title">{emptyStateTitle}</h2>
+            <p className="act-empty-sub">{visibility === "dismissed"
+              ? "Dismissed activities stay available here to restore later."
+              : "Try another filter to find your activities."}</p>
+            <button className="act-btn" type="button" onClick={() => {
+              if (summaryFilter) setSummaryFilter(null);
+              else setVisibility("open");
+            }}>{summaryFilter ? "Clear filter" : "View open activities"}</button>
+          </div>
+        </main>
+      )}
+
+      {activitySessions.length === 0 && (autoLaunchActive || launchNode) && (
         <main
           className={`act-empty-workspace${visibleSessions.length === 0 ? " act-launch-panel" : ""}`}
           aria-label="Activity workspace"
@@ -1820,6 +1790,7 @@ export function ActivityView({
               recent={recentWork}
               onOpenInCanvas={onOpenInCanvas}
               onOpenSession={(sessionKey) => {
+                setVisibility("open");
                 setSummaryFilter(null);
                 selectBySessionKey(sessionKey);
               }}

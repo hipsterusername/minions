@@ -39,14 +39,14 @@
 .settings-sidebar__heading span,
 .settings-heading > span {
   color: var(--accent);
-  font: 600 10px/1.2 var(--font-mono);
+  font: 600 var(--text-size-caption)/1.4 var(--font-mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .settings-sidebar__heading strong {
   color: var(--text-primary);
-  font: 650 18px/1.25 var(--font-sans);
+  font: 650 var(--text-size-title)/1.25 var(--font-sans);
 }
 
 .settings-nav {
@@ -62,7 +62,7 @@
 .settings-nav__group-label {
   padding: 0 8px 4px;
   color: var(--text-dim);
-  font: 600 9px/1 var(--font-mono);
+  font: 600 var(--text-size-caption)/1.4 var(--font-mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -109,7 +109,7 @@
   align-items: center;
   overflow: hidden;
   color: var(--text-secondary);
-  font: 600 12px/1.2 var(--font-sans);
+  font: 600 var(--text-size-ui)/1.4 var(--font-sans);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -121,7 +121,7 @@
 .settings-nav__item small {
   overflow: hidden;
   color: var(--text-muted);
-  font: 400 10px/1.2 var(--font-sans);
+  font: 400 var(--text-size-label)/1.4 var(--font-sans);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -140,7 +140,7 @@
 .settings-sidebar__note {
   margin: auto 8px 0;
   color: var(--text-dim);
-  font: 400 10px/1.45 var(--font-sans);
+  font: 400 var(--text-size-label)/1.45 var(--font-sans);
 }
 
 .settings-beta-badge {
@@ -149,7 +149,7 @@
   align-items: center;
   padding: 2px 5px;
   color: var(--accent);
-  font: 600 8px/1 var(--font-mono);
+  font: 600 var(--text-size-caption)/1.4 var(--font-mono);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   background: color-mix(in srgb, var(--accent) 10%, transparent);
@@ -177,7 +177,7 @@
   align-items: center;
   margin: 5px 0 6px;
   color: var(--text-primary);
-  font: 650 24px/1.2 var(--font-sans);
+  font: 650 var(--text-size-page)/1.2 var(--font-sans);
   letter-spacing: -0.02em;
 }
 
@@ -185,7 +185,7 @@
   max-width: 570px;
   margin: 0;
   color: var(--text-muted);
-  font: 400 12px/1.55 var(--font-sans);
+  font: 400 var(--text-size-ui)/1.55 var(--font-sans);
 }
 
 .settings-card {
@@ -208,13 +208,13 @@
 .settings-card__heading h3 {
   margin: 0 0 3px;
   color: var(--text-primary);
-  font: 600 13px/1.3 var(--font-sans);
+  font: 600 var(--text-size-ui)/1.3 var(--font-sans);
 }
 
 .settings-card__heading p {
   margin: 0;
   color: var(--text-muted);
-  font: 400 11px/1.45 var(--font-sans);
+  font: 400 var(--text-size-label)/1.45 var(--font-sans);
 }
 
 .settings-card__body {
@@ -230,7 +230,7 @@
 .settings-theme-grid__heading {
   padding: 0 2px 2px;
   color: var(--text-dim);
-  font: 650 9px/1.2 var(--font-sans);
+  font: 650 var(--text-size-label)/1.4 var(--font-sans);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -288,13 +288,13 @@
 
 .settings-theme strong {
   color: var(--text-primary);
-  font: 600 11px/1.3 var(--font-sans);
+  font: 600 var(--text-size-label)/1.4 var(--font-sans);
 }
 
 .settings-theme small {
   overflow: hidden;
   color: var(--text-muted);
-  font: 400 9px/1.35 var(--font-sans);
+  font: 400 var(--text-size-label)/1.4 var(--font-sans);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -332,12 +332,12 @@
 
 .settings-agent__identity strong {
   color: var(--text-primary);
-  font: 600 12px/1.3 var(--font-sans);
+  font: 600 var(--text-size-ui)/1.4 var(--font-sans);
 }
 
 .settings-agent__identity small {
   color: var(--text-muted);
-  font: 400 10px/1.4 var(--font-sans);
+  font: 400 var(--text-size-label)/1.4 var(--font-sans);
 }
 
 .settings-agent__icon {
@@ -365,7 +365,7 @@
   display: block;
   margin-bottom: 6px;
   color: var(--text-muted);
-  font: 400 11px/1.2 var(--font-mono);
+  font: 400 var(--text-size-label)/1.4 var(--font-mono);
   letter-spacing: 0.5px;
   text-transform: uppercase;
 }
@@ -405,7 +405,7 @@
   padding: 5px 4px;
   overflow: hidden;
   color: var(--text-muted);
-  font: 600 9px/1.2 var(--font-mono);
+  font: 600 var(--text-size-caption)/1.4 var(--font-mono);
   text-overflow: ellipsis;
   background: var(--bg-primary);
   border: 0;
@@ -440,7 +440,7 @@
 .settings-tier-panel > p {
   margin: 0;
   color: var(--text-muted);
-  font: 400 10px/1.4 var(--font-sans);
+  font: 400 var(--text-size-label)/1.4 var(--font-sans);
 }
 
 .settings-tier-panel > p strong {
@@ -465,7 +465,7 @@
 
 .settings-reasoning--unavailable {
   color: var(--text-muted);
-  font: 400 10px/1.4 var(--font-sans);
+  font: 400 var(--text-size-label)/1.4 var(--font-sans);
 }
 
 .settings-reasoning__toggle {
@@ -474,7 +474,7 @@
   align-items: center;
   margin-right: 2px;
   color: var(--text-secondary);
-  font: 500 10px/1.2 var(--font-mono);
+  font: 500 var(--text-size-caption)/1.4 var(--font-mono);
   cursor: pointer;
 }
 
@@ -498,7 +498,7 @@
   min-height: 27px;
   padding: 4px 7px;
   color: var(--text-secondary);
-  font: 500 9px/1 var(--font-mono);
+  font: 500 var(--text-size-caption)/1.4 var(--font-mono);
   background: var(--bg-primary);
   border: 0;
   border-left: 1px solid var(--border-default);
@@ -536,12 +536,12 @@
 
 .settings-toggle strong {
   color: var(--text-secondary);
-  font: 600 12px/1.35 var(--font-sans);
+  font: 600 var(--text-size-ui)/1.4 var(--font-sans);
 }
 
 .settings-toggle small {
   color: var(--text-muted);
-  font: 400 11px/1.45 var(--font-sans);
+  font: 400 var(--text-size-label)/1.45 var(--font-sans);
 }
 
 .settings-toggle input {
@@ -598,7 +598,7 @@
 .settings-flow span {
   padding: 5px 8px;
   color: var(--text-secondary);
-  font: 500 10px/1 var(--font-mono);
+  font: 500 var(--text-size-caption)/1.4 var(--font-mono);
   background: var(--bg-primary);
   border: 1px solid var(--border-default);
   border-radius: 999px;
@@ -617,7 +617,7 @@
   margin: 0 0 12px;
   padding: 16px;
   color: var(--text-muted);
-  font: 500 12px/1.4 var(--font-sans);
+  font: 500 var(--text-size-ui)/1.4 var(--font-sans);
   text-align: center;
   background: var(--bg-primary);
   border: 1px dashed var(--border-default);
@@ -645,7 +645,7 @@
   min-width: 0;
   padding: 7px 9px;
   color: var(--text-primary);
-  font: 600 13px/1.3 var(--font-sans);
+  font: 600 var(--text-size-ui)/1.3 var(--font-sans);
   background: var(--bg-secondary);
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-control);
@@ -697,7 +697,7 @@
   min-height: 64px;
   padding: 8px 9px;
   color: var(--text-secondary);
-  font: 500 12px/1.45 var(--font-sans);
+  font: 500 var(--text-size-ui)/1.45 var(--font-sans);
   background: var(--bg-secondary);
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-control);
@@ -789,7 +789,7 @@
   align-items: center;
   gap: 6px;
   padding: 8px 12px;
-  font: 600 12px/1 var(--font-sans);
+  font: 600 var(--text-size-ui)/1.4 var(--font-sans);
   border-radius: var(--radius-control);
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
@@ -846,7 +846,7 @@
 
 .settings-mode strong {
   color: var(--text-secondary);
-  font: 600 11px/1.3 var(--font-sans);
+  font: 600 var(--text-size-label)/1.4 var(--font-sans);
 }
 
 .settings-mode[data-active="true"] strong {
@@ -855,7 +855,7 @@
 
 .settings-mode small {
   color: var(--text-muted);
-  font: 400 9px/1.4 var(--font-sans);
+  font: 400 var(--text-size-label)/1.4 var(--font-sans);
 }
 
 .settings-callout,
@@ -863,7 +863,7 @@
   margin: 12px 0 0;
   padding: 9px 10px;
   color: var(--text-muted);
-  font: 400 10px/1.45 var(--font-sans);
+  font: 400 var(--text-size-label)/1.45 var(--font-sans);
   background: var(--bg-primary);
   border-left: 2px solid var(--border-hover);
   border-radius: 3px;

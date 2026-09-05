@@ -1,3 +1,4 @@
+import { MinionsIcon, type MinionsIconName } from "./MinionsIcon.tsx";
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { NormalizedEvent } from "../../shared/normalized-event.ts";
 
@@ -41,28 +42,28 @@ function formatRateLimitMessage(event: Extract<NormalizedEvent, { kind: "rate_li
 
 const BANNER_CONFIG: Record<
   BannerKind,
-  { icon: string; color: string; bg: string; border: string }
+  { icon: MinionsIconName; color: string; bg: string; border: string }
 > = {
   rate_limit: {
-    icon: "\u29D7", // hourglass
+    icon: "wait",
     color: "var(--warning-color)",
     bg: "var(--warning-bg)",
     border: "var(--warning-bg)",
   },
   retry: {
-    icon: "\u21BB", // clockwise arrow
+    icon: "retry",
     color: "var(--priority-high)",
     bg: "var(--warning-bg)",
     border: "var(--warning-bg)",
   },
   compaction: {
-    icon: "\u2026", // ellipsis
+    icon: "compaction",
     color: "var(--tool-accent)",
     bg: "var(--tool-bg)",
     border: "var(--tool-bg)",
   },
   warning: {
-    icon: "\u26A0", // warning triangle
+    icon: "warning",
     color: "var(--status-error)",
     bg: "var(--danger-bg)",
     border: "var(--danger-bg)",
@@ -264,7 +265,7 @@ export function StatusBannerStack({
                 textAlign: "center",
               }}
             >
-              {config.icon}
+              <MinionsIcon name={config.icon} size={14} />
             </span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600 }}>{banner.message}</div>
@@ -284,6 +285,7 @@ export function StatusBannerStack({
               )}
             </div>
             <button
+              aria-label="Dismiss notification"
               onClick={() => onDismiss(banner.id)}
               onMouseDown={(e) => e.stopPropagation()}
               style={{
@@ -300,7 +302,7 @@ export function StatusBannerStack({
               onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
               onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.5")}
             >
-              \u00D7
+              <MinionsIcon name="close" size={14} />
             </button>
             <ProgressBar ttl={banner.ttl} timestamp={banner.timestamp} />
           </div>

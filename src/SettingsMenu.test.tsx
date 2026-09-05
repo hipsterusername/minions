@@ -297,6 +297,21 @@ describe("SettingsMenu", () => {
     });
   });
 
+  it("defaults drag snapping on and preserves the saved opt-out", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<SettingsMenu settings={{ tidyLayout: false }} onSettingsChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    openCategory("Workspace");
+    const toggle = screen.getByRole("checkbox", { name: /snap while dragging/i });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    expect(onChange).toHaveBeenLastCalledWith({ tidyLayout: false, snapWhileDragging: false });
+    rerender(<SettingsMenu settings={{ tidyLayout: false, snapWhileDragging: false }} onSettingsChange={onChange} />);
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+    expect(onChange).toHaveBeenLastCalledWith({ tidyLayout: false, snapWhileDragging: true });
+  });
+
   it("keeps the beta role system off by default and persists an opt-in", () => {
     const onChange = vi.fn();
     render(

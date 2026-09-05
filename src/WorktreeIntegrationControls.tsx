@@ -56,6 +56,7 @@ export function WorktreeIntegrationControls({
         lineage={lineage}
         contribution={contribution ?? null}
         send={send}
+        subscribe={subscribe}
         onExpand={() => setOpen(true)}
       />
       {open ? (

@@ -12,6 +12,7 @@ export type SlashCommand = {
   icon?: string;
   /** Skill recipe retained even when some ids are currently unavailable. */
   skillIds?: string[];
+  aliases?: string[];
 };
 
 export function parseSlashQuery(input: string): string | null {
@@ -25,7 +26,7 @@ export function parseSlashQuery(input: string): string | null {
 export function buildSlashCommands(
   settings: ProjectSettings | undefined,
 ): SlashCommand[] {
-  return normalizeDashboardLeaderActions(settings).map((action) => ({
+  const commands: SlashCommand[] = normalizeDashboardLeaderActions(settings).map((action) => ({
     id: action.id,
     label: action.name,
     description:
@@ -36,6 +37,18 @@ export function buildSlashCommands(
     icon: action.icon,
     skillIds: [...action.skillIds],
   }));
+  // Feature commands remain available independently of editable context actions.
+  let graphId = "task-graph";
+  while (commands.some((command) => command.id === graphId)) graphId += "-feature";
+  commands.push({
+    id: graphId,
+    label: "Graph",
+    aliases: ["crew"],
+    description: "Coordinate work with a task graph · /graph or /crew",
+    insertText: "Use the Task Graph feature to plan and coordinate this work. Inspect the current graph first, then create or update the plan with dependencies and delegate through the graph scheduler. Follow the current graph review and start settings.",
+    icon: "crew",
+  });
+  return commands;
 }
 
 export function filterSlashCommands(
@@ -46,6 +59,7 @@ export function filterSlashCommands(
   if (!normalizedQuery) return commands;
 
   return commands.filter((command) =>
-    command.label.toLowerCase().includes(normalizedQuery),
+    [command.label, ...(command.aliases ?? [])].some((name) =>
+      name.toLowerCase().includes(normalizedQuery)),
   );
 }

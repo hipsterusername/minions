@@ -170,15 +170,33 @@ describe("ActivityScreen", () => {
   });
 
   it("shows the empty state when only minion sessions exist", () => {
+    const onNewLeader = vi.fn();
     render(
       <ActivityScreen
         sessions={[session({ sessionKey: "minion-1", role: "minion", status: "running", taskName: "Minion run" })]}
         onOpenSession={() => {}}
+        onNewLeader={onNewLeader}
       />,
     );
 
     expect(screen.getByText("No sessions are running.")).toBeInTheDocument();
     expect(screen.queryByText("Minion run")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "New leader" })).not.toBeInTheDocument();
+  });
+
+  it("offers a New leader action only for a genuinely session-free activity list", () => {
+    const onNewLeader = vi.fn();
+    render(
+      <ActivityScreen sessions={[]} onOpenSession={() => {}} onNewLeader={onNewLeader} />,
+    );
+
+    expect(screen.getByText("Start a Leader to give this project its first task.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New leader" }));
+    expect(onNewLeader).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Dismissed" }));
+    expect(screen.getByText("No dismissed sessions.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "New leader" })).not.toBeInTheDocument();
   });
 
   it("opens a session when its card is tapped", () => {
@@ -304,9 +322,9 @@ describe("ActivityScreen", () => {
     const remove = within(row).getByRole("button", {
       name: "Review and remove from Activity",
     });
-    expect(review).toHaveTextContent("");
+    expect(review).toHaveTextContent("Review");
     expect(review.querySelector("svg")).toBeInTheDocument();
-    expect(remove).toHaveTextContent("");
+    expect(remove).toHaveTextContent("Remove");
     expect(remove.querySelector(".lucide-list-x")).toBeInTheDocument();
 
     fireEvent.click(review);
@@ -430,7 +448,8 @@ describe("ActivityScreen", () => {
     const send = vi.fn();
     render(
       <ActivityScreen
-        sessions={[session({ sessionKey: "wait", taskName: "Answer me", status: "waiting", reviewLifecycle: waitingLifecycle })]}
+        sessions={[session({ sessionKey: "wait", taskName: "Completed work", status: "completed",
+          reviewLifecycle: { ...waitingLifecycle, reviewState: "completion_to_review" } })]}
         onOpenSession={() => {}}
         send={send}
       />,
@@ -446,6 +465,24 @@ describe("ActivityScreen", () => {
       type: "dismiss_session",
       sessionKey: "wait",
     }));
+  });
+
+  it.each([false, true])("keeps an unanswered decision open for reply without review (canonical: %s)", (canonicalWorkItem) => {
+    const send = vi.fn();
+    const onOpenSession = vi.fn();
+    render(
+      <ActivityScreen
+        sessions={[session({ sessionKey: "decision", taskName: "Answer me", status: "waiting",
+          canonicalWorkItem, ...(canonicalWorkItem ? { workItemId: "work-decision" } : {}),
+          reviewLifecycle: waitingLifecycle })]}
+        onOpenSession={onOpenSession}
+        send={send}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Mark reviewed" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reply" }));
+    expect(onOpenSession).toHaveBeenCalledWith("decision");
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("omits triage lifecycle actions when no send handler is provided", () => {
@@ -505,6 +542,8 @@ describe("ActivityScreen", () => {
         send={send}
       />,
     );
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Select" }));
     fireEvent.click(screen.getByLabelText("Select One"));
     fireEvent.click(screen.getByLabelText("Select Two"));
     fireEvent.click(screen.getByRole("button", { name: "Dismiss 2" }));
@@ -519,19 +558,22 @@ describe("ActivityScreen", () => {
       <ActivityScreen
         sessions={[
           session({ sessionKey: "wait", status: "waiting", taskName: "Answer me", reviewLifecycle: waitingLifecycle }),
+          session({ sessionKey: "done", status: "completed", taskName: "Completed work",
+            reviewLifecycle: { ...waitingLifecycle, reviewState: "completion_to_review" } }),
           session({ sessionKey: "run", status: "running", taskName: "Busy" }),
         ]}
         onOpenSession={() => {}}
         send={send}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: "Select" }));
     fireEvent.click(screen.getByLabelText("Select Answer me"));
     fireEvent.click(screen.getByRole("button", { name: "Select all" }));
     fireEvent.click(screen.getByRole("button", { name: "Mark 1 reviewed" }));
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith(expect.objectContaining({
       type: "acknowledge_session",
-      sessionKey: "wait",
+      sessionKey: "done",
       expectedLifecycleRevision: 3,
     }));
   });

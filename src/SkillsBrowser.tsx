@@ -1,7 +1,9 @@
+import { MinionsIcon } from "./components/MinionsIcon.tsx";
+import { SkillIcon } from "./components/SkillIcon.tsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  ChevronDown,
+  ArrowLeft,
   ChevronRight,
   Copy,
   Download,
@@ -18,6 +20,7 @@ import type { SkillTemplate } from "./skills/types.ts";
 import {
   DockPanel,
   DockPanelHeader,
+  useDock,
   useDockBadge,
   useDockPanelOpen,
 } from "./BottomRightDock.tsx";
@@ -81,12 +84,13 @@ function ActionMenu({ label, actions }: { label: string; actions: MenuAction[] }
     document.addEventListener("keydown", handleKeyDown);
     window.addEventListener("resize", handleViewportChange);
     window.addEventListener("scroll", handleViewportChange, true);
-    requestAnimationFrame(() => {
+    const focusFrame = requestAnimationFrame(() => {
       menuRef.current
         ?.querySelector<HTMLButtonElement>("[role='menuitem']")
         ?.focus();
     });
     return () => {
+      cancelAnimationFrame(focusFrame);
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("resize", handleViewportChange);
@@ -118,6 +122,19 @@ function ActionMenu({ label, actions }: { label: string; actions: MenuAction[] }
   };
 
   const handleMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+      triggerRef.current?.focus();
+      return;
+    }
+    if (event.key === "Tab") {
+      // Resume tab order at the trigger instead of the end of the portal.
+      triggerRef.current?.focus();
+      setOpen(false);
+      return;
+    }
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
     const items = Array.from(
@@ -178,314 +195,188 @@ function ActionMenu({ label, actions }: { label: string; actions: MenuAction[] }
   );
 }
 
-/** A single skill with an explicit primary action and a labeled overflow. */
-function SkillCard({
-  skill,
-  onLaunch,
-  onEdit,
-  onDuplicate,
-  onExport,
-  onDelete,
-}: {
+const CATEGORY_LABELS: Record<SkillTemplate["category"], string> = {
+  code: "Code", docs: "Docs", testing: "Testing", devops: "DevOps",
+  analysis: "Analysis", design: "Design", general: "General",
+};
+
+function SkillDetails({ skill, onBack, onLaunch, onEdit, onDuplicate, onExport, onDelete }: {
   skill: SkillTemplate;
+  onBack: () => void;
   onLaunch: () => void;
   onEdit: () => void;
   onDuplicate: () => void;
   onExport: () => void;
   onDelete: () => void;
 }) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { headingRef.current?.focus(); }, [skill.id]);
   const actions: MenuAction[] = [
-    {
-      label: "Edit skill",
-      icon: <Pencil size={14} aria-hidden="true" />,
-      onSelect: onEdit,
-    },
-    {
-      label: "Duplicate skill",
-      icon: <Copy size={14} aria-hidden="true" />,
-      onSelect: onDuplicate,
-    },
-    {
-      label: "Export skill",
-      icon: <Download size={14} aria-hidden="true" />,
-      onSelect: onExport,
-    },
+    { label: "Edit skill", icon: <Pencil size={14} aria-hidden="true" />, onSelect: onEdit },
+    { label: "Duplicate skill", icon: <Copy size={14} aria-hidden="true" />, onSelect: onDuplicate },
+    { label: "Export skill", icon: <Download size={14} aria-hidden="true" />, onSelect: onExport },
+    ...(!skill.builtIn ? [{ label: "Delete skill", icon: <Trash2 size={14} aria-hidden="true" />, onSelect: onDelete, danger: true }] : []),
   ];
-
-  if (!skill.builtIn) {
-    actions.push({
-      label: "Delete skill",
-      icon: <Trash2 size={14} aria-hidden="true" />,
-      onSelect: onDelete,
-      danger: true,
-    });
-  }
-
   return (
-    <article
-      className="skills-browser__card"
-      style={{ "--skill-accent": skill.accentColor } as React.CSSProperties}
-    >
-      <div className="skills-browser__card-body">
-        <span className="skills-browser__skill-icon" aria-hidden="true">
-          {skill.icon}
-        </span>
-        <div className="skills-browser__skill-copy">
-          <div className="skills-browser__skill-title-row">
-            <h3>{skill.name}</h3>
-            {skill.builtIn && (
-              <span className="skills-browser__badge" title="Built-in preset">
-                Built-in
-              </span>
-            )}
-            {skill.subskills && skill.subskills.length > 0 && (
-              <span
-                className="skills-browser__badge"
-                title={`${skill.subskills.length} sub-skill${
-                  skill.subskills.length === 1 ? "" : "s"
-                }`}
-              >
-                {skill.subskills.length} sub
-              </span>
-            )}
-          </div>
-          <p>{skill.description}</p>
-        </div>
-      </div>
-
-      <div className="skills-browser__card-actions">
-        <button
-          type="button"
-          className="skills-browser__launch-button"
-          onClick={onLaunch}
-          onMouseDown={(event) => event.stopPropagation()}
-          aria-label={`Launch with ${skill.name}`}
-        >
-          <Play size={13} fill="currentColor" aria-hidden="true" />
-          Launch
-        </button>
+    <div className="skills-browser__detail" style={{ "--skill-accent": skill.accentColor } as React.CSSProperties}>
+      <div className="skills-browser__detail-nav">
+        <button type="button" className="skills-browser__back" onClick={onBack}><ArrowLeft size={14} aria-hidden="true" /> All skills</button>
         <ActionMenu label={`More actions for ${skill.name}`} actions={actions} />
       </div>
-    </article>
+      <div className="skills-browser__detail-scroll">
+        <div className="skills-browser__detail-hero">
+          <span className="skills-browser__skill-icon"><SkillIcon skill={skill} size={24} /></span>
+          <div><span className="skills-browser__eyebrow">{CATEGORY_LABELS[skill.category]} · {skill.builtIn ? "Built-in" : "Project skill"}</span>
+            <h3 ref={headingRef} tabIndex={-1}>{skill.name}</h3></div>
+        </div>
+        <p className="skills-browser__detail-description">{skill.description || "Reusable instructions to guide your leader."}</p>
+        <div className="skills-browser__next-step">
+          <MinionsIcon name="skill" size={18} />
+          <div><strong>Make it part of your next task</strong><p>Launch adds a leader to the canvas with this skill selected. Add your task{skill.variables.length ? " and configure its inputs" : ""} there before starting.</p></div>
+        </div>
+        <div className="skills-browser__disclosures">
+          {skill.variables.length > 0 && (
+            <details><summary>Inputs <span>{skill.variables.length}</span></summary>
+              <p className="skills-browser__hint">Configure these on the leader after launch.</p>
+              <dl>{skill.variables.map((variable) => (
+                <div key={variable.name}><dt>{variable.label || variable.name}{variable.required && <span className="skills-browser__badge">Required</span>}</dt>
+                  <dd>{variable.description || variable.placeholder || (variable.type === "select" ? "Choose an option" : "Enter a value")}
+                    {variable.defaultValue && <small>Default: {variable.defaultValue}</small>}
+                  </dd></div>
+              ))}</dl>
+            </details>
+          )}
+          {!!skill.subskills?.length && (
+            <details><summary>Sub-skills <span>{skill.subskills.length}</span></summary>
+              <p className="skills-browser__hint">Specialized guidance the leader can draw on.</p>
+              <dl>{skill.subskills.map((subskill) => <div key={subskill.id}><dt>{subskill.name}</dt><dd>{subskill.description}{subskill.whenToUse && <small>When: {subskill.whenToUse}</small>}</dd></div>)}</dl>
+            </details>
+          )}
+          {!!skill.attachments?.length && (
+            <details><summary>Reference files <span>{skill.attachments.length}</span></summary>
+              <ul>{skill.attachments.map((attachment, index) => <li key={`${attachment.filename}-${index}`}>{attachment.filename}</li>)}</ul>
+            </details>
+          )}
+          <details><summary>Instructions <MinionsIcon name="file" size={14} /></summary>
+            <pre>{skill.template || "No instructions yet. Edit this skill to add them."}</pre>
+          </details>
+        </div>
+      </div>
+      <div className="skills-browser__detail-footer">
+        <button type="button" className="skills-browser__launch-button" aria-label={`Launch with ${skill.name}`} onClick={onLaunch}>
+          <Play size={14} fill="currentColor" aria-hidden="true" /> Launch with skill
+        </button>
+        <span>You choose when the leader starts.</span>
+      </div>
+    </div>
   );
 }
 
-const CATEGORY_LABELS: Record<string, string> = {
-  code: "Code",
-  docs: "Docs",
-  testing: "Testing",
-  devops: "DevOps",
-  analysis: "Analysis",
-  design: "Design",
-  general: "General",
-};
-
 export function SkillsBrowser({
-  onLaunchSkill,
-  onCreateSkill,
-  onEditSkill,
-  onDeleteSkill,
-  onDuplicateSkill,
-  onExportSkill,
-  onImportSkills,
-  onExportSkills,
-  onImportFile,
-  refreshKey,
+  onLaunchSkill, onCreateSkill, onEditSkill, onDeleteSkill, onDuplicateSkill,
+  onExportSkill, onImportSkills, onExportSkills, onImportFile, refreshKey,
 }: SkillsBrowserProps) {
   const isOpen = useDockPanelOpen("skills");
+  const { closePanel } = useDock();
   const [search, setSearch] = useState("");
+  const [source, setSource] = useState<"all" | "project" | "built-in">("all");
+  const [category, setCategory] = useState("all");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
-  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(
-    new Set(),
+  const listRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const restoreFocus = useRef<string | null>(null);
+  const scrollTop = useRef(0);
+  const allSkills = useMemo(() => getPickableSkills(), [refreshKey]);
+  const selected = allSkills.find((skill) => skill.id === selectedId);
+  useDockBadge("skills", { count: allSkills.length });
+  const query = search.trim().toLowerCase();
+  const filtered = allSkills.filter((skill) =>
+    (source === "all" || (source === "built-in" ? skill.builtIn : !skill.builtIn)) &&
+    (category === "all" || skill.category === category) &&
+    (!query || `${skill.name} ${skill.description} ${skill.category}`.toLowerCase().includes(query)),
   );
+  const hasFilters = Boolean(query) || source !== "all" || category !== "all";
+  const backToLibrary = () => { restoreFocus.current = selectedId; setSelectedId(null); };
+  useEffect(() => {
+    if (!selected && listRef.current) {
+      listRef.current.scrollTop = scrollTop.current;
+      const target = Array.from(listRef.current.querySelectorAll<HTMLButtonElement>("[data-skill-id]"))
+        .find((button) => button.dataset["skillId"] === restoreFocus.current);
+      (target ?? searchRef.current)?.focus({ preventScroll: true });
+      restoreFocus.current = null;
+    }
+  }, [selected, isOpen]);
+  useEffect(() => { if (!isOpen) setDragActive(false); }, [isOpen]);
 
   const handleDrop = (event: React.DragEvent) => {
-    event.preventDefault();
-    setDragActive(false);
-    const file = Array.from(event.dataTransfer.files).find(
-      (candidate) =>
-        candidate.type === "application/json" || candidate.name.endsWith(".json"),
-    );
+    event.preventDefault(); setDragActive(false);
+    const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type === "application/json" || candidate.name.endsWith(".json"));
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => onImportFile(reader.result as string);
     reader.readAsText(file);
   };
-
-  const allSkills = useMemo(() => getPickableSkills(), [refreshKey]);
-
-  useDockBadge("skills", { count: allSkills.length });
-
-  const filtered = useMemo(() => {
-    if (!search.trim()) return allSkills;
-    const query = search.toLowerCase();
-    return allSkills.filter(
-      (skill) =>
-        skill.name.toLowerCase().includes(query) ||
-        skill.description.toLowerCase().includes(query) ||
-        skill.category.toLowerCase().includes(query),
-    );
-  }, [allSkills, search]);
-
-  const grouped = useMemo(() => {
-    const map = new Map<string, SkillTemplate[]>();
-    for (const skill of filtered) {
-      const list = map.get(skill.category) ?? [];
-      list.push(skill);
-      map.set(skill.category, list);
-    }
-    return map;
-  }, [filtered]);
-
-  const toggleCategory = (category: string) => {
-    setCollapsedCategories((previous) => {
-      const next = new Set(previous);
-      if (next.has(category)) next.delete(category);
-      else next.add(category);
-      return next;
-    });
-  };
-
   if (!isOpen) return null;
-
   return (
-    <DockPanel id="skills" width={320}>
-      <div
-        className="skills-browser"
-        onDragOver={(event) => {
-          event.preventDefault();
-          if (!dragActive) setDragActive(true);
-        }}
-        onDragLeave={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-            setDragActive(false);
-          }
-        }}
-        onDrop={handleDrop}
-      >
-        {dragActive && (
-          <div className="skills-browser__drop-zone" role="status" aria-live="polite">
-            <Upload size={20} aria-hidden="true" />
-            Drop a skills JSON file to import
+    <DockPanel id="skills" width={400}>
+      <div className="skills-browser" onKeyDown={(event) => {
+        if (event.key === "Escape" && selected && !event.defaultPrevented) {
+          event.stopPropagation(); backToLibrary();
+        }
+      }} onDragOver={(event) => {
+        if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+        event.preventDefault(); setDragActive(true);
+      }} onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false);
+      }} onDrop={handleDrop}>
+        {dragActive && <div className="skills-browser__drop-zone" role="status"><Upload size={20} aria-hidden="true" /> Drop a skills JSON file to import</div>}
+        <DockPanelHeader title={<>Skills <span className="skills-browser__title-count">{allSkills.length}</span></>} actions={!selected ? <>
+          <button type="button" className="skills-browser__new-button" onClick={onCreateSkill}><Plus size={14} aria-hidden="true" /> New skill</button>
+          <ActionMenu label="Skill library actions" actions={[
+            { label: "Import skills", icon: <Upload size={14} aria-hidden="true" />, onSelect: onImportSkills },
+            { label: "Export all skills", icon: <Download size={14} aria-hidden="true" />, onSelect: onExportSkills },
+          ]} />
+        </> : undefined} />
+        {selected ? <SkillDetails key={selected.id} skill={selected} onBack={backToLibrary}
+          onLaunch={() => { onLaunchSkill(selected.id); closePanel(); setSelectedId(null); }}
+          onEdit={() => onEditSkill(selected)} onDuplicate={() => onDuplicateSkill(selected)}
+          onExport={() => onExportSkill(selected)} onDelete={() => onDeleteSkill(selected.id)} /> : <>
+          <div className="skills-browser__toolbar">
+            <div className="skills-browser__intro"><strong>A little expertise for every task.</strong><p>Choose a skill to see how it can help.</p></div>
+            <label className="skills-browser__search"><Search size={15} aria-hidden="true" />
+              <span className="skills-browser__sr-only">Search skills</span>
+              <input ref={searchRef} type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a skill…" />
+            </label>
+            <div className="skills-browser__filters">
+              <div className="skills-browser__sources" role="group" aria-label="Skill source">
+                {([['all', 'All skills'], ['project', 'Yours'], ['built-in', 'Built-in']] as const).map(([value, label]) =>
+                  <button key={value} type="button" aria-pressed={source === value} onClick={() => setSource(value)}>{label}</button>)}
+              </div>
+              <select aria-label="Skill category" value={category} onChange={(event) => setCategory(event.target.value)}><option value="all">All categories</option>
+                {Object.entries(CATEGORY_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </div>
           </div>
-        )}
-
-        <DockPanelHeader
-          title={
-            <>
-              Skills
-              <span className="skills-browser__title-count">{allSkills.length}</span>
-            </>
-          }
-          actions={
-            <>
-              <button
-                type="button"
-                className="skills-browser__new-button"
-                onClick={onCreateSkill}
-                onMouseDown={(event) => event.stopPropagation()}
-              >
-                <Plus size={14} strokeWidth={2.2} aria-hidden="true" />
-                New
-              </button>
-              <ActionMenu
-                label="Skill library actions"
-                actions={[
-                  {
-                    label: "Import skills",
-                    icon: <Upload size={14} aria-hidden="true" />,
-                    onSelect: onImportSkills,
-                  },
-                  {
-                    label: "Export all skills",
-                    icon: <Download size={14} aria-hidden="true" />,
-                    onSelect: onExportSkills,
-                  },
-                ]}
-              />
-            </>
-          }
-        />
-
-        <div className="skills-browser__toolbar">
-          <p>Choose a workflow, then launch a new leader with it armed.</p>
-          <label className="skills-browser__search">
-            <Search size={14} aria-hidden="true" />
-            <span className="skills-browser__sr-only">Search skills</span>
-            <input
-              type="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search skills"
-              onMouseDown={(event) => event.stopPropagation()}
-            />
-          </label>
-        </div>
-
-        <div className="skills-browser__list">
-          {allSkills.length === 0 && (
-            <div className="skills-browser__empty">
-              <span className="skills-browser__empty-icon" aria-hidden="true">✦</span>
-              <strong>No skills yet</strong>
-              <p>Create a reusable workflow to guide your next leader.</p>
-              <button type="button" onClick={onCreateSkill}>
-                <Plus size={14} aria-hidden="true" />
-                Create first skill
-              </button>
-            </div>
-          )}
-
-          {allSkills.length > 0 && filtered.length === 0 && (
-            <div className="skills-browser__empty">
-              <Search size={19} aria-hidden="true" />
-              <strong>No matching skills</strong>
-              <p>Try a different name, description, or category.</p>
-              <button type="button" onClick={() => setSearch("")}>Clear search</button>
-            </div>
-          )}
-
-          {Array.from(grouped.entries()).map(([category, skills]) => {
-            const collapsed = collapsedCategories.has(category);
-            const categoryLabel = CATEGORY_LABELS[category] ?? category;
-            return (
-              <section className="skills-browser__category" key={category}>
-                <button
-                  type="button"
-                  className="skills-browser__category-button"
-                  onClick={() => toggleCategory(category)}
-                  onMouseDown={(event) => event.stopPropagation()}
-                  aria-expanded={!collapsed}
-                >
-                  <span>
-                    {collapsed ? (
-                      <ChevronRight size={14} aria-hidden="true" />
-                    ) : (
-                      <ChevronDown size={14} aria-hidden="true" />
-                    )}
-                    {categoryLabel}
-                  </span>
-                  <span className="skills-browser__category-count">{skills.length}</span>
-                </button>
-
-                {!collapsed && (
-                  <div className="skills-browser__category-list">
-                    {skills.map((skill) => (
-                      <SkillCard
-                        key={skill.id}
-                        skill={skill}
-                        onLaunch={() => onLaunchSkill(skill.id)}
-                        onEdit={() => onEditSkill(skill)}
-                        onDuplicate={() => onDuplicateSkill(skill)}
-                        onExport={() => onExportSkill(skill)}
-                        onDelete={() => onDeleteSkill(skill.id)}
-                      />
-                    ))}
-                  </div>
-                )}
-              </section>
-            );
-          })}
-        </div>
+          <div className="skills-browser__list" ref={listRef}>
+            <p className="skills-browser__results" role="status">{filtered.length} {hasFilters ? "matching" : "available"} skill{filtered.length === 1 ? "" : "s"}</p>
+            {filtered.map((skill) => <button key={skill.id} type="button" className="skills-browser__row" data-skill-id={skill.id}
+              style={{ "--skill-accent": skill.accentColor } as React.CSSProperties} aria-label={`View ${skill.name}`}
+              onClick={() => { scrollTop.current = listRef.current?.scrollTop ?? 0; setSelectedId(skill.id); }}>
+              <span className="skills-browser__skill-icon"><SkillIcon skill={skill} size={20} /></span>
+              <span className="skills-browser__row-copy"><strong>{skill.name}</strong><span>{skill.description || CATEGORY_LABELS[skill.category]}</span></span>
+              <ChevronRight size={15} aria-hidden="true" />
+            </button>)}
+            {!filtered.length && <div className="skills-browser__empty">
+              <MinionsIcon name={hasFilters ? "analysis" : "skill"} size={24} />
+              <strong>{source === "project" && !query && category === "all" ? "Make your first skill" : hasFilters ? "No matching skills" : "No skills yet"}</strong>
+              <p>{source === "project" && !query && category === "all" ? "Turn the way you work into reusable instructions. Start from scratch or duplicate a built-in skill." : "Try a different search, or create a skill for your workflow."}</p>
+              {hasFilters && <button type="button" onClick={() => { setSearch(""); setSource("all"); setCategory("all"); }}>Reset filters</button>}
+              <button type="button" onClick={onCreateSkill}><Plus size={14} aria-hidden="true" /> Create skill</button>
+            </div>}
+          </div>
+          <div className="skills-browser__library-footer"><MinionsIcon name="lightbulb" size={14} /><span>Explore a skill, then bring it to your canvas.</span></div>
+        </>}
       </div>
     </DockPanel>
   );

@@ -47,18 +47,18 @@ const multiSeriesComponent: ChartComponentType = {
 describe("ChartComponent: title and legend", () => {
   it("renders the chart title", () => {
     render(<ChartComponent component={lineComponent} />);
-    expect(screen.getByText("Test Chart")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Test Chart" })).toBeInTheDocument();
   });
 
   it("renders the series label in the legend", () => {
     render(<ChartComponent component={lineComponent} />);
-    expect(screen.getByText("Series A")).toBeInTheDocument();
+    expect(screen.getByText("Series A", { selector: "div" })).toBeInTheDocument();
   });
 
   it("renders all series labels for a multi-series chart", () => {
     render(<ChartComponent component={multiSeriesComponent} />);
-    expect(screen.getByText("Alpha")).toBeInTheDocument();
-    expect(screen.getByText("Beta")).toBeInTheDocument();
+    expect(screen.getByText("Alpha", { selector: "div" })).toBeInTheDocument();
+    expect(screen.getByText("Beta", { selector: "div" })).toBeInTheDocument();
   });
 
   it("renders without title when none is provided", () => {
@@ -246,7 +246,7 @@ describe("ChartComponent: axis labels", () => {
       xAxis: { label: "Hour" },
     };
     render(<ChartComponent component={c} />);
-    expect(screen.getByText("Hour")).toBeInTheDocument();
+    expect(screen.getByText("Hour", { selector: "text" })).toBeInTheDocument();
   });
 
   it("renders y-axis label when provided", () => {
@@ -256,6 +256,6 @@ describe("ChartComponent: axis labels", () => {
       yAxis: { label: "ms" },
     };
     render(<ChartComponent component={c} />);
-    expect(screen.getByText("ms")).toBeInTheDocument();
+    expect(screen.getByText("ms", { selector: "text" })).toBeInTheDocument();
   });
 });

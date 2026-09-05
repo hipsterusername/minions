@@ -5,6 +5,8 @@
  */
 
 import type { RefObject } from "react";
+import { MessageSquare, Sparkles } from "lucide-react";
+import "../leader-body.css";
 import { StreamingBubble } from "../../../components/StreamingBubble.tsx";
 import { MessageTimestamp } from "../../../components/MessageTimestamp.tsx";
 import { chatRoleStyle } from "../../../chat-bubble-style.ts";
@@ -47,30 +49,17 @@ export function LeaderMessageFeed({
     <div
       ref={outputRef}
       onMouseDown={(e) => e.stopPropagation()}
-      style={{
-        flex: 1,
-        minHeight: 0,
-        overflow: "auto",
-        padding: "8px 10px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 4,
-      }}
+      className="leader-message-feed"
     >
-      {data.messages.length === 0 && (
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "var(--text-muted)",
-            fontSize: 12,
-          }}
-        >
-          {data.sessionKey
-            ? "Leader is thinking..."
-            : "Describe your project goal to begin orchestration"}
+      {data.messages.length === 0 && !data.streamingText && !isWorking && (
+        <div className="leader-conversation-empty">
+          <div className="leader-conversation-empty__icon" aria-hidden="true">
+            {data.sessionKey ? <MessageSquare size={20} strokeWidth={1.5} /> : <Sparkles size={20} strokeWidth={1.5} />}
+          </div>
+          <h3>{data.sessionKey ? "Your conversation starts here" : "What would you like to build?"}</h3>
+          <p>{data.sessionKey
+            ? "Send a message to continue with your Leader."
+            : "Describe your goal, add any useful context, and let your Leader take it from there."}</p>
         </div>
       )}
       {groupedMessages.map((group, gi) => {

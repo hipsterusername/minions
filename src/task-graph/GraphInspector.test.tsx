@@ -73,7 +73,7 @@ describe("GraphSummaryCard", () => {
     expect(screen.getByText(/running/, { selector: ".tg-summary__signal--running" })).toBeInTheDocument();
     expect(container.querySelectorAll(".tg-summary-strip")).toHaveLength(1);
     expect(container.querySelector(".tg-summary__leader-mark")).toHaveTextContent("");
-    expect(container.querySelector(".tg-summary__leader-mark svg.lucide-workflow")).toHaveAttribute("aria-hidden", "true");
+    expect(container.querySelector(".tg-summary__leader-mark svg.crew-icon")).toHaveAttribute("aria-hidden", "true");
     expect(container.querySelector(".tg-summary__secondary")).toHaveTextContent(/left.*path/);
     expect(container.querySelector(".tg-summary__goal")).not.toBeInTheDocument();
     expect(container.querySelector(".tg-mini-flow")).not.toBeInTheDocument();
@@ -96,13 +96,22 @@ describe("GraphSummaryCard", () => {
 });
 
 describe("GraphInspector", () => {
+  it("reserves the details rail for a selection and returns its space when closed", () => {
+    render(<GraphInspector snapshot={createGraphFixture(10)} onClose={vi.fn()} onAction={vi.fn()} />);
+    expect(document.body.querySelector(".tg-workspace")).toHaveClass("is-detail-collapsed");
+    fireEvent.click(screen.getByRole("button", { name: /Task 1;/ }));
+    expect(document.body.querySelector(".tg-workspace")).not.toHaveClass("is-detail-collapsed");
+    fireEvent.click(screen.getByRole("button", { name: "Close task details" }));
+    expect(document.body.querySelector(".tg-workspace")).toHaveClass("is-detail-collapsed");
+  });
+
   it("mounts as an edge-to-edge workstream focus mode", () => {
     render(<GraphInspector snapshot={createGraphFixture(10)} onClose={vi.fn()} onAction={vi.fn()} />);
     expect(screen.getByRole("dialog", { name: /10-node research graph/ })).toHaveClass("tg-inspector--fullscreen");
     expect(screen.getByText("Workstream inspector")).toBeInTheDocument();
     expect(screen.getByText("Run objective")).toBeInTheDocument();
     expect(document.body.querySelector(".tg-inspector__mark")).toHaveTextContent("");
-    expect(document.body.querySelector(".tg-inspector__mark svg.lucide-workflow")).toHaveAttribute("aria-hidden", "true");
+    expect(document.body.querySelector(".tg-inspector__mark svg.crew-icon")).toHaveAttribute("aria-hidden", "true");
     expect(document.body.querySelector(".tg-backdrop")).toBeInTheDocument();
   });
 
@@ -375,22 +384,44 @@ describe("Topology scene", () => {
       { width: 420, height: 360 },
     );
 
-    expect(camera.scale).toBe(0.72);
-    expect(camera.offsetX).toBe(28);
-    expect(camera.offsetY).toBe(44);
-    expect(camera.stageWidth).toBe(1_064);
-    expect(camera.stageHeight).toBe(462.4);
+    expect(camera.scale).toBe(1);
+    expect(camera.offsetX).toBe(24);
+    expect(camera.offsetY).toBe(24);
+    expect(camera.stageWidth).toBe(1_448);
+    expect(camera.stageHeight).toBe(568);
   });
 
   it("uses the limiting viewport axis when fitting between scale bounds", () => {
     const camera = fitTopologyCamera(
       { width: 1_000, height: 520 },
       { width: 1_000, height: 700 },
+      "fit",
     );
 
-    expect(camera.scale).toBe(0.944);
-    expect(camera.offsetX).toBe(28);
-    expect(camera.offsetY).toBe(104.56);
+    expect(camera.scale).toBe(0.952);
+    expect(camera.offsetX).toBe(24);
+    expect(camera.offsetY).toBeCloseTo(102.48);
+  });
+
+  it("fits a long graph entirely within a narrow viewport when requested", () => {
+    const camera = fitTopologyCamera({ width: 8_000, height: 800 }, { width: 390, height: 300 }, "fit");
+    expect(camera.stageWidth).toBe(390);
+    expect(camera.stageHeight).toBe(300);
+    expect(camera.offsetX + 8_000 * camera.scale).toBeLessThanOrEqual(390);
+    expect(camera.offsetY + 800 * camera.scale).toBeLessThanOrEqual(300);
+  });
+
+  it("zooms both layers together and restores readable size after fitting", () => {
+    const { container } = render(<Topology snapshot={createGraphFixture(10)} filter="all" selectedNodeId={null} onSelect={vi.fn()} />);
+    const scene = container.querySelector<HTMLElement>(".tg-flow-scene")!;
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(scene.dataset["cameraScale"]).toBe("1.2");
+    expect(scene.querySelectorAll(":scope > .tg-flow-layer")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Fit graph" }));
+    expect(screen.getByRole("button", { name: "Fit graph" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Reset graph zoom to 100%" }));
+    expect(scene.dataset["cameraScale"]).toBe("1");
+    expect(screen.getByRole("button", { name: "Fit graph" })).toHaveAttribute("aria-pressed", "false");
   });
 
   it("lays out the crossing fixture deterministically with no adjacent crossings", () => {

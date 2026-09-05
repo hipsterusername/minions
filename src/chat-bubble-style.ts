@@ -85,7 +85,7 @@ export function chatRoleStyle(
         borderRadius: 5,
         fontFamily: "var(--font-sans)",
         fontWeight: 500,
-        fontSize: compact ? 12 : 13,
+        fontSize: compact ? 13 : 14,
         color: "var(--accent)",
         background: "color-mix(in srgb, var(--accent) 7%, transparent)",
       };
@@ -95,7 +95,7 @@ export function chatRoleStyle(
         paddingInlineStart: BASE_PADDING + INDENT_REPLY,
         fontFamily: "var(--font-sans)",
         fontWeight: 400,
-        fontSize: compact ? 12 : 13,
+        fontSize: compact ? 13 : 14,
         color: "var(--text-primary)",
       };
     case "result":
@@ -104,7 +104,7 @@ export function chatRoleStyle(
         paddingInlineStart: BASE_PADDING + INDENT_REPLY,
         fontFamily: "var(--font-sans)",
         fontWeight: 500,
-        fontSize: compact ? 11 : 12,
+        fontSize: compact ? 12 : 13,
         color: isError ? "var(--status-error)" : "var(--status-success)",
       };
     case "tool":
@@ -113,7 +113,7 @@ export function chatRoleStyle(
         paddingInlineStart: BASE_PADDING + INDENT_TOOL,
         fontFamily: "var(--font-mono)",
         fontWeight: 400,
-        fontSize: 11,
+        fontSize: 12,
         color: "var(--text-muted)",
       };
     case "thinking":
@@ -122,7 +122,7 @@ export function chatRoleStyle(
         paddingInlineStart: BASE_PADDING + INDENT_THINKING,
         fontFamily: "var(--font-sans)",
         fontWeight: 400,
-        fontSize: 11,
+        fontSize: 12,
         fontStyle: "italic",
         color: "var(--text-dim)",
       };
@@ -132,9 +132,8 @@ export function chatRoleStyle(
         paddingInlineStart: BASE_PADDING + INDENT_REPLY,
         fontFamily: "var(--font-sans)",
         fontWeight: 400,
-        fontSize: 10,
+        fontSize: 12,
         color: "var(--text-muted)",
-        opacity: 0.6,
       };
   }
 }

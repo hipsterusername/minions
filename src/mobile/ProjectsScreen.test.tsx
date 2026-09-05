@@ -58,7 +58,7 @@ describe("ProjectsScreen", () => {
       expect(screen.getByText("Alpha")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("▶ 2 active · $0.42 · ⚠ 2 needs you")).toBeInTheDocument();
+    expect(screen.getByText("2 active · $0.42 · 2 needs you")).toBeInTheDocument();
     expect(screen.getByText("1 session · $0.00")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Alpha"));

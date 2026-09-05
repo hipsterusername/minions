@@ -1,3 +1,4 @@
+import { MinionsIcon } from "../components/MinionsIcon.tsx";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -47,13 +48,18 @@ function statsForProject(
   return { count, active, attention, cost };
 }
 
-function formatProjectStats(stats: ProjectStats): string {
-  const parts = stats.active > 0
-    ? [`▶ ${stats.active} active`]
-    : [stats.count === 1 ? "1 session" : `${stats.count} sessions`];
-  parts.push(`$${stats.cost.toFixed(2)}`);
-  if (stats.attention > 0) parts.push(`⚠ ${stats.attention} needs you`);
-  return parts.join(" · ");
+function ProjectStatsSummary({ stats }: { stats: ProjectStats }) {
+  return (
+    <>
+      {stats.active > 0 ? (
+        <><MinionsIcon name="play" size={12} /> {stats.active} active</>
+      ) : (stats.count === 1 ? "1 session" : `${stats.count} sessions`)}
+      {` · $${stats.cost.toFixed(2)}`}
+      {stats.attention > 0 && (
+        <> · <MinionsIcon name="warning" size={12} /> {stats.attention} needs you</>
+      )}
+    </>
+  );
 }
 
 export function ProjectsScreen({ sessions, onSelectProject }: ProjectsScreenProps) {
@@ -254,7 +260,7 @@ export function ProjectsScreen({ sessions, onSelectProject }: ProjectsScreenProp
               <span className="mob-project-name">{project.name}</span>
               <span className="mob-project-path">{project.path}</span>
               <span className="mob-project-meta">
-                {formatProjectStats(stat)}
+                <ProjectStatsSummary stats={stat} />
               </span>
             </button>
           );

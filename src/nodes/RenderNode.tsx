@@ -6,7 +6,7 @@
  * `isFullWidth`), selection UI, and injected styles that the surface consumes.
  */
 
-import { useCallback, useEffect, useInsertionEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useInsertionEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import {
   Check,
   X as XIcon,
@@ -19,6 +19,8 @@ import {
   ArrowRight,
   type LucideIcon,
 } from "lucide-react";
+import "./render/dashboard-polish.css";
+import { copyText } from "../components/CopyButton.tsx";
 import { SimpleMarkdown } from "../components/SimpleMarkdown.tsx";
 import type {
   RenderComponent,
@@ -232,10 +234,9 @@ function MetricCard({ c }: { c: MetricComponent }) {
         }} />
       )}
       <div style={{
-        fontSize: 10,
+        fontSize: "var(--rd-label-size, 12px)",
         color: "var(--text-muted)",
-        fontFamily: "var(--font-mono)",
-        textTransform: "uppercase",
+        fontFamily: "var(--font-sans)",
         letterSpacing: "0.06em",
         lineHeight: 1.2,
         fontWeight: 500,
@@ -266,7 +267,7 @@ function MetricCard({ c }: { c: MetricComponent }) {
       </div>
       {c.detail && (
         <div style={{
-          fontSize: 10,
+          fontSize: "var(--rd-label-size, 12px)",
           color: "var(--text-muted)",
           lineHeight: 1.4,
           marginTop: 2,
@@ -286,6 +287,7 @@ function ProgressBar({ c }: { c: ProgressComponent }) {
   return (
     <div
       className={`${CLS.card} ${CLS.fadeIn}`}
+      role="progressbar" aria-label={c.label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}
       style={{
         padding: "12px 16px",
         display: "flex",
@@ -299,17 +301,16 @@ function ProgressBar({ c }: { c: ProgressComponent }) {
         alignItems: "baseline",
       }}>
         <span style={{
-          fontSize: 10,
+          fontSize: "var(--rd-label-size, 12px)",
           color: "var(--text-muted)",
-          fontFamily: "var(--font-mono)",
-          textTransform: "uppercase",
+          fontFamily: "var(--font-sans)",
           letterSpacing: "0.06em",
           fontWeight: 500,
         }}>
           {c.label}
         </span>
         <span style={{
-          fontSize: 12,
+          fontSize: "var(--rd-body-size, 14px)",
           color: isComplete ? color : "var(--text-secondary)",
           fontFamily: "var(--font-mono)",
           fontWeight: 600,
@@ -382,7 +383,7 @@ function StatusBadge({ c }: { c: StatusComponent }) {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontSize: 10,
+            fontSize: "var(--rd-label-size, 12px)",
             fontWeight: 700,
             position: "relative",
             overflow: "hidden",
@@ -407,7 +408,7 @@ function StatusBadge({ c }: { c: StatusComponent }) {
         </span>
       </span>
       <span style={{
-        fontSize: 12,
+        fontSize: "var(--rd-body-size, 14px)",
         color: "var(--text-primary)",
         fontWeight: 500,
         lineHeight: 1.3,
@@ -424,12 +425,11 @@ function DataTable({ c }: { c: TableComponent }) {
       {c.title && (
         <div style={{
           padding: "8px 14px",
-          fontSize: 10,
+          fontSize: "var(--rd-label-size, 12px)",
           fontWeight: 600,
           color: "var(--text-muted)",
           borderBottom: "1px solid var(--border-default)",
-          fontFamily: "var(--font-mono)",
-          textTransform: "uppercase",
+          fontFamily: "var(--font-sans)",
           letterSpacing: "0.06em",
           background: "var(--bg-elevated)",
         }}>
@@ -440,7 +440,7 @@ function DataTable({ c }: { c: TableComponent }) {
         <table style={{
           width: "100%",
           borderCollapse: "collapse",
-          fontSize: 11,
+          fontSize: "var(--rd-body-size, 14px)",
           fontFamily: "var(--font-mono)",
         }}>
           <thead>
@@ -453,7 +453,7 @@ function DataTable({ c }: { c: TableComponent }) {
                   fontWeight: 600,
                   borderBottom: "1px solid var(--border-default)",
                   whiteSpace: "nowrap",
-                  fontSize: 10,
+                  fontSize: "var(--rd-label-size, 12px)",
                   textTransform: "uppercase",
                   letterSpacing: "0.06em",
                   background: "var(--bg-elevated)",
@@ -499,12 +499,11 @@ function DataList({ c }: { c: ListComponent }) {
       {c.title && (
         <div style={{
           padding: "8px 14px",
-          fontSize: 10,
+          fontSize: "var(--rd-label-size, 12px)",
           fontWeight: 600,
           color: "var(--text-muted)",
           borderBottom: "1px solid var(--border-default)",
-          fontFamily: "var(--font-mono)",
-          textTransform: "uppercase",
+          fontFamily: "var(--font-sans)",
           letterSpacing: "0.06em",
           background: "var(--bg-elevated)",
         }}>
@@ -521,7 +520,7 @@ function DataList({ c }: { c: ListComponent }) {
               alignItems: "baseline",
               gap: 10,
               padding: "4px 14px",
-              fontSize: 12,
+              fontSize: "var(--rd-body-size, 14px)",
               lineHeight: 1.6,
               color: "var(--text-primary)",
             }}
@@ -553,7 +552,7 @@ function TextBlock({ c }: { c: TextComponent }) {
       className={`${CLS.card} ${CLS.fadeIn}`}
       style={{
         padding: "12px 16px",
-        fontSize: 12,
+        fontSize: "var(--rd-body-size, 14px)",
         color: "var(--text-primary)",
         lineHeight: 1.6,
       }}
@@ -569,7 +568,7 @@ function CodeBlock({ c }: { c: CodeComponent }) {
       {(c.title || c.language) && (
         <div style={{
           padding: "6px 14px",
-          fontSize: 10,
+          fontSize: "var(--rd-label-size, 12px)",
           color: "var(--text-muted)",
           borderBottom: "1px solid var(--border-default)",
           fontFamily: "var(--font-mono)",
@@ -583,7 +582,7 @@ function CodeBlock({ c }: { c: CodeComponent }) {
             <span style={{
               textTransform: "uppercase",
               letterSpacing: "0.06em",
-              fontSize: 9,
+              fontSize: "var(--rd-label-size, 12px)",
               padding: "1px 6px",
               borderRadius: 3,
               background: "var(--code-bg)",
@@ -600,7 +599,7 @@ function CodeBlock({ c }: { c: CodeComponent }) {
         style={{
           margin: 0,
           padding: "12px 14px",
-          fontSize: 11,
+          fontSize: "var(--rd-body-size, 14px)",
           fontFamily: "var(--font-mono)",
           color: "var(--text-primary)",
           overflowX: "auto",
@@ -669,10 +668,9 @@ function SparklineChart({ c }: { c: SparklineComponent }) {
     >
       {c.label && (
         <div style={{
-          fontSize: 10,
+          fontSize: "var(--rd-label-size, 12px)",
           color: "var(--text-muted)",
-          fontFamily: "var(--font-mono)",
-          textTransform: "uppercase",
+          fontFamily: "var(--font-sans)",
           letterSpacing: "0.06em",
           fontWeight: 500,
         }}>
@@ -747,7 +745,7 @@ function SparklineChart({ c }: { c: SparklineComponent }) {
             flexDirection: "column",
             justifyContent: "space-between",
             height: h,
-            fontSize: 9,
+            fontSize: "var(--rd-label-size, 12px)",
             fontFamily: "var(--font-mono)",
             color: "var(--text-muted)",
             flexShrink: 0,
@@ -775,12 +773,11 @@ function KeyValueSheet({ c }: { c: KvComponent }) {
       {c.title && (
         <div style={{
           padding: "8px 14px",
-          fontSize: 10,
+          fontSize: "var(--rd-label-size, 12px)",
           fontWeight: 600,
           color: "var(--text-muted)",
           borderBottom: "1px solid var(--border-default)",
-          fontFamily: "var(--font-mono)",
-          textTransform: "uppercase",
+          fontFamily: "var(--font-sans)",
           letterSpacing: "0.06em",
           background: "var(--bg-elevated)",
         }}>
@@ -806,7 +803,7 @@ function KeyValueSheet({ c }: { c: KvComponent }) {
                 minWidth: 80,
               }}>
                 <span style={{
-                  fontSize: 9,
+                  fontSize: "var(--rd-label-size, 12px)",
                   color: "var(--text-muted)",
                   fontFamily: "var(--font-mono)",
                   textTransform: "uppercase",
@@ -843,7 +840,7 @@ function KeyValueSheet({ c }: { c: KvComponent }) {
               }}
             >
               <span style={{
-                fontSize: 11,
+                fontSize: "var(--rd-body-size, 14px)",
                 color: "var(--text-muted)",
                 fontFamily: "var(--font-mono)",
                 flexShrink: 0,
@@ -851,7 +848,7 @@ function KeyValueSheet({ c }: { c: KvComponent }) {
                 {entry.key}
               </span>
               <span style={{
-                fontSize: 11,
+                fontSize: "var(--rd-body-size, 14px)",
                 color: valColor,
                 fontFamily: "var(--font-mono)",
                 fontWeight: 500,
@@ -880,12 +877,11 @@ function TimelineView({ c }: { c: TimelineComponent }) {
       {c.title && (
         <div style={{
           padding: "8px 14px",
-          fontSize: 10,
+          fontSize: "var(--rd-label-size, 12px)",
           fontWeight: 600,
           color: "var(--text-muted)",
           borderBottom: "1px solid var(--border-default)",
-          fontFamily: "var(--font-mono)",
-          textTransform: "uppercase",
+          fontFamily: "var(--font-sans)",
           letterSpacing: "0.06em",
           background: "var(--bg-elevated)",
         }}>
@@ -967,7 +963,7 @@ function TimelineView({ c }: { c: TimelineComponent }) {
                   gap: 8,
                 }}>
                   <span style={{
-                    fontSize: 11,
+                    fontSize: "var(--rd-body-size, 14px)",
                     fontWeight: 500,
                     color: "var(--text-primary)",
                     lineHeight: 1.3,
@@ -976,7 +972,7 @@ function TimelineView({ c }: { c: TimelineComponent }) {
                   </span>
                   {event.time && (
                     <span style={{
-                      fontSize: 9,
+                      fontSize: "var(--rd-label-size, 12px)",
                       color: "var(--text-muted)",
                       fontFamily: "var(--font-mono)",
                       flexShrink: 0,
@@ -989,7 +985,7 @@ function TimelineView({ c }: { c: TimelineComponent }) {
                 </div>
                 {event.detail && (
                   <div style={{
-                    fontSize: 10,
+                    fontSize: "var(--rd-label-size, 12px)",
                     color: "var(--text-muted)",
                     lineHeight: 1.5,
                     marginTop: 3,
@@ -1044,7 +1040,7 @@ function CalloutBlock({ c }: { c: CalloutComponent }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        fontSize: 11,
+        fontSize: "var(--rd-body-size, 14px)",
         lineHeight: 1,
         flexShrink: 0,
         color: cfg.color,
@@ -1055,7 +1051,7 @@ function CalloutBlock({ c }: { c: CalloutComponent }) {
       <div style={{ flex: 1, minWidth: 0 }}>
         {c.title && (
           <div style={{
-            fontSize: 11,
+            fontSize: "var(--rd-body-size, 14px)",
             fontWeight: 700,
             color: cfg.color,
             marginBottom: 4,
@@ -1065,7 +1061,7 @@ function CalloutBlock({ c }: { c: CalloutComponent }) {
           </div>
         )}
         <div style={{
-          fontSize: 11,
+          fontSize: "var(--rd-body-size, 14px)",
           color: "var(--text-primary)",
           lineHeight: 1.6,
         }}>
@@ -1095,10 +1091,9 @@ function SeparatorLine({ c }: { c: SeparatorComponent }) {
           background: "var(--border-default)",
         }} />
         <span style={{
-          fontSize: 9,
+          fontSize: "var(--rd-label-size, 12px)",
           color: "var(--text-muted)",
-          fontFamily: "var(--font-mono)",
-          textTransform: "uppercase",
+          fontFamily: "var(--font-sans)",
           letterSpacing: "0.08em",
           flexShrink: 0,
           fontWeight: 500,
@@ -1134,12 +1129,11 @@ function DiffView({ c }: { c: DiffComponent }) {
       {c.title && (
         <div style={{
           padding: "8px 14px",
-          fontSize: 10,
+          fontSize: "var(--rd-label-size, 12px)",
           fontWeight: 600,
           color: "var(--text-muted)",
           borderBottom: "1px solid var(--border-default)",
-          fontFamily: "var(--font-mono)",
-          textTransform: "uppercase",
+          fontFamily: "var(--font-sans)",
           letterSpacing: "0.06em",
           background: "var(--bg-elevated)",
         }}>
@@ -1157,7 +1151,7 @@ function DiffView({ c }: { c: DiffComponent }) {
         }}>
           <div style={{
             padding: "6px 12px",
-            fontSize: 9,
+            fontSize: "var(--rd-label-size, 12px)",
             color: "var(--status-error)",
             fontFamily: "var(--font-mono)",
             textTransform: "uppercase",
@@ -1176,7 +1170,7 @@ function DiffView({ c }: { c: DiffComponent }) {
             style={{
               margin: 0,
               padding: "10px 12px",
-              fontSize: 10,
+              fontSize: "var(--rd-label-size, 12px)",
               fontFamily: "var(--font-mono)",
               color: "var(--text-primary)",
               whiteSpace: "pre-wrap",
@@ -1192,7 +1186,7 @@ function DiffView({ c }: { c: DiffComponent }) {
         }}>
           <div style={{
             padding: "6px 12px",
-            fontSize: 9,
+            fontSize: "var(--rd-label-size, 12px)",
             color: "var(--status-success)",
             fontFamily: "var(--font-mono)",
             textTransform: "uppercase",
@@ -1211,7 +1205,7 @@ function DiffView({ c }: { c: DiffComponent }) {
             style={{
               margin: 0,
               padding: "10px 12px",
-              fontSize: 10,
+              fontSize: "var(--rd-label-size, 12px)",
               fontFamily: "var(--font-mono)",
               color: "var(--text-primary)",
               whiteSpace: "pre-wrap",
@@ -1241,7 +1235,7 @@ function ChecklistView({ c }: { c: ChecklistComponent }) {
       {(c.title || total > 0) && (
         <div style={{
           padding: "8px 14px",
-          fontSize: 10,
+          fontSize: "var(--rd-label-size, 12px)",
           fontWeight: 600,
           color: "var(--text-muted)",
           borderBottom: "1px solid var(--border-default)",
@@ -1255,7 +1249,7 @@ function ChecklistView({ c }: { c: ChecklistComponent }) {
             {c.title ?? "Checklist"}
           </span>
           <span style={{
-            fontSize: 10,
+            fontSize: "var(--rd-label-size, 12px)",
             color: isComplete ? "var(--status-success)" : "var(--text-muted)",
             fontWeight: 600,
             transition: "color 0.3s ease",
@@ -1287,8 +1281,8 @@ function ChecklistView({ c }: { c: ChecklistComponent }) {
               alignItems: "flex-start",
               gap: 10,
               padding: "5px 14px",
-              fontSize: 11,
-              color: item.checked ? "var(--text-muted)" : "var(--text-primary)",
+              fontSize: "var(--rd-body-size, 14px)",
+              color: "var(--text-primary)",
               lineHeight: 1.5,
               transition: "color 0.2s ease",
             }}
@@ -1308,7 +1302,7 @@ function ChecklistView({ c }: { c: ChecklistComponent }) {
               justifyContent: "center",
               flexShrink: 0,
               marginTop: 1,
-              fontSize: 9,
+              fontSize: "var(--rd-label-size, 12px)",
               color: "var(--status-success)",
               fontWeight: 700,
               transition: "all 0.2s ease",
@@ -1317,8 +1311,6 @@ function ChecklistView({ c }: { c: ChecklistComponent }) {
             </span>
             <span style={{
               textDecoration: item.checked ? "line-through" : "none",
-              opacity: item.checked ? 0.55 : 1,
-              transition: "opacity 0.2s ease",
               flex: 1,
               minWidth: 0,
             }}>
@@ -1348,10 +1340,9 @@ function TagsRow({ c }: { c: TagsComponent }) {
     >
       {c.label && (
         <div style={{
-          fontSize: 10,
+          fontSize: "var(--rd-label-size, 12px)",
           color: "var(--text-muted)",
-          fontFamily: "var(--font-mono)",
-          textTransform: "uppercase",
+          fontFamily: "var(--font-sans)",
           letterSpacing: "0.06em",
           fontWeight: 500,
         }}>
@@ -1372,7 +1363,7 @@ function TagsRow({ c }: { c: TagsComponent }) {
               style={{
                 padding: "3px 9px",
                 borderRadius: 10,
-                fontSize: 10,
+                fontSize: "var(--rd-label-size, 12px)",
                 fontFamily: "var(--font-mono)",
                 fontWeight: 500,
                 color,
@@ -1413,21 +1404,7 @@ function CopyableBlock({ c }: { c: CopyableComponent }) {
 
   const onCopy = useCallback(async () => {
     try {
-      // Prefer the async clipboard API; fall back to a hidden textarea
-      // so non-secure contexts (older Electron, http://) still work.
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(c.content);
-      } else {
-        const ta = document.createElement("textarea");
-        ta.value = c.content;
-        ta.setAttribute("readonly", "");
-        ta.style.position = "fixed";
-        ta.style.opacity = "0";
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand("copy");
-        document.body.removeChild(ta);
-      }
+      await copyText(c.content);
       setCopied(true);
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => setCopied(false), 1500);
@@ -1450,7 +1427,7 @@ function CopyableBlock({ c }: { c: CopyableComponent }) {
         alignItems: "center",
         gap: 4,
         padding: "3px 8px",
-        fontSize: 10,
+        fontSize: "var(--rd-label-size, 12px)",
         fontFamily: "var(--font-mono)",
         fontWeight: 600,
         textTransform: "uppercase",
@@ -1468,7 +1445,7 @@ function CopyableBlock({ c }: { c: CopyableComponent }) {
         transition: "color 0.2s ease, background 0.2s ease, border-color 0.2s ease",
       }}
     >
-      <span style={{ fontSize: 10, lineHeight: 1 }}>
+      <span style={{ fontSize: "var(--rd-label-size, 12px)", lineHeight: 1 }}>
         {copied ? "✓" : "⎘"}
       </span>
       <span>{copied ? "Copied" : "Copy"}</span>
@@ -1488,7 +1465,7 @@ function CopyableBlock({ c }: { c: CopyableComponent }) {
         }}>
           {c.label && (
             <div style={{
-              fontSize: 10,
+              fontSize: "var(--rd-label-size, 12px)",
               fontWeight: 600,
               color: "var(--text-muted)",
               fontFamily: "var(--font-mono)",
@@ -1500,7 +1477,7 @@ function CopyableBlock({ c }: { c: CopyableComponent }) {
           )}
           {c.description && (
             <div style={{
-              fontSize: 11,
+              fontSize: "var(--rd-body-size, 14px)",
               color: "var(--text-secondary)",
               lineHeight: 1.5,
             }}>
@@ -1524,7 +1501,7 @@ function CopyableBlock({ c }: { c: CopyableComponent }) {
               <span style={{
                 textTransform: "uppercase",
                 letterSpacing: "0.06em",
-                fontSize: 9,
+                fontSize: "var(--rd-label-size, 12px)",
                 padding: "1px 6px",
                 borderRadius: 3,
                 background: "var(--code-bg)",
@@ -1543,7 +1520,7 @@ function CopyableBlock({ c }: { c: CopyableComponent }) {
               margin: 0,
               padding: "12px 14px",
               paddingRight: 90,
-              fontSize: 11,
+              fontSize: "var(--rd-body-size, 14px)",
               fontFamily: "var(--font-mono)",
               color: "var(--text-primary)",
               overflowX: "auto",
@@ -1568,7 +1545,7 @@ function CopyableBlock({ c }: { c: CopyableComponent }) {
             style={{
               flex: 1,
               minWidth: 0,
-              fontSize: 12,
+              fontSize: "var(--rd-body-size, 14px)",
               fontFamily: "var(--font-mono)",
               color: "var(--text-primary)",
               background: "var(--code-bg, var(--bg-elevated))",
@@ -1607,7 +1584,7 @@ export interface RenderViewContext {
    */
   onSubmitForm?: ((componentId: string, answers: Record<string, unknown>) => void) | undefined;
   /** Dashboard-level expand/collapse state for all section components. */
-  sectionExpansionState?: boolean | undefined;
+  sectionExpansionState?: boolean | { open: boolean } | undefined;
 }
 
 export function RenderComponentView({
@@ -1859,22 +1836,24 @@ export function DashboardSelectionButton({
 }
 
 function isDashboardInteractiveTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
+  if (!(target instanceof Element)) return false;
   return Boolean(
     target.closest(
-      "button,input,textarea,select,a,[role='tab'],[data-dashboard-context-action]",
+      "button,input,textarea,select,a,summary,[contenteditable='true'],[role='tab'],[role='button'],[data-dashboard-context-action]",
     ),
   );
 }
 
 export function SelectableDashboardComponent({
   componentId,
+  componentLabel = componentId,
   selectionActive,
   selected,
   onToggle,
   children,
 }: {
   componentId: string;
+  componentLabel?: string;
   selectionActive: boolean;
   selected: boolean;
   onToggle: (componentId: string) => void;
@@ -1893,28 +1872,20 @@ export function SelectableDashboardComponent({
       data-testid="render-context-component"
       data-component-id={componentId}
       data-selected={selected ? "true" : undefined}
-      role={selectionActive ? "checkbox" : undefined}
-      aria-checked={selectionActive ? selected : undefined}
-      tabIndex={selectionActive ? 0 : undefined}
       onClick={(e) => {
         if (!selectionActive || isDashboardInteractiveTarget(e.target)) return;
         e.stopPropagation();
         toggle();
       }}
-      onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
-        if (!selectionActive) return;
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          toggle();
-        }
-      }}
     >
       <button
         type="button"
         className="render-context-selectable__marker"
+        hidden={!selectionActive}
         data-dashboard-context-action
         title={label}
-        aria-label={label}
+        aria-label={`${label}: ${componentLabel}`}
+        aria-pressed={selected}
         onClick={(e) => {
           e.stopPropagation();
           toggle();
@@ -1998,7 +1969,7 @@ export function gridColumnFor(c: RenderComponent, columns: number): string | und
   if (isFullWidth(c, columns)) return "1 / -1";
   // Numeric span less than columns → span that many
   if (typeof c.span === "number" && c.span > 1 && c.span < columns) {
-    return `span ${c.span}`;
+    return `span min(${c.span}, var(--rd-cols, ${columns}))`;
   }
   return undefined;
 }

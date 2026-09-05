@@ -48,6 +48,46 @@ function renderNode(props: Partial<Parameters<typeof CanvasNodeComponent>[0]> = 
 }
 
 describe("CanvasNodeComponent leader focusing", () => {
+  it("only condenses after a drag threshold and restores the same live draft on drop", () => {
+    const onDragStart = vi.fn();
+    const onDragEnd = vi.fn();
+    renderNode({ onDragStart, onDragEnd });
+    const input = screen.getByLabelText("Leader title");
+    fireEvent.change(input, { target: { value: "Unsent draft" } });
+    const body = screen.getByTestId("leader-body");
+    fireEvent.mouseDown(body, { button: 0, clientX: 100, clientY: 100 });
+    fireEvent.mouseMove(window, { clientX: 101, clientY: 101 });
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(onDragStart).not.toHaveBeenCalled();
+    fireEvent.mouseMove(window, { clientX: 120, clientY: 120 });
+    expect(screen.getByRole("status")).toHaveTextContent("Release to place on canvas");
+    expect(body).not.toBeVisible();
+    expect(body.closest(".canvas-node-card")).toHaveStyle({ width: "240px", height: "160px" });
+    expect(input).toBeInTheDocument();
+    fireEvent.mouseUp(window, { clientX: 120, clientY: 120 });
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByLabelText("Leader title")).toBe(input);
+    expect(input).toBeVisible();
+    expect(input).toHaveValue("Unsent draft");
+    expect(onDragStart).toHaveBeenCalledTimes(1);
+    expect(onDragEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["Escape", "blur"])("cancels with %s and clears the card and document drag styles", cancellation => {
+    const onMove = vi.fn();
+    renderNode({ onMove, dragZoneName: "Release prep" });
+    fireEvent.mouseDown(screen.getByTestId("leader-body"), { button: 0, clientX: 100, clientY: 100 });
+    fireEvent.mouseMove(window, { clientX: 150, clientY: 170 });
+    expect(screen.getByRole("status")).toHaveTextContent("Release into Release prep");
+    if (cancellation === "Escape") fireEvent.keyDown(window, { key: "Escape" });
+    else fireEvent.blur(window);
+    expect(onMove).toHaveBeenLastCalledWith("leader-1", { x: 20, y: 30 }, true);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByTestId("leader-body")).toBeVisible();
+    expect(document.body.style.userSelect).not.toBe("none");
+    expect(document.body.style.cursor).not.toBe("grabbing");
+  });
+
   it("focuses a leader node on double-click", () => {
     const onFocusNode = vi.fn();
     renderNode({ onFocusNode });

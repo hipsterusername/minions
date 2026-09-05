@@ -13,6 +13,7 @@ import { parseSkillTransfer } from "./skills/skill-transfer.ts";
 import { Suspense, lazy, useState, useEffect, useReducer, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 import { featureFlagStore, FLAG_MCP_SERVERS } from "./feature-flags.ts";
 import { Canvas } from "./Canvas.tsx";
+import { activeWorkspaceId, visibleZoneNodes } from "./canvas-zones.ts";
 import { useSocket } from "./use-socket.ts";
 import { HarnessListProvider } from "./use-harness-list.tsx";
 import { useAutosave } from "./use-autosave.ts";
@@ -32,10 +33,12 @@ import { DEFAULT_THINKING_CONFIG } from "./types.ts";
 import { CONTEXT_EXPLORER_PROMPT } from "./prompts/context-explorer.ts";
 import { getAllNodeTypes } from "./node-registry.ts";
 import { createDefaultNodeData } from "./node-defaults.ts";
+import type { WorkItemSnapshot } from "../shared/work-item-contracts.ts";
 import { ActivityView } from "./ActivityView.tsx";
 import { countReviewableLeaders } from "./ChangesView.tsx";
 import { useSessionActivity } from "./use-session-activity.ts";
-import { mergeCanonicalActivity, useWorkItems } from "./use-work-items.ts";
+import { useActivityLifecycle } from "./use-activity-lifecycle.ts";
+import { activityEntryId, mergeCanonicalActivity, useWorkItems } from "./use-work-items.ts";
 import { reconcileLegacyCanvasLeaders } from "./canvas-work-item-reconcile.ts";
 import { detachSessionCanvasNodes } from "./activity-canvas-detach.ts";
 import { sessionBelongsToProject, needsAttention } from "./mobile/mobile-selectors.ts";
@@ -151,13 +154,16 @@ function ProjectView({
   projectId,
   projectPath,
   onClose,
+  onSwitchProject,
 }: {
   projectId: string;
   projectPath: string;
   onClose: () => void;
+  onSwitchProject: (id: string, path: string) => void;
 }) {
   const socket = useSocket(WS_URL);
   const [nodes, dispatch] = useReducer(canvasReducer, []);
+  const workspaceNodes = useMemo(() => visibleZoneNodes(nodes, activeWorkspaceId(nodes)), [nodes]);
   const [graph, graphDispatch] = useReducer(graphReducer, { edges: [] } as GraphDocument);
   const [transform, setTransform] = useState<CanvasTransform>({
     x: 0,
@@ -165,6 +171,7 @@ function ProjectView({
     scale: 1,
   });
   const [projectName, setProjectName] = useState("");
+  const [projectPanelRight, setProjectPanelRight] = useState(0);
   const [projectSettings, setProjectSettings] = useState<ProjectSettings>({});
   const [settingsSaveState, setSettingsSaveState] = useState<SettingsSaveState>({ status: "idle" });
   const settingsSaveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
@@ -178,6 +185,7 @@ function ProjectView({
   const [loaderAnimDone, setLoaderAnimDone] = useState(false);
   const [loaderUnmounted, setLoaderUnmounted] = useState(false);
   const [activeView, setActiveView] = useState<ActiveView>("activity");
+  const [activitySelection, setActivitySelection] = useState<string | null>(null);
 
   // MCP servers is a still-evolving feature, gated off by default behind
   // a debug feature flag. When off, the dock panel is not mounted at all.
@@ -286,10 +294,10 @@ function ProjectView({
         center.y - h / 2,
         w,
         h,
-        nodes,
+        workspaceNodes,
       );
     },
-    [transform, nodes],
+    [transform, workspaceNodes],
   );
 
   // Spawn a Leader node to explore the project and populate Minions context.
@@ -343,7 +351,7 @@ function ProjectView({
           dispatch,
           noop,
           transform,
-          nodes,
+          workspaceNodes,
           viewportCenter(transform, {
             width: window.innerWidth,
             height: Math.max(0, window.innerHeight - PROJECT_HEADER_HEIGHT),
@@ -364,7 +372,7 @@ function ProjectView({
       };
       dispatch({ type: "ADD_NODE", node });
     },
-    [positionInViewport, projectPath, transform, nodes],
+    [positionInViewport, projectPath, transform, workspaceNodes],
   );
 
   // Focus-node state for cross-surface Canvas navigation
@@ -374,13 +382,11 @@ function ProjectView({
     (nodeId: string) => {
       const node = nodes.find((n) => n.id === nodeId);
       if (!node) return;
-      const x = window.innerWidth / 2 - node.position.x - node.size.width / 2;
-      const y = window.innerHeight / 2 - node.position.y - node.size.height / 2;
-      setTransform({ x, y, scale: 1 });
+      // Canvas switches to the owning workspace before revealing the destination.
       setFocusNodeId(nodeId);
       setActiveView("canvas");
     },
-    [nodes, setTransform],
+    [nodes],
   );
 
   const handleFocusNodeHandled = useCallback(() => {
@@ -459,18 +465,27 @@ function ProjectView({
   const workItemState = useWorkItems({ projectId, connected: socket.connected,
     subscribe: socket.subscribe, send: socket.send });
   const handleDetachSessionFromCanvas = useCallback(
-    (session: { sessionKey: string; workItemId?: string | null }) => {
+    (session: { sessionKey: string; workItemId?: string | null }, confirmedItem?: WorkItemSnapshot) => {
+      const current = session.workItemId ? workItemState.items[session.workItemId] : undefined;
+      const workItem = confirmedItem && (!current ||
+        confirmedItem.lifecycle.lifecycleRevision >= current.lifecycle.lifecycleRevision)
+        ? confirmedItem : current;
+      // A newer restore/start supersedes a delayed archive acknowledgement.
+      if (confirmedItem && workItem?.lifecycle.resolution !== "archived") return;
       detachSessionCanvasNodes(nodes, session, {
         send: socket.send,
         dispatch,
         graphDispatch,
-        workItem: session.workItemId
-          ? workItemState.items[session.workItemId] ?? null
-          : null,
+        workItem: workItem ?? null,
       });
     },
     [nodes, socket.send, workItemState.items],
   );
+  const activityLifecycle = useActivityLifecycle({
+    socketSend: socket.send,
+    socketSubscribe: socket.subscribe,
+    onDetachFromCanvas: handleDetachSessionFromCanvas,
+  });
   useEffect(() => {
     for (const patch of reconcileLegacyCanvasLeaders(
       nodes, workItemState.orderedItems, mobileSessions,
@@ -704,15 +719,18 @@ function ProjectView({
         >
           <>
             <ProjectHeader
+              projectId={projectId}
               name={projectName}
               saveStatus={saveStatus}
               lastSaved={lastSaved}
               onRename={handleRename}
               onBack={onClose}
+              onSwitchProject={onSwitchProject}
+              sessions={mobileSessions}
               retryCount={retryCount}
               retry={retry}
               activeView={activeView}
-              onViewChange={setActiveView}
+              onViewChange={view => { setActivitySelection(null); setActiveView(view); }}
               activityAttentionCount={activityAttentionCount + changesCount}
               settings={projectSettings}
               onSettingsChange={handleSettingsChange}
@@ -724,7 +742,9 @@ function ProjectView({
             {activeView === "activity" ? (
               <div style={{ position: "absolute", top: PROJECT_HEADER_HEIGHT, left: 0, right: 0, bottom: 0 }}>
                 <ActivityView
+                  lifecycleController={activityLifecycle}
                   sessions={activitySessions}
+                  initialSelectedKey={activitySelection}
                   nodes={nodes}
                   onLaunchLeader={handleLaunchActivityLeader}
                   onCommitLaunchLeader={(node) => dispatch({ type: "ADD_NODE", node })}
@@ -777,8 +797,15 @@ function ProjectView({
                     focusNodeId={focusNodeId}
                     onFocusNodeHandled={handleFocusNodeHandled}
                     viewportTopOffset={PROJECT_HEADER_HEIGHT}
+                    projectPanelRight={projectPanelRight}
+                    activitySessions={activitySessions}
+                    onOpenActivitySession={session => {
+                      setActivitySelection(activityEntryId(session));
+                      setActiveView("activity");
+                    }}
                   />
                   <ProjectPanel
+                    onRightEdgeChange={setProjectPanelRight}
                     projectId={projectId}
                     projectPath={projectPath}
                     projectName={projectName}
@@ -882,6 +909,7 @@ export default function App() {
         projectId={currentProject.id}
         projectPath={currentProject.path}
         onClose={() => setCurrentProject(null)}
+        onSwitchProject={(id, projectPath) => setCurrentProject({ id, path: projectPath })}
       />
       <DebugModeAffordance />
     </ThemeContext.Provider>

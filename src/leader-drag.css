@@ -1,0 +1,31 @@
+.leader-drag-anchor { position: absolute; width: 254px; max-width: calc(100vw - 16px); pointer-events: none; }
+.leader-drag-card {
+  overflow: hidden; border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border-default));
+  border-radius: 13px; color: var(--text-primary); background: var(--bg-elevated);
+  box-shadow: 0 16px 40px color-mix(in srgb, var(--overlay-bg) 55%, transparent), 0 2px 6px var(--overlay-bg);
+  font: 12px var(--font-sans); animation: leader-drag-lift 180ms cubic-bezier(.2,.8,.2,1) both;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.leader-drag-card[data-over-zone=true] { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent), 0 16px 40px var(--overlay-bg); }
+.leader-drag-card-main { display: flex; align-items: center; gap: 10px; padding: 12px 12px 6px; }
+.leader-drag-icon { display: grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 9px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg-secondary)); }
+.leader-drag-title { display: grid; gap: 3px; min-width: 0; flex: 1; }
+.leader-drag-title > span { color: var(--text-secondary); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.leader-drag-title strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; font-weight: 600; }
+.leader-drag-grip { color: var(--text-muted); flex-shrink: 0; }
+.leader-drag-state { display: flex; align-items: center; gap: 5px; padding: 0 12px 10px 54px; color: var(--text-secondary); font-size: 10px; }
+.leader-drag-state i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.leader-drag-state i[data-attention=true] { background: var(--status-warning, var(--accent)); }
+.leader-drag-destination { display: flex; align-items: center; gap: 7px; padding: 8px 12px; background: color-mix(in srgb, var(--accent) 7%, var(--bg-secondary)); border-top: 1px solid var(--border-default); color: var(--text-secondary); font-size: 10px; animation: leader-drag-cue 160ms ease-out; }
+.leader-drag-destination svg { flex-shrink: 0; }
+.leader-drag-destination span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.leader-drag-card[data-over-zone=true] .leader-drag-destination { color: var(--accent); }
+.leader-drop-preview { position: absolute; inset: 0; z-index: 49; pointer-events: none; }
+.leader-drop-footprint { position: absolute; box-sizing: border-box; border: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent); border-radius: var(--radius-node); background: color-mix(in srgb, var(--accent) 4%, transparent); }
+.leader-drop-footprint[data-primary=true] { border: 1.5px dashed var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); box-shadow: inset 0 0 0 5px color-mix(in srgb, var(--accent) 4%, transparent); }
+.leader-drop-footprint span { position: absolute; left: 14px; top: 14px; padding: 5px 9px; border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); border-radius: 6px; color: var(--accent); background: var(--bg-secondary); font: 11px var(--font-sans); white-space: nowrap; }
+@keyframes leader-drag-lift { from { opacity: 0; transform: scale(.94) translateY(4px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+@keyframes leader-drag-cue { from { opacity: .4; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .leader-drag-card, .leader-drag-destination { animation: none; transition: none; }
+}

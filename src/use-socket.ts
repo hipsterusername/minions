@@ -20,6 +20,7 @@ const log = browserLogger.child("websocket");
 
 export type ServerMessage =
   | { type: "socket_reconnected" }
+  | { type: "work_item_receipt_pending"; requestId: string }
   | TaskGraphSnapshotEnvelope
   | TaskGraphChangedEnvelope
   | TaskGraphResponseEnvelope

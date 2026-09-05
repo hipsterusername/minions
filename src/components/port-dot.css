@@ -1,0 +1,68 @@
+.leader-port {
+  border-radius: var(--radius-control);
+}
+
+.leader-port:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.leader-port__fins {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  overflow: visible;
+  pointer-events: none;
+  transition: transform 150ms ease, filter 150ms ease;
+}
+
+.leader-port__shell {
+  fill: var(--bg-surface);
+  stroke: var(--text-muted);
+  stroke-width: 1;
+}
+
+.leader-port__fin,
+.leader-port__core {
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  fill: none;
+  transition: fill 150ms ease, opacity 150ms ease;
+}
+
+.leader-port__fin { opacity: 0.7; }
+.leader-port__core { fill: var(--bg-elevated); }
+
+.leader-port:is(:hover, :focus-visible, [data-state="snap"]) .leader-port__fins {
+  transform: scale(1.12);
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 60%, transparent));
+}
+
+.leader-port:is(:hover, :focus-visible, [data-state="snap"], [data-state="target"]) .leader-port__core {
+  fill: currentColor;
+}
+
+.leader-port:is(:hover, :focus-visible, [data-state="snap"], [data-state="target"]) .leader-port__fin {
+  opacity: 1;
+}
+
+.leader-port__collar {
+  fill: none;
+  stroke: var(--text-primary);
+  stroke-width: 1;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.leader-port[data-state="snap"] .leader-port__collar { opacity: 1; }
+.leader-port[data-state="locked"] .leader-port__fins { transform: none; filter: none; }
+.leader-port[data-state="locked"] :is(.leader-port__shell, .leader-port__fin, .leader-port__core) { opacity: 0.35; }
+.leader-port[data-state="locked"] .leader-port__core { fill: var(--bg-elevated); }
+.leader-port__lock { fill: var(--text-muted); }
+.leader-port__lock path { fill: none; stroke: var(--text-muted); stroke-width: 1.5; }
+.leader-port__hint { display: block; margin-top: 3px; color: var(--text-secondary); font-weight: 400; }
+
+@media (prefers-reduced-motion: reduce) {
+  .leader-port__fins, .leader-port__fin, .leader-port__core, .leader-port__collar { transition: none; }
+}

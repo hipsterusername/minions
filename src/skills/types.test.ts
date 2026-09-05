@@ -113,9 +113,10 @@ describe("compileSkills with sub-skills", () => {
         attachments: [{ ...attachment, filename: "example.json", mediaType: "application/json", text: "{}" }],
       }],
     })], {});
-    expect(out).toContain("### Attached context for Parent");
-    expect(out).toContain("Follow this guide.");
-    expect(out).toContain("### Attached context for Eager");
-    expect(out).toContain("#### example.json");
+    expect(out).toContain("### Attached context (load on demand)");
+    expect(out).not.toContain("Follow this guide.");
+    expect(out).toContain("### Attached context (load on demand)");
+    expect(out).toContain("example.json");
+    expect(out).toContain('"subskillId":"eager"');
   });
 });

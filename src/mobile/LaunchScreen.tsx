@@ -1,3 +1,4 @@
+import { SkillIcon } from "../components/SkillIcon.tsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 
@@ -35,6 +36,7 @@ import {
 } from "./attachments.ts";
 import { buildLaunchModelGroups, parseLaunchModelValue } from "./launch-models.ts";
 import type { WorkItemLaunchInput } from "../use-work-items.ts";
+import "./launch-screen.css";
 
 interface LaunchScreenProps {
   send: (data: unknown) => void;
@@ -420,11 +422,13 @@ export function LaunchScreen({ send, onLaunched, onLaunchError, canonicalLaunch,
           </fieldset>
         )}
 
-        <label className="mob-launch-field">
-          <span>
-            Prompt
-            <small>{trimmedPrompt.length} chars</small>
-          </span>
+        <div className="mob-launch-field mob-launch-prompt">
+          <div className="mob-launch-prompt-heading">
+            <label htmlFor="mob-launch-prompt">Prompt</label>
+            <span id="mob-launch-prompt-count">
+              {trimmedPrompt.length} characters
+            </span>
+          </div>
           <div className="mob-launch-templates" aria-label="Prompt starters">
             <button
               type="button"
@@ -446,15 +450,34 @@ export function LaunchScreen({ send, onLaunched, onLaunchError, canonicalLaunch,
             </button>
           </div>
           <textarea
-            aria-label="Prompt"
+            id="mob-launch-prompt"
+            aria-describedby="mob-launch-prompt-count"
             value={prompt}
             onChange={(event) => setPrompt(event.currentTarget.value)}
-            rows={7}
+            rows={5}
             placeholder="What should the leader do?"
           />
-        </label>
+        </div>
 
-        <MobileLeaderRuntimeControls
+        <details className="mob-launch-options" data-testid="launch-run-setup">
+          <summary>
+            <span className="mob-launch-options-copy">
+              <strong>Run setup</strong>
+              <small>Model · {modelLabel}</small>
+              <small>Reasoning · {reasoningLabel}</small>
+              <small>
+                {accessLabel} · {worktreeIsolation ? "Worktree" : "Live"} · {attachedFileCount > 0
+                  ? `${attachedFileCount} ${attachedFileCount === 1 ? "file" : "files"}`
+                  : "No files"} · {selectedSkills.length > 0
+                    ? `${selectedSkills.length} ${selectedSkills.length === 1 ? "skill" : "skills"}`
+                    : "No skills"}
+              </small>
+            </span>
+            <span className="mob-launch-options-chevron" aria-hidden="true">⌄</span>
+          </summary>
+
+          <div className="mob-launch-options-body">
+          <MobileLeaderRuntimeControls
           harnesses={harnesses}
           modelGroups={modelGroups}
           modelValue={modelValue}
@@ -560,7 +583,7 @@ export function LaunchScreen({ send, onLaunched, onLaunchError, canonicalLaunch,
             <div className="mob-launch-skill-chips" aria-label="Selected skills">
               {selectedSkills.map((skill) => (
                 <span className="mob-skill-chip" key={skill.id}>
-                  <span className="mob-skill-icon" aria-hidden="true">{skill.icon}</span>
+                  <span className="mob-skill-icon" aria-hidden="true"><SkillIcon skill={skill} /></span>
                   <span className="mob-skill-chip-name">{skill.name}</span>
                   <button
                     type="button"
@@ -605,15 +628,19 @@ export function LaunchScreen({ send, onLaunched, onLaunchError, canonicalLaunch,
             <strong>{selectedSkills.length > 0 ? `${selectedSkills.length} armed` : "None"}</strong>
           </div>
         </section>
+          </div>
+        </details>
 
-        <button
-          className="mob-launch-submit"
-          type="submit"
-          disabled={!canSubmit || launching}
-          aria-busy={launching || undefined}
-        >
-          Launch leader
-        </button>
+        <div className="mob-launch-action">
+          <button
+            className="mob-launch-submit"
+            type="submit"
+            disabled={!canSubmit || launching}
+            aria-busy={launching || undefined}
+          >
+            Launch leader
+          </button>
+        </div>
       </form>
 
       <LaunchSkillsPanel

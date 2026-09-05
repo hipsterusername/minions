@@ -133,7 +133,7 @@ export function ActivityRail({
                 padding: "8px 0",
               }}
             >
-              No minions spawned yet.
+              Delegated work appears here. Your leader can also work directly.
             </div>
           ) : (
             <ul
@@ -207,6 +207,7 @@ export function ActivityRail({
                       >
                         {m.title}
                       </span>
+                      <span style={{ fontSize: 10, color: STATUS_DOT_COLOR[m.status] }}>{m.status.replaceAll("_", " ")}</span>
                       {m.cost > 0 && (
                         <span
                           style={{

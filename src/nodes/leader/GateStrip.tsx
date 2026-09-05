@@ -1,3 +1,4 @@
+import { MinionsIcon, type MinionsIconName } from "../../components/MinionsIcon.tsx";
 import { useMemo, useState } from "react";
 import "../../gate-strip.css";
 
@@ -27,13 +28,13 @@ interface GateStripProps {
 
 const STATUS_META: Record<
   GateStatus,
-  { glyph: string; label: string; verification: string }
+  { glyph: MinionsIconName; label: string; verification: string }
 > = {
-  not_required: { glyph: "-", label: "Not required", verification: "not required" },
-  required_pending: { glyph: "⚠", label: "Pending", verification: "pending" },
-  passed: { glyph: "✓", label: "Passed", verification: "passed" },
-  failed: { glyph: "✕", label: "Failed", verification: "failed" },
-  waived: { glyph: "~", label: "Waived", verification: "waived" },
+  not_required: { glyph: "minus", label: "Not required", verification: "not required" },
+  required_pending: { glyph: "warning", label: "Pending", verification: "pending" },
+  passed: { glyph: "check", label: "Passed", verification: "passed" },
+  failed: { glyph: "close", label: "Failed", verification: "failed" },
+  waived: { glyph: "waived", label: "Waived", verification: "waived" },
 };
 
 export function GateStrip({ gates, sessionKey, socketSend }: GateStripProps) {
@@ -65,7 +66,7 @@ export function GateStrip({ gates, sessionKey, socketSend }: GateStripProps) {
                 onClick={() => setExpandedGateId(expanded ? null : gate.id)}
               >
                 <span className="gate-strip__glyph" aria-hidden="true">
-                  {meta.glyph}
+                  <MinionsIcon name={meta.glyph} size={13} />
                 </span>
                 <span className="gate-strip__name">{gate.name}</span>
                 <span className="gate-strip__status">{meta.label}</span>

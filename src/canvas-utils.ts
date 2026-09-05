@@ -259,25 +259,62 @@ function boundingBox(
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
+/** Forbidden origins for the moving box; the boundary itself has a full gutter. */
+interface DropExclusion { left: number; right: number; top: number; bottom: number }
+
+function excludesPoint(rect: DropExclusion, point: Position): boolean {
+  return point.x > rect.left && point.x < rect.right && point.y > rect.top && point.y < rect.bottom;
+}
+
 /**
- * Resolve a drag-end drop for a set of nodes that move together (`movers`,
- * e.g. a leader plus its minions/dashboards) so their combined bounding box
- * sits **flush** against the node it collides with, rather than scattering
- * onto a fine grid.
- *
- * When the box overlaps a neighbour, it snaps to one of the neighbour's four
- * sides — right/left keep the top edges aligned, top/bottom keep the left
- * edges aligned — separated by a small consistent `gutter`. The side is
- * chosen by where the box was dropped (a proxy for the cursor): the candidate
- * nearest the drop point wins, so a node dropped to the right snaps right, one
- * dropped below snaps below, and so on. If that side is occupied the next
- * nearest free side is used; if all four are blocked it falls back to an
- * outward search.
- *
- * With no collision the box origin is snapped to the grid so free drops stay
- * tidy. Relative offsets between movers are always preserved exactly.
- *
- * Returns the delta to apply to every mover.
+ * The nearest free origin is either at the requested X or on an exclusion's
+ * vertical boundary. At each such X, merge blocked Y intervals and project
+ * the requested Y to the closest free endpoint. This includes diagonal gaps
+ * without a bounded ring search or a preferred compass direction.
+ * O(n²) worst case; distant X candidates are pruned once a fit is found.
+ */
+function nearestDropOrigin(target: Position, exclusions: DropExclusion[]): Position {
+  const xs = [...new Set([target.x, ...exclusions.flatMap(r => [r.right, r.left])])]
+    .sort((a, b) => Math.abs(a - target.x) - Math.abs(b - target.x) || b - a);
+  const byTop = [...exclusions].sort((a, b) => a.top - b.top || a.bottom - b.bottom);
+  let best = target;
+  let bestDistance = Infinity;
+  for (const x of xs) {
+    const dxSquared = (x - target.x) ** 2;
+    if (dxSquared > bestDistance) break;
+    const intervals: { top: number; bottom: number }[] = [];
+    for (const r of byTop) {
+      if (x <= r.left || x >= r.right) continue;
+      const last = intervals.at(-1);
+      // Touching intervals leave a valid, exact-gutter opening between them.
+      if (last && r.top < last.bottom) last.bottom = Math.max(last.bottom, r.bottom);
+      else intervals.push({ top: r.top, bottom: r.bottom });
+    }
+    const blocked = intervals.find(r => target.y > r.top && target.y < r.bottom);
+    const y = !blocked ? target.y
+      : target.y - blocked.top < blocked.bottom - target.y ? blocked.top : blocked.bottom;
+    const distance = dxSquared + (y - target.y) ** 2;
+    // Stable ties retain X first, then prefer below/right for identical drops.
+    if (distance < bestDistance) {
+      best = { x, y };
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+/** Only magnetize edges already within one grid cell of the user's drop. */
+function alignDropAxis(value: number, start: number, end: number): number {
+  const edge = Math.abs(value - start) <= Math.abs(value - end) ? start : end;
+  return Math.abs(value - edge) <= GRID_SNAP ? edge : value;
+}
+
+/**
+ * Find the closest open placement for a dragged node or cluster. Nearby edges
+ * align, but partial blockers can slide the placement along a side or into a
+ * diagonal opening instead of cycling through four fixed slots. Every obstacle
+ * gets the same gutter, and relative offsets between movers stay exact.
+ * Free drops grid-snap only when that position is clear too.
  */
 export function resolveTidyDrop(
   movers: CanvasNode[],
@@ -286,68 +323,39 @@ export function resolveTidyDrop(
 ): { dx: number; dy: number } {
   if (movers.length === 0) return { dx: 0, dy: 0 };
   const box = boundingBox(movers);
+  const exclusions = obstacles.map(o => ({
+    left: o.position.x - box.width - gutter,
+    right: o.position.x + o.size.width + gutter,
+    top: o.position.y - box.height - gutter,
+    bottom: o.position.y + o.size.height + gutter,
+  }));
 
-  // The neighbour the dropped box overlaps most becomes the anchor to snap to.
+  // Largest overlap is the alignment anchor. Break ties independently of node
+  // array order so reordering the canvas cannot change the preview.
   let primary: CanvasNode | null = null;
   let bestOverlap = 0;
   for (const o of obstacles) {
-    const ow =
-      Math.min(box.x + box.width, o.position.x + o.size.width) -
-      Math.max(box.x, o.position.x);
-    const oh =
-      Math.min(box.y + box.height, o.position.y + o.size.height) -
-      Math.max(box.y, o.position.y);
+    const ow = Math.min(box.x + box.width, o.position.x + o.size.width) - Math.max(box.x, o.position.x);
+    const oh = Math.min(box.y + box.height, o.position.y + o.size.height) - Math.max(box.y, o.position.y);
     const area = Math.max(0, ow) * Math.max(0, oh);
-    if (area > bestOverlap) {
+    if (area > bestOverlap || (area > 0 && area === bestOverlap && primary && o.id < primary.id)) {
       bestOverlap = area;
       primary = o;
     }
   }
 
-  // No collision → keep free drops tidy by snapping the origin to the grid.
   if (!primary) {
-    return { dx: snapToGrid(box.x) - box.x, dy: snapToGrid(box.y) - box.y };
+    const snapped = snapPositionToGrid(box);
+    if (!exclusions.some(r => excludesPoint(r, snapped))) {
+      return { dx: snapped.x - box.x, dy: snapped.y - box.y };
+    }
   }
 
-  const bx = primary.position.x;
-  const by = primary.position.y;
-  const bw = primary.size.width;
-  const bh = primary.size.height;
-
-  // Four flush, edge-aligned candidate origins for the box.
-  const candidates = [
-    { x: bx + bw + gutter, y: by }, // right, tops aligned
-    { x: bx - box.width - gutter, y: by }, // left, tops aligned
-    { x: bx, y: by + bh + gutter }, // below, left edges aligned
-    { x: bx, y: by - box.height - gutter }, // above, left edges aligned
-  ];
-
-  // Prefer the side nearest to where the box was dropped (cursor proxy).
-  candidates.sort(
-    (a, b) =>
-      Math.hypot(a.x - box.x, a.y - box.y) -
-      Math.hypot(b.x - box.x, b.y - box.y),
-  );
-
-  for (const c of candidates) {
-    // The candidate is flush to `primary` by construction; just make sure it
-    // doesn't land on any *other* node.
-    const hitsOther = obstacles.some(
-      (o) =>
-        o !== primary &&
-        rectsOverlap(
-          c.x, c.y, box.width, box.height,
-          o.position.x, o.position.y, o.size.width, o.size.height,
-          0,
-        ),
-    );
-    if (!hitsOther) return { dx: c.x - box.x, dy: c.y - box.y };
-  }
-
-  // Every flush side is occupied — fall back to the outward ring search.
-  const free = findNonOverlappingPosition(
-    box.x, box.y, box.width, box.height, obstacles,
-  );
+  const target = primary ? {
+    x: alignDropAxis(box.x, primary.position.x, primary.position.x + primary.size.width - box.width),
+    y: alignDropAxis(box.y, primary.position.y, primary.position.y + primary.size.height - box.height),
+  } : box;
+  const free = nearestDropOrigin(target, exclusions);
   return { dx: free.x - box.x, dy: free.y - box.y };
 }
 

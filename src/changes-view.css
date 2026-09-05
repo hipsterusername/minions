@@ -248,7 +248,7 @@
 }
 .changes-btn--discard:hover {
   background: var(--danger-color);
-  color: #fff;
+  color: var(--text-on-status);
 }
 
 /* ── Empty state ── */

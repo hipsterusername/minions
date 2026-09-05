@@ -36,6 +36,7 @@ export function LeaderTaskGraphBridge({
       : planSnapshot && proposalActions
         ? <GraphPlanProposalCard snapshot={planSnapshot} actions={proposalActions} /> : null}
     {open && snapshot ? <GraphInspector snapshot={snapshot} goal={goal} plan={displayedPlan}
+      retryReceipts={controller.retryReceipts} onRefresh={controller.refetch}
       controlsEnabled={controlsEnabled && !stale} onClose={closeInspector} onAction={sendAction} /> : null}
     {open && !snapshot && planSnapshot && proposalActions
       ? <GraphPlanProposalDialog snapshot={planSnapshot} actions={proposalActions}

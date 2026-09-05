@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  type CSSProperties,
   useRef,
   useState,
   type KeyboardEvent,
@@ -30,26 +31,11 @@ import { ActivityRail } from "./ActivityRail.tsx";
 import { ContextDrawer } from "./ContextDrawer.tsx";
 import { PaneDivider } from "./PaneDivider.tsx";
 
-const LEFT_PANE_DEFAULT = 260;
-const LEFT_PANE_MIN = 180;
-const LEFT_PANE_MAX = 480;
-const RIGHT_PANE_DEFAULT = 360;
-const RIGHT_PANE_MIN = 280;
-const RIGHT_PANE_MAX = 560;
-
-/**
- * Leader fullscreen mode — a 3-pane cockpit portaled to document.body.
- *
- * Pattern matches `MarkdownNode`'s focus mode: portaled overlay (escapes
- * the canvas CSS transform stack), body-scroll lock, and Esc to exit.
- * Toggle + Cmd/Ctrl+Shift+F handling live in `LeaderNode.tsx` since the
- * focus-scope check needs the node root ref.
- *
- * The overlay is a presentation component: all state, callbacks, and
- * derived values arrive as props from the renderer. Both views read from
- * the same `LeaderData` so the in-canvas stub and the overlay stay in
- * sync automatically.
- */
+import { LayoutDashboard, MessageSquare, PanelLeft, PanelRight, ArrowLeft, Square, Bot } from "lucide-react";
+import type { ContextItem } from "../../../types.ts";
+import { formatCanvasWorkItemStatus, selectCanvasChangeMode } from "../work-item.ts";
+import { partitionDashboardQuestions } from "../../render/dashboard-questions.ts";
+import "./leader-fullscreen.css";
 
 export interface LeaderFullscreenProps {
   data: LeaderData;
@@ -90,323 +76,127 @@ export interface LeaderFullscreenProps {
   /* Slot: chrome to mount inside the overlay so the existing
      SessionToolbar / StatusBannerStack render at the top of the chat
      pane without LeaderFullscreen having to know how to build them. */
+  dashboardSlot?: ReactNode;
+  minionsSlot?: ReactNode;
+  configSlot?: ReactNode;
+  actionsSlot?: ReactNode;
+  contextItems?: ContextItem[] | undefined;
   toolbarSlot: ReactNode;
   bannerSlot: ReactNode;
 }
 
-const STATUS_COLOR: Record<LeaderData["status"], string> = {
-  disconnected: "var(--text-muted)",
-  creating: "var(--status-creating)",
-  running: "var(--status-success)",
-  idle: "var(--text-muted)",
-  stopped: "var(--text-muted)",
-  error: "var(--status-error)",
-  completed: "var(--success-color)",
-};
-
 export function LeaderFullscreen(props: LeaderFullscreenProps) {
-  const {
-    data,
-    isWorking,
-    onUpdateData,
-    onExit,
-    input,
-    onInputChange,
-    onPromptSubmit,
-    onPromptKeyDown,
-    promptPlaceholder,
-    promptSubmitLabel,
-    promptSubmitDisabled,
-    promptSubmitActive,
-    onStop,
-    messageContextSelection,
-    activateMessageSelection,
-    setMessageContextSelection,
-    exitMessageSelection,
-    onAddContentNode,
-    onRevealMinion,
-    onOpenSkillFlyout,
-    skillFlyoutAnchorRef,
-    graphProjection,
-    onOpenGraph,
-    toolbarSlot,
-    bannerSlot,
-  } = props;
+  const { data, isWorking, onUpdateData, onExit, input, onInputChange,
+    onPromptSubmit, onPromptKeyDown, promptPlaceholder, promptSubmitLabel,
+    promptSubmitDisabled, promptSubmitActive, onStop, messageContextSelection,
+    activateMessageSelection, setMessageContextSelection, exitMessageSelection,
+    onAddContentNode, onRevealMinion, onOpenSkillFlyout, skillFlyoutAnchorRef,
+    graphProjection, onOpenGraph, toolbarSlot, bannerSlot, dashboardSlot,
+    minionsSlot, configSlot, actionsSlot, contextItems } = props;
+  const rootRef = useRef<HTMLDivElement>(null);
+  const outputRef = useRef<HTMLDivElement>(null);
+  const [reviewRequest, setReviewRequest] = useState(0);
+  const [view, setView] = useState<"conversation" | "dashboard" | "minions">("conversation");
+  const [side, setSide] = useState<"activity" | "context" | null>(null);
+  const [leftHidden, setLeftHidden] = useState(false);
+  const [rightHidden, setRightHidden] = useState(false);
+  const [leftWidth, setLeftWidth] = useState(250);
+  const [rightWidth, setRightWidth] = useState(330);
+  const [pinnedToBottom, setPinnedToBottom] = useState(true);
+  const groupedMessages = useMemo(() => groupMessages(data.messages), [data.messages]);
+  const thinkingEffort = data.thinkingConfig?.effort ?? DEFAULT_THINKING_CONFIG.effort;
+  const questionCount = partitionDashboardQuestions(data.renderState?.components ?? [], new Map()).questions.length;
+  const hasDashboard = Boolean(data.renderState?.components.length);
+  const minionCount = data.taskPlan.filter(t => t.executor === "minion").length;
+  const selectedView = view === "dashboard" && !hasDashboard ? "conversation"
+    : view === "minions" && !minionsSlot ? "conversation" : view;
+  const approvalPending = selectCanvasChangeMode(data) === "worktree" && data.approvalPending;
 
-  // Body-scroll lock: prevent stray wheel events from panning the canvas
-  // underneath the overlay. Same rationale as MarkdownNode focus mode.
   useEffect(() => {
-    const prev = document.body.style.overflow;
+    const previous = document.activeElement as HTMLElement | null;
+    const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
+    rootRef.current?.querySelector<HTMLButtonElement>('[data-testid="leader-fullscreen-exit"]')?.focus();
+    return () => { document.body.style.overflow = overflow; if (previous?.isConnected) previous.focus(); };
   }, []);
 
-  // ── Auto-scroll + "jump to latest" pill ─────────────────────────
-  // Pin scroll to bottom UNTIL the user scrolls up. Once they're 80px+
-  // away from the bottom we stop auto-scrolling and show a pill that
-  // jumps them back. This mirrors how ChatGPT / Slack behave so a long
-  // reply doesn't yank the user out of whatever they're reading.
-  const outputRef = useRef<HTMLDivElement | null>(null);
-  const [pinnedToBottom, setPinnedToBottom] = useState(true);
+  useEffect(() => {
+    if (pinnedToBottom && outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
+  }, [data.messages.length, data.streamingText, pinnedToBottom, selectedView]);
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
-    const el = outputRef.current;
-    if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior });
+  const scrollToBottom = useCallback(() => {
+    outputRef.current?.scrollTo({ top: outputRef.current.scrollHeight, behavior: "smooth" });
     setPinnedToBottom(true);
   }, []);
+  const revealMinion = (key: string) => {
+    onRevealMinion?.(key);
+    if (minionsSlot) { setView("minions"); setSide(null); }
+  };
+  const toggleSide = (next: "activity" | "context") => {
+    setSide(side === next ? null : next);
+    if (next === "activity") setLeftHidden(!leftHidden);
+    else setRightHidden(!rightHidden);
+  };
+  const trapFocus = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Tab") return;
+    const elements = Array.from(e.currentTarget.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), a[href], input, textarea, select, [tabindex="0"]',
+    )).filter(el => el.getClientRects().length > 0 && !el.closest('[hidden]'));
+    const first = elements[0], last = elements.at(-1);
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+  };
 
-  const handleScroll = useCallback(() => {
-    const el = outputRef.current;
-    if (!el) return;
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setPinnedToBottom(distance < 80);
-  }, []);
-
-  useEffect(() => {
-    if (pinnedToBottom && outputRef.current) {
-      outputRef.current.scrollTop = outputRef.current.scrollHeight;
-    }
-  }, [data.messages.length, data.streamingText, pinnedToBottom]);
-
-  // ── Drag-resizable pane widths ──────────────────────────────────
-  const [leftWidth, setLeftWidth] = useState(LEFT_PANE_DEFAULT);
-  const [rightWidth, setRightWidth] = useState(RIGHT_PANE_DEFAULT);
-  const handleLeftResize = useCallback((delta: number) => {
-    setLeftWidth((w) =>
-      Math.max(LEFT_PANE_MIN, Math.min(LEFT_PANE_MAX, w + delta)),
-    );
-  }, []);
-  const handleRightResize = useCallback((delta: number) => {
-    setRightWidth((w) =>
-      Math.max(RIGHT_PANE_MIN, Math.min(RIGHT_PANE_MAX, w + delta)),
-    );
-  }, []);
-
-  const groupedMessages = useMemo(
-    () => groupMessages(data.messages),
-    [data.messages],
-  );
-
-  const thinkingEffort =
-    data.thinkingConfig?.effort ?? DEFAULT_THINKING_CONFIG.effort;
-
-  const overlay = (
-    <div
-      className="leader-fullscreen-overlay"
-      data-testid="leader-fullscreen-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Leader fullscreen cockpit"
-      data-scroll-capture
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 9000,
-        background: "var(--bg-primary)",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-      }}
-    >
-      <header
-        style={{
-          flexShrink: 0,
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          padding: "10px 16px",
-          background: "var(--bg-surface)",
-          borderBottom: "1px solid var(--border-default)",
-        }}
-      >
-        <LeaderStatusIcon
-          active={data.status === "running" || data.status === "creating"}
-          size={22}
-        />
-        <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: "var(--text-primary)",
-              lineHeight: 1.2,
-            }}
-          >
-            <EditableTitle
-              value={data.taskName ?? "Leader"}
-              onChange={(name) =>
-                onUpdateData({ ...data, taskName: name || null })
-              }
-            />
-          </div>
-          <div
-            style={{
-              fontSize: 10,
-              color: STATUS_COLOR[data.status] ?? "var(--text-muted)",
-              fontFamily: "var(--font-mono)",
-              textTransform: "uppercase",
-              letterSpacing: 0.5,
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              marginTop: 2,
-            }}
-          >
-            {data.status}
-            {data.turns > 0 && (
-              <span
-                style={{
-                  color: "var(--text-muted)",
-                  textTransform: "none",
-                }}
-              >
-                {data.turns} turn{data.turns !== 1 ? "s" : ""}
-              </span>
-            )}
-            {data.totalCost > 0 && (
-              <span style={{ color: "var(--text-muted)", textTransform: "none" }}>
-                ${data.totalCost.toFixed(4)}
-              </span>
-            )}
-          </div>
-        </div>
-
-        <span style={{ flex: 1 }} />
-
-        {data.status === "running" && (
-          <button
-            onClick={onStop}
-            onMouseDown={(e) => e.stopPropagation()}
-            style={{
-              padding: "5px 14px",
-              fontSize: 11,
-              fontFamily: "var(--font-mono)",
-              fontWeight: 600,
-              background: "var(--danger-bg)",
-              border: "1px solid var(--danger-color)",
-              borderRadius: 4,
-              color: "var(--status-error)",
-              cursor: "pointer",
-            }}
-          >
-            Stop
-          </button>
-        )}
-
-        <button
-          onClick={onExit}
-          onMouseDown={(e) => e.stopPropagation()}
-          aria-label="Exit fullscreen"
-          aria-pressed="true"
-          title="Exit fullscreen (Esc)"
-          data-testid="leader-fullscreen-exit"
-          style={{
-            padding: "5px 12px",
-            fontSize: 11,
-            fontFamily: "var(--font-mono)",
-            fontWeight: 600,
-            background: "var(--bg-elevated)",
-            border: "1px solid var(--border-default)",
-            borderRadius: 4,
-            color: "var(--text-secondary)",
-            cursor: "pointer",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 16 16"
-            fill="currentColor"
-            aria-hidden
-          >
-            <path d="M7 2v4H3v1.5h5.5V2H7zM2 8.5V10h4v4h1.5V8.5H2zm12.5 0H9V14h1.5v-4h4V8.5zM14.5 7v-.5H10V2H8.5v5.5h6V7z" />
-          </svg>
-          Exit
+  return createPortal(
+    <div ref={rootRef} className="leader-fullscreen-overlay" data-testid="leader-fullscreen-overlay"
+      role="dialog" aria-modal="true" aria-label="Leader fullscreen cockpit" data-scroll-capture
+      onKeyDown={trapFocus} onPointerDown={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()} onWheel={e => e.stopPropagation()}>
+      <header className="leader-fs-header">
+        <button className="leader-fs-button" onClick={onExit} aria-label="Exit fullscreen"
+          aria-pressed="true" title="Back to canvas (Esc)" data-testid="leader-fullscreen-exit">
+          <ArrowLeft size={15} aria-hidden="true" /><span>Canvas</span>
         </button>
-      </header>
-
-      {/* ── 3-pane body (drag-resizable) ─────────────────────────
-          Plain flex layout (not grid) so the dividers' inline width
-          updates take effect without a layout-engine round trip. */}
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          display: "flex",
-          flexDirection: "row",
-        }}
-      >
-        <div
-          style={{
-            width: leftWidth,
-            flexShrink: 0,
-            display: "flex",
-            flexDirection: "column",
-            minWidth: 0,
-          }}
-        >
-          <ActivityRail data={data} onRevealMinion={onRevealMinion} />
+        <span className="leader-fs-header-divider" />
+        <LeaderStatusIcon active={isWorking || data.status === "creating"} size={24} />
+        <div className="leader-fs-identity">
+          <EditableTitle value={data.taskName ?? "Leader"} onChange={name => onUpdateData({ ...data, taskName: name || null })} />
+          <div className="leader-fs-subtitle">
+            <span className="leader-fs-status" data-active={isWorking}>{formatCanvasWorkItemStatus(data.workItemSnapshot, data.liveEditAwareness) ?? data.status}</span>
+            <span>{data.harness ?? "claude"} · {data.model}</span>
+          </div>
         </div>
-
-        <PaneDivider
-          side="left"
-          onResize={handleLeftResize}
-          onReset={() => setLeftWidth(LEFT_PANE_DEFAULT)}
-          ariaLabel="Resize activity rail"
-        />
-
-        <section
-          data-testid="leader-fullscreen-conversation"
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            background: "var(--bg-primary)",
-            minWidth: 0,
-            minHeight: 0,
-            position: "relative",
-          }}
-        >
-          {toolbarSlot}
+        <div className="leader-fs-session-cost" title="Reported leader session cost; delegated task costs are listed separately">
+          <strong>${data.totalCost.toFixed(3)}</strong><span>{data.turns} turns</span>
+        </div>
+        {isWorking && <button className="leader-fs-button leader-fs-button--danger" onClick={onStop}><Square size={12} aria-hidden="true" /> Stop</button>}
+        {actionsSlot}
+      </header>
+      <div className="leader-fs-body" data-side={side ?? "none"} data-left-hidden={leftHidden}
+        data-right-hidden={rightHidden} style={{ "--activity-width": `${leftWidth}px`, "--context-width": `${rightWidth}px` } as CSSProperties}>
+        <div className="leader-fs-activity" id="leader-fs-activity">
+          <div className="leader-fs-pane-heading"><span>Execution</span><button className="leader-fs-icon" aria-label="Close execution panel" onClick={() => { setSide(null); setLeftHidden(true); }}>×</button></div>
+          {graphProjection && <div className="leader-fs-graph-summary"><span className="leader-fs-muted">Execution graph · {graphProjection.status}</span><strong>{graphProjection.title}</strong><span>{graphProjection.detail}</span><button className="leader-fs-button" onClick={onOpenGraph} disabled={!onOpenGraph}>Inspect graph →</button></div>}
+          <ActivityRail data={data} onRevealMinion={revealMinion} />
+        </div>
+        <div className="leader-fs-divider leader-fs-divider--left"><PaneDivider value={leftWidth} min={200} max={360} side="left" onResize={d => setLeftWidth(w => Math.min(360, Math.max(200, w + d)))} onReset={() => setLeftWidth(250)} ariaLabel="Resize activity rail" /></div>
+        <main className="leader-fs-main">
+          <div className="leader-fs-workspace-nav">
+            <button className="leader-fs-icon" aria-label="Toggle execution panel" aria-controls="leader-fs-activity" onClick={() => toggleSide("activity")}><PanelLeft size={16} /></button>
+            <nav aria-label="Leader workspace" className="leader-fs-view-tabs">
+              <button className="leader-fs-view-tab" aria-current={selectedView === "conversation" ? "page" : undefined} onClick={() => setView("conversation")}><MessageSquare size={14} />Conversation</button>
+              <button className="leader-fs-view-tab" aria-current={selectedView === "dashboard" ? "page" : undefined} disabled={!hasDashboard} title={hasDashboard ? "Open leader dashboard and decisions" : "Dashboard appears when the leader shares an artifact or question"} onClick={() => { setView("dashboard"); setSide(null); }}><LayoutDashboard size={14} />Dashboard{hasDashboard && <span className="leader-fs-dot" />}</button>
+              {minionsSlot && <button className="leader-fs-view-tab" aria-current={selectedView === "minions" ? "page" : undefined} onClick={() => { setView("minions"); setSide(null); }}><Bot size={14} />Minions <span>{minionCount}</span></button>}
+            </nav>
+            <button className="leader-fs-icon" aria-label="Toggle context panel" aria-controls="leader-fs-context" onClick={() => toggleSide("context")}><PanelRight size={16} />{approvalPending && <span className="leader-fs-dot" />}</button>
+          </div>
           {bannerSlot}
-
-          <div
-            ref={outputRef}
-            data-scroll-capture
-            onMouseDown={(e) => e.stopPropagation()}
-            onScroll={handleScroll}
-            style={{
-              flex: 1,
-              minHeight: 0,
-              overflowY: "auto",
-              padding: "16px clamp(16px, 6vw, 64px)",
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
-            }}
-          >
-            {data.messages.length === 0 && (
-              <div
-                style={{
-                  flex: 1,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "var(--text-muted)",
-                  fontSize: 13,
-                }}
-              >
-                {data.sessionKey
-                  ? "Leader is thinking..."
-                  : "Describe your project goal to begin orchestration"}
-              </div>
-            )}
+          {questionCount > 0 && selectedView !== "dashboard" && <button className="leader-fs-attention" onClick={() => { setView("dashboard"); setSide(null); }}>{questionCount} {questionCount === 1 ? "question needs" : "questions need"} your response. Open dashboard →</button>}
+          {approvalPending && <button className="leader-fs-attention" onClick={() => { setSide("context"); setRightHidden(false); setReviewRequest(n => n + 1); }}>Changes are ready for review. Open review & settings →</button>}
+          <section className="leader-fs-conversation" data-testid="leader-fullscreen-conversation" hidden={selectedView !== "conversation"}>
+            <div className="leader-fs-runtime">{toolbarSlot}</div>
+            <div ref={outputRef} className="leader-fs-messages" data-scroll-capture onMouseDown={e => e.stopPropagation()}
+              onScroll={() => { const el = outputRef.current; if (el) setPinnedToBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80); }}>
+              {data.messages.length === 0 && !isWorking && !data.streamingText && <div className="leader-fs-empty"><MessageSquare size={28} strokeWidth={1.3} /><h2>{data.sessionKey ? "Continue the conversation" : "What would you like to accomplish?"}</h2><p>{data.sessionKey ? "Send a message to steer the next step." : "Describe your goal. Your leader can investigate, build, delegate work, and bring decisions back to you."}</p><span>Use / for commands · Inspect connected sources in Context</span></div>}
             {groupedMessages.map((group, gi) => {
               if (group.kind === "tool-group") {
                 return <LeaderToolGroup key={`tg-${gi}`} msgs={group.msgs} />;
@@ -468,135 +258,24 @@ export function LeaderFullscreen(props: LeaderFullscreenProps) {
                 reason={data.waitReason ?? "Waiting..."}
               />
             )}
-          </div>
 
-          {/* Jump-to-latest pill — shown only when the user has scrolled
-              up far enough that we stopped pinning to the bottom. */}
-          {!pinnedToBottom && (
-            <button
-              type="button"
-              onClick={() => scrollToBottom("smooth")}
-              onMouseDown={(e) => e.stopPropagation()}
-              data-testid="leader-fullscreen-scroll-pill"
-              aria-label="Jump to latest message"
-              style={{
-                position: "absolute",
-                bottom: 92,
-                left: "50%",
-                transform: "translateX(-50%)",
-                padding: "5px 12px",
-                fontSize: 11,
-                fontFamily: "var(--font-mono)",
-                fontWeight: 600,
-                background: "var(--bg-elevated)",
-                border: "1px solid var(--accent)",
-                borderRadius: 999,
-                color: "var(--accent)",
-                cursor: "pointer",
-                boxShadow: "var(--shadow-lg)",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                zIndex: 5,
-              }}
-            >
-              <svg
-                width="10"
-                height="10"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                aria-hidden
-              >
-                <path d="M8 12l-5-5h10z" />
-              </svg>
-              Jump to latest
-            </button>
-          )}
-
-          <LeaderPromptBar
-            input={input}
-            onInputChange={onInputChange}
-            onKeyDown={onPromptKeyDown}
-            onSubmit={onPromptSubmit}
-            placeholder={promptPlaceholder}
-            submitLabel={promptSubmitLabel}
-            disabled={promptSubmitDisabled}
-            active={promptSubmitActive}
-          />
-
-          {data.error && (
-            <div
-              style={{
-                padding: "8px 16px",
-                background: "var(--danger-bg)",
-                color: "var(--status-error)",
-                fontSize: 11,
-                borderTop: "1px solid var(--danger-color)",
-                fontFamily: "var(--font-mono)",
-                wordBreak: "break-word",
-                display: "flex",
-                alignItems: "flex-start",
-                justifyContent: "space-between",
-                gap: 8,
-              }}
-            >
-              <span style={{ flex: 1 }}>{data.error}</span>
-              <CopyButton
-                text={data.fullError ?? data.error}
-                layout="inline"
-                alwaysVisible
-                title="Copy error to clipboard"
-              />
-              <button
-                onClick={() => onUpdateData({ ...data, error: null })}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "var(--status-error)",
-                  cursor: "pointer",
-                  fontSize: 14,
-                  padding: "0 2px",
-                  lineHeight: 1,
-                  flexShrink: 0,
-                  opacity: 0.7,
-                }}
-                title="Dismiss error"
-                aria-label="Dismiss error"
-              >
-                x
-              </button>
             </div>
-          )}
-        </section>
-
-        <PaneDivider
-          side="right"
-          onResize={handleRightResize}
-          onReset={() => setRightWidth(RIGHT_PANE_DEFAULT)}
-          ariaLabel="Resize context drawer"
-        />
-
-        <div
-          style={{
-            width: rightWidth,
-            flexShrink: 0,
-            display: "flex",
-            flexDirection: "column",
-            minWidth: 0,
-          }}
-        >
-          <ContextDrawer
-            data={data}
-            onUpdateData={onUpdateData}
-            skillFlyoutAnchorRef={skillFlyoutAnchorRef}
-            onOpenSkillFlyout={onOpenSkillFlyout}
-            {...(graphProjection !== undefined ? { graphProjection } : {})}
-            onOpenGraph={onOpenGraph}
-          />
+            {!pinnedToBottom && <button className="leader-fs-latest leader-fs-button" onClick={scrollToBottom}>↓ Jump to latest</button>}
+            <LeaderPromptBar input={input} onInputChange={onInputChange} onKeyDown={onPromptKeyDown} onSubmit={onPromptSubmit}
+              placeholder={promptPlaceholder} submitLabel={promptSubmitLabel} disabled={promptSubmitDisabled} active={promptSubmitActive} />
+          </section>
+          {hasDashboard && <section hidden={selectedView !== "dashboard"} className="leader-fs-surface" aria-label="Leader dashboard">{dashboardSlot}</section>}
+          {minionsSlot && <section hidden={selectedView !== "minions"} className="leader-fs-surface" aria-label="Minion workspace">{minionsSlot}</section>}
+          {data.error && <div className="leader-fs-error" role="alert"><span>{data.error}</span><CopyButton text={data.fullError ?? data.error} layout="inline" alwaysVisible /><button className="leader-fs-icon" aria-label="Dismiss error" onClick={() => onUpdateData({ ...data, error: null })}>×</button></div>}
+        </main>
+        <div className="leader-fs-divider leader-fs-divider--right"><PaneDivider value={rightWidth} min={280} max={440} side="right" onResize={d => setRightWidth(w => Math.min(440, Math.max(280, w + d)))} onReset={() => setRightWidth(330)} ariaLabel="Resize context drawer" /></div>
+        <div className="leader-fs-context" id="leader-fs-context">
+          <div className="leader-fs-pane-heading"><span>Context & controls</span><button className="leader-fs-icon" aria-label="Close context panel" onClick={() => { setSide(null); setRightHidden(true); }}>×</button></div>
+          <ContextDrawer data={data} onUpdateData={onUpdateData} skillFlyoutAnchorRef={skillFlyoutAnchorRef}
+            onOpenSkillFlyout={onOpenSkillFlyout} graphProjection={graphProjection} onOpenGraph={onOpenGraph}
+            configSlot={configSlot} contextItems={contextItems} reviewRequest={reviewRequest} />
         </div>
       </div>
-    </div>
+    </div>, document.body,
   );
-
-  return createPortal(overlay, document.body);
 }

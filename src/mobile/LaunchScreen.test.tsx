@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getProjectSettings, getProjectSkills, listProjects } from "../api.ts";
@@ -95,6 +95,58 @@ afterEach(() => {
 });
 
 describe("LaunchScreen", () => {
+  it("keeps run setup collapsed behind a native, truthful disclosure", async () => {
+    vi.mocked(getProjectSettings).mockResolvedValue({
+      defaultWorktreeIsolation: true,
+      defaultSandboxPolicy: {
+        filesystemScope: "read-only",
+        approvalPolicy: "on-request",
+      },
+    });
+
+    render(
+      <LaunchScreen
+        send={vi.fn()}
+        onLaunched={vi.fn()}
+        lockedProject={{ id: "compact", path: "/work/compact", name: "Compact" }}
+      />,
+    );
+
+    const disclosure = screen.getByTestId("launch-run-setup");
+    expect(disclosure).not.toHaveAttribute("open");
+    expect(within(disclosure).getByText("Model · Project default")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(disclosure).getByText(/Read only · Worktree · No files · No skills/)).toBeInTheDocument();
+    });
+
+    const summary = disclosure.querySelector("summary");
+    expect(summary).not.toBeNull();
+    summary!.focus();
+    expect(summary).toHaveFocus();
+    fireEvent.click(summary!);
+    expect(disclosure).toHaveAttribute("open");
+    expect(within(disclosure).getByLabelText("Model")).toBeInTheDocument();
+    expect(within(disclosure).getByLabelText("Worktree isolation")).toBeChecked();
+    expect(within(disclosure).getByLabelText("Read only")).toBeChecked();
+  });
+
+  it("separates the prompt label from its live character counter", () => {
+    render(
+      <LaunchScreen
+        send={vi.fn()}
+        onLaunched={vi.fn()}
+        lockedProject={{ path: "/work/prompt", name: "Prompt" }}
+      />,
+    );
+
+    const prompt = screen.getByLabelText("Prompt");
+    const counter = screen.getByText("0 characters");
+    expect(prompt).toHaveAttribute("aria-describedby", counter.id);
+
+    fireEvent.change(prompt, { target: { value: "Ship it" } });
+    expect(counter).toHaveTextContent("7 characters");
+  });
+
   it("inherits the desktop leader defaults for the selected project", async () => {
     vi.mocked(getProjectSettings).mockResolvedValue({
       defaultLeaderHarness: "codex",

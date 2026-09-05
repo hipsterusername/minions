@@ -34,6 +34,11 @@ export function buildUnifiedWorkItemMessages(input: {
       : replay;
     unified.push(...messages);
   }
+  // Session updates and ledger pages arrive independently. Preserve the
+  // current conversation while its run is still missing from cached history.
+  if (!runs.some((run) => run.runKey === currentRunKey)) {
+    unified.push(...currentMessages);
+  }
   return unified;
 }
 

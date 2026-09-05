@@ -14,6 +14,10 @@ import type { ImageComponent, FilePreviewComponent, HtmlArtifactComponent } from
 // jsdom doesn't ship ResizeObserver; provide a no-op so any child that
 // uses it doesn't blow up.
 beforeAll(() => {
+  // jsdom has no top layer. Stub only the native API; focus/inertness must
+  // additionally be verified in a browser, not simulated as a passing test.
+  HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) { this.open = true; });
+  HTMLDialogElement.prototype.close = vi.fn(function (this: HTMLDialogElement) { this.open = false; });
   if (typeof globalThis.ResizeObserver === "undefined") {
     globalThis.ResizeObserver = class {
       observe(): void {}
@@ -392,4 +396,17 @@ describe("FilePreviewRenderer: path source placeholder", () => {
     expect(open).not.toHaveBeenCalled();
     open.mockRestore();
   });
+});
+
+it("moves image focus to Close and restores the trigger after button dismissal", () => {
+  render(<ImageRenderer c={{ id: "i", type: "image", alt: "Sample", src: "data:image/png;base64,AA==" }} />);
+  const trigger = screen.getByRole("button", { name: "Open image lightbox" });
+  trigger.focus();
+  fireEvent.click(trigger);
+  const close = screen.getByRole("button", { name: "Close Image lightbox" });
+  expect(document.activeElement).toBe(close);
+  expect(HTMLDialogElement.prototype.showModal).toHaveBeenCalled();
+  fireEvent.click(close);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(document.activeElement).toBe(trigger);
 });

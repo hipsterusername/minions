@@ -1,0 +1,20 @@
+.skill-editor__body { overflow: hidden; }
+.skill-editor__preview-toggle { display: inline-flex; gap: 6px; align-items: center; margin-left: auto; margin-right: 16px; padding: 7px 10px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-primary); color: var(--text-secondary); font: 12px var(--font-sans); cursor: pointer; }
+.skill-editor__preview-toggle[aria-expanded="true"] { background: var(--state-active); color: var(--accent); }
+.skill-editor :is(button, input, select, textarea):focus-visible { outline: 2px solid var(--accent) !important; outline-offset: 2px; }
+@media (max-width: 800px) {
+  .skill-editor__rail { width: 160px !important; }
+  .skill-editor__body { flex-wrap: wrap; overflow-y: auto; }
+  .skill-editor__form { min-width: 220px !important; padding: 16px !important; }
+  .skill-editor__preview { width: 100% !important; max-height: 300px; border-top: 1px solid var(--border-default); }
+}
+@media (max-width: 520px) {
+  .skill-editor__rail { width: 100% !important; flex-direction: row !important; flex-shrink: 0; overflow-x: auto !important; border-right: 0 !important; border-bottom: 1px solid var(--border-default); }
+  .skill-editor__rail > div { display: none; }
+  .skill-editor__rail > button { flex: 0 0 auto; width: auto !important; padding: 8px !important; }
+  .skill-editor__rail > button > span:nth-child(n+3),
+  .skill-editor__rail > button > span:nth-child(2) > span { display: none; }
+  .skill-editor__form { flex-basis: 100% !important; }
+  .skill-editor__footer { flex-wrap: wrap; }
+  .skill-editor__footer > span { width: 100%; }
+}

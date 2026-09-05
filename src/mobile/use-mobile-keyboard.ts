@@ -4,6 +4,8 @@ interface KeyboardState {
   focused: boolean;
   open: boolean;
   offset: number;
+  height: number;
+  top: number;
 }
 
 function readKeyboardState(focused: boolean): KeyboardState {
@@ -18,6 +20,8 @@ function readKeyboardState(focused: boolean): KeyboardState {
     focused,
     open: focused && offset > 0,
     offset,
+    height: viewportHeight,
+    top: viewportTop,
   };
 }
 
@@ -27,6 +31,8 @@ export function useMobileKeyboard(): KeyboardState {
     focused: false,
     open: false,
     offset: 0,
+    height: window.innerHeight,
+    top: 0,
   }));
 
   useEffect(() => {

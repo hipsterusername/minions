@@ -310,7 +310,7 @@ describe("resolveTidyDrop", () => {
     expect(gap).toBe(16);
   });
 
-  it("falls through to the next-nearest side when the closest one is occupied", () => {
+  it("slides below near the drop when the right side is occupied", () => {
     const blocker = makeNode("b", {
       position: { x: 0, y: 0 },
       size: { width: 200, height: 100 },
@@ -327,10 +327,80 @@ describe("resolveTidyDrop", () => {
       size: { width: 80, height: 60 },
     });
     const { dx, dy } = resolveTidyDrop([dropped], [blocker, occupied]);
-    // Right is blocked by `occupied`, so it drops to the next nearest free
-    // side: flush below, left-aligned.
-    expect(dropped.position.x + dx).toBe(0);
+    // Clear the blocker without pulling the node away from the drop's X.
+    expect(dropped.position.x + dx).toBe(120);
     expect(dropped.position.y + dy).toBe(116);
+  });
+
+  it.each([[1, 1], [-1, 1], [1, -1], [-1, -1]])(
+    "uses a nearby diagonal opening around a partial blocker (mirror %i, %i)",
+    (mx, my) => {
+      const rect = (id: string, x: number, y: number, width: number, height: number) =>
+        makeNode(id, { position: { x: mx === 1 ? x : -x - width, y: my === 1 ? y : -y - height },
+          size: { width, height } });
+      const anchor = rect("anchor", 0, 0, 400, 200);
+      const neighbor = rect("neighbor", -100, -130, 250, 100);
+      const dropped = rect("dropped", 100, -60, 200, 100);
+      const expected = rect("expected", 166, -116, 200, 100).position;
+      for (const obstacles of [[anchor, neighbor], [neighbor, anchor]]) {
+        const { dx, dy } = resolveTidyDrop([dropped], obstacles);
+        expect({ x: dropped.position.x + dx, y: dropped.position.y + dy }).toEqual(expected);
+      }
+    },
+  );
+
+  it("respects a custom gutter around every neighbor", () => {
+    const anchor = makeNode("anchor", { position: { x: 0, y: 0 }, size: { width: 400, height: 200 } });
+    const neighbor = makeNode("neighbor", { position: { x: -100, y: -130 }, size: { width: 250, height: 100 } });
+    const dropped = makeNode("dropped", { position: { x: 100, y: -60 }, size: { width: 200, height: 100 } });
+    expect(resolveTidyDrop([dropped], [anchor, neighbor], 32)).toEqual({ dx: 82, dy: -72 });
+  });
+
+  it("does not grid-snap an otherwise free drop into a neighbor", () => {
+    const dropped = makeNode("dropped", { position: { x: 13, y: 48 }, size: { width: 100, height: 100 } });
+    const obstacle = makeNode("obstacle", { position: { x: 120, y: 48 }, size: { width: 200, height: 100 } });
+    const { dx, dy } = resolveTidyDrop([dropped], [obstacle]);
+    expect({ x: dropped.position.x + dx, y: dropped.position.y + dy }).toEqual({ x: 4, y: 48 });
+  });
+
+  it("finds a safe position even when obstacles extend beyond the old ring-search limit", () => {
+    const dropped = makeNode("dropped", { position: { x: 0, y: 0 }, size: { width: 100, height: 100 } });
+    const obstacles = [
+      makeNode("anchor", { position: { x: 0, y: 0 }, size: { width: 100, height: 100 } }),
+      makeNode("surround", { position: { x: -10000, y: -10000 }, size: { width: 20100, height: 20100 } }),
+    ];
+    expect(resolveTidyDrop([dropped], obstacles)).toEqual({ dx: 0, dy: 10116 });
+    expect(resolveTidyDrop([dropped], [...obstacles].reverse())).toEqual({ dx: 0, dy: 10116 });
+  });
+
+  it("matches an exhaustive nearest-space oracle across crowded layouts, independent of obstacle order", () => {
+    // All edges are multiples of 100, so the exact nearest free point lies
+    // on this lattice. Nonzero edge offsets exceed the alignment magnet.
+    let seed = 71;
+    const random = (max: number) => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed % max; };
+    const dropped = makeNode("dropped", { position: { x: 0, y: 0 }, size: { width: 200, height: 100 } });
+    for (let scene = 0; scene < 40; scene++) {
+      const obstacles = [
+        makeNode("anchor", { position: { x: 0, y: 0 }, size: { width: 300, height: 200 } }),
+        ...Array.from({ length: 8 }, (_, i) => makeNode(`obstacle-${i}`, {
+          position: { x: (random(11) - 5) * 100, y: (random(11) - 5) * 100 },
+          size: { width: (random(4) + 1) * 100, height: (random(4) + 1) * 100 },
+        })),
+      ];
+      const clear = (x: number, y: number) => obstacles.every(o =>
+        x + 200 <= o.position.x || x >= o.position.x + o.size.width ||
+        y + 100 <= o.position.y || y >= o.position.y + o.size.height);
+      let minimum = Infinity;
+      for (let x = -1000; x <= 1000; x += 100) {
+        for (let y = -1000; y <= 1000; y += 100) {
+          if (clear(x, y)) minimum = Math.min(minimum, x * x + y * y);
+        }
+      }
+      const delta = resolveTidyDrop([dropped], obstacles, 0);
+      expect(clear(delta.dx, delta.dy)).toBe(true);
+      expect(delta.dx ** 2 + delta.dy ** 2).toBe(minimum);
+      expect(resolveTidyDrop([dropped], [...obstacles].reverse(), 0)).toEqual(delta);
+    }
   });
 
   it("moves a cluster as one unit, preserving relative offsets and clearing the blocker", () => {

@@ -93,6 +93,8 @@ export interface ProjectSettings {
    * only `false` disables it.
    */
   tidyLayout?: boolean;
+  /** Magnetic top/bottom node alignment during drag. Absent = on. */
+  snapWhileDragging?: boolean;
   /** System-model layer mode. */
   systemModel?: "off" | "advisory" | "enforced";
   /** Beta: add decision-oriented role contracts to Leader and Minion prompts. */

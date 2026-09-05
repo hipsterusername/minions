@@ -76,6 +76,10 @@ describe("normalizeDashboardLeaderActions", () => {
 });
 
 describe("dashboardActionIcon", () => {
+  it("resolves crew and graph to the same feature icon", () => {
+    expect(dashboardActionIcon("crew")).toBe(dashboardActionIcon("graph"));
+    expect(dashboardActionIcon("crew")).not.toBe(dashboardActionIcon(undefined));
+  });
   it("resolves a known key and falls back for unknown or missing keys", () => {
     const known = dashboardActionIcon("play");
     const fallback = dashboardActionIcon("does-not-exist");

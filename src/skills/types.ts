@@ -1,3 +1,4 @@
+import { buildLeaderSkillInventory } from "../../shared/leader-prompt.ts";
 /**
  * Skill Template System
  *
@@ -7,7 +8,6 @@
  */
 
 import {
-  formatSkillAttachments,
   type SkillAttachment,
 } from "../../shared/skill-attachments.ts";
 
@@ -65,7 +65,7 @@ export interface SkillTemplate {
   description: string;
   /** Category for grouping */
   category: "code" | "docs" | "testing" | "devops" | "analysis" | "design" | "general";
-  /** Emoji icon */
+  /** Stable minions:<name> icon ID, legacy emoji, or custom text badge. */
   icon: string;
   /** Accent color hex for UI */
   accentColor: string;
@@ -98,64 +98,7 @@ export interface SkillTemplate {
   builtIn?: boolean;
 }
 
-/**
- * Build the always-injected *map* of a skill's sub-skills: a compact list of
- * each sub-skill's id/name/description (+ when-to-use), an instruction to pull
- * a body on demand via `load_subskill`, and eager-inlined bodies for any
- * sub-skill flagged `alwaysInclude`. Returns `""` when the skill has none.
- */
-export function buildSubskillMap(skill: SkillTemplate): string {
-  const subskills = skill.subskills ?? [];
-  if (subskills.length === 0) return "";
-
-  const bullets = subskills.map((sub) => {
-    const desc = sub.description?.trim() || "(no description)";
-    const when = sub.whenToUse?.trim()
-      ? ` When to use: ${sub.whenToUse.trim()}`
-      : "";
-    const loaded = sub.alwaysInclude ? " (loaded below)" : "";
-    return `- \`${sub.id}\` — **${sub.name}**: ${desc}.${when}${loaded}`;
-  });
-
-  const eager = subskills
-    .filter((sub) => sub.alwaysInclude)
-    .map((sub) => {
-      const attachments = formatSkillAttachments(
-        sub.attachments,
-        `Attached context for ${sub.name}`,
-      );
-      return `#### ${sub.name}\n\n${sub.body.trim()}`
-        + (attachments ? `\n\n${attachments}` : "");
-    });
-
-  const parts = [
-    `### Sub-skills of ${skill.name}`,
-    `This skill is a map. The sub-skills below are not loaded by default. ` +
-      `To pull one into context, call \`load_subskill\` with ` +
-      `\`skillId: "${skill.id}"\` and the sub-skill's id.`,
-    bullets.join("\n"),
-  ];
-  if (eager.length > 0) parts.push(eager.join("\n\n"));
-  return parts.join("\n\n");
-}
-
-/**
- * Compile a skill template by replacing {{placeholders}} with values.
- * Returns the compiled markdown string.
- */
-export function compileSkillTemplate(
-  skill: SkillTemplate,
-  values: Record<string, string>,
-): string {
-  let result = skill.template;
-  // Replace all {{variable_name}} with their values (or empty string)
-  result = result.replace(/\{\{(\w+)\}\}/g, (_match, name: string) => {
-    return values[name] ?? "";
-  });
-  // Clean up any leftover empty lines from missing optional variables
-  result = result.replace(/\n{3,}/g, "\n\n");
-  return result.trim();
-}
+export { buildSubskillMap, compileSkillTemplate, compileSkills } from "../../shared/skill-prompt.ts";
 
 /**
  * Extract variable names from a template string.
@@ -172,32 +115,6 @@ export function extractVariableNames(template: string): string[] {
 }
 
 /**
- * Compile multiple skill templates and join them into a single
- * system prompt addendum. Each skill's output is wrapped in a section.
- */
-export function compileSkills(
-  skills: SkillTemplate[],
-  allValues: Record<string, Record<string, string>>,
-): string {
-  if (skills.length === 0) return "";
-
-  const sections = skills.map((skill) => {
-    const values = allValues[skill.id] ?? {};
-    const compiled = compileSkillTemplate(skill, values);
-    const attachments = formatSkillAttachments(
-      skill.attachments,
-      `Attached context for ${skill.name}`,
-    );
-    const map = buildSubskillMap(skill);
-    return `## Skill: ${skill.name}\n\n${compiled}`
-      + (attachments ? `\n\n${attachments}` : "")
-      + (map ? `\n\n${map}` : "");
-  });
-
-  return `\n\n# Active Skills\n\nThe following skills are active for this session. Follow their instructions.\n\n${sections.join("\n\n---\n\n")}`;
-}
-
-/**
  * Build a markdown inventory of skills the Leader may "arm" a Minion
  * with via `assign_task`'s `skillIds` parameter. Lists each skill's
  * ID, name, and description so the LLM knows what's available without
@@ -205,19 +122,5 @@ export function compileSkills(
  * skills in the library.
  */
 export function buildArmingInventory(skills: SkillTemplate[]): string {
-  if (skills.length === 0) return "";
-  const lines = skills.map((s) => {
-    const desc = s.description?.trim() || "(no description)";
-    return `- \`${s.id}\` — **${s.name}**: ${desc}`;
-  });
-  return (
-    `\n\n# Available Skills (for arming Minions)\n\n` +
-    `When delegating with \`assign_task\`, you may pass \`skillIds\` to ` +
-    `arm the Minion with one or more of the skills below. The compiled ` +
-    `skill instructions will be appended to the Minion's system prompt. ` +
-    `Use this when a task needs focused expertise (e.g. lint cleanup, ` +
-    `code review, doc writing). Pass \`skillValues\` only for skills ` +
-    `whose templates have \`{{placeholders}}\`.\n\n` +
-    `${lines.join("\n")}`
-  );
+  return buildLeaderSkillInventory(skills);
 }

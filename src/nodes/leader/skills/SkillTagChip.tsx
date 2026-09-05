@@ -1,3 +1,4 @@
+import { SkillIcon } from "../../../components/SkillIcon.tsx";
 import { X } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { SkillTemplate } from "../../../skills/types.ts";
@@ -17,7 +18,7 @@ export function SkillTagChip({
       className="skill-tag-chip"
       style={{ "--skill-color": skill.accentColor } as CSSProperties}
     >
-      <span aria-hidden="true">{skill.icon}</span>
+      <span aria-hidden="true"><SkillIcon skill={skill} /></span>
       <span>{skill.name}</span>
       {skill.subskills && skill.subskills.length > 0 && (
         <span

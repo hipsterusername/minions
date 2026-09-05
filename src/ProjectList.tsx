@@ -350,8 +350,13 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
                     <div
                       className="project-list-recent"
                       key={p.id}
-                      onClick={() => onOpenProject(p.id, p.path)}
                     >
+                      <button
+                        className="project-list-recent__open"
+                        type="button"
+                        aria-label={`Open ${p.name}`}
+                        onClick={() => onOpenProject(p.id, p.path)}
+                      >
                       <span
                         className={`project-list-recent__activity ${hasActiveSessions ? "project-list-recent__activity--active" : "project-list-recent__activity--sleeping"}`}
                         role="img"
@@ -363,7 +368,7 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
                           <span className="project-list-recent__zzz" aria-hidden="true">ZZZ</span>
                         )}
                       </span>
-                      <div className="project-list-recent__details">
+                      <span className="project-list-recent__details">
                         <strong>{p.name}</strong>
                         <span className={`project-list-recent__session-count ${hasActiveSessions ? "project-list-recent__session-count--active" : ""}`}>
                           {activeLabel}
@@ -373,7 +378,9 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
                           {formatDate(p.lastOpened)}
                           {!p.hasSidecar && <em>No canvas data</em>}
                         </small>
-                      </div>
+                      </span>
+                      <ArrowRight className="project-list-recent__arrow" size={14} aria-hidden="true" />
+                      </button>
                       <button
                         type="button"
                         className="project-list-remove"
@@ -384,7 +391,6 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
                         <Trash2 size={13} aria-hidden="true" />
                         <span>Remove</span>
                       </button>
-                      <ArrowRight className="project-list-recent__arrow" size={14} aria-hidden="true" />
                     </div>
                   );
                 })}

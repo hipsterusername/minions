@@ -1,3 +1,4 @@
+import { SkillIcon } from "./components/SkillIcon.tsx";
 import { useMemo, useState } from "react";
 import type { SkillTemplate } from "./skills/types.ts";
 
@@ -209,7 +210,7 @@ export function SkillImportModal({
                   style={{ marginTop: 3, flexShrink: 0 }}
                 />
                 <span style={{ fontSize: 16, lineHeight: 1.2, flexShrink: 0 }}>
-                  {skill.icon}
+                  <SkillIcon skill={skill} />
                 </span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div

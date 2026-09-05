@@ -24,14 +24,28 @@
   --border-hover: #313a5a;
   --text-primary: #e6ecf5;
   --text-secondary: #aab3c5;
-  --text-muted: #7c849a;
-  --text-dim: #5c637a;
+  --text-muted: #8b92a6;
+  --text-dim: #83899a;
   --accent: #f59e3b;
+  --text-on-accent: #0a0e1a;
+  --text-on-status: #0a0e1a;
   --accent-dark: #d97a1c;
   --dot-grid: #1a2036;
   --selection-bg: rgba(245, 158, 59, 0.28);
   --font-sans: "DM Sans Variable", "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", "Fira Code", monospace;
+
+  /* Shared reading scale. Keep size and rhythm stable when themes change
+     families. rem units respect the reader's default browser font size. */
+  --text-size-caption: 0.6875rem; /* 11px: short, incidental metadata only */
+  --text-size-label: 0.75rem; /* 12px: labels and compact technical text */
+  --text-size-ui: 0.8125rem; /* 13px: controls and supporting copy */
+  --text-size-body: 0.875rem; /* 14px: conversations and reading surfaces */
+  --text-size-title: 1.125rem; /* 18px: section titles */
+  --text-size-page: 1.5rem; /* 24px: page titles */
+  --leading-ui: 1.4;
+  --leading-body: 1.6;
+  --leading-heading: 1.25;
 
   /* ── Design-language tokens ──
      Shape / elevation / display type. Base values match the default
@@ -50,34 +64,34 @@
 
   /* ── Semantic colors ── */
   --status-success: #34d399;
-  --status-running: #38bdf8;
-  --status-idle: #60a5fa;
+  --status-running: #40c0f8;
+  --status-idle: #7fb7fb;
   --status-warning: #fbbf24;
-  --status-error: #f87171;
-  --status-stopped: #78716c;
-  --status-waiting: #a78bfa;
+  --status-error: #fa9191;
+  --status-stopped: #b5b1af;
+  --status-waiting: #bba6fb;
   --status-creating: #fbbf24;
 
-  --priority-critical: #ef4444;
-  --priority-high: #f97316;
-  --priority-medium: #3b82f6;
-  --priority-low: #6b7280;
+  --priority-critical: #f48282;
+  --priority-high: #fa7f2a;
+  --priority-medium: #74a7f9;
+  --priority-low: #a2a6af;
 
-  --status-disconnected: #64748b;
+  --status-disconnected: #abb4c0;
 
   --model-sonnet: #f59e0b;
-  --model-fable: #f472b6;
-  --model-opus: #a78bfa;
-  --model-opus-old: #8b7ab8;
+  --model-fable: #f57aba;
+  --model-opus: #af96fa;
+  --model-opus-old: #ac9fcc;
   --model-haiku: #34d399;
 
-  --tool-accent: #818cf8;
-  --thinking-accent: #a855f7;
+  --tool-accent: #959ff9;
+  --thinking-accent: #c48dfa;
   --success-color: #4ade80;
-  --danger-color: #dc2626;
-  --danger-color-text: #f87171;
+  --danger-color: #f97d7d;
+  --danger-color-text: #f97d7d;
   --warning-color: #facc15;
-  --info-color: #60a5fa;
+  --info-color: #68aafa;
   --streaming-color: #60a5fa;
   --leader-icon-color: var(--accent);
 
@@ -92,15 +106,15 @@
   --state-active: rgba(255,255,255,0.13);
 
   /* ── Component accents ── */
-  --tool-bg: rgba(129, 140, 248, 0.08);
-  --tool-bg-hover: rgba(129, 140, 248, 0.12);
-  --thinking-bg: rgba(168, 85, 247, 0.06);
-  --thinking-bg-hover: rgba(168, 85, 247, 0.10);
-  --success-bg: rgba(74, 222, 128, 0.08);
-  --danger-bg: rgba(239, 68, 68, 0.08);
-  --error-bg: rgba(239, 68, 68, 0.08);
-  --warning-bg: rgba(250, 204, 21, 0.06);
-  --info-bg: rgba(96, 165, 250, 0.08);
+  --tool-bg: color-mix(in srgb, var(--tool-accent) 8%, transparent);
+  --tool-bg-hover: color-mix(in srgb, var(--tool-accent) 12%, transparent);
+  --thinking-bg: color-mix(in srgb, var(--thinking-accent) 6%, transparent);
+  --thinking-bg-hover: color-mix(in srgb, var(--thinking-accent) 10%, transparent);
+  --success-bg: color-mix(in srgb, var(--success-color) 8%, transparent);
+  --danger-bg: color-mix(in srgb, var(--danger-color) 8%, transparent);
+  --error-bg: color-mix(in srgb, var(--danger-color) 8%, transparent);
+  --warning-bg: color-mix(in srgb, var(--warning-color) 6%, transparent);
+  --info-bg: color-mix(in srgb, var(--info-color) 8%, transparent);
   --muted-bg: rgba(136, 144, 176, 0.06);
   --code-bg: rgba(129, 140, 248, 0.12);
 
@@ -148,6 +162,14 @@ body,
   color: var(--text-primary);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  font-optical-sizing: auto;
+}
+
+/* Native controls otherwise fall back to the browser's UI font. Low
+   specificity lets editors and technical fields opt into --font-mono. */
+:where(button, input, textarea, select) {
+  font-family: inherit;
+  letter-spacing: inherit;
 }
 
 ::selection {
@@ -234,53 +256,6 @@ body,
   color: var(--text-primary) !important;
 }
 
-.message-selectable {
-  border-left: 2px solid transparent;
-  outline: 1px solid transparent;
-  outline-offset: -1px;
-}
-
-.message-selectable--active {
-  border-left-color: var(--accent);
-  outline-color: color-mix(in srgb, var(--accent) 28%, transparent);
-  background: color-mix(in srgb, var(--accent) 4%, transparent);
-}
-
-.message-chunk {
-  position: relative;
-  border-radius: 4px;
-  padding: 1px 4px;
-  margin: 1px 0;
-}
-
-.message-selectable--active .message-chunk {
-  padding-left: 24px;
-  cursor: pointer;
-}
-
-.message-selectable--active .message-chunk:hover,
-.message-chunk--selected {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
-.message-chunk__marker {
-  position: absolute;
-  left: 5px;
-  top: 5px;
-  width: 14px;
-  height: 14px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 3px;
-  border: 1px solid var(--border-default);
-  background: var(--bg-elevated);
-  color: var(--accent);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 1;
-}
-
 .render-context-selectable {
   position: relative;
   border-radius: 6px;
@@ -324,6 +299,8 @@ body,
   transition: opacity 150ms ease, background 150ms ease;
 }
 
+.render-context-selectable__marker:focus,
+.render-context-selectable:focus-within .render-context-selectable__marker,
 .render-context-selectable:hover .render-context-selectable__marker,
 .render-context-selectable--active .render-context-selectable__marker,
 .render-context-selectable--selected .render-context-selectable__marker {
@@ -340,7 +317,7 @@ input, textarea, select,
   -webkit-user-select: text;
 }
 
-/* ── Leader node status icon (theme-colored SVG mask) ── */
+/* ── Leader node status icon ── */
 .leader-status-icon {
   display: block;
   flex-shrink: 0;
@@ -354,8 +331,46 @@ input, textarea, select,
 }
 
 .leader-status-icon[data-state="active"] {
-  mask-image: url("/icons/leader-active.svg");
-  -webkit-mask-image: url("/icons/leader-active.svg");
+  background-color: transparent;
+  color: var(--leader-icon-color, var(--accent));
+}
+
+.leader-status-icon > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Quick glances with uneven fixations, followed by a long centered rest.
+   The crown follows a beat later; the outer circle stays still. */
+.leader-status-icon__pupil {
+  animation: leader-curious-glance 7.6s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+.leader-status-icon__crown {
+  transform-origin: 20px 24px;
+  animation: leader-curious-tilt 7.6s cubic-bezier(0.16, 1, 0.3, 1) 120ms infinite;
+}
+
+@keyframes leader-curious-glance {
+  0%, 12%, 66%, 100% { transform: translate(0, 0); }
+  14%, 27% { transform: translate(-2px, -0.3px); }
+  29%, 43% { transform: translate(-1.2px, -0.7px); }
+  45%, 63% { transform: translate(2px, -0.4px); }
+}
+
+@keyframes leader-curious-tilt {
+  0%, 12%, 66%, 100% { transform: rotate(0deg); }
+  14%, 27% { transform: rotate(-4deg); }
+  29%, 43% { transform: rotate(-2deg); }
+  45%, 63% { transform: rotate(4deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .leader-status-icon__pupil,
+  .leader-status-icon__crown {
+    animation: none;
+  }
 }
 
 .leader-status-icon[data-state="idle"] {
@@ -365,8 +380,8 @@ input, textarea, select,
 
 /* ── Leader scroll-capture zone ── */
 .leader-scroll-zone {
-  outline: 2px solid transparent;
-  outline-offset: -2px;
+  outline: 1px solid transparent;
+  outline-offset: -1px;
   border-radius: 4px;
   transition: outline-color 0.15s;
   /* Prevent scroll chaining: when the chat area reaches its scroll
@@ -379,7 +394,7 @@ input, textarea, select,
 }
 
 .leader-scroll-zone--locked {
-  outline-color: var(--accent) !important;
+  outline-color: color-mix(in srgb, var(--accent) 38%, var(--border-default));
 }
 
 :where(button, [role="button"], input, select, textarea):focus-visible {

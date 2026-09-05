@@ -98,12 +98,21 @@ describe("buildLifecycleCommand", () => {
 });
 
 describe("canAcknowledge / isDismissed", () => {
-  it("allows acknowledge only for open, un-acknowledged review states", () => {
-    expect(canAcknowledge(session({ reviewLifecycle: lifecycle }))).toBe(true);
-    expect(canAcknowledge(session({ reviewLifecycle: { ...lifecycle, acknowledgedAt: 1 } }))).toBe(false);
-    expect(canAcknowledge(session({ reviewLifecycle: { ...lifecycle, dismissedAt: 1 } }))).toBe(false);
-    expect(canAcknowledge(session({ reviewLifecycle: { ...lifecycle, reviewState: "none" } }))).toBe(false);
-    expect(canAcknowledge(session({}))).toBe(false);
+  it.each(["completion_to_review", "error_to_review", "interrupted_to_review"] as const)(
+    "allows acknowledge only for open, un-acknowledged %s outcomes", (reviewState) => {
+      const terminalLifecycle = { ...lifecycle, reviewState };
+      expect(canAcknowledge(session({ reviewLifecycle: terminalLifecycle }))).toBe(true);
+      expect(canAcknowledge(session({ reviewLifecycle: { ...terminalLifecycle, acknowledgedAt: 1 } }))).toBe(false);
+      expect(canAcknowledge(session({ reviewLifecycle: { ...terminalLifecycle, dismissedAt: 1 } }))).toBe(false);
+      expect(canAcknowledge(session({ reviewLifecycle: { ...lifecycle, reviewState: "none" } }))).toBe(false);
+      expect(canAcknowledge(session({}))).toBe(false);
+    });
+
+  it.each([false, true])("does not acknowledge an unanswered decision (canonical: %s)", (canonicalWorkItem) => {
+    expect(canAcknowledge(session({ canonicalWorkItem,
+      ...(canonicalWorkItem ? { workItemId: "work-1" } : {}),
+      reviewLifecycle: lifecycle,
+    }))).toBe(false);
   });
 
   it("reports dismissed state from the lifecycle", () => {

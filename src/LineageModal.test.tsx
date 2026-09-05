@@ -158,7 +158,7 @@ describe("<LineageModal />", () => {
       }),
     });
     // Lineage-level promotion conflict is shown at the tab head.
-    expect(screen.getByRole("alert")).toHaveTextContent("Promotion conflict");
+    expect(screen.getByRole("alert")).toHaveTextContent("Promotion needs another review");
 
     fireEvent.click(screen.getByText("This leader"));
     // Contribution-level guidance + the blocking gate are shown; a conflicted
@@ -210,7 +210,7 @@ describe("<LineageModal />", () => {
             sourceSha: "head" }, position: null, enqueuedAt: 2, startedAt: 3,
           finishedAt: 4, updatedAt: 4 }] }),
     });
-    // Promotion conflict blocks final review even before selecting a row.
+    // Promotion needs another review blocks final review even before selecting a row.
     expect(screen.getByText(/src\/a\.ts/)).toBeInTheDocument();
     expect(screen.getByText(/\.worktrees\/integration/)).toBeInTheDocument();
     fireEvent.click(screen.getByText("This leader"));
@@ -232,4 +232,14 @@ describe("<LineageModal />", () => {
     fireEvent.click(backdrop);
     expect(onClose).toHaveBeenCalledTimes(3);
   });
+});
+
+it("lets review refresh pending gates while integration stays blocked", () => {
+  const { send } = renderModal({ lineage: snapshot({ gates: [{ id: "gate", lineageId: "lineage-1",
+    contributionId: "contrib-1", scope: "contribution", name: "tests", status: "pending", details: null, recordedAt: 1 }] }) });
+  fireEvent.click(screen.getByText("This leader"));
+  const review = screen.getByRole("button", { name: "Approve contribution" });
+  expect(review).toBeEnabled(); fireEvent.click(review);
+  expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "review_worktree_contribution" }));
+  expect(screen.queryByRole("button", { name: "Enqueue contribution" })).toBeNull();
 });

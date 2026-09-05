@@ -11,7 +11,7 @@
  * `--accent`, …) come from the shared theme.
  */
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useId, useState, useCallback, useEffect, useRef } from "react";
 import type { ReactElement, KeyboardEvent } from "react";
 import type { SectionComponent, TabsComponent, TabItem } from "../../../shared/render-containers.ts";
 import type { RenderComponent } from "../../../shared/render-dsl.ts";
@@ -23,15 +23,15 @@ interface SectionRendererProps {
   /** Called once per visible child to produce a React element. */
   renderChild: (child: RenderComponent) => ReactElement;
   /** Dashboard-level expand/collapse state applied to all sections. */
-  globalOpenState?: boolean | undefined;
+  globalOpenState?: boolean | { open: boolean } | undefined;
 }
 
 export function SectionRenderer({ c, renderChild, globalOpenState }: SectionRendererProps): ReactElement {
-  const [isOpen, setIsOpen] = useState(globalOpenState ?? c.defaultOpen ?? false);
+  const [isOpen, setIsOpen] = useState((typeof globalOpenState === "object" ? globalOpenState.open : globalOpenState) ?? c.defaultOpen ?? false);
 
   useEffect(() => {
     if (globalOpenState !== undefined) {
-      setIsOpen(globalOpenState);
+      setIsOpen(typeof globalOpenState === "object" ? globalOpenState.open : globalOpenState);
     }
   }, [globalOpenState]);
 
@@ -70,7 +70,7 @@ export function SectionRenderer({ c, renderChild, globalOpenState }: SectionRend
         <span
           aria-hidden="true"
           style={{
-            fontSize: 10,
+            fontSize: "var(--rd-label-size, 12px)",
             color: "var(--text-muted)",
             lineHeight: 1,
             flexShrink: 0,
@@ -85,7 +85,7 @@ export function SectionRenderer({ c, renderChild, globalOpenState }: SectionRend
         <span
           style={{
             flex: 1,
-            fontSize: 11,
+            fontSize: "var(--rd-body-size, 14px)",
             fontWeight: 600,
             color: "var(--text-primary)",
             letterSpacing: "-0.01em",
@@ -98,7 +98,7 @@ export function SectionRenderer({ c, renderChild, globalOpenState }: SectionRend
         {c.badge !== undefined && (
           <span
             style={{
-              fontSize: 10,
+              fontSize: "var(--rd-label-size, 12px)",
               fontFamily: "var(--font-mono)",
               color: "var(--text-muted)",
               background: "var(--bg-secondary)",
@@ -141,6 +141,7 @@ interface TabsRendererProps {
 }
 
 export function TabsRenderer({ c, renderChild }: TabsRendererProps): ReactElement {
+  const instanceId = useId();
   const firstTabId = c.tabs[0]?.id ?? "";
   const [activeTabId, setActiveTabId] = useState(c.activeTabId ?? firstTabId);
   const tablistRef = useRef<HTMLDivElement>(null);
@@ -151,11 +152,11 @@ export function TabsRenderer({ c, renderChild }: TabsRendererProps): ReactElemen
 
   const handleTabKeyDown = useCallback(
     (e: KeyboardEvent<HTMLButtonElement>, idx: number) => {
-      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
       e.preventDefault();
 
       const dir = e.key === "ArrowLeft" ? -1 : 1;
-      const nextIdx = (idx + dir + c.tabs.length) % c.tabs.length;
+      const nextIdx = e.key === "Home" ? 0 : e.key === "End" ? c.tabs.length - 1 : (idx + dir + c.tabs.length) % c.tabs.length;
       const nextTab = c.tabs[nextIdx];
       if (!nextTab) return;
 
@@ -183,6 +184,7 @@ export function TabsRenderer({ c, renderChild }: TabsRendererProps): ReactElemen
       <div
         ref={tablistRef}
         role="tablist"
+        aria-label="Dashboard views"
         style={{
           display: "flex",
           alignItems: "stretch",
@@ -192,13 +194,16 @@ export function TabsRenderer({ c, renderChild }: TabsRendererProps): ReactElemen
         }}
       >
         {c.tabs.map((tab, idx) => {
-          const isActive = tab.id === activeTabId;
+          const isActive = tab.id === activeTab?.id;
           return (
             <button
               key={tab.id}
               role="tab"
               type="button"
               aria-selected={isActive}
+              tabIndex={isActive ? 0 : -1}
+              id={`${instanceId}-tab-${tab.id}`}
+              aria-controls={`${instanceId}-panel-${tab.id}`}
               onClick={() => setActiveTabId(tab.id)}
               onKeyDown={(e) => handleTabKeyDown(e, idx)}
               style={{
@@ -212,7 +217,7 @@ export function TabsRenderer({ c, renderChild }: TabsRendererProps): ReactElemen
                   ? "2px solid var(--accent)"
                   : "2px solid transparent",
                 cursor: "pointer",
-                fontSize: 11,
+                fontSize: "var(--rd-body-size, 14px)",
                 fontWeight: isActive ? 600 : 400,
                 color: isActive ? "var(--text-primary)" : "var(--text-muted)",
                 whiteSpace: "nowrap",
@@ -224,7 +229,7 @@ export function TabsRenderer({ c, renderChild }: TabsRendererProps): ReactElemen
               {tab.badge !== undefined && (
                 <span
                   style={{
-                    fontSize: 9,
+                    fontSize: "var(--rd-label-size, 12px)",
                     fontFamily: "var(--font-mono)",
                     color: isActive ? "var(--accent)" : "var(--text-muted)",
                     background: isActive
@@ -247,20 +252,21 @@ export function TabsRenderer({ c, renderChild }: TabsRendererProps): ReactElemen
         })}
       </div>
 
-      {activeTab !== undefined && activeTab.components.length > 0 && (
+      {c.tabs.map((tab) => (
         <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            padding: 10,
-          }}
+          key={tab.id}
+          role="tabpanel"
+          id={`${instanceId}-panel-${tab.id}`}
+          aria-labelledby={`${instanceId}-tab-${tab.id}`}
+          hidden={tab.id !== activeTab?.id}
+          tabIndex={0}
+          style={tab.id === activeTab?.id ? { display: "flex", flexDirection: "column", gap: 12, padding: 12 } : undefined}
         >
-          {activeTab.components.map((child) => (
+          {tab.id === activeTab?.id && tab.components.map((child) => (
             <div key={child.id}>{renderChild(child)}</div>
           ))}
         </div>
-      )}
+      ))}
     </div>
   );
 }

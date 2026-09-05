@@ -34,11 +34,13 @@ export function releaseLeaderAutoStart(nodeId: string, prompt: string): void {
 
 export function buildInitialLeaderRun(input: {
   userPrompt: string; data: LeaderData; contextItems: ContextItem[];
+  promptContextItems?: ContextItem[];
   incomingModes: string[]; at?: number;
 }) {
   const { userPrompt, data, contextItems } = input;
   const sessionContext = buildSessionContext(data.messages, data.taskPlan ?? [], data.taskName);
-  const block = buildContextBlock(contextItems);
+  const allItems = [...contextItems, ...(input.promptContextItems ?? [])];
+  const block = buildContextBlock(allItems);
   let prompt = block ? `${block}\n\n${userPrompt}` : userPrompt;
   if (sessionContext) prompt = `${sessionContext}\n\n${prompt}`;
   const frozen = freezeLeaderSystemPrompt({ skillIds: data.skillIds ?? [],
@@ -46,6 +48,6 @@ export function buildInitialLeaderRun(input: {
     systemPromptPrefix: mergeContextPreamble(
       input.incomingModes.map(resolveContextMode), data.systemPromptPrefix) });
   return { prompt, frozen, previousMessages: data.messages,
-    attachments: contextItems.flatMap((item) => item.attachments ?? []),
+    attachments: allItems.flatMap((item) => item.attachments ?? []),
     contextDelivery: seedContextDelivery(contextItems, input.at ?? Date.now()) };
 }

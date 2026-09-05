@@ -27,6 +27,12 @@ afterEach(() => {
 });
 
 describe("FeatureFlagsPanel", () => {
+  it("does not offer a workspace toggle even with a stale override", () => {
+    localStorage.setItem("minions:feature-flags", JSON.stringify({ "canvas-zones": false }));
+    render(<FeatureFlagsPanel onClose={() => {}} onDisableDebug={() => {}} />);
+    expect(screen.queryByLabelText(/canvas workspaces/i)).toBeNull();
+  });
+
   it("renders one row per registered flag", () => {
     render(<FeatureFlagsPanel onClose={() => {}} onDisableDebug={() => {}} />);
     for (const def of FEATURE_FLAGS) {

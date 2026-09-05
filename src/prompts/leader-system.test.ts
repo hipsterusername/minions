@@ -65,6 +65,7 @@ describe("buildBaseLeaderPrompt", () => {
 
   it("offers Task Graph by default without removing direct Leader tools", () => {
     expect(LEADER_SYSTEM_PROMPT).toContain("## Task Graph planning");
+    expect(LEADER_SYSTEM_PROMPT).toContain("`/graph` and `/crew`");
     expect(LEADER_SYSTEM_PROMPT).toContain("submit_graph_plan");
     expect(LEADER_SYSTEM_PROMPT).toContain("assign_task");
     expect(LEADER_SYSTEM_PROMPT).toMatch(/optional reasoning and orchestration aid/i);

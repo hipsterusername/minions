@@ -55,11 +55,11 @@ describe("SkillEditor sub-skills", () => {
       ],
     };
     render(<SkillEditor skill={withVar} onSave={() => {}} onClose={() => {}} />);
-    fireEvent.click(screen.getByText("Compiled preview"));
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
     expect(screen.getByText("Focus on safety.")).toBeInTheDocument();
   });
 
-  it("keeps the compiled preview visible without interaction (sticky pane)", () => {
+  it("keeps compiled instructions hidden until preview is requested", () => {
     const withVar: SkillTemplate = {
       ...baseSkill,
       subskills: [],
@@ -69,7 +69,9 @@ describe("SkillEditor sub-skills", () => {
       ],
     };
     render(<SkillEditor skill={withVar} onSave={() => {}} onClose={() => {}} />);
-    expect(screen.getByText("Focus on safety.")).toBeInTheDocument();
+    expect(screen.getByText("Focus on safety.")).not.toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    expect(screen.getByText("Focus on safety.")).toBeVisible();
   });
 
   it("opens on Essentials and navigates categories via the side rail", () => {
@@ -91,4 +93,20 @@ describe("SkillEditor sub-skills", () => {
       (screen.getByLabelText("Sub-skill 1 id") as HTMLInputElement).value,
     ).toBe("layout");
   });
+});
+
+it("saves a chosen library icon with the skill and restores it when editing", () => {
+  const onSave = vi.fn();
+  const { unmount } = render(<SkillEditor skill={baseSkill} onSave={onSave} onClose={() => {}} />);
+  fireEvent.click(screen.getByRole("button", { name: /Appearance/ }));
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search icons" }), { target: { value: "rocket" } });
+  fireEvent.click(screen.getByRole("button", { name: "Rocket" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  const saved = onSave.mock.calls[0]![0] as SkillTemplate;
+  expect(saved.icon).toBe("minions:rocket");
+  expect(saved.attachments).toEqual(baseSkill.attachments);
+  unmount();
+  render(<SkillEditor skill={saved} onSave={() => {}} onClose={() => {}} />);
+  fireEvent.click(screen.getByRole("button", { name: /Appearance/ }));
+  expect(screen.getByRole("button", { name: "Rocket" })).toHaveAttribute("aria-pressed", "true");
 });

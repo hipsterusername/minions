@@ -53,7 +53,7 @@ describe("buildLeaderSystemPrompt", () => {
     // Stable core is present, plus the always-available built-in inventory.
     expect(out).toContain("You are the Lead Developer agent");
     expect(out).toContain("## Legacy planning mode (debug)");
-    expect(out).toContain("# Available Skills (for arming Minions)");
+    expect(out).toContain("# Available Skills");
     expect(out).toContain("`skill-builder`");
     // Nothing tagged → no active section.
     expect(out).not.toContain("# Active Skills");
@@ -67,7 +67,7 @@ describe("buildLeaderSystemPrompt", () => {
       skillIds: [], skillValues: {}, orchestrationMode: "direct",
     });
     expect(out).toContain("## Legacy planning mode (debug)");
-    expect(out).toContain("# Available Skills (for arming Minions)");
+    expect(out).toContain("# Available Skills");
     expect(out).toContain("`a` — **Alpha**: First");
     expect(out).toContain("`b` — **Beta**: Second");
     // No active section when nothing is tagged
@@ -97,8 +97,8 @@ describe("buildLeaderSystemPrompt", () => {
     expect(out).toContain("# Active Skills");
     expect(out).toContain("## Skill: Lint");
     expect(out).toContain("Lint hard.");
-    expect(out).toContain("Warnings block release.");
-    expect(out).toContain("# Available Skills (for arming Minions)");
+    expect(out).not.toContain("Warnings block release.");
+    expect(out).toContain("# Available Skills");
     // Both armed and unarmed skills appear in the inventory
     expect(out).toContain("`lint` — **Lint**: Cleanup");
     expect(out).toContain("`review` — **Review**: Read code");
@@ -111,7 +111,7 @@ describe("buildLeaderSystemPrompt", () => {
     expect(out).toContain(LEADER_SYSTEM_PROMPT);
     expect(out).toContain("## Task Graph planning");
     expect(out).toContain("submit_graph_plan");
-    expect(out).toContain("# Available Skills (for arming Minions)");
+    expect(out).toContain("# Available Skills");
     expect(out).toContain("`review` — **Review**: Read code");
     expect(out).not.toContain("## Legacy planning mode (debug)");
   });

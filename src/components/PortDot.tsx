@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect, memo } from "react";
+import { useState, useCallback, useEffect, useId, memo } from "react";
+import "./port-dot.css";
 
 /**
  * Protocol-aware port colors — match the edge stroke colors in EdgeRenderer.
@@ -50,7 +51,7 @@ interface PortDotProps {
 }
 
 /**
- * A small circular port indicator rendered on the edge of a canvas node.
+ * A connection indicator rendered on the edge of a canvas node.
  *
  * Rendered at the CanvasNode level (outside the inner renderer) so it is
  * never clipped by `overflow: hidden` containers. Uses `data-no-drag` to
@@ -90,6 +91,20 @@ export const PortDot = memo(function PortDot({
   isSnapTarget = false,
 }: PortDotProps) {
   const [hover, setHover] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [hintDismissed, setHintDismissed] = useState(false);
+  const tooltipId = useId();
+  const isLeader = nodeType === "leader";
+  const showHint = (hover || focused) && !isDragActive && !hintDismissed;
+  const hint = !isLeader ? undefined : locked
+    ? direction === "input" && protocol === "context"
+      ? "Context is fixed after this session starts. Start a new session to change it."
+      : "This connection is currently locked."
+    : direction === "input"
+      ? "Connect a context source here before starting the session."
+      : protocol === "task-assignment"
+        ? "Drag to a Minion’s task input to connect it to this leader."
+        : "Drag to another leader’s context input to share this dashboard.";
   const color = PROTOCOL_COLORS[protocol] ?? "var(--text-muted)";
 
   const side = direction === "output" ? "right" : "left";
@@ -137,17 +152,31 @@ export const PortDot = memo(function PortDot({
 
   const dotSize = isSnapTarget ? 16 : isDragActive && isValidTarget ? 14 : 10;
   // Hit area is always larger than the visual dot for easier targeting
-  const hitSize = Math.max(dotSize, 28);
+  const hitSize = isLeader ? 32 : Math.max(dotSize, 28);
   const hitOffset = -(hitSize / 2);
 
   return (
     <div
+      className={isLeader ? "leader-port" : undefined}
+      data-state={isLeader ? locked ? "locked" : isSnapTarget ? "snap" : isDragActive && isValidTarget ? "target" : "rest" : undefined}
       data-no-drag
       data-port-id={portId}
       data-node-id={nodeId}
       data-port-direction={direction}
-      onMouseEnter={() => setHover(true)}
+      tabIndex={isLeader ? 0 : undefined}
+      role={isLeader ? "group" : undefined}
+      aria-label={isLeader ? `${label} ${direction}${locked ? " (locked)" : ""}` : undefined}
+      aria-describedby={showHint ? tooltipId : undefined}
+      onMouseEnter={() => { setHover(true); setHintDismissed(false); }}
       onMouseLeave={() => setHover(false)}
+      onFocus={() => { setFocused(true); setHintDismissed(false); }}
+      onBlur={() => setFocused(false)}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && showHint) {
+          e.stopPropagation();
+          setHintDismissed(true);
+        }
+      }}
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}
       style={{
@@ -165,7 +194,7 @@ export const PortDot = memo(function PortDot({
         pointerEvents: "auto",
       }}
     >
-      {isSnapTarget && (
+      {isSnapTarget && !isLeader && (
         <div
           style={{
             position: "absolute",
@@ -179,7 +208,16 @@ export const PortDot = memo(function PortDot({
         />
       )}
 
-      <div
+      {isLeader ? (
+        <svg className="leader-port__fins" viewBox="-4 -4 40 40" aria-hidden="true" style={{ color }}>
+          {/* Both point right: into the card on the left, out on the right. */}
+          <path className="leader-port__collar" d="M1 8V3h7M24 3h7v5M31 24v5h-7M8 29H1v-5" />
+          <path className="leader-port__shell" d="M4 5h8l10 11-10 11H4l10-11z" />
+          <path className="leader-port__fin" d="m17 5 10 11-10 11" />
+          <path className="leader-port__core" d="m12 10 6 6-6 6 3-6z" />
+          {locked && <g className="leader-port__lock"><rect x="22" y="22" width="9" height="8" rx="2" /><path d="M24 22v-2a2.5 2.5 0 0 1 5 0v2" /></g>}
+        </svg>
+      ) : <div
         style={{
           width: dotSize,
           height: dotSize,
@@ -203,10 +241,11 @@ export const PortDot = memo(function PortDot({
           transition: "opacity 0.15s, box-shadow 0.15s, width 0.1s, height 0.1s",
           flexShrink: 0,
         }}
-      />
+      />}
 
-      {hover && !isDragActive && (
+      {showHint && (
         <div
+          id={tooltipId}
           role="tooltip"
           style={{
             position: "absolute",
@@ -215,14 +254,16 @@ export const PortDot = memo(function PortDot({
             [direction === "input" ? "left" : "right"]: hitSize + 4,
             top: "50%",
             transform: "translateY(-50%)",
-            padding: "4px 8px",
-            borderRadius: 4,
+            padding: isLeader ? "8px 10px" : "4px 8px",
+            borderRadius: "var(--radius-control, 4px)",
             backgroundColor: "var(--bg-tooltip, #1a1a1a)",
             color: "var(--text-primary, #fff)",
             fontSize: 11,
             fontWeight: 500,
-            lineHeight: 1.2,
-            whiteSpace: "nowrap",
+            lineHeight: isLeader ? 1.5 : 1.2,
+            whiteSpace: isLeader ? "normal" : "nowrap",
+            width: isLeader ? 220 : undefined,
+            border: isLeader ? "1px solid var(--border-hover)" : undefined,
             boxShadow: "0 2px 8px rgba(0, 0, 0, 0.35)",
             pointerEvents: "none",
             zIndex: 30,
@@ -230,6 +271,7 @@ export const PortDot = memo(function PortDot({
           }}
         >
           {locked ? `${label} (locked)` : label}
+          {hint && <span className="leader-port__hint">{hint}</span>}
         </div>
       )}
     </div>

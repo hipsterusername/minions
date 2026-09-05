@@ -16,6 +16,7 @@ import {
   type LucideProps,
 } from "lucide-react";
 import type { ProjectSettings } from "./api.ts";
+import { CrewIcon } from "./components/CrewIcon.tsx";
 import {
   DEFAULT_CONTEXT_ACTION_ICON,
   defaultContextActions,
@@ -30,6 +31,7 @@ export const DASHBOARD_ACTION_ICONS: ReadonlyArray<{
   label: string;
   Icon: ComponentType<LucideProps>;
 }> = [
+  { key: "crew", label: "Graph", Icon: CrewIcon },
   { key: "play", label: "Implement", Icon: Play },
   { key: "sparkles", label: "Fix", Icon: Sparkles },
   { key: "microscope", label: "Review", Icon: Microscope },
@@ -53,7 +55,7 @@ const ICON_BY_KEY: ReadonlyMap<string, ComponentType<LucideProps>> = new Map(
 export function dashboardActionIcon(
   key: string | undefined,
 ): ComponentType<LucideProps> {
-  return (key && ICON_BY_KEY.get(key)) || Slash;
+  return (key && ICON_BY_KEY.get(key === "graph" ? "crew" : key)) || Slash;
 }
 
 export const DEFAULT_DASHBOARD_LEADER_ACTIONS = defaultContextActions();

@@ -1,3 +1,4 @@
+import { MinionsIcon, type MinionsIconName } from "../components/MinionsIcon.tsx";
 import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from "react";
 import type { NodeRenderProps, ThinkingConfig } from "../types.ts";
 import { MINION_THINKING_CONFIG } from "../types.ts";
@@ -765,13 +766,13 @@ export function MinionNodeRenderer({
 
   const priorityColors: Record<string, string> = PRIORITY_COLORS;
 
-  const taskStatusIcon = (status: string) => {
+  const taskStatusIcon = (status: string): MinionsIconName => {
     switch (status) {
-      case "in_progress": return "\u23F3";
-      case "completed": return "\u2713";
-      case "failed": return "\u2717";
-      case "blocked": return "\u26A0";
-      default: return "\u25CB";
+      case "in_progress": return "wait";
+      case "completed": return "check";
+      case "failed": return "close";
+      case "blocked": return "warning";
+      default: return "planned";
     }
   };
 
@@ -923,7 +924,7 @@ export function MinionNodeRenderer({
             title="Settings"
             aria-label={showSettings ? "Hide minion settings" : "Show minion settings"}
           >
-            ⚙
+            <MinionsIcon name="settings" size={14} />
           </button>
         </div>
       </div>
@@ -966,7 +967,7 @@ export function MinionNodeRenderer({
         >
           <div style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0 }}>
             <span style={{ fontSize: 11, flexShrink: 0 }}>
-              {taskStatusIcon(activeTask.status)}
+              <MinionsIcon name={taskStatusIcon(activeTask.status)} size={13} label={activeTask.status.replaceAll("_", " ")} />
             </span>
             <span style={{
               fontSize: 12,

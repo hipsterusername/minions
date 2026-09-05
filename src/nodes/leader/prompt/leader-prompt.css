@@ -1,0 +1,184 @@
+.leader-prompt-bar {
+  flex-shrink: 0;
+  padding: 12px;
+  container: leader-composer / inline-size;
+}
+
+.leader-prompt-bar--inline {
+  border-top: 1px solid var(--border-default);
+  background: var(--bg-surface);
+}
+
+.leader-prompt-bar--overlay {
+  padding: 10px;
+}
+
+.leader-prompt-bar__surface {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius-panel);
+  background: var(--bg-primary);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--overlay-bg) 12%, transparent);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.leader-prompt-bar__surface:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 65%, var(--border-default));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.leader-prompt-bar__input-wrap {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+.leader-prompt-bar__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 160px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px 0;
+  list-style: none;
+}
+
+.leader-prompt-bar__attachments li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-control);
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.leader-prompt-bar__attachments img {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.leader-prompt-bar__attachments [role="alert"] {
+  display: block;
+  color: var(--status-error);
+}
+
+.leader-prompt-bar__attachments button {
+  display: flex;
+  flex-shrink: 0;
+  padding: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+/* The composer places the shared textarea's keyboard hint in its own toolbar. */
+.leader-prompt-bar__input-wrap > div > span {
+  display: none;
+}
+
+.leader-prompt-bar textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+.leader-prompt-bar__toolbar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 8px 8px 12px;
+}
+
+.leader-prompt-bar__hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.leader-prompt-bar__submit {
+  display: inline-flex;
+  min-height: 32px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-left: auto;
+  padding: 7px 11px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-control);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font: 600 12px/1.25 var(--font-sans);
+  cursor: pointer;
+  transition: background 150ms ease, box-shadow 150ms ease;
+}
+
+.leader-prompt-bar__submit[data-primary="true"] {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.leader-prompt-bar__submit:hover:not(:disabled) {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.leader-prompt-bar__submit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.leader-prompt-bar__submit:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.leader-prompt-bar--overlay .leader-prompt-bar__submit {
+  min-height: 40px;
+  padding-inline: 14px;
+  font-size: 13px;
+}
+
+/* Launch forms already supply the outer field border and available height. */
+.leader-launch-prompt .leader-prompt-bar__surface {
+  height: 100%;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.leader-launch-prompt .leader-prompt-bar__input-wrap {
+  flex: 1;
+}
+
+.leader-launch-prompt .leader-prompt-bar__toolbar {
+  padding: 8px 0 0;
+}
+
+@container leader-composer (max-width: 360px) {
+  .leader-prompt-bar__hint > span:last-child {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .leader-prompt-bar__surface,
+  .leader-prompt-bar__submit {
+    transition: none;
+  }
+}

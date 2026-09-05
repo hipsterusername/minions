@@ -25,8 +25,11 @@ export interface CanvasNode<T = unknown> {
 }
 
 export type CanvasAction =
+  | { type: "SET_ACTIVE_WORKSPACE"; id: string }
+  | { type: "UPDATE_ZONES"; zones: CanvasNode[]; moves: Array<{ id: string; position: Position }> }
   | { type: "ADD_NODE"; node: CanvasNode }
   | { type: "REMOVE_NODE"; id: string }
+  | { type: "REMOVE_NODES"; ids: string[] }
   | { type: "MOVE_NODE"; id: string; position: Position }
   | { type: "RESIZE_NODE"; id: string; size: Size }
   | { type: "UPDATE_NODE_DATA"; id: string; data: unknown }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, LockKeyhole, Paperclip } from "lucide-react";
+import { ChevronDown } from "lucide-react";
+import { MinionsIcon } from "../../components/MinionsIcon.tsx";
 import { ConfirmModal } from "../../components/ConfirmModal.tsx";
 import type { ContextItem } from "../../types.ts";
 import { subscribeSocketTopic, type SocketSubscribe } from "../../use-socket.ts";
@@ -56,10 +57,9 @@ export function ConfigFooter({
   const changeMode = selectCanvasChangeMode(data);
   const isWorktreeMode = changeMode === "worktree";
   const changeModeLocked = hasSession || !!data.workItemSnapshot;
-  // Distinct glyphs per mode so the badge/toggle read at a glance:
-  // ⚡ Live = edits hit the working tree directly · 🌿 Worktree = isolated.
-  const LIVE_ICON = "\u{26A1}";
-  const WORKTREE_ICON = "\u{1F33F}";
+  // Distinct artwork for direct edits and an isolated branch.
+  const LIVE_ICON = <MinionsIcon name="live" size={13} />;
+  const WORKTREE_ICON = <MinionsIcon name="worktree" size={13} />;
   const modeIcon = isWorktreeMode ? WORKTREE_ICON : LIVE_ICON;
   const modeLabel = isWorktreeMode ? "Worktree" : "Live";
   const integration = useWorktreeIntegration({
@@ -222,8 +222,8 @@ export function ConfigFooter({
               }}
             >
               {hasSession
-                ? <LockKeyhole size={10} aria-hidden="true" />
-                : <Paperclip size={10} aria-hidden="true" />}
+                ? <MinionsIcon name="lock" size={10} />
+                : <MinionsIcon name="attachment" size={10} />}
               {contextCount}
             </span>
           )}
@@ -373,7 +373,7 @@ export function ConfigFooter({
                     title="Change mode is fixed once the work item is created"
                     style={{ fontSize: 10, color: "var(--text-muted)" }}
                   >
-                    {"\u{1F512}"} fixed
+                    <MinionsIcon name="lock" size={12} /> fixed
                   </span>
                 )}
               </div>
@@ -414,7 +414,7 @@ export function ConfigFooter({
                   opacity: hasSession ? 0.7 : 1,
                 }}
               >
-                {hasSession ? "\u{1F512}" : "\u{1F4CE}"} {contextCount} context source
+                <MinionsIcon name={hasSession ? "lock" : "attachment"} size={12} /> {contextCount} context source
                 {contextCount !== 1 ? "s" : ""}
                 {hasSession ? " (locked)" : " connected"}
               </div>

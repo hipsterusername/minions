@@ -1,4 +1,4 @@
-import { ClipboardList } from "lucide-react";
+import { CrewIcon } from "../components/CrewIcon.tsx";
 import type { TaskGraphPlanSnapshotView } from "../../shared/task-graph-planning-contracts.ts";
 import "./task-graph.css";
 
@@ -23,7 +23,7 @@ export function GraphPlanProposalCard({ snapshot, actions }: {
     <section className="tg-summary tg-plan-proposal" aria-label={`Execution plan ${snapshot.objective}`}>
       <header className="tg-summary__head">
         <div className="tg-summary__identity">
-          <span className="tg-summary__leader-mark" aria-hidden="true"><ClipboardList aria-hidden="true" /></span>
+          <span className="tg-summary__leader-mark" aria-hidden="true"><CrewIcon aria-hidden="true" /></span>
           <div><strong>{titleFor(snapshot)}</strong><span>Revision {snapshot.proposalRevision}</span></div>
         </div>
         <span className={`tg-run-status tg-run-status--${snapshot.state}`}>{snapshot.state.replace("_", " ")}</span>
@@ -85,7 +85,7 @@ export function GraphPlanProposalDialog({ snapshot, actions, onClose }: {
     <div className="tg-plan-dialog" role="dialog" aria-modal="true"
       aria-label={`Execution plan: ${snapshot.objective}`}>
       <header className="tg-inspector__header"><div className="tg-inspector__title">
-        <span className="tg-summary__leader-mark" aria-hidden="true"><ClipboardList aria-hidden="true" /></span>
+        <span className="tg-summary__leader-mark" aria-hidden="true"><CrewIcon aria-hidden="true" /></span>
         <div><strong>{titleFor(snapshot)}</strong><span>{snapshot.objective}</span></div>
       </div><button type="button" className="tg-close" onClick={onClose} aria-label="Close">×</button></header>
       <div className="tg-plan-dialog__body">

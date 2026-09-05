@@ -1,3 +1,4 @@
+import { SkillIcon } from "../components/SkillIcon.tsx";
 import type { SkillTemplate } from "../skills/types.ts";
 
 /**
@@ -89,7 +90,7 @@ export function LaunchSkillsPanel({
                     <div className="mob-skill-config-card" key={skill.id}>
                       <div className="mob-skill-config-head">
                         <span className="mob-skill-icon" aria-hidden="true">
-                          {skill.icon}
+                          <SkillIcon skill={skill} />
                         </span>
                         <strong>{skill.name}</strong>
                       </div>
@@ -177,7 +178,7 @@ export function LaunchSkillsPanel({
                           onClick={() => onToggleSkill(skill.id)}
                         >
                           <span className="mob-skill-icon" aria-hidden="true">
-                            {skill.icon}
+                            <SkillIcon skill={skill} />
                           </span>
                           <span className="mob-skill-row-text">
                             <strong>{skill.name}</strong>

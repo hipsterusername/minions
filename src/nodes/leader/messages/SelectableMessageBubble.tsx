@@ -2,6 +2,7 @@ import {
   memo,
   useCallback,
   useMemo,
+  useRef,
   useState,
   type KeyboardEvent,
   type MouseEvent,
@@ -18,6 +19,7 @@ import {
   MessageSelectionGroup,
 } from "./MessageSelection.tsx";
 import { browserLogger } from "../../../logging.ts";
+import "./message-selection.css";
 
 const log = browserLogger.child("selectable-message-bubble");
 
@@ -66,6 +68,7 @@ export const SelectableMessageBubble = memo(
     onAddContentNode?: ((content: string) => void) | undefined;
   }) {
     const [copied, setCopied] = useState(false);
+    const containerRef = useRef<HTMLDivElement>(null);
     const chunks = useMemo(() => parseMessageChunks(msg.content), [msg.content]);
     const isActive = selection?.messageId === msg.id;
     const selectedIds = useMemo(
@@ -135,22 +138,31 @@ export const SelectableMessageBubble = memo(
       e.stopPropagation();
     }, []);
 
-    const handleContainerClick = useCallback(() => {
+    const handleContainerClick = useCallback((e: MouseEvent<HTMLDivElement>) => {
+      if ((e.target as Element).closest("button, a, input, textarea, select, [contenteditable='true']")) return;
+      if (window.getSelection()?.isCollapsed === false) return;
       if (!isActive) onActivate(msg.id);
     }, [isActive, msg.id, onActivate]);
+
+    const exitSelection = useCallback(() => {
+      onExit();
+      containerRef.current?.focus({ preventScroll: true });
+    }, [onExit]);
 
     const handleContainerKeyDown = useCallback(
       (e: KeyboardEvent<HTMLDivElement>) => {
         if (e.key === "Escape" && isActive) {
-          e.stopPropagation();
-          onExit();
-        }
-        if ((e.key === "Enter" || e.key === " ") && !isActive) {
           e.preventDefault();
+          e.stopPropagation();
+          exitSelection();
+        }
+        if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ") && !isActive) {
+          e.preventDefault();
+          e.stopPropagation();
           onActivate(msg.id);
         }
       },
-      [isActive, msg.id, onActivate, onExit],
+      [isActive, msg.id, onActivate, exitSelection],
     );
 
     const handleSelectAll = useCallback(
@@ -191,13 +203,14 @@ export const SelectableMessageBubble = memo(
     const handleExitSelection = useCallback(
       (e: MouseEvent<HTMLButtonElement>) => {
         e.stopPropagation();
-        onExit();
+        exitSelection();
       },
-      [onExit],
+      [exitSelection],
     );
 
     return (
       <div
+        ref={containerRef}
         className={`copyable message-selectable${isActive ? " message-selectable--active" : ""}`}
         data-testid="selectable-message"
         data-selected={isActive ? "true" : undefined}
@@ -212,85 +225,7 @@ export const SelectableMessageBubble = memo(
           position: "relative",
         }}
       >
-        {isActive ? (
-          <div
-            data-testid="leader-message-selection-toolbar"
-            style={{
-              position: "sticky",
-              top: 8,
-              zIndex: 7,
-              minHeight: 28,
-              display: "flex",
-              justifyContent: "flex-end",
-              pointerEvents: "none",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 4,
-                padding: 2,
-                borderRadius: 5,
-                background: "var(--bg-primary)",
-                border: "1px solid var(--border-default)",
-                boxShadow: "var(--shadow-sm)",
-                pointerEvents: "auto",
-              }}
-              onClick={handleToolbarClick}
-            >
-              <span
-                aria-live="polite"
-                style={{
-                  padding: "0 5px",
-                  color: "var(--text-muted)",
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 10,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {selectedCount} chunk{selectedCount === 1 ? "" : "s"}
-              </span>
-              <MessageSelectionGroup label="Selection controls">
-                <MessageSelectionButton
-                  icon="select-all"
-                  label="Select all chunks"
-                  onClick={handleSelectAll}
-                  disabled={chunks.length === 0}
-                />
-                <MessageSelectionButton
-                  icon="clear"
-                  label="Clear selected chunks"
-                  onClick={handleClearSelection}
-                  disabled={selectedCount === 0}
-                />
-              </MessageSelectionGroup>
-              <MessageSelectionGroup label="Copy and create actions">
-                <MessageSelectionButton
-                  icon="copy"
-                  label="Copy selected chunks"
-                  onClick={handleCopySelected}
-                  disabled={selectedText.length === 0}
-                  tone="primary"
-                />
-                <MessageSelectionButton
-                  icon="node"
-                  label="Add selected chunks as node"
-                  onClick={handleAddSelected}
-                  disabled={!onAddContentNode || selectedText.length === 0}
-                  tone="primary"
-                />
-              </MessageSelectionGroup>
-              <MessageSelectionGroup label="Selection mode">
-                <MessageSelectionButton
-                  icon="exit"
-                  label="Exit chunk selection"
-                  onClick={handleExitSelection}
-                />
-              </MessageSelectionGroup>
-            </div>
-          </div>
-        ) : (
+        {!isActive && (
           <LeaderMessageActions
             text={msg.content}
             onAddContentNode={onAddContentNode}
@@ -313,6 +248,62 @@ export const SelectableMessageBubble = memo(
             <span className="leader-message-meta__suffix">{msg.suffix}</span>
           )}
           <MessageTimestamp timestamp={msg.timestamp} />
+        </div>
+        <div
+          data-testid={isActive ? "leader-message-selection-toolbar" : undefined}
+          aria-hidden={!isActive}
+          inert={!isActive}
+          style={{ visibility: isActive ? "visible" : "hidden" }}
+          className="message-selection-toolbar"
+        >
+          <div
+            className="message-selection-toolbar__controls"
+            onClick={handleToolbarClick}
+          >
+            <span
+              aria-live="polite"
+              className="message-selection-toolbar__count"
+            >
+              {selectedCount} chunk{selectedCount === 1 ? "" : "s"}
+            </span>
+            <MessageSelectionGroup label="Selection controls">
+              <MessageSelectionButton
+                icon="select-all"
+                label="Select all chunks"
+                onClick={handleSelectAll}
+                disabled={chunks.length === 0}
+              />
+              <MessageSelectionButton
+                icon="clear"
+                label="Clear selected chunks"
+                onClick={handleClearSelection}
+                disabled={selectedCount === 0}
+              />
+            </MessageSelectionGroup>
+            <MessageSelectionGroup label="Copy and create actions">
+              <MessageSelectionButton
+                icon="copy"
+                label="Copy selected chunks"
+                onClick={handleCopySelected}
+                disabled={selectedText.length === 0}
+                tone="primary"
+              />
+              <MessageSelectionButton
+                icon="node"
+                label="Add selected chunks as node"
+                onClick={handleAddSelected}
+                disabled={!onAddContentNode || selectedText.length === 0}
+                tone="primary"
+              />
+            </MessageSelectionGroup>
+            <MessageSelectionGroup label="Selection mode">
+              <MessageSelectionButton
+                icon="exit"
+                label="Exit chunk selection"
+                onClick={handleExitSelection}
+              />
+            </MessageSelectionGroup>
+          </div>
         </div>
         {copied && (
           <span

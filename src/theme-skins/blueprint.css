@@ -1,6 +1,6 @@
 /* ── Blueprint skin ───────────────────────────────────────
    Flag-gated (theme-blueprint). Technical brutalist: blueprint navy,
-   cyan signal, zero-radius crisp borders, monospaced controls, hard
+   cyan signal, zero-radius crisp borders, geometric controls, hard
    offset shadows and a faint drafting grid across the canvas. Palette
    lives in src/themes.ts (id "blueprint"); this file owns the
    structural look-and-feel. */
@@ -56,14 +56,13 @@
   box-shadow: 4px 4px 0 rgba(4, 12, 22, 0.55) !important;
 }
 
-/* Boxy, monospaced controls. */
+/* Keep the drafting geometry without overriding each control's type role.
+   Prose inputs inherit sans; technical fields can explicitly opt into mono. */
 :root[data-theme="blueprint"] button,
 :root[data-theme="blueprint"] input,
 :root[data-theme="blueprint"] textarea,
 :root[data-theme="blueprint"] select {
   border-radius: 0 !important;
-  font-family: var(--font-mono) !important;
-  letter-spacing: 0.02em;
 }
 :root[data-theme="blueprint"] button {
   text-transform: none;

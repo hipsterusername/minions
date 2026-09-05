@@ -3,6 +3,7 @@ import { initialWorkItemLifecycle, selectWorkItemPresentation } from "../shared/
 import type { WorkItemSnapshot } from "../shared/work-item-contracts.ts";
 import { initialWorkItemClientState, mergeCanonicalActivity, mergeWorkItemListPage,
   activityEntryId, mergeWorkItemSnapshot, reduceWorkItems } from "./use-work-items.ts";
+import { buildLifecycleCommand, canAcknowledge } from "./mobile/mobile-activity-actions.ts";
 
 function item(id: string, revision: number, updatedAt = revision): WorkItemSnapshot {
   return { id, projectId: "p1", projectPath: "/repo", title: `Task ${id}`,
@@ -164,6 +165,34 @@ describe("canonical client work-item state", () => {
         reviewReason: "Interrupted",
       },
     });
+  });
+
+  it("offers review for a stopped canonical run until it is reviewed or archived", () => {
+    const stopped = item("stopped", 3);
+    stopped.lifecycle = { ...stopped.lifecycle, runtimeState: "inactive", outcome: "stopped" };
+    const [row] = mergeCanonicalActivity([], [stopped]);
+    expect(row).toMatchObject({ status: "inactive", lastActivity: "Stopped",
+      reviewLifecycle: { reviewState: "interrupted_to_review", reviewReason: "Stopped" } });
+    expect(canAcknowledge(row!)).toBe(true);
+    expect(buildLifecycleCommand("acknowledge", row!, "review-stopped")).toEqual({
+      type: "review_work_item", workItemId: "stopped", requestId: "review-stopped",
+      expectedCurrentRunKey: "run-stopped", expectedLifecycleRevision: 3,
+    });
+    for (const resolution of ["reviewed", "archived"] as const) {
+      const [resolved] = mergeCanonicalActivity([], [{ ...stopped,
+        lifecycle: { ...stopped.lifecycle, resolution } }]);
+      expect(canAcknowledge(resolved!)).toBe(false);
+    }
+  });
+
+  it("keeps a canonical decision actionable without offering review", () => {
+    const waiting = item("decision", 2);
+    waiting.lifecycle = { ...waiting.lifecycle, runtimeState: "waiting" };
+    waiting.waitKind = "decision";
+    const [row] = mergeCanonicalActivity([], [waiting]);
+    expect(row).toMatchObject({ pendingAttention: true,
+      reviewLifecycle: { reviewState: "decision_needed" } });
+    expect(canAcknowledge(row!)).toBe(false);
   });
 
   it("does not project generic or file waits as decision-needed", () => {

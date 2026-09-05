@@ -2,7 +2,7 @@
  * Component tests for the canvas Skills browser's interaction hierarchy.
  *
  * Behaviour pinned:
- *   - Launch is a persistent, explicit primary action.
+ *   - Launch and management are revealed in a focused skill detail view.
  *   - Secondary actions use labeled overflow menus instead of ambiguous glyphs.
  *   - Built-in presets have no delete affordance.
  */
@@ -62,12 +62,14 @@ describe("SkillsBrowser", () => {
     // Built-in surfaced despite the library holding only one project skill.
     expect(screen.getByText("Skill Builder")).toBeInTheDocument();
     expect(screen.getByText("Project Lint")).toBeInTheDocument();
-    expect(screen.getAllByText("Built-in").length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(screen.getByRole("button", { name: "View Project Lint" }));
 
     fireEvent.click(screen.getByRole("button", { name: "More actions for Project Lint" }));
     expect(screen.getByRole("menuitem", { name: "Delete skill" })).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "More actions for Project Lint" }));
+    fireEvent.click(screen.getByRole("button", { name: "All skills" }));
+    fireEvent.click(screen.getByRole("button", { name: "View Skill Builder" }));
     fireEvent.click(screen.getByRole("button", { name: "More actions for Skill Builder" }));
     expect(screen.queryByRole("menuitem", { name: "Delete skill" })).not.toBeInTheDocument();
   });
@@ -77,6 +79,7 @@ describe("SkillsBrowser", () => {
     const onExportSkill = vi.fn();
     const onDuplicateSkill = vi.fn();
     renderBrowser({ onExportSkill, onDuplicateSkill });
+    fireEvent.click(screen.getByRole("button", { name: "View Project Lint" }));
 
     fireEvent.click(screen.getByRole("button", { name: "More actions for Project Lint" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Export skill" }));
@@ -91,10 +94,12 @@ describe("SkillsBrowser", () => {
     );
   });
 
-  it("makes launch explicit and always available", () => {
+  it("reveals an explicit launch action after selecting a skill", () => {
     registerSkill(PROJECT_SKILL);
     const onLaunchSkill = vi.fn();
     renderBrowser({ onLaunchSkill });
+    expect(screen.queryByRole("button", { name: "Launch with Project Lint" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "View Project Lint" }));
 
     const launch = screen.getByRole("button", { name: "Launch with Project Lint" });
     expect(launch).toBeVisible();
@@ -110,7 +115,7 @@ describe("SkillsBrowser", () => {
     const onExportSkills = vi.fn();
     renderBrowser({ onCreateSkill, onImportSkills, onExportSkills });
 
-    fireEvent.click(screen.getByRole("button", { name: "New" }));
+    fireEvent.click(screen.getByRole("button", { name: "New skill" }));
     expect(onCreateSkill).toHaveBeenCalledOnce();
 
     fireEvent.click(screen.getByRole("button", { name: "Skill library actions" }));
@@ -126,6 +131,7 @@ describe("SkillsBrowser", () => {
     registerSkill(PROJECT_SKILL);
     renderBrowser();
 
+    fireEvent.click(screen.getByRole("button", { name: "View Project Lint" }));
     const more = screen.getByRole("button", { name: "More actions for Project Lint" });
     fireEvent.click(more);
     expect(screen.getByRole("menu", { name: "More actions for Project Lint" })).toBeVisible();
@@ -138,4 +144,80 @@ describe("SkillsBrowser", () => {
       screen.getByRole("button", { name: "More actions for Project Lint" }),
     ).toHaveAttribute("aria-expanded", "false");
   });
+
+  it("preserves filters and returns focus when leaving skill details", () => {
+    registerSkill(PROJECT_SKILL);
+    renderBrowser();
+    const search = screen.getByRole("searchbox", { name: "Search skills" });
+    fireEvent.change(search, { target: { value: "  PROJECT lint  " } });
+    expect(screen.getByRole("status")).toHaveTextContent("1 matching skill");
+    expect(screen.queryByText("Skill Builder")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "View Project Lint" }));
+    expect(screen.getByRole("heading", { name: "Project Lint" })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "All skills" }));
+    expect(screen.getByRole("searchbox", { name: "Search skills" })).toHaveValue("  PROJECT lint  ");
+    expect(screen.getByRole("button", { name: "View Project Lint" })).toHaveFocus();
+  });
+
+  it("dismisses the portaled menu on Tab and returns focus to its trigger", () => {
+    registerSkill(PROJECT_SKILL);
+    renderBrowser();
+    fireEvent.click(screen.getByRole("button", { name: "View Project Lint" }));
+    const trigger = screen.getByRole("button", { name: "More actions for Project Lint" });
+    fireEvent.click(trigger);
+    const item = screen.getByRole("menuitem", { name: "Edit skill" });
+    item.focus();
+    fireEvent.keyDown(item, { key: "Tab" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    expect(screen.getByRole("heading", { name: "Project Lint" })).toBeVisible();
+  });
+});
+
+it("discloses instructions, inputs and reference context only on demand", () => {
+  clearSkills();
+  registerSkill({ ...PROJECT_SKILL, template: "Follow project rules.", variables: [{ name: "area", label: "Review area", type: "text", required: true }],
+    attachments: [{ kind: "text", filename: "rules.md", mediaType: "text/markdown", text: "private reference body", truncated: false }],
+    subskills: [{ id: "audit", name: "Audit", description: "Check dependencies", body: "Large audit instructions" }],
+  });
+  renderBrowser();
+  expect(screen.queryByText("Instructions")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "View Project Lint" }));
+  expect(screen.getByText("Follow project rules.")).not.toBeVisible();
+  fireEvent.click(screen.getByText("Instructions"));
+  expect(screen.getByText("Follow project rules.")).toBeVisible();
+  fireEvent.click(screen.getByText("Inputs"));
+  expect(screen.getByText("Review area")).toBeVisible();
+  expect(screen.getByText("Required")).toBeVisible();
+  fireEvent.click(screen.getByText("Reference files"));
+  expect(screen.getByText("rules.md")).toBeVisible();
+  expect(screen.queryByText("private reference body")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("Sub-skills"));
+  expect(screen.getByText("Check dependencies")).toBeVisible();
+  clearSkills();
+});
+
+it("lets users recover from empty filters and browse only their skills", () => {
+  clearSkills(); registerSkill(PROJECT_SKILL); renderBrowser();
+  fireEvent.click(screen.getByRole("button", { name: "Yours" }));
+  expect(screen.getByRole("button", { name: "View Project Lint" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "View Skill Builder" })).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole("combobox", { name: "Skill category" }), { target: { value: "design" } });
+  expect(screen.getByText("No matching skills")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+  expect(screen.getByRole("button", { name: "View Skill Builder" })).toBeVisible();
+  clearSkills();
+});
+
+it("Escape dismisses a nested menu before returning to the library", () => {
+  clearSkills(); registerSkill(PROJECT_SKILL); renderBrowser();
+  fireEvent.click(screen.getByRole("button", { name: "View Project Lint" }));
+  fireEvent.click(screen.getByRole("button", { name: "More actions for Project Lint" }));
+  fireEvent.keyDown(screen.getByRole("menuitem", { name: "Edit skill" }), { key: "Escape" });
+  expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  const heading = screen.getByRole("heading", { name: "Project Lint" });
+  expect(heading).toBeVisible();
+  fireEvent.keyDown(heading, { key: "Escape" });
+  expect(screen.getByRole("button", { name: "View Project Lint" })).toHaveFocus();
+  clearSkills();
 });

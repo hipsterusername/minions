@@ -49,13 +49,14 @@ interface ProbeProps {
   socket: ReturnType<typeof createReplaySocket>["socket"];
   initial: LeaderData;
   onState?: (d: LeaderData) => void;
+  socketSend?: (message: unknown) => void;
   size?: Size;
   onResize?: ((size: Size) => void) | undefined;
   onAddContentNode?: ((content: string) => void) | undefined;
   projectSettings?: ProjectSettings;
 }
 
-function Probe({ socket, initial, onState, size, onResize, onAddContentNode, projectSettings }: ProbeProps) {
+function Probe({ socket, initial, onState, socketSend, size, onResize, onAddContentNode, projectSettings }: ProbeProps) {
   const [data, setData] = useState<LeaderData>(initial);
   const node: CanvasNode = {
     id: "leader-test",
@@ -73,15 +74,46 @@ function Probe({ socket, initial, onState, size, onResize, onAddContentNode, pro
       onState?.(nextData);
     },
     socketSubscribe: socket.subscribe,
-    socketSend: () => {
-      /* no-op */
-    },
+    socketSend: socketSend ?? (() => undefined),
     onResize,
     onAddContentNode,
     projectSettings,
   };
   return <LeaderNodeRenderer {...props} />;
 }
+
+describe("LeaderNode: compact skills pill", () => {
+  it("opens selected skills and updates the count when a skill is removed", () => {
+    const { socket } = createReplaySocket();
+    const { container } = render(<Probe socket={socket} initial={makeInitialData({
+      skillIds: ["system-model-authoring", "skill-builder"],
+    })} />);
+    const pill = screen.getByRole("button", { name: "Configure skills, 2 active" });
+    expect(pill).toHaveTextContent(/^Skills2/);
+    expect(within(pill).getByTitle("System Model Authoring")).toBeInTheDocument();
+    expect(within(pill).getByTitle("Skill Builder")).toBeInTheDocument();
+    expect(pill).toHaveAttribute("aria-expanded", "false");
+    expect(container.querySelector(".leader-node__skills")?.children).toHaveLength(1);
+    fireEvent.click(pill);
+    const dialog = screen.getByRole("dialog", { name: "Skills" });
+    expect(pill).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(within(dialog).getAllByRole("button", { name: "Remove Skill Builder" })[0]!);
+    expect(screen.getByRole("button", { name: "Configure skills, 1 active" })).toHaveTextContent(/^Skills1/);
+    expect(within(pill).queryByTitle("Skill Builder")).not.toBeInTheDocument();
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Skills" })).not.toBeInTheDocument();
+  });
+
+  it.each([0, 120])("bounds the visible counter with %i selected skills", (count) => {
+    const { socket } = createReplaySocket();
+    render(<Probe socket={socket} initial={makeInitialData({
+      skillIds: Array.from({ length: count }, (_, index) => `skill-${index}`),
+    })} />);
+    const pill = screen.getByRole("button", { name: count ? `Configure skills, ${count} active` : "Configure skills" });
+    expect(pill).toHaveTextContent(count > 99 ? /^Skills99\+$/ : /^Skills0$/);
+    expect(pill).toHaveAttribute("title", `Skills · ${count} selected`);
+  });
+});
 
 describe("LeaderNode: Context Action recipes", () => {
   it("inserts a custom prompt and additively arms its available skills", () => {
@@ -943,7 +975,7 @@ describe("LeaderNode: embedded dashboard sizing", () => {
 
 describe("LeaderNode: connected-context dedup", () => {
   it("seeds hashes at creation and omits unchanged context on subsequent sends", async () => {
-    const { socket } = createReplaySocket();
+    const { socket, replay } = createReplaySocket();
     const captured: unknown[] = [];
     const mockSend = (msg: unknown) => { captured.push(msg); };
 
@@ -987,6 +1019,8 @@ describe("LeaderNode: connected-context dedup", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Start" }));
     });
+    const created = captured.find((msg) => (msg as { type: string }).type === "create_session") as { sessionKey: string };
+    await pump(replay, [{ message: { type: "session_status", sessionKey: created.sessionKey, status: "idle" } as ServerMessage }]);
 
     const nonCanvasCommands = () =>
       captured.filter((msg) => !["canvas_context", "get_worktree_lineage_status"]
@@ -1024,6 +1058,8 @@ describe("LeaderNode: connected-context dedup", () => {
     // Unchanged context → no context block at all
     expect(sendMsg1.prompt).toBe("Follow-up question");
     expect(sendMsg1.prompt).not.toContain("<connected-context>");
+    await pump(replay, [{ message: { type: "control_response", command: "send_message", sessionKey: created.sessionKey,
+      requestId: (sendMsg1 as { requestId?: string }).requestId, success: true } as ServerMessage }]);
 
     // ── Step 3: mutate context, send → delta block present ──────────────
     contextSnapshot = [
@@ -1054,7 +1090,7 @@ describe("LeaderNode: connected-context dedup", () => {
   });
 
   it("includes only the changed group when one of several context nodes changes", async () => {
-    const { socket } = createReplaySocket();
+    const { socket, replay } = createReplaySocket();
     const captured: unknown[] = [];
     const mockSend = (msg: unknown) => { captured.push(msg); };
 
@@ -1097,6 +1133,8 @@ describe("LeaderNode: connected-context dedup", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Start" }));
     });
+    const created = captured.find((msg) => (msg as { type: string }).type === "create_session") as { sessionKey: string };
+    await pump(replay, [{ message: { type: "session_status", sessionKey: created.sessionKey, status: "idle" } as ServerMessage }]);
 
     const nonCanvasCommands = () =>
       captured.filter((msg) => !["canvas_context", "get_worktree_lineage_status"]
@@ -1126,5 +1164,31 @@ describe("LeaderNode: connected-context dedup", () => {
     // Stable node-a must NOT appear in the delta block
     expect(sendMsg.prompt).not.toContain("stable content");
     expect(sendMsg.prompt).toContain("ask about notes");
+  });
+});
+
+
+describe("LeaderNode: Canvas form receipts", () => {
+  it("submits a correlated decision and restores its draft after matching rejection", async () => {
+    const { socket, replay } = createReplaySocket();
+    const send = vi.fn();
+    const result = render(<Probe socket={socket} socketSend={send} initial={makeInitialData({
+      activeBodyView: "dashboard",
+      renderState: { layout: {}, components: [{ id: "decision", type: "form",
+        fields: [{ id: "answer", kind: "text", label: "Decision answer", default: "Keep this answer" }] }] },
+    })} />);
+    fireEvent.submit(result.container.querySelector("form")!);
+    const commands = () => send.mock.calls.map(([msg]) => msg as Record<string, unknown>)
+      .filter((msg) => msg['type'] === "submit_form");
+    expect(commands()).toHaveLength(1);
+    expect(commands()[0]).toMatchObject({ requestId: expect.any(String), sessionKey: "leader-1",
+      formComponentId: "decision", formAnswers: { answer: "Keep this answer" } });
+    expect(screen.getByLabelText("Decision answer")).toBeDisabled();
+    await pump(replay, [{ message: { type: "control_response", command: "submit_form",
+      sessionKey: "leader-1", requestId: commands()[0]?.['requestId'], success: false,
+      error: "Try after capacity frees", code: "CAPACITY" } as ServerMessage }]);
+    expect(screen.getByLabelText("Decision answer")).toBeEnabled();
+    expect(screen.getByLabelText("Decision answer")).toHaveValue("Keep this answer");
+    expect(screen.getByRole("alert")).toHaveTextContent("Try after capacity frees");
   });
 });

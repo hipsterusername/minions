@@ -132,7 +132,7 @@ export const SimpleMarkdown = memo(function SimpleMarkdown({ text }: { text: str
                 key={i}
                 style={{
                   fontWeight: 700,
-                  fontSize: block.level === 1 ? 14 : block.level === 2 ? 13 : 12,
+                  fontSize: block.level === 1 ? "1.3em" : block.level === 2 ? "1.15em" : "1em",
                   color: "var(--text-primary)",
                   marginTop: i > 0 ? 8 : 0,
                   marginBottom: 2,
@@ -177,7 +177,7 @@ export const SimpleMarkdown = memo(function SimpleMarkdown({ text }: { text: str
                   background: "var(--bg-primary)",
                   border: "1px solid var(--border-default)",
                   fontFamily: "var(--font-mono)",
-                  fontSize: 11,
+                  fontSize: "0.925em",
                   lineHeight: 1.5,
                   overflowX: "auto",
                   whiteSpace: "pre-wrap",

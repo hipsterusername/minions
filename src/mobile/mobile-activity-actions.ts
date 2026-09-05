@@ -62,6 +62,7 @@ export function canAcknowledge(session: MobileSessionInfo): boolean {
   return (
     !!lifecycle &&
     lifecycle.reviewState !== "none" &&
+    lifecycle.reviewState !== "decision_needed" &&
     lifecycle.acknowledgedAt == null &&
     lifecycle.dismissedAt == null
   );

@@ -1,13 +1,14 @@
+import { CrewIcon } from "../components/CrewIcon.tsx";
+import { useChatFollow } from "./use-chat-follow.ts";
+import { ChatFollow } from "./ChatFollow.tsx";
+import { FormSubmissionProvider } from "../nodes/render/FormSubmissionProvider.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent, TouchEvent as ReactTouchEvent } from "react";
 
 import type { DisplayMessage } from "../sdk-messages.ts";
 import { copyText } from "../components/CopyButton.tsx";
 import { formatToolInputDetail, toolDisplayInfo } from "../nodes/leader-message-helpers.ts";
-import {
-  RenderComponentView,
-  gridColumnFor,
-} from "../nodes/RenderNode.tsx";
+import { DashboardSurface } from "../nodes/render/DashboardSurface.tsx";
 import {
   emptySessionStreamState,
   type SessionStreamState,
@@ -598,7 +599,7 @@ function PlanMinionPanel({
   );
 }
 
-function MobileDashboardPanel({
+export function MobileDashboardPanel({
   renderState,
   sessionKey,
   send,
@@ -618,55 +619,15 @@ function MobileDashboardPanel({
     );
   }
 
-  const columns = mobileDashboardColumns();
-  const gap = renderState.layout.gap ?? 12;
-
   return (
     <div className="mob-tab-panel mob-dashboard-panel" role="tabpanel" aria-label="Rendered dashboard">
-      {renderState.layout.title ? (
-        <div className="mob-dashboard-title">{renderState.layout.title}</div>
-      ) : null}
-      <div
-        className="rd-grid-container mob-dashboard-grid-container"
-        style={{
-          containerType: "inline-size",
-          ["--rd-max-cols" as string]: String(columns),
-          ["--rd-gap" as string]: `${gap}px`,
-        }}
-      >
-        <div
-          className="rd-grid"
-          style={{
-            display: "grid",
-            gridTemplateColumns: `repeat(var(--rd-cols, ${columns}), minmax(0, 1fr))`,
-            gap,
-            alignContent: "start",
-            alignItems: "start",
-            gridAutoRows: "min-content",
-            gridAutoFlow: "dense",
-          }}
-        >
-          {renderState.components.map((component) => (
-            <div
-              key={component.id}
-              style={{ gridColumn: gridColumnFor(component, columns), minWidth: 0 }}
-            >
-              <RenderComponentView
-                component={component}
-                context={{
-                  onSubmitForm: (componentId, answers) =>
-                    send({
-                      type: "submit_form",
-                      sessionKey,
-                      formComponentId: componentId,
-                      formAnswers: answers,
-                    }),
-                }}
-              />
-            </div>
-          ))}
-        </div>
-      </div>
+      <DashboardSurface
+        renderState={{ ...renderState, layout: { ...renderState.layout, columns: mobileDashboardColumns() } }}
+        scrollWithin={false}
+        onSubmitForm={(componentId, answers) => send({
+          type: "submit_form", sessionKey, formComponentId: componentId, formAnswers: answers,
+        })}
+      />
     </div>
   );
 }
@@ -695,7 +656,7 @@ export function SessionChatScreen({
   const [composerFocused, setComposerFocused] = useState(false);
   const [activeTab, setActiveTab] = useState<ChatTab>("chat");
   const groupedMessages = useMemo(() => groupMobileMessages(state.messages), [state.messages]);
-  const feedRef = useRef<HTMLDivElement | null>(null);
+  const follow = useChatFollow(sessionKey, `${state.messages.length}:${state.streamingText}`, activeTab === "chat");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const renderState = session?.renderState ?? emptyRenderState();
   const graph = useTaskGraphView({
@@ -721,17 +682,6 @@ export function SessionChatScreen({
     prefix: "mob",
   });
 
-  useEffect(() => {
-    const feed = feedRef.current;
-    if (!feed) return;
-    requestAnimationFrame(() => {
-      if (typeof feed.scrollTo === "function") {
-        feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" });
-      } else {
-        feed.scrollTop = feed.scrollHeight;
-      }
-    });
-  }, [state.messages.length, state.streamingText, composerFocused]);
 
   const title = useMemo(() => {
     if (!session) return sessionKey;
@@ -823,7 +773,22 @@ export function SessionChatScreen({
         </button>
         <div className="mob-chat-title">
           <span>{session ? sessionRoleLabel(session) : "Session"}</span>
-          <h1>{title}</h1>
+          <h1 className={onSelectSession && switchableSessions.length > 1 ? "mob-visually-hidden" : undefined}>{title}</h1>
+          {onSelectSession && switchableSessions.length > 1 ? (
+            <label className="mob-session-title-switcher">
+              <select
+                aria-label="Switch session"
+                value={sessionKey}
+                onChange={(event) => onSelectSession(event.currentTarget.value)}
+              >
+                {switchableSessions.map((option) => (
+                  <option value={option.sessionKey} key={option.sessionKey}>
+                    {sessionDisplayTitle(option)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </div>
         <button
           className="mob-stop-button"
@@ -834,23 +799,6 @@ export function SessionChatScreen({
           Stop
         </button>
       </header>
-
-      {onSelectSession && switchableSessions.length > 1 ? (
-        <label className="mob-session-switcher">
-          <span>Conversation</span>
-          <select
-            aria-label="Switch session"
-            value={sessionKey}
-            onChange={(event) => onSelectSession(event.currentTarget.value)}
-          >
-            {switchableSessions.map((option) => (
-              <option value={option.sessionKey} key={option.sessionKey}>
-                {sessionRoleLabel(option)} · {sessionDisplayTitle(option)}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
 
       {isLeader ? (
         <nav className="mob-chat-tabs" data-has-graph={graph.snapshot ? "true" : "false"} aria-label="Leader session views">
@@ -871,7 +819,7 @@ export function SessionChatScreen({
               data-active={activeTab === "graph" ? "true" : "false"}
               onClick={() => setActiveTab("graph")}
             >
-              Graph
+              <CrewIcon size={16} /> Graph
               <span>{graph.snapshot.nodes.length}</span>
             </button>
           ) : null}
@@ -904,7 +852,7 @@ export function SessionChatScreen({
 
       {activeTab === "chat" ? (
         <>
-          <div className="mob-chat-feed" ref={feedRef}>
+          <div className="mob-chat-feed" ref={follow.feedRef} onScroll={follow.onScroll} tabIndex={-1} aria-label="Conversation">
             {isLeader ? null : <SessionCallout session={session} />}
             {state.messages.length === 0 && !state.streamingText ? (
               <EmptyChatState session={session} />
@@ -933,6 +881,7 @@ export function SessionChatScreen({
             ) : null}
           </div>
 
+          {follow.hasNewActivity ? <ChatFollow onResume={follow.resume} /> : null}
           <form
             className="mob-composer"
             data-focused={composerFocused ? "true" : "false"}
@@ -1030,7 +979,9 @@ export function SessionChatScreen({
       ) : null}
 
       {activeTab === "dashboard" ? (
+        <FormSubmissionProvider key={sessionKey} sessionKey={sessionKey} socketSend={send} socketSubscribe={subscribe}>
         <MobileDashboardPanel renderState={renderState} sessionKey={sessionKey} send={send} />
+        </FormSubmissionProvider>
       ) : null}
 
       {activeTab === "graph" && graph.snapshot ? (

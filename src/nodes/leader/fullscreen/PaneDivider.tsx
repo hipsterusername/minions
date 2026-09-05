@@ -20,12 +20,18 @@ export function PaneDivider({
   onResize,
   onReset,
   ariaLabel,
+  value,
+  min,
+  max,
 }: {
   /** "left" = drag right increases left pane; "right" = drag right shrinks right pane. */
   side: "left" | "right";
   onResize: (deltaX: number) => void;
   onReset?: () => void;
   ariaLabel: string;
+  value?: number;
+  min?: number;
+  max?: number;
 }) {
   const startXRef = useRef<number | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -79,11 +85,22 @@ export function PaneDivider({
       role="separator"
       aria-orientation="vertical"
       aria-label={ariaLabel}
+      tabIndex={value === undefined ? -1 : 0}
+      aria-valuenow={value}
+      aria-valuemin={min}
+      aria-valuemax={max}
+      onKeyDown={(e) => {
+        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+          e.preventDefault();
+          onResize((e.key === "ArrowRight" ? 16 : -16) * (side === "left" ? 1 : -1));
+        } else if (e.key === "Enter") { e.preventDefault(); onReset?.(); }
+      }}
       data-testid={`leader-fullscreen-divider-${side}`}
       data-no-drag
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
       onDoubleClick={(e) => {
         e.stopPropagation();
         onReset?.();

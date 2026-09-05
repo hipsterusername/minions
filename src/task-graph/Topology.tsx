@@ -1,34 +1,18 @@
-import { useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useId, useMemo, useRef } from "react";
+import { useTopologyCamera } from "./use-topology-camera.ts";
+export { fitTopologyCamera } from "./use-topology-camera.ts";
 import { nodeIdsForPlanItem, projectTopology, runtimeRole, whyNotRunning } from "./model.ts";
 import { NodeState } from "./NodeState.tsx";
 import type { GraphFilter, GraphPlanItem, TaskGraphEdgeView, TaskGraphNodeView, TaskGraphSnapshotView } from "./types.ts";
 
-const NODE_WIDTH = 176;
-const NODE_HEIGHT = 84;
+const NODE_WIDTH = 240;
+const NODE_HEIGHT = 112;
 const COLUMN_GAP = 78;
-const ROW_GAP = 22;
-const ROOT_WIDTH = 150;
+const ROW_GAP = 32;
+const ROOT_WIDTH = 200;
 const ROOT_GAP = 76;
 const PADDING_X = 32;
 const PADDING_Y = 52;
-const CAMERA_PADDING_X = 28;
-const CAMERA_PADDING_Y = 44;
-const MIN_CAMERA_SCALE = 0.72;
-const MAX_CAMERA_SCALE = 1.25;
-
-interface Dimensions {
-  width: number;
-  height: number;
-}
-
-interface TopologyCamera {
-  scale: number;
-  offsetX: number;
-  offsetY: number;
-  stageWidth: number;
-  stageHeight: number;
-}
-
 interface PositionedNode {
   node: TaskGraphNodeView;
   x: number;
@@ -51,7 +35,7 @@ export function Topology({
   onSelect: (id: string) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const viewport = useElementDimensions(scrollRef);
+  const drag = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const markerId = useId().replaceAll(":", "");
   const projection = useMemo(
     () => projectTopology(snapshot, filter, selectedNodeId),
@@ -61,7 +45,7 @@ export function Topology({
     () => layoutDag(projection.nodes, projection.edges),
     [projection.nodes, projection.edges],
   );
-  const camera = fitTopologyCamera(layout, viewport);
+  const { camera, zoom, setZoom, zoomBy } = useTopologyCamera(scrollRef, layout);
   const focusedPlan = plan.find((item) => item.taskId === focusedPlanTaskId);
   const focusedIds = nodeIdsForPlanItem(snapshot.nodes, focusedPlan);
   const hasPlanFocus = focusedIds.size > 0;
@@ -81,7 +65,30 @@ export function Topology({
         {projection.hiddenEdgeCount > 0 ? <span>{projection.hiddenEdgeCount} edges hidden until focus.</span> : null}
         {focusedPlanTaskId && !hasPlanFocus ? <span className="tg-notice-attention">Selected plan item has no exact runtime projection.</span> : null}
       </div>
-      <div ref={scrollRef} className="tg-flow-scroll">
+      <div className="tg-flow-controls" role="group" aria-label="Graph zoom controls">
+        <button type="button" className="tg-button" aria-label="Zoom out" disabled={camera.scale <= 0.1} onClick={() => zoomBy(-0.2)}>−</button>
+        <button type="button" className="tg-button" aria-label="Reset graph zoom to 100%" onClick={() => setZoom(1)}>{Math.round(camera.scale * 100)}%</button>
+        <button type="button" className="tg-button" aria-label="Zoom in" disabled={camera.scale >= 2} onClick={() => zoomBy(0.2)}>+</button>
+        <button type="button" className="tg-button" aria-pressed={zoom === "fit"} onClick={() => setZoom("fit")}>Fit graph</button>
+      </div>
+      <div ref={scrollRef} className="tg-flow-scroll" tabIndex={0} role="region" aria-label="Graph canvas"
+        onPointerDown={(event) => {
+          if (event.button !== 0 || event.pointerType === "touch" || (event.target as Element).closest("button")) return;
+          const element = event.currentTarget;
+          drag.current = { x: event.clientX, y: event.clientY, left: element.scrollLeft, top: element.scrollTop };
+          element.setPointerCapture(event.pointerId);
+        }}
+        onPointerMove={(event) => {
+          if (!drag.current) return;
+          event.currentTarget.scrollLeft = drag.current.left + drag.current.x - event.clientX;
+          event.currentTarget.scrollTop = drag.current.top + drag.current.y - event.clientY;
+        }}
+        onPointerUp={(event) => {
+          drag.current = null;
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+        }}
+        onLostPointerCapture={() => { drag.current = null; }}
+      >
         <div
           className="tg-flow-canvas"
           style={{ width: camera.stageWidth, height: camera.stageHeight }}
@@ -141,7 +148,7 @@ export function Topology({
             <div className="tg-flow-layer tg-flow-layer--nodes">
               <article className="tg-flow-root" style={{ left: PADDING_X, top: rootY }}>
                 <span className="tg-role-label">Leader · graph run</span>
-                <strong>{snapshot.title}</strong>
+                <strong title={snapshot.title}>{snapshot.title}</strong>
                 <small>rev {snapshot.revision} · {snapshot.status}</small>
               </article>
 
@@ -164,7 +171,7 @@ export function Topology({
                       <span className="tg-role-label"><i />{roleLabel(role)}</span>
                       {mappedPlanIndex >= 0 ? <span className="tg-plan-badge">P{mappedPlanIndex + 1}</span> : null}
                     </span>
-                    <strong>{node.title}</strong>
+                    <strong title={node.title}>{node.title}</strong>
                     <span className="tg-flow-node__meta">
                       <NodeState node={node} compact />
                       <span>{node.currentAttempt?.state ?? node.readiness}</span>
@@ -177,66 +184,9 @@ export function Topology({
           </div>
         </div>
       </div>
-      <div className="tg-flow-hint"><kbd>Click</kbd> inspect · <kbd>Plan</kbd> focus mapping · ordinary edges collapse at scale</div>
+      <div className="tg-flow-hint">Drag or scroll to pan · Select a task to inspect</div>
     </div>
   );
-}
-
-export function fitTopologyCamera(scene: Dimensions, viewport: Dimensions): TopologyCamera {
-  if (viewport.width <= 0 || viewport.height <= 0) {
-    return {
-      scale: 1,
-      offsetX: 0,
-      offsetY: 0,
-      stageWidth: scene.width,
-      stageHeight: scene.height,
-    };
-  }
-
-  const availableWidth = Math.max(0, viewport.width - CAMERA_PADDING_X * 2);
-  const availableHeight = Math.max(0, viewport.height - CAMERA_PADDING_Y * 2);
-  const fitScale = Math.min(availableWidth / scene.width, availableHeight / scene.height);
-  const scale = roundCameraValue(Math.min(MAX_CAMERA_SCALE, Math.max(MIN_CAMERA_SCALE, fitScale)));
-  const scaledWidth = scene.width * scale;
-  const scaledHeight = scene.height * scale;
-  const stageWidth = roundCameraValue(Math.max(viewport.width, scaledWidth + CAMERA_PADDING_X * 2));
-  const stageHeight = roundCameraValue(Math.max(viewport.height, scaledHeight + CAMERA_PADDING_Y * 2));
-
-  return {
-    scale,
-    offsetX: roundCameraValue(Math.max(CAMERA_PADDING_X, (stageWidth - scaledWidth) / 2)),
-    offsetY: roundCameraValue(Math.max(CAMERA_PADDING_Y, (stageHeight - scaledHeight) / 2)),
-    stageWidth,
-    stageHeight,
-  };
-}
-
-function useElementDimensions(ref: RefObject<HTMLElement | null>): Dimensions {
-  const [dimensions, setDimensions] = useState<Dimensions>({ width: 0, height: 0 });
-
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    const update = () => {
-      const bounds = element.getBoundingClientRect();
-      const next = { width: bounds.width, height: bounds.height };
-      setDimensions((current) => current.width === next.width && current.height === next.height ? current : next);
-    };
-    update();
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
-    observer?.observe(element);
-    window.addEventListener("resize", update);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener("resize", update);
-    };
-  }, [ref]);
-
-  return dimensions;
-}
-
-function roundCameraValue(value: number) {
-  return Math.round(value * 1_000) / 1_000;
 }
 
 export function layoutDag(nodes: readonly TaskGraphNodeView[], edges: readonly TaskGraphEdgeView[]) {
@@ -279,9 +229,9 @@ export function layoutDag(nodes: readonly TaskGraphNodeView[], edges: readonly T
   }
   reduceCrossings(columns, incoming, outgoing);
   const maxRows = Math.max(1, ...[...columns.values()].map((column) => column.length));
-  const columnCount = Math.max(1, ...columns.keys()) + 1;
-  const width = Math.max(900, PADDING_X * 2 + ROOT_WIDTH + ROOT_GAP + columnCount * NODE_WIDTH + Math.max(0, columnCount - 1) * COLUMN_GAP);
-  const height = Math.max(520, PADDING_Y * 2 + maxRows * NODE_HEIGHT + Math.max(0, maxRows - 1) * ROW_GAP);
+  const columnCount = Math.max(0, ...columns.keys()) + 1;
+  const width = Math.max(1, PADDING_X * 2 + ROOT_WIDTH + ROOT_GAP + columnCount * NODE_WIDTH + Math.max(0, columnCount - 1) * COLUMN_GAP);
+  const height = Math.max(1, PADDING_Y * 2 + maxRows * NODE_HEIGHT + Math.max(0, maxRows - 1) * ROW_GAP);
   const positioned: PositionedNode[] = [];
   for (const [columnIndex, columnNodes] of [...columns].toSorted(([a], [b]) => a - b)) {
     const columnHeight = columnNodes.length * NODE_HEIGHT + Math.max(0, columnNodes.length - 1) * ROW_GAP;

@@ -25,7 +25,8 @@ export interface CanvasPromptResult {
 
 export function useCanvasWorkItem(input: Input) {
   const pending = useRef(new Map<string, { resolve: (detail: WorkItemDetailSnapshot) => void;
-    reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>());
+    reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>;
+    recover: () => void }>());
   const teardownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (teardownTimer.current) {
@@ -46,13 +47,36 @@ export function useCanvasWorkItem(input: Input) {
       }, 0);
     };
   }, []);
-  const request = useCallback((command: Record<string, unknown>) => {
+  const request = useCallback((command: Record<string, unknown>, onUnconfirmed?: () => void) => {
     const requestId = command["requestId"] as string;
     return new Promise<WorkItemDetailSnapshot>((resolve, reject) => {
-      const timer = setTimeout(() => { pending.current.delete(requestId);
-        reject(new Error("Work-item command timed out")); }, 15_000);
-      pending.current.set(requestId, { resolve, reject, timer });
-      input.socketSend?.(command);
+      if (!input.socketSend) { reject(new Error("Work-item connection is unavailable")); return; }
+      const readOnly = String(command["type"]).startsWith("get_");
+      let readRetries = 0;
+      const recover = () => {
+        const active = pending.current.get(requestId);
+        if (!active) return;
+        clearTimeout(active.timer);
+        if (readOnly && readRetries++ >= 3) {
+          pending.current.delete(requestId);
+          reject(new Error("Could not refresh the work item; check the connection and try again"));
+          return;
+        }
+        onUnconfirmed?.();
+        // Read requests are safe to repeat. Mutations only query a completed
+        // receipt: a lifecycle change or an intent ledger is not acceptance.
+        try { input.socketSend?.(readOnly ? command : {
+          type: "get_work_item_receipt", requestId,
+          ...(command["workItemId"] ? { workItemId: command["workItemId"] } : {}),
+        }); } catch { /* Keep waiting; the next poll or reconnect can recover. */ }
+        active.timer = setTimeout(recover, 15_000);
+      };
+      const timer = setTimeout(recover, 15_000);
+      pending.current.set(requestId, { resolve, reject, timer, recover });
+      try { input.socketSend?.(command); } catch (error) {
+        clearTimeout(timer); pending.current.delete(requestId);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }, [input.socketSend]);
 
@@ -60,6 +84,10 @@ export function useCanvasWorkItem(input: Input) {
     const msg = raw as ServerMessage & { requestId?: string | null; success?: boolean;
       result?: unknown; error?: string; code?: string; latest?: WorkItemDetailSnapshot | null;
       correlationId?: string; workItem?: WorkItemSnapshot };
+    if (msg.type === "socket_reconnected") {
+      for (const request of pending.current.values()) request.recover();
+      return;
+    }
     if (msg.type === "work_item_response" && msg.requestId) {
       const found = pending.current.get(msg.requestId);
       if (found) {
@@ -130,13 +158,15 @@ export function useCanvasWorkItem(input: Input) {
     input.dataRef.current.workItemSnapshot, input.nodeId, request, requestMutation, input.emitUpdate]);
 
   const sendCanonicalPrompt = useCallback(async (item: WorkItemSnapshot, prompt: string,
-    extras: Record<string, unknown> = {}): Promise<CanvasPromptResult> => {
+    extras: Record<string, unknown> = {}, onUnconfirmed?: () => void,
+    onRequest?: (requestId: string) => void): Promise<CanvasPromptResult> => {
     let command: Record<string, unknown> = {
       ...canonicalPromptCommand(item, prompt), ...extras,
     };
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
-        return { detail: await request(command), outcome: "sent" };
+        onRequest?.(command["requestId"] as string);
+        return { detail: await request(command, onUnconfirmed), outcome: "sent" };
       } catch (error) {
         if (!(error instanceof WorkItemCommandError)) throw error;
         let latest = error.latest;
@@ -198,8 +228,8 @@ export function useCanvasWorkItem(input: Input) {
       ...(run.attachments.length > 0 ? { attachments: run.attachments } : {}) });
     const started = promptResult.detail;
     const next = applyCanvasWorkItemSnapshot(input.dataRef.current, started.workItem);
-    input.emitUpdate({ ...next, sessionKey: started.workItem.currentRunKey,
-      currentRunKey: started.workItem.currentRunKey });
+    input.emitUpdate({ ...next, sessionKey: next.currentRunKey,
+      currentRunKey: next.currentRunKey });
     if (started.workItem.currentRunKey) input.publishCanvasContext(
       started.workItem.currentRunKey, run.contextItems, null);
     return started;

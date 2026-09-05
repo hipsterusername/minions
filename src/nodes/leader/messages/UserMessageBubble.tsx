@@ -1,3 +1,4 @@
+import { CanvasDeliveryReceipt } from "../CanvasDeliveryReceipt.tsx";
 import { memo, useCallback, useState } from "react";
 import { chatRoleStyle } from "../../../chat-bubble-style.ts";
 import { CopyButton } from "../../../components/CopyButton.tsx";
@@ -55,6 +56,7 @@ export const UserMessageBubble = memo(function UserMessageBubble({
       )}
       <div className="leader-message-meta">
         <MessageTimestamp timestamp={msg.timestamp} />
+        <CanvasDeliveryReceipt messageId={msg.id} />
       </div>
     </div>
   );

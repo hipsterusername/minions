@@ -1,4 +1,6 @@
-import { Workflow } from "lucide-react";
+import { TaskRetryFeedback } from "./TaskRetryFeedback.tsx";
+import type { TaskRetryReceipt } from "./use-task-retry-receipts.ts";
+import { CrewIcon } from "../components/CrewIcon.tsx";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ViewportOverlay } from "../components/ViewportOverlay.tsx";
 import { randomUuid } from "../random-id.ts";
@@ -56,6 +58,8 @@ export interface GraphInspectorProps extends GraphInspectorCallbacks {
   goal?: string | null | undefined;
   initialTab?: Tab;
   controlsEnabled?: boolean;
+  retryReceipts?: Record<string, TaskRetryReceipt>;
+  onRefresh?: (() => void) | undefined;
 }
 
 export function GraphInspector({
@@ -67,15 +71,17 @@ export function GraphInspector({
   goal,
   initialTab = "topology",
   controlsEnabled = true,
+  retryReceipts = {},
+  onRefresh,
 }: GraphInspectorProps) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [filter, setFilter] = useState<GraphFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
   const [focusedPlanTaskId, setFocusedPlanTaskId] = useState<string | null>(null);
-  const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
-  const [planOpen, setPlanOpen] = useState(() => typeof window === "undefined" || window.innerWidth >= 900);
-  const [detailOpen, setDetailOpen] = useState(() => typeof window === "undefined" || window.innerWidth >= 900);
+  const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.innerWidth <= 900);
+  const [planOpen, setPlanOpen] = useState(() => typeof window === "undefined" || window.innerWidth > 900);
+  const [detailOpen, setDetailOpen] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const filteredNodes = useMemo(() => filterNodes(snapshot.nodes, filter), [snapshot.nodes, filter]);
@@ -92,9 +98,9 @@ export function GraphInspector({
   }, []);
 
   useEffect(() => {
-    let wasNarrow = window.innerWidth < 900;
+    let wasNarrow = window.innerWidth <= 900;
     const collapseAtNarrowWidth = () => {
-      const isNarrow = window.innerWidth < 900;
+      const isNarrow = window.innerWidth <= 900;
       setNarrow(isNarrow);
       if (isNarrow && !wasNarrow) {
         setPlanOpen(false);
@@ -189,7 +195,7 @@ export function GraphInspector({
         <div ref={dialogRef} className="tg-inspector tg-inspector--fullscreen" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
         <header className="tg-inspector__header">
           <div className="tg-inspector__identity">
-            <span className="tg-inspector__mark" aria-hidden="true"><Workflow aria-hidden="true" /></span>
+            <span className="tg-inspector__mark" aria-hidden="true"><CrewIcon aria-hidden="true" active={snapshot.status === "running"} /></span>
             <div className="tg-inspector__title">
               <span className="tg-eyebrow">Workstream inspector</span>
               <h2 id={titleId}>{snapshot.title}</h2>
@@ -258,9 +264,9 @@ export function GraphInspector({
           </section>
 
           {detailOpen ? selected ? (
-            <DetailDrawer key={selected.id} node={selected} controlsEnabled={controlsEnabled} onClose={() => setSelectedId(null)} dispatch={dispatch} />
+            <DetailDrawer receipt={retryReceipts[selected.id]} onRefresh={onRefresh} key={selected.id} node={selected} controlsEnabled={controlsEnabled} onClose={() => { setSelectedId(null); setDetailOpen(false); }} dispatch={dispatch} />
           ) : selectedEvidence ? (
-            <EvidenceDetail evidence={selectedEvidence} snapshot={snapshot} onSelectNode={(id) => selectNode(id, true)} onClose={() => setSelectedEvidenceId(null)} />
+            <EvidenceDetail evidence={selectedEvidence} snapshot={snapshot} onSelectNode={(id) => selectNode(id, true)} onClose={() => { setSelectedEvidenceId(null); setDetailOpen(false); }} />
           ) : (
             <aside className="tg-detail tg-detail--empty" aria-label="Selection details">
               <span className="tg-empty-state__icon">⌁</span><strong>Choose work to inspect</strong><p>Select a task to review its brief, routed context, and minion responses. Checkpoints show evidence lineage.</p>
@@ -295,7 +301,8 @@ function EvidenceDetail({ evidence, snapshot, onSelectNode, onClose }: { evidenc
   return <aside className="tg-detail" aria-labelledby="tg-evidence-detail-title"><header><div><span className="tg-eyebrow">Context checkpoint</span><h3 id="tg-evidence-detail-title">{evidence.artifactId}</h3></div><button className="tg-close" aria-label="Close checkpoint details" onClick={onClose}>×</button></header><span className={`tg-detail-status tg-verification--${evidence.status}`}>{evidence.status.replaceAll("_", " ")}</span><section><h4>Lineage</h4><div className="tg-detail-lineage"><span>{producer?.title ?? evidence.producerAttemptId}</span><b>→</b><span>{evidence.artifactId}</span><b>→</b><span>{evidence.consumedByNodeIds.length}/{evidence.consumerNodeIds.length} consumed</span></div></section><section><h4>Transfer manifest</h4><dl className="tg-kv-list"><div><dt>Source</dt><dd>{evidence.sourceSnapshot}</dd></div><div><dt>Producer</dt><dd>{evidence.producerAttemptId}</dd></div><div><dt>Verifier</dt><dd>{evidence.verifierAttemptId ?? "Pending"}</dd></div><div><dt>Committed</dt><dd>Available</dd></div><div><dt>Consumed</dt><dd>{evidence.consumedByNodeIds.length} of {evidence.consumerNodeIds.length}</dd></div></dl></section>{evidence.consumerNodeIds.length ? <section><h4>Downstream consumers</h4><div className="tg-detail-chips">{evidence.consumerNodeIds.map((id) => <button type="button" key={id} onClick={() => onSelectNode(id)}>{snapshot.nodes.find((node) => node.id === id)?.title ?? id}{evidence.consumedByNodeIds.includes(id)?" · consumed":" · available"}</button>)}</div></section> : null}</aside>;
 }
 
-function DetailDrawer({ node, controlsEnabled, onClose, dispatch }: { node: TaskGraphNodeView; controlsEnabled: boolean; onClose: () => void; dispatch: (action: ActionIntent, node?: TaskGraphNodeView | null) => void }) {
+function DetailDrawer({ node, controlsEnabled: enabled, onClose, dispatch, receipt, onRefresh }: { receipt?: TaskRetryReceipt | undefined; onRefresh?: (() => void) | undefined; node: TaskGraphNodeView; controlsEnabled: boolean; onClose: () => void; dispatch: (action: ActionIntent, node?: TaskGraphNodeView | null) => void }) {
+  const controlsEnabled = enabled && !receipt?.pending;
   const [input, setInput] = useState("");
   const [waiverReason, setWaiverReason] = useState("");
   const [adjudicationReason,setAdjudicationReason]=useState("");
@@ -310,6 +317,7 @@ function DetailDrawer({ node, controlsEnabled, onClose, dispatch }: { node: Task
   const needsInput = node.blocker?.category === "input";
   return <aside className="tg-detail" aria-labelledby="tg-detail-title">
     <header><div><span className="tg-eyebrow">{node.kind} · {node.id}</span><h3 id="tg-detail-title">{node.title}</h3></div><button className="tg-close" aria-label="Close task details" onClick={onClose}>×</button></header>
+    <TaskRetryFeedback node={node} receipt={receipt} onRefresh={onRefresh} />
     <div className="tg-detail__status-row"><NodeState node={node} /><span>{node.currentAttempt?.executor ?? node.owner ?? "Unassigned"}</span></div>
     <section className="tg-detail__brief" aria-labelledby="tg-brief-heading"><h4 id="tg-brief-heading">Minion brief</h4><p className="tg-detail__objective">{node.objective}</p><BriefList label="Constraints" items={node.constraints} empty="No additional constraints were routed." /><BriefList label="Acceptance criteria" items={node.acceptanceCriteria} empty="No acceptance criteria were declared." /></section>
     <section aria-labelledby="tg-context-heading"><div className="tg-detail__section-heading"><h4 id="tg-context-heading">Routed context</h4><span>{node.context.length} source{node.context.length === 1 ? "" : "s"}</span></div>{node.context.length ? <div className="tg-context-list">{node.context.map((entry) => <article className={`tg-context-card${"withheld" in entry ? " is-withheld" : ""}`} key={`${entry.sourceId}-${entry.contentHash}`}><header><strong>{entry.sourceId}</strong><span>{entry.classification}</span></header>{"withheld" in entry ? <p>Content withheld by its {entry.classification} classification.</p> : <p>{entry.content || "This context source is empty."}</p>}</article>)}</div> : <p className="tg-detail__empty-copy">No routed context was attached to this task.</p>}</section>

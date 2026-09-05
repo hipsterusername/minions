@@ -22,16 +22,16 @@ export const MessageChunkView = memo(function MessageChunkView({
 }: MessageChunkViewProps) {
   const handleClick = useCallback(
     (e: MouseEvent<HTMLDivElement>) => {
-      if (!isActive) return;
       e.stopPropagation();
+      if (!e.shiftKey && window.getSelection()?.isCollapsed === false) return;
       onToggle(chunk.id, e.shiftKey);
     },
-    [chunk.id, isActive, onToggle],
+    [chunk.id, onToggle],
   );
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLDivElement>) => {
-      if (!isActive) return;
+      if (!isActive || e.target !== e.currentTarget) return;
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         e.stopPropagation();
@@ -50,14 +50,14 @@ export const MessageChunkView = memo(function MessageChunkView({
       role={isActive ? "checkbox" : undefined}
       aria-checked={isActive ? selected : undefined}
       tabIndex={isActive ? 0 : undefined}
+      onMouseDown={(e) => {
+        // Shift-click picks a chunk range; don't also extend native text selection.
+        if (isActive && e.shiftKey) e.preventDefault();
+      }}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
     >
-      {isActive && (
-        <span aria-hidden="true" className="message-chunk__marker">
-          {selected ? "✓" : "+"}
-        </span>
-      )}
+      <span aria-hidden="true" className="message-chunk__rail" />
       <SimpleMarkdown text={chunk.rawText} />
     </div>
   );

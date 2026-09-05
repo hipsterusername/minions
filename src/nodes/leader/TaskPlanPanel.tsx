@@ -1,3 +1,4 @@
+import { MinionsIcon, type MinionsIconName } from "../../components/MinionsIcon.tsx";
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { timeAgo } from "../leader-message-helpers.ts";
@@ -16,16 +17,16 @@ const PRIORITY_COLORS: Record<string, string> = {
   low: "var(--streaming-color)",
 };
 
-const TASK_STATUS_ICON: Record<TaskPlanItem["status"], string> = {
-  planned: "○",
-  starting: "◎",
-  running: "◎",
-  blocked: "⏸",
-  completed: "✓",
-  failed: "✗",
-  ended_without_report: "!",
-  cancelled: "○",
-  orphaned: "!",
+const TASK_STATUS_ICON: Record<TaskPlanItem["status"], MinionsIconName> = {
+  planned: "planned",
+  starting: "active",
+  running: "active",
+  blocked: "pause",
+  completed: "check",
+  failed: "close",
+  ended_without_report: "warning",
+  cancelled: "planned",
+  orphaned: "warning",
 };
 
 const TASK_STATUS_COLOR: Record<TaskPlanItem["status"], string> = {
@@ -248,7 +249,7 @@ export function TaskPlanPanel({
                     fontFamily: "var(--font-mono)",
                   }}
                 >
-                  {TASK_STATUS_ICON[task.status]}
+                  <MinionsIcon name={TASK_STATUS_ICON[task.status]} size={13} label={task.status.replaceAll("_", " ")} />
                 </span>
 
                 <span

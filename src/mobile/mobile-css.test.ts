@@ -22,7 +22,8 @@ const css = readFileSync(
 
 /** Extract the body of a single CSS rule by its selector. */
 function ruleBody(selector: string): string {
-  const start = css.indexOf(`${selector} {`);
+  // Match the complete selector, not a descendant selector ending in it.
+  const start = `\n${css}`.indexOf(`\n${selector} {`);
   expect(start, `selector ${selector} not found in mobile.css`).toBeGreaterThan(-1);
   const open = css.indexOf("{", start);
   const close = css.indexOf("}", open);
@@ -83,7 +84,7 @@ describe("mobile.css activity redesign surfaces", () => {
   });
 
   it("gives the visibility filters a touch-sized active tab", () => {
-    expect(ruleBody(".mob-filter")).toContain("min-height: 40px");
+    expect(ruleBody(".mob-filter")).toContain("min-height: 44px");
     expect(ruleBody(".mob-filter--active")).toContain("var(--bg-surface)");
   });
 
@@ -99,7 +100,7 @@ describe("mobile.css activity redesign surfaces", () => {
   });
 
   it("sizes the triage action buttons for touch", () => {
-    expect(ruleBody(".mob-mini-btn")).toContain("min-height: 40px");
+    expect(ruleBody(".mob-mini-btn")).toContain("min-height: 44px");
     expect(ruleBody(".mob-mini-btn--primary")).toContain("var(--status-success)");
   });
 

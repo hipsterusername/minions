@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import { Activity, CheckSquare2, MessageSquare, Plus, Settings } from "lucide-react";
+import { Activity, Bell, BellRing, CheckSquare2, ChevronLeft, MessageSquare, Plus, Settings } from "lucide-react";
 
 import type { ProjectSummary } from "../api.ts";
 import { useSocket } from "../use-socket.ts";
@@ -30,6 +30,8 @@ import {
 } from "./push.ts";
 import { useMobileKeyboard } from "./use-mobile-keyboard.ts";
 import { buildWsUrl } from "../ws-url.ts";
+import { applyTheme } from "../themes.ts";
+import { loadPersistedThemeId } from "../use-theme.ts";
 import "./mobile.css";
 
 type MobileTab = "activity" | "approvals" | "chat" | "launch" | "settings";
@@ -124,8 +126,9 @@ function NotificationsButton({ compact = false }: { compact?: boolean }) {
       disabled={disabled}
       onClick={handleClick}
       aria-label={state === "subscribed" ? "Disable notifications" : "Enable notifications"}
+      title={label}
     >
-      {compact ? "Alerts" : label}
+      {compact ? (state === "subscribed" ? <BellRing size={18} aria-hidden="true" /> : <Bell size={18} aria-hidden="true" />) : label}
     </button>
   );
 }
@@ -190,7 +193,7 @@ function MobileHeader({
             onClick={onBackToProjects}
             aria-label="Back to projects"
           >
-            ‹
+            <ChevronLeft size={20} aria-hidden="true" />
           </button>
         ) : null}
         <div className="mob-app-title">
@@ -203,7 +206,7 @@ function MobileHeader({
         </div>
       </div>
       <div className="mob-app-header-actions">
-        <span className="mob-connection-pill" data-state={reconnectState} role="status" aria-live="polite">
+        <span className="mob-connection-pill" data-state={reconnectState} role="status" aria-live="polite" title={statusLabel}>
           {statusLabel}
         </span>
         {reconnectState === "failed" ? (
@@ -219,6 +222,12 @@ function MobileHeader({
 }
 
 export default function MobileApp() {
+  // The mobile route bypasses App, which initializes the desktop theme.
+  // Apply the same saved palette and skin before the first mobile paint.
+  useLayoutEffect(() => {
+    applyTheme(loadPersistedThemeId());
+  }, []);
+
   const { connected, send, subscribe, reconnectState, manualReconnect } = useSocket(buildWsUrl());
   const keyboard = useMobileKeyboard();
   const { sessions, mobileSessions } = useSessionActivity(subscribe);
@@ -453,7 +462,11 @@ export default function MobileApp() {
     <div
       className="mob-app"
       data-keyboard={keyboard.open ? "open" : "closed"}
-      style={{ "--mob-keyboard-offset": `${keyboard.offset}px` } as CSSProperties}
+      style={{
+        "--mob-keyboard-offset": `${keyboard.open ? 0 : keyboard.offset}px`,
+        "--mob-viewport-height": `${keyboard.height}px`,
+        "--mob-viewport-top": `${keyboard.top}px`,
+      } as CSSProperties}
     >
       {showingActiveSession ? null : (
         <MobileHeader
@@ -519,6 +532,7 @@ export default function MobileApp() {
         <ActivityScreen
           sessions={scopedSessions}
           onOpenSession={openSession}
+          onNewLeader={openLaunch}
           notice={activityNotice}
           send={send}
           workItemRuns={workItemState.runs}

@@ -1,4 +1,8 @@
-import { useState, useMemo, useCallback } from "react";
+import { MinionsIcon } from "./components/MinionsIcon.tsx";
+import { SkillIcon } from "./components/SkillIcon.tsx";
+import { SkillIconPicker } from "./components/SkillIconPicker.tsx";
+import "./skill-editor.css";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import type { SkillAttachment, SkillTemplate, SkillVariable, SubSkill } from "./skills/types.ts";
 import {
   extractVariableNames,
@@ -532,14 +536,21 @@ function VariableRow({
 
 export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
   const isEditing = skill !== null;
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    dialogRef.current?.querySelector<HTMLInputElement>("input")?.focus();
+    return () => { if (previous?.isConnected) previous.focus(); };
+  }, []);
 
   const [name, setName] = useState(skill?.name ?? "");
-  const [icon, setIcon] = useState(skill?.icon ?? "⚡");
+  const [icon, setIcon] = useState(skill?.icon ?? "minions:skill");
   const [category, setCategory] = useState<SkillTemplate["category"]>(
     skill?.category ?? "general",
   );
   const [accentColor, setAccentColor] = useState(
-    skill?.accentColor ?? "var(--info-color)",
+    skill?.accentColor ?? "#3b82f6",
   );
   const [description, setDescription] = useState(skill?.description ?? "");
   const [template, setTemplate] = useState(skill?.template ?? "");
@@ -739,13 +750,33 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
   return (
     <div style={overlayStyle} onClick={onClose}>
       <div
+        className="skill-editor"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={isEditing ? "Edit Skill" : "New Skill"}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            onClose();
+          }
+          if (event.key === "Tab") {
+            const elements = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
+              'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), summary, [tabindex="0"]',
+            )).filter((element) => element.tabIndex >= 0 && element.getClientRects().length > 0);
+            const first = elements[0];
+            const last = elements.at(-1);
+            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+          }
+        }}
         style={modalStyle}
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div style={headerStyle}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 20 }}>{icon}</span>
+            <span style={{ fontSize: 20 }}><SkillIcon skill={{ icon, category }} size={20} /></span>
             <div>
               <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
                 {isEditing ? "Edit Skill" : "New Skill"}
@@ -755,6 +786,7 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
               </div>
             </div>
           </div>
+          <button type="button" className="skill-editor__preview-toggle" aria-expanded={previewOpen} aria-controls="skill-compiled-preview" onClick={() => setPreviewOpen(!previewOpen)}><MinionsIcon name="eye" /> Preview</button>
           <button
             onClick={onClose}
             aria-label="Close"
@@ -772,8 +804,8 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
           </button>
         </div>
 
-        <div style={bodyRowStyle}>
-          <nav style={railStyle} aria-label="Skill sections">
+        <div className="skill-editor__body" style={bodyRowStyle}>
+          <nav className="skill-editor__rail" style={railStyle} aria-label="Skill sections">
             <div
               style={{
                 fontSize: 10,
@@ -789,7 +821,7 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
             <RailItem
               title="Essentials"
               sublabel="Name, body"
-              glyph="✦"
+              glyph={<MinionsIcon name="skill" />}
               active={activeCategory === "essentials"}
               status={essentialsStatus}
               onClick={() => setActiveCategory("essentials")}
@@ -797,14 +829,14 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
             <RailItem
               title="Appearance"
               sublabel="Icon, accent"
-              glyph="🎨"
+              glyph={<MinionsIcon name="appearance" />}
               active={activeCategory === "appearance"}
               onClick={() => setActiveCategory("appearance")}
             />
             <RailItem
               title="Variables"
               sublabel="Placeholders"
-              glyph="⌘"
+              glyph={<MinionsIcon name="variables" />}
               active={activeCategory === "variables"}
               badge={activeVarCount}
               onClick={() => setActiveCategory("variables")}
@@ -812,7 +844,7 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
             <RailItem
               title="Sub-skills"
               sublabel="Nested map"
-              glyph="▸"
+              glyph={<MinionsIcon name="subskills" />}
               active={activeCategory === "subskills"}
               badge={namedSubskillCount}
               onClick={() => setActiveCategory("subskills")}
@@ -826,20 +858,19 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
                 lineHeight: 1.5,
               }}
             >
-              Every section stays a click away — the preview on the right updates
-              as you edit.
+              Start with the essentials. Add an identity and optional context when you need them.
             </div>
           </nav>
 
-          <div style={formPaneStyle}>
+          <div className="skill-editor__form" style={formPaneStyle}>
             <div style={panelStyle("essentials")}>
               <h3 style={panelTitleStyle}>Essentials</h3>
               <p style={panelHintStyle}>
                 The identity and body of the skill. Required to save.
               </p>
               <div style={{ marginBottom: 12 }}>
-                <label style={labelStyle}>Name *</label>
-                <input
+                <label htmlFor="skill-name" style={labelStyle}>Name *</label>
+                <input id="skill-name"
                   style={{
                     ...inputStyle,
                     borderColor: errors["name"]
@@ -857,8 +888,8 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
                 )}
               </div>
               <div style={{ marginBottom: 12 }}>
-                <label style={labelStyle}>Description</label>
-                <input
+                <label htmlFor="skill-description" style={labelStyle}>Description</label>
+                <input id="skill-description"
                   style={inputStyle}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
@@ -866,8 +897,8 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
                 />
               </div>
               <div>
-                <label style={labelStyle}>Template *</label>
-                <textarea
+                <label htmlFor="skill-template" style={labelStyle}>Template *</label>
+                <textarea id="skill-template"
                   style={{
                     ...inputStyle,
                     fontFamily: "var(--font-mono)",
@@ -929,22 +960,13 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "88px 1fr 1fr",
+                  gridTemplateColumns: "1fr 1fr",
                   gap: 12,
                 }}
               >
                 <div>
-                  <label style={labelStyle}>Icon</label>
-                  <input
-                    style={{ ...inputStyle, textAlign: "center" }}
-                    value={icon}
-                    onChange={(e) => setIcon(e.target.value)}
-                    maxLength={4}
-                  />
-                </div>
-                <div>
-                  <label style={labelStyle}>Category</label>
-                  <select
+                  <label htmlFor="skill-category" style={labelStyle}>Category</label>
+                  <select id="skill-category"
                     style={selectStyle}
                     value={category}
                     onChange={(e) =>
@@ -959,11 +981,12 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
                   </select>
                 </div>
                 <div>
-                  <label style={labelStyle}>Accent Color</label>
+                  <label htmlFor="skill-accent" style={labelStyle}>Accent Color</label>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     <input
                       type="color"
-                      value={accentColor}
+                      aria-label="Choose accent color"
+                      value={/^#[0-9a-f]{6}$/i.test(accentColor) ? accentColor : "#3b82f6"}
                       onChange={(e) => setAccentColor(e.target.value)}
                       style={{
                         width: 32,
@@ -977,6 +1000,7 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
                       }}
                     />
                     <input
+                      id="skill-accent"
                       style={{ ...inputStyle, flex: 1, minWidth: 0 }}
                       value={accentColor}
                       onChange={(e) => setAccentColor(e.target.value)}
@@ -985,6 +1009,7 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
                   </div>
                 </div>
               </div>
+              <SkillIconPicker value={icon} onChange={setIcon} category={category} accentColor={accentColor} />
             </div>
 
             <div style={panelStyle("variables")}>
@@ -1031,7 +1056,7 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
             </div>
           </div>
 
-          <div style={previewPaneStyle}>
+          <div id="skill-compiled-preview" className="skill-editor__preview" style={{ ...previewPaneStyle, display: previewOpen ? "flex" : "none" }}>
             <div
               style={{
                 padding: "14px 16px 10px",
@@ -1125,7 +1150,7 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
           </div>
         </div>
 
-        <div style={footerStyle}>
+        <div className="skill-editor__footer" style={footerStyle}>
           <span
             style={{
               fontSize: 12,
@@ -1166,7 +1191,7 @@ export function SkillEditor({ skill, onSave, onClose }: SkillEditorProps) {
             style={{
               ...btnBase,
               background: "var(--accent)",
-              color: "white",
+              color: "var(--text-on-accent)",
               border: "1px solid var(--accent)",
               fontWeight: 600,
             }}

@@ -1,4 +1,4 @@
-import { Workflow } from "lucide-react";
+import { CrewIcon } from "../components/CrewIcon.tsx";
 import { summarizeGraph } from "./model.ts";
 import type { GraphPlanItem, TaskGraphSnapshotView } from "./types.ts";
 import "./task-graph.css";
@@ -26,7 +26,7 @@ export function GraphSummaryCard({
     <section className="tg-summary tg-summary--graph" aria-label={`Task graph ${snapshot.title}`}>
       <div className="tg-summary-strip">
         <div className="tg-summary__identity">
-          <span className="tg-summary__leader-mark" aria-hidden="true"><Workflow aria-hidden="true" /></span>
+          <span className="tg-summary__leader-mark" aria-hidden="true"><CrewIcon aria-hidden="true" active={snapshot.status === "running"} /></span>
           <div className="tg-summary__copy">
             <strong title={snapshot.title}>{snapshot.title}</strong>
             <div className="tg-summary__signals">

@@ -10,6 +10,7 @@
  * leader can wire it up without circular dependencies.
  */
 
+import { useEffect, useId, useRef, useState } from "react";
 import type { ChartComponent, ChartSeries } from "../../../shared/render-chart.ts";
 
 // ── Color palette (matches DSL_COLORS in RenderNode.tsx) ──────────────────
@@ -66,7 +67,7 @@ interface YScale {
 
 // ── Scale builders ─────────────────────────────────────────────────────────
 
-function buildCategoryXScale(series: readonly ChartSeries[], chartW: number): XScale {
+function buildCategoryXScale(series: readonly ChartSeries[], chartW: number, tickCount: number): XScale {
   const seen = new Set<string>();
   const unique: string[] = [];
   for (const s of series) {
@@ -81,14 +82,14 @@ function buildCategoryXScale(series: readonly ChartSeries[], chartW: number): XS
     const idx = unique.indexOf(String(x));
     return idx >= 0 ? (idx + 0.5) * band : 0;
   };
-  const step = Math.max(1, Math.ceil(unique.length / 5));
+  const step = Math.max(1, Math.ceil(unique.length / tickCount));
   const ticks = unique
     .filter((_, i) => i % step === 0)
     .map((v) => ({ label: v, pixel: toPixel(v) }));
   return { toPixel, ticks, bandWidth: band };
 }
 
-function buildLinearXScale(series: readonly ChartSeries[], chartW: number): XScale {
+function buildLinearXScale(series: readonly ChartSeries[], chartW: number, tickCount: number): XScale {
   let min = Infinity, max = -Infinity;
   for (const s of series) {
     for (const p of s.data) {
@@ -99,17 +100,17 @@ function buildLinearXScale(series: readonly ChartSeries[], chartW: number): XSca
   if (!isFinite(min)) { min = 0; max = 1; }
   const range = max === min ? 1 : max - min;
   const toPixel = (x: number | string): number => ((Number(x) - min) / range) * chartW;
-  const ticks = Array.from({ length: 5 }, (_, i) => {
-    const v = min + (i / 4) * range;
+  const ticks = Array.from({ length: tickCount }, (_, i) => {
+    const v = min + (i / Math.max(1, tickCount - 1)) * range;
     return { label: fmtNum(v), pixel: toPixel(v) };
   });
   return { toPixel, ticks, bandWidth: undefined };
 }
 
-function buildXScale(series: readonly ChartSeries[], axisType: string, chartW: number): XScale {
+function buildXScale(series: readonly ChartSeries[], axisType: string, chartW: number, tickCount: number): XScale {
   return axisType === "category"
-    ? buildCategoryXScale(series, chartW)
-    : buildLinearXScale(series, chartW);
+    ? buildCategoryXScale(series, chartW, tickCount)
+    : buildLinearXScale(series, chartW, tickCount);
 }
 
 function buildYScale(
@@ -249,13 +250,23 @@ function ChartSeriesGroup({
 
 export function ChartComponent({ component: c }: { component: ChartComponent }) {
   const height = c.height ?? 200;
-  const viewW = 400;
-  const ML = 44, MR = 56, MT = 8, MB = 32;
+  const chartId = useId();
+  const plotRef = useRef<HTMLDivElement>(null);
+  const [viewW, setViewW] = useState(400);
+  useEffect(() => {
+    if (!plotRef.current || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry && entry.contentRect.width > 0) setViewW(Math.max(200, entry.contentRect.width));
+    });
+    observer.observe(plotRef.current);
+    return () => observer.disconnect();
+  }, []);
+  const ML = 58, MR = 40, MT = 12, MB = 48;
   const chartW = viewW - ML - MR;
   const chartH = height - MT - MB;
   const variant = c.variant ?? "line";
   const axisType = c.xAxis?.type ?? "linear";
-  const xScale = buildXScale(c.series, axisType, chartW);
+  const xScale = buildXScale(c.series, axisType, chartW, Math.max(2, Math.floor(chartW / 90)));
   const yScale = buildYScale(c.series, c.yAxis?.min, c.yAxis?.max, chartH);
   const hasData = c.series.some((s) => s.data.length > 0);
 
@@ -265,7 +276,7 @@ export function ChartComponent({ component: c }: { component: ChartComponent }) 
       style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}
     >
       {c.title && (
-        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+        <div style={{ fontSize: "var(--rd-body-size, 14px)", fontWeight: 600, color: "var(--text-muted)", fontFamily: "var(--font-sans)" }}>
           {c.title}
         </div>
       )}
@@ -274,7 +285,7 @@ export function ChartComponent({ component: c }: { component: ChartComponent }) 
       {c.series.length > 0 && (
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           {c.series.map((s, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "var(--rd-label-size, 12px)", color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
               <span style={{ display: "inline-block", width: 14, height: 2, background: seriesColor(s, i), borderRadius: 1, flexShrink: 0 }} />
               {s.label}
             </div>
@@ -282,18 +293,21 @@ export function ChartComponent({ component: c }: { component: ChartComponent }) 
         </div>
       )}
 
+      <div ref={plotRef} style={{ minWidth: 0 }}>
       {/* Chart area or empty state */}
       {!hasData ? (
-        <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 11, opacity: 0.6 }}>
+        <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: "var(--rd-body-size, 14px)" }}>
           No data to display
         </div>
       ) : (
-        <svg viewBox={`0 0 ${viewW} ${height}`} width="100%" height={height} style={{ display: "block", overflow: "visible" }}>
+        <svg role="img" aria-labelledby={`${chartId}-title`} aria-describedby={`${chartId}-description`} viewBox={`0 0 ${viewW} ${height}`} width="100%" height={height} style={{ display: "block", overflow: "visible" }}>
+          <title id={`${chartId}-title`}>{c.title ?? "Chart"}</title>
+          <desc id={`${chartId}-description`}>{`${variant} chart with ${c.series.length} series. Exact values are available in View chart data below.`}</desc>
           <g transform={`translate(${ML},${MT})`}>
             {yScale.ticks.map((tick, i) => (
               <g key={i}>
                 <line x1={0} y1={tick.pixel} x2={chartW} y2={tick.pixel} stroke="var(--border-default)" strokeWidth="0.5" opacity={0.7} />
-                <text x={-6} y={tick.pixel} textAnchor="end" dominantBaseline="middle" fontSize={9} fill="var(--text-muted)">{tick.label}</text>
+                <text x={-6} y={tick.pixel} textAnchor="end" dominantBaseline="middle" fontSize={12} fill="var(--text-muted)">{tick.label.length > 12 ? `${tick.label.slice(0, 11)}…` : tick.label}</text>
               </g>
             ))}
             <line x1={0} y1={0} x2={0} y2={chartH} stroke="var(--border-hover)" strokeWidth="1" />
@@ -301,14 +315,14 @@ export function ChartComponent({ component: c }: { component: ChartComponent }) 
             {xScale.ticks.map((tick, i) => (
               <g key={i}>
                 <line x1={tick.pixel} y1={chartH} x2={tick.pixel} y2={chartH + 4} stroke="var(--border-hover)" strokeWidth="1" />
-                <text x={tick.pixel} y={chartH + 14} textAnchor="middle" fontSize={9} fill="var(--text-muted)">{tick.label}</text>
+                <text x={tick.pixel} y={chartH + 18} textAnchor="middle" fontSize={12} fill="var(--text-muted)">{tick.label.length > 12 ? `${tick.label.slice(0, 11)}…` : tick.label}</text>
               </g>
             ))}
             {c.xAxis?.label && (
-              <text x={chartW / 2} y={chartH + 26} textAnchor="middle" fontSize={9} fill="var(--text-muted)">{c.xAxis.label}</text>
+              <text x={chartW / 2} y={chartH + 40} textAnchor="middle" fontSize={12} fill="var(--text-muted)">{c.xAxis.label}</text>
             )}
             {c.yAxis?.label && (
-              <text x={-chartH / 2} y={-34} transform="rotate(-90)" textAnchor="middle" fontSize={9} fill="var(--text-muted)">{c.yAxis.label}</text>
+              <text x={-chartH / 2} y={-46} transform="rotate(-90)" textAnchor="middle" fontSize={12} fill="var(--text-muted)">{c.yAxis.label}</text>
             )}
             {c.referenceLines?.map((ref, i) => {
               const py = yScale.toPixel(ref.value);
@@ -316,7 +330,7 @@ export function ChartComponent({ component: c }: { component: ChartComponent }) 
                 <g key={i}>
                   <line x1={0} y1={py} x2={chartW} y2={py} stroke="var(--text-muted)" strokeWidth="1" strokeDasharray="4,3" opacity={0.6} />
                   {ref.label && (
-                    <text x={chartW + 4} y={py} dominantBaseline="middle" fontSize={8} fill="var(--text-muted)">{ref.label}</text>
+                    <text x={chartW + 4} y={py} dominantBaseline="middle" fontSize={12} fill="var(--text-muted)">{ref.label}</text>
                   )}
                 </g>
               );
@@ -324,6 +338,22 @@ export function ChartComponent({ component: c }: { component: ChartComponent }) 
             <ChartSeriesGroup series={c.series} variant={variant} xScale={xScale} yScale={yScale} chartH={chartH} />
           </g>
         </svg>
+      )}
+      </div>
+      {hasData && (
+        <details className="dashboard-chart-data">
+          <summary>View chart data</summary>
+          <div className="dashboard-chart-data-scroll" tabIndex={0} role="region" aria-label={`${c.title ?? "Chart"} data`}>
+            <table>
+              <caption>{c.title ?? "Chart"} — exact values</caption>
+              <thead><tr><th scope="col">Series</th><th scope="col">{c.xAxis?.label ?? "X"}</th><th scope="col">{c.yAxis?.label ?? "Value"}</th></tr></thead>
+              <tbody>{c.series.flatMap((series, index) => series.data.map((point, pointIndex) => (
+                <tr key={`${index}-${pointIndex}`}><th scope="row">{series.label}</th><td>{point.x}</td><td>{point.y}</td></tr>
+              )))}</tbody>
+            </table>
+            {c.referenceLines?.map((line, index) => <p key={index}>{line.label ?? "Reference"}: {line.value}</p>)}
+          </div>
+        </details>
       )}
     </div>
   );

@@ -1,9 +1,9 @@
-import { act, createRef } from "react";
-import { render, screen } from "@testing-library/react";
+import { act, createRef, useState } from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { HarnessListProvider } from "../../use-harness-list.tsx";
 import { ActivityLaunchForm } from "./ActivityLaunchForm.tsx";
-import { LEADER_DEFAULT_DATA } from "./types.ts";
+import { LEADER_DEFAULT_DATA, type LeaderData } from "./types.ts";
 
 describe("ActivityLaunchForm permission authority", () => {
   it("uses only sandbox policy controls for a Codex launch", () => {
@@ -50,5 +50,49 @@ describe("ActivityLaunchForm permission authority", () => {
 
     expect(screen.queryByLabelText("Permissions")).toBeNull();
     expect(screen.getByLabelText("Sandbox approval policy")).toBeInTheDocument();
+  });
+});
+
+
+describe("Activity launch readiness", () => {
+  it("validates input and availability, locks pending launch, and preserves settings on failure", () => {
+    let receive: ((message: unknown) => void) | undefined;
+    const submit = vi.fn();
+    function Probe() {
+      const [input, setInput] = useState("");
+      const [pending, setPending] = useState(false);
+      const [data, setData] = useState<LeaderData>({ ...LEADER_DEFAULT_DATA, taskName: "My launch" });
+      return <>
+        <ActivityLaunchForm nodeId="launch-test" data={data} input={input}
+          slashCommands={[]} promptPlaceholder="Goal" submitDisabled={false} submitActive
+          textareaRef={createRef<HTMLTextAreaElement>()} pending={pending}
+          onInputChange={setInput} onKeyDown={() => undefined}
+          onSubmit={() => { submit(); setPending(true); }} onUpdate={(patch) => setData({ ...data, ...patch })} />
+        <button onClick={() => { setPending(false); setData({ ...data, error: "Launch rejected" }); }}>Reject</button>
+      </>;
+    }
+    render(<HarnessListProvider connected send={() => undefined} subscribe={(listener) => {
+      receive = listener; return () => undefined;
+    }}><Probe /></HarnessListProvider>);
+    expect(screen.getByText("Describe a goal to launch")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Launch leader" })).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText("Goal"), { target: { value: "My exact goal" } });
+    expect(screen.getByText("Checking model availability…")).toBeInTheDocument();
+    act(() => receive?.({ type: "harness_list", harnesses: [{
+      name: "claude", capabilities: { permissionPrompts: true }, models: [{ id: "opus", label: "Opus" }],
+      builtInTools: [], commands: [], agents: [], account: { provider: "anthropic" },
+    }] }));
+    expect(screen.getByText("Ready to launch")).toBeInTheDocument();
+    const launch = screen.getByRole("button", { name: "Launch leader" });
+    fireEvent.click(launch); fireEvent.click(launch);
+    expect(submit).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Starting leader…" })).toBeDisabled();
+    expect(screen.getByPlaceholderText("Goal")).toHaveValue("My exact goal");
+    fireEvent.click(screen.getByText("Reject"));
+    expect(screen.getByRole("alert")).toHaveTextContent("Launch rejected");
+    expect(screen.getByPlaceholderText("Goal")).toHaveValue("My exact goal");
+    expect(screen.getByLabelText(/Name/)).toHaveValue("My launch");
+    expect(screen.getByLabelText("Model")).toHaveValue("claude::opus");
+    expect(screen.getByRole("button", { name: "Launch leader" })).toBeEnabled();
   });
 });

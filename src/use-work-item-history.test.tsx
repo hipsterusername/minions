@@ -19,11 +19,11 @@ function run(runKey: string, startedAt: number, runNumber: number): WorkItemRunS
 }
 
 function socketHarness() {
-  const listeners: Array<(message: unknown) => void> = [];
+  const listeners = new Set<(message: unknown) => void>();
   const subscribe = Object.assign(
     ((_topic: string, listener: (message: unknown) => void) => {
-      listeners.push(listener);
-      return () => undefined;
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
     }) as SocketSubscribe,
     { supportsTopics: true as const },
   );
@@ -103,9 +103,54 @@ describe("useWorkItemHistory", () => {
     rerender({ subscribe: second.subscribe });
     expect(send).toHaveBeenCalledTimes(2);
   });
+
+  it.each([undefined, null, "page-2"])(
+    "recovers history through the stable socket subscription with cursor %s",
+    (cursor) => {
+      const socket = socketHarness();
+      const send = vi.fn();
+      const loadRuns = vi.fn();
+      const runs = [run("run-2", 20, 2)];
+      const { result, rerender } = renderHook(
+        ({ entries, nextCursor }) => useWorkItemHistory({
+          workItemId: "work-1", runs: entries, runNextCursor: nextCursor,
+          onLoadRuns: loadRuns, socketSend: send, socketSubscribe: socket.subscribe,
+        }),
+        { initialProps: { entries: runs, nextCursor: cursor as string | null | undefined } },
+      );
+      loadRuns.mockClear();
+      send.mockClear();
+
+      socket.emit({ type: "socket_reconnected" });
+
+      expect(loadRuns).toHaveBeenCalledExactlyOnceWith(undefined);
+      expect(send).toHaveBeenCalledExactlyOnceWith({ type: "sync_session", sessionKey: "run-2" });
+      rerender({ entries: [run("run-1", 10, 1), ...runs], nextCursor: null });
+      expect(send).toHaveBeenLastCalledWith({ type: "sync_session", sessionKey: "run-1" });
+      socket.emit({
+        type: "sync_response", sessionKey: "run-1", found: true,
+        events: [{ type: "sdk_event", sessionKey: "run-1", timestamp: 11,
+          event: { kind: "text", role: "assistant", text: "Recovered earlier iteration" } }],
+      });
+      expect(result.current.streams["run-1"]?.messages[0]?.content)
+        .toBe("Recovered earlier iteration");
+    },
+  );
 });
 
 describe("buildUnifiedWorkItemMessages", () => {
+  it("keeps the current conversation visible before its ledger entry arrives", () => {
+    const first = emptySessionStreamState("run-1");
+    first.messages = [{ id: "old", role: "assistant", content: "Earlier work", timestamp: 11 }];
+    const messages = buildUnifiedWorkItemMessages({
+      runs: [run("run-1", 10, 1)], streams: { "run-1": first }, currentRunKey: "run-2",
+      currentMessages: [{ id: "current", role: "assistant", content: "Current work", timestamp: 21 }],
+    });
+    expect(messages.map((message) => message.content)).toEqual([
+      "Iteration 1 · completed", "Earlier work", "Current work",
+    ]);
+  });
+
   it("adds ordered iteration boundaries and preserves the live current transcript", () => {
     const first = emptySessionStreamState("run-1");
     first.messages = [{ id: "old", role: "assistant", content: "Earlier work", timestamp: 11 }];

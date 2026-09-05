@@ -1,3 +1,4 @@
+import { MinionsIcon } from "../components/MinionsIcon.tsx";
 import { useState, useEffect, useCallback } from "react";
 import type { NodeRenderProps } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
@@ -218,7 +219,7 @@ function FolderNodeRenderer({
           style={collapsedHeaderStyle}
         >
           <span style={chevronStyle}>&#9654;</span>
-          <span style={folderIconCollapsedStyle}>&#128193;</span>
+          <span style={folderIconCollapsedStyle}><MinionsIcon name="folder" size={18} /></span>
           <span style={collapsedNameStyle} title={data.folderPath}>
             {name || "Untitled folder"}
           </span>
@@ -255,18 +256,18 @@ function FolderNodeRenderer({
           >
             &#9654;
           </span>
-          <span style={folderIconStyle}>&#128193;</span>
+          <span style={folderIconStyle}><MinionsIcon name="folder-open" size={18} /></span>
           <span style={headerNameStyle}>{name}</span>
         </div>
         <span style={headerMetaStyle}>
           {dirCount > 0 && (
             <span style={statPillStyle}>
-              <span style={{ opacity: 0.5 }}>&#128194;</span> {dirCount}
+              <MinionsIcon name="folder" size={12} label="Folders" style={{ opacity: 0.5 }} /> {dirCount}
             </span>
           )}
           {fileCount > 0 && (
             <span style={statPillStyle}>
-              <span style={{ opacity: 0.5 }}>&#128196;</span> {fileCount}
+              <MinionsIcon name="file" size={12} label="Files" style={{ opacity: 0.5 }} /> {fileCount}
             </span>
           )}
         </span>

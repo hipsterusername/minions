@@ -8,8 +8,11 @@
  * responsibility (see `LeaderNode`).
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { MessageCircleQuestion } from "lucide-react";
 import type { RenderState } from "../../../shared/render-dsl.ts";
+import { partitionDashboardQuestions } from "./dashboard-questions.ts";
+import "./dashboard-questions.css";
 import {
   flattenRenderStateToText,
   formatRenderComponentToText,
@@ -37,8 +40,10 @@ export interface DashboardSurfaceProps {
   onSubmitForm?: ((componentId: string, answers: Record<string, unknown>) => void) | undefined;
   /** Add the selected/flattened dashboard text to the canvas as a content node. */
   onAddContentNode?: ((text: string) => void) | undefined;
-  /** Hide the surface header (host provides its own chrome, e.g. a tab bar). */
+  /** Hide the surface title when the host supplies one; actions remain available. */
   hideHeader?: boolean | undefined;
+  /** Let Activity/mobile own scrolling instead of creating another scroll area. */
+  scrollWithin?: boolean;
 }
 
 /**
@@ -51,6 +56,7 @@ export function DashboardSurface({
   onSubmitForm,
   onAddContentNode,
   hideHeader = false,
+  scrollWithin = true,
 }: DashboardSurfaceProps) {
   const { layout, components } = renderState;
   const columns = layout.columns ?? 2;
@@ -60,7 +66,13 @@ export function DashboardSurface({
   const [contextSelectionActive, setContextSelectionActive] = useState(false);
   const [selectedComponentIds, setSelectedComponentIds] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
-  const [sectionExpansionState, setSectionExpansionState] = useState<boolean | undefined>(undefined);
+  const [sectionExpansionState, setSectionExpansionState] = useState<{ open: boolean } | undefined>(undefined);
+  const { questions, components: dashboardComponents } = useMemo(
+    () => partitionDashboardQuestions(components, new Map()),
+    [components],
+  );
+  const questionRef = useRef<HTMLElement>(null);
+  const submitQuestion = onSubmitForm;
 
   const hasSections = useMemo(() => hasSectionComponent(components), [components]);
   const selectedIdSet = useMemo(() => new Set(selectedComponentIds), [selectedComponentIds]);
@@ -106,15 +118,16 @@ export function DashboardSurface({
       className="dashboard-surface"
       style={{
         width: "100%",
-        height: "100%",
+        height: scrollWithin ? "100%" : "auto",
         display: "flex",
         flexDirection: "column",
-        overflow: "hidden",
+        overflow: scrollWithin ? "hidden" : "visible",
         position: "relative",
       }}
     >
-      {!hideHeader && (
+      {(!hideHeader || hasContent) && (
         <div
+          className="dashboard-header"
           style={{
             padding: "8px 14px",
             display: "flex",
@@ -125,7 +138,7 @@ export function DashboardSurface({
             background: "var(--bg-secondary)",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {!hideHeader && <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <img
               src="/icons/dashboard.svg"
               alt="Dashboard"
@@ -133,49 +146,35 @@ export function DashboardSurface({
               height={18}
               style={{ display: "block", flexShrink: 0 }}
             />
-            <span style={{
-              fontSize: 12,
+            <span className="dashboard-title" style={{
+              fontSize: "var(--rd-title-size, 16px)",
               fontWeight: 600,
               color: "var(--text-primary)",
               letterSpacing: "-0.01em",
             }}>
               {layout.title || "Dashboard"}
             </span>
-          </div>
+          </div>}
           {hasContent && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-              {hasSections && (
-                <button
-                  type="button"
-                  onClick={() => setSectionExpansionState((open) => open === true ? false : true)}
-                  aria-label={
-                    sectionExpansionState === true
-                      ? "Collapse all dashboard sections"
-                      : "Expand all dashboard sections"
-                  }
-                  style={{
-                    padding: "4px 8px",
-                    borderRadius: 5,
-                    border: "1px solid var(--border-default)",
-                    background: "var(--bg-surface)",
-                    color: "var(--text-secondary)",
-                    cursor: "pointer",
-                    fontSize: 10,
-                    fontFamily: "var(--font-mono)",
-                    lineHeight: 1.2,
-                  }}
-                >
-                  {sectionExpansionState === true ? "Collapse all" : "Expand all"}
+            <div className="dashboard-header-actions">
+              {questions.length > 0 && (
+                <button type="button" className="dashboard-action dashboard-action--question" onClick={() => {
+                  questionRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
+                  questionRef.current?.querySelector<HTMLElement>("input:not(:disabled),textarea:not(:disabled),select:not(:disabled),button:not(:disabled)")?.focus({ preventScroll: true });
+                }}>
+                  {questions.length} pending {questions.length === 1 ? "question" : "questions"}
                 </button>
               )}
-              <span style={{
-                fontSize: 9,
-                color: "var(--text-muted)",
-                fontFamily: "var(--font-mono)",
-                opacity: 0.7,
-              }}>
-                {components.length} component{components.length !== 1 ? "s" : ""}
-              </span>
+              <button type="button" className="dashboard-action" aria-pressed={contextSelectionActive}
+                onClick={() => contextSelectionActive ? exitContextSelection() : setContextSelectionActive(true)}>
+                {contextSelectionActive ? "Done selecting" : "Select"}
+              </button>
+              {hasSections && <>
+                <button type="button" className="dashboard-action" aria-label="Expand all dashboard sections"
+                  onClick={() => setSectionExpansionState({ open: true })}>Expand all</button>
+                <button type="button" className="dashboard-action" aria-label="Collapse all dashboard sections"
+                  onClick={() => setSectionExpansionState({ open: false })}>Collapse all</button>
+              </>}
             </div>
           )}
         </div>
@@ -187,12 +186,36 @@ export function DashboardSurface({
         className={hasContent ? CLS.scrollArea : undefined}
         data-scroll-capture
         style={{
-          flex: 1,
-          overflow: "auto",
+          flex: scrollWithin ? 1 : undefined,
+          minHeight: 0,
+          overflow: scrollWithin ? "auto" : "visible",
           padding: hasContent ? gap : 0,
           overscrollBehavior: "contain",
         }}
       >
+        {questions.length > 0 && (
+          <section ref={questionRef} className="dashboard-questions" aria-label="Pending leader questions">
+            <div className="dashboard-questions-header">
+              <MessageCircleQuestion className="dashboard-questions-icon" size={20} aria-hidden="true" />
+              <div>
+                <h2 className="dashboard-questions-heading" aria-live="polite">
+                  Leader needs your input
+                  {questions.length > 1 ? ` · ${questions.length} questions` : ""}
+                </h2>
+                <p className="dashboard-questions-hint">Reply here to help the leader continue.</p>
+              </div>
+            </div>
+            <div className="dashboard-questions-body">
+              {questions.map((question) => (
+                <RenderComponentView
+                  key={question.id}
+                  component={question}
+                  context={{ onSubmitForm: submitQuestion }}
+                />
+              ))}
+            </div>
+          </section>
+        )}
         {payloadError !== null && (
           <div
             role="alert"
@@ -202,7 +225,7 @@ export function DashboardSurface({
               background: "var(--error-bg, #fef2f2)",
               border: "1px solid var(--status-error, #dc2626)",
               borderRadius: 6,
-              fontSize: 11,
+              fontSize: "var(--rd-body-size, 14px)",
               color: "var(--status-error, #dc2626)",
               fontFamily: "var(--font-mono, monospace)",
               wordBreak: "break-all",
@@ -241,10 +264,10 @@ export function DashboardSurface({
                 style={{ display: "block" }}
               />
             </div>
-            <div style={{ fontSize: 12, textAlign: "center", lineHeight: 1.6 }}>
+            <div style={{ fontSize: "var(--rd-body-size, 14px)", textAlign: "center", lineHeight: 1.6 }}>
               Waiting for dashboard data...
               <br />
-              <span style={{ fontSize: 10, opacity: 0.6 }}>
+              <span style={{ fontSize: "var(--rd-label-size, 12px)", opacity: 0.6 }}>
                 The Leader agent will populate this panel
               </span>
             </div>
@@ -267,6 +290,8 @@ export function DashboardSurface({
                 <div
                   style={{
                     display: "flex",
+                    flexWrap: "wrap",
+                    justifyContent: "flex-end",
                     alignItems: "center",
                     gap: 4,
                     padding: 2,
@@ -283,7 +308,7 @@ export function DashboardSurface({
                       padding: "0 5px",
                       color: "var(--text-muted)",
                       fontFamily: "var(--font-mono)",
-                      fontSize: 10,
+                      fontSize: "var(--rd-label-size, 12px)",
                       whiteSpace: "nowrap",
                     }}
                   >
@@ -301,7 +326,7 @@ export function DashboardSurface({
                         padding: "0 5px",
                         color: "var(--status-success)",
                         fontFamily: "var(--font-mono)",
-                        fontSize: 10,
+                        fontSize: "var(--rd-label-size, 12px)",
                         whiteSpace: "nowrap",
                       }}
                     >
@@ -385,15 +410,16 @@ export function DashboardSurface({
                   alignContent: "start",
                   alignItems: "start",
                   gridAutoRows: "min-content",
-                  gridAutoFlow: "dense",
+                  gridAutoFlow: "row",
                 }}
               >
-                {components.map((c) => {
+                {dashboardComponents.map((c) => {
                   const col = gridColumnFor(c, columns);
                   return (
                     <div key={c.id} style={{ gridColumn: col, minWidth: 0 }}>
                       <SelectableDashboardComponent
                         componentId={c.id}
+                        componentLabel={("label" in c ? c.label : "title" in c ? c.title : undefined) || c.id}
                         selectionActive={contextSelectionActive}
                         selected={selectedIdSet.has(c.id)}
                         onToggle={toggleSelectedComponent}

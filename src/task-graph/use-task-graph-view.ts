@@ -1,3 +1,4 @@
+import { useTaskRetryReceipts } from "./use-task-retry-receipts.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   taskGraphChangedEnvelopeSchema,
@@ -145,6 +146,7 @@ export function useTaskGraphView({ workItemId, send, subscribe }: UseTaskGraphVi
   const refetch = useCallback(() => {
     if (!workItemId || !send || refetchPendingRef.current) return;
     refetchPendingRef.current = true;
+    setControlsEnabled(false);
     send({ type: "get_task_graph_snapshot", requestId: randomUuid(), workItemId });
   }, [send, workItemId]);
 
@@ -226,10 +228,14 @@ export function useTaskGraphView({ workItemId, send, subscribe }: UseTaskGraphVi
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refetch, refetchPlan, subscribe, workItemId]);
 
+  const { retryReceipts, begin, fail } = useTaskRetryReceipts(workItemId, snapshot, subscribe, refetch);
+
   const sendAction = useCallback((action: GraphInspectorAction) => {
     const command = workItemId ? graphActionToCommand(action,workItemId) : null;
-    if (command) send?.(command);
-  }, [send,workItemId]);
+    if (command && send && controlsEnabled && begin(action)) {
+      try { send(command); } catch (error) { fail(action, error); }
+    }
+  }, [send,workItemId,controlsEnabled,begin,fail]);
 
   const approvePlan = useCallback(() => {
     if (!workItemId || !planSnapshot || !planControlsEnabled || !planSnapshot.canStart) return;
@@ -245,7 +251,11 @@ export function useTaskGraphView({ workItemId, send, subscribe }: UseTaskGraphVi
       expectedProposalRevision: planSnapshot.proposalRevision });
   }, [send, workItemId, planSnapshot, planControlsEnabled]);
 
+  const refreshSnapshot = useCallback(() => {
+    refetchPendingRef.current = false;
+    refetch();
+  }, [refetch]);
   const stale = Boolean((snapshot && !controlsEnabled) || (planSnapshot && !planControlsEnabled));
   return { snapshot, planSnapshot, controlsEnabled, planControlsEnabled, stale,
-    refetch, refetchPlan, sendAction, approvePlan, rejectPlan };
+    refetch: refreshSnapshot, refetchPlan, sendAction, approvePlan, rejectPlan, retryReceipts };
 }
