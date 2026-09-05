@@ -44,7 +44,7 @@ afterEach(() => {
 
 describe("merge_worktree", () => {
   it("on success: clears worktree but does NOT flip session status to completed", async () => {
-    const h = setup({ status: "running" });
+    const h = setup({ status: "idle" });
     h.host.worktree = fakeWorktree;
 
     mergeWorktree(h.ctx, cmd({ type: "merge_worktree" }), h.ws);
@@ -55,7 +55,7 @@ describe("merge_worktree", () => {
     expect(h.host.worktree).toBeNull();
     expect(h.host.cwd).toBe("/p");
     // Critical difference vs approve_changes — status NOT flipped.
-    expect(h.host.status).toBe("running");
+    expect(h.host.status).toBe("idle");
 
     // Only worktree_merged emitted; no session_completed / approval_resolved.
     expect(h.busSent.find((e) => e.type === "worktree_merged")).toBeDefined();
@@ -70,7 +70,7 @@ describe("merge_worktree", () => {
       summary: "conflict",
       targetBranch: "main",
     };
-    const h = setup({ status: "running" });
+    const h = setup({ status: "idle" });
     h.host.worktree = fakeWorktree;
 
     mergeWorktree(h.ctx, cmd({ type: "merge_worktree" }), h.ws);
@@ -94,3 +94,10 @@ describe("merge_worktree", () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+ it("refuses to remove a worktree while its agent is running", () => {
+    const h = setup({ status: "running" }); h.host.worktree = fakeWorktree;
+    mergeWorktree(h.ctx, cmd({ type: "merge_worktree" }), h.ws);
+    expect(h.host.worktree).toBe(fakeWorktree); expect(calls).toHaveLength(0);
+    expect(h.wsSent[0]!["error"]).toContain("agent execution");
+  });

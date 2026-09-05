@@ -38,13 +38,16 @@ export function createAmendWorkPacketToolDef(ctx: SystemModelToolContext): Norma
       const stored = getWorkPacket(ctx.projectPath, args.workPacketId);
       if (!model || !stored) return jsonResult({ packet: null, contextPack: "", found: Boolean(stored) });
       const remove = new Set(args.scopeDelta.removeObjectIds);
+      const selection = stored.packet.selection;
       const ids = unique([
-        ...stored.packet.scope.capabilities,
-        ...stored.packet.scope.flows,
-        ...stored.packet.scope.constraints,
-        ...stored.packet.scope.decisions,
-        ...stored.packet.scope.risks,
-        ...(stored.packet.scope.surfaces ?? []),
+        ...(selection?.objectIds ?? [
+          ...stored.packet.scope.capabilities,
+          ...stored.packet.scope.flows,
+          ...stored.packet.scope.constraints,
+          ...stored.packet.scope.decisions,
+          ...stored.packet.scope.risks,
+          ...(stored.packet.scope.surfaces ?? []),
+        ]),
         ...args.scopeDelta.addObjectIds,
         ...confirmedEntryPointCapabilityIds(args.scopeDelta.entryPoints, model),
       ].filter((id) => !remove.has(id)));
@@ -61,8 +64,10 @@ export function createAmendWorkPacketToolDef(ctx: SystemModelToolContext): Norma
           return object ? [{ id, type: object.type, score: 0, reasons: ["amended scope"] }] : [];
         }),
         matchConfidence: stored.packet.matchConfidence,
-        taskFiles: args.scopeDelta.files ?? stored.packet.scope.suggestedFiles,
-        ownedPaths: args.scopeDelta.ownedPaths,
+        taskFiles: args.scopeDelta.files ?? selection?.taskFiles ?? [],
+        ownedPaths: args.scopeDelta.ownedPaths ?? selection?.ownedPaths,
+        entryPoints: [...(selection?.entryPoints ?? []), ...args.scopeDelta.entryPoints]
+          .filter((entry) => !remove.has(entry.capabilityId) && !remove.has(entry.surfaceId)),
         timestampFn: ctx.timestampFn ?? gitTimestampFn,
         now,
         existingPacket: stored.packet,

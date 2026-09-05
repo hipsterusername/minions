@@ -172,14 +172,15 @@ function waiveScopedGate(db: Database.Database, input: { lineageId: string; cont
   name: string; actor: string; reason: string; at: number }) {
   return db.transaction(() => {
     const scope = input.contributionId ? "contribution" : "lineage";
-    const row = db.prepare(`SELECT id FROM worktree_integration_gates WHERE lineage_id=? AND scope=?
+    const row = db.prepare(`SELECT id,details FROM worktree_integration_gates WHERE lineage_id=? AND scope=?
       AND ${input.contributionId ? "contribution_id=? AND" : "contribution_id IS NULL AND"} name=?`)
       .get(...(input.contributionId
         ? [input.lineageId, scope, input.contributionId, input.name]
-        : [input.lineageId, scope, input.name])) as { id: string } | undefined;
+        : [input.lineageId, scope, input.name])) as { id: string; details: string | null } | undefined;
     if (!row) throw new Error("gate not found");
+    const { advisoryStatus: _advisory, ...binding } = row.details ? JSON.parse(row.details) : {};
     db.prepare("UPDATE worktree_integration_gates SET status='waived',details=?,recorded_at=? WHERE id=?")
-      .run(JSON.stringify({ actor: input.actor, reason: input.reason }), input.at, row.id);
+      .run(JSON.stringify({ ...binding, actor: input.actor, reason: input.reason }), input.at, row.id);
     if (input.contributionId) db.prepare(`UPDATE worktree_contributions
       SET revision=revision+1,updated_at=? WHERE id=?`).run(input.at, input.contributionId);
     else db.prepare("UPDATE worktree_lineages SET revision=revision+1,updated_at=? WHERE id=?")

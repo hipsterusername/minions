@@ -37,6 +37,7 @@ const armedSystemPrompts = new Map<string, string>();
 /** Set to `true` to silently no-op all writes/reads (used by tests). */
 let disabled = false;
 let persistenceUnavailable = false;
+let retryAfter = 0;
 
 function defaultDbPath(): string {
   if (process.env["MINIONS_SERVER_DB"]) {
@@ -56,24 +57,28 @@ function defaultDbPath(): string {
 export function openPersistDb(dbPath?: string): Database.Database {
   if (dbHandle) return dbHandle;
   const resolvedPath = dbPath ?? defaultDbPath();
-  dbHandle = initDb(resolvedPath);
-  const sessionColumns = dbHandle.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
-  if (!sessionColumns.some((column) => column.name === "permission_mode"))
-    dbHandle.exec("ALTER TABLE sessions ADD COLUMN permission_mode TEXT");
-  ensureWorkItemSchema(dbHandle);
-  dbHandle.exec(`
-    CREATE TABLE IF NOT EXISTS session_armed_prompts (
-      session_key TEXT PRIMARY KEY,
-      system_prompt TEXT NOT NULL
-    )
-  `);
+  const db = initDb(resolvedPath);
   try {
-    fs.chmodSync(resolvedPath, 0o600);
-  } catch {
-    // Best effort on platforms without POSIX permissions.
-  }
+    const sessionColumns = db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
+    if (!sessionColumns.some((column) => column.name === "permission_mode"))
+      db.exec("ALTER TABLE sessions ADD COLUMN permission_mode TEXT");
+    ensureWorkItemSchema(db);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS session_armed_prompts (
+        session_key TEXT PRIMARY KEY,
+        system_prompt TEXT NOT NULL
+      )
+    `);
+    try {
+      fs.chmodSync(resolvedPath, 0o600);
+    } catch {
+      // Best effort on platforms without POSIX permissions.
+    }
+  } catch (error) { db.close(); throw error; }
+  dbHandle = db;
   disabled = false;
   persistenceUnavailable = false;
+  retryAfter = 0;
   return dbHandle;
 }
 
@@ -99,13 +104,14 @@ export function disablePersistence(): void {
 
 function ensureDb(): Database.Database | null {
   if (disabled) return null;
+  if (persistenceUnavailable && Date.now() < retryAfter) return null;
   if (!dbHandle) {
     try {
       return openPersistDb();
     } catch (err) {
       log.warn("database_open_failed", { error: err });
-      disabled = true;
       persistenceUnavailable = true;
+      retryAfter = Date.now() + 1000;
       return null;
     }
   }
@@ -225,13 +231,19 @@ function sessionToRow(
 
 export function persistSession(s: PersistableSession): void {
   const db = ensureDb();
-  if (!db) return;
+  if (!db) {
+    if (disabled) return; // Explicit test mode only.
+    throw new Error("Session persistence is unavailable; retry after storage recovers");
+  }
   try {
     const nowIso = new Date().toISOString();
-    repo.upsertSession(db, sessionToRow(s, nowIso, repo.getSession(db, s.id)));
-    db.prepare("UPDATE sessions SET permission_mode = ? WHERE session_key = ?").run(s.permissionMode ?? null, s.id);
+    db.transaction(() => {
+      repo.upsertSession(db, sessionToRow(s, nowIso, repo.getSession(db, s.id)));
+      db.prepare("UPDATE sessions SET permission_mode = ? WHERE session_key = ?").run(s.permissionMode ?? null, s.id);
+    })();
   } catch (err) {
     log.warn("session_upsert_failed", { error: err });
+    throw new Error("Failed to persist session state", { cause: err });
   }
 }
 

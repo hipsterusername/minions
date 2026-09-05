@@ -7,6 +7,24 @@ import type { BusPayload } from "../bus.ts";
 import { createAmendWorkPacketToolDef } from "./amend-work-packet.ts";
 
 describe("amend_work_packet", () => {
+  it("keeps derived context from becoming new scope on repeated amendments", async () => {
+    const project = copyValidFixtureWithSurfaces();
+    const ctx = makeCtx(project);
+    const first = await compileWorkPacket({ model: ctx.runtime.model!, cwd: project, headSha: "head", mode: "advisory",
+      userRequest: "approve", normalizedGoal: "approve",
+      matchedCandidates: [{ id: "flow.approve_changes", type: "flow", score: 5, reasons: [] }],
+      taskFiles: ["server/commands/approve-changes.ts"], matchConfidence: "high",
+      timestampFn: ctx.timestampFn, now: 100, packetId: "wp_stable", leaderSessionKey: "leader-1" });
+    saveWorkPacket(project, first.packet, first.contextPack, 100);
+    const def = createAmendWorkPacketToolDef(ctx);
+    for (let i = 0; i < 3; i++) {
+      const result = await def.handler({ workPacketId: "wp_stable", reason: "review current scope", scopeDelta: {} });
+      const payload = JSON.parse(result.content[0]!.text);
+      expect(payload.packet.scope).toEqual(first.packet.scope);
+      expect(payload.packet.reviewGates).toEqual(first.packet.reviewGates);
+    }
+  });
+
   it("rejects missing reason", async () => {
     const project = copyValidFixture();
     const def = createAmendWorkPacketToolDef(makeCtx(project));
@@ -92,7 +110,7 @@ describe("amend_work_packet", () => {
       packet: { scope: { capabilities: string[]; surfaces: string[] } };
     };
     expect(payload.packet.scope.capabilities).toEqual(["capability.workspace_management"]);
-    expect(payload.packet.scope.surfaces).toEqual(["surface.canvas", "surface.mobile"]);
+    expect(payload.packet.scope.surfaces).toEqual(["surface.mobile"]);
   });
 });
 

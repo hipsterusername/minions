@@ -84,8 +84,11 @@ async function checkSubject(
   subject: FreshnessSubject,
   verified: Set<string>,
 ): Promise<FreshnessObjectResult> {
+  const policy = input.policies.find((item) => item.policyClass === (subject.policyClass ?? subject.freshnessClass ?? "code_coupled"));
   if (subject.freshnessClass && subject.freshnessClass !== "code_coupled") {
-    return baseResult(subject, "not_code_coupled", null, null);
+    // Policy and informational guidance require semantic review, not code timestamp inference.
+    return { ...baseResult(subject, "not_code_coupled", null, null),
+      consequence: policy?.consequence, requiredActions: policy?.requiredActions ?? [] };
   }
   const timestamps = await cachedTimestamps(input, subject);
   if (timestamps.modelTouchedAt === null || timestamps.codeTouchedAt === null) {
@@ -98,7 +101,6 @@ async function checkSubject(
     return baseResult(subject, "fresh", timestamps.modelTouchedAt, timestamps.codeTouchedAt);
   }
 
-  const policy = input.policies.find((item) => item.policyClass === (subject.policyClass ?? "ordinary"));
   const consequence = policy?.consequence ?? "verify_before_task";
   const isBlocking = consequence === "block_if_unverified" && input.mode === "enforced" && !verified.has(subject.objectId);
   return {

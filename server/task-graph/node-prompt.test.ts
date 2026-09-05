@@ -1,5 +1,6 @@
 import {describe,expect,it} from "vitest";
 import type {GraphRevisionInput,TaskNode} from "../../shared/task-graph-contracts.ts";
+import {validateArtifactContract} from "./artifact-contract.ts";
 import {renderTaskGraphNodePrompt} from "./node-prompt.ts";
 
 function node(completionMode?:"task"|"verification"):TaskNode {
@@ -38,8 +39,34 @@ describe("renderTaskGraphNodePrompt",()=>{
     const prompt=renderTaskGraphNodePrompt(revision(task),task,"attempt",1,"source",[],[],[]);
     expect(prompt).toContain("Artifact output contracts (frozen before execution)");
     expect(prompt).toContain('Exact JSON Schema: {"type":"object","required":["findings"]');
-    expect(prompt).toContain('Accepted example: {"findings":["string"]}');
+    const call = JSON.parse(prompt.split('Validated staging call: ')[1]!.split('\n')[0]!);
+    expect(() => validateArtifactContract(call.inlineJson, task.outputSchemas.audit)).not.toThrow();
+    expect(call).toMatchObject({classification:'internal', retentionPolicy:'task', observedWriteSet:[]});
     expect(prompt).toContain('"outputName":"audit"');
+  });
+
+  it.each([
+    {type:"array", minItems:2, items:{type:"string"}},
+    {type:"object", required:["name"], properties:{name:{type:"string"}}, example:{}},
+    {type:"string", enum:["allowed"], example:"rejected"},
+  ])("never advertises an invalid candidate as accepted: %j", schema=>{
+    const task={...node("task"), outputSchemas:{report:schema}};
+    const prompt=renderTaskGraphNodePrompt(revision(task),task,"attempt",1,"source",[],[],[]);
+    expect(prompt).not.toContain("Accepted example:");
+    const call=prompt.split("Validated staging call: ")[1]?.split("\n")[0];
+    if(call) expect(()=>validateArtifactContract(JSON.parse(call).inlineJson,schema)).not.toThrow();
+    else expect(prompt).toContain("No validated example available");
+  });
+
+  it("renders exact ownership and distinguishes reference evidence from selected instructions",()=>{
+    const task={...node(),ownershipRequest:[{scope:"path" as const,mode:"write" as const,normalizedValue:"server/a.ts"},
+      {scope:"symbol" as const,mode:"read" as const,normalizedValue:"B.run"}]};
+    const prompt=renderTaskGraphNodePrompt(revision(task),task,"a",1,"s",[],[],[
+      {sourceId:"canvas:x",classification:"internal",contentHash:"hash",content:"reference"},
+      {sourceId:"skill:review",classification:"internal",contentHash:"hash",content:"rules"}]);
+    for(const scope of task.ownershipRequest) expect(prompt).toContain(JSON.stringify(scope));
+    expect(prompt).toContain("Reference evidence (subordinate to task instructions)");
+    expect(prompt).toContain("Selected skill instructions");
   });
 
   it("reuses a prior final report for a staging-only recovery attempt",()=>{

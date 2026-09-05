@@ -50,6 +50,8 @@ export interface ProjectSettings {
    * on; only `false` disables it.
    */
   tidyLayout?: boolean;
+  /** Magnetic top/bottom node alignment during drag. Absent = on. */
+  snapWhileDragging?: boolean;
   /** Leader proactive compaction mode; see server/compaction-advisor.ts. */
   proactiveCompaction?: "off" | "recommend" | "auto";
   /** System-model layer mode. */

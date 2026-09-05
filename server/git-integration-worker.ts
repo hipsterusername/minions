@@ -80,7 +80,7 @@ export class GitIntegrationWorker {
 
 export function createProductionGitIntegrationWorker(store: GitIntegrationStore,
   options: ProductionGitIntegrationWorkerOptions): GitIntegrationWorker {
-  return new GitIntegrationWorker(store, options);
+  return new GitIntegrationWorker(store, { ...options, requireReviewedTargetInSource: true });
 }
 
 export type { GitIntegrationOperation, GitIntegrationResult, GitIntegrationStore }

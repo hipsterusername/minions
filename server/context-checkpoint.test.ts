@@ -31,7 +31,8 @@ describe("context checkpoint compiler", () => {
       trigger: "proactive", originalPrompt: "Build a durable continuity subsystem.",
       modelHandoff: ["Goal: Preserve the active objective", "Decisions:", "- Use one compiler because both paths need identical semantics", "Dead ends:", "- Do not replay the entire transcript", "Open questions:", "- Whether provider metadata exposes exact limits", "Next actions:", "- Run continuity tests"].join("\n"),
     });
-    expect(checkpoint.objective.statement).toBe("Preserve the active objective");
+    expect(checkpoint.objective.statement).toBe("Build a durable continuity subsystem.");
+    expect(checkpoint.modelHandoff).toContain("Preserve the active objective");
     expect(checkpoint.progress.completed[0]?.taskId).toBe("done");
     expect(checkpoint.progress.inProgress[0]?.taskId).toBe("next");
     expect(checkpoint.constraints).toContain("Preserve task IDs");
@@ -89,11 +90,12 @@ describe("context checkpoint compiler", () => {
     expect(prompt).toContain("</session-continuation>");
     expect(prompt).not.toContain("<previous-session-context>");
     expect(prompt).toContain(
-      "Do NOT re-register completed work; the task registry and dashboard are still live.",
+      "reconstruct only entries proven missing",
     );
+    expect(checkpoint.retainedState).toMatchObject({ taskRegistry: "available_at_capture", dashboard: "available_at_capture" });
   });
 
-  it("uses previous-session semantics for context recovery", () => {
+  it("uses context-window recovery semantics without claiming runtime loss", () => {
     const checkpoint = compileContextCheckpoint(host(), {
       trigger: "context_recovery",
       originalPrompt: "Continue",
@@ -101,8 +103,10 @@ describe("context checkpoint compiler", () => {
     });
 
     const prompt = renderCheckpointPrompt(checkpoint);
-    expect(prompt).toContain("<previous-session-context>");
-    expect(prompt).toContain("</previous-session-context>");
+    expect(prompt).toContain("<context-window-recovery>");
+    expect(prompt).toContain("</context-window-recovery>");
+    expect(prompt).not.toContain("<previous-session-context>");
+    expect(prompt).toContain("taskRegistry: available_at_capture");
   });
 
   it("detects contradictory progress before a swap", () => {

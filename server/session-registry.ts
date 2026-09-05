@@ -1,3 +1,4 @@
+import { startRegisteredSession } from "./session-registry-start.ts";
 /** In-memory home for live and hydrated SessionHost instances. */
 
 import {
@@ -16,6 +17,7 @@ import type { RuntimeSessionInfo, TaskManagerState } from "./task-tools.ts";
 import type { WorktreeLifecycle } from "./worktree-types.ts";
 import { buildSessionListItem, type SessionListItem } from "./session-list-item.ts";
 import { serverLogger } from "./logging.ts";
+import { restoreSessionContinuity } from "./session-continuity.ts";
 import { loadLatestContextCheckpoint } from "./context-checkpoint-store.ts";
 import {
   finishRun,
@@ -192,7 +194,7 @@ export class SessionRegistry {
       // Fire-and-forget; the host fans progress out via the bus. SessionHost
       // marks itself running synchronously before its first async boundary.
       this.releaseCapacity(claimed);
-      void host.start(opts, this.deps);
+      startRegisteredSession(host, opts, this.deps);
     } catch (error) {
       this.releaseCapacity(claimed);
       throw error;
@@ -341,6 +343,7 @@ export class SessionRegistry {
           taskId: row.task_id ?? null,
         });
         host.contextCheckpoint = loadLatestContextCheckpoint(row.session_key);
+        restoreSessionContinuity(host);
         // Preserve provider continuity across restarts. Rows without an SDK
         // session id intentionally start a fresh provider thread.
         host.sessionId = row.session_id;

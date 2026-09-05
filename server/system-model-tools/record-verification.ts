@@ -1,4 +1,6 @@
 import { z } from "zod/v4";
+import { captureEvidenceBinding } from "../system-model/evidence-binding.ts";
+import { loadSystemModel } from "../system-model/load.ts";
 import type { NormalizedToolDef } from "../harness/types.ts";
 import { jsonResult } from "../harness/tool-result.ts";
 import {
@@ -26,7 +28,13 @@ export function createRecordVerificationToolDef(ctx: SystemModelToolContext): No
     handler: async (input: unknown) => {
       const args = recordVerificationInputSchema.parse(input);
       const now = ctx.now?.() ?? Date.now();
+      const stored = getWorkPacket(ctx.projectPath, args.workPacketId);
+      if (!stored || stored.packet.leaderSessionKey !== ctx.leaderSessionKey) {
+        throw new Error("Work Packet is missing or belongs to another session");
+      }
+      const evidenceDigest = await captureEvidenceBinding(ctx.cwd, stored.packet, loadSystemModel(ctx.cwd).model, ctx.projectPath);
       recordWorkPacketVerification(ctx.projectPath, {
+        evidenceDigest,
         workPacketId: args.workPacketId,
         kind: args.kind,
         target: args.target,
@@ -34,10 +42,9 @@ export function createRecordVerificationToolDef(ctx: SystemModelToolContext): No
         notes: args.notes ?? null,
         recordedAt: now,
       });
-      const stored = getWorkPacket(ctx.projectPath, args.workPacketId);
-      if (!stored) return jsonResult({ recorded: true, packet: null });
       const rows = listWorkPacketVerifications(ctx.projectPath, args.workPacketId);
-      const passed = new Set(rows.filter((row) => row.result === "passed").map((row) => `${row.kind}:${row.target}`));
+      const passed = new Set(rows.filter((row) => row.result === "passed" && row.evidenceDigest === evidenceDigest)
+        .map((row) => `${row.kind}:${row.target}`));
       const required = stored.packet.freshness.requiredVerifications;
       const packet = {
         ...stored.packet,

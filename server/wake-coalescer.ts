@@ -169,7 +169,7 @@ function deliverWake(
       const identity = stableKeys.length > 0 ? stableKeys.join("\n") : prompt;
       const digest = createHash("sha256").update(identity).digest("hex").slice(0, 24);
       const resume = deps.resumeWorkItemRun({ workItemId, runKey: host.runKey,
-        prompt, requestId: `wake:${host.runKey}:${digest}` });
+        prompt, continuitySource: "system", requestId: `wake:${host.runKey}:${digest}` });
       void Promise.resolve(resume).then(() => markDelivered(requests), (error: unknown) => {
         log.warn("work_item_resume_failed", {
           sessionKey: host.id,
@@ -193,6 +193,7 @@ function deliverWake(
   try {
     deps.startChildSession({
       ...first.opts,
+      continuitySource: "system",
       invocationKind: "resume_open_run",
       prompt,
     });

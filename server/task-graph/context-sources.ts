@@ -2,8 +2,14 @@ import type Database from "better-sqlite3";
 import type { ScopedContextSource } from "./planning-source.ts";
 import { TaskGraphConflictError } from "./errors.ts";
 import { assertPlanningContextLimits } from "./planning-context-limits.ts";
+import type { SourceSnapshot } from "../../shared/task-graph-contracts.ts";
 
 type Row = Record<string, unknown>;
+
+export function scopedSkillIds(snapshot: SourceSnapshot, sources: Array<{sourceId:string}>): string[] {
+  const ids = new Set(sources.map(source => source.sourceId));
+  return snapshot.compiledSkills.filter(skill => ids.has(`skill:${skill.skillId}`)).map(skill => skill.skillId);
+}
 
 export function storeScopedContextSources(
   db: Database.Database,

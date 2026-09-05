@@ -70,7 +70,7 @@ export function createCheckpointSessionToolDef(
       if (!boundary.safe) return textResult(`deferred: ${boundary.reason}`);
       pendingHandoff.set(ctx.leaderSessionKey, "");
       return textResult(
-        "Emit one structured handoff next, under 4000 characters: goal; decisions and rationale; dead ends; open threads; next steps. The server will continue in a fresh thread after this turn.",
+        "Emit one structured handoff next, under 4000 characters: goal and user constraints; decisions and rationale; completed work and exact artifact paths; verification results; dead ends; open threads; next concrete steps. Distinguish verified facts from assumptions and mark superseded decisions. The server will continue in a fresh thread after this turn.",
       );
     },
   };

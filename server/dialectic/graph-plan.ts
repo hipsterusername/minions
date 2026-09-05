@@ -179,7 +179,7 @@ function synthesisStep(args:{input:SubmitDialecticGraphInput;key:string;round:nu
     key:args.key,title:`Synthesis checkpoint · round ${args.round}`,
     objective:[`Evaluate the dialectic against this goal: ${args.input.objective}`,
       args.role,"Read every newly supplied turn plus the prior checkpoint when present.",
-      "Return a calibrated goalDistance from 0 (goal satisfied) to 1 (no useful progress).",
+      "Return a calibrated goalDistance from 0 (goal satisfied with evidence) to 1 (no useful progress). In summary, justify the score using concrete remaining acceptance gaps and supporting or missing evidence; use unresolvedQuestions for unresolved gaps. A low score needs verified coverage, not participant agreement. Compare progress with the prior synthesis when available.",
       args.final?"Produce the best final candidate outcome.":
         "Recommend continue, reshape, or stop and give concise moderation for the Leader."].join("\n"),
     acceptanceCriteria:args.final?args.criteria:[

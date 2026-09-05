@@ -33,7 +33,7 @@ export async function createWorktree(
     projectPath, lifecycle: "active" as WorktreeLifecycle };
 }
 
-export type PlannedWorktree = Omit<WorktreeInfo, "lifecycle"> & { lifecycle?: WorktreeLifecycle };
+export type PlannedWorktree = Omit<WorktreeInfo, "lifecycle"> & { lifecycle?: WorktreeLifecycle; baseSha?: string };
 
 export async function resolveWorktreeBase(projectPath: string,
   targetRef?: string): Promise<{ targetRef: string; baseSha: string }> {
@@ -47,7 +47,7 @@ export async function resolveWorktreeBase(projectPath: string,
 
 /** Provision or idempotently reuse an exact persisted contribution identity. */
 export async function provisionPlannedWorktree(plan: PlannedWorktree,
-  startPoint = "HEAD"): Promise<WorktreeInfo> {
+  startPoint = plan.baseSha ?? "HEAD"): Promise<WorktreeInfo> {
   const projectPath = resolve(plan.projectPath); const worktreePath = resolve(plan.path);
   const base = allowedWorktreeRoots(projectPath)
     .find((root) => isOwnedWorktreePath(projectPath, worktreePath)
@@ -74,6 +74,10 @@ export async function provisionPlannedWorktree(plan: PlannedWorktree,
     await exec(branchExists
       ? ["worktree", "add", worktreePath, branch]
       : ["worktree", "add", worktreePath, "-b", branch, startPoint], projectPath);
+  }
+  if (plan.baseSha) {
+    try { await exec(["merge-base", "--is-ancestor", plan.baseSha, "HEAD"], worktreePath); }
+    catch { throw new Error("Contribution checkout does not contain its recorded base; preserve its edits and repair the branch before resuming"); }
   }
   return { ...plan, branch, path: worktreePath, projectPath, lifecycle: "active" };
 }

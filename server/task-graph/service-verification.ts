@@ -1,3 +1,5 @@
+import { scopedContextForNode } from "./context-sources.ts";
+import { renderScopedContext, verificationCompletionGuidance, type ScopedContext } from "./node-prompt.ts";
 import type { WorkItemRunSnapshot } from "../../shared/work-item-contracts.ts";
 import type { GraphRevisionInput,GraphSnapshot } from "../../shared/task-graph-contracts.ts";
 import { serverLogger } from "../logging.ts";
@@ -283,7 +285,8 @@ async function launchVerificationRequest(service:TaskGraphService,requestId:stri
       attemptNumber:Math.max(1,ordinal),requestId:`task-graph-verifier:${String(request.verifier_attempt_id)}`,
       harness:node.allowedHarnesses[0],executorClass:"reasoning",
       toolAllowlist:[],
-      prompt:renderVerificationPrompt(node,producer,artifacts,graph.run.sourceSnapshotId),
+      prompt:renderVerificationPrompt(node,producer,artifacts,graph.run.sourceSnapshotId,graph.revision,
+        scopedContextForNode(service.options.db,graph.run.sourceSnapshotId,node.id)),
     });
     const at=service.now();
     const acknowledged=transitionVerificationRequest(service,{requestId,at,
@@ -379,14 +382,18 @@ function verificationSubject(service:TaskGraphService,input:VerificationSubjectI
 }
 
 function renderVerificationPrompt(node:GraphRevisionInput["nodes"][number],producer:Row,
-  artifacts:Row[],sourceSnapshotId:string):string {
+  artifacts:Row[],sourceSnapshotId:string,revision:GraphRevisionInput,context:ScopedContext[]):string {
   return [
     "Independently verify an immutable task-graph output. Do not trust or reproduce the producer's reasoning.",
     `Node: ${node.title} (${node.id})`,`Producer attempt: ${String(producer.id)}`,
     `Source snapshot: ${sourceSnapshotId}`,
+    `Mission: ${revision.objective}\nObjective: ${node.objective}`,
+    `Relevant constraints: ${JSON.stringify([...revision.constraints,...node.constraints])}\nNon-goals: ${JSON.stringify(revision.nonGoals)}`,
+    "Verification is read-only. Producer write ownership does not authorize verifier writes.",
+    renderScopedContext(context.filter(source=>!source.sourceId.startsWith("skill:"))),
     `Acceptance criteria:\n${node.acceptanceCriteria.map(value=>`- ${value}`).join("\n")||"- No additional criteria"}`,
     `Artifacts:\n${artifacts.map(row=>`- ${JSON.stringify(safeArtifactReference(row))}`).join("\n")}`,
     "Read artifact content only through mcp__task-graph__read_input_artifact using the listed artifactId.",
-    "Your final report must be JSON only: {\"result\":\"passed\"|\"failed\"|\"inconclusive\",\"confidence\":0..1,\"summary\":\"...\"}.",
+    verificationCompletionGuidance(),
   ].join("\n\n");
 }

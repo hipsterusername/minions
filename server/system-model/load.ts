@@ -186,8 +186,8 @@ function readContextBudgets(dir: string, errors: ModelValidationError[]) {
   const file = path.join(dir, "context-budgets.yaml");
   if (!fs.existsSync(file)) return undefined;
   const schema = z.union([
-    contextBudgetSchema,
     z.object({ contextBudgets: contextBudgetSchema }).transform((v) => v.contextBudgets),
+    contextBudgetSchema.strict(),
   ]);
   return readYamlFile(file, schema, errors) ?? undefined;
 }

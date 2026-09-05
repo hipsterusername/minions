@@ -1,10 +1,15 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { compileSkills } from "../../shared/skill-prompt.ts";
+import { saveSkillSnapshot } from "../skill-snapshot.ts";
 import "./test-helpers.ts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SemanticTaskGraphPlan } from "../../shared/task-graph-planning-contracts.ts";
 
 vi.mock("../skills.ts", () => ({
   loadSkillsByIds: () => [],
-  compileSkillTemplate: () => "",
+  compileSkills: (skills: import("../skills.ts").SkillTemplate[], values: Record<string, Record<string, string>>) => compileSkills(skills, values),
 }));
 const mocks = vi.hoisted(() => ({ storedPacket: null as null | {
   packet: { id: string; reviewGates: Array<{ gateId: string; name: string;
@@ -54,6 +59,43 @@ function context(semanticPlan: SemanticTaskGraphPlan,
 
 describe("planning source capture", () => {
   beforeEach(() => { mocks.storedPacket = null; });
+
+  it("freezes the same complete disclosure as the Leader, including eager bodies and attachment references", async () => {
+    const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), "graph-skill-"));
+    try {
+      const skill = { id: "design", name: "Design", description: "Design", category: "design" as const,
+        icon: "*", accentColor: "#fff", template: "PARENT {{target}}", variables: [],
+        attachments: [{ kind: "text" as const, filename: "guide.md", mediaType: "text/markdown", text: "PRIVATE_ATTACHMENT", truncated: false }],
+        subskills: [
+          { id: "layout", name: "Layout", description: "Layout rules", body: "LAZY_BODY" },
+          { id: "core", name: "Core", description: "Always", body: "EAGER_BODY", alwaysInclude: true },
+        ] };
+      const values = { design: { target: "dashboard" } };
+      const skillSnapshotId = saveSkillSnapshot(projectPath, { version: 1, skills: [skill], values });
+      const input = { ...context(plan([]), null), projectPath, skillIds: ["design"], skillValues: values, skillSnapshotId };
+      const captured = await capturePlanningSource(input, 1, async () => ({ baseCommit: "abc", dirtyDigest: HASH_A }));
+      const delivered = captured.scopedSources.find(source => source.sourceId === "skill:design")!.content;
+      expect(delivered).toBe(compileSkills([skill], values));
+      for (const sentinel of ["PARENT dashboard", "EAGER_BODY", "load_subskill", "layout", "guide.md", "load_skill_attachment"]) expect(delivered).toContain(sentinel);
+      expect(delivered).not.toContain("LAZY_BODY");
+      expect(delivered).not.toContain("PRIVATE_ATTACHMENT");
+      expect(captured.snapshot.skillSnapshotId).toBe(skillSnapshotId);
+      const selectedPlan = { ...input.plan, steps: [
+        { ...input.plan.steps[0]!, skillIds: ["design"] },
+        { ...input.plan.steps[0]!, key: "plain", skillIds: [] },
+      ] };
+      const selected = await capturePlanningSource({ ...input, skillIds: [], plan: selectedPlan,
+        nodeIdsByStepKey: { ...input.nodeIdsByStepKey, plain: "node-plain" } }, 2,
+        async () => ({ baseCommit: "abc", dirtyDigest: HASH_A }));
+      expect(selected.scopedSources.filter(source => source.sourceId === "skill:design"))
+        .toHaveLength(1);
+      expect(selected.scopedSources.some(source => source.nodeId === "node-plain")).toBe(false);
+      await expect(capturePlanningSource({ ...input, plan: { ...input.plan,
+        steps: [{ ...input.plan.steps[0]!, skillIds: ["missing"] }] } }, 3,
+        async () => ({ baseCommit: "abc", dirtyDigest: HASH_A })))
+        .rejects.toThrow(/(unavailable|not found|Unknown)/i);
+    } finally { fs.rmSync(projectPath, { recursive: true, force: true }); }
+  });
 
   it("routes only context groups selected by a node", async () => {
     const connected = `<connected-context>

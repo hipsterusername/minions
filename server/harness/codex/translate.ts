@@ -10,10 +10,13 @@
 
 import type { ThreadEvent, ThreadItem } from "@openai/codex-sdk";
 import type { NormalizedEvent } from "../../../shared/normalized-event.ts";
+import { estimateCodexTurnCostUSD, ordinaryCodexInputTokens } from "./pricing.ts";
 
 export interface TranslatorContext {
   /** Model name embedded in the init event. */
   model: string;
+  /** Existing session estimate when this translator starts a later invocation. */
+  initialCostUSD?: number;
   /**
    * Accepted for compatibility with the outer generator's sessionId closure;
    * the translator reads thread_id directly from thread.started events.
@@ -34,7 +37,11 @@ export interface CodexTranslator {
 export function createCodexTranslator(ctx: TranslatorContext): CodexTranslator {
   /** Maps item id → Date.now() when item.started was received. */
   const startedAt = new Map<string, number>();
+  const pricedWebSearchIds = new Set<string>();
   let threadId = "";
+  let cumulativeCostUSD = ctx.initialCostUSD ?? 0;
+  let costEstimateAvailable = true;
+  let pendingWebSearchCalls = 0;
 
   function computeElapsed(id: string): number {
     const started = startedAt.get(id);
@@ -166,6 +173,10 @@ export function createCodexTranslator(ctx: TranslatorContext): CodexTranslator {
         break;
 
       case "web_search":
+        if (!pricedWebSearchIds.has(item.id)) {
+          pricedWebSearchIds.add(item.id);
+          pendingWebSearchCalls += 1;
+        }
         events.push({
           kind: "tool_result",
           callId: item.id,
@@ -217,23 +228,43 @@ export function createCodexTranslator(ctx: TranslatorContext): CodexTranslator {
         case "item.completed":
           return handleItemCompleted(evt.item);
 
-        case "turn.completed":
+        case "turn.completed": {
           const rawTurn = evt as ThreadEvent & { turn_id?: string; id?: string };
           const turnId =
             rawTurn.turn_id ??
             rawTurn.id ??
             `${threadId || "unknown"}:${evt.usage.input_tokens}:${evt.usage.output_tokens}:${evt.usage.cached_input_tokens}`;
+          const cacheWrite = evt.usage.cache_write_input_tokens ?? 0;
+          const tokenUsage = {
+            inputTokens: evt.usage.input_tokens,
+            outputTokens: evt.usage.output_tokens,
+            cachedInputTokens: evt.usage.cached_input_tokens,
+            cacheWriteInputTokens: cacheWrite,
+          };
+          const ordinaryInput = ordinaryCodexInputTokens(tokenUsage);
+          const turnCostUSD = costEstimateAvailable
+            ? estimateCodexTurnCostUSD(ctx.model, tokenUsage, pendingWebSearchCalls)
+            : null;
+          pendingWebSearchCalls = 0;
+          if (turnCostUSD == null) {
+            costEstimateAvailable = false;
+          } else {
+            cumulativeCostUSD += turnCostUSD;
+          }
           return [
             {
               kind: "usage",
               source: "turn_completed",
-              input: evt.usage.input_tokens,
+              input: ordinaryInput ?? evt.usage.input_tokens,
               output: evt.usage.output_tokens,
               cacheRead: evt.usage.cached_input_tokens,
+              cacheCreation: cacheWrite,
+              ...(turnCostUSD != null ? { costUSD: cumulativeCostUSD } : {}),
               turnId,
               ...(threadId ? { sdkSessionId: threadId } : {}),
             },
           ];
+        }
 
         case "turn.failed":
           return [{ kind: "done", reason: "error", error: evt.error.message }];

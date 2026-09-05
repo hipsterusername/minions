@@ -196,6 +196,14 @@ describe("context / settings / skills / mcp-servers round-trip", () => {
     expect(readSettings(project)).toMatchObject(next);
   });
 
+  it("round-trips drag snapping opt-out and opt-in", () => {
+    expect(readSettings(project).snapWhileDragging).toBeUndefined();
+    for (const snapWhileDragging of [false, true]) {
+      writeSettings(project, { snapWhileDragging });
+      expect(readSettings(project).snapWhileDragging).toBe(snapWhileDragging);
+    }
+  });
+
   it("round-trips the legacy planning debug override", () => {
     writeSettings(project, { leaderPlanningBackend: "legacy" });
     expect(readSettings(project).leaderPlanningBackend).toBe("legacy");

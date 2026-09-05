@@ -41,7 +41,7 @@ import { createWaitAndContinueToolDef } from "./task-tools/wait-and-continue.ts"
 import { createSetTaskNameToolDef } from "./task-tools/set-task-name.ts";
 import { createRequestApprovalToolDef } from "./task-tools/request-approval.ts";
 import { createCheckpointSessionToolDef } from "./task-tools/checkpoint-session.ts";
-import { createLoadSubskillToolDef } from "./task-tools/load-subskill.ts";
+import { createSkillRetrievalTools } from "./skill-retrieval.ts";
 import { createUpdateProjectContextToolDef } from "./task-tools/update-project-context.ts";
 
 /**
@@ -72,6 +72,7 @@ export function createTaskToolsForLeader(opts: {
    * Defaults to `cwd` when omitted (no-worktree case).
    */
   projectPath?: string;
+  skillSnapshotId?: string | undefined;
   minionSystemPrompt: string;
   /** Skills selected on the Leader and inherited by each spawned Minion. */
   defaultMinionSkillIds?: readonly string[];
@@ -92,7 +93,7 @@ export function createTaskToolsForLeader(opts: {
   taskTimeoutMs?: number;
   getSessionRuntime?: (sessionKey: string) => RuntimeSessionInfo | null;
   onStateChange?: (state: TaskManagerState) => void;
-  onTaskNameChange?: (name: string) => void;
+  onTaskNameChange?: (name: string) => string | void;
   getRenderComponents?: () => RenderComponent[];
   planningBackend?: LeaderPlanningBackend;
 }): { toolDefs: NormalizedToolDef[]; taskState: TaskManagerState } {
@@ -108,6 +109,7 @@ export function createTaskToolsForLeader(opts: {
     startMinionSession: opts.startMinionSession,
     cwd: opts.cwd,
     projectPath: opts.projectPath ?? opts.cwd,
+    skillSnapshotId: opts.skillSnapshotId,
     minionSystemPrompt: opts.minionSystemPrompt,
     defaultMinionSkillIds: opts.defaultMinionSkillIds,
     defaultMinionSkillValues: opts.defaultMinionSkillValues,
@@ -136,7 +138,7 @@ export function createTaskToolsForLeader(opts: {
     createSetTaskNameToolDef(ctx),
     createWaitAndContinueToolDef(ctx),
     createCheckpointSessionToolDef(ctx),
-    createLoadSubskillToolDef(ctx),
+    ...createSkillRetrievalTools({ projectPath: ctx.projectPath, skillSnapshotId: ctx.skillSnapshotId, skillValues: ctx.defaultMinionSkillValues }),
     createUpdateProjectContextToolDef(ctx),
   ];
   // The graph backend adds graph-planning tools in agents/leader.ts. It never

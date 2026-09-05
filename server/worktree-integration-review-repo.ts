@@ -66,7 +66,7 @@ export function recordLineageApproval(db: Database.Database, input: { id: string
         throw new Error("at least one integrated contribution required");
       if (db.prepare("SELECT 1 FROM worktree_contributions WHERE lineage_id=? AND state NOT IN ('integrated','discarded') LIMIT 1").get(row.id))
         throw new Error("all contributions must be integrated or discarded before final approval");
-      if (db.prepare("SELECT 1 FROM worktree_integration_gates WHERE lineage_id=? AND scope='lineage' AND status NOT IN ('passed','waived') LIMIT 1").get(row.id))
+      if (db.prepare("SELECT 1 FROM worktree_integration_gates WHERE lineage_id=? AND scope='lineage' AND name<>'promotion_runtime' AND status NOT IN ('passed','waived') LIMIT 1").get(row.id))
         throw new Error("lineage gates must pass before final approval"); }
     const head = row.integration_head_sha ?? row.base_sha;
     db.prepare(`INSERT INTO worktree_integration_reviews

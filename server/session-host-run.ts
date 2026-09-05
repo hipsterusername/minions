@@ -1,5 +1,6 @@
 /** Lifecycle helpers for SessionHost worktrees, harness starts, and events. */
 import type { AgentType, AgentTypeContext, AgentToolResult } from "./agents/index.ts";
+import { withLaunchCapabilities } from "./agents/launch-context.ts";
 import type {
   AgentHarness,
   HarnessStartOptions,
@@ -8,7 +9,7 @@ import type {
 } from "./harness/types.ts";
 import type { NormalizedEvent } from "../shared/normalized-event.ts";
 import type { Bus } from "./bus.ts";
-import { createWorktree, isGitRepo, provisionPlannedWorktree, type WorktreeInfo } from "./worktree.ts";
+import type { WorktreeInfo } from "./worktree.ts";
 import {
   enrichSystemPromptForWorktree,
   modelSupportsAdaptive,
@@ -16,6 +17,7 @@ import {
 } from "./session-host-config.ts";
 import type { SessionHost, StartSessionOptions } from "./session-host.ts";
 import { applySessionRunningForMinion } from "./task-lifecycle.ts";
+import { buildFreshThreadPrompt } from "./session-handoff.ts";
 import { captureUsageEvent } from "./session-usage-capture.ts";
 import { captureCheckpointHandoffEvent, recordCompactionUsage, withCompactionReminder } from "./proactive-compaction.ts";
 import { serverLogger } from "./logging.ts";
@@ -27,78 +29,12 @@ import { enrichInvocationProviderIdentity, persistInvocationBeforeHarnessOpen,
   persistInvocationTerminalWitness } from "./work-item-run-start.ts";
 import { getRunInvocation, projectRunInvocationSeal, type CleanTerminalSealPolicy } from "./work-item-invocations.ts";
 import { persistenceDb } from "./session-persist.ts";
-import { resolveHarnessSandboxPolicy, type HarnessSandboxPolicyInput } from "./harness/sandbox-policy.ts";
+import { resolveHarnessSandboxPolicy } from "./harness/sandbox-policy.ts";
 export { buildAgentContext } from "./session-host-agent-context.ts";
 export { sessionHostLogFields } from "./session-host-identity.ts";
 
 const log = serverLogger.child("session-host");
-/** Resolve the effective cwd/worktree before opening the SDK query. */
-export async function ensureWorktree(
-  host: SessionHost,
-  opts: StartSessionOptions,
-  bus: Bus,
-  agentType: AgentType,
-): Promise<string> {
-  let effectiveCwd = opts.cwd;
-
-  if (opts.parentWorktree) {
-    host.worktree = opts.parentWorktree;
-    host.cwd = opts.parentWorktree.path;
-    effectiveCwd = opts.parentWorktree.path;
-    log.debug("parent_worktree_inherited", { ...sessionHostLogFields(host), branch: opts.parentWorktree.branch, worktreePath: opts.parentWorktree.path });
-  } else {
-    host.cwd = effectiveCwd;
-  }
-
-  if (!(agentType.wantsWorktree && host.worktreeIsolation)) {
-    return effectiveCwd;
-  }
-
-  if (host.worktree && !opts.parentWorktree) {
-    host.cwd = host.worktree.path;
-    return host.worktree.path;
-  }
-
-  if (opts.parentWorktree) return effectiveCwd;
-
-  try {
-    const inGitRepo = await isGitRepo(effectiveCwd);
-    if (!inGitRepo) throw new Error("Worktree isolation requires a Git repository");
-    const worktreeInfo = opts.plannedContribution
-      ? await provisionPlannedWorktree(opts.plannedContribution)
-      : await createWorktree(effectiveCwd, host.id);
-    host.worktree = worktreeInfo;
-    host.cwd = worktreeInfo.path;
-    bus.emitToSession(host.id, {
-      type: "worktree_created",
-      sessionKey: host.id,
-      worktreePath: worktreeInfo.path,
-      branch: worktreeInfo.branch,
-    });
-    log.info("worktree_created", { ...sessionHostLogFields(host), branch: worktreeInfo.branch, worktreePath: worktreeInfo.path });
-    effectiveCwd = worktreeInfo.path;
-  } catch (err: unknown) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    log.error("worktree_create_failed", { ...sessionHostLogFields(host), error: err });
-    bus.emitToSession(host.id, {
-      type: "worktree_failed",
-      sessionKey: host.id,
-      error: `Worktree creation failed: ${errMsg}`,
-    });
-    // Isolation is a safety boundary, especially for harnesses whose mutation
-    // interception is observe-only. Never downgrade a requested worktree run
-    // into a shared-directory writer when provisioning fails.
-    throw err;
-  }
-  return effectiveCwd;
-}
-export async function ensureContributionWorktree(host: SessionHost, opts: StartSessionOptions, bus: Bus,
-  agentType: AgentType, transition?: SessionHostDeps["transitionWorktreeProvisioning"]): Promise<void> {
-  transition?.(host.runKey, "provisioning");
-  try { await ensureWorktree(host, opts, bus, agentType); transition?.(host.runKey, "active"); }
-  catch (error) { transition?.(host.runKey, "failed",
-    error instanceof Error ? error.message : String(error)); throw error; }
-}
+export { ensureWorktree, ensureContributionWorktree } from "./session-host-worktree.ts";
 /** Parameters for `buildHarnessStartOpts`. */
 export interface HarnessStartInput {
   host: SessionHost;
@@ -110,9 +46,7 @@ export interface HarnessStartInput {
   harness: AgentHarness;
   prompt: string | AsyncIterable<{ role: "user"; content: string }>;
 }
-/**
- * Assemble the HarnessStartOptions passed to `harness.start()`.
- *
+/** Assemble the HarnessStartOptions passed to `harness.start()`.
  * Harness-agnostic: each Claude-specific option lives inside ClaudeHarness
  * itself. This function only assembles the normalized contract fields.
  */
@@ -134,14 +68,21 @@ export function buildHarnessStartOpts(
   const allowedTools = [...new Set(availableTools.filter(name => !requested || requested.has(name)
     || name.startsWith("mcp__minion-status__") || name.startsWith("mcp__task-graph__")))];
 
-  const basePrompt = agentType.buildSystemPrompt(agentCtx, opts.systemPrompt, harness.builtInTools);
+  const permissionMode = isNormalizedPermissionMode(host.permissionMode) ? host.permissionMode : undefined;
+  const sandboxPolicy = resolveHarnessSandboxPolicy({
+    requested: opts.sandboxPolicy ?? host.sandboxPolicy?.requested,
+    permissionMode,
+    worktreeScoped: host.worktreeIsolation || host.worktree !== null,
+    support: harness.capabilities.sandboxEnforcement,
+  });
+  const basePrompt = agentType.buildSystemPrompt(withLaunchCapabilities(agentCtx, harness, allowedTools, sandboxPolicy), opts.systemPrompt, harness.builtInTools);
   const systemPrompt = basePrompt
     ? host.worktree
       ? enrichSystemPromptForWorktree(basePrompt, host.worktree, { role: host.role === "minion" ? "minion" : "leader", canonical: host.workItemId != null, sharedWorktree: host.role === "minion" && opts.parentWorktree != null })
       : basePrompt
     : "";
   const effectiveSystemPrompt = opts.plannedContribution?.resolutionTargetRef
-    ? `${systemPrompt}\n\nThis is a ${opts.plannedContribution.resolutionKind === "lineage" ? "final-lineage" : "contribution"} conflict-resolution iteration. In the retained worktree, merge the latest ${opts.plannedContribution.resolutionTargetRef} into ${opts.plannedContribution.branch}, resolve conflicts, and leave the branch clean. Do not promote directly; gates and approval run afterward.`
+    ? `${systemPrompt}\n\nThis is a ${opts.plannedContribution.resolutionKind === "lineage" ? "final-lineage" : "contribution"} conflict-resolution iteration. The server has prepared the merge of ${opts.plannedContribution.resolutionTargetRef} into ${opts.plannedContribution.branch}. Resolve conflict markers by editing files and run verification. Do not stage, commit, or run Git mutations; the server collects the resolved files and completes the merge. Do not promote directly; gates and approval run afterward.`
     : systemPrompt;
 
   const resolvedModel = host.model ? (harness.resolveModel(host.model) ?? host.model) : "";
@@ -149,7 +90,7 @@ export function buildHarnessStartOpts(
   const startOpts: HarnessStartOptions = {
     sessionKey: host.id,
     cwd: host.cwd,
-    prompt: withCompactionReminder(host, prompt),
+    prompt: withCompactionReminder(host, buildFreshThreadPrompt(host, opts, prompt)),
     systemPrompt: effectiveSystemPrompt,
     model: resolvedModel,
     allowedTools,
@@ -159,26 +100,19 @@ export function buildHarnessStartOpts(
     resumeId: opts.invocationKind === "provider_continuation"
       ? undefined
       : opts.resumeId,
+    ...(Number.isFinite(host.totalCost) && host.totalCost > 0 ? { initialCostUSD: host.totalCost } : {}),
     externalMcpServers: opts.externalMcpServers,
     ...(agentCtx.mutationCoordination
       ? { mutationCoordination: agentCtx.mutationCoordination } : {}),
   };
-
-  if (opts.attachments && opts.attachments.length > 0) {
-    startOpts.attachments = opts.attachments as ReadonlyArray<NormalizedAttachment>;
-  }
+  const attachments = !startOpts.resumeId ? host.continuity?.attachments ?? opts.attachments : opts.attachments;
+  if (attachments?.length) startOpts.attachments = attachments as ReadonlyArray<NormalizedAttachment>;
   const persistedPermissionMode = host.permissionMode;
   if (isNormalizedPermissionMode(persistedPermissionMode)) {
     startOpts.permissionMode = persistedPermissionMode;
   }
   // Follow-ups reuse the last requested policy instead of reverting to defaults.
-  const requestedPolicy: HarnessSandboxPolicyInput | undefined = opts.sandboxPolicy ?? host.sandboxPolicy?.requested;
-  startOpts.sandboxPolicy = resolveHarnessSandboxPolicy({
-    requested: requestedPolicy,
-    permissionMode: startOpts.permissionMode,
-    worktreeScoped: host.worktreeIsolation || host.worktree !== null,
-    support: harness.capabilities.sandboxEnforcement,
-  });
+  startOpts.sandboxPolicy = sandboxPolicy;
   host.sandboxPolicy = startOpts.sandboxPolicy;
 
   if (harness.capabilities.thinking && host.thinkingConfig?.enabled

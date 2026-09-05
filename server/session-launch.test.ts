@@ -24,6 +24,16 @@ function setup() {
 }
 
 describe("launchSession", () => {
+  it("uses the prepared history handoff when readiness forces a provider switch", async () => {
+    const h = setup();
+    await launchSession({ registry: h.registry, bus: h.bus,
+      options: { sessionKey: "next", cwd: "/work", prompt: "Continue", role: "leader", harness: "claude",
+        resumeId: "claude-history", freshThreadPrompt: "PRESERVED_CONTEXT\nContinue" },
+      getReadiness: vi.fn(async () => snapshot(["codex"])),
+    });
+    expect(h.starts[0]).toMatchObject({ harness: "codex", resumeId: undefined, prompt: "PRESERVED_CONTEXT\nContinue" });
+  });
+
   it("switches an unavailable harness without carrying its model", async () => {
     const h = setup();
     const result = await launchSession({

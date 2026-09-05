@@ -75,6 +75,58 @@ function setup() {
 }
 
 describe("TaskGraphService central wiring",() => {
+  it("counts pending admissions across concurrent graph runs sharing one slot", async () => {
+    const db=setup(); const {bus}=fakeBus();
+    createWorkItem(db,{id:"work2",projectId:"project",projectPath:process.cwd(),title:"Second",changeMode:"live",at:1});
+    startWorkItemIteration(db,{workItemId:"work2",runKey:"primary2",idempotencyKey:"primary2",
+      expectedLifecycleRevision:0,expectedCurrentRunKey:null,at:2});
+    let release!: () => void; let calls=0; let live=0;
+    const service=new TaskGraphService({db,bus,availableDispatchSlots:()=>Math.max(0,1-live),children:{
+      startChildRun:async input=>{
+        calls++;
+        await new Promise<void>(resolve=>{release=resolve;});
+        live++;
+        return {...childSnapshot(input.attemptId,input.attemptNumber),workItemId:input.workItemId};
+      },
+    }});
+    service.createRevision(revision(),3);
+    service.createRevision({...revision(),workItemId:"work2",definitionId:"definition2",revisionId:"revision2"},3);
+    const first=service.startRun({id:"graph",workItemId:"work",primaryRunKey:"primary",revisionId:"revision",
+      sourceSnapshot:source(),expectedLifecycleRevision:1,at:4});
+    const second=service.startRun({id:"graph2",workItemId:"work2",primaryRunKey:"primary2",revisionId:"revision2",
+      sourceSnapshot:{...source(),id:"source2",workItemId:"work2",primaryRunKey:"primary2",taskGraphRevisionId:"revision2"},
+      expectedLifecycleRevision:1,at:4});
+    await vi.waitFor(()=>expect(calls).toBe(1));
+    await new Promise(resolve=>setTimeout(resolve,10));
+    expect(calls).toBe(1);
+    release(); await Promise.all([first,second]);
+    expect(live).toBe(1);
+    expect(service.snapshot("graph").attempts.length+service.snapshot("graph2").attempts.length).toBe(1);
+  });
+
+  it("rejects producer output that cannot satisfy its consumer before staging", async () => {
+    const db=setup(); const {bus}=fakeBus();
+    const service=new TaskGraphService({db,bus,children:{startChildRun:async input=>
+      childSnapshot(input.attemptId,input.attemptNumber)}});
+    const graph=revision();
+    graph.nodes=[{...graph.nodes[0]!,id:"producer",outputSchemas:{result:{type:"object"}}},
+      {...graph.nodes[0]!,id:"consumer",inputBindings:{result:{type:"object",required:["needed"],
+        properties:{needed:{type:"string",enum:["valid"]}}}}}];
+    graph.terminalNodeIds=["consumer"];
+    graph.edges=[{id:"handoff",sourceNodeId:"producer",targetNodeId:"consumer",kind:"artifact",
+      sourceOutput:"result",targetInput:"result",satisfactionPolicy:"all_success",failurePolicy:"fail",optional:false}];
+    service.createRevision(graph,3);
+    await service.startRun({id:"graph",workItemId:"work",primaryRunKey:"primary",revisionId:"revision",
+      sourceSnapshot:source(),expectedLifecycleRevision:1,at:4});
+    const session=String(service.snapshot("graph").attempts[0]!.session_run_key);
+    const output={source:"inline" as const,outputName:"result",schemaName:"Result",schemaVersion:"1",
+      classification:"internal" as const,retentionPolicy:"keep",observedWriteSet:[]};
+    expect(()=>service.stageArtifactForSession(session,{...output,inlineJson:{unrelated:true}})).toThrow(/needed/);
+    expect(()=>service.stageArtifactForSession(session,{...output,inlineJson:{needed:"invalid"}})).toThrow();
+    expect(service.snapshot("graph").artifacts).toHaveLength(0);
+    expect(service.stageArtifactForSession(session,{...output,inlineJson:{needed:"valid"}}).staged).toBe(true);
+  });
+
   it("applies deployment harness and tool policy during preflight and persistence",() => {
     const db=setup();const {bus}=fakeBus();const checked:string[]=[];
     const service=new TaskGraphService({db,bus,children:{startChildRun:async(input)=>
@@ -152,19 +204,22 @@ describe("TaskGraphService central wiring",() => {
         observedWriteSet:["package.json"]})});
   });
 
-  it("dispatches frozen graph skill identities to the child run",async()=>{
+  it.each([true,false])("dispatches only task-scoped frozen graph skills (selected=%s)",async selected=>{
     const db=setup();const {bus}=fakeBus();const children:Array<Record<string,unknown>>=[];
     const service=new TaskGraphService({db,bus,children:{startChildRun:async input=>{
       children.push(input);return childSnapshot(input.attemptId,input.attemptNumber);
     }}});
     service.createRevision(revision(),3);
-    const frozen=source();frozen.compiledSkills=[{skillId:"skill-builder",version:"v1",
+    const frozen=source();frozen.skillSnapshotId="a".repeat(64);frozen.compiledSkills=[{skillId:"skill-builder",version:"v1",
       contentHash:HASH,valuesHash:HASH}];
+    if (selected) db.prepare(`INSERT INTO task_graph_context_sources
+      (source_snapshot_id,node_id,source_id,content_hash,classification,content,created_at)
+      VALUES('source','node','skill:skill-builder',?,'internal','Frozen selected playbook',3)`).run(HASH);
 
     await service.startRun({id:"graph",workItemId:"work",primaryRunKey:"primary",
       revisionId:"revision",sourceSnapshot:frozen,expectedLifecycleRevision:1,at:4});
 
-    expect(children).toEqual([expect.objectContaining({skillIds:["skill-builder"]})]);
+    expect(children).toEqual([expect.objectContaining({skillIds:selected?["skill-builder"]:[],skillSnapshotId:"a".repeat(64)})]);
   });
 
   it("submits independent attempts concurrently so fleet workers can claim them",async()=>{

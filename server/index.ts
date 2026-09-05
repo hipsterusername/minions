@@ -1,3 +1,5 @@
+import { evaluateRuntimePromotionGate } from "./worktree-integration-gates.ts";
+import { startWorktreeCleanup } from "./worktree-cleanup.ts";
 /**
  * Server entrypoint — Express + WebSocket wiring.
  *
@@ -51,7 +53,7 @@ import { SqliteWorktreeIntegrationService } from "./worktree-integration-sqlite.
 import { createSqliteGitIntegrationStore } from "./sqlite-git-integration-store.ts";
 import { createProductionGitIntegrationWorker } from "./git-integration-worker.ts";
 import { createGitIntegrationPump } from "./git-integration-pump.ts";
-import { getLineageState, getQueueEntry, recordLineageGate,
+import { getQueueEntry, recordLineageGate,
   recoverInterruptedIntegrations } from "./worktree-integration-repo.ts";
 import { emitItemChanged } from "./work-item-service-events.ts";
 import { TaskGraphService } from "./task-graph/service.ts";
@@ -208,15 +210,8 @@ const worktreeIntegrations = new SqliteWorktreeIntegrationService(pushDb, Date.n
   undefined, undefined, bus);
 const gitIntegrationWorker = createProductionGitIntegrationWorker(createSqliteGitIntegrationStore(
   pushDb, Date.now, (lineageId) => worktreeIntegrations.refresh(lineageId)), {
-  evaluateGate: async ({ operation }) => {
-    if (!operation.lineageId) return { allowed: false, reason: "lineage identity required" };
-    const state = getLineageState(pushDb, operation.lineageId);
-    const failed = (state.gates as Array<{ scope: string; status: string; name: string }>)
-      .find((gate) => gate.scope === "lineage" && gate.name !== "promotion_runtime"
-        && !["passed", "waived"].includes(gate.status));
-    return failed ? { allowed: false, reason: `lineage gate ${failed.name} is ${failed.status}` }
-      : { allowed: true };
-  },
+  evaluateGate: ({ operation }) => evaluateRuntimePromotionGate(pushDb, operation,
+    id => worktreeIntegrations.evaluatePromotionGates(id)),
   onGateEvaluated: async ({ operation }, verdict) => {
     if (!operation.lineageId) return;
     recordLineageGate(pushDb, { id: `promotion-gate:${operation.lineageId}`,
@@ -236,6 +231,7 @@ const gitIntegrationPump = createGitIntegrationPump(gitIntegrationWorker, {
   onError: (error, repositoryPath, targetRef) =>
     log.warn("git_integration_worker_failed", { repositoryPath, targetRef, error }),
 });
+const stopWorktreeCleanup = startWorktreeCleanup(pushDb, error => log.warn("worktree_cleanup_failed", { error }));
 const drainIntegrationScope = gitIntegrationPump.notify;
 worktreeIntegrations.setQueueNotifier(drainIntegrationScope);
 for (const queueId of recoverInterruptedIntegrations(pushDb, Date.now())) {
@@ -375,6 +371,7 @@ server.listen(PORT, HOST, () => {
 
 async function shutdownCleanup(): Promise<void> {
   log.info("shutdown_requested", { worktrees: "preserved" });
+  stopWorktreeCleanup();
   gitIntegrationPump.shutdown();
   liveEditWorkItems.shutdown();
   taskGraphs.dispose();

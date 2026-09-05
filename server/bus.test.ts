@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import type { WebSocketServer } from "ws";
 import {
   createBus,
+  MAX_CLIENT_BURST_BYTES,
   unicast,
   unicastToSession,
   unicastGlobal,
@@ -178,5 +179,28 @@ describe("server/bus: unicast helpers", () => {
         type: "x",
       }),
     ).toThrow();
+  });
+});
+
+
+describe("bounded delivery", () => {
+  it("disconnects a slow client without losing delivery to healthy clients or observers", () => {
+    const slow = { ...makeClient(), bufferedAmount: MAX_CLIENT_BURST_BYTES, terminated: false,
+      terminate() { this.terminated = true; } };
+    const healthy = makeClient();
+    const bus = createBus(makeWss([slow, healthy]));
+    const observed: unknown[] = []; bus.subscribe(event => observed.push(event));
+    bus.emitGlobal({ type: "test" });
+    expect(slow.terminated).toBe(true);
+    expect(slow.sent).toHaveLength(0);
+    expect(healthy.sent).toHaveLength(1);
+    expect(observed).toHaveLength(1);
+  });
+  it("isolates synchronous socket failures", () => {
+    const broken = { ...makeClient(), send() { throw new Error("socket closed"); } };
+    const healthy = makeClient();
+    const bus = createBus(makeWss([broken, healthy]));
+    expect(() => bus.emitGlobal({ type: "test" })).not.toThrow();
+    expect(healthy.sent).toHaveLength(1);
   });
 });

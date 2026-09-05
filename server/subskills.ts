@@ -10,47 +10,9 @@
  */
 
 import { loadAllSkills, type SkillTemplate, type SubSkill } from "./skills.ts";
-import { formatSkillAttachments } from "../shared/skill-attachments.ts";
+import { formatSkillAttachmentIndex } from "../shared/skill-attachments.ts";
 
-/**
- * Build the always-injected *map* of a skill's sub-skills. Mirrors the pure
- * helper in `src/skills/types.ts`. Returns `""` when the skill has no
- * sub-skills.
- */
-export function buildSubskillMap(skill: SkillTemplate): string {
-  const subskills = skill.subskills ?? [];
-  if (subskills.length === 0) return "";
-
-  const bullets = subskills.map((sub) => {
-    const desc = sub.description?.trim() || "(no description)";
-    const when = sub.whenToUse?.trim()
-      ? ` When to use: ${sub.whenToUse.trim()}`
-      : "";
-    const loaded = sub.alwaysInclude ? " (loaded below)" : "";
-    return `- \`${sub.id}\` — **${sub.name}**: ${desc}.${when}${loaded}`;
-  });
-
-  const eager = subskills
-    .filter((sub) => sub.alwaysInclude)
-    .map((sub) => {
-      const attachments = formatSkillAttachments(
-        sub.attachments,
-        `Attached context for ${sub.name}`,
-      );
-      return `#### ${sub.name}\n\n${sub.body.trim()}`
-        + (attachments ? `\n\n${attachments}` : "");
-    });
-
-  const parts = [
-    `### Sub-skills of ${skill.name}`,
-    `This skill is a map. The sub-skills below are not loaded by default. ` +
-      `To pull one into context, call \`load_subskill\` with ` +
-      `\`skillId: "${skill.id}"\` and the sub-skill's id.`,
-    bullets.join("\n"),
-  ];
-  if (eager.length > 0) parts.push(eager.join("\n\n"));
-  return parts.join("\n\n");
-}
+export { buildSubskillMap } from "../shared/skill-prompt.ts";
 
 /**
  * Result of resolving a sub-skill body. Tolerant by design: the caller (the
@@ -77,8 +39,9 @@ export function resolveSubskillBody(
   projectPath: string,
   skillId: string,
   subskillId: string,
+  skills?: readonly SkillTemplate[],
 ): ResolveSubskillResult {
-  const all = loadAllSkills(projectPath);
+  const all = skills ?? loadAllSkills(projectPath);
   const skill = all.find((s) => s.id === skillId);
   if (!skill) {
     return { ok: false, reason: "unknown_skill", validSkillIds: all.map((s) => s.id) };
@@ -111,9 +74,9 @@ export function formatSubskillLoad(
   result: ResolveSubskillResult,
 ): string {
   if (result.ok) {
-    const attachments = formatSkillAttachments(
+    const attachments = formatSkillAttachmentIndex(
       result.subskill.attachments,
-      `Attached context for ${result.subskill.name}`,
+      skillId, subskillId,
     );
     return `# Sub-skill: ${result.skillName} › ${result.subskill.name}\n\n${result.subskill.body}`
       + (attachments ? `\n\n${attachments}` : "");

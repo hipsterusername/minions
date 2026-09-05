@@ -17,18 +17,19 @@ const setTaskNameInputSchema = z.object({
 });
 
 export function createSetTaskNameToolDef(ctx: TaskToolContext): NormalizedToolDef {
+  let canonicalName: string | undefined;
   return {
     name: "set_task_name",
     description:
-      "Set a durable, purpose-clear display name for this leader session (3-6 words). Call once at the start, and rename only if the core objective materially changes.",
+      "Set a durable, purpose-clear display name for this leader session (3-6 words). Call once during task formation. The first leader-selected name is canonical; later calls preserve it.",
     inputSchema: setTaskNameInputSchema,
     handler: async (input: unknown) => {
       const args = setTaskNameInputSchema.parse(input);
-      ctx.onTaskNameChange?.(args.name);
+      canonicalName = ctx.onTaskNameChange?.(canonicalName ?? args.name) ?? canonicalName ?? args.name;
       ctx.bus.emitToSession(ctx.leaderSessionKey, {
         type: "session_task_name",
         sessionKey: ctx.leaderSessionKey,
-        taskName: args.name,
+        taskName: canonicalName,
       });
       // Terse ack — never echo the name the model just sent.
       return okResult();

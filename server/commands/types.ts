@@ -46,6 +46,7 @@ export type WsCommandType =
   | "attach_work_item_surface"
   | "detach_work_item_surface"
   | "get_work_item"
+  | "get_work_item_receipt"
   | "list_work_items"
   | "get_work_item_runs"
   // Durable execution graphs

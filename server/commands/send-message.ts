@@ -11,10 +11,10 @@
  */
 
 import { unicastGlobal, unicastToSession } from "../bus.ts";
-import { createWorktree } from "../worktree.ts";
+import { createWorktree, removeWorktree } from "../worktree.ts";
 import { isValidThinkingConfig, type ThinkingConfig } from "../session-host.ts";
 import { sanitizeAttachments } from "./attachment-sanitize.ts";
-import { errToMessage } from "./helpers.ts";
+import { errToMessage, sendControlError, sendControlResponse } from "./helpers.ts";
 import type { CommandHandler } from "./types.ts";
 import { persistTaskState } from "../session-persist.ts";
 import { dirname, basename } from "node:path";
@@ -24,6 +24,7 @@ import { isLeaderPromptCustomizationEnvelope } from "../../shared/leader-prompt.
 import { SessionCapacityError } from "../session-registry.ts";
 
 const log = serverLogger.child("send-message");
+const pendingFollowUps = new WeakSet<object>();
 
 function projectPathForNewWorktree(cwd: string): string {
   const parent = dirname(cwd);
@@ -31,7 +32,20 @@ function projectPathForNewWorktree(cwd: string): string {
 }
 
 export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
+  // Older clients retain their existing events; receipt-aware clients can
+  // distinguish a rejected send from one whose outcome is still unknown.
+  const reject = (message: string, code: string) => {
+    if (cmd.requestId && cmd.sessionKey) {
+      sendControlError(ws, "send_message", cmd.sessionKey, cmd.requestId, message, { code });
+    }
+  };
+  const accept = () => {
+    if (cmd.requestId && cmd.sessionKey) {
+      sendControlResponse(ws, "send_message", cmd.sessionKey, cmd.requestId);
+    }
+  };
   if (!cmd.sessionKey || !cmd.prompt) {
+    reject("sessionKey and prompt required", "INVALID_MESSAGE");
     unicastGlobal(ws, {
       type: "error",
       message: "sessionKey and prompt required",
@@ -40,6 +54,7 @@ export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
   }
   const host = ctx.registry.get(cmd.sessionKey);
   if (!host) {
+    reject(`Session ${cmd.sessionKey} not found`, "SESSION_NOT_FOUND");
     unicastToSession(ws, cmd.sessionKey, {
       type: "error",
       message: `Session ${cmd.sessionKey} not found`,
@@ -49,6 +64,7 @@ export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
   if (host.role === "leader" && cmd.systemPrompt !== undefined
     && cmd.systemPrompt.trimStart().startsWith("{")
     && !isLeaderPromptCustomizationEnvelope(cmd.systemPrompt)) {
+    reject("Leader systemPrompt contains a malformed customization envelope", "INVALID_SYSTEM_PROMPT");
     unicastToSession(ws, cmd.sessionKey, {
       type: "error",
       message: "Leader systemPrompt contains a malformed customization envelope",
@@ -62,7 +78,7 @@ export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
       const item = detail?.workItem;
       if (!service || !item) throw new Error("Canonical work item is unavailable");
       const mutation = {
-        requestId: randomUUID(), workItemId: item.id, prompt: cmd.prompt,
+        requestId: cmd.requestId ?? randomUUID(), workItemId: item.id, prompt: cmd.prompt,
         expectedLifecycleRevision: item.lifecycle.lifecycleRevision,
         expectedCurrentRunKey: item.currentRunKey,
       };
@@ -77,7 +93,9 @@ export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
         ...(cmd.skillValues ? { skillValues: cmd.skillValues } : {}),
         ...(cmd.attachments ? { attachments: cmd.attachments } : {}),
       });
+      accept();
     } catch (error) {
+      reject(errToMessage(error), "WORK_ITEM_COMMAND_REQUIRED");
       unicastToSession(ws, cmd.sessionKey, {
         type: "session_error", sessionKey: cmd.sessionKey,
         code: "WORK_ITEM_COMMAND_REQUIRED",
@@ -87,6 +105,16 @@ export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
         suggestedCommands: ["continue_work_item"], timestamp: Date.now(),
       });
     }
+    return;
+  }
+
+  if (host.status === "running" || pendingFollowUps.has(host)) {
+    reject("Session is busy; retry this message after the active turn finishes.", "SESSION_BUSY");
+    unicastToSession(ws, host.id, {
+      type: "session_error", sessionKey: host.id, code: "SESSION_BUSY",
+      error: "Session is busy; retry this message after the active turn finishes.",
+      timestamp: Date.now(),
+    });
     return;
   }
 
@@ -144,9 +172,11 @@ export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
         sandboxPolicy: host.sandboxPolicy?.requested,
         ...(attachments ? { attachments } : {}),
       });
+      accept();
       return true;
     } catch (error) {
       if (!(error instanceof SessionCapacityError)) throw error;
+      reject(error.message, error.code);
       unicastToSession(ws, cmd.sessionKey!, {
         type: "session_error",
         sessionKey: cmd.sessionKey!,
@@ -164,8 +194,13 @@ export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
     !host.worktree;
 
   if (needsNewWorktree) {
+    pendingFollowUps.add(host);
     createWorktree(projectPathForNewWorktree(host.cwd), cmd.sessionKey)
       .then((worktreeInfo) => {
+        if (ctx.registry.get(host.id) !== host) {
+          reject("Session changed before the message could start.", "SESSION_CHANGED");
+          return removeWorktree(worktreeInfo.path, worktreeInfo.projectPath);
+        }
         host.worktree = worktreeInfo;
         host.cwd = worktreeInfo.path;
         host.persist();
@@ -179,6 +214,7 @@ export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
       })
       .catch((err: unknown) => {
         const errMsg = errToMessage(err);
+        reject(`Follow-up worktree creation failed: ${errMsg}`, "WORKTREE_CREATE_FAILED");
         log.error("follow_up_worktree_create_failed", {
           sessionKey: cmd.sessionKey,
           error: err,
@@ -188,7 +224,7 @@ export const sendMessage: CommandHandler = async (ctx, cmd, ws) => {
           sessionKey: cmd.sessionKey,
           error: `Follow-up worktree creation failed: ${errMsg}`,
         });
-      });
+      }).finally(() => pendingFollowUps.delete(host));
   } else {
     resumeLeader(host.cwd);
   }

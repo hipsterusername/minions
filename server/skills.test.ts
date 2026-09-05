@@ -123,7 +123,7 @@ describe("compileSkills", () => {
     expect(out).toContain("EAGER BODY");
   });
 
-  it("injects frozen skill attachments into the active skill context", () => {
+  it("advertises frozen skill attachments without injecting their contents", () => {
     const out = compileSkills([makeSkill({
       name: "Reviewer",
       attachments: [{
@@ -131,8 +131,8 @@ describe("compileSkills", () => {
         text: "Never skip review.", truncated: false,
       }],
     })], {});
-    expect(out).toContain("### Attached context for Reviewer");
-    expect(out).toContain("Never skip review.");
+    expect(out).toContain("### Attached context (load on demand)");
+    expect(out).not.toContain("Never skip review.");
   });
 });
 

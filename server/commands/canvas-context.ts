@@ -2,6 +2,7 @@
  * canvas_context - replace the leader session's full connected-canvas snapshot.
  */
 
+import { sanitizeAttachments } from "./attachment-sanitize.ts";
 import { unicastGlobal, unicastToSession } from "../bus.ts";
 import type { CommandHandler } from "./types.ts";
 
@@ -80,5 +81,5 @@ export const canvasContext: CommandHandler = (ctx, cmd, ws) => {
     return;
   }
 
-  host.setCanvasContext(buildCanvasContextBlock(cmd.items));
+  host.setCanvasContext(buildCanvasContextBlock(cmd.items), sanitizeAttachments(cmd.items.flatMap(item => item.attachments ?? [])) ?? []);
 };

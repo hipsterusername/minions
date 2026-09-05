@@ -1,3 +1,7 @@
+import { worktreePathBusy } from "./commands/worktree-operation-lock.ts";
+import { applyStoredWaivers, evaluatePromotionGates, markLineageVerificationNeeded } from "./worktree-integration-gates.ts";
+import { cleanupTerminalWorktrees } from "./worktree-cleanup.ts";
+import { prepareGitResolution } from "./git-resolution.ts";
 import crypto from "node:crypto";
 import path from "node:path";
 import type Database from "better-sqlite3";
@@ -28,6 +32,7 @@ export class SqliteWorktreeIntegrationService implements WorktreeIntegrationServ
     private readonly collectContribution: typeof collectGitContribution = collectGitContribution,
     private readonly bus?: Bus,
     private readonly evaluateGates: typeof evaluateMergeGatesForContext = evaluateMergeGatesForContext) {}
+  private readonly resolving = new Set<string>();
   private queueNotifier: ((repositoryPath: string, targetRef: string) => void) | undefined;
   private workItemNotifier: ((workItemId: string, cause: string) => void) | undefined;
   setQueueNotifier(notifier: (repositoryPath: string, targetRef: string) => void): void {
@@ -142,6 +147,7 @@ export class SqliteWorktreeIntegrationService implements WorktreeIntegrationServ
   }
   async joinLineage(input: { requestId: string; workItemId: string; lineageId: string;
     expectedRevision: number; actor: string }) {
+    if (this.resolving.has(input.workItemId)) throw new WorktreeIntegrationServiceError("queue_busy", "Conflict resolution is in progress");
     return this.command(input.requestId, "join_lineage", input, () => {
       joinWorkItemLineage(this.db, { lineageId: input.lineageId, workItemId: input.workItemId,
         expectedLineageRevision: input.expectedRevision, actor: input.actor, at: this.now() });
@@ -151,6 +157,7 @@ export class SqliteWorktreeIntegrationService implements WorktreeIntegrationServ
   async bindRun(input: { workItemId: string; runKey: string; lineageId?: string }): Promise<PlannedWorktree & {
     resolutionTargetRef?: string; resolutionKind?: "contribution" | "lineage" }> {
     const item = getWorkItem(this.db, input.workItemId); if (!item) throw new Error("work item not found");
+    if (this.resolving.has(item.id)) throw new WorktreeIntegrationServiceError("queue_busy", "Conflict resolution is in progress");
     if (item.change_mode !== "worktree") throw new Error("live work items cannot bind worktree lineages");
     const priorLineageResolution = getLineageResolutionRun(this.db, input.runKey);
     if (priorLineageResolution) { const lineage = repo.getLineage(this.db, priorLineageResolution.lineage_id)!;
@@ -160,9 +167,12 @@ export class SqliteWorktreeIntegrationService implements WorktreeIntegrationServ
         createdAt: lineage.created_at, lifecycle: "active",
         resolutionTargetRef: lineage.target_ref, resolutionKind: "lineage" }; }
     const prior = repo.findContributionByRun(this.db, input.runKey); if (prior) {
+      if (["integrated", "discarded"].includes(prior.state)) throw new Error("Terminal contribution requires a new run");
       const lineage = repo.getLineage(this.db, prior.lineage_id)!; return { path: prior.worktree_path,
         branch: prior.branch_name, projectPath: lineage.repository_path, leaderSessionKey: input.runKey,
-        createdAt: prior.created_at, lifecycle: prior.state === "active" ? "active" : "initializing" };
+        createdAt: prior.created_at, baseSha: prior.base_sha, lifecycle: prior.state === "active" ? "active" : "initializing",
+        ...(this.db.prepare("SELECT 1 FROM worktree_contribution_runs WHERE run_key=? AND kind='resolution'").get(input.runKey)
+          ? { resolutionTargetRef: lineage.integration_ref, resolutionKind: "contribution" as const } : {}) };
     }
     let lineage = input.lineageId ? repo.getLineage(this.db, input.lineageId) : repo.findOpenLineageByWorkItem(this.db, item.id);
     if (lineage?.integration_state === "conflicted") {
@@ -210,7 +220,7 @@ export class SqliteWorktreeIntegrationService implements WorktreeIntegrationServ
         const row = repo.attachResolutionRun(this.db, { contributionId: conflicted.id,
           runKey: input.runKey, expectedRevision: conflicted.revision, at: this.now(), actor: "runtime" });
         return { path: row.worktree_path, branch: row.branch_name, projectPath: lineage.repository_path,
-          leaderSessionKey: input.runKey, createdAt: row.created_at, lifecycle: "active",
+          leaderSessionKey: input.runKey, createdAt: row.created_at, baseSha: row.base_sha, lifecycle: "active",
           resolutionTargetRef: lineage.integration_ref, resolutionKind: "contribution" };
       }
       const editable = contributions.find((entry) => entry.work_item_id === item.id
@@ -219,7 +229,7 @@ export class SqliteWorktreeIntegrationService implements WorktreeIntegrationServ
         const row = repo.attachContributionIteration(this.db, { contributionId: editable.id,
           runKey: input.runKey, expectedRevision: editable.revision, at: this.now(), actor: "runtime" });
         return { path: row.worktree_path, branch: row.branch_name, projectPath: lineage.repository_path,
-          leaderSessionKey: input.runKey, createdAt: row.created_at, lifecycle: "active" };
+          leaderSessionKey: input.runKey, createdAt: row.created_at, baseSha: row.base_sha, lifecycle: "active" };
       }
     }
     if (!lineage) { const created = await this.createLineage({ requestId: `auto:${input.runKey}`, workItemId: item.id });
@@ -232,17 +242,20 @@ export class SqliteWorktreeIntegrationService implements WorktreeIntegrationServ
       baseSha: lineage.integration_head_sha ?? lineage.base_sha,
       state: "planned", at: this.now(), actor: "runtime" });
     return { path: row.worktree_path, branch: row.branch_name, projectPath: lineage.repository_path,
-      leaderSessionKey: input.runKey, createdAt: row.created_at };
+      leaderSessionKey: input.runKey, createdAt: row.created_at, baseSha: row.base_sha };
   }
   async reviewContribution(input: { requestId: string; contributionId: string; expectedRevision: number;
     decision: "approved" | "rejected"; actor: string; summary: string }) {
     const before = repo.getContribution(this.db, input.contributionId);
     if (!before || before.revision !== input.expectedRevision) throw new WorktreeIntegrationServiceError("conflict", "stale contribution revision");
     const lineage = repo.getLineage(this.db, before.lineage_id)!;
-    const verdict = await this.evaluateGates({ worktree: { path: before.worktree_path,
-      branch: before.branch_name, leaderSessionKey: before.originating_run_key,
+    const latestRun = this.db.prepare(`SELECT run_key FROM worktree_contribution_runs
+      WHERE contribution_id=? ORDER BY attached_at DESC, rowid DESC LIMIT 1`).get(before.id) as { run_key: string };
+    const evaluated = await this.evaluateGates({ worktree: { path: before.worktree_path,
+      branch: before.branch_name, leaderSessionKey: latestRun.run_key,
       createdAt: before.created_at, projectPath: lineage.repository_path, lifecycle: "active" },
-      cwd: before.worktree_path, sessionKey: before.originating_run_key });
+      cwd: before.worktree_path, sessionKey: latestRun.run_key });
+    const verdict = applyStoredWaivers(this.db, before.lineage_id, before.id, evaluated);
     return this.gatedCommand(input.requestId, "review_contribution", input, () => {
       let current = repo.getContribution(this.db, input.contributionId);
       if (!current || current.revision !== input.expectedRevision || current.head_sha !== before.head_sha)
@@ -255,12 +268,13 @@ export class SqliteWorktreeIntegrationService implements WorktreeIntegrationServ
         actor: input.actor, notes: input.summary, at: this.now() }); return { value: this.state(row.lineage_id) }; }); }
 
   private persistContributionGates(row: repo.ContributionRow, verdict: MergeGateVerdict, seed: string): void {
-    for (const gate of verdict.gates) repo.recordGate(this.db, { id: id("gate", `${seed}:${gate.id}`),
+    for (const gate of verdict.gates) { if (gate.status === "waived" && this.db.prepare(`SELECT 1 FROM worktree_integration_gates
+      WHERE contribution_id=? AND name=? AND status='waived'`).get(row.id, gate.id)) continue; repo.recordGate(this.db, { id: id("gate", `${seed}:${gate.id}`),
       contributionId: row.id, name: gate.id, status: verdict.mode === "advisory"
         && ["required_pending", "failed"].includes(gate.status) ? "waived"
         : gate.status === "not_required" ? "passed" : gate.status === "required_pending" ? "pending" : gate.status,
-      details: { name: gate.name, reason: gate.reason, mode: verdict.mode,
-        ...(verdict.mode === "advisory" ? { advisoryStatus: gate.status } : {}) }, at: this.now() });
+      details: { name: gate.name, reason: gate.reason, mode: verdict.mode, policyDigest: verdict.policyDigest,
+        ...(verdict.mode === "advisory" ? { advisoryStatus: gate.status } : {}) }, at: this.now() }); }
   }
   async enqueueContribution(input: { requestId: string; contributionId: string; expectedRevision: number }) {
     const row = repo.getContribution(this.db, input.contributionId); if (!row || row.revision !== input.expectedRevision) throw new Error("stale contribution revision");
@@ -279,54 +293,42 @@ export class SqliteWorktreeIntegrationService implements WorktreeIntegrationServ
     const queued = result.queue.find((entry) => entry.state === "queued" && entry.contributionId === row.id);
     if (queued) this.queueNotifier?.(queued.repositoryPath, queued.targetRef); return result; }
   async discardContribution(input: { requestId: string; contributionId: string; expectedRevision: number; reason?: string }) {
-    return this.command(input.requestId, "discard_contribution", input, () => { const row = discardContribution(this.db,
+    const before = repo.getContribution(this.db, input.contributionId);
+    if (before && (this.resolving.has(before.work_item_id) || worktreePathBusy(before.worktree_path))) throw new WorktreeIntegrationServiceError("queue_busy", "Conflict resolution is in progress");
+    if (before && this.db.prepare("SELECT 1 FROM sessions WHERE work_item_id=? AND status='running'").get(before.work_item_id))
+      throw new WorktreeIntegrationServiceError("invalid_state", "Stop execution before discarding its worktree");
+    const result = this.command(input.requestId, "discard_contribution", input, () => { const row = discardContribution(this.db,
       { contributionId: input.contributionId, expectedRevision: input.expectedRevision,
-        actor: "user", reason: input.reason ?? "discarded", at: this.now() }); return this.state(row.lineage_id); }); }
+        actor: "user", reason: input.reason ?? "discarded", at: this.now() }); return this.state(row.lineage_id); });
+    await cleanupTerminalWorktrees(this.db, this.now, before?.state !== "discarded" ? input.contributionId : undefined);
+    return this.refresh(result.id, "discard_cleanup");
+  }
   async reviewFinal(input: { requestId: string; lineageId: string; expectedRevision: number;
     decision: "approved" | "rejected"; actor: string; summary: string }) {
     const before = repo.getLineage(this.db, input.lineageId);
     if (!before || before.revision !== input.expectedRevision) throw new WorktreeIntegrationServiceError("conflict", "stale lineage revision");
-    const combined = await this.evaluateGates({ worktree: { path: before.integration_worktree_path,
-      branch: before.integration_ref.replace(/^refs\/heads\//, ""), leaderSessionKey: before.id,
-      createdAt: before.created_at, projectPath: before.repository_path, lifecycle: "active" },
-      cwd: before.integration_worktree_path, sessionKey: before.id });
-    const verdict = this.aggregateLineageGates(before.id, combined);
+    const verdict = await this.evaluatePromotionGates(before.id);
     return this.gatedCommand(input.requestId, "review_lineage", input, () => {
       let current = repo.getLineage(this.db, input.lineageId);
       if (!current || current.revision !== input.expectedRevision
         || current.integration_head_sha !== before.integration_head_sha) throw new Error("stale lineage revision or head");
-      for (const gate of verdict.gates) repo.recordLineageGate(this.db, {
+      for (const gate of verdict.gates) { if (gate.status === "waived" && this.db.prepare(`SELECT 1
+        FROM worktree_integration_gates WHERE lineage_id=? AND scope='lineage' AND name=? AND status='waived'`)
+        .get(current.id, gate.id)) continue; repo.recordLineageGate(this.db, {
         id: id("gate", `${input.requestId}:${gate.id}`), lineageId: current.id, name: gate.id,
         status: verdict.mode === "advisory" && ["required_pending", "failed"].includes(gate.status)
           ? "waived" : gate.status === "not_required" ? "passed"
             : gate.status === "required_pending" ? "pending" : gate.status,
-        details: { name: gate.name, reason: gate.reason, mode: verdict.mode,
-          ...(verdict.mode === "advisory" ? { advisoryStatus: gate.status } : {}) }, at: this.now() });
+        details: { name: gate.name, reason: gate.reason, mode: verdict.mode, policyDigest: verdict.policyDigest,
+          ...(verdict.mode === "advisory" ? { advisoryStatus: gate.status } : {}) }, at: this.now() }); }
       current = repo.getLineage(this.db, current.id)!;
       if (input.decision === "approved" && verdict.mode === "enforced" && !verdict.allowed) return {
-        value: this.state(current.id), blocked: "lineage gates failed" };
+        value: this.state(markLineageVerificationNeeded(this.db, current.id, this.now())), blocked: "lineage gates failed" };
       repo.recordLineageApproval(this.db, { id: id("review", input.requestId), lineageId: current.id,
         expectedRevision: current.revision, decision: input.decision,
         actor: input.actor, notes: input.summary, at: this.now() }); return { value: this.state(input.lineageId) }; }); }
-  private aggregateLineageGates(lineageId: string, verdict: MergeGateVerdict): MergeGateVerdict {
-    const integrated = repo.getLineageState(this.db, lineageId).contributions
-      .filter((entry) => entry.state === "integrated");
-    const gates = verdict.gates.map((gate) => { if (gate.status === "not_required") return gate;
-      const rows = this.db.prepare(`SELECT contribution_id,status,details FROM worktree_integration_gates
-        WHERE lineage_id=? AND scope='contribution' AND name=?`).all(lineageId, gate.id) as
-        Array<{ contribution_id: string; status: string; details: string | null }>;
-      const statuses = integrated.map((entry) => { const row = rows.find((item) => item.contribution_id === entry.id);
-        if (!row || row.status !== "waived" || verdict.mode === "advisory") return row?.status;
-        const detail = row.details ? JSON.parse(row.details) as { advisoryStatus?: string } : {};
-        return detail.advisoryStatus ? "pending" : "waived"; });
-      const status = statuses.some((value) => value === "failed") ? "failed" as const
-        : integrated.length > 0 && statuses.length === integrated.length
-          && statuses.every((value) => value === "passed" || value === "waived")
-          ? "passed" as const : "required_pending" as const;
-      return { ...gate, status, reason: status === "passed"
-        ? "All integrated contributions satisfied this gate." : "Contribution gate results are incomplete or failed." }; });
-    return { ...verdict, gates, allowed: !gates.some((gate) =>
-      gate.status === "required_pending" || gate.status === "failed") };
+  async evaluatePromotionGates(lineageId: string): Promise<MergeGateVerdict> {
+    return evaluatePromotionGates(this.db, lineageId, this.evaluateGates);
   }
   async waiveGate(input: { requestId: string; scope: "contribution" | "lineage"; contributionId?: string;
     lineageId: string; gateId: string; expectedRevision: number; actor: string; reason: string }) {
@@ -344,12 +346,32 @@ export class SqliteWorktreeIntegrationService implements WorktreeIntegrationServ
       return this.state(input.lineageId); }); }
   async resolveConflict(input: { requestId: string; contributionId: string; queueId: string;
     expectedRevision: number; strategy: "manual" | "ours" | "theirs"; actor: string; reason: string }) {
-    return this.command(input.requestId, "resolve_conflict", input, () => { const row = repo.getContribution(this.db, input.contributionId);
-      if (!row || row.state !== "conflicted" || row.revision !== input.expectedRevision) throw new Error("stale conflicted contribution revision");
-      const queue = repo.getQueueEntry(this.db, input.queueId); if (!queue || queue.contribution_id !== row.id || queue.state !== "conflicted") throw new Error("conflicted queue entry required");
-      recordConflictStrategy(this.db,
-      { contributionId: row.id, strategy: input.strategy,
-        actor: input.actor, reason: input.reason, at: this.now() }); return this.state(row.lineage_id); }); }
+    if (this.db.prepare("SELECT 1 FROM worktree_integration_commands WHERE request_id=?").get(input.requestId))
+      return this.command(input.requestId, "resolve_conflict", input, () => { throw new Error("missing replay"); });
+    const row = repo.getContribution(this.db, input.contributionId);
+    if (!row || row.state !== "conflicted" || row.revision !== input.expectedRevision) throw new Error("stale conflicted contribution revision");
+    const queue = repo.getQueueEntry(this.db, input.queueId);
+    if (!queue || queue.contribution_id !== row.id || queue.state !== "conflicted") throw new Error("conflicted queue entry required");
+    const lineage = repo.getLineage(this.db, row.lineage_id)!;
+    if (this.resolving.has(row.work_item_id) || worktreePathBusy(row.worktree_path)) throw new WorktreeIntegrationServiceError("queue_busy", "Conflict resolution is in progress");
+    this.resolving.add(row.work_item_id);
+    try {
+      await prepareGitResolution({ repositoryPath: lineage.repository_path, worktreePath: row.worktree_path,
+        sourceRef: row.branch_name, targetRef: lineage.integration_ref, strategy: input.strategy });
+      const headSha = input.strategy === "manual" ? null : await this.collectContribution({
+        repositoryPath: lineage.repository_path, worktreePath: row.worktree_path,
+        sourceRef: row.branch_name, message: `minions: resolve ${row.id} with ${input.strategy}` });
+      return this.command(input.requestId, "resolve_conflict", input, () => {
+        const current = repo.getContribution(this.db, row.id);
+        if (!current || current.revision !== input.expectedRevision) throw new Error("stale contribution revision");
+        recordConflictStrategy(this.db, { contributionId: row.id, strategy: input.strategy,
+          actor: input.actor, reason: input.reason, at: this.now() });
+        if (headSha) repo.setContributionHead(this.db, { contributionId: row.id, headSha,
+          expectedRevision: repo.getContribution(this.db, row.id)!.revision, actor: input.actor, at: this.now() });
+        return this.state(row.lineage_id);
+      });
+    } finally { this.resolving.delete(row.work_item_id); }
+  }
   async promote(input: { requestId: string; lineageId: string; expectedRevision: number }) {
     const row = repo.getLineage(this.db, input.lineageId); if (!row || row.revision !== input.expectedRevision) throw new Error("stale lineage revision");
     const target = await this.resolveBase(row.repository_path, row.target_ref);

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorktreeInfo } from "../worktree-types.ts";
 import type { WorkItemService } from "../work-item-service.ts";
 import { initialWorkItemLifecycle } from "../../shared/work-item-lifecycle.ts";
-import { setup, cmd } from "../../tests/support/server-command-harness.ts";
+import { setup, cmd as baseCommand } from "../../tests/support/server-command-harness.ts";
 import { encodeLeaderPromptCustomization } from "../../shared/leader-prompt.ts";
 import { SessionCapacityError } from "../session-registry.ts";
 
@@ -21,6 +21,9 @@ interface StartCall {
 }
 
 const createWorktreeCalls: { cwd: string; key: string }[] = [];
+// Existing clients omit correlation; receipt tests opt in explicitly.
+const cmd = (overrides: Parameters<typeof baseCommand>[0]) =>
+  baseCommand({ requestId: undefined, ...overrides });
 let createWorktreeShouldFail = false;
 const fakeWorktreeInfo: WorktreeInfo = {
   path: "/p/.canvas-worktrees/k",
@@ -40,6 +43,43 @@ vi.mock("../worktree.ts", () => ({
 }));
 
 import { sendMessage } from "./send-message.ts";
+
+describe("correlated message receipts", () => {
+  it("confirms acceptance only after the legacy turn starts", async () => {
+    const h = setup();
+    const { calls } = captureRegistryStart(h);
+    await sendMessage(h.ctx, cmd({ type: "send_message", sessionKey: h.host.id,
+      prompt: "keep this text", requestId: "send-1" }), h.ws);
+    expect(calls).toHaveLength(1);
+    expect(h.wsSent).toContainEqual(expect.objectContaining({ type: "control_response",
+      command: "send_message", requestId: "send-1", success: true }));
+  });
+
+  it("correlates busy rejection without starting another turn", async () => {
+    const h = setup();
+    h.host.status = "running";
+    const { calls } = captureRegistryStart(h);
+    await sendMessage(h.ctx, cmd({ type: "send_message", sessionKey: h.host.id,
+      prompt: "keep this text", requestId: "send-2" }), h.ws);
+    expect(calls).toHaveLength(0);
+    expect(h.wsSent).toContainEqual(expect.objectContaining({ type: "control_response",
+      command: "send_message", requestId: "send-2", success: false, code: "SESSION_BUSY" }));
+  });
+
+  it("does not confirm a send when worktree creation fails", async () => {
+    const h = setup();
+    h.host.role = "leader";
+    h.host.worktreeIsolation = true;
+    h.host.worktree = null;
+    createWorktreeShouldFail = true;
+    await sendMessage(h.ctx, cmd({ type: "send_message", sessionKey: h.host.id,
+      prompt: "keep this text", requestId: "send-3" }), h.ws);
+    await vi.waitFor(() => expect(h.wsSent).toContainEqual(expect.objectContaining({
+      type: "control_response", command: "send_message", requestId: "send-3", success: false,
+    })));
+    expect(h.wsSent.some(message => message["type"] === "control_response" && message["success"] === true)).toBe(false);
+  });
+});
 
 beforeEach(() => {
   createWorktreeCalls.length = 0;
@@ -65,6 +105,25 @@ function captureRegistryStart(
 }
 
 describe("send_message", () => {
+  it("rejects a busy legacy message before changing approval or starting a provider", async () => {
+    const h = setup({ status: "running" });
+    const { calls } = captureRegistryStart(h);
+    await sendMessage(h.ctx, cmd({ type: "send_message", prompt: "second message" }), h.ws);
+    expect(calls).toEqual([]);
+    expect(h.wsSent[0]).toMatchObject({ type: "session_error", code: "SESSION_BUSY" });
+    expect(createWorktreeCalls).toEqual([]);
+  });
+
+  it("reserves a legacy follow-up while its worktree is being created", async () => {
+    const h = setup(); h.host.role = "leader"; h.host.worktreeIsolation = true;
+    captureRegistryStart(h);
+    const first = sendMessage(h.ctx, cmd({ type: "send_message", prompt: "first" }), h.ws);
+    const second = sendMessage(h.ctx, cmd({ type: "send_message", prompt: "second" }), h.ws);
+    await Promise.all([first, second]);
+    expect(createWorktreeCalls).toHaveLength(1);
+    expect(h.wsSent).toContainEqual(expect.objectContaining({ code: "SESSION_BUSY" }));
+  });
+
   it("resumes the session with prompt + resumeId via registry.start (default branch)", () => {
     const h = setup();
     h.host.sessionId = "sdk-id";
@@ -274,6 +333,7 @@ describe("send_message", () => {
 
   it("when worktreeIsolation is on but no worktree exists, creates one then resumes inside it", async () => {
     const h = setup();
+    h.host.persist = vi.fn(); // This command test does not open a persistence database.
     h.host.role = "leader";
     h.host.worktreeIsolation = true;
     h.host.worktree = null;
@@ -308,6 +368,7 @@ describe("send_message", () => {
 
   it("creates a fresh follow-up worktree from the project root when cwd is a stale worktree path", async () => {
     const h = setup();
+    h.host.persist = vi.fn();
     h.host.role = "leader";
     h.host.worktreeIsolation = true;
     h.host.worktree = null;

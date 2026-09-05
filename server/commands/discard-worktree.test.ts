@@ -48,7 +48,7 @@ describe("discard_worktree", () => {
             executor: "minion",
             minionSessionKey: "minion-1",
             leaderSessionKey: "leader-1",
-            status: "running",
+            status: "planned",
             createdAt: Date.now(),
             completedAt: null,
             result: null,
@@ -105,3 +105,10 @@ describe("discard_worktree", () => {
     expect(errAck!["error"]).toBe("rm -rf failed");
   });
 });
+
+ it("refuses to remove a worktree while its agent is running", () => {
+    const h = setup({ status: "running" }); h.host.worktree = fakeWorktree;
+    discardWorktree(h.ctx, cmd({ type: "discard_worktree" }), h.ws);
+    expect(h.host.worktree).toBe(fakeWorktree); expect(removeCalls).toHaveLength(0);
+    expect(h.wsSent[0]!["error"]).toContain("agent execution");
+  });

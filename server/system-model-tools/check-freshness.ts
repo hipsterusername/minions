@@ -48,7 +48,6 @@ export function createCheckFreshnessToolDef(ctx: SystemModelToolContext): Normal
           objectFile: objectFileFor(object),
           globs: args.files ?? object.suggestedFiles,
           freshnessClass: object.freshness?.class,
-          policyClass: "ordinary",
         })),
         policies: model.policies.freshness,
         getTimestamps: ctx.timestampFn ?? gitTimestampFn,

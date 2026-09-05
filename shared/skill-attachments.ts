@@ -10,6 +10,20 @@ export interface SkillAttachment {
 export const MAX_SKILL_ATTACHMENT_CHARS = 200_000;
 export const MAX_SKILL_ATTACHMENTS = 16;
 
+/** Advertise frozen references without injecting their contents. Indexes are zero based. */
+export function formatSkillAttachmentIndex(raw: unknown, skillId: string, subskillId?: string): string {
+  const { attachments, skipped } = inspectSkillAttachments(raw);
+  if (!attachments.length && !skipped) return "";
+  return [
+    "### Attached context (load on demand)",
+    "Call `load_skill_attachment` with the arguments below; use the returned nextOffset for further pages.",
+    ...attachments.map((attachment, attachmentIndex) =>
+      `- ${JSON.stringify(attachment.filename)} (${attachment.text.length} characters${attachment.truncated ? "; source truncated" : ""}): `
+      + JSON.stringify({ skillId, ...(subskillId ? { subskillId } : {}), attachmentIndex })),
+    ...(skipped ? [`${skipped} invalid attachment(s) skipped.`] : []),
+  ].join("\n");
+}
+
 const TEXT_EXTENSIONS = new Set([
   "c", "cc", "conf", "cpp", "cs", "css", "csv", "env", "go", "h", "hpp",
   "htm", "html", "java", "js", "json", "jsx", "log", "markdown", "md", "mdx",

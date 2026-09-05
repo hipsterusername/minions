@@ -141,7 +141,12 @@ class CodexHarness implements AgentHarness {
     if (opts.abortSignal.aborted) ac.abort();
 
     // Snapshot registered groups so concurrent runs don't step on each other.
-    const registeredGroups = { ...this.registeredGroups };
+    // Filter the server-side definitions, so both listing and direct calls
+    // enforce the exact per-run capability contract.
+    const allowed = new Set(opts.allowedTools);
+    const registeredGroups = Object.fromEntries(Object.entries(this.registeredGroups)
+      .map(([group, definitions]) => [group, definitions.filter((definition) =>
+        allowed.has(`mcp__${group}__${definition.name}`))]));
 
     const events = (async function* makeEvents(): AsyncGenerator<NormalizedEvent> {
       let bridgeReg: McpBridgeRegistration | null = null;
@@ -219,7 +224,10 @@ class CodexHarness implements AgentHarness {
             : await collectPrompt(opts.prompt);
         const input: Input = buildCodexInput(text, scratch);
 
-        const translator = createCodexTranslator({ model: opts.model });
+        const translator = createCodexTranslator({
+          model: opts.model,
+          ...(opts.initialCostUSD != null ? { initialCostUSD: opts.initialCostUSD } : {}),
+        });
         const streamErrors: string[] = [];
 
         let runResult;

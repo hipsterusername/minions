@@ -1,3 +1,8 @@
+import { persistContextSource } from "./context-source.ts";
+import { recoveryTag, renderRecoveryFacts, type RecoveryFacts } from "../shared/recovery-context.ts";
+import { boundHandoffText, renderConnectedHandoff, retainUserDirectives, userTextFromPrompt } from "../shared/handoff-text.ts";
+import { persistenceDb } from "./session-persist.ts";
+import { getSessionCanvasContext } from "./canvas-context-store.ts";
 import { randomUUID } from "node:crypto";
 import type { NormalizedEvent } from "../shared/normalized-event.ts";
 import type { RenderComponent } from "../shared/render-dsl.ts";
@@ -69,6 +74,9 @@ export interface ContextCheckpoint {
   recoveryCause: string | null;
   usage: CompactionAdvice | null;
   qualityWarnings: string[];
+  connectedContext?: string | null;
+  retainedState?: RecoveryFacts;
+  connectedContextSourceRef?: string;
 }
 
 export interface CompileCheckpointInput {
@@ -87,14 +95,25 @@ export function compileContextCheckpoint(
 ): ContextCheckpoint {
   const tasks = [...(host.taskState?.tasks.values() ?? [])];
   const prompt = typeof input.originalPrompt === "string" ? input.originalPrompt.trim() : "";
+  const prior = host.contextCheckpoint;
   const semantic = parseHandoff(input.modelHandoff ?? "");
-  const objective = semantic.goal[0] ?? host.taskName ?? prompt ?? "Continue the active objective.";
+  const previousDirectives = host.continuity?.directives.length ? host.continuity.directives
+    : prior?.userDirectives.length ? prior.userDirectives
+      : (host.eventBuffer ?? []).flatMap(row => row.type === "sdk_event" && row.event?.kind === "text"
+        && row.event.role === "user" ? [userTextFromPrompt(row.event.text)] : []);
+  const directives = retainUserDirectives([...previousDirectives, userTextFromPrompt(prompt)]);
+  const objective = directives[0] || prior?.objective.statement
+    || host.taskName || "Continue the active objective.";
   const items = tasks.map(toWorkItem);
   const components = host.renderState?.components ?? [];
   const artifacts = collectArtifacts(tasks, components, host);
+  const db = persistenceDb();
+  if (db && db.name !== ":memory:") artifacts.unshift({ kind: "file", ref: `${db.name}: session_user_directives (full instructions, ordered by id) and session_continuity (full source snapshot); session_key=${host.id}` });
   const now = Date.now();
   const checkpoint: ContextCheckpoint = {
     version: 1,
+    retainedState: { providerThread: "fresh_requested", taskRegistry: host.taskState ? "available_at_capture" : "unknown",
+      dashboard: host.renderState ? "available_at_capture" : "unknown", worktree: host.worktree ? "recorded_at_capture" : "none_recorded" },
     checkpointId: randomUUID(),
     sessionKey: host.id,
     sessionName: host.taskName,
@@ -108,40 +127,45 @@ export function compileContextCheckpoint(
     failureReason: null,
     objective: {
       statement: objective,
-      acceptanceCriteria: unique(tasks.flatMap((task) => task.acceptanceCriteria ?? [])),
-      scope: unique(tasks.flatMap((task) => task.files ?? [])),
-      exclusions: semantic.exclusions,
+      acceptanceCriteria: unique([...(prior?.objective.acceptanceCriteria ?? []), ...tasks.flatMap((task) => task.acceptanceCriteria ?? [])]),
+      scope: unique([...(prior?.objective.scope ?? []), ...tasks.flatMap((task) => task.files ?? [])]),
+      exclusions: unique([...(prior?.objective.exclusions ?? []), ]),
     },
     progress: {
       completed: items.filter((item) => item.status === "completed"),
       inProgress: items.filter((item) => item.status === "running" || item.status === "starting"),
       remaining: items.filter((item) => !["completed", "cancelled"].includes(item.status)),
     },
-    decisions: semantic.decisions.map((decision) => splitDecision(decision)),
-    constraints: unique(tasks.flatMap((task) => task.constraints ?? []).concat(semantic.constraints)),
-    userDirectives: prompt ? [truncateMiddle(prompt, 2_000)] : [],
-    negativeKnowledge: semantic.deadEnds,
-    openQuestions: semantic.openQuestions,
-    risks: semantic.risks,
+    decisions: [...new Map([...(prior?.decisions ?? []), ...semantic.decisions.map(splitDecision)].map(d => [d.decision, d])).values()],
+    constraints: unique([...(prior?.constraints ?? []), ...tasks.flatMap((task) => task.constraints ?? [])]),
+    userDirectives: directives,
+    negativeKnowledge: unique([...(prior?.negativeKnowledge ?? []), ...semantic.deadEnds]),
+    openQuestions: semantic.openQuestions.length ? semantic.openQuestions : prior?.openQuestions ?? [],
+    risks: semantic.risks.length ? semantic.risks : prior?.risks ?? [],
     activeArtifacts: artifacts,
     verification: items
       .filter((item) => item.status === "completed" && item.result)
       .map((item) => ({ target: item.taskId, result: item.result! })),
     nextActions: semantic.nextActions.length > 0
       ? semantic.nextActions
-      : items.filter((item) => !["completed", "cancelled"].includes(item.status)).slice(0, 5).map((item) => item.title),
+      : items.length ? items.filter((item) => !["completed", "cancelled"].includes(item.status)).slice(0, 5).map((item) => item.title)
+        : prior?.nextActions ?? [],
     authoritativeSnapshot: {
       capturedAt: now,
       taskRevision: digest(tasks.map((task) => [task.taskId, task.status, task.completedAt])),
       renderRevision: digest(components),
       worktreeRevision: digest(host.worktree ?? null),
     },
-    modelHandoff: truncateMiddle(input.modelHandoff ?? "", MAX_HANDOFF_CHARS),
-    recentEvents: input.trigger === "context_recovery" ? collectRecentEvents(host.eventBuffer) : [],
+    modelHandoff: truncateMiddle((/^Automatic checkpoint/.test(input.modelHandoff ?? "")
+      ? prior?.modelHandoff : input.modelHandoff) || prior?.modelHandoff || "", MAX_HANDOFF_CHARS),
+    recentEvents: collectRecentEvents(host.eventBuffer ?? []),
+    connectedContext: host.continuity?.canvasContext !== undefined ? host.continuity.canvasContext
+      : host.canvasContext ?? getSessionCanvasContext(host.id),
     recoveryCause: input.recoveryCause ? truncateMiddle(input.recoveryCause, 1_200) : null,
     usage: input.usage ?? null,
     qualityWarnings: [],
   };
+  checkpoint.connectedContextSourceRef = persistContextSource(host.worktree?.projectPath ?? host.cwd, checkpoint.connectedContext);
   checkpoint.qualityWarnings = validateCheckpoint(checkpoint);
   if (input.persist !== false) persistContextCheckpoint(checkpoint);
   return checkpoint;
@@ -154,7 +178,8 @@ export function checkpointStartOptions(
   return {
     ...opts,
     invocationKind: "provider_continuation",
-    prompt: renderCheckpointPrompt(checkpoint),
+    prompt: [renderCheckpointPrompt(checkpoint), checkpoint.connectedContext
+      ? renderConnectedHandoff(checkpoint.connectedContext, checkpoint.connectedContextSourceRef) : ""].filter(Boolean).join("\n\n"),
     resumeId: undefined,
     contextRecoveryAttempt: checkpoint.trigger === "context_recovery"
       ? (opts.contextRecoveryAttempt ?? 0) + 1
@@ -187,15 +212,14 @@ export function renderCheckpointPrompt(checkpoint: ContextCheckpoint): string {
   const p = checkpoint;
   const sections = [
     `<context-checkpoint version="${p.version}" id="${p.checkpointId}" trigger="${p.trigger}">`,
-    p.trigger === "proactive" ? "<session-continuation>" : "<previous-session-context>",
-    p.trigger === "proactive"
-      ? "This is the same logical session continuing in a fresh provider thread after proactive compaction. Continue the objective. Do NOT re-register completed work; the task registry and dashboard are still live."
-      : "This is the same logical session in a fresh provider thread. Continue the objective without repeating completed work. Treat the authoritative sections as facts and the model handoff as supplemental.",
+    `<${recoveryTag(p.trigger)}>`,
+    renderRecoveryFacts(p.retainedState ?? { providerThread: "unknown", taskRegistry: "unknown", dashboard: "unknown", worktree: "unknown" }),
     `Prior session id: ${p.sourceSessionId ?? "(unknown)"}`,
-    `Session name: ${p.sessionName ?? "(unnamed)"}`,
+    `Session name: ${boundHandoffText(p.sessionName ?? "(unnamed)", 200)}`,
+    "User directives are chronological; later corrections supersede earlier conflicting instructions. Model decisions and old evidence may be stale; verify before acting.",
     section("objective", [p.objective.statement, ...labeled("Acceptance criteria", p.objective.acceptanceCriteria), ...labeled("Scope", p.objective.scope), ...labeled("Exclusions", p.objective.exclusions)]),
     section("user-directives", p.userDirectives),
-    renderProgress(p),
+
     section("task-registry", [
       ...p.progress.completed,
       ...p.progress.inProgress,
@@ -203,21 +227,23 @@ export function renderCheckpointPrompt(checkpoint: ContextCheckpoint): string {
     ].map((item) => `${item.taskId} [${item.status}] ${item.title}; executor=${item.executor}${item.result ? ` result=${JSON.stringify(item.result)}` : ""}`)),
     section("constraints", p.constraints),
     section("decisions", p.decisions.map((d) => `${d.decision}${d.rationale ? ` — because ${d.rationale}` : ""}`)),
-    section("next-actions", p.nextActions),
+    section("next-actions", ["Supplemental proposed actions; reconcile with current user/runtime constraints.", ...p.nextActions]),
     section("open-questions-and-risks", [...p.openQuestions, ...p.risks]),
     section("negative-knowledge", p.negativeKnowledge),
-    section("active-artifacts", p.activeArtifacts.map((a) => `${a.kind}: ${a.ref}`)),
+    section("active-artifacts", p.activeArtifacts.filter(a => a.kind === "file").map((a) => `${a.kind}: ${a.ref}`)),
     section("dashboard-components", p.activeArtifacts.filter((a) => a.kind === "dashboard").map((a) => a.ref)),
     section("worktree", p.activeArtifacts.filter((a) => a.kind === "worktree").flatMap((a) => [a.ref, `branch: ${a.ref.match(/\((.+)\)$/)?.[1] ?? "(unknown)"}`])),
-    section("verification", p.verification.map((v) => `${v.target}: ${v.result}`)),
+    section("verification", p.verification.map((v) => `${v.target}: reported result in task-registry; independently verify before relying on it.`)),
     section("recent-events", p.recentEvents),
     p.recoveryCause ? section("recovery-cause", [p.recoveryCause]) : "",
     p.modelHandoff ? section("model-authored-handoff", [p.modelHandoff]) : "",
     section("checkpoint-quality", p.qualityWarnings),
-    p.trigger === "proactive" ? "</session-continuation>" : "</previous-session-context>",
+    `</${recoveryTag(p.trigger)}>`,
     "</context-checkpoint>",
   ];
-  return truncateMiddle(sections.filter(Boolean).join("\n"), MAX_PROMPT_CHARS);
+  const rendered = sections.filter(Boolean).join("\n");
+  if (rendered.length > MAX_PROMPT_CHARS) throw new Error("Checkpoint section budgets exceeded");
+  return rendered;
 }
 
 export function validateCheckpoint(checkpoint: ContextCheckpoint): string[] {
@@ -226,7 +252,7 @@ export function validateCheckpoint(checkpoint: ContextCheckpoint): string[] {
   if (checkpoint.nextActions.length === 0 && checkpoint.progress.remaining.length > 0) warnings.push("Remaining work has no explicit next action.");
   const completed = new Set(checkpoint.progress.completed.map((item) => item.taskId));
   if (checkpoint.progress.remaining.some((item) => completed.has(item.taskId))) warnings.push("A task appears in both completed and remaining state.");
-  if (!checkpoint.modelHandoff && checkpoint.trigger === "proactive") warnings.push("No model-authored semantic handoff was captured.");
+  if (!checkpoint.modelHandoff && checkpoint.trigger === "proactive") warnings.push("Automatic checkpoint: no model-authored semantic handoff was captured; inspect recent evidence before acting.");
   return warnings;
 }
 
@@ -267,20 +293,11 @@ function collectRecentEvents(events: readonly BufferedEvent[]): string[] {
 }
 
 function renderEvent(event: NormalizedEvent): string {
-  if (event.kind === "text" && event.role === "assistant") return `assistant: ${event.text}`;
+  if (event.kind === "text") return `${event.role}: ${event.text}`;
   if (event.kind === "tool_call") return `tool ${event.name}: ${safeJson(event.input)}`;
   if (event.kind === "tool_result") return `tool result${event.isError ? " (error)" : ""}: ${safeJson(event.output)}`;
   if (event.kind === "agent_task_update") return `task ${event.taskId} ${event.status}: ${event.summary}`;
   return "";
-}
-
-function renderProgress(checkpoint: ContextCheckpoint): string {
-  const rows = [
-    ...checkpoint.progress.completed.map((i) => `completed ${i.taskId}: ${i.title}${i.result ? ` — ${i.result}` : ""}`),
-    ...checkpoint.progress.inProgress.map((i) => `in progress ${i.taskId}: ${i.title}`),
-    ...checkpoint.progress.remaining.filter((i) => !checkpoint.progress.inProgress.some((a) => a.taskId === i.taskId)).map((i) => `remaining ${i.taskId}: ${i.title}`),
-  ];
-  return section("authoritative-progress", rows);
 }
 
 function parseHandoff(text: string): Record<"goal" | "decisions" | "deadEnds" | "openQuestions" | "nextActions" | "constraints" | "risks" | "exclusions", string[]> {
@@ -309,7 +326,12 @@ function splitDecision(text: string): { decision: string; rationale: string } {
 
 function section(name: string, rows: string[]): string {
   if (rows.length === 0) return "";
-  return [`<${name}>`, ...rows.map((row) => `- ${row}`), `</${name}>`].join("\n");
+  const budgets: Record<string, number> = {
+    objective: 1_500, "user-directives": 7_000, constraints: 2_000, "next-actions": 1_500,
+    "active-artifacts": 3_000, "task-registry": 1_500, decisions: 500,
+    "model-authored-handoff": 1_200, "recent-events": 600,
+  };
+  return [`<${name}>`, boundHandoffText(rows.map(row => `- ${row}`).join("\n"), budgets[name] ?? 300), `</${name}>`].join("\n");
 }
 
 function labeled(label: string, values: string[]): string[] { return values.map((value) => `${label}: ${value}`); }

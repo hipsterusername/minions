@@ -1,3 +1,4 @@
+import { PROJECT_CONTEXT_CHAR_LIMIT } from "../../shared/project-context.ts";
 import { z } from "zod/v4";
 import type { NormalizedToolDef } from "../harness/types.ts";
 import { textResult } from "../harness/tool-result.ts";
@@ -7,7 +8,7 @@ import type { TaskToolContext } from "./types.ts";
 
 const updateProjectContextInputSchema = z.object({
   content: z.string().trim().min(1).max(100_000).describe(
-    "Complete replacement project context as concise, well-structured Markdown. This content is inherited by subsequently delegated Minions.",
+    `Complete replacement project context as concise, well-structured Markdown. Aim for at most ${PROJECT_CONTEXT_CHAR_LIMIT} characters; larger sources are retained with bounded excerpts in delegated prompts.`,
   ),
 });
 

@@ -3,6 +3,11 @@ import { getHarness } from "../harness/index.ts";
 import type { TaskNode } from "../../shared/task-graph-contracts.ts";
 import type { SandboxPolicy } from "../../shared/workspace-contracts.ts";
 import { TaskGraphValidationError } from "./errors.ts";
+import {
+  MINION_MCP_TOOLS_BASE,
+  SKILL_BUILDER_ID,
+  minionSkillMcpToolNames,
+} from "../agents/minion-tool-policy.ts";
 
 const READ_ONLY_GRAPH_SANDBOX:SandboxPolicy={filesystemScope:"read-only",approvalPolicy:"never"};
 const WRITE_GRAPH_SANDBOX:SandboxPolicy={filesystemScope:"workspace-write",approvalPolicy:"never"};
@@ -62,7 +67,11 @@ export function validateTaskGraphNodePolicy(
       `node ${node.id} requires enforced writes unavailable on harness ${selected.name}`,
     );
   }
-  const supported=new Set([...selected.builtInTools,"mcp__skills__load_subskill",
+  // Validate MCP identities against the same inventory used by Minion registration
+  // and planning defaults. Skill authoring is still gated by the child's armed
+  // skills at registration; an allowlist cannot expose an unregistered tool.
+  const supported=new Set([...selected.builtInTools,...MINION_MCP_TOOLS_BASE,
+    ...minionSkillMcpToolNames([SKILL_BUILDER_ID]),
     "mcp__task-graph__read_input_artifact","mcp__task-graph__stage_output_artifact"]);
   const unsupported=node.allowedTools.filter(name=>!supported.has(name));
   if (unsupported.length) {

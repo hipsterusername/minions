@@ -55,7 +55,7 @@ describe("create_work_packet", () => {
     const project = copyValidFixture();
     writeFileSync(path.join(project, ".systemmodel/policies/freshness.yaml"), [
       "freshness:",
-      "  - policy_class: ordinary",
+      "  - policy_class: code_coupled",
       "    consequence: block_if_unverified",
       "    required_actions: [inspect current code]",
       "",
@@ -108,7 +108,7 @@ describe("create_work_packet", () => {
     };
     expect(payload.packet.scope.capabilities).toEqual(["capability.workspace_management"]);
     expect(payload.packet.scope.entryPoints.map((entryPoint) => entryPoint.surfaceId)).toEqual([
-      "surface.canvas", "surface.mobile",
+      "surface.mobile",
     ]);
   });
 });

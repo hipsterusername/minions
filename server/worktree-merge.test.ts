@@ -6,6 +6,7 @@ interface QueuedCall {
   stderr?: string;
 }
 
+let worktreeList = "";
 const queue: QueuedCall[] = [];
 const observed: { args: string[]; cwd: string }[] = [];
 
@@ -18,6 +19,9 @@ vi.mock("node:child_process", () => {
       cb: (e: Error | null, stdout: string, stderr: string) => void,
     ) => {
       observed.push({ args, cwd: options.cwd });
+      if (args[0] === "worktree" && args[1] === "list") {
+        queueMicrotask(() => cb(null, worktreeList, "")); return;
+      }
       const next = queue.shift();
       if (!next) {
         queueMicrotask(() => cb(new Error("unmocked"), "", ""));
@@ -38,11 +42,13 @@ import type { WorktreeInfo } from "./worktree-types.ts";
 beforeEach(() => {
   queue.length = 0;
   observed.length = 0;
+  worktreeList = "";
 });
 
 afterEach(() => {
   queue.length = 0;
   observed.length = 0;
+  worktreeList = "";
 });
 
 const info: WorktreeInfo = {
@@ -90,7 +96,7 @@ describe("mergeWorktree — happy path", () => {
     expect(observed[0]!.cwd).toBe("/proj");
     expect(observed[3]!.args).toEqual(["merge", "main", "--no-edit"]);
     expect(observed[3]!.cwd).toBe(info.path);
-    expect(observed[5]!.args).toEqual([
+    expect(observed[6]!.args).toEqual([
       "update-ref",
       "refs/heads/main",
       "deadbeef",
@@ -141,6 +147,7 @@ describe("mergeWorktree — conflict path with default rebase", () => {
       "merge", // --abort
       "rebase",
       "rev-parse",
+      "worktree",
       "update-ref",
     ]);
   });
@@ -250,7 +257,7 @@ describe("mergeWorktree — strategy resolution", () => {
 });
 
 describe("mergeAndCleanup", () => {
-  it("on merge success, calls removeWorktree (worktree remove --force + branch -D)", async () => {
+  it("on merge success, removes the clean worktree and deletes the exact reachable head", async () => {
     // Pre-merge: add -A then status --porcelain to detect uncommitted.
     queue.push({ ok: true, stdout: "" }); // add -A
     queue.push({ ok: true, stdout: "" }); // status --porcelain → empty (no auto-commit)
@@ -258,7 +265,9 @@ describe("mergeAndCleanup", () => {
     queue.push({ ok: true, stdout: "" }); // merge
     queue.push({ ok: true, stdout: "abc\n" });
     queue.push({ ok: true, stdout: "" }); // update-ref
-    queue.push({ ok: true, stdout: "" }); // worktree remove --force
+    queue.push({ ok: true, stdout: "abc" }); // source head
+    queue.push({ ok: true, stdout: "" }); // ancestor check
+    queue.push({ ok: true, stdout: "" }); // worktree remove
     queue.push({ ok: true, stdout: "" }); // branch -D
 
     // Spread to avoid mutating the shared `info` fixture across tests.
@@ -269,7 +278,7 @@ describe("mergeAndCleanup", () => {
 
     expect(observed.some((o) => o.args[0] === "worktree" && o.args[1] === "remove"))
       .toBe(true);
-    expect(observed.some((o) => o.args[0] === "branch" && o.args[1] === "-D"))
+    expect(observed.some((o) => o.args[0] === "update-ref" && o.args[1] === "-d"))
       .toBe(true);
   });
 
@@ -313,3 +322,38 @@ describe("mergeAndCleanup", () => {
     ]);
   });
 });
+
+ describe("legacy checkout safety", () => {
+  it("reports a failed checkout fast-forward without a hard reset or target ref update", async () => {
+    enqueueTargetInspection("main", "base", "main");
+    queue.push({ ok: true, stdout: "" }); // initial target status
+    queue.push({ ok: true, stdout: "" }); // merge into contribution
+    queue.push({ ok: true, stdout: "" }); // final target status
+    queue.push({ ok: true, stdout: "source" });
+    worktreeList = "worktree /proj\nbranch refs/heads/main\n";
+    queue.push({ ok: true, stdout: "" }); // checkout still clean
+    queue.push({ ok: false, stderr: "local changes would be overwritten" });
+    const result = await mergeWorktree({ ...info });
+    expect(result.success).toBe(false); expect(result.summary).toContain("local changes");
+    expect(observed.some(call => ["reset", "update-ref"].includes(call.args[0]!))).toBe(false);
+  });
+  it("retains edits made in the contribution before cleanup", async () => {
+    queue.push({ ok: true, stdout: "" }, { ok: true, stdout: "" });
+    enqueueTargetInspection();
+    queue.push({ ok: true, stdout: "" }, { ok: true, stdout: "source" }, { ok: true, stdout: "" });
+    queue.push({ ok: true, stdout: "source" }, { ok: true, stdout: "" });
+    queue.push({ ok: false, stderr: "worktree contains modified or untracked files" });
+    const local = { ...info }; const result = await mergeAndCleanup(local);
+    expect(result.success).toBe(false); expect(result.summary).toContain("cleanup deferred");
+    expect(local.lifecycle).toBe("active");
+    expect(observed).toContainEqual({ args: ["worktree", "remove", info.path], cwd: info.projectPath });
+    expect(observed.some(call => call.args[0] === "update-ref" && call.args[1] === "-d")).toBe(false);
+  });
+ });
+
+ it("requires current verification of the combined source before updating the target", async () => {
+    enqueueTargetInspection(); queue.push({ ok: true, stdout: "" });
+    const result = await mergeWorktree({ ...info }, undefined, { validateResult: async () => false });
+    expect(result.success).toBe(false); expect(result.summary).toContain("verification");
+    expect(observed.some(call => call.args[0] === "update-ref")).toBe(false);
+  });

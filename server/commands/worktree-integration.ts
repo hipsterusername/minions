@@ -53,7 +53,7 @@ export const worktreeIntegrationCommand: CommandHandler = async (ctx, cmd, ws) =
   } catch (error) {
     const typed = error instanceof WorktreeIntegrationServiceError ? error : null;
     send({ type: "worktree_integration_response", command: cmd.type, requestId: cmd.requestId ?? null,
-      success: false, code: typed?.code ?? "internal", error: typed?.message ?? "Integration command failed",
+      success: false, code: typed?.code ?? "internal", error: typed?.message ?? (error instanceof Error ? error.message : "Integration command failed"),
       latest: typed?.latest ?? null });
   }
 };

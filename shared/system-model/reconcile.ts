@@ -68,6 +68,8 @@ export const reconciliationProvenanceSchema = z.object({
 });
 
 export const reconciliationReportSchema = z.object({
+  evidenceDigest: z.string().optional(),
+  diffDigest: z.string().optional(),
   id: z.string(),
   workPacketId: z.string(),
   createdAt: z.number(),

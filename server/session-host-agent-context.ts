@@ -1,3 +1,4 @@
+import { captureSkillSnapshot, readSkillSnapshot, saveSkillSnapshot } from "./skill-snapshot.ts";
 import type { AgentTypeContext } from "./agents/index.ts";
 import { randomUUID } from "node:crypto";
 import type { SessionHost } from "./session-host.ts";
@@ -26,7 +27,19 @@ export function buildAgentContext(
   opts: StartSessionOptions,
   deps: SessionHostDeps,
 ): AgentTypeContext {
+  if (host.role === "leader" || host.role === "minion") {
+    const projectPath = host.worktree?.projectPath ?? opts.parentWorktree?.projectPath ?? host.cwd;
+    host.skillSnapshotId ??= captureSkillSnapshot(projectPath, host.skillValues);
+    if (host.role === "leader") {
+      const snapshot = readSkillSnapshot(projectPath, host.skillSnapshotId);
+      if (JSON.stringify(snapshot.values) !== JSON.stringify(host.skillValues)) {
+        host.skillSnapshotId = saveSkillSnapshot(projectPath, { ...snapshot, values: host.skillValues });
+      }
+    }
+    host.persist();
+  }
   const ctx: AgentTypeContext = {
+    skillSnapshotId: host.skillSnapshotId,
     sessionKey: host.id,
     workItemId: host.workItemId,
     runKey: host.runKey,
@@ -61,6 +74,7 @@ export function buildAgentContext(
           ...(params.permissionMode ? { permissionMode: params.permissionMode } : {}),
           ...(params.executorClass ? { executorClass: params.executorClass } : {}),
           ...(params.skillIds ? { skillIds: params.skillIds } : {}),
+          skillSnapshotId: params.skillSnapshotId,
           ...(params.onAllocated ? { onAllocated: params.onAllocated } : {}),
         });
       }
@@ -85,6 +99,7 @@ export function buildAgentContext(
       permissionMode: params.permissionMode,
       executorClass: params.executorClass,
       skillIds: params.skillIds,
+      skillSnapshotId: params.skillSnapshotId,
       });
     },
     scheduleWaitContinue: (durationMs, reason) => {
@@ -118,8 +133,12 @@ export function buildAgentContext(
     cleanupLiveEditRun: deps.cleanupLiveEditRun,
     getRenderComponents: () => host.renderState?.components ?? [],
     updateTaskName: (name) => {
-      host.taskName = name;
-      host.persist();
+      if (!host.continuity.canonicalTaskName) {
+        host.taskName = name;
+        host.continuity.canonicalTaskName = name;
+        host.persist();
+      }
+      return host.continuity.canonicalTaskName;
     },
     ...reviewLifecycleCallbacks(host, deps.bus),
   };

@@ -55,6 +55,7 @@ export function createCreateWorkPacketToolDef(ctx: SystemModelToolContext): Norm
         matchConfidence: candidates.length > 0 ? prefilter.matchConfidence : "low",
         taskFiles: args.files,
         ownedPaths: args.ownedPaths,
+        entryPoints: args.entryPoints,
         acceptanceCriteria: args.acceptanceCriteria,
         timestampFn: ctx.timestampFn ?? gitTimestampFn,
         now,

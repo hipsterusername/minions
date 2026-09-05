@@ -37,4 +37,50 @@ describe("harness readiness probes", () => {
       fs.rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it("prefers a newer standalone Codex CLI over the SDK-bundled runtime", () => {
+    const versions = new Map<string, readonly [number, number, number]>([
+      ["/fixture/sdk-codex", [0, 149, 1]],
+      ["/fixture/standalone-codex", [0, 153, 3]],
+    ]);
+    expect(resolveCodexRuntime({ PATH: "" }, {
+      resolveBundled: () => "/fixture/sdk-codex",
+      resolvePath: () => [{ executable: "/fixture/standalone-codex", source: "path" }],
+      readVersion: (executable) => versions.get(executable) ?? null,
+    })).toMatchObject({ executable: "/fixture/standalone-codex", source: "path" });
+  });
+
+  it("keeps the SDK-bundled runtime when it is at least as new", () => {
+    const versions = new Map<string, readonly [number, number, number]>([
+      ["/fixture/sdk-codex", [0, 154, 0]],
+      ["/fixture/standalone-codex", [0, 153, 3]],
+    ]);
+    expect(resolveCodexRuntime({ PATH: "" }, {
+      resolveBundled: () => "/fixture/sdk-codex",
+      resolvePath: () => [{ executable: "/fixture/standalone-codex", source: "path" }],
+      readVersion: (executable) => versions.get(executable) ?? null,
+    })).toMatchObject({ executable: "/fixture/sdk-codex", source: "sdk_bundled" });
+  });
+
+  it("keeps an explicit CODEX_PATH authoritative", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "minions-codex-override-"));
+    try {
+      const executable = path.join(directory, process.platform === "win32" ? "codex.exe" : "codex");
+      fs.writeFileSync(executable, "");
+      if (process.platform !== "win32") fs.chmodSync(executable, 0o755);
+      expect(resolveCodexRuntime({ CODEX_PATH: executable, PATH: "" }, {
+        resolveBundled: () => "/fixture/newer-sdk-codex",
+        resolvePath: () => [{ executable: "/fixture/newer-standalone-codex", source: "path" }],
+      })).toMatchObject({ executable, source: "env_override" });
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed for an invalid explicit CODEX_PATH", () => {
+    expect(resolveCodexRuntime({ CODEX_PATH: "/fixture/missing-codex", PATH: "" }, {
+      resolveBundled: () => "/fixture/sdk-codex",
+      resolvePath: () => [{ executable: "/fixture/standalone-codex", source: "path" }],
+    })).toBeNull();
+  });
 });

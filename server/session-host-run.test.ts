@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildHarnessStartOpts, ensureWorktree, sessionHostLogFields } from "./session-host-run.ts";
 import type { AgentHarness, HarnessCapabilities } from "./harness/types.ts";
 import type { AgentType, AgentTypeContext, AgentToolResult } from "./agents/types.ts";
@@ -121,6 +121,22 @@ describe("ensureWorktree safety boundary", () => {
 });
 
 describe("buildHarnessStartOpts — capability gating", () => {
+  it.each([false, true])("passes the effective inventory into prompt assembly (native filesystem=%s)", native => {
+    const harness = fakeHarness(native ? "codex" : "claude", { builtInFilesystem: true },
+      native ? [] : ["Read", "Write", "Bash"]);
+    const buildSystemPrompt = vi.fn<AgentType["buildSystemPrompt"]>(() => "effective prompt");
+    const { allowedTools } = buildHarnessStartOpts({ host: fakeHost(),
+      opts: fakeOpts({ toolAllowlist: ["Read", "mcp__leader-procedures__load_procedure"],
+        sandboxPolicy: { filesystemScope: "read-only", approvalPolicy: "never" } }),
+      agentType: { ...fakeAgentType, buildSystemPrompt }, agentCtx: fakeCtx,
+      toolResult: { toolGroups: {}, mcpToolNames: ["mcp__leader-procedures__load_procedure", "mcp__task-manager__assign_task"] },
+      abortController: new AbortController(), harness, prompt: "hello" });
+    expect(buildSystemPrompt.mock.calls[0]?.[0]).toMatchObject({ effectiveCapabilities: {
+      allowedTools, nativeFilesystem: native,
+    } });
+    expect(allowedTools).not.toContain("Write");
+    expect(allowedTools).not.toContain("mcp__task-manager__assign_task");
+  });
   it("passes the effective worktree policy into harness.start options", () => {
     const harness = fakeHarness("codex", {
       sandboxEnforcement: {
@@ -225,6 +241,23 @@ describe("buildHarnessStartOpts — capability gating", () => {
     expect(continued.startOpts.resumeId).toBeUndefined();
   });
 
+  it("passes the existing session cost into later harness invocations", () => {
+    const host = fakeHost();
+    host.totalCost = 0.125;
+    const { startOpts } = buildHarnessStartOpts({
+      host,
+      opts: fakeOpts({ invocationKind: "resume_open_run", resumeId: "provider-1" }),
+      agentType: fakeAgentType,
+      agentCtx: fakeCtx,
+      toolResult: fakeToolResult,
+      abortController: new AbortController(),
+      harness: fakeHarness("codex", {}),
+      prompt: "continue",
+    });
+
+    expect(startOpts.initialCostUSD).toBe(0.125);
+  });
+
   it("includes harness.builtInTools in allowedTools", () => {
     const harness = fakeHarness("fake", {}, ["Read", "Write", "Bash"]);
     const { allowedTools } = buildHarnessStartOpts({
@@ -285,6 +318,20 @@ describe("buildHarnessStartOpts — capability gating", () => {
       harness,prompt:"hello"});
     expect(allowedTools).toEqual([
       "mcp__minion-status__report_done","mcp__task-graph__stage_output_artifact",
+    ]);
+  });
+
+  it("does not expose skill authoring requested by a graph unless registered for the child",()=>{
+    const harness=fakeHarness("codex",{},[]);
+    const toolResult:AgentToolResult={toolGroups:{},mcpToolNames:[
+      "mcp__minion-status__report_done","mcp__skills__load_skill",
+    ]};
+    const {allowedTools}=buildHarnessStartOpts({host:fakeHost(),opts:fakeOpts({toolAllowlist:[
+      "mcp__skills__load_skill","mcp__skills__create_skill",
+    ]}),agentType:fakeAgentType,agentCtx:fakeCtx,toolResult,
+      abortController:new AbortController(),harness,prompt:"hello"});
+    expect(allowedTools).toEqual([
+      "mcp__minion-status__report_done","mcp__skills__load_skill",
     ]);
   });
 

@@ -194,6 +194,9 @@ export const COMMAND_SCHEMAS = {
     ...mutationFields, workItemId: requiredId,
     surface: workItemBindingSurfaceSchema, bindingId: requiredId,
   }),
+  get_work_item_receipt: command("get_work_item_receipt", {
+    requestId: requiredId, workItemId: requiredId.optional(),
+  }),
   get_work_item: command("get_work_item", {
     workItemId: requiredId, cursor: requiredId.optional(),
     limit: z.number().int().positive().max(100).optional(),

@@ -155,7 +155,7 @@ export function compileWorktreeCompletionPolicy(
 
   if (mode.canonical) {
     return [
-      "- If you spawn subagents via the Agent tool, they inherit your worktree cwd.",
+      "- If you delegate through an available agent tool, give the child the assigned cwd and ownership boundary.",
       "- When delegating to minions via assign_task, they will automatically work in your worktree.",
       "",
       "### Canonical Completion",
@@ -166,7 +166,7 @@ export function compileWorktreeCompletionPolicy(
   }
 
   return [
-    "- If you spawn subagents via the Agent tool, they inherit your worktree cwd.",
+    "- If you delegate through an available agent tool, give the child the assigned cwd and ownership boundary.",
     "- When delegating to minions via assign_task, they will automatically work in your worktree.",
     "",
     "### Approval Workflow (MANDATORY)",
@@ -215,10 +215,10 @@ export function enrichSystemPromptForWorktree(
     "",
     "### Rules",
     "",
-    "- **ALL file operations (Read, Write, Edit, Glob, Grep) MUST target paths within your worktree directory.**",
-    "- When you discover file paths (from Glob, Grep, error messages, git output, etc.), they will already be within your worktree — use them as-is.",
-    `- **NEVER** use paths under \`${worktree.projectPath}\` directly — that is the user's main working tree. ${integrationRule}`,
-    "- Bash commands automatically run in your worktree cwd.",
+    "- Make repository changes only inside this worktree and your assigned write scopes; the effective sandbox policy may restrict them further.",
+    "- Resolve discovered paths before use. Authorized reference reads may include dependencies, installed skills, and durable handoff sources outside the worktree; those reads do not grant write access.",
+    `- Do not mutate the main working tree at \`${worktree.projectPath}\`. ${integrationRule}`,
+    "- Run shell commands from the assigned worktree cwd; use the shell/filesystem tools provided by your harness.",
     ...compileWorktreeCompletionPolicy(mode),
     "",
   ].join("\n");

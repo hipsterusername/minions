@@ -86,6 +86,12 @@ describe("durable session naming", () => {
 
     expect(host.taskName).toBe("Harden session naming workflow");
     expect(persist).toHaveBeenCalledOnce();
+
+    const nextContext = buildAgentContext(host,
+      { sessionKey: host.id, prompt: "Now run the tests", cwd: host.cwd }, makeDeps(() => {}));
+    expect(nextContext.updateTaskName?.("Run naming tests")).toBe("Harden session naming workflow");
+    expect(host.taskName).toBe("Harden session naming workflow");
+    expect(persist).toHaveBeenCalledOnce();
   });
 });
 

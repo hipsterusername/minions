@@ -1,8 +1,10 @@
+import { worktreePathBusy } from "./commands/worktree-operation-lock.ts";
+import { assertResolvedFiles } from "./git-resolution.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { exec } from "./worktree-exec.ts";
 import { provisionPlannedWorktree } from "./worktree-create.ts";
-import { ownedWorktreeRoot } from "./worktree-owned-root.ts";
+import { ownedWorktreeRoot, isOwnedWorktreePath } from "./worktree-owned-root.ts";
 import type { GitGateContext, GitIntegrationExecutorOptions,
   GitIntegrationOperation, GitIntegrationResult } from "./git-integration-types.ts";
 
@@ -21,8 +23,11 @@ async function ancestor(repo: string, older: string, newer: string): Promise<boo
 export async function collectGitContribution(input: { repositoryPath: string;
   worktreePath: string; sourceRef: string; message: string }): Promise<string> {
   const repo = fs.realpathSync(input.repositoryPath);
+  await assertResolvedFiles(input.worktreePath);
+  let merging = false;
+  try { await exec(["rev-parse", "--verify", "MERGE_HEAD"], input.worktreePath); merging = true; } catch { /* no merge */ }
   await exec(["add", "-A"], input.worktreePath);
-  if ((await exec(["status", "--porcelain"], input.worktreePath)).stdout.trim()) {
+  if (merging || (await exec(["status", "--porcelain"], input.worktreePath)).stdout.trim()) {
     await exec(["commit", "-m", input.message], input.worktreePath);
   }
   const head = await sha(repo, input.sourceRef);
@@ -83,14 +88,16 @@ async function promote(repo: string, targetRef: string, expected: string,
 export async function cleanupIntegratedContribution(op: GitIntegrationOperation,
   sourceSha: string, targetSha: string): Promise<boolean> {
   const repo = fs.realpathSync(op.repositoryPath);
-  if (op.kind !== "integrate_contribution" || !await ancestor(repo, sourceSha, targetSha)) return false;
+  if (!await ancestor(repo, sourceSha, targetSha)) return false;
+  if (op.worktreePath && (worktreePathBusy(op.worktreePath) || !isOwnedWorktreePath(repo, op.worktreePath))) return false;
+  if (!await ancestor(repo, sourceSha, await sha(repo, op.targetRef))) return false;
   let currentSource: string;
   try { currentSource = await sha(repo, op.sourceRef); }
   catch { return !op.worktreePath || !fs.existsSync(op.worktreePath); }
   if (currentSource !== sourceSha) return false;
   if (op.worktreePath && fs.existsSync(op.worktreePath)) {
     if (await dirty(op.worktreePath)) return false;
-    try { await exec(["worktree", "remove", "--force", op.worktreePath], repo); } catch { return false; }
+    try { await exec(["worktree", "remove", op.worktreePath], repo); } catch { return false; }
   }
   try { await exec(["update-ref", "-d", fullRef(op.sourceRef), sourceSha], repo); }
   catch { return false; }
@@ -126,6 +133,10 @@ export async function executeGitIntegration(op: GitIntegrationOperation,
     const checkout = await targetCheckout(repo, targetRef);
     if (checkout && await dirty(checkout)) return { status: "waiting", targetSha, sourceSha,
       error: `target checkout is dirty: ${checkout}` };
+    if (op.kind === "promote_lineage" && options.requireReviewedTargetInSource
+      && !await ancestor(repo, targetSha, sourceSha)) return { status: "conflicted", targetSha, sourceSha,
+        conflicts: [], preservedPaths: op.worktreePath ? [op.worktreePath] : [],
+        error: "Target contains unreviewed changes. Run a lineage resolution iteration, verify the combined code, and approve again." };
     const gateContext: GitGateContext = { operation: op, targetSha, sourceSha, attempt };
     if (op.kind === "promote_lineage" && options.evaluateGate) {
       const verdict = await options.evaluateGate(gateContext);

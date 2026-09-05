@@ -412,7 +412,7 @@ describe("TaskGraphPlanningCoordinator", () => {
       .toMatchObject({proposalId:first.proposalId});
   });
 
-  it("reads committed artifacts from a selected historical graph iteration",async()=>{
+  it("reads committed artifacts across Leader iterations without granting historical mutation authority",async()=>{
     const {coordinator,db}=setup();
     const firstPlan=semanticPlan();
     firstPlan.steps[0]={...firstPlan.steps[0]!,outputSchemas:{result:{type:"object"}}};
@@ -447,6 +447,48 @@ describe("TaskGraphPlanningCoordinator", () => {
     expect(()=>coordinator.readArtifact({workItemId:"work",primaryRunKey:"primary",
       artifactId:"historic-artifact",offset:0,maxBytes:1_000}))
       .toThrow("no runtime artifacts");
+
+    // A continuation retains the WorkItem but replaces its current Leader run.
+    db.prepare("UPDATE work_items SET current_run_key='continued' WHERE id='work'").run();
+    // Late projection updates must not reorder the historical proposal lineage.
+    db.prepare("UPDATE task_graph_plan_proposals SET updated_at=9999 WHERE id=?").run(first.proposalId);
+    expect(coordinator.inspection("work","continued",{graphRunId:first.graphRunId!}))
+      .toMatchObject({plan:{proposalId:first.proposalId,primaryRunKey:"primary"},
+        runtime:{graphRunId:first.graphRunId},history:expect.arrayContaining([
+          expect.objectContaining({proposalId:first.proposalId})])});
+    expect(coordinator.inspection("work","continued",{proposalId:first.proposalId}).plan)
+      .toMatchObject({proposalId:first.proposalId});
+    expect(coordinator.inspection("work","continued").plan)
+      .toMatchObject({objective:"Use prior result",canStart:false,autoStartEligible:false});
+    expect(coordinator.readArtifact({workItemId:"work",primaryRunKey:"continued",
+      graphRunId:first.graphRunId!,artifactId:"historic-artifact",offset:0,maxBytes:1_000}))
+      .toMatchObject({content:'{"value":"historic"}'});
+    expect(()=>coordinator.inspection("work","primary"))
+      .toThrow("stale canonical WorkItem authority");
+    expect(()=>coordinator.readArtifact({workItemId:"work",primaryRunKey:"primary",
+      graphRunId:first.graphRunId!,artifactId:"historic-artifact",offset:0,maxBytes:1_000}))
+      .toThrow("stale canonical WorkItem authority");
+    await expect(coordinator.cancel({workItemId:"work",primaryRunKey:"continued",
+      runId:first.graphRunId!,expectedRunRevision:runtime.revision,requestId:"historical-cancel"}))
+      .rejects.toThrow("outside the current Leader authority");
+
+    createWorkItem(db,{id:"other",projectId:"project",projectPath:process.cwd(),
+      title:"Other",changeMode:"live",at:100});
+    startWorkItemIteration(db,{workItemId:"other",runKey:"other-primary",idempotencyKey:"other",
+      expectedLifecycleRevision:0,expectedCurrentRunKey:null,at:101});
+    expect(()=>coordinator.inspection("other","other-primary",{proposalId:first.proposalId}))
+      .toThrow("outside the current WorkItem");
+    expect(()=>coordinator.inspection("other","other-primary",{graphRunId:first.graphRunId!}))
+      .toThrow("outside the current WorkItem");
+    expect(()=>coordinator.readArtifact({workItemId:"other",primaryRunKey:"other-primary",
+      graphRunId:first.graphRunId!,artifactId:"historic-artifact",offset:0,maxBytes:1_000}))
+      .toThrow("outside the current WorkItem");
+
+    const continued=await coordinator.submit({workItemId:"work",primaryRunKey:"continued",
+      mode:"plan",requestId:"continued-proposal",baseProposalRevision:null,plan:semanticPlan()});
+    expect(coordinator.inspection("work","continued",{historyLimit:1}))
+      .toMatchObject({plan:{proposalId:continued.proposalId,proposalRevision:1},
+        history:[{proposalId:continued.proposalId}]});
   });
 
   it("wakes graph attention once per blocked runtime revision", async () => {

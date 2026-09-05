@@ -17,6 +17,10 @@ export const reviewGateSchema = z.object({
   name: z.string(),
   description: z.string().optional(),
   blocksMerge: z.boolean().default(false),
+  requiredChecks: z.array(z.object({
+    kind: z.enum(["freshness", "test", "manual_review", "constraint"]),
+    target: z.string().min(1),
+  })).optional(),
   requiredWhen: z.object({
     files: z.array(z.string()).default([]),
     capabilities: z.array(z.string()).default([]),

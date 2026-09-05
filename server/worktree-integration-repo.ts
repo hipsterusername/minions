@@ -191,7 +191,7 @@ function enqueue(db: Database.Database, input: { id: string; lineageId: string;
       if (db.prepare(`SELECT 1 FROM worktree_integration_queue WHERE lineage_id=?
         AND kind='contribution' AND state IN ('queued','running') LIMIT 1`).get(lineage.id))
         throw new Error("contribution integration is still pending");
-      if (db.prepare(`SELECT 1 FROM worktree_integration_gates WHERE lineage_id=? AND scope='lineage'
+      if (db.prepare(`SELECT 1 FROM worktree_integration_gates WHERE lineage_id=? AND scope='lineage' AND name<>'promotion_runtime'
         AND status NOT IN ('passed','waived') LIMIT 1`).get(lineage.id))
         throw new Error("lineage gates are not satisfied");
     }
@@ -277,6 +277,8 @@ export function finishIntegration(db: Database.Database, input: { queueId: strin
         const changed = db.prepare(`UPDATE worktree_lineages SET integration_head_sha=?,revision=revision+1,
           updated_at=? WHERE id=? AND revision=?`).run(input.resultSha, input.at, lineage.id, lineage.revision);
         if (changed.changes !== 1) throw new Error("lineage head changed concurrently");
+        db.prepare("UPDATE worktree_integration_gates SET status='pending',recorded_at=? WHERE lineage_id=? AND scope='lineage'")
+          .run(input.at, lineage.id);
       }
     } else if (input.outcome === "succeeded") {
       db.prepare(`UPDATE worktree_lineages SET status='integrated',integration_state='integrated',integration_head_sha=COALESCE(?,integration_head_sha),
@@ -319,7 +321,7 @@ export function retryIntegration(db: Database.Database, input: { priorQueueId: s
       if (lineage.integration_state !== "active" || approval?.decision !== "approved"
         || approval.reviewed_head_sha !== (lineage.integration_head_sha ?? lineage.base_sha))
         throw new Error("promotion retry requires resolved gates and current final approval");
-      if (db.prepare(`SELECT 1 FROM worktree_integration_gates WHERE lineage_id=? AND scope='lineage'
+      if (db.prepare(`SELECT 1 FROM worktree_integration_gates WHERE lineage_id=? AND scope='lineage' AND name<>'promotion_runtime'
         AND status NOT IN ('passed','waived') LIMIT 1`).get(lineage.id))
         throw new Error("promotion retry gates are not satisfied");
     }

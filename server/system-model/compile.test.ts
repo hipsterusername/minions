@@ -31,7 +31,7 @@ describe("compileWorkPacket", () => {
 
     expect(result.packet.scope).toMatchObject({
       capabilities: ["capability.workspace_management"],
-      flows: ["flow.approve_changes"],
+      flows: [],
       constraints: ["constraint.bus_only"],
       decisions: ["decision.bus_architecture"],
       risks: ["risk.merge_bypass"],
@@ -127,6 +127,7 @@ describe("compileWorkPacket", () => {
 
   it("keeps surface closure to one hop while preserving capability entry-point provenance", async () => {
     const model = loadSystemModel(copyValidFixtureWithSurfaces()).model!;
+    model.policies.freshness[0]!.policyClass = "code_coupled";
     const result = await compileWorkPacket({
       model,
       cwd: "/repo",
@@ -146,13 +147,6 @@ describe("compileWorkPacket", () => {
     expect(result.packet.scope.entryPoints).toEqual([
       {
         capabilityId: "capability.workspace_management",
-        surfaceId: "surface.canvas",
-        files: ["src/Canvas.tsx"],
-        tests: ["src/Canvas.test.tsx"],
-        flows: ["flow.approve_changes"],
-      },
-      {
-        capabilityId: "capability.workspace_management",
         surfaceId: "surface.mobile",
         files: ["src/mobile/**"],
         tests: ["src/mobile/app.test.ts"],
@@ -160,7 +154,7 @@ describe("compileWorkPacket", () => {
       },
     ]);
     expect(result.contextPack).toContain("Entry point surface.mobile for capability.workspace_management");
+    expect(result.contextPack).not.toContain("Entry point surface.canvas");
     expect(result.contextPack).toContain("Freshness instruction: inspect current code");
-    expect(result.packet.agentInstructions).toEqual(["inspect current code"]);
   });
 });

@@ -1,4 +1,6 @@
 import { z } from "zod/v4";
+import { captureEvidenceBinding } from "../system-model/evidence-binding.ts";
+import { loadSystemModel } from "../system-model/load.ts";
 import type { NormalizedToolDef } from "../harness/types.ts";
 import { jsonResult } from "../harness/tool-result.ts";
 import { constraintCheckSchema, reconciliationReportSchema } from "../../shared/system-model/index.ts";
@@ -25,6 +27,13 @@ export function createRecordConstraintVerdictsToolDef(ctx: SystemModelToolContex
       const args = recordConstraintVerdictsInputSchema.parse(input);
       const base = getLatestReconciliationReportForPacket(ctx.projectPath, args.workPacketId);
       if (!base) return jsonResult({ recorded: false, error: "No reconciliation report found for Work Packet" }, { isError: true });
+      const stored = getWorkPacket(ctx.projectPath, args.workPacketId);
+      if (!stored || stored.packet.leaderSessionKey !== ctx.leaderSessionKey) {
+        throw new Error("Work Packet is missing or belongs to another session");
+      }
+      if (!base.evidenceDigest || base.evidenceDigest !== await captureEvidenceBinding(ctx.cwd, stored.packet, loadSystemModel(ctx.cwd).model, ctx.projectPath)) {
+        throw new Error("Reconciliation evidence is stale; reconcile the current changes before recording verdicts");
+      }
       const outOfScopeVerdict = args.verdicts.find((verdict) =>
         !base.deterministic.constraintsInScope.includes(verdict.constraintId));
       if (outOfScopeVerdict) {
@@ -51,7 +60,8 @@ export function createRecordConstraintVerdictsToolDef(ctx: SystemModelToolContex
         },
       });
       saveReconciliationReport(ctx.projectPath, report);
-      const reviewed = new Set(verdicts.map((verdict) => verdict.constraintId));
+      const reviewed = new Set(verdicts.filter((verdict) => verdict.status === "appears_satisfied"
+        && verdict.evidence.length > 0).map((verdict) => verdict.constraintId));
       const missingConstraintVerdicts = report.deterministic.constraintsInScope
         .filter((constraintId) => !reviewed.has(constraintId));
       const pendingActions = [
@@ -64,7 +74,7 @@ export function createRecordConstraintVerdictsToolDef(ctx: SystemModelToolContex
       ];
       const packet = pendingActions.length === 0
         ? updateWorkPacketStatus(ctx.projectPath, args.workPacketId, "reconciled", now)
-        : getWorkPacket(ctx.projectPath, args.workPacketId)?.packet ?? null;
+        : updateWorkPacketStatus(ctx.projectPath, args.workPacketId, "active", now);
       if (pendingActions.length === 0) {
         ctx.bus.emitToSession(ctx.leaderSessionKey, {
           type: "reconciliation_ready",

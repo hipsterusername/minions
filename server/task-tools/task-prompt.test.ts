@@ -11,6 +11,13 @@ function contextBlock(groups: string[]): string {
 }
 
 describe("buildTaskSpawnPrompt canvas context", () => {
+  it("retains useful content and an exact source reference for a single oversized group", () => {
+    const source = contextBlock([`<context-group title="API contract">KEEP_V1 ${"x".repeat(6100)} END_CONSTRAINT</context-group>`]);
+    const excerpt = truncateCanvasContext(source, 6000, "/tmp/context-sources/exact-source.txt");
+    expect(excerpt.length).toBeLessThanOrEqual(6000);
+    for (const text of ["KEEP_V1", "END_CONSTRAINT", "API contract", "/tmp/context-sources/exact-source.txt",
+      CANVAS_CONTEXT_TRUNCATED_MARKER, "</connected-context>"]) expect(excerpt).toContain(text);
+  });
   it("places bounded Minions project context before the task description", () => {
     const prompt = buildTaskSpawnPrompt({
       taskId: "t1",

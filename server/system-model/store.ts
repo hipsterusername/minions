@@ -38,6 +38,7 @@ export interface StoredWorkPacket {
 }
 
 export interface WorkPacketVerificationRow {
+  evidenceDigest?: string | null;
   workPacketId: string;
   kind: RequiredVerification["kind"];
   target: string;
@@ -156,9 +157,9 @@ export function recordWorkPacketVerification(
   const db = openProjectDb(projectPath);
   db.prepare(
     `INSERT OR REPLACE INTO work_packet_verifications
-      (work_packet_id, kind, target, result, notes, recorded_at)
-     VALUES (@workPacketId, @kind, @target, @result, @notes, @recordedAt)`,
-  ).run(row);
+      (work_packet_id, kind, target, result, notes, recorded_at, evidence_digest)
+     VALUES (@workPacketId, @kind, @target, @result, @notes, @recordedAt, @evidenceDigest)`,
+  ).run({ ...row, notes: row.notes ?? null, evidenceDigest: row.evidenceDigest ?? null });
 }
 
 export function listWorkPacketVerifications(
@@ -167,7 +168,7 @@ export function listWorkPacketVerifications(
 ): WorkPacketVerificationRow[] {
   const db = openProjectDb(projectPath);
   const rows = db.prepare(
-    `SELECT work_packet_id, kind, target, result, notes, recorded_at
+    `SELECT work_packet_id, kind, target, result, notes, recorded_at, evidence_digest
      FROM work_packet_verifications
      WHERE work_packet_id = ?
      ORDER BY kind, target`,
@@ -178,6 +179,7 @@ export function listWorkPacketVerifications(
     result: RequiredVerification["status"];
     notes: string | null;
     recorded_at: number;
+    evidence_digest: string | null;
   }>;
   return rows.map((row) => ({
     workPacketId: row.work_packet_id,
@@ -186,6 +188,7 @@ export function listWorkPacketVerifications(
     result: row.result,
     notes: row.notes,
     recordedAt: row.recorded_at,
+    ...(row.evidence_digest ? { evidenceDigest: row.evidence_digest } : {}),
   }));
 }
 

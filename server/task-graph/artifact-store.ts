@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
 import { artifactStageInputSchema,type ArtifactInput,type ArtifactStageInput,
-  type TaskNode } from "../../shared/task-graph-contracts.ts";
+  type TaskNode, type GraphRevisionInput } from "../../shared/task-graph-contracts.ts";
 import { getMinionsHome } from "../workspace-registry.ts";
 import { TaskGraphValidationError } from "./errors.ts";
 import {validateArtifactContract} from "./artifact-contract.ts";
@@ -27,13 +27,16 @@ type UnverifiedArtifactMetadata = Omit<ArtifactInput,"id"|"contentHash"|"byteSiz
 
 /** Bind a staging source to node authority before touching workspace paths. */
 export function storeTaskGraphArtifactForNode(db:Database.Database,runId:string,node:TaskNode,
-  rawInput:ArtifactStageInput):Omit<ArtifactInput,"id"> {
+  rawInput:ArtifactStageInput,spec?:GraphRevisionInput):Omit<ArtifactInput,"id"> {
   const input=artifactStageInputSchema.parse(rawInput);
   if (!(input.outputName in node.outputSchemas)) throw new TaskGraphValidationError(
     `$.outputName: expected one of ${JSON.stringify(Object.keys(node.outputSchemas))}; received ${JSON.stringify(input.outputName)}. Choose a declared output and restage; the rejected draft did not consume an output slot.`,
   );
   const schema=node.outputSchemas[input.outputName];
-  if (input.source==="inline") return storeInlineTaskGraphArtifact(input,schema);
+  const contracts=spec?.edges.filter(edge=>edge.sourceNodeId===node.id && edge.sourceOutput===input.outputName
+    && (edge.kind==="artifact" || edge.kind==="verified_artifact"))
+    .map(edge=>spec.nodes.find(consumer=>consumer.id===edge.targetNodeId)!.inputBindings[edge.targetInput!]) ?? [];
+  if (input.source==="inline") return storeInlineTaskGraphArtifact(input,schema,contracts);
   const storageRef=canonicalArtifactStorageRef(input.storageRef);
   const declaredScopes=node.ownershipRequest
     .filter(scope=>scope.scope==="path" && scope.mode==="write")
@@ -49,30 +52,30 @@ export function storeTaskGraphArtifactForNode(db:Database.Database,runId:string,
   const {source:_source,...pathInput}=input;
   const observedWriteSet=[...new Set([...pathInput.observedWriteSet,storageRef])];
   return storeTaskGraphArtifact(String(workItem.project_path),
-    {...pathInput,storageRef,observedWriteSet},schema,matchingScopes);
+    {...pathInput,storageRef,observedWriteSet},schema,matchingScopes,contracts);
 }
 
 /** Verify an agent-owned file and copy it into immutable content-addressed storage. */
 export function storeTaskGraphArtifact(workspaceRoot:string,input:UnverifiedArtifactMetadata,
-  declaredOutputSchema:unknown,ownedStorageRefs:string[]): Omit<ArtifactInput,"id"> {
+  declaredOutputSchema:unknown,ownedStorageRefs:string[],contracts:unknown[]=[]): Omit<ArtifactInput,"id"> {
   const source=canonicalWorkspaceFile(workspaceRoot,input.storageRef,ownedStorageRefs);
   const bytes=readBoundedStableFile(source);
-  return storeVerifiedBytes(input,bytes,declaredOutputSchema);
+  return storeVerifiedBytes(input,bytes,declaredOutputSchema,contracts);
 }
 
 /** Serialize bounded agent-supplied JSON and copy it into immutable content-addressed storage. */
 export function storeInlineTaskGraphArtifact(input:Extract<ArtifactStageInput,{source:"inline"}>,
-  declaredOutputSchema:unknown):Omit<ArtifactInput,"id"> {
+  declaredOutputSchema:unknown,contracts:unknown[]=[]):Omit<ArtifactInput,"id"> {
   const bytes=Buffer.from(JSON.stringify(input.inlineJson),"utf8");
   if (bytes.length>MAX_INLINE_ARTIFACT_BYTES) {
     throw new TaskGraphValidationError("inline artifact exceeds the 256 KiB limit");
   }
   const {source:_source,inlineJson:_inlineJson,...metadata}=input;
-  return storeVerifiedBytes({...metadata,storageRef:""},bytes,declaredOutputSchema);
+  return storeVerifiedBytes({...metadata,storageRef:""},bytes,declaredOutputSchema,contracts);
 }
 
 function storeVerifiedBytes(input:UnverifiedArtifactMetadata,bytes:Buffer,
-  declaredOutputSchema:unknown):Omit<ArtifactInput,"id"> {
+  declaredOutputSchema:unknown,contracts:unknown[]=[]):Omit<ArtifactInput,"id"> {
   if (input.byteSize!==undefined && bytes.length!==input.byteSize) {
     throw new TaskGraphValidationError("artifact byteSize does not match stored content");
   }
@@ -81,6 +84,7 @@ function storeVerifiedBytes(input:UnverifiedArtifactMetadata,bytes:Buffer,
     throw new TaskGraphValidationError("artifact contentHash does not match stored content");
   }
   validateDeclaredOutput(bytes,declaredOutputSchema);
+  for (const contract of contracts) validateDeclaredOutput(bytes,contract);
   const root=path.join(getMinionsHome(),"artifacts","task-graph");
   fs.mkdirSync(root,{recursive:true,mode:0o700});
   const rootStat=fs.lstatSync(root);
@@ -115,7 +119,7 @@ function validateDeclaredOutput(bytes:Buffer,declaredOutputSchema:unknown):void 
 
 /** Read a bounded chunk only after revalidating canonical storage and content identity. */
 export function readStoredTaskGraphArtifact(input:{storageRef:string;contentHash:string;byteSize:number;
-  offset:number;maxBytes:number}):TaskGraphArtifactChunk {
+  offset:number;maxBytes:number;contract?:unknown}):TaskGraphArtifactChunk {
   if (!Number.isInteger(input.offset) || input.offset<0 || input.offset>input.byteSize) {
     throw new TaskGraphValidationError("artifact offset is outside the immutable content");
   }
@@ -135,6 +139,7 @@ export function readStoredTaskGraphArtifact(input:{storageRef:string;contentHash
   const bytes=fs.readFileSync(storedReal);
   const actual=`sha256:${crypto.createHash("sha256").update(bytes).digest("hex")}`;
   if (actual!==input.contentHash) throw new TaskGraphValidationError("immutable artifact content hash changed");
+  if (input.contract !== undefined) validateDeclaredOutput(bytes, input.contract);
   const end=Math.min(bytes.length,input.offset+input.maxBytes);
   const chunk=bytes.subarray(input.offset,end);
   let encoding:"utf8"|"base64"="utf8";let content:string;

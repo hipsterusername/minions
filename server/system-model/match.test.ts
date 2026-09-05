@@ -1,3 +1,4 @@
+import { globMatches } from "./match.ts";
 import { describe, expect, it } from "vitest";
 import { matchSystemModel } from "./match.ts";
 import { loadSystemModel } from "./load.ts";
@@ -89,5 +90,17 @@ describe("matchSystemModel", () => {
       score: 4,
       reasons: ["file matches entry point surface.mobile"],
     });
+  });
+});
+
+
+describe("policy glob semantics", () => {
+  it.each(["server/a.ts", "server/commands/remove.ts"])("matches %s under server/**/*.ts", file => {
+    expect(globMatches("server/**/*.ts", file)).toBe(true);
+  });
+  it("keeps single-star matches within one directory", () => {
+    expect(globMatches("server/*.ts", "server/bus.ts")).toBe(true);
+    expect(globMatches("server/*.ts", "server/commands/remove.ts")).toBe(false);
+    expect(globMatches("server/*.ts", "src/bus.ts")).toBe(false);
   });
 });

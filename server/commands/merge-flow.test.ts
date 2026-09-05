@@ -82,7 +82,7 @@ describe.each(CASES)(
   "$command",
   ({ command, handler, expectedOptions }) => {
     it("rejects with control_error when the session has no worktree", () => {
-      const h = setup({ status: "running" });
+      const h = setup({ status: "idle" });
       // host.worktree stays null.
       handler(h.ctx, cmd({ type: command as never }), h.ws);
       expect(h.wsSent).toHaveLength(1);
@@ -92,7 +92,7 @@ describe.each(CASES)(
     });
 
     it("rejects canonical work-item runs before entering the legacy merge flow", () => {
-      const h = setup({ status: "running" });
+      const h = setup({ status: "idle" });
       h.host.worktree = fakeWorktree;
       h.host.workItemId = "work-1";
       handler(h.ctx, cmd({ type: command as never, requestId: "canonical" }), h.ws);
@@ -104,7 +104,7 @@ describe.each(CASES)(
     });
 
     it("on merge success: clears worktree, emits the four success envelopes, replies with success", async () => {
-      const h = setup({ status: "running" });
+      const h = setup({ status: "idle" });
       h.host.worktree = fakeWorktree;
 
       handler(h.ctx, cmd({ type: command as never }), h.ws);
@@ -141,7 +141,7 @@ describe.each(CASES)(
         summary: "conflict",
         targetBranch: "main",
       };
-      const h = setup({ status: "running" });
+      const h = setup({ status: "idle" });
       h.host.worktree = fakeWorktree;
 
       handler(h.ctx, cmd({ type: command as never }), h.ws);
@@ -151,7 +151,7 @@ describe.each(CASES)(
 
       // Worktree intact, status not flipped to completed.
       expect(h.host.worktree).toBe(fakeWorktree);
-      expect(h.host.status).toBe("running");
+      expect(h.host.status).toBe("idle");
 
       // Failed envelope emitted, NOT session_completed.
       const failed = h.busSent.find((e) => e.type === "worktree_merge_failed");
@@ -167,14 +167,14 @@ describe.each(CASES)(
       expect(result.conflicts).toEqual(["src/x.ts"]);
     });
 
-    it("aborts a running session before initiating the merge", async () => {
+    it("refuses a running session until execution has drained", async () => {
       const h = setup({ status: "running" });
       h.host.worktree = fakeWorktree;
       expect(h.host.abortController.signal.aborted).toBe(false);
 
       handler(h.ctx, cmd({ type: command as never }), h.ws);
-      // The abort happens synchronously before the await resolves.
-      expect(h.host.abortController.signal.aborted).toBe(true);
+      expect(mergeCalls).toHaveLength(0);
+      expect(h.wsSent[0]!["error"]).toContain("agent execution");
     });
   },
 );
@@ -185,7 +185,7 @@ it("rejects a duplicate destructive command while a merge is still in flight", a
     new Promise<MergeResult>((resolve) => {
       finishMerge = resolve;
     });
-  const h = setup({ status: "running" });
+  const h = setup({ status: "idle" });
   h.host.worktree = fakeWorktree;
 
   approveChanges(h.ctx, cmd({ type: "approve_changes", requestId: "first" }), h.ws);

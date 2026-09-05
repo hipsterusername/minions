@@ -4,15 +4,14 @@
  * completed; the session stays alive so the user can continue working.
  */
 
-import { mergeAndCleanup } from "../worktree.ts";
 import {
   evaluateMergeGates,
   shouldEvaluateMergeGates,
   shouldWarnForMergeGates,
 } from "../system-model/gates.ts";
-import { blockForMergeGates, getSessionOrError, sendControlError, sendControlResponse, errToMessage } from "./helpers.ts";
+import { mergeWithCurrentGates, blockForMergeGates, getSessionOrError, sendControlError, sendControlResponse, errToMessage } from "./helpers.ts";
 import type { CommandHandler } from "./types.ts";
-import { activeWorktreeOperation, beginWorktreeOperation } from "./worktree-operation-lock.ts";
+import { worktreeBusyReason, beginWorktreeOperation } from "./worktree-operation-lock.ts";
 
 export const mergeWorktree: CommandHandler = (ctx, cmd, ws) => {
   const host = getSessionOrError(ctx.registry, cmd.sessionKey, ws);
@@ -33,7 +32,7 @@ export const mergeWorktree: CommandHandler = (ctx, cmd, ws) => {
       "merge_worktree",
       host.id,
       cmd.requestId,
-      `Worktree operation "${activeWorktreeOperation(host) ?? "unknown"}" is already in progress`,
+      `Worktree operation "${worktreeBusyReason(host) ?? "unknown"}" is already in progress`,
     );
     return;
   }
@@ -53,9 +52,9 @@ export const mergeWorktree: CommandHandler = (ctx, cmd, ws) => {
           lease.release();
           return null;
         }
-        return mergeAndCleanup(host.worktree!);
+        return mergeWithCurrentGates(host);
       })
-    : mergeAndCleanup(host.worktree);
+    : mergeWithCurrentGates(host);
 
   merge
     .then((result) => {

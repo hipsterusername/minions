@@ -234,7 +234,10 @@ describe("work-item production bootstrap", () => {
     const runtime = bootstrapWorkItemRuntime({
       db, bus: bus(), registry: { get: (key) => hosts.get(key) }, now: () => 10,
       launch: (options) => {
-        if (options.runKind === "child") expect(allocated).toEqual([options.sessionKey]);
+        if (options.runKind === "child") {
+          expect(allocated).toEqual([options.sessionKey]);
+          expect(options.skillSnapshotId).toBe("a".repeat(64));
+        }
         const host = new SessionHost(options.sessionKey, options.cwd);
         host.workItemId = options.workItemId ?? null; hosts.set(options.sessionKey, host);
       },
@@ -248,7 +251,7 @@ describe("work-item production bootstrap", () => {
       (runKey) => allocated.push(runKey));
     const child = await runtime.workItems.startChildRun({ requestId: "alloc-child",
       workItemId: detail.workItem.id, parentRunKey: primary.workItem.currentRunKey!,
-      taskId: "task", prompt: "Child", skillIds: ["review"] });
+      taskId: "task", prompt: "Child", skillIds: ["review"], skillSnapshotId: "a".repeat(64) });
     unregister();
     expect(allocated).toEqual([child.runKey]);
   });

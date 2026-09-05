@@ -78,6 +78,7 @@ export const sourceSnapshotSchema = z.object({
   dirtyDiffDigest: hashSchema, workspaceId: z.string().min(1), worktreeIdentity: z.string().min(1),
   systemModelDigest: hashSchema, workPacketRevisionId: z.string().min(1).nullable(),
   connectedContext: z.array(z.object({ sourceId: z.string(), contentHash: hashSchema, classification: z.string() })),
+  skillSnapshotId: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   compiledSkills: z.array(z.object({ skillId: z.string(), version: z.string(), contentHash: hashSchema, valuesHash: hashSchema })),
   harnessPolicyDigest: hashSchema, toolPolicyDigest: hashSchema, createdAt: z.number().int().nonnegative(),
 });

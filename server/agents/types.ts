@@ -19,6 +19,13 @@ import type { LeaderOrchestrationMode } from "../../shared/task-graph-planning-c
 import type { TaskGraphPlanningCoordinator } from "../task-graph/planning-coordinator.ts";
 
 export interface AgentTypeContext {
+  /** Resolved at launch, after tool filtering and sandbox policy resolution. */
+  effectiveCapabilities?: {
+    allowedTools: readonly string[];
+    nativeFilesystem: boolean;
+    filesystemScope: string;
+    approvalPolicy: string;
+  };
   sessionKey: string;
   workItemId?: string | null;
   runKey?: string;
@@ -42,7 +49,7 @@ export interface AgentTypeContext {
    * surfaces and are inherited by delegated Minions. Sourced from the
    * frontend at launch time and persisted across resume/wait cycles.
    */
-  skillIds?: string[];
+  skillIds?: string[]; skillSnapshotId?: string | undefined;
   /** Template values configured for the tagged Leader skills. */
   skillValues?: Record<string, Record<string, string>>;
   /** Worktree inherited from the leader (minion only) */
@@ -69,7 +76,7 @@ export interface AgentTypeContext {
     thinkingConfig?: ThinkingConfig;
     permissionMode?: string;
     executorClass?: "mechanical" | "standard" | "reasoning";
-    skillIds?: string[];
+    skillIds?: string[]; skillSnapshotId?: string | undefined;
     onAllocated?: (sessionKey: string) => void;
   }) => void | Promise<{ sessionKey: string; harness: string; model: string; permissionMode: string }>;
   /** Callback to schedule a delayed "Continue" resume (leader only) */
@@ -99,8 +106,8 @@ export interface AgentTypeContext {
   getSessionRuntime?: (sessionKey: string) => RuntimeSessionInfo | null;
   /** Latest render components for safe checkpoint-boundary validation. */
   getRenderComponents?: () => RenderState["components"];
-  /** Update and persist the durable display name for this session. */
-  updateTaskName?: (name: string) => void;
+  /** Persist the first selected name and return the session's canonical name. */
+  updateTaskName?: (name: string) => string | void;
   /** Raise a durable, structured user-input requirement for Activity. */
   markDecisionNeeded?: (reason: string) => void;
   /** Advance the persisted dashboard revision after a render mutation. */

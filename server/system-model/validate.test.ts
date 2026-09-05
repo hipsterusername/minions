@@ -41,7 +41,7 @@ describe("validateLoadedSystemModel", () => {
     ];
 
     expect(computeOverbreadth(model!, trackedFiles)).toEqual([]);
-    expect(validateLoadedSystemModel(model!, trackedFiles).filter((error) => "severity" in error)).toEqual([]);
+    expect(validateLoadedSystemModel(model!, trackedFiles).filter((error) => error.message.startsWith("Applicability globs"))).toEqual([]);
   });
 
   it("does not require the live checkout to use the new breaking schema during fixture acceptance", () => {

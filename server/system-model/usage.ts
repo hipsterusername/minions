@@ -85,7 +85,6 @@ export async function staleObjects(input: {
       objectFile: objectFileFor(object),
       globs: object.suggestedFiles,
       freshnessClass: object.freshness?.class,
-      policyClass: "ordinary",
     })),
     policies: input.model.policies.freshness,
     getTimestamps: input.timestampFn,

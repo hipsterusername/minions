@@ -117,6 +117,15 @@ describe("session-persist integration", () => {
     rmDb(dbPath);
   });
 
+  it("reports write failures and rolls back the entire session snapshot", () => {
+    const db = openPersistDb();
+    persistSession(makeSession({ model:"original" }));
+    db.exec(`CREATE TRIGGER reject_permission BEFORE UPDATE OF permission_mode ON sessions
+      BEGIN SELECT RAISE(ABORT, 'disk failure'); END`);
+    expect(()=>persistSession(makeSession({ model:"changed",permissionMode:"auto" }))).toThrow(/Failed to persist/);
+    expect(db.prepare("SELECT model FROM sessions WHERE session_key='sess-1'").get()).toEqual({model:"original"});
+  });
+
   it("hydrate returns [] when the DB is empty", () => {
     expect(hydrateSessionsFromDb()).toEqual([]);
   });

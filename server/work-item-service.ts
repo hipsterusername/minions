@@ -30,6 +30,8 @@ export class WorkItemServiceError extends Error {
 }
 
 export interface WorkItemService {
+  saveCommandResponse?(requestId: string, response: Record<string, unknown>): void;
+  getCommandResponse?(requestId: string): Record<string, unknown> | null;
   create(input: WorkItemMutationContext & {
     projectId: string; projectPath: string; title: string; changeMode: ChangeMode;
   }): Promise<WorkItemDetailSnapshot>;
@@ -46,7 +48,7 @@ export interface WorkItemService {
     systemPrompt?: string; attachments?: unknown[];
     orchestrationMode?: LeaderOrchestrationMode }): Promise<WorkItemDetailSnapshot>;
   replyToWaitingRun(input: ExistingWorkItemMutationContext & { workItemId: string; runKey: string;
-    prompt: string; displayPrompt?: string; skillIds?: string[];
+    prompt: string; displayPrompt?: string; continuitySource?: "system"; skillIds?: string[];
     skillValues?: Record<string, Record<string, string>> }): Promise<WorkItemDetailSnapshot>;
   review(input: ExistingWorkItemMutationContext & { workItemId: string }): Promise<WorkItemDetailSnapshot>;
   archive(input: ExistingWorkItemMutationContext & { workItemId: string }): Promise<WorkItemDetailSnapshot>;

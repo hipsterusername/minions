@@ -1,6 +1,5 @@
 import type { WorktreeInfo, MergeResult } from "./worktree-types.js";
 import { exec } from "./worktree-exec.js";
-import { removeWorktree } from "./worktree-create.js";
 import { serverLogger } from "./logging.ts";
 
 const log = serverLogger.child("worktree-merge");
@@ -17,7 +16,7 @@ const log = serverLogger.child("worktree-merge");
 export async function mergeWorktree(
   info: WorktreeInfo,
   targetBranch?: string,
-  options?: { force?: boolean; strategy?: "ours" | "theirs"; rebase?: boolean },
+  options?: { force?: boolean; strategy?: "ours" | "theirs"; rebase?: boolean; validateResult?: () => Promise<boolean> },
 ): Promise<MergeResult> {
   const projectCwd = info.projectPath;
   const worktreeCwd = info.path;
@@ -207,12 +206,11 @@ export async function mergeWorktree(
   // plus all worktree changes. Fast-forward the target branch ref to match.
   // This is safe because the canvas branch is a superset of the target.
   //
-  // NOTE: We use `git update-ref` instead of `git branch -f` because git
-  // refuses to force-update a branch that is currently checked out in any
-  // worktree. Supplying the old SHA makes the ref update atomic: if another
-  // actor advances the target branch while the merge is running, this fails
-  // instead of overwriting their commit.
+  // Checked-out targets use Git's fast-forward merge to preserve concurrent edits.
+  // Unchecked targets use a compare-and-swap ref update against the observed SHA.
   try {
+    if (options?.validateResult && !await options.validateResult()) return { success: false,
+      conflicts: [], targetBranch, summary: "The combined worktree needs current passing verification before updating the target. Review it and retry." };
     if (targetCheckedOutInMain) {
       const { stdout: status } = await exec(["status", "--porcelain"], projectCwd);
       if (status.trim()) {
@@ -228,10 +226,15 @@ export async function mergeWorktree(
       ["rev-parse", info.branch],
       projectCwd,
     );
-    await exec(
-      ["update-ref", `refs/heads/${targetBranch}`, canvasSha.trim(), targetShaBefore],
-      projectCwd,
-    );
+    const checkouts = (await exec(["worktree", "list", "--porcelain"], projectCwd)).stdout.split("\n\n");
+    const checkedOut = checkouts.find(block => block.split("\n").includes(`branch refs/heads/${targetBranch}`));
+    const checkout = checkedOut?.split("\n").find(line => line.startsWith("worktree "))?.slice(9);
+    if (checkout) {
+      if ((await exec(["status", "--porcelain"], checkout)).stdout.trim()) throw new Error("target checkout is dirty");
+      await exec(["merge", "--ff-only", canvasSha.trim()], checkout);
+    } else {
+      await exec(["update-ref", `refs/heads/${targetBranch}`, canvasSha.trim(), targetShaBefore], projectCwd);
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
@@ -240,20 +243,6 @@ export async function mergeWorktree(
       targetBranch,
       summary: `Failed to update ${targetBranch} ref safely: ${message}`,
     };
-  }
-
-  // Step 3: If the main worktree is on the target branch, update its working
-  // tree to reflect the new HEAD. This is equivalent to what `git merge` would
-  // do, but without the risk of a checkout switching branches.
-  try {
-    if (targetCheckedOutInMain) {
-      // Reset the working tree to match the updated branch ref.
-      // --hard is only reached after dirty-checking the target checkout.
-      await exec(["reset", "--hard", targetBranch], projectCwd);
-    }
-  } catch {
-    // Non-fatal: the ref was updated even if the working tree wasn't refreshed.
-    // The user can run `git pull` or `git checkout` to catch up.
   }
 
   return {
@@ -273,7 +262,7 @@ export async function mergeWorktree(
 export async function mergeAndCleanup(
   info: WorktreeInfo,
   targetBranch?: string,
-  options?: { force?: boolean; strategy?: "ours" | "theirs"; rebase?: boolean },
+  options?: { force?: boolean; strategy?: "ours" | "theirs"; rebase?: boolean; validateResult?: () => Promise<boolean> },
 ): Promise<MergeResult> {
   log.debug("merge_and_cleanup_started", {
     branch: info.branch,
@@ -312,8 +301,17 @@ export async function mergeAndCleanup(
 
   if (result.success) {
     // Merge succeeded — remove worktree directory + branch
-    await removeWorktree(info.path, info.projectPath);
-    info.lifecycle = "cleaned";
+    try {
+      const ref = info.branch.startsWith("refs/") ? info.branch : `refs/heads/${info.branch}`;
+      const head = (await exec(["rev-parse", ref], info.projectPath)).stdout.trim();
+      await exec(["merge-base", "--is-ancestor", head, `refs/heads/${result.targetBranch}`], info.projectPath);
+      // Git itself refuses to remove a checkout with edits made since collection.
+      await exec(["worktree", "remove", info.path], info.projectPath);
+      await exec(["update-ref", "-d", ref, head], info.projectPath);
+      info.lifecycle = "cleaned";
+    } catch (error) {
+      return { ...result, success: false, summary: `${result.summary}; cleanup deferred: ${error instanceof Error ? error.message : String(error)}` };
+    }
   }
   // On failure the worktree stays "active" so the user can fix or discard.
 

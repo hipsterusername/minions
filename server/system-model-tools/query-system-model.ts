@@ -1,135 +1,92 @@
-import { z } from "zod/v4";
 import type { NormalizedToolDef } from "../harness/types.ts";
-import { jsonResult } from "../harness/tool-result.ts";
-import type { SystemModelObject, SystemModelObjectType } from "../../shared/system-model/index.ts";
-import { recordSystemModelUsage } from "../system-model/store.ts";
 import { matchSystemModel } from "../system-model/match.ts";
-import { relatedSystemModelObjects } from "../system-model/relations.ts";
+import { discoveryEdges } from "../system-model/discovery-relations.ts";
+import type { LoadedSystemModel } from "../system-model/types.ts";
+import { clip, objectReference, preview, readFacets } from "./query-system-model-projection.ts";
+import { digest, retrievalError, retrievalPage, type RetrievalEntry } from "./query-system-model-page.ts";
+import { normalizeQuery, querySystemModelInputSchema, type Query } from "./query-system-model-schema.ts";
 import type { SystemModelToolContext } from "./shared.ts";
-
-const querySystemModelInputSchema = z.object({
-  query: z.string().optional(),
-  objectTypes: z.array(z.enum([
-    "capability",
-    "domain",
-    "flow",
-    "constraint",
-    "decision",
-    "risk",
-    "surface",
-  ])).optional(),
-  ids: z.array(z.string()).optional(),
-  topK: z.number().int().positive().optional(),
-});
 
 export function createQuerySystemModelToolDef(ctx: SystemModelToolContext): NormalizedToolDef {
   return {
     name: "query_system_model",
-    description:
-      "Read matching system-model objects by free-text query, object type, or id. Results include directly linked objects.",
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      openWorldHint: false,
-      idempotentHint: true,
-    },
+    description: "Discover model context progressively: search compact cards by query or files; read ids with selected facets; "
+      + "expand ids through explicit relationships/direction. No automatic neighbors or packet/usage writes. "
+      + "Repeat arguments with page.nextCursor for more. Oversized entries are JSON-string fragments: concatenate text by "
+      + "entryIndex and code-point offset within the same request/model snapshot, then JSON.parse when nextOffset equals totalCodePoints. "
+      + "Freshness is not checked; runtime packet requirements remain independent.",
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true },
     inputSchema: querySystemModelInputSchema,
     handler: async (input: unknown) => {
-      const args = querySystemModelInputSchema.parse(input);
-      const model = ctx.runtime.model;
-      if (!model) return jsonResult({ matches: [], linked: [], loadErrors: ctx.runtime.loadErrors });
-      const typeFilter = new Set<SystemModelObjectType>(args.objectTypes ?? []);
-      const idFilter = new Set(args.ids ?? []);
-      const query = args.query?.trim() ?? "";
-      if (idFilter.size === 0 && query.length === 0) {
-        return jsonResult({
-          error: "Pass a non-empty query, exact ids, or objectTypes with a query.",
-          usage: "query_system_model({ query, objectTypes?, ids?, topK? })",
-          matches: [],
-          linked: [],
-        }, { isError: true });
+      let query: Query;
+      try { query = normalizeQuery(input); } catch {
+        return retrievalError("invalid_request", "Use query_system_model with a non-empty query or files for search, or exact ids for read/expand. Check operation fields and size limits.");
       }
-      const topK = Math.min(args.topK ?? 5, 10);
-      const matchResult = idFilter.size > 0
-        ? undefined
-        : matchSystemModel({
-          model: withTypeFilter(model, typeFilter),
-          request: query,
-          topK,
+      const model = ctx.runtime.model;
+      if (!model) return retrievalPage(ctx.runtime.loadErrors.map((error) => ({ target: "diagnostics", value: { ...error } })),
+        { operation: query.operation, status: "model_unavailable" }, query, digest(ctx.runtime.loadErrors));
+      const modelVersion = digest({ objects: [...model.objectsById.values()].sort((a, b) => a.id.localeCompare(b.id)),
+        manifest: model.manifest, policies: model.policies });
+      const references = new Map([...model.objectsById.keys()].filter((id) => Buffer.byteLength(id) > 512)
+        .map((id) => [objectReference(id, modelVersion), id]));
+      const selectedIds = query.ids.map((id) => references.get(id) ?? id);
+      const entries: RetrievalEntry[] = [];
+      const metadata: Record<string, unknown> = { operation: query.operation, status: "ok", modelVersion,
+        freshness: { status: "unknown", reason: "not_checked" } };
+      const accepts = (type: string) => !query.objectTypes.length || query.objectTypes.some((item) => item === type);
+      if (query.operation === "search") {
+        const filtered = { ...model, objectsById: new Map([...model.objectsById].filter(([, object]) => accepts(object.type))) };
+        // Rank before paging. Other matcher callers retain their existing topK behavior.
+        const result = matchSystemModel({ model: filtered, request: query.query, files: query.files, topK: filtered.objectsById.size });
+        for (const candidate of result.candidates) entries.push({ target: "matches", value: {
+          ...preview(model.objectsById.get(candidate.id)!, model.policies.contextBudgets.perObjectSummary, modelVersion),
+          score: candidate.score, reasons: candidate.reasons.slice(0, 3).map((reason) => clip(reason, 120)),
+          ...(candidate.reasons.length > 3 ? { reasonsOmitted: candidate.reasons.length - 3 } : {}),
+        } });
+        metadata.status = entries.length ? "ok" : "no_matches";
+        metadata.matchConfidence = result.matchConfidence;
+        metadata.ranking = "lexical";
+        metadata.fallbackInstruction = result.fallbackInstruction;
+      } else if (query.operation === "read") {
+        selectedIds.forEach((id, requestIndex) => {
+          const object = model.objectsById.get(id);
+          const value = !object ? { id, requestIndex, status: "missing" }
+            : !accepts(object.type) ? { id, requestIndex, status: "type_excluded" }
+              : { ...preview(object, model.policies.contextBudgets.perObjectSummary, modelVersion), requestIndex, status: "ok",
+                source: { status: "unavailable" }, ...(query.facets.length ? { facets: readFacets(object, query.facets) } : {}) };
+          entries.push({ target: "matches", value });
         });
-      const matches = idFilter.size > 0
-        ? (args.ids ?? [])
-          .flatMap((id) => {
-            const object = model.objectsById.get(id);
-            return object && (typeFilter.size === 0 || typeFilter.has(object.type)) ? [object] : [];
-          })
-          .map((object) => renderMatch(object, model.policies.contextBudgets.perObjectSummary))
-        : (matchResult?.candidates ?? []).map((candidate) => {
-          const object = model.objectsById.get(candidate.id)!;
-          return {
-            ...renderMatch(object, model.policies.contextBudgets.perObjectSummary),
-            score: candidate.score,
-            reasons: candidate.reasons,
-          };
-        });
-      const matchedObjects = matches.flatMap((match) => {
-        const object = model.objectsById.get(match.id);
-        return object ? [object] : [];
-      });
-      const linked = relatedSystemModelObjects(model, matches.map((match) => match.id)).map(({ object, why }) => ({
-        id: object.id,
-        type: object.type,
-        label: labelFor(object),
-        why,
-      }));
-      recordSystemModelUsage(ctx.projectPath, matchedObjects.map((object) => ({
-        objectId: object.id,
-        source: "query",
-        sessionKey: ctx.leaderSessionKey,
-        usedAt: Date.now(),
-      })));
-      return jsonResult({
-        matches,
-        linked,
-        ...(matchResult ? {
-          matchConfidence: matchResult.matchConfidence,
-          ...(matchResult.fallbackInstruction ? { fallbackInstruction: matchResult.fallbackInstruction } : {}),
-        } : {}),
-      });
+      } else {
+        entries.push(...expand(model, { ...query, ids: selectedIds }, modelVersion));
+        metadata.status = entries.length ? "ok" : "no_matches";
+      }
+      return retrievalPage(entries, metadata, query, modelVersion);
     },
   };
 }
 
-function withTypeFilter(model: SystemModelToolContext["runtime"]["model"], typeFilter: Set<SystemModelObjectType>) {
-  if (!model || typeFilter.size === 0) return model!;
-  const objectsById = new Map([...model.objectsById].filter(([, object]) => typeFilter.has(object.type)));
-  return { ...model, objectsById };
-}
-
-function renderMatch(object: SystemModelObject, tokens: number) {
-  return {
-    id: object.id,
-    type: object.type,
-    label: labelFor(object),
-    summary: trimToTokens(summaryFor(object), tokens),
-  };
-}
-
-function labelFor(object: SystemModelObject): string {
-  if (object.type === "domain" || object.type === "capability" || object.type === "flow" || object.type === "surface") return object.name;
-  if (object.type === "constraint") return object.statement;
-  if (object.type === "decision") return object.title;
-  return object.summary;
-}
-
-function summaryFor(object: SystemModelObject): string {
-  if (object.type === "domain" || object.type === "capability" || object.type === "flow" || object.type === "surface") return object.summary;
-  if (object.type === "constraint") return object.agentInstruction ?? object.statement;
-  if (object.type === "decision") return object.summary;
-  return object.summary;
-}
-
-function trimToTokens(text: string, tokens: number): string {
-  const maxChars = tokens * 4;
-  return text.length <= maxChars ? text : `${text.slice(0, Math.max(0, maxChars - 3))}...`;
+function expand(model: LoadedSystemModel, query: Query, modelVersion: string): RetrievalEntry[] {
+  const seeds = new Set(query.ids);
+  const targets = new Map<string, Array<Record<string, unknown>>>();
+  for (const edge of discoveryEdges(model)) {
+    if (query.relationships.length && !query.relationships.includes(edge.relation)) continue;
+    const matches = [
+      ...(seeds.has(edge.source) && query.direction !== "in" ? [{ id: edge.target, direction: "out" }] : []),
+      ...(seeds.has(edge.target) && query.direction !== "out" ? [{ id: edge.source, direction: "in" }] : []),
+    ];
+    for (const match of matches) {
+      const object = model.objectsById.get(match.id)!;
+      if (seeds.has(match.id) || (query.objectTypes.length && !query.objectTypes.includes(object.type))) continue;
+      const reasons = targets.get(match.id) ?? [];
+      reasons.push({ ...edge, direction: match.direction });
+      targets.set(match.id, reasons);
+    }
+  }
+  const results: RetrievalEntry[] = [...targets].sort(([a], [b]) => a.localeCompare(b)).map(([id, via]) => ({ target: "matches", value: {
+    ...preview(model.objectsById.get(id)!, model.policies.contextBudgets.perObjectSummary, modelVersion), via,
+  } }));
+  query.ids.forEach((id, requestIndex) => {
+    if (!model.objectsById.has(id)) results.push({ target: "diagnostics", value: { id, requestIndex, status: "missing" } });
+  });
+  return results;
 }

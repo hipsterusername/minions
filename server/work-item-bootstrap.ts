@@ -101,6 +101,9 @@ export function bootstrapWorkItemRuntime(
       parentRunKey: child ? input.parentRunKey! : null,
       taskId: child ? input.taskId! : null,
       prompt: input.prompt,
+      userDirectives: input.userDirectives,
+      planningContext: input.planningContext,
+      freshThreadPrompt: input.freshThreadPrompt,
       ...(input.displayPrompt ? { displayPrompt: input.displayPrompt } : {}),
       systemPrompt: input.systemPrompt,
       cwd: child ? parent!.cwd : item.project_path,
@@ -117,6 +120,7 @@ export function bootstrapWorkItemRuntime(
       ...(input.executorClass ? { executorClass: input.executorClass } : {}),
       ...(input.toolAllowlist ? { toolAllowlist: input.toolAllowlist } : {}),
       ...(input.skillIds ? { skillIds: input.skillIds } : {}),
+      skillSnapshotId: input.skillSnapshotId,
       ...(input.skillValues ? { skillValues: input.skillValues } : {}),
       ...(input.attachments ? { attachments: input.attachments } : {}),
     };
@@ -131,6 +135,7 @@ export function bootstrapWorkItemRuntime(
     await launch({
       sessionKey: host.runKey,
       invocationKind: "resume_open_run",
+      continuitySource: input.continuitySource,
       workItemId: host.workItemId,
       runKind: host.runKind,
       parentRunKey: host.parentRunKey,

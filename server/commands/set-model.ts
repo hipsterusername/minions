@@ -27,6 +27,7 @@ export const setModel: CommandHandler = (ctx, cmd, ws) => {
   fn.call(host.runControl, cmd.model as string)
     .then(() => {
       host.model = cmd.model ?? null;
+      host.persist();
       sendControlResponse(ws, "set_model", host.id, cmd.requestId, {
         model: cmd.model,
       });

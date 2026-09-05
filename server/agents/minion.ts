@@ -29,7 +29,7 @@ export { MINION_SYSTEM_PROMPT };
  * The skill-authoring tools are gated separately (see SKILL_AUTHORING_TOOLS).
  */
 const REPORT_NUDGE_PROMPT =
-  "Your task is still open. Call mcp__minion-status__report_done with a one-line summary of what you completed, or report_fail with what blocked you. Do not start new work.";
+  "Your task is still open. Inspect acceptance criteria, required outputs, and evidence. Continue unfinished authorized work. Call mcp__minion-status__report_done only when verified and submitted, using any mode-specific verdict protocol. If a Leader decision is needed, call report_blocked and end this turn without a terminal report. Use report_fail only for an unrecoverable failure and preserve partial evidence and remaining gaps.";
 
 function findParentTask(
   ctx: AgentTypeContext,
@@ -110,9 +110,11 @@ const minionAgent: AgentType = {
     // Sub-skill retrieval reads the project's skill library. When the minion
     // runs inside a leader-inherited worktree, the sidecar lives at the
     // original checkout (parentWorktree.projectPath), not the worktree cwd.
-    const projectPath = ctx.parentWorktree?.projectPath ?? ctx.cwd;
+    const projectPath = ctx.parentWorktree?.projectPath ?? ctx.worktreeInfo?.projectPath ?? ctx.cwd;
     const { toolDefs: subskillDefs } = createSubskillToolsForSession({
       projectPath,
+      skillSnapshotId: ctx.skillSnapshotId,
+      skillValues: ctx.skillValues,
     });
 
     // Skill-authoring tools are opt-in: load them only when this run was armed

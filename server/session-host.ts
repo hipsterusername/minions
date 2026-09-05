@@ -1,3 +1,5 @@
+import { HARNESS_DRAIN, type DrainableHarnessControl } from "./harness/terminal-provenance.ts";
+import { hasWorktreeOperation, trackWorktreeExecution } from "./commands/worktree-operation-lock.ts";
 /**
  * SessionHost — per-session lifecycle owner.
  *
@@ -23,12 +25,14 @@ import { getAgentType } from "./agents/index.ts";
 import type { WorktreeInfo } from "./worktree.ts";
 import type { TaskManagerState } from "./task-tools.ts";
 import type { RenderState } from "./render-tools.ts";
-import { persistEvent as persistEventToDb, persistSession as persistSessionToDb, type PersistableSession } from "./session-persist.ts";
+import { persistEvent as persistEventToDb } from "./session-persist.ts";
+import { captureSessionContinuity, type SessionContinuity } from "./session-continuity.ts";
+import { seedTaskName } from "./session-task-name.ts";
+import { persistHostSnapshot } from "./session-host-persist.ts";
 import { emptyUsageTotals, type SessionUsageTotals } from "./usage-telemetry.ts";
 import { createProactiveCompactionState, type ProactiveCompactionState } from "./proactive-compaction.ts";
 import {
   MAX_BUFFERED_EVENTS,
-  deriveTaskName,
   type BufferedEvent,
   type SessionRole,
   type SessionStatus,
@@ -110,6 +114,7 @@ export class SessionHost {
   skillIds: string[] = [];
   /** Configured values for tagged skill templates. */
   skillValues: Record<string, Record<string, string>> = {};
+  skillSnapshotId: string | undefined;
   /** Task-scoped provider tool restriction, re-derived for execution-graph children on recovery. */
   toolAllowlist: string[] | null = null;
   taskName: string | null = null;
@@ -137,10 +142,14 @@ export class SessionHost {
   waitTimerId: ReturnType<typeof setTimeout> | null = null;
   renderState: RenderState | null = null;
   canvasContext: string | null = null;
+  continuity: SessionContinuity = { directives: [], canonicalTaskName: null };
   proactiveCompaction: ProactiveCompactionState = createProactiveCompactionState();
   contextCheckpoint: ContextCheckpoint | null = null;
   reviewLifecycle: SessionReviewLifecycle = initialSessionReviewLifecycle();
   private terminateDeps: SessionTerminateDeps | null = null;
+  private removed = false;
+  /** Fence late stream/finalizer callbacks before deleting durable state. */
+  markRemoved(): void { this.removed = true; }
   constructor(id: string, cwd: string) {
     this.id = id;
     this.runKey = id;
@@ -161,6 +170,7 @@ export class SessionHost {
    * SDK loop keeps running even if the DB is unavailable.
    */
   bufferEvent(event: BufferedEvent): void {
+    if (this.removed) return;
     this.eventBuffer.push(event);
     if (this.eventBuffer.length > MAX_BUFFERED_EVENTS) {
       this.eventBuffer = this.eventBuffer.slice(-MAX_BUFFERED_EVENTS);
@@ -170,25 +180,8 @@ export class SessionHost {
 
   /** Write-through persistence to SQLite (idempotent). */
   persist(): void {
-    const snap: PersistableSession = {
-      id: this.id,
-      status: this.status,
-      cwd: this.cwd,
-      model: this.model,
-      role: this.role,
-      taskName: this.taskName,
-      sessionId: this.sessionId,
-      worktreeIsolation: this.worktreeIsolation,
-      worktree: this.worktree,
-      approval: this.taskState?.approval ?? null,
-      totalCost: this.totalCost,
-      turns: this.turns,
-      harnessName: this.harnessName,
-      permissionMode: this.permissionMode,
-      sandboxPolicy: this.sandboxPolicy,
-      reviewLifecycle: this.reviewLifecycle,
-    };
-    persistSessionToDb(snap);
+    if (this.removed) return;
+    persistHostSnapshot(this);
   }
   /** Clear any active wait_and_continue timer. */
   clearWaitTimer(): void {
@@ -199,25 +192,24 @@ export class SessionHost {
     if (this.taskState?.pendingWait) this.taskState.pendingWait.timerId = null;
   }
 
-  setCanvasContext(canvasContext: string | null): void {
+  setCanvasContext(canvasContext: string | null, attachments?: import("./session-host-types.ts").ImageAttachment[]): void {
     this.canvasContext = canvasContext;
     setSessionCanvasContext(this.id, canvasContext);
+    this.continuity.canvasContext = canvasContext;
+    if (attachments !== undefined || canvasContext === null) this.continuity.attachments = attachments ?? [];
+    this.persist();
   }
 
-  /**
-   * Start or resume this session. Corresponds to the old `runSession` flow:
-   *   1. Reset volatile state for a fresh SDK run
-   *   2. Create or reuse a worktree for agent types that want one
-   *   3. Build the MCP agent context
-   *   4. Open the SDK query and fan events out onto the bus
-   *
-   * Safe to call repeatedly — each call supersedes the previous run.
-   */
+  /** Start or resume a provider invocation, retaining execution ownership until drain. */
   async start(opts: StartSessionOptions, deps: SessionHostDeps): Promise<void> {
+    if (hasWorktreeOperation(this, opts.parentWorktree?.path ?? opts.plannedContribution?.path ?? this.worktree?.path)) throw new Error("Worktree operation is in progress");
+    if (this.removed) throw new Error("Cannot start a removed session");
     const isCheckpointContinuation = opts.invocationKind === "provider_continuation"
       && Boolean(opts.contextCheckpointId);
     if (this.status === "running" && !isCheckpointContinuation) { return; }
     const abortController = new AbortController();
+    const releaseExecution = trackWorktreeExecution(this);
+    let executionDrain: Promise<void> | undefined;
     this.terminateDeps = deps;
 
     try {
@@ -266,6 +258,7 @@ export class SessionHost {
       // Seed tagged skills from the launch payload; persist across resume/wait
       // cycles where opts no longer carries them.
       if (opts.skillIds) this.skillIds = opts.skillIds;
+      if (opts.skillSnapshotId) this.skillSnapshotId = opts.skillSnapshotId;
       if (opts.skillValues) this.skillValues = opts.skillValues;
       if (opts.toolAllowlist) this.toolAllowlist = [...opts.toolAllowlist];
       if (opts.resumeId) this.sessionId = opts.resumeId;
@@ -288,9 +281,10 @@ export class SessionHost {
       this.clearWaitTimer();
 
       if (!this.taskName && agentType.wantsWorktree) {
-        this.taskName = deriveTaskName(opts.prompt);
+        seedTaskName(this, opts.prompt);
       }
 
+      captureSessionContinuity(this, opts);
       await ensureContributionWorktree(this, opts, deps.bus, agentType, deps.transitionWorktreeProvisioning);
       this.persist();
 
@@ -337,6 +331,7 @@ export class SessionHost {
       const { events, control } = harness.start(startOpts);
       this.eventStream = events;
       this.runControl = control;
+      executionDrain = (control as DrainableHarnessControl)[HARNESS_DRAIN];
       let continuationOpts: StartSessionOptions | null;
       let checkpointInitialized: boolean;
       try {
@@ -385,6 +380,9 @@ export class SessionHost {
         });
       }
       drainQueuedWorkItemGuidance(this, deps);
+    } finally {
+      if (executionDrain) void executionDrain.then(releaseExecution, releaseExecution);
+      else releaseExecution();
     }
   }
   terminate(reason: SessionTerminateReason, deps?: SessionTerminateDeps): Promise<void> {

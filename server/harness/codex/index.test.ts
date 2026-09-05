@@ -1,3 +1,4 @@
+import { dispatchMethod } from "../../mcp-bridge/dispatch.ts";
 
 import {
   beforeEach,
@@ -193,7 +194,15 @@ describe("CodexHarness.start()", () => {
     expect(out.map((e) => e.kind)).toEqual(["init", "text", "usage", "done"]);
     expect(out[0]).toMatchObject({ kind: "init", sessionId: "th-001", model: "gpt-5.6-sol" });
     expect(out[1]).toMatchObject({ kind: "text", role: "assistant", text: "hi" });
-    expect(out[2]).toMatchObject({ kind: "usage", input: 7, output: 11, cacheRead: 3 });
+    expect(out[2]).toMatchObject({
+      kind: "usage",
+      input: 4,
+      output: 11,
+      cacheRead: 3,
+      cacheCreation: 0,
+    });
+    expect((out[2] as Extract<NormalizedEvent, { kind: "usage" }>).costUSD)
+      .toBeCloseTo(0.0002372, 10);
     expect(out[3]).toMatchObject({ kind: "done", reason: "completed", result: "hi" });
     expect(terminalProvenance(out[3] as Extract<NormalizedEvent, { kind: "done" }>))
       .toBe("adapter");
@@ -248,6 +257,16 @@ describe("CodexHarness.start()", () => {
         config?: Record<string, unknown>;
       }).config?.["developer_instructions"],
     ).toBe(systemPrompt);
+  });
+
+  it("adds a resumed invocation estimate to the existing session cost", async () => {
+    const out = await collect(codexHarness.start(baseOpts({
+      resumeId: "th-existing",
+      initialCostUSD: 0.1,
+    })).events);
+    const usage = out.find((event) => event.kind === "usage");
+
+    expect(usage?.costUSD).toBeCloseTo(0.1002372, 10);
   });
 
   it("omits developer_instructions when systemPrompt is undefined", async () => {
@@ -370,7 +389,7 @@ describe("CodexHarness MCP bridge", () => {
       "task-manager": [toolDef("plan_task"), toolDef("assign_task")],
       empty: [],
     });
-    await collect(codexHarness.start(baseOpts({ sessionKey: "abc" })).events);
+    await collect(codexHarness.start(baseOpts({ sessionKey: "abc", allowedTools: ["mcp__task-manager__plan_task"] })).events);
 
     expect(bridgeMock.calls.register).toHaveLength(1);
     expect(bridgeMock.calls.register[0]?.sessionKey).toBe("abc");
@@ -379,6 +398,11 @@ describe("CodexHarness MCP bridge", () => {
       "empty",
     ]);
     expect(bridgeMock.calls.dispose).toEqual(["abc"]);
+    const bridgeTools = bridgeMock.calls.register[0]?.groups["task-manager"] as NormalizedToolDef[];
+    const denied = await dispatchMethod({ jsonrpc:"2.0", id:1, method:"tools/call",
+      params:{name:"assign_task",arguments:{}} }, bridgeTools);
+    expect(denied).toHaveProperty("error");
+    expect((bridgeMock.calls.register[0]?.groups["task-manager"] as NormalizedToolDef[]).map(tool => tool.name)).toEqual(["plan_task"]);
 
     // Codex constructor receives a config + env that reference the registered group.
     const constructorOpts = sdkMock.calls.constructor[0] as {

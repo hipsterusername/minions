@@ -1,3 +1,6 @@
+import { saveSkillSnapshot } from "../skill-snapshot.ts";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
@@ -33,7 +36,7 @@ describe("leader agent wiring", () => {
     expect(prompt).toContain("## Token Economy");
     expect(prompt).toContain("Buy conclusions, not raw data");
     expect(prompt).toContain("over ~2000 chars through their summaries");
-    expect(prompt).toContain("never Read multi-thousand-line files");
+    expect(prompt).toMatch(/never read multi-thousand-line files/i);
     expect(prompt).toContain("## Legacy planning mode (debug)");
     expect(prompt).toContain("executorClass");
     expect(prompt).toContain("timeout_minutes");
@@ -64,7 +67,22 @@ describe("leader agent wiring", () => {
     expect(legacyPrompt).not.toMatch(/wait_and_continue.*60 seconds/i);
   });
 
-  it("exposes task and render tools to leader sessions", () => {
+  it("advertises only effective named tools and describes unnamed native filesystem capability", () => {
+    const prompt = getAgentType("leader").buildSystemPrompt({
+      sessionKey: "restricted", cwd: "/tmp/project", bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
+      worktreeInfo: null, worktreeIsolation: false,
+      effectiveCapabilities: { allowedTools: ["mcp__leader-procedures__load_procedure"],
+        nativeFilesystem: true, filesystemScope: "read-only", approvalPolicy: "never" },
+    }, undefined, []);
+    expect(prompt).toContain("Native shell/filesystem capabilities");
+    expect(prompt).toContain("Filesystem policy: read-only; approval policy: never");
+    expect(prompt).toContain("**mcp__leader-procedures__load_procedure**");
+    expect(prompt).not.toContain("**assign_task**");
+    expect(prompt).not.toContain("Built-in tools: (none");
+    expect(prompt).not.toContain("p18.double_diamond");
+  });
+
+  it("exposes task, procedure and render tools to leader sessions", async () => {
     const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
     const result = getAgentType("leader").getToolGroups({
       sessionKey: "leader-1",
@@ -78,6 +96,7 @@ describe("leader agent wiring", () => {
 
     // Skill-authoring is opt-in: an untagged leader gets no "skills" group.
     expect(Object.keys(result.toolGroups).sort()).toEqual([
+      "leader-procedures",
       "render-dashboard",
       "task-manager",
     ]);
@@ -85,6 +104,8 @@ describe("leader agent wiring", () => {
     expect(result.mcpToolNames).toContain("mcp__task-manager__load_subskill");
     expect(result.mcpToolNames).toContain("mcp__task-manager__update_project_context");
     expect(result.mcpToolNames).toContain("mcp__render-dashboard__render_set");
+    const procedure = result.toolGroups["leader-procedures"]![0]!;
+    expect(JSON.stringify(await procedure.handler({ id: "graph_authoring" }))).toContain("p18.double_diamond");
     expect(result.mcpToolNames).not.toContain("mcp__skills__create_skill");
     // The load_subskill tool def is registered under task-manager.
     expect(
@@ -110,7 +131,7 @@ describe("leader agent wiring", () => {
     expect(taskNames).toEqual([
       "plan_task", "assign_task", "complete_task", "cancel_task", "message_task",
       "get_task_status", "set_task_name", "wait_and_continue", "checkpoint_session",
-      "load_subskill", "update_project_context",
+      "load_skill", "load_subskill", "load_skill_attachment", "update_project_context",
     ]);
     expect(graphNames).toEqual([
       "initialize_graph_document", "upsert_graph_node", "remove_graph_node",
@@ -139,7 +160,7 @@ describe("leader agent wiring", () => {
     expect(taskNames).toEqual([
       "plan_task", "assign_task", "complete_task", "cancel_task", "message_task",
       "get_task_status", "set_task_name", "wait_and_continue", "checkpoint_session",
-      "load_subskill", "update_project_context",
+      "load_skill", "load_subskill", "load_skill_attachment", "update_project_context",
     ]);
     expect(result.toolGroups["graph-planner"]!.map((tool) => tool.name)).toEqual([
       "initialize_graph_document", "upsert_graph_node", "remove_graph_node",
@@ -246,6 +267,24 @@ describe("leader agent wiring", () => {
     }
   });
 
+  it("assembles selected instructions and the catalog from the retrieval snapshot", () => {
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), "leader-frozen-skill-"));
+    try {
+      const skillSnapshotId = saveSkillSnapshot(project, { version: 1, values: { review: { target: "API" } },
+        skills: [{ id: "review", name: "Review", description: "Original catalog", category: "code", icon: "*", accentColor: "#fff",
+          template: "FROZEN {{target}}", variables: [], subskills: [{ id: "rules", name: "Rules", description: "Use for review", body: "LAZY" }] }] });
+      writeSkills(project, []);
+      const prompt = getAgentType("leader").buildSystemPrompt({ sessionKey: "frozen-leader", cwd: project,
+        bus: createBus({ clients: new Set() } as unknown as WebSocketServer), worktreeInfo: null, worktreeIsolation: false,
+        skillIds: ["review"], skillSnapshotId }, encodeLeaderPromptCustomization({ skillsAddendum: "STALE_CLIENT_BODY" }));
+      expect(prompt).toContain("FROZEN API");
+      expect(prompt).toContain("Original catalog");
+      expect(prompt).toContain("load_subskill");
+      expect(prompt).not.toContain("STALE_CLIENT_BODY");
+      expect(prompt).not.toContain("LAZY");
+    } finally { fs.rmSync(project, { recursive: true, force: true }); }
+  });
+
   it("exposes the skill-authoring tools when skill-builder is tagged", () => {
     const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
     const result = getAgentType("leader").getToolGroups({
@@ -260,6 +299,7 @@ describe("leader agent wiring", () => {
     });
 
     expect(Object.keys(result.toolGroups).sort()).toEqual([
+      "leader-procedures",
       "render-dashboard",
       "skills",
       "task-manager",
@@ -448,6 +488,7 @@ describe("leader agent wiring", () => {
     });
 
     expect(Object.keys(result.toolGroups).sort()).toEqual([
+      "leader-procedures",
       "render-dashboard",
       "task-manager",
     ]);
@@ -486,6 +527,10 @@ describe("leader agent wiring", () => {
 
   it("wires an actual-diff provider into reconcile_run", async () => {
     const project = copyValidFixture();
+    const git=promisify(execFile);
+    await git("git", ["init", "-q"], {cwd:project});
+    await git("git", ["add", "."], {cwd:project});
+    await git("git", ["-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "fixture"], {cwd:project});
     writeSettings(project, { systemModel: "advisory" });
     const result = getAgentType("leader").getToolGroups({
       sessionKey: "leader-reconcile",
@@ -519,52 +564,51 @@ describe("leader agent wiring", () => {
     expect(payload.report.deterministic.changedFiles).toEqual([]);
   });
 
-  it("appends the system-model leader prompt addendum only when active", () => {
+  it.each(["advisory", "enforced"] as const)("discloses optional retrieval and conditional requirements in %s mode", (mode) => {
     const project = copyValidFixture();
-    writeSettings(project, { systemModel: "advisory" });
-    const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
-    const prompt = getAgentType("leader").buildSystemPrompt({
-      sessionKey: "leader-1",
-      cwd: project,
-      bus,
-      worktreeInfo: null,
-      worktreeIsolation: false,
-    });
-
-    expect(prompt).toContain("## System Model");
-    expect(prompt).toContain("create_work_packet");
-    expect(prompt).toContain("workPacketId");
-    expect(prompt).toContain("record_work_packet_evidence");
-    expect(prompt).toMatch(/Terminal graph or task execution is not Work Packet closure/i);
-    expect(prompt).toContain("no_change_needed");
-    // Redesign §6: the addendum lists the concrete gated surfaces …
-    expect(prompt).toContain("Gated surfaces");
-    expect(prompt).toContain("server/**/*.ts");
-    // … and no longer mandates querying the model for general planning.
-    expect(prompt).not.toContain("planning context");
-    expect(prompt).toContain("available, not mandated");
+    writeSettings(project, { systemModel: mode });
+    for (const orchestrationMode of ["direct", "auto"] as const) {
+      const prompt = getAgentType("leader").buildSystemPrompt({
+        sessionKey: "leader-retrieval", cwd: project,
+        bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
+        worktreeInfo: null, worktreeIsolation: false, orchestrationMode,
+      });
+      const addendum = prompt!.slice(prompt!.indexOf("## System Model"));
+      expect(addendum).toContain("search compact cards");
+      expect(addendum).toContain("read selected ids with facets");
+      expect(addendum).toContain("expand chosen relationships");
+      expect(addendum).toContain("without another confirmation");
+      expect(addendum).toContain("For an existing packet");
+      expect(addendum).toContain("no_change_needed");
+      expect(addendum).not.toContain("Gated surfaces");
+      expect(addendum).not.toContain("server/**/*.ts");
+      expect(addendum).toContain(mode === "enforced" ? "Enforced runtime checks require" : "Advisory runtime checks report");
+      expect(addendum.length).toBeLessThan(1600);
+    }
   });
 
-  it("ends a truncated system-model addendum with a query recovery pointer", () => {
+  it.each([1, 5, 20, 40])("preserves mandatory procedure under a tiny %i-token optional context budget", (budget) => {
     const project = copyValidFixture();
     writeSettings(project, { systemModel: "advisory" });
-    fs.writeFileSync(
-      path.join(project, ".systemmodel/policies/context-budgets.yaml"),
-      "leaderPromptAddendum: 20\nminionContextPack: 2000\nperObjectSummary: 250\n",
-    );
-    const prompt = getAgentType("leader").buildSystemPrompt({
-      sessionKey: "leader-truncated",
-      cwd: project,
+    fs.writeFileSync(path.join(project, ".systemmodel/policies/context-budgets.yaml"),
+      `leaderPromptAddendum: ${budget}\nminionContextPack: 2000\nperObjectSummary: 250\n`);
+    const ctx = { sessionKey: "leader-small-budget", cwd: project,
       bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
-      worktreeInfo: null,
-      worktreeIsolation: false,
-    });
-
-    expect(prompt).toContain("system-model addendum truncated");
-    expect(prompt).toContain("use `query_system_model` to fetch omitted objects");
-    expect(prompt?.endsWith(
-      "[system-model addendum truncated — use `query_system_model` to fetch omitted objects]",
-    )).toBe(true);
+      worktreeInfo: null, worktreeIsolation: false };
+    const enabled = getAgentType("leader").buildSystemPrompt(ctx);
+    writeSettings(project, { systemModel: "off" });
+    const disabled = getAgentType("leader").buildSystemPrompt(ctx);
+    expect(enabled).not.toContain("fetch omitted objects");
+    // Mandatory procedure has a reserved floor; omit optional discovery first.
+    const marker = enabled!.lastIndexOf("## System Model");
+    const addendum = enabled!.slice(marker);
+    expect(marker).toBeGreaterThan(0);
+    expect(addendum.length).toBeLessThan(800);
+    for (const instruction of ["create_work_packet", "workPacketId", "record_work_packet_evidence",
+      "reconcile_run", "constraint verdicts", "no_change_needed", "omitted by context budget"]) {
+      expect(addendum).toContain(instruction);
+    }
+    expect(disabled).not.toContain("## System Model");
   });
 
   // Per-turn completion must not sweep children; leaders can pause while

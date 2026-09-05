@@ -4,6 +4,7 @@ import type { AgentHarness } from "../harness/types.ts";
 import type { TaskNode } from "../../shared/task-graph-contracts.ts";
 import { TaskGraphValidationError } from "./errors.ts";
 import { sandboxPolicyForTaskGraphNode,validateTaskGraphNodePolicy } from "./execution-policy.ts";
+import { MINION_MCP_TOOLS_BASE, minionSkillMcpToolNames } from "../agents/minion-tool-policy.ts";
 
 const node=(extra:Partial<TaskNode>={}):TaskNode=>({id:"node",title:"Node",objective:"Do it",
   inputBindings:{},outputSchemas:{},constraints:[],acceptanceCriteria:[],executorClass:"standard",
@@ -19,6 +20,18 @@ describe("task graph execution policy",()=>{
     expect(()=>validateTaskGraphNodePolicy(node({allowedTools:["Read",
       "mcp__task-graph__read_input_artifact","mcp__task-graph__stage_output_artifact"]}),
     ()=>harness)).not.toThrow();
+  });
+
+  it("accepts the registered Minion MCP inventory independently of native harness tools",()=>{
+    expect(()=>validateTaskGraphNodePolicy(node({allowedTools:[
+      ...MINION_MCP_TOOLS_BASE,...minionSkillMcpToolNames(["skill-builder"]),
+    ]}),()=>harness)).not.toThrow();
+  });
+
+  it.each(["mcp__skills__missing", "mcp__task-manager__assign_task",
+    "mcp__task-graph__missing"])("rejects unregistered child tool %s",(tool)=>{
+    expect(()=>validateTaskGraphNodePolicy(node({allowedTools:[tool]}),()=>harness))
+      .toThrow(`unavailable on harness test: ${tool}`);
   });
 
   it("rejects unknown harnesses and unavailable tools during revision preflight",()=>{

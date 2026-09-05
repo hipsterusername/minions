@@ -7,6 +7,8 @@ import {
   defaultOrchestrationModeForBackend,
 } from "../shared/leader-planning.ts";
 
+import { inheritedUserDirectives, retainUserDirectives, userTextFromPrompt } from "../shared/handoff-text.ts";
+
 const MAX_PLANNING_CONTEXT_BLOCK_BYTES = 2 * 1024 * 1024;
 
 export interface PrimaryRunConfig {
@@ -21,6 +23,7 @@ export interface PrimaryRunConfig {
   attachments?: ImageAttachment[];
   orchestrationMode?: LeaderOrchestrationMode;
   planningContext?: string;
+  userDirectives?: string[];
 }
 
 interface ConfigInput {
@@ -48,6 +51,7 @@ export function resolvePrimaryRunConfig(previousJson: string | null, input: Conf
       DEFAULT_LEADER_PLANNING_BACKEND,
     );
   }
+  config.userDirectives = retainUserDirectives([...(previous.userDirectives ?? []), ...inheritedUserDirectives(input.prompt ?? ""), userTextFromPrompt(input.prompt ?? "")]);
   const planningContext = input.prompt?.match(/<connected-context>[\s\S]*?<\/connected-context>/)?.[0];
   if (planningContext) {
     if (Buffer.byteLength(planningContext) > MAX_PLANNING_CONTEXT_BLOCK_BYTES) {

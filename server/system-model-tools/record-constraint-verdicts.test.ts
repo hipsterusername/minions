@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest";
+vi.mock("../system-model/evidence-binding.ts", async (original) => ({
+  ...await original<typeof import("../system-model/evidence-binding.ts")>(),
+  captureEvidenceBinding: vi.fn(async () => "current-evidence"),
+}));
+import { describe, expect, it, vi } from "vitest";
 import type { BusPayload } from "../bus.ts";
 import { copyValidFixture } from "../system-model/load.test.ts";
 import {
@@ -11,6 +15,18 @@ import type { ReconciliationReport, WorkPacket } from "../../shared/system-model
 import { createRecordConstraintVerdictsToolDef } from "./record-constraint-verdicts.ts";
 
 describe("record_constraint_verdicts", () => {
+  it.each(["violated", "possibly_violated", "not_checked"])("keeps %s constraints blocking", async (status) => {
+    const project = copyValidFixture();
+    saveWorkPacket(project, { ...packet, status: "reconciled" }, "context", 1);
+    saveReconciliationReport(project, report);
+    const result = await createRecordConstraintVerdictsToolDef(makeCtx(project)).handler({
+      workPacketId: packet.id, verdicts: [{ constraintId: "constraint.bus_only", status, evidence: ["observed"] }],
+    });
+    const payload = JSON.parse(result.content[0]!.text);
+    expect(payload.packet.status).toBe("active");
+    expect(payload.pendingActions.length).toBeGreaterThan(0);
+  });
+
   it("validates ConstraintCheck[] input", async () => {
     const project = copyValidFixture();
     await expect(createRecordConstraintVerdictsToolDef(makeCtx(project)).handler({
@@ -133,6 +149,7 @@ const packet: WorkPacket = {
 };
 
 const report: ReconciliationReport = {
+  evidenceDigest: "current-evidence",
   id: "recon_record_tool",
   workPacketId: packet.id,
   createdAt: 100,

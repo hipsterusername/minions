@@ -92,6 +92,12 @@ export function ensureWorkItemSchema(db: Database.Database): void {
       PRIMARY KEY (work_item_id, surface, binding_id)
     );
 
+    CREATE TABLE IF NOT EXISTS work_item_receipts (
+      request_id TEXT PRIMARY KEY,
+      response_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS work_item_commands (
       request_id    TEXT PRIMARY KEY,
       work_item_id  TEXT NOT NULL REFERENCES work_items(id) ON DELETE CASCADE,

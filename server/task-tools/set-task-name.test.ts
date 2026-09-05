@@ -36,6 +36,23 @@ async function call(
 }
 
 describe("set_task_name", () => {
+  it("preserves the first name when invoked again for a follow-up prompt", async () => {
+    const ctx = makeCtx();
+    const tool = createSetTaskNameToolDef(ctx);
+    await call(tool, { name: "Repair OAuth callback handling" });
+    await call(tool, { name: "Working on callback tests" });
+    expect(ctx.sent.map((event) => event.taskName)).toEqual([
+      "Repair OAuth callback handling", "Repair OAuth callback handling",
+    ]);
+  });
+
+  it("broadcasts the persisted canonical name when a recreated tool requests a new one", async () => {
+    const ctx = makeCtx();
+    ctx.onTaskNameChange = vi.fn(() => "Repair OAuth callback handling");
+    await call(createSetTaskNameToolDef(ctx), { name: "Run follow-up tests" });
+    expect(ctx.sent[0]!.taskName).toBe("Repair OAuth callback handling");
+  });
+
   it("rejects garbage input before emitting — parse guard", async () => {
     const ctx = makeCtx();
     const tool = createSetTaskNameToolDef(ctx);

@@ -72,7 +72,9 @@ export async function launchSession(input: {
         transient: true,
       });
     }
-    registry.start({ ...options, harness: effectiveHarness, initialModel: modelResolution.model, permissionMode }, reservation);
+    registry.start({ ...options, harness: effectiveHarness, initialModel: modelResolution.model, permissionMode,
+      ...(effectiveHarness !== requestedHarness ? { resumeId: undefined, prompt: options.freshThreadPrompt ?? options.prompt } : {}),
+    }, reservation);
     return result;
   } catch (error) {
     registry.releaseCapacity(reservation);

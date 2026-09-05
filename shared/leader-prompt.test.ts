@@ -10,6 +10,7 @@ import {
   encodeLeaderPromptCustomization,
   isLeaderPromptCustomizationEnvelope,
 } from "./leader-prompt.ts";
+import { getLeaderProcedure } from "./leader-procedures.ts";
 import { TASK_GRAPH_PATTERN_CATALOG } from "./task-graph-patterns.ts";
 
 describe("leader prompt composition", () => {
@@ -69,28 +70,33 @@ describe("leader prompt composition", () => {
     expect(TASK_GRAPH_PLANNING_PROMPT).not.toMatch(/sole child-allocation authority/i);
   });
 
-  it("gives author-time use and avoid guidance for every graph pattern", () => {
-    expect(TASK_GRAPH_PLANNING_PROMPT).toMatch(/choose the problem model before authoring topology/i);
-    expect(TASK_GRAPH_PLANNING_PROMPT).toContain('taskKind: "partitioned_batch"');
-    expect(TASK_GRAPH_PLANNING_PROMPT).toContain('taskKind: "draft_refinement"');
-    expect(TASK_GRAPH_PLANNING_PROMPT).toMatch(/pattern metadata.*advisory provenance/i);
+  it("retrieves author-time guidance without injecting every graph pattern", () => {
+    const guidance = getLeaderProcedure("graph_authoring")!.body;
+    expect(TASK_GRAPH_PLANNING_PROMPT).toContain("lifecycle procedure index");
+    expect(TASK_GRAPH_PLANNING_PROMPT).not.toContain("sourceOutput");
+    expect(guidance).toMatch(/choose the problem model before authoring topology/i);
+    expect(guidance).toContain('taskKind: "partitioned_batch"');
+    expect(guidance).toContain('taskKind: "draft_refinement"');
+    expect(guidance).toMatch(/pattern metadata.*advisory provenance/i);
     for (const pattern of TASK_GRAPH_PATTERN_CATALOG) {
-      expect(TASK_GRAPH_PLANNING_PROMPT).toContain(pattern.id);
-      expect(TASK_GRAPH_PLANNING_PROMPT).toContain(`Use when ${pattern.useWhen}`);
-      expect(TASK_GRAPH_PLANNING_PROMPT).toContain(`Avoid when ${pattern.avoidWhen}`);
+      expect(guidance).toContain(pattern.id);
+      expect(guidance).toContain(`Use when ${pattern.useWhen}`);
+      expect(guidance).toContain(`Avoid when ${pattern.avoidWhen}`);
     }
   });
 
-  it("documents the complete artifact dependency contract", () => {
-    expect(TASK_GRAPH_PLANNING_PROMPT).toMatch(/sourceOutput.*producer.*outputSchemas/i);
-    expect(TASK_GRAPH_PLANNING_PROMPT).toMatch(/targetInput.*consumer.*inputBindings/i);
-    expect(TASK_GRAPH_PLANNING_PROMPT).toMatch(/kind \`control\`.*bindings null/i);
+  it("retrieves the complete artifact dependency contract", () => {
+    const guidance = getLeaderProcedure("graph_authoring")!.body;
+    expect(guidance).toMatch(/sourceOutput.*producer.*outputSchemas/i);
+    expect(guidance).toMatch(/targetInput.*consumer.*inputBindings/i);
+    expect(guidance).toMatch(/kind \`control\`.*bindings null/i);
   });
 
-  it("separates terminal graph execution from Work Packet reconciliation", () => {
-    expect(TASK_GRAPH_PLANNING_PROMPT).toMatch(/terminal graph run completes execution but does not close the packet/i);
-    expect(TASK_GRAPH_PLANNING_PROMPT).toMatch(/stable actual diff/i);
-    expect(TASK_GRAPH_PLANNING_PROMPT).toMatch(/canonical model update.*no-change assessment/i);
+  it("retrieves Work Packet closure requirements at reconciliation", () => {
+    const guidance = getLeaderProcedure("reconciliation")!.body;
+    expect(guidance).toMatch(/terminal graph run completes execution but does not close the packet/i);
+    expect(guidance).toMatch(/stable actual diff/i);
+    expect(guidance).toMatch(/canonical model update.*no-change assessment/i);
   });
 
   it("defines all three continuity tags without conflating restart and continuation", () => {
@@ -105,7 +111,7 @@ describe("leader prompt composition", () => {
     expect(LEADER_PROMPT_CORE).toContain("## Session Naming");
     expect(LEADER_PROMPT_CORE).toMatch(/durable label[\s\S]*overall objective/i);
     expect(LEADER_PROMPT_CORE).toMatch(/3–6 words[\s\S]*concrete purpose/i);
-    expect(LEADER_PROMPT_CORE).toMatch(/Keep the name stable[\s\S]*core objective materially changes/i);
+    expect(LEADER_PROMPT_CORE).toMatch(/Keep the name stable[\s\S]*first leader-selected name is canonical/i);
     expect(LEADER_PROMPT_CORE).toContain("Working on tests");
     expect(LEADER_PROMPT_CORE).toContain("Harden session naming workflow");
   });

@@ -28,6 +28,48 @@ function service(): WorkItemService {
   };
 }
 
+describe("work-item receipt recovery", () => {
+  it("does not report the original mutation as rejected when receipt lookup fails", () => {
+    const h = setup();
+    const workItems = service();
+    workItems.getCommandResponse = () => { throw new Error("lookup failed"); };
+    h.ctx.workItems = workItems;
+    dispatchCommand(h.ctx, { type: "get_work_item_receipt", requestId: "original" }, h.ws);
+    expect(h.wsSent.at(-1)).toMatchObject({ type: "work_item_receipt_pending", requestId: "original" });
+    h.ctx.workItems = undefined;
+    dispatchCommand(h.ctx, { type: "get_work_item_receipt", requestId: "original" }, h.ws);
+    expect(h.wsSent.at(-1)).toMatchObject({ type: "work_item_receipt_pending", requestId: "original" });
+  });
+  it.each([true, false])("returns the completed response without executing the command again (success=%s)", async (success) => {
+    const h = setup();
+    const workItems = service();
+    const receipts = new Map<string, Record<string, unknown>>();
+    workItems.saveCommandResponse = (id, response) => { receipts.set(id, response); };
+    workItems.getCommandResponse = (id) => receipts.get(id) ?? null;
+    let finish!: () => void;
+    workItems.continue = vi.fn(async () => {
+      await new Promise<void>((resolve) => { finish = resolve; });
+      if (!success) throw new WorkItemServiceError("invalid_transition", "Rejected");
+      return detail;
+    });
+    h.ctx.workItems = workItems;
+    const requestId = "00000000-0000-4000-8000-000000000099";
+    dispatchCommand(h.ctx, { type: "continue_work_item", requestId, workItemId: "work-1", prompt: "continue",
+      expectedLifecycleRevision: 0, expectedCurrentRunKey: null }, h.ws);
+    const query = { type: "get_work_item_receipt" as const, requestId, workItemId: "work-1" };
+    dispatchCommand(h.ctx, query, h.ws);
+    expect(h.wsSent.at(-1)).toMatchObject({ type: "work_item_receipt_pending", requestId });
+    expect(receipts.size).toBe(0);
+    finish();
+    await vi.waitFor(() => expect(receipts.size).toBe(1));
+    const original = h.wsSent.at(-1);
+    dispatchCommand(h.ctx, query, h.ws);
+    expect(h.wsSent.at(-1)).toEqual(original);
+    expect(h.wsSent.at(-1)).toMatchObject({ type: "work_item_response", success, requestId });
+    expect(workItems.continue).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("work-item command dispatcher", () => {
   it("enriches reconnect lists with volatile live-edit awareness", async () => {
     const h = setup(); h.ctx.workItems = service();

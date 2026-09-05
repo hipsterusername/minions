@@ -96,6 +96,13 @@ export const workPacketSchema = z.object({
   userRequest: z.string(),
   normalizedGoal: z.string(),
   status: workPacketStatusSchema,
+  // Persist inputs separately: derived context must not become selections on amendment.
+  selection: z.object({
+    objectIds: z.array(z.string()),
+    taskFiles: z.array(z.string()),
+    ownedPaths: z.array(z.string()),
+    entryPoints: z.array(z.object({ capabilityId: z.string(), surfaceId: z.string() })),
+  }).optional(),
   scope: z.object({
     capabilities: z.array(z.string()),
     flows: z.array(z.string()),

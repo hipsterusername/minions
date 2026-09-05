@@ -89,6 +89,7 @@ export const COMMAND_TABLE = {
   attach_work_item_surface: workItemCommand,
   detach_work_item_surface: workItemCommand,
   get_work_item: workItemCommand,
+  get_work_item_receipt: workItemCommand,
   list_work_items: workItemCommand,
   get_work_item_runs: workItemCommand,
   get_task_graph_plan: taskGraphCommand,

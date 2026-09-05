@@ -19,7 +19,9 @@ export const SKILL_AUTHORING_TOOLS = [
 
 export function minionSkillMcpToolNames(skillIds: readonly string[]): string[] {
   return [
+    "mcp__skills__load_skill",
     "mcp__skills__load_subskill",
+    "mcp__skills__load_skill_attachment",
     ...(skillIds.includes(SKILL_BUILDER_ID) ? SKILL_AUTHORING_TOOLS : []),
   ];
 }

@@ -31,11 +31,11 @@ export interface SessionHostDeps {
     prompt: string; cwd: string; systemPrompt: string; model?: string;
     harness?: string; thinkingConfig?: ThinkingConfig; permissionMode?: string;
     executorClass?: "mechanical" | "standard" | "reasoning";
-    skillIds?: string[];
+    skillIds?: string[]; skillSnapshotId?: string | undefined;
     /** Called after durable allocation and before provider launch. */
     onAllocated?: (sessionKey: string) => void;
   }) => void | Promise<{ sessionKey: string; harness: string; model: string; permissionMode: string }>;
-  resumeWorkItemRun?: (input: { workItemId: string; runKey: string; prompt: string; requestId: string }) => void | Promise<void>;
+  resumeWorkItemRun?: (input: { workItemId: string; runKey: string; prompt: string; requestId: string; continuitySource?: "system" }) => void | Promise<void>;
   continueWorkItemChild?: (input: { workItemId: string; runKey: string; prompt: string; requestId: string }) => void | Promise<void>;
   cleanupLiveEditRun?: (runKey: string) => void;
   getTaskGraphTools?: (runKey:string) => NormalizedToolDef[];
@@ -104,6 +104,7 @@ export interface StartSessionOptions {
   role?: SessionRole | undefined;
   /** Skill IDs tagged on this session; Leaders pass them to their Minions. */
   skillIds?: string[] | undefined;
+  skillSnapshotId?: string | undefined;
   /** Template values for the tagged skills, inherited by delegated Minions. */
   skillValues?: Record<string, Record<string, string>> | undefined;
   worktreeIsolation?: boolean | undefined;
@@ -115,6 +116,11 @@ export interface StartSessionOptions {
   thinkingConfig?: ThinkingConfig | null | undefined;
   /** Multimodal attachments riding on the first user message. */
   attachments?: ImageAttachment[] | undefined;
+  /** Durable user-authored instructions inherited from earlier iterations. */
+  userDirectives?: string[];
+  /** Server-owned fallback if launch readiness changes the selected provider. */
+  freshThreadPrompt?: string;
+  continuitySource?: "user" | "system";
   /** External MCP servers merged alongside the agent's built-in servers. */
   externalMcpServers?: Record<string, unknown> | undefined;
   /** Formatted `mcp__<serverId>__<toolName>` names allowed without prompts. */

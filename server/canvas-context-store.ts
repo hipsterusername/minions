@@ -2,8 +2,8 @@
  * Per-leader-session connected-canvas context snapshots.
  *
  * Stored out of band from the SessionHost class so `session-host.ts` stays
- * under its architectural file-size budget. In-memory only — snapshots do not
- * survive a server restart, matching the `canvas_context` command contract.
+ * under its architectural file-size budget. Session continuity persists the
+ * snapshot and repopulates this lookup during restart hydration.
  */
 const canvasContextBySession = new Map<string, string>();
 

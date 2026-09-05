@@ -9,7 +9,7 @@ import { getSessionOrError, sendControlError, sendControlResponse, errToMessage 
 import type { CommandHandler } from "./types.ts";
 import { applyLifecycleEvent, isTerminalTaskStatus } from "../task-lifecycle.ts";
 import { persistTaskState } from "../session-persist.ts";
-import { activeWorktreeOperation, beginWorktreeOperation } from "./worktree-operation-lock.ts";
+import { worktreeBusyReason, beginWorktreeOperation } from "./worktree-operation-lock.ts";
 
 export const discardWorktree: CommandHandler = (ctx, cmd, ws) => {
   const host = getSessionOrError(ctx.registry, cmd.sessionKey, ws);
@@ -30,7 +30,7 @@ export const discardWorktree: CommandHandler = (ctx, cmd, ws) => {
       "discard_worktree",
       host.id,
       cmd.requestId,
-      `Worktree operation "${activeWorktreeOperation(host) ?? "unknown"}" is already in progress`,
+      `Worktree operation "${worktreeBusyReason(host) ?? "unknown"}" is already in progress`,
     );
     return;
   }

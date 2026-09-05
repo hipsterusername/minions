@@ -20,6 +20,7 @@ export type GitIntegrationResult = {
   preservedPaths: string[]; error: string;
 } | { status: "waiting" | "failed"; targetSha?: string; sourceSha?: string; error: string };
 export interface GitIntegrationExecutorOptions {
+  requireReviewedTargetInSource?: boolean;
   evaluateGate?: (context: GitGateContext) => Promise<GitGateVerdict>;
   onGateEvaluated?: (context: GitGateContext, verdict: GitGateVerdict) => Promise<void>;
   beforePromote?: (context: GitGateContext & { resultSha: string }) => Promise<void>;

@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { leaderProcedurePointer } from "../../shared/leader-procedures.ts";
 import {
   semanticTaskGraphPlanSchema,
   type LeaderOrchestrationMode,
@@ -92,7 +93,9 @@ export function createTaskGraphPlanningTools(input: {
       && (input.mode === "plan" || !snapshot.autoStartEligible)) {
       input.markDecisionNeeded?.("The execution plan is ready for review and approval.");
     }
-    return snapshot;
+    return { ...snapshot, procedure: leaderProcedurePointer(
+      snapshot.state === "ready" || snapshot.state === "needs_input" ? "review_start"
+        : snapshot.state === "running" ? "graph_authoring" : "adjudication") };
   };
   return [
     {
@@ -199,12 +202,16 @@ export function createTaskGraphPlanningTools(input: {
     },
     {
       name: "get_graph_plan",
-      description: "Read the latest or selected persisted graph plan, its canonical runtime projection, and bounded serial iteration history. Select history by proposalId or graphRunId.",
+      description: "Read current or historical plans, runtime and bounded history across Leader continuations in this WorkItem. Select by proposalId or graphRunId. Earlier Leader runs are read-only; mutations retain current-run authority.",
       inputSchema: getSchema,
       handler: async (raw) => {
         const args=getSchema.parse(raw);
         const inspection=input.coordinator.inspection(input.workItemId,input.primaryRunKey,args);
-        return jsonResult(inspection);
+        return jsonResult({ ...inspection,
+          historicalReadOnly: Boolean(inspection.plan && inspection.plan.primaryRunKey !== input.primaryRunKey),
+          procedure: leaderProcedurePointer(inspection.plan?.state === "ready" || inspection.plan?.state === "needs_input"
+            ? "review_start" : "adjudication"),
+        });
       },
     },
     {
@@ -221,7 +228,7 @@ export function createTaskGraphPlanningTools(input: {
     },
     {
       name: "read_graph_artifact",
-      description: "Read a bounded chunk of a committed artifact from the latest or selected historical graph run. Reads remain WorkItem-, primary-authority-, run-, and attempt-scoped, reject stale or secret artifacts, and never expose server storage paths.",
+      description: "Read a bounded committed artifact from a current or historical graph in this WorkItem, including earlier Leader continuations. The caller must be the current Leader. Reads remain run- and attempt-scoped, reject stale or secret artifacts, and never expose server storage paths.",
       inputSchema: readArtifactSchema,
       handler: async (raw) => {
         const args = readArtifactSchema.parse(raw);

@@ -4,6 +4,7 @@ import { setup, cmd, fakeRunControl } from "../../tests/support/server-command-h
 
 const removeWorktreeCalls: { path: string; project: string }[] = [];
 const removePersistedCalls: string[] = [];
+let useRealRemoval = false;
 
 vi.mock("../worktree.ts", () => ({
   removeWorktree: vi.fn(async (path: string, project: string) => {
@@ -19,10 +20,12 @@ vi.mock("../session-persist.ts", async () => {
     ...actual,
     removePersistedSession: vi.fn((key: string) => {
       removePersistedCalls.push(key);
+      if (useRealRemoval) return actual.removePersistedSession(key);
     }),
   };
 });
 
+import { openPersistDb, disablePersistence } from "../session-persist.ts";
 import { removeSession } from "./remove-session.ts";
 
 const fakeWorktree: WorktreeInfo = {
@@ -71,6 +74,25 @@ describe("remove_session", () => {
     expect(listEvent).toBeDefined();
     expect(listEvent!["topic"]).toBe("global");
     expect(listEvent!["sessions"]).toEqual([]);
+  });
+
+  it("keeps real SQLite state deleted after draining termination and late callbacks", async () => {
+    const h = setup({ status: "running" });
+    const db = openPersistDb(":memory:");
+    useRealRemoval = true;
+    try {
+      h.host.persist();
+      expect(db.prepare("SELECT count(*) n FROM sessions").get()).toEqual({ n: 1 });
+      let release!: () => void;
+      h.setRunControl(fakeRunControl({ close: () => new Promise<void>(resolve => { release = resolve; }) }));
+      removeSession(h.ctx, cmd({ type: "remove_session" }), h.ws);
+      release();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      h.host.persist();
+      h.host.bufferEvent({ type: "session_status", status: "stopped", sessionKey: h.host.id, timestamp: Date.now() });
+      expect(db.prepare("SELECT count(*) n FROM sessions").get()).toEqual({ n: 0 });
+      expect(db.prepare("SELECT count(*) n FROM event_log").get()).toEqual({ n: 0 });
+    } finally { useRealRemoval = false; disablePersistence(); }
   });
 
   it("calls runControl.close() fire-and-forget when present", async () => {

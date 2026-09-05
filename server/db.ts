@@ -1,3 +1,4 @@
+import { ensureSessionContinuitySchema } from "./session-continuity-schema.ts";
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
@@ -209,11 +210,14 @@ export function initDb(dbPath?: string): Database.Database {
     );
   `);
 
+  ensureSessionContinuitySchema(db);
+
   // Idempotent migration: older databases were created before `session_id`
   // existed on the `sessions` table. Without this column the SDK
   // session_id is lost across restarts, and `send_message` cannot resume —
   // it starts a brand-new conversation with no transcript.
   ensureColumn(db, "sessions", "session_id", "TEXT");
+  ensureColumn(db, "work_packet_verifications", "evidence_digest", "TEXT");
   ensureColumn(db, "sessions", "worktree_path", "TEXT");
   ensureColumn(db, "sessions", "worktree_branch", "TEXT");
   ensureColumn(db, "sessions", "worktree_project_path", "TEXT");

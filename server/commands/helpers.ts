@@ -19,7 +19,7 @@ import {
   shouldWarnForMergeGates,
 } from "../system-model/gates.ts";
 import {
-  activeWorktreeOperation,
+  worktreeBusyReason,
   beginWorktreeOperation,
   type WorktreeOperationLease,
 } from "./worktree-operation-lock.ts";
@@ -153,7 +153,7 @@ export function runMergeFlow(
       command,
       host.id,
       cmd.requestId,
-      `Worktree operation "${activeWorktreeOperation(host) ?? "unknown"}" is already in progress`,
+      `Worktree operation "${worktreeBusyReason(host) ?? "unknown"}" is already in progress`,
     );
     return;
   }
@@ -222,7 +222,7 @@ function continueMergeFlow(
   if (host.status === "running") host.abortController.abort();
   host.clearWaitTimer();
 
-  mergeAndCleanup(host.worktree!, undefined, options)
+  mergeWithCurrentGates(host, options)
     .then((result: MergeResult) => {
       if (result.success) {
         if (host.taskState?.approval) host.taskState.approval = null;
@@ -274,4 +274,13 @@ function continueMergeFlow(
       sendControlError(ws, command, cmd.sessionKey!, cmd.requestId, errToMessage(err));
     })
     .finally(() => lease.release());
+}
+
+export function mergeWithCurrentGates(host: SessionHost, options?: MergeOptions): Promise<MergeResult> {
+  return mergeAndCleanup(host.worktree!, undefined, shouldEvaluateMergeGates(host) ? {
+    ...options, validateResult: async () => {
+      const verdict = await evaluateMergeGates(host);
+      return verdict.mode !== "enforced" || verdict.allowed;
+    },
+  } : options);
 }

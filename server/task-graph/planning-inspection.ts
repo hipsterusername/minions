@@ -44,8 +44,8 @@ export function readPlanningHistoryArtifact(
   repo.assertAuthority(input.workItemId,input.primaryRunKey);
   const plan=input.graphRunId
     ? repo.proposalForRun(input.graphRunId)
-    : repo.latest(input.workItemId,input.primaryRunKey);
-  assertPlanAuthority(plan,input.workItemId,input.primaryRunKey);
+    : repo.latest(input.workItemId,input.primaryRunKey) ?? repo.latest(input.workItemId);
+  assertReadablePlan(plan,input.workItemId);
   return readPlanningArtifact(repo.db,plan,input);
 }
 
@@ -89,12 +89,26 @@ function selectedPlan(
 ):TaskGraphPlanSnapshotView|null {
   const plan=selector.proposalId?repo.get(selector.proposalId)
     :selector.graphRunId?repo.proposalForRun(selector.graphRunId)
-      :repo.latest(workItemId,primaryRunKey);
+      :repo.latest(workItemId,primaryRunKey) ?? repo.latest(workItemId);
   if ((selector.proposalId || selector.graphRunId) && !plan) {
     throw new TaskGraphValidationError("graph-plan history entry not found");
   }
-  if (plan) assertPlanAuthority(plan,workItemId,primaryRunKey);
-  return plan;
+  if (plan) assertReadablePlan(plan,workItemId);
+  return plan && plan.primaryRunKey!==primaryRunKey
+    ? {...plan,canStart:false,autoStartEligible:false}
+    : plan;
+}
+
+// The caller must still be the current Leader. Historical evidence belongs to
+// the WorkItem, while mutation authority remains bound to the creating run.
+function assertReadablePlan(
+  plan:TaskGraphPlanSnapshotView|null,
+  workItemId:string,
+):asserts plan is TaskGraphPlanSnapshotView {
+  if (!plan) throw new TaskGraphValidationError("graph plan not found");
+  if (plan.workItemId!==workItemId) {
+    throw new TaskGraphConflictError("graph plan is outside the current WorkItem");
+  }
 }
 
 function assertPlanAuthority(

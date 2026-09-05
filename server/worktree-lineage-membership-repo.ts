@@ -25,7 +25,21 @@ export function joinWorkItemLineage(db: Database.Database, input: { lineageId: s
     const active = findActiveLineageMembership(db, input.workItemId);
     if (active) {
       if (active.lineage_id === lineage.id) return active;
-      throw new Error("work item already belongs to an active lineage");
+      // Move only unqueued, quiescent contributions; committed integration history stays immutable.
+      if (db.prepare(`SELECT 1 FROM sessions WHERE work_item_id=? AND status='running'`).get(input.workItemId)
+        || db.prepare(`SELECT 1 FROM worktree_contributions WHERE work_item_id=? AND lineage_id=?
+          AND state NOT IN ('ready','failed','discarded')`).get(input.workItemId, active.lineage_id)
+        || db.prepare(`SELECT 1 FROM worktree_integration_queue q JOIN worktree_contributions c
+          ON c.id=q.contribution_id WHERE c.work_item_id=? AND c.lineage_id=?`).get(input.workItemId, active.lineage_id))
+        throw new Error("Finish execution and map before queueing contributions; integrated history cannot be moved");
+      db.prepare(`UPDATE worktree_integration_gates SET lineage_id=?,status='pending'
+        WHERE contribution_id IN (SELECT id FROM worktree_contributions WHERE work_item_id=? AND lineage_id=? AND state<>'discarded')`)
+        .run(lineage.id, input.workItemId, active.lineage_id);
+      db.prepare(`UPDATE worktree_contributions SET lineage_id=?,review_state='pending',revision=revision+1,updated_at=?
+        WHERE work_item_id=? AND lineage_id=? AND state<>'discarded'`).run(lineage.id, input.at, input.workItemId, active.lineage_id);
+      db.prepare(`UPDATE worktree_lineage_memberships SET status='left',revision=revision+1,left_at=?
+        WHERE lineage_id=? AND work_item_id=?`).run(input.at, active.lineage_id, input.workItemId);
+      db.prepare(`UPDATE worktree_lineages SET revision=revision+1,updated_at=? WHERE id=?`).run(input.at, active.lineage_id);
     }
     db.prepare(`INSERT INTO worktree_lineage_memberships
       (lineage_id,work_item_id,status,actor,joined_at) VALUES (?, ?, 'active', ?, ?)

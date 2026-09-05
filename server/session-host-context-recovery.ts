@@ -42,7 +42,7 @@ export function buildContextRecoveryStartOptions(
 ): StartSessionOptions {
   const checkpoint = compileContextCheckpoint(host, {
     trigger: "context_recovery",
-    originalPrompt: opts.prompt,
+    originalPrompt: opts.continuitySource === "system" ? "" : opts.prompt,
     recoveryCause: event.fullError ?? event.error ?? "context window exceeded",
   });
   host.contextCheckpoint = checkpoint;

@@ -124,6 +124,8 @@ export interface HarnessStartOptions {
   abortSignal: AbortSignal;
   /** Optional session ID for resume (harness-opaque string). */
   resumeId?: string;
+  /** Existing cumulative cost when a harness opens a later invocation. */
+  initialCostUSD?: number;
   /**
    * Pre-wrapped MCP server objects from user-configured external servers
    * (e.g. sidecar mcp-servers.json). Typed as `unknown` because each harness

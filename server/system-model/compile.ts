@@ -9,11 +9,12 @@ import type {
   WorkPacket,
 } from "../../shared/system-model/index.ts";
 import { checkFreshness, type FreshnessReport, type FreshnessTimestampFn } from "./freshness.ts";
-import { globMatches, LOW_CONFIDENCE_FALLBACK, type MatchCandidate } from "./match.ts";
+import { LOW_CONFIDENCE_FALLBACK, type MatchCandidate } from "./match.ts";
 import { computePacketApplicability } from "./applicability.ts";
-import { expandScope, type ExpandedScope } from "./compile-scope.ts";
+import { expandScope, pathsOverlap, type ExpandedScope } from "./compile-scope.ts";
 import type { LoadedSystemModel } from "./types.ts";
 import { initializeWorkPacketState } from "./work-packet-state.ts";
+import { reviewGateMatches } from "./review-gates.ts";
 
 export const CONTEXT_PACK_PREAMBLE =
   "Suggested files are hints, not truth. Inspect current code before editing. Hard constraints override implementation convenience. If current code contradicts this context, report the conflict.";
@@ -29,6 +30,7 @@ export interface CompileInput {
   matchConfidence: WorkPacket["matchConfidence"];
   taskFiles?: string[];
   ownedPaths?: string[];
+  entryPoints?: Array<{ capabilityId: string; surfaceId: string }>;
   acceptanceCriteria?: string[];
   timestampFn: FreshnessTimestampFn;
   now: number;
@@ -48,9 +50,18 @@ export interface CompiledWorkPacket {
 }
 
 export async function compileWorkPacket(input: CompileInput): Promise<CompiledWorkPacket> {
-  const expanded = expandScope(input.model, input.matchedCandidates.map((candidate) => candidate.id));
+  const taskFiles = unique([...(input.taskFiles ?? []), ...(input.ownedPaths ?? [])]);
+  const seeds = new Set(input.matchedCandidates.map((candidate) => candidate.id));
+  const expanded = expandScope(input.model, [...seeds], taskFiles);
+  const selectedSurfaces = input.matchedCandidates.filter((candidate) => candidate.type === "surface").map((candidate) => candidate.id);
   const entryPoints = expanded.capabilities.flatMap((capability) =>
-    (capability.entryPoints ?? []).map((entryPoint) => ({
+    (capability.entryPoints ?? []).filter((entryPoint) => {
+      const confirmed = input.entryPoints?.filter((entry) => entry.capabilityId === capability.id);
+      if (confirmed?.length) return confirmed.some((entry) => entry.surfaceId === entryPoint.surface);
+      if (selectedSurfaces.length) return selectedSurfaces.includes(entryPoint.surface);
+      if (taskFiles.length) return entryPoint.files.some((glob) => taskFiles.some((file) => pathsOverlap(glob, file)));
+      return seeds.has(capability.id) || entryPoint.flows.some((id) => seeds.has(id));
+    }).map((entryPoint) => ({
       capabilityId: capability.id,
       surfaceId: entryPoint.surface,
       files: entryPoint.files,
@@ -60,14 +71,14 @@ export async function compileWorkPacket(input: CompileInput): Promise<CompiledWo
   const suggestedFiles = unique([
     ...expanded.capabilities.flatMap((c) => c.suggestedFiles),
     ...expanded.flows.flatMap((f) => f.suggestedFiles),
-    ...expanded.surfaces.flatMap((s) => s.suggestedFiles),
+    ...expanded.surfaces.filter((s) => seeds.has(s.id)).flatMap((s) => s.suggestedFiles),
     ...entryPoints.flatMap((entryPoint) => entryPoint.files),
     ...(input.taskFiles ?? []),
   ]);
   const suggestedTests = unique([
     ...expanded.capabilities.flatMap((c) => c.suggestedTests),
     ...expanded.flows.flatMap((f) => f.suggestedTests),
-    ...expanded.surfaces.flatMap((s) => s.suggestedTests),
+    ...expanded.surfaces.filter((s) => seeds.has(s.id)).flatMap((s) => s.suggestedTests),
     ...expanded.constraints.flatMap((c) => c.suggestedTests),
     ...entryPoints.flatMap((entryPoint) => entryPoint.tests),
   ]);
@@ -82,7 +93,6 @@ export async function compileWorkPacket(input: CompileInput): Promise<CompiledWo
         ? unique([...object.suggestedFiles, ...(object.entryPoints ?? []).flatMap((entryPoint) => entryPoint.files)])
         : object.suggestedFiles,
       freshnessClass: object.freshness?.class,
-      policyClass: "ordinary",
     })),
     policies: input.model.policies.freshness,
     getTimestamps: input.timestampFn,
@@ -94,17 +104,21 @@ export async function compileWorkPacket(input: CompileInput): Promise<CompiledWo
     constraints: expanded.constraints.map((item) => item.id),
     decisions: expanded.decisions.map((item) => item.id),
     risks: expanded.risks.map((item) => item.id),
-    surfaces: expanded.surfaces.map((item) => item.id),
+    surfaces: unique([...selectedSurfaces, ...entryPoints.map((entry) => entry.surfaceId)]),
     entryPoints,
     suggestedFiles,
     suggestedTests,
   };
   const packetRequired = derivePacketRequired(input.model, {
-    files: unique([...(input.taskFiles ?? []), ...(input.ownedPaths ?? []), ...suggestedFiles]),
+    files: taskFiles.length ? taskFiles : suggestedFiles,
     capabilities: scope.capabilities,
     flows: scope.flows,
   });
-  const reviewGates = deriveReviewGateRequirements(input.model, scope.capabilities, scope.flows, suggestedFiles);
+  const riskConstraints = expanded.constraints.filter((constraint) => seeds.has(constraint.id)
+    || constraint.scope === "targeted"
+    || constraint.appliesTo.files.some((glob) => taskFiles.some((file) => pathsOverlap(glob, file))));
+  const riskLevel = maxRisk([...expanded.capabilities, ...expanded.flows, ...riskConstraints, ...expanded.risks]);
+  const reviewGates = deriveReviewGateRequirements(input.model, scope.capabilities, scope.flows, taskFiles, riskLevel);
   const base = input.existingPacket;
   const initialState = base ?? initializeWorkPacketState(input.acceptanceCriteria, input.now);
   const packet: WorkPacket = {
@@ -114,6 +128,7 @@ export async function compileWorkPacket(input: CompileInput): Promise<CompiledWo
     userRequest: input.userRequest,
     normalizedGoal: input.normalizedGoal,
     status: input.amendment ? "amended" : "draft",
+    selection: { objectIds: [...seeds], taskFiles: input.taskFiles ?? [], ownedPaths: input.ownedPaths ?? [], entryPoints: input.entryPoints ?? [] },
     scope,
     nonGoals: base?.nonGoals ?? [],
     agentInstructions: unique([
@@ -126,7 +141,7 @@ export async function compileWorkPacket(input: CompileInput): Promise<CompiledWo
       requiredVerifications: freshnessReport.requiredVerifications,
     },
     reviewGates,
-    riskLevel: maxRisk([...expanded.capabilities, ...expanded.flows, ...expanded.constraints, ...expanded.risks]),
+    riskLevel,
     matchConfidence: input.matchConfidence,
     criterionCoverage: initialState.criterionCoverage ?? [],
     evidenceLedger: initialState.evidenceLedger ?? [],
@@ -171,10 +186,7 @@ function renderContextPack(
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, 8);
   const objects: Array<{ id: string; text: string }> = [
-    ...expanded.constraints.flatMap((o) => [
-      { id: o.id, text: `Constraint ${o.id}: ${o.statement}` },
-      ...(o.agentInstruction ? [{ id: `${o.id}.instruction`, text: `Instruction ${o.id}: ${o.agentInstruction}` }] : []),
-    ]),
+    { id: "task-goal", text: `Task: ${packet.normalizedGoal}` },
     ...packet.agentInstructions
       .filter((instruction) => !expanded.constraints.some((constraint) =>
         constraint.agentInstruction === instruction))
@@ -190,6 +202,12 @@ function renderContextPack(
       id: coverage.criterionId,
       text: `Criterion ${coverage.criterionId} [${coverage.status}]: ${coverage.criterion}; evidence ${coverage.evidenceRefs.join(", ") || "none"}`,
     })),
+    ...expanded.capabilities.map((o) => ({ id: o.id, text: `Capability ${o.id}: ${o.summary}` })),
+    ...expanded.flows.map((o) => ({ id: o.id, text: `Flow ${o.id}: ${o.summary}` })),
+    ...[...expanded.constraints].sort((a, b) => riskRank(b.severity) - riskRank(a.severity) || a.id.localeCompare(b.id)).map((o) =>
+      ({ id: o.id, text: `Constraint ${o.id}: ${o.statement}${o.agentInstruction ? ` Instruction: ${o.agentInstruction}` : ""}` })),
+    ...(packet.scope.entryPoints ?? []).map((entryPoint) =>
+      ({ id: `${entryPoint.capabilityId}.${entryPoint.surfaceId}`, text: `Entry point ${entryPoint.surfaceId} for ${entryPoint.capabilityId}: files ${entryPoint.files.join(", ") || "none"}; tests ${entryPoint.tests.join(", ") || "none"}` })),
     ...recentEvidence.map((evidence) => ({
       id: evidence.id,
       text: `Evidence ${evidence.id} [${evidence.provenance}/${evidence.kind}]: ${evidence.summary}`,
@@ -203,10 +221,7 @@ function renderContextPack(
       text: `Required verification [${verification.status}] ${verification.kind}/${verification.target}: ${verification.reason}`,
     })),
     ...expanded.decisions.map((o) => ({ id: o.id, text: `Decision ${o.id}: ${o.summary}` })),
-    ...expanded.flows.map((o) => ({ id: o.id, text: `Flow ${o.id}: ${o.summary}` })),
-    ...expanded.capabilities.map((o) => ({ id: o.id, text: `Capability ${o.id}: ${o.summary}` })),
-    ...expanded.capabilities.flatMap((capability) => (capability.entryPoints ?? []).map((entryPoint) =>
-      ({ id: `${capability.id}.${entryPoint.surface}`, text: `Entry point ${entryPoint.surface} for ${capability.id}: files ${entryPoint.files.join(", ") || "none"}; tests ${entryPoint.tests.join(", ") || "none"}` }))),
+    ...expanded.risks.map((o) => ({ id: o.id, text: `Risk ${o.id}: ${o.summary}${o.mitigation ? ` Mitigation: ${o.mitigation}` : ""}` })),
     { id: "suggested-files", text: `Suggested files: ${packet.scope.suggestedFiles.join(", ") || "none"}` },
     { id: "suggested-tests", text: `Suggested tests: ${packet.scope.suggestedTests.join(", ") || "none"}` },
   ];
@@ -250,11 +265,10 @@ function deriveReviewGateRequirements(
   capabilities: string[],
   flows: string[],
   files: string[],
+  risk: RiskLevel,
 ): ReviewGateRequirement[] {
   return model.policies.reviewGates.map((gate) => {
-    const required = intersects(gate.requiredWhen.capabilities, capabilities)
-      || intersects(gate.requiredWhen.flows, flows)
-      || files.some((file) => gate.requiredWhen.files.some((glob) => globMatches(glob, file)));
+    const required = reviewGateMatches(gate, { capabilities, flows, files, risk });
     return { gateId: gate.id, name: gate.name, status: required ? "required_pending" : "not_required", reason: required ? "Matched packet scope" : "No scope match" };
   });
 }
@@ -282,9 +296,4 @@ function estimatedTokens(text: string): number {
 
 function unique(values: string[]): string[] {
   return [...new Set(values)].sort();
-}
-
-function intersects(a: string[], b: string[]): boolean {
-  const bSet = new Set(b);
-  return a.some((item) => bSet.has(item));
 }

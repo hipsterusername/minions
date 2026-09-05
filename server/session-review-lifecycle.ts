@@ -178,8 +178,10 @@ export function commitReviewLifecycle(
   timestamp: number = Date.now(),
 ): void {
   if (next === host.reviewLifecycle) return;
+  const previous = host.reviewLifecycle;
   host.reviewLifecycle = next;
-  host.persist();
+  try { host.persist(); }
+  catch (error) { host.reviewLifecycle = previous; throw error; }
   // Canonical runs retain this snapshot as immutable run history, but the
   // work-item event is the only live lifecycle authority exposed to clients.
   if (host.workItemId) return;

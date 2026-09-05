@@ -1,22 +1,8 @@
-/**
- * Server-side skill loading and compilation.
- *
- * Mirrors the pure helpers in `src/skills/types.ts`. We re-implement here
- * rather than importing from `src/` because the architecture suite forbids
- * cross-tree imports (see tests/architecture/no-cross-tree-imports.test.ts).
- *
- * Skills live in each registered workspace state root as `skills.json`
- * and are written by the frontend via `writeSkills()` in `project-store.ts`.
- * The Leader's `assign_task` tool uses these helpers to "arm" a Minion
- * with one or more skills, appending the compiled markdown to that
- * Minion's system prompt.
- */
+/** Server-side library loading. The shared compiler keeps preview and all agent paths aligned. */
 
 import { readSkills } from "./project-store.ts";
 import { builtInSkillPresets } from "../shared/skill-presets.ts";
-import { buildSubskillMap } from "./subskills.ts";
 import {
-  formatSkillAttachments,
   sanitizeSkillAttachments,
   type SkillAttachment,
 } from "../shared/skill-attachments.ts";
@@ -34,7 +20,7 @@ export interface SkillVariable {
 }
 
 /**
- * A sub-skill nested inside a parent skill. Mirror of `SubSkill` in
+ * A sub-skill nested inside a parent skill. Same shape as `SubSkill` in
  * `src/skills/types.ts` (cross-tree imports are banned by the architecture
  * suite, so the shape is hand-copied).
  */
@@ -69,51 +55,7 @@ export interface SkillTemplate {
   subskills?: SubSkill[];
 }
 
-/**
- * Compile a single skill template by replacing every `{{variable}}`
- * placeholder with the matching value (or empty string).
- */
-export function compileSkillTemplate(
-  skill: SkillTemplate,
-  values: Record<string, string>,
-): string {
-  let result = skill.template.replace(
-    /\{\{(\w+)\}\}/g,
-    (_match, name: string) => values[name] ?? "",
-  );
-  // Collapse runs of blank lines left behind by missing optional values.
-  result = result.replace(/\n{3,}/g, "\n\n");
-  return result.trim();
-}
-
-/**
- * Compile a list of skills into a single Markdown addendum, suitable
- * for appending to an agent's system prompt.
- */
-export function compileSkills(
-  skills: SkillTemplate[],
-  allValues: Record<string, Record<string, string>>,
-): string {
-  if (skills.length === 0) return "";
-  const sections = skills.map((skill) => {
-    const values = allValues[skill.id] ?? {};
-    const compiled = compileSkillTemplate(skill, values);
-    const attachments = formatSkillAttachments(
-      skill.attachments,
-      `Attached context for ${skill.name}`,
-    );
-    const map = buildSubskillMap(skill);
-    return `## Skill: ${skill.name}\n\n${compiled}`
-      + (attachments ? `\n\n${attachments}` : "")
-      + (map ? `\n\n${map}` : "");
-  });
-  return (
-    `\n\n# Active Skills\n\n` +
-    `The following skills are active for this session. ` +
-    `Follow their instructions.\n\n` +
-    sections.join("\n\n---\n\n")
-  );
-}
+export { compileSkillTemplate, compileSkills } from "../shared/skill-prompt.ts";
 
 /**
  * Lightweight runtime guard for entries pulled from `skills.json`.

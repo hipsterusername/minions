@@ -11,8 +11,7 @@
  *   - Server-side subscription registry. Clients filter on receipt; the
  *     server sends every envelope to every open socket. Per-socket
  *     topic routing is a follow-up if traffic becomes an issue.
- *   - Backpressure beyond what `ws` already provides. We log but do not
- *     drop messages when `bufferedAmount` grows; tune later if needed.
+ * Slow clients are disconnected at a bounded queue size and recover through sync.
  *
  * The architecture fitness test in
  * `tests/architecture/no-direct-broadcast.test.ts` enforces that
@@ -32,6 +31,67 @@ import {
 import { serverLogger } from "./logging.ts";
 
 const log = serverLogger.child("bus");
+export const MAX_CLIENT_BUFFERED_BYTES = 4 * 1024 * 1024;
+export const MAX_CLIENT_BURST_BYTES = 32 * 1024 * 1024;
+export const CLIENT_DRAIN_TIMEOUT_MS = 5_000;
+
+const pendingDrainChecks = new WeakMap<WebSocket, () => void>();
+
+function checkClientPressure(client: WebSocket): void {
+  if (client.readyState !== 1 || client.bufferedAmount <= MAX_CLIENT_BUFFERED_BYTES) {
+    pendingDrainChecks.get(client)?.();
+    return;
+  }
+  if (pendingDrainChecks.has(client)) return;
+
+  // A sync burst can queue several snapshots in one event-loop turn. Give
+  // the transport time to drain before treating that client as slow. Further
+  // sends must not extend the deadline indefinitely.
+  const cleanup = () => {
+    clearTimeout(timer);
+    client.off("close", cleanup);
+    pendingDrainChecks.delete(client);
+  };
+  const timer = setTimeout(() => {
+    cleanup();
+    if (client.readyState === 1 && client.bufferedAmount > MAX_CLIENT_BUFFERED_BYTES) {
+      log.warn("slow_client_disconnected", {
+        cause: "drain_timeout",
+        bufferedBytes: client.bufferedAmount,
+        drainTimeoutMs: CLIENT_DRAIN_TIMEOUT_MS,
+      });
+      client.terminate();
+    }
+  }, CLIENT_DRAIN_TIMEOUT_MS);
+  timer.unref();
+  pendingDrainChecks.set(client, cleanup);
+  client.once("close", cleanup);
+}
+
+function sendBounded(client: WebSocket, message: string): void {
+  if (client.readyState !== 1) return;
+  try {
+    const messageBytes = Buffer.byteLength(message);
+    if (client.bufferedAmount + messageBytes > MAX_CLIENT_BURST_BYTES) {
+      pendingDrainChecks.get(client)?.();
+      log.warn("slow_client_disconnected", {
+        cause: "burst_limit",
+        bufferedBytes: client.bufferedAmount,
+        messageBytes,
+        maxBufferedBytes: MAX_CLIENT_BURST_BYTES,
+      });
+      client.terminate();
+      return;
+    }
+    client.send(message, error => {
+      if (error) log.warn("client_send_failed", { error });
+      checkClientPressure(client);
+    });
+    checkClientPressure(client);
+  } catch (error) {
+    log.warn("client_send_failed", { error });
+  }
+}
 
 // Re-export topic helpers so consumers only import from `./bus.ts`.
 export { sessionTopic, projectTopic, workItemTopic, lineageTopic, GLOBAL_TOPIC, type Topic };
@@ -50,9 +110,7 @@ export function broadcast(wss: WebSocketServer, envelope: WsEnvelope): void {
   for (const client of wss.clients) {
     // `ws` exposes a numeric readyState; 1 === OPEN without importing the
     // constant (server-side it's `WebSocket.OPEN` from the `ws` lib).
-    if ((client as WebSocket).readyState === 1) {
-      (client as WebSocket).send(msg);
-    }
+    sendBounded(client as WebSocket, msg);
   }
 }
 
@@ -102,9 +160,7 @@ export function unicast(
   topic: Topic,
   payload: BusPayload,
 ): void {
-  if ((ws as WebSocket).readyState === 1) {
-    (ws as WebSocket).send(JSON.stringify(wrap(topic, payload)));
-  }
+  sendBounded(ws, JSON.stringify(wrap(topic, payload)));
 }
 
 /**

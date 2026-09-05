@@ -215,7 +215,7 @@ describe("SQLite worktree integration runtime", () => {
     expect(notified).toHaveBeenCalledWith("work", "create_lineage");
   });
 
-  it.each(["passed", "failed"] as const)("aggregates two contribution gates for final review: %s", async (secondStatus) => {
+  it.each(["passed", "failed"] as const)("requires combined verification even when contribution checks are %s", async (secondStatus) => {
     const { db, service } = setup(async () => ({ allowed: false, mode: "enforced" as const,
       gates: [{ id: "tests", name: "Tests", status: "required_pending" as const, reason: "combined diff" }] }));
     createWorkItem(db, { id: "work-2", projectId: "project", projectPath: "/repo", title: "Second",
@@ -238,9 +238,11 @@ describe("SQLite worktree integration runtime", () => {
     db.prepare("UPDATE worktree_lineages SET integration_head_sha='combined' WHERE id=?").run(lineage.id);
     const input = { requestId: `final-${secondStatus}`, lineageId: lineage.id,
       expectedRevision: lineage.revision, decision: "approved" as const, actor: "user", summary: "final" };
-    if (secondStatus === "passed") await expect(service.reviewFinal(input)).resolves.toMatchObject({
-      reviews: expect.arrayContaining([expect.objectContaining({ scope: "lineage", decision: "approved" })]) });
-    else await expect(service.reviewFinal(input)).rejects.toMatchObject({ code: "gate_failed" });
+    await expect(service.reviewFinal(input)).rejects.toMatchObject({ code: "gate_failed" });
+    expect(getLineageState(db, lineage.id).lineage!.integration_state).toBe("conflicted");
+    const verification = await service.bindRun({ workItemId: "work", runKey: "verify-combined" });
+    expect(verification.path).toBe(lineage.integration_worktree_path);
+    expect(verification.resolutionKind).toBe("lineage");
     db.close();
   });
 
@@ -269,4 +271,81 @@ describe("SQLite worktree integration runtime", () => {
     await expect(service.getStatus({ workItemId: "work" })).resolves.toMatchObject({ id: lineage.id,
       status: "integrated", memberships: [expect.objectContaining({ status: "left" })] }); db.close();
   });
+});
+
+ describe("review and lineage lifecycle regressions", () => {
+  it("preserves explicit waivers for the current head and invalidates them on iteration", async () => {
+    const { db, service } = setup(async () => ({ allowed: false, mode: "enforced",
+      gates: [{ id: "tests", name: "Tests", status: "required_pending", reason: "missing" }] }));
+    await service.bindRun({ workItemId: "work", runKey: "one" }); service.transitionProvisioning("one", "active");
+    await service.collectRun("one", "completed"); let row = findContributionByRun(db, "one")!;
+    await expect(service.reviewContribution({ requestId: "failed", contributionId: row.id, expectedRevision: row.revision,
+      decision: "approved", actor: "user", summary: "review" })).rejects.toMatchObject({ code: "gate_failed" });
+    row = findContributionByRun(db, "one")!;
+    await service.waiveGate({ requestId: "waive", scope: "contribution", lineageId: row.lineage_id,
+      contributionId: row.id, expectedRevision: row.revision, gateId: "tests", actor: "user", reason: "accepted" });
+    row = findContributionByRun(db, "one")!;
+    await expect(service.reviewContribution({ requestId: "approved", contributionId: row.id, expectedRevision: row.revision,
+      decision: "approved", actor: "user", summary: "review" })).resolves.toMatchObject({
+        gates: expect.arrayContaining([expect.objectContaining({ status: "waived" })]) });
+    await service.bindRun({ workItemId: "work", runKey: "two" }); await service.collectRun("two", "completed");
+    row = findContributionByRun(db, "two")!;
+    await expect(service.reviewContribution({ requestId: "new-head", contributionId: row.id, expectedRevision: row.revision,
+      decision: "approved", actor: "user", summary: "review" })).rejects.toMatchObject({ code: "gate_failed" }); db.close();
+  });
+  it("evaluates evidence against the latest iteration", async () => {
+    const evaluator = vi.fn(async () => ({ allowed: true, mode: "off" as const, gates: [] }));
+    const { db, service } = setup(evaluator);
+    await service.bindRun({ workItemId: "work", runKey: "one" }); service.transitionProvisioning("one", "active");
+    await service.collectRun("one", "completed"); await service.bindRun({ workItemId: "work", runKey: "two" });
+    await service.collectRun("two", "completed"); const row = findContributionByRun(db, "two")!;
+    await service.reviewContribution({ requestId: "latest", contributionId: row.id, expectedRevision: row.revision,
+      decision: "approved", actor: "user", summary: "review" });
+    expect(evaluator).toHaveBeenCalledWith(expect.objectContaining({ sessionKey: "two" })); db.close();
+  });
+  it("moves an unqueued ready contribution into another lineage and clears its approval", async () => {
+    const { db, service } = setup();
+    await service.bindRun({ workItemId: "work", runKey: "one" }); service.transitionProvisioning("one", "active");
+    await service.collectRun("one", "completed"); let row = findContributionByRun(db, "one")!;
+    await service.reviewContribution({ requestId: "before-map", contributionId: row.id, expectedRevision: row.revision,
+      decision: "approved", actor: "user", summary: "review" });
+    createWorkItem(db, { id: "target-work", projectId: "project", projectPath: "/repo", title: "Target", changeMode: "worktree", at: 2 });
+    const target = await service.createLineage({ requestId: "target-lineage", workItemId: "target-work" });
+    await service.joinLineage({ requestId: "map", workItemId: "work", lineageId: target.id, expectedRevision: target.revision, actor: "user" });
+    row = findContributionByRun(db, "one")!;
+    expect(row).toMatchObject({ lineage_id: target.id, review_state: "pending", state: "ready" });
+    await expect(service.enqueueContribution({ requestId: "unreviewed-map", contributionId: row.id, expectedRevision: row.revision })).rejects.toThrow();
+    db.close();
+  });
+ });
+
+it("allows a fresh final review after a prior runtime gate failure", async () => {
+  const { db, service } = setup(); await service.bindRun({ workItemId: "work", runKey: "one" });
+  const row = findContributionByRun(db, "one")!;
+  db.prepare("UPDATE worktree_contributions SET state='integrated',head_sha='head' WHERE id=?").run(row.id);
+  db.prepare("UPDATE worktree_lineages SET integration_head_sha='head' WHERE id=?").run(row.lineage_id);
+  const { recordLineageGate } = await import("./worktree-integration-repo.ts");
+  recordLineageGate(db, { id: "runtime-failed", lineageId: row.lineage_id, name: "promotion_runtime", status: "failed", at: 50 });
+  let line = getLineageState(db, row.lineage_id).lineage!;
+  await service.reviewFinal({ requestId: "review-again", lineageId: line.id, expectedRevision: line.revision,
+    decision: "approved", actor: "user", summary: "fresh review" });
+  line = getLineageState(db, row.lineage_id).lineage!;
+  await expect(service.promote({ requestId: "promote-again", lineageId: line.id, expectedRevision: line.revision }))
+    .resolves.toMatchObject({ queue: expect.arrayContaining([expect.objectContaining({ kind: "lineage", state: "queued" })]) }); db.close();
+});
+
+it("invalidates explicit waivers when policy changes without a new contribution head", async () => {
+  let policyDigest = "policy-one";
+  const { db, service } = setup(async () => ({ policyDigest, allowed: false, mode: "enforced",
+    gates: [{ id: "tests", name: "Tests", status: "required_pending", reason: "missing" }] }));
+  await service.bindRun({ workItemId: "work", runKey: "one" }); service.transitionProvisioning("one", "active");
+  await service.collectRun("one", "completed"); let row = findContributionByRun(db, "one")!;
+  await expect(service.reviewContribution({ requestId: "policy-fail", contributionId: row.id, expectedRevision: row.revision,
+    decision: "approved", actor: "user", summary: "review" })).rejects.toMatchObject({ code: "gate_failed" });
+  row = findContributionByRun(db, "one")!;
+  await service.waiveGate({ requestId: "policy-waiver", scope: "contribution", lineageId: row.lineage_id,
+    contributionId: row.id, expectedRevision: row.revision, gateId: "tests", actor: "user", reason: "accepted" });
+  row = findContributionByRun(db, "one")!; policyDigest = "policy-two";
+  await expect(service.reviewContribution({ requestId: "new-policy", contributionId: row.id, expectedRevision: row.revision,
+    decision: "approved", actor: "user", summary: "review" })).rejects.toMatchObject({ code: "gate_failed" }); db.close();
 });

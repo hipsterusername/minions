@@ -15,6 +15,7 @@ export interface ModelValidationError {
   file: string;
   message: string;
   path?: string;
+  severity?: "warning" | "error";
 }
 
 export interface LoadedSystemModel {

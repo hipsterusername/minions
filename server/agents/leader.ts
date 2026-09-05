@@ -1,3 +1,6 @@
+import { readSkillSnapshot, selectSnapshotSkills } from "../skill-snapshot.ts";
+import { createLeaderProcedureTools } from "../leader-procedure-tools.ts";
+import { LEADER_PROCEDURE_TOOL_NAMES } from "../../shared/leader-procedures.ts";
 /**
  * Leader agent type — orchestrator that decomposes work and delegates
  * via MCP task-management tools.
@@ -11,7 +14,6 @@ import { createRenderToolsForLeader } from "../render-tools.ts";
 import { createSystemModelToolsForLeader } from "../system-model-tools/index.ts";
 import { createSkillAuthoringTools } from "../skill-authoring-tools.ts";
 import { resolveSystemModelRuntime, type SystemModelRuntime } from "../system-model/runtime.ts";
-import { gatedSurfaceGlobs } from "../system-model/applicability.ts";
 import { MINION_SYSTEM_PROMPT } from "./minion.ts";
 import { readSettings } from "../project-store.ts";
 import { createLeaderStateCallbacks } from "./leader-state-callbacks.ts";
@@ -42,30 +44,25 @@ import {
 } from "../skills.ts";
 import { getDetailedDiff } from "../worktree.ts";
 
-const SYSTEM_MODEL_TRUNCATION_POINTER =
-  "[system-model addendum truncated — use `query_system_model` to fetch omitted objects]";
-
 function buildSystemModelAddendum(runtime: SystemModelRuntime, graphMode = false): string {
   if (runtime.mode === "off" || !runtime.model) return "";
-  // Redesign §6: factual addendum listing gated surfaces, no "query for planning" mandate.
-  const globs = gatedSurfaceGlobs(runtime.model);
-  const surfaces = globs.length > 0 ? globs.join(", ") : "(none currently defined)";
+  const discovery = `## System Model
+
+Use \`query_system_model\` when architecture context would help: search compact cards by question or files, read selected ids with facets, and expand chosen relationships. Reading asserts relevance without another confirmation. Omitted facets return previews; follow page.nextCursor with the same arguments for more. Model snapshots are guidance; inspect current code and use \`check_freshness\` when needed.`;
   const workflow = graphMode
-    ? "For graph work, the semantic plan must identify gated files and Work Packet IDs for affected steps so the scheduler can inject frozen context. Direct `plan_task` and `assign_task` work remains available and computes the same packet requirement deterministically; pass `workPacketId` when assigning packet-scoped work."
-    : "You do not need to check preemptively: `plan_task` and `assign_task` compute this deterministically and tell you when a task hits one. When assigning a minion for packet-scoped work, pass `workPacketId` to `assign_task` so the stored Context Pack is injected.";
-  const addendum = `## System Model
-
-A system model is active. Gated surfaces — a work packet is required when a task touches them: ${surfaces}. ${workflow}
-
-Treat a Work Packet Context Pack as scoped, freshness-qualified guidance, not runtime truth. Hard constraints remain authoritative; inspect current code when guidance is stale, incomplete, or contradicted. Use acceptance coverage and open signals to decide what evidence to gather next. Record material observations with \`record_work_packet_evidence\`; never use confidence alone as authority.
-
-Terminal graph or task execution is not Work Packet closure. After the actual diff is stable, call \`reconcile_run\`. Resolve every acceptance-coverage gap and constraint verdict. If reconciliation reports \`systemModelUpdate.status = review_required\`, either update the smallest accurate \`.systemmodel\` objects and validate them, or rerun reconciliation with an evidence-backed \`no_change_needed\` assessment. Only then may the packet become reconciled.
-
-Tools (available, not mandated): \`query_system_model\` (scored, topK), \`create_work_packet\`, \`amend_work_packet\`, \`check_freshness\`, \`record_verification\`, \`record_work_packet_evidence\`, \`reconcile_run\`, \`record_constraint_verdicts\`, \`model_health\`.`;
+    ? "Graph steps declare affected files and associated Work Packet IDs; direct plan_task/assign_task remain available."
+    : "plan_task and assign_task report packet requirements for declared files.";
+  const requirements = runtime.mode === "enforced"
+    ? "Enforced runtime checks require a valid packet for gated assignments."
+    : "Advisory runtime checks report applicable packet guidance.";
+  const application = `Discovery does not create a Work Packet. ${workflow} ${requirements} Use \`create_work_packet\` for scoped work and pass workPacketId when assigning it. For an existing packet, record evidence and coverage, reconcile the stable actual diff, resolve constraint verdicts, and validate a model update or record an evidence-backed no_change_needed assessment before closure.`;
   const maxChars = runtime.model.policies.contextBudgets.leaderPromptAddendum * 4;
-  if (addendum.length <= maxChars) return addendum;
-  const bodyChars = Math.max(0, maxChars - SYSTEM_MODEL_TRUNCATION_POINTER.length - 1);
-  return `${addendum.slice(0, bodyChars)}\n${SYSTEM_MODEL_TRUNCATION_POINTER}`;
+  const full = `${discovery}\n\n${application}`;
+  if (full.length <= maxChars) return full;
+  // The configured budget controls optional context, not mandatory workflow.
+  // Reserve a complete compact procedure even when that budget is too small.
+  return "## System Model\n\n[Optional discovery detail omitted by context budget; mandatory procedure retained.]\n\n"
+    + "Use query_system_model for guidance and inspect current code. Runtime packet checks apply: create_work_packet for gated work; pass workPacketId with scoped files. Record evidence and coverage with record_work_packet_evidence. After a stable diff, reconcile_run, resolve constraint verdicts, and validate a model update or record evidence-backed no_change_needed before closure. Use load_procedure {id: reconciliation} for details when available.";
 }
 
 const SKILL_AUTHORING_TOOL_NAMES = [
@@ -85,6 +82,7 @@ function registeredPromptToolNames(
   planning: LeaderPlanningProfile,
 ): string[] {
   return [
+    ...LEADER_PROCEDURE_TOOL_NAMES,
     ...planning.taskToolNames,
     ...planning.planningToolNames,
     ...(ctx.worktreeIsolation && ctx.worktreeInfo ? ["request_approval"] : []),
@@ -100,8 +98,9 @@ function buildSkillsAddendum(
   planning: LeaderPlanningProfile,
 ): string {
   const projectPath = ctx.worktreeInfo?.projectPath ?? ctx.cwd;
-  const allSkills = loadAllSkills(projectPath);
-  const active = frozenSkillsAddendum || compileSkills(
+  const snapshot = ctx.skillSnapshotId ? readSkillSnapshot(projectPath, ctx.skillSnapshotId) : null;
+  const allSkills = snapshot?.skills ?? loadAllSkills(projectPath);
+  const active = snapshot ? compileSkills(selectSnapshotSkills(snapshot, ctx.skillIds ?? []), snapshot.values) : frozenSkillsAddendum || compileSkills(
     loadSkillsByIds(projectPath, ctx.skillIds ?? []),
     ctx.skillValues ?? {},
   );
@@ -136,8 +135,16 @@ const leaderAgent: AgentType = {
       hasCanonicalIdentity: Boolean(ctx.workItemId && ctx.runKey),
     });
     return composeLeaderPrompt({
-      builtInTools: tools ?? CLAUDE_LEADER_BUILT_IN_TOOLS,
-      registeredToolNames: registeredPromptToolNames(ctx, systemModelRuntime, planning),
+      builtInTools: (tools ?? CLAUDE_LEADER_BUILT_IN_TOOLS)
+        .filter(name => !ctx.effectiveCapabilities || ctx.effectiveCapabilities.allowedTools.includes(name)),
+      registeredToolNames: ctx.effectiveCapabilities
+        ? ctx.effectiveCapabilities.allowedTools.filter(name => name.startsWith("mcp__"))
+        : registeredPromptToolNames(ctx, systemModelRuntime, planning),
+      ...(ctx.effectiveCapabilities ? {
+        nativeFilesystem: ctx.effectiveCapabilities.nativeFilesystem,
+        filesystemScope: ctx.effectiveCapabilities.filesystemScope,
+        approvalPolicy: ctx.effectiveCapabilities.approvalPolicy,
+      } : {}),
       promptFeatureIds: planning.promptFeatureIds,
       roleSystemAddendum: roleSystemEnabled ? LEADER_ROLE_SYSTEM_PROMPT : "",
       skillsAddendum: buildSkillsAddendum(ctx, customization.skillsAddendum, planning),
@@ -183,6 +190,7 @@ const leaderAgent: AgentType = {
         MINION_SYSTEM_PROMPT,
         roleSystemEnabled,
       ),
+      skillSnapshotId: ctx.skillSnapshotId,
       defaultMinionSkillIds: ctx.skillIds ?? [],
       defaultMinionSkillValues: ctx.skillValues ?? {},
       systemModel: systemModelRuntime.mode !== "off" ? systemModelRuntime.model : null,
@@ -248,6 +256,7 @@ const leaderAgent: AgentType = {
       : [];
 
     const toolGroups: Record<string, import("../harness/types.ts").NormalizedToolDef[]> = {
+      "leader-procedures": createLeaderProcedureTools(),
       "task-manager": taskDefs,
       ...(planningDefs.length > 0 ? { "graph-planner": planningDefs } : {}),
       "render-dashboard": renderDefs,

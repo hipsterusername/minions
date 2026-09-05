@@ -8,6 +8,17 @@ const policies = [
 ];
 
 describe("checkFreshness", () => {
+  it.each(["code_coupled", "policy", "informational"] as const)("applies the %s policy class", async (freshnessClass) => {
+    clearFreshnessCache();
+    const report = await checkFreshness({ cwd: "/classes", headSha: "abc", mode: "advisory",
+      subjects: [{ objectId: "selected", objectFile: "selected.yaml", globs: ["server/code.ts"], freshnessClass }],
+      policies: [{ policyClass: freshnessClass, consequence: "required_agent_actions", requiredActions: ["Inspect the selected guidance"] }],
+      getTimestamps: async () => ({ modelTouchedAt: 1, codeTouchedAt: 2 }),
+    });
+    expect(report.requiredAgentActions).toEqual(["Inspect the selected guidance"]);
+    expect(report.objects[0]?.status).toBe(freshnessClass === "code_coupled" ? "stale" : "not_code_coupled");
+  });
+
   it("classifies fresh, stale, stale-blocked, and unknown subjects", async () => {
     clearFreshnessCache();
     const timestamps: FreshnessTimestampFn = async ({ objectFile }) => ({

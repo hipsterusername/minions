@@ -1,3 +1,4 @@
+import { readSkillSnapshot, saveSkillSnapshot, selectSnapshotSkills } from "../skill-snapshot.ts";
 import { execFile as execFileCallback } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -9,7 +10,7 @@ import type {
   SemanticTaskGraphPlan,
   TaskGraphPlanReviewRequirement,
 } from "../../shared/task-graph-planning-contracts.ts";
-import { compileSkillTemplate, loadSkillsByIds } from "../skills.ts";
+import { compileSkills, loadSkillsByIds } from "../skills.ts";
 import { computePacketApplicability } from "../system-model/applicability.ts";
 import { loadSystemModel } from "../system-model/load.ts";
 import { getWorkPacket } from "../system-model/store.ts";
@@ -31,6 +32,7 @@ export interface PlanningSourceContext {
   worktreeIdentity: string;
   connectedContext: string | null;
   skillIds: readonly string[];
+  skillSnapshotId?: string | undefined;
   skillValues: Record<string, Record<string, string>>;
   harnessName: string;
   allowedTools: readonly string[];
@@ -68,7 +70,17 @@ export async function capturePlanningSource(
 ): Promise<CapturedPlanningSource> {
   const repository = await inspectRepository(input.cwd);
   const canvasSources = splitConnectedContext(input.connectedContext);
-  const loadedSkills = loadSkillsByIds(input.projectPath, input.skillIds);
+  const skillSnapshot = input.skillSnapshotId ? readSkillSnapshot(input.projectPath, input.skillSnapshotId) : null;
+  const requestedSkillIds = [...new Set(input.plan.steps.flatMap(step => step.skillIds ?? [...input.skillIds]))];
+  const loadedSkills = skillSnapshot ? selectSnapshotSkills(skillSnapshot, requestedSkillIds)
+    : loadSkillsByIds(input.projectPath, requestedSkillIds);
+  for (const id of requestedSkillIds) {
+    if (!loadedSkills.some(skill => skill.id === id)) {
+      throw new TaskGraphValidationError(`Selected skill is unavailable in the frozen catalog: ${id}`);
+    }
+  }
+  const skillSnapshotId = input.skillSnapshotId ?? (loadedSkills.length
+    ? saveSkillSnapshot(input.projectPath, { version: 1, skills: loadedSkills, values: input.skillValues }) : undefined);
   const storedPacket = input.plan.workPacketId
     ? getWorkPacket(input.projectPath, input.plan.workPacketId) : null;
   const settings = readSettings(input.projectPath);
@@ -92,7 +104,7 @@ export async function capturePlanningSource(
   const policy = planningPolicy(input, storedPacket, settings.systemModel ?? "off", loadedModel);
   const compiledSkills = loadedSkills.map((skill) => {
     const values = input.skillValues[skill.id] ?? {};
-    const content = compileSkillTemplate(skill, values);
+    const content = compileSkills([skill], { [skill.id]: values });
     return {
       skillId: skill.id,
       version: contentHash({ skill }).slice("sha256:".length, "sha256:".length + 16),
@@ -110,6 +122,7 @@ export async function capturePlanningSource(
     worktreeIdentity: input.worktreeIdentity,
     systemModelDigest,
     connectedRefs,
+    skillSnapshotId,
     compiledSkills: compiledSkills.map(({ content: _content, ...skill }) => skill),
     workPacket: storedPacket?.packet ?? null,
     harnessName: input.harnessName,
@@ -133,6 +146,7 @@ export async function capturePlanningSource(
     systemModelDigest,
     workPacketRevisionId: storedPacket ? contentHash(storedPacket.packet) : null,
     connectedContext: connectedRefs,
+    skillSnapshotId,
     compiledSkills: compiledSkills.map(({ content: _content, ...skill }) => skill),
     harnessPolicyDigest: contentHash({ harnessName: input.harnessName }),
     toolPolicyDigest: contentHash([...input.allowedTools].sort()),
@@ -157,7 +171,7 @@ export async function capturePlanningSource(
       classification: "internal",
       content: source.content,
     });
-    for (const skill of compiledSkills) scopedSources.push({
+    for (const skill of compiledSkills.filter(skill => (step.skillIds ?? input.skillIds).includes(skill.skillId))) scopedSources.push({
       sourceSnapshotId: snapshotId,
       nodeId,
       sourceId: `skill:${skill.skillId}`,

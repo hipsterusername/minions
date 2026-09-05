@@ -11,6 +11,7 @@ import { minionSkillMcpToolNames } from "../agents/minion-tool-policy.ts";
 import { TaskGraphPlanningCoordinator } from "./planning-coordinator.ts";
 import { leaderOrchestrationModeForRun, planningContextForRun } from "./planning-mode.ts";
 import type { TaskGraphService } from "./service.ts";
+import { leaderProcedurePointer } from "../../shared/leader-procedures.ts";
 
 export function installTaskGraphPlanningRuntime(input: {
   db: Database.Database;
@@ -40,6 +41,7 @@ export function installTaskGraphPlanningRuntime(input: {
         connectedContext: getSessionCanvasContext(primaryRunKey)
           ?? planningContextForRun(input.db, primaryRunKey),
         skillIds: host.skillIds,
+        skillSnapshotId: host.skillSnapshotId,
         skillValues: host.skillValues,
         harnessName: host.harnessName,
         allowedTools: host.toolAllowlist ?? [
@@ -67,7 +69,7 @@ export function installTaskGraphPlanningRuntime(input: {
         opts: {
           sessionKey: host.id,
           invocationKind: "resume_open_run",
-          prompt: `The execution graph is now ${plan.state}. Call get_graph_plan, inspect the canonical runtime and evidence, then synthesize the final response.`,
+          prompt: `The execution graph is now ${plan.state}. Call get_graph_plan, inspect the canonical runtime, acceptance coverage, committed artifacts and independent verification. Identify unfinished obligations and failed or inconclusive checks; remediate within authorized scope or report the concrete blocker before finalizing. Synthesize the final response only when the objective is satisfied or honestly explain why it remains incomplete. ${leaderProcedurePointer("adjudication")} If a Work Packet is associated, load the reconciliation procedure before closure.`,
           cwd: host.cwd,
           resumeId: host.sessionId ?? undefined,
           harness: host.harnessName,
@@ -135,4 +137,4 @@ function attentionPrompt(
   }
 }
 
-const genericAttentionPrompt="The execution graph is blocked. Call get_graph_plan, inspect the canonical blocker and evidence, then resolve it or ask the user one focused question.";
+const genericAttentionPrompt=`The execution graph is blocked. Call get_graph_plan, inspect the canonical blocker and evidence, then resolve it or ask the user one focused question. ${leaderProcedurePointer("adjudication")}`;

@@ -24,7 +24,7 @@ import {
 
 const MAX_HANDOFF_CHARS = 4_000;
 const RECOMMEND_REMINDER =
-  "System reminder: Context is above the proactive checkpoint recommendation threshold. Call `checkpoint_session` at the next safe boundary to continue in a fresh thread.";
+  "System reminder: Context is above the proactive checkpoint recommendation threshold. Call `checkpoint_session` at the next safe boundary. Include the objective, user constraints and corrections, decisions, completed work, exact artifact paths, verification evidence, unresolved risks, and the next concrete action.";
 
 export interface ProactiveCompactionState {
   setting: ProactiveCompactionSetting;
@@ -129,7 +129,7 @@ export function buildPendingCompactionStartOptions(
   if (priorSessionId) host.proactiveCompaction.oldSessionIds.push(priorSessionId);
   const checkpoint = compileContextCheckpoint(host, {
     trigger: "proactive",
-    originalPrompt: opts.prompt,
+    originalPrompt: opts.continuitySource === "system" ? "" : opts.prompt,
     modelHandoff: manual || handoff || "Automatic checkpoint at idle boundary.",
     usage: forced,
   });

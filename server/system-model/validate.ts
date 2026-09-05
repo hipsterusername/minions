@@ -1,6 +1,7 @@
 import type { Constraint, SystemModelObject } from "../../shared/system-model/index.ts";
 import type { LoadedSystemModel, ModelValidationError } from "./types.ts";
 import { globMatches } from "./match.ts";
+import { validateFileAnchors } from "./file-anchors.ts";
 
 export const OVERBREADTH_THRESHOLD = 0.4;
 
@@ -18,8 +19,9 @@ export function computeOverbreadth(model: LoadedSystemModel, trackedFiles: strin
   });
 }
 
-export function validateLoadedSystemModel(model: LoadedSystemModel, trackedFiles: string[] = []): ModelValidationError[] {
+export function validateLoadedSystemModel(model: LoadedSystemModel, trackedFiles?: string[]): ModelValidationError[] {
   const errors: ModelValidationError[] = [];
+  if (trackedFiles) errors.push(...validateFileAnchors(model, trackedFiles));
   for (const object of model.objectsById.values()) {
     if (hasDomain(object)) checkRefs(errors, model, object.id, "domain", [object.domain], "domain.");
   }
@@ -72,7 +74,7 @@ export function validateLoadedSystemModel(model: LoadedSystemModel, trackedFiles
       if (source?.type === "capability" || source?.type === "flow") validateCrossDomain(errors, model, source, risk.id, "risk");
     }
   }
-  for (const issue of computeOverbreadth(model, trackedFiles)) {
+  for (const issue of computeOverbreadth(model, trackedFiles ?? [])) {
     errors.push({
       file: issue.objectId,
       path: issue.kind === "gate" ? "requiredWhen.files" : "appliesTo.files",

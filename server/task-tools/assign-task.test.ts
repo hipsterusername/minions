@@ -1,3 +1,5 @@
+import { captureSkillSnapshot, readSkillSnapshot } from "../skill-snapshot.ts";
+import { createSkillRetrievalTools } from "../skill-retrieval.ts";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
@@ -27,6 +29,7 @@ interface CapturedSpawn {
   model?: string;
   harness?: string;
   skillIds?: string[];
+  skillSnapshotId?: string;
 }
 
 interface Harness {
@@ -84,7 +87,9 @@ async function callAssign(
     timeout_minutes?: number;
     ownedPaths?: string[];
     include_canvas_context?: boolean;
+    inheritSkills?: boolean;
     skillIds?: string[];
+  skillSnapshotId?: string;
     skillValues?: Record<string, Record<string, string>>;
     workPacketId?: string;
   },
@@ -115,6 +120,35 @@ describe("assign_task", () => {
 
   afterEach(() => {
     fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  it.each([["src", "src/child.ts"], ["src/**/*.ts", "src/deep/child.ts"], ["./src/a.ts", "src/a.ts"]])(
+    "rejects overlapping directory, glob, and normalized scopes %s / %s", async (first, second) => {
+      await callAssign(harness.ctx, { taskId:"owner",title:"Owner",description:"work",priority:"high",ownedPaths:[first] });
+      await expect(callAssign(harness.ctx, { taskId:"conflict",title:"Conflict",description:"work",priority:"high",ownedPaths:[second] }))
+        .rejects.toThrow(/overlaps active task owner/);
+      expect(harness.spawns).toHaveLength(1);
+    });
+
+  it("reserves scopes before awaiting child allocation", async () => {
+    let release!: () => void;
+    const original=harness.ctx.startMinionSession;
+    harness.ctx.startMinionSession=async input=>{
+      await new Promise<void>(resolve=>{release=resolve;});
+      return await original(input) ?? {sessionKey: input.sessionKey,harness:"codex",model:"test",permissionMode:"auto"};
+    };
+    const first=callAssign(harness.ctx,{taskId:"pending",title:"Pending",description:"work",priority:"high",ownedPaths:["src"]});
+    await expect(callAssign(harness.ctx,{taskId:"other",title:"Other",description:"work",priority:"high",ownedPaths:["src/a.ts"]}))
+      .rejects.toThrow(/allocation is pending/);
+    release(); await first;
+  });
+
+  it("rejects a gated enforced assignment without a Work Packet before mutation", async () => {
+    writeSettings(projectDir,{systemModel:"enforced"}); harness.ctx.systemModel=FIXTURE_MODEL;
+    await expect(callAssign(harness.ctx,{taskId:"gated",title:"Gated",description:"work",priority:"high",ownedPaths:["server/a.ts"]}))
+      .rejects.toThrow(/Work Packet is required/);
+    expect(harness.spawns).toHaveLength(0);
+    expect(harness.ctx.taskState.tasks.has("gated")).toBe(false);
   });
 
   it("rejects garbage input before spawning a minion — parse guard", async () => {
@@ -211,8 +245,27 @@ describe("assign_task", () => {
     expect(sent).toContain("# Active Skills");
     expect(sent).toContain("## Skill: Lint Cleanup");
     expect(sent).toContain("Run the linter and fix every warning.");
-    expect(sent).toContain("Warnings are release blockers.");
+    expect(sent).not.toContain("Warnings are release blockers.");
     expect(sent.startsWith(BASE_MINION_PROMPT)).toBe(true);
+  });
+
+  it("inherits frozen definitions and persists task value overrides for child retrieval", async () => {
+    writeSkills(projectDir, [{ id: "review", name: "Review", description: "Review", category: "code", icon: "*", accentColor: "#fff",
+      template: "Review {{target}}", variables: [], subskills: [{ id: "details", name: "Details", description: "Rules", body: "ORIGINAL_RULES" }] }]);
+    harness.ctx.skillSnapshotId = captureSkillSnapshot(projectDir, { review: { target: "API" } });
+    harness.ctx.defaultMinionSkillIds = ["review"];
+    harness.ctx.defaultMinionSkillValues = { review: { target: "API" } };
+    writeSkills(projectDir, []);
+    await callAssign(harness.ctx, { taskId: "frozen", title: "Review", description: "Review it", priority: "low",
+      skillValues: { review: { target: "UI" } } });
+    const child = harness.spawns[0]!;
+    expect(child.systemPrompt).toContain("Review UI");
+    expect(child.systemPrompt).toContain("load_subskill");
+    const snapshot = readSkillSnapshot(projectDir, child.skillSnapshotId!);
+    expect(snapshot.values.review).toEqual({ target: "UI" });
+    const def = createSkillRetrievalTools({ projectPath: projectDir, skillSnapshotId: child.skillSnapshotId })
+      .find(tool => tool.name === "load_subskill")!;
+    expect(JSON.stringify(await def.handler({ skillId: "review", subskillId: "details" }))).toContain("ORIGINAL_RULES");
   });
 
   it("inherits Leader-selected skills when assign_task omits skillIds", async () => {
@@ -242,6 +295,10 @@ describe("assign_task", () => {
     expect(harness.ctx.taskState.tasks.get("t-inherited")?.skillIds).toEqual(["review"]);
     expect(harness.emissions.find((entry) => entry.payload.type === "minion_spawned")?.payload)
       .toMatchObject({ skillIds: ["review"] });
+    await callAssign(harness.ctx, { taskId: "unarmed", title: "Mechanical change", description: "details",
+      priority: "medium", inheritSkills: false, skillIds: [] });
+    expect(harness.spawns[1]!.skillIds).toEqual([]);
+    expect(harness.spawns[1]!.systemPrompt).not.toContain("## Skill: Code Review");
   });
 
   it("inherits configured values for Leader-selected skill templates", async () => {
@@ -869,7 +926,7 @@ describe("assign_task", () => {
     expect(prompt).toContain("- src/bar.ts");
   });
 
-  it("warns in the tool result when two concurrent tasks share an ownedPath", async () => {
+  it("rejects before spawning when two concurrent tasks share an ownedPath", async () => {
     await callAssign(harness.ctx, {
       taskId: "t-overlap-a",
       title: "Task A",
@@ -878,15 +935,11 @@ describe("assign_task", () => {
       ownedPaths: ["src/foo.ts", "src/shared.ts"],
     });
 
-    const { text } = await callAssign(harness.ctx, {
-      taskId: "t-overlap-b",
-      title: "Task B",
-      description: "details",
-      priority: "low",
-      ownedPaths: ["src/bar.ts", "src/shared.ts"],
-    });
-
-    expect(text).toContain("Warning: ownedPaths overlap with running task t-overlap-a: src/shared.ts");
+    await expect(callAssign(harness.ctx, {
+      taskId: "t-overlap-b", title: "B", description: "Conflicting write", priority: "high",
+      ownedPaths: ["src/shared.ts"],
+    })).rejects.toThrow(/overlaps active task t-overlap-a/);
+    expect(harness.ctx.taskState.tasks.has("t-overlap-b")).toBe(false);
   });
 
   it("does not warn when the other task is completed (not running/starting)", async () => {

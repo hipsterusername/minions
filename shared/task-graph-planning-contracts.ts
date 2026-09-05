@@ -47,6 +47,8 @@ export const semanticGraphPlanStepSchema = z.object({
   objective: z.string().trim().min(1),
   acceptanceCriteria: z.array(z.string().trim().min(1)).min(1),
   constraints: z.array(z.string().trim().min(1)).default([]),
+  skillIds: z.array(z.string().trim().min(1)).optional()
+    .describe("Exact skills for this step from the frozen catalog. Omit to inherit selected Leader skills; [] excludes all optional playbooks. Project constraints still apply."),
   dependsOn: z.array(semanticGraphDependencySchema).default([]),
   contextSelectors: z.array(z.string().trim().min(1)).default([])
     .describe("Task-scoped source selectors. Prefix connected-canvas selectors with canvas:; use repo: for repository paths or symbols."),

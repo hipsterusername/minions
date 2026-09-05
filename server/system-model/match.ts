@@ -151,11 +151,17 @@ function countHits(haystack: Set<string>, needles: Set<string>): number {
 }
 
 export function globMatches(glob: string, file: string): boolean {
-  const source = glob.split(/[/\\]+/).map(escapeGlobPart).join("[/\\\\]");
-  return new RegExp(`^${source}$`).test(file);
-}
-
-function escapeGlobPart(part: string): string {
-  if (part === "**") return ".*";
-  return part.replace(/[.+^${}()|[\]\\]/g, "\\$&").replaceAll("\\*", "[^/\\\\]*");
+  const pattern = glob.replaceAll("\\", "/").replace(/^\.\//, "");
+  let source = "";
+  for (let i = 0; i < pattern.length; i++) {
+    const char = pattern[i]!;
+    if (char === "*" && pattern[i + 1] === "*") {
+      i++;
+      if (pattern[i + 1] === "/") { source += "(?:.*/)?"; i++; }
+      else source += ".*";
+    } else if (char === "*") source += "[^/]*";
+    else if (char === "?") source += "[^/]";
+    else source += char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(`^${source}$`).test(file.replaceAll("\\", "/").replace(/^\.\//, ""));
 }

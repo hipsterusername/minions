@@ -30,7 +30,7 @@ export interface TaskGraphChildLauncher {
     attemptNumber:number;prompt:string;requestId:string;harness?:string;model?:string;
     resumeId?:string;invocationKind?:"new_run"|"resume_open_run";
     executorClass?:"mechanical"|"standard"|"reasoning";toolAllowlist?:string[];
-    skillIds?:string[];
+    skillIds?:string[]; skillSnapshotId?: string | undefined;
     sandboxPolicy?:import("../../shared/workspace-contracts.ts").SandboxPolicy}):Promise<WorkItemRunSnapshot>;
   cancelChildRun?(runKey:string):void|Promise<void>;
 }
@@ -347,12 +347,11 @@ export class TaskGraphService {
       outputSchemas:node.outputSchemas,allowedTools:node.allowedTools,
       ownershipRequest:node.ownershipRequest,sessionAffinity:node.sessionAffinity}:null;
   }
-
   stageArtifactForSession(sessionRunKey:string,input:ArtifactStageInput):{artifactId:string;staged:boolean} {
     const attempt=this.attemptForSession(sessionRunKey,["running","waiting"]);
     if (!attempt) throw new TaskGraphValidationError("session is not a current graph attempt");
     const node=this.repo.getRevision(String(attempt.revision_id)).nodes.find(item=>item.id===attempt.node_id)!;
-    const stored=storeTaskGraphArtifactForNode(this.options.db,String(attempt.run_id),node,input);
+    const stored=storeTaskGraphArtifactForNode(this.options.db,String(attempt.run_id),node,input,this.repo.getRevision(String(attempt.revision_id)));
     const artifactId=`artifact_${contentHash({attemptId:attempt.id,outputName:stored.outputName,
       contentHash:stored.contentHash}).slice("sha256:".length)}`;
     const staged=this.evidence.stageArtifact({runId:String(attempt.run_id),attemptId:String(attempt.id),

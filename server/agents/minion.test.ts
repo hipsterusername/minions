@@ -67,11 +67,14 @@ describe("minion task lifecycle", () => {
     expect(startMinionSession).toHaveBeenCalledWith({
       sessionKey: "minion-1",
       invocationKind: "resume_open_run",
-      prompt:
-        "Your task is still open. Call mcp__minion-status__report_done with a one-line summary of what you completed, or report_fail with what blocked you. Do not start new work.",
+      prompt: expect.stringContaining("Continue unfinished authorized work"),
       cwd: "/tmp/project",
       systemPrompt: armedPrompt,
     });
+    const nudge = startMinionSession.mock.calls[0]![0].prompt;
+    expect(nudge).toContain("only when verified and submitted");
+    expect(nudge).toContain("report_blocked and end this turn without a terminal report");
+    expect(nudge).toContain("preserve partial evidence and remaining gaps");
   });
 
   it("completes the second silent clean completion after a nudge — the clean terminal, not the report, decides", async () => {
@@ -298,7 +301,9 @@ describe("minion task lifecycle", () => {
 describe("minion sub-skill tool group", () => {
   it("derives exact skill tools from the armed skill identities", () => {
     expect(minionSkillMcpToolNames(["code-review"])).toEqual([
+      "mcp__skills__load_skill",
       "mcp__skills__load_subskill",
+      "mcp__skills__load_skill_attachment",
     ]);
     expect(minionSkillMcpToolNames(["skill-builder"])).toContain(
       "mcp__skills__create_skill",
@@ -354,7 +359,7 @@ describe("minion sub-skill tool group", () => {
     const minion = getAgentType("minion");
     // ctxWith's forEachLeaderTaskState is a no-op → no parent task at all.
     const { toolGroups, mcpToolNames } = minion.getToolGroups(ctxWith());
-    expect(toolGroups["skills"]?.map((t) => t.name)).toEqual(["load_subskill"]);
+    expect(toolGroups["skills"]?.map((t) => t.name)).toEqual(["load_skill", "load_subskill", "load_skill_attachment"]);
     expect(mcpToolNames).toContain("mcp__skills__load_subskill");
     expect(mcpToolNames).not.toContain("mcp__skills__create_skill");
     expect(mcpToolNames).not.toContain("mcp__skills__list_skills");
@@ -365,7 +370,7 @@ describe("minion sub-skill tool group", () => {
     const { toolGroups, mcpToolNames } = minion.getToolGroups(
       ctxWithArmedSkills(["code-review"]),
     );
-    expect(toolGroups["skills"]?.map((t) => t.name)).toEqual(["load_subskill"]);
+    expect(toolGroups["skills"]?.map((t) => t.name)).toEqual(["load_skill", "load_subskill", "load_skill_attachment"]);
     expect(mcpToolNames).not.toContain("mcp__skills__create_skill");
   });
 
@@ -375,7 +380,9 @@ describe("minion sub-skill tool group", () => {
       ctxWithArmedSkills(["skill-builder"]),
     );
     expect(toolGroups["skills"]?.map((t) => t.name)).toEqual([
+      "load_skill",
       "load_subskill",
+      "load_skill_attachment",
       "list_skills",
       "get_skill",
       "create_skill",

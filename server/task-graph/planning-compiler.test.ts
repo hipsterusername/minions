@@ -4,6 +4,7 @@ import type { AgentHarness } from "../harness/types.ts";
 import type { SemanticTaskGraphPlan } from "../../shared/task-graph-planning-contracts.ts";
 import { compileSemanticGraphPlan } from "./planning-compiler.ts";
 import { validateTaskGraphNodePolicy } from "./execution-policy.ts";
+import { minionSkillMcpToolNames } from "../agents/minion-tool-policy.ts";
 
 function plan(): SemanticTaskGraphPlan {
   return {
@@ -112,16 +113,18 @@ describe("semantic graph-plan compiler", () => {
     expect(()=>compile(invalid)).not.toThrow();
   });
 
-  it("accepts omitted tool restrictions for a harness with native filesystem access",()=>{
+  it.each([{skillIds:[]}, {skillIds:["skill-builder"]}])(
+    "accepts inherited Codex tools with skills $skillIds",({skillIds})=>{
     const codex=({name:"codex",builtInTools:[],capabilities:{mutationInterception:"observe_only",
       builtInFilesystem:true,
       sandboxEnforcement:{filesystem:["read-only","workspace-write"],approval:true}}}) as unknown as AgentHarness;
     const compileForCodex=(value:SemanticTaskGraphPlan)=>compileSemanticGraphPlan({
       workItemId:"work",workspaceId:"workspace",primaryRunKey:"primary",proposalRevision:1,
-      plan:value,defaultHarness:"codex",defaultAllowedTools:[],
+      plan:value,defaultHarness:"codex",defaultAllowedTools:minionSkillMcpToolNames(skillIds),
       validateNodePolicy:(node)=>validateTaskGraphNodePolicy(node,()=>codex),
     });
-    expect(()=>compileForCodex(plan())).not.toThrow();
+    expect(compileForCodex(plan()).revision.nodes[0]!.allowedTools)
+      .toEqual(minionSkillMcpToolNames(skillIds));
     const guessed=plan();
     guessed.steps[0]={...guessed.steps[0]!,allowedTools:["shell"]};
     expect(()=>compileForCodex(guessed))

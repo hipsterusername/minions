@@ -31,10 +31,11 @@ export const removeSession: CommandHandler = (ctx, cmd, ws) => {
       });
       return;
     }
-    host.terminate("remove", {
+    host.markRemoved();
+    void host.terminate("remove", {
       bus: ctx.bus,
       forEachLeaderTaskState: ctx.registry.forEachLeaderTaskState,
-    });
+    }).catch((error: unknown) => log.warn("session_remove_shutdown_failed", { sessionKey: host.id, error }));
 
     if (host.worktree) {
       const { path: wtPath, projectPath: wtProject } = host.worktree;

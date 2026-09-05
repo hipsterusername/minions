@@ -14,6 +14,7 @@ export interface RunContinuationInput {
   runKey: string;
   prompt: string;
   displayPrompt?: string;
+  continuitySource?: "system";
   skillIds?: string[];
   skillValues?: Record<string, Record<string, string>>;
 }

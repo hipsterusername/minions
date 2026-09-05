@@ -18,7 +18,7 @@ export interface TaskGraphArtifactReference {
   sourceSnapshotId:string;
 }
 
-interface AuthorizedArtifact { row:Row;reference:TaskGraphArtifactReference }
+interface AuthorizedArtifact { row:Row;reference:TaskGraphArtifactReference;contracts?:unknown[] }
 
 /** Return prompt-safe metadata for only the immutable inputs authorized to this session. */
 export function taskGraphArtifactsForSession(
@@ -41,6 +41,9 @@ export function readTaskGraphArtifactForSession(service:TaskGraphService,session
   const metadata=metadataOf(authorized.row);
   const storageRef=metadata["storageRef"];
   if (typeof storageRef!=="string") throw new TaskGraphValidationError("artifact storage is unavailable");
+  for (const contract of authorized.contracts ?? []) readStoredTaskGraphArtifact({storageRef,
+    contentHash:authorized.reference.contentHash,byteSize:authorized.reference.byteSize,
+    offset:0,maxBytes:1,contract});
   return {...authorized.reference,...readStoredTaskGraphArtifact({storageRef,
     contentHash:authorized.reference.contentHash,byteSize:authorized.reference.byteSize,
     offset:input.offset,maxBytes:input.maxBytes})};
@@ -95,7 +98,9 @@ function attemptInputs(service:TaskGraphService,attempt:Row):AuthorizedArtifact[
         AND newer.node_id=producer.node_id AND newer.attempt_number>producer.attempt_number)
       ORDER BY ar.committed_at DESC,ar.id DESC LIMIT 1`).get(attempt["run_id"],edge.sourceNodeId,
       edge.sourceOutput,attempt["run_source_snapshot_id"]) as Row|undefined;
-    if (row) results.push({row,reference:safeArtifactReference(row,edge.targetInput)});
+    const consumer = spec.nodes.find(node => node.id === edge.targetNodeId);
+    if (row) results.push({row,reference:safeArtifactReference(row,edge.targetInput),
+      contracts: [consumer?.inputBindings[edge.targetInput!]]});
   }
   return uniqueArtifacts(results);
 }
@@ -113,8 +118,13 @@ function verifierInputs(service:TaskGraphService,request:Row):AuthorizedArtifact
 }
 
 function uniqueArtifacts(items:AuthorizedArtifact[]):AuthorizedArtifact[] {
-  const seen=new Set<string>();
-  return items.filter(item=>!seen.has(item.reference.artifactId) && Boolean(seen.add(item.reference.artifactId)));
+  const seen=new Map<string,AuthorizedArtifact>();
+  for (const item of items) {
+    const prior=seen.get(item.reference.artifactId);
+    if (prior) prior.contracts=[...(prior.contracts??[]),...(item.contracts??[])];
+    else seen.set(item.reference.artifactId,item);
+  }
+  return [...seen.values()];
 }
 
 function metadataOf(row:Row):Row {

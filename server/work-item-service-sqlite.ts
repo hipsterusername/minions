@@ -1,3 +1,5 @@
+import type { WorkItemInvocation } from "./work-item-invocation.ts";
+export type { WorkItemInvocation } from "./work-item-invocation.ts";
 import type Database from "better-sqlite3";
 import type { Bus } from "./bus.ts";
 import {
@@ -26,26 +28,15 @@ import { attachWorkItemBinding, detachWorkItemBinding } from "./work-item-bindin
 import { getRunByStartRequest, listWorkItemBindings, listWorkItemRunsPage, listWorkItemsPage } from "./work-item-query-repo.ts";
 import { WorkItemServiceError, type WorkItemService } from "./work-item-service.ts";
 import { executeWorkItemCommand, findCommandResult } from "./work-item-command-ledger.ts";
+import { getWorkItemReceipt, saveWorkItemReceipt } from "./work-item-receipts.ts";
 import { emitBindingChanged, emitItemChanged, emitRunChanged } from "./work-item-service-events.ts";
+import { buildRunHandoff, inheritRunContinuity } from "./work-item-handoff.ts";
 import { compatibleResumeId, resolvePrimaryRunConfig } from "./work-item-run-config.ts";
 import { resolveWorkItemMutation } from "./work-item-archive.ts";
 import { continueChildWorkItemRun, continueWorkItemIntent, type RunContinuationInput } from "./work-item-continuation.ts";
 import { bindingSnapshot, itemSnapshot, runSnapshot } from "./work-item-snapshots.ts";
 import { resolveWorkItemProjectIdentity } from "./work-item-project.ts";
 
-export interface WorkItemInvocation {
-  requestId?: string; workItemId: string; runKey: string; prompt: string; resumeId?: string;
-  displayPrompt?: string;
-  invocationKind: "new_run" | "resume_open_run";
-  parentRunKey?: string; taskId?: string;
-  systemPrompt?: string; model?: string; thinkingConfig?: ThinkingConfig;
-  attachments?: import("./session-host-types.ts").ImageAttachment[];
-  harness?: string; permissionMode?: string;
-  sandboxPolicy?: import("../shared/workspace-contracts.ts").SandboxPolicy;
-  executorClass?: "mechanical" | "standard" | "reasoning"; skillIds?: string[]; skillValues?: Record<string, Record<string, string>>;
-  toolAllowlist?: string[];
-  plannedContribution?: import("./worktree-create.ts").PlannedWorktree & { resolutionTargetRef?: string; resolutionKind?: "contribution" | "lineage" };
-}
 export interface SqliteWorkItemServiceOptions {
   db: Database.Database; bus: Bus;
   generateKey: (kind: "work_item" | "run", requestId: string) => string;
@@ -78,6 +69,12 @@ export class SqliteWorkItemService implements WorkItemService {
     });
   }
   getSync(id: string): WorkItemDetailSnapshot | null { return this.detail(id); }
+  saveCommandResponse(requestId: string, response: Record<string, unknown>): void {
+    saveWorkItemReceipt(this.options.db, requestId, response, this.now());
+  }
+  getCommandResponse(requestId: string): Record<string, unknown> | null {
+    return getWorkItemReceipt(this.options.db, requestId);
+  }
   latestOrThrow(id: string): WorkItemDetailSnapshot {
     const detail = this.detail(id);
     if (!detail) throw new WorkItemServiceError("not_found", `Work item ${id} not found`, null);
@@ -131,7 +128,7 @@ export class SqliteWorkItemService implements WorkItemService {
       ? JSON.stringify({ harness: previous.harness_name, ...(previous.model ? { model: previous.model } : {}) })
       : null);
     try {
-      const resolved = resolvePrimaryRunConfig(inherited, input);
+      const resolved = resolvePrimaryRunConfig(inheritRunContinuity(this.options.db, previous, inherited), input);
       const ledger = executeWorkItemCommand(this.options.db, { requestId: input.requestId,
         workItemId: input.workItemId, command: "start_run", payload: input, at: this.now() }, () =>
         startWorkItemIteration(this.options.db, {
@@ -155,12 +152,14 @@ export class SqliteWorkItemService implements WorkItemService {
       try {
         const { config } = resolvePrimaryRunConfig(started.run!.run_config_json, {});
         const resumeId = compatibleResumeId(previous, config);
+        const freshThreadPrompt = previous ? buildRunHandoff(this.options.db, previous, config, input.prompt) : undefined;
         const plannedContribution = started.workItem.change_mode === "worktree"
           ? await this.options.bindWorktreeRun?.({ workItemId: input.workItemId,
               runKey: started.run!.session_key }) : undefined;
         await (this.options.ensureRunLaunched ?? this.options.launchRun)({
           workItemId: input.workItemId, runKey: started.run!.session_key,
-          prompt: input.prompt, invocationKind: "new_run",
+          prompt: !resumeId ? freshThreadPrompt ?? input.prompt : input.prompt, invocationKind: "new_run",
+          freshThreadPrompt,
           ...(input.displayPrompt ? { displayPrompt: input.displayPrompt } : {}),
           ...(input.skillIds !== undefined ? { skillIds: input.skillIds } : {}),
           ...(input.skillValues !== undefined ? { skillValues: input.skillValues } : {}),
@@ -211,6 +210,7 @@ export class SqliteWorkItemService implements WorkItemService {
         const continuation = {
           workItemId: input.workItemId, runKey: input.runKey, prompt: input.prompt,
           invocationKind: "resume_open_run",
+          continuitySource: input.continuitySource,
           ...(input.displayPrompt ? { displayPrompt: input.displayPrompt } : {}),
           ...(input.skillIds !== undefined ? { skillIds: input.skillIds } : {}),
           ...(input.skillValues !== undefined ? { skillValues: input.skillValues } : {}),
@@ -339,7 +339,7 @@ export class SqliteWorkItemService implements WorkItemService {
     systemPrompt?: string; model?: string; thinkingConfig?: ThinkingConfig; harness?: string;
     permissionMode?: string; sandboxPolicy?: import("../shared/workspace-contracts.ts").SandboxPolicy;
     executorClass?: "mechanical" | "standard" | "reasoning";
-    skillIds?: string[]; toolAllowlist?: string[]; }) {
+    skillIds?: string[]; skillSnapshotId?: string | undefined; toolAllowlist?: string[]; }) {
     const runKey = this.options.generateKey("run", input.requestId);
     const ledger = executeWorkItemCommand(this.options.db, { requestId: input.requestId,
       workItemId: input.workItemId, command: "start_child_run", payload: input, at: this.now() }, () =>
@@ -365,7 +365,7 @@ export class SqliteWorkItemService implements WorkItemService {
           ...(input.resumeId?{resumeId:input.resumeId}:{}),systemPrompt: input.systemPrompt,
           model: input.model, thinkingConfig: input.thinkingConfig, harness: input.harness,
           permissionMode: input.permissionMode,...(input.sandboxPolicy?{sandboxPolicy:input.sandboxPolicy}:{}),
-          executorClass: input.executorClass, skillIds: input.skillIds,
+          executorClass: input.executorClass, skillIds: input.skillIds, skillSnapshotId: input.skillSnapshotId,
           toolAllowlist:input.toolAllowlist });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

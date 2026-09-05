@@ -401,7 +401,7 @@ describe("item.completed: error (non-fatal)", () => {
 });
 
 describe("turn.completed", () => {
-  it("emits usage event with input, output, and cacheRead from cached_input_tokens", () => {
+  it("emits ordinary input separately from cache-read and cache-write tokens", () => {
     const tr = makeTranslator();
     tr.translate({ type: "thread.started", thread_id: "thread-usage" });
     const events = tr.translate({
@@ -419,13 +419,67 @@ describe("turn.completed", () => {
       {
         kind: "usage",
         source: "turn_completed",
-        input: 200,
+        input: 150,
         output: 80,
         cacheRead: 50,
+        cacheCreation: 0,
         turnId: "turn-usage",
         sdkSessionId: "thread-usage",
       },
     ]);
+  });
+
+  it("emits a cumulative standard-rate cost estimate for supported models", () => {
+    const tr = createCodexTranslator({ model: "gpt-5.6-sol", initialCostUSD: 0.25 });
+    tr.translate({ type: "thread.started", thread_id: "thread-cost" });
+
+    const first = tr.translate({
+      type: "turn.completed",
+      turn_id: "turn-1",
+      usage: {
+        input_tokens: 1_000,
+        output_tokens: 50,
+        cached_input_tokens: 200,
+        cache_write_input_tokens: 100,
+        reasoning_output_tokens: 20,
+      },
+    } as never);
+    const second = tr.translate({
+      type: "turn.completed",
+      turn_id: "turn-2",
+      usage: {
+        input_tokens: 100,
+        output_tokens: 10,
+        cached_input_tokens: 0,
+        cache_write_input_tokens: 0,
+        reasoning_output_tokens: 5,
+      },
+    } as never);
+
+    expect(first[0]).toMatchObject({ input: 700, cacheCreation: 100, costUSD: 0.25438 });
+    expect(second[0]).toMatchObject({ input: 100, costUSD: 0.25498 });
+  });
+
+  it("includes completed web searches in the turn estimate once", () => {
+    const tr = createCodexTranslator({ model: "gpt-5.6-luna" });
+    const search = {
+      type: "item.completed",
+      item: { id: "ws-priced", type: "web_search", query: "pricing" },
+    } as const;
+    tr.translate(search);
+    tr.translate(search);
+    const [usage] = tr.translate({
+      type: "turn.completed",
+      usage: {
+        input_tokens: 0,
+        output_tokens: 0,
+        cached_input_tokens: 0,
+        cache_write_input_tokens: 0,
+        reasoning_output_tokens: 0,
+      },
+    });
+
+    expect(usage).toMatchObject({ costUSD: 0.01 });
   });
 
   it("does NOT emit a done event (outer generator is responsible)", () => {

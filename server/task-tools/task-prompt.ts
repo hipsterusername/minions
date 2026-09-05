@@ -1,3 +1,6 @@
+import { renderSourceExcerpt } from "../../shared/handoff-text.ts";
+import { PROJECT_CONTEXT_CHAR_LIMIT } from "../../shared/project-context.ts";
+export { PROJECT_CONTEXT_CHAR_LIMIT } from "../../shared/project-context.ts";
 import { compileWorktreeCompletionPolicy } from "../session-host-config.ts";
 
 interface TaskSpawnPromptArgs {
@@ -14,11 +17,12 @@ interface TaskSpawnPromptArgs {
   canvasContext?: string | null;
   contextPack?: string | null;
   projectContext?: string | null;
+  projectContextSourceRef?: string;
+  canvasContextSourceRef?: string;
 }
 
 export const CANVAS_CONTEXT_CHAR_LIMIT = 6000;
 export const CANVAS_CONTEXT_TRUNCATED_MARKER = "…canvas context truncated";
-export const PROJECT_CONTEXT_CHAR_LIMIT = 6000;
 export const PROJECT_CONTEXT_TRUNCATED_MARKER = "…project context truncated";
 
 function appendListSection(lines: string[], title: string, items?: string[]): void {
@@ -26,42 +30,31 @@ function appendListSection(lines: string[], title: string, items?: string[]): vo
   lines.push("", title, "", ...items.map((item) => `- ${item}`));
 }
 
-function renderTruncatedContext(
-  prefix: string,
-  groups: string[],
-  suffix: string,
-  maxChars: number,
-): string {
-  const render = (kept: string[]) =>
-    `${prefix}${kept.length > 0 ? `${kept.join("\n")}\n` : ""}${CANVAS_CONTEXT_TRUNCATED_MARKER}${suffix}`;
-  const kept: string[] = [];
-  for (let i = 0; i < groups.length - 1; i++) {
-    const candidate = render([...kept, groups[i]!]);
-    if (candidate.length > maxChars) break;
-    kept.push(groups[i]!);
-  }
-  return render(kept);
-}
-
 export function truncateCanvasContext(
   canvasContext: string,
   maxChars = CANVAS_CONTEXT_CHAR_LIMIT,
+  sourceRef?: string,
 ): string {
   if (canvasContext.length <= maxChars) return canvasContext;
-  const groupRegex = /<context-group(?:\s+title="[^"]*")?>[\s\S]*?<\/context-group>/g;
-  const matches = Array.from(canvasContext.matchAll(groupRegex));
-  if (matches.length === 0) return CANVAS_CONTEXT_TRUNCATED_MARKER;
-
-  const firstIndex = matches[0]!.index ?? 0;
-  const last = matches[matches.length - 1]!;
-  const lastEnd = (last.index ?? 0) + last[0].length;
-  const groups = matches.map((match) => match[0]);
-  return renderTruncatedContext(
-    canvasContext.slice(0, firstIndex),
-    groups,
-    canvasContext.slice(lastEnd),
-    maxChars,
-  );
+  const open = "<connected-context>\n";
+  const close = "\n</connected-context>";
+  const content = canvasContext.replace(/^<connected-context>\s*/, "").replace(/\s*<\/connected-context>$/, "");
+  if (maxChars <= open.length + close.length) return renderSourceExcerpt(content, maxChars, sourceRef, CANVAS_CONTEXT_TRUNCATED_MARKER);
+  const budget = maxChars - open.length - close.length;
+  const groups = [...content.matchAll(/<context-group\b[^>]*>[\s\S]*?<\/context-group>/g)];
+  const footer = `\n${CANVAS_CONTEXT_TRUNCATED_MARKER}\n${sourceRef
+    ? `Full source (reference data): ${sourceRef}`
+    : "Full source unavailable to this renderer; request missing context from the Leader."}`;
+  let excerpt = groups.length ? content.slice(0, groups[0]!.index) : "";
+  let kept = 0;
+  for (const group of groups) {
+    if (excerpt.length + group[0].length + 1 + footer.length > budget) break;
+    excerpt += group[0] + "\n";
+    kept++;
+  }
+  // A single oversized source must still provide actionable content and provenance.
+  return open + (kept ? excerpt + footer
+    : renderSourceExcerpt(content, budget, sourceRef, CANVAS_CONTEXT_TRUNCATED_MARKER)) + close;
 }
 
 export function buildTaskSpawnPrompt(args: TaskSpawnPromptArgs): string {
@@ -95,9 +88,8 @@ export function buildTaskSpawnPrompt(args: TaskSpawnPromptArgs): string {
   );
 
   if (args.projectContext) {
-    const projectContext = args.projectContext.length <= PROJECT_CONTEXT_CHAR_LIMIT
-      ? args.projectContext
-      : `${args.projectContext.slice(0, PROJECT_CONTEXT_CHAR_LIMIT - PROJECT_CONTEXT_TRUNCATED_MARKER.length - 1)}\n${PROJECT_CONTEXT_TRUNCATED_MARKER}`;
+    const projectContext = renderSourceExcerpt(args.projectContext, PROJECT_CONTEXT_CHAR_LIMIT,
+      args.projectContextSourceRef, PROJECT_CONTEXT_TRUNCATED_MARKER);
     lines.push("", "## Minions project context", "", projectContext);
   }
 
@@ -114,7 +106,7 @@ export function buildTaskSpawnPrompt(args: TaskSpawnPromptArgs): string {
       "",
       "## Canvas context (from connected nodes)",
       "",
-      truncateCanvasContext(args.canvasContext),
+      truncateCanvasContext(args.canvasContext, CANVAS_CONTEXT_CHAR_LIMIT, args.canvasContextSourceRef),
     );
   }
 

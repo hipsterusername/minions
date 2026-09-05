@@ -182,8 +182,9 @@ describe("formatSubskillLoad", () => {
         }],
       }),
     });
-    expect(out).toContain("### Attached context for Sub");
-    expect(out).toContain('{"safe":true}');
+    expect(out).toContain("### Attached context (load on demand)");
+    expect(out).not.toContain('{"safe":true}');
+    expect(out).toContain("example.json");
   });
 
   it("lists valid skill ids on unknown_skill", () => {

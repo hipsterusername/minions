@@ -1,6 +1,7 @@
 import type { WorkPacket, ReviewGateRequirement } from "../../shared/system-model/index.ts";
 import type { DetailedDiff } from "../worktree-types.ts";
 import { globMatches } from "./match.ts";
+import { reviewGateMatches } from "./review-gates.ts";
 import type { LoadedSystemModel } from "./types.ts";
 import type { DeterministicReconciliation } from "../../shared/system-model/reconcile.ts";
 
@@ -65,6 +66,7 @@ export function reconcileDeterministic(input: ReconcileInput): DeterministicReco
     capabilities: scopeCapabilities,
     flows: scopeFlows,
     files: changedFiles,
+    risk: input.packet.riskLevel,
   });
   return {
     provenance: "deterministic",
@@ -86,12 +88,10 @@ export function reconcileDeterministic(input: ReconcileInput): DeterministicReco
 
 function deriveGateRequirements(
   model: LoadedSystemModel,
-  scope: { capabilities: string[]; flows: string[]; files: string[] },
+  scope: { capabilities: string[]; flows: string[]; files: string[]; risk: WorkPacket["riskLevel"] },
 ): ReviewGateRequirement[] {
   return model.policies.reviewGates.map((gate) => {
-    const required = intersects(gate.requiredWhen.capabilities, scope.capabilities)
-      || intersects(gate.requiredWhen.flows, scope.flows)
-      || scope.files.some((file) => matchesAny(file, gate.requiredWhen.files));
+    const required = reviewGateMatches(gate, scope);
     return {
       gateId: gate.id,
       name: gate.name,

@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest";
+vi.mock("../system-model/evidence-binding.ts", async (original) => ({
+  ...await original<typeof import("../system-model/evidence-binding.ts")>(),
+  captureEvidenceBinding: vi.fn(async () => "current-evidence"),
+}));
+import { describe, expect, it, vi } from "vitest";
 import type { BusPayload } from "../bus.ts";
 import type { DetailedDiff } from "../worktree-types.ts";
 import { loadSystemModel } from "../system-model/load.ts";

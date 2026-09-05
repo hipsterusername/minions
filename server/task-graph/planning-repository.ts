@@ -123,7 +123,7 @@ export class TaskGraphPlanningRepository {
     const row = primaryRunKey
       ? this.latestRow(workItemId, primaryRunKey)
       : this.db.prepare(`SELECT * FROM task_graph_plan_proposals WHERE work_item_id=?
-          ORDER BY updated_at DESC,proposal_revision DESC LIMIT 1`).get(workItemId) as Row | undefined;
+          ORDER BY created_at DESC,proposal_revision DESC,id DESC LIMIT 1`).get(workItemId) as Row | undefined;
     return row ? this.map(row) : null;
   }
 
@@ -131,8 +131,8 @@ export class TaskGraphPlanningRepository {
     this.assertAuthority(workItemId,primaryRunKey);
     const bounded=Math.max(1,Math.min(50,Math.trunc(limit)));
     return (this.db.prepare(`SELECT * FROM task_graph_plan_proposals
-      WHERE work_item_id=? AND primary_run_key=?
-      ORDER BY proposal_revision DESC LIMIT ?`).all(workItemId,primaryRunKey,bounded) as Row[])
+      WHERE work_item_id=?
+      ORDER BY created_at DESC,proposal_revision DESC,id DESC LIMIT ?`).all(workItemId,bounded) as Row[])
       .map(row=>{
         const snapshot=this.map(row);
         return taskGraphPlanHistoryEntrySchema.parse({

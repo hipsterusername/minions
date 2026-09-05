@@ -13,12 +13,16 @@ import { serverLogger } from "../logging.ts";
 
 const log = serverLogger.child("work-item-command");
 
-function send(ws: Parameters<CommandHandler>[2], cmd: WsCommand, payload: Record<string, unknown>): void {
+function send(ctx: Parameters<CommandHandler>[0], ws: Parameters<CommandHandler>[2], cmd: WsCommand, payload: Record<string, unknown>): void {
+  if (cmd.requestId && !cmd.type.startsWith("get_") && !cmd.type.startsWith("list_")) {
+    try { ctx.workItems?.saveCommandResponse?.(cmd.requestId, payload); }
+    catch (error) { log.error("receipt_persist_failed", { requestId: cmd.requestId, error }); }
+  }
   if (cmd.workItemId) unicastToWorkItem(ws, cmd.workItemId, payload as { type: string } & Record<string, unknown>);
   else unicastGlobal(ws, payload as { type: string } & Record<string, unknown>);
 }
 
-function unavailable(cmd: WsCommand, ws: Parameters<CommandHandler>[2]): void {
+function unavailable(ctx: Parameters<CommandHandler>[0], cmd: WsCommand, ws: Parameters<CommandHandler>[2]): void {
   const payload = {
     type: "work_item_response",
     command: cmd.type,
@@ -28,7 +32,7 @@ function unavailable(cmd: WsCommand, ws: Parameters<CommandHandler>[2]): void {
     code: "unavailable",
     latest: null,
   };
-  send(ws, cmd, payload);
+  send(ctx, ws, cmd, payload);
 }
 
 function existingMutationContext(cmd: WsCommand): {
@@ -50,7 +54,7 @@ function resultSchema(cmd: WsCommand): z.ZodType {
   return workItemDetailSnapshotSchema;
 }
 
-function reply(ws: Parameters<CommandHandler>[2], cmd: WsCommand, rawResult: unknown): void {
+function reply(ctx: Parameters<CommandHandler>[0], ws: Parameters<CommandHandler>[2], cmd: WsCommand, rawResult: unknown): void {
   const result = resultSchema(cmd).parse(rawResult);
   const payload = {
     type: "work_item_response",
@@ -59,10 +63,10 @@ function reply(ws: Parameters<CommandHandler>[2], cmd: WsCommand, rawResult: unk
     success: true,
     result,
   };
-  send(ws, cmd, payload);
+  send(ctx, ws, cmd, payload);
 }
 
-function fail(ws: Parameters<CommandHandler>[2], cmd: WsCommand, error: unknown): void {
+function fail(ctx: Parameters<CommandHandler>[0], ws: Parameters<CommandHandler>[2], cmd: WsCommand, error: unknown): void {
   const correlationId = randomUUID();
   const candidate = error instanceof WorkItemServiceError
     ? workItemServiceErrorSchema.safeParse({
@@ -82,7 +86,7 @@ function fail(ws: Parameters<CommandHandler>[2], cmd: WsCommand, error: unknown)
     correlationId, command: cmd.type, requestId: cmd.requestId ?? null,
     workItemId: cmd.workItemId ?? null, code: typed?.code ?? "internal", error,
   });
-  send(ws, cmd, {
+  send(ctx, ws, cmd, {
     type: "work_item_response",
     command: cmd.type,
     requestId: cmd.requestId ?? null,
@@ -96,7 +100,19 @@ function fail(ws: Parameters<CommandHandler>[2], cmd: WsCommand, error: unknown)
 
 export const workItemCommand: CommandHandler = async (ctx, cmd, ws) => {
   const service = ctx.workItems;
-  if (!service) return unavailable(cmd, ws);
+  if (cmd.type === "get_work_item_receipt") {
+    let receipt: Record<string, unknown> | null = null;
+    try { receipt = service?.getCommandResponse?.(cmd.requestId!) ?? null; }
+    catch (error) {
+      log.error("receipt_lookup_failed", { requestId: cmd.requestId, error });
+    }
+    // A failed lookup says nothing about whether the original mutation ran.
+    send(ctx, ws, cmd, receipt ?? {
+      type: "work_item_receipt_pending", requestId: cmd.requestId,
+    });
+    return;
+  }
+  if (!service) return unavailable(ctx, cmd, ws);
   try {
     let result: unknown;
     switch (cmd.type) {
@@ -199,8 +215,8 @@ export const workItemCommand: CommandHandler = async (ctx, cmd, ws) => {
     default:
       return;
     }
-    reply(ws, cmd, result);
+    reply(ctx, ws, cmd, result);
   } catch (error) {
-    fail(ws, cmd, error);
+    fail(ctx, ws, cmd, error);
   }
 };

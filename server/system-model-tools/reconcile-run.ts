@@ -1,4 +1,6 @@
 import { z } from "zod/v4";
+import { captureEvidenceBinding, evidenceHash } from "../system-model/evidence-binding.ts";
+import { loadSystemModel } from "../system-model/load.ts";
 import type { NormalizedToolDef } from "../harness/types.ts";
 import { jsonResult } from "../harness/tool-result.ts";
 import {
@@ -29,16 +31,19 @@ export function createReconcileRunToolDef(ctx: SystemModelToolContext): Normaliz
     inputSchema: reconcileRunInputSchema,
     handler: async (input: unknown) => {
       const args = reconcileRunInputSchema.parse(input);
-      const model = ctx.runtime.model;
+      const { model, errors } = loadSystemModel(ctx.cwd);
       const stored = getWorkPacket(ctx.projectPath, args.workPacketId);
-      if (!model || !stored) return jsonResult({ report: null, found: Boolean(stored), loadErrors: ctx.runtime.loadErrors });
+      if (!model || !stored) return jsonResult({ report: null, found: Boolean(stored), loadErrors: errors });
       if (!ctx.getDetailedDiff) return jsonResult({ report: null, error: "reconcile_run requires a diff provider" }, { isError: true });
 
       const now = ctx.now?.() ?? Date.now();
+      if (stored.packet.leaderSessionKey !== ctx.leaderSessionKey) throw new Error("Work Packet belongs to another session");
+      const evidenceDigest = await captureEvidenceBinding(ctx.cwd, stored.packet, model, ctx.projectPath);
+      const diff = await ctx.getDetailedDiff();
       const deterministic = reconcileDeterministic({
         model,
         packet: stored.packet,
-        diff: await ctx.getDetailedDiff(),
+        diff,
       });
       if (args.systemModelUpdate?.status === "updated"
         && deterministic.changedModelFiles.length === 0) {
@@ -76,6 +81,8 @@ export function createReconcileRunToolDef(ctx: SystemModelToolContext): Normaliz
         })
         : undefined;
       const report = reconciliationReportSchema.parse({
+        evidenceDigest,
+        diffDigest: evidenceHash(diff),
         id: createReconciliationId(now, args.workPacketId),
         workPacketId: args.workPacketId,
         createdAt: now,
@@ -96,6 +103,9 @@ export function createReconcileRunToolDef(ctx: SystemModelToolContext): Normaliz
         gates: deterministic.gateRequirements,
         constraintChecks: [],
       });
+      if (await captureEvidenceBinding(ctx.cwd, stored.packet, model, ctx.projectPath) !== evidenceDigest) {
+        throw new Error("Repository changed during reconciliation; retry against a stable diff");
+      }
       saveReconciliationReport(ctx.projectPath, report);
       const pendingActions = [
         ...(acceptanceCoverage.status === "incomplete"

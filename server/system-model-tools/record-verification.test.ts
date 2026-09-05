@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest";
+vi.mock("../system-model/evidence-binding.ts", async (original) => ({
+  ...await original<typeof import("../system-model/evidence-binding.ts")>(),
+  captureEvidenceBinding: vi.fn(async () => "current-evidence"),
+}));
+import { describe, expect, it, vi } from "vitest";
 import { copyValidFixture } from "../system-model/load.test.ts";
 import { getWorkPacket, listWorkPacketVerifications, saveWorkPacket } from "../system-model/store.ts";
 import type { WorkPacket } from "../../shared/system-model/index.ts";

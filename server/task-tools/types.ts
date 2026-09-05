@@ -27,7 +27,7 @@ export interface TaskRecord {
    * Used to gate opt-in tool surfaces (e.g. the skill-authoring tools only
    * load for a minion whose task armed the `skill-builder` skill).
    */
-  skillIds?: string[];
+  skillIds?: string[]; skillSnapshotId?: string | undefined;
   priority: "low" | "medium" | "high" | "critical";
   /** Who is executing this task */
   executor: "leader" | "minion";
@@ -168,7 +168,7 @@ export interface TaskToolContext {
     harness?: string;
     permissionMode?: string;
     executorClass?: "mechanical" | "standard" | "reasoning";
-    skillIds?: string[];
+    skillIds?: string[]; skillSnapshotId?: string | undefined;
     onAllocated?: (sessionKey: string) => void;
   }) => void | Promise<{ sessionKey: string; harness: string; model: string; permissionMode: string }>;
   cwd: string;
@@ -179,6 +179,7 @@ export interface TaskToolContext {
    * `skills.json`. Falls back to `cwd` when no worktree is in use.
    */
   projectPath: string;
+  skillSnapshotId?: string | undefined;
   minionSystemPrompt: string;
   /**
    * Skills selected when the Leader was launched. Every delegated Minion
@@ -198,8 +199,8 @@ export interface TaskToolContext {
   getCanvasContext?: () => string | null;
   getSessionRuntime?: (sessionKey: string) => RuntimeSessionInfo | null;
   onStateChange?: (state: TaskManagerState) => void;
-  /** Write through the Leader's durable display name before broadcasting it. */
-  onTaskNameChange?: (name: string) => void;
+  /** Persist the first selected name and return the canonical name to broadcast. */
+  onTaskNameChange?: (name: string) => string | void;
   worktreeBranch?: string | null;
   worktreeInfo?: WorktreeInfo | null;
   worktreeIsolation?: boolean;

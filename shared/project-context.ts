@@ -1,3 +1,4 @@
+export const PROJECT_CONTEXT_CHAR_LIMIT = 6000;
 export const UNCONFIGURED_PROJECT_CONTEXT_MESSAGE =
   "Project context has not been configured yet.";
 
