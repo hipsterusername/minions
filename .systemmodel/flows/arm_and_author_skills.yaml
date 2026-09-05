@@ -11,8 +11,10 @@ suggested_tests: [ src/SkillsBrowser.test.tsx, src/SkillEditor.test.tsx, src/Ski
 steps:
   - Create, import, edit, duplicate, or delete skill definitions and subskills in the registered workspace state root.
   - Select known skill IDs and provide required values on a launch surface.
-  - Compile and freeze instructions and values into the Leader or minion prompt at spawn.
-  - Permit lazy subskill loading and grant mutation tools only when skill-builder is armed.
+  - Freeze the workspace catalog and configured values in a content-addressed snapshot; persist its ID for recovery and carry it through direct and graph child launches.
+  - Compile selected parent instructions, subskill indexes and eager bodies with the shared formatter; advertise attachment references rather than including their contents.
+  - Allow read-only load_skill and load_subskill from the frozen catalog, and load_skill_attachment pages of at most 12000 characters. Library edits take effect in future snapshots; missing or changed snapshots fail explicitly.
+  - Grant mutation tools only when skill-builder is armed; read-only skill retrieval does not change this gate.
 freshness:
   class: code_coupled
 risk: high

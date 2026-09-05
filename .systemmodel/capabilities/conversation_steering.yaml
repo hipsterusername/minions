@@ -1,14 +1,14 @@
 id: capability.conversation_steering
 type: capability
 name: Conversation and steering
-summary: Users can send text, attachments, decision replies, and follow-up iterations to running or waiting work while preserving session identity and harness continuity.
+summary: Users can send canonical follow-up guidance, attachments, and decision replies; the server routes continuation to a waiting reply, queued live-run guidance, recovery, or a new iteration.
 constraints: []
 decisions: [ decision.canonical_work_item_lifecycle ]
 risks:
   - risk.dual_ingress_divergence
-suggested_files: [ src/nodes/LeaderNode.tsx, src/ActivityView.tsx, src/mobile/SessionChatScreen.tsx, server/commands/send-message.ts ]
-suggested_tests: [ src/nodes/LeaderNode.test.tsx, src/ActivityView.test.tsx, src/mobile/SessionChatScreen.test.tsx, server/commands/send-message.test.ts ]
-keywords: [ conversation, send, message, reply, steer, follow_up, decision, attachment, waiting, resume, iteration, chat ]
+suggested_files: [ src/nodes/LeaderNode.tsx, src/ActivityView.tsx, src/mobile/SessionChatScreen.tsx, server/commands/send-message.ts, server/work-item-continuation.ts, src/use-work-items.ts ]
+suggested_tests: [ src/nodes/LeaderNode.test.tsx, src/ActivityView.test.tsx, src/mobile/SessionChatScreen.test.tsx, server/commands/send-message.test.ts, server/work-item-service-sqlite.test.ts, src/use-work-items.test.ts ]
+keywords: [ canonical, follow-up, guidance, continuation, conversation, send, message, reply, steer, follow_up, decision, attachment, waiting, resume, iteration, chat ]
 entry_points:
   - surface: surface.canvas
     summary: Send and steer from Leader and session nodes with connected context and attachments.
@@ -26,8 +26,8 @@ entry_points:
     tests: [ src/mobile/SessionChatScreen.test.tsx, src/mobile/ReviewChangesScreen.test.tsx, src/mobile/attachments.test.ts ]
     flows: [ flow.steer_session, flow.answer_structured_decision ]
   - surface: surface.ws_api
-    summary: Route bare send_message, canonical reply or start, and submit_form commands.
-    files: [ server/commands/send-message.ts, server/commands/work-items.ts, server/commands/submit-form.ts ]
+    summary: Route canonical continue_work_item through server-owned state dispatch; retain bare send_message and submit_form paths.
+    files: [ server/commands/send-message.ts, server/commands/work-items.ts, server/work-item-continuation.ts, server/commands/submit-form.ts ]
     tests: [ server/commands/send-message.test.ts, server/commands/work-items.test.ts, server/commands/submit-form.test.ts ]
     flows: [ flow.steer_session, flow.answer_structured_decision ]
 freshness:

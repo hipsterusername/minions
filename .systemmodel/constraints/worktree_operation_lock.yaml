@@ -10,9 +10,9 @@ applies_to:
     - server/worktree-integration-operations.ts
     - server/worktree-merge.ts
 severity: critical
-agent_instruction: Acquire the operation lock around the complete mutation, report conflicts without optimistic success, and retain worktree and preserved-path state on failure.
+agent_instruction: Acquire the operation lock around the complete mutation. Refuse legacy merge or removal until providers sharing the checkout have drained; abort alone is insufficient. Preserve edits with checkout-aware Git merges and non-forced cleanup, and retain paths on failure.
 review_gate: gate.worktree_integration
-suggested_tests: [ server/commands/merge-flow.test.ts, server/worktree-merge.test.ts, server/worktree-integration-sqlite.test.ts ]
+suggested_tests: [ server/commands/merge-flow.test.ts, server/worktree-merge.test.ts, server/worktree-integration-sqlite.test.ts, server/worktree-lifecycle.integration.test.ts ]
 evidence: [ decision.worktree_isolation_and_approval ]
 domain: domain.integration
 scope: domain

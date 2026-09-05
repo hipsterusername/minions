@@ -3,62 +3,84 @@ review_gates:
     name: Execution graph runtime
     description: Preserve canonical authority, immutable topology, fenced attempts, leased admission, durable outbox recovery, evidence binding, and revisioned projection convergence.
     blocks_merge: true
+    required_checks:
+      - kind: test
+        target: server/task-graph/service.test.ts
     required_when:
       files: [server/task-graph/**, shared/task-graph-contracts.ts, shared/task-graph-view-contracts.ts, server/commands/task-graph.ts, src/task-graph/**]
       capabilities: [capability.execution_graph_runtime, capability.durable_work_items, capability.execution_observability]
       flows: [flow.execute_execution_graph, flow.inspect_execution_graph]
-      risk: [high, critical]
   - id: gate.event_bus_architecture
     name: Event bus architecture
     description: Preserve typed bus routing and prohibit direct server broadcast.
     blocks_merge: true
+    required_checks:
+      - kind: test
+        target: server/bus.test.ts
+      - kind: test
+        target: tests/architecture/no-direct-broadcast.test.ts
     required_when:
       files: [server/bus.ts, server/commands/**, tests/architecture/no-direct-broadcast.test.ts]
       capabilities: [capability.execution_observability]
       flows: [flow.monitor_execution, flow.recover_after_disconnect]
-      risk: [high, critical]
   - id: gate.command_contracts
     name: Command contracts
     description: Keep command schemas, command union, handlers, and contract tests complete and aligned.
     blocks_merge: true
+    required_checks:
+      - kind: test
+        target: server/commands/schemas.test.ts
     required_when:
       files: [server/commands/index.ts, server/commands/types.ts, server/commands/schemas.ts]
       capabilities: [capability.runtime_configuration, capability.session_control]
       flows: [flow.configure_runtime, flow.control_execution]
-      risk: [high, critical]
   - id: gate.worktree_integration
     name: Worktree integration
     description: Review locking, gates, merge segregation, conflict handling, and cleanup for worktree changes.
     blocks_merge: true
+    required_checks:
+      - kind: test
+        target: server/worktree-integration-sqlite.test.ts
+      - kind: test
+        target: server/commands/merge-flow.test.ts
     required_when:
       files: [server/worktree-*.ts, server/commands/approve-changes.ts, server/commands/discard-worktree.ts, server/commands/merge-*.ts]
       capabilities: [capability.approval_and_legacy_integration, capability.canonical_lineage_integration]
       flows: [flow.review_legacy_changes, flow.promote_lineage, flow.recover_integration_conflict]
-      risk: [high, critical]
   - id: gate.system_model_core
     name: System model core
     description: Validate schema, parsing, retrieval, gates, reconciliation, and repository model changes.
     blocks_merge: true
+    required_checks:
+      - kind: test
+        target: server/system-model/gates.test.ts
+      - kind: test
+        target: server/system-model-tools/reconcile-run.test.ts
     required_when:
       files: [shared/system-model/**, server/system-model/**, server/system-model-tools/**, .systemmodel/**]
       capabilities: [capability.system_model_guidance]
       flows: [flow.inspect_system_model]
-      risk: [high, critical]
   - id: gate.workspace_boundaries
     name: Workspace root authorization
     description: Verify UUID binding, canonical source authorization, central owned roots, and non-destructive legacy migration.
     blocks_merge: true
+    required_checks:
+      - kind: test
+        target: server/workspace-registry.test.ts
     required_when:
       files: [server/workspace-registry.ts, server/project-store.ts, server/path-guard.ts, server/worktree-owned-root.ts, server/worktree-*.ts]
       capabilities: [capability.project_workspace, capability.approval_and_legacy_integration, capability.canonical_lineage_integration]
       flows: [flow.open_project_workspace, flow.review_legacy_changes, flow.promote_lineage]
-      risk: [high, critical]
   - id: gate.sandbox_guarantees
     name: Sandbox guarantee honesty
-    description: Verify independent policy axes, Codex enforcement, safe defaults, plan read-only, and unmanaged reporting for unsupported harnesses.
+    description: Verify independent policy axes, Codex enforcement, safe defaults, explicit-policy precedence over legacy plan fallback, and unmanaged reporting for unsupported harnesses.
     blocks_merge: true
+    required_checks:
+      - kind: test
+        target: server/harness/codex/index.test.ts
+      - kind: test
+        target: server/task-graph/execution-policy.test.ts
     required_when:
       files: [shared/workspace-contracts.ts, server/harness/**, src/nodes/leader/SandboxPolicyControls.tsx]
       capabilities: [capability.runtime_configuration, capability.leader_creation]
       flows: [flow.configure_runtime, flow.launch_leader]
-      risk: [high, critical]

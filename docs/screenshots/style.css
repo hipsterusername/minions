@@ -1,0 +1,13 @@
+/* Only the documentation frame is custom. Product components keep their CSS. */
+body { margin: 0; background: var(--bg-canvas); }
+.guide-scene { padding: 36px 48px; height: 100vh; box-sizing: border-box; }
+.guide-heading { margin-bottom: 24px; }
+.guide-heading span { font-size: 12px; letter-spacing: 2px; color: var(--accent); font-weight: 700; }
+.guide-heading h1 { font-size: 30px; margin: 10px 0 6px; }
+.guide-heading p { color: var(--text-muted); font-size: 14px; margin: 0; }
+.guide-scene > .leader-launch-form { height: calc(100% - 112px); }
+.guide-plan, .guide-worker, .guide-dashboard { border: 1px solid var(--border-default); border-radius: 12px; overflow: hidden; background: var(--bg-surface); }
+.guide-plan { margin-bottom: 24px; }
+.guide-workers { display: flex; gap: 24px; }
+.guide-worker { flex: 1; height: 410px; }
+.guide-dashboard { height: 770px; padding: 16px; }

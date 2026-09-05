@@ -6,6 +6,15 @@ applies_to:
   flows: []
   surfaces: []
   files:
+    - server/bus.ts
+    - server/commands/remove-session.ts
+    - server/commands/send-message.ts
+    - server/session-host-persist.ts
+    - server/session-continuity.ts
+    - server/session-continuity-schema.ts
+    - server/work-item-handoff.ts
+    - server/context-checkpoint.ts
+    - server/session-registry-start.ts
     - server/session-host.ts
     - server/session-persist.ts
     - server/session-task-state-persist.ts
@@ -15,8 +24,8 @@ applies_to:
     - server/commands/sync-session.ts
     - src/session-stream.ts
 severity: critical
-agent_instruction: Persist harness, model, permissions, skills, complete task snapshots, pending waits, attention delivery, render, approval, review, and worktree state; hydrate the full session graph before reconciliation; keep event buffers capped and sync full state before incremental folding.
-suggested_tests: [ server/session-persist.test.ts, server/session-registry.test.ts, server/commands/sync-session.test.ts, server/session-host.test.ts, src/session-stream.test.ts ]
+agent_instruction: Fence removed hosts against late writes, explicitly reject busy legacy messages, commit host snapshots atomically and surface persistence failures, retry transient database-open failures, and disconnect slow WebSocket consumers at the queue bound. Persist harness, model, permissions, skills, complete task snapshots, pending waits, attention delivery, render, approval, review, and worktree state; hydrate the full session graph before reconciliation; keep event buffers capped and sync full state before incremental folding. Archive full user instructions in chronological order, restore skill selections and variables before automatic wakes, and retain objective, corrections and semantic evidence in bounded checkpoint sections. Fresh iterations without compatible provider history require a server-owned handoff with prior-run evidence and archive references.
+suggested_tests: [ server/session-handoff.test.ts, server/session-launch.test.ts, server/bus.test.ts, server/commands/remove-session.test.ts, server/commands/send-message.test.ts, server/session-persist.test.ts, server/session-registry.test.ts, server/commands/sync-session.test.ts, server/session-host.test.ts, src/session-stream.test.ts ]
 evidence: [ decision.typed_event_bus ]
 domain: domain.observability
 scope: global

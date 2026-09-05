@@ -1,34 +1,28 @@
 id: flow.execute_execution_graph
 type: flow
 name: Execute a canonical execution graph
-summary: When a Leader chooses graph orchestration, optionally classify the work with a versioned authoring pattern or a specialized dialectic, revision-fence and preflight the expanded semantic proposal against frozen source and harness policy, materialize immutable topology, then centrally run fenced attempts—including cache-stable participant threads and Leader-moderated synthesis checkpoints—until evidence satisfies terminal nodes.
+summary: Leaders submit a bounded semantic plan under a canonical WorkItem; the server freezes sources, validates policy and ownership, materializes immutable topology, and schedules fenced attempts with durable evidence and recovery.
 constraints:
   - constraint.execution_graph_authority
   - constraint.execution_graph_admission
   - constraint.execution_graph_evidence
-  - constraint.dialectic_reasoning_integrity
   - constraint.work_packet_reconciliation
 decisions:
   - decision.server_owned_execution_graphs
-  - decision.leader_moderated_dialectic_graphs
   - decision.canonical_work_item_lifecycle
-risks: [ risk.dialectic_correlated_reasoning ]
-suggested_files: [ server/dialectic/graph-plan.ts, shared/task-graph-patterns.ts, shared/task-graph-planning-contracts.ts, shared/task-graph-contracts.ts, shared/work-item-contracts.ts, shared/leader-prompt.ts, server/agents/leader.ts, server/system-model-tools/reconcile-run.ts, server/task-graph/patterns.ts, server/task-graph/planning-runtime.ts, server/task-graph/planning-coordinator.ts, server/task-graph/planning-source.ts, server/task-graph/planning-compiler.ts, server/task-graph/execution-policy.ts, server/task-graph/dispatch-context.ts, server/task-graph/repository.ts, server/task-graph/scheduler.ts, server/task-graph/recovery.ts, server/task-graph/evidence.ts, server/task-graph/service.ts, server/work-item-service-sqlite.ts, server/commands/task-graph.ts ]
-suggested_tests: [ server/dialectic/graph-plan.test.ts, server/task-graph/session-affinity.test.ts, shared/task-graph-patterns.test.ts, server/task-graph/patterns.test.ts, server/task-graph/planning-runtime.test.ts, server/task-graph/planning-coordinator.test.ts, server/task-graph/planning-compiler.test.ts, server/task-graph/execution-policy.test.ts, server/task-graph/runtime.test.ts, server/task-graph/service.test.ts, server/work-item-service-sqlite.test.ts, shared/leader-prompt.test.ts, server/agents/leader.test.ts, server/system-model-tools/reconcile-run.test.ts, tests/task-graph/runtime.test.ts, tests/contracts/work-item-contracts.test.ts ]
+risks: []
+suggested_files: [ shared/task-graph-patterns.ts, shared/task-graph-planning-contracts.ts, shared/task-graph-contracts.ts, shared/work-item-contracts.ts, shared/leader-prompt.ts, server/agents/leader.ts, server/system-model-tools/reconcile-run.ts, server/task-graph/patterns.ts, server/task-graph/planning-runtime.ts, server/task-graph/planning-coordinator.ts, server/task-graph/planning-source.ts, server/task-graph/planning-compiler.ts, server/task-graph/execution-policy.ts, server/task-graph/dispatch-context.ts, server/task-graph/repository.ts, server/task-graph/scheduler.ts, server/task-graph/recovery.ts, server/task-graph/evidence.ts, server/task-graph/service.ts, server/work-item-service-sqlite.ts, server/commands/task-graph.ts ]
+suggested_tests: [ shared/task-graph-patterns.test.ts, server/task-graph/patterns.test.ts, server/task-graph/planning-runtime.test.ts, server/task-graph/planning-coordinator.test.ts, server/task-graph/planning-compiler.test.ts, server/task-graph/execution-policy.test.ts, server/task-graph/runtime.test.ts, server/task-graph/service.test.ts, server/work-item-service-sqlite.test.ts, shared/leader-prompt.test.ts, server/agents/leader.test.ts, server/system-model-tools/reconcile-run.test.ts, tests/task-graph/runtime.test.ts, tests/contracts/work-item-contracts.test.ts ]
 steps:
   - Let the Leader decide whether graph orchestration adds value; preserve direct execution and direct delegation outside submitted graph scope.
   - Optionally attach a reviewed pattern version and bounded problem signature; recommend direct execution or a supported static pattern deterministically, and lint the expanded plan for graph theater, weak artifact contracts, correlated ensembles, missing partial-coverage disclosure, and missing stop rules.
   - Treat pattern templates, routing, and lint findings only as proposal-authoring and review aids; never let them admit attempts, mutate runtime topology, or bypass the server scheduler.
-  - For a difficult or ambiguous problem that benefits from sustained opposition, let the Leader submit the p13 dialectic specialization; expand two materially different epistemic roles and a neutral synthesizer into a bounded static graph rather than a hidden orchestration loop.
-  - Keep each dialectic participant and synthesizer in its own totally ordered session-affinity chain with stable harness, model, executor tier, tools, sandbox, and artifact contracts; resume only the latest successful provider thread on a harness that truthfully supports resume and prompt caching.
   - Accept a semantic plan only against the latest proposal revision, treating omitted tool restrictions as inherited harness policy and supplied allowedTools values as exact harness or fully qualified MCP identifiers.
   - Freeze repository, connected-context, skill, harness, and tool-policy planning sources; preflight topology, ownership, sandbox enforcement, and tool availability before the proposal can start.
   - Persist each proposal revision and materialize its validated acyclic bounded graph as a content-hashed immutable revision under the owning WorkItem.
   - Start one graph run for the current primary run only after WorkItem lifecycle CAS and source-snapshot ownership checks pass.
   - Freeze joins, acquire the server scheduler lease, and admit ready nodes only when capacity, ownership, and requested budget reservations are available.
   - Persist each attempt, generation, resource reservation, and outbox dispatch before launching its attempt-identified child WorkItem run.
-  - At each non-final dialectic checkpoint, commit a structured synthesis with calibrated goal distance, disagreements, unresolved questions, candidate outcome, and moderation recommendation; block the next episode on a human gate and resume the Leader with the report and exact revision-fenced moderation coordinates.
-  - Let the Leader continue, reshape the remaining subtree, or stop the dialectic; preserve all prior turns and syntheses as immutable graph evidence and never let the synthesizer decide on the Leader's behalf.
   - Fence progress and terminal events by run revision, attempt generation, actor session, and idempotency key; retry with a new attempt identity.
   - Commit only current successful attempt artifacts and satisfy verified edges only with source-snapshot- and hash-bound independent evidence.
   - Recover expired claims as lost, replay only undelivered outbox rows, and continue scheduling under the current lease token.

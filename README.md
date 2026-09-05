@@ -19,7 +19,7 @@ Minions gives you a spatial interface for orchestrating coding agents:
 
 - **Infinite canvas** — drag, zoom, arrange nodes visually
 - **Leader/Minion orchestration** — give a Leader a complex task, and it spawns Minion agents, wires them up, and tracks progress through a live task board
-- **Git worktree isolation** — each Minion works in its own worktree so parallel agents don't conflict, and changes route through an explicit approval flow before merging
+- **Git worktree isolation** — Minions share the Leader's isolated worktree, declared overlapping write scopes are rejected during assignment, and changes route through an explicit approval flow before merging
 - **Skills browser** — browse, create, and launch pre-configured skill templates
 - **Project management** — persistent projects with SQLite storage, session history, cost tracking
 - **Multiple agent harnesses** — use Claude Code, OpenAI Codex, OpenCode, or Pi, with each installed harness exposing its own configured model catalog
@@ -47,6 +47,10 @@ harness runtime. It succeeds when at least one harness is authenticated and
 prints controlled remediation for the others.
 
 ## Quick Start
+
+**New to Minions?** Follow the [Getting Started guide](./docs/getting-started.md)
+for a complete first-project walkthrough, screenshots, copyable prompts, and
+help with Minions, task graphs, dashboards, context, and reviewing changes.
 
 ```bash
 git clone https://github.com/hipsterusername/minions.git
@@ -175,8 +179,9 @@ Leader configuration exposes two independent boundaries:
   operating-system sandbox.
 - **Execution sandbox** requests filesystem access (`read-only`,
   `workspace-write`, or explicit `unrestricted`), approval behavior, and
-  network access independently. Plan mode always forces read-only, and the
-  normal default is workspace-write with network disabled.
+  network access independently. An explicit sandbox policy takes precedence over legacy plan mode; without
+  an explicit policy, legacy plan mode defaults to read-only. Normal execution
+  defaults to workspace-write with network disabled.
 
 Codex enforces all three sandbox axes. Harnesses that cannot enforce an axis
 report it as `unmanaged`; Minions does not claim that Claude, OpenCode, or Pi

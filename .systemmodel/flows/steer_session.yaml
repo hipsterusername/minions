@@ -1,17 +1,18 @@
 id: flow.steer_session
 type: flow
 name: Steer a running or waiting session
-summary: Users send follow-up text or attachments through the command family appropriate to a bare session or canonical WorkItem run.
+summary: Users send canonical follow-up guidance or attachments through continue_work_item; the server resolves waiting replies, queued active-run guidance, orphan recovery, or a new iteration.
 constraints: []
 decisions: [ decision.canonical_work_item_lifecycle ]
 risks:
   - risk.dual_ingress_divergence
-suggested_files: [ src/nodes/LeaderNode.tsx, src/ActivityView.tsx, src/mobile/SessionChatScreen.tsx, server/commands/send-message.ts, server/commands/work-items.ts ]
-suggested_tests: [ src/nodes/LeaderNode.test.tsx, src/ActivityView.test.tsx, src/mobile/SessionChatScreen.test.tsx, server/commands/send-message.test.ts, server/commands/work-items.test.ts ]
+suggested_files: [ src/nodes/LeaderNode.tsx, src/ActivityView.tsx, src/mobile/SessionChatScreen.tsx, server/commands/send-message.ts, server/commands/work-items.ts, server/work-item-continuation.ts, src/use-work-items.ts ]
+suggested_tests: [ src/nodes/LeaderNode.test.tsx, src/ActivityView.test.tsx, src/mobile/SessionChatScreen.test.tsx, server/commands/send-message.test.ts, server/commands/work-items.test.ts, server/work-item-service-sqlite.test.ts, src/use-work-items.test.ts ]
 steps:
   - Load current host or WorkItem state and sanitize attached context.
-  - Route bare sessions to send_message and canonical decision waits to reply_to_waiting_run.
-  - Start a new canonical iteration for eligible terminal WorkItems rather than raw-sending to an old host.
+  - Dispatch canonical continue_work_item using authoritative server state; canonical send_message also forwards to this service.
+  - Reply to a waiting run, queue idempotent guidance for a live run, recover an orphaned run, or start an eligible new iteration.
+  - Keep bare-session send_message as a separate legacy path.
   - Resume on the existing harness and create a fresh worktree when approval feedback requires new edits.
 freshness:
   class: code_coupled

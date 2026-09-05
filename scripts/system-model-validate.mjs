@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "child_process";
+import { existsSync } from "node:fs";
 import { loadSystemModel } from "../server/system-model/load.ts";
 import { validateLoadedSystemModel } from "../server/system-model/validate.ts";
 
@@ -36,11 +37,11 @@ if (strict && warnings.length > 0) process.exit(1);
 console.log(`System model valid: ${model.objectsById.size} objects`);
 
 function trackedFiles() {
-  const result = spawnSync("git", ["ls-files"], { cwd, encoding: "utf8" });
+  const result = spawnSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], { cwd, encoding: "utf8" });
   if (result.status !== 0 && !result.stdout) {
     throw result.error ?? new Error(result.stderr || "git ls-files failed");
   }
-  return result.stdout.split(/\r?\n/).filter(Boolean);
+  return [...new Set(result.stdout.split("\0").filter((file) => file && existsSync(file)))];
 }
 
 function printWarnings(warnings) {

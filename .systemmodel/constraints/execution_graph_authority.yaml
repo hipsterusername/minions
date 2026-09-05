@@ -18,7 +18,7 @@ applies_to:
     - server/task-graph/service.ts
     - server/commands/task-graph.ts
 severity: critical
-agent_instruction: Preserve the ownership hierarchy, reject mutable reuse of a graph revision, fence run start against the current WorkItem lifecycle and primary run, and allocate a fresh durable attempt identity for every retrying child.
+agent_instruction: Preserve the ownership hierarchy, reject mutable reuse of a graph revision, fence run start against the current WorkItem lifecycle and primary run, and allocate a fresh durable attempt identity for every retrying child. The current Leader may read historical plans, runtime and valid committed artifacts from earlier primary runs in the same WorkItem; stale callers and cross-WorkItem reads are rejected. Historical inspection grants no mutation or start authority.
 review_gate: gate.execution_graph_runtime
 suggested_tests: [ tests/contracts/work-item-contracts.test.ts, server/work-item-repo.test.ts, server/task-graph/runtime.test.ts, server/task-graph/service.test.ts ]
 evidence: [ decision.server_owned_execution_graphs, decision.canonical_work_item_lifecycle ]

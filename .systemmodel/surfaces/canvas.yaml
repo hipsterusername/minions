@@ -4,4 +4,4 @@ name: Canvas
 summary: Desktop spatial workspace for creating, connecting, launching, observing, and reviewing agent work.
 keywords: [canvas, desktop, spatial, nodes, edges, project, leader, session, dashboard, review]
 suggested_files: [src/App.tsx, src/Canvas.tsx, src/ProjectHeader.tsx, src/ProjectPanel.tsx, src/node-registry.ts]
-suggested_tests: [src/App.dom.test.tsx, src/canvas-state.dom.test.tsx, src/node-registry.test.ts, src/ProjectPanel.test.ts]
+suggested_tests: [src/App.dom.test.tsx, src/canvas-state.dom.test.tsx, src/node-registry.dom.test.ts, src/ProjectPanel.test.ts]

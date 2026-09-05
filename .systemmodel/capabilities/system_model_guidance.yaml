@@ -1,12 +1,12 @@
 id: capability.system_model_guidance
 type: capability
 name: System model guidance and gates
-summary: Users and agents can retrieve architecture context, scope work packets, track criterion coverage and provenance-bearing evidence, act on prioritized signals, reconcile actual changes, assess canonical model updates, and verify or waive merge gates.
+summary: Agents discover architecture through compact search, selected facet reads, and explicit relationship expansion with bounded continuation. Users and agents separately scope work packets, track evidence and coverage, reconcile changes, assess model updates, and verify or waive merge gates.
 constraints: [ constraint.work_packet_reconciliation ]
 decisions: [ decision.role_gated_agent_tools, decision.worktree_isolation_and_approval ]
-suggested_files: [ src/SettingsMenu.tsx, src/nodes/SystemGraphNode.tsx, src/nodes/leader/GateStrip.tsx, shared/system-model/packet.ts, shared/system-model/reconcile.ts, shared/leader-prompt.ts, server/agents/leader.ts, server/worktree-diff.ts, server/system-model/compile.ts, server/system-model/reconcile.ts, server/system-model/work-packet-state.ts, server/system-model-tools/** ]
-suggested_tests: [ src/SettingsMenu.test.tsx, src/nodes/SystemGraphNode.test.tsx, src/nodes/leader/GateStrip.test.tsx, shared/system-model/packet.test.ts, shared/system-model/reconcile.test.ts, shared/leader-prompt.test.ts, server/agents/leader.test.ts, server/worktree-diff.test.ts, server/system-model/compile.test.ts, server/system-model/reconcile.test.ts, server/system-model-tools/record-work-packet-evidence.test.ts, server/system-model-tools/reconcile-run.test.ts, server/system-model-tools/model-health.test.ts ]
-keywords: [ system_model, architecture, graph, query, work_packet, context_pack, freshness, reconciliation, verification, acceptance_criteria, criterion_coverage, evidence_ledger, signal, constraint, gate, waiver, provenance, model_update ]
+suggested_files: [ .systemmodel/**, server/system-model/**, shared/system-model/**, src/SettingsMenu.tsx, src/nodes/SystemGraphNode.tsx, src/nodes/leader/GateStrip.tsx, shared/system-model/packet.ts, shared/system-model/reconcile.ts, shared/leader-prompt.ts, server/agents/leader.ts, server/worktree-diff.ts, server/system-model/compile.ts, server/system-model/reconcile.ts, server/system-model/work-packet-state.ts, server/system-model-tools/** ]
+suggested_tests: [ server/system-model/repository-context.test.ts, server/system-model/file-anchors.test.ts, src/SettingsMenu.test.tsx, src/nodes/SystemGraphNode.test.tsx, src/nodes/leader/GateStrip.test.tsx, shared/system-model/packet.test.ts, shared/system-model/reconcile.test.ts, shared/leader-prompt.test.ts, server/agents/leader.test.ts, server/worktree-diff.test.ts, server/system-model/compile.test.ts, server/system-model/reconcile.test.ts, server/system-model-tools/record-work-packet-evidence.test.ts, server/system-model-tools/reconcile-run.test.ts, server/system-model-tools/model-health.test.ts ]
+keywords: [ budget, relevance, retrieval, scope, system_model, architecture, graph, query, work_packet, context_pack, freshness, reconciliation, verification, acceptance_criteria, criterion_coverage, evidence_ledger, signal, constraint, gate, waiver, provenance, model_update ]
 entry_points:
   - surface: surface.canvas
     summary: Inspect status and graph relations and review gate evidence or waivers.
@@ -14,9 +14,9 @@ entry_points:
     tests: [ src/SettingsMenu.test.tsx, src/nodes/SystemGraphNode.test.tsx, src/nodes/leader/GateStrip.test.tsx ]
     flows: [ flow.inspect_system_model, flow.review_legacy_changes ]
   - surface: surface.agent_tools
-    summary: Query the model; create, amend, and verify scoped packets; append evidence and signals; reconcile actual diffs; and assess canonical model updates.
+    summary: Search compact cards, read selected facets, and expand declared relationships without implicit neighbors or packet writes; separately manage scoped packet evidence, verification, and reconciliation.
     files: [ server/system-model-tools/query-system-model.ts, server/system-model-tools/create-work-packet.ts, server/system-model-tools/record-work-packet-evidence.ts, server/system-model-tools/reconcile-run.ts, server/system-model-tools/record-constraint-verdicts.ts, server/system-model-tools/record-verification.ts, server/system-model-tools/model-health.ts ]
-    tests: [ server/system-model-tools/query-system-model.test.ts, server/system-model-tools/create-work-packet.test.ts, server/system-model-tools/record-work-packet-evidence.test.ts, server/system-model-tools/reconcile-run.test.ts, server/system-model-tools/record-constraint-verdicts.test.ts, server/system-model-tools/record-verification.test.ts, server/system-model-tools/model-health.test.ts ]
+    tests: [ server/system-model-tools/query-system-model.test.ts, server/system-model-tools/query-system-model-page.test.ts, server/system-model-tools/query-system-model-projection.test.ts, server/system-model/discovery-relations.test.ts, server/system-model-tools/create-work-packet.test.ts, server/system-model-tools/record-work-packet-evidence.test.ts, server/system-model-tools/reconcile-run.test.ts, server/system-model-tools/record-constraint-verdicts.test.ts, server/system-model-tools/record-verification.test.ts, server/system-model-tools/model-health.test.ts ]
     flows: [ flow.inspect_system_model ]
   - surface: surface.ws_api
     summary: Report model status and graph data and process explicit gate-waiver commands.

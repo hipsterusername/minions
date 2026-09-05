@@ -1,6 +1,6 @@
 id: constraint.skill_freezing_and_role_gate
 type: constraint
-statement: Armed skill instructions and values freeze at spawn from the registered workspace state root; only exact skill-builder arming grants authoring tools.
+statement: Skill prompts and progressive retrieval share a content-addressed catalog from the registered workspace state root, with its ID persisted across recovery and inherited by children; only exact skill-builder arming grants authoring tools.
 applies_to:
   capabilities: []
   flows: []
@@ -12,10 +12,14 @@ applies_to:
     - server/task-tools/assign-task.ts
     - server/task-tools/task-prompt.ts
     - server/skill-authoring-tools.ts
+    - server/skill-snapshot.ts
+    - server/skill-retrieval.ts
+    - server/task-graph/planning-source.ts
+    - server/session-continuity.ts
     - server/agents/minion.ts
 severity: high
-agent_instruction: Compile and persist armed skill content at launch, resolve the library from the registered workspace state root, drop unknown IDs, and gate authoring by exact skill ID.
-suggested_tests: [ server/task-tools/assign-task.test.ts, server/task-tools/task-prompt.test.ts, server/skill-authoring-tools.test.ts, server/agents/minion.test.ts ]
+agent_instruction: Persist immutable catalog bytes and the run snapshot ID before execution. Use the same snapshot and shared formatter for prompt assembly and read-only parent/subskill/attachment retrieval; preserve task value overrides in child snapshots, reject unavailable or changed snapshots, and gate authoring by exact selected skill ID. Direct assignments inherit by default and may set inheritSkills=false for an exact selection. Graph step skillIds replace inherited selections when supplied, including [] for none; reject unavailable explicit graph selections. Dispatch only each node's frozen selected skills while retaining project constraints.
+suggested_tests: [ server/task-tools/assign-task.test.ts, server/task-tools/task-prompt.test.ts, server/skill-authoring-tools.test.ts, server/agents/minion.test.ts, server/skill-retrieval.test.ts, tests/contracts/skill-retrieval.test.ts, server/task-graph/planning-source.test.ts, server/session-handoff.test.ts ]
 evidence: [ decision.role_gated_agent_tools ]
 domain: domain.delegation
 scope: targeted

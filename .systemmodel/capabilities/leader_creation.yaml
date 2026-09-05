@@ -1,13 +1,13 @@
 id: capability.leader_creation
 type: capability
 name: Leader creation and iterations
-summary: Users can launch a configured Leader from canvas, mobile, or activity and start or resume durable iterations through the correct ingress.
+summary: Users can launch a configured Leader from canvas, mobile, or activity and start or resume durable iterations through the correct ingress. The first leader-selected task name is canonical and persists across prompts, recovery, and later primary iterations.
 constraints: []
 decisions: [ decision.canonical_work_item_lifecycle, decision.role_gated_agent_tools ]
 risks:
   - risk.dual_ingress_divergence
-suggested_files: [ src/nodes/LeaderNode.tsx, src/nodes/leader/work-item.ts, server/commands/work-items.ts, server/commands/create-session.ts, server/session-launch.ts ]
-suggested_tests: [ src/nodes/LeaderNode.session-init.test.tsx, src/nodes/leader/work-item.test.ts, server/commands/work-items.test.ts, server/commands/create-session.test.ts, server/session-launch.test.ts ]
+suggested_files: [ src/nodes/LeaderNode.tsx, src/nodes/leader/work-item.ts, server/commands/work-items.ts, server/commands/create-session.ts, server/session-launch.ts, server/session-task-name.ts, server/session-continuity.ts, server/task-tools/set-task-name.ts ]
+suggested_tests: [ src/nodes/LeaderNode.session-init.test.tsx, src/nodes/leader/work-item.test.ts, server/commands/work-items.test.ts, server/commands/create-session.test.ts, server/session-launch.test.ts, server/session-task-name.test.ts, server/task-tools/set-task-name.test.ts ]
 keywords: [ leader, create, launch, start, resume, iteration, intention, prompt, work_item, session, run, empty_canvas, activity, mobile ]
 entry_points:
   - surface: surface.canvas

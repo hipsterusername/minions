@@ -7,12 +7,13 @@ decisions: [ decision.worktree_isolation_and_approval ]
 risks:
   - risk.legacy_canonical_review_split
   - risk.canonical_conflict_controls_latent
-suggested_files: [ src/ChangesView.tsx, src/LineageModal.tsx, src/mobile/ReviewChangesScreen.tsx, server/commands/approve-changes.ts, server/worktree-merge.ts, server/commands/worktree-integration.ts ]
-suggested_tests: [ src/ChangesView.test.tsx, src/LineageModal.test.tsx, src/mobile/ReviewChangesScreen.test.tsx, server/commands/merge-flow.test.ts, server/commands/worktree-integration.test.ts ]
+suggested_files: [ src/ChangesView.tsx, src/LineageModal.tsx, src/mobile/ReviewChangesScreen.tsx, server/commands/approve-changes.ts, server/worktree-merge.ts, server/commands/worktree-integration.ts, server/git-resolution.ts, server/worktree-cleanup.ts ]
+suggested_tests: [ src/ChangesView.test.tsx, src/LineageModal.test.tsx, src/mobile/ReviewChangesScreen.test.tsx, server/commands/merge-flow.test.ts, server/commands/worktree-integration.test.ts, server/worktree-lifecycle.integration.test.ts ]
 steps:
   - Display server-reported conflicts, gates, and preserved paths without optimistic completion.
-  - Select ours, theirs, or retry for legacy work, or an exposed retry, discard, or promotion path for canonical lineage.
-  - Acquire the corresponding operation lock and re-run gates and revision checks.
+  - For canonical work, the server prepares the merge and executes explicit ours/theirs choices; manual iterations edit files without Git metadata writes.
+  - Refuse collection while conflict markers remain; after resolution collect a new head and require review before retry.
+  - Acquire the corresponding operation lock, wait for execution to drain before legacy removal, and rerun gates and revision checks.
   - Clear worktree or contribution state only after successful service completion.
 freshness:
   class: code_coupled

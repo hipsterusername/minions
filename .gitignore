@@ -12,8 +12,23 @@ dist/
 /wireframes/
 /artifacts/
 
-# Local documentation work
-/docs/
+# Local documentation work, except published guides and feature documentation
+/docs/*
+!/docs/getting-started.md
+!/docs/progressive-system-model-retrieval.md
+!/docs/features/
+/docs/features/*
+!/docs/features/canvas-zones.md
+!/docs/images/
+/docs/images/*
+!/docs/images/getting-started-*.png
+!/docs/screenshots/
+/docs/screenshots/*
+!/docs/screenshots/README.md
+!/docs/screenshots/capture.mjs
+!/docs/screenshots/index.html
+!/docs/screenshots/scenes.tsx
+!/docs/screenshots/style.css
 
 # Vite
 .vite/

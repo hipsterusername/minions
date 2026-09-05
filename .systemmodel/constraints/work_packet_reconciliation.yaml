@@ -5,11 +5,11 @@ applies_to:
   capabilities: [ capability.system_model_guidance, capability.execution_graph_runtime ]
   flows: [ flow.inspect_system_model, flow.execute_execution_graph ]
   surfaces: [ surface.agent_tools ]
-  files: [ shared/system-model/packet.ts, shared/system-model/reconcile.ts, shared/leader-prompt.ts, server/agents/leader.ts, server/worktree-diff.ts, server/system-model/compile.ts, server/system-model/reconcile.ts, server/system-model/work-packet-state.ts, server/system-model-tools/** ]
+  files: [ shared/system-model/packet.ts, shared/system-model/reconcile.ts, shared/leader-prompt.ts, server/agents/leader.ts, server/worktree-diff.ts, server/system-model/compile.ts, server/system-model/reconcile.ts, server/system-model/evidence-binding.ts, server/system-model/gates.ts, server/system-model/review-gates.ts, server/system-model/work-packet-state.ts, server/system-model-tools/** ]
 severity: high
-agent_instruction: Preserve prior evidence, treat confidence as advisory, reconcile only against the stable actual diff, and require a validated model update or evidence-backed no-change assessment before packet closure.
+agent_instruction: Bind reconciliation and required gate checks to repository content, packet scope, and policy digests; invalidate legacy or stale evidence, require supported constraint verdicts, honor blocksMerge and all declared triggers, preserve prior evidence, treat confidence as advisory, reconcile only against the stable actual diff, and require a validated model update or evidence-backed no-change assessment before packet closure.
 review_gate: gate.system_model_core
-suggested_tests: [ shared/system-model/packet.test.ts, shared/system-model/reconcile.test.ts, shared/leader-prompt.test.ts, server/agents/leader.test.ts, server/worktree-diff.test.ts, server/system-model/compile.test.ts, server/system-model/reconcile.test.ts, server/system-model-tools/record-work-packet-evidence.test.ts, server/system-model-tools/reconcile-run.test.ts, server/system-model-tools/record-constraint-verdicts.test.ts ]
+suggested_tests: [ shared/system-model/packet.test.ts, shared/system-model/reconcile.test.ts, shared/leader-prompt.test.ts, server/agents/leader.test.ts, server/worktree-diff.test.ts, server/system-model/compile.test.ts, server/system-model/reconcile.test.ts, server/system-model/gates.test.ts, server/system-model/match.test.ts, server/system-model-tools/record-work-packet-evidence.test.ts, server/system-model-tools/reconcile-run.test.ts, server/system-model-tools/record-constraint-verdicts.test.ts ]
 evidence: [ decision.role_gated_agent_tools, decision.server_owned_execution_graphs ]
 domain: domain.platform
 scope: targeted

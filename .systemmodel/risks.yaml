@@ -4,10 +4,9 @@ risks:
     summary: A dialectic can create expensive agreement theater when participants share the same assumptions, runtime profile, or context framing, or can corrupt cache continuity when provider threads cross participant boundaries.
     severity: high
     applies_to:
-      capabilities:
-        - capability.execution_graph_runtime
+      capabilities: []
       flows:
-        - flow.execute_execution_graph
+        - flow.conduct_dialectic
       surfaces:
         - surface.agent_tools
         - surface.graph_inspector
@@ -21,7 +20,7 @@ risks:
     domain: domain.delegation
   - id: risk.dual_ingress_divergence
     type: risk
-    summary: Mobile and transient actors still create bare sessions while canvas uses canonical WorkItems.
+    summary: Project-scoped canvas and mobile launches use canonical WorkItems; legacy mobile fallback and transient actors can still create bare sessions and diverge from canonical routing.
     severity: high
     applies_to:
       capabilities:

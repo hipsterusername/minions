@@ -1,7 +1,7 @@
 id: capability.skill_library
 type: capability
 name: Skill library and arming
-summary: Users can maintain reusable project skills, configure them at launch, freeze their compiled instructions for a run, and grant exact skill-gated authoring tools.
+summary: Users can maintain reusable project skills, configure them at launch, freeze their catalogs for a run, progressively retrieve parent instructions, subskills and attachment pages, and grant exact skill-gated authoring tools.
 constraints:
   - constraint.skill_freezing_and_role_gate
 decisions: [ decision.role_gated_agent_tools ]
@@ -22,9 +22,9 @@ entry_points:
     tests: [ src/mobile/LaunchSkillsPanel.test.tsx, src/mobile/LaunchScreen.test.tsx ]
     flows: [ flow.arm_and_author_skills, flow.launch_leader ]
   - surface: surface.agent_tools
-    summary: Compile frozen prompts, load armed subskills, and conditionally expose skill-authoring MCP tools.
-    files: [ server/task-tools/task-prompt.ts, server/subskill-tools.ts, server/skill-authoring-tools.ts ]
-    tests: [ server/task-tools/task-prompt.test.ts, server/subskills.test.ts, server/skill-authoring-tools.test.ts ]
+    summary: Use one shared compiler and immutable run catalog for selected parent instructions, subskill indexes and eager bodies; load any catalog parent or subskill read-only and page individual attachments. Authoring remains separately gated by exact skill-builder selection.
+    files: [ shared/skill-prompt.ts, server/skill-snapshot.ts, server/skill-retrieval.ts, server/session-continuity.ts, server/task-graph/planning-source.ts, server/subskill-tools.ts, server/skill-authoring-tools.ts ]
+    tests: [ server/skill-retrieval.test.ts, tests/contracts/skill-retrieval.test.ts, server/task-graph/planning-source.test.ts, server/session-handoff.test.ts, server/subskills.test.ts, server/skill-authoring-tools.test.ts ]
     flows: [ flow.arm_and_author_skills, flow.delegate_and_steer_minions ]
 freshness:
   class: code_coupled

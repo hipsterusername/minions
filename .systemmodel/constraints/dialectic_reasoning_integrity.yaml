@@ -2,10 +2,9 @@ id: constraint.dialectic_reasoning_integrity
 type: constraint
 statement: A canonical dialectic is a bounded immutable graph whose materially different participants and neutral synthesizer use separate totally ordered cache-stable provider threads, whose non-final syntheses expose calibrated goal distance and unresolved disagreement through a Leader-controlled human gate, and whose moderation is revision-fenced.
 applies_to:
-  capabilities:
-    - capability.execution_graph_runtime
+  capabilities: []
   flows:
-    - flow.execute_execution_graph
+    - flow.conduct_dialectic
   surfaces:
     - surface.agent_tools
     - surface.graph_inspector
@@ -28,5 +27,4 @@ evidence: [ decision.leader_moderated_dialectic_graphs, decision.server_owned_ex
 domain: domain.delegation
 scope: targeted
 guards:
-  - capability.execution_graph_runtime
-  - flow.execute_execution_graph
+  - flow.conduct_dialectic

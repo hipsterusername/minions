@@ -1,0 +1,21 @@
+id: flow.conduct_dialectic
+type: flow
+name: Conduct a bounded Leader-moderated dialectic
+summary: Leaders use distinct participants and neutral synthesis to examine difficult questions, preserving separate provider threads and resolving bounded checkpoints before another episode runs.
+primary_capability: capability.execution_graph_runtime
+domain: domain.delegation
+constraints: [ constraint.dialectic_reasoning_integrity ]
+decisions: [ decision.leader_moderated_dialectic_graphs, decision.server_owned_execution_graphs ]
+risks: [ risk.dialectic_correlated_reasoning ]
+suggested_files: [ server/dialectic/graph-plan.ts, server/task-graph/dispatch-context.ts, server/task-graph/planning-runtime.ts, server/task-graph/planning-tools.ts ]
+suggested_tests: [ server/dialectic/graph-plan.test.ts, server/task-graph/session-affinity.test.ts, server/task-graph/planning-runtime.test.ts, server/task-graph/planning-tools.test.ts ]
+steps:
+  - For a difficult or ambiguous problem that benefits from sustained opposition, let the Leader submit the p13 dialectic specialization; expand two materially different epistemic roles and a neutral synthesizer into a bounded static graph rather than a hidden orchestration loop.
+  - Keep each dialectic participant and synthesizer in its own totally ordered session-affinity chain with stable harness, model, executor tier, tools, sandbox, and artifact contracts; resume only the latest successful provider thread on a harness that truthfully supports resume and prompt caching.
+  - At each non-final dialectic checkpoint, commit a structured synthesis with calibrated goal distance, disagreements, unresolved questions, candidate outcome, and moderation recommendation; block the next episode on a human gate and resume the Leader with the report and exact revision-fenced moderation coordinates.
+  - Let the Leader continue, reshape the remaining subtree, or stop the dialectic; preserve all prior turns and syntheses as immutable graph evidence and never let the synthesizer decide on the Leader's behalf.
+  - Execute the resulting graph through the shared immutable topology, fenced attempts, evidence, and recovery contracts.
+freshness:
+  class: code_coupled
+risk: high
+bridges: []

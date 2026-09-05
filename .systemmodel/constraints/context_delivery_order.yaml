@@ -10,9 +10,13 @@ applies_to:
     - src/context-extraction.ts
     - src/context-delivery.ts
     - server/commands/canvas-context.ts
+    - server/session-continuity.ts
+    - server/session-handoff.ts
+    - server/context-checkpoint.ts
+    - src/session-stream.ts
 severity: high
-agent_instruction: Preserve graph ordering and provider eligibility, sanitize attachments, publish the complete snapshot before start/send, and explicitly mark stale or cleared context.
-suggested_tests: [ src/connected-context.test.ts, src/context-extraction.test.ts, src/context-delivery.test.ts, src/context-staleness.test.ts ]
+agent_instruction: Preserve graph ordering and provider eligibility, sanitize attachments, publish the complete snapshot before start/send, and explicitly mark stale or cleared context. Persist the latest complete source snapshot and sanitized images; reseed fresh provider threads on the server before execution and invalidate browser delivery acknowledgements after committed checkpoints. Bounded prompt excerpts must mark omissions and identify durable full sources.
+suggested_tests: [ server/session-handoff.test.ts, src/nodes/leader/session-context.test.ts, src/connected-context.test.ts, src/context-extraction.test.ts, src/context-delivery.test.ts, src/context-staleness.test.ts ]
 evidence: [ decision.typed_event_bus ]
 domain: domain.workspace
 scope: domain

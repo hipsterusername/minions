@@ -1,7 +1,7 @@
 id: capability.context_routing
 type: capability
 name: Context routing
-summary: Users and Leaders can turn workspace-owned project knowledge and connected artifacts into bounded, freshness-aware agent input.
+summary: Users and Leaders can turn workspace-owned project knowledge and connected artifacts into bounded, freshness-aware agent input, including progressive skill retrieval from immutable run catalogs.
 constraints: []
 decisions: [ decision.typed_event_bus ]
 risks:
@@ -16,9 +16,9 @@ entry_points:
     tests: [ src/connected-context.test.ts, src/context-extraction.test.ts, src/ProjectPanel.test.tsx ]
     flows: [ flow.route_canvas_context, flow.save_project_knowledge ]
   - surface: surface.agent_tools
-    summary: Let Leaders replace workspace-owned project context and freeze configured project context, selected canvas context, and work-packet material into delegated task prompts.
-    files: [ server/task-tools/update-project-context.ts, server/task-tools/task-prompt.ts, server/task-tools/assign-task.ts ]
-    tests: [ server/task-tools/update-project-context.test.ts, server/task-tools/task-prompt.test.ts, server/task-tools/assign-task.test.ts ]
+    summary: Let Leaders replace workspace-owned context and freeze configured context into delegation; Leaders and Minions load parent skills, sub-skills, and paged attachments from the same persisted skill snapshot used for prompts.
+    files: [ server/task-tools/update-project-context.ts, server/task-tools/task-prompt.ts, server/task-tools/assign-task.ts, shared/skill-prompt.ts, server/skill-retrieval.ts, server/skill-snapshot.ts, server/task-graph/planning-source.ts ]
+    tests: [ server/task-tools/update-project-context.test.ts, server/task-tools/task-prompt.test.ts, server/task-tools/assign-task.test.ts, server/skill-retrieval.test.ts, tests/contracts/skill-retrieval.test.ts, server/task-graph/planning-source.test.ts ]
     flows: [ flow.save_project_knowledge, flow.route_canvas_context, flow.delegate_and_steer_minions ]
   - surface: surface.ws_api
     summary: Deliver a complete context snapshot to SessionHost before execution.

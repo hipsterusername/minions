@@ -1,16 +1,21 @@
 id: flow.inspect_system_model
 type: flow
 name: Inspect the system model and gate evidence
-summary: Users and agents query model context, maintain provenance-bearing packet evidence and criterion coverage, reconcile actual diffs, resolve model-update needs, and apply valid gate waivers.
+summary: Agents progressively search, open selected facets, and expand relevant model relationships. For scoped implementation work, users and agents maintain packet evidence and coverage, reconcile diffs, resolve model-update needs, and apply valid gate waivers.
 constraints: [ constraint.work_packet_reconciliation ]
 decisions: [ decision.role_gated_agent_tools, decision.worktree_isolation_and_approval ]
-suggested_files: [ src/SettingsMenu.tsx, src/nodes/SystemGraphNode.tsx, src/nodes/leader/GateStrip.tsx, shared/system-model/packet.ts, shared/system-model/reconcile.ts, shared/leader-prompt.ts, server/agents/leader.ts, server/worktree-diff.ts, server/system-model/compile.ts, server/system-model/reconcile.ts, server/system-model/work-packet-state.ts, server/system-model-tools/**, server/commands/get-system-model-status.ts ]
-suggested_tests: [ src/SettingsMenu.test.tsx, src/nodes/SystemGraphNode.test.tsx, src/nodes/leader/GateStrip.test.tsx, shared/system-model/packet.test.ts, shared/system-model/reconcile.test.ts, shared/leader-prompt.test.ts, server/agents/leader.test.ts, server/worktree-diff.test.ts, server/system-model/compile.test.ts, server/system-model/reconcile.test.ts, server/system-model-tools/record-work-packet-evidence.test.ts, server/system-model-tools/reconcile-run.test.ts, server/system-model-tools/record-constraint-verdicts.test.ts, server/system-model-tools/model-health.test.ts, tests/contracts/system-model-commands.test.ts ]
+suggested_files: [ .systemmodel/**, server/system-model/**, shared/system-model/**, src/SettingsMenu.tsx, src/nodes/SystemGraphNode.tsx, src/nodes/leader/GateStrip.tsx, shared/system-model/packet.ts, shared/system-model/reconcile.ts, shared/leader-prompt.ts, server/agents/leader.ts, server/worktree-diff.ts, server/system-model/compile.ts, server/system-model/reconcile.ts, server/system-model/work-packet-state.ts, server/system-model-tools/**, server/commands/get-system-model-status.ts ]
+suggested_tests: [ server/system-model/repository-context.test.ts, server/system-model/file-anchors.test.ts, src/SettingsMenu.test.tsx, src/nodes/SystemGraphNode.test.tsx, src/nodes/leader/GateStrip.test.tsx, shared/system-model/packet.test.ts, shared/system-model/reconcile.test.ts, shared/leader-prompt.test.ts, server/agents/leader.test.ts, server/worktree-diff.test.ts, server/system-model/compile.test.ts, server/system-model/reconcile.test.ts, server/system-model-tools/record-work-packet-evidence.test.ts, server/system-model-tools/reconcile-run.test.ts, server/system-model-tools/record-constraint-verdicts.test.ts, server/system-model-tools/model-health.test.ts, tests/contracts/system-model-commands.test.ts ]
 steps:
   - Load repository model status and inspect capability, flow, surface, constraint, risk, and decision relations.
-  - Query relevant objects and create or amend a scoped work packet with explicit acceptance criteria.
+  - Search compact cards by question or file hints, read selected facets, and explicitly expand declared relationships; queries do not create packets or record usage.
+  - Follow bounded continuation for complete detail; treat model version as a loaded snapshot and freshness as unchecked until verified.
+  - Create or amend a scoped work packet with explicit acceptance criteria when implementation scope calls for one, independently of retrieval relevance.
+  - Keep discovery dependencies and bridges available for querying without turning them into owned scope; include matching entry points and file-applicable or explicitly guarded constraints.
+  - Persist selected objects, confirmed entry-point pairs, and declared paths separately from derived context so repeated amendments retain their scope.
   - Append provenance-bearing observations, maintain current criterion coverage, and prioritize unresolved gaps or contradictions as signals.
-  - Route hard constraints, open high-priority signals, coverage, and bounded recent evidence before broader context hints.
+  - Apply authored context budgets and freshness-class policies; retain task intent and selected capability or flow guidance, rank applicable constraints by severity, and mark omitted context explicitly.
+  - Match specialized gates by declared subsystem files or behavior; descriptive file hints are not task ownership and risk alone does not activate unrelated repository gates.
   - After task or graph execution is terminal, reconcile against the stable actual worktree diff without treating runtime completion as packet closure.
   - Resolve constraint verdicts and either validate the smallest necessary canonical model update or record an evidence-backed no-change assessment.
   - Re-evaluate gates and permit a reasoned human waiver only in a mode that allows it.

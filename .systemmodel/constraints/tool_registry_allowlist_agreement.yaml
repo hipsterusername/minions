@@ -6,6 +6,7 @@ applies_to:
   flows: []
   surfaces: []
   files:
+    - server/harness/codex/index.ts
     - server/agents/leader.ts
     - server/agents/minion.ts
     - server/task-tools.ts
@@ -15,8 +16,8 @@ applies_to:
     - server/task-graph/planning-compiler.ts
     - server/task-graph/execution-policy.ts
 severity: high
-agent_instruction: Compare registered definitions to mcpToolNames for each role and condition, test exact equality, and document every callable tool in the role prompt. Treat graph planning as an additive Leader capability: graph-enabled profiles must retain direct planning, delegation, steering, status, and waiting tools. During semantic-plan preflight, validate supplied allowedTools as exact selected-harness built-in or fully qualified MCP identifiers; tell planners to omit the field when shell/filesystem access is harness-native and unnamed, and freeze the inherited policy with the planning source.
-suggested_tests: [ server/agents/leader.test.ts, server/agents/minion.test.ts, server/minion-tools.test.ts, server/render-tools.test.ts, server/task-graph/planning-compiler.test.ts, server/task-graph/execution-policy.test.ts ]
+agent_instruction: Filter Codex bridge definitions by the exact per-run allowedTools identifiers so both listing and direct calls reject forbidden tools. Compare registered definitions to mcpToolNames for each role and condition, test exact equality, and document every callable tool in the role prompt. Treat graph planning as an additive Leader capability: graph-enabled profiles must retain direct planning, delegation, steering, status, and waiting tools. During semantic-plan preflight, validate supplied allowedTools as exact selected-harness built-in or fully qualified MCP identifiers; tell planners to omit the field when shell/filesystem access is harness-native and unnamed, and freeze the inherited policy with the planning source.
+suggested_tests: [ server/harness/codex/index.test.ts, server/agents/leader.test.ts, server/agents/minion.test.ts, server/minion-tools.test.ts, server/render-tools.test.ts, server/task-graph/planning-compiler.test.ts, server/task-graph/execution-policy.test.ts ]
 evidence: [ decision.role_gated_agent_tools ]
 domain: domain.delegation
 scope: global

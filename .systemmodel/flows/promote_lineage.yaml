@@ -7,13 +7,17 @@ decisions: [ decision.worktree_isolation_and_approval, decision.canonical_work_i
 risks:
   - risk.legacy_canonical_review_split
   - risk.canonical_conflict_controls_latent
-suggested_files: [ src/LineageModal.tsx, src/LineageNodeStrip.tsx, src/WorktreeIntegrationControls.tsx, src/use-worktree-integration.ts, server/commands/worktree-integration.ts, server/worktree-integration-service.ts ]
-suggested_tests: [ src/LineageModal.test.tsx, src/LineageNodeStrip.test.tsx, src/WorktreeIntegrationControls.test.tsx, src/use-worktree-integration.test.tsx, server/commands/worktree-integration.test.ts ]
+suggested_files: [ src/LineageModal.tsx, src/LineageNodeStrip.tsx, src/WorktreeIntegrationControls.tsx, src/use-worktree-integration.ts, server/commands/worktree-integration.ts, server/worktree-integration-service.ts, server/worktree-integration-gates.ts, server/worktree-cleanup.ts, server/git-integration-executor.ts ]
+suggested_tests: [ src/LineageModal.test.tsx, src/LineageNodeStrip.test.tsx, src/WorktreeIntegrationControls.test.tsx, src/use-worktree-integration.test.tsx, server/commands/worktree-integration.test.ts, server/worktree-lifecycle.integration.test.ts ]
 steps:
-  - Create or join a lineage and load its latest integration snapshot.
+  - Create or join a lineage; provision contributions from its persisted base commit.
+  - Move only finished, unqueued contributions between lineages, invalidating their approvals.
   - Review a contribution separately from enqueueing it for integration.
   - Retry or discard failed contributions with expectedIntegrationRevision while preserving conflict evidence.
-  - Complete final lineage review and promote only after queue, gates, and target conditions permit.
+  - Bind review to current file contents, baseline, policy, and latest run; collection alone does not invalidate evidence.
+  - Require a resolution iteration and new review when the target has changes absent from the reviewed source.
+  - Require current verification of the combined code when gates are enforced; contribution checks alone do not satisfy final review.
+  - Reevaluate final gates before local promotion, then remove clean unchanged terminal worktrees and retry deferred cleanup.
 freshness:
   class: code_coupled
 risk: critical

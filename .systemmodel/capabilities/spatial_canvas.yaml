@@ -1,11 +1,11 @@
 id: capability.spatial_canvas
 type: capability
 name: Spatial canvas authoring
-summary: Users can create, arrange, group, connect, annotate, search, navigate, resize, and safely delete a persistent graph of work and context nodes.
+summary: Users can create, arrange, group, connect, annotate, search, navigate, resize, and safely delete a persistent graph of work and context nodes. Canvas Workspaces are always available with a permanent Global workspace. Switching fits the destination without moving content or unmounting live sessions; new nodes join the active workspace and owned output follows its leader. Existing Zone metadata and active workspace persist with the canvas. Default-on project drag snapping aligns nearby top/bottom edges and above/below placements, holds within a wider release threshold, and preserves the aligned position on drop; users can disable it in Workspace settings.
 constraints: [ constraint.canvas_action_prop_stability ]
 decisions: [ decision.canonical_work_item_lifecycle ]
-suggested_files: [ src/Canvas.tsx, src/CanvasNode.tsx, src/CanvasMiniMap.tsx, src/use-canvas-keyboard.ts, src/auto-layout.ts, src/components/AnnotationLayer.tsx ]
-suggested_tests: [ src/canvas-state.dom.test.tsx, src/CanvasNode.test.tsx, src/CanvasMiniMap.test.ts, src/use-canvas-keyboard.test.tsx, src/auto-layout.test.ts, src/components/AnnotationLayer.test.tsx ]
+suggested_files: [ src/canvas-drag-snap.ts, src/use-canvas-drag-snap.ts, src/CanvasLayoutControls.tsx, src/canvas-state.ts, src/canvas-zones.ts, src/use-canvas-zones.ts, src/CanvasZones.tsx, src/Canvas.tsx, src/CanvasNode.tsx, src/CanvasMiniMap.tsx, src/use-canvas-keyboard.ts, src/auto-layout.ts, src/components/AnnotationLayer.tsx ]
+suggested_tests: [ src/canvas-drag-snap.test.ts, src/Canvas.drag.test.tsx, src/SettingsMenu.test.tsx, src/canvas-zones.test.ts, src/CanvasZones.test.tsx, src/Canvas.zones.test.tsx, src/canvas-state.dom.test.tsx, src/CanvasNode.test.tsx, src/CanvasMiniMap.test.ts, src/use-canvas-keyboard.test.tsx, src/auto-layout.test.ts, src/components/AnnotationLayer.test.tsx ]
 keywords: [ canvas, spatial, node, edge, graph, group, arrange, layout, annotation, zoom, pan, minimap, keyboard, palette, autosave ]
 entry_points:
   - surface: surface.canvas

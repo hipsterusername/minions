@@ -19,7 +19,7 @@ applies_to:
     - server/task-graph/service.ts
     - server/task-graph/view.ts
 severity: critical
-agent_instruction: Reject stale generations, actor mismatches, superseded producers, undeclared outputs, write-set escape, changed artifact hashes, source-snapshot mismatch, and producer self-verification; evaluate edges only from current committed evidence.
+agent_instruction: Reject stale generations, actor mismatches, superseded producers, undeclared outputs, write-set escape, changed artifact hashes, source-snapshot mismatch, and producer self-verification; validate producer bytes against each consumer input contract before staging and again on reads; evaluate edges only from current committed evidence.
 review_gate: gate.execution_graph_runtime
 suggested_tests: [ server/task-graph/runtime.test.ts, server/task-graph/service.test.ts, server/task-graph/artifact-store.test.ts, tests/task-graph/runtime.test.ts ]
 evidence: [ decision.server_owned_execution_graphs ]

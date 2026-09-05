@@ -9,7 +9,7 @@ suggested_tests: [ src/SettingsMenu.test.tsx, src/components/SessionToolbar.test
 steps:
   - Load harness inventory and readiness before presenting compatible choices.
   - Choose shared versus isolated Git change placement independently from the process sandbox.
-  - Resolve filesystem and approval requests at session creation; plan mode always forces read-only.
+  - Resolve filesystem and approval requests at session creation; an explicit sandbox policy wins over legacy plan mode, which supplies read-only only when no policy is provided.
   - Default authorized execution roots to workspace-write and require an explicit unrestricted request.
   - Apply both axes to Codex and mark unsupported axes unmanaged for harnesses that cannot enforce them.
   - Render live controls only for synced runControl capabilities.

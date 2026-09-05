@@ -4,12 +4,14 @@ name: Navigate and organize the spatial workspace
 summary: Users create, search, focus, arrange, group, connect, resize, annotate, undo, and safely delete nodes while autosave preserves the graph.
 constraints: [ constraint.canvas_action_prop_stability ]
 decisions: [ decision.canonical_work_item_lifecycle ]
-suggested_files: [ src/Canvas.tsx, src/CanvasNode.tsx, src/CanvasMiniMap.tsx, src/use-canvas-keyboard.ts, src/auto-layout.ts, src/components/AnnotationLayer.tsx ]
-suggested_tests: [ src/canvas-state.dom.test.tsx, src/CanvasNode.test.tsx, src/CanvasMiniMap.test.ts, src/use-canvas-keyboard.test.tsx, src/auto-layout.test.ts, src/components/AnnotationLayer.test.tsx ]
+suggested_files: [ src/canvas-zones.ts, src/use-canvas-zones.ts, src/CanvasZones.tsx, src/Canvas.tsx, src/CanvasNode.tsx, src/CanvasMiniMap.tsx, src/use-canvas-keyboard.ts, src/auto-layout.ts, src/components/AnnotationLayer.tsx ]
+suggested_tests: [ src/canvas-zones.test.ts, src/CanvasZones.test.tsx, src/Canvas.zones.test.tsx, src/canvas-state.dom.test.tsx, src/CanvasNode.test.tsx, src/CanvasMiniMap.test.ts, src/use-canvas-keyboard.test.tsx, src/auto-layout.test.ts, src/components/AnnotationLayer.test.tsx ]
 steps:
   - Create or locate nodes through toolbar, context menu, palette, keyboard, search, or minimap.
   - Move, resize, group, connect, annotate, and arrange while preserving graph and selection semantics.
   - Undo, redo, or delete with group confirmation and Leader surface-detach safeguards.
+  - Create and switch between separate canvas Workspaces, available by default without a feature toggle. Global is permanent; switching fits the destination while retaining layout, live sessions, and graph context. New content joins the active workspace and owned output follows its leader.
+  - Transfer selected content between workspaces by menu or drag. Search and attention navigation switch to the owning workspace. Deleting a non-Global workspace offers moving content to Global or deleting it through session cleanup. Fit, minimap, layout, and selection use the active canvas; membership Undo preserves newer session data.
   - Autosave nodes, graph, and transform together and expose failed persistence for retry.
 freshness:
   class: code_coupled
