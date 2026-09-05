@@ -1,15 +1,11 @@
+import { openProjectFixture } from "./project-fixture.mjs";
 import { expect, test } from "@playwright/test";
 
 test("switches, fits, saves, and reloads workspace canvases with a permanent Global", async ({ page }) => {
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto("/");
-  await page.getByRole("button", { name: "New Project" }).click();
-  await page.getByPlaceholder("/path/to/new/project...").fill(process.env.MINIONS_E2E_PROJECT);
-  await page.getByPlaceholder("Project name (optional, defaults to folder name)").fill("Workspace Journey");
-  await page.getByRole("button", { name: "Create", exact: true }).click();
-  await page.getByRole("button", { name: "Initialize Git & create first commit" }).click();
+  await openProjectFixture(page, "Workspace Journey");
   await page.getByRole("tab", { name: "Canvas" }).click();
   const openWorkspaces = async () => {
     const toggle = page.getByRole("button", { name: /^Workspaces ·/ });

@@ -41,8 +41,8 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:smoke": "playwright test tests/e2e/clean-clone.smoke.spec.mjs",
-    "test:e2e": "playwright test",
+    "test:smoke": "playwright test --config playwright.smoke.config.mjs",
+    "test:e2e": "pnpm test:smoke && playwright test",
     "test:mutation": "stryker run",
     "coverage:report": "node scripts/coverage-report.mjs",
     "audit:prod": "pnpm audit --prod --audit-level high",
@@ -106,7 +106,7 @@
   },
   "pnpm": {
     "overrides": {
-      "fast-uri": "3.1.5",
+      "fast-uri": "3.1.6",
       "ip-address": "10.3.1"
     },
     "onlyBuiltDependencies": [

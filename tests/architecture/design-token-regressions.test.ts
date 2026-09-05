@@ -22,10 +22,5 @@ describe("architecture: design-token regressions", () => {
     expect(renderNode.match(/rgba\(255\s*,\s*255\s*,\s*255/gi) ?? []).toEqual([]);
   });
 
-  it("keeps the leader prompt action flat and accent-contrast safe", () => {
-    const promptBar = readRepoFile("src/nodes/leader/prompt/LeaderPromptBar.tsx");
-
-    expect(promptBar).not.toContain("var(--gradient-primary)");
-    expect(promptBar).toContain("var(--text-on-accent)");
-  });
+  // Rendered prompt contrast is checked in the browser smoke journey.
 });

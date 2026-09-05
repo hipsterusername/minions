@@ -237,8 +237,11 @@ or claim the bare `https://<machine>.<tailnet>.ts.net/` origin.
 | `pnpm build` | Production build |
 | `pnpm typecheck` | TypeScript type checking |
 | `pnpm test` | Run vitest in watch mode |
-| `pnpm test:run` | Run all tests once (used by CI) |
-| `pnpm test:coverage` | Run all tests once and produce a coverage report |
+| `pnpm test:run` | Run all unit, contract, and architecture tests once |
+| `pnpm test:coverage` | Run the suite once with coverage (used by CI) |
+| `pnpm test:smoke` | Run the isolated Echo browser journey without provider credentials |
+| `pnpm test:e2e` | Run the smoke journey, then the remaining browser tests with graph fixtures |
+| `pnpm audit:prod` | Audit production dependencies; fail on high or critical findings |
 | `pnpm verify` | Run the full CI gate locally (typechecks, tests, licenses, system model, build) |
 | `pnpm preflight` | Validate prerequisites |
 
@@ -251,16 +254,29 @@ Tests are required for all behavioural changes:
    For an even tighter local loop, install `prek` once
    (`prek install`) — the hook config in `.pre-commit-config.yaml`
    will run typecheck + tests on every commit.
-2. **When refactoring**, write a test that captures the current behaviour
-   *before* you change the code. The test should pass on `main`, then
-   pass unchanged on your branch. If it had to change, you changed
-   behaviour — call that out in the PR.
+2. **When refactoring**, preserve tests of observable behavior. If a test
+   fails because code moved, a CSS token moved to a stylesheet, or a fixture
+   assumes an old lifecycle, repair the test without weakening its behavioral
+   contract. Describe actual behavior changes in the PR.
 3. **When fixing a bug**, write a failing test first, then make it pass.
    The test stays in the suite.
 4. **Test files live next to the code they test** (`src/foo.ts` →
    `src/foo.test.ts`). Cross-tree contract tests live under
    `tests/contracts/`; architecture-fitness tests under
    `tests/architecture/`.
+
+CI collects coverage during the main test run and publishes available reports even
+when tests fail; coverage percentages are diagnostic, not a separate threshold.
+The smoke server exposes only Echo, while the remaining browser tests also get a
+fake Pi runtime for graph recovery. Both use temporary homes and databases. The
+smoke journey exercises explicit Git initialization, so its temporary directory
+must be outside any Git repository. If your system temp directory is inside one,
+use a clean location, for example `TMPDIR=/var/tmp pnpm test:smoke` on Linux.
+
+Assert user-visible outcomes rather than source-file spellings. Layout and
+computed-style assertions are appropriate when position, size, visibility, or
+readable contrast is the behavior under test; do not remove them to satisfy a
+blanket style ban. Browser tests cover actual rendering, which jsdom cannot.
 
 The architecture-fitness suite encodes invariants enforced in CI:
 server file size ceilings (≤ 400 lines), no cross-tree imports between

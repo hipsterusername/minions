@@ -20,6 +20,7 @@ export default defineConfig({
     // Coverage is reported but not gated.
     coverage: {
       provider: "v8",
+      reportOnFailure: true,
       reporter: ["text", "json-summary", "html"],
       include: ["src/**/*.{ts,tsx}", "server/**/*.ts", "shared/**/*.ts"],
       exclude: [

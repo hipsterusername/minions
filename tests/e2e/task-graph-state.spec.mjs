@@ -1,3 +1,4 @@
+import { openProjectFixture } from "./project-fixture.mjs";
 import fs from "node:fs";
 import Database from "better-sqlite3";
 import { expect, test } from "@playwright/test";
@@ -11,15 +12,13 @@ import {
 test.use({ viewport: { width: 1440, height: 900 } });
 
 test("converges successful and failure/retry/blocked Task Graph state through the real system", async ({ page }) => {
-  const baseProjectPath = process.env.MINIONS_E2E_PROJECT;
   const dbPath = process.env.MINIONS_E2E_DB;
-  if (!baseProjectPath || !dbPath) throw new Error("Task Graph E2E environment is missing");
-  const projectPath = `${baseProjectPath}-task-graph-state`;
+  if (!dbPath) throw new Error("MINIONS_E2E_DB is required");
 
   await page.route(/https:\/\/fonts\.(?:googleapis|gstatic)\.com\/.*/, (route) =>
     route.abort(),
   );
-  const project = await createProject(page, projectPath);
+  const project = await openProjectFixture(page, "Task Graph State");
   const workspaceId = project.workspaceId ?? project.id;
   await connectTaskGraphSocket(page);
 
@@ -137,20 +136,6 @@ test("converges successful and failure/retry/blocked Task Graph state through th
   });
   await closeTaskGraphSocket(page);
 });
-
-async function createProject(page, projectPath) {
-  await page.goto("/");
-  await page.getByRole("button", { name: "New Project" }).click();
-  await page.getByPlaceholder("/path/to/new/project...").fill(projectPath);
-  await page.getByPlaceholder("Project name (optional, defaults to folder name)")
-    .fill("Task Graph State");
-  const createdResponse = page.waitForResponse((response) =>
-    response.request().method() === "POST"
-      && new URL(response.url()).pathname === "/api/projects"
-      && response.status() === 201);
-  await page.getByRole("button", { name: "Create" }).click();
-  return (await createdResponse).json();
-}
 
 async function pollWorkItem(page, projectId) {
   let item;

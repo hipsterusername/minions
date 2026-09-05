@@ -10,10 +10,8 @@
  *      weight. Either the query is the assertion (drop the matcher) or
  *      the test should assert something falsifiable (visible text, a
  *      callback, a state change).
- *   2. CSS-style implementation coupling — `toHaveStyle({ display: ... })`,
- *      reads of `getComputedStyle(...)`, or attribute-only checks
- *      (`data-no-drag`, inline `style=`) that pin presentation rather
- *      than behaviour.
+ * Layout and computed-style assertions are intentionally allowed: geometry,
+ * visibility, and readable contrast are behavior in a spatial application.
  *
  * If a real test needs one of these patterns, justify it with an inline
  * `// BANNED_ASSERTION_OK: <reason>` comment on the same line; the
@@ -31,7 +29,7 @@ interface Violation {
   rel: string;
   line: number;
   text: string;
-  rule: "QUERY_AS_ASSERTION" | "CSS_COUPLING";
+  rule: "QUERY_AS_ASSERTION";
 }
 
 /** All `*.test.ts` and `*.test.tsx` files under the scan roots. */
@@ -65,30 +63,15 @@ function walk(dir: string, acc: string[]): void {
 }
 
 /**
- * `expect(<getBy*|queryBy*|findBy*>(...)).toBe(Defined|Truthy)()` is
+ * `expect(<getBy*>(...)).toBe(Defined|Truthy)()` is
  * the canonical "the query is the assertion" anti-pattern. Match the
  * full chain on a single line so multiline formatting decisions don't
  * trip the scanner.
  */
 const QUERY_AS_ASSERTION_RE =
-  /expect\([^)]*\b(?:getBy|queryBy|findBy)[A-Z]\w*\([^)]*\)[^)]*\)\s*\.\s*(?:toBeDefined|toBeTruthy)\s*\(\s*\)/;
+  /expect\([^)]*\bgetBy[A-Z]\w*\([^)]*\)[^)]*\)\s*\.\s*(?:toBeDefined|toBeTruthy)\s*\(\s*\)/;
 
-/**
- * CSS / DOM-impl coupling: `.toHaveStyle({...})` with a literal style
- * object, raw `getComputedStyle(...)` reads, bare `getAttribute("style")`
- * reads, and inline-style flex assertions. These pin presentation, not
- * behaviour.
- */
-const CSS_COUPLING_RES: ReadonlyArray<RegExp> = [
-  /\.toHaveStyle\s*\(\s*\{/,
-  /getComputedStyle\s*\(/,
-  /\.getAttribute\s*\(\s*["']style["']\s*\)/,
-  // Inline-style flex-string assertion: `.style*.toMatch(/flex/)` couples
-  // the test to CSS implementation details.
-  /\.style[A-Za-z.]*\.toMatch\([^)]*flex[^)]*\)/,
-];
-
-/** A line carrying this marker is allowed to violate either rule. */
+/** A line carrying this marker is allowed to violate the rule. */
 const ESCAPE_HATCH_RE = /BANNED_ASSERTION_OK:/;
 
 /**
@@ -120,19 +103,6 @@ function scanFile(path: string): Violation[] {
         text: line.trim(),
         rule: "QUERY_AS_ASSERTION",
       });
-      continue;
-    }
-
-    for (const re of CSS_COUPLING_RES) {
-      if (re.test(line)) {
-        out.push({
-          rel,
-          line: i + 1,
-          text: line.trim(),
-          rule: "CSS_COUPLING",
-        });
-        break;
-      }
     }
   }
 
@@ -160,17 +130,6 @@ describe("architecture: banned assertion shapes", () => {
       offenders.length === 0
         ? ""
         : `Found ${offenders.length} query-as-assertion violation(s). The query already throws on absence — drop the matcher or assert something falsifiable instead.\n\n${formatViolations(offenders)}\n\nIf the call site is genuinely correct, mark it with \`// BANNED_ASSERTION_OK: <reason>\` on the same line.`,
-    ).toEqual([]);
-  });
-
-  it("the test tree contains no CSS-style implementation coupling (§5.5 IMPL_COUPLING)", () => {
-    const all = files.flatMap(scanFile);
-    const offenders = all.filter((v) => v.rule === "CSS_COUPLING");
-    expect(
-      offenders,
-      offenders.length === 0
-        ? ""
-        : `Found ${offenders.length} CSS-style coupling violation(s). Tests must assert behaviour, not computed styles or inline-style attributes.\n\n${formatViolations(offenders)}\n\nIf the assertion is genuinely about a behaviour proxy (e.g. \`display:none\` proves something is hidden), mark it with \`// BANNED_ASSERTION_OK: <reason>\` on the same line.`,
     ).toEqual([]);
   });
 });

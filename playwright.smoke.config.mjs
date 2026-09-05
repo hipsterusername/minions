@@ -1,3 +1,3 @@
 import { createBrowserConfig } from "./tests/e2e/browser-config.mjs";
 
-export default createBrowserConfig();
+export default createBrowserConfig({ smoke: true });

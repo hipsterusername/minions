@@ -59,7 +59,7 @@ describe("buildSessionContext", () => {
     const result = buildSessionContext(messages, []);
     expect(result).toContain("[user]: What is the plan?");
     expect(result).toContain("[assistant]: Here is the plan.");
-    expect(result).toContain("<previous-session-context>");
+    expect(result).toContain("<session-continuation>");
   });
 
   it("excludes tool and thinking messages from conversation entries", () => {
@@ -94,12 +94,15 @@ describe("buildSessionContext", () => {
     expect(result).toContain("My Test Session");
   });
 
-  it("truncates messages longer than 2000 characters", () => {
-    const long = "x".repeat(2100);
+  it("bounds conversation excerpts while preserving user directives separately", () => {
+    const long = "x".repeat(2100) + "KEEP THIS INSTRUCTION";
     const messages = [msg("user", long)];
     const result = buildSessionContext(messages, []);
-    expect(result).toContain("…");
-    // The truncated portion should not appear
-    expect(result.length).toBeLessThan(long.length + 500);
+    const history = result.match(/<conversation-history>([\s\S]*?)<\/conversation-history>/)?.[1];
+    expect(history).toContain("…");
+    expect(history!.length).toBeLessThan(2050);
+    expect(history).not.toContain("KEEP THIS INSTRUCTION");
+    const directives = result.match(/<user-directives>([\s\S]*?)<\/user-directives>/)?.[1];
+    expect(directives).toContain(long);
   });
 });

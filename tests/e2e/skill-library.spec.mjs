@@ -1,14 +1,10 @@
+import { openProjectFixture } from "./project-fixture.mjs";
 import { expect, test } from "@playwright/test";
 
 test("creates a themed skill, explores its context, launches and reloads it", async ({ page }) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto("/");
-  await page.getByRole("button", { name: "New Project" }).click();
-  await page.getByPlaceholder("/path/to/new/project...").fill(process.env.MINIONS_E2E_PROJECT);
-  await page.getByPlaceholder("Project name (optional, defaults to folder name)").fill("Skill Library Journey");
-  await page.getByRole("button", { name: "Create", exact: true }).click();
-  await page.getByRole("button", { name: "Initialize Git & create first commit" }).click();
+  await openProjectFixture(page, "Skill Library Journey");
   await page.getByRole("tab", { name: "Canvas" }).click();
   await page.getByRole("button", { name: "Skills", exact: true }).click();
   const panel = page.locator('[data-dock-panel="skills"]');
@@ -32,11 +28,17 @@ test("creates a themed skill, explores its context, launches and reloads it", as
   await expect(panel.getByText("Review {{target}} before release. Check tests and rollback steps.")).not.toBeVisible();
   await panel.getByText("Instructions", { exact: true }).click();
   await expect(panel.getByText("Review {{target}} before release. Check tests and rollback steps.")).toBeVisible();
-  await panel.getByText("Inputs", { exact: true }).click();
+  await panel.locator("summary").filter({ hasText: /^Inputs\b/ }).click();
   await expect(panel.getByText("Target", { exact: true })).toBeVisible();
+  const launchSaved = page.waitForResponse((response) =>
+    response.request().method() === "PUT"
+      && new URL(response.url()).pathname.endsWith("/state") && response.ok());
   await panel.getByRole("button", { name: "Launch with Release Scout" }).click();
   await expect(panel).not.toBeVisible();
-  await expect(page.getByText("Release Scout", { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Configure skills, 1 active" }).click();
+  await expect(page.getByRole("dialog", { name: "Skills", exact: true })
+    .getByLabel("Selected skills", { exact: true })).toContainText("Release Scout");
+  await launchSaved;
   await page.reload();
   await page.getByText("Skill Library Journey", { exact: true }).click();
   await page.getByRole("tab", { name: "Canvas" }).click();

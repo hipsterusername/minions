@@ -62,7 +62,41 @@ test("creates, launches, persists, and reloads an echo-backed project", async ({
   await page.getByRole("tab", { name: "Canvas" }).click();
   await expect(page.getByLabel("Enter fullscreen")).toBeVisible();
   await page.getByLabel("Enter fullscreen").click();
-  await expect(page.getByRole("dialog", { name: "Leader fullscreen cockpit" })).toContainText(
-    context,
-  );
+  const cockpit = page.getByRole("dialog", { name: "Leader fullscreen cockpit" });
+  await expect(cockpit).toContainText(context);
+
+  // Exercise the rendered prompt, including its stylesheet. Searching the TSX
+  // for a token name cannot tell us whether the user can read the action.
+  await cockpit.getByRole("textbox").fill("Review the saved project.");
+  const submit = cockpit.getByRole("button", { name: "New iteration", exact: true });
+  await expect(submit).toBeEnabled();
+  await expect(submit).toBeVisible();
+  await expect.poll(() => submit.evaluate((button) => {
+    const style = getComputedStyle(button);
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 1;
+    const ctx = canvas.getContext("2d");
+    function rgba(color) {
+      ctx.clearRect(0, 0, 1, 1);
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, 1, 1);
+      return [...ctx.getImageData(0, 0, 1, 1).data];
+    }
+    function luminance(channels) {
+      const linear = channels.slice(0, 3).map((channel) => {
+        const value = channel / 255;
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      });
+      return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+    }
+    const foreground = rgba(style.color);
+    const background = rgba(style.backgroundColor);
+    // These are solid colors; fail explicitly if compositing becomes necessary.
+    if (foreground[3] !== 255 || background[3] !== 255 || style.backgroundImage !== "none") {
+      throw new Error("Prompt contrast measurement requires solid foreground and background colors");
+    }
+    const values = [luminance(foreground), luminance(background)].sort((a, b) => a - b);
+    return (values[1] + 0.05) / (values[0] + 0.05);
+  }), { message: "Enabled prompt action text contrast after its color transition" })
+    .toBeGreaterThanOrEqual(4.5);
 });

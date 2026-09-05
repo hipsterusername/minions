@@ -612,8 +612,9 @@ describe("SessionHost.start — error path", () => {
       prompt?: string;
     };
     expect(secondStart.resumeId).toBeUndefined();
-    expect(secondStart.prompt).toContain("<previous-session-context>");
-    expect(secondStart.prompt).not.toContain("<context-window-recovery>");
+    expect(secondStart.prompt).toContain('trigger="context_recovery"');
+    expect(secondStart.prompt).toContain("<context-window-recovery>");
+    expect(secondStart.prompt).toContain("providerThread: fresh_requested");
     expect(secondStart.prompt).toContain("I finished step one.");
     expect(secondStart.prompt).toContain("Continue the work.");
   });

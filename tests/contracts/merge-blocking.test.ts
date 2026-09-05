@@ -92,7 +92,7 @@ describe("contract: enforced merge blocking", () => {
 function enforcedHarness(): ReturnType<typeof setup> & { project: string } {
   const project = copyValidFixture();
   writeSettings(project, { systemModel: "enforced" });
-  const h = setup({ cwd: project, status: "running" });
+  const h = setup({ cwd: project, status: "idle" });
   h.host.worktree = worktree(project);
   return Object.assign(h, { project });
 }

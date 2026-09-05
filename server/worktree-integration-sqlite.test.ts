@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { initDb } from "./db.ts";
 import { ensureWorkItemSchema } from "./work-item-schema.ts";
@@ -37,8 +38,11 @@ describe("SQLite worktree integration runtime", () => {
   it("persists a planned contribution and returns its exact worker identity before launch", async () => {
     const { db, service } = setup(); const plan = await service.bindRun({ workItemId: "work", runKey: "run-1" });
     expect(plan).toMatchObject({ projectPath: "/repo", leaderSessionKey: "run-1",
-      branch: expect.stringContaining("minions/contribution/"), path: expect.stringContaining(".canvas-worktrees") });
+      branch: expect.stringContaining("minions/contribution/") });
     const contribution = findContributionByRun(db, "run-1")!;
+    expect(path.isAbsolute(plan.path)).toBe(true);
+    expect(path.basename(plan.path)).toBe(contribution.id);
+    expect(plan.path.startsWith("/repo/")).toBe(false);
     expect(contribution).toMatchObject({ state: "planned", branch_name: plan.branch, worktree_path: plan.path });
     expect(getLineageState(db, contribution.lineage_id).lineage).toMatchObject({ project_id: "project",
       target_ref: "refs/heads/main", base_sha: "abc123" }); db.close();

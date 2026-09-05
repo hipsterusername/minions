@@ -1,3 +1,4 @@
+import { openProjectFixture } from "./project-fixture.mjs";
 import fs from "node:fs";
 import Database from "better-sqlite3";
 import { expect, test } from "@playwright/test";
@@ -33,23 +34,9 @@ async function sendConflictingCommand(page, command) {
 }
 
 test("reconnect refetch converges in flight and a stale control cannot rewrite SQLite", async ({ page }) => {
-  const baseProjectPath = process.env.MINIONS_E2E_PROJECT;
   const dbPath = process.env.MINIONS_E2E_DB;
-  if (!baseProjectPath || !dbPath) throw new Error("Task Graph E2E environment is missing");
-  const projectPath = `${baseProjectPath}-task-graph-recovery`;
-
-  await page.goto("/");
-  await page.getByRole("button", { name: "New Project" }).click();
-  await page.getByPlaceholder("/path/to/new/project...").fill(projectPath);
-  await page
-    .getByPlaceholder("Project name (optional, defaults to folder name)")
-    .fill("Task Graph Recovery");
-  const createdResponse = page.waitForResponse((response) =>
-    response.request().method() === "POST"
-      && new URL(response.url()).pathname === "/api/projects"
-      && response.status() === 201);
-  await page.getByRole("button", { name: "Create" }).click();
-  const project = await (await createdResponse).json();
+  if (!dbPath) throw new Error("MINIONS_E2E_DB is required");
+  const project = await openProjectFixture(page, "Task Graph Recovery");
   const workspaceId = project.workspaceId ?? project.id;
 
   await connectTaskGraphSocket(page);

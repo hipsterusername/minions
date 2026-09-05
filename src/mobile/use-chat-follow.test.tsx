@@ -37,7 +37,7 @@ it("text selection pauses follow even near the bottom", () => {
   feed.scrollTop = 800;
   rerender(<Feed activity="selected text streaming" />);
   expect(feed.scrollTop).toBe(800);
-  expect(screen.getByRole("button", { name: /New activity/ })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /New activity/ })).toBeVisible();
 });
 it("keeps a paused offset on keyboard/viewport resize and uses immediate scrolling with reduced motion", () => {
   let resize = () => {};

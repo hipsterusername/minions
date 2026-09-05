@@ -23,13 +23,13 @@ it("shows only confirmed bulk successes and restores once using the acknowledged
   expect(screen.queryByLabelText("Dismissed activity receipts")).toBeNull();
   act(() => emit({ type: "control_response", command: "dismiss_session", requestId: send.mock.calls[0]![0].requestId, success: false, error: "Busy" }));
   act(() => emit({ type: "control_response", command: "dismiss_session", requestId: send.mock.calls[1]![0].requestId, success: true, lifecycle: { lifecycleRevision: 8, dismissedAt: 1 } }));
-  expect(screen.getByText(/Dismissed from Activity · 1 activity/)).toBeTruthy();
-  expect(screen.getByText(/First: Dismiss failed: Busy/)).toBeTruthy();
+  expect(screen.getByText(/Dismissed from Activity · 1 activity/)).toBeVisible();
+  expect(screen.getByText(/First: Dismiss failed: Busy/)).toBeVisible();
   const restore = screen.getByRole("button", { name: "Restore Second to Activity" });
   fireEvent.click(restore); fireEvent.click(restore);
   expect(send).toHaveBeenCalledTimes(3);
   expect(send.mock.calls[2]![0]).toMatchObject({ type: "reopen_session", sessionKey: "two", expectedLifecycleRevision: 8 });
-  expect(screen.getByText("Restoring…")).toBeTruthy();
+  expect(screen.getByText("Restoring…")).toBeVisible();
   act(() => emit({ type: "control_response", command: "reopen_session", requestId: send.mock.calls[2]![0].requestId, success: false, error: "Retry" }));
   expect(screen.getByRole("button", { name: "Restore Second to Activity" }).hasAttribute("disabled")).toBe(false);
   fireEvent.click(screen.getByRole("button", { name: "Restore Second to Activity" }));
