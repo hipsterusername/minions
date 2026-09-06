@@ -55,8 +55,14 @@ await check("git", async () => run("git", ["--version"]));
 await check("backend port", async () => canBind(Number(process.env["PORT"] ?? 3141)));
 await check("frontend port", async () => canBind(Number(process.env["VITE_PORT"] ?? 6173)));
 await check("native dependencies", async () => {
-  await import("better-sqlite3");
-  return "better-sqlite3 loaded";
+  const { default: Database } = await import("better-sqlite3");
+  const db = new Database(":memory:");
+  try {
+    db.prepare("SELECT 1").get();
+    return "better-sqlite3 database opened and queried";
+  } finally {
+    db.close();
+  }
 });
 
 console.log("\nHarness readiness\n");

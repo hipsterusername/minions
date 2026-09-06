@@ -17,6 +17,7 @@ import {
 } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkDependencies } from "./check-dependencies.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const root = join(scriptDir, "..");
@@ -83,6 +84,7 @@ function start(enableTail = tailscale) {
     return;
   }
 
+  checkDependencies(["tsx", "vite", "better-sqlite3"]);
   mkdirSync(runDir, { recursive: true });
   // Append so a restart keeps history; truncate is the alternative if noisy.
   const out = openSync(logFile, "a");
@@ -152,6 +154,7 @@ function stop() {
 }
 
 function restart() {
+  checkDependencies(["tsx", "vite", "better-sqlite3"]);
   const restoreTailscale = tailscale || existsSync(tailscaleFile);
   const pid = readPid();
   if (isRunning(pid)) {

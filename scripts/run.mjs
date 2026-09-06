@@ -3,6 +3,9 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkDependencies } from "./check-dependencies.mjs";
+
+checkDependencies(["tsx", "vite", "better-sqlite3"]);
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const mode = process.argv[2] === "preview" ? "preview" : "dev";

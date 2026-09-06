@@ -27,7 +27,7 @@
   "packageManager": "pnpm@10.15.1",
   "scripts": {
     "dev": "node scripts/run.mjs dev",
-    "server": "tsx server/index.ts",
+    "server": "node --import ./scripts/register-typescript.mjs server/index.ts",
     "start": "node scripts/start.mjs start",
     "stop": "node scripts/start.mjs stop",
     "restart": "node scripts/start.mjs restart",
@@ -40,6 +40,8 @@
     "typecheck:server": "tsc -p server/tsconfig.json --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:install": "node --test tests/install/startup.test.mjs",
+    "test:sqlite": "node --import ./scripts/register-typescript.mjs scripts/sqlite-smoke.mjs",
     "test:coverage": "vitest run --coverage",
     "test:smoke": "playwright test --config playwright.smoke.config.mjs",
     "test:e2e": "pnpm test:smoke && playwright test",
@@ -47,10 +49,10 @@
     "coverage:report": "node scripts/coverage-report.mjs",
     "audit:prod": "pnpm audit --prod --audit-level high",
     "check:licenses": "node scripts/check-licenses.mjs",
-    "system-model:validate": "node --import tsx scripts/system-model-validate.mjs",
+    "system-model:validate": "node --import ./scripts/register-typescript.mjs scripts/system-model-validate.mjs",
     "verify": "pnpm typecheck && pnpm typecheck:server && pnpm test:run && pnpm check:licenses && pnpm system-model:validate -- --strict && pnpm build",
     "agent:preflight": "node scripts/agent-workflow-preflight.mjs",
-    "preflight": "node --import tsx scripts/preflight.mjs"
+    "preflight": "node --import ./scripts/register-typescript.mjs scripts/preflight.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.241",
@@ -110,7 +112,9 @@
       "ip-address": "10.3.1"
     },
     "onlyBuiltDependencies": [
-      "esbuild",
+      "esbuild"
+    ],
+    "ignoredBuiltDependencies": [
       "better-sqlite3"
     ]
   }

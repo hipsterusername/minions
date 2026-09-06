@@ -379,7 +379,12 @@ shows the effective catalog returned by that command. Set `OPENCODE_PATH` or
 Another instance may be running. Kill it or use a different port: `PORT=3142 pnpm start`
 
 **Native module build errors during `pnpm install`**
-`better-sqlite3` requires a C++ compiler. On macOS run `xcode-select --install`. On Ubuntu/Debian: `sudo apt install build-essential`.
+`better-sqlite3` 13 bundles native binaries for supported platforms, including Windows x64. The project's pnpm configuration skips its unnecessary implicit `node-gyp rebuild`; `esbuild` remains allowed to run its install script. If an older checkout fails while looking for Visual Studio or a C++ compiler, update the checkout and run `pnpm install` again.
+
+**Cannot find package `tsx`**
+Run `pnpm install` successfully before starting Minions or running `pnpm preflight`. This error usually means dependencies have not been installed yet.
+
+Startup commands now check for missing local dependencies and print `Run pnpm install` before launching. The Windows CI job runs a frozen-lockfile install with native compilation disabled, then checks startup diagnostics and SQLite database creation, writes, and reads. Run those checks locally with `pnpm test:install` and `pnpm test:sqlite`.
 
 ## License
 

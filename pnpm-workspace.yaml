@@ -1,1 +1,5 @@
-onlyBuiltDependencies: esbuild,better-sqlite3
+onlyBuiltDependencies:
+  - esbuild
+# better-sqlite3 13 bundles native binaries. Skip pnpm's implicit node-gyp rebuild.
+ignoredBuiltDependencies:
+  - better-sqlite3
