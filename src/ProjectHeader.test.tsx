@@ -77,9 +77,9 @@ describe("ProjectHeader project navigation", () => {
     expect(onRename).toHaveBeenCalledWith("Alpha Prime");
   });
 
-  it("previews active agents in their workspace and caps the visible roster", async () => {
+  it("previews active leaders in their workspace and caps the visible roster", async () => {
     const session = (sessionKey: string, overrides: Partial<SessionInfo> = {}): SessionInfo => ({
-      sessionKey, sessionId: null, taskName: sessionKey, role: "minion",
+      sessionKey, sessionId: null, taskName: sessionKey, role: "leader",
       status: "running", cwd: "/repo/alpha", ...overrides,
     });
     renderHeader({ sessions: [
@@ -95,7 +95,8 @@ describe("ProjectHeader project navigation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Alpha" }));
     const alpha = within(await screen.findByRole("menuitemradio", { name: /Alpha/ }));
-    expect(alpha.getByText("4 active")).toBeVisible();
+    expect(alpha.getByText("4 active leaders")).toBeVisible();
+    expect(alpha.getByText("0 crew")).toBeVisible();
     expect(alpha.getByText("Build feature")).toBeVisible();
     expect(alpha.getByText("Review changes")).toBeVisible();
     expect(alpha.getByText("Waiting")).toBeVisible();
@@ -107,12 +108,55 @@ describe("ProjectHeader project navigation", () => {
     }
     const beta = within(screen.getByRole("menuitemradio", { name: /Beta/ }));
     expect(beta.getByText("Other workspace")).toBeVisible();
-    expect(beta.getByText("1 active")).toBeVisible();
+    expect(beta.getByText("1 active leader")).toBeVisible();
+  });
+
+  it("counts executing crew across leader rosters and child sessions without duplicates", async () => {
+    const session = (sessionKey: string, overrides: Partial<SessionInfo> = {}): SessionInfo => ({
+      sessionKey, sessionId: null, taskName: sessionKey, role: "minion",
+      status: "running", cwd: "/repo/alpha", ...overrides,
+    });
+    const sessions = [
+      session("leader-1", { role: "leader", runKey: "leader-run", activeMinions: [
+        { taskId: "live", title: "Live", status: "running", sessionKey: "live" },
+        { taskId: "starting", title: "Starting", status: "starting", sessionKey: null },
+        { taskId: "planned", title: "Planned", status: "planned", sessionKey: null },
+        { taskId: "blocked", title: "Blocked", status: "blocked", sessionKey: null },
+        { taskId: "finished", title: "Finished", status: "running", sessionKey: "finished" },
+      ] }),
+      session("leader-2", { role: "leader", status: "idle", activeMinions: [
+        { taskId: "roster-only", title: "Roster only", status: "running", sessionKey: "roster-only" },
+      ] }),
+      session("live"),
+      session("graph-child", { parentRunKey: "leader-run", cwd: "/central/worktree" }),
+      session("finished", { status: "completed" }),
+      session("waiting", { status: "waiting" }),
+      session("idle", { status: "idle" }),
+      session("failed", { status: "error" }),
+      session("cancelled", { status: "cancelled" }),
+      session("default", { role: "default" }),
+      session("other-project", { projectId: "project-2" }),
+      session("other-leader-child", { parentRunKey: "other-leader" }),
+    ];
+    const props = renderHeader({ sessions });
+    fireEvent.click(screen.getByRole("button", { name: "Alpha" }));
+    const alphaItem = await screen.findByRole("menuitemradio", { name: /Alpha/ });
+    const alpha = within(alphaItem);
+    expect(alpha.getByText("1 active leader")).toBeVisible();
+    expect(alpha.getByText("4 crew")).toBeVisible();
+    expect(alpha.getByText("1 active leader").querySelector(".leader-status-icon")).toHaveAttribute("aria-hidden", "true");
+    expect(alpha.getByText("4 crew").querySelector(".crew-icon")).toHaveAttribute("aria-hidden", "true");
+    expect(alpha.queryByText("live")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("menuitemradio", { name: /Beta/ })).getByText("1 crew")).toBeVisible();
+
+    props.rerender(sessions.map((entry) => ({ ...entry, status: "completed", activeMinions: [] })));
+    expect(alpha.queryByText(/crew$/)).not.toBeInTheDocument();
+    expect(alpha.queryByText(/active leader/)).not.toBeInTheDocument();
   });
 
   it("updates the open preview when agents finish without fetching projects again", async () => {
     const session: SessionInfo = {
-      sessionKey: "minion-1", sessionId: null, role: "minion",
+      sessionKey: "leader-1", sessionId: null, role: "leader",
       taskName: "Live task", cwd: "/repo/alpha", status: "running",
     };
     const props = renderHeader({ sessions: [session] });
@@ -123,7 +167,7 @@ describe("ProjectHeader project navigation", () => {
     props.rerender([{ ...session, status: "completed" }]);
 
     expect(screen.queryByText("Live task")).not.toBeInTheDocument();
-    expect(screen.queryByText(/active$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/active leader/)).not.toBeInTheDocument();
     expect(screen.getByRole("menu", { name: "Switch project" })).toBeVisible();
     expect(vi.mocked(listProjects).mock.calls.length).toBe(calls);
   });

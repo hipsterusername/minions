@@ -63,6 +63,7 @@ export function LeaderPromptBar({
   onTextareaFocus,
   slashCommands,
   portalSlashMenu = false,
+  showSubmit = true,
 }: {
   input: string;
   onInputChange: (value: string) => void;
@@ -79,6 +80,8 @@ export function LeaderPromptBar({
   slashCommands?: SlashCommand[];
   /** Render slash commands at the viewport layer so constrained surfaces do not clip them. */
   portalSlashMenu?: boolean;
+  /** Allow a containing form to keep its submit action outside scrolling content. */
+  showSubmit?: boolean;
 }) {
   const attachments = useContext(PromptAttachmentsContext);
   const slashCommandContext = useContext(LeaderSlashCommandsContext);
@@ -240,7 +243,7 @@ export function LeaderPromptBar({
             {attachments && <span>Paste images or text files</span>}
             <span>Shift + Enter for a new line</span>
           </span>
-          <button
+          {showSubmit && <button
             type="button"
             className="leader-prompt-bar__submit"
             data-primary={buttonIsPrimary}
@@ -250,7 +253,7 @@ export function LeaderPromptBar({
           >
             {submitLabel}
             <ArrowUp size={14} strokeWidth={2} aria-hidden="true" />
-          </button>
+          </button>}
         </div>
       </div>
     </div>

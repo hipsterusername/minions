@@ -121,15 +121,26 @@
   transform: none;
 }
 
+.act-category-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .act-summary {
   display: flex;
-  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
   gap: 6px;
   margin: 0;
+  padding-block: 2px;
 }
 
 .act-summary-item {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 6px;
   min-height: 30px;
@@ -1378,12 +1389,13 @@
 /* ── Inspector ─────────────────────────────────────────── */
 
 .act-inspector {
+  container-name: session-inspector;
   container-type: inline-size;
   flex: 1;
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   overflow: hidden;
   background: var(--bg-secondary);
 }
@@ -1520,6 +1532,7 @@
 }
 
 .act-inspector-layout {
+  grid-row: 3;
   display: grid;
   grid-template-columns: minmax(380px, 1.35fr) minmax(310px, 420px);
   min-width: 0;
@@ -2511,6 +2524,9 @@
   min-height: 0;
   container-type: inline-size;
   container-name: leader-launch;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
 }
 .leader-launch-layout {
   display: grid;
@@ -2556,17 +2572,6 @@
 }
 .leader-launch-section-head h3 { margin: 0; font-size: 15px; letter-spacing: -.01em; }
 .leader-launch-section-head p { margin: 4px 0 0; color: var(--text-muted); font-size: 12.5px; line-height: 1.5; }
-.leader-launch-ready {
-  flex: 0 0 auto;
-  padding: 4px 8px;
-  color: var(--accent);
-  font: 650 11px/1 var(--font-mono);
-  letter-spacing: .035em;
-  text-transform: uppercase;
-  background: color-mix(in srgb, var(--accent) 8%, var(--bg-primary));
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border-default));
-  border-radius: 999px;
-}
 .leader-launch-field { display: grid; gap: 5px; min-width: 0; }
 .leader-launch-field > span,
 .leader-launch-prompt-label > span { color: var(--text-secondary); font-size: 11px; font-weight: 700; letter-spacing: .055em; text-transform: uppercase; }
@@ -2791,20 +2796,9 @@
 }
 
 @media (max-height: 720px) {
-  .leader-launch-form,
-  .leader-launch-layout {
-    height: auto;
-    min-height: 100%;
-  }
-  .leader-launch-layout { align-items: start; }
-  .leader-launch-primary {
-    height: auto;
-    min-height: 100%;
-    max-height: none;
-  }
   .leader-launch-layout { padding-block: 10px; }
   .leader-launch-work,
-  .leader-launch-config { padding-block: 13px; }
+  .leader-launch-config { padding-block: 12px; }
   .leader-launch-section-head p { display: none; }
   .leader-launch-prompt [data-testid="leader-prompt-bar-overlay"] textarea {
     min-height: 92px !important;
@@ -2840,7 +2834,6 @@
     border-top: 1px solid var(--border-default);
     border-left: 0;
   }
-  .leader-launch-ready { display: none; }
   .leader-launch-project { max-width: 100%; width: 100%; box-sizing: border-box; }
 }
 
@@ -2974,11 +2967,6 @@
     display: none;
   }
 
-  .act-inspector-layout {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(300px, 1.15fr) minmax(230px, .85fr);
-  }
-
   .act-context-panel {
     border-top: 1px solid var(--border-default);
     border-left: 0;
@@ -3069,24 +3057,141 @@
   }
 }
 
-/* Respond to the inspector's available width, including the adjacent list. */
-@container (max-width: 700px) {
+/* Keep the conversation readable before allocating space to supporting panels. */
+.act-root--list-collapsed .act-main { display: none; }
+.act-compact-navigation { display: none; }
+
+@container session-inspector (max-width: 1060px) {
+  .act-compact-navigation {
+    display: flex;
+    gap: 6px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border-default);
+  }
+  .act-compact-navigation button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 6px 12px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-secondary);
+    font: 600 13px var(--font-sans);
+    cursor: pointer;
+  }
+  .act-compact-navigation button[aria-pressed="true"] {
+    border-color: var(--border-hover);
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+  }
+  .act-compact-attention { color: var(--status-warning); font-size: 11px; }
   .act-inspector-layout {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(280px, 1.15fr) minmax(230px, .85fr);
-    overflow-y: auto;
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
   }
-  .act-context-panel {
-    border-top: 1px solid var(--border-default);
-    border-left: 0;
-  }
-  .act-toolbar-btn {
-    width: 32px;
-    padding: 0;
-    justify-content: center;
-  }
-  .act-toolbar-btn span { display: none; }
-  .act-inspector-topbar { gap: 10px; }
+  [data-compact-pane="conversation"] .act-context-panel,
+  [data-compact-pane="context"] .act-conversation-pane { display: none; }
+  .act-context-panel { border: 0; }
+  .act-conversation-scroll { padding: 12px 18px 16px; }
+  .act-composer { padding: 10px 18px; }
+  .act-context-scroll { padding: 14px 18px; }
+  .act-inspector-topbar { min-height: 60px; padding: 10px 12px; gap: 10px; }
   .act-inspector-avatar { display: none; }
-  .act-inspector-identity { grid-template-columns: 32px minmax(0, 1fr); }
+  .act-inspector-identity { grid-template-columns: 32px minmax(0, 1fr); gap: 8px; }
+  .act-toolbar-btn { width: 36px; min-height: 36px; padding: 0; justify-content: center; }
+  .act-toolbar-btn span { display: none; }
+}
+
+.leader-launch-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px clamp(14px, 2cqi, 24px);
+  border-top: 1px solid var(--border-default);
+  background: var(--bg-secondary);
+}
+.leader-launch-footer > span { color: var(--text-muted); font-size: 12px; }
+.leader-launch-footer button { min-height: 40px; flex-shrink: 0; }
+.leader-launch-layout { overflow-y: auto; }
+.leader-launch-work { overflow-y: auto; }
+
+@media (max-width: 1440px) {
+  .act-main { flex-basis: clamp(280px, 23vw, 320px); padding-inline: 10px; }
+  .act-section { margin-bottom: 18px; }
+  .act-section-head { margin-bottom: 8px; }
+  .act-list-toolbar { margin-inline: -10px; padding-inline: 10px; margin-bottom: 12px; }
+  .act-triage-title, .act-card-title {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 18px;
+  }
+  .act-triage-line, .act-card-top { align-items: flex-start; }
+  .act-card { height: auto; min-height: 52px; }
+  .act-triage-row {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr);
+    height: auto;
+    gap: 2px 8px;
+    padding-block: 6px;
+  }
+  .act-triage-main, .act-triage-row:is(:hover, :focus-within) .act-triage-main { padding: 0; }
+  .act-triage-actions {
+    position: static;
+    grid-column: 2;
+    justify-self: end;
+    transform: none;
+    opacity: 1;
+    pointer-events: auto;
+    padding: 0;
+    background: transparent;
+  }
+  .act-triage-actions button { min-height: 32px; }
+  .act-launch-head { padding: 12px 18px; }
+  .act-launch-head h2 { font-size: 21px; }
+  .leader-launch-layout { padding: 12px; }
+  .leader-launch-work, .leader-launch-config { padding: 12px; gap: 8px; }
+  .leader-launch-section-head p { display: none; }
+  .leader-launch-summary { gap: 4px; }
+}
+
+@media (max-height: 620px) {
+  .leader-launch-primary { min-height: 340px; }
+  .act-inspector-topbar { min-height: 52px; padding-block: 6px; }
+}
+
+@media (max-width: 900px) {
+  .act-main { flex: 1; }
+  .act-root:has(.act-inspector) .act-main,
+  .act-root:has(.act-launch-panel) .act-main { display: none; }
+  .act-inspector, .act-launch-panel, .act-empty-workspace {
+    width: 100%;
+    box-shadow: none;
+  }
+  .act-activity-toggle { display: none; }
+}
+
+@media (max-width: 520px) {
+  .act-inspector-identity h2 { font-size: 13px; line-height: 1.35; }
+  .act-inspector-meta { gap: 5px; flex-wrap: wrap; }
+  .act-compact-navigation button { flex: 1; padding-inline: 8px; }
+  .act-context-tabs { gap: 2px; }
+  .act-context-tab { padding-inline: 4px; }
+  .act-conversation-scroll { padding: 10px 12px; }
+  .act-composer { padding: 8px 12px; }
+  .act-launch-head { padding: 10px 12px; }
+  .leader-launch-layout { padding: 8px; }
+  .leader-launch-footer { padding: 8px 12px; }
+}
+
+@media (pointer: coarse) {
+  .act-compact-navigation button, .act-toolbar-btn, .act-inspector-back,
+  .leader-launch-starters button, .act-context-tab { min-height: 44px; }
 }

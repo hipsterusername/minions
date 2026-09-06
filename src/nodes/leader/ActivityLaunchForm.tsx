@@ -195,7 +195,6 @@ export function ActivityLaunchForm({
                 <h3>Define the work</h3>
                 <p>Describe the outcome. You can steer the leader from Activity after launch.</p>
               </div>
-              <span className="leader-launch-ready" role="status">{readiness}</span>
             </div>
 
             <label className="leader-launch-field" htmlFor={`leader-launch-title-${nodeId}`}>
@@ -237,6 +236,7 @@ export function ActivityLaunchForm({
                 active={ready && submitActive}
                 variant="overlay"
                 portalSlashMenu
+                showSubmit={false}
                 autoFocus
                 textareaRef={textareaRef}
               />
@@ -449,6 +449,13 @@ export function ActivityLaunchForm({
           </aside>
         </section>
       </div>
+      <footer className="leader-launch-footer">
+        <span role="status">{readiness}</span>
+        <button type="button" className="act-launch-btn" disabled={!ready}
+          onClick={() => { if (ready) onSubmit(); }}>
+          {pending ? "Starting leader…" : "Launch leader"}
+        </button>
+      </footer>
     </div>
   );
 }

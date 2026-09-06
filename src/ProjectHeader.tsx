@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from "react";
-import { Activity, Bot, Check, ChevronDown, FolderKanban, LayoutGrid, Pencil } from "lucide-react";
+import { Activity, Check, ChevronDown, FolderKanban, LayoutGrid, Pencil } from "lucide-react";
+import { CrewIcon } from "./components/CrewIcon.tsx";
+import { LeaderStatusIcon } from "./nodes/leader/LeaderStatusIcon.tsx";
 import type { SaveStatus } from "./use-autosave.ts";
 import { listProjects, type ProjectSettings, type ProjectSummary } from "./api.ts";
 import { SettingsMenu } from "./SettingsMenu.tsx";
@@ -17,24 +19,52 @@ const ACTIVE_SESSION_LABELS: Record<string, string> = {
   waiting: "Waiting",
 };
 
-function ProjectMinionPreview({ project, sessions }: {
+const EXECUTING_MINION_STATUSES = new Set(["creating", "starting", "running"]);
+
+function ProjectAgentPreview({ project, sessions }: {
   project: ProjectSummary;
   sessions: SessionInfo[];
 }) {
   const workspaceId = project.workspaceId ?? project.id;
-  const active = sessions.filter((session) =>
-    Object.hasOwn(ACTIVE_SESSION_LABELS, session.status) &&
-    (session.projectId
+  const belongsToProject = (session: SessionInfo) =>
+    session.projectId
       ? session.projectId === workspaceId
-      : sessionBelongsToProject(session, project.sourceRoot ?? project.path, workspaceId)),
-  );
-  if (active.length === 0) return null;
+      : sessionBelongsToProject(session, project.sourceRoot ?? project.path, workspaceId);
+  const leaders = sessions.filter((session) => session.role === "leader" && belongsToProject(session));
+  const active = leaders.filter((session) => Object.hasOwn(ACTIVE_SESSION_LABELS, session.status));
+  const leaderKeys = new Set(leaders.flatMap((leader) => [leader.sessionKey, leader.runKey ?? leader.sessionKey]));
+  const sessionsByKey = new Map(sessions.map((session) => [session.sessionKey, session]));
+  const crew = new Set<string>();
+  for (const leader of leaders) {
+    for (const minion of leader.activeMinions ?? []) {
+      const live = minion.sessionKey ? sessionsByKey.get(minion.sessionKey) : undefined;
+      if (EXECUTING_MINION_STATUSES.has(live?.status ?? minion.status)) {
+        crew.add(minion.sessionKey ?? `${leader.sessionKey}:${minion.taskId}`);
+      }
+    }
+  }
+  // Graph child runs can be present before a leader's task roster is updated.
+  for (const session of sessions) {
+    if (session.role === "minion" && EXECUTING_MINION_STATUSES.has(session.status) &&
+      (session.parentRunKey ? leaderKeys.has(session.parentRunKey) : belongsToProject(session))) {
+      crew.add(session.sessionKey);
+    }
+  }
+  if (active.length === 0 && crew.size === 0) return null;
+
+  const leaderLabel = `${active.length} active leader${active.length === 1 ? "" : "s"}`;
 
   return (
     <span className="project-switcher__preview">
       <span className="project-switcher__preview-heading">
-        <Bot size={12} aria-hidden="true" />
-        {active.length} active
+        <span className="project-switcher__metric">
+          <LeaderStatusIcon size={12} active decorative />
+          {leaderLabel}
+        </span>
+        <span className="project-switcher__metric" title="Minions currently starting or executing">
+          <CrewIcon size={12} aria-hidden="true" />
+          {crew.size} crew
+        </span>
       </span>
       {active.slice(0, 3).map((session) => (
         <span className="project-switcher__minion" key={session.sessionKey}
@@ -209,6 +239,7 @@ export function ProjectHeader({
 
   return (
     <div
+      className="project-header"
       style={{
         position: "absolute",
         top: 0,
@@ -315,7 +346,7 @@ export function ProjectHeader({
                           {current ? name : project.name}
                         </span>
                         <span className="project-switcher__project-path">{project.path}</span>
-                        <ProjectMinionPreview project={project} sessions={sessions} />
+                        <ProjectAgentPreview project={project} sessions={sessions} />
                       </span>
                       {current ? <Check size={14} strokeWidth={2} aria-hidden="true" /> : null}
                     </button>
@@ -376,6 +407,7 @@ export function ProjectHeader({
 
       <div
         onClick={saveStatus === "error" && retry ? () => retry() : undefined}
+        className="project-header-save-status"
         style={{
           marginLeft: "auto",
           display: "flex",

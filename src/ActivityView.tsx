@@ -43,6 +43,7 @@ import {
   GitCompare,
   LayoutDashboard,
   ListX,
+  PanelLeft,
   Maximize2,
   MessageSquareText,
   Monitor,
@@ -548,6 +549,8 @@ function Inspector({
   session,
   leader,
   onClose,
+  activityCollapsed,
+  onToggleActivity,
   onOpenInCanvas,
   onExpandFullscreen,
   onStopSession,
@@ -566,6 +569,8 @@ function Inspector({
   session: ActivitySession;
   leader: LeaderNodeRef | undefined;
   onClose: () => void;
+  activityCollapsed: boolean;
+  onToggleActivity: () => void;
   onOpenInCanvas: (nodeId: string) => void;
   onExpandFullscreen: (nodeId: string) => void;
   onStopSession: (sessionKey: string) => void;
@@ -595,6 +600,8 @@ function Inspector({
     taskGraphController.snapshot || taskGraphController.planSnapshot,
   );
   const [reply, setReply] = useState("");
+  const [compactPane, setCompactPane] = useState<"conversation" | "context">("conversation");
+  const conversationToggle = useRef<HTMLButtonElement>(null);
   const [conversation, setConversation] = useState(
     () => emptySessionStreamState(session.sessionKey),
   );
@@ -610,6 +617,7 @@ function Inspector({
     manuallySelectedSideTab.current = false;
     setActiveSideTab(initialInspectorSideTab(session, minions.length));
     setPreviewRunKey(null);
+    setCompactPane("conversation");
   }, [session.sessionKey]);
   useEffect(() => {
     setConversation(emptySessionStreamState(session.sessionKey));
@@ -625,7 +633,9 @@ function Inspector({
       ...next,
       messages: preserveOptimisticUserMessages(current.messages, next.messages),
     })),
-    prefix: "activity",
+    // Match LeaderNode's event IDs so preserved canvas user turns can anchor
+    // to their preceding responses when the Activity feed is rebuilt.
+    prefix: "lm",
   });
   useEffect(() => {
     if (promptFailure) {
@@ -778,7 +788,7 @@ function Inspector({
   };
 
   return (
-    <aside className="act-inspector" aria-label="Session details">
+    <aside className="act-inspector" aria-label="Session details" data-compact-pane={compactPane}>
       <header className="act-inspector-topbar">
         <div className="act-inspector-identity">
           <button
@@ -801,6 +811,18 @@ function Inspector({
           </div>
         </div>
         <div className="act-inspector-topactions">
+          {activityCollapsed && <button
+            className="act-toolbar-btn act-activity-toggle"
+            type="button"
+            aria-label={activityCollapsed ? "Show activity list" : "Hide activity list"}
+            aria-expanded={!activityCollapsed}
+            aria-controls="activity-session-list"
+            onClick={onToggleActivity}
+            title={activityCollapsed ? "Show activity list" : "Hide activity list"}
+          >
+            <PanelLeft size={14} aria-hidden />
+            <span>Activity</span>
+          </button>}
           {leader ? (
             <>
               <button
@@ -835,6 +857,15 @@ function Inspector({
           )}
         </div>
       </header>
+
+      <div className="act-compact-navigation" role="group" aria-label="Session view">
+        <button ref={conversationToggle} type="button" aria-pressed={compactPane === "conversation"}
+          onClick={() => setCompactPane("conversation")}>Conversation</button>
+        <button type="button" aria-pressed={compactPane === "context"}
+          onClick={() => setCompactPane("context")}>
+          Context{needsAttention(session) && <span className="act-compact-attention">Needs you</span>}
+        </button>
+      </div>
 
       <div className="act-inspector-layout">
         <main className="act-conversation-pane" aria-label="Conversation">
@@ -915,7 +946,14 @@ function Inspector({
           </div>
         </main>
 
-        <section className="act-context-panel" aria-label="Leader context">
+        <section className="act-context-panel" aria-label="Leader context"
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && !event.defaultPrevented && conversationToggle.current?.offsetParent) {
+              event.stopPropagation();
+              setCompactPane("conversation");
+              conversationToggle.current.focus();
+            }
+          }}>
           <div className="act-context-tabs" role="tablist" aria-label="Leader context views">
             {sideTabs.map((tab) => {
               const Icon = tab.icon;
@@ -1257,6 +1295,7 @@ export function ActivityView({
   promptFailures = {}, onClearPromptFailure,
 }: ActivityViewProps) {
   const [selectedKey, setSelectedKey] = useState<string | null>(initialSelectedKey);
+  const [activityCollapsed, setActivityCollapsed] = useState(false);
   const [startedEntry, setStartedEntry] = useState<string | null>(null);
   const [visibility, setVisibility] = useState<ActivityVisibility>("open");
   const [summaryFilter, setSummaryFilter] = useState<ActivitySummaryFilter | null>(null);
@@ -1523,9 +1562,8 @@ export function ActivityView({
   }, [activitySessions]);
 
   return (
-    <div className="act-root" {...removalFocus}>
-      {startedEntry && startedEntry === selectedKey && <p className="act-action-pending" role="status">Leader started</p>}
-      <div className="act-main">
+    <div className={`act-root${activityCollapsed && selectedSession ? " act-root--list-collapsed" : ""}`} {...removalFocus}>
+      <div className="act-main" id="activity-session-list">
         <div className="act-list-toolbar">
           <header className="act-header">
             <div className="act-header-main">
@@ -1561,7 +1599,21 @@ export function ActivityView({
               <span>New</span>
             </button>
           </header>
-          <div className="act-summary" aria-label="Filter activity by status">
+          <div className="act-category-toolbar">
+            {selectedSession && (
+              <button
+                className="act-icon-btn act-activity-toggle"
+                type="button"
+                aria-label="Hide activity list"
+                aria-expanded={!activityCollapsed}
+                aria-controls="activity-session-list"
+                onClick={() => setActivityCollapsed(true)}
+                title="Hide activity list"
+              >
+                <PanelLeft size={14} aria-hidden />
+              </button>
+            )}
+            <div className="act-summary" aria-label="Filter activity by status">
             {summaryItems.map((item) => {
               const selected = summaryFilter === item.id;
               return (
@@ -1579,10 +1631,13 @@ export function ActivityView({
                 </button>
               );
             })}
+            </div>
           </div>
         </div>
 
-        <ActivityDismissReceipt controller={lifecycleController ?? localLifecycle} sessions={visibleSessions} />
+        {startedEntry && startedEntry === selectedKey && (
+          <p className="act-action-pending" role="status">Leader started</p>
+        )}
         {actionError && (
           <div className="act-action-error" role="alert">
             <span>{actionError}</span>
@@ -1819,6 +1874,8 @@ export function ActivityView({
           session={selectedSession}
           leader={leaderIndex.get(selectedSession.sessionKey)}
           onClose={() => setSelectedKey(null)}
+          activityCollapsed={activityCollapsed}
+          onToggleActivity={() => setActivityCollapsed((collapsed) => !collapsed)}
           onOpenInCanvas={onOpenInCanvas}
           onExpandFullscreen={onExpandFullscreen}
           onStopSession={onStopSession}
@@ -1877,6 +1934,7 @@ export function ActivityView({
           </div>
         </section>
       )}
+      <ActivityDismissReceipt controller={lifecycleController ?? localLifecycle} sessions={visibleSessions} />
     </div>
   );
 }

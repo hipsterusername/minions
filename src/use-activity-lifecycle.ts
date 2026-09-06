@@ -43,6 +43,11 @@ export function useActivityLifecycle({ socketSend, socketSubscribe, onDetachFrom
   onDetachFromCanvas?: ((session: Pick<MobileSessionInfo, "sessionKey" | "workItemId">, workItem?: WorkItemSnapshot) => void) | undefined;
 }) {
   const [dismissedReceipts, setDismissedReceipts] = useState<MobileSessionInfo[]>([]);
+  useEffect(() => {
+    if (!dismissedReceipts.length) return;
+    const timer = setTimeout(() => setDismissedReceipts([]), 8_000);
+    return () => clearTimeout(timer);
+  }, [dismissedReceipts]);
   const requests = useRef(new Map<string, PendingAction>());
   const [pendingKeys, setPendingKeys] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -149,5 +154,5 @@ export function useActivityLifecycle({ socketSend, socketSubscribe, onDetachFrom
   }
 
   return { sendLifecycle, pendingKeys, dismissedReceipts, actionError: Object.values(errors).join("\n") || null,
-    clearActionError: () => setErrors({}) };
+    clearDismissedReceipts: () => setDismissedReceipts([]), clearActionError: () => setErrors({}) };
 }

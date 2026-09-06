@@ -13,7 +13,7 @@ import type { SocketSubscribe } from "./use-socket.ts";
 import type { CanvasNode } from "./types.ts";
 import type { LeaderData } from "./nodes/leader/types.ts";
 import type { MobileSessionInfo } from "./mobile/mobile-selectors.ts";
-import type { DisplayMessage } from "./sdk-messages.ts";
+import { normalizedToDisplayMessages, type DisplayMessage } from "./sdk-messages.ts";
 import { createGraphFixture } from "./task-graph/fixtures.ts";
 import { useActivityLifecycle } from "./use-activity-lifecycle.ts";
 
@@ -1014,6 +1014,44 @@ describe("ActivityView", () => {
         type: "control_response", command: "dismiss_session", success: false,
       })).toEqual({ failed: true, error: "Dismiss failed: The server rejected the action." });
     });
+  });
+
+  it("keeps canvas user turns between their responses after Activity sync and live updates", () => {
+    const { subscribe, emit } = makeSubscribe();
+    const firstResponse = { kind: "text", role: "assistant", text: "First response" } as const;
+    const secondResponse = { kind: "text", role: "assistant", text: "Second response" } as const;
+    const messages: DisplayMessage[] = [
+      { id: "local-first", role: "user", content: "First prompt", timestamp: 1 },
+      ...normalizedToDisplayMessages(firstResponse, "lm"),
+      { id: "local-second", role: "user", content: "Second prompt", timestamp: 3 },
+      ...normalizedToDisplayMessages(secondResponse, "lm"),
+    ];
+    render(
+      <ActivityView
+        sessions={[session({ sessionKey: "run", status: "running", taskName: "Ordered chat" })]}
+        nodes={[leaderNode("run", messages)]}
+        {...noop}
+        socketSubscribe={subscribe}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /ordered chat/i }));
+    const sync = {
+      type: "sync_response", sessionKey: "run", found: true, status: "running",
+      events: [firstResponse, secondResponse].map((event) => ({
+        type: "sdk_event", sessionKey: "run", event,
+      })),
+    };
+    const contents = () => Array.from(document.querySelectorAll(".act-tx-msg"))
+      .map((element) => element.textContent);
+    const expected = ["First prompt", "First response", "Second prompt", "Second response"];
+    emit(sync);
+    expect(contents()).toEqual(expected.map((content) => expect.stringContaining(content)));
+    emit(sync);
+    expect(contents()).toEqual(expected.map((content) => expect.stringContaining(content)));
+    emit({ type: "sdk_event", sessionKey: "run", event: {
+      kind: "text", role: "assistant", text: "Further progress",
+    } });
+    expect(contents()).toEqual([...expected, "Further progress"].map((content) => expect.stringContaining(content)));
   });
 
   it("shows an optimistic user turn and thinking state while steering a selected session", () => {

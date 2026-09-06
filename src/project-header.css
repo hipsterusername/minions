@@ -51,6 +51,7 @@
   display: flex;
   align-items: center;
   min-width: 0;
+  width: 100%;
   max-width: min(300px, 30vw);
   gap: 7px;
   padding: 5px 8px 5px 10px;
@@ -170,10 +171,17 @@
 
 .project-switcher__preview-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 5px;
+  gap: 5px 12px;
   color: var(--text-secondary);
   font-weight: 550;
+}
+
+.project-switcher__metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .project-switcher__minion {
@@ -267,4 +275,19 @@
   .project-switcher__trigger {
     max-width: 32vw;
   }
+}
+
+/* Let the project name truncate inside its flex item instead of covering tabs. */
+.project-header > [role="tablist"] { flex-shrink: 0; margin-right: auto; }
+.project-header-save-status:empty { display: none !important; }
+@media (max-width: 640px) {
+  .project-header { gap: 6px !important; padding-inline: 8px !important; }
+  .project-header-logo { width: 46px; }
+  .project-switcher { flex: 1; }
+  .project-switcher__trigger { padding-inline: 4px; }
+  .project-header-save-status { max-width: 70px; padding-inline: 2px !important; }
+  .project-header-save-status > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+@media (max-width: 380px) {
+  .project-header-logo { display: none; }
 }

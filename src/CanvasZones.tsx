@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { FolderInput, Plus, X, Undo2, Globe, Check, ChevronDown, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { FolderInput, Plus, Globe, Check, ChevronDown, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { UndoNotification } from "./components/UndoNotification.tsx";
 import { ViewportOverlay } from "./components/ViewportOverlay.tsx";
 import { GLOBAL_WORKSPACE_ID, visibleZoneNodes, zoneSummary, type CanvasZone } from "./canvas-zones.ts";
 import { SkillIcon } from "./components/SkillIcon.tsx";
@@ -190,11 +191,10 @@ export function CanvasZones({ controller: c, nodes, selectedIds, topOffset = 0, 
         </div>
         </div>}
       </aside>
-      {c.receipt && <div className="canvas-zone-receipt" role="status" onMouseDown={e => e.stopPropagation()}>
-        <span title={c.receipt}>{c.receipt}</span>{c.receiptZone && c.zones.some(z => z.id === c.receiptZone) && <button onClick={() => c.viewZone(c.receiptZone!)}>Switch workspace</button>}
-        {c.undoAvailable && <button onClick={c.undo}><Undo2 size={14} /> Undo</button>}
-        <button aria-label="Dismiss workspace notification" onClick={c.dismissReceipt}><X size={14} /></button>
-      </div>}
+      {c.receipt && <UndoNotification message={c.receipt} onUndo={c.undoAvailable ? c.undo : undefined}
+        onDismiss={c.dismissReceipt} dismissLabel="Dismiss workspace notification">
+        {c.receiptZone && c.zones.some(z => z.id === c.receiptZone) && <button onClick={() => c.viewZone(c.receiptZone!)}>Switch workspace</button>}
+      </UndoNotification>}
     </ViewportOverlay>
     {c.dialog && <ZoneDialog key={c.dialog.kind + (c.dialog.kind !== "choose" ? c.dialog.zoneId ?? "new" : "")} controller={c} />}
   </>;
