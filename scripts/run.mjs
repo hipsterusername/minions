@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkDependencies } from "./check-dependencies.mjs";
@@ -9,12 +10,13 @@ checkDependencies(["tsx", "vite", "better-sqlite3"]);
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const mode = process.argv[2] === "preview" ? "preview" : "dev";
-const isWin = process.platform === "win32";
+const require = createRequire(import.meta.url);
 const host = process.env["HOST"] || "127.0.0.1";
 const vitePort = process.env["VITE_PORT"] || (mode === "preview" ? "4173" : "6173");
-const binExt = isWin ? ".cmd" : "";
-const tsx = join(root, "node_modules", ".bin", `tsx${binExt}`);
-const vite = join(root, "node_modules", ".bin", `vite${binExt}`);
+// Run JavaScript entry points directly: Windows .cmd shims need a shell,
+// and shell command strings break executable and checkout paths with spaces.
+const tsx = require.resolve("tsx/cli");
+const vite = join(dirname(require.resolve("vite/package.json")), "bin", "vite.js");
 
 if (mode === "preview" && !existsSync(join(root, "dist"))) {
   console.error("Built preview is unavailable: dist/ does not exist. Run `pnpm build` first.");
@@ -38,10 +40,12 @@ const frontendArgs = mode === "preview"
       "--strictPort",
       ...(process.env["MINIONS_NO_OPEN"] === "1" ? [] : ["--open"]),
     ];
-const frontend = spawn(vite, frontendArgs, { cwd: root, env, stdio: "inherit", shell: false });
+// A detached Windows runner has no console; hide the consoles its services
+// would otherwise create and keep open for their entire lifetime.
+const frontend = spawn(process.execPath, [vite, ...frontendArgs], { cwd: root, env, stdio: "inherit", shell: false, windowsHide: true });
 
 function startServer() {
-  return spawn(tsx, ["server/index.ts"], { cwd: root, env, stdio: "inherit", shell: false });
+  return spawn(process.execPath, [tsx, "server/index.ts"], { cwd: root, env, stdio: "inherit", shell: false, windowsHide: true });
 }
 
 function stop(code = 0) {

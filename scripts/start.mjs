@@ -93,7 +93,8 @@ function start(enableTail = tailscale) {
     cwd: root,
     detached: true,
     stdio: ["ignore", out, out],
-    shell: isWin,
+    shell: false,
+    windowsHide: true,
   });
 
   writeFileSync(pidFile, String(child.pid));
@@ -184,7 +185,8 @@ function runTailscaleServe(args, stdio = "inherit") {
   return spawnSync(process.execPath, [join(scriptDir, "tailscale-serve.mjs"), ...args], {
     cwd: root,
     stdio,
-    shell: isWin,
+    shell: false,
+    windowsHide: true,
   });
 }
 
