@@ -20,15 +20,22 @@ export function clearAuthToken(): void {
 export function getAuthToken(): Promise<string> {
   if (_authToken) return Promise.resolve(_authToken);
   if (!_tokenPromise) {
-    _tokenPromise = fetch(`${BASE}/auth/token`)
+    const request = fetch(`${BASE}/auth/token`)
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to fetch auth token: ${res.status}`);
         return res.json() as Promise<{ token: string }>;
       })
       .then(({ token }) => {
-        _authToken = token;
+        if (_tokenPromise === request) _authToken = token;
         return token;
+      })
+      .catch((error: unknown) => {
+        // A temporary server/proxy failure must not poison subsequent requests.
+        // An older request must also leave a newer bootstrap untouched.
+        if (_tokenPromise === request) _tokenPromise = null;
+        throw error;
       });
+    _tokenPromise = request;
   }
   return _tokenPromise;
 }

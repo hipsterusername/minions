@@ -36,6 +36,51 @@ describe("API client boundary", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/auth/token");
   });
 
+  it.each([
+    ["HTTP 502", () => Promise.resolve(jsonResponse({}, 502))],
+    ["network failure", () => Promise.reject(new TypeError("Failed to fetch"))],
+  ])("retries token bootstrap after %s so Git checks can recover", async (_label, fail) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockImplementationOnce(fail)
+      .mockResolvedValueOnce(jsonResponse({ token: "recovered" }))
+      .mockResolvedValueOnce(jsonResponse({ isRepository: true }));
+
+    await expect(checkProjectGit("/repo")).rejects.toThrow();
+    await expect(checkProjectGit("/repo")).resolves.toEqual({ isRepository: true });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/auth/token", "/api/auth/token", "/api/projects/git-status",
+    ]);
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/projects/git-status", expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: "Bearer recovered" }),
+    }));
+  });
+
+  it.each(["resolve", "reject"])("ignores an invalidated bootstrap when it later %ss", async (outcome) => {
+    let resolveOld!: (response: Response) => void;
+    let rejectOld!: (error: Error) => void;
+    const oldResponse = new Promise<Response>((resolve, reject) => {
+      resolveOld = resolve;
+      rejectOld = reject;
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(oldResponse)
+      .mockResolvedValueOnce(jsonResponse({ token: "new" }));
+
+    const oldRequest = getAuthToken();
+    clearAuthToken();
+    await expect(getAuthToken()).resolves.toBe("new");
+    if (outcome === "resolve") {
+      resolveOld(jsonResponse({ token: "old" }));
+      await expect(oldRequest).resolves.toBe("old");
+    } else {
+      rejectOld(new Error("offline"));
+      await expect(oldRequest).rejects.toThrow("offline");
+    }
+    await expect(getAuthToken()).resolves.toBe("new");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("sends authenticated JSON requests without losing method or body", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(jsonResponse({ token: "secret" }))
