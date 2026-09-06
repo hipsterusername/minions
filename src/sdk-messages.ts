@@ -12,6 +12,7 @@
  */
 
 import type { NormalizedEvent } from "../shared/normalized-event.ts";
+import { displayTextFromPrompt } from "../shared/handoff-text.ts";
 import { randomUuid } from "./random-id.ts";
 
 // ── Display message (rendered in both Leader & Minion nodes) ──
@@ -104,7 +105,7 @@ export function normalizedToDisplayMessages(
     case "text": {
       const text = event.role === "assistant"
         ? event.text.replace(/<!--task-name:.+?-->\s*/g, "")
-        : event.text;
+        : event.role === "user" ? displayTextFromPrompt(event.text) : event.text;
       if (!text.trim()) return [];
       return [{
         id: event.role === "user" && event.id

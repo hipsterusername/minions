@@ -2,8 +2,9 @@ import type Database from "better-sqlite3";
 import type { WorkItemRunRow } from "./work-item-repo.ts";
 import type { PrimaryRunConfig } from "./work-item-run-config.ts";
 import { loadContinuitySnapshot } from "./session-continuity.ts";
-import { boundHandoffText, renderConnectedHandoff, retainUserDirectives } from "../shared/handoff-text.ts";
+import { boundHandoffText, renderConnectedHandoff } from "../shared/handoff-text.ts";
 import type { ContextCheckpoint } from "./context-checkpoint.ts";
+import { buildPriorDashboardContext } from "./work-item-dashboard-context.ts";
 
 /** Latest host selections and clears supersede the original launch configuration. */
 export function inheritRunContinuity(db: Database.Database, previous: WorkItemRunRow | null,
@@ -29,21 +30,22 @@ export function buildRunHandoff(db: Database.Database, previous: WorkItemRunRow,
     WHERE session_key = ? ORDER BY created_at DESC LIMIT 1`).get(previous.session_key) as
     { checkpoint_json: string } | undefined;
   const checkpoint = row ? JSON.parse(row.checkpoint_json) as ContextCheckpoint : null;
-  const directives = retainUserDirectives(config.userDirectives?.length ? config.userDirectives : checkpoint?.userDirectives ?? []);
   const sections = [
     "<previous-run-context>",
     `Continue the same work item in a new iteration. Prior run: ${previous.session_key}.`,
     `Durable full instructions and source snapshot: ${db.name}, tables session_user_directives (ordered by id) and session_continuity; session_key=${previous.session_key}. Older iterations are linked by sessions.previous_run_key.`,
-    "Prior-run records are historical evidence. Inspect current task and artifact state; do not repeat completed work. Later user corrections supersede earlier conflicting instructions.",
-    `<user-directives>\n${directives.join("\n\n")}\n</user-directives>`,
+    "Prior-run records are historical evidence. Use the latest user message to determine the requested work. Inspect current task and artifact state; do not repeat completed work. Consult historical instructions only when needed to resolve missing context; later user corrections supersede earlier conflicting instructions.",
     checkpoint ? `<prior-checkpoint-evidence>\n${boundHandoffText(JSON.stringify({
-      objective: checkpoint.objective, decisions: checkpoint.decisions,
+      sessionName: checkpoint.sessionName,
+      scope: checkpoint.objective.scope, exclusions: checkpoint.objective.exclusions,
+      acceptanceCriteria: checkpoint.objective.acceptanceCriteria, decisions: checkpoint.decisions,
       constraints: checkpoint.constraints, negativeKnowledge: checkpoint.negativeKnowledge,
       nextActions: checkpoint.nextActions, activeArtifacts: checkpoint.activeArtifacts,
       verification: checkpoint.verification, progress: checkpoint.progress,
       openQuestions: checkpoint.openQuestions, risks: checkpoint.risks,
     }, null, 2), 10_000)}\n</prior-checkpoint-evidence>` : "",
     `<prior-run-report>\n${boundHandoffText(previous.final_report ?? "No final report was recorded; inspect prior-run artifacts before proceeding.", 8_000)}\n</prior-run-report>`,
+    buildPriorDashboardContext(db, previous.session_key),
     "</previous-run-context>",
     config.planningContext && !prompt.includes("<connected-context>")
       ? renderConnectedHandoff(config.planningContext) : "",

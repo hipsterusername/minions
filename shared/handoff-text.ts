@@ -31,10 +31,16 @@ export function retainUserDirectives(values: readonly string[], max = 12_000): s
 
 /** Generated history and connected sources have their own handoff sections. */
 export function userTextFromPrompt(prompt: string): string {
-  return prompt.replace(/<(context-checkpoint|previous-run-context|previous-session-context|session-continuation|context-window-recovery|connected-context|context-update)\b[^>]*>[\s\S]*?<\/\1>/g, "").trim();
+  return displayTextFromPrompt(prompt).trim();
 }
 
-/** The UI pins user instructions before its lossy conversation-history section. */
+/** Legacy transcript events may contain an assembled prompt instead of displayPrompt. */
+export function displayTextFromPrompt(prompt: string): string {
+  const text = prompt.replace(/<(context-checkpoint|previous-run-context|previous-session-context|session-continuation|context-window-recovery|connected-context|context-update)\b[^>]*>[\s\S]*?<\/\1>/g, "");
+  return text === prompt ? prompt : text.trim();
+}
+
+/** Read pinned instructions from older UI handoffs for continuity compatibility. */
 export function inheritedUserDirectives(prompt: string): string[] {
   const history = prompt.match(/<(previous-session-context|session-continuation|context-window-recovery)>([\s\S]*?)<\/\1>/)?.[2];
   const pinned = history?.split(/<task-plan>|<conversation-history>/)[0]

@@ -6,7 +6,6 @@ import { renderRecoveryFacts } from "../../../shared/recovery-context.ts";
  * shapes the session-stream hook and prompt builder expect.
  */
 
-import { retainUserDirectives, userTextFromPrompt } from "../../../shared/handoff-text.ts";
 import { msgId as sharedMsgId } from "../../sdk-messages.ts";
 import type { SessionStreamState } from "../../session-stream.ts";
 import type { LeaderData, LeaderMessage, TaskPlanItem } from "./types.ts";
@@ -84,10 +83,6 @@ export function buildSessionContext(
   if (taskName) {
     parts.push(`Session name: ${taskName}\n`);
   }
-
-  const directives = retainUserDirectives(messages.filter(m => m.role === "user")
-    .map(m => userTextFromPrompt(m.content)));
-  if (directives.length) parts.push(`Original request and subsequent instructions, oldest first. Later corrections supersede earlier conflicts.\n<user-directives>\n${directives.join("\n\n")}\n</user-directives>`);
 
   // Task plan state
   if (taskPlan.length > 0) {

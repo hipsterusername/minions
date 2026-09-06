@@ -3,9 +3,11 @@ import { buildSessionContext, extractLeaderCore } from "./session-context.ts";
 import { sessionStreamReducer } from "../../session-stream.ts";
 import { seedContextDelivery, diffContextDelivery } from "../../context-delivery.ts";
 import type { LeaderData, LeaderMessage } from "./types.ts";
+import { LEADER_DEFAULT_DATA } from "./types.ts";
+import { buildInitialLeaderRun } from "./initial-run.ts";
 
 describe("handoff user intent and source delivery", () => {
-  it("reserves original instructions and corrections outside the rolling assistant history", () => {
+  it("keeps legacy history bounded without pinning the first request as a directive", () => {
     const messages = [
       { role: "user", content: "ORIGINAL_CONSTRAINT" },
       { role: "user", content: "CORRECTION: use the blue deployment" },
@@ -13,9 +15,22 @@ describe("handoff user intent and source delivery", () => {
     ] as LeaderMessage[];
     const prompt = buildSessionContext(messages, [], "Migrate safely");
     expect(prompt).toContain("earlier messages omitted");
-    expect(prompt).toContain("ORIGINAL_CONSTRAINT");
-    expect(prompt).toContain("CORRECTION");
-    expect(prompt).toContain("Later corrections supersede earlier conflicts");
+    expect(prompt).not.toContain("ORIGINAL_CONSTRAINT");
+    expect(prompt).not.toContain("CORRECTION");
+    expect(prompt).not.toContain("<user-directives>");
+  });
+
+  it("leaves canonical iteration history to the server while delivering the latest request and sources", () => {
+    const result = buildInitialLeaderRun({ userPrompt: "Make the button blue.",
+      data: { ...LEADER_DEFAULT_DATA, workItemId: "work-1", messages: [
+        { id: "old", role: "user", content: "ORIGINAL_REQUEST", timestamp: 1 },
+      ] }, incomingModes: [], contextItems: [
+        { nodeId: "spec", nodeType: "markdown", label: "Requirements", content: "CURRENT_SPEC" },
+      ] });
+    expect(result.prompt).toContain("CURRENT_SPEC");
+    expect(result.prompt).toContain("Make the button blue.");
+    expect(result.prompt).not.toContain("ORIGINAL_REQUEST");
+    expect(result.prompt).not.toContain("<session-continuation>");
   });
 
   it("invalidates unchanged and append-only source acknowledgements on a committed checkpoint", () => {

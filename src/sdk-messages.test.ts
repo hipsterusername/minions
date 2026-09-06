@@ -29,6 +29,15 @@ describe("normalizedToDisplayMessages", () => {
   // ── text ──────────────────────────────────────────────────────────────────
 
   describe("text", () => {
+    it("shows the latest user message instead of generated iteration context", () => {
+      const prompt = "<previous-run-context><user-directives>FIRST REQUEST</user-directives></previous-run-context>\n\n<connected-context>SPEC</connected-context>\n\nMake the button blue.";
+      expect(normalizedToDisplayMessages({ kind: "text", role: "user", text: prompt })[0]?.content)
+        .toBe("Make the button blue.");
+      const exact = "  My message\nwith spacing  ";
+      expect(normalizedToDisplayMessages({ kind: "text", role: "user", text: exact })[0]?.content).toBe(exact);
+      expect(normalizedToDisplayMessages({ kind: "text", role: "assistant", text: prompt })[0]?.content).toBe(prompt);
+    });
+
     it("produces 1 assistant message for an assistant text event", () => {
       const event: NormalizedEvent = { kind: "text", text: "Hello!", role: "assistant" };
       const msgs = normalizedToDisplayMessages(event);

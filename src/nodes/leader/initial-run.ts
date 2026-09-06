@@ -38,7 +38,10 @@ export function buildInitialLeaderRun(input: {
   incomingModes: string[]; at?: number;
 }) {
   const { userPrompt, data, contextItems } = input;
-  const sessionContext = buildSessionContext(data.messages, data.taskPlan ?? [], data.taskName);
+  // Canonical iterations resume the provider thread or receive a server-owned
+  // handoff. Replaying client history here duplicates old requests on every run.
+  const sessionContext = data.workItemId || data.workItemSnapshot ? ""
+    : buildSessionContext(data.messages, data.taskPlan ?? [], data.taskName);
   const allItems = [...contextItems, ...(input.promptContextItems ?? [])];
   const block = buildContextBlock(allItems);
   let prompt = block ? `${block}\n\n${userPrompt}` : userPrompt;

@@ -94,7 +94,7 @@ describe("buildSessionContext", () => {
     expect(result).toContain("My Test Session");
   });
 
-  it("bounds conversation excerpts while preserving user directives separately", () => {
+  it("bounds conversation excerpts without duplicating the original request", () => {
     const long = "x".repeat(2100) + "KEEP THIS INSTRUCTION";
     const messages = [msg("user", long)];
     const result = buildSessionContext(messages, []);
@@ -102,7 +102,6 @@ describe("buildSessionContext", () => {
     expect(history).toContain("…");
     expect(history!.length).toBeLessThan(2050);
     expect(history).not.toContain("KEEP THIS INSTRUCTION");
-    const directives = result.match(/<user-directives>([\s\S]*?)<\/user-directives>/)?.[1];
-    expect(directives).toContain(long);
+    expect(result).not.toContain("<user-directives>");
   });
 });

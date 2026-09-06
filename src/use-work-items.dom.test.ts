@@ -107,9 +107,10 @@ describe("useWorkItems lifecycle recovery", () => {
       ?.reviewLifecycle?.dismissedAt).not.toBeNull();
   });
 
-  it("automatically retries an initiation conflict against the authoritative snapshot", () => {
+  it("retries an initiation conflict while keeping generated context out of the displayed message", () => {
     const { result, send, publish } = setup();
-    act(() => result.current.start(result.current.items["work-1"]!, "Continue"));
+    const prompt = "<session-continuation>ORIGINAL REQUEST</session-continuation>\n\nContinue";
+    act(() => result.current.start(result.current.items["work-1"]!, prompt));
     const first = send.mock.calls.at(-1)?.[0] as {
       requestId: string; expectedLifecycleRevision: number; displayPrompt: string;
     };
@@ -127,7 +128,7 @@ describe("useWorkItems lifecycle recovery", () => {
       requestId: string; expectedLifecycleRevision: number; prompt: string;
     };
     expect(retry).toMatchObject({
-      expectedLifecycleRevision: 4, prompt: "Continue", displayPrompt: "Continue",
+      expectedLifecycleRevision: 4, prompt, displayPrompt: "Continue",
     });
     expect(retry.requestId).not.toBe(first.requestId);
     expect(result.current.items["work-1"]?.lifecycle.lifecycleRevision).toBe(4);

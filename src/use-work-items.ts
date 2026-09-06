@@ -6,6 +6,7 @@ import type { MobileSessionInfo } from "./mobile/mobile-selectors.ts";
 import type { ServerMessage, SocketSubscribe } from "./use-socket.ts";
 import { mergeWorkItemSnapshot } from "./work-item-snapshot-merge.ts";
 import { randomUuid } from "./random-id.ts";
+import { displayTextFromPrompt } from "../shared/handoff-text.ts";
 import { formatCoordinatedLabel, reduceLiveEditAwareness,
   type LiveEditAwareness } from "../shared/live-edit-coordination.ts";
 import { decideConflictRecovery } from "./work-item-retry-policy.ts";
@@ -290,7 +291,7 @@ export function useWorkItems(input: {
         type: "continue_work_item", requestId, workItemId: item.id,
         expectedLifecycleRevision: item.lifecycle.lifecycleRevision,
         expectedCurrentRunKey: item.currentRunKey,
-        prompt: launch.prompt, displayPrompt: launch.prompt,
+        prompt: launch.prompt, displayPrompt: displayTextFromPrompt(launch.prompt),
         ...(launch.options ?? {}),
       });
       return;
@@ -318,7 +319,7 @@ export function useWorkItems(input: {
       pendingPrompts.current.set(recovery.command.requestId, {
         ...pending, attempts: pending.attempts + 1,
       });
-      input.send({ ...recovery.command, displayPrompt: pending.prompt,
+      input.send({ ...recovery.command, displayPrompt: displayTextFromPrompt(pending.prompt),
         ...(pending.options ?? {}) });
       return;
     }
@@ -359,13 +360,16 @@ export function useWorkItems(input: {
       pendingPrompts.current.set(requestId, {
         prompt: extra["prompt"], attempts: 1,
         projectId: item.projectId, workItemId: item.id,
+        options: { displayPrompt: typeof extra["displayPrompt"] === "string"
+          ? extra["displayPrompt"] : displayTextFromPrompt(extra["prompt"]) },
       });
     }
     input.send({ type, requestId, workItemId: item.id,
       expectedLifecycleRevision: item.lifecycle.lifecycleRevision,
       expectedCurrentRunKey: item.currentRunKey, ...extra,
       ...(type === "continue_work_item" && typeof extra["prompt"] === "string"
-        ? { displayPrompt: extra["prompt"] }
+        ? { displayPrompt: typeof extra["displayPrompt"] === "string"
+          ? extra["displayPrompt"] : displayTextFromPrompt(extra["prompt"]) }
         : {}),
     });
   }, [clearPromptFailure, input.send]);

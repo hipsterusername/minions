@@ -10,6 +10,8 @@ import type { AgentHarness } from "./harness/types.ts";
 import type { AgentTypeContext } from "./agents/types.ts";
 import { createSqliteWorkItemService, type WorkItemInvocation } from "./work-item-service-sqlite.ts";
 import { createBus } from "./bus.ts";
+import { upsertRenderState } from "./session-repo.ts";
+import { displayTextFromPrompt } from "../shared/handoff-text.ts";
 
 beforeEach(() => openPersistDb(":memory:"));
 afterEach(() => closePersistDb());
@@ -173,13 +175,26 @@ describe("provider-boundary handoff regressions", () => {
     prior.role = "leader";
     prior.sessionId = scenario !== "missing-resume" ? "provider-first" : null;
     prior.continuity.directives = ["ORIGINAL_DIRECTIVE", "MID_RUN_CORRECTION"];
+    prior.reviewLifecycle.dashboardRevision = 2;
+    prior.reviewLifecycle.finalDashboardRevision = 2;
     prior.persist();
+    upsertRenderState(db, prior.id, { layout: { title: "Current dashboard", columns: 2, gap: 12 },
+      components: [{ id: "compatibility", type: "status", label: "DASHBOARD_EVIDENCE", state: "success" }] });
+    compileContextCheckpoint(prior, { trigger: "proactive", originalPrompt: "ORIGINAL_DIRECTIVE",
+      modelHandoff: "Decisions:\n- Keep the existing API\nNext actions:\n- Verify compatibility" });
     detail = service.sealPrimaryRun({ workItemId: created.workItem.id, runKey: "run-first", outcome: "completed", finalReport: "VERIFIED_REPORT",
       expectedLifecycleRevision: detail.workItem.lifecycle.lifecycleRevision, expectedCurrentRunKey: "run-first" });
     await service.startRun({ requestId: "second", workItemId: created.workItem.id, prompt: "Continue",
       harness: scenario === "provider-switch" ? "claude" : "codex",
       expectedLifecycleRevision: detail.workItem.lifecycle.lifecycleRevision, expectedCurrentRunKey: "run-first" });
     const launch = launches.at(-1)!;
+    expect(launch.freshThreadPrompt).not.toContain("ORIGINAL_DIRECTIVE");
+    expect(launch.freshThreadPrompt).not.toContain("MID_RUN_CORRECTION");
+    expect(launch.freshThreadPrompt).not.toContain("<user-directives>");
+    expect(launch.freshThreadPrompt).toContain("Keep the existing API");
+    expect(launch.freshThreadPrompt).toContain("session_user_directives");
+    expect(launch.freshThreadPrompt).toContain("DASHBOARD_EVIDENCE");
+    expect(displayTextFromPrompt(launch.freshThreadPrompt!)).toBe("Continue");
     if (scenario === "compatible-resume") {
       expect(launch.resumeId).toBe("provider-first");
       expect(launch.prompt).toBe("Continue");
@@ -187,7 +202,7 @@ describe("provider-boundary handoff regressions", () => {
       return;
     }
     expect(launch.resumeId).toBeUndefined();
-    for (const text of ["ORIGINAL_DIRECTIVE", "MID_RUN_CORRECTION", "VERIFIED_REPORT", "Continue"]) expect(launch.prompt).toContain(text);
+    for (const text of ["VERIFIED_REPORT", "Continue"]) expect(launch.prompt).toContain(text);
     expect(launch.userDirectives).toContain("MID_RUN_CORRECTION");
   });
 });
