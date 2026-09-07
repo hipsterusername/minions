@@ -12,12 +12,13 @@
  *      and the UI sticks at `creating` forever.
  */
 
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { createSession } from "./create-session.ts";
 import { SessionRegistry } from "../session-registry.ts";
 import { SessionHost } from "../session-host.ts";
+import { closePersistDb } from "../session-persist.ts";
 import type { CommandContext, WsCommand } from "./types.ts";
 import type { Bus } from "../bus.ts";
 import type { StartSessionOptions } from "../session-host.ts";
@@ -31,6 +32,12 @@ import "../harness/echo/index.ts";
 
 beforeAll(() => {
   registerProjectPath(process.cwd());
+});
+
+afterEach(() => {
+  // Real session hosts open persistence even when launch fails. Release the
+  // SQLite handle before setup-node removes the suite's directory on Windows.
+  closePersistDb();
 });
 
 interface SentMessage {
