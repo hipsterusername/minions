@@ -65,6 +65,7 @@ describe("context checkpoint compiler", () => {
         sessionKey: "stable-run",
         invocationKind: "resume_open_run",
         prompt: "Continue",
+        displayPrompt: "The original user request",
         cwd: "/repo",
         resumeId: "provider-old",
       });
@@ -75,6 +76,7 @@ describe("context checkpoint compiler", () => {
         contextCheckpointId: checkpoint.checkpointId,
       });
       expect(options.resumeId).toBeUndefined();
+      expect(options.displayPrompt).toBeUndefined();
     },
   );
 

@@ -178,6 +178,9 @@ export function checkpointStartOptions(
   return {
     ...opts,
     invocationKind: "provider_continuation",
+    // The user turn was already recorded by the source invocation. A thread
+    // handoff continues that turn; it must not emit its display text again.
+    displayPrompt: undefined,
     prompt: [renderCheckpointPrompt(checkpoint), checkpoint.connectedContext
       ? renderConnectedHandoff(checkpoint.connectedContext, checkpoint.connectedContextSourceRef) : ""].filter(Boolean).join("\n\n"),
     resumeId: undefined,
