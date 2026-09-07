@@ -46,7 +46,12 @@ const view = selectRootView({
   preference: resolveViewPreference(),
 });
 
-if (view === "mobile" && !window.location.pathname.startsWith("/m")) {
+if (window.location.pathname === "/file-view") {
+  const FileLinkView = lazy(() => import("./FileLinkView.tsx"));
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode><Suspense fallback={null}><FileLinkView /></Suspense></StrictMode>,
+  );
+} else if (view === "mobile" && !window.location.pathname.startsWith("/m")) {
   // Small-screen visitor hit a desktop URL: hop onto `/m` before rendering so
   // we never download the desktop bundle. `replace` keeps the redirect out of
   // history, so Back doesn't bounce them between shells.

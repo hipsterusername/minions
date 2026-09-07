@@ -1,21 +1,18 @@
 /**
  * Lightweight inline markdown renderer for message bubbles.
- * Handles: **bold**, *italic*, `code`, ```code blocks```, numbered/bulleted lists.
+ * Handles: **bold**, *italic*, `code`, ```code blocks```, numbered/bulleted lists, and links.
  * Does NOT use dangerouslySetInnerHTML — returns React elements.
  */
 
 import { memo, useMemo } from "react";
 import type { ReactElement } from "react";
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
+import { ChatLink } from "./ChatLink.tsx";
 
 /** Parse inline formatting within a single line */
 function renderInline(text: string): (string | ReactElement)[] {
   const parts: (string | ReactElement)[] = [];
-  // Match: `code`, **bold**, *italic*
-  const regex = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g;
+  // Match code first so examples stay literal; accept Markdown and (label)[path] links.
+  const regex = /(`[^`]+`|\[[^\]\n]+\]\((?:<[^>\n]+>|[^()\n]|\([^()\n]*\))*\)|\([^()\n]+\)\[[^\]\n]+\]|\*\*[^*]+\*\*|\*[^*]+\*)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
@@ -40,6 +37,17 @@ function renderInline(text: string): (string | ReactElement)[] {
           {raw.slice(1, -1)}
         </code>,
       );
+    } else if (raw.startsWith("[") || raw.startsWith("(")) {
+      const standard = raw.startsWith("[");
+      const separator = raw.indexOf(standard ? "](" : ")[");
+      const label = raw.slice(1, separator);
+      let destination = raw.slice(separator + 2, -1).trim();
+      if (destination.startsWith("<")) {
+        destination = destination.slice(1, destination.indexOf(">"));
+      } else {
+        destination = destination.replace(/\s+["'][^"']*["']$/, "");
+      }
+      parts.push(<ChatLink key={match.index} destination={destination}>{renderInline(label)}</ChatLink>);
     } else if (raw.startsWith("**")) {
       parts.push(
         <strong key={match.index} style={{ fontWeight: 600, color: "var(--text-primary)" }}>
@@ -185,7 +193,7 @@ export const SimpleMarkdown = memo(function SimpleMarkdown({ text }: { text: str
                   color: "var(--accent)",
                 }}
               >
-                {escapeHtml(block.content)}
+                {block.content}
               </pre>
             );
           case "blank":

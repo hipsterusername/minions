@@ -1,3 +1,4 @@
+import { SimpleMarkdown } from "./SimpleMarkdown.tsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { DisplayMessage } from "../sdk-messages.ts";
@@ -141,7 +142,7 @@ export function SessionTranscript({
                 className="act-tx-msg-time"
               />
             </div>
-            <div className="act-tx-msg-body">{msg.content}</div>
+            <div className="act-tx-msg-body">{msg.role === "assistant" || msg.role === "result" ? <SimpleMarkdown text={msg.content} /> : msg.content}</div>
           </div>
         );
       })}
@@ -151,7 +152,7 @@ export function SessionTranscript({
             <span className="act-tx-msg-role">Agent</span>
             <span className="act-tx-msg-dot" aria-hidden="true" />
           </div>
-          <div className="act-tx-msg-body">{streamingText}</div>
+          <div className="act-tx-msg-body"><SimpleMarkdown text={streamingText} /></div>
         </div>
       )}
       {thinking && !streamingText && (

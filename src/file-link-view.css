@@ -1,0 +1,34 @@
+.file-link-view {
+  height: 100dvh;
+  overflow: auto;
+  padding: 24px;
+  box-sizing: border-box;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+}
+
+.file-link-view .md-preview {
+  max-width: 90ch;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.file-link-view .md-h1 { font-size: 1.8em; }
+.file-link-view .md-h2 { font-size: 1.4em; }
+.file-link-view .md-h3 { font-size: 1.15em; }
+.file-link-view .md-p { margin: 0.6em 0; }
+.file-link-view .md-spacer { height: 0.5em; }
+.file-link-view .md-inline-code,
+.file-link-view .md-code-block {
+  font-family: var(--font-mono);
+  background: var(--code-bg);
+  border-radius: 4px;
+}
+.file-link-view .md-inline-code { padding: 2px 5px; }
+.file-link-view .md-code-block { padding: 12px; overflow-x: auto; }
+.file-link-view .md-blockquote {
+  margin-left: 0;
+  padding-left: 16px;
+  border-left: 3px solid var(--border-default);
+  color: var(--text-secondary);
+}
