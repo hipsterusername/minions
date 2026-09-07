@@ -151,10 +151,21 @@ function reduceSyncResponse(
   let fullError = msg.lastErrorFull ?? error;
   let status: SessionStreamStatus =
     (msg.status as SessionStreamStatus | undefined) ?? state.status;
+  let streaming = emptySessionStreamState(state.sessionKey);
 
   for (const evt of events) {
     if (evt.type === "sdk_event" && evt.event) {
       const event = evt.event;
+      if (isStreamingEvent(event)) {
+        streaming = reduceSdkEvent(streaming, {
+          type: "sdk_event", sessionKey: msg.sessionKey, event,
+        }, prefix);
+        continue;
+      }
+      if ((event.kind === "text" && event.role === "assistant")
+        || event.kind === "thinking" || event.kind === "done") {
+        streaming = emptySessionStreamState(state.sessionKey);
+      }
       const produced = normalizedToDisplayMessages(event, prefix);
       const filtered = collapseAssistantResultDup(rebuilt, produced, event);
       for (const m of filtered.appended) {
@@ -193,8 +204,8 @@ function reduceSyncResponse(
     messages: rebuilt.length > 0 ? rebuilt : state.messages,
     contextDelivery: rebuilt.some(m => m.id.startsWith(`${prefix}-checkpoint-`)
       && !state.messages.some(old => old.id === m.id)) ? {} : state.contextDelivery,
-    streamingText: "",
-    streamingBlockIndex: null,
+    streamingText: streaming.streamingText,
+    streamingBlockIndex: streaming.streamingBlockIndex,
     totalCost: cost,
     turns,
     error,

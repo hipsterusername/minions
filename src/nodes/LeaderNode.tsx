@@ -306,10 +306,8 @@ export function LeaderNodeRenderer({
   }, [data.messages.length]);
 
   useEffect(() => {
-    if (!socketSend || !data.sessionKey || syncedRef.current) return;
-    syncedRef.current = true;
-    socketSend({ type: "sync_session", sessionKey: data.sessionKey });
-  }, [socketSend, data.sessionKey]);
+    if (data.sessionKey) syncedRef.current = true;
+  }, [data.sessionKey]);
 
   const publishCanvasContext = useCallback((
     sessionKey: string,
@@ -400,6 +398,7 @@ export function LeaderNodeRenderer({
   );
 
   useSessionStream({
+    socketSend,
     ...(socketSubscribe ? { socketSubscribe } : {}),
     state: extractLeaderCore(data),
     onChange: applyCoreUpdate,

@@ -35,6 +35,8 @@ import { sessionTopic } from "../shared/ws-envelope.ts";
 
 /** Subscription function shape consumed by the hook. */
 export interface UseSessionStreamOptions {
+  /** Request a snapshot after attaching and whenever the socket reconnects. */
+  socketSend?: ((data: unknown) => void) | undefined;
   /**
    * The subscription primitive. May be `undefined` while the socket is
    * still being established — the hook is a no-op in that case.
@@ -104,11 +106,11 @@ function isTransientStreamingOnlyChange(
  * exactly when the reducer returns a new state reference.
  *
  * The hook tracks `state` and `onChange` via refs so the subscription
- * doesn't tear down on every render. The subscription only resets when
- * `socketSubscribe` itself changes (e.g. socket reconnect).
+ * doesn't tear down on every render. It resets when the session key or
+ * socket callbacks change; reconnect notifications request a fresh snapshot.
  */
 export function useSessionStream(opts: UseSessionStreamOptions): void {
-  const { socketSubscribe, prefix } = opts;
+  const { socketSubscribe, socketSend, prefix } = opts;
   const sessionKey = opts.state.sessionKey;
 
   // Latest props, accessed via ref so the subscription effect's
@@ -153,6 +155,10 @@ export function useSessionStream(opts: UseSessionStreamOptions): void {
     const listener = (msg: unknown) => {
       const current = stateRef.current;
       const serverMsg = msg as ServerMessage;
+      if (serverMsg.type === "socket_reconnected") {
+        socketSend?.({ type: "sync_session", sessionKey });
+        return;
+      }
       // Debug capture — no-ops when debug mode is off, scoped to the
       // node prefix so leader/minion buffers don't collide.
       recordWsMessageForDebug(
@@ -187,13 +193,16 @@ export function useSessionStream(opts: UseSessionStreamOptions): void {
     };
 
     const unsubscribe = subscribeSocketTopic(socketSubscribe, sessionTopic(sessionKey), listener);
+    // A run can emit events before React commits its new session key. Attach
+    // first, then recover that gap, independently of the caller's launch guard.
+    socketSend?.({ type: "sync_session", sessionKey });
     return () => {
       unsubscribe?.();
       cancelFrame(pendingFrameRef.current);
       pendingFrameRef.current = null;
       pendingTransientRef.current = null;
     };
-  }, [socketSubscribe, sessionKey]);
+  }, [socketSubscribe, socketSend, sessionKey]);
 
   useEffect(() => {
     return () => {

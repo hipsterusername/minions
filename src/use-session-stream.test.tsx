@@ -13,9 +13,10 @@
  * handling of a missing `socketSubscribe`.
  */
 
-import { act, render } from "@testing-library/react";
+import { act, render, renderHook } from "@testing-library/react";
+import type { ServerMessage, SocketSubscribe } from "./use-socket.ts";
 import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   emptySessionStreamState,
@@ -67,7 +68,62 @@ async function pump(
 
 // ── Tests ───────────────────────────────────────────────
 
+function useFrameTimers() {
+    vi.useFakeTimers();
+    vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((cb) =>
+        window.setTimeout(() => cb(performance.now()), 16),
+      );
+    vi
+      .spyOn(window, "cancelAnimationFrame")
+      .mockImplementation((id) => window.clearTimeout(id));
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
+
 describe("useSessionStream: subscribe/unsubscribe lifecycle", () => {
+  it("catches up after binding each run and reconnecting, with the listener already attached", () => {
+    const listeners = new Set<(message: ServerMessage) => void>();
+    const subscribe = ((topicOrListener: string | ((message: ServerMessage) => void),
+      callback?: (message: ServerMessage) => void) => {
+      const listener = typeof topicOrListener === "function" ? topicOrListener : callback!;
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    }) as SocketSubscribe;
+    const onChange = vi.fn();
+    const send = vi.fn((command: unknown) => {
+      const { sessionKey } = command as { sessionKey: string };
+      for (const listener of listeners) listener({
+        type: "sync_response", sessionKey, found: true, status: "idle",
+        events: [{ type: "sdk_event", sessionKey, timestamp: 1,
+          event: { kind: "text", role: "assistant", text: `Early reply for ${sessionKey}` } }],
+      });
+    });
+    const view = renderHook(({ sessionKey }: { sessionKey: string | null }) => useSessionStream({
+      socketSubscribe: subscribe, socketSend: send,
+      state: emptySessionStreamState(sessionKey), onChange, prefix: "test",
+    }), { initialProps: { sessionKey: null as string | null } });
+    expect(send).not.toHaveBeenCalled();
+    for (const sessionKey of ["run-1", "run-2"]) {
+      view.rerender({ sessionKey });
+      expect(send).toHaveBeenLastCalledWith({ type: "sync_session", sessionKey });
+      expect(onChange.mock.lastCall?.[0]).toMatchObject({ sessionKey, status: "idle",
+        messages: [expect.objectContaining({ content: `Early reply for ${sessionKey}` })] });
+      expect(listeners.size).toBe(1);
+    }
+    act(() => {
+      for (const listener of listeners) listener({ type: "socket_reconnected" });
+    });
+    expect(send).toHaveBeenCalledTimes(3);
+    expect(send).toHaveBeenLastCalledWith({ type: "sync_session", sessionKey: "run-2" });
+    view.unmount();
+    expect(listeners.size).toBe(0);
+  });
+
   it("registers exactly one subscriber on mount and removes it on unmount", () => {
     const { socket } = createReplaySocket();
     const initial: SessionStreamState = {
@@ -84,6 +140,7 @@ describe("useSessionStream: subscribe/unsubscribe lifecycle", () => {
 
   it("does NOT re-subscribe across re-renders that don't change socketSubscribe", () => {
     const { socket } = createReplaySocket();
+    const subscribeSpy = vi.spyOn(socket, "subscribe");
     const initial: SessionStreamState = {
       ...emptySessionStreamState("leader-1"),
       status: "running",
@@ -106,6 +163,8 @@ describe("useSessionStream: subscribe/unsubscribe lifecycle", () => {
     act(() => button.click());
     act(() => button.click());
     expect(socket.subscriberCount).toBe(1);
+
+    expect(subscribeSpy).toHaveBeenCalledTimes(1);
 
     view.unmount();
     expect(socket.subscriberCount).toBe(0);
@@ -203,6 +262,7 @@ describe("useSessionStream: drives state via the reducer against fixtures", () =
 
     // No two consecutive states should be the same reference — the
     // hook is supposed to gate onChange on reference inequality.
+    expect(states.length).toBeGreaterThan(1);
     for (let i = 1; i < states.length; i++) {
       expect(states[i]).not.toBe(states[i - 1]);
     }
@@ -239,6 +299,8 @@ describe("useSessionStream: drives state via the reducer against fixtures", () =
 
     // Both consumers see the same final state shape (volatile fields
     // notwithstanding — but `messages` count and totals must match).
+    expect(a.at(-1)?.messages.length).toBeGreaterThan(0);
+    expect(b.at(-1)?.messages.length).toBeGreaterThan(0);
     expect(a.at(-1)?.messages.length).toBe(b.at(-1)?.messages.length);
     expect(a.at(-1)?.totalCost).toBe(b.at(-1)?.totalCost);
     expect(a.at(-1)?.turns).toBe(b.at(-1)?.turns);
@@ -304,15 +366,7 @@ describe("useSessionStream: respects the reducer's reference-equality contract",
 
 describe("useSessionStream: batches transient streaming updates", () => {
   it("coalesces token deltas into one frame update", async () => {
-    vi.useFakeTimers();
-    const requestAnimationFrameSpy = vi
-      .spyOn(window, "requestAnimationFrame")
-      .mockImplementation((cb) =>
-        window.setTimeout(() => cb(performance.now()), 16),
-      );
-    const cancelAnimationFrameSpy = vi
-      .spyOn(window, "cancelAnimationFrame")
-      .mockImplementation((id) => window.clearTimeout(id));
+    useFrameTimers();
 
     const { socket, replay } = createReplaySocket();
     const initial: SessionStreamState = {
@@ -355,21 +409,10 @@ describe("useSessionStream: batches transient streaming updates", () => {
     expect(states[0]?.streamingText).toBe("Hello");
     expect(states[0]?.streamingBlockIndex).toBe(0);
 
-    requestAnimationFrameSpy.mockRestore();
-    cancelAnimationFrameSpy.mockRestore();
-    vi.useRealTimers();
   });
 
   it("rebases pending streaming frames over concurrent controlled state changes", async () => {
-    vi.useFakeTimers();
-    const requestAnimationFrameSpy = vi
-      .spyOn(window, "requestAnimationFrame")
-      .mockImplementation((cb) =>
-        window.setTimeout(() => cb(performance.now()), 16),
-      );
-    const cancelAnimationFrameSpy = vi
-      .spyOn(window, "cancelAnimationFrame")
-      .mockImplementation((id) => window.clearTimeout(id));
+    useFrameTimers();
 
     const { socket, replay } = createReplaySocket();
     const initial: SessionStreamState = {
@@ -420,21 +463,10 @@ describe("useSessionStream: batches transient streaming updates", () => {
     expect(states[0]?.status).toBe("stopped");
     expect(states[0]?.streamingText).toBe("partial");
 
-    requestAnimationFrameSpy.mockRestore();
-    cancelAnimationFrameSpy.mockRestore();
-    vi.useRealTimers();
   });
 
   it("flushes durable session changes immediately and cancels pending streaming frames", async () => {
-    vi.useFakeTimers();
-    const requestAnimationFrameSpy = vi
-      .spyOn(window, "requestAnimationFrame")
-      .mockImplementation((cb) =>
-        window.setTimeout(() => cb(performance.now()), 16),
-      );
-    const cancelAnimationFrameSpy = vi
-      .spyOn(window, "cancelAnimationFrame")
-      .mockImplementation((id) => window.clearTimeout(id));
+    useFrameTimers();
 
     const { socket, replay } = createReplaySocket();
     const initial: SessionStreamState = {
@@ -478,8 +510,5 @@ describe("useSessionStream: batches transient streaming updates", () => {
     });
     expect(states).toHaveLength(1);
 
-    requestAnimationFrameSpy.mockRestore();
-    cancelAnimationFrameSpy.mockRestore();
-    vi.useRealTimers();
   });
 });

@@ -38,6 +38,34 @@ function leaderSession(overrides: Partial<MobileSessionInfo> = {}): MobileSessio
 }
 
 describe("SessionChatScreen", () => {
+  it("receives immediate catch-up replies on mount, session switch, and reconnect", () => {
+    const listeners = new Set<(message: ServerMessage) => void>();
+    const subscribe = ((topicOrListener: string | ((message: ServerMessage) => void),
+      callback?: (message: ServerMessage) => void) => {
+      const listener = typeof topicOrListener === "function" ? topicOrListener : callback!;
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    }) as SocketSubscribe;
+    const send = vi.fn((command: unknown) => {
+      const message = command as { type: string; sessionKey: string };
+      if (message.type !== "sync_session") return;
+      for (const listener of listeners) listener({
+        type: "sync_response", sessionKey: message.sessionKey, found: true, status: "running",
+        events: [{ type: "sdk_event", sessionKey: message.sessionKey, timestamp: 1,
+          event: { kind: "text", role: "assistant", text: `Caught up ${message.sessionKey}` } }],
+      });
+    });
+    const props = { subscribe, send, onBack: () => {} };
+    const view = render(<SessionChatScreen {...props} sessionKey="first" />);
+    expect(screen.getByText("Caught up first")).toBeInTheDocument();
+    view.rerender(<SessionChatScreen {...props} sessionKey="second" />);
+    expect(screen.getByText("Caught up second")).toBeInTheDocument();
+    expect(screen.queryByText("Caught up first")).not.toBeInTheDocument();
+    send.mockClear();
+    act(() => { for (const listener of listeners) listener({ type: "socket_reconnected" }); });
+    expect(send).toHaveBeenCalledWith({ type: "sync_session", sessionKey: "second" });
+  });
+
   it("renders persisted user inputs in the mobile transcript", async () => {
     const listeners: Array<(message: ServerMessage) => void> = [];
     render(

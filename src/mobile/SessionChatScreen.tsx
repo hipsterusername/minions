@@ -1,3 +1,5 @@
+import { ChatLinkScope } from "../components/ChatLink.tsx";
+import { SimpleMarkdown } from "../components/SimpleMarkdown.tsx";
 import { CrewIcon } from "../components/CrewIcon.tsx";
 import { useChatFollow } from "./use-chat-follow.ts";
 import { ChatFollow } from "./ChatFollow.tsx";
@@ -140,7 +142,7 @@ export function MessageBubble({ message, detail = false }: { message: DisplayMes
         <span className="mob-message-label-text">{label}</span>
       </div>
       <div className="mob-message-content">
-        {body}
+        {message.role === "assistant" || message.role === "result" ? <SimpleMarkdown text={body} /> : body}
       </div>
       {message.suffix ? <div className="mob-message-suffix">{message.suffix}</div> : null}
     </>
@@ -668,16 +670,16 @@ export function SessionChatScreen({
   useEffect(() => {
     setState(emptySessionStreamState(sessionKey));
     setActiveTab("chat");
-    send({ type: "sync_session", sessionKey });
-  }, [send, sessionKey]);
+  }, [sessionKey]);
 
   useEffect(() => {
     if (activeTab === "graph" && !graph.snapshot) setActiveTab("chat");
   }, [activeTab, graph.snapshot]);
 
   useSessionStream({
+    socketSend: send,
     socketSubscribe: subscribe,
-    state,
+    state: state.sessionKey === sessionKey ? state : emptySessionStreamState(sessionKey),
     onChange: setState,
     prefix: "mob",
   });
@@ -766,6 +768,7 @@ export function SessionChatScreen({
   );
 
   return (
+    <ChatLinkScope project={session?.projectId} cwd={session?.cwd}>
     <main className="mob-chat" aria-label="Session chat">
       <header className="mob-chat-header">
         <button className="mob-icon-button" type="button" onClick={onBack} aria-label="Back to activity">
@@ -872,7 +875,7 @@ export function SessionChatScreen({
                   <span>assistant</span>
                   <span className="mob-stream-dots" aria-hidden="true" />
                 </div>
-                <div className="mob-message-content">{state.streamingText}</div>
+                <div className="mob-message-content"><SimpleMarkdown text={state.streamingText} /></div>
               </article>
             ) : null}
             {session && LEADER_LIVE_STATUSES.has(session.status) &&
@@ -995,5 +998,6 @@ export function SessionChatScreen({
         />
       ) : null}
     </main>
+    </ChatLinkScope>
   );
 }

@@ -336,6 +336,30 @@ describe("sessionStreamReducer: status/error", () => {
 // ── sync_response ──────────────────────────────────────
 
 describe("sessionStreamReducer: sync_response", () => {
+  it("restores a partial response and continues from its buffered prefix", () => {
+    const synced = sessionStreamReducer(freshState(), {
+      type: "sync_response", sessionKey: "k1", found: true, status: "running",
+      events: [streamDelta("Hello"), streamDelta(" child", 0, "child-tool")].map((event) => ({
+        type: "sdk_event", sessionKey: "k1", timestamp: 1, event,
+      })),
+    }, "t");
+    expect(synced.streamingText).toBe("Hello");
+    const continued = sessionStreamReducer(synced, sdkEvent("k1", streamDelta(" world")), "t");
+    expect(continued.streamingText).toBe("Hello world");
+  });
+
+  it.each([streamEnd(), assistantText("Finished"),
+    { kind: "done", reason: "completed" } as NormalizedEvent])("clears completed streaming blocks during replay: %s", (end) => {
+    const synced = sessionStreamReducer(freshState(), {
+      type: "sync_response", sessionKey: "k1", found: true,
+      events: [streamDelta("Partial"), end].map((event) => ({
+        type: "sdk_event", sessionKey: "k1", timestamp: 1, event,
+      })),
+    }, "t");
+    expect(synced.streamingText).toBe("");
+    expect(synced.streamingBlockIndex).toBeNull();
+  });
+
   it("rebuilds messages from buffered events with id-dedup", () => {
     const s0 = freshState({ messages: [], status: "disconnected" });
     const s1 = sessionStreamReducer(

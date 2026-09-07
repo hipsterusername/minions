@@ -1,20 +1,21 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useChatFollow } from "./use-chat-follow.ts";
 import { ChatFollow } from "./ChatFollow.tsx";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+beforeEach(() => {
+  vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(1000);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(200);
+});
 function Feed({ activity = "first" }: { activity?: string }) {
   const follow = useChatFollow("session", activity);
   return <><div ref={follow.feedRef} onScroll={follow.onScroll} tabIndex={-1} data-testid="feed">Earlier message</div>
     {follow.hasNewActivity && <ChatFollow onResume={follow.resume} />}<input aria-label="Composer" /></>;
 }
-function dimensions(feed: HTMLElement) {
-  Object.defineProperties(feed, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, value: 200 } });
-}
 it("pauses when scrolling up, preserves reading through tokens and focus, and resumes once", () => {
   const { rerender } = render(<Feed />);
-  const feed = screen.getByTestId("feed"); dimensions(feed);
+  const feed = screen.getByTestId("feed");
   feed.scrollTop = 300; fireEvent.scroll(feed);
   rerender(<Feed activity="token one" />);
   expect(feed.scrollTop).toBe(300);
@@ -32,7 +33,7 @@ it("pauses when scrolling up, preserves reading through tokens and focus, and re
 });
 it("text selection pauses follow even near the bottom", () => {
   const { rerender } = render(<Feed />);
-  const feed = screen.getByTestId("feed"); dimensions(feed);
+  const feed = screen.getByTestId("feed");
   vi.spyOn(window, "getSelection").mockReturnValue({ isCollapsed: false, anchorNode: feed.firstChild } as Selection);
   feed.scrollTop = 800;
   rerender(<Feed activity="selected text streaming" />);
@@ -44,7 +45,7 @@ it("keeps a paused offset on keyboard/viewport resize and uses immediate scrolli
   vi.stubGlobal("ResizeObserver", class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() {} });
   vi.stubGlobal("matchMedia", () => ({ matches: true }));
   const { rerender } = render(<Feed />);
-  const feed = screen.getByTestId("feed"); dimensions(feed);
+  const feed = screen.getByTestId("feed");
   const scrollTo = vi.fn(); feed.scrollTo = scrollTo;
   feed.scrollTop = 300; fireEvent.scroll(feed);
   feed.scrollTop = 250; act(() => resize());
