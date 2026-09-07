@@ -327,7 +327,7 @@ function withLeaderThinkingDefaults(
 }
 
 function isFableModel(model: unknown): boolean {
-  return model === "claude-fable-5" || model === "fable";
+  return model === "claude-fable-5-1" || model === "claude-fable-5" || model === "fable";
 }
 
 /**

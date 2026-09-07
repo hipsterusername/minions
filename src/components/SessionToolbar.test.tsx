@@ -20,6 +20,7 @@ const CLAUDE_ENTRY: HarnessListEntry = {
   },
   builtInTools: ["Read", "Bash"],
   models: [
+    { id: "claude-fable-5-1", label: "Fable 5.1" },
     { id: "claude-fable-5", label: "Fable 5" },
     { id: "claude-opus-4-8", label: "Opus 4.8" },
     { id: "claude-opus-4-7", label: "Opus 4.7" },
@@ -194,15 +195,15 @@ describe("SessionToolbar — model selection picker", () => {
     expect(props.onHarnessChange).not.toHaveBeenCalled();
   });
 
-  it("offers Fable 5 as a Claude model", () => {
+  it.each([["Fable 5.1", "claude-fable-5-1"], ["Fable 5", "claude-fable-5"]])("offers %s as a Claude model", (label, model) => {
     const props = renderWithHarnesses(
       [CLAUDE_ENTRY, CODEX_ENTRY],
       { sessionKey: null, harness: "claude", model: "claude-sonnet-5" },
     );
     fireEvent.click(screen.getByTitle("Model selection"));
-    const fableOption = screen.getByRole("button", { name: /Fable 5/ });
+    const fableOption = screen.getByRole("button", { name: label });
     fireEvent.click(fableOption);
-    expect(props.onModelChange).toHaveBeenCalledWith("claude-fable-5");
+    expect(props.onModelChange).toHaveBeenCalledWith(model);
   });
 
   it("does not add vague tier chips to model rows", () => {
@@ -347,6 +348,16 @@ describe("SessionToolbar — harness-aware models", () => {
     expect(screen.getByRole("button", { name: /Sonnet 5/ })).toBeEnabled();
     expect(screen.queryByRole("button", { name: /GPT-5.5/ })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /OpenAI/ })).toBeDisabled();
+  });
+
+  it.each(["fable", "claude-fable-5-1"])("offers max reasoning for %s", (model) => {
+    const props = renderWithHarnesses([CLAUDE_ENTRY], { harness: "claude", model });
+    fireEvent.click(screen.getByTitle("Model selection"));
+    fireEvent.click(screen.getByRole("button", { name: "Max" }));
+    expect(props.onThinkingConfigChange).toHaveBeenCalledWith({
+      ...DEFAULT_THINKING,
+      effort: "max",
+    });
   });
 
   it("keeps reasoning controls inside the model picker", () => {

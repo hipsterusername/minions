@@ -197,12 +197,12 @@ describe("ClaudeHarness.start()", () => {
     });
     persistence.closePersistDb();
   });
-  it("exposes Fable 5 in static model metadata", async () => {
+  it.each([["claude-fable-5-1", "Fable 5.1"], ["claude-fable-5", "Fable 5"]])("exposes %s in static model metadata", async (id, label) => {
     const harness = await importHarness();
 
     expect(harness.staticInfo().models).toContainEqual({
-      id: "claude-fable-5",
-      label: "Fable 5",
+      id,
+      label,
     });
   });
 
@@ -341,14 +341,14 @@ describe("ClaudeHarness.start()", () => {
     ]);
   });
 
-  it("passes thinking options when opts.thinking is set and the model supports adaptive thinking", async () => {
+  it.each(["claude-opus-4-8", "claude-fable-5-1"])("passes thinking options for %s to the SDK", async (model) => {
     sdkMock.query.mockReturnValue(makeHandle([doneMessage()]));
     const harness = await importHarness();
 
     await collect(
       harness.start(
         baseOpts({
-          model: "claude-sonnet-5",
+          model,
           thinking: { effort: "high", display: "summarized" },
         }),
       ).events,

@@ -52,7 +52,10 @@ export interface SessionToolbarProps {
 /** Default Claude model labels. Used when the active harness is Claude or unknown. */
 const CLAUDE_MODEL_LABELS: Record<string, string> = {
   sonnet: "Sonnet",
-  fable: "Fable 5",
+  fable: "Fable 5.1",
+  "opus-5": "Opus 5",
+  "claude-opus-5": "Opus 5",
+  "claude-fable-5-1": "Fable 5.1",
   opus: "Opus 4.8",
   "opus-old": "Opus 4.7",
   haiku: "Haiku",
@@ -832,7 +835,7 @@ export function SessionToolbar({
     if (activeHarness && activeHarness.models.length > 0) {
       return activeHarness.models.map((m) => m.id);
     }
-    return ["fable", "sonnet", "opus", "opus-old", "haiku"];
+    return ["fable", "claude-fable-5", "sonnet", "opus-5", "opus", "opus-old", "haiku"];
   }, [activeHarness]);
 
   const modelLabels = useMemo<Record<string, string>>(() => {

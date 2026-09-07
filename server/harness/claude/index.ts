@@ -92,6 +92,7 @@ const CLAUDE_BUILT_IN_TOOLS = [
  */
 const CLAUDE_STATIC_MODELS: ReadonlyArray<{ id: string; label: string }> = [
   { id: "claude-opus-5", label: "Opus 5" },
+  { id: "claude-fable-5-1", label: "Fable 5.1" },
   { id: "claude-fable-5", label: "Fable 5" },
   { id: "claude-opus-4-8", label: "Opus 4.8" },
   { id: "claude-opus-4-7", label: "Opus 4.7" },

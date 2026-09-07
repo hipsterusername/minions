@@ -258,17 +258,17 @@ describe("context / settings / skills / mcp-servers round-trip", () => {
     expect(byId.analyze?.prompt).toContain("Do not make changes");
   });
 
-  it("uses medium leader thinking for fable when no explicit setting is stored", () => {
+  it.each(["claude-fable-5-1", "claude-fable-5", "fable"])("uses medium leader thinking for fable when no explicit setting is stored (%s)", (model) => {
     writeSettings(project, {
-      defaultLeaderModel: "claude-fable-5",
+      defaultLeaderModel: model,
     });
 
     expect(readSettings(project).defaultLeaderThinkingConfig?.effort).toBe("medium");
   });
 
-  it("preserves an explicit stored leader thinking effort for fable", () => {
+  it.each(["claude-fable-5-1", "claude-fable-5", "fable"])("preserves an explicit stored leader thinking effort for fable (%s)", (model) => {
     writeSettings(project, {
-      defaultLeaderModel: "claude-fable-5",
+      defaultLeaderModel: model,
       defaultLeaderThinkingConfig: {
         enabled: true,
         effort: "high",

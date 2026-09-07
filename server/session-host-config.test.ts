@@ -1,6 +1,6 @@
 
 import { describe, expect, it } from "vitest";
-import { enrichSystemPromptForWorktree } from "./session-host-config.ts";
+import { enrichSystemPromptForWorktree, modelSupportsAdaptive } from "./session-host-config.ts";
 
 const FAKE_WORKTREE = {
   path: "/tmp/worktrees/feature-abc",
@@ -144,5 +144,11 @@ describe("enrichSystemPromptForWorktree — appends, does not replace", () => {
       sharedWorktree: false,
     });
     expect(enriched.length).toBeGreaterThan(BASE_MINION.length);
+  });
+});
+
+describe("Claude adaptive thinking validation", () => {
+  it.each(["fable", "claude-fable-5-1", "claude-fable-5", "opus-5", "claude-opus-5"])("accepts adaptive thinking for %s", (model) => {
+    expect(modelSupportsAdaptive(model)).toBe(true);
   });
 });

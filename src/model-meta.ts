@@ -71,6 +71,10 @@ const CLAUDE_MODEL_CAPABILITIES: Record<string, ModelCapability> = {
     supportsAdaptiveThinking: true,
     supportedEffortLevels: OPUS_EFFORTS,
   },
+  "claude-fable-5-1": {
+    supportsAdaptiveThinking: true,
+    supportedEffortLevels: OPUS_EFFORTS,
+  },
   "claude-fable-5": {
     supportsAdaptiveThinking: true,
     supportedEffortLevels: OPUS_EFFORTS,
