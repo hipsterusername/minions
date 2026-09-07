@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useReducer, useState } from "react";
 
 import type { ServerMessage, SessionInfo, SocketSubscribe } from "./use-socket.ts";
 import type { MobileSessionInfo } from "./mobile/mobile-selectors.ts";
@@ -20,6 +20,8 @@ type AttentionMap = Record<string, boolean>;
 type ActivityMap = Record<string, { text: string; timestamp: number }>;
 
 export interface SessionActivityState {
+  /** False until the server has supplied the authoritative session list. */
+  hasLoaded: boolean;
   /** Raw session list as last broadcast by the server. */
   sessions: SessionInfo[];
   /** Sessions enriched with `lastActivity` / `lastActivityAt` / `pendingAttention`. */
@@ -33,6 +35,11 @@ function sessionWithStatus(session: SessionInfo, status: string): SessionInfo {
 function sessionWithSyncResponse(session: SessionInfo, msg: Extract<ServerMessage, { type: "sync_response" }>): SessionInfo {
   return {
     ...session,
+    ...(msg.runKey !== undefined ? { runKey: msg.runKey } : {}),
+    ...(msg.workItemId !== undefined ? { workItemId: msg.workItemId } : {}),
+    ...(msg.runKind !== undefined ? { runKind: msg.runKind } : {}),
+    ...(msg.parentRunKey !== undefined ? { parentRunKey: msg.parentRunKey } : {}),
+    ...(msg.taskId !== undefined ? { taskId: msg.taskId } : {}),
     ...(msg.sessionId !== undefined ? { sessionId: msg.sessionId } : {}),
     ...(msg.status ? { status: msg.status } : {}),
     ...(msg.cwd ? { cwd: msg.cwd } : {}),
@@ -120,6 +127,15 @@ export function activityFromMessage(
   msg: ServerMessage,
 ): { sessionKey: string; text: string; timestamp: number; attention?: boolean } | null {
   switch (msg.type) {
+    case "sync_response": {
+      if (!msg.found) return null;
+      const event = msg.events?.findLast((entry) => entry.type === "sdk_event"
+        && entry.event?.kind === "text" && entry.event.role === "assistant");
+      return event?.event ? activityFromMessage({
+        type: "sdk_event", sessionKey: msg.sessionKey,
+        event: event.event, timestamp: event.timestamp,
+      }) : null;
+    }
     case "minion_status":
       return {
         sessionKey: msg.minionSessionKey,
@@ -204,6 +220,13 @@ export function reduceSessionActivity(
     );
   }
 
+  if (msg.type === "session_task_name" || msg.type === "session_error"
+    || msg.type === "session_completed") {
+    sessions = sessions.map((session) => session.sessionKey !== msg.sessionKey ? session
+      : msg.type === "session_task_name" ? { ...session, taskName: msg.taskName }
+      : sessionWithStatus(session, msg.type === "session_error" ? "error" : "completed"));
+  }
+
   if (msg.type === "sync_response" && msg.found) {
     sessions = sessionsWithSyncResponse(sessions, msg);
   }
@@ -234,10 +257,10 @@ export function reduceSessionActivity(
   }
 
   const activity = activityFromMessage(msg);
-  if (!activity) return { sessions, activities, attention };
+  if (!activity) return sessions === prev.sessions ? prev : { sessions, activities, attention };
 
   if (activity.text) {
-    activities = {
+    if (activity.timestamp >= (activities[activity.sessionKey]?.timestamp ?? -Infinity)) activities = {
       ...activities,
       [activity.sessionKey]: { text: activity.text, timestamp: activity.timestamp },
     };
@@ -255,79 +278,15 @@ export function reduceSessionActivity(
  * state. The subscription is set up once per `subscribe` identity.
  */
 export function useSessionActivity(subscribe: SocketSubscribe): SessionActivityState {
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [activities, setActivities] = useState<ActivityMap>({});
-  const [attention, setAttention] = useState<AttentionMap>({});
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [{ sessions, activities, attention }, dispatch] = useReducer(reduceSessionActivity, {
+    sessions: [], activities: {}, attention: {},
+  });
 
-  useEffect(() => {
-    return subscribe("*", (msg) => {
-      if (msg.type === "session_list") {
-        setSessions((current) => sessionsFromList(current, msg.sessions));
-        return;
-      }
-
-      if (msg.type === "session_status") {
-        setSessions((current) =>
-          current.map((session) =>
-            session.sessionKey === msg.sessionKey
-              ? sessionWithStatus(session, msg.status)
-              : session,
-          ),
-        );
-      }
-
-      if (msg.type === "sync_response" && msg.found) {
-        setSessions((current) => sessionsWithSyncResponse(current, msg));
-      }
-
-      if (msg.type === "task_plan_update") {
-        setSessions((current) =>
-          current.map((session) =>
-            session.sessionKey === msg.leaderSessionKey
-              ? { ...session, taskPlan: msg.tasks }
-              : session,
-          ),
-        );
-      }
-
-      if (msg.type === "render_update") {
-        setSessions((current) =>
-          current.map((session) =>
-            session.sessionKey === msg.leaderSessionKey
-              ? sessionWithRenderUpdate(session, msg)
-              : session,
-          ),
-        );
-      }
-
-
-      if (msg.type === "session_lifecycle_changed") {
-        setSessions((current) => current.map((session) =>
-          session.sessionKey === msg.sessionKey &&
-          (session.reviewLifecycle?.lifecycleRevision ?? -1) < msg.lifecycle.lifecycleRevision
-            ? { ...session, reviewLifecycle: msg.lifecycle }
-            : session,
-        ));
-      }
-
-      const activity = activityFromMessage(msg);
-      if (!activity) return;
-
-      if (activity.text) {
-        setActivities((current) => ({
-          ...current,
-          [activity.sessionKey]: { text: activity.text, timestamp: activity.timestamp },
-        }));
-      }
-
-      if (activity.attention !== undefined) {
-        setAttention((current) => ({
-          ...current,
-          [activity.sessionKey]: activity.attention === true,
-        }));
-      }
-    });
-  }, [subscribe]);
+  useEffect(() => subscribe("*", (message) => {
+    if (message.type === "session_list") setHasLoaded(true);
+    dispatch(message);
+  }), [subscribe]);
 
   const mobileSessions = useMemo<MobileSessionInfo[]>(
     () =>
@@ -340,5 +299,5 @@ export function useSessionActivity(subscribe: SocketSubscribe): SessionActivityS
     [activities, attention, sessions],
   );
 
-  return { sessions, mobileSessions };
+  return { sessions, mobileSessions, hasLoaded };
 }

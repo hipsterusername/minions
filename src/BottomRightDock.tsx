@@ -1,6 +1,6 @@
 /**
  * BottomRightDock — single source of truth for the bottom-right cluster
- * of floating tools (Sessions, Map, MCP, Skills).
+ * of floating tools (Sessions, Map, MCP) and the header Skills menu.
  * Design contract:
  *   - Exactly one panel can be open at a time (mutex).
  *   - Pressing Escape closes the active panel.
@@ -257,7 +257,7 @@ export function DockPanel({
         data-dock-panel={id}
         style={{
           position: "absolute",
-          bottom: 64,
+          ...(id === "skills" ? { top: 52 } : { bottom: 64 }),
           right: 16,
           width,
           maxHeight: "calc(100% - 96px)",
@@ -517,6 +517,21 @@ function DockPill({
   );
 }
 
+export function SkillsNavButton() {
+  const { activePanel, togglePanel, badges } = useDock();
+  return (
+    <div onMouseDown={(event) => event.stopPropagation()}>
+      <DockPill
+        config={{ id: "skills", label: "Skills", icon: <SkillsIcon /> }}
+        active={activePanel === "skills"}
+        badge={badges.skills}
+        density="full"
+        onClick={() => togglePanel("skills")}
+      />
+    </div>
+  );
+}
+
 export function DockBar() {
   const { activePanel, togglePanel, badges } = useDock();
   const density = useDockDensity();
@@ -552,11 +567,6 @@ export function DockBar() {
             },
           ]
         : []),
-      {
-        id: "skills",
-        label: "Skills",
-        icon: <SkillsIcon />,
-      },
     ];
   }, [mcpEnabled]);
 

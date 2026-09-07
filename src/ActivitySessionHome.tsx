@@ -1,8 +1,11 @@
-import { ArrowRight, Plus } from "lucide-react";
+import { ArrowRight, ChevronRight, Plus } from "lucide-react";
 
 import type { MobileSessionInfo } from "./mobile/mobile-selectors.ts";
 import {
   attentionKind,
+  attentionAction,
+  needsAttention,
+  sessionStatusLabel,
   isSessionTitleEcho,
   sessionDisplayTitle,
   sessionRoleLabel,
@@ -92,7 +95,6 @@ function sessionSummary(session: MobileSessionInfo): string {
 function sessionMeta(session: MobileSessionInfo): string {
   const parts = [sessionRoleLabel(session)];
   if (session.lastActivityAt) parts.push(timeAgo(session.lastActivityAt));
-  if (session.model) parts.push(session.model);
   return parts.join(" · ");
 }
 
@@ -121,6 +123,7 @@ export function ActivitySessionHome({
 }) {
   const relevant = selectRelevantSessions(sessions);
   const primary = relevant[0];
+  const attentionCount = sessions.filter(needsAttention).length;
   if (!primary) return null;
 
   return (
@@ -128,11 +131,12 @@ export function ActivitySessionHome({
       <div className="act-session-home__content">
         <header className="act-session-home__heading">
           <div>
-            <span>Pick up your work</span>
-            <h2>Where should we continue?</h2>
+            <span>Activity overview</span>
+            <h2>{needsAttention(primary) ? "Your next step" : "Pick up your work"}</h2>
             <p>
-              The most relevant session is surfaced first, based on what needs you,
-              what is still running, and what changed most recently.
+              {attentionCount > 0
+                ? `${attentionCount} ${attentionCount === 1 ? "session needs" : "sessions need"} your attention.`
+                : "No decisions or reviews waiting on you."}
             </p>
           </div>
           <button className="act-session-home__new" type="button" onClick={onLaunch}>
@@ -147,10 +151,12 @@ export function ActivitySessionHome({
         >
           <div className="act-session-feature__heading">
             <span>Best next step</span>
-            <span className={`act-pill act-pill--${primary.status}`}>{primary.status}</span>
+            <span className={`act-pill act-pill--${primary.status}`}>{sessionStatusLabel(primary.status)}</span>
           </div>
           <div className="act-session-feature__body">
-            <span className="act-session-home__reason">{sessionRelevanceLabel(primary)}</span>
+            {sessionRelevanceLabel(primary) !== sessionStatusLabel(primary.status) && (
+              <span className="act-session-home__reason">{sessionRelevanceLabel(primary)}</span>
+            )}
             <h3 id="act-session-feature-title">{sessionDisplayTitle(primary)}</h3>
             <p>{sessionSummary(primary)}</p>
           </div>
@@ -161,23 +167,24 @@ export function ActivitySessionHome({
               type="button"
               onClick={() => onOpenSession(primary.sessionKey)}
             >
-              <span>Open session</span>
+              <span>{needsAttention(primary) ? attentionAction(primary) : "Open session"}</span>
               <ArrowRight size={14} strokeWidth={2.25} aria-hidden />
             </button>
           </footer>
         </div>
 
         {relevant.length > 1 && (
-          <div className="act-session-more" aria-labelledby="act-session-more-title">
-            <div className="act-session-more__heading">
+          <details className="act-session-more" aria-labelledby="act-session-more-title">
+            <summary className="act-session-more__heading">
               <div>
-                <h3 id="act-session-more-title">Also relevant</h3>
-                <p>A short list of work worth returning to.</p>
+                <h3 id="act-session-more-title">Other sessions</h3>
+                <p>Recent work and sessions in progress.</p>
               </div>
               {sessions.length > relevant.length && (
                 <span>{sessions.length - relevant.length} more in Activity</span>
               )}
-            </div>
+              <ChevronRight className="act-session-more__chevron" size={16} aria-hidden />
+            </summary>
             <div className="act-session-more__list">
               {relevant.slice(1).map((session) => (
                 <button
@@ -207,7 +214,7 @@ export function ActivitySessionHome({
                 </button>
               ))}
             </div>
-          </div>
+          </details>
         )}
       </div>
     </main>

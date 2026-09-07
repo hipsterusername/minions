@@ -1,3 +1,7 @@
+import { ChatLinkScope } from "./components/ChatLink.tsx";
+import { SimpleMarkdown } from "./components/SimpleMarkdown.tsx";
+import { ActivityLoading, type ActivityLoadingProps } from "./ActivityLoading.tsx";
+import { findUnansweredForms } from "../shared/render-dsl.ts";
 import { CrewIcon } from "./components/CrewIcon.tsx";
 import { ActivityDismissReceipt, useActivityRemovalFocus } from "./ActivityDismissReceipt.tsx";
 import {
@@ -25,6 +29,7 @@ import {
   attentionAction,
   sessionDisplayTitle,
   sessionRoleLabel,
+  sessionStatusLabel,
 } from "./mobile/mobile-selectors.ts";
 import {
   canAcknowledge,
@@ -33,6 +38,8 @@ import {
 } from "./mobile/mobile-activity-actions.ts";
 import { timeAgo } from "./nodes/leader-message-helpers.ts";
 import { ActivityTranscript } from "./WorkItemTranscript.tsx";
+import { useChatFollow } from "./use-chat-follow.ts";
+import { JumpToLatest } from "./components/JumpToLatest.tsx";
 import {
   Activity as ActivityIcon,
   ArrowLeft,
@@ -101,7 +108,7 @@ import "./activity.css";
  * not yet placed) still appear and show their activity stream.
  */
 
-export interface ActivityViewProps {
+export interface ActivityViewProps extends ActivityLoadingProps {
   /** Initial destination when opening detached work from Canvas. */
   initialSelectedKey?: string | null;
   /** Project-owned request state survives switching to Canvas. */
@@ -117,7 +124,7 @@ export interface ActivityViewProps {
   /** Reveal + center the leader node on the canvas. */
   onOpenInCanvas: (nodeId: string) => void;
   /** Reveal on canvas AND open the fullscreen cockpit. */
-  onExpandFullscreen: (nodeId: string) => void;
+  onExpandFullscreen: (nodeId: string, selectedKey: string) => void;
   /** Stop a running session. */
   onStopSession: (sessionKey: string) => void;
   /**
@@ -159,7 +166,9 @@ type ActivitySession = MobileSessionInfo & {
   lifecyclePending?: boolean;
 };
 
-type ActivitySummaryFilter = "needs-you" | "working" | "waiting";
+type ActivitySummaryFilter = "needs-you" | "working" | "ready";
+type InspectorActionRequest = { entryId: string; action: string };
+
 type InspectorSideTab = "dashboard" | "graph" | "minions" | "details";
 
 const ACTIVITY_OPTIMISTIC_USER_PREFIX = "activity-optimistic-user-";
@@ -201,15 +210,14 @@ function matchesSummaryFilter(
     case "needs-you":
       return needsAttention(session);
     case "working":
-      return session.status === "running" || session.status === "creating";
-    case "waiting":
-      return session.status === "waiting" ||
-        session.reviewLifecycle?.reviewState === "decision_needed";
+      return !needsAttention(session) && (session.status === "running" || session.status === "creating");
+    case "ready":
+      return !needsAttention(session) && (session.status === "idle" || session.status === "inactive");
   }
 }
 
 function formatCost(cost: number | undefined): string {
-  if (cost == null || !Number.isFinite(cost)) return "$0.00";
+  if (cost == null || !Number.isFinite(cost)) return "Not reported";
   if (cost > 0 && cost < 0.01) return `$${cost.toFixed(4)}`;
   return `$${cost.toFixed(2)}`;
 }
@@ -228,7 +236,7 @@ function buildLeaderNodeIndex(nodes: CanvasNode[]): Map<string, LeaderNodeRef> {
 }
 
 function StatusPill({ status }: { status: string }) {
-  return <span className={`act-pill act-pill--${status}`}>{status}</span>;
+  return <span className={`act-pill act-pill--${status}`}>{sessionStatusLabel(status)}</span>;
 }
 
 function isRetainedInactive(session: MobileSessionInfo): boolean {
@@ -334,6 +342,7 @@ function SessionTriageRow({
   selected,
   checked,
   onSelect,
+  onOpenAction,
   onToggleSelect,
   onAction,
 }: {
@@ -341,6 +350,7 @@ function SessionTriageRow({
   selected: boolean;
   checked: boolean;
   onSelect: () => void;
+  onOpenAction: () => void;
   onToggleSelect: () => void;
   onAction: (action: LifecycleAction, session: ActivitySession) => void;
 }) {
@@ -391,7 +401,7 @@ function SessionTriageRow({
           <button
             className="act-mini-btn act-mini-btn--primary act-mini-btn--open"
             type="button"
-            onClick={onSelect}
+            onClick={onOpenAction}
           >
             {attentionAction(session)}
           </button>
@@ -426,15 +436,7 @@ function SessionCard({
     : session.status === "idle" || session.status === "inactive"
       ? "idle"
       : "other";
-  const stateLabel = session.status === "creating"
-    ? "Starting"
-    : session.status === "inactive"
-      ? "Paused"
-    : tone === "running"
-      ? "Working now"
-      : tone === "idle"
-        ? "Ready for input"
-        : readableStatus(session.status);
+  const stateLabel = sessionStatusLabel(session.status);
   const reportedActivity = session.lastActivity?.trim();
   const genericActivity = reportedActivity && new Set([
     "active",
@@ -547,6 +549,7 @@ function readableStatus(status: string): string {
 
 function Inspector({
   session,
+  actionRequest,
   leader,
   onClose,
   activityCollapsed,
@@ -567,6 +570,7 @@ function Inspector({
   runs = [], runNextCursor, onLoadRuns,
 }: {
   session: ActivitySession;
+  actionRequest: InspectorActionRequest | null;
   leader: LeaderNodeRef | undefined;
   onClose: () => void;
   activityCollapsed: boolean;
@@ -611,10 +615,10 @@ function Inspector({
   const [activeSideTab, setActiveSideTab] = useState<InspectorSideTab>(
     () => initialInspectorSideTab(session, minions.length),
   );
-  const manuallySelectedSideTab = useRef(false);
+  const inspectorRef = useRef<HTMLElement>(null);
+  const pendingForms = findUnansweredForms(session.renderState?.components ?? []);
   const [previewRunKey, setPreviewRunKey] = useState<string | null>(null);
   useEffect(() => {
-    manuallySelectedSideTab.current = false;
     setActiveSideTab(initialInspectorSideTab(session, minions.length));
     setPreviewRunKey(null);
     setCompactPane("conversation");
@@ -622,13 +626,12 @@ function Inspector({
   useEffect(() => {
     setConversation(emptySessionStreamState(session.sessionKey));
     setAwaitingResponse(null);
-    if (!session.sessionKey.startsWith("work-item:")) {
-      socketSend?.({ type: "sync_session", sessionKey: session.sessionKey });
-    }
-  }, [session.sessionKey, socketSend]);
+  }, [session.sessionKey]);
   useSessionStream({
+    socketSend: session.sessionKey.startsWith("work-item:") ? undefined : socketSend,
     socketSubscribe,
-    state: conversation,
+    state: conversation.sessionKey === session.sessionKey
+      ? conversation : emptySessionStreamState(session.sessionKey),
     onChange: (next) => setConversation((current) => ({
       ...next,
       messages: preserveOptimisticUserMessages(current.messages, next.messages),
@@ -647,18 +650,36 @@ function Inspector({
   const hasDashboard = Boolean(
     session.renderState && session.renderState.components.length > 0,
   );
+  // New context becomes available without moving the user's current reading position.
   useEffect(() => {
-    if (hasDashboard && !manuallySelectedSideTab.current) {
-      setActiveSideTab("dashboard");
-    }
-  }, [hasDashboard, session.sessionKey]);
-  useEffect(() => {
-    if (graphAvailable && !manuallySelectedSideTab.current) {
-      setActiveSideTab("graph");
-    } else if (!graphAvailable && activeSideTab === "graph") {
+    if ((activeSideTab === "dashboard" && !hasDashboard)
+      || (activeSideTab === "graph" && !graphAvailable)
+      || (activeSideTab === "minions" && minions.length === 0)) {
       setActiveSideTab("details");
     }
-  }, [activeSideTab, graphAvailable, session.sessionKey]);
+  }, [activeSideTab, hasDashboard, graphAvailable, minions.length]);
+
+  useEffect(() => {
+    if (!actionRequest || actionRequest.entryId !== activityEntryId(session)) return;
+    const action = actionRequest.action;
+    const target = action === "Reply"
+      ? (pendingForms.length ? "decision" : "reply")
+      : action === "Read" && session.reviewLifecycle?.finalReport ? "report"
+      : action === "Review" && showChanges ? "changes" : "conversation";
+    setCompactPane(target === "reply" || target === "conversation" ? "conversation" : "context");
+    if (target !== "reply" && target !== "conversation") setActiveSideTab("details");
+    const frame = requestAnimationFrame(() => {
+      const section = inspectorRef.current?.querySelector<HTMLElement>(`[data-activity-target="${target}"]`);
+      if (target !== "conversation") section?.scrollIntoView?.({ block: "start" });
+      const control = target === "decision"
+        ? section?.querySelector('.dashboard-questions')?.querySelector<HTMLElement>('input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])')
+        : null;
+      (control ?? section)?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+    // A request is an explicit click, including repeated clicks on the same action.
+    // Live session updates must not steal focus or scroll the user's reading position.
+  }, [actionRequest]);
   const conversationMatches = conversation.sessionKey === session.sessionKey;
   const rawTranscriptMessages = conversationMatches && conversation.messages.length > 0
     ? preserveOptimisticUserMessages(leader?.data.messages ?? [], conversation.messages)
@@ -667,6 +688,7 @@ function Inspector({
   const streamingText = conversationMatches && conversation.streamingText
     ? conversation.streamingText
     : leader?.data.streamingText ?? "";
+  const chatFollow = useChatFollow(session.sessionKey, streamingText || transcriptMessages.at(-1));
   useEffect(() => {
     if (!awaitingResponse) return;
     const hasNewResponse = transcriptMessages.some((message) =>
@@ -743,21 +765,21 @@ function Inspector({
     label: string;
     icon: typeof ActivityIcon;
   }> = [
-    {
-      id: "dashboard",
+    ...(hasDashboard ? [{
+      id: "dashboard" as const,
       label: "Dashboard",
       icon: LayoutDashboard,
-    },
+    }] : []),
     ...(graphAvailable ? [{
       id: "graph" as const,
       label: "Graph",
       icon: CrewIcon,
     }] : []),
-    {
-      id: "minions",
+    ...(minions.length > 0 ? [{
+      id: "minions" as const,
       label: "Minions",
       icon: UsersRound,
-    },
+    }] : []),
     {
       id: "details",
       label: "Session details",
@@ -765,7 +787,6 @@ function Inspector({
     },
   ];
   const chooseSideTab = (tab: InspectorSideTab) => {
-    manuallySelectedSideTab.current = true;
     setActiveSideTab(tab);
   };
   const handleSideTabKeyDown = (
@@ -788,7 +809,8 @@ function Inspector({
   };
 
   return (
-    <aside className="act-inspector" aria-label="Session details" data-compact-pane={compactPane}>
+    <ChatLinkScope project={session.projectId} cwd={session.cwd}>
+    <aside ref={inspectorRef} className="act-inspector" aria-label="Session details" data-compact-pane={compactPane}>
       <header className="act-inspector-topbar">
         <div className="act-inspector-identity">
           <button
@@ -835,7 +857,7 @@ function Inspector({
                 <span>Open in Canvas</span>
               </button>
               <button
-                className="act-toolbar-btn act-toolbar-btn--primary"
+                className="act-toolbar-btn"
                 type="button"
                 onClick={() => onExpandFullscreen(leader.nodeId)}
                 aria-label="Expand fullscreen"
@@ -891,8 +913,9 @@ function Inspector({
                 </span>
               </div>
             )}
-          <div className="act-conversation-scroll">
-            <section className="act-conversation" aria-label="Conversation history">
+          <div className="act-conversation-scroll" ref={chatFollow.feedRef} onScroll={chatFollow.onScroll}
+            tabIndex={0} role="region" aria-label="Conversation messages">
+            <section ref={chatFollow.contentRef} className="act-conversation" aria-label="Conversation history" data-activity-target="conversation" tabIndex={-1}>
               {transcriptMessages.length > 0 || streamingText || workItemHistory.orderedRuns.length > 0 ? (
                 <ActivityTranscript unified={Boolean(session.workItemId)} history={workItemHistory}
                   currentRunKey={session.sessionKey} currentMessages={transcriptMessages}
@@ -915,6 +938,7 @@ function Inspector({
               )}
             </section>
           </div>
+          {!chatFollow.isFollowing && <JumpToLatest onClick={chatFollow.resume} hasNewActivity={chatFollow.hasNewActivity} />}
           {promptFailure && (
             <div className="act-action-error" role="alert">
               <span>{promptFailure.error}</span>
@@ -934,6 +958,7 @@ function Inspector({
                     submitReply();
                   }
                 }}
+                data-activity-target="reply"
                 placeholder="Reply or steer this agent…"
                 aria-label="Reply or steer this agent"
               />
@@ -1072,33 +1097,20 @@ function Inspector({
                 <header className="act-side-heading">
                   <span>Session details</span>
                   <h3>Context and output</h3>
-                  <p>Execution metadata, recent activity, and reviewable work.</p>
+                  <p>Decisions, results, and work ready to review.</p>
                 </header>
-                <article className="act-content-card">
-                  <dl className="act-detail-list">
-                    <div><dt>Status</dt><dd><StatusPill status={session.status} /></dd></div>
-                    <div><dt>Role</dt><dd>{sessionRoleLabel(session)}</dd></div>
-                    <div><dt>Model</dt><dd>{session.model ?? "Not reported"}</dd></div>
-                    <div><dt>Harness</dt><dd>{session.harness ?? "Not reported"}</dd></div>
-                    <div><dt>Turns</dt><dd>{session.turns ?? 0}</dd></div>
-                    <div><dt>Total cost</dt><dd>{formatCost(session.totalCost)}</dd></div>
-                  </dl>
-                </article>
-                <article className="act-content-card">
-                  <header className="act-content-card__head">
-                    <div>
-                      <h4>Latest activity</h4>
-                      <p>{session.lastActivityAt
-                        ? `Updated ${timeAgo(session.lastActivityAt)}`
-                        : "No timestamp was reported for this session."}</p>
-                    </div>
-                  </header>
-                  <div className="act-latest-activity">
-                    {session.lastActivity || "This leader has not published an activity summary yet."}
-                  </div>
-                </article>
+                {pendingForms.length > 0 && (
+                  <section className="act-content-card act-decision-card" data-activity-target="decision" tabIndex={-1} aria-label="Decision needed">
+                    <FormSubmissionProvider key={session.sessionKey} sessionKey={session.sessionKey}
+                      socketSend={socketSend} socketSubscribe={socketSubscribe}>
+                      <DashboardSurface hideHeader scrollWithin={false} renderState={{
+                        layout: { columns: 1 }, components: pendingForms,
+                      }} />
+                    </FormSubmissionProvider>
+                  </section>
+                )}
                 {showChanges && leader && (
-                  <article className="act-content-card">
+                  <article className="act-content-card" data-activity-target="changes" tabIndex={-1} aria-label="Changes">
                     <header className="act-content-card__head">
                       <GitCompare size={16} aria-hidden />
                       <div>
@@ -1120,7 +1132,7 @@ function Inspector({
                   </article>
                 )}
                 {session.reviewLifecycle?.finalReport && (
-                  <article className="act-content-card act-content-card--report">
+                  <article className="act-content-card act-content-card--report" data-activity-target="report" tabIndex={-1} aria-label="Final report">
                     <header className="act-content-card__head">
                       <FileText size={16} aria-hidden />
                       <div>
@@ -1128,9 +1140,34 @@ function Inspector({
                         <p>The leader’s completed handoff and verification summary.</p>
                       </div>
                     </header>
-                    <div className="act-final-report">{session.reviewLifecycle.finalReport}</div>
+                    <div className="act-final-report"><SimpleMarkdown text={session.reviewLifecycle.finalReport} /></div>
                   </article>
                 )}
+
+                {session.lastActivity && !isSessionTitleEcho(session, session.lastActivity) && <article className="act-content-card">
+                  <header className="act-content-card__head">
+                    <div>
+                      <h4>Latest activity</h4>
+                      <p>{session.lastActivityAt
+                        ? `Updated ${timeAgo(session.lastActivityAt)}`
+                        : "No timestamp was reported for this session."}</p>
+                    </div>
+                  </header>
+                  <div className="act-latest-activity">
+                    {session.lastActivity || "This leader has not published an activity summary yet."}
+                  </div>
+                </article>}
+                <details className="act-content-card act-session-metadata">
+                  <summary className="act-content-card__head">Session information<ChevronRight size={15} aria-hidden /></summary>
+                  <dl className="act-detail-list">
+                    <div><dt>Status</dt><dd><StatusPill status={session.status} /></dd></div>
+                    <div><dt>Role</dt><dd>{sessionRoleLabel(session)}</dd></div>
+                    <div><dt>Model</dt><dd>{session.model ?? "Not reported"}</dd></div>
+                    <div><dt>Harness</dt><dd>{session.harness ?? "Not reported"}</dd></div>
+                    <div><dt>Turns</dt><dd>{session.turns ?? "Not reported"}</dd></div>
+                    <div><dt>Total cost</dt><dd>{formatCost(session.totalCost)}</dd></div>
+                  </dl>
+                </details>
                 {session.workItemId && (
                   <details className="act-content-card act-run-history">
                     <summary className="act-content-card__head">
@@ -1200,7 +1237,7 @@ function Inspector({
                           {previewRun.finalReport ? (
                             <div className="act-run-preview-report">
                               <strong>Final report</strong>
-                              <p>{previewRun.finalReport}</p>
+                              <div><SimpleMarkdown text={previewRun.finalReport} /></div>
                             </div>
                           ) : null}
                         </section>
@@ -1270,10 +1307,12 @@ function Inspector({
         </section>
       </div>
     </aside>
+    </ChatLinkScope>
   );
 }
 
 export function ActivityView({
+  loading = false, loadError = null, onRetryLoad, connected = true,
   initialSelectedKey = null,
   lifecycleController,
   sessions,
@@ -1295,6 +1334,12 @@ export function ActivityView({
   promptFailures = {}, onClearPromptFailure,
 }: ActivityViewProps) {
   const [selectedKey, setSelectedKey] = useState<string | null>(initialSelectedKey);
+  const [actionRequest, setActionRequest] = useState<InspectorActionRequest | null>(null);
+  const openSessionAction = (session: ActivitySession) => {
+    const entryId = activityEntryId(session);
+    setSelectedKey(entryId);
+    setActionRequest({ entryId, action: attentionAction(session) });
+  };
   const [activityCollapsed, setActivityCollapsed] = useState(false);
   const [startedEntry, setStartedEntry] = useState<string | null>(null);
   const [visibility, setVisibility] = useState<ActivityVisibility>("open");
@@ -1413,9 +1458,9 @@ export function ActivityView({
       count: visibilitySessions.filter((session) => matchesSummaryFilter(session, "working")).length,
     },
     {
-      id: "waiting",
-      label: "Waiting",
-      count: visibilitySessions.filter((session) => matchesSummaryFilter(session, "waiting")).length,
+      id: "ready",
+      label: "Ready",
+      count: visibilitySessions.filter((session) => matchesSummaryFilter(session, "ready")).length,
     },
   ];
 
@@ -1425,6 +1470,7 @@ export function ActivityView({
   );
 
   const selectBySessionKey = (sessionKey: string) => {
+    setActionRequest(null);
     const entry = activitySessions.find((session) => session.sessionKey === sessionKey)
       ?? sessions.find((session) => session.sessionKey === sessionKey);
     setSelectedKey(entry ? activityEntryId(entry) : `session:${sessionKey}`);
@@ -1434,7 +1480,8 @@ export function ActivityView({
   // An empty Open view embeds the launch composer and recent work. Filtering
   // never creates a draft. A draft is committed to Canvas only after launch
   // assigns a session key.
-  const emptyStateActive = activitySessions.length === 0;
+  const loadPending = loading || Boolean(loadError);
+  const emptyStateActive = activitySessions.length === 0 && !loadPending;
   const autoLaunchActive = emptyStateActive && visibility === "open" && !summaryFilter;
   const recentWork = useMemo(
     () => selectRecentAgentWork(sessions, nodes.filter((node) => node.id !== launchNodeId)),
@@ -1581,7 +1628,7 @@ export function ActivityView({
                   {(["open", "all", "dismissed"] as const).map((id) => (
                     <option key={id} value={id}>
                       {id === "open" ? "Open" : id === "all" ? "All" : "Dismissed"}
-                      {" · "}{allActivitySessions.filter((session) => isVisibleInActivity(session, id)).length}
+                      {!loadPending && <> · {allActivitySessions.filter((session) => isVisibleInActivity(session, id)).length}</>}
                     </option>
                   ))}
                 </select>
@@ -1753,7 +1800,9 @@ export function ActivityView({
           </div>
         )}
 
-        {activitySessions.length === 0 ? (
+        {loadPending && <ActivityLoading loadError={loadError} onRetryLoad={onRetryLoad}
+          connected={connected} skeleton={activitySessions.length === 0} />}
+        {activitySessions.length === 0 ? (loadPending ? null :
           <div className="act-list-empty" aria-label="Empty session list">
             <strong>{visibleSessions.length === 0 ? "Session list is empty" : "Nothing in this list"}</strong>
             <span>
@@ -1777,7 +1826,8 @@ export function ActivityView({
                       session={session}
                       selected={activityEntryId(session) === selectedKey}
                       checked={checkedKeys.has(activityEntryId(session))}
-                      onSelect={() => setSelectedKey(activityEntryId(session))}
+                      onOpenAction={() => openSessionAction(session)}
+                      onSelect={() => { setActionRequest(null); setSelectedKey(activityEntryId(session)); }}
                       onToggleSelect={() => toggleChecked(activityEntryId(session))}
                       onAction={sendLifecycle}
                     />
@@ -1800,7 +1850,7 @@ export function ActivityView({
                       selected={activityEntryId(session) === selectedKey}
                       checked={checkedKeys.has(activityEntryId(session))}
                       hasChanges={session.reviewableChanges === true}
-                      onSelect={() => setSelectedKey(activityEntryId(session))}
+                      onSelect={() => { setActionRequest(null); setSelectedKey(activityEntryId(session)); }}
                       onToggleSelect={() => toggleChecked(activityEntryId(session))}
                       onAction={sendLifecycle}
                     />
@@ -1812,7 +1862,13 @@ export function ActivityView({
         )}
       </div>
 
-      {activitySessions.length === 0 && !autoLaunchActive && !launchNode && (
+      {loadPending && activitySessions.length === 0 && !launchNode && (
+        <main className="act-empty-workspace act-loading-workspace" aria-label="Activity workspace">
+          <p className="act-empty-sub">{loadError ? "Activity could not finish loading."
+            : "Your activity will appear as it arrives."}</p>
+        </main>
+      )}
+      {!loadPending && activitySessions.length === 0 && !autoLaunchActive && !launchNode && (
         <main className="act-empty-workspace act-filter-workspace" aria-label="Activity workspace">
           <div className="act-empty-headline">
             <ActivityIcon size={28} aria-hidden />
@@ -1864,7 +1920,10 @@ export function ActivityView({
       {!selectedSession && !launchNode && activitySessions.length > 0 && (
         <ActivitySessionHome
           sessions={activitySessions}
-          onOpenSession={selectBySessionKey}
+          onOpenSession={(sessionKey) => {
+            const session = activitySessions.find((item) => item.sessionKey === sessionKey);
+            if (session) openSessionAction(session);
+          }}
           onLaunch={openLaunchExperience}
         />
       )}
@@ -1872,12 +1931,13 @@ export function ActivityView({
       {selectedSession && (
         <Inspector
           session={selectedSession}
+          actionRequest={actionRequest}
           leader={leaderIndex.get(selectedSession.sessionKey)}
           onClose={() => setSelectedKey(null)}
           activityCollapsed={activityCollapsed}
           onToggleActivity={() => setActivityCollapsed((collapsed) => !collapsed)}
           onOpenInCanvas={onOpenInCanvas}
-          onExpandFullscreen={onExpandFullscreen}
+          onExpandFullscreen={(nodeId) => onExpandFullscreen(nodeId, activityEntryId(selectedSession))}
           onStopSession={onStopSession}
           onAttachToCanvas={onAttachToCanvas}
           socketSend={socketSend}

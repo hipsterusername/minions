@@ -1,0 +1,58 @@
+.activity-loading {
+  padding: 20px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.activity-loading-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.activity-loading-status button {
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.activity-loading-rows {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.activity-loading-row {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+  border-radius: 10px;
+  animation: activity-loading-pulse 1.8s ease-in-out infinite alternate;
+}
+
+.activity-loading-row span {
+  height: 10px;
+  width: 85%;
+  border-radius: 4px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.activity-loading-row span:first-child { width: 55%; height: 14px; }
+.activity-loading-row span:last-child { width: 30%; }
+
+@keyframes activity-loading-pulse { to { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) {
+  .activity-loading-row { animation: none; }
+}
+
+/* At narrow widths the list owns loading feedback; keep the workspace from covering it. */
+@media (max-width: 900px) {
+  .act-root > .act-loading-workspace { display: none; }
+}

@@ -142,7 +142,9 @@ describe("LeaderNode task graph integration", () => {
     }));
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     fireEvent.click(screen.getByRole("button", { name: "Enter fullscreen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Toggle context panel" }));
     fireEvent.click(screen.getByTestId("drawer-tab-graph"));
+    expect(screen.getByTestId("drawer-panel-graph")).toBeVisible();
     expect(screen.getByTestId("drawer-panel-graph")).toHaveTextContent("1 planned steps");
     fireEvent.click(screen.getByRole("button", { name: "Open graph details" }));
     expect(screen.getByRole("dialog", { name: /Execution plan: Build graph planning/ }))

@@ -26,6 +26,9 @@ type WorkItemClientAction = ServerMessage | {
   type: "work_item_list_page";
   result: WorkItemListSnapshot;
   replace: boolean;
+} | {
+  type: "work_item_list_complete";
+  ids: string[];
 };
 
 export function mergeWorkItemListPage(
@@ -33,9 +36,11 @@ export function mergeWorkItemListPage(
   result: WorkItemListSnapshot,
   replace: boolean,
 ): WorkItemClientState {
-  const items: Record<string, WorkItemSnapshot> = replace ? {} : { ...state.items };
+  const items: Record<string, WorkItemSnapshot> = replace ? {} : Object.fromEntries(
+    Object.entries(state.items).filter(([, item]) => item.projectId === result.projectId),
+  );
   for (const item of result.items) {
-    const prior = items[item.id];
+    const prior = state.items[item.id]?.projectId === result.projectId ? state.items[item.id] : undefined;
     items[item.id] = prior ? mergeWorkItemSnapshot(prior, item) : item;
   }
   const ids = new Set(Object.keys(items));
@@ -56,6 +61,13 @@ function mergeRunSnapshots(
 }
 
 export function reduceWorkItems(state: WorkItemClientState, msg: WorkItemClientAction): WorkItemClientState {
+  if (msg.type === "work_item_list_complete") {
+    const ids = new Set(msg.ids);
+    return { ...state,
+      items: Object.fromEntries(Object.entries(state.items).filter(([id]) => ids.has(id))),
+      coordination: Object.fromEntries(Object.entries(state.coordination).filter(([id]) => ids.has(id))),
+    };
+  }
   if (msg.type === "work_item_list_page") {
     return mergeWorkItemListPage(state, msg.result, msg.replace);
   }
@@ -127,6 +139,7 @@ export function mergeCanonicalActivity(
   coordination: Readonly<Record<string, LiveEditAwareness>> = {},
 ): MobileSessionInfo[] {
   const canonicalIds = new Set(items.map((item) => item.id));
+  const canonicalRunKeys = new Set(items.flatMap((item) => item.currentRunKey ? [item.currentRunKey] : []));
   const byRun = new Map(sessions.map((session) => [session.sessionKey, session]));
   const canonical = items.map((item): MobileSessionInfo => {
     const base = item.currentRunKey ? byRun.get(item.currentRunKey) : undefined;
@@ -173,6 +186,9 @@ export function mergeCanonicalActivity(
   const representativeRank = (session: MobileSessionInfo) =>
     session.runKind === "primary" ? 2 : session.role === "leader" ? 1 : 0;
   for (const session of sessions) {
+    // A partial session snapshot may lack workItemId even though its run has
+    // already been folded into the canonical row above.
+    if (canonicalRunKeys.has(session.sessionKey)) continue;
     if (!session.workItemId) {
       legacyFallback.push(session);
       continue;
@@ -216,7 +232,12 @@ export function useWorkItems(input: {
 }) {
   const [state, dispatch] = useReducer(reduceWorkItems, initialWorkItemClientState);
   const [promptFailures, setPromptFailures] = useState<Record<string, PromptFailure>>({});
-  const listRequests = useRef(new Map<string, { projectId: string; replace: boolean }>());
+  const [listLoad, setListLoad] = useState<{
+    projectId: string | null; loading: boolean; error: string | null;
+  }>({ projectId: null, loading: true, error: null });
+  const listRequests = useRef(new Map<string, { projectId: string }>());
+  const listedIds = useRef(new Set<string>());
+  const listTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const pendingPrompts = useRef(new Map<string, {
     prompt: string; attempts: number; projectId: string; workItemId: string;
     options?: Record<string, unknown>;
@@ -224,18 +245,32 @@ export function useWorkItems(input: {
     onError?: (error: string) => void;
   }>());
   const pendingLaunches = useRef(new Map<string, PendingLaunch>());
-  const requestListPage = useCallback((projectId: string, cursor?: string, replace = false) => {
+  const requestListPage = useCallback((projectId: string, cursor?: string) => {
     const requestId = randomUuid();
-    listRequests.current.set(requestId, { projectId, replace });
+    listRequests.current.set(requestId, { projectId });
+    clearTimeout(listTimer.current);
+    listTimer.current = setTimeout(() => {
+      listRequests.current.delete(requestId);
+      setListLoad({ projectId, loading: false, error: "Activity is taking longer than expected." });
+    }, 30_000);
     input.send({
       type: "list_work_items",
       requestId,
       projectId,
       includeArchived: true,
-      limit: 100,
+      // Paint a small recent page first, then fetch history in efficient batches.
+      limit: cursor ? 100 : 20,
       ...(cursor ? { cursor } : {}),
     });
   }, [input.send]);
+  const retryLoad = useCallback(() => {
+    clearTimeout(listTimer.current);
+    listRequests.current.clear();
+    listedIds.current.clear();
+    setListLoad((current) => current.projectId === input.projectId && current.loading && !current.error
+      ? current : { projectId: input.projectId, loading: true, error: null });
+    if (input.connected && input.projectId) requestListPage(input.projectId);
+  }, [input.connected, input.projectId, requestListPage]);
   const clearPromptFailure = useCallback((workItemId: string) => {
     setPromptFailures((current) => {
       if (!(workItemId in current)) return current;
@@ -247,27 +282,32 @@ export function useWorkItems(input: {
   const receive = useCallback((message: ServerMessage) => {
     if ((message.type === "work_item_changed" || message.type === "work_item_created")
       && message.workItem.projectId !== input.projectId) return;
-    if (message.type === "work_item_response" && message.success
-      && message.command === "list_work_items") {
+    if (message.type === "work_item_changed" || message.type === "work_item_created") {
+      listedIds.current.add(message.workItem.id);
+    }
+    if (message.type === "work_item_response" && message.command === "list_work_items") {
+      const request = message.requestId ? listRequests.current.get(message.requestId) : undefined;
+      // A timed-out request or an obsolete project/refresh must never settle this load.
+      if (!request || request.projectId !== input.projectId) return;
+      listRequests.current.delete(message.requestId!);
+      clearTimeout(listTimer.current);
       const result = message.result as Partial<WorkItemListSnapshot> | undefined;
-      if (result?.projectId !== input.projectId) return;
-      const requestId = message.requestId;
-      const request = requestId ? listRequests.current.get(requestId) : undefined;
-      if (requestId) {
-        // Ignore a page from an obsolete refresh generation (for example,
-        // after a reconnect or project switch) instead of replacing the
-        // current aggregate with that one stale page.
-        if (!request || !result.items) return;
-        listRequests.current.delete(requestId);
-        if (request.projectId !== input.projectId) return;
-        dispatch({
-          type: "work_item_list_page",
-          result: result as WorkItemListSnapshot,
-          replace: request.replace,
-        });
-        if (result.nextCursor) requestListPage(request.projectId, result.nextCursor);
+      if (!message.success || result?.projectId !== input.projectId || !Array.isArray(result.items)) {
+        setListLoad({ projectId: input.projectId, loading: false,
+          error: message.error ?? "Unable to load activity." });
         return;
       }
+      for (const item of result.items) listedIds.current.add(item.id);
+      // Keep previously visible rows during refresh; prune only once every page arrives.
+      dispatch({ type: "work_item_list_page", result: result as WorkItemListSnapshot, replace: false });
+      if (result.nextCursor) {
+        // Yield between pages so the first batch can render and input stays responsive.
+        listTimer.current = setTimeout(() => requestListPage(request.projectId, result.nextCursor!), 0);
+      } else {
+        dispatch({ type: "work_item_list_complete", ids: [...listedIds.current] });
+        setListLoad({ projectId: input.projectId, loading: false, error: null });
+      }
+      return;
     }
     dispatch(message);
     if (message.type !== "work_item_response" || !message.requestId) return;
@@ -344,14 +384,19 @@ export function useWorkItems(input: {
     pendingLaunches.current.clear();
     setPromptFailures({});
     return () => {
+      clearTimeout(listTimer.current);
       listRequests.current.clear();
       pendingPrompts.current.clear();
       pendingLaunches.current.clear();
     };
   }, [input.connected, input.projectId]);
   useEffect(() => {
-    if (input.connected && input.projectId) requestListPage(input.projectId, undefined, true);
-  }, [input.connected, input.projectId, requestListPage]);
+    retryLoad();
+    return () => {
+      clearTimeout(listTimer.current);
+      listRequests.current.clear();
+    };
+  }, [retryLoad]);
   const mutate = useCallback((type: string, item: WorkItemSnapshot,
     extra: Record<string, unknown> = {}) => {
     const requestId = randomUuid();
@@ -388,10 +433,15 @@ export function useWorkItems(input: {
       title: launchInput.title, changeMode: launchInput.changeMode,
     });
   }, [input.projectId, input.send]);
+  const orderedItems = useMemo(() => state.projectId === input.projectId
+    ? Object.values(state.items).sort((a, b) => b.updatedAt - a.updatedAt) : [],
+  [state.items, state.projectId, input.projectId]);
   return useMemo(() => ({ ...state,
+    loading: listLoad.projectId !== input.projectId || listLoad.loading,
+    loadError: listLoad.projectId === input.projectId ? listLoad.error : null,
+    retryLoad,
     promptFailures, clearPromptFailure,
-    orderedItems: state.projectId === input.projectId
-      ? Object.values(state.items).sort((a, b) => b.updatedAt - a.updatedAt) : [],
+    orderedItems,
     loadRuns: (workItemId: string, cursor?: string) => input.send({
       type: "get_work_item_runs", workItemId, cursor, limit: 100,
     }),
@@ -401,5 +451,5 @@ export function useWorkItems(input: {
     start: (item: WorkItemSnapshot, prompt: string) => mutate("continue_work_item", item, { prompt }),
     reply: (item: WorkItemSnapshot, prompt: string) => mutate("continue_work_item", item, { prompt }),
     launch,
-  }), [state, promptFailures, clearPromptFailure, input.projectId, input.send, mutate, launch]);
+  }), [state, listLoad, retryLoad, orderedItems, promptFailures, clearPromptFailure, input.projectId, input.send, mutate, launch]);
 }

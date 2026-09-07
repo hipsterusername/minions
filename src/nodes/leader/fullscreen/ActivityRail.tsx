@@ -74,7 +74,8 @@ export function ActivityRail({
         background: "var(--bg-surface)",
         minWidth: 0,
         overflow: "hidden",
-        height: "100%",
+        flex: 1,
+        minHeight: 0,
       }}
     >
       <div

@@ -713,99 +713,43 @@
   white-space: nowrap;
 }
 
-/* Reveal quick actions on hover or keyboard focus without adding a footer. */
-.act-card-actions,
+/* Touch layouts keep actions visible; hover-capable layouts use an overlay below. */
+.act-triage-row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  height: auto;
+  gap: 3px 8px;
+  padding-block: 8px;
+}
+.act-triage-main { padding: 0; }
 .act-triage-actions {
-  position: absolute;
-  right: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  padding: 2px 0 2px 6px;
-  background: var(--bg-elevated);
-  border-radius: 4px;
-  opacity: 0;
-  pointer-events: none;
+  grid-column: 2;
+  justify-self: end;
 }
-
-.act-card:hover .act-card-actions,
-.act-card:focus-within .act-card-actions,
-.act-triage-row:hover .act-triage-actions,
-.act-triage-row:focus-within .act-triage-actions {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.act-card-main:focus-visible,
-.act-triage-main:focus-visible {
+.act-card-actions { flex-shrink: 0; }
+.act-triage-actions button, .act-card-actions button { min-height: 32px; }
+.act-card-main:focus-visible, .act-triage-main:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
   border-radius: 3px;
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .act-card:hover .act-card-main,
-  .act-card:focus-within .act-card-main { padding-right: 36px; }
-  .act-card:has(.act-card-actions > button:nth-child(2)):is(:hover, :focus-within) .act-card-main {
-    padding-right: 68px;
-  }
-  .act-triage-row:is(:hover, :focus-within) .act-triage-main { padding-right: 132px; }
-}
-
-@media (hover: none), (pointer: coarse) {
-  .act-triage-actions .act-mini-btn--open { display: none; }
-  .act-card-actions,
-  .act-triage-actions {
-    position: static;
-    transform: none;
-    opacity: 1;
-    pointer-events: auto;
-    padding: 0;
-    background: transparent;
-  }
-}
-
 /* ── Status pill ───────────────────────────────────────── */
 
 .act-pill {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  font-family: var(--font-mono);
-  padding: 2px 8px;
-  border-radius: 999px;
-  color: var(--bg-primary);
-  background: var(--status-idle);
+  --pill-tone: var(--text-secondary);
+  font: 600 10.5px var(--font-sans);
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--pill-tone) 25%, transparent);
+  color: var(--pill-tone);
+  background: color-mix(in srgb, var(--pill-tone) 9%, transparent);
   white-space: nowrap;
 }
-
-.act-pill--running {
-  background: var(--status-running);
-}
-.act-pill--idle {
-  background: var(--status-idle);
-}
-.act-pill--inactive {
-  background: var(--status-idle);
-}
-.act-pill--creating {
-  background: var(--status-creating);
-}
-.act-pill--waiting {
-  background: var(--status-waiting);
-}
-.act-pill--completed {
-  background: var(--status-success);
-}
-.act-pill--error {
-  background: var(--status-error);
-}
-.act-pill--stopped {
-  background: var(--status-stopped);
-}
-.act-pill--disconnected {
-  background: var(--status-disconnected);
-}
+.act-pill--running, .act-pill--creating { --pill-tone: var(--status-running); }
+.act-pill--waiting { --pill-tone: var(--status-warning); }
+.act-pill--completed { --pill-tone: var(--status-success); }
+.act-pill--error { --pill-tone: var(--status-error); }
 
 /* ── Empty state ───────────────────────────────────────── */
 
@@ -1563,6 +1507,7 @@
 }
 
 .act-conversation-scroll {
+  overflow-anchor: none;
   flex: 1 1 auto;
   min-height: 0;
   padding: 18px clamp(20px, 2.5vw, 30px) 24px;
@@ -2451,14 +2396,14 @@
   border-top: 1px solid var(--border-default);
 }
 
-.act-run-preview-report strong {
+.act-run-preview-report > strong {
   color: var(--text-muted);
   font: 650 8.5px/1.3 var(--font-sans);
   letter-spacing: .04em;
   text-transform: uppercase;
 }
 
-.act-run-preview-report p {
+.act-run-preview-report > div {
   margin: 0;
   color: var(--text-secondary);
   font: 400 10px/1.5 var(--font-sans);
@@ -2772,13 +2717,10 @@
 .leader-launch-skill { min-width: 0; padding: 9px 2px; border-bottom: 1px solid var(--border-default); }
 .leader-launch-skill:last-child { border-bottom: 0; }
 .leader-launch-skill[data-selected="true"] { margin-inline: -6px; padding-inline: 8px; border-radius: 7px; background: color-mix(in srgb, var(--accent) 5%, var(--bg-primary)); }
-.leader-launch-skill > label { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: start; gap: 8px; cursor: pointer; }
-.leader-launch-skill > label input { margin: 3px 0 0; accent-color: var(--accent); }
+.leader-launch-skill > label { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 8px; cursor: pointer; }
+.leader-launch-skill > label input { margin: 0; accent-color: var(--accent); }
 .leader-launch-skill-icon { font-size: 14px; line-height: 1.4; }
-.leader-launch-skill > label strong,
-.leader-launch-skill > label small { display: block; }
-.leader-launch-skill > label strong { font-size: 12.5px; }
-.leader-launch-skill > label small { margin-top: 3px; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+.leader-launch-skill > label strong { display: block; font-size: 12.5px; }
 .leader-launch-skill-vars { display: grid; gap: 9px; margin: 10px 0 0 48px; padding-top: 10px; border-top: 1px solid var(--border-default); }
 .leader-launch-skill-vars label { display: grid; gap: 5px; }
 .leader-launch-skill-vars label > span { color: var(--text-secondary); font-size: 12px; font-weight: 600; }
@@ -3195,3 +3137,68 @@
   .act-compact-navigation button, .act-toolbar-btn, .act-inspector-back,
   .leader-launch-starters button, .act-context-tab { min-height: 44px; }
 }
+
+/* Context disclosure and actionable focus targets. */
+.act-session-metadata > summary, .act-session-more > summary { cursor: pointer; }
+.act-session-metadata > summary { display: flex; justify-content: space-between; }
+.act-session-metadata[open] > summary svg { transform: rotate(90deg); }
+.act-session-metadata .act-detail-list { padding: 0 16px 16px; }
+.act-session-metadata > summary:focus-visible, .act-session-more > summary:focus-visible,
+[data-activity-target]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.act-decision-card { border-color: color-mix(in srgb, var(--status-warning) 45%, var(--border-default)); }
+.act-triage-row .act-mini-btn--primary {
+  color: var(--text-primary);
+  border-color: var(--border-default);
+  background: var(--bg-surface);
+}
+.act-triage-row .act-mini-btn--primary:hover { border-color: var(--text-secondary); }
+@media (pointer: coarse) {
+  .act-triage-actions button, .act-card-actions button { min-width: 44px; min-height: 44px; }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .act-card,
+  .act-triage-row {
+    height: auto;
+    min-height: 48px;
+  }
+
+  .act-card-main { padding-block: 5px; }
+
+  .act-triage-actions,
+  .act-card-actions {
+    position: absolute;
+    z-index: 1;
+    top: 50%;
+    right: 6px;
+    grid-column: auto;
+    padding: 4px 4px 4px 20px;
+    border-radius: 8px;
+    background: linear-gradient(to right, transparent, var(--bg-elevated) 16px);
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(4px, -50%);
+    transition: opacity 160ms ease, transform 160ms ease;
+  }
+
+  .act-triage-row:is(:hover, :focus-within) .act-triage-actions,
+  .act-card:is(:hover, :focus-within) .act-card-actions {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(0, -50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .act-triage-actions,
+  .act-card-actions,
+  .act-triage-actions button,
+  .act-card-actions button {
+    transition: none;
+  }
+}
+
+.act-decision-card .dashboard-header { display: none; }
+
+.act-session-more__chevron { flex-shrink: 0; color: var(--text-muted); }
+.act-session-more[open] .act-session-more__chevron { transform: rotate(90deg); }

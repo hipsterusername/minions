@@ -182,6 +182,17 @@ describe("MobileApp", () => {
     render(<MobileApp />);
     fireEvent.click(await screen.findByText("Alpha"));
 
+    await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      type: "list_work_items", projectId: "alpha",
+    })));
+    const request = send.mock.calls.find(([command]) => command.type === "list_work_items"
+      && command.projectId === "alpha")![0];
+    expect(screen.queryByRole("button", { name: "New leader" })).not.toBeInTheDocument();
+    emitSocketMessage({ type: "session_list", sessions: [] });
+    emitSocketMessage({ type: "work_item_response", command: "list_work_items",
+      requestId: request.requestId, success: true,
+      result: { projectId: "alpha", items: [], nextCursor: null } });
+
     const emptyAction = await screen.findByRole("button", { name: "New leader" });
     fireEvent.click(emptyAction);
 

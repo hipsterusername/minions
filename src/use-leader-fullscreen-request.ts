@@ -13,7 +13,7 @@ import { clearLeaderFullscreen, leaderFullscreenStore } from "./leader-fullscree
  * request is consumed (cleared) so a later remount of the node doesn't replay
  * a stale request unprompted.
  */
-export function useLeaderFullscreenRequest(nodeId: string, onOpen: () => void): void {
+export function useLeaderFullscreenRequest(nodeId: string, onOpen: (onExit?: () => void) => void): void {
   const request = useSyncExternalStore(
     leaderFullscreenStore.subscribe,
     leaderFullscreenStore.getSnapshot,
@@ -28,7 +28,7 @@ export function useLeaderFullscreenRequest(nodeId: string, onOpen: () => void): 
     if (request.nodeId !== nodeId) return;
     if (request.nonce === handledNonceRef.current) return;
     handledNonceRef.current = request.nonce;
-    onOpenRef.current();
+    onOpenRef.current(request.onExit);
     clearLeaderFullscreen();
   }, [request, nodeId]);
 }

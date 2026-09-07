@@ -248,7 +248,7 @@ describe("ActivitySessionHome", () => {
     expect(within(dashboard).getByRole("heading", { name: "Release decision" })).toBeInTheDocument();
     expect(within(dashboard).getByText("Waiting for you")).toBeInTheDocument();
 
-    fireEvent.click(within(dashboard).getByRole("button", { name: /open session/i }));
+    fireEvent.click(within(dashboard).getByRole("button", { name: /^Reply$/i }));
     expect(onOpenSession).toHaveBeenCalledWith("waiting");
 
     fireEvent.click(within(dashboard).getByRole("button", { name: /new leader/i }));
@@ -273,6 +273,10 @@ describe("ActivitySessionHome", () => {
 
     expect(screen.getByText("1 more in Activity")).toBeInTheDocument();
     expect(screen.queryByText("Five")).not.toBeInTheDocument();
+    const disclosure = screen.getByText("Other sessions").closest("details")!;
+    expect(disclosure.open).toBe(false);
+    fireEvent.click(screen.getByText("Other sessions"));
+    expect(disclosure.open).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: /two/i }));
     expect(onOpenSession).toHaveBeenCalledWith("two");
   });

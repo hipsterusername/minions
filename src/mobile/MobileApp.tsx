@@ -230,7 +230,7 @@ export default function MobileApp() {
 
   const { connected, send, subscribe, reconnectState, manualReconnect } = useSocket(buildWsUrl());
   const keyboard = useMobileKeyboard();
-  const { sessions, mobileSessions } = useSessionActivity(subscribe);
+  const { sessions, mobileSessions, hasLoaded: sessionsLoaded } = useSessionActivity(subscribe);
   const [selectedProject, setSelectedProject] = useState<ProjectScope | null>(null);
   const workItemState = useWorkItems({ projectId: selectedProject?.id ?? null,
     connected, subscribe, send });
@@ -530,6 +530,10 @@ export default function MobileApp() {
         />
       ) : (
         <ActivityScreen
+          loading={!sessionsLoaded || workItemState.loading}
+          loadError={workItemState.loadError}
+          onRetryLoad={workItemState.retryLoad}
+          connected={connected}
           sessions={scopedSessions}
           onOpenSession={openSession}
           onNewLeader={openLaunch}

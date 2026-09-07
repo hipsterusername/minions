@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type ReactNode } from "react";
 import { Activity, Check, ChevronDown, FolderKanban, LayoutGrid, Pencil } from "lucide-react";
 import { CrewIcon } from "./components/CrewIcon.tsx";
 import { LeaderStatusIcon } from "./nodes/leader/LeaderStatusIcon.tsx";
@@ -106,6 +106,7 @@ interface ProjectHeaderProps {
   onRetrySettingsSave?: () => void;
   socketSend?: (data: unknown) => void;
   socketSubscribe?: SocketSubscribe;
+  actions?: ReactNode;
 }
 
 export function ProjectHeader({
@@ -128,6 +129,7 @@ export function ProjectHeader({
   onRetrySettingsSave,
   socketSend,
   socketSubscribe,
+  actions,
 }: ProjectHeaderProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(name);
@@ -456,6 +458,7 @@ export function ProjectHeader({
         )}
       </div>
 
+      {actions}
       <SettingsMenu
         settings={settings}
         onSettingsChange={onSettingsChange}

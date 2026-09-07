@@ -1,8 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App, { formatProjectDocumentTitle } from "./App.tsx";
 import { getProject, listProjects, updateProject } from "./api.ts";
+import { useLeaderFullscreenRequest } from "./use-leader-fullscreen-request.ts";
+import type { ActivityViewProps } from "./ActivityView.tsx";
 
 vi.mock("./nodes/ClaudeSessionNode.tsx", () => ({}));
 vi.mock("./nodes/LeaderNode.tsx", () => ({}));
@@ -71,7 +73,27 @@ vi.mock("./ProjectHeader.tsx", () => ({
 
 
 vi.mock("./Canvas.tsx", () => ({
-  Canvas: () => <div>Canvas</div>,
+  Canvas: () => {
+    const [fullscreen, setFullscreen] = useState(false);
+    const returnRef = useRef<(() => void) | undefined>(undefined);
+    useLeaderFullscreenRequest("leader-1", onExit => {
+      returnRef.current = onExit;
+      setFullscreen(true);
+    });
+    return <div>Canvas{fullscreen && <button onClick={() => {
+      setFullscreen(false);
+      returnRef.current?.();
+    }}>Exit fullscreen</button>}</div>;
+  },
+}));
+
+vi.mock("./ActivityView.tsx", () => ({
+  ActivityView: ({ initialSelectedKey, onExpandFullscreen }: ActivityViewProps) => (
+    <div data-testid="activity-view">
+      <span>{initialSelectedKey}</span>
+      <button onClick={() => onExpandFullscreen("leader-1", "work-item:work-1")}>Expand fullscreen</button>
+    </div>
+  ),
 }));
 
 vi.mock("./ProjectPanel.tsx", () => ({
@@ -93,6 +115,7 @@ vi.mock("./SkillEditor.tsx", () => ({
 vi.mock("./BottomRightDock.tsx", () => ({
   DockProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   DockBar: () => null,
+  SkillsNavButton: () => null,
 }));
 
 vi.mock("./LeaderLoadingScreen.tsx", () => ({
@@ -135,6 +158,28 @@ describe("App document title", () => {
       "Alpha Project (Minions)",
     );
     expect(formatProjectDocumentTitle("   ")).toBe("Minions");
+  });
+
+  it("returns from fullscreen to the selected Activity entry on repeated visits", async () => {
+    const project = await getProject("project-1");
+    vi.mocked(getProject).mockResolvedValue({ ...project, nodes: [{
+      id: "leader-1", type: "leader", position: { x: 0, y: 0 },
+      size: { width: 560, height: 520 }, data: {},
+    }] });
+    render(<App />);
+    fireEvent.click(await screen.findByText("Recent Alpha"));
+
+    for (let visit = 0; visit < 2; visit++) {
+      fireEvent.click(await screen.findByRole("button", { name: "Expand fullscreen" }));
+      expect(screen.queryByTestId("activity-view")).toBeNull();
+      fireEvent.click(await screen.findByRole("button", { name: "Exit fullscreen" }));
+      expect(await screen.findByTestId("activity-view")).toHaveTextContent("work-item:work-1");
+      expect(screen.queryByText("Canvas")).toBeNull();
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "Go To Canvas" }));
+    expect(screen.getByText("Canvas")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Exit fullscreen" })).toBeNull();
   });
 
   it("tracks the selected project name and resets when closed", async () => {

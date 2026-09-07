@@ -13,6 +13,17 @@ afterEach(() => {
 });
 
 describe("useLeaderFullscreenRequest", () => {
+  it("passes the return callback through a request made before the node mounts", () => {
+    const onExit = vi.fn();
+    requestLeaderFullscreen("node-a", onExit);
+    const onOpen = vi.fn();
+    renderHook(() => useLeaderFullscreenRequest("node-a", onOpen));
+
+    expect(onOpen).toHaveBeenCalledWith(onExit);
+    expect(onExit).not.toHaveBeenCalled();
+    expect(leaderFullscreenStore.getSnapshot()).toBeNull();
+  });
+
   it("fires onOpen only for a request that names this node", () => {
     const onOpen = vi.fn();
     renderHook(() => useLeaderFullscreenRequest("node-a", onOpen));

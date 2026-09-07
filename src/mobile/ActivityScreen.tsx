@@ -1,3 +1,6 @@
+import { ActivityLoading, type ActivityLoadingProps } from "../ActivityLoading.tsx";
+import { ChatLinkScope } from "../components/ChatLink.tsx";
+import { SimpleMarkdown } from "../components/SimpleMarkdown.tsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ListX, Plus, RotateCcw, X } from "lucide-react";
 
@@ -25,7 +28,7 @@ import {
   type LifecycleAction,
 } from "./mobile-activity-actions.ts";
 
-interface ActivityScreenProps {
+interface ActivityScreenProps extends ActivityLoadingProps {
   sessions: MobileSessionInfo[];
   onOpenSession: (sessionKey: string) => void;
   onNewLeader?: () => void;
@@ -403,7 +406,9 @@ function RunHistory({
                 <div className="mob-run-history-preview" role="region"
                   aria-label={`Preview of iteration ${run.runNumber}`}>
                   <strong>Read-only preview</strong>
-                  <p>{run.finalReport ?? "This iteration did not publish a final report."}</p>
+                  <ChatLinkScope project={session.projectId} cwd={session.cwd}>
+                    <SimpleMarkdown text={run.finalReport ?? "This iteration did not publish a final report."} />
+                  </ChatLinkScope>
                 </div>
               ) : null}
             </li>)}
@@ -417,7 +422,7 @@ function RunHistory({
   );
 }
 
-export function ActivityScreen({ sessions, onOpenSession, onNewLeader, notice,
+export function ActivityScreen({ loading = false, loadError = null, onRetryLoad, connected = true, sessions, onOpenSession, onNewLeader, notice,
   workItemRuns = {}, runNextCursor = {}, onLoadRuns, send }: ActivityScreenProps) {
   const [visibility, setVisibility] = useState<ActivityVisibility>("open");
   const [selecting, setSelecting] = useState(false);
@@ -530,6 +535,15 @@ export function ActivityScreen({ sessions, onOpenSession, onNewLeader, notice,
     </div>
   );
 
+  const loadPending = loading || Boolean(loadError);
+  if (visibilitySessions.length === 0 && loadPending) {
+    return <main className="mob-screen mob-activity" aria-label="Activity">
+      <header className="mob-screen-header"><h1>Activity</h1></header>
+      {notice ? <NoticeBanner notice={notice} /> : null}
+      {filters}
+      <ActivityLoading loadError={loadError} onRetryLoad={onRetryLoad} connected={connected} skeleton />
+    </main>;
+  }
   if (visibilitySessions.length === 0) {
     const canStartFirstLeader = sessions.length === 0 && visibility !== "dismissed" && onNewLeader;
     return (
@@ -579,6 +593,7 @@ export function ActivityScreen({ sessions, onOpenSession, onNewLeader, notice,
       </header>
       {notice ? <NoticeBanner notice={notice} /> : null}
 
+      {loadPending && <ActivityLoading loadError={loadError} onRetryLoad={onRetryLoad} connected={connected} />}
       <div className="mob-activity-summary" aria-label="Filter activity by status">
         {summaryItems.map((item) => {
           const selected = summaryFilter === item.id;

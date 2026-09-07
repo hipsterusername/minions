@@ -1,3 +1,4 @@
+import { ChatLinkScope } from "./components/ChatLink.tsx";
 import "./nodes/ClaudeSessionNode.tsx";
 import "./nodes/LeaderNode.tsx";
 import "./nodes/MinionNode.tsx";
@@ -45,7 +46,7 @@ import { sessionBelongsToProject, needsAttention } from "./mobile/mobile-selecto
 import { requestLeaderFullscreen } from "./leader-fullscreen-request.ts";
 import { McpServersBrowser } from "./McpServersBrowser.tsx";
 import { SkillsBrowser } from "./SkillsBrowser.tsx";
-import { DockProvider, DockBar } from "./BottomRightDock.tsx";
+import { DockProvider, DockBar, SkillsNavButton } from "./BottomRightDock.tsx";
 import { DebugModeAffordance } from "./components/DebugModeAffordance.tsx";
 import { LeaderLoadingScreen } from "./LeaderLoadingScreen.tsx";
 import type { SkillTemplate } from "./skills/types.ts";
@@ -460,7 +461,7 @@ function ProjectView({
 
   // Session activity (Activity view) — the same live stream the mobile Activity
   // screen consumes, scoped to this project by working directory.
-  const { mobileSessions } = useSessionActivity(socket.subscribe);
+  const { mobileSessions, hasLoaded: sessionsLoaded } = useSessionActivity(socket.subscribe);
   const workItemState = useWorkItems({ projectId, connected: socket.connected,
     subscribe: socket.subscribe, send: socket.send });
   const handleDetachSessionFromCanvas = useCallback(
@@ -517,11 +518,14 @@ function ProjectView({
   // `handleFocusNode` switches to the canvas and centers the node; the
   // fullscreen request is picked up by that LeaderNode as it mounts.
   const handleExpandFullscreen = useCallback(
-    (nodeId: string) => {
+    (nodeId: string, selectedKey: string) => {
       handleFocusNode(nodeId);
-      requestLeaderFullscreen(nodeId);
+      requestLeaderFullscreen(nodeId, () => {
+        setActivitySelection(selectedKey);
+        setActiveView(activeView);
+      });
     },
-    [handleFocusNode],
+    [handleFocusNode, activeView],
   );
 
   const handleStopSession = useCallback(
@@ -568,6 +572,7 @@ function ProjectView({
       },
     };
     dispatch({ type: "ADD_NODE", node });
+    setActiveView("canvas");
   }, [dispatch, positionInViewport, projectSettings]);
 
   // Skills customization handlers
@@ -715,8 +720,10 @@ function ProjectView({
           subscribe={socket.subscribe}
           connected={socket.connected}
         >
-          <>
+          <ChatLinkScope project={projectId} cwd={projectPath}>
+          <DockProvider>
             <ProjectHeader
+              actions={<SkillsNavButton />}
               projectId={projectId}
               name={projectName}
               saveStatus={saveStatus}
@@ -740,6 +747,10 @@ function ProjectView({
             {activeView === "activity" ? (
               <div style={{ position: "absolute", top: PROJECT_HEADER_HEIGHT, left: 0, right: 0, bottom: 0 }}>
                 <ActivityView
+                  loading={!sessionsLoaded || workItemState.loading}
+                  loadError={workItemState.loadError}
+                  onRetryLoad={workItemState.retryLoad}
+                  connected={socket.connected}
                   lifecycleController={activityLifecycle}
                   sessions={activitySessions}
                   initialSelectedKey={activitySelection}
@@ -776,87 +787,86 @@ function ProjectView({
                 />
               </div>
             ) : (
-              <DockProvider>
-                <div style={{ position: "absolute", top: PROJECT_HEADER_HEIGHT, left: 0, right: 0, bottom: 0 }}>
-                  <Canvas
-                    nodes={nodes}
-                    dispatch={dispatch}
-                    graph={graph}
-                    graphDispatch={graphDispatch}
-                    transform={transform}
-                    setTransform={setTransform}
-                    socketSend={socket.send}
-                    socketSubscribe={socket.subscribe}
-                    socketConnected={socket.connected}
-                    projectPath={projectPath}
-                    projectId={projectId}
-                    projectSettings={projectSettings}
-                    onProjectSettingsChange={handleSettingsChange}
-                    focusNodeId={focusNodeId}
-                    onFocusNodeHandled={handleFocusNodeHandled}
-                    viewportTopOffset={PROJECT_HEADER_HEIGHT}
-                    projectPanelRight={projectPanelRight}
-                    activitySessions={activitySessions}
-                    onOpenActivitySession={session => {
-                      setActivitySelection(activityEntryId(session));
-                      setActiveView("activity");
-                    }}
-                  />
-                  <ProjectPanel
-                    onRightEdgeChange={setProjectPanelRight}
-                    projectId={projectId}
-                    projectPath={projectPath}
-                    projectName={projectName}
-                    onSpawnContextExplorer={handleSpawnContextExplorer}
-                    socketSubscribe={socket.subscribe}
-                    nodes={nodes}
-                    onOpenFile={handleOpenFile}
-                    onUpdateNodeData={(nodeId, data) => dispatch({ type: "UPDATE_NODE_DATA", id: nodeId, data })}
-                    onFocusNode={handleFocusNode}
-                  />
-                  <SkillsBrowser
-                    onLaunchSkill={handleLaunchSkill}
-                    onCreateSkill={handleCreateSkill}
-                    onEditSkill={handleEditSkill}
-                    onDeleteSkill={handleDeleteSkill}
-                    onDuplicateSkill={handleDuplicateSkill}
-                    onExportSkill={handleExportSkill}
-                    onImportSkills={handleImportSkills}
-                    onExportSkills={handleExportSkills}
-                    onImportFile={openImportPreview}
-                    refreshKey={skillsRefreshKey}
-                  />
-                  {mcpServersEnabled && (
-                    <McpServersBrowser projectId={projectId} />
-                  )}
-                  {skillEditorOpen && (
-                    <Suspense fallback={<ModalLoadingFallback label="Loading skill editor…" />}>
-                      <SkillEditor
-                        skill={editingSkill}
-                        onSave={handleSaveSkill}
-                        onClose={() => {
-                          setSkillEditorOpen(false);
-                          setEditingSkill(null);
-                        }}
-                      />
-                    </Suspense>
-                  )}
-                  {skillImport && (
-                    <Suspense fallback={<ModalLoadingFallback label="Loading skill import…" />}>
-                      <SkillImportModal
-                        incoming={skillImport.incoming}
-                        existingIds={skillImport.existingIds}
-                        skipped={skillImport.skipped}
-                        onConfirm={handleConfirmImport}
-                        onClose={() => setSkillImport(null)}
-                      />
-                    </Suspense>
-                  )}
+              <div style={{ position: "absolute", top: PROJECT_HEADER_HEIGHT, left: 0, right: 0, bottom: 0 }}>
+                <Canvas
+                  nodes={nodes}
+                  dispatch={dispatch}
+                  graph={graph}
+                  graphDispatch={graphDispatch}
+                  transform={transform}
+                  setTransform={setTransform}
+                  socketSend={socket.send}
+                  socketSubscribe={socket.subscribe}
+                  socketConnected={socket.connected}
+                  projectPath={projectPath}
+                  projectId={projectId}
+                  projectSettings={projectSettings}
+                  onProjectSettingsChange={handleSettingsChange}
+                  focusNodeId={focusNodeId}
+                  onFocusNodeHandled={handleFocusNodeHandled}
+                  viewportTopOffset={PROJECT_HEADER_HEIGHT}
+                  projectPanelRight={projectPanelRight}
+                  activitySessions={activitySessions}
+                  onOpenActivitySession={session => {
+                    setActivitySelection(activityEntryId(session));
+                    setActiveView("activity");
+                  }}
+                />
+                <ProjectPanel
+                  onRightEdgeChange={setProjectPanelRight}
+                  projectId={projectId}
+                  projectPath={projectPath}
+                  projectName={projectName}
+                  onSpawnContextExplorer={handleSpawnContextExplorer}
+                  socketSubscribe={socket.subscribe}
+                  nodes={nodes}
+                  onOpenFile={handleOpenFile}
+                  onUpdateNodeData={(nodeId, data) => dispatch({ type: "UPDATE_NODE_DATA", id: nodeId, data })}
+                  onFocusNode={handleFocusNode}
+                />
+                {mcpServersEnabled && (
+                  <McpServersBrowser projectId={projectId} />
+                )}
                   <DockBar />
                 </div>
-              </DockProvider>
             )}
-          </>
+            <SkillsBrowser
+              onLaunchSkill={handleLaunchSkill}
+              onCreateSkill={handleCreateSkill}
+              onEditSkill={handleEditSkill}
+              onDeleteSkill={handleDeleteSkill}
+              onDuplicateSkill={handleDuplicateSkill}
+              onExportSkill={handleExportSkill}
+              onImportSkills={handleImportSkills}
+              onExportSkills={handleExportSkills}
+              onImportFile={openImportPreview}
+              refreshKey={skillsRefreshKey}
+            />
+            {skillEditorOpen && (
+              <Suspense fallback={<ModalLoadingFallback label="Loading skill editor…" />}>
+                <SkillEditor
+                  skill={editingSkill}
+                  onSave={handleSaveSkill}
+                  onClose={() => {
+                    setSkillEditorOpen(false);
+                    setEditingSkill(null);
+                  }}
+                />
+              </Suspense>
+            )}
+            {skillImport && (
+              <Suspense fallback={<ModalLoadingFallback label="Loading skill import…" />}>
+                <SkillImportModal
+                  incoming={skillImport.incoming}
+                  existingIds={skillImport.existingIds}
+                  skipped={skillImport.skipped}
+                  onConfirm={handleConfirmImport}
+                  onClose={() => setSkillImport(null)}
+                />
+              </Suspense>
+            )}
+          </DockProvider>
+          </ChatLinkScope>
         </HarnessListProvider>
       ) : null}
     </div>

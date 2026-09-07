@@ -15,6 +15,30 @@ function session(overrides: Partial<MobileSessionInfo>): MobileSessionInfo {
 }
 
 describe("ActivityScreen", () => {
+  it("shows loading until confirmed empty and keeps received rows interactive", () => {
+    const open = vi.fn();
+    const props = { onOpenSession: open, onNewLeader: vi.fn() };
+    const view = render(<ActivityScreen {...props} sessions={[]} loading />);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading activity");
+    expect(screen.queryByText("No active sessions")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "New leader" })).not.toBeInTheDocument();
+    view.rerender(<ActivityScreen {...props} sessions={[session({ taskName: "Recent work" })]} loading />);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading more activity");
+    fireEvent.click(screen.getByText("Recent work"));
+    expect(open).toHaveBeenCalledWith("s-1");
+    view.rerender(<ActivityScreen {...props} sessions={[]} />);
+    expect(screen.getByText("No active sessions")).toBeInTheDocument();
+  });
+
+  it("offers retry instead of empty onboarding after a failed load", () => {
+    const retry = vi.fn();
+    render(<ActivityScreen sessions={[]} onOpenSession={() => {}} loadError="Unavailable" onRetryLoad={retry} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Unavailable");
+    expect(screen.queryByText("No active sessions")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
   it("does not repeat the session title as card activity", () => {
     render(
       <ActivityScreen
@@ -57,12 +81,12 @@ describe("ActivityScreen", () => {
   });
   it("expands canonical run history and requests subsequent pages", () => {
     const load = vi.fn();
-    render(<ActivityScreen sessions={[session({ sessionKey: "run-2", workItemId: "work-1", taskName: "Task" })]}
+    render(<ActivityScreen sessions={[session({ sessionKey: "run-2", workItemId: "work-1", taskName: "Task", projectId: "workspace" })]}
       onOpenSession={() => {}} onLoadRuns={load} runNextCursor={{ "work-1": "next" }}
       workItemRuns={{ "work-1": [{ runKey: "run-1", workItemId: "work-1", runKind: "primary",
         parentRunKey: null, taskId: null, runNumber: 1, previousRunKey: null,
         providerSessionId: null, outcome: "completed", startedAt: 1, endedAt: 2,
-        finalReport: "Shipped safely" }] }} />);
+        finalReport: "Shipped safely\n[Audit](docs/audit.md:12)" }] }} />);
     fireEvent.click(screen.getByText("Run history"));
     const history = screen.getByText("Run history").closest("details");
     history!.open = true;
@@ -74,6 +98,13 @@ describe("ActivityScreen", () => {
     fireEvent.click(within(history!).getByRole("button", { name: "Preview" }));
     expect(within(history!).getByRole("region", { name: "Preview of iteration 1" }))
       .toHaveTextContent("Shipped safely");
+    const link = within(history!).getByRole("link", { name: "Audit" });
+    const url = new URL(link.getAttribute("href")!, "http://localhost");
+    expect(url.pathname).toBe("/file-view");
+    expect(url.searchParams.get("project")).toBe("workspace");
+    expect(url.searchParams.get("path")).toBe("/tmp/project/docs/audit.md");
+    expect(url.searchParams.get("line")).toBe("12");
+    expect(link).toHaveAttribute("target", "_blank");
     expect(load).toHaveBeenCalledWith("work-1", "next");
   });
 

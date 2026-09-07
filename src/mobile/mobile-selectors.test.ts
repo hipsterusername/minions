@@ -287,8 +287,16 @@ describe("attention classification", () => {
       reviewLifecycle: lifecycle("interrupted_to_review"),
     }))).toBe("inactive");
     expect(attentionReason(session({ reviewLifecycle: lifecycle("decision_needed", { acknowledgedAt: 1 }) })))
-      .toBe("acknowledged");
+      .toBe("reviewed");
     expect(attentionReason(session({ status: "error" }))).toBe("errored");
+  });
+
+  it("prioritizes new changes over an already reviewed completion", () => {
+    const item = session({ status: "idle", reviewableChanges: true,
+      reviewLifecycle: lifecycle("completion_to_review", { acknowledgedAt: 1 }) });
+    expect(attentionKind(item)).toBe("changes");
+    expect(attentionReason(item)).toBe("changes ready");
+    expect(attentionAction(item)).toBe("Review");
   });
 
   it("labels the primary action verb per review state", () => {

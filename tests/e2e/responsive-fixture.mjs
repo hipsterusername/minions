@@ -40,11 +40,13 @@ export async function openResponsiveFixture(page) {
     else if (path.includes("context")) json = { content: "" };
     return route.fulfill({ json });
   });
+  let sendEvent;
   await page.routeWebSocket("**/ws*", (socket) => socket.onMessage((raw) => {
     const message = JSON.parse(raw);
     const send = (data) => socket.send(JSON.stringify({
       topic: data.sessionKey ? `session:${data.sessionKey}` : "global", ...data,
     }));
+    sendEvent = send;
     if (message.type === "list_sessions") send({ type: "session_list", sessions });
     if (message.type === "list_harnesses") send({ type: "harness_list", harnesses });
     if (message.type === "sync_session") {
@@ -72,4 +74,5 @@ export async function openResponsiveFixture(page) {
   await page.locator(".act-main").waitFor();
   await page.getByTestId("leader-loading").waitFor({ state: "hidden" });
   await page.evaluate(() => document.fonts.ready);
+  return { send: (event) => sendEvent(event) };
 }

@@ -20,6 +20,8 @@ export interface LeaderFullscreenRequest {
   nodeId: string;
   /** Monotonic counter so identical-node requests are still observable. */
   nonce: number;
+  /** Restore the caller's screen when the user exits the cockpit. */
+  onExit?: () => void;
 }
 
 let current: LeaderFullscreenRequest | null = null;
@@ -37,9 +39,9 @@ function notify(): void {
 }
 
 /** Request that the leader node with `nodeId` open its fullscreen cockpit. */
-export function requestLeaderFullscreen(nodeId: string): void {
+export function requestLeaderFullscreen(nodeId: string, onExit?: () => void): void {
   nonce += 1;
-  current = { nodeId, nonce };
+  current = { nodeId, nonce, ...(onExit ? { onExit } : {}) };
   notify();
 }
 

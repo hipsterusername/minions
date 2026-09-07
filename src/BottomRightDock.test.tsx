@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import {
   DockBar,
+  SkillsNavButton,
   DockPanel,
   DockProvider,
   DOCK_COMPACT_BREAKPOINT_PX,
@@ -51,6 +52,7 @@ function renderDock() {
       <PanelProbe id="sessions" />
       <PanelProbe id="map" />
       <PanelProbe id="mcp" />
+      <SkillsNavButton />
       <PanelProbe id="skills" />
       <DockBar />
     </DockProvider>,
@@ -115,6 +117,7 @@ describe("BottomRightDock", () => {
         <div data-testid="outside" style={{ width: 100, height: 100 }}>
           outside
         </div>
+        <SkillsNavButton />
         <PanelProbe id="skills" />
         <DockBar />
       </DockProvider>,

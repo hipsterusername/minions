@@ -115,6 +115,95 @@ function sentCommand(socketSend: ReturnType<typeof vi.fn>, type: string) {
 }
 
 describe("ActivityView", () => {
+  it("renders file and web links in the final report", () => {
+    const path = "/workspace/project/docs/report.md";
+    render(<ActivityView sessions={[session({ sessionKey: "report-links", taskName: "Audit report",
+      projectId: "workspace", reviewLifecycle: { ...completeLifecycle,
+        finalReport: `[Completed audit and graph](${path})\n[Website](https://example.com/audit)`,
+      },
+    })]} nodes={[]} {...noop} />);
+    fireEvent.click(screen.getByRole("button", { name: /audit report/i }));
+    const report = screen.getByRole("article", { name: "Final report" });
+    const link = within(report).getByRole("link", { name: "Completed audit and graph" });
+    const url = new URL(link.getAttribute("href")!, "http://localhost");
+    expect(url.pathname).toBe("/file-view");
+    expect(url.searchParams.get("project")).toBe("workspace");
+    expect(url.searchParams.get("path")).toBe(path);
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(within(report).getByRole("link", { name: "Website" })).toHaveAttribute("href", "https://example.com/audit");
+    expect(report).not.toHaveTextContent("[Completed audit and graph]");
+  });
+
+  it("opens a report from Read, restores its focus on repeat clicks, and preserves manual navigation on updates", async () => {
+    const item = session({ sessionKey: "report-action", status: "completed", taskName: "Report action",
+      reviewLifecycle: completeLifecycle,
+      renderState: { layout: { columns: 1 }, components: [{ id: "progress", type: "text", content: "Release progress" }] },
+    });
+    const { rerender } = render(<ActivityView sessions={[item]} nodes={[]} {...noop} />);
+    const read = within(activityList()).getByRole("button", { name: "Read" });
+    fireEvent.click(read);
+    const inspector = screen.getByRole("complementary", { name: "Session details" });
+    const report = within(inspector).getByRole("article", { name: "Final report" });
+    await waitFor(() => expect(report).toHaveFocus());
+    expect(inspector).toHaveAttribute("data-compact-pane", "context");
+    expect(report).toHaveTextContent(completeLifecycle.finalReport);
+    expect(within(inspector).getByText("Session information").closest("details")).not.toHaveAttribute("open");
+    fireEvent.click(within(inspector).getByRole("tab", { name: "Dashboard" }));
+    rerender(<ActivityView sessions={[{ ...item, lastActivity: "New activity" }]} nodes={[]} {...noop} />);
+    expect(within(inspector).getByRole("tab", { name: "Dashboard" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(read);
+    await waitFor(() => expect(within(inspector).getByRole("article", { name: "Final report" })).toHaveFocus());
+  });
+
+  it("opens changes from Review without acknowledging the session", async () => {
+    const socketSend = vi.fn();
+    render(<ActivityView sessions={[session({ sessionKey: "changes-action", taskName: "Review changes" })]}
+      nodes={[leaderNode("changes-action", [], { worktreeIsolation: true, worktreeStatus: "active" })]}
+      {...noop} socketSend={socketSend} />);
+    fireEvent.click(within(activityList()).getByRole("button", { name: "Review" }));
+    await waitFor(() => expect(screen.getByRole("article", { name: "Changes" })).toHaveFocus());
+    expect(socketSend.mock.calls.some(([message]) => message.type === "acknowledge_session")).toBe(false);
+  });
+
+  it("routes Reply to a nested pending decision and submits through the existing form transport", async () => {
+    const socketSend = vi.fn();
+    const { subscribe } = makeSubscribe();
+    render(<ActivityView sessions={[session({ sessionKey: "nested-decision-action", status: "waiting", taskName: "Choose release",
+      renderState: { layout: { columns: 1 }, components: [{ id: "section", type: "section", title: "Release context", components: [
+        { id: "release-form", type: "form", title: "Release decision", fields: [{ id: "release-answer", kind: "text", label: "Release choice", required: true }], submitLabel: "Confirm choice" },
+      ] }] },
+    })]} nodes={[]} {...noop} socketSend={socketSend} socketSubscribe={subscribe} />);
+    fireEvent.click(within(activityList()).getByRole("button", { name: "Reply" }));
+    const input = screen.getByRole("textbox", { name: /release choice/i });
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(screen.getByRole("complementary", { name: "Session details" })).toHaveAttribute("data-compact-pane", "context");
+    fireEvent.change(input, { target: { value: "Ship" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm choice" }));
+    expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({ type: "submit_form", sessionKey: "nested-decision-action",
+      formComponentId: "release-form", formAnswers: { "release-answer": "Ship" }, requestId: expect.any(String) }));
+  });
+
+  it("focuses the composer for Reply when the dashboard has no pending forms", async () => {
+    render(<ActivityView sessions={[session({ sessionKey: "reply-action", status: "waiting", taskName: "Reply action",
+      renderState: { layout: { columns: 1 }, components: [{ id: "answered", type: "form", fields: [], submittedAnswers: {} }] },
+    })]} nodes={[]} {...noop} socketSend={() => {}} />);
+    fireEvent.click(within(activityList()).getByRole("button", { name: "Reply" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Reply or steer this agent" })).toHaveFocus());
+    expect(screen.getByRole("complementary", { name: "Session details" })).toHaveAttribute("data-compact-pane", "conversation");
+  });
+
+  it("shows unknown telemetry honestly and keeps empty context tabs out of navigation", () => {
+    render(<ActivityView sessions={[session({ sessionKey: "unknown", taskName: "Unknown telemetry" })]} nodes={[]} {...noop} />);
+    fireEvent.click(within(activityList()).getByRole("button", { name: /unknown telemetry/i }));
+    const inspector = screen.getByRole("complementary", { name: "Session details" });
+    expect(within(inspector).queryByRole("tab", { name: /dashboard|minions|graph/i })).not.toBeInTheDocument();
+    fireEvent.click(within(inspector).getByText("Session information"));
+    expect(within(inspector).queryByText("$0.00")).not.toBeInTheDocument();
+    expect(within(inspector).queryByText("0")).not.toBeInTheDocument();
+    expect(within(inspector).getAllByText("Not reported")).toHaveLength(4);
+  });
+
+
   it("returns from a session with a back button before the activity icon", () => {
     render(
       <ActivityView
@@ -224,6 +313,8 @@ describe("ActivityView", () => {
     });
 
     const graphTab = screen.getByRole("tab", { name: "Graph" });
+    expect(graphTab).toHaveAttribute("aria-selected", "false");
+    fireEvent.click(graphTab);
     expect(graphTab).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("region", { name: /execution plan coordinate the graph/i }))
       .toBeInTheDocument();
@@ -1796,7 +1887,7 @@ describe("ActivityView", () => {
     expect(within(activityList()).getByText("Taking a break")).toBeInTheDocument();
   });
 
-  it("supports needs-you and waiting summary filters and keeps zero-result controls available", () => {
+  it("supports distinct needs-you and ready summary filters and keeps zero-result controls available", () => {
     render(
       <ActivityView
         sessions={[
@@ -1813,10 +1904,12 @@ describe("ActivityView", () => {
     expect(within(activityList()).getByText("Needs reply")).toBeInTheDocument();
     expect(within(activityList()).queryByText("Taking a break")).not.toBeInTheDocument();
 
-    const waitingFilter = screen.getByRole("button", { name: /waiting: 1\. filter activity/i });
+    const waitingFilter = screen.getByRole("button", { name: /ready: 1\. filter activity/i });
     fireEvent.click(waitingFilter);
     expect(waitingFilter).toHaveAttribute("aria-pressed", "true");
-    expect(within(activityList()).getByText("Needs reply")).toBeInTheDocument();
+    expect(within(activityList()).getByText("Taking a break")).toBeInTheDocument();
+
+    expect(within(activityList()).queryByText("Needs reply")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("combobox", { name: "Activity visibility" }), { target: { value: "all" } });
     expect(waitingFilter).toHaveAttribute("aria-pressed", "false");
@@ -1839,7 +1932,10 @@ describe("ActivityView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /ship it/i }));
     const inspector = screen.getByRole("complementary", { name: /session details/i });
-    expect(within(inspector).getByText("$1.50")).toBeInTheDocument();
+    const metadata = within(inspector).getByText("Session information").closest("details")!;
+    expect(metadata.open).toBe(false);
+    fireEvent.click(within(inspector).getByText("Session information"));
+    expect(within(inspector).getByText("$1.50")).toBeVisible();
     expect(within(inspector).getByText("7")).toBeInTheDocument();
     expect(within(inspector).getByText("claude-opus-4-8")).toBeInTheDocument();
   });
@@ -1895,7 +1991,7 @@ describe("ActivityView", () => {
       .toBeInTheDocument();
   });
 
-  it("reveals a dashboard that hydrates after the session inspector opens", () => {
+  it("offers hydrated context without switching the reader away from their current tab", () => {
     const { rerender } = render(
       <ActivityView
         sessions={[session({
@@ -1911,8 +2007,7 @@ describe("ActivityView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /hydrating dashboard/i }));
     const inspector = screen.getByRole("complementary", { name: /session details/i });
-    const dashboardTab = within(inspector).getByRole("tab", { name: /dashboard/i });
-    expect(dashboardTab).toHaveAttribute("aria-selected", "false");
+    expect(within(inspector).queryByRole("tab", { name: /dashboard|minions/i })).not.toBeInTheDocument();
 
     rerender(
       <ActivityView
@@ -1931,7 +2026,10 @@ describe("ActivityView", () => {
       />,
     );
 
-    expect(dashboardTab).toHaveAttribute("aria-selected", "true");
+    const dashboardTab = within(inspector).getByRole("tab", { name: /dashboard/i });
+    expect(dashboardTab).toHaveAttribute("aria-selected", "false");
+    expect(within(inspector).getByRole("tab", { name: "Session details" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(dashboardTab);
     expect(within(inspector).getByText("Dashboard hydrated")).toBeInTheDocument();
   });
 
@@ -1961,7 +2059,7 @@ describe("ActivityView", () => {
 
     fireEvent.click(expandBtn);
     fireEvent.click(openBtn);
-    expect(onExpandFullscreen).toHaveBeenCalledWith("node-run");
+    expect(onExpandFullscreen).toHaveBeenCalledWith("node-run", "session:run");
     expect(onOpenInCanvas).toHaveBeenCalledWith("node-run");
   });
 
@@ -2001,6 +2099,14 @@ describe("ActivityView", () => {
       return () => listeners.delete(listener);
     }) as SocketSubscribe;
     Object.defineProperty(socketSubscribe, "supportsTopics", { value: true });
+    socketSend.mockImplementation((command: { type?: string; sessionKey?: string }) => {
+      if (command.type !== "sync_session") return;
+      for (const listener of listeners) listener({
+        type: "sync_response", sessionKey: command.sessionKey, found: true, status: "running",
+        events: [{ type: "sdk_event", sessionKey: command.sessionKey, timestamp: 1,
+          event: { kind: "text", role: "assistant", text: "Loaded from the server." } }],
+      });
+    });
 
     render(
       <ActivityView
@@ -2017,6 +2123,7 @@ describe("ActivityView", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /server-owned session/i }));
+    expect(screen.getByText("Loaded from the server.")).toBeInTheDocument();
     await waitFor(() => {
       expect(socketSend).toHaveBeenCalledWith({
         type: "sync_session",
@@ -2053,6 +2160,9 @@ describe("ActivityView", () => {
     });
     expect(screen.getByText("Still updating live.")).toBeInTheDocument();
     expect(screen.queryByText(/attach this session/i)).not.toBeInTheDocument();
+    socketSend.mockClear();
+    act(() => { for (const listener of listeners) listener({ type: "socket_reconnected" }); });
+    expect(socketSend).toHaveBeenCalledWith({ type: "sync_session", sessionKey: "server-only" });
   });
 
   it("renders one ordered transcript across every run in a work item", async () => {
@@ -2075,7 +2185,7 @@ describe("ActivityView", () => {
       { runKey: "run-1", workItemId: "work-1", runKind: "primary" as const,
         parentRunKey: null, taskId: null, runNumber: 1, previousRunKey: null,
         providerSessionId: null, outcome: "completed" as const, startedAt: 10,
-        endedAt: 11, finalReport: "First complete" },
+        endedAt: 11, finalReport: "First complete\n[Earlier audit](docs/earlier.md)" },
     ];
 
     render(
@@ -2125,6 +2235,10 @@ describe("ActivityView", () => {
     const preview = screen.getByRole("region", { name: "Preview of iteration 1" });
     expect(within(preview).getByText("Earlier iteration output")).toBeInTheDocument();
     expect(within(preview).getByText("First complete")).toBeInTheDocument();
+    const reportLink = within(preview).getByRole("link", { name: "Earlier audit" });
+    const reportUrl = new URL(reportLink.getAttribute("href")!, "http://localhost");
+    expect(reportUrl.pathname).toBe("/file-view");
+    expect(reportUrl.searchParams.get("path")).toBe("/tmp/project/docs/earlier.md");
     expect(within(preview).getByText("Read-only preview")).toBeInTheDocument();
   });
 
@@ -2223,5 +2337,32 @@ describe("ActivityView", () => {
     fireEvent.click(screen.getByRole("button", { name: /chatty/i }));
     expect(screen.getByText("Do the thing")).toBeInTheDocument();
     expect(screen.getByText("On it.")).toBeInTheDocument();
+  });
+});
+
+
+describe("Activity loading", () => {
+  it("does not show empty onboarding or auto-create a draft until loading finishes", () => {
+    const launch = vi.fn();
+    const props = { ...noop, onLaunchLeader: launch, nodes: [], sessions: [] };
+    const view = render(<ActivityView {...props} loading />);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading activity");
+    expect(screen.queryByLabelText("Empty session list")).not.toBeInTheDocument();
+    expect(launch).not.toHaveBeenCalled();
+    view.rerender(<ActivityView {...props} />);
+    expect(screen.getByLabelText("Empty session list")).toBeInTheDocument();
+    expect(launch).toHaveBeenCalledOnce();
+  });
+
+  it("keeps received activity visible while more loads and offers retry on failure", () => {
+    const retry = vi.fn();
+    const props = { ...noop, nodes: [], sessions: [session({ taskName: "Recent work" })] };
+    const view = render(<ActivityView {...props} loading />);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading more activity");
+    expect(within(activityList()).getByText("Recent work")).toBeInTheDocument();
+    view.rerender(<ActivityView {...props} loadError="Unavailable" onRetryLoad={retry} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Unavailable");
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retry).toHaveBeenCalledOnce();
   });
 });

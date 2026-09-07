@@ -32,13 +32,14 @@
 .leader-fs-dot { width: 6px; height: 6px; background: var(--accent); border-radius: 50%; display: inline-block; flex-shrink: 0; }
 .leader-fs-conversation { display: flex; flex-direction: column; flex: 1; min-height: 0; position: relative; }
 .leader-fs-runtime { border-bottom: 1px solid var(--border-default); }
-.leader-fs-messages { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 28px max(22px, calc((100% - 800px) / 2)); display: flex; flex-direction: column; gap: 12px; }
+.leader-fs-messages { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 28px max(22px, calc((100% - 800px) / 2)); overflow-anchor: none; scrollbar-gutter: stable; }
+.leader-fs-message-content { display: flex; flex-direction: column; gap: 12px; min-height: 100%; }
+.leader-fs-scrim { position: absolute; inset: 50px 0 0; z-index: 9; background: rgb(0 0 0 / .25); border: 0; }
 .leader-fs-empty { margin: auto; width: min(100%, 430px); padding: 40px 0; color: var(--text-muted); line-height: 1.7; }
 .leader-fs-empty > svg { color: var(--accent); margin-bottom: 16px; }
 .leader-fs-empty h2 { font-size: 23px; line-height: 1.3; font-weight: 550; color: var(--text-primary); margin: 0 0 12px; }
 .leader-fs-empty p { font-size: 14px; margin: 0 0 22px; }
 .leader-fs-empty span { font-size: 11px; }
-.leader-fs-latest { position: absolute; bottom: 100px; left: 50%; transform: translateX(-50%); border-radius: 30px; box-shadow: var(--shadow-lg); }
 .leader-fs-surface { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
 .leader-fs-error { display: flex; align-items: start; gap: 10px; padding: 12px 18px; background: var(--danger-bg); color: var(--danger-color); font-size: 12px; overflow-wrap: anywhere; }
 .leader-fs-error > span { flex: 1; }

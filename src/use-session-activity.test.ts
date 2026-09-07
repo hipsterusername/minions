@@ -3,6 +3,8 @@ import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { ServerMessage, SessionInfo, SocketSubscribe } from "./use-socket.ts";
+import { activityEntryId, mergeCanonicalActivity } from "./use-work-items.ts";
+import { initialWorkItemLifecycle } from "../shared/work-item-lifecycle.ts";
 import {
   activityFromMessage,
   reduceSessionActivity,
@@ -22,6 +24,72 @@ function session(overrides: Partial<SessionInfo> = {}): SessionInfo {
 function emptyState() {
   return { sessions: [] as SessionInfo[], activities: {}, attention: {} };
 }
+
+describe("launch identity reconciliation", () => {
+  it("updates live titles and terminal status on every activity surface", () => {
+    let state = { ...emptyState(), sessions: [session()] };
+    state = reduceSessionActivity(state, {
+      type: "session_task_name", sessionKey: "s1", taskName: "Canonical task name",
+    });
+    expect(state.sessions[0]?.taskName).toBe("Canonical task name");
+    state = reduceSessionActivity(state, { type: "session_error", sessionKey: "s1", error: "Failed" });
+    expect(state.sessions[0]?.status).toBe("error");
+    state = reduceSessionActivity(state, {
+      type: "session_completed", sessionKey: "s1", reason: "Done", timestamp: 3,
+    });
+    expect(state.sessions[0]?.status).toBe("completed");
+  });
+
+  it("recovers activity from a snapshot without replacing newer live activity", () => {
+    const snapshot: ServerMessage = { type: "sync_response", sessionKey: "s1", found: true,
+      events: [{ type: "sdk_event", sessionKey: "s1", timestamp: 1,
+        event: { kind: "text", role: "assistant", text: "Early reply" } }] };
+    let state = reduceSessionActivity(emptyState(), snapshot);
+    expect(state.activities["s1"]?.text).toBe("Early reply");
+    state = reduceSessionActivity(state, { type: "sdk_event", sessionKey: "s1", timestamp: 2,
+      event: { kind: "text", role: "assistant", text: "New reply" } });
+    state = reduceSessionActivity(state, snapshot);
+    expect(state.activities["s1"]?.text).toBe("New reply");
+  });
+
+  it.each([false, true])("preserves sync lineage with an existing session: %s", (existing) => {
+    const identity = { workItemId: "work-1", runKey: "s1", runKind: "primary" as const,
+      parentRunKey: null, taskId: null };
+    const next = reduceSessionActivity({ ...emptyState(), sessions: existing ? [session()] : [] }, {
+      type: "sync_response", sessionKey: "s1", found: true, ...identity,
+      status: "running", cwd: "/proj", role: "leader",
+    });
+    expect(next.sessions).toHaveLength(1);
+    expect(next.sessions[0]).toMatchObject(identity);
+    const partial = reduceSessionActivity(next, {
+      type: "sync_response", sessionKey: "s1", found: true, status: "idle",
+    });
+    expect(partial.sessions[0]).toMatchObject(identity);
+  });
+
+  it.each(["sync-first", "work-item-first"])("keeps one Activity entry during launch (%s)", (order) => {
+    const draft = { id: "work-1", projectId: "p1", projectPath: "/proj", title: "Launch task",
+      lifecycle: initialWorkItemLifecycle(), currentRunKey: null, waitKind: null,
+      iteration: 0, lastTransitionAt: 1, createdAt: 1, updatedAt: 1 };
+    const started = { ...draft, currentRunKey: "s1", iteration: 1, updatedAt: 2,
+      lifecycle: { ...draft.lifecycle, runtimeState: "working" as const, lifecycleRevision: 1 } };
+    const synced = reduceSessionActivity(emptyState(), {
+      type: "sync_response", sessionKey: "s1", found: true, workItemId: draft.id,
+      runKey: "s1", runKind: "primary", role: "leader", status: "running", cwd: "/proj",
+    });
+    const stages = [
+      mergeCanonicalActivity([], [draft]),
+      order === "sync-first" ? mergeCanonicalActivity(synced.sessions, [draft])
+        : mergeCanonicalActivity([], [started]),
+      mergeCanonicalActivity(synced.sessions, [started]),
+    ];
+    for (const rows of stages) {
+      expect(rows).toHaveLength(1);
+      expect(activityEntryId(rows[0]!)).toBe("work-item:work-1");
+    }
+    expect(stages[2]![0]).toMatchObject({ sessionKey: "s1", status: "running" });
+  });
+});
 
 describe("activityFromMessage", () => {
   it("maps minion_status with fail trigger to an attention activity", () => {
@@ -110,6 +178,29 @@ describe("activityFromMessage", () => {
 });
 
 describe("useSessionActivity", () => {
+  it("keeps live status, dashboard and attention updates together", () => {
+    let emit: (message: ServerMessage) => void = () => {};
+    const subscribe = ((_topic: string, listener: (message: ServerMessage) => void) => {
+      emit = listener;
+      return () => { emit = () => {}; };
+    }) as SocketSubscribe;
+    const { result } = renderHook(() => useSessionActivity(subscribe));
+    act(() => {
+      emit({ type: "session_list", sessions: [session()] } as ServerMessage);
+      emit({ type: "session_status", sessionKey: "s1", status: "running" } as ServerMessage);
+      emit({ type: "render_update", leaderSessionKey: "s1", action: "set",
+        layout: { columns: 1 }, components: [{ id: "status", type: "text", content: "Ready" }] } as ServerMessage);
+      emit({ type: "wait_state", sessionKey: "s1", action: "started", reason: "Waiting", timestamp: 10 } as ServerMessage);
+      emit({ type: "sdk_event", sessionKey: "s1", event: { kind: "text", role: "assistant", text: "Progress" }, timestamp: 20 } as ServerMessage);
+    });
+    expect(result.current.mobileSessions[0]).toMatchObject({
+      status: "running", lastActivity: "Progress", lastActivityAt: 20, pendingAttention: true,
+      renderState: { components: [{ id: "status", content: "Ready" }] },
+    });
+    act(() => emit({ type: "wait_state", sessionKey: "s1", action: "completed", reason: "Finished", timestamp: 30 } as ServerMessage));
+    expect(result.current.mobileSessions[0]).toMatchObject({ lastActivity: "Finished", pendingAttention: false });
+  });
+
   it("uses snapshot lastActivityAt until a newer live activity arrives", () => {
     let listener: ((msg: ServerMessage) => void) | null = null;
     const subscribe: SocketSubscribe = ((_topicOrFn: unknown, maybeFn?: unknown) => {
@@ -194,7 +285,7 @@ describe("useSessionActivity", () => {
 
 describe("reduceSessionActivity", () => {
   it("replaces the session list on session_list", () => {
-    const next = reduceSessionActivity(emptyState(), {
+    const next = reduceSessionActivity({ ...emptyState(), sessions: [session({ sessionKey: "obsolete" })] }, {
       type: "session_list",
       sessions: [session({ sessionKey: "a" }), session({ sessionKey: "b" })],
     } as ServerMessage);
@@ -384,5 +475,28 @@ describe("wait completion attention", () => {
       type: "wait_state", sessionKey: "s1", action, reason: "Wait ended", timestamp: 20,
     } as ServerMessage);
     expect(state.attention["s1"]).toBe(false);
+  });
+});
+
+describe("initial session loading", () => {
+  it("waits for an authoritative list even if an individual session sync arrives first", () => {
+    let emit: (message: ServerMessage) => void = () => {};
+    const subscribe = ((_topic: unknown, listener: typeof emit) => {
+      emit = listener;
+      return () => {};
+    }) as SocketSubscribe;
+    const { result } = renderHook(() => useSessionActivity(subscribe));
+    expect(result.current.hasLoaded).toBe(false);
+    act(() => emit({ type: "sync_response", found: true, sessionKey: "s1" } as ServerMessage));
+    expect(result.current.hasLoaded).toBe(false);
+    expect(result.current.sessions).toHaveLength(1);
+    act(() => emit({ type: "session_list", sessions: [] }));
+    expect(result.current.hasLoaded).toBe(true);
+    expect(result.current.sessions).toEqual([]);
+  });
+
+  it("does not invalidate activity state for unrelated socket traffic", () => {
+    const state = emptyState();
+    expect(reduceSessionActivity(state, { type: "socket_reconnected" })).toBe(state);
   });
 });

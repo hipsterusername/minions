@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkItemSnapshot } from "../shared/work-item-contracts.ts";
 import { initialWorkItemLifecycle } from "../shared/work-item-lifecycle.ts";
 import { mergeCanonicalActivity, useWorkItems } from "./use-work-items.ts";
@@ -29,8 +29,9 @@ function setup() {
   const publish = (message: ServerMessage) => {
     for (const listener of listeners) listener(message);
   };
+  const listRequest = send.mock.calls.find(([command]) => command.type === "list_work_items")![0];
   act(() => publish({
-    type: "work_item_response", command: "list_work_items", requestId: null,
+    type: "work_item_response", command: "list_work_items", requestId: listRequest.requestId,
     success: true, result: { projectId: "project-1",
       items: [terminalItem(3)], nextCursor: null },
   }));
@@ -38,6 +39,7 @@ function setup() {
 }
 
 describe("useWorkItems lifecycle recovery", () => {
+  afterEach(() => vi.useRealTimers());
   it("loads leader iteration history before the work-item list hydrates", () => {
     const send = vi.fn();
     const subscribe = (() => () => {}) as SocketSubscribe;
@@ -53,6 +55,7 @@ describe("useWorkItems lifecycle recovery", () => {
   });
 
   it("loads every work-item page so archived rows cannot reappear as legacy sessions", () => {
+    vi.useFakeTimers();
     const send = vi.fn();
     let listener: ((message: ServerMessage) => void) | undefined;
     const subscribe = ((topic: string, next: (message: ServerMessage) => void) => {
@@ -66,7 +69,7 @@ describe("useWorkItems lifecycle recovery", () => {
       (command as { type?: string }).type === "list_work_items")?.[0] as {
         requestId: string; limit: number; cursor?: string;
       };
-    expect(firstRequest).toMatchObject({ limit: 100 });
+    expect(firstRequest).toMatchObject({ limit: 20 });
     expect(firstRequest.cursor).toBeUndefined();
 
     act(() => listener?.({
@@ -75,6 +78,9 @@ describe("useWorkItems lifecycle recovery", () => {
       result: { projectId: "project-1", items: [terminalItem(3)],
         nextCursor: "page-2" },
     }));
+    expect(result.current.loading).toBe(true);
+    expect(result.current.items["work-1"]?.id).toBe("work-1");
+    act(() => vi.advanceTimersByTime(0));
     const secondRequest = send.mock.calls.at(-1)?.[0] as {
       requestId: string; limit: number; cursor?: string;
     };
@@ -98,6 +104,7 @@ describe("useWorkItems lifecycle recovery", () => {
     }));
 
     expect(Object.keys(result.current.items).sort()).toEqual(["work-1", "work-archived"]);
+    expect(result.current.loading).toBe(false);
     const activity = mergeCanonicalActivity([
       { sessionKey: "run-archived", sessionId: null, workItemId: "work-archived",
         status: "stopped", cwd: "/repo" },
@@ -182,8 +189,9 @@ describe("useWorkItems lifecycle recovery", () => {
       }),
       { initialProps: { projectId: "project-1" as string | null } },
     );
+    const listRequest = send.mock.calls.find(([command]) => command.type === "list_work_items")![0];
     act(() => listener?.({
-      type: "work_item_response", command: "list_work_items", requestId: null,
+      type: "work_item_response", command: "list_work_items", requestId: listRequest.requestId,
       success: true, result: { projectId: "project-1",
         items: [terminalItem(3)], nextCursor: null },
     }));

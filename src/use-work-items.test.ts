@@ -102,12 +102,25 @@ describe("canonical client work-item state", () => {
     expect(created.items["new"]?.id).toBe("new");
   });
 
-  it("canonical items win over legacy rows, dedupe by workItemId, and order by update time", () => {
+  it("canonical items win over legacy rows, dedupe by workItemId, and preserve supplied order", () => {
     const sessions = [{ sessionKey: "old", sessionId: null, workItemId: "a", status: "idle", cwd: "/repo" },
       { sessionKey: "legacy", sessionId: null, status: "idle", cwd: "/repo" }];
     const merged = mergeCanonicalActivity(sessions, [item("a", 2, 20), item("b", 1, 10)]);
     expect(merged.map((row) => row.workItemId ?? row.sessionKey)).toEqual(["a", "b", "legacy"]);
     expect(merged[0]).toMatchObject({ taskName: "Task a", lastActivity: "Working", status: "running" });
+  });
+
+  it.each([undefined, null])("merges a current run with missing work-item identity (%s)", (workItemId) => {
+    const sessions = [
+      { sessionKey: "run-a", sessionId: "provider-a", ...(workItemId === undefined ? {} : { workItemId }),
+        status: "running", cwd: "/repo" },
+      { sessionKey: "unrelated", sessionId: null, status: "idle", cwd: "/repo" },
+    ];
+    const merged = mergeCanonicalActivity(sessions, [item("a", 2)]);
+    expect(merged).toHaveLength(2);
+    expect(merged[0]).toMatchObject({ sessionKey: "run-a", sessionId: "provider-a",
+      workItemId: "a", canonicalWorkItem: true });
+    expect(merged[1]).toEqual(sessions[1]);
   });
 
   it("collapses persisted iterations before canonical work-item hydration", () => {

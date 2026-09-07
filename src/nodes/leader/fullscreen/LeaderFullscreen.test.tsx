@@ -9,11 +9,14 @@
 
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { LeaderNodeRenderer } from "../../LeaderNode.tsx";
 import { LEADER_DEFAULT_DATA, type LeaderData } from "../types.ts";
 import type { CanvasNode, NodeRenderProps } from "../../../types.ts";
+import { requestLeaderFullscreen, resetLeaderFullscreenRequest } from "../../../leader-fullscreen-request.ts";
+
+afterEach(() => resetLeaderFullscreenRequest());
 
 beforeAll(() => {
   if (typeof globalThis.ResizeObserver === "undefined") {
@@ -56,6 +59,37 @@ function Probe({ initial }: ProbeProps) {
 }
 
 describe("LeaderNode fullscreen cockpit", () => {
+  it.each(["button", "Escape", "Cmd+Shift+F", "Ctrl+Shift+F"])(
+    "%s returns to the external entry point once, without affecting later canvas opens",
+    async (exitMethod) => {
+      const onExit = vi.fn();
+      requestLeaderFullscreen("leader-fs-test", onExit);
+      render(<Probe />);
+      expect(screen.getByTestId("leader-fullscreen-overlay")).toBeInTheDocument();
+
+      await act(async () => {
+        if (exitMethod === "button") {
+          fireEvent.click(screen.getByRole("button", { name: "Exit fullscreen" }));
+        } else {
+          fireEvent.keyDown(window, exitMethod === "Escape" ? { key: "Escape" } : {
+            key: "f", shiftKey: true,
+            metaKey: exitMethod === "Cmd+Shift+F", ctrlKey: exitMethod === "Ctrl+Shift+F",
+          });
+        }
+      });
+      expect(screen.queryByTestId("leader-fullscreen-overlay")).toBeNull();
+      expect(onExit).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Enter fullscreen" }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Exit fullscreen" }));
+      });
+      expect(onExit).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it("does not render the overlay by default", () => {
     render(<Probe />);
     expect(

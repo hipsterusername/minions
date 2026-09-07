@@ -19,6 +19,22 @@ export type MobileSessionInfo = SessionInfo & {
   canonicalWorkItem?: boolean;
 };
 
+/** Shared display vocabulary for Activity rows, home, and inspector. */
+export function sessionStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    running: "Working now", creating: "Starting", idle: "Ready for input",
+    inactive: "Inactive", waiting: "Waiting for you", completed: "Completed",
+    error: "Error", stopped: "Stopped", disconnected: "Disconnected",
+  };
+  return labels[status] ?? status.replace(/[-_]/g, " ");
+}
+
+function pendingReviewState(session: MobileSessionInfo): string {
+  const lifecycle = session.reviewLifecycle;
+  return lifecycle?.acknowledgedAt != null || lifecycle?.dismissedAt != null
+    ? "none" : lifecycle?.reviewState ?? "none";
+}
+
 /** Statuses where the agent is doing work right now. */
 const ACTIVE_STATUSES = new Set(["running", "creating", "waiting"]);
 /** Terminal statuses — the session has ended (or its socket dropped). */
@@ -112,7 +128,7 @@ export type AttentionKind = "inactive" | "error" | "waiting" | "changes";
 
 /** Classify why a session needs the user, driving its triage icon/accent. */
 export function attentionKind(session: MobileSessionInfo): AttentionKind {
-  const reviewState = session.reviewLifecycle?.reviewState;
+  const reviewState = pendingReviewState(session);
   if (reviewState === "interrupted_to_review" && session.status === "inactive") return "inactive";
   if (reviewState === "error_to_review" || reviewState === "interrupted_to_review") return "error";
   if (reviewState === "decision_needed") return "waiting";
@@ -124,7 +140,8 @@ export function attentionKind(session: MobileSessionInfo): AttentionKind {
 /** Short human reason shown beside a triage row's title. */
 export function attentionReason(session: MobileSessionInfo): string {
   const lifecycle = session.reviewLifecycle;
-  if (lifecycle?.acknowledgedAt) return "acknowledged";
+  if (lifecycle?.acknowledgedAt != null && session.reviewableChanges) return "changes ready";
+  if (lifecycle?.acknowledgedAt != null) return "reviewed";
   if (lifecycle?.reviewState === "completion_to_review") return "complete · read report";
   if (lifecycle?.reviewState === "interrupted_to_review") {
     return session.status === "inactive" ? "inactive" : "interrupted";
@@ -145,7 +162,7 @@ export function attentionReason(session: MobileSessionInfo): string {
 
 /** The verb for a triage row's primary action button. */
 export function attentionAction(session: MobileSessionInfo): string {
-  const reviewState = session.reviewLifecycle?.reviewState;
+  const reviewState = pendingReviewState(session);
   if (reviewState === "completion_to_review") return "Read";
   if (reviewState === "interrupted_to_review") {
     return session.status === "inactive" ? "View" : "Inspect";

@@ -141,6 +141,17 @@ export function LeaderNodeRenderer({
   // MarkdownNode focus-mode rationale). Toggle via the header button or
   // Cmd/Ctrl+Shift+F when the leader card owns focus; Esc to exit.
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const fullscreenReturnRef = useRef<(() => void) | undefined>(undefined);
+  const openFullscreen = useCallback((onExit?: () => void) => {
+    fullscreenReturnRef.current = onExit;
+    setIsFullscreen(true);
+  }, []);
+  const exitFullscreen = useCallback(() => {
+    const onExit = fullscreenReturnRef.current;
+    fullscreenReturnRef.current = undefined;
+    setIsFullscreen(false);
+    onExit?.();
+  }, []);
   // Wire-validation error for the most recent embedded-dashboard render_update.
   const [renderPayloadError, setRenderPayloadError] = useState<string | null>(null);
   const [launchNotice, setLaunchNotice] = useState<string | null>(null);
@@ -257,23 +268,24 @@ export function LeaderNodeRenderer({
         const owns = root && (root === focused || root.contains(focused));
         if (owns || isFullscreen) {
           e.preventDefault();
-          setIsFullscreen((v) => !v);
+          if (isFullscreen) exitFullscreen();
+          else openFullscreen();
         }
         return;
       }
       if (e.key === "Escape" && isFullscreen && !e.defaultPrevented
         && !document.querySelector('[role="dialog"]:not([data-testid="leader-fullscreen-overlay"]), [role="menu"]')) {
         e.preventDefault();
-        setIsFullscreen(false);
+        exitFullscreen();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isFullscreen]);
+  }, [isFullscreen, openFullscreen, exitFullscreen]);
 
   // The Activity view (or any sibling surface) can ask this node to open its
   // cockpit by id; the hook bridges that request channel to local state.
-  useLeaderFullscreenRequest(node.id, () => setIsFullscreen(true));
+  useLeaderFullscreenRequest(node.id, openFullscreen);
 
   // Click-outside: deactivate scroll lock when clicking outside the scroll zone
   useEffect(() => {
@@ -1116,7 +1128,7 @@ export function LeaderNodeRenderer({
           <button
             type="button"
             className="leader-node__icon-button"
-            onClick={() => setIsFullscreen(true)}
+            onClick={() => openFullscreen()}
             onMouseDown={(e) => e.stopPropagation()}
             aria-label="Enter fullscreen"
             aria-pressed={isFullscreen}
@@ -1268,7 +1280,7 @@ export function LeaderNodeRenderer({
           data={data}
           isWorking={displayStatus === "running"}
           onUpdateData={(next) => emitUpdate(next)}
-          onExit={() => setIsFullscreen(false)}
+          onExit={exitFullscreen}
           input={input}
           onInputChange={setInput}
           onPromptSubmit={handlePromptSubmit}
