@@ -286,14 +286,13 @@ distinguishes the workers' results from the Leader's verification.
 
 ## 6. Use a task graph
 
-A graph is useful when work has dependencies: inspect first, run independent
-tasks, then verify the combined result. Ordinary tasks can use direct execution
-or a task list. Selecting a graph-capable orchestration setting makes graphs
-available; it does not mean every request will create one.
+Graph is always enabled and is the standard path for Leader assignments to
+Minions, including single-step assignments. Dependencies let a Leader inspect
+first, run independent tasks, then verify the combined result. Leaders can
+still perform local work themselves without creating a graph.
 
 To practice, start a separate Leader on the starter project, or use a fresh
-copy of it after finishing your first run. Select **Graph available — review
-graph before start** if you want to inspect the proposed plan before it starts.
+copy of it after finishing your first run. Select **Graph — review before start** if you want to inspect the proposed plan before it starts.
 Ask explicitly:
 
 ```text
@@ -605,7 +604,7 @@ and the final evidence. Ask for any missing product decision in a form.
 | A port is busy | Check for an existing instance first. `PORT` changes the backend port; `VITE_PORT` changes the browser-facing port. Use a free port for the one that conflicts |
 | Project cannot use isolation | Verify the folder is a Git repository with an initial commit and that the path is correct |
 | No Minions appear | A small task may be handled directly. Ask explicitly for bounded delegation, and inspect the plan for assignment errors or blockers |
-| No graph appears | Graph availability is optional orchestration capability. Ask for a task graph explicitly and inspect the selected mode |
+| No graph appears | Graph is always enabled for Minion assignments. A Leader may be doing local work; inspect its progress and selected review mode |
 | Graph is blocked | Select the blocked node and read the reason. Resolve missing input, dependencies, or failed checks before retrying |
 | Dashboard is empty | Ask the Leader to render a dashboard with specific fields; dashboards are created by the agent as needed |
 | Form is still pending | Fill required fields and press its submit button; inspect submission feedback and connection state |

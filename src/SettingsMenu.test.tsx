@@ -334,19 +334,12 @@ describe("SettingsMenu", () => {
     });
   });
 
-  it("offers Task Graph assistance without describing it as a replacement for direct tools", () => {
-    const onChange = vi.fn();
-    render(<SettingsMenu settings={{}} onSettingsChange={onChange} />);
-
+  it("does not expose a Graph opt-out in agent defaults", () => {
+    render(<SettingsMenu settings={{}} onSettingsChange={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
     openCategory("Agent defaults");
-
-    const toggle = screen.getByRole("checkbox", { name: /disable task graph tools/i });
-    expect(toggle).not.toBeChecked();
-    expect(screen.getByText(/Leaders keep their direct execution and delegation tools/i))
-      .toBeVisible();
-    fireEvent.click(toggle);
-    expect(onChange).toHaveBeenCalledWith({ leaderPlanningBackend: "legacy" });
+    expect(screen.queryByRole("checkbox", { name: /disable task graph tools/i })).toBeNull();
+    expect(screen.queryByText("Graph assistance")).toBeNull();
   });
 
   it("uses a fixed Minion definition by default and reveals tier tabs only after opt-in", () => {

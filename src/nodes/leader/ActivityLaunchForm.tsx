@@ -1,12 +1,8 @@
 import { SkillIcon } from "../../components/SkillIcon.tsx";
 import { useContext, useMemo, type KeyboardEvent, type RefObject } from "react";
 import {
-  Bot,
-  Brain,
   FolderGit2,
-  GitBranch,
   Settings2,
-  ShieldCheck,
   Sparkles,
 } from "lucide-react";
 import { DEFAULT_THINKING_CONFIG, type ThinkingConfig } from "../../types.ts";
@@ -143,19 +139,10 @@ export function ActivityLaunchForm({
   const permissionOptions = activeHarnessName === "codex"
     || (activeHarness !== undefined && !activeHarness.capabilities.permissionPrompts)
     ? [] : PERMISSIONS;
-  const selectedPermission = permissionOptions.find(
-    (permission) => permission.value === (data.permissionMode ?? "auto"),
-  );
   const selectedModel = modelGroups
     .flatMap((group) => group.options)
     .find((option) => option.value === modelValue);
   const reasoningEffort = (data.thinkingConfig ?? DEFAULT_THINKING_CONFIG).effort;
-  const requestedFilesystem = data.sandboxPolicy?.filesystemScope ?? "workspace-write";
-  const displayedFilesystem = data.effectiveSandboxPolicy?.effective.filesystemScope
-    ?? (harnessesLoaded && (activeHarness?.capabilities.sandboxEnforcement === undefined
-      || !activeHarness.capabilities.sandboxEnforcement.filesystem.includes(requestedFilesystem))
-      ? "unmanaged" : requestedFilesystem);
-
   const missingVariable = selectedSkills.some((skill) => skill.variables.some((variable) =>
     variable.required && !(data.skillValues?.[skill.id]?.[variable.name]
       ?? variable.defaultValue ?? "").trim()));
@@ -269,43 +256,6 @@ export function ActivityLaunchForm({
               ) : null}
             </div>
 
-            <div className="leader-launch-summary" aria-label="Configured settings">
-              <span title={`Model: ${selectedModel?.label ?? activeModel}`}>
-                <Bot size={12} aria-hidden />
-                {selectedModel?.label ?? activeModel}
-              </span>
-              {selectedPermission ? (
-                <span title={`Permissions: ${selectedPermission.label}`}>
-                  <ShieldCheck size={12} aria-hidden />
-                  {selectedPermission.label}
-                </span>
-              ) : null}
-              {capability.supportsAdaptiveThinking ? (
-                <span title={`Reasoning: ${reasoningEffort}`}>
-                  <Brain size={12} aria-hidden />
-                  {reasoningEffort === "xhigh" ? "Extra high" : reasoningEffort}
-                </span>
-              ) : null}
-              <span title={data.worktreeIsolation ? "Isolated worktree" : "Shared project checkout"}>
-                <GitBranch size={12} aria-hidden />
-                {data.worktreeIsolation ? "Isolated" : "Shared"}
-              </span>
-              <span title="Agent process filesystem boundary">
-                <ShieldCheck size={12} aria-hidden />
-                {displayedFilesystem}
-              </span>
-              <span title={`${selectedSkills.length} selected skills`}>
-                <Sparkles size={12} aria-hidden />
-                {selectedSkills.length} {selectedSkills.length === 1 ? "skill" : "skills"}
-              </span>
-              <span title="Planning and orchestration mode">
-                <GitBranch size={12} aria-hidden />
-                {(data.orchestrationMode ?? "auto") === "plan" ? "Graph review"
-                  : (data.orchestrationMode ?? "auto") === "direct"
-                    ? "Direct tools only" : "Graph available"}
-              </span>
-            </div>
-
             <div className="leader-launch-config-grid">
               <label className="leader-launch-field">
                 <span>Model</span>
@@ -331,14 +281,11 @@ export function ActivityLaunchForm({
               <label className="leader-launch-field">
                 <span>Orchestration</span>
                 <select aria-label="Orchestration"
-                  value={data.orchestrationMode ?? "auto"}
+                  value={data.orchestrationMode === "plan" ? "plan" : "auto"}
                   onChange={(event) => onUpdate({ orchestrationMode:
                     event.target.value as NonNullable<LeaderData["orchestrationMode"]> })}>
-                  <option value="auto">Graph available — auto-start safe graph work</option>
-                  <option value="plan">Graph available — review graph before start</option>
-                  {data.orchestrationMode === "direct" ? (
-                    <option value="direct">Direct tools only — debug</option>
-                  ) : null}
+                  <option value="auto">Graph — auto-start safe work</option>
+                  <option value="plan">Graph — review before start</option>
                 </select>
               </label>
 
@@ -421,16 +368,16 @@ export function ActivityLaunchForm({
                     const selected = (data.skillIds ?? []).includes(skill.id);
                     return (
                       <div className="leader-launch-skill" data-selected={selected} key={skill.id}>
-                        <label>
+                        <label title={skill.description}>
                           <input
                             type="checkbox"
+                            aria-description={skill.description}
                             checked={selected}
                             onChange={(event) => updateSkill(skill.id, event.target.checked)}
                           />
                           <span className="leader-launch-skill-icon" aria-hidden><SkillIcon skill={skill} /></span>
                           <span>
                             <strong>{skill.name}</strong>
-                            <small>{skill.description}</small>
                           </span>
                         </label>
                         {selected ? (

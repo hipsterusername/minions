@@ -1,3 +1,4 @@
+import type { TaskGraphPlanningCoordinator } from "./task-graph/planning-coordinator.ts";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -68,6 +69,7 @@ function makeDeps(
     bus: createBus(fakeWss),
     startChildSession,
     forEachLeaderTaskState: () => {},
+    getTaskGraphPlanning: () => ({} as TaskGraphPlanningCoordinator),
   };
 }
 
@@ -127,9 +129,8 @@ describe("Phase B — minion harness inheritance", () => {
         sessionKey: "leader-1",
         prompt: "hi",
         cwd: "/tmp/work",
-        role: "leader",
+        role: "leader", workItemId: "work-1",
         harness: "echo",
-        workItemId: "work-1",
       },
       deps,
     );
@@ -179,7 +180,7 @@ describe("Phase B — minion harness inheritance", () => {
         sessionKey: "leader-2",
         prompt: "hi",
         cwd: "/tmp/work",
-        role: "leader",
+        role: "leader", workItemId: "work-1",
         harness: "echo",
       },
       deps,
@@ -219,7 +220,7 @@ describe("permissionMode flow into the host", () => {
         sessionKey: "leader-perm",
         prompt: "hi",
         cwd: "/tmp/work",
-        role: "leader",
+        role: "leader", workItemId: "work-1",
         harness: "echo",
         permissionMode: "bypassPermissions",
       },
@@ -240,7 +241,7 @@ describe("permissionMode flow into the host", () => {
         sessionKey: "leader-perm-2",
         prompt: "hi",
         cwd: "/tmp/work",
-        role: "leader",
+        role: "leader", workItemId: "work-1",
         harness: "echo",
         permissionMode: "bypassPermissions",
       },

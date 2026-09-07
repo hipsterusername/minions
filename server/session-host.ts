@@ -1,3 +1,4 @@
+import { assertSessionIdentity } from "./leader-identity.ts";
 import { HARNESS_DRAIN, type DrainableHarnessControl } from "./harness/terminal-provenance.ts";
 import { hasWorktreeOperation, trackWorktreeExecution } from "./commands/worktree-operation-lock.ts";
 /**
@@ -202,6 +203,7 @@ export class SessionHost {
 
   /** Start or resume a provider invocation, retaining execution ownership until drain. */
   async start(opts: StartSessionOptions, deps: SessionHostDeps): Promise<void> {
+    assertSessionIdentity(opts, this);
     if (hasWorktreeOperation(this, opts.parentWorktree?.path ?? opts.plannedContribution?.path ?? this.worktree?.path)) throw new Error("Worktree operation is in progress");
     if (this.removed) throw new Error("Cannot start a removed session");
     const isCheckpointContinuation = opts.invocationKind === "provider_continuation"
@@ -227,13 +229,6 @@ export class SessionHost {
       if (opts.workItemId !== undefined) {
         if (opts.workItemId && this.workItemId === null) {
           this.workItemId = opts.workItemId;
-        } else if (opts.workItemId && this.workItemId !== opts.workItemId) {
-          // Keep the first immutable identity and expose mismatches for the
-          // command boundary to reject.
-          log.warn("work_item_context_mismatch", {
-            ...sessionHostLogFields(this),
-            receivedWorkItemId: opts.workItemId,
-          });
         }
       }
       log.info("run_starting", sessionHostLogFields(this));

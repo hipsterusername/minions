@@ -170,6 +170,11 @@ gets a new UUID by default. To intentionally make a copy the source for an
 existing workspace, use `POST /api/projects/attach`; the replaced binding's
 central state is retained and is never deleted implicitly.
 
+Every Leader runs under a durable work item; launches without work-item identity are rejected.
+Graph is always enabled for Leaders and is the standard path for executing Minion
+assignments. Choose automatic start for safe Graph work or review before start
+in the Leader orchestration controls. Leaders can still perform local work themselves.
+
 ### Git change mode and execution sandbox
 
 Leader configuration exposes two independent boundaries:

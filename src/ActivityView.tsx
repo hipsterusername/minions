@@ -135,8 +135,8 @@ export interface ActivityViewProps {
   socketSend?: ((data: unknown) => void) | undefined;
   /** WS subscribe — used by the inline worktree review panel. */
   socketSubscribe?: SocketSubscribe | undefined;
-  /** Project working directory used when the embedded leader starts. */
-  projectPath?: string | undefined;
+  /** Workspace identity and source root for the embedded Leader launch. */
+  projectId?: string | undefined; projectPath?: string | undefined;
   projectSettings?: ProjectSettings | undefined;
   /** Update a leader node's data (e.g. after a merge is requested). */
   onUpdateNodeData: (nodeId: string, data: LeaderData) => void;
@@ -1288,7 +1288,7 @@ export function ActivityView({
   onDetachFromCanvas,
   socketSend,
   socketSubscribe,
-  projectPath,
+  projectId, projectPath,
   projectSettings,
   onUpdateNodeData,
   workItemRuns = {}, runNextCursor = {}, onLoadRuns, onPromptWorkItem,
@@ -1854,7 +1854,7 @@ export function ActivityView({
               onUpdateNodeData={updateLaunchNodeData}
               socketSend={socketSend}
               socketSubscribe={socketSubscribe}
-              projectPath={projectPath}
+              projectId={projectId} projectPath={projectPath}
               projectSettings={projectSettings}
             />
           </div>
@@ -1928,7 +1928,7 @@ export function ActivityView({
               onUpdateData={(data) => updateLaunchNodeData(launchNode.id, data as LeaderData)}
               socketSend={socketSend}
               socketSubscribe={socketSubscribe}
-              projectPath={projectPath}
+              projectId={projectId} projectPath={projectPath}
               projectSettings={projectSettings}
             />
           </div>

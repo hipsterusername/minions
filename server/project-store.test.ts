@@ -18,7 +18,7 @@ import {
   it,
   vi,
 } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -138,7 +138,7 @@ describe("initSidecar / openProjectDb", () => {
       approvalPolicy: "on-failure",
     });
     expect(typeof settings.defaultWorktreeIsolation).toBe("boolean");
-    expect(settings.leaderPlanningBackend).toBe("task_graph");
+    expect(settings).not.toHaveProperty("leaderPlanningBackend");
   });
 
   it("openProjectDb initialises without provider defaults and re-uses an existing sidecar", () => {
@@ -204,9 +204,15 @@ describe("context / settings / skills / mcp-servers round-trip", () => {
     }
   });
 
-  it("round-trips the legacy planning debug override", () => {
+  it("drops the removed Graph opt-out on reads and writes", () => {
     writeSettings(project, { leaderPlanningBackend: "legacy" });
-    expect(readSettings(project).leaderPlanningBackend).toBe("legacy");
+    expect(readSettings(project)).not.toHaveProperty("leaderPlanningBackend");
+    const settingsPath = join(findWorkspaceBySource(project)!.stateRoot, "settings.json");
+    expect(JSON.parse(readFileSync(settingsPath, "utf-8")))
+      .not.toHaveProperty("leaderPlanningBackend");
+    writeFileSync(settingsPath, JSON.stringify({ leaderPlanningBackend: "legacy", roleSystemBeta: true }));
+    expect(readSettings(project)).not.toHaveProperty("leaderPlanningBackend");
+    expect(readSettings(project).roleSystemBeta).toBe(true);
   });
 
   it("drops the removed network axis from legacy sandbox defaults", () => {

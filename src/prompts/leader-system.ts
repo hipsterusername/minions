@@ -8,7 +8,6 @@
 
 import {
   CLAUDE_LEADER_BUILT_IN_TOOLS,
-  LEGACY_LEADER_TOOL_NAMES,
   TASK_GRAPH_LEADER_TOOL_NAMES,
   composeLeaderPrompt,
 } from "../../shared/leader-prompt.ts";
@@ -18,14 +17,12 @@ export const CLAUDE_BUILT_IN_TOOLS = CLAUDE_LEADER_BUILT_IN_TOOLS;
 
 export function buildBaseLeaderPrompt(
   tools: readonly string[],
-  orchestrationMode: LeaderOrchestrationMode = "auto",
+  _orchestrationMode: LeaderOrchestrationMode = "auto",
 ): string {
-  const graph = orchestrationMode !== "direct";
   return composeLeaderPrompt({
     builtInTools: tools,
-    registeredToolNames: graph
-      ? TASK_GRAPH_LEADER_TOOL_NAMES : LEGACY_LEADER_TOOL_NAMES,
-    promptFeatureIds: [graph ? "task_graph_planning" : "legacy_planning"],
+    registeredToolNames: TASK_GRAPH_LEADER_TOOL_NAMES,
+    promptFeatureIds: ["task_graph_planning"],
   });
 }
 

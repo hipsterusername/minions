@@ -330,8 +330,7 @@ function ProjectView({
         skillIds: [],
         skillValues: {},
         skillPanelOpen: false,
-        orchestrationMode: projectSettings.leaderPlanningBackend === "legacy"
-          ? "direct" : "auto",
+        orchestrationMode: "auto",
       },
     };
     dispatch({ type: "ADD_NODE", node });
@@ -565,8 +564,7 @@ function ProjectView({
         skillIds: [skillId],
         skillValues: {},
         skillPanelOpen: true,
-        orchestrationMode: projectSettings.leaderPlanningBackend === "legacy"
-          ? "direct" : "auto",
+        orchestrationMode: "auto",
       },
     };
     dispatch({ type: "ADD_NODE", node });
@@ -756,7 +754,7 @@ function ProjectView({
                   onDetachFromCanvas={handleDetachSessionFromCanvas}
                   socketSend={socket.send}
                   socketSubscribe={socket.subscribe}
-                  projectPath={projectPath}
+                  projectId={projectId} projectPath={projectPath}
                   projectSettings={projectSettings}
                   onUpdateNodeData={(nodeId, data) => dispatch({ type: "UPDATE_NODE_DATA", id: nodeId, data })}
                   workItemRuns={workItemState.runs}

@@ -1,28 +1,21 @@
 import type Database from "better-sqlite3";
+import type { LeaderOrchestrationMode } from "../../shared/task-graph-planning-contracts.ts";
 import {
-  leaderOrchestrationModeSchema,
-  type LeaderOrchestrationMode,
-} from "../../shared/task-graph-planning-contracts.ts";
-import {
-  DEFAULT_LEADER_PLANNING_BACKEND,
-  defaultOrchestrationModeForBackend,
+  normalizeLeaderOrchestrationMode,
 } from "../../shared/leader-planning.ts";
 
-const DEFAULT_CANONICAL_ORCHESTRATION_MODE = defaultOrchestrationModeForBackend(
-  DEFAULT_LEADER_PLANNING_BACKEND,
-);
+const DEFAULT_CANONICAL_ORCHESTRATION_MODE = "auto";
 
 export function leaderOrchestrationModeForRun(
   db: Database.Database,
   runKey: string,
-): LeaderOrchestrationMode {
+): Exclude<LeaderOrchestrationMode, "direct"> {
   const row = db.prepare("SELECT run_config_json FROM sessions WHERE session_key=?")
     .get(runKey) as { run_config_json: string | null } | undefined;
   if (!row?.run_config_json) return DEFAULT_CANONICAL_ORCHESTRATION_MODE;
   try {
     const value = (JSON.parse(row.run_config_json) as Record<string, unknown>)["orchestrationMode"];
-    const parsed = leaderOrchestrationModeSchema.safeParse(value);
-    return parsed.success ? parsed.data : DEFAULT_CANONICAL_ORCHESTRATION_MODE;
+    return normalizeLeaderOrchestrationMode(value);
   } catch { return DEFAULT_CANONICAL_ORCHESTRATION_MODE; }
 }
 

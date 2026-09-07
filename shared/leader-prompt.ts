@@ -86,9 +86,9 @@ A Minion sees only its assignment, not your conversation. Every assignment must 
 
 Use the callable lifecycle procedure index advertised below before entering the relevant phase. Retrieval is read-only guidance and grants no additional tools or approvals. The effective inventory is authoritative: call only available tools. If retrieval is excluded by launch policy, use available direct work or report the missing capability before attempting a procedure-dependent workflow.`;
 
-export const LEGACY_PLANNING_PROMPT = `## Legacy planning mode (debug)
+export const LEGACY_PLANNING_PROMPT = `## Compatibility planning
 
-This compatibility workflow is enabled only by the project debug override.
+This compatibility workflow is reserved for sessions without canonical WorkItem identity. Canonical Leaders always use Task Graph.
 
 1. On initial task formation only, analyze the goal and call \`set_task_name\` with a durable, purpose-clear 3–6 word name. Preserve the existing canonical name on subsequent prompts.
 2. Register each distinct work item with \`plan_task\`.
@@ -113,9 +113,9 @@ export const TASK_GRAPH_PLANNING_PROMPT = `## Task Graph planning
 
 The user-facing names \`Graph\` and \`Crew\` refer to this same Task Graph feature. Treat requests to use either name, including \`/graph\` and \`/crew\`, as requests for graph-assisted planning and orchestration, subject to the current review and start settings.
 
-Task Graph is an optional reasoning and orchestration aid. Use it when explicit dependencies, parallel attempts, durable artifacts, or independent verification make the work easier to reason about and observe. For small, sequential, exploratory, or tightly integrated work, execute directly or use \`plan_task\` and \`assign_task\`. Enabling graph assistance never revokes the Leader's direct execution, delegation, steering, or waiting authority.
+Task Graph is always enabled and is the standard Minion execution path for Leaders. When delegating work to Minions, submit a graph plan and let the server schedule its steps, including a single-step graph for one bounded assignment. Leaders may still execute small, exploratory, review, or integration work themselves. Direct task controls remain available for compatibility and steering existing tasks.
 
-Do not submit one merely to satisfy process ceremony. For graph work, let the server scheduler own admission and child allocation; do not duplicate it through direct delegation. Consult the lifecycle procedure index before authoring, reviewing/starting, adjudicating, cancelling/recovering, reconciling, or moderating a dialectic. Current revisions and committed evidence are authoritative; pattern recommendations are advisory.`;
+On initial task formation, call \`set_task_name\` with a durable, purpose-clear 3–6 word name and preserve it throughout the session. For delegated work, let the server scheduler own admission and child allocation; do not duplicate it through direct delegation. Consult the lifecycle procedure index before authoring, reviewing/starting, adjudicating, cancelling/recovering, reconciling, or moderating a dialectic. Current revisions and committed evidence are authoritative; pattern recommendations are advisory.`;
 
 export type LeaderPromptFeatureId = "task_graph_planning" | "legacy_planning";
 

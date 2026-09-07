@@ -29,7 +29,7 @@ beforeEach(() => {
   resetLeaderAutoStartClaimsForTests();
   vi.mocked(loadImageFromFile).mockReset().mockResolvedValue(image);
 });
-function setup(initial: Partial<LeaderData> = {}, launchMode = false, canonical = false) {
+function setup(initial: Partial<LeaderData> = {}, launchMode = false, canonical = true) {
   const { socket, replay } = createReplaySocket();
   function Probe() {
     const [data, setData] = useState({ ...LEADER_DEFAULT_DATA, ...initial });
@@ -43,7 +43,19 @@ function setup(initial: Partial<LeaderData> = {}, launchMode = false, canonical 
   render(<Probe />);
   const commands = (type: string) => socket.sent.filter(message =>
     (message as { type?: string }).type === type) as Record<string, unknown>[];
-  return { commands, replay };
+  const allocate = async () => {
+    for (const type of ["create_work_item", "attach_work_item_surface"]) {
+      await waitFor(() => expect(commands(type)).toHaveLength(1));
+      const command = commands(type)[0]!;
+      await act(() => replay([{ message: { type: "work_item_response", command: type,
+        requestId: command['requestId'] as string, success: true,
+        result: { workItem: { ...item, currentRunKey: null,
+          lifecycle: { ...item.lifecycle, runtimeState: "draft", outcome: "none" } },
+          bindings: [], currentRun: null, runs: [], nextCursor: null } } }]));
+    }
+    await waitFor(() => expect(commands("continue_work_item")).toHaveLength(1));
+  };
+  return { commands, replay, allocate };
 }
 function paste(files = [new File(["pixels"], "shot.png", { type: "image/png" })]) {
   fireEvent.paste(screen.getByLabelText("Leader prompt"), { clipboardData: {
@@ -60,14 +72,18 @@ describe("Leader pasted context", () => {
     paste();
     await readyImage();
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    const create = test.commands("create_session")[0]!;
+    await test.allocate();
+    const create = test.commands("continue_work_item")[0]!;
     expect(create).toMatchObject({ attachments: [attachment] });
     expect(create['prompt']).toContain("Use the attached context.");
     expect(screen.getByRole("img", { name: "shot.png" })).toBeInTheDocument();
     paste([new File(["new"], "next.png", { type: "image/png" })]);
     await waitFor(() => expect(screen.getByRole("img", { name: "next.png" })).toBeInTheDocument());
-    await act(() => test.replay([{ message: { type: "session_status",
-      sessionKey: create['sessionKey'] as string, status: "running" } }]));
+    await act(() => test.replay([{ message: { type: "work_item_response", command: "continue_work_item",
+      requestId: create['requestId'] as string, success: true,
+      result: { workItem: { ...item, lifecycle: { ...item.lifecycle, lifecycleRevision: 4, runtimeState: "working", outcome: "none" } },
+        bindings: [], currentRun: null, runs: [], nextCursor: null } } }]));
+    await act(() => test.replay([{ message: { type: "session_status", sessionKey: "run-1", status: "running" } }]));
     expect(screen.queryByRole("img", { name: "shot.png" })).toBeNull();
     expect(screen.getByRole("img", { name: "next.png" })).toBeInTheDocument();
   });
@@ -134,8 +150,9 @@ describe("Leader pasted context", () => {
     paste([new File(["The acceptance criteria"], "notes.md", { type: "text/markdown" })]);
     await waitFor(() => expect(screen.queryByText(/Loading…/)).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    expect(test.commands("create_session")[0]?.['prompt']).toContain("The acceptance criteria");
-    expect(test.commands("create_session")[0]?.['attachments']).toBeUndefined();
+    await test.allocate();
+    expect(test.commands("continue_work_item")[0]?.['prompt']).toContain("The acceptance criteria");
+    expect(test.commands("continue_work_item")[0]?.['attachments']).toBeUndefined();
   });
 
   it("preserves the draft across fullscreen and removes attachments before sending", async () => {
@@ -147,7 +164,8 @@ describe("Leader pasted context", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove shot.png" }));
     fireEvent.change(screen.getByLabelText("Leader prompt"), { target: { value: "Just the prompt" } });
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    expect(test.commands("create_session")[0]?.['attachments']).toBeUndefined();
+    await test.allocate();
+    expect(test.commands("continue_work_item")[0]?.['attachments']).toBeUndefined();
   });
 
   it("retains images when a new leader fails to launch", async () => {
@@ -155,12 +173,14 @@ describe("Leader pasted context", () => {
     paste();
     await readyImage();
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    const create = test.commands("create_session")[0]!;
-    await act(() => test.replay([{ message: { type: "session_status",
-      sessionKey: create['sessionKey'] as string, status: "error" } }]));
+    await test.allocate();
+    const create = test.commands("continue_work_item")[0]!;
+    await act(() => test.replay([{ message: { type: "work_item_response", command: "continue_work_item",
+      requestId: create['requestId'] as string, success: false, code: "invalid_state", error: "Launch failed" } }]));
     expect(screen.getByRole("img", { name: "shot.png" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    expect(test.commands("create_session")[1]).toMatchObject({ attachments: [attachment] });
+    await waitFor(() => expect(test.commands("continue_work_item")).toHaveLength(2));
+    expect(test.commands("continue_work_item")[1]).toMatchObject({ attachments: [attachment] });
   });
 
   it("handles clipboard items when files are unavailable and leaves removed loads removed", async () => {
@@ -177,12 +197,14 @@ describe("Leader pasted context", () => {
     expect(screen.getByRole("button", { name: "Start" })).toBeEnabled();
   });
 
-  it("carries pasted images into legacy new sessions", async () => {
-    const test = setup({ sessionKey: "old-run", status: "completed" });
+  it("keeps pasted images when workspace identity is unavailable", async () => {
+    const test = setup({}, false, false);
     paste();
     await readyImage();
-    fireEvent.click(screen.getByRole("button", { name: "New Session" }));
-    await waitFor(() => expect(test.commands("create_session")).toHaveLength(1));
-    expect(test.commands("create_session")[0]).toMatchObject({ attachments: [attachment] });
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    expect(test.commands("create_session")).toHaveLength(0);
+    expect(test.commands("create_work_item")).toHaveLength(0);
+    expect(screen.getByRole("img", { name: "shot.png" })).toBeInTheDocument();
+    expect(screen.getByText("Select a project before starting a Leader.")).toBeInTheDocument();
   });
 });

@@ -3,8 +3,7 @@ import type { ImageAttachment } from "./session-host-types.ts";
 import type { SandboxPolicy } from "../shared/workspace-contracts.ts";
 import type { LeaderOrchestrationMode } from "../shared/task-graph-planning-contracts.ts";
 import {
-  DEFAULT_LEADER_PLANNING_BACKEND,
-  defaultOrchestrationModeForBackend,
+  normalizeLeaderOrchestrationMode,
 } from "../shared/leader-planning.ts";
 
 import { inheritedUserDirectives, retainUserDirectives, userTextFromPrompt } from "../shared/handoff-text.ts";
@@ -46,11 +45,7 @@ export function resolvePrimaryRunConfig(previousJson: string | null, input: Conf
   if (input.systemPrompt !== undefined) config.systemPrompt = input.systemPrompt;
   if (input.attachments !== undefined) config.attachments = input.attachments as ImageAttachment[];
   if (input.orchestrationMode !== undefined) config.orchestrationMode = input.orchestrationMode;
-  if (config.orchestrationMode === undefined) {
-    config.orchestrationMode = defaultOrchestrationModeForBackend(
-      DEFAULT_LEADER_PLANNING_BACKEND,
-    );
-  }
+  config.orchestrationMode = normalizeLeaderOrchestrationMode(config.orchestrationMode);
   config.userDirectives = retainUserDirectives([...(previous.userDirectives ?? []), ...inheritedUserDirectives(input.prompt ?? ""), userTextFromPrompt(input.prompt ?? "")]);
   const planningContext = input.prompt?.match(/<connected-context>[\s\S]*?<\/connected-context>/)?.[0];
   if (planningContext) {

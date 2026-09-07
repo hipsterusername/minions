@@ -26,7 +26,13 @@ function leader(id = "leader") {
 
 describe("canonical leader names", () => {
   it("preserves the selected name across follow-up prompts and server recovery", () => {
+    const db = persistenceDb()!;
+    createWorkItem(db, { id: "work", projectId: "project", projectPath: "/tmp",
+      title: "Initial prompt", changeMode: "live", at: 1 });
+    startWorkItemIteration(db, { workItemId: "work", runKey: "leader", idempotencyKey: "start",
+      expectedLifecycleRevision: 0, expectedCurrentRunKey: null, at: 2 });
     const host = leader();
+    host.workItemId = "work";
     selectName(host, "Repair OAuth callback handling");
     captureSessionContinuity(host, { sessionKey: host.id, cwd: host.cwd, prompt: "Now test it" });
     const registry = new SessionRegistry();

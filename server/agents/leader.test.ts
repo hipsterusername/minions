@@ -21,54 +21,36 @@ import { ROLE_SYSTEM_PROMPT } from "../../shared/prompts/role-system.ts";
 import type { TaskGraphPlanningCoordinator } from "../task-graph/planning-coordinator.ts";
 import "./leader.ts";
 
+const canonicalLeaderContext = {
+  workItemId: "work", runKey: "primary",
+  taskGraphPlanning: {} as TaskGraphPlanningCoordinator,
+};
+
 beforeEach(() => disablePersistence());
 
 describe("leader agent wiring", () => {
-  it("keeps legacy delegation guidance behind the direct-mode prompt", () => {
+  it("never selects the compatibility prompt for saved direct mode", () => {
     const prompt = getAgentType("leader").buildSystemPrompt({
-      sessionKey: "legacy-prompt",
-      cwd: "/tmp/project",
-      bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
-      worktreeInfo: null,
-      worktreeIsolation: false,
-      orchestrationMode: "direct",
+      sessionKey: "leader-prompt", runKey: "leader-prompt", workItemId: "work",
+      cwd: "/tmp/project", bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
+      worktreeInfo: null, worktreeIsolation: false, orchestrationMode: "direct",
     });
-    expect(prompt).toContain("## Token Economy");
-    expect(prompt).toContain("Buy conclusions, not raw data");
-    expect(prompt).toContain("over ~2000 chars through their summaries");
-    expect(prompt).toMatch(/never read multi-thousand-line files/i);
-    expect(prompt).toContain("## Legacy planning mode (debug)");
-    expect(prompt).toContain("executorClass");
-    expect(prompt).toContain("timeout_minutes");
-    expect(prompt).toContain("ownedPaths");
-    expect(prompt).toMatch(/retry|re-assign/i);
-    expect(prompt).toMatch(/model.*overrides.*executorClass/i);
-    expect(prompt).not.toContain("## Task Graph planning");
+    expect(prompt).toContain("## Task Graph planning");
+    expect(prompt).not.toContain("## Compatibility planning");
+    expect(LEADER_SYSTEM_PROMPT).toContain("## Task Graph planning");
   });
 
-  it("keeps direct controls available without copying legacy-mode prose into the graph prompt", () => {
-    expect(LEADER_SYSTEM_PROMPT).toContain("## Task Graph planning");
-    expect(LEADER_SYSTEM_PROMPT).not.toContain("## Legacy planning mode (debug)");
-    expect(LEADER_SYSTEM_PROMPT).toContain("wait_and_continue");
-    expect(LEADER_SYSTEM_PROMPT).toMatch(/optional reasoning and orchestration aid/i);
-    const legacyPrompt = getAgentType("leader").buildSystemPrompt({
-      sessionKey: "legacy-wait-prompt",
-      cwd: "/tmp/project",
-      bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
-      worktreeInfo: null,
-      worktreeIsolation: false,
-      orchestrationMode: "direct",
-    });
-    // The section must explain that the system wakes the leader early when all
-    // child tasks finish — so agents use long waits rather than short polling loops.
-    expect(legacyPrompt).toMatch(/auto-wake|wakes you early/i);
-    expect(legacyPrompt).toMatch(/10.{1,5}30 min/i);
-    // The old 60-second example must no longer appear.
-    expect(legacyPrompt).not.toMatch(/wait_and_continue.*60 seconds/i);
+  it("rejects tool registration without durable Leader identity", () => {
+    expect(() => getAgentType("leader").getToolGroups({
+      sessionKey: "bare", cwd: "/tmp", bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
+      worktreeInfo: null, worktreeIsolation: false,
+      startMinionSession: vi.fn(), scheduleWaitContinue: vi.fn(),
+    })).toThrow("canonical planning authority");
   });
 
   it("advertises only effective named tools and describes unnamed native filesystem capability", () => {
     const prompt = getAgentType("leader").buildSystemPrompt({
+      ...canonicalLeaderContext,
       sessionKey: "restricted", cwd: "/tmp/project", bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
       worktreeInfo: null, worktreeIsolation: false,
       effectiveCapabilities: { allowedTools: ["mcp__leader-procedures__load_procedure"],
@@ -85,6 +67,7 @@ describe("leader agent wiring", () => {
   it("exposes task, procedure and render tools to leader sessions", async () => {
     const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
     const result = getAgentType("leader").getToolGroups({
+      ...canonicalLeaderContext,
       sessionKey: "leader-1",
       cwd: "/tmp/project",
       bus,
@@ -96,6 +79,7 @@ describe("leader agent wiring", () => {
 
     // Skill-authoring is opt-in: an untagged leader gets no "skills" group.
     expect(Object.keys(result.toolGroups).sort()).toEqual([
+      "graph-planner",
       "leader-procedures",
       "render-dashboard",
       "task-manager",
@@ -117,6 +101,7 @@ describe("leader agent wiring", () => {
   it("adds graph planning alongside direct tools for graph-mode primary Leaders", () => {
     const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
     const ctx = {
+      ...canonicalLeaderContext,
       sessionKey: "leader-graph", runKey: "primary", workItemId: "work",
       cwd: "/tmp/project", bus, worktreeInfo: null, worktreeIsolation: false,
       startMinionSession: vi.fn(), scheduleWaitContinue: vi.fn(),
@@ -142,12 +127,13 @@ describe("leader agent wiring", () => {
     expect(result.mcpToolNames).toContain("mcp__task-manager__plan_task");
     expect(result.mcpToolNames).toContain("mcp__task-manager__assign_task");
     expect(leader.buildSystemPrompt(ctx)).toContain("## Task Graph planning");
-    expect(leader.buildSystemPrompt(ctx)).not.toContain("## Legacy planning mode (debug)");
+    expect(leader.buildSystemPrompt(ctx)).not.toContain("## Compatibility planning");
   });
 
   it("defaults canonical Leaders without a persisted mode to Task Graph", () => {
     const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
     const ctx = {
+      ...canonicalLeaderContext,
       sessionKey: "leader-default-graph", runKey: "primary", workItemId: "work",
       cwd: "/tmp/project", bus, worktreeInfo: null, worktreeIsolation: false,
       startMinionSession: vi.fn(), scheduleWaitContinue: vi.fn(),
@@ -169,14 +155,16 @@ describe("leader agent wiring", () => {
       "read_graph_artifact", "cancel_graph_run", "moderate_dialectic", "adjudicate_graph_node",
     ]);
     expect(result.mcpToolNames).toContain("mcp__task-manager__plan_task");
-    expect(leader.buildSystemPrompt(ctx)).toMatch(/Task Graph is an optional/i);
+    expect(leader.buildSystemPrompt(ctx)).toMatch(/Task Graph is always enabled/i);
     expect(leader.buildSystemPrompt(ctx)).toContain("- **plan_task**");
   });
 
-  it("switches a canonical Leader's prompt and tools together in legacy debug mode", () => {
+  it("keeps a canonical Leader's Graph prompt and tools enabled despite a legacy override", () => {
     const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
     const ctx = {
+      ...canonicalLeaderContext,
       sessionKey: "leader-legacy-debug", runKey: "primary", workItemId: "work",
+      taskGraphPlanning: {} as TaskGraphPlanningCoordinator,
       cwd: "/tmp/project", bus, worktreeInfo: null, worktreeIsolation: false,
       startMinionSession: vi.fn(), scheduleWaitContinue: vi.fn(),
       orchestrationMode: "direct" as const,
@@ -188,16 +176,17 @@ describe("leader agent wiring", () => {
 
     expect(taskNames).toContain("plan_task");
     expect(taskNames).toContain("assign_task");
-    expect(result.toolGroups["graph-planner"]).toBeUndefined();
-    expect(prompt).toContain("## Legacy planning mode (debug)");
+    expect(result.toolGroups["graph-planner"]).toBeDefined();
+    expect(prompt).not.toContain("## Compatibility planning");
     expect(prompt).toContain("- **plan_task**");
-    expect(prompt).not.toContain("## Task Graph planning");
-    expect(prompt).not.toContain("- **submit_graph_plan**");
+    expect(prompt).toContain("## Task Graph planning");
+    expect(prompt).toContain("- **submit_graph_plan**");
   });
 
   it("documents every registered Leader tool and keeps the allowlist exact", () => {
     const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
     const ctx = {
+      ...canonicalLeaderContext,
       sessionKey: "leader-tools",
       cwd: "/tmp/project",
       bus,
@@ -243,6 +232,7 @@ describe("leader agent wiring", () => {
         skillsAddendum: "# Active Skills\n\nReview the API carefully.",
       });
       const prompt = getAgentType("leader").buildSystemPrompt({
+        ...canonicalLeaderContext,
         sessionKey: "leader-prompt",
         cwd: project,
         bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
@@ -288,6 +278,7 @@ describe("leader agent wiring", () => {
   it("exposes the skill-authoring tools when skill-builder is tagged", () => {
     const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
     const result = getAgentType("leader").getToolGroups({
+      ...canonicalLeaderContext,
       sessionKey: "leader-1",
       cwd: "/tmp/project",
       bus,
@@ -299,6 +290,7 @@ describe("leader agent wiring", () => {
     });
 
     expect(Object.keys(result.toolGroups).sort()).toEqual([
+      "graph-planner",
       "leader-procedures",
       "render-dashboard",
       "skills",
@@ -320,6 +312,7 @@ describe("leader agent wiring", () => {
     writeSettings(project, { systemModel: "advisory" });
     const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
     const ctx = {
+      ...canonicalLeaderContext,
       sessionKey: "leader-all-tools",
       cwd: project,
       bus,
@@ -355,6 +348,7 @@ describe("leader agent wiring", () => {
   it("omits the skill-authoring tools when only other skills are tagged", () => {
     const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
     const result = getAgentType("leader").getToolGroups({
+      ...canonicalLeaderContext,
       sessionKey: "leader-1",
       cwd: "/tmp/project",
       bus,
@@ -383,6 +377,7 @@ describe("leader agent wiring", () => {
       const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
       const startMinionSession = vi.fn();
       const result = getAgentType("leader").getToolGroups({
+        ...canonicalLeaderContext,
         sessionKey: "leader-1",
         cwd: project,
         bus,
@@ -419,6 +414,7 @@ describe("leader agent wiring", () => {
       const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
       const leader = getAgentType("leader");
       const baseCtx = {
+        ...canonicalLeaderContext,
         sessionKey: "leader-role",
         cwd: project,
         bus,
@@ -464,6 +460,7 @@ describe("leader agent wiring", () => {
     const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
     const leader = getAgentType("leader");
     const beforePrompt = leader.buildSystemPrompt({
+      ...canonicalLeaderContext,
       sessionKey: "leader-1",
       cwd: project,
       bus,
@@ -471,6 +468,7 @@ describe("leader agent wiring", () => {
       worktreeIsolation: false,
     });
     const result = leader.getToolGroups({
+      ...canonicalLeaderContext,
       sessionKey: "leader-1",
       cwd: project,
       bus,
@@ -480,6 +478,7 @@ describe("leader agent wiring", () => {
       scheduleWaitContinue: vi.fn(),
     });
     const afterPrompt = leader.buildSystemPrompt({
+      ...canonicalLeaderContext,
       sessionKey: "leader-1",
       cwd: project,
       bus,
@@ -488,6 +487,7 @@ describe("leader agent wiring", () => {
     });
 
     expect(Object.keys(result.toolGroups).sort()).toEqual([
+      "graph-planner",
       "leader-procedures",
       "render-dashboard",
       "task-manager",
@@ -501,6 +501,7 @@ describe("leader agent wiring", () => {
     writeSettings(project, { systemModel: "advisory" });
     const bus = createBus({ clients: new Set() } as unknown as WebSocketServer);
     const result = getAgentType("leader").getToolGroups({
+      ...canonicalLeaderContext,
       sessionKey: "leader-1",
       cwd: project,
       bus,
@@ -533,6 +534,7 @@ describe("leader agent wiring", () => {
     await git("git", ["-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "fixture"], {cwd:project});
     writeSettings(project, { systemModel: "advisory" });
     const result = getAgentType("leader").getToolGroups({
+      ...canonicalLeaderContext,
       sessionKey: "leader-reconcile",
       cwd: project,
       bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
@@ -569,6 +571,7 @@ describe("leader agent wiring", () => {
     writeSettings(project, { systemModel: mode });
     for (const orchestrationMode of ["direct", "auto"] as const) {
       const prompt = getAgentType("leader").buildSystemPrompt({
+        ...canonicalLeaderContext,
         sessionKey: "leader-retrieval", cwd: project,
         bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
         worktreeInfo: null, worktreeIsolation: false, orchestrationMode,
@@ -622,6 +625,7 @@ describe("leader agent wiring", () => {
     const taskState = makeTaskStateWithChildren();
     const terminations: Array<[string, string]> = [];
     const ctx = {
+      ...canonicalLeaderContext,
       sessionKey: "leader-1",
       cwd: "/tmp/project",
       bus,
@@ -650,6 +654,7 @@ describe("leader agent wiring", () => {
 
     getAgentType("leader").onTerminate?.(
       {
+        ...canonicalLeaderContext,
         sessionKey: "leader-1",
         cwd: "/tmp/project",
         bus,

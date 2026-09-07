@@ -35,6 +35,9 @@ describe("leader prompt composition", () => {
     });
 
     expect(prompt.startsWith(LEADER_PROMPT_CORE)).toBe(true);
+    for (const marker of ["plan_task", "ROLE SYSTEM", "SKILLS", "USER PREFIX"]) {
+      expect(prompt).toContain(marker);
+    }
     expect(prompt.indexOf("plan_task")).toBeLessThan(prompt.indexOf("SKILLS"));
     expect(prompt.indexOf("ROLE SYSTEM")).toBeLessThan(prompt.indexOf("SKILLS"));
     expect(prompt.indexOf("SKILLS")).toBeLessThan(prompt.indexOf("USER PREFIX"));
@@ -61,13 +64,12 @@ describe("leader prompt composition", () => {
     expect(inventory).toContain('wake_on: "any_terminal"');
   });
 
-  it("keeps graph orchestration optional and preserves direct Leader authority", () => {
-    expect(TASK_GRAPH_PLANNING_PROMPT).toMatch(/optional reasoning and orchestration aid/i);
-    expect(TASK_GRAPH_PLANNING_PROMPT).toMatch(/never revokes.*direct execution/i);
-    expect(TASK_GRAPH_PLANNING_PROMPT).toContain("plan_task");
-    expect(TASK_GRAPH_PLANNING_PROMPT).toContain("assign_task");
-    expect(TASK_GRAPH_PLANNING_PROMPT).toMatch(/do not submit one merely.*ceremony/i);
-    expect(TASK_GRAPH_PLANNING_PROMPT).not.toMatch(/sole child-allocation authority/i);
+  it("makes Graph the standard Minion execution path while allowing Leader local work", () => {
+    expect(TASK_GRAPH_PLANNING_PROMPT).toMatch(/always enabled.*standard Minion execution path/i);
+    expect(TASK_GRAPH_PLANNING_PROMPT).toContain("single-step graph");
+    expect(TASK_GRAPH_PLANNING_PROMPT).toContain("Leaders may still execute");
+    expect(TASK_GRAPH_PLANNING_PROMPT).toContain("server scheduler own admission and child allocation");
+    expect(TASK_GRAPH_PLANNING_PROMPT).not.toContain("optional reasoning");
   });
 
   it("retrieves author-time guidance without injecting every graph pattern", () => {

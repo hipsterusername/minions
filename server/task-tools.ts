@@ -141,8 +141,8 @@ export function createTaskToolsForLeader(opts: {
     ...createSkillRetrievalTools({ projectPath: ctx.projectPath, skillSnapshotId: ctx.skillSnapshotId, skillValues: ctx.defaultMinionSkillValues }),
     createUpdateProjectContextToolDef(ctx),
   ];
-  // The graph backend adds graph-planning tools in agents/leader.ts. It never
-  // replaces these direct Leader controls: graph use is a choice, not a gate.
+  // Canonical Leaders delegate through Graph. Keep direct controls for
+  // compatibility sessions and management of existing tasks.
   const baseDefs = directDefs;
 
   // Only add request_approval when worktree isolation is active

@@ -8,7 +8,6 @@ import {
   type ProjectSettings,
   type ProjectSummary,
 } from "../api.ts";
-import { randomUuid } from "../random-id.ts";
 import { useHarnessList } from "../use-harness-list.tsx";
 import { DEFAULT_HARNESS_NAME, findHarness } from "../harness-list.ts";
 import { getModelCapability } from "../model-meta.ts";
@@ -39,10 +38,9 @@ import type { WorkItemLaunchInput } from "../use-work-items.ts";
 import "./launch-screen.css";
 
 interface LaunchScreenProps {
-  send: (data: unknown) => void;
   onLaunched: (sessionKey: string) => void;
   onLaunchError?: (error: string) => void;
-  canonicalLaunch?: (input: WorkItemLaunchInput,
+  canonicalLaunch: (input: WorkItemLaunchInput,
     onStarted: (sessionKey: string) => void, onError: (error: string) => void) => void;
   /**
    * When provided, the launch screen is locked to a single project: the
@@ -53,7 +51,7 @@ interface LaunchScreenProps {
   lockedProject?: { id?: string; path: string; name: string };
 }
 
-export function LaunchScreen({ send, onLaunched, onLaunchError, canonicalLaunch, lockedProject }: LaunchScreenProps) {
+export function LaunchScreen({ onLaunched, onLaunchError, canonicalLaunch, lockedProject }: LaunchScreenProps) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
@@ -269,7 +267,12 @@ export function LaunchScreen({ send, onLaunched, onLaunchError, canonicalLaunch,
     launchingRef.current = true;
     setLaunching(true);
 
-    const canonical = Boolean(targetProjectId && canonicalLaunch);
+    if (!targetProjectId || !canonicalLaunch) {
+      launchingRef.current = false;
+      setLaunching(false);
+      setError("Select a project before starting a Leader.");
+      return;
+    }
     // Only freeze a custom prompt when the user picked skills. Canonical runs
     // still receive the server-owned default Leader prompt when none are armed.
     const skillPayload =
@@ -278,7 +281,7 @@ export function LaunchScreen({ send, onLaunched, onLaunchError, canonicalLaunch,
             systemPrompt: freezeLeaderSystemPrompt({
               skillIds: selectedSkillIds,
               skillValues,
-              orchestrationMode: canonical ? "auto" : "direct",
+              orchestrationMode: "auto",
             }).systemPrompt,
             skillIds: selectedSkillIds,
             skillValues,
@@ -295,34 +298,19 @@ export function LaunchScreen({ send, onLaunched, onLaunchError, canonicalLaunch,
       ...(imageAttachments.length > 0 ? { attachments: imageAttachments } : {}),
       ...skillPayload,
     };
-    if (canonical && canonicalLaunch) {
-      setError(null);
-      canonicalLaunch({
-        title: trimmedPrompt.split("\n")[0]!.slice(0, 120) || "Mobile Leader",
-        changeMode: worktreeIsolation ? "worktree" : "live",
-        prompt: launchPrompt,
-        options: { ...runtimeOptions, orchestrationMode: "auto" },
-      }, onLaunched, (message) => {
-        launchingRef.current = false;
-        setLaunching(false);
-        setError(message);
-        onLaunchError?.(message);
-      });
-      return;
-    }
-
-    const sessionKey = `leader-${randomUuid()}`;
-    send({
-      type: "create_session",
-      sessionKey,
+    setError(null);
+    canonicalLaunch({
+      title: trimmedPrompt.split("\n")[0]!.slice(0, 120) || "Mobile Leader",
+      changeMode: worktreeIsolation ? "worktree" : "live",
       prompt: launchPrompt,
-      ...(trimmedPrompt ? { displayPrompt: trimmedPrompt } : {}),
-      role: "leader",
-      ...(targetProjectId ? { workspaceId: targetProjectId } : { cwd: targetPath }),
-      worktreeIsolation,
-      ...runtimeOptions,
+      options: { ...runtimeOptions, orchestrationMode: "auto" },
+    }, onLaunched, (message) => {
+      launchingRef.current = false;
+      setLaunching(false);
+      setError(message);
+      onLaunchError?.(message);
     });
-    onLaunched(sessionKey);
+
   }
 
   async function handleAttachChange(event: ChangeEvent<HTMLInputElement>) {

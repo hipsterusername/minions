@@ -99,8 +99,7 @@ export function installTaskGraphPlanningRuntime(input: {
   });
   input.sessionDeps.getLeaderOrchestrationMode = (runKey) =>
     leaderOrchestrationModeForRun(input.db, runKey);
-  input.sessionDeps.getTaskGraphPlanning = (runKey) =>
-    leaderOrchestrationModeForRun(input.db, runKey) === "direct" ? null : coordinator;
+  input.sessionDeps.getTaskGraphPlanning = () => coordinator;
   return coordinator;
 }
 

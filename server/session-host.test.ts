@@ -1,3 +1,5 @@
+import { createWorkItem, startWorkItemIteration } from "./work-item-repo.ts";
+import type { TaskGraphPlanningCoordinator } from "./task-graph/planning-coordinator.ts";
 /**
  * SessionHost — lifecycle tests.
  *
@@ -128,6 +130,7 @@ function makeHarness(id = "host-1", cwd = "/tmp"): Harness {
     bus,
     startChildSession: vi.fn(),
     forEachLeaderTaskState: vi.fn(),
+    getTaskGraphPlanning: () => ({} as TaskGraphPlanningCoordinator),
   };
 
   return { host: new SessionHost(id, cwd), bus, envelopes, deps };
@@ -176,11 +179,10 @@ describe("SessionHost.start — happy-path lifecycle", () => {
   it("allows a canonical live run when the harness has no interception", async () => {
     harnessRef.mutationInterception = "none";
     const { host, deps, envelopes } = makeHarness("live-none");
-    // This lifecycle-only harness deliberately omits the Task Graph runtime.
     deps.getLeaderOrchestrationMode = () => "direct";
     host.workItemId = "work-1";
-    await host.start({ sessionKey: host.id, workItemId: "work-1",
-      prompt: "change files", cwd: host.cwd, role: "leader",
+    await host.start({ sessionKey: host.id,
+      prompt: "change files", cwd: host.cwd, role: "leader", workItemId: "work-1",
       worktreeIsolation: false }, deps);
     expect(harnessRef.starts).toHaveLength(1);
     expect(host.lastError).toBeFalsy();
@@ -190,11 +192,10 @@ describe("SessionHost.start — happy-path lifecycle", () => {
   it("allows a canonical live run when the harness is only observe-only", async () => {
     harnessRef.mutationInterception = "observe_only";
     const { host, deps, envelopes } = makeHarness("live-observe-only");
-    // This lifecycle-only harness deliberately omits the Task Graph runtime.
     deps.getLeaderOrchestrationMode = () => "direct";
     host.workItemId = "work-1";
-    await host.start({ sessionKey: host.id, workItemId: "work-1",
-      prompt: "change files", cwd: host.cwd, role: "leader",
+    await host.start({ sessionKey: host.id,
+      prompt: "change files", cwd: host.cwd, role: "leader", workItemId: "work-1",
       worktreeIsolation: false }, deps);
     expect(harnessRef.starts).toHaveLength(1);
     expect(host.status).not.toBe("error");
@@ -204,7 +205,7 @@ describe("SessionHost.start — happy-path lifecycle", () => {
   it("allows an observe-only child that inherits its parent's worktree", async () => {
     harnessRef.mutationInterception = "observe_only";
     const { host, deps } = makeHarness("safe-child", "/repo"); host.workItemId = "work-1";
-    await host.start({ sessionKey: host.id, workItemId: "work-1", prompt: "change",
+    await host.start({ sessionKey: host.id, prompt: "change",
       cwd: "/repo", role: "minion", worktreeIsolation: false,
       parentWorktree: { path: "/repo/.minions/worktrees/parent", branch: "minions/parent",
         projectPath: "/repo", leaderSessionKey: "parent", createdAt: 1, lifecycle: "active" } }, deps);
@@ -320,7 +321,7 @@ describe("SessionHost.start — happy-path lifecycle", () => {
             prompt: "Continue.",
             cwd: host.cwd,
             resumeId: host.sessionId ?? undefined,
-            role: "leader",
+            role: "leader", workItemId: "work-1",
             harness: "claude",
           },
         });
@@ -330,7 +331,7 @@ describe("SessionHost.start — happy-path lifecycle", () => {
       control: { abort: () => {} },
     });
 
-    await host.start({ sessionKey: host.id, prompt: "p", cwd: host.cwd, role: "leader" }, deps);
+    await host.start({ sessionKey: host.id, prompt: "p", cwd: host.cwd, role: "leader", workItemId: "work-1" }, deps);
 
     expect(host.taskState?.pendingWait).toBeNull();
     expect(startChildSession).toHaveBeenCalledWith(expect.objectContaining({
@@ -507,13 +508,13 @@ describe("SessionHost.start — happy-path lifecycle", () => {
       { kind: "init", sessionId: "provider-1", model: "sonnet" },
       { kind: "done", reason: "stop" },
     ];
-    await host.start({ sessionKey: host.id, workItemId: "work-1", prompt: "first", cwd: host.cwd }, deps);
+    await host.start({ sessionKey: host.id, prompt: "first", cwd: host.cwd }, deps);
 
     harnessRef.events = [
       { kind: "init", sessionId: "provider-1", model: "sonnet" },
       { kind: "done", reason: "stop" },
     ];
-    await host.start({ sessionKey: host.id, workItemId: "work-1", prompt: "second", cwd: host.cwd }, deps);
+    await host.start({ sessionKey: host.id, prompt: "second", cwd: host.cwd }, deps);
 
     const sdkEvents = host.eventBuffer.filter((event) => event.type === "sdk_event");
     expect(sdkEvents).toHaveLength(2);
@@ -654,19 +655,19 @@ describe("SessionHost.start — error path", () => {
       { kind: "usage", input: 110_000, output: 1 },
       { kind: "done", reason: "stop" },
     ];
-    await host.start({ sessionKey: host.id, prompt: "first", cwd: host.cwd, role: "leader" }, deps);
+    await host.start({ sessionKey: host.id, prompt: "first", cwd: host.cwd, role: "leader", workItemId: "work-1" }, deps);
 
     harnessRef.events = [
       { kind: "init", sessionId: "thread-1", model: "sonnet" },
       { kind: "done", reason: "stop" },
     ];
-    await host.start({ sessionKey: host.id, prompt: "next wake", cwd: host.cwd, role: "leader" }, deps);
+    await host.start({ sessionKey: host.id, prompt: "next wake", cwd: host.cwd, role: "leader", workItemId: "work-1" }, deps);
 
     const secondStart = harnessRef.starts[1] as { prompt: string };
     expect(secondStart.prompt).toContain("checkpoint_session");
     expect(secondStart.prompt).toContain("55%");
 
-    await host.start({ sessionKey: host.id, prompt: "third", cwd: host.cwd, role: "leader" }, deps);
+    await host.start({ sessionKey: host.id, prompt: "third", cwd: host.cwd, role: "leader", workItemId: "work-1" }, deps);
     const thirdStart = harnessRef.starts[2] as { prompt: string };
     expect(thirdStart.prompt).not.toContain("checkpoint_session");
   });
@@ -692,7 +693,7 @@ describe("SessionHost.start — error path", () => {
       return { events: (async function* () { for (const event of events) yield event; })(), control: { abort: () => {} } };
     };
 
-    await host.start({ sessionKey: host.id, prompt: "p", cwd: host.cwd, role: "leader", resumeId: "old-thread" }, deps);
+    await host.start({ sessionKey: host.id, prompt: "p", displayPrompt: "Original user prompt", cwd: host.cwd, role: "leader", workItemId: "work-1", resumeId: "old-thread" }, deps);
 
     expect(starts).toBe(2);
     expect(host.sessionId).toBe("new-thread");
@@ -702,11 +703,20 @@ describe("SessionHost.start — error path", () => {
     expect(secondStart.prompt).not.toContain("<previous-session-context>");
     expect(secondStart.prompt).toContain("Goal: finish compaction");
     expect(envelopes.some((e) => e.type === "session_compacted")).toBe(true);
+    expect(host.eventBuffer.flatMap((event) => event.type === "sdk_event"
+      && event.event?.kind === "text" && event.event.role === "user"
+      ? [event.event.text] : [])).toEqual(["Original user prompt"]);
+
+    await host.start({ sessionKey: host.id, invocationKind: "resume_open_run",
+      prompt: "Apply the next revision", displayPrompt: "Apply the next revision",
+      cwd: host.cwd, role: "leader", workItemId: "work-1", resumeId: "new-thread" }, deps);
+    expect(host.eventBuffer.flatMap((event) => event.type === "sdk_event"
+      && event.event?.kind === "text" && event.event.role === "user"
+      ? [event.event.text] : [])).toEqual(["Original user prompt", "Apply the next revision"]);
   });
 
   it("keeps the logical run active while a checkpoint opens its fresh provider thread", async () => {
     const { host, deps, envelopes } = makeHarness("leader-checkpoint-lifecycle");
-    // This lifecycle-only harness deliberately omits the Task Graph runtime.
     deps.getLeaderOrchestrationMode = () => "direct";
     host.workItemId = "work-checkpoint-lifecycle";
     const runtimeLifecycle = {
@@ -767,6 +777,11 @@ describe("SessionHost.start — error path", () => {
   it("does not let a stale recovery frame persist error after a healthy compacted run", async () => {
     const db = openPersistDb(":memory:");
     const { host, deps } = makeHarness("leader-db-status");
+    createWorkItem(db, { id: "work-1", projectId: "project", projectPath: host.cwd,
+      title: "Checkpoint", changeMode: "live", at: Date.now() });
+    startWorkItemIteration(db, { workItemId: "work-1", runKey: host.id,
+      idempotencyKey: "start-checkpoint", expectedLifecycleRevision: 0,
+      expectedCurrentRunKey: null, at: Date.now() });
     await createCheckpointSessionToolDef(taskToolCtx("leader-db-status")).handler({});
 
     const emitToSession = deps.bus.emitToSession.bind(deps.bus);
@@ -794,8 +809,9 @@ describe("SessionHost.start — error path", () => {
       return { events: (async function* () { for (const event of events) yield event; })(), control: { abort: () => {} } };
     };
 
-    await host.start({ sessionKey: host.id, prompt: "p", cwd: host.cwd, role: "leader", resumeId: "old-thread" }, deps);
+    await host.start({ sessionKey: host.id, prompt: "p", cwd: host.cwd, role: "leader", workItemId: "work-1", resumeId: "old-thread" }, deps);
 
+    expect(host.lastError).toBeFalsy();
     expect(starts).toBe(2);
     expect(host.status).toBe("idle");
     expect(
@@ -824,7 +840,7 @@ describe("SessionHost.start — error path", () => {
       return { events: (async function* () { for (const event of events) yield event; })(), control: { abort: () => {} } };
     };
 
-    await host.start({ sessionKey: host.id, prompt: "p", cwd: host.cwd, role: "leader", resumeId: "old-force" }, deps);
+    await host.start({ sessionKey: host.id, prompt: "p", cwd: host.cwd, role: "leader", workItemId: "work-1", resumeId: "old-force" }, deps);
 
     expect(starts).toBe(2);
     const secondStart = harnessRef.starts[1] as { resumeId?: string; prompt: string };

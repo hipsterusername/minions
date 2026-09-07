@@ -44,19 +44,13 @@ describe("buildBaseLeaderPrompt", () => {
     expect(buildBaseLeaderPrompt(CLAUDE_BUILT_IN_TOOLS)).not.toContain("Approval Workflow");
   });
 
-  it("has a dedicated section teaching the form as the way to ask the user a question", () => {
-    expect(LEADER_SYSTEM_PROMPT).toContain("## Asking the User a Question");
-    // The form component must be named as the mechanism.
-    expect(LEADER_SYSTEM_PROMPT).toMatch(/render a `form`/i);
-  });
-
   it("explicitly disclaims a native AskUserQuestion tool so Opus agents stop reaching for it", () => {
     expect(LEADER_SYSTEM_PROMPT).toContain("AskUserQuestion");
     expect(LEADER_SYSTEM_PROMPT).toMatch(/no `AskUserQuestion` tool/i);
   });
 
   it("keeps ask-user guidance in the stable core before generated capabilities", () => {
-    expect(LEADER_SYSTEM_PROMPT).toMatch(/## Asking the User a Question/i);
+    expect(LEADER_SYSTEM_PROMPT).toContain("## Asking the User a Question");
     expect(LEADER_SYSTEM_PROMPT).toMatch(/render a `form`/i);
     expect(LEADER_SYSTEM_PROMPT.indexOf("## Asking the User a Question")).toBeLessThan(
       LEADER_SYSTEM_PROMPT.indexOf("## Your Capabilities"),
@@ -68,15 +62,13 @@ describe("buildBaseLeaderPrompt", () => {
     expect(LEADER_SYSTEM_PROMPT).toContain("`/graph` and `/crew`");
     expect(LEADER_SYSTEM_PROMPT).toContain("submit_graph_plan");
     expect(LEADER_SYSTEM_PROMPT).toContain("assign_task");
-    expect(LEADER_SYSTEM_PROMPT).toMatch(/optional reasoning and orchestration aid/i);
+    expect(LEADER_SYSTEM_PROMPT).toMatch(/always enabled and is the standard Minion execution path/i);
     expect(LEADER_SYSTEM_PROMPT).not.toContain("## Legacy planning mode (debug)");
     const legacyPrompt = buildBaseLeaderPrompt(CLAUDE_BUILT_IN_TOOLS, "direct");
-    // Must explain that the system wakes the leader early when all minion tasks finish.
-    expect(legacyPrompt).toMatch(/auto-wake|wakes you early/i);
-    expect(legacyPrompt).toMatch(/10.{1,5}30 min/i);
+    expect(legacyPrompt).toBe(LEADER_SYSTEM_PROMPT);
     // The old 60-second polling example must be gone.
     expect(legacyPrompt).not.toMatch(/wait_and_continue.*60 seconds/i);
-    expect(legacyPrompt).toContain("## Legacy planning mode (debug)");
-    expect(legacyPrompt).not.toContain("## Task Graph planning");
+    expect(legacyPrompt).not.toContain("## Compatibility planning");
+    expect(legacyPrompt).toContain("## Task Graph planning");
   });
 });

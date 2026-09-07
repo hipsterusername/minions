@@ -3,7 +3,7 @@ import { resolveLeaderPlanningProfile } from "./leader-planning-profile.ts";
 
 describe("Leader planning profile", () => {
   it("adds Task Graph assistance without removing direct Leader tools", () => {
-    const profile = resolveLeaderPlanningProfile({ hasCanonicalIdentity: true });
+    const profile = resolveLeaderPlanningProfile({});
 
     expect(profile).toMatchObject({
       backend: "task_graph",
@@ -23,29 +23,15 @@ describe("Leader planning profile", () => {
     ]);
   });
 
-  it("keeps noncanonical compatibility sessions on the legacy profile", () => {
-    const profile = resolveLeaderPlanningProfile({ hasCanonicalIdentity: false });
-
-    expect(profile).toMatchObject({
-      backend: "legacy",
-      orchestrationMode: "direct",
-      promptFeatureIds: ["legacy_planning"],
-      usesTaskGraph: false,
-      includeSkillInventory: true,
-    });
-    expect(profile.taskToolNames).toContain("plan_task");
-    expect(profile.planningToolNames).toEqual([]);
-  });
-
-  it("honors the explicit legacy debug mode for canonical Leaders", () => {
+  it("keeps Graph enabled for canonical Leaders with a saved legacy override", () => {
     const profile = resolveLeaderPlanningProfile({
-      hasCanonicalIdentity: true,
       orchestrationMode: "direct",
     });
 
-    expect(profile.backend).toBe("legacy");
-    expect(profile.promptFeatureIds).toEqual(["legacy_planning"]);
+    expect(profile.backend).toBe("task_graph");
+    expect(profile.promptFeatureIds).toEqual(["task_graph_planning"]);
     expect(profile.taskToolNames).toContain("assign_task");
-    expect(profile.planningToolNames).toEqual([]);
+    expect(profile.planningToolNames).toContain("submit_graph_plan");
+    expect(profile.orchestrationMode).toBe("auto");
   });
 });

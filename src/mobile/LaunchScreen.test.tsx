@@ -106,7 +106,7 @@ describe("LaunchScreen", () => {
 
     render(
       <LaunchScreen
-        send={vi.fn()}
+        canonicalLaunch={vi.fn()}
         onLaunched={vi.fn()}
         lockedProject={{ id: "compact", path: "/work/compact", name: "Compact" }}
       />,
@@ -133,9 +133,9 @@ describe("LaunchScreen", () => {
   it("separates the prompt label from its live character counter", () => {
     render(
       <LaunchScreen
-        send={vi.fn()}
+        canonicalLaunch={vi.fn()}
         onLaunched={vi.fn()}
-        lockedProject={{ path: "/work/prompt", name: "Prompt" }}
+        lockedProject={{ id: "project-test", path: "/work/prompt", name: "Prompt" }}
       />,
     );
 
@@ -159,7 +159,7 @@ describe("LaunchScreen", () => {
       },
       defaultWorktreeIsolation: true,
     });
-    const send = vi.fn();
+    const launch = vi.fn((_input: unknown, onStarted: (key: string) => void) => onStarted("run-1"));
     let subscriber: ((msg: unknown) => void) | undefined;
     const subscribe = vi.fn((fn: (msg: unknown) => void) => {
       subscriber = fn;
@@ -169,7 +169,7 @@ describe("LaunchScreen", () => {
     render(
       <HarnessListProvider send={vi.fn()} subscribe={subscribe} connected>
         <LaunchScreen
-          send={send}
+          canonicalLaunch={launch}
           onLaunched={vi.fn()}
           lockedProject={{ id: "alpha", path: "/work/alpha", name: "Alpha" }}
         />
@@ -191,9 +191,9 @@ describe("LaunchScreen", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Launch leader" }));
 
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({
-      type: "create_session",
-      workspaceId: "alpha",
+    expect(launch).toHaveBeenCalledWith(expect.objectContaining({
+      changeMode: "worktree",
+      options: expect.objectContaining({
       harness: "codex",
       model: "gpt-5.5-codex",
       thinkingConfig: { enabled: true, effort: "high", display: "summarized" },
@@ -202,8 +202,9 @@ describe("LaunchScreen", () => {
         filesystemScope: "read-only",
         approvalPolicy: "always",
       },
-      worktreeIsolation: true,
-    }));
+
+      }),
+    }), expect.any(Function), expect.any(Function));
   });
 
   it("lets a mobile Leader grant full host access without changing approval policy", async () => {
@@ -220,12 +221,12 @@ describe("LaunchScreen", () => {
       subscriber = fn;
       return () => {};
     });
-    const send = vi.fn();
+    const launch = vi.fn((_input: unknown, onStarted: (key: string) => void) => onStarted("run-1"));
 
     render(
       <HarnessListProvider send={vi.fn()} subscribe={subscribe} connected>
         <LaunchScreen
-          send={send}
+          canonicalLaunch={launch}
           onLaunched={vi.fn()}
           lockedProject={{ id: "host-access", path: "/work/host-access", name: "Host access" }}
         />
@@ -240,12 +241,17 @@ describe("LaunchScreen", () => {
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Use host tools" } });
     fireEvent.click(screen.getByRole("button", { name: "Launch leader" }));
 
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+    expect(launch).toHaveBeenCalledWith(expect.objectContaining({
+
+      options: expect.objectContaining({
+
       sandboxPolicy: {
         filesystemScope: "unrestricted",
         approvalPolicy: "on-request",
       },
-    }));
+
+      }),
+    }), expect.any(Function), expect.any(Function));
   });
 
   it("renders projects, validates required input, and launches a leader", async () => {
@@ -265,11 +271,10 @@ describe("LaunchScreen", () => {
         hasSidecar: false,
       },
     ]);
-    vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000001");
-    const send = vi.fn();
+    const launch = vi.fn((_input: unknown, onStarted: (key: string) => void) => onStarted("run-1"));
     const onLaunched = vi.fn();
 
-    render(<LaunchScreen send={send} onLaunched={onLaunched} />);
+    render(<LaunchScreen canonicalLaunch={launch} onLaunched={onLaunched} />);
 
     await waitFor(() => {
       expect(screen.getByText("Alpha")).toBeInTheDocument();
@@ -290,17 +295,15 @@ describe("LaunchScreen", () => {
     fireEvent.click(submit);
 
     await waitFor(() => {
-      expect(send).toHaveBeenCalledWith({
-        type: "create_session",
-        sessionKey: "leader-00000000-0000-4000-8000-000000000001",
+      expect(launch).toHaveBeenCalledWith(expect.objectContaining({
         prompt: "Build the mobile launch flow",
-        displayPrompt: "Build the mobile launch flow",
-        role: "leader",
-        workspaceId: "alpha",
-        worktreeIsolation: false,
-      });
+        changeMode: "live",
+      options: expect.objectContaining({
+
+      }),
+    }), expect.any(Function), expect.any(Function));
     });
-    expect(onLaunched).toHaveBeenCalledWith("leader-00000000-0000-4000-8000-000000000001");
+    expect(onLaunched).toHaveBeenCalledWith("run-1");
   });
 
   it("disables canonical launch immediately and ignores duplicate submissions", () => {
@@ -308,7 +311,6 @@ describe("LaunchScreen", () => {
 
     render(
       <LaunchScreen
-        send={vi.fn()}
         onLaunched={vi.fn()}
         canonicalLaunch={canonicalLaunch}
         lockedProject={{ id: "alpha", path: "/work/alpha", name: "Alpha" }}
@@ -339,7 +341,6 @@ describe("LaunchScreen", () => {
 
     render(
       <LaunchScreen
-        send={vi.fn()}
         onLaunched={vi.fn()}
         canonicalLaunch={canonicalLaunch}
         lockedProject={{ id: "alpha", path: "/work/alpha", name: "Alpha" }}
@@ -357,65 +358,25 @@ describe("LaunchScreen", () => {
     expect(submit).not.toHaveAttribute("aria-busy");
   });
 
-  it("still launches when crypto.randomUUID is unavailable (non-secure LAN context)", async () => {
-    // Regression: on a phone over plain HTTP, crypto.randomUUID is undefined.
-    // Minting the session key must not throw, so the leader still launches.
-    const originalCrypto = globalThis.crypto;
-    Object.defineProperty(globalThis, "crypto", {
-      configurable: true,
-      value: {
-        getRandomValues<T extends ArrayBufferView>(array: T): T {
-          const bytes = new Uint8Array(array.buffer, array.byteOffset, array.byteLength);
-          for (let i = 0; i < bytes.length; i += 1) bytes[i] = i + 1;
-          return array;
-        },
-      },
-    });
-
-    try {
-      const send = vi.fn();
-      const onLaunched = vi.fn();
-
-      render(
-        <LaunchScreen
-          send={send}
-          onLaunched={onLaunched}
-          lockedProject={{ path: "/work/delta", name: "Delta" }}
-        />,
-      );
-
-      fireEvent.change(screen.getByLabelText("Prompt"), {
-        target: { value: "Ship it" },
-      });
-      fireEvent.click(screen.getByRole("button", { name: "Launch leader" }));
-
-      await waitFor(() => {
-        expect(send).toHaveBeenCalledTimes(1);
-      });
-      const payload = send.mock.calls[0]![0] as { type: string; sessionKey: string };
-      expect(payload.type).toBe("create_session");
-      expect(payload.sessionKey).toMatch(
-        /^leader-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-      );
-      expect(onLaunched).toHaveBeenCalledWith(payload.sessionKey);
-    } finally {
-      Object.defineProperty(globalThis, "crypto", {
-        configurable: true,
-        value: originalCrypto,
-      });
-    }
+  it("does not launch a Leader without project identity", () => {
+    const canonicalLaunch = vi.fn();
+    render(<LaunchScreen canonicalLaunch={canonicalLaunch} onLaunched={vi.fn()}
+      lockedProject={{ path: "/work/unbound", name: "Unbound" }} />);
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Ship it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Launch leader" }));
+    expect(canonicalLaunch).not.toHaveBeenCalled();
+    expect(screen.getByText("Select a project before starting a Leader.")).toBeInTheDocument();
   });
 
   it("locks to a project: hides the picker, skips the fetch, and launches into it", async () => {
-    vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000002");
-    const send = vi.fn();
+    const launch = vi.fn((_input: unknown, onStarted: (key: string) => void) => onStarted("run-1"));
     const onLaunched = vi.fn();
 
     render(
       <LaunchScreen
-        send={send}
+        canonicalLaunch={launch}
         onLaunched={onLaunched}
-        lockedProject={{ path: "/work/gamma", name: "Gamma" }}
+        lockedProject={{ id: "project-test", path: "/work/gamma", name: "Gamma" }}
       />,
     );
 
@@ -435,35 +396,32 @@ describe("LaunchScreen", () => {
     fireEvent.click(submit);
 
     await waitFor(() => {
-      expect(send).toHaveBeenCalledWith({
-        type: "create_session",
-        sessionKey: "leader-00000000-0000-4000-8000-000000000002",
+      expect(launch).toHaveBeenCalledWith(expect.objectContaining({
         prompt: "Do the thing",
-        displayPrompt: "Do the thing",
-        role: "leader",
-        cwd: "/work/gamma",
-        worktreeIsolation: false,
-      });
+        changeMode: "live",
+      options: expect.objectContaining({
+
+      }),
+    }), expect.any(Function), expect.any(Function));
     });
-    expect(onLaunched).toHaveBeenCalledWith("leader-00000000-0000-4000-8000-000000000002");
+    expect(onLaunched).toHaveBeenCalledWith("run-1");
   });
 
   it("lists models from every harness (Anthropic + OpenAI) and launches with the chosen model + harness", async () => {
-    vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000003");
     let subscriber: ((msg: unknown) => void) | undefined;
     const subscribe = vi.fn((fn: (msg: unknown) => void) => {
       subscriber = fn;
       return () => {};
     });
-    const send = vi.fn();
+    const launch = vi.fn((_input: unknown, onStarted: (key: string) => void) => onStarted("run-1"));
     const onLaunched = vi.fn();
 
     render(
       <HarnessListProvider send={vi.fn()} subscribe={subscribe} connected={true}>
         <LaunchScreen
-          send={send}
+          canonicalLaunch={launch}
           onLaunched={onLaunched}
-          lockedProject={{ path: "/work/epsilon", name: "Epsilon" }}
+          lockedProject={{ id: "project-test", path: "/work/epsilon", name: "Epsilon" }}
         />
       </HarnessListProvider>,
     );
@@ -487,19 +445,17 @@ describe("LaunchScreen", () => {
     fireEvent.click(screen.getByRole("button", { name: "Launch leader" }));
 
     await waitFor(() => {
-      expect(send).toHaveBeenCalledTimes(1);
+      expect(launch).toHaveBeenCalledTimes(1);
     });
-    expect(send).toHaveBeenCalledWith({
-      type: "create_session",
-      sessionKey: "leader-00000000-0000-4000-8000-000000000003",
+    expect(launch).toHaveBeenCalledWith(expect.objectContaining({
       prompt: "Do work",
-      displayPrompt: "Do work",
-      role: "leader",
-      cwd: "/work/epsilon",
-      worktreeIsolation: false,
+      changeMode: "live",
+      options: expect.objectContaining({
       model: "gpt-5.5",
       harness: "codex",
-    });
+
+      }),
+    }), expect.any(Function), expect.any(Function));
   });
 
   it("lets a mobile Leader override reasoning for the selected model", async () => {
@@ -508,14 +464,14 @@ describe("LaunchScreen", () => {
       subscriber = fn;
       return () => {};
     });
-    const send = vi.fn();
+    const launch = vi.fn((_input: unknown, onStarted: (key: string) => void) => onStarted("run-1"));
 
     render(
       <HarnessListProvider send={vi.fn()} subscribe={subscribe} connected>
         <LaunchScreen
-          send={send}
+          canonicalLaunch={launch}
           onLaunched={vi.fn()}
-          lockedProject={{ path: "/work/reasoning", name: "Reasoning" }}
+          lockedProject={{ id: "project-test", path: "/work/reasoning", name: "Reasoning" }}
         />
       </HarnessListProvider>,
     );
@@ -534,11 +490,16 @@ describe("LaunchScreen", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Launch leader" }));
 
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+    expect(launch).toHaveBeenCalledWith(expect.objectContaining({
+
+      options: expect.objectContaining({
+
       model: "gpt-5.5-codex",
       harness: "codex",
       thinkingConfig: { enabled: true, effort: "medium", display: "omitted" },
-    }));
+
+      }),
+    }), expect.any(Function), expect.any(Function));
   });
 
   it("explains capability gating and disables reasoning for unsupported models", async () => {
@@ -550,12 +511,12 @@ describe("LaunchScreen", () => {
       subscriber = fn;
       return () => {};
     });
-    const send = vi.fn();
+    const launch = vi.fn((_input: unknown, onStarted: (key: string) => void) => onStarted("run-1"));
 
     render(
       <HarnessListProvider send={vi.fn()} subscribe={subscribe} connected>
         <LaunchScreen
-          send={send}
+          canonicalLaunch={launch}
           onLaunched={vi.fn()}
           lockedProject={{ id: "gated", path: "/work/gated", name: "Gated" }}
         />
@@ -577,22 +538,26 @@ describe("LaunchScreen", () => {
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Run safely" } });
     fireEvent.click(screen.getByRole("button", { name: "Launch leader" }));
 
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+    expect(launch).toHaveBeenCalledWith(expect.objectContaining({
+
+      options: expect.objectContaining({
+
       model: "echo-fast",
       harness: "echo",
       thinkingConfig: { enabled: false, effort: "high", display: "summarized" },
-    }));
+
+      }),
+    }), expect.any(Function), expect.any(Function));
   });
 
   it("omits the model when left on Default", async () => {
-    vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000004");
-    const send = vi.fn();
+    const launch = vi.fn((_input: unknown, onStarted: (key: string) => void) => onStarted("run-1"));
 
     render(
       <LaunchScreen
-        send={send}
+        canonicalLaunch={launch}
         onLaunched={vi.fn()}
-        lockedProject={{ path: "/work/zeta", name: "Zeta" }}
+        lockedProject={{ id: "project-test", path: "/work/zeta", name: "Zeta" }}
       />,
     );
 
@@ -600,20 +565,19 @@ describe("LaunchScreen", () => {
     fireEvent.click(screen.getByRole("button", { name: "Launch leader" }));
 
     await waitFor(() => {
-      expect(send).toHaveBeenCalledTimes(1);
+      expect(launch).toHaveBeenCalledTimes(1);
     });
-    expect(send.mock.calls[0]![0]).not.toHaveProperty("model");
+    expect((launch.mock.calls[0]![0] as { options: object }).options).not.toHaveProperty("model");
   });
 
   it("launches with selected text files folded into the initial prompt", async () => {
-    vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000005");
-    const send = vi.fn();
+    const launch = vi.fn((_input: unknown, onStarted: (key: string) => void) => onStarted("run-1"));
 
     render(
       <LaunchScreen
-        send={send}
+        canonicalLaunch={launch}
         onLaunched={vi.fn()}
-        lockedProject={{ path: "/work/files", name: "Files" }}
+        lockedProject={{ id: "project-test", path: "/work/files", name: "Files" }}
       />,
     );
 
@@ -633,14 +597,13 @@ describe("LaunchScreen", () => {
     fireEvent.click(submit);
 
     await waitFor(() => {
-      expect(send).toHaveBeenCalledWith({
-        type: "create_session",
-        sessionKey: "leader-00000000-0000-4000-8000-000000000005",
+      expect(launch).toHaveBeenCalledWith(expect.objectContaining({
         prompt: "Attached file: index.html\nMedia type: text/html\n```html\n<main>Hello</main>\n```",
-        role: "leader",
-        cwd: "/work/files",
-        worktreeIsolation: false,
-      });
+        changeMode: "live",
+      options: expect.objectContaining({
+
+      }),
+    }), expect.any(Function), expect.any(Function));
     });
   });
 
@@ -657,12 +620,11 @@ describe("LaunchScreen", () => {
 
   it("loads project skills and arms the leader with skillIds + a compiled system prompt", async () => {
     vi.mocked(getProjectSkills).mockResolvedValue([LINT_SKILL]);
-    vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000006");
-    const send = vi.fn();
+    const launch = vi.fn((_input: unknown, onStarted: (key: string) => void) => onStarted("run-1"));
 
     render(
       <LaunchScreen
-        send={send}
+        canonicalLaunch={launch}
         onLaunched={vi.fn()}
         lockedProject={{ id: "proj-skills", path: "/work/skills", name: "Skills" }}
       />,
@@ -683,8 +645,8 @@ describe("LaunchScreen", () => {
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Go" } });
     fireEvent.click(screen.getByRole("button", { name: "Launch leader" }));
 
-    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
-    const payload = send.mock.calls[0]![0] as {
+    await waitFor(() => expect(launch).toHaveBeenCalledTimes(1));
+    const payload = (launch.mock.calls[0]![0] as { options: unknown }).options as {
       skillIds?: string[];
       skillValues?: Record<string, Record<string, string>>;
       systemPrompt?: string;
@@ -696,12 +658,11 @@ describe("LaunchScreen", () => {
 
   it("omits skill fields from the payload when no skills are armed", async () => {
     vi.mocked(getProjectSkills).mockResolvedValue([LINT_SKILL]);
-    vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000007");
-    const send = vi.fn();
+    const launch = vi.fn((_input: unknown, onStarted: (key: string) => void) => onStarted("run-1"));
 
     render(
       <LaunchScreen
-        send={send}
+        canonicalLaunch={launch}
         onLaunched={vi.fn()}
         lockedProject={{ id: "proj-skills", path: "/work/skills", name: "Skills" }}
       />,
@@ -712,8 +673,8 @@ describe("LaunchScreen", () => {
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Go" } });
     fireEvent.click(screen.getByRole("button", { name: "Launch leader" }));
 
-    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
-    const payload = send.mock.calls[0]![0] as Record<string, unknown>;
+    await waitFor(() => expect(launch).toHaveBeenCalledTimes(1));
+    const payload = (launch.mock.calls[0]![0] as { options: unknown }).options as Record<string, unknown>;
     expect(payload).not.toHaveProperty("skillIds");
     expect(payload).not.toHaveProperty("skillValues");
     expect(payload).not.toHaveProperty("systemPrompt");

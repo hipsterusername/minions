@@ -9,13 +9,18 @@ describe("primary run planning config", () => {
     expect(JSON.parse(json)).toMatchObject({ orchestrationMode: "auto" });
   });
 
-  it("preserves an existing legacy debug mode when updating run config", () => {
+  it("migrates an existing legacy debug mode when updating run config", () => {
     const { config } = resolvePrimaryRunConfig(
       JSON.stringify({ orchestrationMode: "direct", harness: "codex" }),
       { prompt: "Continue" },
     );
 
-    expect(config.orchestrationMode).toBe("direct");
+    expect(config.orchestrationMode).toBe("auto");
+  });
+
+  it("ignores a direct-mode override from an older client", () => {
+    const { config } = resolvePrimaryRunConfig(null, { orchestrationMode: "direct" });
+    expect(config.orchestrationMode).toBe("auto");
   });
 
   it("stages bounded connected context and orchestration mode before launch", () => {

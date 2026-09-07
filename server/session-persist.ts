@@ -23,6 +23,7 @@ import {
 import { serverLogger } from "./logging.ts";
 import { reviewLifecycleToColumns, type SessionReviewLifecycle } from "./session-review-lifecycle.ts";
 import { ensureWorkItemSchema } from "./work-item-schema.ts";
+import { backfillLegacyWorkItems } from "./work-item-migration.ts";
 import { removeSessionPersistence } from "./session-persist-remove.ts";
 import { getMinionsHome } from "./workspace-registry.ts";
 import {
@@ -355,7 +356,6 @@ export function persistRenderState(
   }
 }
 
-/** Durable pieces used to rematerialize a host with fresh volatile handles. */
 export interface HydratedSession {
   row: repo.SessionRow & { permission_mode?: string | null };
   armedSystemPrompt: string | null;
@@ -368,7 +368,8 @@ export interface HydratedSession {
 export function hydrateSessionsFromDb(): HydratedSession[] {
   const db = ensureDb();
   if (!db) return [];
-
+  // Upgrade historical Leaders before exposing hosts or rebuilding wakes.
+  backfillLegacyWorkItems(db, Date.now());
   let rows: Array<repo.SessionRow & { permission_mode?: string | null }>;
   try {
     rows = repo.getAllSessions(db);

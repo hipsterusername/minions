@@ -136,10 +136,22 @@ function fillRegistryWithRunning(
 }
 
 describe("createSession — MAX_SESSIONS cap", () => {
+  it.each([undefined, "", " "])("rejects a bare Leader launch (%s) with actionable guidance", async (workItemId) => {
+    const registry = new SessionRegistry();
+    const { ws, sent } = makeFakeWs();
+    await createSession(makeCtx(registry, 5), {
+      type: "create_session", sessionKey: "bare-leader", role: "leader", workItemId,
+    }, ws as unknown as Parameters<typeof createSession>[2]);
+    expect(sent[0]?.payload).toMatchObject({ type: "session_error", code: "WORK_ITEM_ID_REQUIRED",
+      guidance: "Use create_work_item and start_work_item_run." });
+    expect(registry.has("bare-leader")).toBe(false);
+  });
+
   it("passes selected skill IDs and values into the session host", async () => {
     const registry = new SessionRegistry();
     const starts: StartSessionOptions[] = [];
     const ctx = makeCtx(registry, 5);
+    ctx.workItems = canonicalService("leader-skills");
     ctx.launchSession = async (options) => {
       starts.push(options);
       return {
@@ -156,7 +168,7 @@ describe("createSession — MAX_SESSIONS cap", () => {
       type: "create_session",
       sessionKey: "leader-skills",
       prompt: "Review this project",
-      cwd: process.cwd(),
+      workItemId: "work-ingress",
       role: "leader",
       skillIds: ["code-review"],
       skillValues: { "code-review": { target: "the API" } },
@@ -168,10 +180,11 @@ describe("createSession — MAX_SESSIONS cap", () => {
     })]);
   });
 
-  it("is idempotent for an existing sessionKey and does not start another host", () => {
+  it("is idempotent for an existing sessionKey and does not start another host", async () => {
     const registry = new SessionRegistry();
     const existing = new SessionHost("leader-existing", process.cwd());
     existing.status = "running";
+    existing.workItemId = "work-ingress";
     (registry as unknown as { map: Map<string, SessionHost> }).map.set(
       existing.id,
       existing,
@@ -186,15 +199,16 @@ describe("createSession — MAX_SESSIONS cap", () => {
 
     const { ws, sent } = makeFakeWs();
     const ctx = makeCtx(registry, 1);
+    ctx.workItems = canonicalService("leader-existing");
     const cmd: WsCommand = {
       type: "create_session",
       sessionKey: "leader-existing",
       prompt: "hi",
-      cwd: process.cwd(),
+      workItemId: "work-ingress",
       role: "leader",
     };
 
-    createSession(ctx, cmd, ws as unknown as Parameters<typeof createSession>[2]);
+    await createSession(ctx, cmd, ws as unknown as Parameters<typeof createSession>[2]);
 
     expect(starts).toHaveLength(0);
     expect(sent).toHaveLength(1);
@@ -219,11 +233,12 @@ describe("createSession — MAX_SESSIONS cap", () => {
 
     const { ws, sent } = makeFakeWs();
     const ctx = makeCtx(registry, 50);
+    ctx.workItems = canonicalService("leader-new");
     const cmd: WsCommand = {
       type: "create_session",
       sessionKey: "leader-new",
       prompt: "hi",
-      cwd: process.cwd(),
+      workItemId: "work-ingress",
       role: "leader",
     };
 
@@ -246,11 +261,12 @@ describe("createSession — MAX_SESSIONS cap", () => {
     const busSent: Array<Record<string, unknown>> = [];
     const { ws } = makeFakeWs();
     const ctx = makeCtx(registry, 5, makeBus(busSent));
+    ctx.workItems = canonicalService("leader-new");
     const cmd: WsCommand = {
       type: "create_session",
       sessionKey: "leader-new",
       prompt: "hi",
-      cwd: process.cwd(),
+      workItemId: "work-ingress",
       role: "leader",
     };
 

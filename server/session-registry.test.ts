@@ -632,6 +632,13 @@ describe("SessionRegistry.hydrateFromDb — sessionId round-trip", () => {
     const host = r.get("leader-1");
     expect(host).toBeDefined();
     expect(host?.sessionId).toBe("abc-123");
+    expect(host?.workItemId).toMatch(/^legacy-work-/);
+    const db = openPersistDb();
+    expect(db.prepare("SELECT work_item_id FROM sessions WHERE session_key = ?").get("leader-1"))
+      .toEqual({ work_item_id: host?.workItemId });
+    const second = new SessionRegistry();
+    second.hydrateFromDb();
+    expect(second.get("leader-1")?.workItemId).toBe(host?.workItemId);
   });
 
   it("restores immutable work-item and child-run lineage columns", () => {

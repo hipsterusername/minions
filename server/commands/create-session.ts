@@ -77,6 +77,14 @@ export const createSession: CommandHandler = async (
     return;
   }
 
+  if (cmd.role === "leader" && !cmd.workItemId?.trim()) {
+    rejectCreate(ws, key, "Leaders require a work item. Create a work item and start its run.", {
+      code: "WORK_ITEM_ID_REQUIRED",
+      guidance: "Use create_work_item and start_work_item_run.",
+    });
+    return;
+  }
+
   if (cmd.workItemId) {
     if (!ctx.workItems) {
       rejectCreate(ws, key, "Canonical work-item service is unavailable", {

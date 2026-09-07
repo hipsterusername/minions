@@ -132,7 +132,6 @@ const leaderAgent: AgentType = {
     const customization = decodeLeaderPromptCustomization(customPrompt);
     const planning = resolveLeaderPlanningProfile({
       orchestrationMode: ctx.orchestrationMode,
-      hasCanonicalIdentity: Boolean(ctx.workItemId && ctx.runKey),
     });
     return composeLeaderPrompt({
       builtInTools: (tools ?? CLAUDE_LEADER_BUILT_IN_TOOLS)
@@ -171,10 +170,8 @@ const leaderAgent: AgentType = {
     const roleSystemEnabled = isRoleSystemEnabled(ctx);
     const planning = resolveLeaderPlanningProfile({
       orchestrationMode: ctx.orchestrationMode,
-      hasCanonicalIdentity: Boolean(ctx.workItemId && ctx.runKey),
     });
-    if (planning.usesTaskGraph && (!ctx.taskGraphPlanning
-      || !ctx.workItemId || !ctx.runKey)) {
+    if (!ctx.taskGraphPlanning || !ctx.workItemId?.trim() || !ctx.runKey?.trim()) {
       throw new Error("Graph-mode Leader requires canonical planning authority");
     }
 
@@ -209,15 +206,14 @@ const leaderAgent: AgentType = {
       planningBackend: planning.backend,
     });
 
-    const planningDefs = planning.usesTaskGraph
-      ? createTaskGraphPlanningTools({
-        coordinator: ctx.taskGraphPlanning!,
-        workItemId: ctx.workItemId!,
-        primaryRunKey: ctx.runKey!,
+    const planningDefs = createTaskGraphPlanningTools({
+        coordinator: ctx.taskGraphPlanning,
+        workItemId: ctx.workItemId,
+        primaryRunKey: ctx.runKey,
         mode: planning.orchestrationMode === "plan" ? "plan" : "auto",
         leaderSessionKey,
         markDecisionNeeded: ctx.markDecisionNeeded,
-      }) : [];
+      });
 
     const { toolDefs: renderDefs, renderState } = createRenderToolsForLeader({
       leaderSessionKey,

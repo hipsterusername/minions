@@ -274,7 +274,7 @@ describe("LeaderNode: new-session initiation", () => {
     expect(last.messages[0]?.content).toBe("Investigate the regression.");
   });
 
-  it("suppresses a manual Start after autoStart claimed the session (no double create_session)", async () => {
+  it("suppresses a manual Start after autoStart claimed the session (no duplicate work item)", async () => {
     // Reproduces the double-init / doubled-content race: autoStart fires on
     // mount and claims the session (syncedRef set), but the generated
     // sessionKey has NOT yet propagated back into node.data — here modelled by
@@ -299,7 +299,7 @@ describe("LeaderNode: new-session initiation", () => {
 
     function RaceProbe() {
       const props: NodeRenderProps = {
-        node,
+        node, projectId: "project-1", projectPath: "/repo",
         isSelected: false,
         onUpdateData: () => {
           /* swallow: sessionKey never propagates to props (stale-dataRef window) */
@@ -313,10 +313,10 @@ describe("LeaderNode: new-session initiation", () => {
     render(<RaceProbe />);
 
     const creates = () =>
-      captured.filter((m) => (m as { type?: string }).type === "create_session");
+      captured.filter((m) => (m as { type?: string }).type === "create_work_item");
 
     expect(creates()).toHaveLength(1);
-    expect(creates()[0]).toMatchObject({ permissionMode: "bypassPermissions" });
+    expect(creates()[0]).toMatchObject({ workspaceId: "project-1" });
 
     await act(async () => {
       fireEvent.change(screen.getByTestId("leader-prompt-input-inline"), {
@@ -364,10 +364,19 @@ describe("LeaderNode: new-session initiation", () => {
       result: { workItem: canonicalItem(null, 1, "draft", "none"), bindings: [], currentRun: null, runs: [], nextCursor: null } } }]));
     await waitFor(() => expect(latestCommand("continue_work_item")).toBeDefined());
     const start = latestCommand("continue_work_item") as { requestId: string };
+    // The host can produce a reply before the launch receipt gives React its run key.
+    await act(() => replay([{ message: { type: "sdk_event", sessionKey: "run-1",
+      event: { kind: "text", role: "assistant", text: "Early launch reply" } } }]));
     await act(() => replay([{ message: { type: "work_item_response", command: "continue_work_item",
       requestId: start.requestId, success: true,
       result: { workItem: canonicalItem("run-1", 2, "starting", "none"), bindings: [], currentRun: null, runs: [], nextCursor: null } } }]));
     await waitFor(() => expect(latest.currentRunKey).toBe("run-1"));
+    expect(latestCommand("sync_session")).toEqual({ type: "sync_session", sessionKey: "run-1" });
+    await act(() => replay([{ message: { type: "sync_response", sessionKey: "run-1",
+      found: true, status: "running", events: [{ type: "sdk_event", sessionKey: "run-1",
+        timestamp: 1, event: { kind: "text", role: "assistant", text: "Early launch reply" } }] } }]));
+    expect(latest.messages.some((message) => message.content === "Early launch reply")).toBe(true);
+    expect(latest.messages.some((message) => message.content === "First iteration")).toBe(true);
 
     await act(() => replay([{ message: { type: "work_item_changed",
       workItem: canonicalItem("run-1", 3, "inactive", "completed"), revision: 3,
@@ -383,6 +392,7 @@ describe("LeaderNode: new-session initiation", () => {
       requestId: second.requestId, success: true,
       result: { workItem: canonicalItem("run-2", 4, "starting", "none"), bindings: [], currentRun: null, runs: [], nextCursor: null } } }]));
     await waitFor(() => expect([latest.workItemId, latest.currentRunKey]).toEqual(["work-1", "run-2"]));
+    expect(latestCommand("sync_session")).toEqual({ type: "sync_session", sessionKey: "run-2" });
   });
 
   it("queues guidance for an active work item and confirms deferred delivery", async () => {

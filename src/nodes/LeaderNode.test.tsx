@@ -1,3 +1,4 @@
+import { canonicalLeaderResponder } from "../../tests/harness/canonical-leader.ts";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi, beforeAll, afterEach } from "vitest";
@@ -66,7 +67,7 @@ function Probe({ socket, initial, onState, socketSend, size, onResize, onAddCont
     data,
   };
   const props: NodeRenderProps = {
-    node,
+    node, projectId: "project-1", projectPath: "/repo",
     isSelected: false,
     onUpdateData: (next) => {
       const nextData = next as LeaderData;
@@ -116,6 +117,31 @@ describe("LeaderNode: compact skills pill", () => {
 });
 
 describe("LeaderNode: Context Action recipes", () => {
+  it("adds @ skills without losing existing selections or values, and submits their instructions", async () => {
+    const { socket, replay } = createReplaySocket();
+    const states: LeaderData[] = [];
+    const socketSend = vi.fn(canonicalLeaderResponder(replay));
+    render(<Probe socket={socket} socketSend={socketSend}
+      initial={makeInitialData({ sessionKey: null, status: "disconnected",
+        skillIds: ["system-model-authoring"], skillValues: { "system-model-authoring": { focus: "keep" } },
+      })}
+      onState={(state) => states.push(state)} />);
+    const input = screen.getByTestId("leader-prompt-input-inline");
+    for (let i = 0; i < 2; i++) {
+      fireEvent.change(input, { target: { value: "Build with @skill-b" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+    }
+    expect(input).toHaveValue("Build with @skill-builder ");
+    expect(states.at(-1)?.skillIds).toEqual(["system-model-authoring", "skill-builder"]);
+    expect(states.at(-1)?.skillValues).toEqual({ "system-model-authoring": { focus: "keep" } });
+    expect(socketSend.mock.calls.some(([message]) => message.type === "create_session")).toBe(false);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Start" })); });
+    const request = socketSend.mock.calls.find(([message]) => message.type === "continue_work_item")?.[0];
+    expect(request).toBeDefined();
+    expect(request.prompt).toContain("Build with @skill-builder");
+    expect(request.systemPrompt).toContain("Skill Builder");
+  });
+
   it("inserts a custom prompt and additively arms its available skills", () => {
     const { socket } = createReplaySocket();
     const states: LeaderData[] = [];
@@ -977,7 +1003,8 @@ describe("LeaderNode: connected-context dedup", () => {
   it("seeds hashes at creation and omits unchanged context on subsequent sends", async () => {
     const { socket, replay } = createReplaySocket();
     const captured: unknown[] = [];
-    const mockSend = (msg: unknown) => { captured.push(msg); };
+    const respond = canonicalLeaderResponder(replay);
+    const mockSend = (msg: unknown) => { captured.push(msg); respond(msg); };
 
     // Use a mutable reference so we can change what getContextForNode returns
     // without changing the function reference (keeping handleSend stable).
@@ -998,7 +1025,7 @@ describe("LeaderNode: connected-context dedup", () => {
         data,
       };
       const props: NodeRenderProps = {
-        node,
+        node, projectId: "project-1", projectPath: "/repo",
         isSelected: false,
         onUpdateData: (next) => setData(next as LeaderData),
         socketSubscribe: socket.subscribe,
@@ -1019,22 +1046,19 @@ describe("LeaderNode: connected-context dedup", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Start" }));
     });
-    const created = captured.find((msg) => (msg as { type: string }).type === "create_session") as { sessionKey: string };
+    const created = { sessionKey: "run-1" };
     await pump(replay, [{ message: { type: "session_status", sessionKey: created.sessionKey, status: "idle" } as ServerMessage }]);
 
     const nonCanvasCommands = () =>
-      captured.filter((msg) => !["canvas_context", "get_worktree_lineage_status"]
+      captured.filter((msg) => !["canvas_context", "get_worktree_lineage_status", "create_work_item", "attach_work_item_surface", "get_work_item", "sync_session", "get_task_graph_view", "get_task_graph_snapshot", "get_graph_plan", "get_task_graph_plan"]
         .includes((msg as { type?: string }).type ?? ""));
-    const integrationStatusQueries = () => captured.filter((msg) =>
-      (msg as { type?: string }).type === "get_worktree_lineage_status");
     const canvasCommands = () =>
       captured.filter((msg) => (msg as { type?: string }).type === "canvas_context");
 
     expect(nonCanvasCommands()).toHaveLength(1);
-    expect(integrationStatusQueries()).toHaveLength(0);
     expect(canvasCommands()).toHaveLength(1);
     const createMsg = nonCanvasCommands()[0] as { type: string; prompt: string };
-    expect(createMsg.type).toBe("create_session");
+    expect(createMsg.type).toBe("continue_work_item");
     // Full context block injected at session creation
     expect(createMsg.prompt).toContain("<connected-context>");
     expect(createMsg.prompt).toContain("Initial context");
@@ -1054,7 +1078,7 @@ describe("LeaderNode: connected-context dedup", () => {
     expect(nonCanvasCommands()).toHaveLength(2);
     expect(canvasCommands()).toHaveLength(1);
     const sendMsg1 = nonCanvasCommands()[1] as { type: string; prompt: string };
-    expect(sendMsg1.type).toBe("send_message");
+    expect(sendMsg1.type).toBe("continue_work_item");
     // Unchanged context → no context block at all
     expect(sendMsg1.prompt).toBe("Follow-up question");
     expect(sendMsg1.prompt).not.toContain("<connected-context>");
@@ -1078,7 +1102,7 @@ describe("LeaderNode: connected-context dedup", () => {
     expect(nonCanvasCommands()).toHaveLength(3);
     expect(canvasCommands()).toHaveLength(2);
     const sendMsg2 = nonCanvasCommands()[2] as { type: string; prompt: string };
-    expect(sendMsg2.type).toBe("send_message");
+    expect(sendMsg2.type).toBe("continue_work_item");
     // Already-delivered source changed → an update block (replace), NOT a
     // fresh <connected-context> block, carrying only the changed item.
     expect(sendMsg2.prompt).toContain("<connected-context-update>");
@@ -1092,7 +1116,8 @@ describe("LeaderNode: connected-context dedup", () => {
   it("includes only the changed group when one of several context nodes changes", async () => {
     const { socket, replay } = createReplaySocket();
     const captured: unknown[] = [];
-    const mockSend = (msg: unknown) => { captured.push(msg); };
+    const respond = canonicalLeaderResponder(replay);
+    const mockSend = (msg: unknown) => { captured.push(msg); respond(msg); };
 
     let contextSnapshot: ContextItem[] = [
       { nodeId: "node-a", nodeType: "markdown", label: "markdown", content: "stable content" },
@@ -1112,7 +1137,7 @@ describe("LeaderNode: connected-context dedup", () => {
         data,
       };
       const props: NodeRenderProps = {
-        node,
+        node, projectId: "project-1", projectPath: "/repo",
         isSelected: false,
         onUpdateData: (next) => setData(next as LeaderData),
         socketSubscribe: socket.subscribe,
@@ -1133,13 +1158,13 @@ describe("LeaderNode: connected-context dedup", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Start" }));
     });
-    const created = captured.find((msg) => (msg as { type: string }).type === "create_session") as { sessionKey: string };
+    const created = { sessionKey: "run-1" };
     await pump(replay, [{ message: { type: "session_status", sessionKey: created.sessionKey, status: "idle" } as ServerMessage }]);
 
     const nonCanvasCommands = () =>
-      captured.filter((msg) => !["canvas_context", "get_worktree_lineage_status"]
+      captured.filter((msg) => !["canvas_context", "get_worktree_lineage_status", "create_work_item", "attach_work_item_surface", "get_work_item", "sync_session", "get_task_graph_view", "get_task_graph_snapshot", "get_graph_plan", "get_task_graph_plan"]
         .includes((msg as { type?: string }).type ?? ""));
-    expect((nonCanvasCommands()[0] as { type: string }).type).toBe("create_session");
+    expect((nonCanvasCommands()[0] as { type: string }).type).toBe("continue_work_item");
 
     // Only change node-b; node-a remains the same
     contextSnapshot = [
@@ -1158,7 +1183,7 @@ describe("LeaderNode: connected-context dedup", () => {
 
     expect(nonCanvasCommands()).toHaveLength(2);
     const sendMsg = nonCanvasCommands()[1] as { type: string; prompt: string };
-    expect(sendMsg.type).toBe("send_message");
+    expect(sendMsg.type).toBe("continue_work_item");
     // Delta block includes the changed node-b
     expect(sendMsg.prompt).toContain("updated notes");
     // Stable node-a must NOT appear in the delta block

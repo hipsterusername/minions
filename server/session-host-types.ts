@@ -89,7 +89,7 @@ export interface StartSessionOptions {
    * legacy/external callers and treated as `new_run` during migration.
    */
   invocationKind?: SessionInvocationKind | undefined;
-  /** Durable work-item identity; optional for compatibility callers. */
+  /** Required for Leader launches; resumes inherit the existing immutable identity. */
   workItemId?: string | undefined;
   /** Immutable run lineage metadata; omitted by legacy callers. */
   runKind?: SessionRunKind | undefined;

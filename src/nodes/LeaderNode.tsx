@@ -1,3 +1,4 @@
+import { ChatLinkScope } from "../components/ChatLink.tsx";
 import { FormSubmissionProvider } from "./render/FormSubmissionProvider.tsx";
 import { useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore } from "react";
 import { Maximize2, Square, Zap } from "lucide-react";
@@ -76,6 +77,7 @@ import { HeaderMenu } from "./leader/HeaderMenu.tsx";
 import { LeaderStatusIcon } from "./leader/LeaderStatusIcon.tsx";
 import { PromptAttachmentsContext, usePromptAttachments } from "./leader/prompt/use-prompt-attachments.ts";
 import { LeaderPromptBar, LeaderSlashCommandsProvider } from "./leader/prompt/LeaderPromptBar.tsx";
+import { LeaderPromptSkillsContext } from "./leader/prompt/LeaderPromptSkillsContext.ts";
 import { LeaderPromptOverlay } from "./leader/prompt/LeaderPromptOverlay.tsx";
 import { DashboardSurface } from "./render/DashboardSurface.tsx";
 import { LeaderFullscreen } from "./leader/fullscreen/LeaderFullscreen.tsx";
@@ -159,6 +161,14 @@ export function LeaderNodeRenderer({
       ? `Action inserted. Unavailable Skills were not armed: ${invocation.missingSkillIds.join(", ")}.`
       : null);
   }, [onUpdateData, slashCommands]);
+
+  const handleSkillSelect = useCallback((skillId: string) => {
+    const current = dataRef.current;
+    if (!getSkill(skillId) || current.skillIds?.includes(skillId)) return;
+    const next = { ...current, skillIds: [...(current.skillIds ?? []), skillId] };
+    dataRef.current = next;
+    onUpdateData(next);
+  }, [onUpdateData]);
 
   useEffect(() => {
     armLeaderCompletionSound();
@@ -717,7 +727,6 @@ export function LeaderNodeRenderer({
     // reattach); guarding here closes the double-create race (duplicate host).
     if (syncedRef.current || !promptAttachments.canSubmit() || !launchFeedback.begin(input)) return;
     submittedAttachmentIds.current = promptAttachments.drafts.map(draft => draft.id);
-    const key = `leader-${Date.now().toString(36)}`;
     const userPrompt =
       input.trim() || (promptAttachments.items.length ? "Use the attached context." : "Analyze the project and suggest how to proceed.");
 
@@ -744,39 +753,10 @@ export function LeaderNodeRenderer({
       return;
     }
 
-    socketSend({
-      type: "create_session",
-      sessionKey: key,
-      prompt: fullPrompt,
-      systemPrompt: frozenPrompt.systemPrompt,
-      role: "leader",
-      skillIds: data.skillIds ?? [], skillValues: data.skillValues ?? {},
-      model: data.model,
-      thinkingConfig: data.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
-      permissionMode: data.permissionMode,
-      worktreeIsolation: data.worktreeIsolation,
-      sandboxPolicy: data.sandboxPolicy ?? DEFAULT_SANDBOX_POLICY,
-      ...(data.harness ? { harness: data.harness } : {}),
-      ...(attachments.length > 0 ? { attachments } : {}),
-      ...(projectId ? { workspaceId: projectId } : projectPath ? { cwd: projectPath } : {}),
-    });
-    publishCanvasContext(key, contextItems, null);
-    syncedRef.current = true;
-    onUpdateData({
-      ...dataRef.current,
-      sessionKey: key,
-      status: "creating",
-      contextDelivery,
-      messages: [
-        ...prevMessages,
-        {
-          id: msgId(),
-          role: "user" as const,
-          content: userPrompt,
-          timestamp: Date.now(),
-        },
-      ],
-    });
+    launchFeedback.failed(false);
+    syncedRef.current = false;
+    emitUpdate({ ...dataRef.current, status: "error",
+      error: "Select a project before starting a Leader." });
   }, [socketSend, input, getContextForNode, getIncomingContextModes, publishCanvasContext,
     data.skillIds, data.skillValues, data.model, data.thinkingConfig, data.sandboxPolicy, projectId,
     projectPath, emitUpdate, beginCanonicalRun, launchFeedback, promptAttachments]);
@@ -790,7 +770,6 @@ export function LeaderNodeRenderer({
     launchFeedback.begin(prompt);
     submittedAttachmentIds.current = promptAttachments.drafts.map(draft => draft.id);
 
-    const key = `leader-${Date.now().toString(36)}`;
 
     const contextItems = getContextForNode?.() ?? [];
     const { prompt: fullPrompt, frozen: frozenPrompt, previousMessages: prevMessages,
@@ -817,40 +796,10 @@ export function LeaderNodeRenderer({
       return;
     }
 
-    socketSend({
-      type: "create_session",
-      sessionKey: key,
-      prompt: fullPrompt,
-      systemPrompt: frozenPrompt.systemPrompt,
-      role: "leader",
-      skillIds: dataRef.current.skillIds ?? [], skillValues: dataRef.current.skillValues ?? {},
-      model: dataRef.current.model,
-      thinkingConfig: dataRef.current.thinkingConfig ?? DEFAULT_THINKING_CONFIG,
-      permissionMode: dataRef.current.permissionMode,
-      worktreeIsolation: dataRef.current.worktreeIsolation,
-      sandboxPolicy: dataRef.current.sandboxPolicy ?? DEFAULT_SANDBOX_POLICY,
-      ...(dataRef.current.harness ? { harness: dataRef.current.harness } : {}),
-      ...(attachments.length > 0 ? { attachments } : {}),
-      ...(projectId ? { workspaceId: projectId } : projectPath ? { cwd: projectPath } : {}),
-    });
-    publishCanvasContext(key, contextItems, null);
-    syncedRef.current = true;
-    onUpdateData({
-      ...dataRef.current,
-      sessionKey: key,
-      status: "creating",
-      autoStartPrompt: null,
-      contextDelivery,
-      messages: [
-        ...prevMessages,
-        {
-          id: msgId(),
-          role: "user" as const,
-          content: prompt,
-          timestamp: Date.now(),
-        },
-      ],
-    });
+    launchFeedback.failed(false);
+    syncedRef.current = false;
+    emitUpdate({ ...dataRef.current, status: "error",
+      error: "Select a project before starting a Leader." });
   }, [socketSend, onUpdateData, getContextForNode, getIncomingContextModes,
     publishCanvasContext, projectPath, projectId, emitUpdate, beginCanonicalRun]);
 
@@ -1071,17 +1020,18 @@ export function LeaderNodeRenderer({
 
   if (launchMode) {
     return (
-      <FormSubmissionProvider key={data.sessionKey} sessionKey={data.sessionKey ?? ""} socketSend={socketSend} socketSubscribe={socketSubscribe}><CanvasDeliveryContext.Provider value={delivery}><PromptAttachmentsContext.Provider value={promptAttachments}><LeaderSlashCommandsProvider commands={slashCommands} onSelect={handleContextActionSelect}>
+      <FormSubmissionProvider key={data.sessionKey} sessionKey={data.sessionKey ?? ""} socketSend={socketSend} socketSubscribe={socketSubscribe}><CanvasDeliveryContext.Provider value={delivery}><PromptAttachmentsContext.Provider value={promptAttachments}><LeaderSlashCommandsProvider commands={slashCommands} onSelect={handleContextActionSelect}><LeaderPromptSkillsContext.Provider value={handleSkillSelect}>
         <ActivityLaunchForm nodeId={node.id} data={data} input={input} slashCommands={slashCommands}
           promptPlaceholder={promptPlaceholder} submitDisabled={promptSubmitDisabled} submitActive={promptSubmitActive} pending={launchFeedback.pending} unavailableReason={!socketSend ? "Connection unavailable" : undefined} textareaRef={promptTextareaRef} {...(projectPath ? { projectPath } : {})}
           onInputChange={setInput} onKeyDown={handleKeyDown} onSubmit={handlePromptSubmit} onUpdate={(patch) => onUpdateData({ ...dataRef.current, ...patch })} />
         {launchFeedback.notice || launchNotice ? <div className="leader-launch-notice" role="status">{launchFeedback.notice ?? launchNotice}</div> : null}
-      </LeaderSlashCommandsProvider></PromptAttachmentsContext.Provider></CanvasDeliveryContext.Provider></FormSubmissionProvider>
+      </LeaderPromptSkillsContext.Provider></LeaderSlashCommandsProvider></PromptAttachmentsContext.Provider></CanvasDeliveryContext.Provider></FormSubmissionProvider>
     );
   }
 
   return (
-    <FormSubmissionProvider key={data.sessionKey} sessionKey={data.sessionKey ?? ""} socketSend={socketSend} socketSubscribe={socketSubscribe}><CanvasDeliveryContext.Provider value={delivery}><PromptAttachmentsContext.Provider value={promptAttachments}><LeaderSlashCommandsProvider commands={slashCommands} onSelect={handleContextActionSelect}>
+    <ChatLinkScope project={projectId} cwd={data.worktreePath ?? projectPath}>
+    <FormSubmissionProvider key={data.sessionKey} sessionKey={data.sessionKey ?? ""} socketSend={socketSend} socketSubscribe={socketSubscribe}><CanvasDeliveryContext.Provider value={delivery}><PromptAttachmentsContext.Provider value={promptAttachments}><LeaderSlashCommandsProvider commands={slashCommands} onSelect={handleContextActionSelect}><LeaderPromptSkillsContext.Provider value={handleSkillSelect}>
     <div
       ref={nodeRootRef}
       tabIndex={-1}
@@ -1439,7 +1389,8 @@ export function LeaderNodeRenderer({
         </div>
       )}
     </div>
-    </LeaderSlashCommandsProvider></PromptAttachmentsContext.Provider></CanvasDeliveryContext.Provider></FormSubmissionProvider>
+    </LeaderPromptSkillsContext.Provider></LeaderSlashCommandsProvider></PromptAttachmentsContext.Provider></CanvasDeliveryContext.Provider></FormSubmissionProvider>
+    </ChatLinkScope>
   );
 }
 

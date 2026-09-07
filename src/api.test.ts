@@ -158,9 +158,8 @@ describe("API client boundary", () => {
     await getProjectTree(id, 4);
 
     const requestUrl = String(fetchMock.mock.calls[1]?.[0]);
-    expect(requestUrl).toMatch(/^\/api\/projects\/[^/]+\/tree\?depth=4$/);
-    expect(id).not.toContain("+");
-    expect(id).not.toContain("=");
+    expect(id).toBe("L3RtcC9yw6lwbw");
+    expect(requestUrl).toBe("/api/projects/L3RtcC9yw6lwbw/tree?depth=4");
   });
 
   it("surfaces the response status and body for failed calls", async () => {

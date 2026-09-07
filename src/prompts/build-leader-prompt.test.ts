@@ -3,7 +3,7 @@
  *
  * Pinning behaviour:
  *   - The base LEADER_SYSTEM_PROMPT is always included.
- *   - The legacy arming inventory lists skill IDs + names + descriptions.
+ *   - The skill inventory lists skill IDs + names + descriptions.
  *   - Tagged skills (active for the leader itself) are compiled and
  *     appended via the existing Active Skills section.
  *   - Built-in skill presets (e.g. the Skill Builder) always appear in the
@@ -46,27 +46,27 @@ describe("buildLeaderSystemPrompt", () => {
     clearSkills();
   });
 
-  it("surfaces built-in presets in the legacy inventory even when the registry is empty", () => {
+  it("surfaces built-in presets in the skill inventory even when the registry is empty", () => {
     const out = buildLeaderSystemPromptPreview({
       skillIds: [], skillValues: {}, orchestrationMode: "direct",
     });
     // Stable core is present, plus the always-available built-in inventory.
     expect(out).toContain("You are the Lead Developer agent");
-    expect(out).toContain("## Legacy planning mode (debug)");
+    expect(out).toContain("## Task Graph planning");
     expect(out).toContain("# Available Skills");
     expect(out).toContain("`skill-builder`");
     // Nothing tagged → no active section.
     expect(out).not.toContain("# Active Skills");
   });
 
-  it("appends the legacy arming inventory when the registry has skills", () => {
+  it("appends the skill inventory when the registry has skills", () => {
     registerSkill(makeSkill({ id: "a", name: "Alpha", description: "First" }));
     registerSkill(makeSkill({ id: "b", name: "Beta", description: "Second" }));
 
     const out = buildLeaderSystemPromptPreview({
       skillIds: [], skillValues: {}, orchestrationMode: "direct",
     });
-    expect(out).toContain("## Legacy planning mode (debug)");
+    expect(out).toContain("## Task Graph planning");
     expect(out).toContain("# Available Skills");
     expect(out).toContain("`a` — **Alpha**: First");
     expect(out).toContain("`b` — **Beta**: Second");

@@ -15,7 +15,7 @@ describe("ActivityLaunchForm permission authority", () => {
       }}>
         <ActivityLaunchForm
           nodeId="leader-1"
-          data={{ ...LEADER_DEFAULT_DATA, harness: "codex", model: "gpt-5.6-sol" }}
+          data={{ ...LEADER_DEFAULT_DATA, harness: "codex", model: "gpt-5.6-sol", orchestrationMode: "direct" }}
           input=""
           slashCommands={[]}
           promptPlaceholder="Describe work"
@@ -48,6 +48,9 @@ describe("ActivityLaunchForm permission authority", () => {
       }],
     }));
 
+    expect(screen.getByRole("combobox", { name: "Orchestration" })).toHaveValue("auto");
+    expect(screen.queryByRole("option", { name: /direct tools only/i })).toBeNull();
+    expect(screen.getByRole("option", { name: /Graph — review before start/i })).toHaveValue("plan");
     expect(screen.queryByLabelText("Permissions")).toBeNull();
     expect(screen.getByLabelText("Sandbox approval policy")).toBeInTheDocument();
   });

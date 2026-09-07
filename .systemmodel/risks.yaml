@@ -20,7 +20,7 @@ risks:
     domain: domain.delegation
   - id: risk.dual_ingress_divergence
     type: risk
-    summary: Project-scoped canvas and mobile launches use canonical WorkItems; legacy mobile fallback and transient actors can still create bare sessions and diverge from canonical routing.
+    summary: New Leader entry points could bypass work-item allocation or drop identity during resume, breaking durable orchestration.
     severity: high
     applies_to:
       capabilities:
@@ -37,7 +37,7 @@ risks:
         - src/mobile/LaunchScreen.tsx
         - server/commands/create-session.ts
         - server/commands/work-items.ts
-    mitigation: Keep routing explicit, test equivalent intentions across both families, and avoid synthesizing canonical state for bare sessions.
+    mitigation: Require work-item identity at Leader ingress and runtime start, keep all Leader surfaces on work-item commands, migrate historical Leaders before hydration, and test rejection plus resume identity retention.
     domain: domain.execution_lifecycle
   - id: risk.legacy_canonical_review_split
     type: risk

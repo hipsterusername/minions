@@ -2,6 +2,7 @@ import "./test-helpers.ts";
 import { describe, expect, it, vi } from "vitest";
 import type { Bus } from "../bus.ts";
 import { SessionHost } from "../session-host.ts";
+import { ensureWorkItemSchema } from "../work-item-schema.ts";
 import { initDb } from "../db.ts";
 import type { TaskGraphPlanSnapshotView } from "../../shared/task-graph-planning-contracts.ts";
 import type { SessionRegistry } from "../session-registry.ts";
@@ -29,6 +30,11 @@ describe("planning runtime installation", () => {
       taskGraphs: { options: { db } } as unknown as TaskGraphService,
     });
 
+    ensureWorkItemSchema(db);
+    db.prepare("INSERT INTO sessions(session_key, run_config_json) VALUES (?, ?)")
+      .run("legacy-primary", JSON.stringify({ orchestrationMode: "direct" }));
+    expect(sessionDeps.getLeaderOrchestrationMode?.("legacy-primary")).toBe("auto");
+    expect(sessionDeps.getTaskGraphPlanning?.("legacy-primary")).toBe(coordinator);
     expect(start).not.toHaveBeenCalled();
     coordinator.start();
     expect(start).toHaveBeenCalledOnce();

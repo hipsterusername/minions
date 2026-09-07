@@ -1,3 +1,4 @@
+import { createWorkItem, startWorkItemIteration } from "./work-item-repo.ts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SessionHost, type StartSessionOptions } from "./session-host.ts";
 import { SessionRegistry } from "./session-registry.ts";
@@ -18,6 +19,12 @@ afterEach(() => closePersistDb());
 
 function leader() {
   const host = new SessionHost("handoff-leader", "/tmp");
+  const db = openPersistDb();
+  createWorkItem(db, { id: "handoff-work", projectId: "project", projectPath: host.cwd,
+    title: "Handoff", changeMode: "live", at: 1 });
+  startWorkItemIteration(db, { workItemId: "handoff-work", runKey: host.id,
+    idempotencyKey: "start-handoff", expectedLifecycleRevision: 0, expectedCurrentRunKey: null, at: 2 });
+  host.workItemId = "handoff-work";
   host.role = "leader";
   host.sessionId = "old-provider";
   return host;
@@ -81,8 +88,9 @@ describe("provider-boundary handoff regressions", () => {
     const cleared = boundary(secondRegistry.get(host.id)!, options("Continue"));
     expect(cleared.prompt).not.toContain("REQUIRED_SPEC");
     expect(cleared.attachments).toBeUndefined();
-    expect(removePersistedSession(host.id)).toBe(true);
-    expect(openPersistDb().prepare("SELECT * FROM session_continuity").all()).toEqual([]);
+    // Canonical history is durable; legacy deletion cannot erase the run or its instructions.
+    expect(removePersistedSession(host.id)).toBe(false);
+    expect(openPersistDb().prepare("SELECT * FROM session_continuity").all()).toHaveLength(1);
   });
 
   it("includes earlier user events in overflow recovery and keeps large checkpoint sections well formed", () => {

@@ -1,3 +1,5 @@
+import { assertLeaderIdentity } from "./leader-identity.ts";
+import { normalizeLeaderOrchestrationMode } from "../shared/leader-planning.ts";
 import { captureSkillSnapshot, readSkillSnapshot, saveSkillSnapshot } from "./skill-snapshot.ts";
 import type { AgentTypeContext } from "./agents/index.ts";
 import { randomUUID } from "node:crypto";
@@ -159,13 +161,12 @@ export function buildAgentContext(
   if (graphTools.length) ctx.taskGraphToolDefs = graphTools;
   const graphAllowedTools=deps.getTaskGraphAllowedTools?.(host.runKey);
   if (graphAllowedTools) host.toolAllowlist=[...graphAllowedTools];
-  // Canonical primary Leaders use Task Graph by default. Bare compatibility
-  // sessions have no durable graph authority and therefore remain legacy.
-  ctx.orchestrationMode = host.workItemId
-    ? (deps.getLeaderOrchestrationMode?.(host.runKey) ?? "auto")
-    : "direct";
-  const planning = deps.getTaskGraphPlanning?.(host.runKey);
-  if (planning && ctx.orchestrationMode !== "direct") ctx.taskGraphPlanning = planning;
+  if (host.role === "leader") {
+    assertLeaderIdentity({ role: host.role, workItemId: host.workItemId, runKey: host.runKey });
+    ctx.orchestrationMode = normalizeLeaderOrchestrationMode(deps.getLeaderOrchestrationMode?.(host.runKey));
+    const planning = deps.getTaskGraphPlanning?.(host.runKey);
+    if (planning) ctx.taskGraphPlanning = planning;
+  }
   if (host.renderState) ctx.existingRenderState = host.renderState;
   if (host.skillIds.length > 0) ctx.skillIds = host.skillIds;
   if (Object.keys(host.skillValues).length > 0) ctx.skillValues = host.skillValues;

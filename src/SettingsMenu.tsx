@@ -45,7 +45,6 @@ import {
   Trash2,
 } from "lucide-react";
 import "./settings-menu.css";
-import { normalizeLeaderPlanningBackend } from "../shared/leader-planning.ts";
 
 interface SettingsMenuProps {
   settings: ProjectSettings;
@@ -592,25 +591,6 @@ function SettingsPopover({
                     : undefined}
                   onChange={(defaultSandboxPolicy) =>
                     onSettingsChange({ ...settings, defaultSandboxPolicy })
-                  }
-                />
-              </SettingsCard>
-
-              <SettingsCard
-                title="Graph assistance"
-                description="Task Graph is available for dependency reasoning and durable orchestration; Leaders keep their direct execution and delegation tools."
-              >
-                <ToggleRow
-                  label="Disable Task Graph tools"
-                  description="Debug only. New Leaders keep direct planning and delegation but do not receive graph proposal tools."
-                  checked={normalizeLeaderPlanningBackend(
-                    settings.leaderPlanningBackend,
-                  ) === "legacy"}
-                  onChange={(checked) =>
-                    onSettingsChange({
-                      ...settings,
-                      leaderPlanningBackend: checked ? "legacy" : "task_graph",
-                    })
                   }
                 />
               </SettingsCard>

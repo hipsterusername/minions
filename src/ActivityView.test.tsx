@@ -1,3 +1,5 @@
+import { createReplaySocket } from "../tests/harness/ws-replay.ts";
+import { canonicalLeaderResponder } from "../tests/harness/canonical-leader.ts";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -1244,10 +1246,11 @@ describe("ActivityView", () => {
     expect(onLaunchLeader).toHaveBeenCalledTimes(1);
   });
 
-  it("commits an Activity leader to Canvas only after its session is initiated", () => {
+  it("commits an Activity leader to Canvas only after its session is initiated", async () => {
     const draft = leaderNode("", [], { sessionKey: null, status: "disconnected" });
     const onCommitLaunchLeader = vi.fn();
-    const socketSend = vi.fn();
+    const { socket, replay } = createReplaySocket();
+    const socketSend = vi.fn(canonicalLeaderResponder(replay));
     render(
       <ActivityView
         sessions={[session({ sessionKey: "run", status: "running", taskName: "Working" })]}
@@ -1256,6 +1259,8 @@ describe("ActivityView", () => {
         onLaunchLeader={() => draft}
         onCommitLaunchLeader={onCommitLaunchLeader}
         socketSend={socketSend}
+        socketSubscribe={socket.subscribe}
+        projectId="project-1"
         projectPath="/tmp/project"
       />, { wrapper: ReadyLaunchHarness },
     );
@@ -1271,16 +1276,15 @@ describe("ActivityView", () => {
     });
     fireEvent.click(within(launchPanel).getByRole("button", { name: /^launch leader$/i }));
 
-    expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
-      type: "create_session",
-      role: "leader",
+    await waitFor(() => expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
+      type: "continue_work_item",
       prompt: "Start only when submitted.",
-    }));
+    })));
     expect(onCommitLaunchLeader).toHaveBeenCalledTimes(1);
     expect(onCommitLaunchLeader).toHaveBeenCalledWith(expect.objectContaining({
       id: draft.id,
       data: expect.objectContaining({
-        sessionKey: expect.stringMatching(/^leader-/),
+        sessionKey: "run-1",
         worktreeIsolation: true,
       }),
     }));
@@ -1306,10 +1310,6 @@ describe("ActivityView", () => {
     const setup = screen.getByRole("complementary", { name: /run setup/i });
     expect(setup.querySelector("details")).toBeNull();
     expect(within(setup).getByText("Run configuration")).toBeVisible();
-    expect(within(setup).getByLabelText("Configured settings")).toHaveTextContent(/opus/i);
-    expect(within(setup).getByLabelText("Configured settings")).toHaveTextContent(/auto/i);
-    expect(within(setup).getByLabelText("Configured settings")).toHaveTextContent(/shared/i);
-    expect(within(setup).getByLabelText("Configured settings")).toHaveTextContent(/0 skills/i);
     expect(within(setup).getByRole("combobox", { name: /model/i })).toBeVisible();
     expect(within(setup).getByRole("combobox", { name: /permissions/i })).toBeVisible();
     expect(within(setup).getByRole("checkbox", { name: /isolated worktree/i })).toBeVisible();
@@ -1386,7 +1386,7 @@ describe("ActivityView", () => {
     expect(screen.queryByRole("region", { name: /new leader/i })).not.toBeInTheDocument();
   });
 
-  it("launches from the Activity workspace without opening another surface", () => {
+  it("launches from the Activity workspace without opening another surface", async () => {
     const draft = leaderNode("", [], {
       sessionKey: null,
       status: "disconnected",
@@ -1397,7 +1397,8 @@ describe("ActivityView", () => {
       skillIds: [],
       skillValues: {},
     });
-    const socketSend = vi.fn();
+    const { socket, replay } = createReplaySocket();
+    const socketSend = vi.fn(canonicalLeaderResponder(replay));
     render(
       <ActivityView
         sessions={[]}
@@ -1405,6 +1406,8 @@ describe("ActivityView", () => {
         {...noop}
         onLaunchLeader={() => draft.id}
         socketSend={socketSend}
+        socketSubscribe={socket.subscribe}
+        projectId="project-1"
         projectPath="/tmp/project"
       />, { wrapper: ReadyLaunchHarness },
     );
@@ -1415,12 +1418,11 @@ describe("ActivityView", () => {
     });
     fireEvent.click(within(workspace).getByRole("button", { name: /^launch leader$/i }));
 
-    expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
-      type: "create_session",
-      role: "leader",
+    await waitFor(() => expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
+      type: "continue_work_item",
       prompt: "Repair the release workflow and verify it.",
-      cwd: "/tmp/project",
-    }));
+      workItemId: "work-1",
+    })));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 

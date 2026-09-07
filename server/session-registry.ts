@@ -1,4 +1,5 @@
 import { startRegisteredSession } from "./session-registry-start.ts";
+import { assertSessionIdentity } from "./leader-identity.ts";
 /** In-memory home for live and hydrated SessionHost instances. */
 
 import {
@@ -142,9 +143,7 @@ export class SessionRegistry {
   }
 
   /**
-   * Start (or resume) a session by key. Creates a SessionHost if one
-   * doesn't exist for this key yet; otherwise re-enters `start()` on
-   * the existing host (the resume path).
+   * Start by key, creating a host or resuming the existing one.
    */
   start(
     opts: StartSessionOptions,
@@ -168,6 +167,7 @@ export class SessionRegistry {
     }
     try {
       let host = this.map.get(opts.sessionKey);
+      assertSessionIdentity(opts, host);
       if (!host) {
         host = new SessionHost(opts.sessionKey, opts.cwd);
         this.map.set(opts.sessionKey, host);

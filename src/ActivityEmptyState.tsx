@@ -33,7 +33,7 @@ export function ActivityEmptyState({
   onUpdateNodeData,
   socketSend,
   socketSubscribe,
-  projectPath,
+  projectId, projectPath,
   projectSettings,
 }: {
   title?: string | undefined;
@@ -52,7 +52,7 @@ export function ActivityEmptyState({
   onUpdateNodeData: (nodeId: string, data: LeaderData) => void;
   socketSend?: ((data: unknown) => void) | undefined;
   socketSubscribe?: SocketSubscribe | undefined;
-  projectPath?: string | undefined;
+  projectId?: string | undefined; projectPath?: string | undefined;
   projectSettings?: import("./api.ts").ProjectSettings | undefined;
 }) {
   const openRecent = (entry: RecentAgentWork) => {
@@ -115,7 +115,7 @@ export function ActivityEmptyState({
               onUpdateData={(data) => onUpdateNodeData(launchNode.id, data as LeaderData)}
               socketSend={socketSend}
               socketSubscribe={socketSubscribe}
-              projectPath={projectPath}
+              projectId={projectId} projectPath={projectPath}
               projectSettings={projectSettings}
             />
           </div>

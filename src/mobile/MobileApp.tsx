@@ -516,7 +516,7 @@ export default function MobileApp() {
       ) : activeTab === "approvals" ? (
         <ApprovalsScreen approvals={scopedApprovalRows} onOpenReview={openReview} />
       ) : activeTab === "launch" ? (
-        <LaunchScreen send={send} onLaunched={handleLaunchSubmitted}
+        <LaunchScreen onLaunched={handleLaunchSubmitted}
           onLaunchError={(message) => {
             if (/Maximum session limit/i.test(message)) showSessionLimitNotice();
           }}

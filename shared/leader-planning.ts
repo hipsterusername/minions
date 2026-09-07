@@ -1,10 +1,7 @@
 import type { LeaderOrchestrationMode } from "./task-graph-planning-contracts.ts";
 
-export const LEADER_PLANNING_BACKENDS = ["task_graph", "legacy"] as const;
-export type LeaderPlanningBackend = (typeof LEADER_PLANNING_BACKENDS)[number];
-
-/** Graph assistance is enabled for every new canonical Leader by default. */
-export const DEFAULT_LEADER_PLANNING_BACKEND: LeaderPlanningBackend = "task_graph";
+/** Legacy supports standalone task-tool consumers; Leaders always use task_graph. */
+export type LeaderPlanningBackend = "task_graph" | "legacy";
 
 /** Tool partitions shared by prompt previews and authoritative server profiles. */
 export const LEGACY_LEADER_TASK_TOOL_NAMES = [
@@ -32,18 +29,9 @@ export const LEADER_RENDER_TOOL_NAMES = [
   "render_set", "render_patch", "render_append", "render_remove", "publish_html",
 ] as const;
 
-export function normalizeLeaderPlanningBackend(value: unknown): LeaderPlanningBackend {
-  return value === "legacy" ? "legacy" : DEFAULT_LEADER_PLANNING_BACKEND;
-}
-
-export function defaultOrchestrationModeForBackend(
-  backend: LeaderPlanningBackend,
-): LeaderOrchestrationMode {
-  return backend === "legacy" ? "direct" : "auto";
-}
-
-export function planningBackendForOrchestrationMode(
-  mode: LeaderOrchestrationMode,
-): LeaderPlanningBackend {
-  return mode === "direct" ? "legacy" : "task_graph";
+/** Persisted direct-mode overrides migrate to Graph; plan review remains explicit. */
+export function normalizeLeaderOrchestrationMode(
+  value: unknown,
+): Exclude<LeaderOrchestrationMode, "direct"> {
+  return value === "plan" ? "plan" : "auto";
 }

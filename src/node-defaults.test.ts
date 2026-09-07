@@ -8,11 +8,11 @@ describe("createDefaultNodeData leader thinking defaults", () => {
     expect(data.orchestrationMode).toBe("auto");
   });
 
-  it("uses direct mode only when the legacy debug backend is selected", () => {
+  it("ignores a saved legacy Graph opt-out", () => {
     const data = createDefaultNodeData("leader", {
       leaderPlanningBackend: "legacy",
     }) as { orchestrationMode: string };
-    expect(data.orchestrationMode).toBe("direct");
+    expect(data.orchestrationMode).toBe("auto");
   });
 
   it("applies the project sandbox default to new leaders", () => {
@@ -28,9 +28,9 @@ describe("createDefaultNodeData leader thinking defaults", () => {
     expect(data.sandboxPolicy).not.toBe(sandboxPolicy);
   });
 
-  it("defaults fable leaders to medium thinking effort", () => {
+  it.each(["claude-fable-5-1", "claude-fable-5", "fable"])("defaults %s leaders to medium thinking effort", (model) => {
     const data = createDefaultNodeData("leader", {
-      defaultLeaderModel: "claude-fable-5",
+      defaultLeaderModel: model,
     }) as { thinkingConfig: ThinkingConfig };
 
     expect(data.thinkingConfig.effort).toBe("medium");
