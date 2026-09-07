@@ -1,12 +1,14 @@
 import {
   Fragment,
+  useEffect,
   useId,
   useLayoutEffect,
   useState,
   type CSSProperties,
   type RefObject,
 } from "react";
-import { Slash, CornerDownLeft, ArrowDownUp } from "lucide-react";
+import { AtSign, Slash, CornerDownLeft, ArrowDownUp } from "lucide-react";
+import { MinionsIcon } from "../../../components/MinionsIcon.tsx";
 import { dashboardActionIcon } from "../../../dashboard-leader-actions.ts";
 import type { SlashCommand } from "./slash-commands.ts";
 
@@ -49,6 +51,7 @@ export function LeaderSlashMenu({
   onHover,
   query = "",
   anchorRef,
+  kind = "commands",
 }: {
   id?: string;
   commands: SlashCommand[];
@@ -57,12 +60,21 @@ export function LeaderSlashMenu({
   onHover: (index: number) => void;
   query?: string;
   anchorRef?: RefObject<HTMLElement | null>;
+  kind?: "commands" | "skills";
 }) {
   const [portalPosition, setPortalPosition] = useState<CSSProperties | null>(null);
   const generatedId = useId();
   const menuId = id ?? generatedId;
+  const selectedCommandId = commands[selectedIndex]?.id;
 
   useLayoutEffect(() => {
+    document.getElementById(`${menuId}-option-${selectedCommandId}`)
+      ?.scrollIntoView?.({ block: "nearest" });
+  }, [menuId, selectedCommandId]);
+
+  // The anchor can be a parent mounted in the same commit. Its ref is ready
+  // after layout effects; keep the portal hidden until positioning completes.
+  useEffect(() => {
     if (!anchorRef) return;
 
     const updatePosition = () => {
@@ -114,7 +126,7 @@ export function LeaderSlashMenu({
     <div
       id={menuId}
       role="listbox"
-      aria-label="Leader context shortcuts"
+      aria-label={kind === "skills" ? "Leader skills" : "Leader context shortcuts"}
       data-no-drag
       onMouseDown={(event) => event.stopPropagation()}
       style={{
@@ -160,8 +172,10 @@ export function LeaderSlashMenu({
             fontFamily: "var(--font-mono)",
           }}
         >
-          <Slash size={11} strokeWidth={2.5} aria-hidden="true" />
-          Commands
+          {kind === "skills"
+            ? <AtSign size={11} strokeWidth={2.5} aria-hidden="true" />
+            : <Slash size={11} strokeWidth={2.5} aria-hidden="true" />}
+          {kind === "skills" ? "Skills" : "Commands"}
         </span>
         <span
           style={{
@@ -196,7 +210,7 @@ export function LeaderSlashMenu({
               type="button"
               role="option"
               aria-selected={selected}
-              data-testid={`leader-slash-command-${command.id}`}
+              data-testid={kind === "skills" ? `leader-skill-mention-${command.id}` : `leader-slash-command-${command.id}`}
               onMouseDown={(event) => event.preventDefault()}
               onMouseEnter={() => onHover(index)}
               onClick={() => onSelect(command)}
@@ -235,7 +249,7 @@ export function LeaderSlashMenu({
                     : "var(--accent)",
                 }}
               >
-                <Icon size={15} strokeWidth={2} />
+                {kind === "skills" ? <MinionsIcon name="skill" size={15} /> : <Icon size={15} strokeWidth={2} />}
               </span>
               <span
                 style={{

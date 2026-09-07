@@ -7,6 +7,8 @@ import {
   LeaderSlashCommandsProvider,
 } from "./LeaderPromptBar.tsx";
 import { buildSlashCommands, type SlashCommand } from "./slash-commands.ts";
+import { LeaderPromptSkillsContext } from "./LeaderPromptSkillsContext.ts";
+import { getSkill, registerSkill, unregisterSkill } from "../../../skills/registry.ts";
 
 const slashCommands = buildSlashCommands(undefined);
 
@@ -16,36 +18,118 @@ function renderPromptBar({
   onInputChange = vi.fn(),
   onKeyDown = vi.fn(),
   onSubmit = vi.fn(),
+  onSkillSelect,
+  variant = "inline",
+  portalSlashMenu = false,
 }: {
   initialInput?: string;
   commands?: SlashCommand[] | null;
   onInputChange?: ComponentProps<typeof LeaderPromptBar>["onInputChange"];
   onKeyDown?: ComponentProps<typeof LeaderPromptBar>["onKeyDown"];
   onSubmit?: ComponentProps<typeof LeaderPromptBar>["onSubmit"];
+  onSkillSelect?: (id: string) => void;
+  variant?: "inline" | "overlay";
+  portalSlashMenu?: boolean;
 } = {}) {
   function Harness() {
     const [input, setInput] = useState(initialInput);
     return (
-      <LeaderPromptBar
-        input={input}
-        onInputChange={(value) => {
-          onInputChange(value);
-          setInput(value);
-        }}
-        onKeyDown={onKeyDown}
-        onSubmit={onSubmit}
-        placeholder="Prompt"
-        submitLabel="Start"
-        disabled={false}
-        active
-        {...(commands === null ? {} : { slashCommands: commands })}
-      />
+      <LeaderPromptSkillsContext.Provider value={onSkillSelect}>
+        <LeaderPromptBar
+          variant={variant}
+          portalSlashMenu={portalSlashMenu}
+          input={input}
+          onInputChange={(value) => {
+            onInputChange(value);
+            setInput(value);
+          }}
+          onKeyDown={onKeyDown}
+          onSubmit={onSubmit}
+          placeholder="Prompt"
+          submitLabel="Start"
+          disabled={false}
+          active
+          {...(commands === null ? {} : { slashCommands: commands })}
+        />
+      </LeaderPromptSkillsContext.Provider>
     );
   }
 
   render(<Harness />);
   return { onInputChange, onKeyDown, onSubmit };
 }
+
+describe("LeaderPromptBar skill mentions", () => {
+  it("includes project skills in the picker", () => {
+    registerSkill({ ...getSkill("skill-builder")!, id: "project-check", name: "Project Check" });
+    try {
+      const onSkillSelect = vi.fn();
+      renderPromptBar({ initialInput: "Check this\n@project", onSkillSelect });
+      fireEvent.click(screen.getByRole("option", { name: /Project Check/ }));
+      expect(onSkillSelect).toHaveBeenCalledExactlyOnceWith("project-check");
+      expect(screen.getByLabelText("Leader prompt")).toHaveValue("Check this\n@project-check ");
+    } finally {
+      unregisterSkill("project-check");
+    }
+  });
+
+  it.each(["inline", "overlay"] as const)("selects a skill with Enter in the %s composer without submitting", (variant) => {
+    const onSkillSelect = vi.fn();
+    const { onKeyDown, onSubmit } = renderPromptBar({
+      initialInput: "Use @skill-b", onSkillSelect, variant, portalSlashMenu: variant === "overlay",
+    });
+    const textarea = screen.getByRole("combobox", { name: "Leader prompt" }) as HTMLTextAreaElement;
+    expect(screen.getByRole("listbox", { name: "Leader skills" })).toBeInTheDocument();
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(textarea).toHaveValue("Use @skill-builder ");
+    expect(textarea).toHaveFocus();
+    expect(textarea.selectionStart).toBe(textarea.value.length);
+    expect(onSkillSelect).toHaveBeenCalledExactlyOnceWith("skill-builder");
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onKeyDown).not.toHaveBeenCalled();
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("filters by display name and selects by clicking", () => {
+    const onSkillSelect = vi.fn();
+    renderPromptBar({ initialInput: "@Builder", onSkillSelect });
+    fireEvent.click(screen.getByRole("option", { name: /Skill Builder/ }));
+    expect(onSkillSelect).toHaveBeenCalledExactlyOnceWith("skill-builder");
+    expect(screen.getByLabelText("Leader prompt")).toHaveValue("@skill-builder ");
+  });
+
+  it("replaces the whole token at the caret while preserving surrounding text", () => {
+    const onSkillSelect = vi.fn();
+    renderPromptBar({ initialInput: "Use @skill-bad for this task", onSkillSelect });
+    const textarea = screen.getByLabelText("Leader prompt") as HTMLTextAreaElement;
+    textarea.setSelectionRange(12, 12);
+    fireEvent.select(textarea);
+    fireEvent.keyDown(textarea, { key: "Tab" });
+    expect(textarea).toHaveValue("Use @skill-builder for this task");
+    expect(textarea.selectionStart).toBe("Use @skill-builder ".length);
+    expect(onSkillSelect).toHaveBeenCalledExactlyOnceWith("skill-builder");
+  });
+
+  it("supports arrow navigation and Escape dismissal", () => {
+    const onSkillSelect = vi.fn();
+    renderPromptBar({ initialInput: "@", onSkillSelect });
+    const textarea = screen.getByLabelText("Leader prompt");
+    const options = screen.getAllByRole("option");
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    expect(textarea).toHaveAttribute("aria-activedescendant", options[1]!.id);
+    fireEvent.keyDown(textarea, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(textarea).toHaveValue("@");
+    expect(onSkillSelect).not.toHaveBeenCalled();
+  });
+
+  it.each(["hello@example.com", "@nonexistent-skill", "already @skill-builder done"])("keeps normal prompt handling for %s", (initialInput) => {
+    const { onKeyDown } = renderPromptBar({ initialInput, onSkillSelect: vi.fn() });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.keyDown(screen.getByLabelText("Leader prompt"), { key: "Enter" });
+    expect(onKeyDown).toHaveBeenCalledOnce();
+  });
+});
 
 describe("LeaderPromptBar slash commands", () => {
   it("shows context shortcuts and Graph for a slash", () => {

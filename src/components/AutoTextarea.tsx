@@ -7,6 +7,7 @@ interface AutoTextareaProps {
   onKeyDown?: (e: React.KeyboardEvent) => void;
   onFocus?: (e: React.FocusEvent<HTMLTextAreaElement>) => void;
   onBlur?: (e: React.FocusEvent<HTMLTextAreaElement>) => void;
+  onSelect?: (e: React.SyntheticEvent<HTMLTextAreaElement>) => void;
   placeholder?: string;
   maxRows?: number;
   disabled?: boolean;
@@ -31,6 +32,7 @@ export function AutoTextarea({
   onPaste,
   onFocus,
   onBlur,
+  onSelect,
   placeholder,
   maxRows = 8,
   disabled,
@@ -81,6 +83,7 @@ export function AutoTextarea({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
+        onSelect={onSelect}
         onPaste={onPaste}
         onMouseDown={(e) => e.stopPropagation()}
         aria-label={ariaLabel}

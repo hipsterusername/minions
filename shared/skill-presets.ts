@@ -55,6 +55,14 @@ export const systemModelAuthoringSkill: SkillPreset = {
 
 Author or update repo-side files under .systemmodel/. The model is human-authored context for future agents, not a generated code graph.
 
+## Why It Improves Quality
+Give agents concise, shared knowledge of user-facing capabilities, architectural constraints, known risks, and relevant files and tests. This helps them scope changes correctly, preserve invariants, and focus reviews on likely regressions. Keep the model current so its guidance stays trustworthy.
+
+## How to Enable It
+1. Select **System Model Authoring** in the session's **Skills** picker and ask the agent to create or update the repository model.
+2. Ensure .systemmodel/manifest.yaml exists in the worktree and validate the model using the authoring process below.
+3. Open **Settings → Governance → System model**. Choose **Advisory** to share model context without blocking merges, or **Enforced** to also block failed review gates. Selecting the authoring skill alone does not enable model guidance.
+
 ## Object Discipline
 - Capabilities are user-facing powers, not modules. Prefer "approve isolated worktree changes" over "worktree.ts".
 - Create an object only if it will change agent behavior: better scoping, stronger constraints, clearer review gates, or fewer missed risks.

@@ -16,6 +16,9 @@ import "./leader-prompt.css";
 import { PromptAttachmentsContext } from "./use-prompt-attachments.ts";
 import { AutoTextarea } from "../../../components/AutoTextarea.tsx";
 import { LeaderSlashMenu } from "./LeaderSlashMenu.tsx";
+import { getPickableSkills } from "../../../skills/registry.ts";
+import { LeaderPromptSkillsContext } from "./LeaderPromptSkillsContext.ts";
+import { buildSkillMentions, parseSkillMention } from "./skill-mentions.ts";
 import {
   filterSlashCommands,
   parseSlashQuery,
@@ -85,6 +88,7 @@ export function LeaderPromptBar({
 }) {
   const attachments = useContext(PromptAttachmentsContext);
   const slashCommandContext = useContext(LeaderSlashCommandsContext);
+  const onSkillSelect = useContext(LeaderPromptSkillsContext);
   const availableSlashCommands = slashCommands ?? slashCommandContext?.commands;
   const [menuDismissed, setMenuDismissed] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -93,13 +97,16 @@ export function LeaderPromptBar({
   const slashMenuId = useId();
   const resolvedTextareaRef = textareaRef ?? internalTextareaRef;
   const pendingCaretPosition = useRef<number | null>(null);
-  const query = availableSlashCommands?.length
-    ? parseSlashQuery(input)
+  const [caretPosition, setCaretPosition] = useState<number | null>(input.length);
+  const mention = onSkillSelect && caretPosition !== null
+    ? parseSkillMention(input, Math.min(caretPosition, input.length))
     : null;
+  const availableCommands = mention ? buildSkillMentions(getPickableSkills()) : availableSlashCommands;
+  const query = mention?.query ?? (availableSlashCommands?.length ? parseSlashQuery(input) : null);
   const matches =
-    query === null || !availableSlashCommands
+    query === null || !availableCommands
       ? []
-      : filterSlashCommands(availableSlashCommands, query);
+      : filterSlashCommands(availableCommands, query);
   const menuOpen = query !== null && matches.length > 0 && !menuDismissed;
   const isOverlay = variant === "overlay";
   // Reserve the menu's rows plus its header, footer, and anchor gap inside
@@ -125,18 +132,30 @@ export function LeaderPromptBar({
   }, [input, resolvedTextareaRef]);
 
   const selectCommand = (command: SlashCommand) => {
-    pendingCaretPosition.current = command.insertText.length;
-    onInputChange(command.insertText);
-    slashCommandContext?.onSelect?.(command);
+    if (mention) {
+      const suffix = input.slice(mention.end);
+      const text = command.insertText + (/^\s/.test(suffix) ? "" : " ");
+      const nextCaret = mention.start + command.insertText.length + 1;
+      pendingCaretPosition.current = nextCaret;
+      setCaretPosition(nextCaret);
+      onSkillSelect?.(command.id);
+      onInputChange(input.slice(0, mention.start) + text + suffix);
+    } else {
+      pendingCaretPosition.current = command.insertText.length;
+      onInputChange(command.insertText);
+      slashCommandContext?.onSelect?.(command);
+    }
     setMenuDismissed(true);
   };
 
   const handleInputChange = (value: string) => {
+    setCaretPosition(resolvedTextareaRef.current?.selectionStart ?? value.length);
     onInputChange(value);
     setMenuDismissed(false);
   };
 
   const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.nativeEvent.isComposing) return;
     if (!menuOpen) {
       onKeyDown(event);
       return;
@@ -194,6 +213,7 @@ export function LeaderPromptBar({
           {menuOpen && (() => {
             const menu = (
               <LeaderSlashMenu
+                kind={mention ? "skills" : "commands"}
                 id={slashMenuId}
                 commands={matches}
                 selectedIndex={selectedIndex}
@@ -211,6 +231,14 @@ export function LeaderPromptBar({
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
+            onSelect={(event) => {
+              const textarea = event.currentTarget;
+              const nextCaret = textarea.selectionStart === textarea.selectionEnd ? textarea.selectionStart : null;
+              if (nextCaret !== caretPosition) {
+                setCaretPosition(nextCaret);
+                setMenuDismissed(false);
+              }
+            }}
             {...(attachments ? { onPaste: attachments.onPaste } : {})}
             autoFocus={autoFocus}
             ariaLabel="Leader prompt"
@@ -240,6 +268,7 @@ export function LeaderPromptBar({
         <div className="leader-prompt-bar__toolbar">
           <span className="leader-prompt-bar__hint" aria-hidden="true">
             {availableSlashCommands?.length ? <span>/ commands</span> : null}
+            {onSkillSelect && <span>@ skills</span>}
             {attachments && <span>Paste images or text files</span>}
             <span>Shift + Enter for a new line</span>
           </span>
