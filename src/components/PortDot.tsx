@@ -95,6 +95,7 @@ export const PortDot = memo(function PortDot({
   const [hintDismissed, setHintDismissed] = useState(false);
   const tooltipId = useId();
   const isLeader = nodeType === "leader";
+  const usesPortFins = isLeader || direction === "output";
   const showHint = (hover || focused) && !isDragActive && !hintDismissed;
   const hint = !isLeader ? undefined : locked
     ? direction === "input" && protocol === "context"
@@ -152,13 +153,13 @@ export const PortDot = memo(function PortDot({
 
   const dotSize = isSnapTarget ? 16 : isDragActive && isValidTarget ? 14 : 10;
   // Hit area is always larger than the visual dot for easier targeting
-  const hitSize = isLeader ? 32 : Math.max(dotSize, 28);
+  const hitSize = usesPortFins ? 32 : Math.max(dotSize, 28);
   const hitOffset = -(hitSize / 2);
 
   return (
     <div
-      className={isLeader ? "leader-port" : undefined}
-      data-state={isLeader ? locked ? "locked" : isSnapTarget ? "snap" : isDragActive && isValidTarget ? "target" : "rest" : undefined}
+      className={usesPortFins ? "canvas-port" : undefined}
+      data-state={usesPortFins ? locked ? "locked" : isSnapTarget ? "snap" : isDragActive && isValidTarget ? "target" : "rest" : undefined}
       data-no-drag
       data-port-id={portId}
       data-node-id={nodeId}
@@ -194,7 +195,7 @@ export const PortDot = memo(function PortDot({
         pointerEvents: "auto",
       }}
     >
-      {isSnapTarget && !isLeader && (
+      {isSnapTarget && !usesPortFins && (
         <div
           style={{
             position: "absolute",
@@ -208,14 +209,14 @@ export const PortDot = memo(function PortDot({
         />
       )}
 
-      {isLeader ? (
-        <svg className="leader-port__fins" viewBox="-4 -4 40 40" aria-hidden="true" style={{ color }}>
+      {usesPortFins ? (
+        <svg className="canvas-port__fins" viewBox="-4 -4 40 40" aria-hidden="true" style={{ color }}>
           {/* Both point right: into the card on the left, out on the right. */}
-          <path className="leader-port__collar" d="M1 8V3h7M24 3h7v5M31 24v5h-7M8 29H1v-5" />
-          <path className="leader-port__shell" d="M4 5h8l10 11-10 11H4l10-11z" />
-          <path className="leader-port__fin" d="m17 5 10 11-10 11" />
-          <path className="leader-port__core" d="m12 10 6 6-6 6 3-6z" />
-          {locked && <g className="leader-port__lock"><rect x="22" y="22" width="9" height="8" rx="2" /><path d="M24 22v-2a2.5 2.5 0 0 1 5 0v2" /></g>}
+          <path className="canvas-port__collar" d="M1 8V3h7M24 3h7v5M31 24v5h-7M8 29H1v-5" />
+          <path className="canvas-port__shell" d="M4 5h8l10 11-10 11H4l10-11z" />
+          <path className="canvas-port__fin" d="m17 5 10 11-10 11" />
+          <path className="canvas-port__core" d="m12 10 6 6-6 6 3-6z" />
+          {locked && <g className="canvas-port__lock"><rect x="22" y="22" width="9" height="8" rx="2" /><path d="M24 22v-2a2.5 2.5 0 0 1 5 0v2" /></g>}
         </svg>
       ) : <div
         style={{
@@ -271,7 +272,7 @@ export const PortDot = memo(function PortDot({
           }}
         >
           {locked ? `${label} (locked)` : label}
-          {hint && <span className="leader-port__hint">{hint}</span>}
+          {hint && <span className="canvas-port__hint">{hint}</span>}
         </div>
       )}
     </div>

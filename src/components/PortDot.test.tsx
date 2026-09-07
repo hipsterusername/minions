@@ -59,10 +59,19 @@ describe("leader port fins and hints", () => {
     expect(onConnectionEnd).toHaveBeenCalledWith({ nodeId: input.nodeId, nodeType: input.nodeType, portId: input.portId, direction: input.direction, protocol: input.protocol });
   });
 
-  it("keeps ordinary node ports circular with their existing label", () => {
+  it("keeps ordinary node input ports circular with their existing label", () => {
     const { container } = render(<PortDot {...input} nodeType="minion" />);
     expect(container.querySelector("svg")).toBeNull();
     fireEvent.mouseEnter(container.querySelector("[data-port-id]")!);
     expect(screen.getByRole("tooltip")).toHaveTextContent(/^Context$/);
+  });
+
+  it("uses the fin style for ordinary node output ports", () => {
+    const { container } = render(
+      <PortDot {...input} nodeType="markdown" direction="output" portId="content-out" />,
+    );
+    expect(container.querySelector(".canvas-port__fins")).toBeInTheDocument();
+    expect(container.querySelector("[data-port-id]"))
+      .toHaveAttribute("data-state", "rest");
   });
 });
