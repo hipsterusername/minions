@@ -1,4 +1,6 @@
 import path from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
 import { initDb } from "./db.ts";
 import { ensureWorkItemSchema } from "./work-item-schema.ts";
@@ -7,11 +9,12 @@ import { createWorkItem } from "./work-item-repo.ts";
 import { findContributionByRun, getLineageState } from "./worktree-integration-repo.ts";
 import { SqliteWorktreeIntegrationService } from "./worktree-integration-sqlite.ts";
 import type { MergeGateVerdict } from "./system-model/gates.ts";
+import { registerWorkspace } from "./workspace-registry.ts";
 
 function setup(gates: () => Promise<MergeGateVerdict> = async () =>
-  ({ allowed: true, mode: "off", gates: [] })) {
+  ({ allowed: true, mode: "off", gates: [] }), projectPath = "/repo") {
   const db = initDb(":memory:"); ensureWorkItemSchema(db); ensureWorktreeIntegrationSchema(db);
-  createWorkItem(db, { id: "work", projectId: "project", projectPath: "/repo", title: "Task",
+  createWorkItem(db, { id: "work", projectId: "project", projectPath, title: "Task",
     changeMode: "worktree", at: 1 });
   let tick = 10; const service = new SqliteWorktreeIntegrationService(db, () => tick++,
     async () => ({ targetRef: "refs/heads/main", baseSha: "abc123" }),
@@ -36,16 +39,24 @@ describe("SQLite worktree integration runtime", () => {
   });
 
   it("persists a planned contribution and returns its exact worker identity before launch", async () => {
-    const { db, service } = setup(); const plan = await service.bindRun({ workItemId: "work", runKey: "run-1" });
-    expect(plan).toMatchObject({ projectPath: "/repo", leaderSessionKey: "run-1",
-      branch: expect.stringContaining("minions/contribution/") });
-    const contribution = findContributionByRun(db, "run-1")!;
-    expect(path.isAbsolute(plan.path)).toBe(true);
-    expect(path.basename(plan.path)).toBe(contribution.id);
-    expect(plan.path.startsWith("/repo/")).toBe(false);
-    expect(contribution).toMatchObject({ state: "planned", branch_name: plan.branch, worktree_path: plan.path });
-    expect(getLineageState(db, contribution.lineage_id).lineage).toMatchObject({ project_id: "project",
-      target_ref: "refs/heads/main", base_sha: "abc123" }); db.close();
+    const projectPath = mkdtempSync(path.join(tmpdir(), "minions-contribution-source-"));
+    const { db, service } = setup(undefined, projectPath);
+    try {
+      const workspace = registerWorkspace(projectPath)!;
+      const plan = await service.bindRun({ workItemId: "work", runKey: "run-1" });
+      expect(plan).toMatchObject({ projectPath, leaderSessionKey: "run-1",
+        branch: expect.stringContaining("minions/contribution/") });
+      const contribution = findContributionByRun(db, "run-1")!;
+      expect(path.isAbsolute(plan.path)).toBe(true);
+      expect(plan.path).toBe(path.join(workspace.stateRoot, "worktrees", contribution.id));
+      expect(plan.path.startsWith(`${projectPath}${path.sep}`)).toBe(false);
+      expect(contribution).toMatchObject({ state: "planned", branch_name: plan.branch, worktree_path: plan.path });
+      expect(getLineageState(db, contribution.lineage_id).lineage).toMatchObject({ project_id: "project",
+        target_ref: "refs/heads/main", base_sha: "abc123" });
+    } finally {
+      db.close();
+      rmSync(projectPath, { recursive: true, force: true });
+    }
   });
 
   it("reuses the preserved conflicted contribution for a resolution iteration", async () => {

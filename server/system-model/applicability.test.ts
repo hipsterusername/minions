@@ -34,9 +34,13 @@ describe("computePacketApplicability", () => {
   });
 
   it("ignores non-critical constraints (only critical severity counts)", () => {
-    // The fixture's only critical constraint is bus_only; a src-only file
-    // matches neither the gate nor a critical constraint.
-    const result = computePacketApplicability(model, ["src/Canvas.tsx"]);
+    const noncriticalModel = {
+      ...model,
+      constraints: model.constraints.map((constraint) => ({ ...constraint, severity: "high" as const })),
+      policies: { ...model.policies, reviewGates: [] },
+    };
+    // The file still matches the constraint's glob; only severity excludes it.
+    const result = computePacketApplicability(noncriticalModel, ["server/commands/approve-changes.ts"]);
     expect(result.constraintHits).toEqual([]);
     expect(result.packetRequired).toBe(false);
   });
@@ -44,7 +48,13 @@ describe("computePacketApplicability", () => {
 
 describe("gatedSurfaceGlobs", () => {
   it("returns the unique, sorted union of gate and critical-constraint globs", () => {
-    expect(gatedSurfaceGlobs(model)).toEqual(["server/**/*.ts"]);
+    const withUnsortedGlobs = {
+      ...model,
+      policies: { ...model.policies, reviewGates: model.policies.reviewGates.map((gate) => ({
+        ...gate, requiredWhen: { ...gate.requiredWhen, files: ["src/**/*.tsx", "server/**/*.ts"] },
+      })) },
+    };
+    expect(gatedSurfaceGlobs(withUnsortedGlobs)).toEqual(["server/**/*.ts", "src/**/*.tsx"]);
   });
 });
 

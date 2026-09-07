@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FreshnessTimestampFn } from "./freshness.ts";
 import { compileWorkPacket, CONTEXT_PACK_PREAMBLE } from "./compile.ts";
 import { loadSystemModel } from "./load.ts";
-import { copyValidFixtureWithSurfaces } from "./load.test.ts";
+import { copyValidFixtureWithSurfaces } from "../../tests/support/system-model-fixture.ts";
 
 const freshTimestamps: FreshnessTimestampFn = async () => ({ modelTouchedAt: 20, codeTouchedAt: 10 });
 

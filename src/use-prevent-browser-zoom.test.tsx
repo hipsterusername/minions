@@ -17,35 +17,13 @@ function Probe() {
 }
 
 describe("usePreventBrowserZoom", () => {
-  it("preventDefaults ctrl-wheel anywhere in the document", () => {
+  it.each(["ctrlKey", "metaKey"] as const)("prevents browser zoom for %s-wheel anywhere in the document", (modifier) => {
     const { unmount } = render(<Probe />);
-
     const event = new WheelEvent("wheel", {
-      ctrlKey: true,
-      deltaY: 12,
-      bubbles: true,
-      cancelable: true,
+      [modifier]: true, deltaY: 12, bubbles: true, cancelable: true,
     });
     document.body.dispatchEvent(event);
-
     expect(event.defaultPrevented).toBe(true);
-
-    unmount();
-  });
-
-  it("preventDefaults meta-wheel anywhere in the document", () => {
-    const { unmount } = render(<Probe />);
-
-    const event = new WheelEvent("wheel", {
-      metaKey: true,
-      deltaY: 12,
-      bubbles: true,
-      cancelable: true,
-    });
-    document.body.dispatchEvent(event);
-
-    expect(event.defaultPrevented).toBe(true);
-
     unmount();
   });
 

@@ -68,22 +68,14 @@ describe("architecture: no direct crypto.randomUUID() in src/", () => {
     expect(files.length).toBeGreaterThan(10);
   });
 
-  for (const f of files.filter((x) => x.rel !== RANDOM_ID_FILE)) {
-    if (f.count === 0) continue;
-    it(`${f.rel} has no direct crypto.randomUUID() call sites`, () => {
-      expect(
-        f.count,
-        `${f.rel} has ${f.count} direct crypto.randomUUID() call site(s). ` +
-          `Use randomUuid() from src/random-id.ts — crypto.randomUUID is ` +
-          `undefined on non-secure origins (http://<lan-ip>) and throws.`,
-      ).toBe(0);
-    });
-  }
-
-  it("flags every offending file individually (none expected)", () => {
+  it("reports every file with direct crypto.randomUUID() call sites", () => {
     const offenders = files
       .filter((x) => x.rel !== RANDOM_ID_FILE && x.count > 0)
-      .map((x) => x.rel);
-    expect(offenders).toEqual([]);
+      .map(({ rel, count }) => ({ rel, count }));
+    expect(
+      offenders,
+      "Use randomUuid() from src/random-id.ts — crypto.randomUUID is " +
+        "undefined on non-secure origins (http://<lan-ip>) and throws.",
+    ).toEqual([]);
   });
 });

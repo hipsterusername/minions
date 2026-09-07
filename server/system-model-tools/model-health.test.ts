@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadSystemModel } from "../system-model/load.ts";
-import { copyValidFixture, copyValidFixtureWithSurfaces } from "../system-model/load.test.ts";
+import { copyValidFixture, copyValidFixtureWithSurfaces } from "../../tests/support/system-model-fixture.ts";
 import { createModelHealthToolDef } from "./model-health.ts";
 import type { BusPayload } from "../bus.ts";
 

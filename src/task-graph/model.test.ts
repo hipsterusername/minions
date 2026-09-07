@@ -34,9 +34,13 @@ describe("task graph projections", () => {
     expect(runtimeRole(snapshot.nodes[2]!, [{ taskId: "node-2", title: "Exact", status: "running", executor: "leader" }])).toBe("leader");
   });
 
-  it("offers active-path and attention projections without changing canonical nodes", () => {
+  it.each([
+    ["active", ["node-0", "node-1", "node-2", "node-3", "node-4", "node-5", "node-6", "node-7", "node-9", "node-11", "node-12", "node-15", "node-18"]],
+    ["attention", ["node-5", "node-7", "node-10", "node-13", "node-14", "node-15", "node-17"]],
+  ] as const)("selects exactly the %s nodes without changing canonical state", (filter, expectedIds) => {
     const snapshot = createGraphFixture(20);
-    expect(filterNodes(snapshot.nodes, "active").some((node) => node.currentAttempt?.state === "running")).toBe(true);
-    expect(filterNodes(snapshot.nodes, "attention").every((node) => node.currentAttempt?.state === "failed" || node.logicalState === "failed" || node.logicalState === "exhausted" || !!node.blocker || ["pending", "failed", "stale"].includes(node.verification.state))).toBe(true);
+    const original = structuredClone(snapshot.nodes);
+    expect(filterNodes(snapshot.nodes, filter).map((node) => node.id)).toEqual(expectedIds);
+    expect(snapshot.nodes).toEqual(original);
   });
 });

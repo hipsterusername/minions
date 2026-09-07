@@ -5,8 +5,8 @@
  * (Linux PRIMARY-selection paste, autoscroll). The bug it fixes manifested
  * when a middle-click started outside the canvas container — the previous
  * container-scoped listener never ran, so a paste fired on the input under
- * the cursor. The test mounts the hook and dispatches a `mousedown` on a
- * detached element nowhere near the canvas to confirm `preventDefault` is
+ * the cursor. The test mounts the hook and dispatches a `mousedown` on the
+ * document body outside the canvas to confirm `preventDefault` is
  * still called.
  */
 
@@ -20,35 +20,13 @@ function Probe() {
 }
 
 describe("useSuppressMiddleClickPaste", () => {
-  it("preventDefaults a middle-button mousedown anywhere in the document", () => {
+  it.each(["mousedown", "auxclick"])("prevents middle-button %s anywhere in the document", (eventType) => {
     const { unmount } = render(<Probe />);
-
-    // Dispatch on `document.body` to prove the listener is global, not
-    // scoped to the canvas container.
-    const event = new MouseEvent("mousedown", {
-      button: 1,
-      bubbles: true,
-      cancelable: true,
+    const event = new MouseEvent(eventType, {
+      button: 1, bubbles: true, cancelable: true,
     });
     document.body.dispatchEvent(event);
-
     expect(event.defaultPrevented).toBe(true);
-
-    unmount();
-  });
-
-  it("preventDefaults a middle-button auxclick anywhere in the document", () => {
-    const { unmount } = render(<Probe />);
-
-    const event = new MouseEvent("auxclick", {
-      button: 1,
-      bubbles: true,
-      cancelable: true,
-    });
-    document.body.dispatchEvent(event);
-
-    expect(event.defaultPrevented).toBe(true);
-
     unmount();
   });
 
@@ -67,11 +45,11 @@ describe("useSuppressMiddleClickPaste", () => {
     unmount();
   });
 
-  it("removes its listeners on unmount", () => {
+  it.each(["mousedown", "auxclick"])("removes its %s listener on unmount", (eventType) => {
     const { unmount } = render(<Probe />);
     unmount();
 
-    const event = new MouseEvent("mousedown", {
+    const event = new MouseEvent(eventType, {
       button: 1,
       bubbles: true,
       cancelable: true,

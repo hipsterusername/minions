@@ -34,12 +34,14 @@ afterEach(() => {
 
 describe("writeHtmlArtifact", () => {
   it("defaults to the MINIONS_HOME state collection", () => {
+    const originalMinionsHome = process.env.MINIONS_HOME;
     delete process.env.MINIONS_ARTIFACTS_DIR;
     process.env.MINIONS_HOME = tmpRoot;
     try {
       expect(htmlArtifactsRoot()).toBe(path.join(tmpRoot, "artifacts", "html"));
     } finally {
-      delete process.env.MINIONS_HOME;
+      if (originalMinionsHome === undefined) delete process.env.MINIONS_HOME;
+      else process.env.MINIONS_HOME = originalMinionsHome;
       process.env.MINIONS_ARTIFACTS_DIR = tmpRoot;
     }
   });

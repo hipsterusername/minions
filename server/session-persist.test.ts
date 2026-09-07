@@ -140,6 +140,7 @@ describe("session-persist integration", () => {
   });
 
   it("places the default global session database under MINIONS_HOME", () => {
+    const originalMinionsHome = process.env["MINIONS_HOME"];
     const minionsHome = fs.mkdtempSync(path.join(os.tmpdir(), "minions-global-state-"));
     closePersistDb();
     delete process.env["MINIONS_SERVER_DB"];
@@ -149,7 +150,8 @@ describe("session-persist integration", () => {
       expect(fs.existsSync(path.join(minionsHome, "server.db"))).toBe(true);
     } finally {
       closePersistDb();
-      delete process.env["MINIONS_HOME"];
+      if (originalMinionsHome === undefined) delete process.env["MINIONS_HOME"];
+      else process.env["MINIONS_HOME"] = originalMinionsHome;
       process.env["MINIONS_SERVER_DB"] = dbPath;
       fs.rmSync(minionsHome, { recursive: true, force: true });
     }

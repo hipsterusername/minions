@@ -199,7 +199,9 @@ describe("buildHarnessStartOpts — capability gating", () => {
       } }),
       prompt: "follow up",
     });
-    expect(startOpts.sandboxPolicy?.requested).toEqual(host.sandboxPolicy.requested);
+    const expected = { filesystemScope: "read-only", approvalPolicy: "always" };
+    expect(startOpts.sandboxPolicy?.requested).toEqual(expected);
+    expect(host.sandboxPolicy.requested).toEqual(expected);
   });
 
   it("retains Claude acceptEdits as a normalized restart permission", () => {

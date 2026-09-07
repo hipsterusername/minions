@@ -23,12 +23,17 @@ function snapshot(overrides: Partial<WorktreeLineageSnapshot> = {}): WorktreeLin
 }
 
 describe("worktree integration client state", () => {
-  it("does not roll a contribution back when an older lineage response arrives", () => {
+  it.each([
+    { lineageRevision: 3, contributionRevision: 2, expectedLineage: 4, expectedContribution: 5, expectedState: "queued" },
+    { lineageRevision: 6, contributionRevision: 2, expectedLineage: 6, expectedContribution: 5, expectedState: "queued" },
+    { lineageRevision: 3, contributionRevision: 6, expectedLineage: 4, expectedContribution: 6, expectedState: "ready" },
+  ])("merges lineage $lineageRevision and contribution $contributionRevision independently", ({ lineageRevision, contributionRevision, expectedLineage, expectedContribution, expectedState }) => {
     const current = snapshot({ revision: 4, contributions: [{ ...snapshot().contributions[0]!,
       revision: 5, state: "queued" }] });
-    const merged = mergeWorktreeIntegrationSnapshot(current, snapshot({ revision: 3 }));
-    expect(merged.revision).toBe(4);
-    expect(merged.contributions[0]?.state).toBe("queued");
+    const merged = mergeWorktreeIntegrationSnapshot(current, snapshot({ revision: lineageRevision,
+      contributions: [{ ...snapshot().contributions[0]!, revision: contributionRevision }] }));
+    expect(merged.revision).toBe(expectedLineage);
+    expect(merged.contributions[0]).toMatchObject({ revision: expectedContribution, state: expectedState });
   });
 
   it("selects a resolution run through the durable contribution run membership", () => {

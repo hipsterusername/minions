@@ -3,7 +3,7 @@ import { retrievalPage, digest, type RetrievalEntry } from "./query-system-model
 import { normalizeQuery } from "./query-system-model-schema.ts";
 import { createQuerySystemModelToolDef } from "./query-system-model.ts";
 import { loadSystemModel } from "../system-model/load.ts";
-import { copyValidFixtureWithSurfaces } from "../system-model/load.test.ts";
+import { copyValidFixtureWithSurfaces } from "../../tests/support/system-model-fixture.ts";
 
 const snapshot = digest({ model: "test" });
 const metadata = { operation: "read", status: "ok", modelVersion: snapshot, freshness: { status: "unknown", reason: "not_checked" } };

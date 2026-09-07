@@ -147,7 +147,7 @@ describe("<LineageModal />", () => {
     }));
   });
 
-  it("surfaces conflict recovery and blocks approval on pending gates", () => {
+  it("surfaces conflict recovery and pending gates for a conflicted contribution", () => {
     renderModal({
       lineage: snapshot({
         integrationState: "conflicted",
@@ -167,6 +167,26 @@ describe("<LineageModal />", () => {
     expect(screen.getByText("tests: pending")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve contribution" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Retry contribution" })).toBeNull();
+  });
+
+  it.each(["pending", "failed"] as const)("blocks an otherwise eligible enqueue on a %s gate", (status) => {
+    const lineage = snapshot({
+      contributions: [{ ...snapshot().contributions[0]!, reviewState: "approved" }],
+      gates: [{ id: "gate", lineageId: "lineage-1", contributionId: "contrib-1",
+        scope: "contribution", name: "tests", status, details: null, recordedAt: 4 }],
+    });
+    const { send, rerender } = renderModalRerender({ lineage });
+    fireEvent.click(screen.getByText("This leader"));
+    const enqueue = screen.getByRole("button", { name: "Enqueue contribution" });
+    expect(enqueue).toBeDisabled();
+    fireEvent.click(enqueue);
+    expect(send).not.toHaveBeenCalled();
+    rerender({ ...lineage, gates: [{ ...lineage.gates[0]!, status: "passed" }] });
+    expect(screen.getByRole("button", { name: "Enqueue contribution" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Enqueue contribution" }));
+    expect(send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      type: "enqueue_worktree_contribution", contributionId: "contrib-1", expectedIntegrationRevision: 2,
+    }));
   });
 
   it("keeps final review and promotion as separate actions", () => {

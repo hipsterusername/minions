@@ -2,7 +2,7 @@ import { globMatches } from "./match.ts";
 import { describe, expect, it } from "vitest";
 import { matchSystemModel } from "./match.ts";
 import { loadSystemModel } from "./load.ts";
-import { copyValidFixtureWithSurfaces } from "./load.test.ts";
+import { copyValidFixtureWithSurfaces } from "../../tests/support/system-model-fixture.ts";
 
 describe("matchSystemModel", () => {
   it("scores deterministic top-K candidates with reason strings", () => {

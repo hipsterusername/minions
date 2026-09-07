@@ -4,7 +4,7 @@ vi.mock("../system-model/evidence-binding.ts", async (original) => ({
 }));
 import { describe, expect, it, vi } from "vitest";
 import type { BusPayload } from "../bus.ts";
-import { copyValidFixture } from "../system-model/load.test.ts";
+import { copyValidFixture } from "../../tests/support/system-model-fixture.ts";
 import {
   getLatestReconciliationReportForPacket,
   getWorkPacket,

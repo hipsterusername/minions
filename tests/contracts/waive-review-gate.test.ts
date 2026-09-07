@@ -5,7 +5,7 @@ import { attachConnectionListeners } from "../../server/ws-connection.ts";
 import type { ConnectionDeps } from "../../server/ws-connection.ts";
 import { dispatchCommand } from "../../server/commands/index.ts";
 import { cmd, setup } from "../support/server-command-harness.ts";
-import { copyValidFixture } from "../../server/system-model/load.test.ts";
+import { copyValidFixture } from "../support/system-model-fixture.ts";
 import { getWorkPacket, saveWorkPacket } from "../../server/system-model/store.ts";
 import type { WorkPacket } from "../../shared/system-model/index.ts";
 

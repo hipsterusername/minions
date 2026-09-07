@@ -249,6 +249,9 @@ or claim the bare `https://<machine>.<tailnet>.ts.net/` origin.
 
 Tests are required for all behavioural changes:
 
+See [Testing strategy](docs/testing-strategy.md) for choosing test boundaries,
+reviewing test value, and pruning with explicit surviving-coverage evidence.
+
 1. **Before pushing**, run `pnpm verify` (typechecks, tests, license and system-model checks, build).
    CI runs the same gate and will fail the PR otherwise.
    For an even tighter local loop, install `prek` once

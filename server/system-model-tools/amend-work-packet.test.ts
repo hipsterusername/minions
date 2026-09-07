@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { loadSystemModel } from "../system-model/load.ts";
 import { getWorkPacket, saveWorkPacket } from "../system-model/store.ts";
 import { compileWorkPacket } from "../system-model/compile.ts";
-import { copyValidFixture, copyValidFixtureWithSurfaces } from "../system-model/load.test.ts";
+import { copyValidFixture, copyValidFixtureWithSurfaces } from "../../tests/support/system-model-fixture.ts";
 import type { BusPayload } from "../bus.ts";
 import { createAmendWorkPacketToolDef } from "./amend-work-packet.ts";
 

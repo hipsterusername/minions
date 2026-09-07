@@ -102,11 +102,6 @@ describe("ChartComponent: bar variant", () => {
     ],
   };
 
-  it("renders <rect> elements for bar series", () => {
-    const { container } = render(<ChartComponent component={barComponent} />);
-    expect(container.querySelector("rect")).not.toBeNull();
-  });
-
   it("renders one rect per data point", () => {
     const { container } = render(<ChartComponent component={barComponent} />);
     // 3 data points → 3 rects
@@ -130,11 +125,6 @@ describe("ChartComponent: scatter variant", () => {
       },
     ],
   };
-
-  it("renders <circle> elements for scatter series", () => {
-    const { container } = render(<ChartComponent component={scatterComponent} />);
-    expect(container.querySelector("circle")).not.toBeNull();
-  });
 
   it("renders one circle per data point", () => {
     const { container } = render(<ChartComponent component={scatterComponent} />);

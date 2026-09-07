@@ -132,41 +132,45 @@ describe("terminateSessionHost — leader child cleanup", () => {
     },
   );
 
-  it("aborts running minion children when the leader is removed", () => {
+  it("aborts running minion children when the leader is removed", async () => {
     const { host, deps, taskState, terminations } = makeLeaderFixture();
 
-    terminateSessionHost(host, deps, "remove");
+    const termination = terminateSessionHost(host, deps, "remove");
 
     expect(terminations).toEqual([["minion-1", "abort"]]);
     expect(taskState.tasks.get("running-child")?.status).toBe("cancelled");
     expect(host.status).toBe("stopped");
+    await termination;
   });
 
-  it("aborts running minion children when the leader is closed", () => {
+  it("aborts running minion children when the leader is closed", async () => {
     const { host, deps, terminations } = makeLeaderFixture();
 
-    terminateSessionHost(host, deps, "close");
+    const termination = terminateSessionHost(host, deps, "close");
 
     expect(terminations).toEqual([["minion-1", "abort"]]);
+    await termination;
   });
 
-  it("leaves children running when the leader is merely stopped", () => {
+  it("leaves children running when the leader is merely stopped", async () => {
     const { host, deps, taskState, terminations } = makeLeaderFixture();
 
-    terminateSessionHost(host, deps, "stop");
+    const termination = terminateSessionHost(host, deps, "stop");
 
     expect(terminations).toEqual([]);
     expect(taskState.tasks.get("running-child")?.status).toBe("running");
     expect(host.status).toBe("stopped");
+    await termination;
   });
 
-  it("leaves children running when the leader's run is aborted", () => {
+  it("leaves children running when the leader's run is aborted", async () => {
     const { host, deps, taskState, terminations } = makeLeaderFixture();
 
-    terminateSessionHost(host, deps, "abort");
+    const termination = terminateSessionHost(host, deps, "abort");
 
     expect(terminations).toEqual([]);
     expect(taskState.tasks.get("running-child")?.status).toBe("running");
+    await termination;
   });
 });
 

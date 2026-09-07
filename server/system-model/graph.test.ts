@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import path from "path";
 import { loadSystemModel } from "./load.ts";
 import { systemModelToGraph } from "./graph.ts";
-import { copyValidFixtureWithSurfaces } from "./load.test.ts";
+import { copyValidFixtureWithSurfaces } from "../../tests/support/system-model-fixture.ts";
 
 describe("systemModelToGraph", () => {
   it("builds nodes and linked-object edges", () => {

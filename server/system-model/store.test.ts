@@ -17,7 +17,7 @@ import {
   updateWorkPacketStatus,
   waiveLatestWorkPacketGate,
 } from "./store.ts";
-import { copyValidFixture } from "./load.test.ts";
+import { copyValidFixture } from "../../tests/support/system-model-fixture.ts";
 import type { ReconciliationReport, WorkPacket } from "../../shared/system-model/index.ts";
 import { findWorkspaceBySource } from "../workspace-registry.ts";
 

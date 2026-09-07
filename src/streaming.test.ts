@@ -26,15 +26,6 @@ describe("extractStreamDelta", () => {
     expect(extractStreamDelta(event)).toBeNull();
   });
 
-  it("returns null for a complete text event", () => {
-    const event: NormalizedEvent = { kind: "text", text: "done", role: "assistant" };
-    expect(extractStreamDelta(event)).toBeNull();
-  });
-
-  it("returns null for a thinking event", () => {
-    const event: NormalizedEvent = { kind: "thinking", text: "pondering" };
-    expect(extractStreamDelta(event)).toBeNull();
-  });
 });
 
 // ── isStreamEnd ───────────────────────────────────────────────────────────────

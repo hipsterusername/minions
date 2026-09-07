@@ -6,7 +6,7 @@ import type { ConnectionDeps } from "../../server/ws-connection.ts";
 import { dispatchCommand } from "../../server/commands/index.ts";
 import { cmd, setup } from "../support/server-command-harness.ts";
 import { writeSettings } from "../../server/project-store.ts";
-import { copyValidFixture, copyValidFixtureWithSurfaces } from "../../server/system-model/load.test.ts";
+import { copyValidFixture, copyValidFixtureWithSurfaces } from "../support/system-model-fixture.ts";
 
 class FakeWs extends EventEmitter {
   readyState = 1;

@@ -1,5 +1,5 @@
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { initDb } from "./db.ts";
 import type Database from "better-sqlite3";
 import {
@@ -97,6 +97,7 @@ describe("session-repo / sessions", () => {
   beforeEach(() => {
     db = makeDb();
   });
+  afterEach(() => db.close());
 
   it("inserts a new session row and retrieves it", () => {
     const row = makeSessionRow();
@@ -127,11 +128,11 @@ describe("session-repo / sessions", () => {
   it("lists all sessions in created_at order", () => {
     upsertSession(
       db,
-      makeSessionRow({ session_key: "a", created_at: "2026-01-01T00:00:00Z" }),
+      makeSessionRow({ session_key: "b", created_at: "2026-02-01T00:00:00Z" }),
     );
     upsertSession(
       db,
-      makeSessionRow({ session_key: "b", created_at: "2026-02-01T00:00:00Z" }),
+      makeSessionRow({ session_key: "a", created_at: "2026-01-01T00:00:00Z" }),
     );
     const all = getAllSessions(db);
     expect(all.map((s) => s.session_key)).toEqual(["a", "b"]);
@@ -151,6 +152,7 @@ describe("session-repo / task_records", () => {
   beforeEach(() => {
     db = makeDb();
   });
+  afterEach(() => db.close());
 
   it("inserts and reads back a TaskRecord with fidelity", () => {
     const rec = makeTaskRecord();
@@ -239,6 +241,7 @@ describe("session-repo / render_state", () => {
   beforeEach(() => {
     db = makeDb();
   });
+  afterEach(() => db.close());
 
   it("round-trips a dashboard via JSON-encoded components", () => {
     const state = makeRenderState();
@@ -298,6 +301,7 @@ describe("session-repo / event_log", () => {
   beforeEach(() => {
     db = makeDb();
   });
+  afterEach(() => db.close());
 
   it("appends events in order and retrieves them by session", () => {
     appendEvent(db, "s1", "task_plan_update", { n: 1 });

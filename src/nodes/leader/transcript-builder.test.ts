@@ -68,17 +68,6 @@ describe("buildLeaderTranscript", () => {
     }
   });
 
-  it("uses the correct labels for user, assistant, and thinking messages", () => {
-    const transcript = buildLeaderTranscript([
-      message("user", "Question"),
-      message("assistant", "Answer"),
-      message("thinking", "Reasoning"),
-    ], "full");
-
-    expect(transcript).toContain("User:\nQuestion");
-    expect(transcript).toContain("Assistant:\nAnswer");
-    expect(transcript).toContain("Assistant (thinking):\nReasoning");
-  });
 });
 
 describe("buildLeaderTranscriptBlocks", () => {

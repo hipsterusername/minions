@@ -10,7 +10,7 @@
  *   - When neither is selected, Delete is a no-op.
  */
 import { describe, it, expect, vi } from "vitest";
-import { renderHook, fireEvent } from "@testing-library/react";
+import { render, renderHook, fireEvent } from "@testing-library/react";
 import type { Dispatch, MutableRefObject } from "react";
 import { useCanvasKeyboard } from "./use-canvas-keyboard.ts";
 import type { CanvasNode, CanvasAction } from "./types.ts";
@@ -48,7 +48,7 @@ function makeOpts(overrides: {
 }
 
 describe("useCanvasKeyboard — Delete with edge selection", () => {
-  it("calls onDeleteSelectedEdge when only an edge is selected", () => {
+  it.each(["Delete", "Backspace"])("%s deletes only the selected edge", (code) => {
     const onDeleteSelectedEdge = vi.fn();
     const dispatch = vi.fn() as unknown as Dispatch<CanvasAction>;
     const opts = makeOpts({
@@ -57,10 +57,22 @@ describe("useCanvasKeyboard — Delete with edge selection", () => {
       dispatch,
     });
     renderHook(() => useCanvasKeyboard(opts));
-    fireEvent.keyDown(window, { code: "Delete" });
+    fireEvent.keyDown(window, { code });
     expect(onDeleteSelectedEdge).toHaveBeenCalledTimes(1);
     // Node delete path must not fire when an edge is the active selection.
     expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it.each(["input", "textarea"] as const)("keeps selected canvas items while editing a %s", (tag) => {
+    const onDeleteSelectedEdge = vi.fn();
+    const opts = makeOpts({ selectedIds: new Set(["node-1"]), selectedEdgeId: "edge-1", onDeleteSelectedEdge });
+    renderHook(() => useCanvasKeyboard(opts));
+    const view = render(tag === "input" ? <input aria-label="Editor" /> : <textarea aria-label="Editor" />);
+    const editor = view.getByRole("textbox");
+    for (const code of ["Delete", "Backspace"]) fireEvent.keyDown(editor, { code });
+    expect(onDeleteSelectedEdge).not.toHaveBeenCalled();
+    expect(opts.dispatch).not.toHaveBeenCalled();
+    expect(opts.graphDispatch).not.toHaveBeenCalled();
   });
 
   it("does nothing when no edge and no node are selected", () => {

@@ -17,7 +17,7 @@ vi.mock("../worktree.ts", () => ({
 
 import { openProjectDb, writeSettings } from "../project-store.ts";
 import { recordWorkPacketVerification, saveWorkPacket } from "./store.ts";
-import { copyValidFixture } from "./load.test.ts";
+import { copyValidFixture } from "../../tests/support/system-model-fixture.ts";
 import { evaluateMergeGates } from "./gates.ts";
 import type { WorkPacket } from "../../shared/system-model/index.ts";
 

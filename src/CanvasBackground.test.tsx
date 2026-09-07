@@ -52,6 +52,16 @@ describe("CanvasBackground", () => {
     );
     const ids = Array.from(container.querySelectorAll("[id]"), (node) => node.id);
 
+    expect(ids).toHaveLength(6);
     expect(new Set(ids).size).toBe(ids.length);
+    for (const svg of container.querySelectorAll("svg")) {
+      const localIds = new Set(Array.from(svg.querySelectorAll("[id]"), (node) => node.id));
+      for (const node of svg.querySelectorAll("[fill], [mask]")) {
+        for (const attribute of ["fill", "mask"]) {
+          const reference = node.getAttribute(attribute)?.match(/^url\(#(.+)\)$/)?.[1];
+          if (reference) expect(localIds.has(reference)).toBe(true);
+        }
+      }
+    }
   });
 });

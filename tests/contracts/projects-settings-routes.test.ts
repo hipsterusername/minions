@@ -36,6 +36,7 @@ vi.mock("node:os", async () => {
 
 import { mountSettingsRoutes } from "../../server/routes/projects/settings.ts";
 import { initSidecar } from "../../server/project-store.ts";
+import { findWorkspaceBySource } from "../../server/workspace-registry.ts";
 import {
   registerProjectPath,
   unregisterProjectPath,
@@ -140,14 +141,19 @@ describe("settings routes", () => {
   });
 
   it("GET returns the documented defaults when settings.json is absent", async () => {
-    fs.rmSync(path.join(project, ".minions", "settings.json"), {
-      force: true,
-    });
+    const workspace = findWorkspaceBySource(project);
+    expect(workspace).not.toBeNull();
+    const settingsPath = path.join(workspace!.stateRoot, "settings.json");
+    expect(fs.existsSync(settingsPath)).toBe(true);
+    fs.writeFileSync(settingsPath, JSON.stringify({ roleSystemBeta: true }));
+    expect(await (await fetch(`${baseUrl}/${encoded}/settings`)).json()).toMatchObject({ roleSystemBeta: true });
+    fs.rmSync(settingsPath);
+    expect(fs.existsSync(settingsPath)).toBe(false);
     const res = await fetch(`${baseUrl}/${encoded}/settings`);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body["defaultModel"]).toBeDefined();
     expect(body["defaultPermissionMode"]).toBeDefined();
-    expect(body["roleSystemBeta"]).toBe(false);
+    expect(body).toMatchObject({ roleSystemBeta: false, defaultWorktreeIsolation: false, defaultPermissionMode: "auto" });
   });
 
   it("preserves an intentionally empty Context Action list", async () => {

@@ -53,13 +53,6 @@ function uid(label: string): string {
 
 describe("harness registry", () => {
   describe("registerHarness + getHarness", () => {
-    it("retrieves the harness by the name it was registered with", () => {
-      const name = uid("alpha");
-      const harness = makeStubHarness(name);
-      registerHarness(harness);
-      expect(getHarness(name)).toBe(harness);
-    });
-
     it("stores multiple harnesses independently", () => {
       const nameA = uid("multi");
       const nameB = uid("multi");
@@ -82,52 +75,24 @@ describe("harness registry", () => {
   });
 
   describe("getHarness — unknown name", () => {
-    it("throws for an unregistered name", () => {
-      expect(() => getHarness("__not-registered-xyz__")).toThrow(
-        /Unknown harness "__not-registered-xyz__"/,
-      );
-    });
-
-    it("includes the offending name in the error", () => {
-      const badName = uid("bad-name");
-      expect(() => getHarness(badName)).toThrow(new RegExp(`Unknown harness "${badName}"`));
-    });
-
-    it("names registered harnesses in the error message", () => {
+    it("rejects unknown names with the requested name, registered choices, and import hint", () => {
       const name = uid("visible-in-error");
+      const badName = uid("bad-name");
       registerHarness(makeStubHarness(name));
-      // A *different* unknown name is looked up; the error should list `name`.
-      expect(() => getHarness("__totally-different__")).toThrow(new RegExp(name));
-    });
-
-    it("error message always contains 'Registered harnesses:'", () => {
-      expect(() => getHarness("__sentinel__")).toThrow(/Registered harnesses:/);
-    });
-
-    it("error message always contains the import hint", () => {
-      expect(() => getHarness("__sentinel-2__")).toThrow(
-        /Import the harness module before calling getHarness/,
+      expect(() => getHarness(badName)).toThrow(
+        new RegExp(`Unknown harness "${badName}"\\. Registered harnesses: .*${name}.*Import the harness module before calling getHarness`),
       );
     });
   });
 
   describe("registeredHarnessNames", () => {
-    it("includes a name that was just registered", () => {
-      const name = uid("names-check");
-      registerHarness(makeStubHarness(name));
-      expect(registeredHarnessNames()).toContain(name);
-    });
-
-    it("returns an Array, not a Map iterator or Set", () => {
-      expect(Array.isArray(registeredHarnessNames())).toBe(true);
-    });
-
-    it("reflects multiple registrations", () => {
+    it("returns an array reflecting multiple registrations", () => {
       const a = uid("multi-names");
       const b = uid("multi-names");
       registerHarness(makeStubHarness(a));
       registerHarness(makeStubHarness(b));
       const names = registeredHarnessNames();
+      expect(Array.isArray(names)).toBe(true);
       expect(names).toContain(a);
       expect(names).toContain(b);
     });

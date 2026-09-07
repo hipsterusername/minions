@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadSystemModel } from "../system-model/load.ts";
-import { copyValidFixture } from "../system-model/load.test.ts";
+import { copyValidFixture } from "../../tests/support/system-model-fixture.ts";
 import { createCheckFreshnessToolDef } from "./check-freshness.ts";
 
 describe("check_freshness", () => {

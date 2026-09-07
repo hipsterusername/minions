@@ -50,7 +50,11 @@ const base = {
 describe("decideConflictRecovery", () => {
   it("retries with fresh fences via the unified continuation command", () => {
     const latest = detail("waiting", { waitKind: "decision" });
-    const decision = decideConflictRecovery({ ...base, latest });
+    const decision = decideConflictRecovery({ ...base, latest, options: {
+      type: "wrong", requestId: "stale", workItemId: "wrong", prompt: "wrong",
+      expectedLifecycleRevision: 0, expectedCurrentRunKey: "stale",
+      displayPrompt: "Visible continuation",
+    } });
 
     expect(decision).toEqual({
       kind: "retry",
@@ -61,6 +65,7 @@ describe("decideConflictRecovery", () => {
         prompt: "Continue",
         expectedLifecycleRevision: 4,
         expectedCurrentRunKey: "run-1",
+        displayPrompt: "Visible continuation",
       },
     });
   });
@@ -98,6 +103,10 @@ describe("decideConflictRecovery", () => {
     ["identity-mismatch", {
       ...base,
       latest: detail("inactive", { id: "other-work" }),
+    }],
+    ["identity-mismatch", {
+      ...base,
+      latest: detail("inactive", { projectId: "other-project" }),
     }],
     ["unsupported-state", { ...base, latest: detail("waiting") }],
     ["missing-latest", { ...base, latest: null }],

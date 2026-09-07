@@ -1,77 +1,66 @@
-
-import { describe, it, expect } from "vitest";
-import { z, type ZodTypeAny } from "zod/v4";
+import { beforeEach, describe, it, expect, vi } from "vitest";
+import { z } from "zod/v4";
+import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { wrapTools } from "./tools.ts";
 import type { NormalizedToolDef } from "../types.ts";
 
-function makeDef(name: string, schema: ZodTypeAny = z.object({ value: z.string() })): NormalizedToolDef {
-  return {
-    name,
-    description: `${name} tool`,
-    inputSchema: schema,
-    handler: async (_input) => ({ content: [{ type: "text" as const, text: "ok" }] }),
-  };
-}
+// Observe the SDK boundary while still constructing real SDK tools and servers.
+vi.mock("@anthropic-ai/claude-agent-sdk", async (importOriginal) => {
+  const sdk = await importOriginal<typeof import("@anthropic-ai/claude-agent-sdk")>();
+  return { ...sdk, tool: vi.fn(sdk.tool), createSdkMcpServer: vi.fn(sdk.createSdkMcpServer) };
+});
+
+beforeEach(() => vi.clearAllMocks());
 
 describe("wrapTools", () => {
-  it("returns an object (MCP server instance)", () => {
-    const server = wrapTools("test-server", [makeDef("my_tool")]);
-    expect(server).toBeDefined();
-    expect(typeof server).toBe("object");
-  });
-
-  it("produces a server whose tools list matches the provided defs", () => {
-    const defs = [makeDef("alpha"), makeDef("beta"), makeDef("gamma")];
+  it.each([0, 1, 3])("registers exactly %i tools and forwards their schemas and handlers", async (count) => {
+    const schema = z.object({
+      taskId: z.string(),
+      title: z.string(),
+      priority: z.enum(["low", "medium", "high"]),
+    });
+    const defs: NormalizedToolDef[] = Array.from({ length: count }, (_, index) => ({
+      name: `tool_${index}`,
+      description: `Tool ${index} description`,
+      inputSchema: schema,
+      handler: vi.fn(async () => ({ content: [{ type: "text" as const, text: `result_${index}` }] })),
+    }));
     const server = wrapTools("test-server", defs);
-    // The SDK's MCP server exposes its tools on the `instance.tools` property.
-    const instance = (server as { instance?: { tools?: unknown[] } }).instance;
-    if (instance?.tools) {
-      expect(instance.tools).toHaveLength(3);
-    } else {
-      // If the instance shape differs, just confirm the server was created.
-      expect(server).toBeTruthy();
+
+    expect(server).toMatchObject({ type: "sdk", name: "test-server" });
+    expect(tool).toHaveBeenCalledTimes(count);
+    expect(createSdkMcpServer).toHaveBeenCalledExactlyOnceWith({
+      name: "test-server",
+      tools: vi.mocked(tool).mock.results.map((result) => result.value),
+    });
+    for (const [index, def] of defs.entries()) {
+      expect(tool).toHaveBeenNthCalledWith(index + 1, def.name, def.description, schema.shape, expect.any(Function));
+      // The spy erases the SDK's schema generic; this adapter accepts unknown
+      // input and forwards it to the normalized handler.
+      const callback = vi.mocked(tool).mock.calls[index]![3] as (
+        args: unknown, extra: unknown,
+      ) => Promise<unknown>;
+      const input = { taskId: `task_${index}`, title: "Example", priority: "high" };
+      await expect(callback(input, {})).resolves.toEqual({
+        content: [{ type: "text", text: `result_${index}` }],
+      });
+      expect(def.handler).toHaveBeenCalledExactlyOnceWith(input);
     }
   });
 
-  it("wraps a single tool without errors", () => {
-    expect(() => wrapTools("s", [makeDef("lone_tool")])).not.toThrow();
-  });
-
-  it("wraps tools with multi-field schemas", () => {
-    const def = makeDef(
-      "multi_field",
-      z.object({
-        taskId: z.string(),
-        title: z.string(),
-        priority: z.enum(["low", "medium", "high"]),
-      }),
+  it.each([
+    ["bad_tool", z.string()],
+    ["number_tool", z.number()],
+  ])("rejects non-object schema for %s with an actionable diagnostic", (name, inputSchema) => {
+    const def: NormalizedToolDef = {
+      name,
+      description: "Invalid schema",
+      inputSchema,
+      handler: async () => ({ content: [] }),
+    };
+    expect(() => wrapTools("s", [def])).toThrow(
+      new RegExp(`${name}.*ZodObject.*\\.shape`),
     );
-    expect(() => wrapTools("s", [def])).not.toThrow();
-  });
-
-  it("handles an empty defs array without errors", () => {
-    const server = wrapTools("empty-server", []);
-    expect(server).toBeDefined();
-  });
-
-  it("throws a descriptive error for a non-ZodObject schema", () => {
-    const defWithString: NormalizedToolDef = {
-      name: "bad_tool",
-      description: "...",
-      inputSchema: z.string(),
-      handler: async (_) => ({ content: [] }),
-    };
-    expect(() => wrapTools("s", [defWithString])).toThrow(/bad_tool.*ZodObject/);
-  });
-
-  it("error message includes the tool name and .shape hint", () => {
-    const defWithNumber: NormalizedToolDef = {
-      name: "number_tool",
-      description: "...",
-      inputSchema: z.number(),
-      handler: async (_) => ({ content: [] }),
-    };
-    expect(() => wrapTools("s", [defWithNumber])).toThrow("number_tool");
-    expect(() => wrapTools("s", [defWithNumber])).toThrow(".shape");
+    expect(createSdkMcpServer).not.toHaveBeenCalled();
   });
 });

@@ -49,22 +49,13 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  vi.useRealTimers();
   wheelDetector.reset();
+  vi.useRealTimers();
 });
 
 // ── classify() must not touch pan-gesture state ─────────────────────────
 
 describe("wheelDetector.classify()", () => {
-  it("does not set isPanGestureActive when classifying a trackpad event", () => {
-    expect(wheelDetector.isPanGestureActive).toBe(false);
-    const device = wheelDetector.classify(trackpadEvent());
-    expect(device).toBe("trackpad");
-    // Critical invariant: classification alone must NOT mark a pan gesture.
-    // The canvas decides when it's actually panning.
-    expect(wheelDetector.isPanGestureActive).toBe(false);
-  });
-
   it("does not set isPanGestureActive when classifying a mouse event", () => {
     const device = wheelDetector.classify(mouseEvent());
     expect(device).toBe("mouse");
@@ -105,18 +96,25 @@ describe("wheelZoomFactor()", () => {
   it("makes equal opposite wheel movements reversible", () => {
     const zoomIn = wheelZoomFactor(mouseEvent({ deltaY: -100 }), false);
     const zoomOut = wheelZoomFactor(mouseEvent({ deltaY: 100 }), false);
+    expect(zoomIn).toBeGreaterThan(1);
+    expect(zoomOut).toBeLessThan(1);
     expect(zoomIn * zoomOut).toBeCloseTo(1, 12);
   });
 
-  it("normalizes line and pixel wheel deltas to the same notch", () => {
+  it("normalizes line, page and pixel wheel deltas to the same notch", () => {
     const pixels = wheelZoomFactor(mouseEvent({ deltaY: 100, deltaMode: 0 }), false);
     const lines = wheelZoomFactor(mouseEvent({ deltaY: 3, deltaMode: 1 }), false);
+    const pages = wheelZoomFactor(mouseEvent({ deltaY: 1, deltaMode: 2 }), false);
+    expect(pixels).toBeLessThan(1);
     expect(lines).toBeCloseTo(pixels, 12);
+    expect(pages).toBeCloseTo(pixels, 12);
   });
 
   it("bounds pinch spikes while preserving direction", () => {
     const zoomIn = wheelZoomFactor(trackpadEvent({ deltaY: -10_000 }), true);
     const zoomOut = wheelZoomFactor(trackpadEvent({ deltaY: 10_000 }), true);
+    expect(zoomIn).toBeGreaterThan(1);
+    expect(zoomOut).toBeLessThan(1);
     expect(zoomIn).toBeLessThanOrEqual(1.25);
     expect(zoomOut).toBeGreaterThanOrEqual(0.8);
     expect(zoomIn * zoomOut).toBeCloseTo(1, 12);
@@ -126,13 +124,8 @@ describe("wheelZoomFactor()", () => {
 // ── markPanGestureActive() drives the pan flag ──────────────────────────
 
 describe("wheelDetector.markPanGestureActive()", () => {
-  it("flips isPanGestureActive to true", () => {
-    expect(wheelDetector.isPanGestureActive).toBe(false);
-    wheelDetector.markPanGestureActive();
-    expect(wheelDetector.isPanGestureActive).toBe(true);
-  });
-
   it("auto-clears after the gesture timeout", () => {
+    expect(wheelDetector.isPanGestureActive).toBe(false);
     wheelDetector.markPanGestureActive();
     expect(wheelDetector.isPanGestureActive).toBe(true);
 
@@ -158,7 +151,7 @@ describe("wheelDetector.markPanGestureActive()", () => {
   });
 });
 
-// ── End-to-end: scroll-capture-zone behaviour ───────────────────────────
+// ── Unit state transitions used by scroll-capture routing ──────────────
 
 describe("scroll-capture interplay", () => {
   it("first trackpad event over a scroll-capture zone leaves the pan flag false", () => {

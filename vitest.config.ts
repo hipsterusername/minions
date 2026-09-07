@@ -36,6 +36,7 @@ export default defineConfig({
         test: {
           name: "node",
           environment: "node",
+          setupFiles: ["./tests/setup-node.ts"],
           include: [
             "server/**/*.test.ts",
             "tests/architecture/**/*.test.ts",
@@ -75,10 +76,11 @@ export default defineConfig({
               url: "http://localhost/",
             },
           },
-          setupFiles: ["./tests/setup-dom.ts"],
+          setupFiles: ["./tests/setup-node.ts", "./tests/setup-dom.ts"],
           include: [
             "src/**/*.test.tsx",
             "src/**/*.dom.test.ts",
+            "tests/contracts/test-storage.test.ts",
           ],
           exclude: ["node_modules/**", "dist/**", ".canvas-worktrees/**"],
         },

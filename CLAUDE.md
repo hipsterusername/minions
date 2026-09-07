@@ -152,6 +152,11 @@ New server files must be under 400 lines; split them if they grow.
 
 ## Conventions worth repeating
 
+- Keep local notes, handoffs, raw audit ledgers, evidence and recovery patches
+  under ignored `.scratch/<task>/`. Follow the portable-fixture and staging
+  checks in [CONTRIBUTING.md](./CONTRIBUTING.md#local-working-artifacts).
+  Save canvas project context through `update_project_context`; do not promote
+  session output or machine-specific paths into source or published docs.
 - **Replace, don't deprecate.** When the new shape lands, delete the
   old one. No dual config formats, no compat shims.
 - **No `setTimeout("wait for state")` in tests.** Use

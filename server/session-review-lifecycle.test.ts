@@ -31,6 +31,7 @@ describe("session review lifecycle", () => {
     const dismissed = dismissReview(acknowledged, 30);
     expect(decision.reviewState).toBe("decision_needed");
     expect(acknowledged).toMatchObject({ reviewState: "decision_needed", acknowledgedAt: 20 });
+    expect(dismissed).toMatchObject({ reviewState: "decision_needed", acknowledgedAt: 20, dismissedAt: 30 });
     expect(reopenReview(dismissed)).toMatchObject({
       reviewState: "decision_needed",
       acknowledgedAt: 20,

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { WorkPacket } from "../../shared/system-model/index.ts";
 import type { DetailedDiff } from "../worktree-types.ts";
 import { loadSystemModel } from "./load.ts";
-import { copyValidFixtureWithSurfaces } from "./load.test.ts";
+import { copyValidFixtureWithSurfaces } from "../../tests/support/system-model-fixture.ts";
 import { reconcileDeterministic } from "./reconcile.ts";
 
 describe("reconcileDeterministic", () => {

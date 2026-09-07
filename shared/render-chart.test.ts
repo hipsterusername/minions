@@ -167,13 +167,10 @@ describe("formatChart", () => {
   });
 
   it("shows min and max of the series y values", () => {
-    const result = formatChart(base);
-    expect(result).toContain("12");
-    expect(result).toContain("34");
-  });
-
-  it("includes the range annotation", () => {
-    expect(formatChart(base)).toContain("range");
+    const result = formatChart({ ...base, series: [{ label: "web",
+      data: [20, 22, 18, 25, 21, 34, 12].map((y, x) => ({ x, y })),
+    }] });
+    expect(result).toContain("(range 12–34)");
   });
 
   it("falls back to 'Chart' when no title is set", () => {

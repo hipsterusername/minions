@@ -1,14 +1,100 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFile, spawnSync } from "node:child_process";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
+import Database from "better-sqlite3";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const { scripts } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+
+test("test runners leave inherited installation storage untouched", { timeout: 120_000 }, async () => {
+  const fixture = mkdtempSync(join(tmpdir(), "minions-install-storage-"));
+  const liveHome = join(fixture, "user-state");
+  mkdirSync(liveHome);
+  const env = {
+    ...process.env,
+    MINIONS_HOME: liveHome,
+    MINIONS_SERVER_DB: join(liveHome, "server.db"),
+    DB_PATH: join(liveHome, "canvas.db"),
+    MINIONS_ARTIFACTS_DIR: join(liveHome, "html"),
+    MINIONS_E2E_HOME: join(fixture, "browser-home"),
+  };
+  // Child CLIs are standalone processes, not Node test-runner workers.
+  delete env.NODE_TEST_CONTEXT;
+  try {
+    for (const file of [env.MINIONS_SERVER_DB, env.DB_PATH]) {
+      const db = new Database(file);
+      db.exec("CREATE TABLE sentinel (value TEXT); INSERT INTO sentinel VALUES ('keep me')");
+      db.close();
+    }
+    const originalFiles = readdirSync(liveHome).sort();
+    const originals = originalFiles.map((file) => readFileSync(join(liveHome, file)));
+    const assertUntouched = () => {
+      assert.deepEqual(readdirSync(liveHome).sort(), originalFiles);
+      for (const [index, file] of originalFiles.entries()) {
+        assert.deepEqual(readFileSync(join(liveHome, file)), originals[index], file);
+      }
+    };
+
+    // Run the exact command-handler fixtures that used to persist leader-new/hi,
+    // plus real storage probes in both the Node and DOM projects.
+    const unitArgs = [
+      "node_modules/vitest/vitest.mjs", "run",
+      "server/commands/create-session.test.ts", "tests/contracts/test-storage.test.ts",
+    ];
+    await promisify(execFile)(process.execPath, unitArgs, {
+      cwd: root, env, encoding: "utf8", timeout: 90_000,
+    });
+    assertUntouched();
+
+    // A fresh installation must not gain a state directory from verification.
+    const freshHome = join(fixture, "fresh-installation");
+    await promisify(execFile)(process.execPath, unitArgs, {
+      cwd: root, encoding: "utf8", timeout: 90_000,
+      env: {
+        ...env, MINIONS_HOME: freshHome,
+        MINIONS_SERVER_DB: join(freshHome, "server.db"),
+        DB_PATH: join(freshHome, "canvas.db"),
+        MINIONS_ARTIFACTS_DIR: join(freshHome, "html"),
+      },
+    });
+    assert.equal(existsSync(freshHome), false);
+
+    // Use the browser server's actual environment without requiring Chromium.
+    // Exercise both browser configs and production storage resolution.
+    await promisify(execFile)(process.execPath, ["--import", "./scripts/register-typescript.mjs", "--input-type=module", "-e", `
+      import assert from 'node:assert/strict';
+      import fs from 'node:fs';
+      import path from 'node:path';
+      import { createBrowserConfig } from './tests/e2e/browser-config.mjs';
+      import { initDb } from './server/db.ts';
+      import { openPersistDb, closePersistDb } from './server/session-persist.ts';
+      import { getMinionsHome, registerWorkspace } from './server/workspace-registry.ts';
+      import { writeHtmlArtifact } from './server/html-artifact-store.ts';
+      const inheritedEnv = { ...process.env };
+      for (const smoke of [true, false]) {
+        Object.assign(process.env, inheritedEnv);
+        Object.assign(process.env, createBrowserConfig({ smoke }).webServer.env);
+        assert.equal(getMinionsHome(), path.join(process.env.MINIONS_E2E_HOME, '.minions'));
+        const db = openPersistDb();
+        db.prepare('INSERT OR REPLACE INTO sessions (session_key, task_name) VALUES (?, ?)').run('browser-probe', 'hi');
+        closePersistDb();
+        initDb().close();
+        fs.mkdirSync(process.env.MINIONS_E2E_PROJECT, { recursive: true });
+        registerWorkspace(process.env.MINIONS_E2E_PROJECT);
+        await writeHtmlArtifact('browser-probe', { id: String(smoke), html: '<p>test</p>' });
+      }
+    `], { cwd: root, env, encoding: "utf8", timeout: 20_000 });
+    assertUntouched();
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
 
 test("startup launches both services from a checkout path with spaces without shell shims", async () => {
   const fixture = mkdtempSync(join(tmpdir(), "minions startup spaces "));

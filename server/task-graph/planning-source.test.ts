@@ -108,7 +108,7 @@ describe("planning source capture", () => {
 
     expect(captured.scopedSources).toHaveLength(1);
     expect(captured.scopedSources[0]?.content).toContain("Auth rules");
-    expect(captured.scopedSources[0]?.content).not.toContain("Billing rules");
+    expect(captured.scopedSources[0]?.content).not.toContain("Authentication surcharge rules");
     expect(captured.snapshot.connectedContext).toHaveLength(2);
   });
 

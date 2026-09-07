@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadSystemModel } from "./load.ts";
-import { copyValidFixtureWithSurfaces } from "./load.test.ts";
+import { copyValidFixtureWithSurfaces } from "../../tests/support/system-model-fixture.ts";
 import { discoveryEdges, DISCOVERY_RELATIONSHIPS } from "./discovery-relations.ts";
 
 function fixture() {

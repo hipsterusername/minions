@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadSystemModel } from "../system-model/load.ts";
-import { copyValidFixtureWithSurfaces } from "../system-model/load.test.ts";
+import { copyValidFixtureWithSurfaces } from "../../tests/support/system-model-fixture.ts";
 import { createQuerySystemModelToolDef } from "./query-system-model.ts";
 import { computePacketApplicability } from "../system-model/applicability.ts";
 import { findWorkspaceBySource } from "../workspace-registry.ts";

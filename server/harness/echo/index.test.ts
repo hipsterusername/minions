@@ -134,10 +134,7 @@ describe("start() — event sequence", () => {
 
   it("falls back to 'echo' as model when no model is supplied", async () => {
     const events = await collect({ prompt: "x", model: "" });
-    const initEv = events[0];
-    if (initEv?.kind === "init") {
-      expect(initEv.model).toBe("echo");
-    }
+    expect(events[0]).toMatchObject({ kind: "init", model: "echo" });
   });
 
   it("echos an async-iterable prompt by joining parts with newlines", async () => {

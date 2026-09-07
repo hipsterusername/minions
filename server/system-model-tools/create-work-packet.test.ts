@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { loadSystemModel } from "../system-model/load.ts";
 import { getWorkPacket } from "../system-model/store.ts";
-import { copyValidFixture, copyValidFixtureWithSurfaces } from "../system-model/load.test.ts";
+import { copyValidFixture, copyValidFixtureWithSurfaces } from "../../tests/support/system-model-fixture.ts";
 import type { BusPayload } from "../bus.ts";
 import { createCreateWorkPacketToolDef } from "./create-work-packet.ts";
 

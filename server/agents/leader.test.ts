@@ -11,7 +11,7 @@ import { getAgentType } from "./registry.ts";
 import { LEADER_SYSTEM_PROMPT } from "./leader.ts";
 import { disablePersistence } from "../session-persist.ts";
 import { writeSettings, writeSkills } from "../project-store.ts";
-import { copyValidFixture } from "../system-model/load.test.ts";
+import { copyValidFixture } from "../../tests/support/system-model-fixture.ts";
 import type { TaskManagerState } from "../task-tools.ts";
 import {
   LEADER_PROMPT_CORE,

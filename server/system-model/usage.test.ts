@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadSystemModel } from "./load.ts";
-import { copyValidFixture, copyValidFixtureWithSurfaces } from "./load.test.ts";
+import { copyValidFixture, copyValidFixtureWithSurfaces } from "../../tests/support/system-model-fixture.ts";
 import { recordSystemModelUsage, saveWorkPacket } from "./store.ts";
 import { orphanedObjects, staleObjects, unusedInLastNPackets } from "./usage.ts";
 import type { WorkPacket } from "../../shared/system-model/index.ts";

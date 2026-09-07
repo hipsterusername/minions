@@ -19,6 +19,9 @@ import type { NormalizedToolDef } from "../../server/harness/types.ts";
 import {
   applyRenderMessage,
   emptyRenderState,
+  renderMessageSchema,
+  RENDER_COMPONENT_TYPES,
+  type RenderComponent,
   type RenderMessage,
   type RenderState,
 } from "../../shared/render-dsl.ts";
@@ -48,7 +51,7 @@ function lastRenderMessage(envelopes: CapturedEnvelope[]): RenderMessage {
   const env = envelopes.at(-1);
   if (!env) throw new Error("no envelope captured");
   const { topic: _topic, type: _type, leaderSessionKey: _l, ...payload } = env;
-  return payload as unknown as RenderMessage;
+  return renderMessageSchema.parse(payload);
 }
 
 async function callTool(def: NormalizedToolDef, args: unknown): Promise<unknown> {
@@ -183,7 +186,42 @@ describe("render-DSL producer↔consumer round-trip", () => {
     expect(consumer.components.map((c) => c.id)).toEqual(["b"]);
   });
 
-  it("every component variant emitted by the producer parses cleanly on the consumer", async () => {
+  const components: RenderComponent[] = [
+    { id: "metric", type: "metric", label: "Files", value: "12" },
+    { id: "text", type: "text", content: "para" },
+    { id: "code", type: "code", content: "console.log(1)", language: "ts" },
+    { id: "list", type: "list", items: ["one", "two"] },
+    { id: "table", type: "table", headers: ["A", "B"], rows: [["1", "2"]] },
+    { id: "status", type: "status", label: "OK", state: "success" },
+    { id: "progress", type: "progress", label: "p", value: 42 },
+    { id: "sparkline", type: "sparkline", data: [1, 3, 2] },
+    { id: "kv", type: "kv", entries: [{ key: "branch", value: "main" }] },
+    { id: "timeline", type: "timeline", events: [{ label: "Started", state: "running" }] },
+    { id: "callout", type: "callout", variant: "warning", content: "Check this" },
+    { id: "separator", type: "separator", label: "Results" },
+    { id: "diff", type: "diff", before: { content: "old" }, after: { content: "new" } },
+    { id: "checklist", type: "checklist", items: [{ label: "Test", checked: true }] },
+    { id: "tags", type: "tags", items: [{ text: "TypeScript", color: "blue" }] },
+    { id: "copyable", type: "copyable", content: "pnpm test", label: "Command" },
+    { id: "form", type: "form", fields: [{ id: "name", kind: "text", label: "Name" }] },
+    { id: "chart", type: "chart", series: [{ label: "Latency", data: [{ x: 1, y: 2 }] }] },
+    { id: "section", type: "section", title: "Detail", components: [
+      { id: "section-child", type: "text", content: "Nested detail" },
+    ] },
+    { id: "tabs", type: "tabs", tabs: [{ id: "tab", label: "Result", components: [
+      { id: "tab-child", type: "metric", label: "Count", value: "3" },
+    ] }] },
+    { id: "image", type: "image", src: "data:image/png;base64,AA==", alt: "Diagram" },
+    { id: "file-preview", type: "file-preview", source: { kind: "inline", content: "Preview" } },
+    { id: "html-artifact", type: "html-artifact", html: "<p>Visualization</p>" },
+  ];
+
+  it("includes a round-trip fixture for every registered component type", () => {
+    expect(components.map((component) => component.type).sort())
+      .toEqual([...RENDER_COMPONENT_TYPES].sort());
+  });
+
+  it.each(components)("round-trips $type through the producer and consumer schema", async (component) => {
     const { bus, captured } = rig();
     const { toolDefs } = createRenderToolsForLeader({
       leaderSessionKey: "leader-1",
@@ -191,30 +229,13 @@ describe("render-DSL producer↔consumer round-trip", () => {
     });
     const setTool = findTool(toolDefs, "render_set");
 
-    // One representative of each major component family. If any of these
-    // diverge between the server and client schemas, the consumer's parse
-    // would throw — caught here.
-    await callTool(setTool, {
-      components: [
-        { id: "k1", type: "metric", label: "L", value: "V" },
-        { id: "k2", type: "text", content: "para" },
-        { id: "k3", type: "code", content: "console.log(1)", language: "ts" },
-        { id: "k4", type: "list", items: ["one", "two"] },
-        {
-          id: "k5",
-          type: "table",
-          headers: ["A", "B"],
-          rows: [["1", "2"]],
-        },
-        { id: "k6", type: "status", label: "OK", state: "success" },
-        { id: "k7", type: "progress", label: "p", value: 42 },
-      ],
-    });
+    await callTool(setTool, { components: [component] });
 
     const next = applyRenderMessage(emptyRenderState(), lastRenderMessage(captured));
-    expect(next.components.map((c) => c.id)).toEqual([
-      "k1", "k2", "k3", "k4", "k5", "k6", "k7",
-    ]);
+    // HTML is sanitized by the producer; all other fixture fields survive intact.
+    expect(next.components).toEqual([component.type === "html-artifact"
+      ? { ...component, html: expect.stringContaining("<p>Visualization</p>") }
+      : component]);
   });
 
   it("callout without a variant round-trips without a validation error", async () => {
@@ -232,12 +253,14 @@ describe("render-DSL producer↔consumer round-trip", () => {
       components: [{ id: "c1", type: "callout", content: "heads up" }],
     });
 
+    expect(captured.at(-1)?.["components"]).toEqual([
+      { id: "c1", type: "callout", content: "heads up" },
+    ]);
     const next = applyRenderMessage(emptyRenderState(), lastRenderMessage(captured));
     const callout = next.components.find((c) => c.id === "c1")!;
     if (callout.type !== "callout") throw new Error("expected callout");
-    // "info" is the documented default, so elideDefaults strips it from the
-    // broadcast payload; downstream renderers restore it via `?? "info"`.
-    expect(callout.variant).toBeUndefined();
+    // The wire elides "info"; the real consumer's schema restores that default.
+    expect(callout.variant).toBe("info");
     expect(callout.content).toBe("heads up");
   });
 

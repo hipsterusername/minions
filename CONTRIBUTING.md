@@ -16,6 +16,40 @@ The current development workflow and optional Tailscale setup are documented
 in [README.md](./README.md). Project-specific testing and architecture rules
 live in [CLAUDE.md](./CLAUDE.md).
 
+## Local working artifacts
+
+When using Minions to work on this repository, keep session working material in
+ignored `.scratch/<task>/` directories. For example:
+
+- `.scratch/<task>/notes.md` and `handoff.md` for working notes and continuity.
+- `.scratch/<task>/evidence/` for logs, screenshots, audit ledgers and reports.
+- `.scratch/<task>/repro/` for disposable experiments and reproduction scripts.
+- `.scratch/<task>/backups/` for recovery patches and copies of pending changes.
+
+Create these directories as needed; their contents stay local. For disposable
+test state, use `fs.mkdtemp` with `os.tmpdir()` and clean up the directory after
+use. Give each task or test its own directory. Keep runtime databases, provider
+state and credentials in their configured application storage, outside source
+files; tests must use isolated temporary storage rather than live user state.
+
+Use the canvas `update_project_context` tool to save project knowledge in
+workspace-owned storage. Include these scratch conventions in task assignments.
+Do not write session context or raw audit output into published documentation.
+Legacy `docs/audits/` working records are also ignored.
+
+Before promoting a result into source or documentation, remove usernames,
+absolute checkout paths, session identifiers, credentials and dependencies on
+local evidence files. Use repository-relative links in documentation and
+fictional paths such as `/workspace/project/docs/report.md` in test fixtures.
+Promote useful reproductions into normal tests with temporary fixtures.
+
+Before staging, use `git check-ignore -v -- <scratch-path>` to confirm the
+location is ignored. Stage intended files explicitly, then inspect
+`git diff --cached --name-status` and `git diff --cached` for local artifacts and
+personal data. Ignore rules do not protect already tracked files or prevent
+`git add -f`; never force-add local working artifacts or add ignore exceptions
+for session output. Existing tracked leaks must be removed or sanitized explicitly.
+
 ## Before submitting a pull request
 
 Run the same gate used by CI:

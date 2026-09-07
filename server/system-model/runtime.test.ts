@@ -1,13 +1,14 @@
 import fs from "fs";
 import path from "path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WebSocketServer } from "ws";
 import { createBus } from "../bus.ts";
 import { writeSettings } from "../project-store.ts";
 import { resolveSystemModelRuntime, systemModelStatus } from "./runtime.ts";
-import { copyValidFixture, copyValidFixtureWithSurfaces } from "./load.test.ts";
+import { copyValidFixture, copyValidFixtureWithSurfaces } from "../../tests/support/system-model-fixture.ts";
 
 describe("resolveSystemModelRuntime", () => {
+  afterEach(() => vi.restoreAllMocks());
   it("stays off when the project setting is off", () => {
     const project = copyValidFixture();
     writeSettings(project, { systemModel: "off" });

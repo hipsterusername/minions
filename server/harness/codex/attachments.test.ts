@@ -120,20 +120,22 @@ describe("writeCodexAttachments", () => {
 
     await writeCodexAttachments({
       sessionKey: key,
-      attachments: [{ kind: "image", mediaType: "image/png", data: PNG_1X1 }],
+      attachments: [
+        { kind: "image", mediaType: "image/png", data: PNG_1X1 },
+        { kind: "image", mediaType: "image/jpeg", data: PNG_1X1 },
+      ],
     });
     const scratch = track(
       await writeCodexAttachments({
         sessionKey: key,
         attachments: [
           { kind: "image", mediaType: "image/png", data: PNG_1X1 },
-          { kind: "image", mediaType: "image/jpeg", data: PNG_1X1 },
         ],
       }),
     );
 
     const files = await fs.readdir(scratch.dir);
-    expect(files).toHaveLength(2);
+    expect(files).toEqual(["attachment-0.png"]);
   });
 
   it("dispose removes the scratch directory", async () => {

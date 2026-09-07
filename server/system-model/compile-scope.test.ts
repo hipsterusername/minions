@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { expandScope } from "./compile-scope.ts";
 import { loadSystemModel } from "./load.ts";
-import { copyValidFixtureWithSurfaces } from "./load.test.ts";
+import { copyValidFixtureWithSurfaces } from "../../tests/support/system-model-fixture.ts";
 
 describe("expandScope", () => {
   it("stops after one typed hop instead of pulling sibling flows", () => {

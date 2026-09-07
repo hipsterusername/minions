@@ -3,7 +3,7 @@ vi.mock("../system-model/evidence-binding.ts", async (original) => ({
   captureEvidenceBinding: vi.fn(async () => "current-evidence"),
 }));
 import { describe, expect, it, vi } from "vitest";
-import { copyValidFixture } from "../system-model/load.test.ts";
+import { copyValidFixture } from "../../tests/support/system-model-fixture.ts";
 import { getWorkPacket, listWorkPacketVerifications, saveWorkPacket } from "../system-model/store.ts";
 import type { WorkPacket } from "../../shared/system-model/index.ts";
 import type { BusPayload } from "../bus.ts";

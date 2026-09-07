@@ -28,9 +28,18 @@ describe("planning context limits", () => {
   });
 
   it("does not double-count one frozen source routed to multiple nodes", () => {
-    const content = "x".repeat(128 * 1024);
-    expect(() => assertPlanningContextLimits([
-      source("one", "shared", content), source("two", "shared", content),
-    ])).not.toThrow();
+    const content = "x".repeat(MAX_PLANNING_SOURCE_BYTES);
+    const shared = Array.from({ length: 9 }, (_, index) =>
+      source(`node-${index}`, "shared", content));
+    // Counting each routing edge would exceed the 2 MiB snapshot budget.
+    expect(() => assertPlanningContextLimits(shared)).not.toThrow();
+  });
+
+  it("rejects distinct frozen sources exceeding the snapshot budget", () => {
+    const content = "x".repeat(MAX_PLANNING_SOURCE_BYTES);
+    const distinct = Array.from({ length: 9 }, (_, index) =>
+      source(`node-${index}`, `source-${index}`, content));
+    expect(() => assertPlanningContextLimits(distinct.slice(0, 8))).not.toThrow();
+    expect(() => assertPlanningContextLimits(distinct)).toThrow("2 MiB");
   });
 });

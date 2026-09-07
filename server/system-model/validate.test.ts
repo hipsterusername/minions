@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { loadSystemModel } from "./load.ts";
 import { computeOverbreadth, validateLoadedSystemModel } from "./validate.ts";
 import path from "path";
-import { copyValidFixtureWithSurfaces } from "./load.test.ts";
+import { copyValidFixtureWithSurfaces } from "../../tests/support/system-model-fixture.ts";
 
 describe("validateLoadedSystemModel", () => {
   it("passes the valid fixture", () => {

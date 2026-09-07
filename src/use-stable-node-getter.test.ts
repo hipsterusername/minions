@@ -12,28 +12,20 @@ import { renderHook } from "@testing-library/react";
 import { useStableNodeGetter } from "./use-stable-node-getter.ts";
 
 describe("useStableNodeGetter", () => {
-  it("returns a stable closure per nodeId across re-renders", () => {
+  it("keeps distinct per-node closures stable while calling the latest compute", () => {
     const { result, rerender } = renderHook(
       ({ compute }) => useStableNodeGetter(compute),
-      { initialProps: { compute: (id: string) => id.length } },
+      { initialProps: { compute: (id: string) => `before:${id}` } },
     );
-    const first = result.current("node-a");
-    rerender({ compute: (id: string) => id.length });
-    const second = result.current("node-a");
-    expect(second).toBe(first);
-    expect(result.current("node-b")).not.toBe(first);
-  });
-
-  it("always calls the latest compute through the returned closure", () => {
-    const { result, rerender } = renderHook(
-      ({ compute }) => useStableNodeGetter(compute),
-      { initialProps: { compute: (_id: string) => 1 } },
-    );
-    const closure = result.current("node-a");
-    expect(closure()).toBe(1);
-    rerender({ compute: (_id: string) => 2 });
-    // Same closure identity, but reflects the updated compute.
-    expect(result.current("node-a")).toBe(closure);
-    expect(closure()).toBe(2);
+    const a = result.current("node-a");
+    const b = result.current("node-b");
+    expect(b).not.toBe(a);
+    expect(a()).toBe("before:node-a");
+    expect(b()).toBe("before:node-b");
+    rerender({ compute: (id: string) => `after:${id}` });
+    expect(result.current("node-a")).toBe(a);
+    expect(result.current("node-b")).toBe(b);
+    expect(a()).toBe("after:node-a");
+    expect(b()).toBe("after:node-b");
   });
 });

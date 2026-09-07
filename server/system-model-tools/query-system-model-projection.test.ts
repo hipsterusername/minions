@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadSystemModel } from "../system-model/load.ts";
-import { copyValidFixtureWithSurfaces } from "../system-model/load.test.ts";
+import { copyValidFixtureWithSurfaces } from "../../tests/support/system-model-fixture.ts";
 import { FACETS } from "./query-system-model-schema.ts";
 import { objectFacets, preview, readFacets } from "./query-system-model-projection.ts";
 

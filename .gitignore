@@ -11,14 +11,28 @@ dist/
 /mockups/
 /wireframes/
 /artifacts/
+/evaluations/
+
+# Local agent work: notes, handoffs, reproductions, evidence and patch backups.
+# Prefer .scratch/<task>/; never force-add its contents. See CONTRIBUTING.md.
+.scratch/
+/scratch/
+/tmp/
+/temp/
+*.tmp
+*.temp
 
 # Local documentation work, except published guides and feature documentation
 /docs/*
 !/docs/getting-started.md
 !/docs/progressive-system-model-retrieval.md
+!/docs/testing-strategy.md
+# Session audit records stay local; publish only sanitized, portable guidance.
+/docs/audits/
 !/docs/features/
 /docs/features/*
 !/docs/features/canvas-zones.md
+!/docs/features/activity-surface-assessment.md
 !/docs/images/
 /docs/images/*
 !/docs/images/getting-started-*.png
@@ -45,12 +59,18 @@ data/
 *.db-shm
 *.db-wal
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal
 *.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
 
 # Minions runtime data
 .canvas-worktrees/
 .minions/
 .run/
+/.minions-mcp-launch-*/
+/__dag_verify__/
 
 # Claude Code local settings (user-specific)
 .claude/settings.local.json

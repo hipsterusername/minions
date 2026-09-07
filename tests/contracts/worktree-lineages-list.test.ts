@@ -32,7 +32,8 @@ describe("list_worktree_lineages command", () => {
     const payload = h.wsSent[0];
     expect(payload).toMatchObject({ topic: "global", type: "worktree_lineages_list", requestId: "req-1" });
     const lineages = payload["lineages"] as unknown[];
-    expect(lineages).toHaveLength(2);
+    expect(lineages.map((lineage) => (lineage as { id: string }).id))
+      .toEqual(["lineage-1", "lineage-2"]);
     for (const lineage of lineages) {
       expect(worktreeLineageSnapshotSchema.safeParse(lineage).success).toBe(true);
     }
