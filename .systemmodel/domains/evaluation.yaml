@@ -1,0 +1,5 @@
+id: domain.evaluation
+type: domain
+name: External evaluation
+summary: Owns the separately installed evaluator that measures isolated agent executions and renders retained offline evidence without becoming application runtime.
+keywords: [ evaluation, evals, benchmark, adapter, grader, token_usage, offline_report, external_boundary ]

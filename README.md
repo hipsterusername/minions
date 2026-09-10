@@ -72,6 +72,13 @@ If you'd rather run in the foreground and stream logs (stopping both on
 
 That's it. No environment variables, no database setup, no Docker — SQLite handles storage automatically.
 
+### Independent agent evaluations
+
+The separately installable [`evals/`](./evals/README.md) package validates task
+fixtures, plans explicit adapter runs, grades frozen submissions, accounts for
+usage coverage, and generates offline performance reports. It is not part of
+the Minions application runtime and does not run during normal app startup.
+
 ## Usage
 
 ### Leader/Minion Orchestration

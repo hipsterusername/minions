@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "id": "reconciliation-complex",
+  "revision": "r2",
+  "family": "data",
+  "difficulty": "complex",
+  "promptFile": "prompt.md",
+  "fixture": {
+    "builderId": "fixture.reconciliation",
+    "configFile": "fixture.mjs",
+    "imageDigest": "node:22-alpine"
+  },
+  "requiredCapabilities": [
+    "filesystem"
+  ],
+  "submission": {
+    "include": [
+      "src/**"
+    ],
+    "exclude": [
+      "node_modules/**"
+    ],
+    "maxBytes": 131072
+  },
+  "criteria": [
+    {
+      "id": "reconciliation.joins",
+      "description": "Join orders/payments/refunds and report unknown references.",
+      "mandatory": true
+    },
+    {
+      "id": "reconciliation.deduplication",
+      "description": "Deduplicate events by ID using the latest timestamp.",
+      "mandatory": true
+    },
+    {
+      "id": "reconciliation.rates",
+      "description": "Use the latest rate at or before each event time.",
+      "mandatory": true
+    },
+    {
+      "id": "reconciliation.rounding",
+      "description": "Round half-up to cents after aggregate conversion.",
+      "mandatory": true
+    },
+    {
+      "id": "reconciliation.refunds",
+      "description": "Process partial refunds chronologically with exact remaining-balance limits.",
+      "mandatory": true
+    },
+    {
+      "id": "reconciliation.io",
+      "description": "Read four JSON files, validate all rows, preserve inputs and obey output/exit protocol.",
+      "mandatory": true
+    }
+  ],
+  "grader": {
+    "id": "grader.reconciliation",
+    "revision": "r2",
+    "configFile": "../../ground-truth/reconciliation-complex/oracle.mjs"
+  },
+  "limits": {
+    "maxTotalTokens": 12000,
+    "executionTimeoutMs": 600000,
+    "preparationTimeoutMs": 90000,
+    "gradingTimeoutMs": 90000
+  }
+}

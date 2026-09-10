@@ -1,0 +1,1 @@
+{"id": "aider-vlq-validation", "profiles": {"validation": {"taskIds": ["aider-vlq"], "modes": ["codex-raw", "minion-single", "minion-graph"], "repetitions": 1}}}

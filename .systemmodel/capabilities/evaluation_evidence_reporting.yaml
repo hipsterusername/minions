@@ -1,0 +1,26 @@
+id: capability.evaluation_evidence_reporting
+type: capability
+name: Inspect evaluation performance reports
+summary: Evaluators can grade frozen submissions, account for token-usage coverage, and compare outcomes, elapsed time, and usage in offline HTML, JSON, CSV, and chart exports.
+constraints: [ constraint.external_evaluation_boundary ]
+decisions: [ decision.standalone_evaluation_boundary ]
+risks: [ risk.evaluation_measurement_overclaim ]
+suggested_files: [ evals/src/cli/grading.ts, evals/src/graders/fixture-api.ts, evals/src/graders/executor.ts, evals/ground-truth/pagination-simple/oracle.mjs, evals/src/telemetry/usage.ts, evals/src/reports/aggregation.ts, evals/src/reports/registry.ts, evals/src/reports/artifacts.ts, evals/src/reports/browser.ts ]
+suggested_tests: [ evals/src/telemetry/usage.test.ts, evals/tests/reports/reports.test.ts, evals/tests/fixtures/benchmark-tasks.test.ts ]
+keywords: [ eval, evals, benchmark, offline_report, performance_report, performance, report, grading, grader, token, usage, token_usage, usage_coverage, csv, json, html, svg, comparison, visualization ]
+entry_points:
+  - surface: surface.external_evaluation
+    summary: Grade retained frozen files and generate a self-contained report with accessible tables, plotted data, filters, and CSV/JSON/SVG exports after participants have stopped.
+    files: [ evals/src/cli/grading.ts, evals/src/graders/fixture-api.ts, evals/src/graders/executor.ts, evals/ground-truth/pagination-simple/oracle.mjs, evals/src/cli/report.ts, evals/src/reports/aggregation.ts, evals/src/reports/registry.ts, evals/src/reports/browser.ts ]
+    tests: [ evals/tests/reports/reports.test.ts, evals/src/telemetry/usage.test.ts ]
+    flows: [ flow.inspect_evaluation_evidence ]
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.evaluation
+depends_on: [ capability.standalone_agent_evaluation ]
+bridges:
+  - to: capability.execution_observability
+    reason: Offline reports contextualize separately collected execution evidence; they do not replace authoritative in-app session observability.
+  - to: capability.system_model_guidance
+    reason: System-model search exposes report and extension paths for future evaluation work.

@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "id": "worker-recovery-complex",
+  "revision": "r2",
+  "family": "queue",
+  "difficulty": "complex",
+  "promptFile": "prompt.md",
+  "fixture": {
+    "builderId": "fixture.worker-recovery",
+    "configFile": "fixture.mjs",
+    "imageDigest": "node:22-alpine"
+  },
+  "requiredCapabilities": [
+    "filesystem",
+    "process"
+  ],
+  "submission": {
+    "include": [
+      "src/**"
+    ],
+    "exclude": [
+      "node_modules/**"
+    ],
+    "maxBytes": 131072
+  },
+  "criteria": [
+    {
+      "id": "worker.claim-lease",
+      "description": "Claims are leased and stale claims can be retried.",
+      "mandatory": true
+    },
+    {
+      "id": "worker.restart",
+      "description": "Crash/restart loses no queued job.",
+      "mandatory": true
+    },
+    {
+      "id": "worker.idempotency",
+      "description": "One committed effect exists per job despite retries.",
+      "mandatory": true
+    }
+  ],
+  "grader": {
+    "id": "grader.worker-recovery",
+    "revision": "r2",
+    "configFile": "../../ground-truth/worker-recovery-complex/oracle.mjs"
+  },
+  "limits": {
+    "maxTotalTokens": 9000,
+    "executionTimeoutMs": 600000,
+    "preparationTimeoutMs": 90000,
+    "gradingTimeoutMs": 90000
+  }
+}

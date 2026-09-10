@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "id": "project-archive-complex",
+  "revision": "r2",
+  "family": "full-stack",
+  "difficulty": "complex",
+  "promptFile": "prompt.md",
+  "fixture": {
+    "builderId": "fixture.project-archive",
+    "configFile": "fixture.mjs",
+    "imageDigest": "node:22.14.0-bookworm"
+  },
+  "requiredCapabilities": [
+    "filesystem",
+    "browser"
+  ],
+  "submission": {
+    "include": [
+      "src/**",
+      "migrations/**"
+    ],
+    "exclude": [
+      "node_modules/**"
+    ],
+    "maxBytes": 262144
+  },
+  "criteria": [
+    {
+      "id": "archive.visibility",
+      "description": "Default API/UI list excludes archived projects and explicit archived filter includes them.",
+      "mandatory": true
+    },
+    {
+      "id": "archive.edits",
+      "description": "Archived projects reject edits while detail remains readable.",
+      "mandatory": true
+    },
+    {
+      "id": "archive.restore",
+      "description": "Archive/restore are idempotent and restore preserves project data.",
+      "mandatory": true
+    },
+    {
+      "id": "archive.migration",
+      "description": "Existing rows migrate as unarchived.",
+      "mandatory": true
+    },
+    {
+      "id": "archive.ui",
+      "description": "Real browser archive/filter/restore interactions use persistent HTTP state and render names as text.",
+      "mandatory": true
+    }
+  ],
+  "grader": {
+    "id": "grader.project-archive",
+    "revision": "r2",
+    "configFile": "../../ground-truth/project-archive-complex/oracle.mjs"
+  },
+  "limits": {
+    "maxTotalTokens": 12000,
+    "executionTimeoutMs": 600000,
+    "preparationTimeoutMs": 90000,
+    "gradingTimeoutMs": 120000
+  }
+}

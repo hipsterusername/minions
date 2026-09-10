@@ -44,6 +44,8 @@ risk: high
 domain: domain.observability
 depends_on: []
 bridges:
+  - to: capability.standalone_agent_evaluation
+    reason: Product views remain authoritative for app sessions while the external evaluator retains separately collected adapter evidence and offline reports.
   - to: flow.delegate_and_steer_minions
     reason: Execution views expose delegated child activity while delegation retains ownership of the orchestration flow.
   - to: flow.inspect_execution_graph

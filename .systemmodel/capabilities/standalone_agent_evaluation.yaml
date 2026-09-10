@@ -1,0 +1,28 @@
+id: capability.standalone_agent_evaluation
+type: capability
+name: Run isolated agent evaluations
+summary: Evaluators can validate fixtures, lock an explicit experiment, and control durable external runs across raw Codex, single-Minions, and graph-Minions adapters without loading application internals.
+constraints: [ constraint.external_evaluation_boundary ]
+decisions: [ decision.standalone_evaluation_boundary ]
+risks: [ risk.evaluation_measurement_overclaim ]
+suggested_files: [ evals/src/cli/main.ts, evals/src/cli/operations.ts, evals/src/core/runner.ts, evals/src/core/registry.ts, evals/tasks/pagination-simple/manifest.json, evals/suites/baseline.json, evals/src/adapters/factory.ts, evals/src/adapters/managed-minions.ts, evals/src/adapters/codex.ts, evals/src/isolation/docker.ts, evals/docs/extension-contracts.md ]
+suggested_tests: [ evals/tests/cli/operational.test.ts, evals/tests/adapters/external.test.ts, evals/tests/adapters/managed.test.ts, evals/tests/lifecycle/boundaries.test.ts, evals/tests/architecture/no-core-runtime-imports.test.ts ]
+keywords: [ eval, evals, evaluation, benchmark, task, fixture, extension, cli, validate, plan, run, resume, cancel, codex_raw, minion_single, minion_graph, adapter, isolation, durable, token, usage, token_usage ]
+entry_points:
+  - surface: surface.external_evaluation
+    summary: Run the external CLI or extend its task manifests, suites, and adapter registry; validate oracles before locking experiments. The credential-free demo verifies the harness and provides no benchmark measurements.
+    files: [ evals/src/cli/main.ts, evals/src/cli/operations.ts, evals/src/cli/demo.ts, evals/tasks/pagination-simple/manifest.json, evals/tasks/pagination-simple/fixture.mjs, evals/suites/baseline.json, evals/src/core/registry.ts, evals/src/adapters/factory.ts, evals/docs/extension-contracts.md, evals/README.md ]
+    tests: [ evals/tests/cli/operational.test.ts, evals/tests/cli/integration-contracts.test.ts ]
+    flows: [ flow.run_standalone_agent_evaluation ]
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.evaluation
+depends_on: []
+bridges:
+  - to: capability.execution_graph_runtime
+    reason: The graph adapter observes a dedicated external Minions instance through its protocol; it neither embeds nor controls the app-owned graph scheduler.
+  - to: capability.execution_observability
+    reason: Adapter observations are normalized into an evaluator-owned usage and event ledger, separate from product session views.
+  - to: capability.system_model_guidance
+    reason: Model discovery points agents to the external operational routes while keeping their runtime boundary explicit.

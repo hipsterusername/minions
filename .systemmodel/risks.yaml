@@ -164,3 +164,23 @@ risks:
         - src/nodes/leader/SandboxPolicyControls.tsx
     mitigation: Persist requested and effective policies separately, mark unsupported filesystem or approval axes unmanaged, and only claim complete enforcement for Codex.
     domain: domain.platform
+  - id: risk.evaluation_measurement_overclaim
+    type: risk
+    summary: Fixture demonstrations, partial token telemetry, or an unmanaged local backend could be presented as controlled provider performance evidence.
+    severity: high
+    applies_to:
+      capabilities:
+        - capability.standalone_agent_evaluation
+        - capability.evaluation_evidence_reporting
+      flows:
+        - flow.run_standalone_agent_evaluation
+        - flow.inspect_evaluation_evidence
+      surfaces:
+        - surface.external_evaluation
+      files:
+        - evals/src/cli/main.ts
+        - evals/src/telemetry/usage.ts
+        - evals/src/reports/aggregation.ts
+        - evals/src/reports/html.ts
+    mitigation: Require explicit provider-backed execution, immutable plans, supported isolation, and complete coverage before controlled comparisons; retain unknown or partial telemetry and label fixture checks as harness evidence.
+    domain: domain.evaluation

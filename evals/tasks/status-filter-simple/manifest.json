@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "id": "status-filter-simple",
+  "revision": "r2",
+  "family": "api",
+  "difficulty": "simple",
+  "promptFile": "prompt.md",
+  "fixture": {
+    "builderId": "fixture.status-filter",
+    "configFile": "fixture.mjs",
+    "imageDigest": "node:22-alpine"
+  },
+  "requiredCapabilities": [
+    "filesystem",
+    "process"
+  ],
+  "submission": {
+    "include": [
+      "src/**"
+    ],
+    "exclude": [
+      "node_modules/**"
+    ],
+    "maxBytes": 65536
+  },
+  "criteria": [
+    {
+      "id": "status-filter.values",
+      "description": "Validate exact status values and safe integer pagination, including empty results.",
+      "mandatory": true
+    },
+    {
+      "id": "status-filter.baseline",
+      "description": "An omitted filter preserves legacy ordered results.",
+      "mandatory": true
+    },
+    {
+      "id": "status-filter.pagination",
+      "description": "Filter before zero-based pagination.",
+      "mandatory": true
+    }
+  ],
+  "grader": {
+    "id": "grader.status-filter",
+    "revision": "r2",
+    "configFile": "../../ground-truth/status-filter-simple/oracle.mjs"
+  },
+  "limits": {
+    "maxTotalTokens": 4000,
+    "executionTimeoutMs": 300000,
+    "preparationTimeoutMs": 60000,
+    "gradingTimeoutMs": 60000
+  }
+}

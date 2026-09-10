@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "id": "pagination-simple",
+  "revision": "r2",
+  "family": "library",
+  "difficulty": "simple",
+  "promptFile": "prompt.md",
+  "fixture": {
+    "builderId": "fixture.pagination",
+    "configFile": "fixture.mjs",
+    "imageDigest": "node:22-alpine"
+  },
+  "requiredCapabilities": [
+    "filesystem",
+    "process"
+  ],
+  "submission": {
+    "include": [
+      "src/**"
+    ],
+    "exclude": [
+      "node_modules/**"
+    ],
+    "maxBytes": 65536
+  },
+  "criteria": [
+    {
+      "id": "pagination.validation",
+      "description": "Require nonnegative safe integer page and positive safe integer pageSize; reject invalid values with RangeError.",
+      "mandatory": true
+    },
+    {
+      "id": "pagination.boundaries",
+      "description": "Use zero-based pages without skips at boundaries.",
+      "mandatory": true
+    },
+    {
+      "id": "pagination.order",
+      "description": "Preserve input order and return empty arrays beyond the end.",
+      "mandatory": true
+    }
+  ],
+  "grader": {
+    "id": "grader.pagination",
+    "revision": "r2",
+    "configFile": "../../ground-truth/pagination-simple/oracle.mjs"
+  },
+  "limits": {
+    "maxTotalTokens": 4000,
+    "executionTimeoutMs": 300000,
+    "preparationTimeoutMs": 60000,
+    "gradingTimeoutMs": 60000
+  }
+}

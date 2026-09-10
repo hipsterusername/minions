@@ -84,3 +84,18 @@ review_gates:
       files: [shared/workspace-contracts.ts, server/harness/**, src/nodes/leader/SandboxPolicyControls.tsx]
       capabilities: [capability.runtime_configuration, capability.leader_creation]
       flows: [flow.configure_runtime, flow.launch_leader]
+  - id: gate.standalone_evaluation
+    name: Standalone evaluation boundary
+    description: Preserve independent evaluator installation, explicit adapter and provider boundaries, isolated grading, usage honesty, and offline report behavior.
+    blocks_merge: true
+    required_checks:
+      - kind: test
+        target: evals/tests/architecture/no-core-runtime-imports.test.ts
+      - kind: test
+        target: evals/tests/cli/operational.test.ts
+      - kind: test
+        target: evals/tests/reports/reports.test.ts
+    required_when:
+      files: [evals/**]
+      capabilities: [capability.standalone_agent_evaluation, capability.evaluation_evidence_reporting]
+      flows: [flow.run_standalone_agent_evaluation, flow.inspect_evaluation_evidence]

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "baseline-v1",
+  "description": "Credential-free six-task ground-truth coverage profile."
+  ,"profiles": {
+    "smoke": { "repetitions": 1, "taskIds": ["pagination-simple"], "modes": ["minion-single", "minion-graph", "codex-raw"] },
+    "coverage": { "repetitions": 1, "taskIds": ["pagination-simple", "worker-recovery-complex", "status-filter-simple", "project-archive-complex", "orders-report-simple", "reconciliation-complex"], "modes": ["minion-single", "minion-graph", "codex-raw"] },
+    "controlled": { "repetitions": 5, "taskIds": ["pagination-simple", "worker-recovery-complex", "status-filter-simple", "project-archive-complex", "orders-report-simple", "reconciliation-complex"], "modes": ["minion-single", "minion-graph", "codex-raw"], "maxGraphChildren": 3 }
+  }
+}

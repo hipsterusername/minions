@@ -29,6 +29,8 @@ risk: high
 domain: domain.platform
 depends_on: []
 bridges:
+  - to: capability.standalone_agent_evaluation
+    reason: Discovery can route evaluation work to its standalone CLI, extension, and offline-report files without implying that evaluation executes in the app.
   - to: flow.review_legacy_changes
     reason: Seed changes use the integration-owned legacy approval flow for human review.
 risks: []

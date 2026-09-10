@@ -1,0 +1,7 @@
+id: surface.external_evaluation
+type: surface
+name: External evaluation CLI and library
+summary: Separately installed commands and library extension contracts for task fixtures, adapters, graders, durable experiments, and offline reports.
+keywords: [ eval, evals, cli, validate, plan, run, resume, cancel, grade, report, demo, offline, benchmark ]
+suggested_files: [ evals/src/cli/main.ts, evals/README.md, evals/docs/extension-contracts.md, evals/src/core/registry.ts, evals/src/reports/html.ts ]
+suggested_tests: [ evals/tests/cli/operational.test.ts, evals/tests/reports/reports.test.ts ]

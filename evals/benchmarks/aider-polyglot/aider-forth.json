@@ -1,0 +1,1 @@
+{"id": "aider-forth-validation", "profiles": {"validation": {"taskIds": ["aider-forth"], "modes": ["codex-raw", "minion-single", "minion-graph"], "repetitions": 1}}}

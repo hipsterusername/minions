@@ -1,0 +1,24 @@
+id: flow.run_standalone_agent_evaluation
+type: flow
+name: Run a standalone agent evaluation
+summary: The external CLI validates task/oracle packages, locks a selected suite and adapter configuration, then explicitly runs, resumes, or cancels isolated participants with durable lifecycle records.
+constraints: [ constraint.external_evaluation_boundary ]
+decisions: [ decision.standalone_evaluation_boundary ]
+risks: [ risk.evaluation_measurement_overclaim ]
+suggested_files: [ evals/src/cli/main.ts, evals/src/cli/preflight.ts, evals/src/core/plan.ts, evals/src/core/runner.ts, evals/src/adapters/factory.ts, evals/src/isolation/index.ts ]
+suggested_tests: [ evals/tests/cli/operational.test.ts, evals/src/core/runner.test.ts, evals/src/core/plan.test.ts, evals/tests/lifecycle/boundaries.test.ts ]
+steps:
+  - Validate selected manifests and hidden oracle cases without calling a provider.
+  - Resolve registered adapters and isolation capabilities, then write an immutable plan outside the source checkout.
+  - Explicitly launch, resume, or cancel each durable external participant while retaining deadlines, handles, usage observations, and frozen submissions.
+  - Grade frozen submissions separately and preserve failed or incomplete cells for later reporting.
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.evaluation
+primary_capability: capability.standalone_agent_evaluation
+bridges:
+  - to: capability.execution_graph_runtime
+    reason: Graph-mode participants use the app protocol only across the dedicated-instance adapter boundary.
+  - to: constraint.external_evaluation_boundary
+    reason: Lifecycle code must remain independently runnable and must reject unsupported controlled modes explicitly.

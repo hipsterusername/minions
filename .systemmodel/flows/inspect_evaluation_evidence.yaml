@@ -1,0 +1,24 @@
+id: flow.inspect_evaluation_evidence
+type: flow
+name: Inspect offline evaluation evidence
+summary: A separate grader and report pipeline turns frozen result records and normalized usage coverage into durable offline comparisons and accessible exports.
+constraints: [ constraint.external_evaluation_boundary ]
+decisions: [ decision.standalone_evaluation_boundary ]
+risks: [ risk.evaluation_measurement_overclaim ]
+suggested_files: [ evals/src/cli/grading.ts, evals/src/cli/report.ts, evals/src/telemetry/usage.ts, evals/src/reports/aggregation.ts, evals/src/reports/export.ts, evals/src/reports/html.ts ]
+suggested_tests: [ evals/src/telemetry/usage.test.ts, evals/tests/reports/reports.test.ts, evals/tests/fixtures/benchmark-tasks.test.ts ]
+steps:
+  - Execute the selected hidden grader against immutable submission files instead of participant source imports.
+  - Normalize supported adapter usage representations and preserve unknown or partial coverage rather than estimating it.
+  - Aggregate outcomes and timing with missing mandatory criteria retained in denominators.
+  - Render self-contained HTML plus JSON, CSV, and plotted SVG exports without a running app server or canvas UI.
+freshness:
+  class: code_coupled
+risk: high
+domain: domain.evaluation
+primary_capability: capability.evaluation_evidence_reporting
+bridges:
+  - to: capability.execution_observability
+    reason: Product observability remains authoritative for app sessions; report data is independently retained evaluation evidence.
+  - to: constraint.external_evaluation_boundary
+    reason: Reporting must continue to operate after the external participants and dedicated app instance stop.

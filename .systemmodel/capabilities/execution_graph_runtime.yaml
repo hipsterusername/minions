@@ -39,6 +39,8 @@ domain: domain.delegation
 depends_on:
   - capability.durable_work_items
 bridges:
+  - to: capability.standalone_agent_evaluation
+    reason: The external graph adapter exercises a dedicated protocol-connected instance and never becomes an alternate scheduler or runtime authority.
   - to: capability.durable_work_items
     reason: Graph execution is subordinate to durable WorkItem intent and its current primary run.
   - to: flow.inspect_execution_graph

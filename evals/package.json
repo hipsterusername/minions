@@ -1,0 +1,38 @@
+{
+  "name": "@minions/agent-evals",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone operational agent evaluation runner, source graders and offline reports",
+  "bin": {
+    "agent-evals": "./dist/src/cli/main.js"
+  },
+  "exports": {
+    ".": "./dist/src/core/index.js",
+    "./schemas": "./dist/schemas/index.js",
+    "./adapters": "./dist/src/adapters/index.js",
+    "./isolation": "./dist/src/isolation/index.js",
+    "./graders": "./dist/src/graders/index.js",
+    "./reports": "./dist/src/reports/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm build && vitest run --config tests/support/vitest.config.ts",
+    "test:watch": "vitest --config tests/support/vitest.config.ts"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "26.2.0",
+    "jsdom": "30.0.1",
+    "playwright": "1.62.1",
+    "tsx": "4.23.12",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  }
+}

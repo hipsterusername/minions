@@ -1,0 +1,3 @@
+export function assertSchemaVersion(actual: number, expected = 1): void { if (actual !== expected) throw new Error(`unsupported schema version ${actual}; migrate this document to version ${expected}`); }
+export function assertParticipantSafePath(path: string): void { if (!path || path.includes("\\") || path.includes("\0") || /^[A-Za-z]:/.test(path) || path.startsWith("/") || path.split("/").some((part) => part === ".." || part === "")) throw new Error(`unsafe participant path: ${path}`); }
+export function isCoreApplicationImport(specifier: string): boolean { return /(^|\/)\.{1,2}\/(src|server|shared)(\/|$)|^(src|server|shared)\//.test(specifier); }

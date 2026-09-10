@@ -1,0 +1,16 @@
+id: constraint.external_evaluation_boundary
+type: constraint
+statement: "The evaluator is a separately installed process: it may use dedicated Minions HTTP/WebSocket protocol clients, but must not import core application internals, read live user state, or claim provider-free fixture evidence as benchmark performance."
+applies_to:
+  capabilities: [ capability.standalone_agent_evaluation, capability.evaluation_evidence_reporting ]
+  flows: [ flow.run_standalone_agent_evaluation, flow.inspect_evaluation_evidence ]
+  surfaces: [ surface.external_evaluation ]
+  files: [ evals/** ]
+severity: critical
+agent_instruction: Keep eval runtime dependencies and output roots self-contained. Start only evaluator-owned app instances through adapters, grade frozen submissions in the separate grader path, preserve unknown usage, and require explicit invocation for any provider-backed run.
+review_gate: gate.standalone_evaluation
+suggested_tests: [ evals/tests/architecture/no-core-runtime-imports.test.ts, evals/tests/lifecycle/boundaries.test.ts, evals/tests/cli/operational.test.ts, evals/tests/reports/reports.test.ts ]
+evidence: [ decision.standalone_evaluation_boundary ]
+domain: domain.evaluation
+scope: targeted
+guards: [ capability.standalone_agent_evaluation, capability.evaluation_evidence_reporting, flow.run_standalone_agent_evaluation, flow.inspect_evaluation_evidence ]
