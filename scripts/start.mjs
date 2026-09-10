@@ -10,7 +10,6 @@ import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
-  openSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -86,13 +85,12 @@ function start(enableTail = tailscale) {
 
   checkDependencies(["tsx", "vite", "better-sqlite3"]);
   mkdirSync(runDir, { recursive: true });
-  // Append so a restart keeps history; truncate is the alternative if noisy.
-  const out = openSync(logFile, "a");
-
   const child = spawn(process.execPath, [join(scriptDir, "run.mjs"), "dev"], {
     cwd: root,
     detached: true,
-    stdio: ["ignore", out, out],
+    // The runner owns rotation; inherited append descriptors bypass its bound.
+    stdio: "ignore",
+    env: { ...process.env, MINIONS_LAUNCH_LOG: logFile },
     shell: false,
     windowsHide: true,
   });
@@ -132,7 +130,10 @@ function stop() {
 
   try {
     if (isWin) {
-      process.kill(pid, "SIGTERM");
+      const result = spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], {
+        stdio: "ignore", windowsHide: true, timeout: 5_000,
+      });
+      if (result.error || result.status !== 0) throw result.error ?? new Error("Could not stop the launcher tree");
     } else {
       // The detached child is a process-group leader; signal the whole group
       // so the server and vite children go down with it.
@@ -146,6 +147,13 @@ function stop() {
     }
   }
 
+  const deadline = Date.now() + 5_000;
+  while (isRunning(pid) && Date.now() < deadline) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  }
+  if (isRunning(pid)) {
+    throw new Error(`Minions (pid ${pid}) did not stop; preserving its ownership record.`);
+  }
   if (existsSync(pidFile)) rmSync(pidFile);
   if (existsSync(tailscaleFile)) {
     disableTailscaleServe();

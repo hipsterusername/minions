@@ -38,6 +38,9 @@ export function createBrowserConfig({ smoke = false } = {}) {
     projects: [{ name: "chromium", use: { browserName: "chromium" } }],
     webServer: {
       command: "node scripts/run.mjs dev",
+      // Let the runner clean up its owned backend process group. An immediate
+      // SIGKILL leaves that detached group alive with Playwright's output pipes.
+      gracefulShutdown: { signal: "SIGTERM", timeout: 5_000 },
       // Wait through Vite's proxy for the backend as well as the frontend.
       // Vite can accept requests before the API server is listening, which
       // otherwise lets the first test race the auth bootstrap endpoint.

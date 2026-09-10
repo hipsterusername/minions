@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile, spawnSync } from "node:child_process";
+import { execFile, spawnSync as spawnSyncProcess, spawn } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,18 @@ import { promisify } from "node:util";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import Database from "better-sqlite3";
+import { boundedLog } from "../../scripts/bounded-log.mjs";
+import { supervise } from "../../scripts/launcher-supervisor.mjs";
+
+// Fixture CLIs are standalone processes, not Node test-runner workers.
+const fixtureEnv = { ...process.env };
+delete fixtureEnv.NODE_TEST_CONTEXT;
+
+// Fixture CLIs never read stdin. Avoid creating an unnecessary input pipe,
+// which restricted process sandboxes may refuse even when the child succeeds.
+function spawnSync(command, args, options = {}) {
+  return spawnSyncProcess(command, args, { stdio: ["ignore", "pipe", "pipe"], ...options });
+}
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const { scripts } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
@@ -126,12 +138,12 @@ test("startup launches both services from a checkout path with spaces without sh
     for (const command of ["dev", "preview", "start"]) {
       const result = spawnSync(process.execPath, scripts[command].split(" ").slice(1), {
         cwd: fixture, encoding: "utf8", timeout: 10_000,
-        env: { ...process.env, MINIONS_NO_OPEN: "1", HOST: "127.0.0.1", VITE_PORT: "6273" },
+        env: { ...fixtureEnv, MINIONS_NO_OPEN: "1", HOST: "127.0.0.1", VITE_PORT: "6273" },
       });
       assert.ifError(result.error);
-      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.status, command === "start" ? 0 : 1, result.stderr);
       if (command === "start") {
-        const pid = Number(readFileSync(join(fixture, ".run", "minions.pid"), "utf8"));
+        const pid = Number.parseInt(readFileSync(join(fixture, ".run", "minions.pid"), "utf8"), 10);
         const deadline = Date.now() + 10_000;
         while (Date.now() < deadline) {
           try { process.kill(pid, 0); } catch { break; }
@@ -144,6 +156,7 @@ test("startup launches both services from a checkout path with spaces without sh
         ...(command === "preview" ? ["preview"] : []),
         "--host", "127.0.0.1", "--port", "6273", "--strictPort",
       ]);
+      rmSync(join(fixture, ".run"), { recursive: true, force: true });
       rmSync(join(fixture, "tsx.json"));
       rmSync(join(fixture, "vite.json"));
     }
@@ -160,7 +173,7 @@ test("startup commands explain how to install dependencies in a clean checkout",
     for (const command of ["start", "restart", "dev", "preview", "server", "preflight", "system-model:validate"]) {
       const [executable, ...args] = scripts[command].split(" ");
       assert.equal(executable, "node");
-      const result = spawnSync(process.execPath, args, { cwd: fixture, encoding: "utf8", timeout: 10_000 });
+      const result = spawnSync(process.execPath, args, { cwd: fixture, env: fixtureEnv, encoding: "utf8", timeout: 10_000 });
       assert.ifError(result.error);
       assert.equal(result.status, 1, command);
       assert.match(result.stderr, /Run `pnpm install` first\./, command);
@@ -171,14 +184,14 @@ test("startup commands explain how to install dependencies in a clean checkout",
     // An interrupted install can leave node_modules present but incomplete.
     mkdirSync(join(fixture, "node_modules"));
     const partial = spawnSync(process.execPath, ["scripts/start.mjs", "start"], {
-      cwd: fixture, encoding: "utf8", timeout: 10_000,
+      cwd: fixture, env: fixtureEnv, encoding: "utf8", timeout: 10_000,
     });
     assert.equal(partial.status, 1);
     assert.match(partial.stderr, /Run `pnpm install` first\./);
 
     for (const command of ["stop", "status"]) {
       const result = spawnSync(process.execPath, scripts[command].split(" ").slice(1), {
-        cwd: fixture, encoding: "utf8", timeout: 10_000,
+        cwd: fixture, env: fixtureEnv, encoding: "utf8", timeout: 10_000,
       });
       assert.equal(result.status, 0, result.stderr);
       assert.doesNotMatch(result.stderr, /pnpm install/);
@@ -194,7 +207,7 @@ test("the guarded preload still executes TypeScript when dependencies are instal
     const entry = join(fixture, "entry.ts");
     writeFileSync(entry, 'const value: number = 42; console.log(value);');
     const result = spawnSync(process.execPath, ["--import", "./scripts/register-typescript.mjs", entry], {
-      cwd: root, encoding: "utf8", timeout: 10_000,
+      cwd: root, env: fixtureEnv, encoding: "utf8", timeout: 10_000,
     });
     assert.ifError(result.error);
     assert.equal(result.status, 0, result.stderr);
@@ -202,4 +215,184 @@ test("the guarded preload still executes TypeScript when dependencies are instal
   } finally {
     rmSync(fixture, { recursive: true, force: true });
   }
+});
+
+test("second reconciled restart retains exit and spawn-error supervision", { timeout: 10_000 }, async () => {
+  for (const ending of ["exit", "error"]) {
+    let launches = 0;
+    let reconciled = 0;
+    const failure = await new Promise((resolve) => {
+      supervise(() => {
+        launches++;
+        if (launches === 3 && ending === "error") return spawn(join(tmpdir(), "missing-minions-executable"), [], { stdio: "ignore", env: fixtureEnv });
+        return spawn(process.execPath, ["-e", `process.exit(${launches < 3 ? 42 : 7})`], { stdio: "ignore", env: fixtureEnv });
+      }, { stopped: () => false, reconcile: async () => { reconciled++; return true; }, fail: resolve });
+    });
+    assert.equal(launches, 3);
+    assert.equal(reconciled, 2);
+    assert.match(failure.message, ending === "error" ? /ENOENT/ : /exited \(7\)/);
+  }
+});
+
+test("crash circuit has zero automatic retries even with a reconciliation capability", { timeout: 10_000 }, async () => {
+  let launches = 0;
+  let reconciled = 0;
+  const error = await new Promise((resolve) => {
+    supervise(() => {
+      launches++;
+      return spawn(process.execPath, ["-e", "process.exit(1)"], { stdio: "ignore", env: fixtureEnv });
+    }, { stopped: () => false, reconcile: async () => { reconciled++; return true; }, fail: resolve });
+  });
+  assert.equal(launches, 1);
+  assert.equal(reconciled, 0);
+  assert.match(error.message, /recovery refused/);
+});
+
+test("stop during restart reconciliation cannot launch another generation", { timeout: 10_000 }, async () => {
+  let stopped = false;
+  let launches = 0;
+  let release;
+  let entered;
+  const ready = new Promise((resolve) => { entered = resolve; });
+  supervise(() => {
+    launches++;
+    return spawn(process.execPath, ["-e", "process.exit(42)"], { stdio: "ignore", env: fixtureEnv });
+  }, {
+    stopped: () => stopped,
+    reconcile: () => { entered(); return new Promise((resolve) => { release = resolve; }); },
+    fail: (error) => assert.fail(error),
+  });
+  await ready;
+  stopped = true;
+  release(true);
+  await new Promise(setImmediate);
+  assert.equal(launches, 1);
+});
+
+test("rotation closes old descriptors and retains only the bounded byte tail", async () => {
+  const fixture = mkdtempSync(join(tmpdir(), "minions-log-"));
+  const path = join(fixture, "service.log");
+  try {
+    writeFileSync(path, Buffer.alloc(1000, 65));
+    writeFileSync(`${path}.1`, Buffer.alloc(1000, 65));
+    writeFileSync(`${path}.9`, Buffer.alloc(1000, 65));
+    const writer = boundedLog(path, 32, 3);
+    const child = spawn(process.execPath, ["-e", "process.stdout.write('0123456789'.repeat(10000))"], { stdio: ["ignore", "pipe", "ignore"], env: fixtureEnv });
+    let bytes = 0;
+    child.stdout.on("data", (chunk) => { bytes += chunk.length; writer.write(chunk); });
+    await new Promise((resolve, reject) => { child.once("error", reject); child.once("close", (code) => code === 0 ? resolve() : reject(new Error(String(code)))); });
+    writer.close();
+    writer.close();
+    assert.equal(bytes, 100000);
+    assert.throws(() => writer.write("closed"), /closed/);
+    assert.deepEqual(readdirSync(fixture).sort(), ["service.log", "service.log.1", "service.log.2"]);
+    const retained = [2, 1, 0].map((index) => readFileSync(index ? `${path}.${index}` : path));
+    assert.ok(retained.every((chunk) => chunk.length <= 32));
+    assert.equal(Buffer.concat(retained).toString(), "0123456789".repeat(10000).slice(-96));
+    const single = boundedLog(path, 8, 1);
+    single.write("abcdefgh12345678"); single.close();
+    assert.deepEqual(readdirSync(fixture), ["service.log"]);
+    assert.equal(readFileSync(path, "utf8"), "12345678");
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+function launcherFixture(backend, frontend) {
+  const fixture = mkdtempSync(join(tmpdir(), "minions-lifecycle-"));
+  cpSync(join(root, "scripts"), join(fixture, "scripts"), { recursive: true });
+  for (const [name, code] of [["tsx", backend], ["vite", frontend], ["better-sqlite3", ""]]) {
+    const dir = join(fixture, "node_modules", name);
+    mkdirSync(join(dir, "bin"), { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name, type: "module", main: "index.js", exports: { ".": "./index.js", "./cli": "./index.js", "./package.json": "./package.json" } }));
+    writeFileSync(join(dir, "index.js"), code);
+    writeFileSync(join(dir, "bin", "vite.js"), code);
+  }
+  return fixture;
+}
+
+function runFixture(fixture) {
+  const child = spawn(process.execPath, ["scripts/run.mjs"], { cwd: fixture, stdio: ["ignore", "pipe", "pipe"], env: { ...fixtureEnv, MINIONS_NO_OPEN: "1" } });
+  let output = "";
+  const waiters = [];
+  for (const stream of [child.stdout, child.stderr]) stream.on("data", (chunk) => {
+    output += chunk;
+    for (const waiter of waiters) if (output.includes(waiter.text)) waiter.resolve();
+  });
+  const closed = new Promise((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
+  return { child, closed, output: () => output, seen: (text) => output.includes(text) ? Promise.resolve() : Promise.race([new Promise((resolve) => waiters.push({ text, resolve })), closed.then(() => { throw new Error(`Launcher closed before ${text}: ${output}`); })]) };
+}
+
+test("intentional launcher stop permits a subsequent start without a recovery fence", { timeout: 15_000, skip: process.platform === "win32" }, async () => {
+  const code = 'console.log("fixture-ready"); setInterval(() => {}, 1000);';
+  const fixture = launcherFixture(code, code);
+  let run = runFixture(fixture);
+  try {
+    await run.seen("fixture-ready");
+    run.child.kill("SIGTERM");
+    assert.equal(await run.closed, 0);
+    assert.ok(!existsSync(join(fixture, ".run", "recovery-required")));
+    run = runFixture(fixture);
+    await run.seen("fixture-ready");
+    run.child.kill("SIGTERM");
+    assert.equal(await run.closed, 0);
+  } finally { run.child.kill("SIGKILL"); await run.closed; rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test("partial startup failure stops the other service without blocking future starts", { timeout: 15_000 }, async () => {
+  const fixture = launcherFixture('setInterval(() => {}, 1000);', 'throw new Error("frontend startup failed");');
+  const run = runFixture(fixture);
+  try {
+    assert.equal(await run.closed, 1);
+    assert.match(run.output(), /Frontend exited/);
+    assert.match(run.output(), /automatic crash restart is disabled/);
+    assert.ok(!existsSync(join(fixture, ".run", "recovery-required")));
+  } finally { run.child.kill("SIGKILL"); await run.closed; rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test("production runner supervises two explicit restarts then stops on a crash", { timeout: 15_000, skip: process.platform === "win32" }, async () => {
+  const fixture = launcherFixture(`
+    import { existsSync, readFileSync, writeFileSync } from "node:fs";
+    const generation = existsSync("generation") ? Number(readFileSync("generation", "utf8")) + 1 : 1;
+    writeFileSync("generation", String(generation));
+    process.exit(generation < 3 ? 42 : 7);
+  `, 'setInterval(() => {}, 1000);');
+  const run = runFixture(fixture);
+  try {
+    assert.equal(await run.closed, 1);
+    assert.equal(readFileSync(join(fixture, "generation"), "utf8"), "3");
+    assert.match(run.output(), /exited \(7\)/);
+  } finally { run.child.kill("SIGKILL"); await run.closed; rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test("adopting oversized logs preserves the recent tail with a bounded copying buffer", () => {
+  const fixture = mkdtempSync(join(tmpdir(), "minions-log-adopt-"));
+  const path = join(fixture, "service.log");
+  try {
+    writeFileSync(path, "old history".repeat(10000) + "recent crash");
+    const writer = boundedLog(path, 12, 2);
+    writer.close();
+    assert.equal(readFileSync(path, "utf8"), "recent crash");
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test("backend replacement stops owned provider descendants before the next launch", { timeout: 15_000, skip: process.platform !== "linux" }, async () => {
+  const fixture = launcherFixture(`
+    import { spawn } from "node:child_process";
+    import { existsSync, readFileSync, appendFileSync } from "node:fs";
+    const previous = existsSync("providers") ? readFileSync("providers", "utf8").trim().split("\\n").map(Number) : [];
+    for (const pid of previous) {
+      try {
+        const stat = readFileSync("/proc/" + pid + "/stat", "utf8");
+        if (stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0] !== "Z") appendFileSync("overlap", String(pid));
+      } catch {}
+    }
+    const provider = spawn(process.execPath, ["-e", "process.send('ready'); setInterval(() => {}, 1000)"], { stdio: ["ignore", "ignore", "ignore", "ipc"] });
+    appendFileSync("providers", String(provider.pid) + "\\n");
+    provider.once("message", () => process.exit(previous.length < 1 ? 42 : 7));
+  `, 'setInterval(() => {}, 1000);');
+  const run = runFixture(fixture);
+  try {
+    assert.equal(await run.closed, 1);
+    assert.equal(readFileSync(join(fixture, "providers"), "utf8").trim().split("\n").length, 2);
+    assert.ok(!existsSync(join(fixture, "overlap")), "old managed provider was still running at replacement");
+  } finally { run.child.kill("SIGKILL"); await run.closed; rmSync(fixture, { recursive: true, force: true }); }
 });
